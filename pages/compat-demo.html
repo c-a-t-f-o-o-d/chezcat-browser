@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Layout compatibility - ChezCat</title>
+<link rel="stylesheet" href="styles.css">
+<style>
+body { margin:0; background:#edf2f6; color:#23364b; font:16px/1.5 sans-serif }
+header { background:#172c3d; color:white; padding:20px 24px }
+header a { display:inline-block; background:#2b4a60; color:white; padding:7px 12px; margin:4px 6px 0 0; text-decoration:none }
+main { max-width:980px; margin:0 auto; padding:20px }
+section { background:white; border:1px solid #c9d7e2; padding:18px; margin-bottom:20px }
+h1 { margin:0 0 8px; font-size:26px }
+h2 { font-size:21px; margin:0 0 12px }
+p { margin:8px 0 14px }
+.muted { color:#547083; font-size:13px }
+.logo { font:bold 32px/1.3 sans-serif; color:#176bad; margin:4px 0 20px }
+.search-input { width:240px; height:30px; background:white; color:#23364b }
+.button-wrap { display:inline-block; margin:6px 3px }
+.button-face { display:block; border:1px solid #627f94; background:#e5edf3; height:30px }
+.search-button { width:95px; height:30px; background:#e5edf3; color:#23364b }
+.side-link { display:block; margin-left:10px; font-size:11px }
+.chip { display:inline-block; padding:10px 14px; margin:5px; background:#126c66; color:white; text-decoration:none }
+.card { display:inline-block; width:210px; padding:12px; margin:6px; background:#f0f5fa; border:1px solid #aec3d3 }
+.card p { font-size:13px; margin:5px 0 }
+.comparison { width:100%; border-spacing:3px 5px }
+.comparison th { background:#244b67; color:white; text-align:left }
+.comparison td { background:#edf3f8 }
+.nowrap { white-space:nowrap }
+.override { text-align:left }
+.disclosure-panel { max-height:0; overflow:hidden; background:#e4edf2 }
+.disclosure-toggle:checked ~ .disclosure-panel { max-height:220px }
+.disclosure-toggle:checked + label { color:#126c66 }
+.disclosure-panel p { padding:12px; margin:0 }
+</style>
+</head>
+<body>
+<header>
+<h1>Layout compatibility</h1>
+<div>Compact controls, aligned columns, and links that follow their boxes.</div>
+<nav><a href="start.html">Home</a><a href="forms.html">Forms</a><a href="flex-demo.html">Flex layout</a><a href="position-demo.html">Positioning</a></nav>
+</header>
+<main>
+<section>
+<h2>A classic search layout</h2>
+<p class="muted">This original sample combines an HTML center element, a three-cell table, and inline-block button wrappers. Both buttons should stay compact and share a row.</p>
+<center>
+<div class="logo">Own Search</div>
+<form action="/form-result#received" method="get">
+<table cellpadding="0" cellspacing="0">
+<tr valign="top">
+<td width="25%"></td>
+<td align="center" nowrap>
+<input class="search-input" type="text" name="q" value="Try typing here" aria-label="Sample search">
+<br>
+<span class="button-wrap"><span class="button-face"><input class="search-button" type="submit" name="action" value="Search"></span></span>
+<span class="button-wrap"><span class="button-face"><input class="search-button" type="reset" value="Reset"></span></span>
+</td>
+<td align="left" width="25%"><a class="side-link" href="forms.html">More forms</a></td>
+</tr>
+</table>
+</form>
+<p class="muted">Editing and Reset work locally. To send the query and see the received values, open this page through the HTTP or HTTPS demo server.</p>
+</center>
+</section>
+<section>
+<h2>Whole boxes stay together</h2>
+<p>Resize the window. Each card moves as a single box, and text inside the card keeps its own line breaks.</p>
+<div style="text-align:center">
+<div class="card"><strong>First card</strong><p>Block content inside an inline box.</p><a class="chip" href="second.html">Open page</a></div>
+<div class="card"><strong>Second card</strong><p>Its width is independent of its neighbor.</p><a class="chip" href="gallery.html">See images</a></div>
+<div class="card"><strong>Third card</strong><p>Padding is part of each link's clickable area.</p><a class="chip" href="text-demo.html">Read text</a></div>
+</div>
+</section>
+<section>
+<h2>Shared table columns</h2>
+<p class="muted">Column widths stay aligned across rows. Cell padding and border spacing remain separate.</p>
+<table class="comparison" cellpadding="8">
+<thead><tr><th>Item</th><th>What to check</th><th>Try it</th></tr></thead>
+<tbody>
+<tr><td class="nowrap">Text input</td><td>Editing and focus still follow the visible control.</td><td><input name="note" size="12" value="Edit me"></td></tr>
+<tr><td>Small label</td><td>A longer description shares the same column as the row above.</td><td><a href="position-demo.html">Position demo</a></td></tr>
+<tr><td>Bottom aligned</td><td>This cell has extra height.<br>Its neighbor should sit near the bottom.</td><td valign="bottom"><a href="jpeg-demo.html">JPEG demo</a></td></tr>
+</tbody>
+</table>
+</section>
+<section>
+<h2>CSS takes precedence</h2>
+<center class="override"><div style="width:230px;background:#dcecef;padding:10px">This box stays on the left because CSS overrides legacy centering.</div></center>
+<p style="font:italic 700 12pt/1.5 sans-serif">This line uses a font shorthand with point units.</p>
+<p class="muted">Page text now uses our own TrueType/WOFF1 reader and renderer. Font-family names select available installed or page fonts. Try the <a href="fonts.html">Page fonts workshop</a> for styles, selection and downloadable fonts.</p>
+</section>
+<section>
+<h2>A disclosure made with CSS</h2>
+<p>Click the checkbox or its label. This panel uses <code>:checked</code>, a following-sibling selector, and overflow clipping. It works with JavaScript off.</p>
+<input id="disclosure" class="disclosure-toggle" type="checkbox">
+<label for="disclosure">Show the details</label>
+<div class="disclosure-panel"><p>The checkbox's current state controls this box. Uncheck it and these details are clipped again. <a href="second.html">This link is clickable while visible.</a></p></div>
+</section>
+<p class="muted">Basic separate-border tables are supported here. Row and column spans, collapsed borders, floats, and advanced table sizing remain future work.</p>
+</main>
+</body>
+</html>

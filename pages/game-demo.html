@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Cat Courier — ChezCat</title>
+<style>
+body { margin:0; background:#edf2f4; color:#183444; font-family:system-ui,sans-serif; font-size:16px; line-height:1.5; }
+main { max-width:900px; padding:28px; margin:0 auto; }
+.eyebrow { color:#176e89; font-size:13px; font-weight:bold; }
+h1 { font-size:34px; margin:8px 0; }
+.card { background:white; border:1px solid #ccdae0; padding:20px; margin:18px 0; }
+.arena { position:relative; width:380px; height:260px; background:#10223d; border:2px solid #36536b; margin:16px 0; }
+.player { position:absolute; width:26px; height:26px; background:#42c7bc; left:24px; top:112px; border:2px solid #eafaf4; }
+.parcel { position:absolute; width:18px; height:18px; background:#e9ae56; left:300px; top:40px; }
+.patrol { position:absolute; width:22px; height:22px; background:#a5b4d7; left:170px; top:220px; }
+button { padding:9px 14px; margin:4px 8px 4px 0; background:#e4f1ee; color:#183444; border:1px solid #6d9f9a; }
+.small { font-size:13px; color:#526b78; }
+code { font-family:monospace; }
+a { color:#176e89; }
+</style></head><body><main>
+<p class="eyebrow">CHEZCAT / PLAYABLE DOM WORKSHOP</p>
+<h1>Cat Courier</h1>
+<p>Move the teal courier onto five gold parcels. The pale square patrols the bottom of the board.</p>
+<section class="card">
+<p id="game-status">Ready. Choose Start, then use the arrow keys or W A S D.</p>
+<p><button id="start-game" type="button">Start / restart</button><button id="pause-game" type="button">Pause / resume</button></p>
+<div class="arena" id="arena"><div class="player" id="player"></div><div class="parcel" id="parcel"></div><div class="patrol" id="patrol"></div></div>
+<p id="game-score">Parcels: 0 / 5</p>
+<p class="small">Arrows or W A S D move. Space pauses. Holding a key uses native key repeat. You can also use these buttons:</p>
+<p><button id="move-left" type="button">Left</button><button id="move-up" type="button">Up</button><button id="move-down" type="button">Down</button><button id="move-right" type="button">Right</button></p>
+<noscript><p>JavaScript is disabled. Enable it in Settings to play.</p></noscript>
+</section>
+<section class="card"><h2>What this exercises</h2>
+<p>This original game uses ordinary HTML elements, CSS positioning, real keyboard events, and <code>requestAnimationFrame</code>. F12 opens the inspector while the game is running.</p>
+<p class="small">This is a first game foundation. Canvas, WebGL, WebGPU, audio, gamepads, pointer lock and WebAssembly are still separate features to implement. Modern game engines will need those larger systems.</p>
+<p><a href="start.html">Home</a> · <a href="javascript-demo.html">JavaScript workshop</a></p>
+</section>
+<script src="scripts/game-demo.js"></script>
+</main></body></html>

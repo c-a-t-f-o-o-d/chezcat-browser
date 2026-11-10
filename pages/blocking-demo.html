@@ -1,0 +1,31 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Request blocking — ChezCat</title>
+<style>
+body{font-family:system-ui,sans-serif;background:#edf2f4;color:#183444;margin:0;line-height:1.5}
+main{max-width:900px;margin:auto;padding:28px}h1{font-size:32px}.card{background:white;border:1px solid #ccdae0;padding:20px;margin:20px 0}
+a{color:#176e89}code,pre{font-family:monospace;background:#e3edf0;padding:4px}img{display:block;width:240px;height:50px;margin:12px 0}
+.sample{padding:16px;background:#dfe9ed;color:#183444}.small{font-size:13px;color:#526b78}
+</style><link rel="stylesheet" href="blocking/advert.css"></head><body><main>
+<h1>Request blocking</h1>
+<p>ChezCat can stop matching automatic image, script, stylesheet and font requests before they are sent. Rules also apply to redirect destinations.</p>
+<section class="card"><h2>Try it locally</h2>
+<p>Start <strong>Run-Http-Demo.cmd</strong>, then <a href="http://127.0.0.1:8765/pages/blocking-demo.html">open this workshop over HTTP</a>. Local files are not network requests and are not filtered.</p>
+<p>In Settings, enable <strong>Block ads / trackers with local request rules</strong>. Open <strong>Request-blocking rules</strong>, add these two rules, choose Done, then Apply:</p>
+<pre>path:/pages/blocking/
+@@path:/pages/blocking/allowed/</pre>
+<p>With those rules enabled, the first banner, external script and extra stylesheet below are blocked. The second banner is an allow exception. F12 > Network or Ctrl+I shows each decision; the server terminal shows the requests actually received.</p>
+</section>
+<section class="card"><h2>Actual test resources</h2>
+<p class="sample">Without the rule this box is gold. With the rule it stays pale blue.</p>
+<p id="script-result">The external sample script has not executed.</p>
+<p>Blocked sample banner:</p><img src="blocking/banner.svg" alt="Sample banner blocked">
+<p>Allowed sample banner:</p><img src="blocking/allowed/banner.svg" alt="Allowed sample banner">
+<p class="small">The banners are original shapes served by your local fixture. No advertising network is contacted by this page.</p>
+</section>
+<section class="card"><h2>Rule reference</h2>
+<p><code>ads.example.com</code> matches that host and its subdomains.</p>
+<p><code>path:/ads/</code> matches a path prefix on any host.</p>
+<p><code>url:https://example.com/ads/</code> matches an origin and path prefix.</p>
+<p><code>@@path:/ads/allowed/</code> allows a matching request through this filter. The browser's origin and certificate rules still apply.</p>
+<p class="small">This is a small local request blocker. It has no automatic filter downloads, cosmetic element hiding or full EasyList syntax. Existing profiles start with blocking disabled; the optional starter host list is intentionally small.</p>
+<p><a href="start.html">Home</a> · <a href="browser-tests.html">Real-site browser checks</a></p>
+</section><script src="blocking/advert.js"></script></main></body></html>

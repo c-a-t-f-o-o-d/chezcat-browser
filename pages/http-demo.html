@@ -1,0 +1,61 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>HTTP transport demo</title>
+<link rel="stylesheet" href="styles.css">
+<style>.hero { background: #17394a; color: #eef8fc; padding: 28px; margin-bottom: 24px; }
+.hero a { color: #9fe9d2; } li { margin-bottom: 10px; }</style>
+</head><body><main>
+<div class="hero"><p>CHEZCAT / HTTP DEMO</p><h1>These bytes arrived over HTTP.</h1>
+<p><a href="browser-tests.html">Browser checks</a> &middot; <a href="browser-post-demo.html">POST forms</a> &middot; <a href="/browser-report">Request headers</a></p>
+<p><a href="javascript-demo.html">JavaScript workshop</a> &middot; <a href="/compressed-pages/javascript-demo.html">The same workshop with gzip scripts</a></p>
+<p>This page, its stylesheet and the image below come from a local HTTP server.</p>
+<p>Run <code>Run-Http-Demo.cmd</code>, then open <code>http://127.0.0.1:8765/</code> in ChezCat.</p></div>
+<div class="card"><h2>Forms and text</h2><p><a href="/pages/forms.html">Edit and submit a real GET form</a></p><p><a href="/pages/text-demo.html">Accents, symbols and character references</a></p></div>
+<div class="card" id="checks"><h2>Working responses</h2>
+<ul><li><a href="/plain">A regular response with Content-Length</a></li>
+<li><a href="/chunked">Chunked transfer with an extension and trailer</a></li>
+<li><a href="/close-delimited">A response ending when the connection closes</a></li>
+<li><a href="/query?word=hello%20world&amp;number=42">A query string preserved in the request</a></li></ul></div>
+<div class="card"><h2>Compressed responses</h2>
+<p>The browser now requests gzip and deflate. Our shared DEFLATE decoder handles the content before HTML, CSS or image parsing.</p>
+<ul><li><a href="/gzip">Gzip content</a></li>
+<li><a href="/deflate">Deflate content with its zlib wrapper</a></li>
+<li><a href="/chunked-gzip">Gzip split across HTTP chunks</a></li>
+<li><a href="/gzip-members">A page split into two gzip members</a></li>
+<li><a href="/gzip-stacked">Gzip followed by deflate</a></li>
+<li><a href="/compressed-pages/jpeg-demo.html">Compressed JPEG gallery</a></li>
+<li><a href="/compressed-pages/position-demo.html">Compressed positioning demo</a></li>
+<li><a href="/compressed-pages/flex-demo.html">The flex demo with compressed HTML, CSS and images</a></li>
+<li><a href="/encoding">See the Accept-Encoding request header</a></li></ul>
+<p>Ctrl+I shows encoded and decoded byte counts.</p></div>
+<div class="card"><h2>Redirects and navigation</h2>
+<ul><li><a href="/redirect">A redirect back to this section</a></li>
+<li><a href="/redirect-relative/start">A relative redirect to the second page</a></li>
+<li><a href="/redirect-chain/3">A short redirect chain</a></li>
+<li><a href="/slow?seconds=3">A slow response: immediately navigate elsewhere to test cancellation</a></li>
+<li><a href="/slow-stream?seconds=3">A response sent slowly after its headers</a></li>
+<li><a href="/pages/gallery.html">The existing gallery over HTTP</a></li></ul>
+<p>Use Back and Forward after following several links. The address should show the final destination.</p></div>
+<div class="card"><h2>Text decoding</h2>
+<p><a href="/charset/utf-8">UTF-8</a> &nbsp; <a href="/charset/windows-1252">Windows-1252</a> &nbsp; <a href="/charset/iso-8859-1">ISO-8859-1</a></p>
+<p class="muted">Page fonts supply available Unicode glyphs. The original bitmap fallback covers printable Latin-1 and Windows-1252 punctuation; unavailable characters use visible fallback boxes. Complex-script shaping is still limited.</p></div>
+<div class="card"><h2>Error handling</h2>
+<p>These links deliberately exercise errors. A useful error or readable error-status page is expected.</p>
+<ul><li><a href="/status/404">404 with an HTML body</a></li>
+<li><a href="/status/500">500 with an HTML body</a></li>
+<li><a href="/redirect-loop">An endless redirect loop</a></li>
+<li><a href="/redirect-https">A redirect to a public HTTPS site (requires a compatible certificate and server)</a></li>
+<li><a href="/redirect-file">A forbidden redirect from HTTP into a local file</a></li>
+<li><a href="/truncated">A body shorter than its Content-Length</a></li>
+<li><a href="/bad-chunk">Invalid chunk framing</a></li>
+<li><a href="/conflicting-length">Conflicting Content-Length headers</a></li>
+<li><a href="/charset/unsupported">An unsupported charset label</a></li>
+<li><a href="/gzip-bad-crc">A gzip checksum mismatch</a></li>
+<li><a href="/gzip-oversized">Gzip that expands past the document limit</a></li>
+<li><a href="/raw-deflate">Raw DEFLATE without the required zlib wrapper</a></li>
+<li><a href="/brotli">Brotli content, not implemented yet</a></li></ul></div>
+<div class="card"><h2>An image fetched over HTTP</h2>
+<img class="picture" src="images/landscape.png" alt="Original landscape test image">
+<p>Ctrl+I shows the requests and resource results for the current document.</p></div>
+<p class="muted">The optional Python server is a development tool. The browser's HTTP client, parsing, decoding and painting remain in the browser itself.</p>
+<p><a href="/pages/start.html">Start page</a> &nbsp; <a href="#top">Back to top</a></p>
+</main></body></html>

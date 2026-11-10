@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Bytes, text and collections - ChezCat</title>
+<link rel="stylesheet" href="styles.css">
+<style>
+main { max-width: 940px; }
+.hero { background: #17394a; color: #eef8fc; padding: 26px; }
+.hero a { color: #9fe9d2; }
+.eyebrow { color: #9fe9d2; font-size: 14px; font-weight: bold; }
+h1 { font-size: 34px; }
+h2 { font-size: 23px; }
+.controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 12px 0; }
+button { padding: 9px 14px; border: 1px solid #6d9f9a; background: #e4f1ee; color: #17394a; }
+input { padding: 8px; max-width: 95%; }
+.field { width: 540px; }
+.result { background: #e4edf2; padding: 14px; white-space: pre-wrap; }
+.ready { background: #ccefe0; color: #184d41; padding: 14px; }
+.small { font-size: 14px; color: #5d7180; }
+</style>
+</head>
+<body><main>
+<section class="hero">
+<p class="eyebrow">CHEZCAT / JAVASCRIPT WORKSHOP</p>
+<h1>Bytes, text and collections.</h1>
+<p>Shared memory views, exact byte ordering, Unicode text and collections that remember insertion order. These examples run in ChezCat's own interpreter.</p>
+<p><a href="start.html">Home</a> &middot; <a href="javascript-demo.html">JavaScript workshop</a> &middot; <a href="game-demo.html">Cat Courier</a></p>
+</section>
+<p class="ready" id="binary-status">Waiting for JavaScript. Enable it in Settings to run this workshop.</p>
+<noscript><p class="card">JavaScript is disabled. Enable it in Settings, or use Ctrl+J, then reload.</p></noscript>
+
+<section class="card">
+<h2>1. One buffer, several views</h2>
+<p>The middle view covers bytes 4 through 7 of a twelve-byte buffer. Changing its first element changes the same byte in the whole view. A slice keeps its own copy.</p>
+<div class="controls"><label for="byte-value">First middle byte:</label><input id="byte-value" value="99" maxlength="3" size="5"><button id="write-byte" type="button">Write byte</button><button id="reset-bytes" type="button">Reset bytes</button></div>
+<pre class="result" id="byte-output">Waiting for buffer views.</pre>
+<p class="small">ArrayBuffer, Uint8Array, byteOffset, byteLength, subarray, slice and indexed writes.</p>
+</section>
+
+<section class="card">
+<h2>2. Read a number in either byte order</h2>
+<p>A DataView writes the number 4660, or hexadecimal 1234, into bytes 0 and 1. Reverse its byte order and the whole view changes immediately.</p>
+<button id="toggle-endian" type="button">Toggle byte order</button>
+<pre class="result" id="endian-output">Waiting for DataView.</pre>
+<p class="small">DataView uses big-endian ordering by default; passing true selects little-endian ordering.</p>
+</section>
+
+<section class="card">
+<h2>3. Turn text into bytes and back</h2>
+<label for="text-input">Text to encode:</label>
+<div class="controls"><input class="field" id="text-input" value="ChezCat caf&#233;" maxlength="100"><button id="encode-text" type="button">Encode text</button></div>
+<pre class="result" id="text-output">Waiting for UTF-8 text encoding.</pre>
+<p class="small">The decoder receives two fragments. A multi-byte character can cross that boundary without being lost.</p>
+</section>
+
+<section class="card">
+<h2>4. Count names while preserving order</h2>
+<label for="collection-input">Comma-separated names:</label>
+<div class="controls"><input class="field" id="collection-input" value="cat, tab, cat, page, tab" maxlength="160"><button id="count-names" type="button">Count names</button></div>
+<pre class="result" id="collection-output">Waiting for Map and Set.</pre>
+<p class="small">Map stores the counts. Set keeps one copy of each name. Array map/filter and for-of process the values.</p>
+</section>
+
+<section class="card">
+<h2>5. Run the small checks</h2>
+<p>These checks exercise actual values and mutations. They include sparse array callbacks and an object whose properties are frozen.</p>
+<button id="run-binary-checks" type="button">Run checks again</button>
+<pre class="result" id="binary-check-output">Waiting for checks.</pre>
+<p class="small">F12 opens the inspector. Ctrl+I shows load and script activity. This workshop does not fetch external assets or submit data.</p>
+</section>
+<p class="small">This remains a bounded JavaScript subset. Shared/resizable buffers, BigInt typed arrays, general Symbol iterators, workers and WebAssembly are still separate work. TextDecoder currently supports UTF-8, UTF-16LE/BE and Windows-1252.</p>
+<p><a href="start.html">Back to Home</a></p>
+<script src="scripts/binary-demo.js"></script>
+</main></body>
+</html>

@@ -1,0 +1,35 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>JPEG image demo</title>
+<link rel="stylesheet" href="styles.css">
+<style>
+.hero { background: #17394a; color: #eef8fc; padding: 28px; }
+.hero a { color: #9fe9d2; }
+.row { display: flex; flex-wrap: wrap; gap: 20px; }
+.sample { flex: 1 1 320px; min-width: 0; }
+.sample img { display: block; width: 100%; margin: 14px 0; }
+.portrait { max-width: 320px; }
+.label { color: #176e89; font-weight: bold; }
+</style></head><body><main>
+<div class="hero"><p>CHEZCAT / BUILD 0.28</p>
+<h1>More pictures. Our own decoder.</h1>
+<p>JPEG images now join PNG, BMP and PPM. These original scenes exercise ordinary and progressive files, grayscale, color sampling and orientation.</p>
+<p><a href="start.html">Start page</a> &nbsp; <a href="position-demo.html">Positioning demo</a> &nbsp; <a href="gallery.html">Other image formats</a></p></div>
+
+<div class="card"><h2>One scene, two JPEG encodings.</h2>
+<p>The same landscape is encoded as baseline and progressive JPEG. Both should show the complete scene after loading.</p>
+<div class="row">
+<div class="sample"><p class="label">Baseline</p><a href="start.html"><img src="images/jpeg-landscape.jpg" alt="Baseline JPEG landscape"></a><p>Click the image to return home.</p></div>
+<div class="sample"><p class="label">Progressive</p><img src="images/jpeg-progressive.jpg" alt="Progressive JPEG landscape"><p>The decoder combines the scans before displaying the result.</p></div>
+</div></div>
+
+<div class="card"><h2>Grayscale and orientation.</h2>
+<div class="row">
+<div class="sample"><p class="label">Grayscale</p><img src="images/jpeg-gray.jpg" alt="Grayscale JPEG scene"><p>This file contains one image component.</p></div>
+<div class="sample"><p class="label">Camera orientation</p><img class="portrait" src="images/jpeg-oriented.jpg" alt="JPEG with an EXIF orientation tag"><p>The orientation tag rotates this image into its intended viewing direction.</p></div>
+</div></div>
+
+<div class="card"><h2>Check the pixels.</h2>
+<p>Resize the window or change the zoom. The two landscape images should keep their proportions and wrap onto separate rows in a narrow window.</p>
+<p>Press Ctrl+I to see which images loaded and their decoded dimensions. The local HTTP and HTTPS demos can also serve this page with compressed HTML, CSS and JPEG responses.</p></div>
+<p><a href="gallery.html">PNG, BMP and PPM gallery</a> &nbsp; <a href="#top">Back to top</a></p>
+</main></body></html>

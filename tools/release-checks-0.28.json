@@ -1,0 +1,112 @@
+{
+  "release": "0.28.0",
+  "date_utc": "2026-11-10",
+  "native_rust_tests": 577,
+  "formatting": "pass",
+  "native_all_target_clippy_warnings_denied": "pass",
+  "windows_all_target_clippy_warnings_denied": "pass",
+  "optimized_builds": [
+    "x86_64-unknown-linux-gnu",
+    "x86_64-pc-windows-gnu"
+  ],
+  "production_cargo_dependencies": 0,
+  "webp": {
+    "lossy_alpha_static_cases": 697,
+    "independent_animation_frames": 112,
+    "workshop_frames": 12,
+    "lossy_visible_max_channel_error": 1,
+    "lossless_exact_cases": 261,
+    "malformed_rejections": 18,
+    "mutations": 900
+  },
+  "gif_apng": {
+    "comparison_cases": 69,
+    "frames_compared_exactly": 240,
+    "inherited_png_sample_cases": 30,
+    "legacy_gif_cases": 191,
+    "targeted_rejections": 25,
+    "mutations": 320,
+    "retention_fallbacks": 2,
+    "malformed_later_frame_after_fallback_rejections": 2
+  },
+  "tiff_jpeg": {
+    "new_valid_cases": 263,
+    "exact_independent_fax_cases": 66,
+    "jpeg_in_tiff_cases": 11,
+    "full_jpeg_regression_cases": 830,
+    "targeted_rejections": 31,
+    "mutations": 360,
+    "cmyk_max_channel_error": 1,
+    "ycck_max_channel_error": 3,
+    "ycck_highest_mean_error": 0.147
+  },
+  "qoi_netpbm": {
+    "qoi": 147,
+    "netpbm": 170,
+    "external_oracle": 164,
+    "rejections": 50,
+    "mutations": 240,
+    "cancellations": 3
+  },
+  "image_http_pipeline": {
+    "checks": 35,
+    "browser_runs": 17,
+    "new_formats": 9,
+    "maximum_display_channel_error": 1,
+    "reused_images_one_fetch": true,
+    "no_images_zero_asset_requests": true,
+    "javascript_disabled": true,
+    "embedded_and_direct_animation_verified": true
+  },
+  "windows_executable": {
+    "machine": "Windows x64",
+    "subsystem": "GUI",
+    "version": "0.28.0",
+    "icon_payloads_matching_source": 7,
+    "system_imports": [
+      "bcrypt.dll",
+      "comdlg32.dll",
+      "GDI32.dll",
+      "KERNEL32.dll",
+      "msvcrt.dll",
+      "ntdll.dll",
+      "SHELL32.dll",
+      "USER32.dll",
+      "WS2_32.dll",
+      "api-ms-win-core-synch-l1-2-0.dll",
+      "bcryptprimitives.dll"
+    ],
+    "sha256": "026045dc9151ae0c7f0b0f240878e3710260dc345f3328f882bab621d2c81196",
+    "size": 3216896,
+    "icon_hashes": [
+      "ad6d50570385380d902ce744bf6e66af1cc5d4afa8d30f4687edd8c133dae3d9",
+      "6ca22eaf3505af36c4ca437b728206db708526bec588f945da21fbe6fdbf5326",
+      "b7a21e65c7a1bc8205290afbf9f55628172f3cada9109e23577e87a2b936417b",
+      "f2c66915bd554a48c25bbdb9f6f05b758018fd7a9a9844136cf8b0fc357ef936",
+      "8318191b779a42712dd925665449df039afc4576d278eb326ac121df8f351053",
+      "a1092e61be13234ed786833a818ffea431839d589787a16def85e04240ff93d6",
+      "a67111ab70c59207f2065e349905c5873ecbe2f1a3d3dd63648d5e59837ec9cd"
+    ]
+  },
+  "limits_of_validation": [
+    "Windows desktop timer/message delivery was not executed; Windows executable was cross-compiled.",
+    "No live-site compatibility claim; HTTP integration fixtures use loopback.",
+    "Input mutation checks are not exhaustive fuzzing or an independent decoder security audit."
+  ],
+  "decoder_and_player_source_sha256": {
+    "app_animation.rs": "a4ae11f1f5ef37154cc01f54082ab900ffb881b55738a2c72c5e6cc10113f78a",
+    "gif.rs": "83423a5cc2654feaf6acdca1f3246f338beb28bf061c60e650847a24c5abf67c",
+    "image.rs": "80a1ee19e0886b801388529071c33b3cc42982d19b97c6e855dfc196badb77b9",
+    "image_bmp.rs": "9004b88091321e1978b700d839519710355a4120a455d4d8f77c232d30592a96",
+    "image_png.rs": "e4df9c181a5daf9664cd366296eab9f1495e1519f43d66e4ca0f61a1762086f3",
+    "image_simple.rs": "286772469ec9cf68eabc8fac2161eb49c9bd32ddba4f56134a720c2eef15d51c",
+    "image_svg.rs": "fbee9827cbabedf12ddf3aa48b08d46fbf6a838a1297a690ddc52108a3f48ffd",
+    "image_tiff.rs": "7a89112f9b395d36244e78e0686a2177ceafbb015c4c0f88a64427bbdaea5071",
+    "image_vp8.rs": "27eca32fb572dd2868050dba75848578d078f2a89ccb60a06c7f6abd9606f537",
+    "image_vp8_tables.rs": "369b5cb44434a83c56862ad1b6a440dbff2ffa9ec224b762e87aa19a9e04d461",
+    "image_webp.rs": "48742052ed71ba2a8f8dd01f7ac88648ee4807f042414091eda31c8bafacbb7e",
+    "jpeg.rs": "6aabb0738be919a6d83abd53c16b87e56a1323816630bc8e74749bd5893dec23",
+    "loader.rs": "13e564096bbeeae577e8fb6e98a7da512fa5aec9bf982b78e3d29e93d4a1e777",
+    "platform.rs": "bb4eaaa691b8b77fe1d53ff587e4918683087765ab54f426ebe792df449bf3a3"
+  }
+}

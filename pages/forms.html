@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Forms - ChezCat</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    .form-card { background: #ffffff; padding: 22px; border: 1px solid #c5d5dc; margin: 18px 0; }
+    .wide { display: block; width: 90%; max-width: 620px; margin: 8px 0 16px; }
+    .choices { margin: 12px 0; }
+    button { margin: 6px 10px 6px 0; }
+    .muted { color: #526575; font-size: 14px; }
+  </style>
+</head>
+<body><main>
+  <p><a href="start.html">Home</a> &middot; <a href="http-demo.html">HTTP demo</a> &middot; <a href="text-demo.html">Text samples</a></p>
+  <h1>Put the page to work</h1>
+  <p>Click a field and type. Tab and Shift+Tab move between controls; Space toggles a focused choice. Labels can be clicked too.</p>
+  <p class="muted">To submit, use the Forms link in the local HTTP or HTTPS demo. The server echoes the values it receives.</p>
+  <div class="form-card">
+    <h2>A small GET form</h2>
+    <form id="demo" action="/form-result?old-query-is-replaced=1#received" method="get">
+      <label for="query">Search text (required)</label>
+      <input class="wide" id="query" type="search" name="q" required maxlength="80" placeholder="Try café, a + sign, or an ampersand">
+      <label for="note">Optional note</label>
+      <input class="wide" id="note" name="note" value="Made from scratch">
+      <label for="topic">Choose a topic</label>
+      <select class="wide" id="topic" name="topic">
+        <optgroup label="Browser pieces">
+          <option value="pages" selected>HTML and CSS pages</option>
+          <option value="scripts">JavaScript programs</option>
+          <option value="loading">HTTP and HTTPS loading</option>
+        </optgroup>
+        <optgroup label="Experiments">
+          <option value="pictures">Images and painting</option>
+          <option value="later" disabled>Not available yet</option>
+        </optgroup>
+      </select>
+      <p class="muted">Click to open the dropdown. Arrow keys move through choices; Enter selects and Esc cancels. Reset restores HTML and CSS pages.</p>
+      <div class="choices"><label><input type="checkbox" name="details" value="yes" checked> Include details</label></div>
+      <div class="choices"><label><input type="checkbox" name="extras" value="yes"> Include extras</label></div>
+      <p>Choose a view:</p>
+      <div class="choices"><label><input type="radio" name="view" value="compact" checked> Compact</label> <label><input type="radio" name="view" value="expanded"> Expanded</label></div>
+      <input type="hidden" name="source" value="ChezCat demo">
+      <input type="hidden" name="_charset_" value="ignored">
+      <p><label>Read-only value <input name="edition" value="0.8" readonly></label></p>
+      <p><label>Disabled field <input name="not-sent" value="Skipped" disabled></label></p>
+      <button type="submit" name="submit" value="send">Send values</button>
+      <button type="reset">Reset form</button>
+    </form>
+  </div>
+  <div class="form-card">
+    <h2>Independent controls</h2>
+    <p>These are outside the form. The first joins it through its form attribute.</p>
+    <label>Extra value <input name="outside" value="Still included" form="demo"></label>
+    <p><label><input type="checkbox"> This choice has no form and stays local.</label></p>
+  </div>
+  <p class="muted">Text/search/tel inputs, single dropdowns, hidden values, checkboxes, radio buttons, submit and reset are supported. URL-encoded POST forms and basic scripted buttons also work; try the <a href="browser-post-demo.html">POST workshop</a>. Multiple-selection lists, passwords, upload controls, multi-line editing and full validation are later work. Unsupported named controls stop submission with an explanation.</p>
+</main></body>
+</html>

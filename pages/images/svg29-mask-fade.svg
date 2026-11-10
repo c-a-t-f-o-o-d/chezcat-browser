@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="320" height="200" viewBox="0 0 320 200">
+  <defs>
+    <linearGradient id="fade" x1="0" x2="1">
+      <stop stop-color="black"/>
+      <stop offset=".5" stop-color="white"/>
+      <stop offset="1" stop-color="black"/>
+    </linearGradient>
+    <linearGradient id="ribbon" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#a2efce"/>
+      <stop offset="1" stop-color="#df9c63"/>
+    </linearGradient>
+    <mask id="soft" maskUnits="userSpaceOnUse" x="16" y="22" width="288" height="156">
+      <rect x="16" y="22" width="288" height="156" fill="url(#fade)"/>
+    </mask>
+    <clipPath id="card"><rect x="8" y="8" width="304" height="184" rx="24"/></clipPath>
+  </defs>
+  <g clip-path="url(#card)">
+    <rect width="320" height="200" fill="#173a49"/>
+    <path d="M24 60H296M24 100H296M24 140H296M80 24V176M160 24V176M240 24V176"
+          fill="none" stroke="#2c5866" stroke-width="1"/>
+    <g mask="url(#soft)">
+      <path d="M-20 120C36 -18 94 212 160 78S274 150 340 58L340 100C274 192 226 -18 160 120S36 24 -20 162Z" fill="url(#ribbon)"/>
+      <circle cx="160" cy="100" r="56" fill="none" stroke="#c3efd7" stroke-width="5"/>
+    </g>
+    <circle cx="160" cy="100" r="7" fill="#f8e3bd"/>
+  </g>
+</svg>

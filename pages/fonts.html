@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Page fonts — ChezCat</title>
+<link rel="stylesheet" href="styles.css">
+<style>
+@font-face { font-family: "ChezCat Geometry WOFF"; src: url("fonts/chezcat-geometry.woff") format("woff"); }
+@font-face { font-family: "ChezCat Geometry TTF"; src: url("fonts/chezcat-geometry.ttf") format("truetype"); }
+body { font-family: Arial, sans-serif; }
+.sample { font-size:28px; line-height:1.5; }
+.serif { font-family:"Times New Roman", serif; }
+.mono { font-family:Consolas, "Courier New", monospace; }
+.geometry { font-family:"ChezCat Geometry WOFF", serif; font-size:56px; }
+.geometry-ttf { font-family:"ChezCat Geometry TTF", serif; font-size:56px; }
+.row { display:flex; flex-wrap:wrap; gap:20px; }
+.column { flex:1; min-width:260px; }
+input, select, button { font-family:Arial,sans-serif; font-size:20px; }
+input { width:250px; }
+</style></head><body><main>
+<p><a href="start.html">Home</a></p>
+<h1>Page fonts</h1>
+<p>These examples use ChezCat's own font reader, text measurements and grayscale renderer. Installed fonts supply their outlines; our code draws the text.</p>
+<section class="card">
+<h2>Families and styles</h2>
+<p class="sample">Sans serif: Wide WWW, narrow iii. Café, naïve, résumé.</p>
+<p class="sample serif">Serif: The quick brown fox jumps over the lazy dog.</p>
+<p class="sample mono">Monospace: 0123456789 ABCDEFG abcdefg</p>
+<p class="sample"><b>Bold text</b>, <i>italic text</i> and <b><i>bold italic</i></b>.</p>
+<p>Try Ctrl+plus and Ctrl+minus. Font sizes now change smoothly instead of stepping through the bitmap grid.</p>
+</section>
+<section class="card">
+<h2>Downloadable fonts</h2>
+<p>The two tiny fonts below are original test artwork included with this project. Both should show the same geometric outlines. The accented character intentionally combines the round glyph with an accent.</p>
+<div class="row"><div class="column"><h3>WOFF</h3><p class="geometry">AV A V o é 😀</p></div><div class="column"><h3>TrueType</h3><p class="geometry-ttf">AV A V o é 😀</p></div></div>
+<p class="muted">This fixture defines only these glyphs and a space. Other characters use the next available font. Ctrl+I shows each font load.</p>
+</section>
+<section class="card">
+<h2>Selection and controls</h2>
+<p class="sample">Select part of this sentence, then search for narrow or Wide with Ctrl+F. The highlight should follow each character's actual width.</p>
+<p><label for="sample-input">Edit this proportional text:</label></p>
+<p><input id="sample-input" value="Wide WWW and narrow iii"></p>
+<p><select><option>Wide WWW and narrow iii</option><option>Café and résumé</option><option>Another choice</option></select> <button type="button">A page button</button></p>
+</section>
+<p class="muted">Current limits: TrueType outlines and WOFF1; no WOFF2, CFF outlines, variable fonts, complex-script shaping or right-to-left layout yet. Fonts from another origin remain blocked by the current resource policy.</p>
+</main></body></html>

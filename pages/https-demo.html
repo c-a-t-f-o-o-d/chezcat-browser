@@ -1,0 +1,36 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>HTTPS transport demo</title>
+<link rel="stylesheet" href="styles.css">
+<style>.hero { background: #17394a; color: #eef8fc; padding: 28px; margin-bottom: 24px; }
+.hero a { color: #9fe9d2; } li { margin-bottom: 10px; }</style>
+</head><body><main>
+<div class="hero"><p>CHEZCAT / BUILD 0.28</p><h1>HTTPS with two versions.</h1>
+<p>This page, its stylesheet and the image below travel through the browser's own TLS implementation.</p>
+<p>TLS 1.3 supports ChaCha20-Poly1305 and AES-GCM. This local TLS 1.2 demo uses ECDHE with AES-GCM and Extended Master Secret. Both verify supported RSA/ECDSA certificate chains.</p>
+<p>Run <code>Run-Https-Demo.cmd</code>. It starts this server and opens a new browser window with the separate <code>demo-roots.pem</code> trust file. The server defaults to a P-256 certificate.</p>
+<p>For TLS 1.2, run <code>Run-Https-Demo.cmd --tls-version 1.2</code>. To keep the two steps separate, add <code>--server-only</code>, then run <code>Run-Https-Browser.cmd</code>. A normal browser window intentionally does not trust these test certificates.</p></div>
+<div class="card" id="checks"><h2>Try the connection.</h2>
+<ul><li><a href="/secure">Load a page through HTTPS</a></li>
+<li><a href="/chunked">Receive a chunked response</a></li>
+<li><a href="/close-delimited">Receive a response ending with an authenticated TLS close</a></li>
+<li><a href="/redirect">Follow an HTTPS redirect</a></li>
+<li><a href="/pages/forms.html">Send a GET form through HTTPS</a></li>
+<li><a href="/pages/browser-post-demo.html">Send a POST form through HTTPS</a></li>
+<li><a href="/browser-report">Inspect request headers through HTTPS</a></li>
+<li><a href="/pages/gallery.html">Load images through HTTPS</a></li>
+<li><a href="/compressed-pages/jpeg-demo.html">Load the compressed JPEG gallery</a></li>
+<li><a href="/compressed-pages/position-demo.html">Load the compressed positioning demo</a></li>
+<li><a href="/compressed-pages/flex-demo.html">Load compressed HTML, CSS and images through HTTPS</a></li>
+<li><a href="/chunked-gzip">Decode a chunked gzip response through HTTPS</a></li>
+<li><a href="/slow?seconds=3">Cancel a slow HTTPS response with Esc</a></li></ul>
+<p>The status bar identifies the negotiated TLS version and a verified certificate. Press Ctrl+I to see the requests, trust file and certificate fingerprints.</p></div>
+<div class="card"><h2>Expected rejection.</h2>
+<p><a href="/redirect-http">Try an automatic redirect from HTTPS to unencrypted HTTP.</a> The browser should stop and explain why.</p>
+<form action="http://127.0.0.1:8765/form-result" method="get"><p>This form deliberately targets HTTP from an HTTPS page.</p><input name="q" value="demo value"><button type="submit">Try blocked form</button></form>
+</div>
+<div class="card"><h2>An image delivered through TLS.</h2>
+<img class="picture" src="images/landscape.png" alt="Original landscape test image">
+<p>Automatic resources remain restricted to this page's origin.</p></div>
+<p class="muted">The local server uses publicly shared test keys and two separate demo trust roots. Close the demo browser and use Run.cmd for the normal trust configuration.</p>
+<p><a href="/pages/start.html">Start page</a> &nbsp; <a href="#top">Back to top</a></p>
+</main></body></html>

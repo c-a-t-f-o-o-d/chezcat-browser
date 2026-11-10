@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>JavaScript workshop - ChezCat</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    main { max-width: 960px; }
+    .hero { background: #17394a; color: #eef8fc; padding: 24px; }
+    .hero a { color: #9fe9d2; }
+    .hero h1 { margin-top: 0; }
+    .ready { background: #ccefe0; color: #184d41; padding: 12px; }
+    .row { display: flex; flex-wrap: wrap; gap: 16px; }
+    .demo { flex: 1 1 350px; min-width: 0; box-sizing: border-box; }
+    .controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 12px 0; }
+    .field { display: block; width: 90%; max-width: 480px; margin: 8px 0 12px; }
+    .result { background: #e4edf2; padding: 12px; margin: 12px 0; }
+    .counter { font-size: 32px; color: #176e89; }
+    .preview { padding: 14px; margin: 12px 0; background: #d1eaf3; }
+    .mint { background: #ccefe0; }
+    .limit { border: 2px solid #a57122; background: #fff5df; }
+    code { background: #e4edf2; }
+  </style>
+  <script>var demoSeed = 10;</script>
+  <script src="scripts/javascript-demo.js"></script>
+</head>
+<body><main>
+  <div class="hero">
+    <p><a href="start.html">Home</a> &middot; <a href="forms.html">Native forms</a></p>
+    <h1>A page that responds.</h1>
+    <p>Small programs, real controls, and our own JavaScript interpreter. Each example exercises a piece of the growing language and DOM subset.</p>
+  </div>
+  <p id="ready" class="ready">Waiting for the page scripts.</p>
+  <noscript><div class="card"><h2>JavaScript is disabled</h2><p>Press Ctrl+J to enable the first JavaScript subset and reload this page. These examples need it. The form still has its normal GET action when served by the local HTTP demo.</p></div></noscript>
+
+  <div class="row">
+    <div class="card demo">
+      <h2>1. Keep a little state</h2>
+      <p>The inline script supplies a starting value of 10. The external script keeps the counter between clicks.</p>
+      <p id="count" class="counter">10</p>
+      <div class="controls"><button id="less" type="button">Subtract 1</button><button id="more" type="button">Add 1</button><button id="zero" type="button">Reset to 10</button></div>
+    </div>
+    <div class="card demo">
+      <h2>2. Read what you type</h2>
+      <label for="name">Your name</label>
+      <input id="name" class="field" value="" maxlength="40" placeholder="Type a name">
+      <p id="greeting" class="result">Hello, visitor.</p>
+      <p class="muted">An input listener reads the current field value and replaces this paragraph's text.</p>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="card demo">
+      <h2>3. Do some arithmetic</h2>
+      <label for="limit">Add the whole numbers from 1 through:</label>
+      <input id="limit" class="field" value="10" maxlength="4" size="8">
+      <button id="calculate" type="button">Calculate sum</button>
+      <p id="sum" class="result">Choose a whole number from 1 to 1000.</p>
+      <p class="muted">Uses Number, comparisons, a for loop, and addition.</p>
+    </div>
+    <div class="card demo">
+      <h2>4. Change the view</h2>
+      <div class="controls"><button id="color" type="button">Change colors</button><button id="visibility" type="button">Hide / show</button></div>
+      <p id="preview" class="preview">The page updates this element's class, text color, and display style.</p>
+      <p id="view-state" class="muted">The preview is visible.</p>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>5. Cancel a default action</h2>
+    <p><label><input id="locked" type="checkbox"> This checkbox should stay unchecked.</label></p>
+    <p id="check-result" class="result">Click the checkbox. Its listener calls event.preventDefault().</p>
+    <p class="muted">The click listener sees the proposed checked state. Canceling the click restores its previous state.</p>
+  </div>
+
+  <div class="card">
+    <h2>6. Handle a form locally</h2>
+    <form id="local-form" action="/form-result" method="get">
+      <label for="message">A short message</label>
+      <input id="message" class="field" name="message" value="Made from scratch" maxlength="80">
+      <div class="controls"><button type="submit">Use this message</button><button type="reset">Reset field</button></div>
+    </form>
+    <p id="form-result" class="result">Submit to display your message here.</p>
+    <p class="muted">The submit listener prevents navigation. Reset uses the browser's normal form behavior. With JavaScript disabled, submission uses the local HTTP demo's /form-result endpoint.</p>
+  </div>
+
+  <div class="card">
+    <h2>7. Keep objects and arrays</h2>
+    <p>This collection lives in an object. Two references share its array, and its methods use <code>this</code> to read the same state.</p>
+    <label for="piece">A browser piece</label>
+    <input id="piece" class="field" value="JavaScript" maxlength="40">
+    <div class="controls"><button id="add-piece" type="button">Add piece</button><button id="undo-piece" type="button">Remove last</button><button id="reset-pieces" type="button">Reset collection</button></div>
+    <p id="pieces" class="result">Waiting for the collection.</p>
+    <p id="piece-keys" class="muted"></p>
+    <p class="muted">Uses object and array literals, shared references, push/pop/join, Object.keys, and function.call/apply. The collection is limited to 20 entries.</p>
+  </div>
+
+  <div class="card">
+    <h2>8. Schedule and cancel a callback</h2>
+    <p>Start a half-second timer, then try canceling it before the message changes. Each callback runs after the current action finishes.</p>
+    <div class="controls"><button id="timer-start" type="button">Start timer</button><button id="timer-cancel" type="button">Cancel timer</button></div>
+    <p id="timer-result" class="result">No timer is pending.</p>
+  </div>
+
+  <div class="card">
+    <h2>9. Try the new language pieces</h2>
+    <p>This example combines array construction, for-of, do/while, bitwise assignment, regexp lookbehind and lookahead, and a small eval expression.</p>
+    <button id="compat-run" type="button">Run language example</button>
+    <p id="compat-result" class="result">Waiting for the language example.</p>
+    <p id="navigator-result" class="muted">Waiting for browser information.</p>
+  </div>
+
+  <div class="card">
+    <h2>10. Read JSON and choose a case</h2>
+    <p>Try mode <code>sum</code> or <code>count</code>. The button parses JSON, uses a switch statement, and writes the result as JSON.</p>
+    <label for="json-source">Input JSON</label>
+    <input id="json-source" class="field" value='{"mode":"sum","items":[2,3,5]}' maxlength="256">
+    <button id="json-run" type="button">Parse and run</button>
+    <p id="json-result" class="result">Waiting for the JSON example.</p>
+    <p class="muted">Try a missing quote to exercise a catchable parse error, then correct it and run again.</p>
+  </div>
+
+  <div class="card limit">
+    <h2>11. Intentional limit test</h2>
+    <p>Use this test in ChezCat. The button intentionally starts an endless loop. The interpreter should stop the handler at its execution limit and leave the page usable.</p>
+    <button id="loop" type="button">Run intentional endless loop</button>
+    <p id="loop-result" class="result">After the handler stops, press Ctrl+I to read the error. Return to this page and try the counter again.</p>
+  </div>
+  <p class="muted">This is a small language and DOM subset. It does not yet run the scripts used by complex sites such as Google Search. Ctrl+U shows the HTML; Ctrl+I shows script loads, errors, and console messages.</p>
+  <p><a href="start.html">Back to the start page</a> &middot; <a href="#top">Back to top</a></p>
+</main></body>
+</html>

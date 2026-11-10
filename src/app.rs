@@ -1,0 +1,4910 @@
+use crate::editor::Editor;
+use crate::forms::{Forms, Kind, SelectRow};
+use crate::html::{self, Document};
+use crate::image::Bitmap;
+use crate::layout::{self, Layout, PaintItem};
+use crate::loader::{self, Loaded};
+use crate::navigation::{self, Location};
+use crate::paint::{Canvas, GLYPH_ADVANCE, GLYPH_HEIGHT};
+use crate::ui;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+
+#[path = "app_animation.rs"]
+mod animation;
+#[path = "app_browser_ui.rs"]
+mod browser_ui;
+use browser_ui::BrowserPanel;
+#[path = "app_history.rs"]
+mod browsing_history;
+#[path = "app_chrome.rs"]
+mod chrome;
+#[path = "app_inspector.rs"]
+mod inspector;
+#[path = "app_keyboard.rs"]
+pub(crate) mod keyboard;
+
+pub const BAR_HEIGHT: i32 = 68;
+pub const FOOT_HEIGHT: i32 = 32;
+const FIND_HEIGHT: i32 = 42;
+const START: &str = include_str!("../pages/start.html");
+
+pub enum PlatformAction {
+    None,
+    OpenFile,
+    Copy(String),
+    Cut(String),
+    Paste,
+}
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Focus {
+    Page,
+    Address,
+    Find,
+    Control(usize),
+}
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum View {
+    Page,
+    Source,
+    Resources,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct TextPoint {
+    run: usize,
+    offset: usize,
+}
+#[derive(Clone, Copy)]
+struct Selection {
+    start: TextPoint,
+    end: TextPoint,
+}
+impl Selection {
+    fn ordered(self) -> (TextPoint, TextPoint) {
+        (self.start.min(self.end), self.start.max(self.end))
+    }
+    fn slice(self, run: usize, length: usize) -> Option<(usize, usize)> {
+        let (start, end) = self.ordered();
+        if run < start.run || run > end.run {
+            return None;
+        }
+        let a = if run == start.run {
+            start.offset.min(length)
+        } else {
+            0
+        };
+        let b = if run == end.run {
+            end.offset.min(length)
+        } else {
+            length
+        };
+        (a < b).then_some((a, b))
+    }
+}
+enum Drag {
+    None,
+    Text {
+        x: i32,
+        y: i32,
+        href: Option<String>,
+        moved: bool,
+    },
+    Scrollbar {
+        offset: i32,
+    },
+    Field,
+    Control {
+        node: usize,
+    },
+    SelectOption {
+        node: usize,
+        index: usize,
+    },
+}
+#[derive(Clone, Copy)]
+struct SelectPopup {
+    node: usize,
+    highlighted: Option<usize>, // Row index; group headings cannot be chosen.
+    first: usize,
+    wheel_remainder: i32,
+}
+#[derive(Clone, Copy)]
+struct SelectPopupBox {
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+    row_height: i32,
+    visible: usize,
+    scale: i32,
+}
+struct HistoryEntry {
+    location: Location,
+    scroll: i32,
+    request: crate::http::Request,
+}
+#[derive(Clone, Copy)]
+enum NavigationKind {
+    New,
+    Reload(i32),
+    History(usize, i32),
+}
+#[derive(Clone, Copy)]
+enum LoadingScroll {
+    Offset(i32),
+    Fragment,
+}
+struct Pending {
+    id: u64,
+    location: Location,
+    kind: NavigationKind,
+    mode: crate::http::FetchMode,
+    request: crate::http::Request,
+    committed: bool,
+    scroll_target: Option<LoadingScroll>,
+}
+struct Resubmission {
+    token: u64,
+    location: Location,
+    request: crate::http::Request,
+    kind: NavigationKind,
+    mode: crate::http::FetchMode,
+    offered: bool,
+}
+
+pub struct App {
+    pub document: Document,
+    pub page: Layout,
+    pub width: i32,
+    pub height: i32,
+    pub scroll: i32,
+    pub source: Option<PathBuf>,
+    pub status: String,
+    pub failed: bool,
+    location: Location,
+    current_request: crate::http::Request,
+    base_location: Location,
+    home_location: Location,
+    raw: String,
+    styles: HashMap<usize, String>,
+    base_fonts: crate::fonts::Book,
+    fonts: crate::fonts::Book,
+    images: HashMap<usize, std::sync::Arc<Bitmap>>,
+    image_densities: HashMap<usize, f64>,
+    animations: HashMap<usize, animation::Playback>,
+    events: Vec<String>,
+    last_failed_navigation: Option<String>,
+    scripts_enabled: bool,
+    images_enabled: bool,
+    profile: crate::profile::Store,
+    browsing_history: crate::history::Store,
+    browsing_history_error: Option<String>,
+    history_maintenance: Option<std::time::Instant>,
+    history_closed: bool,
+    browser_panel: Option<BrowserPanel>,
+    scripting: Option<crate::scripting::Page>,
+    scripting_blocked: Option<String>,
+    history: Vec<HistoryEntry>,
+    history_index: usize,
+    zoom: f32,
+    focus: Focus,
+    address: Editor,
+    find: Editor,
+    forms: Forms,
+    find_open: bool,
+    matches: Vec<Selection>,
+    match_index: usize,
+    selection: Option<Selection>,
+    drag: Drag,
+    select_popup: Option<SelectPopup>,
+    hover: Option<String>,
+    menu: bool,
+    chrome: chrome::Chrome,
+    inspector: inspector::Inspector,
+    view: View,
+    alternate: Option<Document>,
+    page_scroll: i32,
+    wheel_remainder: i32,
+    pending_surrogate: Option<u16>,
+    worker: Option<loader::Worker>,
+    trust: std::sync::Arc<crate::trust::Store>,
+    wake: loader::Wake,
+    pending: Option<Pending>,
+    next_request: u64,
+    resubmission: Option<Resubmission>,
+    next_confirmation: u64,
+}
+
+impl App {
+    pub fn new() -> Self {
+        let location = Location::home();
+        let document = html::parse(START);
+        let page = layout::build_viewport(
+            &document,
+            1068,
+            760 - BAR_HEIGHT - FOOT_HEIGHT,
+            1.0,
+            &HashMap::new(),
+            &HashMap::new(),
+        );
+        let forms = Forms::new(&document);
+        let mut address = Editor::default();
+        address.set(&location.display());
+        Self {
+            document,
+            page,
+            width: 1080,
+            height: 760,
+            scroll: 0,
+            source: None,
+            status: String::new(),
+            failed: false,
+            location: location.clone(),
+            current_request: crate::http::Request::Get,
+            base_location: location.clone(),
+            home_location: location.clone(),
+            raw: START.to_owned(),
+            styles: HashMap::new(),
+            base_fonts: crate::fonts::Book::empty(),
+            fonts: crate::fonts::Book::empty(),
+            images: HashMap::new(),
+            image_densities: HashMap::new(),
+            animations: HashMap::new(),
+            events: vec!["Loaded bundled start page (no external resources).".to_owned()],
+            last_failed_navigation: None,
+            scripts_enabled: true,
+            images_enabled: true,
+            profile: crate::profile::Store::memory(),
+            browsing_history: crate::history::Store::memory(),
+            browsing_history_error: None,
+            history_maintenance: None,
+            history_closed: false,
+            browser_panel: None,
+            scripting: None,
+            scripting_blocked: None,
+            history: vec![HistoryEntry {
+                location,
+                scroll: 0,
+                request: crate::http::Request::Get,
+            }],
+            history_index: 0,
+            zoom: 1.0,
+            focus: Focus::Page,
+            address,
+            find: Editor::default(),
+            forms,
+            find_open: false,
+            matches: Vec::new(),
+            match_index: 0,
+            selection: None,
+            drag: Drag::None,
+            select_popup: None,
+            hover: None,
+            menu: false,
+            chrome: chrome::Chrome::default(),
+            inspector: inspector::Inspector::default(),
+            view: View::Page,
+            alternate: None,
+            page_scroll: 0,
+            wheel_remainder: 0,
+            pending_surrogate: None,
+            worker: None,
+            trust: std::sync::Arc::new(crate::trust::Store::unconfigured()),
+            wake: std::sync::Arc::new(|| {}),
+            pending: None,
+            next_request: 0,
+            resubmission: None,
+            next_confirmation: 0,
+        }
+    }
+    pub fn use_system_fonts(&mut self) {
+        self.base_fonts = crate::fonts::Book::system();
+        self.fonts = self.base_fonts.clone();
+        self.reflow();
+    }
+    pub fn use_home_file(&mut self, path: PathBuf) {
+        if !path.is_file() {
+            return;
+        }
+        if let Ok(location) = navigation::explicit(&path) {
+            if let Ok(loaded) = loader::local_with_options(&location, self.load_options()) {
+                self.home_location = location.clone();
+                self.commit(location.clone(), loaded, false);
+                self.history = vec![HistoryEntry {
+                    location,
+                    scroll: 0,
+                    request: crate::http::Request::Get,
+                }];
+                self.history_index = 0;
+            }
+        }
+    }
+    fn error(&mut self, error: String) {
+        self.status = error;
+        self.failed = true;
+    }
+    pub fn open(&mut self, path: &Path) {
+        self.cancel_pending();
+        match navigation::explicit(path) {
+            Ok(location) => self.navigate(location),
+            Err(e) => self.error(e),
+        }
+    }
+    pub fn open_address(&mut self, address: &str) {
+        match navigation::address(address, &self.location) {
+            Ok(location) => self.navigate_location(location, address.contains('#')),
+            Err(error) => {
+                self.cancel_pending();
+                self.error(error);
+            }
+        }
+    }
+    /// Command-line relative paths start in the process working directory,
+    /// while address-bar paths start beside the current local document.
+    pub fn open_argument(&mut self, address: &std::ffi::OsStr) {
+        self.cancel_pending();
+        // Preserve literal '#'/'%' filename characters from the shell or a
+        // file association. `explicit` rejects network/device paths before I/O.
+        match navigation::explicit(Path::new(address)) {
+            Ok(location) => self.navigate(location),
+            Err(file_error) => {
+                if let Some(text) = address.to_str() {
+                    match navigation::address(text, &Location::home()) {
+                        Ok(location) => self.navigate(location),
+                        Err(error) => self.error(error),
+                    }
+                } else {
+                    self.error(file_error);
+                }
+            }
+        }
+    }
+    pub fn set_load_wake(&mut self, wake: loader::Wake) {
+        if let Some(worker) = &self.worker {
+            worker.set_wake(wake.clone());
+        }
+        self.wake = wake;
+    }
+    /// Called at startup; trust is immutable for all requests in this worker.
+    pub fn use_trust_store(&mut self, trust: std::sync::Arc<crate::trust::Store>) {
+        self.cancel_pending();
+        self.worker = None;
+        self.trust = trust;
+    }
+    pub fn set_javascript_enabled(&mut self, enabled: bool) {
+        if self.scripts_enabled != enabled {
+            self.scripts_enabled = enabled;
+            self.scripting = None;
+            if !enabled {
+                self.document.scripting_enabled = false;
+            }
+            self.reload();
+        }
+    }
+    pub fn set_images_enabled(&mut self, enabled: bool) {
+        if self.images_enabled != enabled {
+            self.images_enabled = enabled;
+            if !enabled {
+                self.images.clear();
+                self.image_densities.clear();
+                self.animations.clear();
+                self.reflow();
+            }
+            self.reload();
+        }
+    }
+    fn load_options(&self) -> loader::LoadOptions {
+        loader::LoadOptions {
+            javascript: self.scripts_enabled,
+            images: self.images_enabled,
+            blocking: std::sync::Arc::new(crate::blocking::Policy::new(
+                &self.profile.data().settings.blocking,
+            )),
+            viewport_width: ((self.width - 12).max(1) as f32 / self.zoom)
+                .round()
+                .max(1.0) as u32,
+            viewport_height: (self.viewport_height().max(1) as f32 / self.zoom)
+                .round()
+                .max(1.0) as u32,
+            density_milli: (self.zoom * 1000.0).round().max(1.0) as u32,
+        }
+    }
+    fn toggle_javascript(&mut self) {
+        let mut data = self.profile.data().clone();
+        data.settings.javascript = !self.scripts_enabled;
+        if let Err(error) = self.profile.save(data) {
+            self.profile_error(error);
+            return;
+        }
+        self.set_javascript_enabled(!self.scripts_enabled);
+    }
+    pub fn is_loading(&self) -> bool {
+        self.pending.is_some()
+    }
+    fn cancel_pending(&mut self) {
+        if let Some(worker) = &self.worker {
+            worker.cancel();
+        }
+        self.pending = None;
+        self.resubmission = None;
+    }
+    pub fn stop_loading(&mut self) {
+        if self.pending.is_none() {
+            return;
+        }
+        self.cancel_pending();
+        self.address.set(&self.location.display());
+        self.status = "Loading stopped.".to_owned();
+        self.failed = false;
+    }
+    fn start_network(
+        &mut self,
+        location: Location,
+        kind: NavigationKind,
+        mode: crate::http::FetchMode,
+    ) {
+        self.start_network_request(location, kind, mode, crate::http::Request::Get);
+    }
+    fn start_network_request(
+        &mut self,
+        location: Location,
+        kind: NavigationKind,
+        mode: crate::http::FetchMode,
+        request: crate::http::Request,
+    ) {
+        self.select_popup = None;
+        self.resubmission = None;
+        if self.worker.is_none() {
+            match loader::Worker::new(self.wake.clone(), self.trust.clone()) {
+                Ok(worker) => self.worker = Some(worker),
+                Err(error) => {
+                    self.error(error);
+                    return;
+                }
+            }
+        }
+        self.next_request = self.next_request.wrapping_add(1);
+        let id = self.next_request;
+        self.address.set(&location.display());
+        self.focus = Focus::Page;
+        self.status = format!(
+            "{} {} | Esc stops",
+            if mode == crate::http::FetchMode::FullReload {
+                "Full reload:"
+            } else {
+                "Loading"
+            },
+            location.display()
+        );
+        self.failed = false;
+        self.menu = false;
+        self.pending = Some(Pending {
+            id,
+            location: location.clone(),
+            kind,
+            mode,
+            request: request.clone(),
+            committed: false,
+            scroll_target: None,
+        });
+        self.worker.as_ref().unwrap().submit_request_with_options(
+            id,
+            location,
+            mode,
+            self.load_options(),
+            request,
+        );
+    }
+    pub fn poll_load(&mut self) -> bool {
+        self.inspector.invalidate();
+        let Some(worker) = &self.worker else {
+            return false;
+        };
+        let poll = worker.poll();
+        let mut changed = false;
+        if let Some((id, text)) = poll.progress {
+            if self
+                .pending
+                .as_ref()
+                .is_some_and(|pending| pending.id == id)
+            {
+                self.status = format!("{} | Esc stops", text);
+                changed = true;
+            }
+        }
+        if let Some((id, loaded)) = poll.document {
+            if self
+                .pending
+                .as_ref()
+                .is_some_and(|pending| pending.id == id && !pending.committed)
+            {
+                let pending = self.pending.as_mut().unwrap();
+                pending.committed = true;
+                pending.location = loaded.location.clone();
+                pending.request = loaded.request.clone();
+                let kind = pending.kind;
+                pending.scroll_target = match kind {
+                    NavigationKind::Reload(scroll) | NavigationKind::History(_, scroll) => {
+                        Some(LoadingScroll::Offset(scroll))
+                    }
+                    NavigationKind::New if !loaded.location.fragment.is_empty() => {
+                        Some(LoadingScroll::Fragment)
+                    }
+                    _ => None,
+                };
+                self.finish_navigation(kind, loaded, true);
+                self.status.push_str(" | Loading images; Esc stops");
+                changed = true;
+            }
+        }
+        if let Some((id, update)) = poll.images {
+            if self
+                .pending
+                .as_ref()
+                .is_some_and(|pending| pending.id == id && pending.committed)
+            {
+                let has_images = !update.images.is_empty();
+                self.images.extend(update.images);
+                self.install_animations(update.animations);
+                self.events.extend(update.events);
+                if has_images {
+                    self.update_script_geometry();
+                }
+                if has_images && self.view == View::Page {
+                    // Node IDs and the document realm remain stable. Reflow
+                    // never rebuilds Forms or executes startup scripts again.
+                    self.reflow();
+                    self.restore_loading_scroll();
+                    self.sync_editors();
+                }
+                changed = true;
+            }
+        }
+        if let Some(completion) = poll.completed {
+            if self
+                .pending
+                .as_ref()
+                .is_some_and(|pending| pending.id == completion.id)
+            {
+                let pending = self.pending.take().unwrap();
+                changed = true;
+                match completion.result {
+                    Ok(end) if pending.committed => {
+                        self.events.extend(end.events);
+                        self.set_load_status(&end.notice, end.skipped);
+                        let outcome = self
+                            .scripting
+                            .as_mut()
+                            .map(|page| page.finish_loading(&mut self.document, &mut self.forms));
+                        if outcome.is_some_and(|outcome| outcome.layout_changed) {
+                            self.reflow();
+                            if self.view == View::Page {
+                                self.apply_loading_scroll(pending.scroll_target);
+                            }
+                        }
+                        self.validate_control_focus();
+                        self.sync_editors();
+                        self.show_script_errors();
+                        self.failed = false;
+                    }
+                    Ok(_) => self.error("The loader finished without a document.".into()),
+                    Err(error) => {
+                        self.address.set(&self.location.display());
+                        self.last_failed_navigation = Some(format!(
+                            "{}\n{}\n{}",
+                            pending.location.display(),
+                            error,
+                            if pending.committed {
+                                "The new document is displayed; its remaining resources did not finish."
+                            } else {
+                                "The previous page is still displayed."
+                            }
+                        ));
+                        self.error(format!(
+                            "{}: {}",
+                            fit_text(&pending.location.display(), 100),
+                            error
+                        ));
+                    }
+                }
+            }
+        }
+        if changed && self.view == View::Resources {
+            self.refresh_resource_view();
+        }
+        changed
+    }
+
+    fn restore_loading_scroll(&mut self) {
+        let target = self
+            .pending
+            .as_ref()
+            .and_then(|pending| pending.scroll_target);
+        self.apply_loading_scroll(target);
+    }
+
+    fn apply_loading_scroll(&mut self, target: Option<LoadingScroll>) {
+        match target {
+            Some(LoadingScroll::Offset(scroll)) => {
+                self.set_scroll(scroll.clamp(0, self.max_scroll()));
+            }
+            Some(LoadingScroll::Fragment) => self.jump_fragment(),
+            None => {}
+        }
+    }
+
+    fn user_changed_loading_position(&mut self) {
+        if let Some(pending) = &mut self.pending {
+            pending.scroll_target = None;
+        }
+    }
+
+    fn refresh_resource_view(&mut self) {
+        let scroll = self.scroll;
+        let focus = self.focus;
+        let menu = self.menu;
+        self.view = View::Source;
+        self.toggle_view(View::Resources);
+        self.set_scroll(scroll.clamp(0, self.max_scroll()));
+        self.focus = focus;
+        self.menu = menu;
+    }
+    pub fn wait_for_load(&mut self) {
+        let started = std::time::Instant::now();
+        while self.is_loading() {
+            self.poll_load();
+            // While already waiting for image I/O, service the displayed
+            // document's queued tasks as the window event loop does. This
+            // adds no post-load waiting; --wait-ms controls that separately.
+            if self.is_loading() {
+                self.poll_page_timer();
+            }
+            if started.elapsed() > std::time::Duration::from_secs(90) {
+                self.stop_loading();
+                self.error("Page loading exceeded the headless 90-second limit.".to_owned());
+                break;
+            }
+            if self.is_loading() {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+        }
+    }
+
+    pub fn next_script_timer(&self) -> Option<std::time::Instant> {
+        if self
+            .pending
+            .as_ref()
+            .is_some_and(|pending| !pending.committed)
+            || self.resubmission.is_some()
+            || !self.scripts_enabled
+            || !self.document.scripting_enabled
+        {
+            return None;
+        }
+        self.scripting.as_ref()?.next_timer_deadline()
+    }
+
+    pub fn poll_script_timer(&mut self) -> bool {
+        self.inspector.invalidate();
+        if self.next_script_timer().is_none() {
+            return false;
+        }
+        let Some(outcome) = self
+            .scripting
+            .as_mut()
+            .and_then(|page| page.poll_timer(&mut self.document, &mut self.forms))
+        else {
+            return false;
+        };
+        if outcome.layout_changed {
+            self.reflow();
+        }
+        self.validate_control_focus();
+        self.sync_editors();
+        if outcome.errors > 0 {
+            self.status = format!(
+                "JavaScript timer: {} error(s). Ctrl+I shows details.",
+                outcome.errors
+            );
+            self.failed = false;
+        }
+        if self.view == View::Resources {
+            // Refresh a diagnostic snapshot after asynchronous work, retaining
+            // the reader's scroll position and the underlying page position.
+            self.refresh_resource_view();
+        }
+        true
+    }
+
+    fn validate_control_focus(&mut self) {
+        if let Focus::Control(node) = self.focus {
+            if self
+                .forms
+                .controls
+                .get(&node)
+                .is_none_or(|control| !control.focusable())
+                || !self
+                    .page
+                    .controls
+                    .iter()
+                    .any(|control| control.node == node)
+            {
+                self.focus = Focus::Page;
+            }
+        }
+        if self.select_popup.is_some_and(|popup| {
+            self.focus != Focus::Control(popup.node)
+                || self
+                    .forms
+                    .controls
+                    .get(&popup.node)
+                    .is_none_or(|control| control.disabled || control.kind != Kind::Select)
+        }) {
+            self.select_popup = None;
+            self.drag = Drag::None;
+        }
+    }
+
+    pub fn script_timer_unavailable(&mut self) {
+        if let Some(page) = &mut self.scripting {
+            page.stop_timers("The operating system could not schedule the timer wake-up.");
+        }
+        self.animations.clear();
+        self.events.push(
+            "Page timer could not be scheduled; image animations stopped at their current frame."
+                .into(),
+        );
+        self.status = "Page timer could not be scheduled. Ctrl+I shows details.".into();
+    }
+
+    /// Optional headless settling time. It returns early when the queue empties;
+    /// pending timers never extend the caller's fixed deadline.
+    pub fn wait_for_script_timers(&mut self, duration: std::time::Duration) {
+        let deadline = std::time::Instant::now() + duration;
+        while std::time::Instant::now() < deadline {
+            let Some(due) = self.next_page_timer() else {
+                break;
+            };
+            if self.poll_page_timer() {
+                continue;
+            }
+            let wait = due
+                .min(deadline)
+                .saturating_duration_since(std::time::Instant::now());
+            if !wait.is_zero() {
+                std::thread::sleep(wait.min(std::time::Duration::from_millis(10)));
+            }
+        }
+    }
+    fn finish_navigation(&mut self, kind: NavigationKind, loaded: Loaded, images_pending: bool) {
+        self.save_scroll();
+        let location = loaded.location.clone();
+        let same = self.location == location && self.current_request == loaded.request;
+        self.commit(location.clone(), loaded, images_pending);
+        match kind {
+            NavigationKind::New => {
+                if !same {
+                    self.history.truncate(self.history_index + 1);
+                    self.history.push(HistoryEntry {
+                        location,
+                        scroll: self.scroll,
+                        request: self.current_request.clone(),
+                    });
+                    if self.history.len() > 128 {
+                        self.history.remove(0);
+                    }
+                    self.history_index = self.history.len() - 1;
+                }
+            }
+            NavigationKind::Reload(scroll) => {
+                self.set_scroll(scroll.clamp(0, self.max_scroll()));
+                self.history[self.history_index].location = location;
+                self.history[self.history_index].request = self.current_request.clone();
+            }
+            NavigationKind::History(index, scroll) => {
+                self.history_index = index;
+                self.history[index].location = location;
+                self.history[index].request = self.current_request.clone();
+                self.set_scroll(scroll.clamp(0, self.max_scroll()));
+            }
+        }
+        self.record_browsing_visit();
+    }
+    pub fn home(&mut self) {
+        self.browser_panel = None;
+        if let Some(home) = self.profile.data().settings.home.clone() {
+            match navigation::address(&home, &Location::home()) {
+                Ok(location) => self.navigate(location),
+                Err(error) => self.error(error),
+            }
+        } else {
+            self.navigate(self.home_location.clone());
+        }
+    }
+    pub fn reload(&mut self) {
+        self.reload_with_mode(crate::http::FetchMode::Normal);
+    }
+    fn reload_with_mode(&mut self, mode: crate::http::FetchMode) {
+        if let Some(pending) = self.pending.as_ref().filter(|pending| !pending.committed) {
+            let (location, kind) = (pending.location.clone(), pending.kind);
+            let request = pending.request.clone();
+            let mode = if pending.mode == crate::http::FetchMode::FullReload {
+                pending.mode
+            } else {
+                mode
+            };
+            if request.is_post() {
+                self.ask_resubmission(location, request, kind, mode);
+            } else {
+                self.start_network(location, kind, mode);
+            }
+            return;
+        }
+        let old = if self.view == View::Page {
+            self.scroll
+        } else {
+            self.page_scroll
+        };
+        if self.location.url.is_some() {
+            if self.current_request.is_post() {
+                self.ask_resubmission(
+                    self.location.clone(),
+                    self.current_request.clone(),
+                    NavigationKind::Reload(old),
+                    mode,
+                );
+            } else {
+                self.start_network(self.location.clone(), NavigationKind::Reload(old), mode);
+            }
+            return;
+        }
+        match loader::local_with_options(&self.location, self.load_options()) {
+            Ok(loaded) => self.finish_navigation(NavigationKind::Reload(old), loaded, false),
+            Err(e) => self.error(e),
+        }
+    }
+    fn save_scroll(&mut self) {
+        if let Some(entry) = self.history.get_mut(self.history_index) {
+            entry.scroll = if self.view == View::Page {
+                self.scroll
+            } else {
+                self.page_scroll
+            };
+        }
+    }
+    fn ask_resubmission(
+        &mut self,
+        location: Location,
+        request: crate::http::Request,
+        kind: NavigationKind,
+        mode: crate::http::FetchMode,
+    ) {
+        self.cancel_pending();
+        self.address.set(&self.location.display());
+        self.next_confirmation = self.next_confirmation.wrapping_add(1);
+        self.resubmission = Some(Resubmission {
+            token: self.next_confirmation,
+            location,
+            request,
+            kind,
+            mode,
+            offered: false,
+        });
+        self.status =
+            "This page needs the previous POST form data. Confirm resending to continue.".into();
+        self.failed = false;
+        self.menu = false;
+    }
+    /// The platform owns the native dialog; no App reference crosses its modal
+    /// message loop. Navigation invalidates the token before a delayed answer.
+    pub fn take_resubmission_prompt(&mut self) -> Option<(u64, String)> {
+        let question = self.resubmission.as_mut()?;
+        if question.offered {
+            return None;
+        }
+        question.offered = true;
+        Some((question.token, question.location.display()))
+    }
+    pub fn confirm_resubmission(&mut self, token: u64, accepted: bool) {
+        if !self
+            .resubmission
+            .as_ref()
+            .is_some_and(|question| question.token == token && question.offered)
+        {
+            return;
+        }
+        let question = self.resubmission.take().unwrap();
+        if accepted {
+            self.start_network_request(
+                question.location,
+                question.kind,
+                question.mode,
+                question.request,
+            );
+        } else {
+            self.status = "Form data was not resent.".into();
+            self.failed = false;
+        }
+    }
+    fn navigate(&mut self, location: Location) {
+        self.navigate_location(location, false);
+    }
+    fn navigate_location(&mut self, location: Location, fragment_navigation: bool) {
+        let location = if location.url.is_none()
+            && location.path.is_none()
+            && self.home_location.path.is_some()
+        {
+            Location {
+                fragment: location.fragment,
+                ..self.home_location.clone()
+            }
+        } else {
+            location
+        };
+        let same_document = location.url == self.location.url
+            && location.path == self.location.path
+            && location.root == self.location.root
+            && (!self.current_request.is_post() || fragment_navigation);
+        let keep_images = same_document
+            && self
+                .pending
+                .as_ref()
+                .is_some_and(|pending| pending.committed);
+        if !keep_images {
+            self.cancel_pending();
+        } else if let Some(pending) = &mut self.pending {
+            pending.location = location.clone();
+            pending.scroll_target = if location.fragment.is_empty() {
+                None
+            } else {
+                Some(LoadingScroll::Fragment)
+            };
+        }
+        if !same_document && location.url.is_some() {
+            self.start_network(
+                location,
+                NavigationKind::New,
+                crate::http::FetchMode::Normal,
+            );
+            return;
+        }
+        let loaded = if same_document {
+            None
+        } else {
+            match loader::local_with_options(&location, self.load_options()) {
+                Ok(loaded) => Some(loaded),
+                Err(e) => {
+                    self.error(e);
+                    return;
+                }
+            }
+        };
+        self.last_failed_navigation = None;
+        self.save_scroll();
+        let same = self.location == location;
+        if let Some(loaded) = loaded {
+            self.commit(location.clone(), loaded, false);
+            self.record_browsing_visit();
+        } else {
+            self.location = location.clone();
+            if let Some(page) = &mut self.scripting {
+                page.set_location(&self.location);
+            }
+            self.address.set(&self.location.display());
+            if self.view != View::Page {
+                self.view = View::Page;
+                self.alternate = None;
+                self.reflow();
+            }
+            if self.location.fragment.is_empty() {
+                self.set_scroll(0);
+            }
+            self.focus = Focus::Page;
+            self.selection = None;
+            self.drag = Drag::None;
+            self.hover = None;
+            self.menu = false;
+            self.status.clear();
+            self.failed = false;
+            self.jump_fragment();
+        }
+        if !same {
+            self.history.truncate(self.history_index + 1);
+            self.history.push(HistoryEntry {
+                location,
+                scroll: self.scroll,
+                request: self.current_request.clone(),
+            });
+            if self.history.len() > 128 {
+                self.history.remove(0);
+            }
+            self.history_index = self.history.len() - 1;
+        }
+    }
+    fn navigation_history_index(&self) -> usize {
+        match self
+            .pending
+            .as_ref()
+            .filter(|pending| !pending.committed)
+            .map(|pending| pending.kind)
+        {
+            Some(NavigationKind::History(index, _)) => index,
+            _ => self.history_index,
+        }
+    }
+    fn history_move(&mut self, delta: isize) {
+        let index = self.navigation_history_index() as isize + delta;
+        if index < 0 || index >= self.history.len() as isize {
+            return;
+        }
+        let index = index as usize;
+        let location = self.history[index].location.clone();
+        let scroll = self.history[index].scroll;
+        let request = self.history[index].request.clone();
+        let same_document = location.url == self.location.url
+            && location.path == self.location.path
+            && location.root == self.location.root
+            && request == self.current_request;
+        let keep_images = same_document
+            && self
+                .pending
+                .as_ref()
+                .is_some_and(|pending| pending.committed);
+        if !keep_images {
+            self.cancel_pending();
+        } else if let Some(pending) = &mut self.pending {
+            pending.location = location.clone();
+            pending.scroll_target = Some(LoadingScroll::Offset(scroll));
+        }
+        if same_document {
+            self.save_scroll();
+            self.location = location;
+            if let Some(page) = &mut self.scripting {
+                page.set_location(&self.location);
+            }
+            self.address.set(&self.location.display());
+            if self.view != View::Page {
+                self.view = View::Page;
+                self.alternate = None;
+                self.reflow();
+            }
+            self.history_index = index;
+            self.set_scroll(scroll.clamp(0, self.max_scroll()));
+            self.selection = None;
+            self.focus = Focus::Page;
+            self.status.clear();
+            self.failed = false;
+            return;
+        }
+        if location.url.is_some() {
+            if request.is_post() {
+                self.ask_resubmission(
+                    location,
+                    request,
+                    NavigationKind::History(index, scroll),
+                    crate::http::FetchMode::Normal,
+                );
+            } else {
+                self.start_network(
+                    location,
+                    NavigationKind::History(index, scroll),
+                    crate::http::FetchMode::Normal,
+                );
+            }
+            return;
+        }
+        match loader::local_with_options(&location, self.load_options()) {
+            Ok(loaded) => {
+                self.finish_navigation(NavigationKind::History(index, scroll), loaded, false)
+            }
+            Err(e) => self.error(e),
+        }
+    }
+    fn follow(&mut self, href: &str) {
+        match navigation::resolve(href, &self.base_location) {
+            Ok(location) => self.navigate_location(location, href.contains('#')),
+            Err(e) => self.error(e),
+        }
+    }
+    fn commit(&mut self, location: Location, loaded: Loaded, images_pending: bool) {
+        self.current_request = loaded.request;
+        self.resubmission = None;
+        let scripts = loaded.scripts;
+        self.inspector.navigation(&scripts);
+        self.scripting_blocked = loaded.scripting_blocked;
+        self.scripting = None;
+        self.base_location = loaded.base;
+        self.document = loaded.document;
+        self.document.scripting_enabled = self.scripts_enabled && self.scripting_blocked.is_none();
+        self.forms = Forms::new(&self.document);
+        self.raw = loaded.raw;
+        self.styles = loaded.styles;
+        self.fonts = self.base_fonts.clone();
+        self.fonts.extend(&loaded.fonts);
+        self.images = loaded.images;
+        self.image_densities = loaded.image_densities;
+        self.animations.clear();
+        self.install_animations(loaded.animations);
+        self.events = loaded.events;
+        self.last_failed_navigation = None;
+        self.source = location.path.clone();
+        self.location = location;
+        self.view = View::Page;
+        self.alternate = None;
+        self.set_scroll(0);
+        self.wheel_remainder = 0;
+        self.pending_surrogate = None;
+        self.selection = None;
+        self.drag = Drag::None;
+        self.hover = None;
+        self.menu = false;
+        self.focus = Focus::Page;
+        self.address.set(&self.location.display());
+        self.set_load_status(&loaded.notice, loaded.skipped);
+        self.failed = false;
+        if self.document.scripting_enabled {
+            let mut page = crate::scripting::Page::new();
+            page.set_location(&self.location);
+            page.set_geometry(crate::script_geometry::Geometry::new(
+                self.width - 12,
+                self.viewport_height(),
+                self.zoom,
+                &self.styles,
+                natural_image_sizes(&self.images, &self.image_densities),
+                &self.fonts,
+            ));
+            if images_pending {
+                page.start_before_load(&mut self.document, &mut self.forms, &scripts, &loaded.csp);
+            } else {
+                page.start_with_policy(&mut self.document, &mut self.forms, &scripts, &loaded.csp);
+            }
+            self.scripting = Some(page);
+        }
+        self.reflow();
+        self.jump_fragment();
+        self.show_script_errors();
+    }
+    fn set_load_status(&mut self, notice: &str, skipped: usize) {
+        self.status = if skipped == 0 {
+            notice.to_owned()
+        } else {
+            format!(
+                "{}{}{} resource(s) skipped. Ctrl+I shows details.",
+                notice,
+                if notice.is_empty() { "" } else { " | " },
+                skipped
+            )
+        };
+    }
+    fn show_script_errors(&mut self) {
+        let script_errors = self.scripting.as_ref().map_or(0, |page| page.error_count());
+        if script_errors != 0 {
+            self.status = format!("JavaScript subset: {script_errors} script error(s). Ctrl+I shows details; Ctrl+J toggles scripting.");
+        }
+    }
+    fn jump_fragment(&mut self) {
+        let fragment = &self.location.fragment;
+        if fragment.is_empty() || self.page.anchor_is_fixed(fragment) {
+            return;
+        }
+        if let Some((_, y)) = self.page.anchors.iter().find(|(id, _)| id == fragment) {
+            self.set_scroll((*y - 12).clamp(0, self.max_scroll()));
+        } else if fragment.eq_ignore_ascii_case("top") {
+            self.set_scroll(0);
+        } else {
+            self.status = format!("No anchor named {}", fragment);
+        }
+    }
+    fn reflow(&mut self) {
+        self.inspector.invalidate();
+        self.select_popup = None;
+        self.page = if let Some(doc) = &self.alternate {
+            layout::build_viewport_with_fonts(
+                doc,
+                self.width - 12,
+                self.viewport_height(),
+                self.zoom,
+                &HashMap::new(),
+                &HashMap::new(),
+                None,
+                &self.base_fonts,
+            )
+        } else {
+            let sizes = natural_image_sizes(&self.images, &self.image_densities);
+            let checked = |node| {
+                self.forms
+                    .controls
+                    .get(&node)
+                    .filter(|control| matches!(control.kind, Kind::Checkbox | Kind::Radio))
+                    .map(|control| control.checked)
+            };
+            layout::build_viewport_with_fonts(
+                &self.document,
+                self.width - 12,
+                self.viewport_height(),
+                self.zoom,
+                &self.styles,
+                &sizes,
+                Some(&checked),
+                &self.fonts,
+            )
+        };
+        if self.alternate.is_none() {
+            let viewport_height = self.viewport_height();
+            if let Some(scripting) = &mut self.scripting {
+                scripting.sync_geometry(
+                    self.width - 12,
+                    viewport_height,
+                    self.zoom,
+                    natural_image_sizes(&self.images, &self.image_densities),
+                    &self.page,
+                );
+            }
+        } else {
+            self.update_script_geometry();
+        }
+        self.selection = None;
+        self.drag = Drag::None;
+        self.set_scroll(self.scroll.clamp(0, self.max_scroll()));
+        self.update_find(false);
+    }
+    pub fn resize(&mut self, width: i32, height: i32) {
+        let width = width.clamp(1, 8192);
+        let height = height.clamp(1, 8192);
+        let changed = self.width != width || self.height != height;
+        self.width = width;
+        self.height = height;
+        self.keep_menu_selection_visible();
+        if changed {
+            self.chrome.hover = None;
+            self.chrome.pressed = None;
+            self.reflow();
+        }
+        self.set_scroll(self.scroll.clamp(0, self.max_scroll()));
+        self.sync_editors();
+        self.inspector_sync_editor();
+    }
+    pub fn set_zoom(&mut self, zoom: f32) {
+        if !zoom.is_finite() {
+            return;
+        }
+        let fraction = self.scroll as f32 / self.page.height.max(1) as f32;
+        self.zoom = zoom.clamp(0.5, 3.0);
+        self.reflow();
+        self.set_scroll(((fraction * self.page.height as f32) as i32).clamp(0, self.max_scroll()));
+        self.sync_editors();
+    }
+    pub fn content_top(&self) -> i32 {
+        BAR_HEIGHT + if self.find_open { FIND_HEIGHT } else { 0 }
+    }
+    pub fn viewport_height(&self) -> i32 {
+        (self.content_bottom() - self.content_top()).max(1)
+    }
+    pub fn max_scroll(&self) -> i32 {
+        (self.page.height - self.viewport_height()).max(0)
+    }
+    fn set_scroll(&mut self, scroll: i32) {
+        let scroll = scroll.clamp(0, self.max_scroll());
+        if scroll != self.scroll {
+            self.select_popup = None;
+        }
+        self.scroll = scroll;
+        self.page.set_scroll(self.scroll);
+    }
+    pub fn scroll_by(&mut self, delta: i32) {
+        self.user_changed_loading_position();
+        self.set_scroll(
+            self.scroll
+                .saturating_add(delta)
+                .clamp(0, self.max_scroll()),
+        );
+    }
+    pub fn wheel(&mut self, delta: i32, ctrl: bool) {
+        if self.menu {
+            self.chrome_wheel(delta);
+            return;
+        }
+        if self.browser_panel.is_some() {
+            self.browser_wheel(delta);
+            return;
+        }
+        self.user_changed_loading_position();
+        if ctrl {
+            self.set_zoom(self.zoom + delta as f32 / 1200.0);
+            return;
+        }
+        if let (Some(popup), Some(bounds)) = (self.select_popup, self.select_popup_box()) {
+            let rows = self.forms.controls[&popup.node]
+                .select
+                .as_ref()
+                .unwrap()
+                .rows
+                .len();
+            let popup = self.select_popup.as_mut().unwrap();
+            popup.wheel_remainder = popup.wheel_remainder.saturating_add(delta);
+            let steps = popup.wheel_remainder / 120;
+            popup.wheel_remainder %= 120;
+            popup.first = (popup.first as i32)
+                .saturating_sub(steps.saturating_mul(3))
+                .clamp(0, rows.saturating_sub(bounds.visible) as i32)
+                as usize;
+            return;
+        }
+        self.wheel_remainder = self
+            .wheel_remainder
+            .saturating_add(delta.saturating_mul(72));
+        let pixels = self.wheel_remainder / 120;
+        self.wheel_remainder %= 120;
+        self.scroll_by(-pixels);
+    }
+    pub fn title(&self) -> String {
+        let title = if self.document.title.is_empty() {
+            "Untitled"
+        } else {
+            &self.document.title
+        };
+        let view = match self.view {
+            View::Page => "",
+            View::Source => "Source: ",
+            View::Resources => "Resources: ",
+        };
+        format!(
+            "{}{} - ChezCat",
+            view,
+            title.chars().take(160).collect::<String>()
+        )
+    }
+    pub fn show_source(&mut self) {
+        self.toggle_view(View::Source);
+    }
+    pub fn show_resources(&mut self) {
+        self.toggle_view(View::Resources);
+    }
+    fn toggle_view(&mut self, requested: View) {
+        let view = if self.view == requested {
+            View::Page
+        } else {
+            requested
+        };
+        if self.view == View::Page {
+            self.page_scroll = self.scroll;
+        }
+        self.view = view;
+        self.set_scroll(0);
+        self.focus = Focus::Page;
+        self.menu = false;
+        self.alternate = match view {
+            View::Page => None,
+            View::Source => Some(html::parse(&format!("<title>Page source</title><style>body {{ margin: 24px; }} pre {{ font-size: 14px; white-space: pre-wrap; }}</style><body><h1>Page source</h1><p>Ctrl+U returns to the page. Ctrl+F searches this view.</p><pre>{}</pre></body>", escape(&self.raw)))),
+            View::Resources => {
+                let scripting = if !self.scripts_enabled {
+                    "JavaScript is OFF. Ctrl+J enables it and reloads the page.".to_owned()
+                } else if let Some(reason) = &self.scripting_blocked {
+                    format!("JavaScript blocked on this page: {reason}")
+                } else {
+                    self.scripting.as_ref().map(|page| page.report()).unwrap_or_else(|| "No active page runtime.".into())
+                };
+                Some(html::parse(&format!(
+                    "<title>Resource activity</title><style>body {{ margin: 24px; }} pre {{ font-size: 14px; white-space: pre-wrap; }}</style><body><h1>Resource activity</h1><p>Ctrl+I returns to the page. The document list belongs to the page still displayed.</p><pre>TRUST FILE: {}\n\nLAST FAILED NAVIGATION: {}\n\nDOCUMENT: {}\nCONTENT ROOT / ORIGIN: {}\n\n{}</pre><h2>JavaScript</h2><pre>{}</pre><p>Ctrl+J toggles scripting and reloads the page. The first language and DOM subset is limited; unsupported syntax and APIs are reported above.</p></body>",
+                    escape(self.trust.description()),
+                    escape(self.last_failed_navigation.as_deref().unwrap_or("None")),
+                    escape(&self.location.display()),
+                    escape(&self.location.root.as_ref().map(|p| p.display().to_string()).or_else(|| self.location.url.as_ref().map(|u| format!("{}://{}", if u.secure { "https" } else { "http" }, u.host_header()))).unwrap_or_else(|| "bundled".to_owned())),
+                    escape(&self.events.join("\n\n")),
+                    escape(&scripting),
+                )))
+            },
+        };
+        self.reflow();
+        if view == View::Page {
+            self.set_scroll(self.page_scroll.clamp(0, self.max_scroll()));
+        }
+    }
+}
+
+impl App {
+    fn address_rect(&self) -> (i32, i32) {
+        (202, (self.width - 266).max(20))
+    }
+    fn sync_editors(&mut self) {
+        self.sync_browser_panel();
+        self.address
+            .ensure_visible(((self.address_rect().1 - 16) / 12).max(1) as usize);
+        self.find
+            .ensure_visible(((self.width - 320) / 12).max(1) as usize);
+        if let Focus::Control(node) = self.focus {
+            if let Some(rect) = self.page.controls.iter().find(|c| c.node == node) {
+                if let Some(control) = self.forms.controls.get_mut(&node) {
+                    if let Some(font) = &rect.text_font {
+                        let shape = font.shape(&control.value.text());
+                        let value = &mut control.value;
+                        value.offset = value.offset.min(value.cursor).min(value.chars.len());
+                        let available = (rect.width - 14).max(0);
+                        while value.offset < value.cursor
+                            && shape.x(value.cursor) - shape.x(value.offset) > available
+                        {
+                            value.offset += 1;
+                        }
+                    } else {
+                        control.value.ensure_visible(
+                            ((rect.width - 12) / (GLYPH_ADVANCE * rect.scale)).max(1) as usize,
+                        );
+                    }
+                }
+            }
+        }
+    }
+    fn has_editor(&self) -> bool {
+        match self.focus {
+            Focus::Address | Focus::Find => true,
+            Focus::Control(node) => self
+                .forms
+                .controls
+                .get(&node)
+                .is_some_and(|c| c.kind == Kind::Text && !c.disabled),
+            Focus::Page => false,
+        }
+    }
+    fn editor_editable(&self) -> bool {
+        match self.focus {
+            Focus::Control(node) => self.forms.controls.get(&node).is_some_and(|c| c.editable()),
+            _ => self.has_editor(),
+        }
+    }
+    fn editor(&mut self) -> &mut Editor {
+        match self.focus {
+            Focus::Find => &mut self.find,
+            Focus::Control(node) => {
+                &mut self
+                    .forms
+                    .controls
+                    .get_mut(&node)
+                    .expect("focused control exists")
+                    .value
+            }
+            _ => &mut self.address,
+        }
+    }
+    fn focus_control(&mut self, node: usize) {
+        self.focus_control_with_scroll(node, true);
+    }
+    fn focus_control_with_scroll(&mut self, node: usize, scroll_into_view: bool) {
+        if self.view != View::Page
+            || !self
+                .forms
+                .controls
+                .get(&node)
+                .is_some_and(|c| c.focusable())
+            || !self.page.controls.iter().any(|rect| rect.node == node)
+        {
+            return;
+        }
+        self.select_popup = None;
+        self.chrome.focus = None;
+        self.focus = Focus::Control(node);
+        self.selection = None;
+        self.pending_surrogate = None;
+        self.menu = false;
+        if scroll_into_view && !self.page.control_is_fixed(node) {
+            if let Some(rect) = self.page.controls.iter().find(|r| r.node == node) {
+                let (top, height) = (rect.y, rect.height);
+                if top < self.scroll {
+                    self.set_scroll(top);
+                } else if top + height > self.scroll + self.viewport_height() {
+                    self.set_scroll(top + height - self.viewport_height());
+                }
+            }
+        }
+        // Pointer activation still needs the horizontal offset that was on
+        // screen when the click occurred. Its caret is assigned before syncing.
+        if scroll_into_view {
+            self.sync_editors();
+        }
+    }
+    fn tab_focus(&mut self, previous: bool) {
+        let mut candidates: Vec<_> = if self.view == View::Page {
+            self.page
+                .controls
+                .iter()
+                .filter_map(|rect| {
+                    self.forms
+                        .controls
+                        .get(&rect.node)
+                        .filter(|c| c.focusable() && c.tab_index >= 0)
+                        .map(|c| {
+                            (
+                                if c.tab_index > 0 {
+                                    (0, c.tab_index)
+                                } else {
+                                    (1, 0)
+                                },
+                                rect.node,
+                            )
+                        })
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+        candidates.sort_unstable();
+        let index = if let Focus::Control(node) = self.focus {
+            candidates.iter().position(|(_, id)| *id == node)
+        } else {
+            None
+        };
+        let next = match index {
+            Some(index) if previous => index.checked_sub(1),
+            Some(index) => (index + 1 < candidates.len()).then_some(index + 1),
+            None if previous => candidates.len().checked_sub(1),
+            None => (!candidates.is_empty()).then_some(0),
+        };
+        if let Some(index) = next {
+            self.focus_control(candidates[index].1);
+        } else {
+            self.focus_address();
+        }
+    }
+    fn submit_form(&mut self, owner: usize, submitter: Option<usize>) {
+        self.script_begin_job();
+        self.submit_form_in_job(owner, submitter);
+    }
+    fn submit_form_in_job(&mut self, owner: usize, submitter: Option<usize>) {
+        if let Err(error) = self
+            .forms
+            .validate_submission(&self.document, owner, submitter)
+        {
+            self.error(error);
+            return;
+        }
+        if self.script_event(owner, "submit", true) {
+            return;
+        }
+        match self.forms.submit_request(
+            &self.document,
+            owner,
+            submitter,
+            &self.location,
+            &self.base_location,
+        ) {
+            Ok(submission) => {
+                self.drag = Drag::None;
+                self.start_network_request(
+                    submission.location,
+                    NavigationKind::New,
+                    crate::http::FetchMode::Normal,
+                    submission.request,
+                );
+            }
+            Err(error) => self.error(error),
+        }
+    }
+    fn activate_control(&mut self, node: usize) {
+        self.activate_control_at(node, None);
+    }
+    fn activate_control_at(&mut self, node: usize, image_point: Option<(i32, i32)>) {
+        let Some(control) = self.forms.controls.get(&node) else {
+            return;
+        };
+        if control.disabled {
+            return;
+        }
+        let owner = control.owner;
+        let kind = control.kind;
+        let old_checked = control.checked;
+        let previous_radio = if kind == Kind::Radio {
+            self.forms
+                .controls
+                .iter()
+                .find(|(id, c)| {
+                    c.kind == Kind::Radio
+                        && c.checked
+                        && c.owner == owner
+                        && c.name == control.name
+                        && (!control.name.is_empty() || **id == node)
+                })
+                .map(|(&id, _)| id)
+        } else {
+            None
+        };
+        self.script_begin_job();
+        if matches!(kind, Kind::Checkbox | Kind::Radio) {
+            self.forms.toggle(node);
+            self.invalidate_script_geometry();
+        }
+        let changed = self.forms.controls[&node].checked != old_checked;
+        if self.script_event(node, "click", true) {
+            match kind {
+                Kind::Checkbox => self.forms.controls.get_mut(&node).unwrap().checked = old_checked,
+                Kind::Radio => {
+                    if let Some(previous) = previous_radio {
+                        // Restore this group's former selection. Script changes
+                        // to unrelated controls are not part of default rollback.
+                        let _ = self.forms.script_set_checked(previous, true);
+                    } else {
+                        self.forms.controls.get_mut(&node).unwrap().checked = false;
+                    }
+                }
+                _ => {}
+            }
+            if matches!(kind, Kind::Checkbox | Kind::Radio) {
+                self.reflow();
+            }
+            return;
+        }
+        if self.forms.controls.get(&node).is_none_or(|c| c.disabled) {
+            return;
+        }
+        match kind {
+            Kind::Checkbox | Kind::Radio => {
+                if changed {
+                    self.script_event(node, "input", false);
+                    self.script_event(node, "change", false);
+                }
+                self.reflow();
+            }
+            Kind::Submit | Kind::Image => {
+                if let Some(owner) = owner {
+                    if kind == Kind::Image {
+                        if let Some((x, y)) = image_point {
+                            if let Err(error) = self.forms.select_image_point(node, x, y) {
+                                self.error(error);
+                                return;
+                            }
+                        }
+                    }
+                    self.submit_form_in_job(owner, Some(node));
+                } else {
+                    self.error("This button has no form.".into());
+                }
+            }
+            Kind::Reset => {
+                if let Some(owner) = owner {
+                    if self.script_event(owner, "reset", true) {
+                        return;
+                    }
+                    self.forms.reset(owner);
+                    self.invalidate_script_geometry();
+                    self.reflow();
+                    self.sync_editors();
+                    self.status = "Form reset.".into();
+                    self.failed = false;
+                }
+            }
+            Kind::Button => {}
+            Kind::Select => self.open_select(node),
+            Kind::Unsupported => self.error(format!(
+                "{} in this build.",
+                self.forms.controls[&node].caption
+            )),
+            _ => {}
+        }
+    }
+    fn image_point_at(&self, node: usize, x: i32, y: i32) -> Option<(i32, i32)> {
+        if self.forms.controls.get(&node)?.kind != Kind::Image || !self.images.contains_key(&node) {
+            return None;
+        }
+        let rect = self.page.controls.iter().find(|rect| rect.node == node)?;
+        let image = rect.image.as_ref()?;
+        let document_y = y
+            .saturating_sub(self.content_top())
+            .saturating_add(self.scroll);
+        // A label can activate this control from outside its own border box.
+        // Only a direct click on the rendered image selects a new coordinate.
+        if !crate::paint::ClipRect::new(rect.x, rect.y, rect.width, rect.height)
+            .contains(x, document_y)
+        {
+            return None;
+        }
+        // The coordinate origin is the rendered image's content edge, not its
+        // intrinsic pixel grid. Keep signed padding/border coordinates and undo
+        // browser zoom, truncating fractional CSS pixels toward zero.
+        let css_x = (f64::from(x) - f64::from(rect.x) - f64::from(image.x)) / f64::from(self.zoom);
+        let css_y =
+            (f64::from(document_y) - f64::from(rect.y) - f64::from(image.y)) / f64::from(self.zoom);
+        Some((css_x as i32, css_y as i32))
+    }
+    fn select_popup_box(&self) -> Option<SelectPopupBox> {
+        let popup = self.select_popup?;
+        if self.view != View::Page || self.focus != Focus::Control(popup.node) {
+            return None;
+        }
+        let control = self.forms.controls.get(&popup.node)?;
+        if control.disabled {
+            return None;
+        }
+        let state = control.select.as_ref()?;
+        if state.rows.is_empty() {
+            return None;
+        }
+        let rect = self
+            .page
+            .controls
+            .iter()
+            .find(|rect| rect.node == popup.node)?;
+        let row_height = rect
+            .text_font
+            .as_ref()
+            .map_or((GLYPH_HEIGHT + 6) * rect.scale, |font| font.height() + 12);
+        let top = self.content_top();
+        let bottom = self.content_bottom();
+        if bottom <= top {
+            return None;
+        }
+        let raw_top = rect.y + top - self.scroll;
+        let control_top = raw_top.clamp(top, bottom);
+        let control_bottom = raw_top.saturating_add(rect.height).clamp(top, bottom);
+        let above = (control_top - top).max(0).min(self.viewport_height());
+        let below = (bottom - control_bottom).max(0).min(self.viewport_height());
+        let wanted = (state.rows.len().min(12) as i32 * row_height) + 2;
+        let upward = below < wanted && above > below;
+        let space = if upward { above } else { below };
+        let visible = ((space - 2).max(0) / row_height).min(12) as usize;
+        let visible = visible.min(state.rows.len());
+        if visible == 0 {
+            return None;
+        }
+        let widest = state
+            .rows
+            .iter()
+            .map(|row| match row {
+                SelectRow::Group { label, .. } => label.chars().count(),
+                SelectRow::Option(index) => {
+                    state.options[*index].label.chars().count()
+                        + usize::from(state.options[*index].group.is_some()) * 2
+                }
+            })
+            .max()
+            .unwrap_or(0)
+            .min(256) as i32;
+        let widest = rect
+            .text_font
+            .as_ref()
+            .map_or(widest * GLYPH_ADVANCE * rect.scale, |font| {
+                state
+                    .rows
+                    .iter()
+                    .map(|row| match row {
+                        SelectRow::Group { label, .. } => {
+                            font.measure(&label.chars().take(256).collect::<String>())
+                        }
+                        SelectRow::Option(index) => {
+                            let option = &state.options[*index];
+                            font.measure(&option.label.chars().take(256).collect::<String>())
+                                + if option.group.is_some() {
+                                    font.measure("  ")
+                                } else {
+                                    0
+                                }
+                        }
+                    })
+                    .max()
+                    .unwrap_or(0)
+            });
+        let width = (widest + 28).max(rect.width).min((self.width - 8).max(1));
+        let height = visible as i32 * row_height + 2;
+        let x = rect.x.clamp(0, (self.width - width).max(0));
+        let y = if upward {
+            control_top - height
+        } else {
+            control_bottom
+        };
+        Some(SelectPopupBox {
+            x,
+            y,
+            width,
+            height,
+            row_height,
+            visible,
+            scale: rect.scale,
+        })
+    }
+
+    fn select_row_option(&self, node: usize, row: usize) -> Option<usize> {
+        let state = self.forms.controls.get(&node)?.select.as_ref()?;
+        let SelectRow::Option(index) = *state.rows.get(row)? else {
+            return None;
+        };
+        (!state.options[index].disabled).then_some(index)
+    }
+
+    fn select_row_at(&self, x: i32, y: i32) -> Option<usize> {
+        let popup = self.select_popup?;
+        let bounds = self.select_popup_box()?;
+        if x <= bounds.x
+            || x >= bounds.x + bounds.width - 1
+            || y <= bounds.y
+            || y >= bounds.y + bounds.height - 1
+        {
+            return None;
+        }
+        Some(popup.first + ((y - bounds.y - 1) / bounds.row_height) as usize)
+    }
+
+    fn open_select(&mut self, node: usize) {
+        self.focus_control(node);
+        let Some(state) = self
+            .forms
+            .controls
+            .get(&node)
+            .and_then(|control| control.select.as_ref())
+        else {
+            return;
+        };
+        let highlighted = state.selected.and_then(|selected| state.rows.iter()
+            .position(|row| matches!(row, SelectRow::Option(index) if *index == selected && !state.options[*index].disabled)))
+            .or_else(|| state.rows.iter().position(|row| matches!(row, SelectRow::Option(index) if !state.options[*index].disabled)));
+        self.select_popup = Some(SelectPopup {
+            node,
+            highlighted,
+            first: 0,
+            wheel_remainder: 0,
+        });
+        self.drag = Drag::None;
+        if self.select_popup_box().is_none() {
+            self.select_popup = None;
+        } else {
+            self.keep_select_highlight_visible();
+        }
+    }
+
+    fn keep_select_highlight_visible(&mut self) {
+        let Some(bounds) = self.select_popup_box() else {
+            return;
+        };
+        let Some(popup) = &mut self.select_popup else {
+            return;
+        };
+        if let Some(row) = popup.highlighted {
+            if row < popup.first {
+                popup.first = row;
+            }
+            if row >= popup.first + bounds.visible {
+                popup.first = row + 1 - bounds.visible;
+            }
+        }
+        let count = self.forms.controls[&popup.node]
+            .select
+            .as_ref()
+            .unwrap()
+            .rows
+            .len();
+        popup.first = popup.first.min(count.saturating_sub(bounds.visible));
+    }
+
+    fn move_select_highlight(&mut self, forward: bool, edge: bool) {
+        let Some(popup) = self.select_popup else {
+            return;
+        };
+        let state = self.forms.controls[&popup.node].select.as_ref().unwrap();
+        let rows = state.rows.len();
+        let candidate = if forward {
+            let start = if edge {
+                0
+            } else {
+                popup.highlighted.map_or(0, |row| row + 1)
+            };
+            (start..rows).find(|&row| self.select_row_option(popup.node, row).is_some())
+        } else {
+            let end = if edge {
+                rows
+            } else {
+                popup.highlighted.unwrap_or(rows)
+            };
+            (0..end)
+                .rev()
+                .find(|&row| self.select_row_option(popup.node, row).is_some())
+        };
+        if let Some(row) = candidate {
+            self.select_popup.as_mut().unwrap().highlighted = Some(row);
+            self.keep_select_highlight_visible();
+        }
+    }
+
+    fn choose_select(&mut self, node: usize, index: usize) {
+        self.select_popup = None;
+        self.drag = Drag::None;
+        if self.forms.select_option(node, index).unwrap_or(false) {
+            self.script_begin_job();
+            self.invalidate_script_geometry();
+            self.script_event(node, "input", false);
+            self.script_event(node, "change", false);
+            self.sync_editors();
+        }
+    }
+
+    fn step_select(&mut self, node: usize, forward: bool, edge: bool) {
+        let Some(state) = self
+            .forms
+            .controls
+            .get(&node)
+            .and_then(|control| control.select.as_ref())
+        else {
+            return;
+        };
+        let candidate = if forward {
+            let start = if edge {
+                0
+            } else {
+                state.selected.map_or(0, |index| index + 1)
+            };
+            (start..state.options.len()).find(|&index| !state.options[index].disabled)
+        } else {
+            let end = if edge {
+                state.options.len()
+            } else {
+                state.selected.unwrap_or(state.options.len())
+            };
+            (0..end).rev().find(|&index| !state.options[index].disabled)
+        };
+        if let Some(index) = candidate {
+            self.choose_select(node, index);
+        }
+    }
+
+    fn draw_select_popup(&self, canvas: &mut Canvas) {
+        let (Some(popup), Some(bounds)) = (self.select_popup, self.select_popup_box()) else {
+            return;
+        };
+        let state = self.forms.controls[&popup.node].select.as_ref().unwrap();
+        let font = self
+            .page
+            .controls
+            .iter()
+            .find(|rect| rect.node == popup.node)
+            .and_then(|rect| rect.text_font.as_ref());
+        canvas.set_clip(Some(crate::paint::ClipRect::new(
+            0,
+            self.content_top(),
+            self.width,
+            self.viewport_height(),
+        )));
+        canvas.fill_rect(bounds.x, bounds.y, bounds.width, bounds.height, 0x526d80);
+        canvas.fill_rect(
+            bounds.x + 1,
+            bounds.y + 1,
+            bounds.width - 2,
+            bounds.height - 2,
+            0xffffff,
+        );
+        for (visible, row) in state
+            .rows
+            .iter()
+            .enumerate()
+            .skip(popup.first)
+            .take(bounds.visible)
+        {
+            let y = bounds.y + 1 + (visible - popup.first) as i32 * bounds.row_height;
+            let (label, disabled, grouped) = match row {
+                SelectRow::Group { node, label } => {
+                    canvas.fill_rect(
+                        bounds.x + 1,
+                        y,
+                        bounds.width - 2,
+                        bounds.row_height,
+                        0xe7edf1,
+                    );
+                    (
+                        label.as_str(),
+                        self.document.attr(*node, "disabled").is_some(),
+                        false,
+                    )
+                }
+                SelectRow::Option(index) => {
+                    let option = &state.options[*index];
+                    if popup.highlighted == Some(visible) && !option.disabled {
+                        canvas.fill_rect(
+                            bounds.x + 1,
+                            y,
+                            bounds.width - 2,
+                            bounds.row_height,
+                            0xc4e2f5,
+                        );
+                    }
+                    (
+                        option.label.as_str(),
+                        option.disabled,
+                        option.group.is_some(),
+                    )
+                }
+            };
+            if let Some(font) = font {
+                let indent = if grouped { font.measure("  ") } else { 0 };
+                let label = font.fit(label, (bounds.width - 20 - indent).max(0));
+                let shape = font.shape(&label);
+                shape.draw(
+                    canvas,
+                    bounds.x + 7 + indent,
+                    y + (bounds.row_height - shape.height()) / 2,
+                    if disabled { 0x89929a } else { 0x26364a },
+                );
+                continue;
+            }
+            let indent = if grouped {
+                2 * GLYPH_ADVANCE * bounds.scale
+            } else {
+                0
+            };
+            let cells =
+                ((bounds.width - 20 - indent) / (GLYPH_ADVANCE * bounds.scale)).max(0) as usize;
+            canvas.text(
+                bounds.x + 7 + indent,
+                y + (bounds.row_height - GLYPH_HEIGHT * bounds.scale) / 2,
+                &fit_text(label, cells),
+                bounds.scale,
+                if disabled { 0x89929a } else { 0x26364a },
+            );
+        }
+        if state.rows.len() > bounds.visible && bounds.width >= 12 {
+            let track = bounds.height - 4;
+            let thumb = (track * bounds.visible as i32 / state.rows.len() as i32).max(4);
+            let offset = (track - thumb) * popup.first as i32
+                / state.rows.len().saturating_sub(bounds.visible).max(1) as i32;
+            canvas.fill_rect(
+                bounds.x + bounds.width - 6,
+                bounds.y + 2,
+                4,
+                track,
+                0xe7edf1,
+            );
+            canvas.fill_rect(
+                bounds.x + bounds.width - 6,
+                bounds.y + 2 + offset,
+                4,
+                thumb,
+                0x849aaa,
+            );
+        }
+        canvas.set_clip(None);
+    }
+    fn script_begin_job(&mut self) {
+        self.inspector.invalidate();
+        if let Some(page) = &mut self.scripting {
+            page.begin_job();
+        }
+    }
+    fn update_script_geometry(&mut self) {
+        let height = self.viewport_height();
+        if let Some(page) = &mut self.scripting {
+            page.update_geometry(
+                self.width - 12,
+                height,
+                self.zoom,
+                natural_image_sizes(&self.images, &self.image_densities),
+            );
+        }
+    }
+    fn invalidate_script_geometry(&mut self) {
+        if let Some(page) = &mut self.scripting {
+            page.invalidate_geometry();
+        }
+    }
+    fn script_event(&mut self, target: usize, event: &str, cancelable: bool) -> bool {
+        self.inspector.invalidate();
+        let Some(page) = &mut self.scripting else {
+            return false;
+        };
+        let outcome = page.dispatch(
+            &mut self.document,
+            &mut self.forms,
+            target,
+            event,
+            cancelable,
+        );
+        if outcome.layout_changed {
+            self.reflow();
+        }
+        self.validate_control_focus();
+        self.sync_editors();
+        if outcome.errors > 0 {
+            self.status = format!(
+                "JavaScript subset: {} error(s). Ctrl+I shows details.",
+                outcome.errors
+            );
+            self.failed = false;
+        }
+        outcome.prevented
+    }
+    fn edited_control(&mut self, previous: Option<(usize, String)>) {
+        if let Some((node, previous)) = previous {
+            if self
+                .forms
+                .controls
+                .get(&node)
+                .is_some_and(|c| c.value.text() != previous)
+            {
+                self.script_begin_job();
+                self.invalidate_script_geometry();
+                self.script_event(node, "input", false);
+            }
+        }
+    }
+    fn current_control_value(&self) -> Option<(usize, String)> {
+        if let Focus::Control(node) = self.focus {
+            self.forms
+                .controls
+                .get(&node)
+                .filter(|c| c.editable())
+                .map(|c| (node, c.value.text()))
+        } else {
+            None
+        }
+    }
+    fn focus_address(&mut self) {
+        self.reset_chrome();
+        self.select_popup = None;
+        self.focus = Focus::Address;
+        self.address.set(
+            &self
+                .pending
+                .as_ref()
+                .map(|pending| pending.location.display())
+                .unwrap_or_else(|| self.location.display()),
+        );
+        self.address.select_all();
+        self.menu = false;
+        self.pending_surrogate = None;
+        self.sync_editors();
+    }
+    fn open_find(&mut self) {
+        self.reset_chrome();
+        self.select_popup = None;
+        let changed = !self.find_open;
+        self.find_open = true;
+        if changed {
+            self.reflow();
+        }
+        self.focus = Focus::Find;
+        self.find.select_all();
+        self.menu = false;
+        self.set_scroll(self.scroll.clamp(0, self.max_scroll()));
+        self.update_find(false);
+        self.sync_editors();
+    }
+    pub fn search(&mut self, query: &str) {
+        self.user_changed_loading_position();
+        self.open_find();
+        self.find.set(query);
+        self.update_find(true);
+        self.sync_editors();
+    }
+    fn key_default(&mut self, key: u32, ctrl: bool, shift: bool, alt: bool) -> PlatformAction {
+        // AltGr belongs to text input. Page dispatch has already observed the
+        // key; it must not dismiss a browser menu or steal an inspector editor.
+        if ctrl && alt {
+            return PlatformAction::None;
+        }
+        if !alt && (key == 0x7b || ctrl && shift && key == 0x49) {
+            self.toggle_inspector();
+            return PlatformAction::None;
+        }
+        if self.inspector.focused && self.inspector.mode != inspector::Mode::Closed {
+            if alt
+                || ctrl
+                    && matches!(
+                        key,
+                        0x4c | 0x52 | 0x74 | 0x4f | 0xbc | 0x48 | 0x44 | 0x4a | 0x42
+                    )
+            {
+                self.inspector.focused = false;
+            } else {
+                return self.inspector_key(key, ctrl, shift, alt);
+            }
+        }
+        if let Some(action) = self.chrome_key(key, ctrl, shift, alt) {
+            return action;
+        }
+        if self.browser_panel.is_some() {
+            return self.browser_key(key, ctrl, shift, alt);
+        }
+        self.user_changed_loading_position();
+        if let Some(popup) = self.select_popup {
+            if !ctrl && !alt {
+                match key {
+                    0x1b => {
+                        self.select_popup = None;
+                        self.drag = Drag::None;
+                        return PlatformAction::None;
+                    }
+                    0x26 | 0x28 | 0x24 | 0x23 => {
+                        self.move_select_highlight(
+                            matches!(key, 0x28 | 0x24),
+                            matches!(key, 0x24 | 0x23),
+                        );
+                        return PlatformAction::None;
+                    }
+                    0x0d | 0x20 => {
+                        if let Some(index) = popup
+                            .highlighted
+                            .and_then(|row| self.select_row_option(popup.node, row))
+                        {
+                            self.choose_select(popup.node, index);
+                        } else {
+                            self.select_popup = None;
+                        }
+                        return PlatformAction::None;
+                    }
+                    _ => {}
+                }
+            }
+            self.select_popup = None;
+            self.drag = Drag::None;
+        }
+        if alt {
+            match key {
+                0x25 => self.history_move(-1),
+                0x27 => self.history_move(1),
+                0x24 => self.home(),
+                0x44 => self.focus_address(),
+                _ => {}
+            }
+            return PlatformAction::None;
+        }
+        if ctrl {
+            match key {
+                0x44 => self.add_current_bookmark(),
+                0x42 if shift => self.show_bookmarks(),
+                0x48 => self.show_history(),
+                0xbc => self.show_settings(),
+                0x4c => self.focus_address(),
+                0x4f => return PlatformAction::OpenFile,
+                0x52 if !shift => self.reload(),
+                0x52 | 0x74 => self.reload_with_mode(crate::http::FetchMode::FullReload),
+                0x46 => self.open_find(),
+                0x55 => self.show_source(),
+                0x49 => self.show_resources(),
+                0x4a => self.toggle_javascript(),
+                0xbb | 0x6b => self.set_zoom(self.zoom + 0.25),
+                0xbd | 0x6d => self.set_zoom(self.zoom - 0.25),
+                0x30 | 0x60 => {
+                    self.set_zoom(self.profile.data().settings.default_zoom as f32 / 100.0)
+                }
+                0x41 => {
+                    if self.has_editor() {
+                        self.editor().select_all();
+                    } else if let Some(last) = self.page.runs.last() {
+                        self.selection = Some(Selection {
+                            start: TextPoint { run: 0, offset: 0 },
+                            end: TextPoint {
+                                run: self.page.runs.len() - 1,
+                                offset: last.text.chars().count(),
+                            },
+                        });
+                    }
+                }
+                0x43 | 0x58 => {
+                    let text = if self.has_editor() {
+                        self.editor().selected()
+                    } else {
+                        self.selected_text()
+                    };
+                    self.sync_editors();
+                    return if text.is_empty() {
+                        PlatformAction::None
+                    } else if key == 0x58 && self.editor_editable() {
+                        PlatformAction::Cut(text)
+                    } else {
+                        PlatformAction::Copy(text)
+                    };
+                }
+                0x56 if self.editor_editable() => return PlatformAction::Paste,
+                0x24 => {
+                    if !self.has_editor() {
+                        self.set_scroll(0);
+                    } else {
+                        self.editor().move_to(0, shift);
+                    }
+                }
+                0x23 => {
+                    if !self.has_editor() {
+                        self.set_scroll(self.max_scroll());
+                    } else {
+                        let n = self.editor().chars.len();
+                        self.editor().move_to(n, shift);
+                    }
+                }
+                _ => {}
+            }
+            self.sync_editors();
+            return PlatformAction::None;
+        }
+        match key {
+            0x74 => {
+                self.reload();
+                return PlatformAction::None;
+            }
+            0x75 => {
+                self.focus_address();
+                return PlatformAction::None;
+            }
+            0x72 => {
+                if !self.find_open {
+                    self.open_find();
+                }
+                self.find_next(shift);
+                return PlatformAction::None;
+            }
+            0x1b => {
+                if self.is_loading() {
+                    self.stop_loading();
+                    return PlatformAction::None;
+                }
+                if self.menu {
+                    self.menu = false;
+                } else if self.focus == Focus::Address {
+                    self.focus = Focus::Page;
+                    self.address.set(&self.location.display());
+                } else if matches!(self.focus, Focus::Control(_)) {
+                    self.focus = Focus::Page;
+                } else if self.find_open {
+                    self.find_open = false;
+                    self.reflow();
+                    self.focus = Focus::Page;
+                    self.matches.clear();
+                } else if self.view != View::Page {
+                    self.toggle_view(self.view);
+                }
+                self.set_scroll(self.scroll.clamp(0, self.max_scroll()));
+                return PlatformAction::None;
+            }
+            _ => {}
+        }
+        if key == 0x09 {
+            self.tab_focus(shift);
+            return PlatformAction::None;
+        }
+        if let Focus::Control(node) = self.focus {
+            let kind = self.forms.controls[&node].kind;
+            if kind == Kind::Select && matches!(key, 0x26 | 0x28 | 0x24 | 0x23) {
+                self.step_select(node, matches!(key, 0x28 | 0x24), matches!(key, 0x24 | 0x23));
+                return PlatformAction::None;
+            }
+            if key == 0x0d && kind == Kind::Text {
+                match self.forms.implicit_submitter(node) {
+                    Ok((_, Some(submitter))) => self.activate_control(submitter),
+                    Ok((owner, None)) => self.submit_form(owner, None),
+                    Err(error) => self.error(error),
+                }
+                return PlatformAction::None;
+            }
+            if kind != Kind::Text {
+                if matches!(key, 0x0d | 0x20) {
+                    self.activate_control(node);
+                }
+                return PlatformAction::None;
+            }
+        }
+        if self.has_editor() {
+            let previous = self.current_control_value();
+            match key {
+                0x0d => {
+                    if self.focus == Focus::Find {
+                        self.find_next(shift);
+                    } else {
+                        let address = self.address.text();
+                        self.open_address(&address);
+                    }
+                }
+                0x08 if self.editor_editable() => self.editor().backspace(),
+                0x2e if self.editor_editable() => self.editor().delete(),
+                0x25 => self.editor().left(shift),
+                0x27 => self.editor().right(shift),
+                0x24 => self.editor().move_to(0, shift),
+                0x23 => {
+                    let n = self.editor().chars.len();
+                    self.editor().move_to(n, shift);
+                }
+                _ => {}
+            }
+            self.edited_control(previous);
+            if self.focus == Focus::Find && matches!(key, 0x08 | 0x2e) {
+                self.update_find(true);
+            }
+        } else {
+            match key {
+                0x26 => self.scroll_by(-24),
+                0x28 => self.scroll_by(24),
+                0x21 => self.scroll_by(-self.viewport_height() + 24),
+                0x22 => self.scroll_by(self.viewport_height() - 24),
+                0x20 => self.scroll_by((self.viewport_height() - 24) * if shift { -1 } else { 1 }),
+                0x24 => self.set_scroll(0),
+                0x23 => self.set_scroll(self.max_scroll()),
+                _ => {}
+            }
+        }
+        self.sync_editors();
+        PlatformAction::None
+    }
+    pub fn text_input(&mut self, ch: char) {
+        if self.inspector.focused && self.inspector.mode != inspector::Mode::Closed {
+            if !ch.is_control() {
+                let mut buffer = [0u8; 4];
+                self.inspector_paste(ch.encode_utf8(&mut buffer));
+            }
+            return;
+        }
+        if self.menu || self.chrome.focus.is_some() {
+            return;
+        }
+        if self.browser_panel.is_some() {
+            if !ch.is_control() {
+                let mut buffer = [0u8; 4];
+                self.browser_paste(ch.encode_utf8(&mut buffer));
+            }
+            return;
+        }
+        if !self.editor_editable() || ch.is_control() {
+            return;
+        }
+        let mut buffer = [0u8; 4];
+        self.paste(ch.encode_utf8(&mut buffer));
+    }
+    pub fn utf16_input(&mut self, unit: u16) {
+        if (0xd800..=0xdbff).contains(&unit) {
+            self.pending_surrogate = Some(unit);
+            return;
+        }
+        let code = if (0xdc00..=0xdfff).contains(&unit) {
+            match self.pending_surrogate.take() {
+                Some(high) => 0x10000 + (((high as u32 - 0xd800) << 10) | (unit as u32 - 0xdc00)),
+                None => 0xfffd,
+            }
+        } else {
+            self.pending_surrogate = None;
+            unit as u32
+        };
+        if let Some(ch) = char::from_u32(code) {
+            self.text_input(ch);
+        }
+    }
+    pub fn paste(&mut self, text: &str) {
+        if self.inspector.focused && self.inspector.mode != inspector::Mode::Closed {
+            self.inspector_paste(text);
+            return;
+        }
+        if self.menu || self.chrome.focus.is_some() {
+            return;
+        }
+        if self.browser_panel.is_some() {
+            self.browser_paste(text);
+            return;
+        }
+        if !self.editor_editable() {
+            return;
+        }
+        if let Focus::Control(node) = self.focus {
+            let previous = self.current_control_value();
+            self.forms.controls.get_mut(&node).unwrap().insert(text);
+            self.edited_control(previous);
+            self.sync_editors();
+            return;
+        }
+        let limit = if self.focus == Focus::Find {
+            256
+        } else {
+            32_768
+        };
+        self.editor().insert(text, limit);
+        if self.focus == Focus::Find {
+            self.update_find(true);
+        }
+        self.sync_editors();
+    }
+    pub fn cut_copied(&mut self, text: &str) {
+        if self.inspector.focused && self.inspector.mode != inspector::Mode::Closed {
+            self.inspector_cut_copied(text);
+            return;
+        }
+        if self.browser_panel.is_some() {
+            self.browser_cut_copied(text);
+            return;
+        }
+        // The platform acknowledges only a successful clipboard write. If a
+        // reentrant native message changed the selection, leave the editor alone.
+        if self.editor_editable() && self.editor().selected() == text {
+            let previous = self.current_control_value();
+            self.editor().delete_selection();
+            self.edited_control(previous);
+            if self.focus == Focus::Find {
+                self.update_find(true);
+            }
+            self.sync_editors();
+        }
+    }
+    fn update_find(&mut self, reveal: bool) {
+        self.matches.clear();
+        self.match_index = 0;
+        let needle = self.find.text().to_ascii_lowercase();
+        if !self.find_open || needle.is_empty() {
+            return;
+        }
+        let mut text = String::new();
+        let mut spans = Vec::new();
+        for (i, run) in self.page.runs.iter().enumerate() {
+            if i > 0 && !run.separator_before.is_empty() {
+                text.push(' ');
+            }
+            let start = text.len();
+            text.push_str(&run.text);
+            spans.push((start, text.len(), i));
+            if text.len() > 2 * 1024 * 1024 {
+                break;
+            }
+        }
+        let lower = text.to_ascii_lowercase();
+        for (start, value) in lower.match_indices(&needle).take(2000) {
+            let end = start + value.len();
+            let a = spans.partition_point(|(_, b, _)| *b <= start);
+            let b = spans
+                .partition_point(|(a, _, _)| *a < end)
+                .saturating_sub(1);
+            if a >= spans.len() || b < a {
+                continue;
+            }
+            let (as_, ae, arun) = spans[a];
+            let (bs, be, brun) = spans[b];
+            let aoffset = text[as_..start.clamp(as_, ae)].chars().count();
+            let boffset = text[bs..end.clamp(bs, be)].chars().count();
+            self.matches.push(Selection {
+                start: TextPoint {
+                    run: arun,
+                    offset: aoffset,
+                },
+                end: TextPoint {
+                    run: brun,
+                    offset: boffset,
+                },
+            });
+        }
+        if reveal {
+            self.reveal_match();
+        }
+    }
+    fn reveal_match(&mut self) {
+        if let Some(found) = self.matches.get(self.match_index) {
+            if self.page.run_is_fixed(found.start.run) {
+                return;
+            }
+            let run = &self.page.runs[found.start.run];
+            self.set_scroll((run.y - self.viewport_height() / 3).clamp(0, self.max_scroll()));
+        }
+    }
+    fn find_next(&mut self, previous: bool) {
+        if self.matches.is_empty() {
+            self.update_find(true);
+            return;
+        }
+        self.match_index = if previous {
+            (self.match_index + self.matches.len() - 1) % self.matches.len()
+        } else {
+            (self.match_index + 1) % self.matches.len()
+        };
+        self.reveal_match();
+    }
+    fn selected_text(&self) -> String {
+        let Some(selection) = self.selection else {
+            return String::new();
+        };
+        let mut out = String::new();
+        let mut previous: Option<usize> = None;
+        for (i, run) in self.page.runs.iter().enumerate() {
+            if let Some((a, b)) = selection.slice(i, run.text.chars().count()) {
+                if previous.is_some() {
+                    out.push_str(run.separator_before);
+                }
+                out.extend(run.text.chars().skip(a).take(b - a));
+                previous = Some(i);
+            }
+        }
+        out
+    }
+    fn point_at(&self, x: i32, y: i32) -> Option<TextPoint> {
+        let y = y - self.content_top() + self.scroll;
+        // Runs remain in source order for copy/find. Pick overlapping text in
+        // paint order, so an overlay cannot select the hidden text below it.
+        let mut exact = None;
+        for (item_index, item) in self.page.items.iter().enumerate().rev() {
+            if self
+                .page
+                .paint_clip(item_index)
+                .is_some_and(|clip| !clip.contains(x, y))
+            {
+                continue;
+            }
+            let inside = |left: i32, top: i32, width: i32, height: i32| {
+                x >= left
+                    && x < left.saturating_add(width)
+                    && y >= top
+                    && y < top.saturating_add(height)
+            };
+            match *item {
+                PaintItem::Text(index) => {
+                    let run = &self.page.runs[index];
+                    if inside(run.x, run.y, run.width(), run.height()) {
+                        exact = Some(index);
+                        break;
+                    }
+                }
+                PaintItem::Rect {
+                    x,
+                    y,
+                    width,
+                    height,
+                    ..
+                } if inside(x, y, width, height) => {
+                    if self.page.paint_is_positioned(item_index) {
+                        return None;
+                    }
+                    break;
+                }
+                PaintItem::Image {
+                    x,
+                    y,
+                    width,
+                    height,
+                    ..
+                } if inside(x, y, width, height) => return None,
+                PaintItem::Control(index) => {
+                    let control = &self.page.controls[index];
+                    if inside(control.x, control.y, control.width, control.height) {
+                        return None;
+                    }
+                }
+                _ => {}
+            }
+        }
+        let nearest = || {
+            self.page
+                .runs
+                .iter()
+                .enumerate()
+                .filter(|(index, run)| {
+                    self.page.run_clip(*index).is_none_or(|clip| {
+                        let area =
+                            crate::paint::ClipRect::new(run.x, run.y, run.width(), run.height())
+                                .intersect(clip);
+                        area.left < area.right && area.top < area.bottom
+                    })
+                })
+                .min_by_key(|(_, run)| {
+                    let dy = if y < run.y {
+                        run.y - y
+                    } else {
+                        (y - run.y - run.height()).max(0)
+                    };
+                    let dx = if x < run.x {
+                        run.x - x
+                    } else {
+                        (x - run.x - run.width()).max(0)
+                    };
+                    i64::from(dy) * 1_000_000 + i64::from(dx)
+                })
+        };
+        let (i, run) = exact
+            .map(|index| (index, &self.page.runs[index]))
+            .or_else(nearest)?;
+        let offset = run.character_at(x - run.x);
+        Some(TextPoint {
+            run: i,
+            offset: offset.min(run.text.chars().count()),
+        })
+    }
+    fn scrollbar(&self) -> (i32, i32, i32) {
+        let track = self.viewport_height();
+        let thumb = ((i64::from(track) * i64::from(track) / i64::from(self.page.height.max(1)))
+            as i32)
+            .clamp(24.min(track), track);
+        let y = self.content_top()
+            + ((i64::from(track - thumb) * i64::from(self.scroll))
+                / i64::from(self.max_scroll().max(1))) as i32;
+        (y, thumb, track)
+    }
+    pub fn pointer_down(&mut self, x: i32, y: i32, shift: bool) -> PlatformAction {
+        if !self.menu && self.inspector_main_pointer_down(x, y) {
+            return PlatformAction::None;
+        }
+        if self.browser_panel.is_some() && self.browser_pointer_down(x, y, shift) {
+            return PlatformAction::None;
+        }
+        self.user_changed_loading_position();
+        self.pending_surrogate = None;
+        if let Some(popup) = self.select_popup {
+            if let Some(row) = self.select_row_at(x, y) {
+                if let Some(index) = self.select_row_option(popup.node, row) {
+                    self.select_popup.as_mut().unwrap().highlighted = Some(row);
+                    self.drag = Drag::SelectOption {
+                        node: popup.node,
+                        index,
+                    };
+                } else {
+                    self.drag = Drag::None;
+                }
+            } else {
+                self.select_popup = None;
+                self.drag = Drag::None;
+            }
+            return PlatformAction::None;
+        }
+        if self.chrome_pointer_down(x, y, shift) {
+            return PlatformAction::None;
+        }
+        if y < self.content_top() || y >= self.content_bottom() {
+            return PlatformAction::None;
+        }
+        self.focus = Focus::Page;
+        if x >= self.width - 12 && self.max_scroll() > 0 {
+            let (top, thumb, _) = self.scrollbar();
+            if y < top {
+                self.scroll_by(-self.viewport_height());
+            } else if y >= top + thumb {
+                self.scroll_by(self.viewport_height());
+            } else {
+                self.drag = Drag::Scrollbar { offset: y - top };
+            }
+            return PlatformAction::None;
+        }
+        if self.view == View::Page {
+            if let Some(node) = self
+                .page
+                .control_at(x, y - self.content_top() + self.scroll)
+            {
+                self.selection = None;
+                if !self.page.controls.iter().any(|rect| rect.node == node) {
+                    return PlatformAction::None;
+                }
+                if let Some(control) = self.forms.controls.get(&node) {
+                    if control.disabled {
+                        self.drag = Drag::None;
+                        return PlatformAction::None;
+                    }
+                    let kind = control.kind;
+                    // Pointer focus must not move the target between press and
+                    // release. Keyboard focus still brings controls into view.
+                    self.focus_control_with_scroll(node, false);
+                    if kind == Kind::Text {
+                        if let Some(rect) = self.page.controls.iter().find(|c| c.node == node) {
+                            let pos =
+                                control_character_at(rect, &self.forms.controls[&node].value, x);
+                            self.forms
+                                .controls
+                                .get_mut(&node)
+                                .unwrap()
+                                .value
+                                .move_to(pos, shift);
+                        }
+                        self.drag = Drag::Field;
+                        self.sync_editors();
+                    } else {
+                        self.drag = Drag::Control { node };
+                    }
+                }
+                return PlatformAction::None;
+            }
+        }
+        if let Some(point) = self.point_at(x, y) {
+            let start = if shift {
+                self.selection.map(|s| s.start).unwrap_or(point)
+            } else {
+                point
+            };
+            self.selection = Some(Selection { start, end: point });
+        }
+        let href = self
+            .page
+            .link_at(x, y - self.content_top() + self.scroll)
+            .map(str::to_owned);
+        self.drag = Drag::Text {
+            x,
+            y,
+            href,
+            moved: shift,
+        };
+        PlatformAction::None
+    }
+    pub fn pointer_move(&mut self, x: i32, y: i32, dragging: bool) -> bool {
+        if self.inspector.mode == inspector::Mode::Docked
+            && self.inspector.focused
+            && self.inspector_pointer_move(x, y, dragging)
+        {
+            return true;
+        }
+        let hover = self.chrome_hit(x, y);
+        let chrome_changed = self.chrome.hover != hover;
+        self.chrome.hover = hover;
+        if self.menu || self.chrome.pressed.is_some() {
+            self.hover = None;
+            if let Some(chrome::ChromeAction::MenuItem(index)) = hover {
+                self.chrome.menu_selected = Some(index);
+            }
+            return chrome_changed;
+        }
+        if self.browser_panel.is_some() {
+            return self.browser_pointer_move(x, y, dragging) || chrome_changed;
+        }
+        if let Some(popup) = self.select_popup {
+            if let Some(row) = self.select_row_at(x, y) {
+                if self.select_row_option(popup.node, row).is_some()
+                    && popup.highlighted != Some(row)
+                {
+                    self.select_popup.as_mut().unwrap().highlighted = Some(row);
+                    return true;
+                }
+            }
+            return chrome_changed;
+        }
+        let hover = if y >= self.content_top() && y < self.content_bottom() {
+            self.page
+                .link_at(x, y - self.content_top() + self.scroll)
+                .map(str::to_owned)
+        } else {
+            None
+        };
+        let changed = self.hover != hover || chrome_changed;
+        self.hover = hover;
+        if !dragging {
+            return changed;
+        }
+        match &mut self.drag {
+            Drag::Text {
+                x: start_x,
+                y: start_y,
+                moved,
+                ..
+            } => {
+                *moved |= (x - *start_x).abs() > 4 || (y - *start_y).abs() > 4;
+                if !*moved {
+                    return changed;
+                }
+                if y < self.content_top() {
+                    self.scroll_by(-24);
+                } else if y > self.content_bottom() {
+                    self.scroll_by(24);
+                }
+                if let Some(point) = self.point_at(x, y) {
+                    if let Some(selection) = &mut self.selection {
+                        selection.end = point;
+                    }
+                }
+            }
+            Drag::Scrollbar { offset } => {
+                let offset = *offset;
+                let (_, thumb, track) = self.scrollbar();
+                let position = (y - offset - self.content_top()).clamp(0, (track - thumb).max(0));
+                self.set_scroll(
+                    ((i64::from(position) * i64::from(self.max_scroll()))
+                        / i64::from((track - thumb).max(1))) as i32,
+                );
+            }
+            Drag::Field => {
+                if let Focus::Control(node) = self.focus {
+                    if let Some(rect) = self.page.controls.iter().find(|rect| rect.node == node) {
+                        let pos = control_character_at(rect, &self.forms.controls[&node].value, x);
+                        self.editor().move_to(pos, true);
+                        self.sync_editors();
+                        return true;
+                    }
+                }
+                let (left, padding, advance) = match self.focus {
+                    Focus::Find => (72, 8, 12),
+                    Focus::Control(node) => self
+                        .page
+                        .controls
+                        .iter()
+                        .find(|c| c.node == node)
+                        .map(|c| (c.x, 6, GLYPH_ADVANCE * c.scale))
+                        .unwrap_or((0, 6, 12)),
+                    _ => (self.address_rect().0, 8, 12),
+                };
+                let pos = self.editor().offset + ((x - left - padding).max(0) / advance) as usize;
+                self.editor().move_to(pos, true);
+                self.sync_editors();
+            }
+            Drag::None | Drag::Control { .. } | Drag::SelectOption { .. } => {}
+        }
+        changed || !matches!(self.drag, Drag::None)
+    }
+    pub fn pointer_up(&mut self, x: i32, y: i32) -> PlatformAction {
+        if self.inspector.mode == inspector::Mode::Docked && self.inspector.focused && !self.menu {
+            return self.inspector_pointer_up(x, y);
+        }
+        if let Some(action) = self.chrome_pointer_up(x, y) {
+            return action;
+        }
+        if self.browser_panel.is_some() {
+            self.browser_pointer_up(x, y);
+            return PlatformAction::None;
+        }
+        let drag = std::mem::replace(&mut self.drag, Drag::None);
+        if let Drag::SelectOption { node, index } = drag {
+            if self.select_popup.is_some_and(|popup| popup.node == node)
+                && self
+                    .select_row_at(x, y)
+                    .and_then(|row| self.select_row_option(node, row))
+                    == Some(index)
+            {
+                self.choose_select(node, index);
+            }
+            return PlatformAction::None;
+        }
+        if let Drag::Field = drag {
+            if let Focus::Control(node) = self.focus {
+                if self.view == View::Page
+                    && y >= self.content_top()
+                    && y < self.content_bottom()
+                    && self
+                        .page
+                        .control_at(x, y - self.content_top() + self.scroll)
+                        == Some(node)
+                {
+                    self.activate_control(node);
+                }
+            }
+            return PlatformAction::None;
+        }
+        if let Drag::Control { node } = drag {
+            if self.view == View::Page
+                && y >= self.content_top()
+                && y < self.content_bottom()
+                && self
+                    .page
+                    .control_at(x, y - self.content_top() + self.scroll)
+                    == Some(node)
+            {
+                let point = self.image_point_at(node, x, y);
+                self.activate_control_at(node, point);
+            }
+            return PlatformAction::None;
+        }
+        if let Drag::Text {
+            href: Some(href),
+            moved: false,
+            x: start_x,
+            y: start_y,
+        } = drag
+        {
+            if (x - start_x).abs() <= 4
+                && (y - start_y).abs() <= 4
+                && y >= self.content_top()
+                && y < self.content_bottom()
+                && self.page.link_at(x, y - self.content_top() + self.scroll) == Some(href.as_str())
+            {
+                self.follow(&href);
+            }
+        }
+        PlatformAction::None
+    }
+    pub fn pointer_cancel(&mut self) {
+        self.inspector.cancel_pointer();
+        self.drag = Drag::None;
+        self.chrome.hover = None;
+        self.chrome.pressed = None;
+        self.hover = None;
+        if let Some(panel) = &mut self.browser_panel {
+            panel.cancel_pointer();
+        }
+    }
+    pub fn wants_hand(&self, x: i32, y: i32) -> bool {
+        if let Some(action) = self.chrome_hit(x, y) {
+            return self.chrome_enabled(action);
+        }
+        if self.menu || y < self.content_top() {
+            return false;
+        }
+        if self.inspector.mode == inspector::Mode::Docked && y >= self.content_bottom() {
+            return self.inspector_wants_hand(x, y);
+        }
+        if self.browser_panel.is_some() {
+            return self.browser_wants_hand(x, y);
+        }
+        if let Some(popup) = self.select_popup {
+            return self
+                .select_row_at(x, y)
+                .and_then(|row| self.select_row_option(popup.node, row))
+                .is_some();
+        }
+        if self.view == View::Page && y >= self.content_top() && y < self.content_bottom() {
+            if let Some(node) = self
+                .page
+                .control_at(x, y - self.content_top() + self.scroll)
+            {
+                return self
+                    .forms
+                    .controls
+                    .get(&node)
+                    .is_some_and(|c| c.focusable() && c.kind != Kind::Text);
+            }
+        }
+        y >= self.content_top()
+            && y < self.content_bottom()
+            && self
+                .page
+                .link_at(x, y - self.content_top() + self.scroll)
+                .is_some()
+    }
+}
+
+impl App {
+    pub fn draw(&self) -> Canvas {
+        let mut canvas = Canvas::new(self.width as usize, self.height as usize);
+        canvas.fill_rect(0, 0, self.width, self.height, 0xffffff);
+        let top = self.content_top();
+        let bottom = self.content_bottom();
+        for (item_index, item) in self.page.items.iter().enumerate() {
+            let viewport = crate::paint::ClipRect::new(0, top, self.width, bottom - top);
+            let clip = self.page.paint_clip(item_index).map_or(viewport, |clip| {
+                viewport.intersect(clip.translate_y(top - self.scroll))
+            });
+            canvas.set_clip(Some(clip));
+            match *item {
+                PaintItem::HitBox { .. } => {}
+                PaintItem::Control(index) => {
+                    if self.view != View::Page {
+                        continue;
+                    }
+                    let rect = &self.page.controls[index];
+                    let y = rect.y + top - self.scroll;
+                    if y >= bottom || y.saturating_add(rect.height) <= top {
+                        continue;
+                    }
+                    if let Some(control) = self.forms.controls.get(&rect.node) {
+                        draw_control(
+                            &mut canvas,
+                            rect,
+                            y,
+                            control,
+                            self.document.attr(rect.node, "placeholder").unwrap_or(""),
+                            self.focus == Focus::Control(rect.node),
+                            self.images.get(&rect.node).map(|bitmap| bitmap.as_ref()),
+                        );
+                    }
+                }
+                PaintItem::Rect {
+                    x,
+                    y,
+                    width,
+                    height,
+                    color,
+                } => {
+                    let y = y + top - self.scroll;
+                    if y < bottom && y.saturating_add(height) > top {
+                        canvas.fill_rect(x, y, width, height, color);
+                    }
+                }
+                PaintItem::Image {
+                    node,
+                    x,
+                    y,
+                    width,
+                    height,
+                    presentation,
+                } => {
+                    let y = y + top - self.scroll;
+                    if y >= bottom || y.saturating_add(height) <= top {
+                        continue;
+                    }
+                    if self.view == View::Page {
+                        if let Some(bitmap) = self.images.get(&node) {
+                            canvas.fitted_image(
+                                crate::paint::ClipRect::new(x, y, width, height),
+                                bitmap,
+                                presentation,
+                            );
+                            continue;
+                        }
+                    }
+                    canvas.fill_rect(x, y, width, height, 0xe9edf1);
+                    canvas.fill_rect(x, y, width, 1, 0x8a98a6);
+                    canvas.fill_rect(x, y, 1, height, 0x8a98a6);
+                    canvas.fill_rect(x, y + height - 1, width, 1, 0x8a98a6);
+                    canvas.fill_rect(x + width - 1, y, 1, height, 0x8a98a6);
+                    if width >= 12 && height >= 14 {
+                        let alt = self
+                            .document
+                            .attr(node, "alt")
+                            .unwrap_or("Image unavailable");
+                        canvas.text(
+                            x + 5,
+                            y + 5,
+                            &fit_text(alt, ((width - 10) / 6).max(0) as usize),
+                            1,
+                            0x5d6770,
+                        );
+                    }
+                }
+                PaintItem::Text(index) => {
+                    let run = &self.page.runs[index];
+                    let y = run.y + top - self.scroll;
+                    let h = run.height();
+                    if y + h <= top || y >= bottom {
+                        continue;
+                    }
+                    let length = run.text.chars().count();
+                    let first_match = self.matches.partition_point(|found| found.end.run < index);
+                    for (i, found) in self
+                        .matches
+                        .iter()
+                        .enumerate()
+                        .skip(first_match)
+                        .take_while(|(_, found)| found.start.run <= index)
+                    {
+                        if let Some((a, b)) = found.slice(index, length) {
+                            canvas.fill_rect(
+                                run.x + run.character_x(a),
+                                y - 1,
+                                run.character_x(b) - run.character_x(a),
+                                h,
+                                if i == self.match_index {
+                                    0xffb95c
+                                } else {
+                                    0xffed96
+                                },
+                            );
+                        }
+                    }
+                    if let Some((a, b)) = self.selection.and_then(|s| s.slice(index, length)) {
+                        canvas.fill_rect(
+                            run.x + run.character_x(a),
+                            y - 1,
+                            run.character_x(b) - run.character_x(a),
+                            h,
+                            0xb4d8fa,
+                        );
+                    }
+                    if let Some(shape) = &run.shaped {
+                        shape.draw(&mut canvas, run.x, y, run.color);
+                    } else {
+                        let text = run.text.replace('\u{a0}', " ");
+                        canvas.styled_text(run.x, y, &text, run.scale, run.color, run.italic);
+                        if run.bold {
+                            canvas.styled_text(
+                                run.x + 1,
+                                y,
+                                &text,
+                                run.scale,
+                                run.color,
+                                run.italic,
+                            );
+                        }
+                    }
+                    if run.underline {
+                        canvas.fill_rect(run.x, y + run.ascent() + 2, run.width(), 1, run.color);
+                    }
+                    // Keep search/selection readable on dark pages with light text.
+                    for found in self
+                        .matches
+                        .iter()
+                        .skip(first_match)
+                        .take_while(|found| found.start.run <= index)
+                    {
+                        if let Some((a, b)) = found.slice(index, length) {
+                            highlight_text(&mut canvas, run, y, a, b);
+                        }
+                    }
+                    if let Some((a, b)) = self.selection.and_then(|s| s.slice(index, length)) {
+                        highlight_text(&mut canvas, run, y, a, b);
+                    }
+                }
+            }
+        }
+        canvas.set_clip(None);
+        if self.max_scroll() > 0 {
+            let (y, thumb, track) = self.scrollbar();
+            canvas.fill_rect(self.width - 12, top, 12, track, ui::SURFACE);
+            ui::rounded_rect(&mut canvas, (self.width - 9, y, 6, thumb), 3.0, ui::MUTED);
+        }
+        self.draw_select_popup(&mut canvas);
+        if self.inspector.mode == inspector::Mode::Docked {
+            self.draw_inspector(&mut canvas);
+        }
+        let bottom = self.height - FOOT_HEIGHT;
+        // Chrome is painted last so document content cannot cover the controls.
+        self.draw_toolbar(&mut canvas);
+        self.draw_find_bar(&mut canvas);
+        let profile_warning = self.profile.problem().is_some() && !self.failed;
+        let history_warning = self.browsing_history_error.is_some() && !self.failed;
+        canvas.fill_rect(
+            0,
+            bottom,
+            self.width,
+            FOOT_HEIGHT,
+            if self.failed {
+                ui::ERROR
+            } else if profile_warning || history_warning {
+                ui::CREAM
+            } else {
+                ui::NAVY
+            },
+        );
+        let status = if profile_warning {
+            "Preferences unavailable; Ctrl+, for details."
+        } else if history_warning {
+            "History needs attention; Ctrl+H for details."
+        } else if !self.status.is_empty() {
+            self.status.as_str()
+        } else if let Some(href) = &self.hover {
+            href.as_str()
+        } else {
+            match self.view {
+                View::Page if self.location.url.as_ref().is_some_and(|url| url.secure) => {
+                    "HTTPS / CERTIFICATE VERIFIED  |  Ctrl+I resources"
+                }
+                View::Page if self.location.url.is_some() => {
+                    "HTTP / UNENCRYPTED  |  Ctrl+L address  |  Ctrl+I resources"
+                }
+                View::Page => "LOCAL FILES  |  Ctrl+O open  |  Ctrl+F find  |  Ctrl+I resources",
+                View::Source => "PAGE SOURCE  |  Ctrl+U returns to page",
+                View::Resources => "RESOURCE ACTIVITY  |  Ctrl+I returns to page",
+            }
+        };
+        canvas.text(
+            12,
+            bottom + 12,
+            &fit_text(status, ((self.width - 108) / 6).max(0) as usize),
+            1,
+            if profile_warning || history_warning {
+                ui::INK
+            } else {
+                ui::CREAM
+            },
+        );
+        ui::rounded_rect(
+            &mut canvas,
+            (self.width - 76, bottom + 6, 64, 20),
+            5.0,
+            if self.failed {
+                ui::ERROR
+            } else if profile_warning || history_warning {
+                ui::CREAM
+            } else {
+                ui::NAVY_LIGHT
+            },
+        );
+        canvas.text(
+            self.width - 64,
+            bottom + 12,
+            &format!("{:.0}%", self.zoom * 100.0),
+            1,
+            if self.failed {
+                ui::CREAM
+            } else if profile_warning || history_warning {
+                ui::TEAL_DARK
+            } else {
+                ui::TEAL
+            },
+        );
+        self.draw_browser_panel(&mut canvas);
+        self.draw_menu(&mut canvas);
+        self.draw_chrome_tooltip(&mut canvas);
+        canvas
+    }
+}
+
+fn highlight_text(
+    canvas: &mut Canvas,
+    run: &crate::layout::TextRun,
+    y: i32,
+    start: usize,
+    end: usize,
+) {
+    if let Some(shape) = &run.shaped {
+        shape.draw_range(canvas, run.x, y, 0x182b3b, start, end);
+        if run.underline {
+            canvas.fill_rect(
+                run.x + shape.x(start),
+                y + shape.ascent + 2,
+                shape.x(end) - shape.x(start),
+                1,
+                0x182b3b,
+            );
+        }
+        return;
+    }
+    let text: String = run
+        .text
+        .chars()
+        .skip(start)
+        .take(end - start)
+        .map(|c| if c == '\u{a0}' { ' ' } else { c })
+        .collect();
+    let x = run.x + start as i32 * GLYPH_ADVANCE * run.scale;
+    canvas.styled_text(x, y, &text, run.scale, 0x182b3b, run.italic);
+    if run.bold {
+        canvas.styled_text(x + 1, y, &text, run.scale, 0x182b3b, run.italic);
+    }
+    if run.underline {
+        canvas.fill_rect(
+            x,
+            y + GLYPH_HEIGHT * run.scale + 2,
+            (end - start) as i32 * GLYPH_ADVANCE * run.scale,
+            1,
+            0x182b3b,
+        );
+    }
+}
+
+fn control_character_at(rect: &layout::ControlBox, value: &Editor, x: i32) -> usize {
+    if let Some(font) = &rect.text_font {
+        let shape = font.shape(&value.text());
+        shape.hit(x - rect.x - 6 + shape.x(value.offset))
+    } else {
+        value.offset + ((x - rect.x - 6).max(0) / (GLYPH_ADVANCE * rect.scale)) as usize
+    }
+}
+
+fn draw_control_text(
+    canvas: &mut Canvas,
+    rect: &layout::ControlBox,
+    y: i32,
+    control: &crate::forms::Control,
+    placeholder: &str,
+    focused: bool,
+    color: u32,
+) {
+    let font = rect.text_font.as_ref().unwrap();
+    let (x, width, height) = (rect.x, rect.width, rect.height);
+    let clip = canvas.clip();
+    canvas.set_clip(Some(clip.intersect(crate::paint::ClipRect::new(
+        x + 2,
+        y + 2,
+        (width - 4).max(0),
+        (height - 4).max(0),
+    ))));
+    if control.kind == Kind::Text {
+        let value = &control.value;
+        let shape = font.shape(&value.text());
+        let origin = x + 6 - shape.x(value.offset);
+        let text_y = y + (height - shape.height()) / 2;
+        if value.chars.is_empty() && !focused {
+            let hint = font.shape(&font.fit(placeholder, (width - 12).max(0)));
+            hint.draw(canvas, x + 6, y + (height - hint.height()) / 2, 0x75818b);
+        }
+        let selected = value.range();
+        if focused && !selected.is_empty() {
+            canvas.fill_rect(
+                origin + shape.x(selected.start),
+                y + 2,
+                shape.x(selected.end) - shape.x(selected.start),
+                height - 4,
+                0xb4d8fa,
+            );
+        }
+        shape.draw(canvas, origin, text_y, color);
+        if focused && !selected.is_empty() {
+            shape.draw_range(
+                canvas,
+                origin,
+                text_y,
+                0x203847,
+                selected.start,
+                selected.end,
+            );
+        }
+        if focused {
+            canvas.fill_rect(origin + shape.x(value.cursor), y + 3, 1, height - 6, color);
+        }
+    } else {
+        let select = control.kind == Kind::Select;
+        let caption = font.fit(
+            &control.caption,
+            (width - if select { 32 } else { 12 }).max(0),
+        );
+        let shape = font.shape(&caption);
+        let text_x = if select {
+            x + 6
+        } else {
+            x + (width - shape.width()) / 2
+        };
+        shape.draw(canvas, text_x, y + (height - shape.height()) / 2, color);
+        if select && width >= 18 {
+            for row in 0..4 {
+                canvas.fill_rect(
+                    x + width - 16 + row,
+                    y + height / 2 - 2 + row,
+                    7 - 2 * row,
+                    1,
+                    color,
+                );
+            }
+        }
+    }
+    canvas.set_clip(Some(clip));
+}
+
+/// The layout engine uses integer CSS pixels. Correct responsive image density
+/// before page zoom, preserving the bitmap's aspect when layout bounds apply.
+fn natural_image_sizes(
+    images: &HashMap<usize, std::sync::Arc<Bitmap>>,
+    densities: &HashMap<usize, f64>,
+) -> HashMap<usize, (usize, usize)> {
+    images
+        .iter()
+        .map(|(&node, bitmap)| {
+            let density = densities.get(&node).copied().unwrap_or(1.0);
+            let size = if density == f64::INFINITY {
+                (0, 0)
+            } else {
+                let largest = bitmap.width.max(bitmap.height).max(1) as f64;
+                // Explicit 0x is valid HTML. Its unbounded intrinsic dimensions are
+                // capped here, before integer conversion or layout multiplication.
+                let density = if density.is_finite() && density >= 0.0 {
+                    density
+                } else {
+                    1.0
+                };
+                let scale = if density == 0.0 {
+                    32_768.0 / largest
+                } else {
+                    (1.0 / density).min(32_768.0 / largest)
+                };
+                (
+                    (bitmap.width as f64 * scale).round().clamp(0.0, 32_768.0) as usize,
+                    (bitmap.height as f64 * scale).round().clamp(0.0, 32_768.0) as usize,
+                )
+            };
+            (node, size)
+        })
+        .collect()
+}
+
+fn draw_control(
+    canvas: &mut Canvas,
+    rect: &layout::ControlBox,
+    y: i32,
+    control: &crate::forms::Control,
+    placeholder: &str,
+    focused: bool,
+    bitmap: Option<&Bitmap>,
+) {
+    let (x, width, height, scale) = (rect.x, rect.width, rect.height, rect.scale);
+    if control.kind == Kind::Image {
+        if let (Some(image), Some(bitmap)) = (&rect.image, bitmap) {
+            if let Some(background) = rect.background {
+                canvas.fill_rect(x, y, width, height, background);
+            }
+            canvas.fitted_image(
+                crate::paint::ClipRect::new(
+                    x.saturating_add(image.x),
+                    y.saturating_add(image.y),
+                    image.width,
+                    image.height,
+                ),
+                bitmap,
+                image.presentation,
+            );
+            let [top, right, bottom, left] = image.border;
+            canvas.fill_rect(x, y, width, top, image.border_color[0]);
+            canvas.fill_rect(
+                x.saturating_add(width).saturating_sub(right),
+                y,
+                right,
+                height,
+                image.border_color[1],
+            );
+            canvas.fill_rect(
+                x,
+                y.saturating_add(height).saturating_sub(bottom),
+                width,
+                bottom,
+                image.border_color[2],
+            );
+            canvas.fill_rect(x, y, left, height, image.border_color[3]);
+            if focused {
+                let color = 0x178b78;
+                canvas.fill_rect(x, y, width, 1, color);
+                canvas.fill_rect(x, y, 1, height, color);
+                canvas.fill_rect(
+                    x,
+                    y.saturating_add(height).saturating_sub(1),
+                    width,
+                    1,
+                    color,
+                );
+                canvas.fill_rect(
+                    x.saturating_add(width).saturating_sub(1),
+                    y,
+                    1,
+                    height,
+                    color,
+                );
+            }
+            return;
+        }
+    }
+    let inactive = control.disabled || control.kind == Kind::Unsupported;
+    let color = if inactive { 0x78858e } else { rect.color };
+    let background = if inactive {
+        0xe8edf0
+    } else {
+        rect.background.unwrap_or(
+            if matches!(
+                control.kind,
+                Kind::Submit | Kind::Image | Kind::Reset | Kind::Button
+            ) {
+                0xe3edf2
+            } else {
+                0xffffff
+            },
+        )
+    };
+    let border = if focused { 0x178b78 } else { 0x7c8b96 };
+    canvas.fill_rect(x, y, width, height, border);
+    canvas.fill_rect(
+        x + 1,
+        y + 1,
+        (width - 2).max(0),
+        (height - 2).max(0),
+        background,
+    );
+    if focused {
+        canvas.fill_rect(x, y + height - 2.min(height), width, 2.min(height), border);
+    }
+    if matches!(control.kind, Kind::Checkbox | Kind::Radio) {
+        let size = (GLYPH_HEIGHT * scale).min(width - 4).min(height - 4).max(0);
+        let sx = x + (width - size) / 2;
+        let sy = y + (height - size) / 2;
+        if control.kind == Kind::Radio {
+            let inset = (size / 4).max(1);
+            canvas.fill_rect(sx + inset, sy, size - 2 * inset, size, border);
+            canvas.fill_rect(sx, sy + inset, size, size - 2 * inset, border);
+            canvas.fill_rect(
+                sx + inset,
+                sy + inset,
+                (size - 2 * inset).max(0),
+                (size - 2 * inset).max(0),
+                if control.checked { color } else { background },
+            );
+        } else if control.checked && size >= 5 {
+            for row in 0..size {
+                let dx = row.min(size - row - 1);
+                canvas.fill_rect(sx + dx, sy + row, scale.min(size), scale.min(size), color);
+                canvas.fill_rect(
+                    sx + size - dx - scale.min(size),
+                    sy + row,
+                    scale.min(size),
+                    scale.min(size),
+                    color,
+                );
+            }
+        }
+        return;
+    }
+    if rect.text_font.is_some() {
+        draw_control_text(canvas, rect, y, control, placeholder, focused, color);
+        return;
+    }
+    if height < GLYPH_HEIGHT * scale + 2 {
+        return;
+    }
+    let advance = GLYPH_ADVANCE * scale;
+    let cells = ((width - 12) / advance).max(0) as usize;
+    let text_y = y + (height - GLYPH_HEIGHT * scale) / 2;
+    if control.kind == Kind::Text {
+        let value = &control.value;
+        if value.chars.is_empty() && !focused {
+            canvas.text(
+                x + 6,
+                text_y,
+                &fit_text(placeholder, cells),
+                scale,
+                0x75818b,
+            );
+        }
+        let selected = value.range();
+        for (i, &ch) in value
+            .chars
+            .iter()
+            .enumerate()
+            .skip(value.offset)
+            .take(cells)
+        {
+            let px = x + 6 + (i - value.offset) as i32 * advance;
+            if focused && selected.contains(&i) {
+                canvas.fill_rect(px, y + 2, advance, height - 4, 0xb4d8fa);
+            }
+            let mut bytes = [0u8; 4];
+            canvas.text(
+                px,
+                text_y,
+                ch.encode_utf8(&mut bytes),
+                scale,
+                if focused && selected.contains(&i) {
+                    0x203847
+                } else {
+                    color
+                },
+            );
+        }
+        if focused && value.cursor >= value.offset && value.cursor - value.offset <= cells {
+            canvas.fill_rect(
+                x + 5 + (value.cursor - value.offset) as i32 * advance,
+                y + 3,
+                1,
+                height - 6,
+                color,
+            );
+        }
+    } else if control.kind == Kind::Select {
+        let cells = ((width - 32) / advance).max(0) as usize;
+        canvas.text(
+            x + 6,
+            text_y,
+            &fit_text(&control.caption, cells),
+            scale,
+            color,
+        );
+        if width >= 18 {
+            let arrow_x = x + width - 16;
+            let arrow_y = y + height / 2 - 2;
+            for row in 0..4 {
+                canvas.fill_rect(arrow_x + row, arrow_y + row, 7 - 2 * row, 1, color);
+            }
+        }
+    } else {
+        let caption = fit_text(&control.caption, cells);
+        let text_x = x + (width - caption.chars().count() as i32 * advance) / 2;
+        canvas.text(text_x, text_y, &caption, scale, color);
+    }
+}
+fn field(canvas: &mut Canvas, editor: &Editor, rect: (i32, i32, i32, i32), focused: bool) {
+    field_at_offset(canvas, editor, rect, focused, editor.offset);
+}
+// The idle address field starts at the origin; focused editing still follows
+// the caret. Other native fields keep their existing editing offset.
+fn field_at_offset(
+    canvas: &mut Canvas,
+    editor: &Editor,
+    rect: (i32, i32, i32, i32),
+    focused: bool,
+    offset: usize,
+) {
+    let (x, y, w, h) = rect;
+    ui::rounded_rect(
+        canvas,
+        rect,
+        7.0,
+        if focused { ui::CARD } else { ui::SURFACE },
+    );
+    ui::rounded_border(
+        canvas,
+        rect,
+        7.0,
+        if focused { 2.0 } else { 1.0 },
+        if focused { ui::TEAL } else { ui::BORDER },
+    );
+    let cells = ((w - 16) / 12).max(0) as usize;
+    let range = editor.range();
+    for (i, ch) in editor.chars.iter().enumerate().skip(offset).take(cells) {
+        let px = x + 8 + (i - offset) as i32 * 12;
+        if focused && range.contains(&i) {
+            canvas.fill_rect(px, y + 5, 12, h - 10, ui::SELECTED);
+        }
+        let mut bytes = [0u8; 4];
+        canvas.text(px, y + (h - 14) / 2, ch.encode_utf8(&mut bytes), 2, ui::INK);
+    }
+    if focused && editor.cursor >= offset && editor.cursor - offset <= cells {
+        canvas.fill_rect(
+            x + 7 + (editor.cursor - offset) as i32 * 12,
+            y + 6,
+            1,
+            h - 12,
+            ui::INK,
+        );
+    }
+}
+
+fn escape(text: &str) -> String {
+    text.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+}
+fn fit_text(text: &str, max_chars: usize) -> String {
+    let mut chars = text.chars();
+    let mut result: String = chars.by_ref().take(max_chars).collect();
+    if chars.next().is_some() && max_chars >= 3 {
+        result = result.chars().take(max_chars - 3).collect();
+        result.push_str("...");
+    }
+    result
+}
+
+#[cfg(test)]
+#[path = "app_chrome_tests.rs"]
+mod chrome_tests;
+
+#[cfg(test)]
+#[path = "app_font_tests.rs"]
+mod font_tests;
+
+#[cfg(test)]
+#[path = "app_geometry_tests.rs"]
+mod geometry_tests;
+
+#[cfg(test)]
+#[path = "app_history_tests.rs"]
+mod saved_history_tests;
+
+#[cfg(test)]
+#[path = "app_post_tests.rs"]
+mod post_tests;
+
+#[cfg(test)]
+#[path = "app_script_tests.rs"]
+mod script_tests;
+
+#[cfg(test)]
+#[path = "app_loading_tests.rs"]
+mod loading_tests;
+
+#[cfg(test)]
+#[path = "app_select_tests.rs"]
+mod select_tests;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, Mutex};
+    static SERIAL: AtomicUsize = AtomicUsize::new(0);
+
+    #[test]
+    fn responsive_density_and_object_fit_reach_layout_paint_links_and_image_controls() {
+        let files = Fixture::new();
+        let picture="data:image/x-portable-pixmap,P3%204%202%20255%20255%200%200%200%20255%200%200%200%20255%20255%20255%20255%200%200%200%20255%20255%200%20255%200%20255%200%20255%20255";
+        let path=files.write("presentation.html",&format!("<title>Image presentation</title><body style='margin:0;background:#123456'><a href=next.html><img id=contained src='{picture}' style='display:block;width:4px;height:4px;object-fit:contain;object-position:left bottom'></a><img id=density srcset='{picture} 2x' style='display:block'><form action=next.html><input id=button type=image src='{picture}' style='display:block;width:4px;height:4px;border:0;padding:0;object-fit:cover;object-position:left top'></form>"));
+        files.write("next.html", "<title>Image link reached</title>");
+        let mut app = App::new();
+        app.open(&path);
+        assert!(!app.failed, "{}", app.status);
+        let node = |id| {
+            app.document
+                .nodes
+                .iter()
+                .enumerate()
+                .find(|(n, _)| app.document.attr(*n, "id") == Some(id))
+                .unwrap()
+                .0
+        };
+        let (contained, density, button) = (node("contained"), node("density"), node("button"));
+        let rect = |node| {
+            app.page
+                .items
+                .iter()
+                .find_map(|item| match item {
+                    PaintItem::Image {
+                        node: n,
+                        x,
+                        y,
+                        width,
+                        height,
+                        ..
+                    } if *n == node => Some((*x, *y, *width, *height)),
+                    _ => None,
+                })
+                .unwrap()
+        };
+        let (x, y, w, h) = rect(contained);
+        assert_eq!((w, h), (4, 4));
+        let (_, _, w, h) = rect(density);
+        assert_eq!((w, h), (2, 1));
+        assert_eq!(app.images[&density].width, 4);
+        let canvas = app.draw();
+        let top = app.content_top();
+        let pixel = |x: i32, y: i32| canvas.pixels[(y + top) as usize * canvas.width + x as usize];
+        assert_eq!(pixel(x, y), 0x123456);
+        assert_eq!(pixel(x, y + 2), 0xff0000);
+        assert_eq!(pixel(x + 3, y + 3), 0x00ffff);
+        let control = app.page.controls.iter().find(|c| c.node == button).unwrap();
+        let image = control.image.as_ref().unwrap();
+        assert_eq!(pixel(control.x + image.x, control.y + image.y), 0xff0000);
+        assert_eq!(
+            pixel(control.x + image.x + 3, control.y + image.y),
+            0x00ff00
+        );
+        // Transparent padding inside the image box remains part of its link.
+        assert!(app.wants_hand(x, y + top));
+        app.pointer_down(x, y + top, false);
+        app.pointer_up(x, y + top);
+        assert_eq!(app.document.title, "Image link reached");
+    }
+
+    #[test]
+    fn extreme_valid_image_densities_are_bounded_before_layout() {
+        let bitmap = Arc::new(Bitmap {
+            width: 4,
+            height: 2,
+            pixels: vec![0; 8],
+        });
+        let images = HashMap::from([
+            (1, bitmap.clone()),
+            (2, bitmap.clone()),
+            (3, bitmap.clone()),
+            (4, bitmap),
+        ]);
+        let sizes = natural_image_sizes(
+            &images,
+            &HashMap::from([
+                (1, 0.0),
+                (2, f64::INFINITY),
+                (3, 2.0),
+                (4, f64::MIN_POSITIVE),
+            ]),
+        );
+        assert_eq!(sizes[&1], (32768, 16384));
+        assert_eq!(sizes[&2], (0, 0));
+        assert_eq!(sizes[&3], (2, 1));
+        assert_eq!(sizes[&4], (32768, 16384));
+    }
+
+    #[test]
+    fn overflow_clipping_matches_painted_pixels_and_pointer_navigation() {
+        let files = Fixture::new();
+        let path = files.write("clipped.html", "<title>Clipping</title><body style='margin:0'><div style='width:30px;height:20px;overflow:hidden'><a href=next.html style='display:block;width:100px;height:100px;background:red'></a></div></body>");
+        files.write("next.html", "<title>Visible link</title>");
+        let mut app = App::new();
+        app.open(&path);
+        let canvas = app.draw();
+        let top = app.content_top();
+        let pixel = |x: i32, y: i32| canvas.pixels[y as usize * canvas.width + x as usize];
+        assert_eq!(pixel(2, top + 2), 0xff0000);
+        assert_eq!(pixel(29, top + 19), 0xff0000);
+        assert_eq!(pixel(30, top + 2), 0xffffff);
+        assert_eq!(pixel(2, top + 20), 0xffffff);
+        assert_eq!(
+            pixel(0, 0),
+            ui::NAVY,
+            "document clip must not affect browser chrome"
+        );
+        assert!(app.wants_hand(2, top + 2));
+        assert!(!app.wants_hand(35, top + 2));
+        app.pointer_down(35, top + 2, false);
+        app.pointer_up(35, top + 2);
+        assert_eq!(app.document.title, "Clipping");
+        app.pointer_down(2, top + 2, false);
+        app.pointer_up(2, top + 2);
+        assert_eq!(app.document.title, "Visible link");
+    }
+    struct Fixture(PathBuf);
+    impl Fixture {
+        fn new() -> Self {
+            let p = std::env::temp_dir().join(format!(
+                "own-browser-app-{}-{}",
+                std::process::id(),
+                SERIAL.fetch_add(1, Ordering::Relaxed)
+            ));
+            std::fs::create_dir_all(&p).unwrap();
+            Self(p)
+        }
+        fn write(&self, name: &str, content: &str) -> PathBuf {
+            let p = self.0.join(name);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(&p, content).unwrap();
+            p
+        }
+    }
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    struct LiveSite {
+        url: String,
+        requests: Arc<Mutex<Vec<String>>>,
+        headers: Arc<Mutex<Vec<String>>>,
+        stop: Arc<std::sync::atomic::AtomicBool>,
+        thread: Option<std::thread::JoinHandle<()>>,
+    }
+    impl LiveSite {
+        fn new() -> Self {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            listener.set_nonblocking(true).unwrap();
+            let port = listener.local_addr().unwrap().port();
+            let requests = Arc::new(Mutex::new(Vec::new()));
+            let seen = requests.clone();
+            let headers = Arc::new(Mutex::new(Vec::new()));
+            let seen_headers = headers.clone();
+            let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let ending = stop.clone();
+            let thread = std::thread::spawn(move || {
+                let mut clients = Vec::new();
+                while !ending.load(Ordering::Relaxed) {
+                    match listener.accept() {
+                        Ok((mut stream, _)) => {
+                            let seen = seen.clone();
+                            let seen_headers = seen_headers.clone();
+                            clients.push(std::thread::spawn(move || {
+                                stream.set_read_timeout(Some(std::time::Duration::from_secs(2))).unwrap();
+                                let mut request = Vec::new(); let mut byte = [0u8; 1];
+                                while request.len() < 8192 && !request.ends_with(b"\r\n\r\n") {
+                                    if stream.read(&mut byte).unwrap_or(0) == 0 { return; } request.push(byte[0]);
+                                }
+                                let text = String::from_utf8(request).unwrap();
+                                let path = text.split_whitespace().nth(1).unwrap_or("/").to_owned();
+                                seen.lock().unwrap().push(path.clone());
+                                seen_headers.lock().unwrap().push(text);
+                                let mut extra = String::new(); let mut mime = "text/html;charset=utf-8"; let mut status = 200;
+                                let body = match path.as_str() {
+                                    "/redirect" => { status = 302; extra = "Location: /doc#target\r\n".to_owned(); String::new() }
+                                    "/location-redirect" => { status = 302; extra = "Location: /location-page?q=%23#target\r\n".to_owned(); String::new() }
+                                    path if path.starts_with("/location-page") => "<html><head><base href='/assets/'></head><body><button id=read type=button>Read</button><p id=target>Target</p><script>var saved=location,stringify=location.toString;function readURL(){if(saved!==window.location || saved!==document.location || stringify!==location.toString)throw Error('location identity');if(document.URL!==saved.href || document.documentURI!==saved.href)throw Error('document URL');document.title=stringify.call(saved);}readURL();document.getElementById('read').onclick=readURL;</script></body></html>".to_owned(),
+                                    "/doc" => format!("<title>Network page</title><base href='/assets/'><link rel=stylesheet href=style.css><img src=pixel.ppm><img src='http://localhost:{port}/blocked'><img src='file:///blocked'><p>Start</p>{}<p id=target>Target</p>{}", "<p>Before</p>".repeat(20), "<p>After</p>".repeat(20)),
+                                    "/assets/style.css" => { mime = "text/css"; "p{color:#123456}".to_owned() }
+                                    "/assets/pixel.ppm" => { mime = "image/x-portable-pixmap"; "P3\n1 1\n255\n255 0 0\n".to_owned() }
+                                    "/slow" | "/slow2" => { std::thread::sleep(std::time::Duration::from_millis(600)); "<title>Stale slow page</title><p>Slow</p>".to_owned() }
+                                    "/empty" => { status = 204; String::new() }
+                                    "/compat" => "<title>Compatibility controls</title><style>body{margin:0} .atomic{display:inline-block} .atomic button{display:block} .padded{display:inline-block;padding:12px} input{width:200px}</style><center><h1>Find something</h1><form action='/form'><table cellpadding=0 cellspacing=0><tr><td width='25%'></td><td align=center><input name=q value=seed></td><td width='25%'><a class=padded href='/fast'>Open</a></td></tr><tr><td></td><td align=center><span class=atomic><button name=go value=send>Search</button></span> <span class=atomic><button type=reset>Reset</button></span></td><td></td></tr></table></form></center>".to_owned(),
+                                    path if path == "/form" || path.starts_with("/form?") => "<title>Live form</title><form action='/form' method=get><label for=q>Query</label><input id=q name=q value=hello required><input type=hidden name=source value=fixture><label><input type=checkbox name=details value=yes checked>Details</label><button name=go value=send>Submit</button><button type=reset>Reset</button></form>".to_owned(),
+                                    _ => "<title>Next page</title><p>Fast</p>".to_owned(),
+                                };
+                                let response = format!("HTTP/1.1 {status} Test\r\nContent-Type: {mime}\r\nContent-Length: {}\r\n{extra}Connection: close\r\n\r\n{body}", body.len());
+                                let _ = stream.write_all(response.as_bytes());
+                            }));
+                        }
+                        Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                            std::thread::sleep(std::time::Duration::from_millis(2))
+                        }
+                        Err(e) => panic!("Fixture accept failed: {e}"),
+                    }
+                }
+                for client in clients {
+                    client.join().unwrap();
+                }
+            });
+            Self {
+                url: format!("http://127.0.0.1:{port}"),
+                requests,
+                headers,
+                stop,
+                thread: Some(thread),
+            }
+        }
+        fn wait_for_request(&self, path: &str) {
+            let started = std::time::Instant::now();
+            while !self.requests.lock().unwrap().iter().any(|r| r == path) {
+                assert!(started.elapsed() < std::time::Duration::from_secs(3));
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+        }
+    }
+    impl Drop for LiveSite {
+        fn drop(&mut self) {
+            self.stop.store(true, Ordering::Relaxed);
+            if let Some(thread) = self.thread.take() {
+                thread.join().unwrap();
+            }
+        }
+    }
+
+    #[test]
+    fn command_line_files_preserve_literal_characters_and_use_the_working_directory() {
+        let files = Fixture::new();
+        let path = files.write(
+            "folder # 100%/page.html",
+            "<title>Literal filename</title><p>Local</p>",
+        );
+        let mut app = App::new();
+        app.open_argument(path.as_os_str());
+        assert!(!app.failed, "{}", app.status);
+        assert_eq!(app.document.title, "Literal filename");
+        app.use_home_file(path.clone());
+        app.open_argument(std::ffi::OsStr::new("pages/second.html"));
+        assert!(!app.failed, "{}", app.status);
+        assert_eq!(
+            app.location,
+            navigation::explicit(Path::new("pages/second.html")).unwrap()
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::ffi::OsStringExt;
+            let name = std::ffi::OsString::from_vec(b"native-\xff.html".to_vec());
+            let path = files.0.join(name);
+            std::fs::write(&path, b"<title>Native filename</title>").unwrap();
+            app.open_argument(path.as_os_str());
+            assert!(!app.failed, "{}", app.status);
+            assert_eq!(app.document.title, "Native filename");
+        }
+    }
+
+    #[test]
+    fn failed_navigation_keeps_the_page_and_exposes_the_attempt_in_resources() {
+        let files = Fixture::new();
+        let path = files.write(
+            "page.html",
+            "<title>Current page</title><p>Keep this page</p>",
+        );
+        let mut app = App::new();
+        app.open(&path);
+        let before = app.location.clone();
+        app.open_address("https://127.0.0.1:9/");
+        app.wait_for_load();
+        assert!(app.failed);
+        assert_eq!(app.location, before);
+        assert_eq!(app.document.title, "Current page");
+        assert_eq!(app.address.text(), before.display());
+        app.show_resources();
+        let text = app
+            .page
+            .runs
+            .iter()
+            .map(|r| r.text.as_str())
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert!(text.contains("LAST FAILED NAVIGATION:"), "{text}");
+        assert!(text.contains("https://127.0.0.1:9/"), "{text}");
+        assert!(text.contains("TRUST FILE:"), "{text}");
+        app.show_resources();
+        app.open(&path);
+        assert!(app.last_failed_navigation.is_none());
+    }
+
+    #[test]
+    fn full_reload_shortcuts_refetch_assets_and_do_not_leak_to_normal_navigation() {
+        let site = LiveSite::new();
+        let mut app = App::new();
+        app.open_address(&format!("{}/doc", site.url));
+        app.wait_for_load();
+        assert!(!app.failed, "{}", app.status);
+        app.scroll_by(160);
+        let scroll = app.scroll;
+        let history = (app.history.len(), app.history_index);
+        for (key, ctrl, shift, force) in [
+            (0x74, true, false, true),
+            (0x74, false, false, false),
+            (0x52, true, true, true),
+            (0x52, true, false, false),
+        ] {
+            let start = site.headers.lock().unwrap().len();
+            app.key(key, ctrl, shift, false);
+            assert!(app.is_loading());
+            app.wait_for_load();
+            assert!(!app.failed, "{}", app.status);
+            assert_eq!((app.history.len(), app.history_index), history);
+            assert_eq!(app.scroll, scroll);
+            assert_eq!(
+                app.events.iter().any(|e| e.starts_with("FULL RELOAD:")),
+                force
+            );
+            let headers = site.headers.lock().unwrap();
+            let requests = &headers[start..];
+            assert_eq!(requests.len(), 3);
+            let paths: Vec<_> = requests
+                .iter()
+                .map(|r| r.split_whitespace().nth(1).unwrap())
+                .collect();
+            assert_eq!(paths, ["/doc", "/assets/style.css", "/assets/pixel.ppm"]);
+            for request in requests {
+                assert_eq!(request.contains("\r\nCache-Control: no-cache\r\n"), force);
+                assert_eq!(request.contains("\r\nPragma: no-cache\r\n"), force);
+                assert!(
+                    !request.contains("If-None-Match:") && !request.contains("If-Modified-Since:")
+                );
+            }
+        }
+        let start = site.headers.lock().unwrap().len();
+        app.open_address(&format!("{}/fast", site.url));
+        app.wait_for_load();
+        assert!(!app.failed, "{}", app.status);
+        assert!(!site.headers.lock().unwrap()[start].contains("Cache-Control:"));
+    }
+
+    #[test]
+    fn full_reload_restarts_pending_redirects_and_preserves_history_semantics() {
+        let site = LiveSite::new();
+        let mut app = App::new();
+        app.open_address(&format!("{}/redirect", site.url));
+        app.key(0x74, true, false, false);
+        assert_eq!(
+            app.pending.as_ref().unwrap().mode,
+            crate::http::FetchMode::FullReload
+        );
+        app.wait_for_load();
+        assert!(!app.failed, "{}", app.status);
+        assert_eq!(app.history.len(), 2);
+        assert_eq!(app.history_index, 1);
+        assert_eq!(app.location.fragment, "target");
+        let headers = site.headers.lock().unwrap();
+        let full_paths: Vec<_> = headers
+            .iter()
+            .filter(|r| r.contains("\r\nCache-Control: no-cache\r\n"))
+            .map(|r| r.split_whitespace().nth(1).unwrap())
+            .collect();
+        assert_eq!(
+            full_paths,
+            [
+                "/redirect",
+                "/doc",
+                "/assets/style.css",
+                "/assets/pixel.ppm"
+            ]
+        );
+    }
+
+    #[test]
+    fn centered_table_controls_remain_clickable_after_resize_zoom_and_find() {
+        let site = LiveSite::new();
+        let mut app = App::new();
+        for (width, zoom) in [(920, 1.0), (480, 1.25)] {
+            app.open_address(&format!("{}/compat", site.url));
+            app.wait_for_load();
+            assert!(!app.failed, "{}", app.status);
+            app.resize(width, 650);
+            app.set_zoom(zoom);
+            app.search("Find something");
+            assert_eq!(app.matches.len(), 1);
+            app.key(0x1b, false, false, false);
+            let query = *app
+                .forms
+                .controls
+                .iter()
+                .find(|(_, c)| c.name == "q")
+                .unwrap()
+                .0;
+            let reset = *app
+                .forms
+                .controls
+                .iter()
+                .find(|(_, c)| c.kind == Kind::Reset)
+                .unwrap()
+                .0;
+            let submit = *app
+                .forms
+                .controls
+                .iter()
+                .find(|(_, c)| c.name == "go")
+                .unwrap()
+                .0;
+            for (node, text) in [
+                (query, Some("edited")),
+                (reset, None),
+                (query, Some("layout + café")),
+                (submit, None),
+            ] {
+                let field = app
+                    .page
+                    .controls
+                    .iter()
+                    .find(|c| c.node == node)
+                    .unwrap()
+                    .clone();
+                let (x, y) = (field.x + 6, field.y + app.content_top() - app.scroll + 6);
+                assert!(
+                    (0..app.width).contains(&x)
+                        && (app.content_top()..app.height - FOOT_HEIGHT).contains(&y)
+                );
+                app.pointer_down(x, y, false);
+                app.pointer_up(x, y);
+                if let Some(text) = text {
+                    assert!(app.focus == Focus::Control(query));
+                    app.key(0x41, true, false, false);
+                    app.paste(text);
+                    assert_eq!(app.forms.controls[&query].value.text(), text);
+                } else if node == reset {
+                    assert_eq!(app.forms.controls[&query].value.text(), "seed");
+                }
+            }
+            app.wait_for_load();
+            assert!(!app.failed, "{}", app.status);
+            assert_eq!(app.document.title, "Live form");
+            assert!(site
+                .requests
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|r| r == "/form?q=layout+%2B+caf%C3%A9&go=send"));
+        }
+    }
+
+    #[test]
+    fn live_form_edit_submit_and_same_url_resubmit_reach_the_server() {
+        let site = LiveSite::new();
+        let mut app = App::new();
+        app.open_address(&format!("{}/form", site.url));
+        app.wait_for_load();
+        assert!(!app.failed, "{}", app.status);
+        let node = *app
+            .forms
+            .controls
+            .iter()
+            .find(|(_, c)| c.name == "q")
+            .unwrap()
+            .0;
+        let field = app
+            .page
+            .controls
+            .iter()
+            .find(|c| c.node == node)
+            .unwrap()
+            .clone();
+        let (x, y) = (field.x + 10, field.y + app.content_top() + 8);
+        app.pointer_down(x, y, false);
+        app.pointer_up(x, y);
+        app.key(0x41, true, false, false);
+        app.paste("café +&");
+        app.key(0x09, false, false, false);
+        let checkbox = *app
+            .forms
+            .controls
+            .iter()
+            .find(|(_, c)| c.kind == Kind::Checkbox)
+            .unwrap()
+            .0;
+        assert!(app.focus == Focus::Control(checkbox));
+        app.key(0x20, false, false, false);
+        assert!(!app.forms.controls[&checkbox].checked);
+        app.key(0x09, false, true, false);
+        assert!(app.focus == Focus::Control(node));
+        app.key(0x0d, false, false, false);
+        app.wait_for_load();
+        assert!(!app.failed, "{}", app.status);
+        assert!(site
+            .requests
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|r| r == "/form?q=caf%C3%A9+%2B%26&source=fixture&go=send"));
+        assert_eq!(app.document.title, "Live form");
+        // Recreate the same values. Explicit GET submission must fetch even if
+        // the full URL equals the current document (fragment navigation does not).
+        app.focus_control(node);
+        app.key(0x41, true, false, false);
+        app.paste("café +&");
+        app.forms.toggle(checkbox);
+        let before = site.requests.lock().unwrap().len();
+        app.key(0x0d, false, false, false);
+        app.wait_for_load();
+        assert_eq!(site.requests.lock().unwrap().len(), before + 1);
+    }
+
+    #[test]
+    fn form_labels_reset_readonly_clipboard_and_mouse_cancellation() {
+        let fixture = Fixture::new();
+        let file = fixture.write("form.html", "<form><input id=edit name=q value=seed maxlength=6><input id=ro name=r value=kept readonly><input name=skip disabled><label for=c>Choice</label><input id=c type=checkbox name=c><button type=reset>Reset</button></form>");
+        let mut app = App::new();
+        app.resize(900, 500);
+        app.open(&file);
+        let node = *app
+            .forms
+            .controls
+            .iter()
+            .find(|(_, c)| c.name == "q")
+            .unwrap()
+            .0;
+        app.focus_control(node);
+        app.key(0x41, true, false, false);
+        let PlatformAction::Cut(text) = app.key(0x58, true, false, false) else {
+            panic!("Cut action");
+        };
+        assert_eq!(app.forms.controls[&node].value.text(), "seed");
+        app.cut_copied(&text);
+        app.paste("é🦀abcd");
+        assert_eq!(app.forms.controls[&node].value.text(), "é🦀abc");
+        app.key(0x09, false, false, false);
+        let readonly = *app
+            .forms
+            .controls
+            .iter()
+            .find(|(_, c)| c.name == "r")
+            .unwrap()
+            .0;
+        assert!(app.focus == Focus::Control(readonly));
+        app.key(0x41, true, false, false);
+        assert!(matches!(
+            app.key(0x58, true, false, false),
+            PlatformAction::Copy(_)
+        ));
+        app.paste("overwrite");
+        app.key(0x08, false, false, false);
+        assert_eq!(app.forms.controls[&readonly].value.text(), "kept");
+        let checkbox = *app
+            .forms
+            .controls
+            .iter()
+            .find(|(_, c)| c.kind == Kind::Checkbox)
+            .unwrap()
+            .0;
+        let label = app.page.runs.iter().find(|r| r.text == "Choice").unwrap();
+        let (x, y) = (label.x + 2, label.y + app.content_top() + 2);
+        app.pointer_down(x, y, false);
+        app.pointer_up(x, y);
+        assert!(app.forms.controls[&checkbox].checked);
+        let rect = app
+            .page
+            .controls
+            .iter()
+            .find(|c| c.node == checkbox)
+            .unwrap()
+            .clone();
+        let (x, y) = (rect.x + 2, rect.y + app.content_top() + 2);
+        app.pointer_down(x, y, false);
+        app.pointer_up(800, 450);
+        assert!(app.forms.controls[&checkbox].checked);
+        let reset = *app
+            .forms
+            .controls
+            .iter()
+            .find(|(_, c)| c.kind == Kind::Reset)
+            .unwrap()
+            .0;
+        app.activate_control(reset);
+        assert_eq!(app.forms.controls[&node].value.text(), "seed");
+        assert!(!app.forms.controls[&checkbox].checked);
+        app.draw(); // Controls paint using the same live value/checked state.
+    }
+
+    #[test]
+    fn live_http_redirect_base_assets_and_fragment_history() {
+        let site = LiveSite::new();
+        let mut app = App::new();
+        app.resize(640, 420);
+        app.open_address(&format!("{}/redirect", site.url));
+        app.wait_for_load();
+        assert!(!app.failed, "{}", app.status);
+        assert_eq!(app.document.title, "Network page");
+        assert_eq!(app.location.url.as_ref().unwrap().path, "/doc");
+        assert_eq!(app.location.fragment, "target");
+        assert_eq!(app.base_location.url.as_ref().unwrap().path, "/assets/");
+        assert_eq!(app.styles.len(), 1);
+        assert_eq!(app.images.len(), 1);
+        assert!(app.scroll > 0);
+        assert_eq!(site.requests.lock().unwrap().len(), 4);
+        assert!(app.events.iter().any(|e| e.contains("document's scheme")));
+        app.open_address(&format!("{}/doc#top", site.url));
+        let request_count = site.requests.lock().unwrap().len();
+        app.history_move(-1);
+        assert!(!app.is_loading());
+        assert_eq!(app.location.fragment, "target");
+        assert!(app.scroll > 0);
+        assert_eq!(site.requests.lock().unwrap().len(), request_count);
+        app.follow("../next");
+        app.wait_for_load();
+        assert_eq!(app.location.url.as_ref().unwrap().path, "/next");
+        assert_eq!(app.document.title, "Next page");
+    }
+
+    #[test]
+    fn script_location_uses_final_redirect_and_ignores_pending_or_failed_targets() {
+        let site = LiveSite::new();
+        let mut app = App::new();
+        app.open_address(&format!("{}/location-redirect", site.url));
+        app.wait_for_load();
+        assert!(!app.failed, "{}", app.status);
+        let original = format!("{}/location-page?q=%23#target", site.url);
+        assert_eq!(app.location.display(), original);
+        assert_eq!(
+            app.document.title,
+            original,
+            "{}",
+            app.scripting.as_ref().unwrap().report()
+        );
+        assert_eq!(app.base_location.url.as_ref().unwrap().path, "/assets/");
+        let read = app
+            .document
+            .nodes
+            .iter()
+            .enumerate()
+            .find_map(|(node, _)| (app.document.attr(node, "id") == Some("read")).then_some(node))
+            .unwrap();
+        let next = format!("{}/location-page?q=%23#next%20part", site.url);
+        let requests = site.requests.lock().unwrap().len();
+        app.open_address(&next);
+        assert!(!app.is_loading());
+        app.activate_control(read);
+        assert_eq!(app.document.title, next);
+        app.history_move(-1);
+        app.activate_control(read);
+        assert_eq!(app.document.title, original);
+        app.history_move(1);
+        app.activate_control(read);
+        assert_eq!(app.document.title, next);
+        assert_eq!(site.requests.lock().unwrap().len(), requests);
+        app.open_address(&format!("{}/slow", site.url));
+        assert!(app.is_loading());
+        assert_ne!(app.address.text(), next);
+        app.activate_control(read);
+        assert_eq!(app.document.title, next);
+        app.stop_loading();
+        app.open_address(&format!("{}/empty", site.url));
+        app.wait_for_load();
+        assert!(app.failed);
+        app.activate_control(read);
+        assert_eq!(app.document.title, next);
+        assert_eq!(app.location.display(), next);
+        assert_eq!(
+            app.scripting.as_ref().unwrap().error_count(),
+            0,
+            "{}",
+            app.scripting.as_ref().unwrap().report()
+        );
+    }
+
+    #[test]
+    fn replacing_and_stopping_a_live_request_keep_stale_pages_out() {
+        let site = LiveSite::new();
+        let mut app = App::new();
+        app.open_address(&format!("{}/slow", site.url));
+        site.wait_for_request("/slow");
+        app.open_address(&format!("{}/fast", site.url));
+        app.wait_for_load();
+        assert!(!app.failed, "{}", app.status);
+        assert_eq!(app.document.title, "Next page");
+        std::thread::sleep(std::time::Duration::from_millis(650));
+        app.poll_load();
+        assert_eq!(app.document.title, "Next page");
+        app.open_address(&format!("{}/slow2", site.url));
+        site.wait_for_request("/slow2");
+        app.stop_loading();
+        std::thread::sleep(std::time::Duration::from_millis(250));
+        app.poll_load();
+        assert!(!app.is_loading());
+        assert_eq!(app.document.title, "Next page");
+        assert_eq!(app.address.text(), app.location.display());
+    }
+
+    #[test]
+    fn an_http_no_content_response_keeps_the_current_document() {
+        let site = LiveSite::new();
+        let mut app = App::new();
+        let title = app.document.title.clone();
+        app.open_address(&format!("{}/empty", site.url));
+        app.wait_for_load();
+        assert!(app.failed);
+        assert!(app.status.contains("204"));
+        assert_eq!(app.document.title, title);
+    }
+
+    #[test]
+    fn navigation_history_scroll_reload_and_failed_load() {
+        let f = Fixture::new();
+        let a = f.write(
+            "a.html",
+            &format!(
+                "<title>A</title><a href='b.html'>Next</a>{}<p id='target'>Target</p>{}",
+                "<p>Before</p>".repeat(20),
+                "<p>After</p>".repeat(20)
+            ),
+        );
+        f.write("b.html", "<title>B</title><p>Second page</p>");
+        let mut app = App::new();
+        app.resize(640, 420);
+        app.open(&a);
+        app.scroll_by(120);
+        app.follow("b.html");
+        assert_eq!(app.document.title, "B");
+        app.history_move(-1);
+        assert_eq!(app.document.title, "A");
+        assert_eq!(app.scroll, 120);
+        app.follow("#target");
+        assert!(app.scroll > 120);
+        assert_eq!(app.history_index + 1, app.history.len());
+        let title = app.document.title.clone();
+        app.follow("https://example.com/");
+        app.wait_for_load();
+        assert!(app.failed);
+        assert_eq!(app.document.title, title);
+        f.write("a.html", "<title>Edited</title><p>Saved change</p>");
+        app.reload();
+        assert_eq!(app.document.title, "Edited");
+        assert!(!app.failed);
+        assert_eq!(app.scroll, 0);
+    }
+
+    #[test]
+    fn local_assets_and_inert_content_use_the_selected_root() {
+        let f = Fixture::new();
+        f.write("outside.css", "p { color:red; }");
+        f.write("site/style.css", "p { color:#123456; }");
+        f.write("site/pixel.ppm", "P3\n1 1\n255\n255 40 20\n");
+        let file = f.write("site/index.html", "<link rel='stylesheet' href='style.css'><link rel='stylesheet' href='../outside.css'><template><img src='absent.png'></template><p>Styled</p><img src='pixel.ppm'>");
+        let mut app = App::new();
+        app.open(&file);
+        assert!(!app.failed);
+        assert_eq!(app.styles.len(), 1);
+        assert_eq!(app.images.len(), 1);
+        assert_eq!(
+            app.page
+                .runs
+                .iter()
+                .find(|r| r.text == "Styled")
+                .unwrap()
+                .color,
+            0x123456
+        );
+        assert!(app
+            .events
+            .iter()
+            .any(|e| e.contains("outside.css") && e.contains("SKIPPED")));
+        assert!(!app.events.iter().any(|e| e.contains("absent.png")));
+    }
+
+    #[test]
+    fn address_editing_and_unicode_input_preserve_text() {
+        let f = Fixture::new();
+        let file = f.write("space page.html", "<title>Address</title><p>Opened</p>");
+        let mut app = App::new();
+        app.key(0x4c, true, false, false);
+        app.paste(&file.display().to_string());
+        app.key(0x0d, false, false, false);
+        assert_eq!(app.document.title, "Address");
+        app.key(0x4c, true, false, false);
+        app.utf16_input(0xd83e);
+        app.utf16_input(0xdd80);
+        assert_eq!(app.address.text(), "🦀");
+        app.text_input('é');
+        assert_eq!(app.address.text(), "🦀é");
+        app.key(0x41, true, false, false);
+        match app.key(0x43, true, false, false) {
+            PlatformAction::Copy(text) => assert_eq!(text, "🦀é"),
+            _ => panic!("No clipboard action"),
+        }
+        app.key(0x1b, false, false, false);
+        assert_eq!(app.address.text(), app.location.display());
+    }
+
+    #[test]
+    fn find_reopens_and_closing_it_clamps_scroll() {
+        let mut app = App::new();
+        app.resize(640, 400);
+        app.search("page");
+        assert!(!app.matches.is_empty());
+        let count = app.matches.len();
+        app.key(0x1b, false, false, false);
+        assert!(app.matches.is_empty());
+        app.key(0x46, true, false, false);
+        assert_eq!(app.matches.len(), count);
+        app.scroll = app.max_scroll();
+        app.pointer_down(app.width - 20, BAR_HEIGHT + 20, false);
+        app.pointer_up(app.width - 20, BAR_HEIGHT + 20);
+        assert!(!app.find_open);
+        assert_eq!(app.scroll, app.max_scroll());
+        app.show_source();
+        assert!(app.page.runs.iter().any(|r| r.text.contains("doctype")));
+        app.show_source();
+        assert!(app.view == View::Page);
+    }
+
+    #[test]
+    fn link_drag_and_capture_cancel_do_not_navigate() {
+        let f = Fixture::new();
+        let file = f.write(
+            "a.html",
+            "<title>A</title><a href='b.html'>Open next page</a>",
+        );
+        f.write("b.html", "<title>B</title><p>Second</p>");
+        let mut app = App::new();
+        app.open(&file);
+        let run = &app.page.runs[0];
+        let (x, y) = (run.x + 1, run.y + BAR_HEIGHT + 1);
+        app.pointer_down(x, y, false);
+        app.pointer_move(x + 20, y, true);
+        app.pointer_up(x + 20, y);
+        assert_eq!(app.document.title, "A");
+        assert!(!app.selected_text().is_empty());
+        app.pointer_down(x, y, false);
+        app.pointer_cancel();
+        app.pointer_up(x, y);
+        assert_eq!(app.document.title, "A");
+        app.pointer_down(x, y, false);
+        app.pointer_up(x, y);
+        assert_eq!(app.document.title, "B");
+    }
+
+    #[test]
+    fn flex_reflow_keeps_editing_links_find_and_anchor_navigation_working() {
+        let files = Fixture::new();
+        let file = files.write("flex.html", &format!(
+            "<title>Flex interactions</title><style>body{{margin:8px}}.row{{display:flex;flex-wrap:wrap;align-items:center;gap:16px}}.reverse{{flex-direction:row-reverse}}</style>\
+            <div class='row reverse'><a href='next.html'>Open</a><span>Alpha</span><a href='#target'>Jump</a></div>\
+            <form><div class=row><label for=q>Query</label><input id=q name=q value=seed size=10><button type=reset>Reset</button></div></form>\
+            {}<div class='row reverse'><p id=target>Target</p><p>Neighbor</p></div>{}",
+            "<p>Before</p>".repeat(20), "<p>After</p>".repeat(20)));
+        files.write("next.html", "<title>Next flex page</title><p>Arrived</p>");
+        let mut app = App::new();
+        app.open(&file);
+        let node = *app
+            .forms
+            .controls
+            .iter()
+            .find(|(_, c)| c.name == "q")
+            .unwrap()
+            .0;
+        for (width, zoom) in [(900, 1.0), (460, 1.5)] {
+            app.resize(width, 650);
+            app.set_zoom(zoom);
+            app.scroll = 0;
+            let field = app
+                .page
+                .controls
+                .iter()
+                .find(|c| c.node == node)
+                .unwrap()
+                .clone();
+            let (x, y) = (field.x + 8, field.y + app.content_top() + 8);
+            app.pointer_down(x, y, false);
+            app.pointer_up(x, y);
+            assert!(app.focus == Focus::Control(node));
+            app.key(0x41, true, false, false);
+            app.paste("updated");
+            assert_eq!(app.forms.controls[&node].value.text(), "updated");
+            app.key(0x09, false, false, false);
+            let reset = *app
+                .forms
+                .controls
+                .iter()
+                .find(|(_, c)| c.kind == Kind::Reset)
+                .unwrap()
+                .0;
+            assert!(app.focus == Focus::Control(reset));
+            let rect = app
+                .page
+                .controls
+                .iter()
+                .find(|c| c.node == reset)
+                .unwrap()
+                .clone();
+            let (x, y) = (rect.x + 5, rect.y + app.content_top() - app.scroll + 5);
+            app.pointer_down(x, y, false);
+            app.pointer_up(x, y);
+            assert_eq!(app.forms.controls[&node].value.text(), "seed");
+            app.search("Alpha");
+            assert_eq!(app.matches.len(), 1);
+            app.selection = app.matches.first().copied();
+            assert_eq!(app.selected_text(), "Alpha");
+            app.key(0x1b, false, false, false);
+        }
+        app.scroll = 0;
+        let jump = app.page.runs.iter().find(|r| r.text == "Jump").unwrap();
+        let (x, y) = (jump.x + 2, jump.y + app.content_top() + 2);
+        assert!(app.wants_hand(x, y));
+        app.pointer_down(x, y, false);
+        app.pointer_up(x, y);
+        let target = app
+            .page
+            .anchors
+            .iter()
+            .find(|(name, _)| name == "target")
+            .unwrap()
+            .1;
+        assert!(app.scroll > 0);
+        assert!(
+            (0..=16).contains(&(target - app.scroll)),
+            "anchor should remain just below the viewport top"
+        );
+        let text = app.page.runs.iter().find(|r| r.text == "Target").unwrap();
+        assert!(
+            (text.y - target).abs() < 64,
+            "moved anchor must follow its text"
+        );
+        app.scroll = 0;
+        let link = app.page.runs.iter().find(|r| r.text == "Open").unwrap();
+        let (x, y) = (link.x + 2, link.y + app.content_top() + 2);
+        app.pointer_down(x, y, false);
+        app.pointer_up(x, y);
+        assert_eq!(app.document.title, "Next flex page");
+    }
+
+    #[test]
+    fn positioned_controls_links_find_and_history_follow_the_visible_geometry() {
+        let files = Fixture::new();
+        let markup = format!(
+            "<title>Positioned</title><style>body{{margin:16px}} .stage{{position:relative;height:160px}} .absolute{{position:absolute;left:30px;top:24px;width:180px;background:#ccefe0}} .pin{{position:fixed;right:8px;bottom:8px;width:240px;height:160px;background:#17394a;color:white}} .pin p{{margin:0}} </style><div class=stage><div class=absolute><a href='next.html'>Absolute</a></div></div><p>Before</p><div style='position:absolute;left:20px;top:200px'>Middle</div><p>After</p>{}<h2 id=target>Destination</h2>{}<div class=pin id=pin><p><a href='#target'>Pinned</a></p><form><input name=q value=original><button type=reset>Reset</button></form></div>",
+            "<p>Normal document flow.</p>".repeat(25),
+            "<p>More normal document flow.</p>".repeat(20),
+        );
+        let file = files.write("position.html", &markup);
+        files.write(
+            "next.html",
+            "<title>Next positioned page</title><p>Arrived</p>",
+        );
+        let mut app = App::new();
+        app.open(&file);
+        app.resize(780, 620);
+        let node = *app
+            .forms
+            .controls
+            .iter()
+            .find(|(_, c)| c.name == "q")
+            .unwrap()
+            .0;
+        assert!(app.page.control_is_fixed(node));
+        let pin_y =
+            |app: &App| app.page.runs.iter().find(|r| r.text == "Pinned").unwrap().y - app.scroll;
+        let initial_y = pin_y(&app);
+        assert_eq!(initial_y, app.viewport_height() - 8 - 160);
+        let document_height = app.page.height;
+        for scroll in [300, 700, 0, 400] {
+            app.set_scroll(scroll);
+            assert_eq!(pin_y(&app), initial_y);
+            assert_eq!(app.page.height, document_height);
+            let rect = app.page.controls.iter().find(|r| r.node == node).unwrap();
+            let (x, y) = (rect.x + 8, rect.y - app.scroll + app.content_top() + 8);
+            app.pointer_down(x, y, false);
+            app.pointer_up(x, y);
+            assert!(app.focus == Focus::Control(node));
+            assert_eq!(app.scroll, scroll);
+            app.key(0x41, true, false, false);
+            app.paste("updated");
+            assert_eq!(app.forms.controls[&node].value.text(), "updated");
+            let reset = app
+                .forms
+                .controls
+                .iter()
+                .find(|(_, c)| c.kind == Kind::Reset)
+                .unwrap()
+                .0;
+            let rect = app.page.controls.iter().find(|r| r.node == *reset).unwrap();
+            let (x, y) = (rect.x + 5, rect.y - app.scroll + app.content_top() + 5);
+            app.pointer_down(x, y, false);
+            app.pointer_up(x, y);
+            assert_eq!(app.forms.controls[&node].value.text(), "original");
+        }
+        app.focus = Focus::Page;
+        app.search("Pinned");
+        assert_eq!(app.scroll, 400);
+        assert_eq!(pin_y(&app), app.viewport_height() - 8 - 160);
+        app.selection = app.matches.first().copied();
+        assert_eq!(app.selected_text(), "Pinned");
+        app.key(0x1b, false, false, false);
+        assert_eq!(pin_y(&app), initial_y);
+        app.follow("#pin");
+        assert_eq!(
+            app.scroll, 400,
+            "an already visible fixed anchor must not scroll the document"
+        );
+        app.resize(780, 480);
+        assert_eq!(pin_y(&app), app.viewport_height() - 8 - 160);
+        app.set_zoom(1.5);
+        assert_eq!(pin_y(&app), app.viewport_height() - 12 - 240);
+        let link = app.page.runs.iter().find(|r| r.text == "Pinned").unwrap();
+        let (x, y) = (link.x + 2, link.y - app.scroll + app.content_top() + 2);
+        assert!(app.wants_hand(x, y));
+        let point = app.point_at(x, y).unwrap();
+        assert_eq!(app.page.runs[point.run].text, "Pinned");
+        app.pointer_down(x, y, false);
+        app.pointer_up(x, y);
+        let target = app
+            .page
+            .anchors
+            .iter()
+            .find(|(id, _)| id == "target")
+            .unwrap()
+            .1;
+        assert!((0..=16).contains(&(target - app.scroll)));
+        app.set_scroll(0);
+        let absolute = app.page.runs.iter().find(|r| r.text == "Absolute").unwrap();
+        let (x, y) = (absolute.x + 2, absolute.y + app.content_top() + 2);
+        app.pointer_down(x, y, false);
+        app.pointer_up(x, y);
+        assert_eq!(app.document.title, "Next positioned page");
+        app.history_move(-1);
+        assert_eq!(app.document.title, "Positioned");
+        assert_eq!(app.scroll, 0);
+        assert_eq!(pin_y(&app), app.viewport_height() - 12 - 240);
+        let words: Vec<_> = app.page.runs.iter().map(|r| r.text.as_str()).collect();
+        let before = words.iter().position(|&word| word == "Before").unwrap();
+        let middle = words.iter().position(|&word| word == "Middle").unwrap();
+        let after = words.iter().position(|&word| word == "After").unwrap();
+        assert!(
+            before < middle && middle < after,
+            "copy/find order must remain source order"
+        );
+    }
+
+    #[test]
+    fn jpeg_assets_load_through_the_resource_loader_and_keep_image_links() {
+        let files = Fixture::new();
+        std::fs::write(
+            files.0.join("baseline.jpg"),
+            include_bytes!("../pages/images/jpeg-landscape.jpg"),
+        )
+        .unwrap();
+        std::fs::write(
+            files.0.join("progressive.jpg"),
+            include_bytes!("../pages/images/jpeg-progressive.jpg"),
+        )
+        .unwrap();
+        std::fs::write(
+            files.0.join("oriented.jpg"),
+            include_bytes!("../pages/images/jpeg-oriented.jpg"),
+        )
+        .unwrap();
+        let file = files.write("jpeg.html", "<title>JPEGs</title><a href=next.html><img src=baseline.jpg width=350></a><img src=progressive.jpg width=350><img src=oriented.jpg>");
+        files.write("next.html", "<title>JPEG link</title><p>Arrived</p>");
+        let mut app = App::new();
+        app.open(&file);
+        assert_eq!(app.images.len(), 3);
+        assert!(app
+            .events
+            .iter()
+            .filter(|e| e.starts_with("IMAGE "))
+            .all(|e| !e.contains("SKIPPED")));
+        let oriented = app
+            .document
+            .nodes
+            .iter()
+            .enumerate()
+            .find(|(i, _)| app.document.attr(*i, "src") == Some("oriented.jpg"))
+            .unwrap()
+            .0;
+        assert_eq!(
+            (app.images[&oriented].width, app.images[&oriented].height),
+            (320, 180)
+        );
+        let (x, y) = app
+            .page
+            .items
+            .iter()
+            .find_map(|item| match item {
+                PaintItem::Image { x, y, .. } => Some((*x + 10, *y + 10 + app.content_top())),
+                _ => None,
+            })
+            .unwrap();
+        assert!(app.wants_hand(x, y));
+        app.pointer_down(x, y, false);
+        app.pointer_up(x, y);
+        assert_eq!(app.document.title, "JPEG link");
+    }
+
+    #[test]
+    fn fine_wheel_zoom_and_resize_keep_scroll_bounded() {
+        let mut app = App::new();
+        app.resize(640, 400);
+        for _ in 0..120 {
+            app.wheel(-1, false);
+        }
+        assert_eq!(app.scroll, 72);
+        app.scroll_by(i32::MAX);
+        assert_eq!(app.scroll, app.max_scroll());
+        app.set_zoom(3.0);
+        assert!(app.scroll <= app.max_scroll());
+        app.resize(1200, 800);
+        assert!(app.scroll <= app.max_scroll());
+        app.scroll_by(i32::MIN);
+        assert_eq!(app.scroll, 0);
+    }
+
+    #[test]
+    fn cut_waits_for_clipboard_success_and_empty_copy_is_a_noop() {
+        let mut app = App::new();
+        assert!(matches!(
+            app.key(0x43, true, false, false),
+            PlatformAction::None
+        ));
+        app.focus_address();
+        app.address.set("Keep this");
+        app.address.select_all();
+        match app.key(0x58, true, false, false) {
+            PlatformAction::Cut(text) => {
+                assert_eq!(app.address.text(), "Keep this");
+                app.cut_copied(&text);
+                assert_eq!(app.address.text(), "");
+            }
+            _ => panic!("Expected deferred cut"),
+        }
+    }
+
+    #[test]
+    fn find_and_copy_reconstruct_wrapped_words_and_inline_styles() {
+        let f = Fixture::new();
+        let long = "abcdefghijklmnopqrstuvxyz".repeat(5);
+        let path = f.write(
+            "index.html",
+            &format!(
+                "<p>{}</p><p>to<strong style='font-size:32px'>get</strong>her again</p>",
+                long
+            ),
+        );
+        let mut app = App::new();
+        app.open(&path);
+        app.resize(280, 400);
+        app.search(&long);
+        assert_eq!(app.matches.len(), 1);
+        app.selection = app.matches.first().copied();
+        assert_eq!(app.selected_text(), long);
+        app.search("together");
+        assert_eq!(app.matches.len(), 1);
+        app.selection = app.matches.first().copied();
+        assert_eq!(app.selected_text(), "together");
+    }
+}

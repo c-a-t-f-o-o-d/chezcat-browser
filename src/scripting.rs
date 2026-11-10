@@ -1,0 +1,4147 @@
+//! The deliberately small DOM boundary of the original JavaScript interpreter.
+//! A Page is one document realm. It never opens files, makes requests, navigates,
+//! or injects HTML. Its document-owned timer queue is pumped by the App;
+//! callbacks never execute on a background thread.
+//!
+//! Classic scripts run once, in source order, after parsing. Event jobs share
+//! both interpreter and host-work limits; dispatch never resets those limits.
+
+use std::collections::HashMap;
+use std::time::{Duration, Instant};
+
+use crate::forms::{self, Forms, Kind};
+use crate::html::{Document, Node, NodeKind};
+use crate::javascript::{Host, Runtime, Value};
+use crate::loader::Script;
+
+const WINDOW: u32 = 1;
+const DOCUMENT: u32 = 2;
+const CONSOLE: u32 = 3;
+const NAVIGATOR: u32 = 4;
+const PLUGINS: u32 = 5;
+const MIME_TYPES: u32 = 6;
+const DOCUMENT_IMAGES: u32 = 7;
+const LOCATION: u32 = 8;
+const PERFORMANCE: u32 = 9;
+const NODE_BASE: u32 = 1024;
+const STYLE_BASE: u32 = 1_000_000;
+const EVENT_BASE: u32 = 2_000_000;
+const MAX_LISTENERS: usize = 64;
+const MAX_HOST_WORK: usize = 100_000;
+const MAX_COPY_WORK: usize = 8 * 1024 * 1024;
+const MAX_STRING: usize = 32 * 1024;
+const MAX_EXTRA_NODES: usize = 256;
+const MAX_EXTRA_BYTES: usize = 1024 * 1024;
+const MAX_LOG_LINES: usize = 128;
+const MAX_LOG_BYTES: usize = 32 * 1024;
+const MAX_LOG_LINE: usize = 2048;
+const MAX_HANDLER_BYTES: usize = 8192;
+const MAX_TIMERS: usize = 64;
+const MAX_TIMER_ARGUMENTS: usize = 30;
+const MAX_TIMER_BYTES: usize = 256 * 1024;
+const MAX_TIMER_CALLBACKS: usize = 4096;
+const MAX_ANIMATION_FRAMES: usize = 64;
+const FRAME_INTERVAL: Duration = Duration::from_millis(16);
+pub const MAX_CONSOLE_SOURCE: usize = 8192;
+
+/// Values supplied by the native input path, never by document code.
+#[derive(Clone, Debug, Default)]
+pub struct KeyboardInput {
+    pub down: bool,
+    pub target: Option<usize>,
+    pub key: String,
+    pub code: String,
+    pub ctrl: bool,
+    pub shift: bool,
+    pub alt: bool,
+    pub meta: bool,
+    pub repeat: bool,
+    pub location: u8,
+    pub key_code: u32,
+}
+
+#[derive(Default, Debug)]
+pub struct Outcome {
+    pub prevented: bool,
+    pub layout_changed: bool,
+    pub errors: usize,
+}
+
+#[derive(Clone)]
+struct Listener {
+    serial: u32,
+    target: u32,
+    event: String,
+    function: Value,
+    property: bool,
+    options: ListenerOptions,
+}
+
+#[derive(Clone, Copy, Default)]
+struct ListenerOptions {
+    capture: bool,
+    once: bool,
+    passive: bool,
+}
+
+struct Timer {
+    id: u32,
+    due: Instant,
+    callback: Value,
+    arguments: Vec<Value>,
+    bytes: usize,
+    nesting: u32,
+}
+
+struct AnimationFrame {
+    id: u32,
+    callback: Value,
+}
+
+struct Event {
+    handle: u32,
+    target: u32,
+    current: u32,
+    name: String,
+    cancelable: bool,
+    bubbles: bool,
+    prevented: bool,
+    stopped: bool,
+    immediate: bool,
+    phase: u8,
+    passive: bool,
+    keyboard: Option<KeyboardInput>,
+    timestamp: f64,
+}
+
+#[derive(Default)]
+struct Tree {
+    active: Vec<bool>,
+    parents: Vec<Option<usize>>,
+    order: Vec<usize>,
+    ids: HashMap<String, usize>,
+    body: Option<usize>,
+    head: Option<usize>,
+    document_element: Option<usize>,
+}
+
+/// The App supplies the displayed document's committed location. These values
+/// reflect its existing URL serialization; the content root and HTML base URL
+/// are deliberately not part of this script-visible snapshot.
+struct LocationView {
+    href: String,
+    protocol: String,
+    host: String,
+    hostname: String,
+    port: String,
+    pathname: String,
+    search: String,
+    hash: String,
+    origin: String,
+}
+
+impl LocationView {
+    fn new(location: &crate::navigation::Location) -> Self {
+        let href = location.display();
+        // Location::display encodes literal '#' characters in path/query data
+        // and serializes the separately stored, decoded fragment exactly once.
+        let fragment_start = href.find('#').unwrap_or(href.len());
+        let hash = href[fragment_start..].to_owned();
+        let (protocol, host, hostname, port, pathname, search, origin) =
+            if let Some(url) = &location.url {
+                let protocol = if url.secure { "https:" } else { "http:" }.to_owned();
+                let host = url.host_header();
+                let hostname = if url.host.contains(':') {
+                    format!("[{}]", url.host)
+                } else {
+                    url.host.clone()
+                };
+                let port = if url.port == if url.secure { 443 } else { 80 } {
+                    String::new()
+                } else {
+                    url.port.to_string()
+                };
+                let search = url
+                    .query
+                    .as_ref()
+                    .filter(|query| !query.is_empty())
+                    .map_or_else(String::new, |query| format!("?{query}"));
+                let origin = format!("{protocol}//{host}");
+                (
+                    protocol,
+                    host,
+                    hostname,
+                    port,
+                    url.path.clone(),
+                    search,
+                    origin,
+                )
+            } else {
+                let file = location.path.is_some();
+                let pathname = if file {
+                    // File locations have no network authority or query. Use
+                    // the path spelling from the same serializer as href.
+                    href["file://".len()..fragment_start].to_owned()
+                } else {
+                    "home".to_owned()
+                };
+                (
+                    if file { "file:" } else { "about:" }.to_owned(),
+                    String::new(),
+                    String::new(),
+                    String::new(),
+                    pathname,
+                    String::new(),
+                    "null".to_owned(),
+                )
+            };
+        Self {
+            href,
+            protocol,
+            host,
+            hostname,
+            port,
+            pathname,
+            search,
+            hash,
+            origin,
+        }
+    }
+
+    fn property(&self, property: &str) -> Option<&str> {
+        Some(match property {
+            "href" => &self.href,
+            "protocol" => &self.protocol,
+            "host" => &self.host,
+            "hostname" => &self.hostname,
+            "port" => &self.port,
+            "pathname" => &self.pathname,
+            "search" => &self.search,
+            "hash" => &self.hash,
+            "origin" => &self.origin,
+            _ => return None,
+        })
+    }
+}
+
+struct State {
+    geometry: Option<crate::script_geometry::Geometry>,
+    location: Option<LocationView>,
+    listeners: Vec<Listener>,
+    native_functions: HashMap<&'static str, Value>,
+    native_methods: Vec<(u32, &'static str, Value)>,
+    eval_allowed: bool,
+    timers: Vec<Timer>,
+    animation_frames: Vec<AnimationFrame>,
+    next_animation_frame: u32,
+    animation_due: Option<Instant>,
+    animation_callbacks: u64,
+    clock_origin: Instant,
+    pending_keyboard: Option<KeyboardInput>,
+    next_timer: u32,
+    timer_bytes: usize,
+    timer_callbacks: usize,
+    timer_nesting: u32,
+    next_listener: u32,
+    next_event: u32,
+    event: Option<Event>,
+    tree: Tree,
+    dirty: bool,
+    host_work: usize,
+    copy_work: usize,
+    node_limit: usize,
+    retained: usize,
+    retained_limit: usize,
+    changed: bool,
+    errors: usize,
+    logs: Vec<String>,
+    log_bytes: usize,
+    omitted: usize,
+    executed: usize,
+    enabled: bool,
+    ready: &'static str,
+}
+
+impl State {
+    fn new() -> Self {
+        Self {
+            geometry: None,
+            location: None,
+            listeners: Vec::new(),
+            native_functions: HashMap::new(),
+            native_methods: Vec::new(),
+            eval_allowed: false,
+            timers: Vec::new(),
+            animation_frames: Vec::new(),
+            next_animation_frame: 0,
+            animation_due: None,
+            animation_callbacks: 0,
+            clock_origin: Instant::now(),
+            pending_keyboard: None,
+            next_timer: 0,
+            timer_bytes: 0,
+            timer_callbacks: 0,
+            timer_nesting: 0,
+            next_listener: 0,
+            next_event: EVENT_BASE,
+            event: None,
+            tree: Tree::default(),
+            dirty: true,
+            host_work: MAX_HOST_WORK,
+            copy_work: MAX_COPY_WORK,
+            node_limit: 0,
+            retained: 0,
+            retained_limit: MAX_EXTRA_BYTES,
+            changed: false,
+            errors: 0,
+            logs: Vec::new(),
+            log_bytes: 0,
+            omitted: 0,
+            executed: 0,
+            enabled: false,
+            ready: "loading",
+        }
+    }
+
+    fn layout_changed(&mut self) {
+        self.changed = true;
+        if let Some(geometry) = &mut self.geometry {
+            geometry.invalidate();
+        }
+    }
+
+    fn work(&mut self, count: usize) -> Result<(), String> {
+        if count > self.host_work {
+            self.host_work = 0;
+            return Err("DOM work limit reached (100000 node/host operations per job).".into());
+        }
+        self.host_work -= count;
+        Ok(())
+    }
+
+    fn copies(&mut self, bytes: usize) -> Result<(), String> {
+        if bytes > self.copy_work {
+            self.copy_work = 0;
+            return Err("DOM string work limit reached (8 MiB per job).".into());
+        }
+        self.copy_work -= bytes;
+        Ok(())
+    }
+
+    fn set_timeout(&mut self, arguments: &[Value]) -> Result<Value, String> {
+        let Some(callback @ Value::Function(_)) = arguments.first() else {
+            return Err(
+                "setTimeout requires a function; string/eval timers are not supported.".into(),
+            );
+        };
+        if self.timers.len() >= MAX_TIMERS {
+            return Err("Timer limit reached (64 pending callbacks per document).".into());
+        }
+        if self.timer_callbacks >= MAX_TIMER_CALLBACKS {
+            return Err(
+                "Timer callback limit reached (4096 per document). Reload starts a new allowance."
+                    .into(),
+            );
+        }
+        let extra = arguments.get(2..).unwrap_or(&[]);
+        if extra.len() > MAX_TIMER_ARGUMENTS {
+            return Err("Timer argument limit reached (30).".into());
+        }
+        let bytes = extra
+            .iter()
+            .try_fold(std::mem::size_of_val(extra), |total, value| {
+                total.checked_add(match value {
+                    Value::String(text) => text.len(),
+                    _ => 0,
+                })
+            })
+            .ok_or("Timer argument size overflow.")?;
+        if bytes > MAX_TIMER_BYTES.saturating_sub(self.timer_bytes) {
+            return Err("Timer argument memory limit reached (256 KiB per document).".into());
+        }
+        self.copies(bytes)?;
+        let delay_value = arguments.get(1).unwrap_or(&Value::Undefined);
+        if let Value::String(text) = delay_value {
+            self.copies(text.len().saturating_mul(3))?;
+        }
+        let delay = timer_integer(delay_value)?.max(0) as u64;
+        let delay = if self.timer_nesting > 5 {
+            delay.max(4)
+        } else {
+            delay
+        };
+        let due = Instant::now()
+            .checked_add(Duration::from_millis(delay))
+            .ok_or("Timer deadline overflow.")?;
+        let id = self
+            .next_timer
+            .checked_add(1)
+            .filter(|id| *id <= i32::MAX as u32)
+            .ok_or("Timer identifier limit reached.")?;
+        self.next_timer = id;
+        self.timer_bytes += bytes;
+        self.timers.push(Timer {
+            id,
+            due,
+            callback: callback.clone(),
+            arguments: extra.to_vec(),
+            bytes,
+            nesting: self.timer_nesting.saturating_add(1),
+        });
+        Ok(Value::Number(f64::from(id)))
+    }
+
+    fn clear_timeout(&mut self, arguments: &[Value]) -> Result<Value, String> {
+        let id_value = arguments.first().unwrap_or(&Value::Undefined);
+        if let Value::String(text) = id_value {
+            self.copies(text.len().saturating_mul(3))?;
+        }
+        let id = timer_integer(id_value)?;
+        if let Some(index) = self
+            .timers
+            .iter()
+            .position(|timer| id > 0 && timer.id == id as u32)
+        {
+            let timer = self.timers.remove(index);
+            self.timer_bytes -= timer.bytes;
+        }
+        Ok(Value::Undefined)
+    }
+
+    fn clock_ms(&self, now: Instant) -> f64 {
+        // A real monotonic realm clock, deliberately rounded down to whole
+        // milliseconds. No epoch time or high-resolution device clock leaks.
+        now.saturating_duration_since(self.clock_origin).as_millis() as f64
+    }
+
+    fn request_animation_frame(&mut self, arguments: &[Value]) -> Result<Value, String> {
+        let Some(callback @ Value::Function(_)) = arguments.first() else {
+            return Err("requestAnimationFrame requires a function callback.".into());
+        };
+        if self.animation_frames.len() >= MAX_ANIMATION_FRAMES {
+            return Err(
+                "Animation frame limit reached (64 pending callbacks per document).".into(),
+            );
+        }
+        let id = self
+            .next_animation_frame
+            .checked_add(1)
+            .filter(|id| *id <= i32::MAX as u32)
+            .ok_or("Animation frame identifier limit reached.")?;
+        self.next_animation_frame = id;
+        self.animation_frames.push(AnimationFrame {
+            id,
+            callback: callback.clone(),
+        });
+        self.animation_due
+            .get_or_insert_with(|| Instant::now() + FRAME_INTERVAL);
+        Ok(Value::Number(f64::from(id)))
+    }
+
+    fn cancel_animation_frame(&mut self, arguments: &[Value]) -> Result<Value, String> {
+        let value = arguments.first().unwrap_or(&Value::Undefined);
+        if let Value::String(text) = value {
+            self.copies(text.len().saturating_mul(3))?;
+        }
+        let id = timer_integer(value)?;
+        self.animation_frames
+            .retain(|frame| id <= 0 || frame.id != id as u32);
+        if self.animation_frames.is_empty() {
+            self.animation_due = None;
+        }
+        Ok(Value::Undefined)
+    }
+
+    fn replace_bytes(&mut self, old: usize, new: usize) -> Result<(), String> {
+        self.copies(new)?;
+        let retained = self.retained.saturating_sub(old).saturating_add(new);
+        if retained > self.retained_limit {
+            return Err("DOM retained text/attribute growth limit reached (1 MiB).".into());
+        }
+        self.retained = retained;
+        Ok(())
+    }
+
+    fn log(&mut self, message: &str) {
+        let message = prefix(message, MAX_LOG_LINE);
+        if self.logs.len() >= MAX_LOG_LINES
+            || self.log_bytes.saturating_add(message.len() + 1) > MAX_LOG_BYTES
+        {
+            self.omitted = self.omitted.saturating_add(1);
+        } else {
+            self.log_bytes += message.len() + 1;
+            self.logs.push(message.to_owned());
+        }
+    }
+
+    fn error(&mut self, label: &str, error: &str) {
+        self.errors = self.errors.saturating_add(1);
+        self.log(&format!(
+            "{}: {}",
+            prefix(label, 512),
+            prefix(error, MAX_LOG_LINE - 520)
+        ));
+    }
+
+    fn rebuild(&mut self, doc: &Document) -> Result<(), String> {
+        if !self.dirty {
+            return Ok(());
+        }
+        self.work(doc.nodes.len())?;
+        let mut tree = Tree {
+            active: vec![false; doc.nodes.len()],
+            parents: vec![None; doc.nodes.len()],
+            ..Tree::default()
+        };
+        let mut stack = if doc.nodes.is_empty() {
+            Vec::new()
+        } else {
+            vec![(0, None)]
+        };
+        while let Some((node, parent)) = stack.pop() {
+            self.work(1)?;
+            if node >= doc.nodes.len() || tree.active[node] {
+                continue;
+            }
+            let tag = tag(doc, node);
+            if matches!(tag, "script" | "style" | "template" | "iframe" | "object")
+                || tag == "noscript" && doc.scripting_enabled
+            {
+                continue;
+            }
+            tree.active[node] = true;
+            tree.parents[node] = parent;
+            tree.order.push(node);
+            if tag == "body" && tree.body.is_none() {
+                tree.body = Some(node);
+            }
+            if tag == "head" && tree.head.is_none() {
+                tree.head = Some(node);
+            }
+            if parent == Some(0)
+                && tree.document_element.is_none()
+                && matches!(doc.nodes[node].kind, NodeKind::Element { .. })
+            {
+                tree.document_element = Some(node);
+            }
+            if let Some(id) = doc
+                .attr(node, "id")
+                .filter(|id| !id.is_empty() && id.len() <= MAX_STRING)
+            {
+                self.copies(id.len())?;
+                tree.ids.entry(id.to_owned()).or_insert(node);
+            }
+            stack.extend(
+                doc.nodes[node]
+                    .children
+                    .iter()
+                    .rev()
+                    .map(|&child| (child, Some(node))),
+            );
+        }
+        self.tree = tree;
+        self.dirty = false;
+        Ok(())
+    }
+
+    fn add_listener(
+        &mut self,
+        target: u32,
+        event: &str,
+        function: Value,
+        property: bool,
+        options: ListenerOptions,
+    ) -> Result<(), String> {
+        if property {
+            if let Some(old) = self
+                .listeners
+                .iter_mut()
+                .find(|l| l.target == target && l.event == event && l.property)
+            {
+                old.function = function;
+                return Ok(());
+            }
+        } else if self.listeners.iter().any(|l| {
+            l.target == target
+                && l.event == event
+                && !l.property
+                && l.options.capture == options.capture
+                && same_function(&l.function, &function)
+        }) {
+            return Ok(());
+        }
+        if self.listeners.len() >= MAX_LISTENERS {
+            return Err("Event listener limit reached (64 per document).".into());
+        }
+        self.next_listener = self
+            .next_listener
+            .checked_add(1)
+            .ok_or("Event listener identity limit reached.")?;
+        self.listeners.push(Listener {
+            serial: self.next_listener,
+            target,
+            event: event.into(),
+            function,
+            property,
+            options,
+        });
+        Ok(())
+    }
+}
+
+pub struct Page {
+    runtime: Runtime,
+    state: State,
+}
+
+impl Default for Page {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Page {
+    pub fn new() -> Self {
+        let mut runtime = Runtime::new();
+        for (name, handle) in [
+            ("window", WINDOW),
+            ("self", WINDOW),
+            ("globalThis", WINDOW),
+            ("document", DOCUMENT),
+            ("console", CONSOLE),
+            ("navigator", NAVIGATOR),
+            ("clientInformation", NAVIGATOR),
+            ("location", LOCATION),
+            ("performance", PERFORMANCE),
+        ] {
+            runtime
+                .define_global(name, Value::Host(handle))
+                .expect("fixed host global");
+        }
+        runtime
+            .bind_browser_global(WINDOW)
+            .expect("fixed browser global");
+        let mut state = State::new();
+        for name in [
+            "setTimeout",
+            "clearTimeout",
+            "requestAnimationFrame",
+            "cancelAnimationFrame",
+            "addEventListener",
+            "removeEventListener",
+        ] {
+            let function = runtime
+                .define_host_function(name, WINDOW, name)
+                .expect("fixed timer global");
+            state.native_functions.insert(name, function);
+        }
+        for (object, method) in [
+            (NAVIGATOR, "javaEnabled"),
+            (PLUGINS, "item"),
+            (PLUGINS, "namedItem"),
+            (PLUGINS, "refresh"),
+            (MIME_TYPES, "item"),
+            (MIME_TYPES, "namedItem"),
+            (DOCUMENT_IMAGES, "item"),
+            (DOCUMENT_IMAGES, "namedItem"),
+            (LOCATION, "toString"),
+            (PERFORMANCE, "now"),
+            (DOCUMENT, "getElementById"),
+            (DOCUMENT, "querySelector"),
+            (DOCUMENT, "addEventListener"),
+            (DOCUMENT, "removeEventListener"),
+        ] {
+            let function = runtime
+                .host_method(object, method)
+                .expect("fixed navigator method");
+            state.native_methods.push((object, method, function));
+        }
+        Self { runtime, state }
+    }
+
+    /// Only trusted App navigation updates this context. Failed and pending
+    /// navigations must keep the displayed document's existing location.
+    pub fn set_location(&mut self, location: &crate::navigation::Location) {
+        self.state.location = Some(LocationView::new(location));
+    }
+
+    pub fn set_geometry(&mut self, geometry: crate::script_geometry::Geometry) {
+        self.state.geometry = Some(geometry);
+    }
+
+    pub fn invalidate_geometry(&mut self) {
+        if let Some(geometry) = &mut self.state.geometry {
+            geometry.invalidate();
+        }
+    }
+
+    pub fn update_geometry(
+        &mut self,
+        width: i32,
+        height: i32,
+        zoom: f32,
+        images: HashMap<usize, (usize, usize)>,
+    ) {
+        if let Some(geometry) = &mut self.state.geometry {
+            geometry.update(width, height, zoom, images);
+        }
+    }
+
+    pub fn sync_geometry(
+        &mut self,
+        width: i32,
+        height: i32,
+        zoom: f32,
+        images: HashMap<usize, (usize, usize)>,
+        layout: &crate::layout::Layout,
+    ) {
+        if let Some(geometry) = &mut self.state.geometry {
+            geometry.sync(width, height, zoom, images, layout);
+        }
+    }
+
+    /// One user action may cause click, input/change and submit/reset. App calls
+    /// this once for that entire action, never once per listener or dispatch.
+    pub fn begin_job(&mut self) {
+        self.runtime.begin_job();
+        self.state.host_work = MAX_HOST_WORK;
+        self.state.copy_work = MAX_COPY_WORK;
+        self.state.timer_nesting = 0;
+        if let Some(geometry) = &mut self.state.geometry {
+            geometry.begin_job();
+        }
+    }
+
+    pub fn next_timer_deadline(&self) -> Option<Instant> {
+        if !self.state.enabled {
+            return None;
+        }
+        self.state
+            .timers
+            .iter()
+            .map(|timer| timer.due)
+            .chain(self.state.animation_due)
+            .min()
+    }
+
+    /// Executes one due timer task or one bounded animation-frame batch.
+    /// Work scheduled by callbacks waits until a later event-loop turn.
+    pub fn poll_timer(&mut self, doc: &mut Document, forms: &mut Forms) -> Option<Outcome> {
+        self.poll_timer_at(doc, forms, Instant::now())
+    }
+
+    fn poll_timer_at(
+        &mut self,
+        doc: &mut Document,
+        forms: &mut Forms,
+        now: Instant,
+    ) -> Option<Outcome> {
+        if !self.state.enabled || !doc.scripting_enabled {
+            return None;
+        }
+        let timer_due = self.state.timers.iter().map(|timer| timer.due).min();
+        if self
+            .state
+            .animation_due
+            .is_some_and(|due| due <= now && timer_due.is_none_or(|timer| due <= timer))
+        {
+            return Some(self.poll_animation_frames(doc, forms, now));
+        }
+        let (index, _) = self
+            .state
+            .timers
+            .iter()
+            .enumerate()
+            .filter(|(_, timer)| timer.due <= now)
+            .min_by_key(|(_, timer)| (timer.due, timer.id))?;
+        if self.state.timer_callbacks >= MAX_TIMER_CALLBACKS {
+            self.state.timers.clear();
+            self.state.timer_bytes = 0;
+            self.state.error(
+                "setTimeout",
+                "Timer callback limit reached (4096 per document). Reload starts a new allowance.",
+            );
+            return Some(Outcome {
+                errors: 1,
+                ..Outcome::default()
+            });
+        }
+        let timer = self.state.timers.remove(index);
+        self.state.timer_bytes -= timer.bytes;
+        self.begin_job();
+        self.state.timer_nesting = timer.nesting;
+        self.state.timer_callbacks += 1;
+        let before = self.state.errors;
+        if let Err(error) = self.runtime.invoke(
+            timer.callback,
+            &timer.arguments,
+            Value::Host(WINDOW),
+            &mut Bridge {
+                doc,
+                forms,
+                state: &mut self.state,
+            },
+        ) {
+            self.state
+                .error(&format!("setTimeout callback {}", timer.id), &error);
+        }
+        self.state.timer_nesting = 0;
+        Some(Outcome {
+            prevented: false,
+            layout_changed: std::mem::take(&mut self.state.changed),
+            errors: self.state.errors.saturating_sub(before),
+        })
+    }
+
+    pub fn stop_timers(&mut self, reason: &str) {
+        self.state.timers.clear();
+        self.state.animation_frames.clear();
+        self.state.animation_due = None;
+        self.state.timer_bytes = 0;
+        self.state.error("setTimeout", reason);
+    }
+
+    fn poll_animation_frames(
+        &mut self,
+        doc: &mut Document,
+        forms: &mut Forms,
+        now: Instant,
+    ) -> Outcome {
+        self.begin_job();
+        let before = self.state.errors;
+        let timestamp = self.state.clock_ms(now);
+        let handles: Vec<u32> = self
+            .state
+            .animation_frames
+            .iter()
+            .map(|frame| frame.id)
+            .collect();
+        // Snapshot handles, not callbacks: an earlier callback may cancel a
+        // later one. New requests always wait for a later frame. Every callback
+        // in this frame sees the same timestamp and shares one work budget.
+        self.state.animation_due = None;
+        for id in handles {
+            let Some(index) = self
+                .state
+                .animation_frames
+                .iter()
+                .position(|frame| frame.id == id)
+            else {
+                continue;
+            };
+            let frame = self.state.animation_frames.remove(index);
+            self.state.animation_callbacks = self.state.animation_callbacks.saturating_add(1);
+            if let Err(error) = self.runtime.invoke(
+                frame.callback,
+                &[Value::Number(timestamp)],
+                Value::Host(WINDOW),
+                &mut Bridge {
+                    doc,
+                    forms,
+                    state: &mut self.state,
+                },
+            ) {
+                self.state
+                    .error(&format!("requestAnimationFrame callback {id}"), &error);
+            }
+        }
+        if self.state.animation_frames.is_empty() {
+            self.state.animation_due = None;
+        } else {
+            self.state.animation_due = Some(now.max(Instant::now()) + FRAME_INTERVAL);
+        }
+        Outcome {
+            prevented: false,
+            layout_changed: std::mem::take(&mut self.state.changed),
+            errors: self.state.errors.saturating_sub(before),
+        }
+    }
+
+    /// Explicit browser-inspector command, evaluated in this document's real
+    /// realm. It has the same host capabilities, CSP eval permission and resource
+    /// limits as page code, and never invokes object conversion to print a value.
+    pub fn console_eval(&mut self, doc: &mut Document, forms: &mut Forms, source: &str) -> Outcome {
+        let before = self.state.errors;
+        self.begin_job();
+        self.state
+            .log(&format!("> {}", prefix(source, MAX_LOG_LINE - 4)));
+        let denied = if !self.state.enabled || !doc.scripting_enabled {
+            Some("Console execution requires JavaScript to be enabled for this document.")
+        } else if !self.state.eval_allowed {
+            Some("Console execution is blocked by this document's Content Security Policy (eval is not allowed).")
+        } else if source.len() > MAX_CONSOLE_SOURCE {
+            Some("Console commands are limited to 8 KiB.")
+        } else {
+            None
+        };
+        if let Some(error) = denied {
+            self.state.error("Inspector console", error);
+        } else {
+            match self.runtime.execute(
+                source,
+                &mut Bridge {
+                    doc,
+                    forms,
+                    state: &mut self.state,
+                },
+            ) {
+                Ok(value) => {
+                    let result = match &value {
+                        Value::String(text) => format!("{:?}", prefix(text, MAX_LOG_LINE / 2)),
+                        _ => value.to_text(),
+                    };
+                    self.state.log(&format!("=> {result}"));
+                }
+                Err(error) => self.state.error("Inspector console", &error),
+            }
+        }
+        Outcome {
+            prevented: false,
+            layout_changed: std::mem::take(&mut self.state.changed),
+            errors: self.state.errors.saturating_sub(before),
+        }
+    }
+
+    /// Clearing diagnostic text does not erase page errors or change its realm.
+    pub fn clear_console(&mut self) {
+        self.state.logs.clear();
+        self.state.log_bytes = 0;
+        self.state.omitted = 0;
+    }
+
+    #[cfg(test)]
+    pub fn start(&mut self, doc: &mut Document, forms: &mut Forms, sources: &[Script]) -> Outcome {
+        self.start_with_policy(doc, forms, sources, &crate::csp::PolicySet::default())
+    }
+
+    pub fn start_with_policy(
+        &mut self,
+        doc: &mut Document,
+        forms: &mut Forms,
+        sources: &[Script],
+        policy: &crate::csp::PolicySet,
+    ) -> Outcome {
+        self.start_document(doc, forms, sources, policy, false)
+    }
+
+    /// A network document becomes interactive while its images are loading.
+    /// Its realm and listeners survive subsequent resource updates.
+    pub fn start_before_load(
+        &mut self,
+        doc: &mut Document,
+        forms: &mut Forms,
+        sources: &[Script],
+        policy: &crate::csp::PolicySet,
+    ) -> Outcome {
+        self.start_document(doc, forms, sources, policy, true)
+    }
+
+    fn start_document(
+        &mut self,
+        doc: &mut Document,
+        forms: &mut Forms,
+        sources: &[Script],
+        policy: &crate::csp::PolicySet,
+        defer_load: bool,
+    ) -> Outcome {
+        let geometry = self.state.geometry.take();
+        let location = self.state.location.take();
+        *self = Self::new();
+        self.state.geometry = geometry;
+        self.state.location = location;
+        self.begin_job();
+        self.state.enabled = doc.scripting_enabled;
+        self.state.eval_allowed = policy.allows_eval().is_ok();
+        if !doc.scripting_enabled {
+            return Outcome::default();
+        }
+        self.state.ready = "interactive";
+        self.state.node_limit = doc.nodes.len().saturating_add(MAX_EXTRA_NODES);
+        if let Err(error) = self.state.work(doc.nodes.len()) {
+            self.state.error("JavaScript startup", &error);
+            return Outcome {
+                errors: 1,
+                ..Outcome::default()
+            };
+        }
+        self.state.retained = document_bytes(doc);
+        self.state.retained_limit = self.state.retained.saturating_add(MAX_EXTRA_BYTES);
+        if let Err(error) = self.state.rebuild(doc) {
+            self.state.error("JavaScript startup", &error);
+            return Outcome {
+                errors: 1,
+                ..Outcome::default()
+            };
+        }
+        // Compile each attribute as an ordinary function in this small global
+        // environment. Legacy implicit form/element name scope is unsupported.
+        let nodes = self.state.tree.order.clone();
+        'handlers: for node in nodes {
+            if let Err(error) = self.state.work(1) {
+                self.state.error("inline handler scan", &error);
+                break;
+            }
+            for name in [
+                "onclick",
+                "oninput",
+                "onchange",
+                "onsubmit",
+                "onreset",
+                "onload",
+                "onkeydown",
+                "onkeyup",
+            ] {
+                let Some(source) = doc.attr(node, name) else {
+                    continue;
+                };
+                let target = if name == "onload" && tag(doc, node) == "body" {
+                    WINDOW
+                } else {
+                    node_handle(node)
+                };
+                if name == "onload" && target != WINDOW {
+                    continue;
+                }
+                let label = format!("inline {name} on node {node}");
+                if source.len() > MAX_HANDLER_BYTES {
+                    self.state
+                        .error(&label, "Inline event handler exceeds 8 KiB.");
+                    continue;
+                }
+                if let Err(error) = policy.allows_attribute(source) {
+                    self.state.error(&label, &error);
+                    continue;
+                }
+                if self.state.listeners.len() >= MAX_LISTENERS {
+                    self.state
+                        .error(&label, "Event listener limit reached (64 per document).");
+                    break 'handlers;
+                }
+                let result = self.runtime.compile_handler(source);
+                match result {
+                    Ok(function @ Value::Function(_)) => {
+                        if let Err(error) = self.state.add_listener(
+                            target,
+                            &name[2..],
+                            function,
+                            true,
+                            ListenerOptions::default(),
+                        ) {
+                            self.state.error(&label, &error);
+                        }
+                    }
+                    Ok(_) => self
+                        .state
+                        .error(&label, "Handler did not compile to a function."),
+                    Err(error) => self.state.error(&label, &error),
+                }
+            }
+        }
+        for source in sources {
+            self.state.executed += 1;
+            if let Err(error) = self.runtime.execute(
+                &source.source,
+                &mut Bridge {
+                    doc,
+                    forms,
+                    state: &mut self.state,
+                },
+            ) {
+                self.state.error(
+                    &format!("{} (script node {})", source.label, source.node),
+                    &error,
+                );
+            }
+        }
+        self.dispatch_to(doc, forms, DOCUMENT, "DOMContentLoaded", false, true);
+        if !defer_load {
+            self.state.ready = "complete";
+            self.dispatch_to(doc, forms, WINDOW, "load", false, false);
+        }
+        let changed = std::mem::take(&mut self.state.changed);
+        Outcome {
+            prevented: false,
+            layout_changed: changed,
+            errors: self.state.errors,
+        }
+    }
+
+    /// The later resource-completion task fires load at most once. Stopping or
+    /// replacing a load does not call this method for the abandoned document.
+    pub fn finish_loading(&mut self, doc: &mut Document, forms: &mut Forms) -> Outcome {
+        if !self.state.enabled || !doc.scripting_enabled || self.state.ready != "interactive" {
+            return Outcome::default();
+        }
+        self.begin_job();
+        let before = self.state.errors;
+        self.state.ready = "complete";
+        self.dispatch_to(doc, forms, WINDOW, "load", false, false);
+        Outcome {
+            prevented: false,
+            layout_changed: std::mem::take(&mut self.state.changed),
+            errors: self.state.errors - before,
+        }
+    }
+
+    pub fn error_count(&self) -> usize {
+        self.state.errors
+    }
+
+    /// Called by App after beginning the native input job. No script can
+    /// manufacture this trusted input or observe browser/inspector editors.
+    pub fn keyboard(
+        &mut self,
+        doc: &mut Document,
+        forms: &mut Forms,
+        input: KeyboardInput,
+    ) -> Outcome {
+        if !self.state.enabled || !doc.scripting_enabled {
+            return Outcome::default();
+        }
+        let before = self.state.errors;
+        if input.key.len() > 64 || input.code.len() > 64 || input.location > 3 {
+            self.state.error(
+                "Keyboard input",
+                "Native keyboard input exceeds its bounds.",
+            );
+            return Outcome {
+                errors: 1,
+                ..Outcome::default()
+            };
+        }
+        if let Err(error) = self.state.rebuild(doc) {
+            self.state.error("Keyboard input", &error);
+            return Outcome {
+                errors: 1,
+                ..Outcome::default()
+            };
+        }
+        let node = input.target.or(self.state.tree.body);
+        let target = node.map_or(DOCUMENT, node_handle);
+        let event = if input.down { "keydown" } else { "keyup" };
+        self.state.pending_keyboard = Some(input);
+        let prevented = self.dispatch_to(doc, forms, target, event, true, true);
+        self.state.pending_keyboard = None;
+        Outcome {
+            prevented,
+            layout_changed: std::mem::take(&mut self.state.changed),
+            errors: self.state.errors.saturating_sub(before),
+        }
+    }
+
+    pub fn dispatch(
+        &mut self,
+        doc: &mut Document,
+        forms: &mut Forms,
+        target: usize,
+        event: &str,
+        cancelable: bool,
+    ) -> Outcome {
+        if !self.state.enabled || !doc.scripting_enabled {
+            return Outcome::default();
+        }
+        let before = self.state.errors;
+        // Direct activation is currently wired only for supported form controls
+        // and forms; ancestors can still observe these bubbling events.
+        let supported = match event {
+            "click" | "input" | "change" => forms
+                .controls
+                .get(&target)
+                .is_some_and(|c| !matches!(c.kind, Kind::Hidden | Kind::Unsupported)),
+            "submit" | "reset" => tag(doc, target) == "form",
+            _ => false,
+        };
+        if !supported {
+            return Outcome::default();
+        }
+        let prevented = self.dispatch_to(doc, forms, node_handle(target), event, cancelable, true);
+        Outcome {
+            prevented,
+            layout_changed: std::mem::take(&mut self.state.changed),
+            errors: self.state.errors.saturating_sub(before),
+        }
+    }
+
+    fn dispatch_to(
+        &mut self,
+        doc: &mut Document,
+        forms: &mut Forms,
+        target: u32,
+        event: &str,
+        cancelable: bool,
+        bubbles: bool,
+    ) -> bool {
+        let result = self.event_path(doc, target);
+        let path = match result {
+            Ok(path) => path,
+            Err(error) => {
+                self.state.error(event, &error);
+                return false;
+            }
+        };
+        let Some(next) = self.state.next_event.checked_add(1) else {
+            self.state.error(event, "Event identity limit reached.");
+            return false;
+        };
+        let handle = self.state.next_event;
+        self.state.next_event = next;
+        self.state.event = Some(Event {
+            handle,
+            // HTML's Window load event uses the legacy target override:
+            // target is Document while currentTarget and callback this are Window.
+            target: if target == WINDOW && event == "load" {
+                DOCUMENT
+            } else {
+                target
+            },
+            current: target,
+            name: event.into(),
+            cancelable,
+            bubbles,
+            prevented: false,
+            stopped: false,
+            immediate: false,
+            phase: 0,
+            passive: false,
+            keyboard: self.state.pending_keyboard.take(),
+            timestamp: self.state.clock_ms(Instant::now()),
+        });
+        let mut visits: Vec<_> = path
+            .iter()
+            .skip(1)
+            .rev()
+            .map(|&node| (node, true, 1))
+            .collect();
+        visits.extend([(target, true, 2), (target, false, 2)]);
+        if bubbles {
+            visits.extend(path.iter().skip(1).map(|&node| (node, false, 3)));
+        }
+        for (current, capture, phase) in visits {
+            if self
+                .state
+                .event
+                .as_ref()
+                .is_some_and(|e| e.immediate || e.stopped)
+            {
+                break;
+            }
+            if let Some(active) = &mut self.state.event {
+                active.current = current;
+                active.phase = phase;
+            }
+            // DOM snapshots each current target/phase separately. A removed
+            // listener stays removed, and a listener added during this phase
+            // waits for a subsequent phase or dispatch.
+            let snapshot: Vec<_> = self
+                .state
+                .listeners
+                .iter()
+                .filter(|l| l.event == event && l.target == current && l.options.capture == capture)
+                .map(|l| l.serial)
+                .collect();
+            for serial in &snapshot {
+                let Some(listener) = self
+                    .state
+                    .listeners
+                    .iter()
+                    .find(|l| l.serial == *serial && l.target == current)
+                    .cloned()
+                else {
+                    continue;
+                };
+                if listener.options.once {
+                    self.state.listeners.retain(|l| l.serial != *serial);
+                }
+                if let Some(active) = &mut self.state.event {
+                    active.passive = listener.options.passive;
+                }
+                let result = self.runtime.invoke(
+                    listener.function,
+                    &[Value::Host(handle)],
+                    Value::Host(current),
+                    &mut Bridge {
+                        doc,
+                        forms,
+                        state: &mut self.state,
+                    },
+                );
+                match result {
+                    Ok(Value::Bool(false)) if listener.property && cancelable => {
+                        if let Some(active) = &mut self.state.event {
+                            active.prevented = true;
+                        }
+                    }
+                    Err(error) => self.state.error(&format!("{event} listener"), &error),
+                    _ => {}
+                }
+                if let Some(active) = &mut self.state.event {
+                    active.passive = false;
+                }
+                if self.state.event.as_ref().is_some_and(|e| e.immediate) {
+                    break;
+                }
+            }
+        }
+        // Handles expire instead of being reused: retained JS event references
+        // can never mutate a later event's cancellation state.
+        self.state.event.take().is_some_and(|event| event.prevented)
+    }
+
+    fn event_path(&mut self, doc: &Document, target: u32) -> Result<Vec<u32>, String> {
+        self.state.work(1)?;
+        self.state.rebuild(doc)?;
+        if target == WINDOW {
+            return Ok(vec![WINDOW]);
+        }
+        if target == DOCUMENT {
+            return Ok(vec![DOCUMENT, WINDOW]);
+        }
+        let node = node_index(target).ok_or("Unknown event target.")?;
+        if !self.state.tree.active.get(node).copied().unwrap_or(false) {
+            return Err("Event target is no longer connected.".into());
+        }
+        let mut path = vec![target];
+        {
+            let mut parent = self.state.tree.parents[node];
+            while let Some(node) = parent {
+                self.state.work(1)?;
+                if node != 0 {
+                    path.push(node_handle(node));
+                }
+                parent = self.state.tree.parents[node];
+            }
+            path.extend([DOCUMENT, WINDOW]);
+        }
+        Ok(path)
+    }
+
+    pub fn report(&self) -> String {
+        if !self.state.enabled {
+            return "JavaScript did not run for this document (disabled or blocked by document policy).\n".into();
+        }
+        let mut text = format!("ChezCat JavaScript subset\n{} script(s), {} active listener(s), {} error(s).\n{} pending timer(s), {} timer callback(s) executed.\nClassic scripts run after parsing. Events come from supported controls/forms.\nFunction timers use the document queue. Bounded eval follows the document CSP.\nLocation and document URL inspection are read-only and reflect the displayed document.\nHTML injection, script navigation, storage and network APIs are not implemented.\n\n", self.state.executed, self.state.listeners.len(), self.state.errors, self.state.timers.len(), self.state.timer_callbacks);
+        for line in &self.state.logs {
+            text.push_str(line);
+            text.push('\n');
+        }
+        text.push_str(&format!("Animation frames: {} pending callback(s), {} executed. Whole-millisecond monotonic timestamps; 16 ms minimum frame interval.\n", self.state.animation_frames.len(), self.state.animation_callbacks));
+        if self.state.omitted > 0 {
+            text.push_str(&format!(
+                "{} further log entries omitted by the report limit.\n",
+                self.state.omitted
+            ));
+        }
+        text
+    }
+}
+
+struct Bridge<'a> {
+    doc: &'a mut Document,
+    forms: &'a mut Forms,
+    state: &'a mut State,
+}
+
+// Web IDL long conversion used by timer delays/identifiers. Object coercion is
+// deliberately outside this bridge; primitive conversion matches the runtime.
+fn timer_integer(value: &Value) -> Result<i32, String> {
+    if matches!(
+        value,
+        Value::Function(_) | Value::Object(_) | Value::Host(_)
+    ) {
+        return Err("Timer delay/identifier requires a primitive value; object coercion is not implemented.".into());
+    }
+    let number = value.to_number();
+    if !number.is_finite() || number == 0.0 {
+        return Ok(0);
+    }
+    Ok(number.trunc().rem_euclid(4_294_967_296.0) as u32 as i32)
+}
+
+fn navigator_platform() -> String {
+    if cfg!(target_os = "windows") {
+        "Win32".into()
+    } else if cfg!(target_os = "macos") {
+        "MacIntel".into()
+    } else if cfg!(target_os = "linux") {
+        format!("Linux {}", std::env::consts::ARCH)
+    } else {
+        format!("{} {}", std::env::consts::OS, std::env::consts::ARCH)
+    }
+}
+
+impl Bridge<'_> {
+    // A stable live HTMLCollection, limited to this realm's connected DOM.
+    // https://dom.spec.whatwg.org/#interface-htmlcollection
+    fn image_at(&mut self, index: usize) -> Result<Option<usize>, String> {
+        self.state.rebuild(self.doc)?;
+        let mut found = 0usize;
+        for position in 0..self.state.tree.order.len() {
+            let node = self.state.tree.order[position];
+            self.state.work(1)?;
+            if tag(self.doc, node) == "img" {
+                if found == index {
+                    return Ok(Some(node));
+                }
+                found += 1;
+            }
+        }
+        Ok(None)
+    }
+
+    fn image_named(&mut self, name: &str) -> Result<Option<usize>, String> {
+        if name.is_empty() {
+            return Ok(None);
+        }
+        if name.len() > MAX_STRING {
+            return Err("Image collection name exceeds 32 KiB.".into());
+        }
+        self.state.copies(name.len())?;
+        self.state.rebuild(self.doc)?;
+        for position in 0..self.state.tree.order.len() {
+            let node = self.state.tree.order[position];
+            self.state.work(1)?;
+            if tag(self.doc, node) == "img" {
+                for attribute in ["id", "name"] {
+                    let value = self.doc.attr(node, attribute);
+                    self.state.copies(value.map_or(0, str::len))?;
+                    if value == Some(name) {
+                        return Ok(Some(node));
+                    }
+                }
+            }
+        }
+        Ok(None)
+    }
+
+    fn image_collection_get(&mut self, property: &str) -> Result<Value, String> {
+        self.state.rebuild(self.doc)?;
+        if property == "length" {
+            self.state.work(self.state.tree.order.len())?;
+            let length = self
+                .state
+                .tree
+                .order
+                .iter()
+                .filter(|&&node| tag(self.doc, node) == "img")
+                .count();
+            return Ok(Value::Number(length as f64));
+        }
+        let node = if let Some(index) = collection_index(property) {
+            self.image_at(index)?
+        } else {
+            self.image_named(property)?
+        };
+        Ok(node.map_or(Value::Undefined, |node| Value::Host(node_handle(node))))
+    }
+
+    fn element_parent(&mut self, node: usize, document: bool) -> Result<Value, String> {
+        self.state.rebuild(self.doc)?;
+        Ok(match self.state.tree.parents[node] {
+            Some(0) if document => Value::Host(DOCUMENT),
+            Some(parent) if parent != 0 => Value::Host(node_handle(parent)),
+            _ => Value::Null,
+        })
+    }
+
+    fn query_selector(&mut self, object: u32, source: &str) -> Result<Value, String> {
+        self.state.rebuild(self.doc)?;
+        let root = if object == DOCUMENT {
+            0
+        } else {
+            self.node(object)?
+        };
+        let mut candidates = Vec::new();
+        let mut stack = self.doc.nodes[root]
+            .children
+            .iter()
+            .rev()
+            .copied()
+            .collect::<Vec<_>>();
+        while let Some(node) = stack.pop() {
+            self.state.work(1)?;
+            if !self.state.tree.active.get(node).copied().unwrap_or(false) {
+                continue;
+            }
+            if matches!(self.doc.nodes[node].kind, NodeKind::Element { .. }) {
+                candidates.push(node);
+            }
+            stack.extend(self.doc.nodes[node].children.iter().rev().copied());
+        }
+        let checked = |node| {
+            self.forms
+                .controls
+                .get(&node)
+                .filter(|control| matches!(control.kind, Kind::Checkbox | Kind::Radio))
+                .map(|control| control.checked)
+        };
+        let found = crate::css::query_first(
+            self.doc,
+            source,
+            &candidates,
+            Some(&checked),
+            &mut self.state.host_work,
+        )?;
+        Ok(found.map_or(Value::Null, |node| Value::Host(node_handle(node))))
+    }
+
+    fn node(&mut self, handle: u32) -> Result<usize, String> {
+        self.state.rebuild(self.doc)?;
+        let node = node_index(handle).ok_or("This is not an element handle.")?;
+        if !self.state.tree.active.get(node).copied().unwrap_or(false)
+            || !matches!(self.doc.nodes[node].kind, NodeKind::Element { .. })
+            || node == 0
+        {
+            return Err("Element is disconnected, inert, or unavailable in this subset.".into());
+        }
+        Ok(node)
+    }
+
+    fn text(&mut self, value: &Value) -> Result<String, String> {
+        if matches!(
+            value,
+            Value::Function(_) | Value::Host(_) | Value::Object(_)
+        ) {
+            return Err("DOM values must be primitive strings, numbers, booleans or null.".into());
+        }
+        let text = value.to_text();
+        if text.len() > MAX_STRING {
+            return Err("DOM string limit reached (32 KiB).".into());
+        }
+        self.state.copies(text.len())?;
+        Ok(text)
+    }
+
+    fn string(&mut self, text: &str) -> Result<Value, String> {
+        if text.len() > MAX_STRING {
+            return Err("DOM result exceeds 32 KiB.".into());
+        }
+        self.state.copies(text.len())?;
+        Ok(Value::String(text.into()))
+    }
+
+    fn location_handle(&self) -> Result<Value, String> {
+        if self.state.location.is_some() {
+            Ok(Value::Host(LOCATION))
+        } else {
+            Err("The document Location is unavailable without a committed URL context.".into())
+        }
+    }
+
+    fn location_property(&mut self, property: &str) -> Result<Value, String> {
+        let location = self
+            .state
+            .location
+            .as_ref()
+            .ok_or("The document Location is unavailable without a committed URL context.")?;
+        let value = location.property(property).ok_or_else(|| {
+            format!("Location property {property:?} is not supported; URL inspection is read-only.")
+        })?;
+        if value.len() > MAX_STRING {
+            return Err("Location result exceeds 32 KiB.".into());
+        }
+        let size = value.len();
+        self.state.copies(size)?;
+        // Reborrow after charging the job's copy budget, before allocating.
+        Ok(Value::String(
+            self.state
+                .location
+                .as_ref()
+                .unwrap()
+                .property(property)
+                .unwrap()
+                .to_owned(),
+        ))
+    }
+
+    fn attribute(&mut self, node: usize, name: &str, value: Option<String>) -> Result<(), String> {
+        if name == "id" && self.doc.attr(node, "id") != value.as_deref() {
+            self.state.work(self.forms.controls.len())?;
+            self.state.copies(
+                self.forms
+                    .controls
+                    .keys()
+                    .map(|&control| self.doc.attr(control, "form").map_or(0, str::len))
+                    .sum(),
+            )?;
+            let old = self.doc.attr(node, "id");
+            if self.forms.controls.keys().any(|&control| {
+                self.doc.attr(control, "form").is_some_and(|owner| {
+                    !owner.is_empty() && (Some(owner) == old || Some(owner) == value.as_deref())
+                })
+            }) {
+                return Err(
+                    "Changing an id used by an explicit form association is not implemented."
+                        .into(),
+                );
+            }
+        }
+        if name == "disabled" {
+            self.charge_disabled_refresh(node, value.is_some())?;
+        }
+        let old = self.doc.attr(node, name).map_or(0, str::len);
+        let new = value.as_ref().map_or(0, String::len);
+        self.state.replace_bytes(
+            old * if name == "id" { 2 } else { 1 },
+            new * if name == "id" { 2 } else { 1 },
+        )?;
+        let NodeKind::Element { attrs, id, .. } = &mut self.doc.nodes[node].kind else {
+            return Err("Not an element.".into());
+        };
+        if name == "id" {
+            *id = value.clone();
+            self.state.dirty = true;
+        }
+        if let Some(index) = attrs.iter().position(|(key, _)| key == name) {
+            if let Some(value) = value {
+                attrs[index].1 = value;
+            } else {
+                attrs.remove(index);
+            }
+        } else if let Some(value) = value {
+            attrs.push((name.into(), value));
+        }
+        if name == "disabled" {
+            self.forms.refresh_disabled(self.doc);
+        }
+        self.state.layout_changed();
+        Ok(())
+    }
+
+    fn charge_disabled_refresh(&mut self, changed: usize, present: bool) -> Result<(), String> {
+        // Forms rebuilds parent links and checks fieldset/first-legend ancestry.
+        // Account for those traversals before changing the attribute. The small
+        // estimation walk is charged too, including possible legend searches.
+        self.state.work(
+            self.doc
+                .nodes
+                .len()
+                .saturating_mul(2)
+                .saturating_add(self.forms.controls.len()),
+        )?;
+        self.state.work(
+            self.forms
+                .controls
+                .values()
+                .filter_map(|control| control.select.as_ref())
+                .map(|select| select.options.len().saturating_mul(3))
+                .sum(),
+        )?;
+        for &control in self.forms.controls.keys() {
+            let mut depth = 1usize;
+            let mut parent = self.state.tree.parents[control];
+            while let Some(node) = parent {
+                self.state.work(2)?;
+                let disabled = if node == changed {
+                    present
+                } else {
+                    self.doc.attr(node, "disabled").is_some()
+                };
+                if tag(self.doc, node) == "fieldset" && disabled {
+                    self.state
+                        .work(self.doc.nodes[node].children.len().saturating_add(depth))?;
+                }
+                parent = self.state.tree.parents[node];
+                depth += 1;
+            }
+        }
+        Ok(())
+    }
+
+    fn text_content(&mut self, node: usize) -> Result<String, String> {
+        self.state.rebuild(self.doc)?;
+        let mut result = String::new();
+        let mut stack = vec![node];
+        while let Some(node) = stack.pop() {
+            self.state.work(1)?;
+            if !self.state.tree.active[node] {
+                continue;
+            }
+            if let NodeKind::Text(text) = &self.doc.nodes[node].kind {
+                if result.len().saturating_add(text.len()) > MAX_STRING {
+                    return Err("textContent result exceeds 32 KiB.".into());
+                }
+                self.state.copies(text.len())?;
+                result.push_str(text);
+            }
+            stack.extend(self.doc.nodes[node].children.iter().rev().copied());
+        }
+        Ok(result)
+    }
+
+    fn set_text_content(&mut self, node: usize, text: String) -> Result<(), String> {
+        if !text_container(tag(self.doc, node)) {
+            return Err(
+                "textContent replacement is limited to plain text containers and buttons.".into(),
+            );
+        }
+        // Complete validation before touching any node. Control models and
+        // already-loaded script/style/image resources must never become stale.
+        let mut descendants = Vec::new();
+        let mut stack = self.doc.nodes[node].children.clone();
+        let mut old_bytes = 0usize;
+        while let Some(child) = stack.pop() {
+            self.state.work(1)?;
+            if let NodeKind::Element { tag, .. } = &self.doc.nodes[child].kind {
+                if !text_container(tag) || tag == "button" {
+                    return Err("textContent cannot remove controls, resources, scripts or structural elements.".into());
+                }
+            }
+            old_bytes = old_bytes.saturating_add(node_bytes(&self.doc.nodes[child]));
+            descendants.push(child);
+            stack.extend(self.doc.nodes[child].children.iter().copied());
+        }
+        let reuse = if let [child] = self.doc.nodes[node].children.as_slice() {
+            matches!(self.doc.nodes[*child].kind, NodeKind::Text(_)).then_some(*child)
+        } else {
+            None
+        };
+        if reuse.is_none() && !text.is_empty() && self.doc.nodes.len() >= self.state.node_limit {
+            return Err("DOM appended-node limit reached (256 per document).".into());
+        }
+        let mut captions = Vec::new();
+        let mut current = Some(node);
+        while let Some(index) = current {
+            self.state.work(1)?;
+            if tag(self.doc, index) == "button" {
+                self.state.work(self.doc.nodes.len())?;
+                captions.push(index);
+            }
+            current = self.state.tree.parents.get(index).copied().flatten();
+        }
+        self.state.replace_bytes(old_bytes, text.len())?;
+        if let Some(child) = reuse {
+            self.doc.nodes[child].kind = NodeKind::Text(text);
+        } else {
+            for child in descendants {
+                self.doc.nodes[child].children.clear();
+                self.doc.nodes[child].kind = NodeKind::Text(String::new());
+            }
+            self.doc.nodes[node].children.clear();
+            if !text.is_empty() {
+                let child = self.doc.nodes.len();
+                self.doc.nodes.push(Node {
+                    kind: NodeKind::Text(text),
+                    children: Vec::new(),
+                });
+                self.doc.nodes[node].children.push(child);
+            }
+        }
+        // Updating a span inside a button must update the native caption too.
+        for index in captions {
+            if let Some(control) = self.forms.controls.get_mut(&index) {
+                control.caption = forms::caption(self.doc, index, control.kind);
+            }
+        }
+        self.state.dirty |= reuse.is_none();
+        self.state.layout_changed();
+        Ok(())
+    }
+
+    fn listener_target(&mut self, handle: u32, event: &str) -> Result<(), String> {
+        let allowed = matches!(
+            event,
+            "click" | "input" | "change" | "submit" | "reset" | "keydown" | "keyup"
+        ) || event == "DOMContentLoaded" && matches!(handle, DOCUMENT | WINDOW)
+            || event == "load" && handle == WINDOW;
+        if !allowed {
+            return Err(format!("Event {event:?} is not supported on this target."));
+        }
+        if !matches!(handle, DOCUMENT | WINDOW) {
+            self.node(handle)?;
+        }
+        Ok(())
+    }
+
+    fn handler(&mut self, object: u32, property: &str) -> Result<Option<Value>, String> {
+        let Some(event) = handler_event(property) else {
+            return Ok(None);
+        };
+        let object = self.handler_target(object, event);
+        self.listener_target(object, event)?;
+        Ok(Some(
+            self.state
+                .listeners
+                .iter()
+                .find(|l| l.target == object && l.event == event && l.property)
+                .map_or(Value::Null, |l| l.function.clone()),
+        ))
+    }
+
+    fn set_handler(&mut self, object: u32, property: &str, value: Value) -> Result<bool, String> {
+        let Some(event) = handler_event(property) else {
+            return Ok(false);
+        };
+        let object = self.handler_target(object, event);
+        self.listener_target(object, event)?;
+        match value {
+            Value::Function(_) => {
+                self.state
+                    .add_listener(object, event, value, true, ListenerOptions::default())?
+            }
+            Value::Null | Value::Undefined => self
+                .state
+                .listeners
+                .retain(|l| !(l.target == object && l.event == event && l.property)),
+            _ => return Err("Event handler properties accept a function or null.".into()),
+        }
+        Ok(true)
+    }
+
+    fn handler_target(&self, object: u32, event: &str) -> u32 {
+        if event == "load" && node_index(object).is_some_and(|node| tag(self.doc, node) == "body") {
+            WINDOW
+        } else {
+            object
+        }
+    }
+
+    fn event_listener(
+        &mut self,
+        object: u32,
+        method: &str,
+        args: &[Value],
+        fields: Option<&[(&str, Value)]>,
+    ) -> Result<Value, String> {
+        if args.len() < 2 {
+            return Err("Event listeners need an event name and callback.".into());
+        }
+        let mut options = ListenerOptions::default();
+        if let Some(fields) = fields {
+            for (name, value) in fields {
+                match *name {
+                    "capture" => options.capture = value.truthy(),
+                    "once" => options.once = value.truthy(),
+                    "passive" => options.passive = value.truthy(),
+                    "signal" if !matches!(value, Value::Null | Value::Undefined) => {
+                        return Err("AbortSignal listener options are not implemented.".into())
+                    }
+                    _ => {}
+                }
+            }
+        } else if let Some(value) = args.get(2) {
+            if matches!(
+                value,
+                Value::Object(_) | Value::Host(_) | Value::Function(_)
+            ) {
+                return Err("Listener options require the runtime dictionary conversion.".into());
+            }
+            options.capture = value.truthy();
+        }
+        let event = self.text(&args[0])?;
+        self.listener_target(object, &event)?;
+        if matches!(args[1], Value::Null | Value::Undefined) {
+            return Ok(Value::Undefined);
+        }
+        if !matches!(args[1], Value::Function(_)) {
+            return Err(
+                "Event listener objects with handleEvent are not implemented; use a function."
+                    .into(),
+            );
+        }
+        if method == "addEventListener" {
+            self.state
+                .add_listener(object, &event, args[1].clone(), false, options)?;
+        } else {
+            self.state.listeners.retain(|l| {
+                !(l.target == object
+                    && l.event == event
+                    && !l.property
+                    && l.options.capture == options.capture
+                    && same_function(&l.function, &args[1]))
+            });
+        }
+        Ok(Value::Undefined)
+    }
+
+    fn style_node(&mut self, handle: u32) -> Result<usize, String> {
+        if !(STYLE_BASE..EVENT_BASE).contains(&handle) {
+            return Err("Unknown style handle.".into());
+        }
+        self.node(node_handle((handle - STYLE_BASE) as usize))
+    }
+
+    fn get_style(&mut self, node: usize, name: &str) -> Result<Value, String> {
+        let style = self.doc.attr(node, "style").unwrap_or("");
+        if style.len() > MAX_STRING {
+            return Err("Inline style exceeds 32 KiB.".into());
+        }
+        self.state.copies(style.len())?;
+        let value = style
+            .split(';')
+            .filter_map(|item| item.split_once(':'))
+            .filter(|(key, _)| key.trim().eq_ignore_ascii_case(name))
+            .map(|(_, value)| value.trim().split('!').next().unwrap_or("").trim())
+            .next_back()
+            .unwrap_or("")
+            .to_owned();
+        self.string(&value)
+    }
+
+    fn set_style(
+        &mut self,
+        node: usize,
+        name: &str,
+        value: &str,
+        priority: &str,
+    ) -> Result<(), String> {
+        validate_css_value(value, matches!(name, "font" | "font-family"))?;
+        if !priority.is_empty() && !priority.eq_ignore_ascii_case("important") {
+            return Err("CSS priority must be empty or important.".into());
+        }
+        let existing = self.doc.attr(node, "style").unwrap_or("");
+        if existing.len() > MAX_STRING {
+            return Err("Inline style exceeds 32 KiB.".into());
+        }
+        self.state.copies(existing.len())?;
+        let mut style = String::new();
+        for item in existing.split(';').filter(|item| !item.trim().is_empty()) {
+            if item
+                .split_once(':')
+                .is_some_and(|(key, _)| key.trim().eq_ignore_ascii_case(name))
+            {
+                continue;
+            }
+            style.push_str(item.trim());
+            style.push(';');
+        }
+        if !value.trim().is_empty() {
+            style.push_str(name);
+            style.push(':');
+            style.push_str(value.trim());
+            if !priority.is_empty() {
+                style.push_str(" !important");
+            }
+            style.push(';');
+        }
+        if style.len() > MAX_STRING {
+            return Err("Inline style exceeds 32 KiB.".into());
+        }
+        self.attribute(node, "style", Some(style))
+    }
+}
+
+impl Host for Bridge<'_> {
+    fn dictionary_argument(
+        &self,
+        _object: u32,
+        method: &str,
+    ) -> Option<(usize, &'static [&'static str])> {
+        match method {
+            "addEventListener" => Some((2, &["capture", "once", "passive", "signal"])),
+            "removeEventListener" => Some((2, &["capture"])),
+            _ => None,
+        }
+    }
+
+    fn call_with_dictionary(
+        &mut self,
+        object: u32,
+        method: &str,
+        args: &[Value],
+        fields: Option<&[(&str, Value)]>,
+    ) -> Result<Value, String> {
+        if matches!(method, "addEventListener" | "removeEventListener") {
+            self.state.work(1)?;
+            self.event_listener(object, method, args, fields)
+        } else {
+            self.call(object, method, args)
+        }
+    }
+
+    fn random(&mut self) -> Result<f64, String> {
+        self.state.work(1)?;
+        let mut bytes = [0u8; 8];
+        crate::random::fill(&mut bytes)?;
+        Ok((u64::from_le_bytes(bytes) >> 11) as f64 / 9_007_199_254_740_992.0)
+    }
+    fn allow_eval(&mut self) -> Result<bool, String> {
+        self.state.work(1)?;
+        if !self.state.enabled {
+            return Err("String compilation is unavailable while scripting is disabled.".into());
+        }
+        Ok(self.state.eval_allowed)
+    }
+
+    fn owns_global_property(&self, property: &str) -> bool {
+        matches!(
+            property,
+            "window"
+                | "self"
+                | "globalThis"
+                | "document"
+                | "console"
+                | "navigator"
+                | "clientInformation"
+                | "location"
+                | "addEventListener"
+                | "removeEventListener"
+                | "setTimeout"
+                | "clearTimeout"
+                | "requestAnimationFrame"
+                | "cancelAnimationFrame"
+                | "performance"
+        ) || handler_event(property).is_some()
+    }
+
+    fn has(&mut self, object: u32, property: &str) -> Result<bool, String> {
+        self.state.work(1)?;
+        if object == PERFORMANCE {
+            return Ok(property == "now");
+        }
+        if object == LOCATION {
+            return Ok(self.state.location.as_ref().is_some_and(|location| {
+                property == "toString" || location.property(property).is_some()
+            }));
+        }
+        if object == NAVIGATOR {
+            return Ok(matches!(
+                property,
+                "userAgent"
+                    | "appVersion"
+                    | "appCodeName"
+                    | "appName"
+                    | "product"
+                    | "vendor"
+                    | "platform"
+                    | "language"
+                    | "cookieEnabled"
+                    | "webdriver"
+                    | "pdfViewerEnabled"
+                    | "javaEnabled"
+                    | "plugins"
+                    | "mimeTypes"
+            ));
+        }
+        if matches!(object, PLUGINS | MIME_TYPES) {
+            return Ok(matches!(property, "length" | "item" | "namedItem")
+                || object == PLUGINS && property == "refresh");
+        }
+        if object == DOCUMENT_IMAGES {
+            return if matches!(property, "length" | "item" | "namedItem") {
+                Ok(true)
+            } else {
+                self.image_collection_get(property)
+                    .map(|value| !matches!(value, Value::Undefined))
+            };
+        }
+        if object >= EVENT_BASE {
+            if !self
+                .state
+                .event
+                .as_ref()
+                .is_some_and(|event| event.handle == object)
+            {
+                return Err("Event handle has expired.".into());
+            }
+            let keyboard = self.state.event.as_ref().unwrap().keyboard.is_some();
+            return Ok(keyboard && keyboard_property(property)
+                || matches!(
+                    property,
+                    "type"
+                        | "target"
+                        | "currentTarget"
+                        | "cancelable"
+                        | "bubbles"
+                        | "eventPhase"
+                        | "defaultPrevented"
+                        | "preventDefault"
+                        | "stopPropagation"
+                        | "stopImmediatePropagation"
+                        | "timeStamp"
+                        | "isTrusted"
+                ));
+        }
+        if object >= STYLE_BASE {
+            self.style_node(object)?;
+            return Ok(matches!(
+                property,
+                "setProperty" | "getPropertyValue" | "removeProperty"
+            ) || css_name(property).is_ok());
+        }
+        if object == CONSOLE {
+            return Ok(matches!(property, "log" | "info" | "warn" | "error"));
+        }
+        if let Some(event) = handler_event(property) {
+            return if event == "load" {
+                Ok(self.handler_target(object, event) == WINDOW)
+            } else {
+                self.listener_target(object, event)?;
+                Ok(true)
+            };
+        }
+        if object == WINDOW {
+            if property == "location" {
+                return Ok(self.state.location.is_some());
+            }
+            // Reserved but unavailable APIs remain absent.
+            // The interpreter answers ordinary globals and expandos separately.
+            return Ok(matches!(
+                property,
+                "window"
+                    | "self"
+                    | "globalThis"
+                    | "document"
+                    | "console"
+                    | "navigator"
+                    | "clientInformation"
+                    | "addEventListener"
+                    | "removeEventListener"
+                    | "setTimeout"
+                    | "clearTimeout"
+                    | "requestAnimationFrame"
+                    | "cancelAnimationFrame"
+                    | "performance"
+            ));
+        }
+        if object == DOCUMENT {
+            if matches!(property, "location" | "URL" | "documentURI") {
+                return Ok(self.state.location.is_some());
+            }
+            return Ok(matches!(
+                property,
+                "title"
+                    | "contentType"
+                    | "body"
+                    | "head"
+                    | "images"
+                    | "parentElement"
+                    | "parentNode"
+                    | "ownerDocument"
+                    | "documentElement"
+                    | "readyState"
+                    | "referrer"
+                    | "compatMode"
+                    | "prerendering"
+                    | "getElementById"
+                    | "querySelector"
+                    | "addEventListener"
+                    | "removeEventListener"
+            ));
+        }
+        let node = self.node(object)?;
+        Ok(match property {
+            "value" => self.forms.controls.contains_key(&node),
+            "selectedIndex" => self
+                .forms
+                .controls
+                .get(&node)
+                .is_some_and(|control| control.kind == Kind::Select),
+            "checked" => self
+                .forms
+                .controls
+                .get(&node)
+                .is_some_and(|control| matches!(control.kind, Kind::Checkbox | Kind::Radio)),
+            _ => matches!(
+                property,
+                "tagName"
+                    | "nodeName"
+                    | "nodeType"
+                    | "parentElement"
+                    | "parentNode"
+                    | "ownerDocument"
+                    | "clientWidth"
+                    | "clientHeight"
+                    | "clientLeft"
+                    | "clientTop"
+                    | "textContent"
+                    | "style"
+                    | "id"
+                    | "className"
+                    | "title"
+                    | "hidden"
+                    | "disabled"
+                    | "querySelector"
+                    | "getAttribute"
+                    | "hasAttribute"
+                    | "setAttribute"
+                    | "removeAttribute"
+                    | "addEventListener"
+                    | "removeEventListener"
+            ),
+        })
+    }
+
+    fn get(&mut self, object: u32, property: &str) -> Result<Value, String> {
+        self.state.work(1)?;
+        if let Some((_, _, function)) = self
+            .state
+            .native_methods
+            .iter()
+            .find(|(target, method, _)| *target == object && *method == property)
+        {
+            return Ok(function.clone());
+        }
+        if object == PERFORMANCE {
+            return Ok(Value::Undefined);
+        }
+        if object == NAVIGATOR {
+            return Ok(match property {
+                "userAgent" => Value::String(crate::http::USER_AGENT.into()),
+                "appVersion" => Value::String(
+                    crate::http::USER_AGENT
+                        .split_once('/')
+                        .map_or("", |(_, version)| version)
+                        .into(),
+                ),
+                // These three strings are HTML's legacy compatibility constants,
+                // not claims that the browser embeds Mozilla or Gecko code.
+                "appCodeName" => Value::String("Mozilla".into()),
+                "appName" => Value::String("Netscape".into()),
+                "product" => Value::String("Gecko".into()),
+                "vendor" => Value::String(String::new()),
+                "platform" => Value::String(navigator_platform()),
+                // The browser UI currently has one fixed English language.
+                // No system locale, installed fonts or hardware are consulted.
+                "language" => Value::String("en".into()),
+                "cookieEnabled" | "webdriver" | "pdfViewerEnabled" => Value::Bool(false),
+                "plugins" => Value::Host(PLUGINS),
+                "mimeTypes" => Value::Host(MIME_TYPES),
+                _ => Value::Undefined,
+            });
+        }
+        if matches!(object, PLUGINS | MIME_TYPES) {
+            return Ok(if property == "length" {
+                Value::Number(0.0)
+            } else {
+                Value::Undefined
+            });
+        }
+        if object == DOCUMENT_IMAGES {
+            return self.image_collection_get(property);
+        }
+        if object == LOCATION {
+            return self.location_property(property);
+        }
+        if object >= EVENT_BASE {
+            let event = self
+                .state
+                .event
+                .as_ref()
+                .filter(|e| e.handle == object)
+                .ok_or("Event handle has expired.")?;
+            return Ok(match property {
+                "type" => Value::String(event.name.clone()),
+                "target" => Value::Host(event.target),
+                "currentTarget" => Value::Host(event.current),
+                "cancelable" => Value::Bool(event.cancelable),
+                "bubbles" => Value::Bool(event.bubbles),
+                "eventPhase" => Value::Number(f64::from(event.phase)),
+                "defaultPrevented" => Value::Bool(event.prevented),
+                "timeStamp" => Value::Number(event.timestamp),
+                "isTrusted" => Value::Bool(true),
+                name if event.keyboard.is_some() && keyboard_property(name) => {
+                    let key = event.keyboard.as_ref().unwrap();
+                    match name {
+                        "key" => Value::String(key.key.clone()),
+                        "code" => Value::String(key.code.clone()),
+                        "location" => Value::Number(f64::from(key.location)),
+                        "ctrlKey" => Value::Bool(key.ctrl),
+                        "shiftKey" => Value::Bool(key.shift),
+                        "altKey" => Value::Bool(key.alt),
+                        "metaKey" => Value::Bool(key.meta),
+                        "repeat" => Value::Bool(key.repeat),
+                        "isComposing" => Value::Bool(false),
+                        "keyCode" | "which" => Value::Number(f64::from(key.key_code)),
+                        "charCode" => Value::Number(0.0),
+                        _ => Value::Undefined,
+                    }
+                }
+                _ => return Err(format!("Event property {property:?} is not supported.")),
+            });
+        }
+        if object >= STYLE_BASE {
+            let node = self.style_node(object)?;
+            return self.get_style(node, &css_name(property)?);
+        }
+        if let Some(value) = self.handler(object, property)? {
+            return Ok(value);
+        }
+        if object == WINDOW {
+            if let Some(function) = self.state.native_functions.get(property) {
+                return Ok(function.clone());
+            }
+            return match property {
+                "window" | "self" | "globalThis" => Ok(Value::Host(WINDOW)),
+                "document" => Ok(Value::Host(DOCUMENT)),
+                "console" => Ok(Value::Host(CONSOLE)),
+                "performance" => Ok(Value::Host(PERFORMANCE)),
+                "navigator" | "clientInformation" => Ok(Value::Host(NAVIGATOR)),
+                "location" => self.location_handle(),
+                "addEventListener" | "removeEventListener" => Err("Reading native method values is not implemented yet; direct calls are supported.".into()),
+                _ => Ok(Value::Undefined),
+            };
+        }
+        if object == DOCUMENT {
+            return match property {
+                "location" => self.location_handle(),
+                "URL" | "documentURI" => self.location_property("href"),
+                "contentType" => {
+                    let content_type = self.doc.content_type.clone();
+                    self.string(&content_type)
+                }
+                "title" => {
+                    if self.doc.title.len() > MAX_STRING {
+                        return Err("Document title exceeds 32 KiB.".into());
+                    }
+                    let title = self.doc.title.clone();
+                    self.string(&title)
+                }
+                "body" | "head" | "documentElement" => {
+                    self.state.rebuild(self.doc)?;
+                    let node = match property {
+                        "body" => self.state.tree.body,
+                        "head" => self.state.tree.head,
+                        _ => self.state.tree.document_element,
+                    };
+                    Ok(node.map_or(Value::Null, |node| Value::Host(node_handle(node))))
+                }
+                "readyState" => Ok(Value::String(self.state.ready.into())),
+                // This browser does not send Referer or populate a document
+                // referrer. Expose the actual empty value of that policy.
+                "referrer" => Ok(Value::String(String::new())),
+                // ChezCat currently has one standards layout mode and never
+                // prerenders a hidden speculative document. Report that actual
+                // behavior; quirks-mode layout is not implemented.
+                "compatMode" => Ok(Value::String("CSS1Compat".into())),
+                "prerendering" => Ok(Value::Bool(false)),
+                "images" => Ok(Value::Host(DOCUMENT_IMAGES)),
+                "parentElement" | "parentNode" | "ownerDocument" => Ok(Value::Null),
+                _ => Err(format!("Document property {property:?} is not supported.")),
+            };
+        }
+        let node = self.node(object)?;
+        match property {
+            "tagName" | "nodeName" => self.string(&tag(self.doc, node).to_ascii_uppercase()),
+            "nodeType" => Ok(Value::Number(1.0)),
+            "parentElement" => self.element_parent(node, false),
+            "parentNode" => self.element_parent(node, true),
+            "ownerDocument" => Ok(Value::Host(DOCUMENT)),
+            "clientWidth" | "clientHeight" | "clientLeft" | "clientTop" => {
+                let is_root = self.state.tree.document_element == Some(node);
+                let value = if let Some(geometry) = &mut self.state.geometry {
+                    geometry.read(
+                        self.doc,
+                        self.forms,
+                        node,
+                        is_root,
+                        property,
+                        &mut self.state.host_work,
+                    )?
+                } else {
+                    // A pure script test has no attached viewport/layout box.
+                    0.0
+                };
+                Ok(Value::Number(value))
+            }
+            "textContent" => Ok(Value::String(self.text_content(node)?)),
+            "style" => Ok(Value::Host(STYLE_BASE + node as u32)),
+            "id" | "className" | "title" => {
+                let name = if property == "className" {
+                    "class"
+                } else {
+                    property
+                };
+                let value = self.doc.attr(node, name).unwrap_or("");
+                if value.len() > MAX_STRING {
+                    return Err("Attribute value exceeds 32 KiB.".into());
+                }
+                let value = value.to_owned();
+                self.string(&value)
+            }
+            "hidden" | "disabled" => Ok(Value::Bool(self.doc.attr(node, property).is_some())),
+            "checked" | "value" | "selectedIndex" => {
+                let control = self
+                    .forms
+                    .controls
+                    .get(&node)
+                    .ok_or("This element is not a supported form control.")?;
+                match property {
+                    "selectedIndex" => {
+                        let select = control
+                            .select
+                            .as_ref()
+                            .ok_or("selectedIndex requires a supported select control.")?;
+                        Ok(Value::Number(
+                            select.selected.map_or(-1.0, |index| index as f64),
+                        ))
+                    }
+                    "checked" => {
+                        if matches!(control.kind, Kind::Checkbox | Kind::Radio) {
+                            Ok(Value::Bool(control.checked))
+                        } else {
+                            Err("checked is supported on checkbox/radio controls.".into())
+                        }
+                    }
+                    _ => {
+                        let value = control.value.text();
+                        self.string(&value)
+                    }
+                }
+            }
+            _ => Err(format!("Element property {property:?} is not supported.")),
+        }
+    }
+
+    fn set(&mut self, object: u32, property: &str, value: Value) -> Result<(), String> {
+        self.state.work(1)?;
+        if object == PERFORMANCE {
+            return Err("Performance is read-only in this subset.".into());
+        }
+        if object == LOCATION {
+            return Err("Location is read-only; script navigation is not implemented.".into());
+        }
+        if object == DOCUMENT_IMAGES {
+            return Err("The document image collection is read-only.".into());
+        }
+        if matches!(object, NAVIGATOR | PLUGINS | MIME_TYPES) {
+            return Err("Navigator and plugin information are read-only in this subset.".into());
+        }
+        if object >= EVENT_BASE {
+            return Err("Event properties are read-only; use preventDefault().".into());
+        }
+        if object >= STYLE_BASE {
+            let node = self.style_node(object)?;
+            let value = self.text(&value)?;
+            return self.set_style(node, &css_name(property)?, &value, "");
+        }
+        if self.set_handler(object, property, value.clone())? {
+            return Ok(());
+        }
+        if object == DOCUMENT && property == "title" {
+            let value = self.text(&value)?;
+            self.state
+                .replace_bytes(self.doc.title.len(), value.len())?;
+            self.doc.title = value;
+            self.state.layout_changed();
+            return Ok(());
+        }
+        if matches!(object, DOCUMENT | WINDOW | CONSOLE) {
+            return Err(format!(
+                "{} property {property:?} is not writable in this subset.",
+                if object == DOCUMENT {
+                    "Document"
+                } else if object == WINDOW {
+                    "Window"
+                } else {
+                    "Console"
+                }
+            ));
+        }
+        let node = self.node(object)?;
+        match property {
+            "textContent" => {
+                let text = if matches!(value, Value::Null | Value::Undefined) {
+                    String::new()
+                } else {
+                    self.text(&value)?
+                };
+                self.set_text_content(node, text)
+            }
+            "id" | "className" | "title" => {
+                let value = self.text(&value)?;
+                self.attribute(
+                    node,
+                    if property == "className" {
+                        "class"
+                    } else {
+                        property
+                    },
+                    Some(value),
+                )
+            }
+            "hidden" | "disabled" => {
+                self.attribute(node, property, value.truthy().then(String::new))
+            }
+            "checked" => {
+                self.state.work(self.forms.controls.len())?;
+                self.state
+                    .copies(self.forms.controls.values().map(|c| c.name.len()).sum())?;
+                self.forms.script_set_checked(node, value.truthy())?;
+                self.state.layout_changed();
+                Ok(())
+            }
+            "selectedIndex" => {
+                if let Value::String(text) = &value {
+                    self.state.copies(text.len().saturating_mul(3))?;
+                }
+                let index = timer_integer(&value)?;
+                let control = self
+                    .forms
+                    .controls
+                    .get(&node)
+                    .ok_or("This element is not a supported form control.")?;
+                let select = control
+                    .select
+                    .as_ref()
+                    .ok_or("selectedIndex requires a supported select control.")?;
+                if let Some(option) = usize::try_from(index)
+                    .ok()
+                    .and_then(|index| select.options.get(index))
+                {
+                    self.state
+                        .copies(option.label.len().saturating_add(option.value.len()))?;
+                }
+                self.forms.script_set_selected_index(node, index)?;
+                self.state.layout_changed();
+                Ok(())
+            }
+            "value" => {
+                let value = if matches!(value, Value::Null) {
+                    String::new()
+                } else {
+                    self.text(&value)?
+                };
+                self.state.work(self.forms.controls.len())?;
+                let existing_bytes = self.forms.controls.values().fold(0usize, |bytes, c| {
+                    bytes
+                        .saturating_add(c.name.len())
+                        .saturating_add(c.value.chars.len().saturating_mul(4))
+                });
+                self.state.copies(existing_bytes)?;
+                let kind = self
+                    .forms
+                    .controls
+                    .get(&node)
+                    .ok_or("This element is not a supported form control.")?
+                    .kind;
+                if let Some(select) = &self.forms.controls[&node].select {
+                    self.state.work(select.options.len())?;
+                    self.state.copies(
+                        select
+                            .options
+                            .iter()
+                            .map(|option| option.value.len().saturating_add(option.label.len()))
+                            .sum(),
+                    )?;
+                }
+                if !matches!(kind, Kind::Text | Kind::Select) {
+                    let old = self.doc.attr(node, "value").map_or(0, str::len);
+                    if self
+                        .state
+                        .retained
+                        .saturating_sub(old)
+                        .saturating_add(value.len())
+                        > self.state.retained_limit
+                    {
+                        return Err(
+                            "DOM retained text/attribute growth limit reached (1 MiB).".into()
+                        );
+                    }
+                    if value.len() > self.state.copy_work {
+                        return Err("DOM string work limit reached (8 MiB per job).".into());
+                    }
+                }
+                self.forms.script_set_value(node, &value)?;
+                let control = &self.forms.controls[&node];
+                if !matches!(control.kind, Kind::Text | Kind::Select) {
+                    self.attribute(node, "value", Some(value))?;
+                    if tag(self.doc, node) == "input" {
+                        let control = self.forms.controls.get_mut(&node).unwrap();
+                        control.caption = forms::caption(self.doc, node, control.kind);
+                    }
+                }
+                self.state.layout_changed();
+                Ok(())
+            }
+            _ => Err(format!(
+                "Element property {property:?} is not writable in this subset."
+            )),
+        }
+    }
+
+    fn call(&mut self, object: u32, method: &str, args: &[Value]) -> Result<Value, String> {
+        self.state.work(1)?;
+        if object == PERFORMANCE {
+            return if method == "now" {
+                Ok(Value::Number(self.state.clock_ms(Instant::now())))
+            } else {
+                Err(format!("Performance method {method:?} is not implemented."))
+            };
+        }
+        if object == LOCATION {
+            return if method == "toString" {
+                self.location_property("href")
+            } else {
+                Err(format!("Location method {method:?} is not supported; script navigation is not implemented."))
+            };
+        }
+        if object == DOCUMENT_IMAGES {
+            if args.is_empty() {
+                return Err("Image collection methods require one argument.".into());
+            }
+            let node = match method {
+                "item" => {
+                    if let Value::String(text) = &args[0] {
+                        self.state.copies(text.len())?;
+                    }
+                    self.image_at(timer_integer(&args[0])? as u32 as usize)?
+                }
+                "namedItem" => {
+                    let name = self.text(&args[0])?;
+                    self.image_named(&name)?
+                }
+                _ => {
+                    return Err(format!(
+                        "Image collection method {method:?} is not supported."
+                    ))
+                }
+            };
+            return Ok(node.map_or(Value::Null, |node| Value::Host(node_handle(node))));
+        }
+        if object == NAVIGATOR && method == "javaEnabled" {
+            return Ok(Value::Bool(false));
+        }
+        if matches!(object, PLUGINS | MIME_TYPES) {
+            return match method {
+                "item" => {
+                    let value = args.first().ok_or("Plugin item needs an index.")?;
+                    if let Value::String(text) = value {
+                        self.state.copies(text.len())?;
+                    }
+                    timer_integer(value)?;
+                    Ok(Value::Null)
+                }
+                "namedItem" => {
+                    let value = args.first().ok_or("Plugin namedItem needs a name.")?;
+                    self.text(value)?;
+                    Ok(Value::Null)
+                }
+                "refresh" if object == PLUGINS => Ok(Value::Undefined),
+                _ => Err(format!(
+                    "Plugin collection method {method:?} is not supported."
+                )),
+            };
+        }
+        if object == WINDOW {
+            match method {
+                "setTimeout" => return self.state.set_timeout(args),
+                "clearTimeout" => return self.state.clear_timeout(args),
+                "requestAnimationFrame" => return self.state.request_animation_frame(args),
+                "cancelAnimationFrame" => return self.state.cancel_animation_frame(args),
+                _ => {}
+            }
+        }
+        if method == "querySelector" && (object == DOCUMENT || node_index(object).is_some()) {
+            if args.len() != 1 {
+                return Err("querySelector needs one selector string.".into());
+            }
+            let selector = self.text(&args[0])?;
+            return self.query_selector(object, &selector);
+        }
+        if object >= EVENT_BASE {
+            if !args.is_empty() {
+                return Err("Event methods take no arguments in this subset.".into());
+            }
+            let event = self
+                .state
+                .event
+                .as_mut()
+                .filter(|e| e.handle == object)
+                .ok_or("Event handle has expired.")?;
+            match method {
+                "preventDefault" => {
+                    if event.cancelable && !event.passive {
+                        event.prevented = true;
+                    }
+                }
+                "stopPropagation" => event.stopped = true,
+                "stopImmediatePropagation" => {
+                    event.stopped = true;
+                    event.immediate = true;
+                }
+                _ => return Err(format!("Event method {method:?} is not supported.")),
+            }
+            return Ok(Value::Undefined);
+        }
+        if object == CONSOLE && matches!(method, "log" | "info" | "warn" | "error") {
+            let mut message = String::new();
+            for value in args {
+                let text = value.to_text();
+                self.state.copies(text.len())?;
+                if !message.is_empty() {
+                    message.push(' ');
+                }
+                message.push_str(prefix(&text, MAX_LOG_LINE.saturating_sub(message.len())));
+            }
+            self.state.log(&format!("console.{method}: {message}"));
+            return Ok(Value::Undefined);
+        }
+        if matches!(method, "addEventListener" | "removeEventListener") {
+            return self.event_listener(object, method, args, None);
+        }
+        if object == DOCUMENT && method == "getElementById" {
+            if args.len() != 1 {
+                return Err("getElementById needs one id.".into());
+            }
+            let id = self.text(&args[0])?;
+            self.state.rebuild(self.doc)?;
+            return Ok(self
+                .state
+                .tree
+                .ids
+                .get(&id)
+                .copied()
+                .map_or(Value::Null, |node| Value::Host(node_handle(node))));
+        }
+        if object >= STYLE_BASE {
+            let node = self.style_node(object)?;
+            if method == "setProperty" && (2..=3).contains(&args.len()) {
+                let name = self.text(&args[0])?;
+                let name = css_name(&name)?;
+                let value = self.text(&args[1])?;
+                let priority = args
+                    .get(2)
+                    .map(|v| self.text(v))
+                    .transpose()?
+                    .unwrap_or_default();
+                self.set_style(node, &name, &value, &priority)?;
+                return Ok(Value::Undefined);
+            }
+            if matches!(method, "getPropertyValue" | "removeProperty") && args.len() == 1 {
+                let name = css_name(&self.text(&args[0])?)?;
+                let value = self.get_style(node, &name)?;
+                if method == "removeProperty" {
+                    self.set_style(node, &name, "", "")?;
+                }
+                return Ok(value);
+            }
+            return Err(format!(
+                "Style method {method:?} is not supported with these arguments."
+            ));
+        }
+        if matches!(object, DOCUMENT | WINDOW | CONSOLE | NAVIGATOR) {
+            return Err(format!(
+                "{} method {method:?} is not supported in this subset.",
+                if object == DOCUMENT {
+                    "Document"
+                } else if object == WINDOW {
+                    "Window"
+                } else if object == NAVIGATOR {
+                    "Navigator"
+                } else {
+                    "Console"
+                }
+            ));
+        }
+        let node = self.node(object)?;
+        if matches!(
+            method,
+            "getAttribute" | "hasAttribute" | "setAttribute" | "removeAttribute"
+        ) {
+            let count = if method == "setAttribute" { 2 } else { 1 };
+            if args.len() != count {
+                return Err("Wrong number of attribute arguments.".into());
+            }
+            let name = self.text(&args[0])?.to_ascii_lowercase();
+            if !matches!(
+                name.as_str(),
+                "id" | "class"
+                    | "style"
+                    | "title"
+                    | "hidden"
+                    | "disabled"
+                    | "role"
+                    | "lang"
+                    | "dir"
+            ) && !inert_attribute_name(&name)
+            {
+                return Err("Supported attributes are id, class, style, title, hidden, disabled, role, lang, dir, data-* and aria-*; use .value/.checked for live controls.".into());
+            }
+            match method {
+                "getAttribute" => {
+                    let value = self.doc.attr(node, &name);
+                    if value.is_some_and(|value| value.len() > MAX_STRING) {
+                        return Err("Attribute value exceeds 32 KiB.".into());
+                    }
+                    let value = value.map(str::to_owned);
+                    return value.map_or(Ok(Value::Null), |value| self.string(&value));
+                }
+                "hasAttribute" => return Ok(Value::Bool(self.doc.attr(node, &name).is_some())),
+                "removeAttribute" => self.attribute(node, &name, None)?,
+                _ => {
+                    let value = self.text(&args[1])?;
+                    if name == "style" {
+                        validate_style(&value)?;
+                    }
+                    self.attribute(node, &name, Some(value))?;
+                }
+            }
+            return Ok(Value::Undefined);
+        }
+        Err(format!("DOM method {method:?} is not supported."))
+    }
+}
+
+fn node_handle(node: usize) -> u32 {
+    NODE_BASE + node as u32
+}
+fn inert_attribute_name(name: &str) -> bool {
+    (name.starts_with("data-") && name.len() > 5 || name.starts_with("aria-") && name.len() > 5)
+        && name.len() <= 256
+        && name.bytes().all(|byte| {
+            byte.is_ascii_lowercase()
+                || byte.is_ascii_digit()
+                || matches!(byte, b'-' | b'_' | b':' | b'.')
+        })
+}
+fn collection_index(property: &str) -> Option<usize> {
+    if property.is_empty() || property.len() > 1 && property.starts_with('0') {
+        return None;
+    }
+    let index = property.parse::<u32>().ok()?;
+    (index != u32::MAX && index.to_string() == property).then_some(index as usize)
+}
+
+fn node_index(handle: u32) -> Option<usize> {
+    (NODE_BASE..STYLE_BASE)
+        .contains(&handle)
+        .then(|| (handle - NODE_BASE) as usize)
+}
+fn tag(doc: &Document, node: usize) -> &str {
+    match doc.nodes.get(node).map(|n| &n.kind) {
+        Some(NodeKind::Element { tag, .. }) => tag,
+        _ => "",
+    }
+}
+fn same_function(a: &Value, b: &Value) -> bool {
+    matches!((a,b), (Value::Function(a), Value::Function(b)) if a == b)
+}
+fn keyboard_property(property: &str) -> bool {
+    matches!(
+        property,
+        "key"
+            | "code"
+            | "location"
+            | "ctrlKey"
+            | "shiftKey"
+            | "altKey"
+            | "metaKey"
+            | "repeat"
+            | "isComposing"
+            | "keyCode"
+            | "which"
+            | "charCode"
+    )
+}
+
+fn handler_event(property: &str) -> Option<&str> {
+    match property {
+        "onclick" | "oninput" | "onchange" | "onsubmit" | "onreset" | "onload" | "onkeydown"
+        | "onkeyup" => Some(&property[2..]),
+        _ => None,
+    }
+}
+fn text_container(tag: &str) -> bool {
+    matches!(
+        tag,
+        "div"
+            | "span"
+            | "p"
+            | "a"
+            | "b"
+            | "strong"
+            | "i"
+            | "em"
+            | "u"
+            | "s"
+            | "small"
+            | "mark"
+            | "sub"
+            | "sup"
+            | "code"
+            | "pre"
+            | "kbd"
+            | "samp"
+            | "var"
+            | "label"
+            | "button"
+            | "h1"
+            | "h2"
+            | "h3"
+            | "h4"
+            | "h5"
+            | "h6"
+            | "li"
+            | "dt"
+            | "dd"
+            | "legend"
+            | "blockquote"
+            | "br"
+            | "wbr"
+    )
+}
+fn node_bytes(node: &Node) -> usize {
+    match &node.kind {
+        NodeKind::Text(text) => text.len(),
+        NodeKind::Element { id, attrs, .. } => {
+            id.as_ref().map_or(0, String::len)
+                + attrs.iter().map(|(_, value)| value.len()).sum::<usize>()
+        }
+    }
+}
+fn document_bytes(doc: &Document) -> usize {
+    doc.title.len() + doc.nodes.iter().map(node_bytes).sum::<usize>()
+}
+fn prefix(text: &str, maximum: usize) -> &str {
+    let mut end = text.len().min(maximum);
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    &text[..end]
+}
+fn css_name(name: &str) -> Result<String, String> {
+    if name.len() > 64 {
+        return Err("CSS property name exceeds 64 bytes.".into());
+    }
+    let mut css = String::new();
+    for ch in name.chars() {
+        if ch.is_ascii_uppercase() {
+            css.push('-');
+            css.push(ch.to_ascii_lowercase());
+        } else {
+            css.push(ch);
+        }
+    }
+    if !matches!(
+        css.as_str(),
+        "display"
+            | "position"
+            | "inset"
+            | "top"
+            | "right"
+            | "bottom"
+            | "left"
+            | "color"
+            | "background"
+            | "background-color"
+            | "font"
+            | "font-family"
+            | "font-size"
+            | "font-weight"
+            | "font-style"
+            | "text-decoration"
+            | "text-decoration-line"
+            | "text-align"
+            | "line-height"
+            | "white-space"
+            | "width"
+            | "height"
+            | "min-width"
+            | "max-width"
+            | "min-height"
+            | "max-height"
+            | "margin"
+            | "margin-top"
+            | "margin-right"
+            | "margin-bottom"
+            | "margin-left"
+            | "padding"
+            | "padding-top"
+            | "padding-right"
+            | "padding-bottom"
+            | "padding-left"
+            | "border"
+            | "border-width"
+            | "border-color"
+            | "border-style"
+            | "box-sizing"
+            | "vertical-align"
+            | "flex"
+            | "flex-grow"
+            | "flex-shrink"
+            | "flex-basis"
+            | "flex-direction"
+            | "flex-wrap"
+            | "justify-content"
+            | "align-items"
+            | "align-self"
+            | "gap"
+            | "row-gap"
+            | "column-gap"
+            | "order"
+    ) {
+        return Err(format!(
+            "CSS property {name:?} is not supported by the script bridge."
+        ));
+    }
+    Ok(css)
+}
+fn validate_css_value(value: &str, allow_font_quotes: bool) -> Result<(), String> {
+    if value.len() > MAX_STRING
+        || value.chars().any(|ch| {
+            ch.is_control() && !ch.is_ascii_whitespace()
+                || matches!(ch, ';' | '{' | '}' | '\\' | '@' | '!')
+                || !allow_font_quotes && matches!(ch, '\'' | '"')
+        })
+        || value.to_ascii_lowercase().contains("url(")
+    {
+        return Err(
+            "CSS mutation accepts simple values without URLs, escapes or extra declarations."
+                .into(),
+        );
+    }
+    if allow_font_quotes {
+        let mut quote = None;
+        for ch in value.chars() {
+            if let Some(open) = quote {
+                if ch == open {
+                    quote = None;
+                } else if matches!(ch, '\n' | '\r' | '\u{c}') {
+                    return Err("A quoted font family cannot contain a line ending.".into());
+                }
+            } else if matches!(ch, '\'' | '"') {
+                quote = Some(ch);
+            }
+        }
+        if quote.is_some() {
+            return Err("A quoted font family must have a matching closing quote.".into());
+        }
+    }
+    Ok(())
+}
+fn validate_style(style: &str) -> Result<(), String> {
+    for item in style.split(';').filter(|item| !item.trim().is_empty()) {
+        let (name, value) = item
+            .split_once(':')
+            .ok_or("Style declaration needs a colon.")?;
+        let name = css_name(name.trim())?;
+        validate_css_value(
+            value.trim(),
+            matches!(name.as_str(), "font" | "font-family"),
+        )?;
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::html;
+
+    fn setup(source: &str, scripts: &[&str]) -> (Document, Forms, Page, Outcome) {
+        setup_at(source, scripts, None)
+    }
+
+    fn setup_at(
+        source: &str,
+        scripts: &[&str],
+        location: Option<&crate::navigation::Location>,
+    ) -> (Document, Forms, Page, Outcome) {
+        let mut doc = html::parse(source);
+        doc.scripting_enabled = true;
+        let mut forms = Forms::new(&doc);
+        let scripts: Vec<_> = scripts
+            .iter()
+            .enumerate()
+            .map(|(node, source)| Script {
+                node,
+                source: (*source).into(),
+                label: format!("test script {node}"),
+            })
+            .collect();
+        let mut page = Page::new();
+        if let Some(location) = location {
+            page.set_location(location);
+        }
+        let result = page.start(&mut doc, &mut forms, &scripts);
+        (doc, forms, page, result)
+    }
+
+    fn id(doc: &Document, id: &str) -> usize {
+        doc.nodes
+            .iter()
+            .enumerate()
+            .find(|(node, _)| doc.attr(*node, "id") == Some(id))
+            .unwrap()
+            .0
+    }
+
+    fn text(doc: &Document, node: usize) -> String {
+        let mut text = String::new();
+        let mut stack = vec![node];
+        while let Some(node) = stack.pop() {
+            if let NodeKind::Text(value) = &doc.nodes[node].kind {
+                text.push_str(value);
+            }
+            stack.extend(doc.nodes[node].children.iter().rev().copied());
+        }
+        text
+    }
+
+    fn click(page: &mut Page, doc: &mut Document, forms: &mut Forms, node: usize) -> Outcome {
+        page.begin_job();
+        page.dispatch(doc, forms, node, "click", true)
+    }
+
+    #[test]
+    fn animation_frames_snapshot_cancel_share_timestamps_and_wait_for_next_frame() {
+        let (mut doc, mut forms, mut page, start) = setup(
+            "<body><p>Frames</p></body>",
+            &[r#"
+var order='', stamp=-1, last=-1;
+if(performance!==window.performance || typeof performance.now!=='function')throw Error('clock');
+var p=performance.now(); if(performance.now()<p)throw Error('nonmonotonic');
+requestAnimationFrame(function(t){order+='a';stamp=t;cancelAnimationFrame(cancelled);
+ requestAnimationFrame(function(next){if(next<stamp)throw Error('time reversed');order+='r';document.title=order;});
+});
+var cancelled=requestAnimationFrame(function(){throw Error('cancelled callback ran');});
+requestAnimationFrame(function(t){if(t!==stamp)throw Error('frame timestamps differ');order+='d';document.title=order;});
+setTimeout(function(){order+='t';},0);
+"#],
+        );
+        assert_eq!(start.errors, 0, "{}", page.report());
+        let due = page.state.animation_due.unwrap();
+        page.poll_timer_at(&mut doc, &mut forms, due).unwrap();
+        assert_eq!(page.state.timer_callbacks, 1);
+        let outcome = page.poll_timer_at(&mut doc, &mut forms, due).unwrap();
+        assert_eq!(outcome.errors, 0, "{}", page.report());
+        assert_eq!(doc.title, "tad");
+        assert_eq!(page.state.animation_callbacks, 2);
+        assert_eq!(page.state.animation_frames.len(), 1);
+        assert!(page.poll_timer_at(&mut doc, &mut forms, due).is_none());
+        let next = page.state.animation_due.unwrap();
+        assert!(next >= due + FRAME_INTERVAL);
+        // Animation frames use a per-frame budget and don't inherit the
+        // document's separate finite timeout-callback allowance.
+        page.state.timer_callbacks = MAX_TIMER_CALLBACKS;
+        let outcome = page.poll_timer_at(&mut doc, &mut forms, next).unwrap();
+        assert_eq!(outcome.errors, 0, "{}", page.report());
+        assert_eq!(doc.title, "tadr");
+        assert!(page.next_timer_deadline().is_none());
+    }
+
+    #[test]
+    fn animation_frames_bound_queue_and_work_and_stop_with_the_document() {
+        let (_, _, mut page, start) = setup(
+            "<body></body>",
+            &["for(var i=0;i<65;i++)requestAnimationFrame(function(){});"],
+        );
+        assert_eq!(start.errors, 1);
+        assert_eq!(page.state.animation_frames.len(), MAX_ANIMATION_FRAMES);
+        page.stop_timers("Stopped by user.");
+        assert!(page.next_timer_deadline().is_none());
+        let (_, _, _, start) = setup("<body></body>", &["requestAnimationFrame('bad');"]);
+        assert_eq!(start.errors, 1);
+        let (mut doc, mut forms, mut page, start) = setup(
+            "<body></body>",
+            &["requestAnimationFrame(function(){while(true){}});"],
+        );
+        assert_eq!(start.errors, 0);
+        let due = page.state.animation_due.unwrap();
+        let outcome = page.poll_timer_at(&mut doc, &mut forms, due).unwrap();
+        assert_eq!(outcome.errors, 1);
+        assert!(page.report().contains("limit"));
+        assert!(page.next_timer_deadline().is_none());
+        // A new explicit inspector job still has a fresh work allowance.
+        let result = page.console_eval(&mut doc, &mut forms, "document.title='Recovered'");
+        assert_eq!(result.errors, 0);
+        assert_eq!(doc.title, "Recovered");
+    }
+
+    #[test]
+    fn native_keyboard_events_bubble_cancel_and_expose_actual_input_values() {
+        let (mut doc, mut forms, mut page, start) = setup(
+            "<html><body><input id=field></body></html>",
+            &[r#"
+var order='', saved;
+window.addEventListener('keydown',function(e){order+='w';if(e.eventPhase!==1)throw Error('capture');},true);
+document.getElementById('field').onkeydown=function(e){
+ if(e.key!=='A' || e.code!=='KeyA' || !e.shiftKey || e.ctrlKey || e.altKey || e.metaKey || !e.repeat || e.location!==0)throw Error('key fields');
+ if(e.keyCode!==65 || e.which!==65 || e.charCode!==0 || !e.isTrusted || e.isComposing || e.timeStamp<0)throw Error('event fields');
+ if(!('key' in e) || !('timeStamp' in e))throw Error('presence');
+ saved=e;order+='i';return false;
+};
+document.addEventListener('keydown',function(e){if(!e.defaultPrevented)throw Error('cancellation');order+='d';document.title=order;});
+document.onkeyup=function(e){if(e.key!=='A' || e.type!=='keyup')throw Error('release');
+ document.title+='u';};
+"#],
+        );
+        assert_eq!(start.errors, 0, "{}", page.report());
+        let input = KeyboardInput {
+            down: true,
+            target: Some(id(&doc, "field")),
+            key: "A".into(),
+            code: "KeyA".into(),
+            shift: true,
+            repeat: true,
+            key_code: 65,
+            ..KeyboardInput::default()
+        };
+        page.begin_job();
+        let outcome = page.keyboard(&mut doc, &mut forms, input.clone());
+        assert_eq!(outcome.errors, 0, "{}", page.report());
+        assert!(outcome.prevented);
+        assert_eq!(doc.title, "wid");
+        page.begin_job();
+        let outcome = page.keyboard(
+            &mut doc,
+            &mut forms,
+            KeyboardInput {
+                down: false,
+                repeat: false,
+                ..input
+            },
+        );
+        assert_eq!(outcome.errors, 0, "{}", page.report());
+        assert_eq!(doc.title, "widu");
+        let expired = page.console_eval(&mut doc, &mut forms, "saved.preventDefault()");
+        assert_eq!(expired.errors, 1);
+        assert!(page.report().contains("Event handle has expired"));
+        doc.scripting_enabled = false;
+        let outcome = page.keyboard(&mut doc, &mut forms, KeyboardInput::default());
+        assert_eq!(outcome.errors, 0);
+        assert_eq!(doc.title, "widu");
+    }
+
+    #[test]
+    fn inspector_console_uses_the_live_realm_and_preserves_job_bounds() {
+        let (mut doc, mut forms, mut page, start) =
+            setup("<body><p id=out>old</p></body>", &["var count=1;"]);
+        assert_eq!(start.errors, 0);
+        let result = page.console_eval(
+            &mut doc,
+            &mut forms,
+            "count+=2;document.getElementById('out').textContent=count;count",
+        );
+        assert_eq!(result.errors, 0, "{}", page.report());
+        assert!(result.layout_changed);
+        assert_eq!(text(&doc, id(&doc, "out")), "3");
+        assert!(page.report().contains("=> 3"));
+        let result = page.console_eval(&mut doc, &mut forms, "while(true){}");
+        assert_eq!(result.errors, 1);
+        assert!(page.report().contains("limit"));
+        page.clear_console();
+        assert_eq!(page.error_count(), 1);
+        let result = page.console_eval(&mut doc, &mut forms, "count+4");
+        assert_eq!(result.errors, 0, "{}", page.report());
+        assert!(page.report().contains("=> 7"));
+        page.set_location(&crate::navigation::Location::home());
+        let result = page.console_eval(
+            &mut doc,
+            &mut forms,
+            "location.href='https://example.test/'",
+        );
+        assert_eq!(result.errors, 1);
+        let result = page.console_eval(&mut doc, &mut forms, "location.href");
+        assert_eq!(result.errors, 0);
+        assert!(page.report().contains("about:home"));
+    }
+
+    #[test]
+    fn inspector_console_obeys_script_and_csp_settings_and_source_limit() {
+        let mut doc = html::parse("<body><p id=out>unchanged</p></body>");
+        doc.scripting_enabled = true;
+        let mut forms = Forms::new(&doc);
+        let mut page = Page::new();
+        let mut policy = crate::csp::PolicySet::default();
+        policy.add_header("script-src 'self'");
+        page.start_with_policy(&mut doc, &mut forms, &[], &policy);
+        assert_eq!(
+            page.console_eval(&mut doc, &mut forms, "document.title='denied'")
+                .errors,
+            1
+        );
+        assert_ne!(doc.title, "denied");
+        assert!(page.report().contains("Content Security Policy"));
+        page.start(&mut doc, &mut forms, &[]);
+        assert_eq!(
+            page.console_eval(&mut doc, &mut forms, &";".repeat(MAX_CONSOLE_SOURCE + 1))
+                .errors,
+            1
+        );
+        doc.scripting_enabled = false;
+        assert_eq!(
+            page.console_eval(&mut doc, &mut forms, "document.title='denied'")
+                .errors,
+            1
+        );
+        assert_ne!(doc.title, "denied");
+    }
+
+    #[test]
+    fn location_reads_serialized_components_and_stable_native_identity() {
+        let script = r#"
+var l=location;
+if(l!==window.location || l!==document.location || l!==self.location || l!==globalThis.location)throw Error('location identity');
+if(document.URL!==l.href || document.documentURI!==l.href)throw Error('document URL');
+if(!('location' in window) || !('location' in document) || !('URL' in document) || !('documentURI' in document))throw Error('URL presence');
+if('baseURI' in document || 'assign' in l || 'replace' in l || 'reload' in l)throw Error('unsupported capability advertised');
+var stringify=l.toString;
+if(typeof stringify!=='function' || stringify!==l.toString || stringify.call(l)!==l.href)throw Error('native string method');
+var rejected=false;try{stringify.call(window);}catch(e){rejected=e.name==='TypeError';}
+if(!rejected)throw Error('incorrect receiver');
+rejected=false;try{stringify();}catch(e){rejected=e.name==='TypeError';}
+if(!rejected)throw Error('detached receiver');
+document.title=[l.href,l.protocol,l.host,l.hostname,l.port,l.pathname,l.search,l.hash,l.origin].join('|');
+"#;
+        for (url, expected) in [
+            (
+                "http://EXAMPLE.com:80/a%2Fb/c?q=a%20b&x=%23#snow%20%E2%98%83",
+                "http://example.com/a%2Fb/c?q=a%20b&x=%23#snow%20%E2%98%83|http:|example.com|example.com||/a%2Fb/c|?q=a%20b&x=%23|#snow%20%E2%98%83|http://example.com",
+            ),
+            (
+                "https://[2001:0db8::1]:8443/a?value=%2F#x%2Fy",
+                "https://[2001:db8::1]:8443/a?value=%2F#x%2Fy|https:|[2001:db8::1]:8443|[2001:db8::1]|8443|/a|?value=%2F|#x%2Fy|https://[2001:db8::1]:8443",
+            ),
+            (
+                "https://[::1]:443/?#",
+                "https://[::1]/?|https:|[::1]|[::1]||/|||https://[::1]",
+            ),
+            (
+                "about:home#section%20two",
+                "about:home#section%20two|about:||||home||#section%20two|null",
+            ),
+        ] {
+            let location = crate::navigation::address(url, &crate::navigation::Location::home()).unwrap();
+            let (doc, _, page, result) = setup_at("<html><body></body></html>", &[script], Some(&location));
+            assert_eq!(result.errors, 0, "{url}: {}", page.report());
+            assert_eq!(doc.title, expected, "{url}");
+        }
+        for (path, expected_path) in [
+            ("/site/a b#%.html", "/site/a%20b%23%25.html"),
+            ("C:/site/a b.html", "/C:/site/a%20b.html"),
+        ] {
+            let location = crate::navigation::Location {
+                path: Some(std::path::PathBuf::from(path)),
+                fragment: "part #one".into(),
+                root: Some(std::path::PathBuf::from("/private/content-root")),
+                url: None,
+            };
+            let (doc, _, page, result) =
+                setup_at("<html><body></body></html>", &[script], Some(&location));
+            assert_eq!(result.errors, 0, "{}", page.report());
+            assert_eq!(doc.title, format!("file://{expected_path}#part%20%23one|file:||||{expected_path}||#part%20%23one|null"));
+            assert!(!doc.title.contains("private"));
+        }
+    }
+
+    #[test]
+    fn location_native_handle_stays_live_after_trusted_context_updates() {
+        let first = crate::navigation::address(
+            "https://example.test/path?q=one#first",
+            &crate::navigation::Location::home(),
+        )
+        .unwrap();
+        let (mut doc, mut forms, mut page, result) = setup_at(
+            "<html><body><button id=read type=button>Read</button></body></html>",
+            &[r#"var saved=location, stringify=location.toString;
+document.getElementById('read').onclick=function(){
+if(saved!==location || stringify!==location.toString)throw Error('identity changed');
+document.title=stringify.call(saved)+'|'+document.URL+'|'+document.documentURI;
+};"#],
+            Some(&first),
+        );
+        assert_eq!(result.errors, 0, "{}", page.report());
+        let next = crate::navigation::address("#next%20part", &first).unwrap();
+        page.set_location(&next);
+        let button = id(&doc, "read");
+        assert_eq!(
+            click(&mut page, &mut doc, &mut forms, button).errors,
+            0,
+            "{}",
+            page.report()
+        );
+        assert_eq!(doc.title, vec![next.display(); 3].join("|"));
+    }
+
+    #[test]
+    fn location_requires_real_context_and_rejects_navigation_and_host_redefinition() {
+        for source in [
+            "location.href;",
+            "window.location;",
+            "document.location;",
+            "document.URL;",
+            "document.documentURI;",
+        ] {
+            let (_, _, page, result) = setup("<body></body>", &[source]);
+            assert_eq!(result.errors, 1, "{source}: {}", page.report());
+            assert!(
+                page.report()
+                    .contains("unavailable without a committed URL context"),
+                "{}",
+                page.report()
+            );
+        }
+        let location = crate::navigation::Location::home();
+        for source in [
+            "location='https://else.invalid/';",
+            "window.location='https://else.invalid/';",
+            "document.location='https://else.invalid/';",
+            "location.href='https://else.invalid/';",
+            "location.hash='#changed';",
+            "location.toString=function(){return 'spoof';};",
+            "document.URL='spoof';",
+            "document.documentURI='spoof';",
+            "location.assign('https://else.invalid/');",
+            "location.replace('https://else.invalid/');",
+            "location.reload();",
+            "Object.defineProperty(window,'location',{value:'spoof'});",
+            "Object.defineProperty(location,'href',{value:'spoof'});",
+            "Object.setPrototypeOf(location,{href:'spoof'});",
+            "delete location.href;",
+        ] {
+            let (doc, _, page, result) = setup_at("<body></body>", &[
+                source,
+                "if(location!==window.location || location!==document.location || location.href!=='about:home' || location.toString()!==document.URL)throw Error('Location changed'); document.title=location.href;",
+            ], Some(&location));
+            assert_eq!(result.errors, 1, "{source}: {}", page.report());
+            assert_eq!(doc.title, "about:home", "{source}: {}", page.report());
+        }
+    }
+
+    #[test]
+    fn location_results_obey_dom_size_and_copy_work_limits() {
+        let location = crate::navigation::Location::home();
+        let (mut doc, mut forms, mut page, result) =
+            setup_at("<body></body>", &[], Some(&location));
+        assert_eq!(result.errors, 0);
+        page.state.copy_work = "about:home".len();
+        let mut bridge = Bridge {
+            doc: &mut doc,
+            forms: &mut forms,
+            state: &mut page.state,
+        };
+        assert_eq!(
+            bridge.get(LOCATION, "href").unwrap().to_text(),
+            "about:home"
+        );
+        assert!(bridge
+            .call(LOCATION, "toString", &[])
+            .unwrap_err()
+            .contains("string work limit"));
+        page.set_location(&crate::navigation::Location {
+            path: Some(std::path::PathBuf::from(format!(
+                "/{}",
+                "x".repeat(MAX_STRING)
+            ))),
+            ..location
+        });
+        page.begin_job();
+        let mut bridge = Bridge {
+            doc: &mut doc,
+            forms: &mut forms,
+            state: &mut page.state,
+        };
+        assert!(bridge.get(DOCUMENT, "URL").unwrap_err().contains("32 KiB"));
+        assert!(bridge
+            .get(LOCATION, "pathname")
+            .unwrap_err()
+            .contains("32 KiB"));
+    }
+
+    #[test]
+    fn native_document_methods_metadata_body_load_and_random_match_actual_capabilities() {
+        let (doc, _, page, outcome) = setup(
+            "<html><body><p id='out'>Hello</p></body></html>",
+            &[r#"
+if(typeof document.getElementById!=='function' || document.getElementById!==document.getElementById)throw Error('method identity');
+var get=document.getElementById;
+if(get.call(document,'out').textContent!=='Hello')throw Error('receiver');
+var failed=false;try{get('out');}catch(e){failed=e.name==='TypeError';}
+if(!failed)throw Error('detached receiver accepted');
+if(document.prerendering!==false || document.compatMode!=='CSS1Compat')throw Error('metadata');
+if(document.contentType!=='text/html')throw Error('content type');
+if(!('prerendering' in document) || !('compatMode' in document) || !('contentType' in document))throw Error('presence');
+var random=Math.random();if(random<0 || random>=1)throw Error('random');
+document.body.onload=function(e){if(this!==window || e.target!==document)throw Error('load');document.title+='B';};
+if(window.onload!==document.body.onload)throw Error('body alias');
+addEventListener('load',function(){document.title+='W';},{once:true});
+document.title='';
+"#],
+        );
+        assert_eq!(outcome.errors, 0, "{}", page.report());
+        assert_eq!(doc.title, "BW");
+    }
+
+    #[test]
+    fn document_and_element_ancestry_follow_the_connected_tree() {
+        let (mut doc, mut forms, mut page, outcome) = setup(
+            "<html><head><title>Initial</title></head><body><div id=box><form id=owner><button type=button id=label>Follow</button></form></div></body></html>",
+            &[r#"
+var html=document.documentElement, body=document.body, head=document.head;
+var box=document.getElementById('box'), owner=document.getElementById('owner'), label=document.getElementById('label');
+if(head.tagName!=='HEAD' || head.parentElement!==html || body.parentNode!==html)throw Error('document elements');
+if(html.parentElement!==null || html.parentNode!==document)throw Error('document root');
+if(document.parentNode!==null || document.parentElement!==null || document.ownerDocument!==null)throw Error('root ancestry');
+if(label.parentElement!==owner || label.parentNode!==owner || owner.parentElement!==box)throw Error('nested ancestry');
+if(label.ownerDocument!==document || head.ownerDocument!==document)throw Error('ownership');
+if(!('parentElement' in label) || !('parentNode' in document) || !('head' in document))throw Error('presence');
+document.addEventListener('click',function(event){
+    for(var node=event.target;node && node!==document.documentElement;node=node.parentElement){
+        if(node.tagName==='FORM'){document.title=node.id;event.preventDefault();return;}
+    }
+});
+"#],
+        );
+        assert_eq!(outcome.errors, 0, "{}", page.report());
+        let label = id(&doc, "label");
+        let outcome = click(&mut page, &mut doc, &mut forms, label);
+        assert_eq!(outcome.errors, 0, "{}", page.report());
+        assert!(outcome.prevented);
+        assert_eq!(doc.title, "owner");
+    }
+
+    #[test]
+    fn document_images_is_live_ordered_and_preserves_native_members() {
+        let (doc, _, page, outcome) = setup(
+            "<html><body><img id=first name=logo><div><img id=second name=shared></div><img id=shared><img id=length><img id=item><img id=01><template><img id=inert></template></body></html>",
+            &[r#"
+var images=document.images;
+var first=document.getElementById('first'), second=document.getElementById('second');
+if(images!==document.images || images.length!==6)throw Error('identity or length');
+if(images[0]!==first || images.item(0)!==first || images.item(1.9)!==second)throw Error('tree order');
+if(images.item(4294967296)!==first || images.item(-1)!==null)throw Error('unsigned index');
+if(images.logo!==first || images.namedItem('shared')!==second || images['01']!==images[5])throw Error('names');
+if(images[6]!==undefined || images.item(6)!==null || images.namedItem('missing')!==null || images.namedItem('')!==null)throw Error('missing');
+if(!('0' in images) || '6' in images || !('logo' in images) || 'inert' in images)throw Error('presence');
+if(images.length!==6 || typeof images.item!=='function' || images.namedItem('length')!==images[3] || images.namedItem('item')!==images[4])throw Error('member collision');
+first.id='renamed';
+if(images.first!==undefined || images.renamed!==first || images.logo!==first || images.length!==6)throw Error('live names');
+var item=images.item;
+if(item!==images.item || item.call(images,0)!==first)throw Error('method identity');
+var rejected=false;try{item(0);}catch(error){rejected=error.name==='TypeError';}
+if(!rejected)throw Error('unbound method accepted');
+document.title='Images inspected';
+"#, "document.images.length=0;", "if(document.images.length!==6)throw Error('mutable collection');"],
+        );
+        assert_eq!(outcome.errors, 1, "{}", page.report());
+        assert!(page.report().contains("image collection is read-only"));
+        assert_eq!(doc.title, "Images inspected");
+        assert_eq!(doc.attr(id(&doc, "renamed"), "name"), Some("logo"));
+    }
+
+    #[test]
+    fn capture_once_passive_and_listener_removal_follow_event_phases() {
+        let (mut doc, mut forms, mut page, outcome)=setup("<html><body><form id='f'><button id='b' type='button'>Go</button></form></body></html>", &[r#"
+var b=document.getElementById('b');var f=document.getElementById('f');
+document.title='';
+window.addEventListener('click',function(e){if(e.eventPhase!==1)throw Error('window capture');document.title+='W';},true);
+document.addEventListener('click',function(e){document.title+='D';},{capture:true,once:true});
+f.addEventListener('click',function(e){document.title+='F';},{capture:true});
+function removed(){document.title+='X';}
+b.addEventListener('click',removed,true);
+b.removeEventListener('click',removed,{capture:true,signal:1});
+b.addEventListener('click',function(e){if(e.eventPhase!==2)throw Error('target capture');document.title+='C';},{capture:true});
+b.addEventListener('click',function(e){if(e.eventPhase!==2)throw Error('target bubble');e.preventDefault();if(e.defaultPrevented)throw Error('passive cancellation');document.title+='P';},{passive:true,once:true});
+b.addEventListener('click',function(e){document.title+='B';});
+f.addEventListener('click',function(e){if(e.eventPhase!==3)throw Error('ancestor bubble');document.title+='f';});
+"#]);
+        assert_eq!(outcome.errors, 0, "{}", page.report());
+        let button = id(&doc, "b");
+        let outcome = click(&mut page, &mut doc, &mut forms, button);
+        assert_eq!(outcome.errors, 0, "{}", page.report());
+        assert!(!outcome.prevented);
+        assert_eq!(doc.title, "WDFCPBf");
+        let outcome = click(&mut page, &mut doc, &mut forms, button);
+        assert_eq!(outcome.errors, 0, "{}", page.report());
+        assert!(!outcome.prevented);
+        assert_eq!(doc.title, "WDFCPBfWFCBf");
+    }
+
+    #[test]
+    fn capture_stop_propagation_preserves_same_phase_and_blocks_later_visits() {
+        let (mut doc, mut forms, mut page, outcome) = setup(
+            "<body><button id=b>Go</button></body>",
+            &[r#"
+var b=document.getElementById('b');document.title='';
+b.addEventListener('click',function(e){e.stopPropagation();document.title+='C';},true);
+b.addEventListener('click',function(e){document.title+='D';},true);
+b.addEventListener('click',function(e){document.title+='B';e.preventDefault();});
+document.addEventListener('click',function(){document.title+='bad';});
+"#],
+        );
+        assert_eq!(outcome.errors, 0, "{}", page.report());
+        let button = id(&doc, "b");
+        let outcome = click(&mut page, &mut doc, &mut forms, button);
+        assert_eq!(outcome.errors, 0, "{}", page.report());
+        assert!(!outcome.prevented);
+        assert_eq!(doc.title, "CD");
+    }
+
+    #[test]
+    fn inert_attribute_metadata_is_mutable_but_active_capabilities_remain_blocked() {
+        let (doc, _, page, outcome) = setup(
+            "<html><body><p id=p>Text</p></body></html>",
+            &[
+                r#"
+var p=document.getElementById('p');
+p.setAttribute('data-mode','night');p.setAttribute('aria-label','Night');p.setAttribute('role','status');
+if(p.getAttribute('data-mode')!=='night' || !p.hasAttribute('aria-label'))throw Error('metadata');
+p.removeAttribute('aria-label');if(p.hasAttribute('aria-label'))throw Error('removed');
+"#,
+                "document.getElementById('p').setAttribute('onclick','attack()');",
+                "document.getElementById('p').setAttribute('src','https://example.org/pixel');",
+            ],
+        );
+        assert_eq!(outcome.errors, 2, "{}", page.report());
+        let p = id(&doc, "p");
+        assert_eq!(doc.attr(p, "data-mode"), Some("night"));
+        assert_eq!(doc.attr(p, "onclick"), None);
+        assert_eq!(doc.attr(p, "src"), None);
+    }
+
+    #[test]
+    fn script_font_properties_keep_the_declared_family_and_shorthand() {
+        let (doc, _, page, outcome) = setup(
+            "<body><p id=p>Text</p></body>",
+            &[r#"
+var p=document.getElementById('p');
+p.style.fontFamily='"Page Face", serif';
+if(p.style.fontFamily!=='"Page Face", serif')throw 'family';
+p.style.setProperty('font','italic 700 20px/1.5 "Page Face", sans-serif');
+if(p.style.getPropertyValue('font')!=='italic 700 20px/1.5 "Page Face", sans-serif')throw 'shorthand';
+"#],
+        );
+        assert_eq!(outcome.errors, 0, "{}", page.report());
+        let style = doc.attr(id(&doc, "p"), "style").unwrap();
+        assert!(
+            style.contains("font-family:") && style.contains("font:italic 700 20px/1.5"),
+            "{style}"
+        );
+    }
+
+    #[test]
+    fn native_property_probes_report_only_supported_capabilities() {
+        let (doc, _, page, result) = setup(
+            "<html><body><p id='p'>Text</p><input id='box' type='checkbox'><input id='name'><button id='button'>Go</button></body></html>",
+            &[r#"
+var ordinary=undefined; let lexical=1; window.extra=7;
+var p=document.getElementById('p');
+var box=document.getElementById('box');
+var name=document.getElementById('name');
+var checks=[
+ 'ordinary' in window, !('lexical' in window), 'extra' in window,
+ 'setTimeout' in window, 'clearTimeout' in self, 'document' in globalThis,
+ !('location' in window), !('fetch' in window), 'navigator' in window,
+ 'querySelector' in document, 'getElementById' in document, 'readyState' in document,
+ 'referrer' in document, document.referrer==='', !('cookie' in document),
+ !('onload' in document), 'onload' in window, 'onclick' in p,
+ 'textContent' in p, !('value' in p), 'value' in name,
+ 'checked' in box, !('checked' in name), 'querySelector' in p,
+ 'color' in p.style, 'getPropertyValue' in p.style, !('madeUpProperty' in p.style),
+ 'log' in console, !('table' in console)
+];
+for(var i=0;i<checks.length;i+=1){if(!checks[i]){throw Error('probe '+i);}}
+document.title='Supported capabilities only';
+"#],
+        );
+        assert_eq!(result.errors, 0, "{}", page.report());
+        assert_eq!(doc.title, "Supported capabilities only");
+    }
+
+    #[test]
+    fn navigator_reports_our_identity_and_actual_absent_capabilities_without_device_queries() {
+        let script = format!(
+            r#"
+if(navigator !== window.navigator || navigator !== clientInformation || navigator !== self.clientInformation) throw Error('identity');
+if(navigator.userAgent !== '{}' || navigator.platform !== '{}') throw Error('browser');
+if(navigator.cookieEnabled || navigator.pdfViewerEnabled || navigator.javaEnabled()) throw Error('capabilities');
+if(navigator.webdriver !== false || navigator.language !== 'en') throw Error('state');
+if(navigator.plugins.length !== 0 || navigator.mimeTypes.length !== 0) throw Error('plugins');
+if(navigator.plugins.item(0) !== null || navigator.plugins.namedItem('PDF') !== null || navigator.mimeTypes.item(-1) !== null) throw Error('empty');
+if(navigator.plugins[0] !== undefined || navigator.userAgentData !== undefined || navigator.hardwareConcurrency !== undefined) throw Error('fabricated');
+if('hardwareConcurrency' in navigator || 'geolocation' in navigator || '0' in navigator.plugins) throw Error('probes');
+if(typeof navigator.javaEnabled !== 'function' || typeof navigator.plugins.item !== 'function') throw Error('callable');
+navigator.plugins.refresh();
+document.title='Navigator matches browser';
+"#,
+            crate::http::USER_AGENT,
+            navigator_platform()
+        );
+        let (doc, _, page, outcome) = setup("<body></body>", &[&script]);
+        assert_eq!(outcome.errors, 0, "{}", page.report());
+        assert_eq!(doc.title, "Navigator matches browser");
+
+        let (doc, _, page, outcome) = setup(
+            "<body></body>",
+            &[
+                "navigator.cookieEnabled=true;",
+                "document.title=String(navigator.cookieEnabled);",
+            ],
+        );
+        assert_eq!(outcome.errors, 1, "{}", page.report());
+        assert_eq!(doc.title, "false");
+    }
+
+    #[test]
+    fn select_script_values_and_indices_preserve_defaults_and_do_not_emit_user_events() {
+        let (mut doc, mut forms, mut page, outcome) = setup(
+            "<body><form id=f><select id=s name=choice><option value=a>Alpha<option value=b selected>Beta<optgroup label=Hidden disabled><option value=c>Gamma</optgroup></select><p id=result>Initial</p></form></body>",
+            &[r#"
+var s=document.getElementById('s');var events=0;
+s.oninput=function(){events+=1;};s.onchange=function(){events+=1;};
+if(!('selectedIndex' in s) || s.selectedIndex!==1 || s.value!=='b') throw Error('initial');
+s.value='c';if(s.selectedIndex!==2 || s.value!=='c') throw Error('disabled script choice');
+s.value='missing';if(s.selectedIndex!==-1 || s.value!=='') throw Error('missing');
+s.selectedIndex=0;if(s.value!=='a') throw Error('index');
+if(events!==0) throw Error('unexpected input event');
+document.title='Select setters';
+"#],
+        );
+        assert_eq!(outcome.errors, 0, "{}", page.report());
+        assert_eq!(doc.title, "Select setters");
+        let select = id(&doc, "s");
+        let form = id(&doc, "f");
+        assert_eq!(doc.attr(select, "value"), None);
+        assert_eq!(forms.controls[&select].caption, "Alpha");
+        forms.reset(form);
+        assert_eq!(forms.controls[&select].value.text(), "b");
+        assert_eq!(
+            forms.controls[&select].select.as_ref().unwrap().selected,
+            Some(1)
+        );
+        page.begin_job();
+        let mut bridge = Bridge {
+            doc: &mut doc,
+            forms: &mut forms,
+            state: &mut page.state,
+        };
+        bridge
+            .set(node_handle(select), "selectedIndex", Value::Number(99.0))
+            .unwrap();
+        assert_eq!(
+            bridge.get(node_handle(select), "value").unwrap().to_text(),
+            ""
+        );
+        assert!(bridge
+            .set(node_handle(select), "selectedIndex", Value::Host(WINDOW))
+            .is_err());
+    }
+
+    #[test]
+    fn eval_csp_is_enforced_for_startup_timers_and_user_events() {
+        let source = r#"
+var code="document.getElementById('out').textContent='changed'; 7;";
+function attempt(label){
+ try {
+  var compile=eval;
+  var result=label==='timer' ? compile(code) : eval(code);
+  if(result!==7) throw Error('eval completion');
+  document.title+=label+':allowed;';
+ } catch(error){ document.title+=label+':'+error.name+';'; }
+}
+document.title='';attempt('start');
+setTimeout(function(){attempt('timer');},0);
+document.getElementById('button').addEventListener('click',function(){attempt('click');});
+"#;
+        for (header, meta, allowed) in [
+            ("", "", true),
+            ("script-src 'unsafe-inline'", "", false),
+            ("script-src 'unsafe-inline' 'unsafe-eval'", "", true),
+            (
+                "default-src 'none'; script-src-elem 'unsafe-inline' 'unsafe-eval'",
+                "",
+                false,
+            ),
+            ("script-src 'nonce-YWJj'", "", false),
+            ("script-src 'nonce-YWJj' 'unsafe-eval'", "", true),
+            (
+                "script-src 'unsafe-inline' 'unsafe-eval', script-src 'unsafe-inline'",
+                "",
+                false,
+            ),
+            (
+                "script-src 'unsafe-inline' 'unsafe-eval'",
+                "script-src 'unsafe-inline'",
+                false,
+            ),
+        ] {
+            let mut policy = crate::csp::PolicySet::default();
+            policy.add_header(header);
+            if !meta.is_empty() {
+                policy.add_meta(meta, 1);
+            }
+            // The loader filters inline sources before start_with_policy.
+            // Exercise that same gate so a nonce-authorized source must still
+            // pass the independent string-compilation decision at execution.
+            assert!(policy.allows_inline(10, Some("YWJj"), source).is_ok());
+            let mut doc =
+                html::parse("<body><p id=out>untouched</p><button id=button>Run</button></body>");
+            doc.scripting_enabled = true;
+            let button = id(&doc, "button");
+            let out = id(&doc, "out");
+            let mut forms = Forms::new(&doc);
+            let mut page = Page::new();
+            let scripts = [Script {
+                node: 10,
+                label: "eval CSP fixture".into(),
+                source: source.into(),
+            }];
+            assert_eq!(
+                page.start_with_policy(&mut doc, &mut forms, &scripts, &policy)
+                    .errors,
+                0,
+                "{}",
+                page.report()
+            );
+            assert_eq!(
+                page.poll_timer_at(
+                    &mut doc,
+                    &mut forms,
+                    Instant::now() + Duration::from_secs(1)
+                )
+                .unwrap()
+                .errors,
+                0,
+                "{}",
+                page.report()
+            );
+            assert_eq!(
+                click(&mut page, &mut doc, &mut forms, button).errors,
+                0,
+                "{}",
+                page.report()
+            );
+            let expected = if allowed { "allowed" } else { "EvalError" };
+            assert_eq!(
+                doc.title,
+                format!("start:{expected};timer:{expected};click:{expected};"),
+                "header={header}; meta={meta}"
+            );
+            assert_eq!(
+                text(&doc, out),
+                if allowed { "changed" } else { "untouched" }
+            );
+        }
+    }
+
+    #[test]
+    fn deferred_load_uses_the_existing_realm_and_fires_once_after_ready() {
+        let mut doc = html::parse("<html><body><p id='result'>Initial</p></body></html>");
+        doc.scripting_enabled = true;
+        let mut forms = Forms::new(&doc);
+        let mut page = Page::new();
+        let scripts = [Script { node: 0, label: "deferred fixture".into(), source: r#"
+var order='script';
+document.addEventListener('DOMContentLoaded', function(){order+='-dom';document.title=document.readyState;});
+setTimeout(function(){order+='-timer';},0);
+window.addEventListener('load',function(){order+='-load';document.getElementById('result').textContent=order;document.title=document.readyState;});
+"#.into() }];
+        assert_eq!(
+            page.start_before_load(
+                &mut doc,
+                &mut forms,
+                &scripts,
+                &crate::csp::PolicySet::default()
+            )
+            .errors,
+            0
+        );
+        assert_eq!(doc.title, "interactive");
+        assert_eq!(text(&doc, id(&doc, "result")), "Initial");
+        assert_eq!(page.poll_timer(&mut doc, &mut forms).unwrap().errors, 0);
+        let finished = page.finish_loading(&mut doc, &mut forms);
+        assert!(finished.layout_changed && finished.errors == 0);
+        assert_eq!(doc.title, "complete");
+        assert_eq!(text(&doc, id(&doc, "result")), "script-dom-timer-load");
+        assert!(!page.finish_loading(&mut doc, &mut forms).layout_changed);
+        assert_eq!(text(&doc, id(&doc, "result")), "script-dom-timer-load");
+    }
+
+    #[test]
+    fn timers_are_deferred_ordered_cancellable_and_keep_argument_identity() {
+        let (mut doc, mut forms, mut page, outcome) = setup(
+            "<html><body><p id=out>Waiting</p></body></html>",
+            &[r#"var order='startup'; var shared={count:1};
+var cancelled=setTimeout(()=>{missing();},0); clearTimeout(cancelled);
+var schedule=window.setTimeout;
+if(typeof setTimeout!=='function' || schedule!==setTimeout || self.clearTimeout!==clearTimeout){missing();}
+schedule(function(object,label){
+ if(this!==window){missing();} object.count++;
+ document.getElementById('out').textContent=label+':'+object.count+':'+order;
+ setTimeout(()=>{document.title='nested';},0);
+},0,shared,'first');
+setTimeout(()=>{document.title='second:'+shared.count;},0);
+document.addEventListener('DOMContentLoaded',()=>{order+='-dom';});
+window.addEventListener('load',()=>{order+='-load';});"#],
+        );
+        assert_eq!(outcome.errors, 0, "{}", page.report());
+        assert_eq!(text(&doc, id(&doc, "out")), "Waiting");
+        assert_eq!(page.state.timers.len(), 2);
+        let due = Instant::now() + Duration::from_secs(1);
+        assert_eq!(
+            page.poll_timer_at(&mut doc, &mut forms, due)
+                .unwrap()
+                .errors,
+            0
+        );
+        assert_eq!(text(&doc, id(&doc, "out")), "first:2:startup-dom-load");
+        assert_eq!(page.state.timers.len(), 2);
+        page.poll_timer_at(&mut doc, &mut forms, due).unwrap();
+        assert_eq!(doc.title, "second:2");
+        page.poll_timer_at(&mut doc, &mut forms, due).unwrap();
+        assert_eq!(doc.title, "nested");
+        assert!(page.next_timer_deadline().is_none());
+        assert_eq!(page.state.timer_bytes, 0);
+    }
+
+    #[test]
+    fn timer_delay_conversion_limits_and_callback_failure_are_bounded() {
+        assert_eq!(timer_integer(&Value::Number(4_294_967_297.0)).unwrap(), 1);
+        assert_eq!(timer_integer(&Value::String("-1.7".into())).unwrap(), -1);
+        assert_eq!(timer_integer(&Value::Number(f64::INFINITY)).unwrap(), 0);
+        let (mut doc, mut forms, mut page, outcome) = setup("<p id=out>Waiting</p>", &[
+            "setTimeout(()=>{while(true){}},0); setTimeout(()=>{document.title='Recovered';},0); setTimeout(()=>{document.title='Too early';},60000);"
+        ]);
+        assert_eq!(outcome.errors, 0);
+        let now = Instant::now();
+        assert_eq!(
+            page.poll_timer_at(&mut doc, &mut forms, now)
+                .unwrap()
+                .errors,
+            1
+        );
+        assert_eq!(
+            page.poll_timer_at(&mut doc, &mut forms, now)
+                .unwrap()
+                .errors,
+            0
+        );
+        assert_eq!(doc.title, "Recovered");
+        assert!(page.poll_timer_at(&mut doc, &mut forms, now).is_none());
+        let (_, _, page, outcome) = setup(
+            "<p>Timers</p>",
+            &["try{setTimeout('document.title=1',0);}catch(e){document.title='Wrong';}"],
+        );
+        assert_eq!(outcome.errors, 1);
+        assert!(page.state.timers.is_empty());
+        let (_, _, page, outcome) = setup(
+            "<p>Timers</p>",
+            &["for(var i=0;i<65;i++){setTimeout(()=>{},60000);}"],
+        );
+        assert_eq!(outcome.errors, 1);
+        assert_eq!(page.state.timers.len(), MAX_TIMERS);
+        let source = format!("var large='{}';setTimeout(()=>{{}},60000,large,large,large);setTimeout(()=>{{}},60000,large,large);", "x".repeat(60 * 1024));
+        let (_, _, page, outcome) = setup("<p>Timers</p>", &[&source]);
+        assert_eq!(outcome.errors, 1);
+        assert_eq!(page.state.timers.len(), 1);
+        assert!(page.report().contains("Timer argument memory limit"));
+    }
+
+    #[test]
+    fn nested_timers_are_clamped_and_cannot_run_forever() {
+        let (mut doc, mut forms, mut page, outcome) = setup(
+            "<p>Timers</p>",
+            &["function again(){setTimeout(again,0);} setTimeout(again,0);"],
+        );
+        assert_eq!(outcome.errors, 0);
+        let future = Instant::now() + Duration::from_secs(3600);
+        for _ in 0..6 {
+            page.poll_timer_at(&mut doc, &mut forms, future).unwrap();
+        }
+        let before = Instant::now();
+        page.poll_timer_at(&mut doc, &mut forms, future).unwrap();
+        assert!(page.state.timers[0].due >= before + Duration::from_millis(4));
+        for _ in 7..MAX_TIMER_CALLBACKS {
+            page.poll_timer_at(&mut doc, &mut forms, future).unwrap();
+        }
+        assert!(page.state.timers.is_empty());
+        assert_eq!(page.state.timer_callbacks, MAX_TIMER_CALLBACKS);
+        assert!(page.report().contains("Timer callback limit reached"));
+    }
+
+    #[test]
+    fn startup_order_live_dom_forms_and_ready_events() {
+        let (doc, forms, page, result) = setup(
+            "<html><head><title>Initial</title></head><body><form id=f><input id=name value=original><input id=check type=checkbox><button id=button type=button><span id=caption>Old</span></button></form><p id=result>Waiting</p></body></html>",
+            &[
+                "var order = 'one'; document.getElementById('name').value = 'edited'; document.getElementById('check').checked = true; document.getElementById('caption').textContent = 'Changed';",
+                "order += '-two'; document.addEventListener('DOMContentLoaded', function(event) { order += '-dom'; if (event.target !== document || this !== document || document.readyState !== 'interactive') { missing(); } }); window.addEventListener('load', function(event) { if(event.target !== document || event.currentTarget !== window || this !== window || document.readyState !== 'complete'){missing();} document.title = order + '-load'; document.getElementById('result').textContent = document.getElementById('name').value; document.getElementById('result').style.color = 'red'; document.getElementById('result').style.setProperty('font-weight', 'bold'); });",
+            ],
+        );
+        assert_eq!(result.errors, 0, "{}", page.report());
+        assert!(result.layout_changed);
+        assert_eq!(doc.title, "one-two-dom-load");
+        assert_eq!(text(&doc, id(&doc, "result")), "edited");
+        assert_eq!(forms.controls[&id(&doc, "name")].value.text(), "edited");
+        assert!(forms.controls[&id(&doc, "check")].checked);
+        assert_eq!(forms.controls[&id(&doc, "button")].caption, "Changed");
+        assert_eq!(
+            doc.attr(id(&doc, "result"), "style"),
+            Some("color:red;font-weight:bold;")
+        );
+    }
+
+    #[test]
+    fn event_bubbling_context_return_false_and_non_cancelable_events() {
+        let (mut doc, mut forms, mut page, result) = setup(
+            "<body><form id=f onsubmit='return false'><button id=b type=button onclick=\"document.getElementById('out').textContent += 'p'; return false;\">Go</button></form><p id=out></p></body>",
+            &["var b=document.getElementById('b'); var out=document.getElementById('out'); b.addEventListener('click', function(e){ if(this !== b || e.target !== b || e.currentTarget !== b) { missing(); } out.textContent += 'b'; return false; }); document.getElementById('f').addEventListener('click',function(e){ if(e.target !== b || e.currentTarget !== this) { missing(); } out.textContent += 'f'; }); document.addEventListener('click',function(e){out.textContent += 'd';}); window.addEventListener('click',function(e){out.textContent += 'w';}); b.oninput=function(e){e.preventDefault(); return false;};"],
+        );
+        assert_eq!(result.errors, 0, "{}", page.report());
+        let button = id(&doc, "b");
+        let result = click(&mut page, &mut doc, &mut forms, button);
+        assert_eq!(result.errors, 0, "{}", page.report());
+        assert!(result.prevented);
+        assert_eq!(text(&doc, id(&doc, "out")), "pbfdw");
+        page.begin_job();
+        assert!(
+            !page
+                .dispatch(&mut doc, &mut forms, button, "input", false)
+                .prevented
+        );
+        let form = id(&doc, "f");
+        assert!(
+            page.dispatch(&mut doc, &mut forms, form, "submit", true)
+                .prevented
+        );
+
+        let (mut doc, mut forms, mut page, result) = setup("<body><button id=b type=button>Go</button></body>", &["document.getElementById('b').addEventListener('click', function(e){ return false; });"]);
+        assert_eq!(result.errors, 0);
+        let button = id(&doc, "b");
+        assert!(!click(&mut page, &mut doc, &mut forms, button).prevented);
+    }
+
+    #[test]
+    fn listener_snapshot_deduplication_removal_and_expired_events() {
+        let (mut doc, mut forms, mut page, result) = setup(
+            "<body><button id=b type=button>Go</button><p id=out></p></body>",
+            &["var b=document.getElementById('b'); var out=document.getElementById('out'); function removed(e){out.textContent += 'R';} function late(e){out.textContent += 'L';} function first(e){out.textContent += 'F'; b.removeEventListener('click',removed); b.addEventListener('click',late);} b.addEventListener('click',first); b.addEventListener('click',first); b.addEventListener('click',removed);"],
+        );
+        assert_eq!(result.errors, 0, "{}", page.report());
+        let button = id(&doc, "b");
+        assert_eq!(click(&mut page, &mut doc, &mut forms, button).errors, 0);
+        assert_eq!(text(&doc, id(&doc, "out")), "F");
+        assert_eq!(click(&mut page, &mut doc, &mut forms, button).errors, 0);
+        assert_eq!(text(&doc, id(&doc, "out")), "FFL");
+
+        let (mut doc, mut forms, mut page, result) = setup("<body><button id=b type=button>Go</button></body>", &["var saved=null; document.getElementById('b').onclick=function(e){if(saved !== null){saved.preventDefault();} saved=e;};"]);
+        assert_eq!(result.errors, 0);
+        let button = id(&doc, "b");
+        assert!(!click(&mut page, &mut doc, &mut forms, button).prevented);
+        let result = click(&mut page, &mut doc, &mut forms, button);
+        assert!(!result.prevented);
+        assert_eq!(result.errors, 1);
+        assert!(page.report().contains("Event handle has expired."));
+    }
+
+    #[test]
+    fn text_replacement_is_atomic_reachable_and_reuses_stable_nodes() {
+        let (doc, forms, page, result) = setup(
+            "<body><div id=unsafe><span>Keep</span><input id=edit value=original></div><div id=safe><span id=removed>Old</span></div><p id=result></p><p id=loop>0</p></body>",
+            &[
+                "document.getElementById('unsafe').textContent='must not replace';",
+                "document.getElementById('safe').textContent='new'; document.getElementById('result').textContent=String(document.getElementById('removed') === null); var i=0; while(i<1000){document.getElementById('loop').textContent=String(i); i++;}",
+            ],
+        );
+        assert_eq!(result.errors, 1, "{}", page.report());
+        assert_eq!(text(&doc, id(&doc, "unsafe")), "Keep");
+        assert!(forms.controls.contains_key(&id(&doc, "edit")));
+        assert_eq!(text(&doc, id(&doc, "safe")), "new");
+        assert_eq!(text(&doc, id(&doc, "result")), "true");
+        assert_eq!(text(&doc, id(&doc, "loop")), "999");
+        let before = html::parse("<body><div id=unsafe><span>Keep</span><input id=edit value=original></div><div id=safe><span id=removed>Old</span></div><p id=result></p><p id=loop>0</p></body>").nodes.len();
+        assert_eq!(doc.nodes.len(), before + 2);
+    }
+
+    #[test]
+    fn inert_and_blocked_handlers_never_execute_and_inline_breakout_is_rejected() {
+        let source = "<body><template><button id=inactive onclick=\"document.title='bad'\">Hidden</button></template><noscript><button id=fallback onclick=\"document.title='bad'\">Fallback</button></noscript><button id=b onclick=\"});document.title='escaped';(function(){\">Go</button><p id=out></p></body>";
+        let (doc, _, page, result) = setup(source, &["document.getElementById('out').textContent=String(document.getElementById('inactive') === null && document.getElementById('fallback') === null);"]);
+        assert_eq!(result.errors, 1, "{}", page.report());
+        assert_eq!(doc.title, "");
+        assert_eq!(text(&doc, id(&doc, "out")), "true");
+        let mut doc = html::parse("<body onload=\"document.title='ran'\"><button id=b onclick=\"document.title='ran'\">Go</button></body>");
+        let mut forms = Forms::new(&doc);
+        let mut page = Page::new();
+        let result = page.start(
+            &mut doc,
+            &mut forms,
+            &[Script {
+                node: 0,
+                source: "document.title='ran'".into(),
+                label: "blocked".into(),
+            }],
+        );
+        assert_eq!(result.errors, 0);
+        let button = id(&doc, "b");
+        assert_eq!(click(&mut page, &mut doc, &mut forms, button).errors, 0);
+        assert_eq!(doc.title, "");
+    }
+
+    #[test]
+    fn form_mutations_keep_defaults_groups_and_do_not_dispatch_input() {
+        let (mut doc, mut forms, mut page, result) = setup(
+            "<body><form id=f><fieldset disabled><input id=blocked value=x></fieldset><input id=text value=original><input id=r1 type=radio name=pick checked><input id=r2 type=radio name=pick><input id=submit type=submit value=Before><button id=button type=button value=before>Caption</button></form><p id=out>quiet</p></body>",
+            &["var t=document.getElementById('text'); t.oninput=function(){document.getElementById('out').textContent='unexpected';}; t.value='edited'; document.getElementById('r2').checked=true; document.getElementById('blocked').disabled=false; if(document.getElementById('blocked').disabled !== false){missing();} document.getElementById('submit').value='After'; document.getElementById('button').value='after';"],
+        );
+        assert_eq!(result.errors, 0, "{}", page.report());
+        assert_eq!(text(&doc, id(&doc, "out")), "quiet");
+        assert!(forms.controls[&id(&doc, "blocked")].disabled);
+        assert!(!forms.controls[&id(&doc, "r1")].checked);
+        assert!(forms.controls[&id(&doc, "r2")].checked);
+        assert_eq!(forms.controls[&id(&doc, "submit")].caption, "After");
+        assert_eq!(forms.controls[&id(&doc, "button")].caption, "Caption");
+        forms.reset(id(&doc, "f"));
+        assert_eq!(forms.controls[&id(&doc, "text")].value.text(), "original");
+        assert!(forms.controls[&id(&doc, "r1")].checked);
+        assert!(!forms.controls[&id(&doc, "r2")].checked);
+        let input = id(&doc, "text");
+        page.begin_job();
+        assert_eq!(
+            page.dispatch(&mut doc, &mut forms, input, "input", false)
+                .errors,
+            0
+        );
+        assert_eq!(text(&doc, id(&doc, "out")), "unexpected");
+    }
+
+    #[test]
+    fn attribute_changes_cannot_reassociate_controls_or_add_active_capabilities() {
+        let (doc, forms, page, result) = setup(
+            "<body><p id=first>First</p><form id=f></form><input id=input form=f value=keep><p id=out></p></body>",
+            &[
+                "document.getElementById('f').id='other';",
+                "document.getElementById('first').setAttribute('id','f');",
+                "document.getElementById('input').setAttribute('value','changed');",
+                "document.getElementById('first').setAttribute('onclick','alert(1)');",
+                "document.getElementById('first').style.background='url(https://example.test/)';",
+                "document.getElementById('first').setAttribute('class','ready'); document.getElementById('out').textContent=document.getElementById('input').value;",
+            ],
+        );
+        assert_eq!(result.errors, 5, "{}", page.report());
+        assert_eq!(
+            forms.controls[&id(&doc, "input")].owner,
+            Some(id(&doc, "f"))
+        );
+        assert_eq!(doc.attr(id(&doc, "input"), "value"), Some("keep"));
+        assert_eq!(doc.attr(id(&doc, "first"), "class"), Some("ready"));
+        assert_eq!(text(&doc, id(&doc, "out")), "keep");
+    }
+
+    #[test]
+    fn host_limits_listener_limits_and_shared_jobs_are_visible_diagnostics() {
+        let html = format!(
+            "<body><button id=b type=button>Go</button>{}</body>",
+            "<p>filler</p>".repeat(3000)
+        );
+        let (doc, _, page, result) = setup(
+            &html,
+            &["var b=document.getElementById('b'); while(true){b.disabled = false;}"],
+        );
+        assert!(result.errors >= 1);
+        assert!(page.report().contains("DOM work limit reached"));
+        assert!(!doc.nodes.is_empty());
+
+        let (mut doc, mut forms, mut page, result) = setup("<body><button id=b type=button>Go</button></body>", &["var b=document.getElementById('b'); var i=0; while(i<65){b.addEventListener('click',function(e){console.log('ok');});i++;}"]);
+        assert_eq!(result.errors, 1);
+        assert_eq!(page.state.listeners.len(), MAX_LISTENERS);
+        let button = id(&doc, "b");
+        page.begin_job();
+        page.state.host_work = 1;
+        let result = page.dispatch(&mut doc, &mut forms, button, "click", true);
+        assert!(result.errors >= 1);
+        // dispatch cannot reset the exhausted shared action allowance.
+        assert_eq!(page.state.host_work, 0);
+        assert!(
+            page.dispatch(&mut doc, &mut forms, button, "click", true)
+                .errors
+                >= 1
+        );
+        for _ in 0..200 {
+            page.state.log(&"x".repeat(3000));
+        }
+        assert!(page.report().len() <= MAX_LOG_BYTES + 1024);
+        assert!(page.state.omitted > 0);
+    }
+}
