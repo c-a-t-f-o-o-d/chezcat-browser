@@ -1,0 +1,6 @@
+/target/
+/*.ppm
+/*.bmp
+**/__pycache__/
+*.pyc
+/docs/
