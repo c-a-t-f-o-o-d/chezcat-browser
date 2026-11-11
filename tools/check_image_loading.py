@@ -220,7 +220,7 @@ def serving(assets):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--browser', type=Path, required=True)
-    parser.add_argument('--output', type=Path, default=Path('image-loading-report.json'))
+    parser.add_argument('--output', type=Path, default=Path('results/verification/image-loading-report.json'))
     parser.add_argument('--work-dir', type=Path)
     args = parser.parse_args()
     browser = args.browser.resolve()
@@ -334,7 +334,7 @@ def main():
                                 'reference_frames': len(asset['frames'])} for name, asset in assets.items()},
               'checks_detail': results, 'runs': records}
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(json.dumps(report, indent=2) + '\n')
+    args.output.write_text(json.dumps(report, indent=2) + '\n', encoding="utf-8")
     print(json.dumps({k: v for k, v in report.items() if k not in ('assets', 'checks_detail', 'runs')}, indent=2))
 
 

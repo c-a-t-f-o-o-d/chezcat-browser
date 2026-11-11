@@ -389,7 +389,7 @@ def main():
         source=PROBE
         for name in ('image','jpeg','compression'):
             source=source.replace(name.upper(),json.dumps(str(ROOT/'src'/f'{name}.rs')))
-        (directory/'probe.rs').write_text(source)
+        (directory/'probe.rs').write_text(source, encoding="utf-8")
         executable=directory/('probe.exe' if __import__('os').name=='nt' else 'probe')
         subprocess.run([args.rustc,'--edition=2021','-O',str(directory/'probe.rs'),'-o',str(executable)],check=True)
         process=subprocess.Popen([str(executable)],stdin=subprocess.PIPE,stdout=subprocess.PIPE,text=True)
@@ -421,7 +421,7 @@ def main():
             'results':results}
     if args.output:
         args.output.parent.mkdir(parents=True,exist_ok=True)
-        args.output.write_text(json.dumps(report,indent=2)+'\n')
+        args.output.write_text(json.dumps(report,indent=2)+'\n', encoding="utf-8")
     print(json.dumps({key:value for key,value in report.items() if key!='results'},indent=2))
 
 

@@ -32,7 +32,7 @@ def main():
         with source.open('a') as out:
             out.write('\n#[cfg(test)]\n#[path="independent_string_retention_review.rs"]\nmod independent_string_retention_review;\n')
         harness = tmp / 'harness.rs'
-        harness.write_text('#![allow(dead_code)]\n#[path="src/javascript.rs"]\nmod javascript;\n')
+        harness.write_text('#![allow(dead_code)]\n#[path="src/javascript.rs"]\nmod javascript;\n', encoding="utf-8")
         probe = tmp / 'tests'
         compiled = subprocess.run(['rustc', '--edition=2021', '--test', str(harness), '-o', str(probe)], capture_output=True, text=True, timeout=180)
         if compiled.returncode:
@@ -45,7 +45,7 @@ def main():
         'source_and_tests_unchanged_during_run': True, 'exit_code': run.returncode,
         'stdout': run.stdout, 'stderr': run.stderr}
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(json.dumps(report, indent=2) + '\n')
+    args.output.write_text(json.dumps(report, indent=2) + '\n', encoding="utf-8")
     print(run.stdout)
     print(run.stderr, end='')
     return run.returncode

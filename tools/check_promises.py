@@ -128,8 +128,8 @@ def source_manifest(root):
 def compile_probe(source_root, directory, rustc="rustc"):
     path = directory / "promise-probe.rs"
     executable = directory / ("promise-probe.exe" if os.name == "nt" else "promise-probe")
-    path.write_text(PROBE.replace("JAVASCRIPT_SOURCE", json.dumps(str(source_root / "src/javascript.rs"))))
-    available = "pub fn microtask_checkpoint(" in (source_root / "src/promises.rs").read_text() if (source_root / "src/promises.rs").is_file() else False
+    path.write_text(PROBE.replace("JAVASCRIPT_SOURCE", json.dumps(str(source_root / "src/javascript.rs"))), encoding="utf-8")
+    available = "pub fn microtask_checkpoint(" in (source_root / "src/promises.rs").read_text(encoding="utf-8") if (source_root / "src/promises.rs").is_file() else False
     flags = ["--cfg", "chezcat_microtasks"] if available else []
     subprocess.run([rustc, "--edition=2021", "-O", *flags, str(path), "-o", str(executable)],
                    capture_output=True, text=True, timeout=120, check=True)
@@ -186,7 +186,7 @@ def main():
     parser.add_argument("--allow-gaps", action="store_true")
     parser.add_argument("--references-only", action="store_true")
     options = parser.parse_args()
-    data = json.loads(CASE_FILE.read_text())
+    data = json.loads(CASE_FILE.read_text(encoding="utf-8"))
     cases = [case for case in data["cases"] if not options.case_prefix or any(case["id"].startswith(p) for p in options.case_prefix)]
     negatives = [] if options.references_only else data["negative_cases"]
     if not 1 <= len(cases) <= 128 or len({case["id"] for case in cases}) != len(cases):
@@ -230,7 +230,7 @@ def main():
         "comparisons":len(results),"passed":sum(case.get("passed",False) for case in results),
         "negative_cases":len(bounds),"negative_passed":sum(case["passed"] for case in bounds),"results":results,"negatives":bounds}
     options.output.parent.mkdir(parents=True,exist_ok=True)
-    options.output.write_text(json.dumps(report,indent=2)+"\n")
+    options.output.write_text(json.dumps(report,indent=2)+"\n", encoding="utf-8")
     print(json.dumps({key:report[key] for key in ("label","comparisons","passed","negative_cases","negative_passed","checkpoint_available","references_only")},indent=2))
     if options.references_only or options.allow_gaps: return 0
     return 0 if report["passed"]==len(results) and report["negative_passed"]==len(bounds) else 1

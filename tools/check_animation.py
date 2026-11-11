@@ -231,7 +231,7 @@ def demo_assets():
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--rustc", default="rustc")
-    parser.add_argument("--output", type=Path, default=Path("animation-report.json"))
+    parser.add_argument("--output", type=Path, default=Path("results/verification/animation-report.json"))
     parser.add_argument("--artifacts", type=Path)
     parser.add_argument("--magick", default=shutil.which("magick"))
     parser.add_argument("--ffmpeg", default=shutil.which("ffmpeg"))
@@ -243,7 +243,7 @@ def main():
     source = PROBE.replace("IMAGE_SOURCE", json.dumps(str(ROOT / "src/image.rs")))
     source = source.replace("COMPRESSION_SOURCE", json.dumps(str(ROOT / "src/compression.rs")))
     source = source.replace("JPEG_SOURCE", json.dumps(str(ROOT / "src/jpeg.rs")))
-    (folder / "probe.rs").write_text(source)
+    (folder / "probe.rs").write_text(source, encoding="utf-8")
     compiled = subprocess.run([args.rustc, "--edition=2021", "-O", str(folder / "probe.rs"), "-o", str(folder / "probe")], capture_output=True, text=True)
     if compiled.returncode:
         raise RuntimeError(compiled.stderr)
@@ -490,7 +490,7 @@ def main():
               "png_source_sha256": hashlib.sha256((ROOT / "src/image_png.rs").read_bytes()).hexdigest(),
               "comparisons": checks, "rejections": rejections}
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(json.dumps(report, indent=2) + "\n")
+    args.output.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     print(json.dumps({k: v for k, v in report.items() if k not in ("comparisons", "rejections")}, indent=2))
 
 

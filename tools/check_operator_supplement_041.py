@@ -16,10 +16,10 @@ import tempfile
 
 sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parents[1]
-HELPER = ROOT / 'tools/verification-0.40/check_javascript-inventory-helper.py'
+HELPER = ROOT / 'tools/check_javascript.py'
 FIXTURES = ROOT / 'tools/operator_supplement_cases_041.json'
-REFERENCES = ROOT / 'tools/verification-0.41/operator-supplement-original-node.json'
-ADJUDICATION = ROOT / 'tools/verification-0.41/operator-supplement-bound-adjudication.json'
+REFERENCES = ROOT / 'tools/reference/review-041/operator-supplement-original-node.json'
+ADJUDICATION = ROOT / 'tools/reference/review-041/operator-supplement-bound-adjudication.json'
 
 
 def digest(path):
@@ -36,11 +36,11 @@ def main():
     spec = importlib.util.spec_from_file_location('operator_helper_041', HELPER)
     helper = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(helper)
-    fixture_data = json.loads(FIXTURES.read_text())
-    reference_data = json.loads(REFERENCES.read_text())
+    fixture_data = json.loads(FIXTURES.read_text(encoding="utf-8"))
+    reference_data = json.loads(REFERENCES.read_text(encoding="utf-8"))
     assert reference_data['fixture_sha256'] == digest(FIXTURES)
     originals = {c['id']: c for c in reference_data['cases']}
-    adjudication = json.loads(ADJUDICATION.read_text())
+    adjudication = json.loads(ADJUDICATION.read_text(encoding="utf-8"))
     assert adjudication['fixture_sha256'] == digest(FIXTURES)
     bound_assertions = {c['id']: c for c in adjudication['cases']}
     root = options.source_root.resolve()
@@ -55,7 +55,7 @@ def main():
         tmp = Path(tmp)
         rust = tmp / 'probe.rs'
         probe = tmp / 'probe'
-        rust.write_text(helper.PROBE.replace('JAVASCRIPT_SOURCE', json.dumps(str(root / 'src/javascript.rs'))))
+        rust.write_text(helper.PROBE.replace('JAVASCRIPT_SOURCE', json.dumps(str(root / 'src/javascript.rs'))), encoding="utf-8")
         subprocess.run(['rustc', '--edition=2021', '-O', str(rust), '-o', str(probe)], capture_output=True, text=True, check=True, timeout=180)
         for case in fixture_data['cases']:
             source = case['source']
@@ -102,7 +102,7 @@ def main():
         'original_bound_categories_matched': sum(x['original_expected_category_matched'] for x in bounds),
         'results': results, 'early_errors': early, 'bounds': bounds}
     options.output.parent.mkdir(parents=True, exist_ok=True)
-    options.output.write_text(json.dumps(report, indent=2) + '\n')
+    options.output.write_text(json.dumps(report, indent=2) + '\n', encoding="utf-8")
     print(json.dumps({k: v for k, v in report.items() if k not in ['source_manifest', 'inputs', 'results', 'early_errors', 'bounds']}, indent=2))
     return 0 if options.allow_gaps or all(x['passed'] for x in results + early + bounds) else 1
 

@@ -221,7 +221,7 @@ def exercise(browser, folder, results):
             process = subprocess.run([str(browser), first.origin + path, "--trust-file",
                 str(trust or FIXTURES / "ca.pem"), "--no-profile", "--activity-report", str(report),
                 "--wait-ms", "350"], capture_output=True, text=True, timeout=30)
-            text = report.read_text() if report.exists() else ""
+            text = report.read_text(encoding="utf-8") if report.exists() else ""
             require((process.returncode == 0) == succeeds, f"{path}: {process.stderr}")
             if title:
                 require("Page title: " + title in text, f"{path}: missing title: {text}")
@@ -282,7 +282,7 @@ def main():
     except (AssertionError, OSError, subprocess.SubprocessError) as error:
         result["error"] = str(error)
     if options.output:
-        options.output.write_text(json.dumps(result, indent=2) + "\n")
+        options.output.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(result, indent=2))
     raise SystemExit(0 if result["passed"] else 1)
 

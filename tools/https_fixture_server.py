@@ -131,7 +131,7 @@ def main() -> None:
                 parser.exit(1, f"Cannot open the demo browser: {error}\n")
             print("Opened a NEW browser window with the isolated demo trust file.", flush=True)
         else:
-            print(f"Open the matching demo browser: .\\Run-Https-Browser.cmd {port}", flush=True)
+            print(f"Open the matching demo browser: .\\tools\\demos\\Run-Https-Browser.cmd {port}", flush=True)
         print("Demo trust: tools/https-demo/demo-roots.pem (local fixtures only).", flush=True)
         print("An already-open normal browser does not trust these test certificates.", flush=True)
         print("For Google, EFF and GRC, start ChezCat.exe normally in a separate window.", flush=True)

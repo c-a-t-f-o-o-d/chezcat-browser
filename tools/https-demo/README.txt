@@ -1,4 +1,4 @@
-LOCAL HTTPS TEST FIXTURES - OWN BROWSER 0.8
+LOCAL HTTPS TEST FIXTURES - CHEZCAT
 
 The demo server defaults to a P-256 ECDSA identity. It also supports RSA and
 P-384 identities. The browser's TLS 1.3 subset supports ChaCha20-Poly1305,
@@ -28,15 +28,15 @@ All three leaf identities cover localhost and 127.0.0.1. All demo certificates
 are valid from 2025-01-01 through 2035-01-01 UTC.
 
 RUN THE DEMO
-Run Run-Https-Demo.cmd. It starts the server and opens the correctly trusted demo browser.
-For TLS 1.2, use: Run-Https-Demo.cmd --tls-version 1.2
-For the separate two-step workflow, add --server-only then run Run-Https-Browser.cmd.
+From the project root, run tools\demos\Run-Https-Demo.cmd. It starts the server and opens the correctly trusted demo browser.
+For TLS 1.2, use: tools\demos\Run-Https-Demo.cmd --tls-version 1.2
+For the separate two-step workflow, add --server-only then run tools\demos\Run-Https-Browser.cmd.
 The browser launcher explicitly selects demo-roots.pem, which contains only
 ca.pem and ec-ca.pem, in place of the normal public trust roots.
 The server binds only to 127.0.0.1. Python is needed only for this test server.
 
-Build 0.8 adds original baseline/progressive JPEG decoding and basic relative,
-absolute and fixed CSS positioning. Open either new demo through HTTPS:
+These retained demos exercise original JPEG decoding and CSS positioning.
+Open either through HTTPS:
 
   https://localhost:8766/compressed-pages/jpeg-demo.html
   https://localhost:8766/compressed-pages/position-demo.html

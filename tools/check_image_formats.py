@@ -174,8 +174,8 @@ def run():
    w,h=struct.unpack('<II',p.stdout[:8]);assert 0<w<=16384 and 0<h<=16384 and w*h<=4194304 and len(p.stdout)==8+w*h*4
   malformed.append(p.returncode)
  report={'generated_valid':len(results),'pillow_comparable':sum('pillow_max_channel_difference'in v for v in results),'pillow_unsupported':sum('pillow_unsupported'in v for v in results),'malformed_mutations':len(malformed),'results':results}
- (ROOT/'raster-compare-results.json').write_text(json.dumps(report,indent=2)+'\n')
+ (ROOT/'raster-compare-results.json').write_text(json.dumps(report,indent=2)+'\n', encoding="utf-8")
  if args.output:
-  args.output.parent.mkdir(parents=True, exist_ok=True);args.output.write_text(json.dumps(report,indent=2)+'\n')
+  args.output.parent.mkdir(parents=True, exist_ok=True);args.output.write_text(json.dumps(report,indent=2)+'\n', encoding="utf-8")
  print(json.dumps({k:v for k,v in report.items() if k!='results'},indent=2))
 if __name__=='__main__':run()

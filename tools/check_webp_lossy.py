@@ -47,7 +47,7 @@ match image::decode(&d){Ok(b)=>{let mut o=std::io::stdout().lock();o.write_all(&
 '''
 for module in ('compression','jpeg','image'):
     source=source.replace(module.upper(),json.dumps(str(REPO/'src'/(module+'.rs'))))
-(root/'vp8-probe.rs').write_text(source)
+(root/'vp8-probe.rs').write_text(source, encoding="utf-8")
 subprocess.run([args.rustc, '--edition', '2021', '-O', str(root/'vp8-probe.rs'), '-o', str(probe)], check=True)
 rng = random.Random(2828)
 fixtures = []
@@ -302,6 +302,6 @@ if args.write_demos:
 summary = {'cases':len(results),'libvpx_cases':vpx_cases,'animation_frames':len(animation_results),'demo_frames':len(demo_checks),'malformed_rejections':len(malformed),'mutations':mutations,'errors':sum('error' in r for r in results),'over_tolerance':sum(r.get('maximum',0)>1 for r in results+animation_results),'maximum':max((r.get('maximum',0) for r in results+animation_results),default=0),'results':results,'animation_results':animation_results,'demo_checks':demo_checks}
 if args.output:
     args.output.parent.mkdir(parents=True,exist_ok=True)
-    args.output.write_text(json.dumps(summary,indent=2)+'\n')
+    args.output.write_text(json.dumps(summary,indent=2)+'\n', encoding="utf-8")
 print(json.dumps({k:v for k,v in summary.items() if k not in ('results','animation_results','demo_checks')}))
 raise SystemExit(bool(summary['errors'] or summary['over_tolerance']))

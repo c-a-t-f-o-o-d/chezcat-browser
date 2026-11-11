@@ -2460,21 +2460,21 @@ BROWSER_CASES.extend([
 # 0.41: retain original fixture bytes and compare complete outcomes. These
 # development-only files and their original Node references were frozen before
 # implementation; independent review inputs remain separate.
-_041 = ROOT / "tools/verification-0.41"
+_041 = ROOT / "tools/reference/review-041"
 _FIXTURE_PATHS_041 = [
     _041 / 'string-objects-cases.json',
     _041 / 'object-is-original-node.json',
     _041 / 'string-objects-boundary-adjudication.json',
     _041 / 'operator-supplement-bound-adjudication.json',
     ROOT / 'tools/operator_supplement_cases_041.json',
-    ROOT / 'tools/url-041/frozen.json',
-    ROOT / 'tools/url-041/edge-review-frozen.json',
-    ROOT / 'tools/url-041/bounds-corrected.json',
+    ROOT / 'tools/reference/url-041/frozen.json',
+    ROOT / 'tools/reference/url-041/edge-review-frozen.json',
+    ROOT / 'tools/reference/url-041/bounds-corrected.json',
 ]
 _FIXTURE_HASHES_041 = {str(path.relative_to(ROOT)): hashlib.sha256(path.read_bytes()).hexdigest() for path in _FIXTURE_PATHS_041}
-_string_objects_041 = json.loads((_041 / "string-objects-cases.json").read_text())['cases']
-_object_is_041 = json.loads((_041 / "object-is-original-node.json").read_text())['cases']
-_operators_041 = json.loads((ROOT / "tools/operator_supplement_cases_041.json").read_text())
+_string_objects_041 = json.loads((_041 / "string-objects-cases.json").read_text(encoding="utf-8"))['cases']
+_object_is_041 = json.loads((_041 / "object-is-original-node.json").read_text(encoding="utf-8"))['cases']
+_operators_041 = json.loads((ROOT / "tools/operator_supplement_cases_041.json").read_text(encoding="utf-8"))
 COMPLETION_CASES.append(('new-wrapper-constructor-cannot-catch-atomic', 'try{new String("x");}catch(e){test.record(1);}finally{test.record(2);}'))
 COMPLETION_CASES.extend((row['id'], row['source']) for row in _string_objects_041 if row['kind'] == 'comparison')
 COMPLETION_CASES.extend((row['id'], row['source']) for row in _object_is_041)
@@ -2495,19 +2495,19 @@ ATOMIC_NEGATIVE_CASES.update(row['id'] for row in _limits_041)
 
 # The forty original URL programs retain their frozen source and completion
 # values. Corrected bound inputs are documented separately by the owner checker.
-_url_041 = json.loads((ROOT / "tools/url-041/frozen.json").read_text())
+_url_041 = json.loads((ROOT / "tools/reference/url-041/frozen.json").read_text(encoding="utf-8"))
 COMPLETION_CASES.extend((row['name'], row['source']) for row in _url_041['ordinary'])
-_url_edges_041 = json.loads((ROOT / 'tools/url-041/edge-review-frozen.json').read_text())['cases']
+_url_edges_041 = json.loads((ROOT / 'tools/reference/url-041/edge-review-frozen.json').read_text(encoding="utf-8"))['cases']
 COMPLETION_CASES.extend((row['name'], row['source']) for row in _url_edges_041)
-_url_bounds_041 = json.loads((ROOT / 'tools/url-041/bounds-corrected.json').read_text())['bounds']
+_url_bounds_041 = json.loads((ROOT / 'tools/reference/url-041/bounds-corrected.json').read_text(encoding="utf-8"))['bounds']
 NEGATIVE.extend((row['name'], row['source']) for row in _url_bounds_041)
 ATOMIC_NEGATIVE_CASES.update(row['name'] for row in _url_bounds_041)
 NEGATIVE_DIAGNOSTICS_041 = {row['name']: row['diagnostic'] for row in _url_bounds_041}
 NEGATIVE_DIAGNOSTICS_041.update({row['id']: row['error_contains'] for row in _string_objects_041 if row['kind'] == 'boundary'})
 NEGATIVE_DIAGNOSTICS_041.update({row['id']: row['error_fragment'] for row in _operators_041['bounds']})
-_string_bound_041 = json.loads((_041 / 'string-objects-boundary-adjudication.json').read_text())
+_string_bound_041 = json.loads((_041 / 'string-objects-boundary-adjudication.json').read_text(encoding="utf-8"))
 NEGATIVE_DIAGNOSTICS_041[_string_bound_041['id']] = _string_bound_041['accepted_error_contains']
-for _row in json.loads((_041 / 'operator-supplement-bound-adjudication.json').read_text())['cases']:
+for _row in json.loads((_041 / 'operator-supplement-bound-adjudication.json').read_text(encoding="utf-8"))['cases']:
     NEGATIVE_DIAGNOSTICS_041[_row['id']] = _row['adjudicated_error_fragment']
 
 def main():

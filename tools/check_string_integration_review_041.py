@@ -16,9 +16,9 @@ import tempfile
 
 sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parents[1]
-HELPER = ROOT / 'tools/verification-0.40/check_javascript-inventory-helper.py'
+HELPER = ROOT / 'tools/check_javascript.py'
 FIXTURES = ROOT / 'tools/string_integration_review_cases_041.json'
-REFERENCES = ROOT / 'tools/verification-0.41/string-integration-original-node.json'
+REFERENCES = ROOT / 'tools/reference/review-041/string-integration-original-node.json'
 
 
 def digest(path):
@@ -39,8 +39,8 @@ def main():
     spec = importlib.util.spec_from_file_location('string_integration_helper', HELPER)
     helper = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(helper)
-    cases = json.loads(FIXTURES.read_text())['cases']
-    originals = json.loads(REFERENCES.read_text())
+    cases = json.loads(FIXTURES.read_text(encoding="utf-8"))['cases']
+    originals = json.loads(REFERENCES.read_text(encoding="utf-8"))
     assert originals['fixture_sha256'] == digest(FIXTURES)
     originals = {c['id']: c for c in originals['cases']}
     root = args.source_root.resolve()
@@ -52,7 +52,7 @@ def main():
         tmp = Path(tmp)
         rust = tmp / 'probe.rs'
         probe = tmp / 'probe'
-        rust.write_text(helper.PROBE.replace('JAVASCRIPT_SOURCE', json.dumps(str(root / 'src/javascript.rs'))))
+        rust.write_text(helper.PROBE.replace('JAVASCRIPT_SOURCE', json.dumps(str(root / 'src/javascript.rs'))), encoding="utf-8")
         subprocess.run(['rustc', '--edition=2021', '-O', str(rust), '-o', str(probe)], capture_output=True, text=True, check=True, timeout=180)
         for case in cases:
             source = case['source']
@@ -71,7 +71,7 @@ def main():
         'inputs': inputs, 'source_and_inputs_unchanged_during_run': True,
         'cases': len(rows), 'matches': sum(x['matches_node'] for x in rows), 'results': rows}
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(json.dumps(report, indent=2) + '\n')
+    args.output.write_text(json.dumps(report, indent=2) + '\n', encoding="utf-8")
     print(json.dumps({k: v for k, v in report.items() if k not in ['source_manifest', 'inputs', 'results']}, indent=2))
     for row in rows:
         if not row['matches_node']:

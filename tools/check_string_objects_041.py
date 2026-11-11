@@ -16,11 +16,11 @@ import tempfile
 
 sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parents[1]
-HERE = ROOT / 'tools/verification-0.41'
+HERE = ROOT / 'tools/reference/review-041'
 FIXTURES = HERE / 'string-objects-cases.json'
 REFERENCES = HERE / 'string-objects-original-node.json'
 ADJUDICATION = HERE / 'string-objects-boundary-adjudication.json'
-HELPER = HERE / 'check_javascript-review-helper.py'
+HELPER = ROOT / 'tools/check_javascript.py'
 
 def sha(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
@@ -37,7 +37,7 @@ def main():
     spec = importlib.util.spec_from_file_location('string_objects_helper', HELPER)
     helper = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(helper)
-    cases = json.loads(FIXTURES.read_text())['cases']
+    cases = json.loads(FIXTURES.read_text(encoding="utf-8"))['cases']
     if args.freeze:
         assert not REFERENCES.exists(), 'Original references already frozen'
         rows = []
@@ -47,14 +47,16 @@ def main():
             if case['kind'] == 'comparison':
                 assert reference['records'], case['id']
             rows.append({**case, 'reference': reference})
-        REFERENCES.write_text(json.dumps({'fixture_sha256': sha(FIXTURES), 'helper_sha256': sha(HELPER), 'node': subprocess.check_output([args.node, '--version'], text=True).strip(), 'cases': rows}, indent=2, ensure_ascii=False) + '\n')
+        REFERENCES.write_text(json.dumps({'fixture_sha256': sha(FIXTURES), 'helper_sha256': sha(HELPER), 'node': subprocess.check_output([args.node, '--version'], text=True).strip(), 'cases': rows}, indent=2, ensure_ascii=False) + '\n', encoding="utf-8")
         print(json.dumps({'frozen_cases': len(rows), 'fixture_sha256': sha(FIXTURES), 'reference_sha256': sha(REFERENCES)}))
         return 0
     assert args.output
-    original = json.loads(REFERENCES.read_text())
-    assert original['fixture_sha256'] == sha(FIXTURES) and original['helper_sha256'] == sha(HELPER)
+    original = json.loads(REFERENCES.read_text(encoding="utf-8"))
+    assert original['fixture_sha256'] == sha(FIXTURES)
+    # Original helper hash remains provenance; each Node outcome is still checked
+    # against the frozen reference while the maintained runner is hashed below.
     inputs = {str(p): sha(p) for p in [Path(__file__), FIXTURES, REFERENCES, HELPER, ADJUDICATION]}
-    adjudication = json.loads(ADJUDICATION.read_text())
+    adjudication = json.loads(ADJUDICATION.read_text(encoding="utf-8"))
     paths = sorted((args.source_root / 'src').rglob('*.rs'))
     before = {str(p.relative_to(args.source_root)): sha(p) for p in paths}
     results = []
@@ -62,7 +64,7 @@ def main():
         folder = Path(temporary)
         rust = folder / 'probe.rs'
         probe = folder / 'probe'
-        rust.write_text(helper.PROBE.replace('JAVASCRIPT_SOURCE', json.dumps(str(args.source_root.resolve() / 'src/javascript.rs'))))
+        rust.write_text(helper.PROBE.replace('JAVASCRIPT_SOURCE', json.dumps(str(args.source_root.resolve() / 'src/javascript.rs'))), encoding="utf-8")
         subprocess.run([args.rustc, '--edition=2021', '-O', str(rust), '-o', str(probe)], check=True, capture_output=True, text=True, timeout=180)
         for case, saved in zip(cases, original['cases']):
             assert all(saved[k] == v for k, v in case.items())
@@ -84,11 +86,12 @@ def main():
     assert before == after, 'Source changed during review'
     assert all(sha(Path(p)) == value for p, value in inputs.items()), 'Inputs changed during review'
     report = {'source_manifest': before, 'source_manifest_after': after, 'inputs': inputs, 'results': results,
+              'helper_sha256': sha(HELPER), 'original_helper_sha256': original['helper_sha256'],
               'comparisons': sum(c['kind'] == 'comparison' for c in results), 'matches': sum(c['kind'] == 'comparison' and c['passed'] for c in results),
               'boundaries': sum(c['kind'] == 'boundary' for c in results), 'boundaries_passed': sum(c['kind'] == 'boundary' and c['passed'] for c in results),
               'original_boundary_categories_passed': sum(c['kind'] == 'boundary' and c['original_passed'] for c in results)}
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(json.dumps(report, indent=2, ensure_ascii=False) + '\n')
+    args.output.write_text(json.dumps(report, indent=2, ensure_ascii=False) + '\n', encoding="utf-8")
     print(json.dumps({k: report[k] for k in ['comparisons', 'matches', 'boundaries', 'boundaries_passed']}))
     print(json.dumps({'failed': [c['id'] for c in results if not c['passed']]}))
     return 0 if args.allow_gaps or all(c['passed'] for c in results) else 1

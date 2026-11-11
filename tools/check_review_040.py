@@ -17,10 +17,10 @@ import tempfile
 
 sys.dont_write_bytecode=True
 ROOT=Path(__file__).resolve().parents[1]
-HELPER=ROOT/'tools/verification-0.40/check_javascript-inventory-helper.py'
+HELPER=ROOT/'tools/check_javascript.py'
 CASES=ROOT/'tools/review_cases_040.json'
 BOUNDS=ROOT/'tools/review_bounds_040.json'
-REFERENCE=ROOT/'tools/verification-0.40/original-node-references.json'
+REFERENCE=ROOT/'tools/reference/review-040/original-node-references.json'
 
 def digest(path):return hashlib.sha256(path.read_bytes()).hexdigest()
 
@@ -47,21 +47,21 @@ def main():
     supplement=options.suite!='grammar-regexp'
     case_file=ROOT/'tools'/f"{options.suite.replace('-','_')}_review_cases_040.json" if supplement else CASES
     bounds_file=case_file if supplement else BOUNDS
-    reference_file=ROOT/'tools/verification-0.40'/f'{options.suite}-original-node-references.json' if supplement else REFERENCE
+    reference_file=ROOT/'tools/reference/review-040'/f'{options.suite}-original-node-references.json' if supplement else REFERENCE
     input_hashes={path:digest(path) for path in [Path(__file__),HELPER,case_file,bounds_file,reference_file]}
-    spec_file=ROOT/'tools/verification-0.40/date-current-spec-expectations.json'
+    spec_file=ROOT/'tools/reference/review-040/date-current-spec-expectations.json'
     current_spec={}
     if options.suite=='date':
         input_hashes[spec_file]=digest(spec_file)
-        spec_data=json.loads(spec_file.read_text())
+        spec_data=json.loads(spec_file.read_text(encoding="utf-8"))
         assert spec_data['fixture_sha256']==digest(case_file)
         current_spec={c['id']:c for c in spec_data['cases']}
-    cases=json.loads(case_file.read_text())['cases']
-    bounds=json.loads(bounds_file.read_text())['bounds' if supplement else 'cases']
+    cases=json.loads(case_file.read_text(encoding="utf-8"))['cases']
+    bounds=json.loads(bounds_file.read_text(encoding="utf-8"))['bounds' if supplement else 'cases']
     if supplement:
         cases=[{**c,'kind':c.get('kind','comparison'),'group':options.suite} for c in cases]
         bounds=[{**c,'group':options.suite} for c in bounds]
-    originals={c['id']:c for c in json.loads(reference_file.read_text())['cases']}
+    originals={c['id']:c for c in json.loads(reference_file.read_text(encoding="utf-8"))['cases']}
     if options.group:
         cases=[c for c in cases if c['group'] in options.group]
         bounds=[c for c in bounds if c['group'] in options.group]
@@ -69,7 +69,7 @@ def main():
     results=[];early=[];limits=[]
     with tempfile.TemporaryDirectory(prefix='chezcat-review-040-') as directory:
         directory=Path(directory);probe=directory/'probe';rust=directory/'probe.rs'
-        rust.write_text(helper.PROBE.replace('JAVASCRIPT_SOURCE',json.dumps(str(root/'src/javascript.rs'))))
+        rust.write_text(helper.PROBE.replace('JAVASCRIPT_SOURCE',json.dumps(str(root/'src/javascript.rs'))), encoding="utf-8")
         subprocess.run([options.rustc,'--edition=2021','-O',str(rust),'-o',str(probe)],capture_output=True,text=True,timeout=180,check=True)
         for case in cases:
             source=case['source'];mode=case['browser_global']
@@ -123,7 +123,7 @@ def main():
         'bound_cases':len(limits),'bounds_passed':sum(x['passed'] for x in limits),
         'results':results,'early_errors':early,'bounds':limits}
     options.output.parent.mkdir(parents=True,exist_ok=True)
-    options.output.write_text(json.dumps(report,indent=2)+'\n')
+    options.output.write_text(json.dumps(report,indent=2)+'\n', encoding="utf-8")
     print(json.dumps({k:report[k] for k in ['label','groups','cases','matches','ordinary_cases','ordinary_matches','reference_difference_cases','reference_differences_observed','current_spec_assertions_passed','early_error_cases','early_errors_passed','bound_cases','bounds_passed']},indent=2))
     complete=(report['ordinary_matches']==report['ordinary_cases']
         and report['current_spec_assertions_passed']==report['reference_difference_cases']

@@ -3,4 +3,7 @@
 /*.bmp
 **/__pycache__/
 *.pyc
-/docs/
+/results/*
+!/results/README.md
+/*.zip
+*.zip.tmp

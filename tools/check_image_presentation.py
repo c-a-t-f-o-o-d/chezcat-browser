@@ -105,13 +105,13 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--browser', type=Path, required=True)
     parser.add_argument('--work-dir', type=Path)
-    parser.add_argument('--output', type=Path, default=Path('image-presentation-report.json'))
+    parser.add_argument('--output', type=Path, default=Path('results/verification/image-presentation-report.json'))
     args = parser.parse_args()
     browser = args.browser.resolve()
     assert browser.is_file(), '--browser must name the built executable'
     version = subprocess.run([str(browser), '--help'], capture_output=True, text=True, check=True).stdout.splitlines()[0]
     package_version = re.search(r'^version = "([^"]+)"',
-                                (ROOT / 'Cargo.toml').read_text(), re.MULTILINE).group(1)
+                                (ROOT / 'Cargo.toml').read_text(encoding="utf-8"), re.MULTILINE).group(1)
     expected = 'ChezCat ' + '.'.join(package_version.split('.')[:2])
     assert version == expected, ('Expected current source version', expected, version)
     started = time.monotonic()
@@ -324,7 +324,7 @@ def main():
                   browser_sha256=hashlib.sha256(browser.read_bytes()).hexdigest(),
                   elapsed_seconds=round(time.monotonic() - started, 3), checks_detail=checks, runs=runs)
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(json.dumps(report, indent=2) + '\n')
+    args.output.write_text(json.dumps(report, indent=2) + '\n', encoding="utf-8")
     print(json.dumps({k:v for k,v in report.items() if k not in ('checks_detail', 'runs')}, indent=2))
 
 

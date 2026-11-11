@@ -97,7 +97,7 @@ def page(name, size, rendering='auto', fitting='fill', position='center'):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--browser', type=Path)
-    parser.add_argument('--output', type=Path, default=Path('image-downsampling-report.json'))
+    parser.add_argument('--output', type=Path, default=Path('results/verification/image-downsampling-report.json'))
     parser.add_argument('--work-dir', type=Path)
     parser.add_argument('--write-demo', action='store_true')
     args = parser.parse_args()
@@ -171,7 +171,7 @@ def main():
                   elapsed_seconds=round(time.monotonic() - started, 3),
                   scope='Actual loopback App renders; original fixtures; no personal profile; display-space RGBA, no ICC or linear-light claim')
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(json.dumps(report, indent=2) + '\n')
+    args.output.write_text(json.dumps(report, indent=2) + '\n', encoding="utf-8")
     print(json.dumps(report, indent=2))
 
 

@@ -137,7 +137,7 @@ def compile_probe(root, destination, rustc):
         f'#[path={json.dumps(str(root / "src" / (name + ".rs")))}] mod {name};'
         for name in MODULES if (root / 'src' / (name + '.rs')).is_file())
     path = destination.with_suffix('.rs')
-    probe = PROBE if 'pub struct Poll {' in (root / 'src/loader.rs').read_text() else LEGACY_PROBE
+    probe = PROBE if 'pub struct Poll {' in (root / 'src/loader.rs').read_text(encoding="utf-8") else LEGACY_PROBE
     path.write_text(source + '\n' + probe, encoding='utf-8')
     subprocess.run([rustc, '--edition=2021', '-O', str(path), '-o', str(destination)], check=True)
 

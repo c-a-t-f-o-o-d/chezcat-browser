@@ -16,7 +16,7 @@ import tempfile
 
 sys.dont_write_bytecode=True
 ROOT=Path(__file__).resolve().parents[1]
-HELPER=ROOT/"tools/verification-0.39/check_javascript-inventory-helper.py"
+HELPER=ROOT/"tools/check_javascript.py"
 
 CASES=[
     ("nullish-distinguishes-falsy", r"""
@@ -102,7 +102,7 @@ def main():
     root=options.source_root.resolve();before=source_manifest(root);results=[];boundaries=[]
     with tempfile.TemporaryDirectory(prefix="chezcat-optional-review-") as directory:
         directory=Path(directory);probe=directory/"probe";rust=directory/"probe.rs"
-        rust.write_text(helper.PROBE.replace("JAVASCRIPT_SOURCE",json.dumps(str(root/"src/javascript.rs"))))
+        rust.write_text(helper.PROBE.replace("JAVASCRIPT_SOURCE",json.dumps(str(root/"src/javascript.rs"))), encoding="utf-8")
         subprocess.run(["rustc","--edition=2021","-O",str(rust),"-o",str(probe)],capture_output=True,text=True,timeout=120,check=True)
         for name,source in CASES:
             source=source.strip()+"\n'ok';\n";reference=helper.run_node("node",source);actual=helper.run_own(probe,source)
@@ -120,7 +120,7 @@ def main():
         'rustc':subprocess.check_output(['rustc','--version'],text=True).strip(),'source_manifest':before,'checker_sha256':digest(Path(__file__)),
         'helper_sha256':digest(HELPER),'cases':len(results),'matches':sum(x['matches_node'] for x in results),
         'early_error_cases':len(boundaries),'early_errors_passed':sum(x['fails_before_effects'] for x in boundaries),'results':results,'early_errors':boundaries}
-    options.output.parent.mkdir(parents=True,exist_ok=True);options.output.write_text(json.dumps(report,indent=2)+'\n')
+    options.output.parent.mkdir(parents=True,exist_ok=True);options.output.write_text(json.dumps(report,indent=2)+'\n', encoding="utf-8")
     print(json.dumps({k:report[k] for k in ['label','cases','matches','early_error_cases','early_errors_passed']},indent=2))
     return 0 if options.allow_gaps or (report['matches']==len(results) and report['early_errors_passed']==len(boundaries)) else 1
 

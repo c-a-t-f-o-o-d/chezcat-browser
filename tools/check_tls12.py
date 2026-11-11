@@ -345,7 +345,7 @@ def compile_probe(directory, rustc):
     source = "#![allow(dead_code)]\n" + "\n".join(
         f"#[path={json.dumps(str(ROOT / 'src' / (name + '.rs')))}] mod {name};" for name in MODULES)
     path = directory / "probe.rs"
-    path.write_text(source + "\n" + PROBE)
+    path.write_text(source + "\n" + PROBE, encoding="utf-8")
     binary = directory / ("probe.exe" if os.name == "nt" else "probe")
     subprocess.run([rustc, "--edition=2021", "-O", str(path), "-o", str(binary)], check=True)
     return binary
@@ -917,7 +917,7 @@ def main():
                   "cases": checks.results}
         if arguments.output:
             arguments.output.parent.mkdir(parents=True, exist_ok=True)
-            arguments.output.write_text(json.dumps(report, indent=2) + "\n")
+            arguments.output.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
         print(json.dumps({key: value for key, value in report.items() if key != "cases"}, indent=2))
         return 0 if passed == len(checks.results) and passed else 1
 

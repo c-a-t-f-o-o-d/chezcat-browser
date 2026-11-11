@@ -129,7 +129,7 @@ def main():
         source = PROBE
         for module in ('compression', 'jpeg', 'image'):
             source = source.replace(module.upper(), json.dumps(str(ROOT/'src'/(module+'.rs'))))
-        (work/'probe.rs').write_text(source)
+        (work/'probe.rs').write_text(source, encoding="utf-8")
         probe = work/'probe'
         subprocess.run([args.rustc, '--edition', '2021', '-O', str(work/'probe.rs'), '-o', str(probe)], check=True)
 
@@ -257,7 +257,7 @@ def main():
                       loopback_only=True, elapsed_seconds=round(time.monotonic()-started, 3),
                       results=checks, presentation=browser_checks)
         args.output.parent.mkdir(parents=True, exist_ok=True)
-        args.output.write_text(json.dumps(report, indent=2)+'\n')
+        args.output.write_text(json.dumps(report, indent=2)+'\n', encoding="utf-8")
         print(json.dumps({k:v for k,v in report.items() if k not in ('results','presentation')}, indent=2))
 
 

@@ -17,7 +17,7 @@ import tempfile
 
 sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parents[1]
-HELPER = ROOT / "tools/verification-0.39/check_promises-inventory-helper.py"
+HELPER = ROOT / "tools/check_promises.py"
 PROMISE_SPEC = "https://tc39.es/ecma262/multipage/control-abstraction-objects.html"
 TRY_SPEC = PROMISE_SPEC + "#sec-promise.try"
 
@@ -145,7 +145,7 @@ def main():
         'observed_reference_differences':sum(not x['matches_node'] for x in differences),
         'current_spec_assertions_passed':sum(x['chezcat_follows_current_spec'] for x in differences),
         'results':results,'reference_differences':differences}
-    options.output.parent.mkdir(parents=True,exist_ok=True);options.output.write_text(json.dumps(report,indent=2)+'\n')
+    options.output.parent.mkdir(parents=True,exist_ok=True);options.output.write_text(json.dumps(report,indent=2)+'\n', encoding="utf-8")
     print(json.dumps({k:report[k] for k in ['label','ordinary_cases','ordinary_matches','reference_difference_cases','observed_reference_differences','current_spec_assertions_passed']},indent=2))
     return 0 if report['ordinary_matches']==len(results) and report['current_spec_assertions_passed']==len(differences) else 1
 

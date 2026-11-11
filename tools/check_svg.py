@@ -205,8 +205,8 @@ for iteration in range(240):
 report = {'reference': 'system librsvg/Cairo, development only; specification geometry for listed differences',
           'raster_comparisons': len(cases)-8, 'additional_svg2_analytical_assertions': 2,
           'additional_masking_specification_assertions': 6, 'malformed_mutations': 240, 'cases': summary}
-(ROOT/'svg-compare-results.json').write_text(json.dumps(report,indent=2)+'\n')
+(ROOT/'svg-compare-results.json').write_text(json.dumps(report,indent=2)+'\n', encoding="utf-8")
 if args.output:
- args.output.parent.mkdir(parents=True, exist_ok=True);args.output.write_text(json.dumps(report,indent=2)+'\n')
+ args.output.parent.mkdir(parents=True, exist_ok=True);args.output.write_text(json.dumps(report,indent=2)+'\n', encoding="utf-8")
 assert all(v.get('pass') for v in summary), 'SVG reference comparison has mismatches'
 print(f'{len(cases)-8} SVG reference raster comparisons, 2 SVG2 assertions, 6 masking specification assertions and 240 malformed mutations passed.')

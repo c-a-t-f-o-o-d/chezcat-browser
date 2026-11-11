@@ -178,7 +178,7 @@ for i in range(600):
  if p.returncode==0:
   w,h=struct.unpack('<II',p.stdout[:8]);assert w*h<=4194304 and len(p.stdout)==8+w*h*4
 report={'valid_cases':len(results),'independent_reference':'Pillow/libwebp lossless encoding/decoding','malformed_mutations':600,'results':results}
-(ROOT/'webp-compare-results.json').write_text(json.dumps(report,indent=2)+'\n')
+(ROOT/'webp-compare-results.json').write_text(json.dumps(report,indent=2)+'\n', encoding="utf-8")
 if args.output:
- args.output.parent.mkdir(parents=True, exist_ok=True);args.output.write_text(json.dumps(report,indent=2)+'\n')
+ args.output.parent.mkdir(parents=True, exist_ok=True);args.output.write_text(json.dumps(report,indent=2)+'\n', encoding="utf-8")
 print('PASS',len(results),'VP8L comparisons (89 forced features, 171 libwebp encoded, 1 extended metadata) plus 600 malformed mutations and explicit resource-limit checks.')

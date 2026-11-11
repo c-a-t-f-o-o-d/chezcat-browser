@@ -1,0 +1,33 @@
+* text=auto eol=lf
+*.cmd text eol=crlf
+*.exe binary
+*.dll binary
+*.ico binary
+*.cur binary
+*.o binary
+*.res binary
+*.png binary
+*.apng binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.bmp binary
+*.tif binary
+*.tiff binary
+*.qoi binary
+*.ppm binary
+*.pgm binary
+*.pbm binary
+*.pam binary
+*.pnm binary
+*.tga binary
+*.pcx binary
+*.ttf binary
+*.otf binary
+*.woff binary
+*.woff2 binary
+*.bin binary
+*.zip binary
+results/** -text
+tools/reference/test262/** -text

@@ -186,7 +186,7 @@ def main():
     source = PROBE
     for key, name in [('IMAGE', 'image.rs'), ('JPEG', 'jpeg.rs'), ('COMPRESSION', 'compression.rs')]:
         source = source.replace('path=' + key, 'path=' + json.dumps(str(ROOT / 'src' / name)))
-    (work / 'probe.rs').write_text(source)
+    (work / 'probe.rs').write_text(source, encoding="utf-8")
     executable = work / ('probe.exe' if os.name == 'nt' else 'probe')
     subprocess.run(['rustc', '--edition=2021', '-O', str(work / 'probe.rs'), '-o', str(executable)], check=True)
     input_path, output_path = work / 'input.img', work / 'pixels.bin'
@@ -403,7 +403,7 @@ def main():
                   work_directory=str(work), checks=checks)
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)
-        args.output.write_text(json.dumps(report, indent=2) + '\n')
+        args.output.write_text(json.dumps(report, indent=2) + '\n', encoding="utf-8")
     print(json.dumps({k:v for k, v in report.items() if k != 'checks'}, indent=2))
 
 

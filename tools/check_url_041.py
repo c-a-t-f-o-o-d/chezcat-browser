@@ -59,7 +59,7 @@ BOUNDS = [
 
 def digest(data): return hashlib.sha256(data).hexdigest()
 def main():
-    ap=argparse.ArgumentParser();ap.add_argument('--root',type=pathlib.Path,default=HERE.parent);ap.add_argument('--freeze',action='store_true');ap.add_argument('--output',type=pathlib.Path,required=True);ap.add_argument('--expect',type=pathlib.Path,default=HERE/'url-041'/'frozen.json');ap.add_argument('--skip-bounds',action='store_true');ap.add_argument('--original-bounds',action='store_true');a=ap.parse_args()
+    ap=argparse.ArgumentParser();ap.add_argument('--root',type=pathlib.Path,default=HERE.parent);ap.add_argument('--freeze',action='store_true');ap.add_argument('--output',type=pathlib.Path,required=True);ap.add_argument('--expect',type=pathlib.Path,default=HERE/'reference'/'url-041'/'frozen.json');ap.add_argument('--skip-bounds',action='store_true');ap.add_argument('--original-bounds',action='store_true');a=ap.parse_args()
     spec=importlib.util.spec_from_file_location('helper',a.root/'tools'/'check_javascript.py');m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
     frozen={'schema':1,'fixture_sources_sha256':digest(json.dumps(CASES,ensure_ascii=False).encode()),'bounds_sources_sha256':digest(json.dumps(BOUNDS,ensure_ascii=False).encode()),'helper_sha256':digest((a.root/'tools'/'check_javascript.py').read_bytes()),'ordinary':[],'bounds':[{'name':n,'source':s,'diagnostic':d} for n,s,d in BOUNDS]}
     if a.freeze:
@@ -68,19 +68,19 @@ def main():
             n=subprocess.run(['node','-e',m.NODE_DRIVER],input=source,text=True,capture_output=True,timeout=10,check=True);v=json.loads(n.stdout)
             if not v['ok']: raise SystemExit(f'Node failed {name}: {v}')
             frozen['ordinary'].append({'name':name,'source':source,'node':v})
-        a.expect.parent.mkdir(parents=True,exist_ok=True);a.expect.write_text(json.dumps(frozen,indent=2,ensure_ascii=False)+'\n')
-    expected=json.loads(a.expect.read_text())
+        a.expect.parent.mkdir(parents=True,exist_ok=True);a.expect.write_text(json.dumps(frozen,indent=2,ensure_ascii=False)+'\n', encoding="utf-8")
+    expected=json.loads(a.expect.read_text(encoding="utf-8"))
     if expected['fixture_sources_sha256']!=frozen['fixture_sources_sha256'] or expected['bounds_sources_sha256']!=frozen['bounds_sources_sha256']: raise SystemExit('Frozen fixture source mismatch')
     bounds=BOUNDS
     if not a.original_bounds and (a.expect.parent/'bounds-corrected.json').exists():
-        corrected=json.loads((a.expect.parent/'bounds-corrected.json').read_text());bounds=[(c['name'],c['source'],c['diagnostic']) for c in corrected['bounds']]
+        corrected=json.loads((a.expect.parent/'bounds-corrected.json').read_text(encoding="utf-8"));bounds=[(c['name'],c['source'],c['diagnostic']) for c in corrected['bounds']]
     output={'frozen_sha256':digest(a.expect.read_bytes()),'source_sha256':digest((a.root/'src'/'javascript.rs').read_bytes()),'ordinary':[],'bounds':[]}
     with tempfile.TemporaryDirectory(prefix='chezcat-url-041-') as t:
-        p=pathlib.Path(t);rs=p/'probe.rs';exe=p/'probe';rs.write_text(m.PROBE.replace('JAVASCRIPT_SOURCE',json.dumps(str((a.root/'src'/'javascript.rs').resolve()))));subprocess.run(['rustc','--edition=2021','-O',str(rs),'-o',str(exe)],check=True,timeout=180)
+        p=pathlib.Path(t);rs=p/'probe.rs';exe=p/'probe';rs.write_text(m.PROBE.replace('JAVASCRIPT_SOURCE',json.dumps(str((a.root/'src'/'javascript.rs').resolve()))), encoding="utf-8");subprocess.run(['rustc','--edition=2021','-O',str(rs),'-o',str(exe)],check=True,timeout=180)
         for case in expected['ordinary']:
             r=subprocess.run([str(exe)],input=case['source'],text=True,capture_output=True,timeout=10,check=True);lines=r.stdout.splitlines();records=[l.split('\t',1)[1] for l in lines if l.startswith('RECORD\t')];head=lines[0] if lines else '';match=head=='OK\t'+case['node']['value'] and records==case['node']['records'];output['ordinary'].append({'name':case['name'],'match':match,'actual':lines,'expected':case['node']})
         if not a.skip_bounds:
             for name,source,diagnostic in bounds:
                 r=subprocess.run([str(exe)],input=source,text=True,capture_output=True,timeout=10,check=True);output['bounds'].append({'name':name,'pass':r.stdout.startswith('ERROR\t') and diagnostic in r.stdout,'actual':r.stdout.strip()})
-    output['ordinary_matching']=sum(x['match'] for x in output['ordinary']);output['ordinary_total']=len(output['ordinary']);output['bounds_passing']=sum(x['pass'] for x in output['bounds']);output['bounds_total']=len(output['bounds']);output['bound_sources']='original' if a.original_bounds else 'bounds-corrected.json';a.output.parent.mkdir(parents=True,exist_ok=True);a.output.write_text(json.dumps(output,indent=2,ensure_ascii=False)+'\n');print(json.dumps({k:v for k,v in output.items() if not isinstance(v,list)}));print('Failures:',', '.join(x['name'] for x in output['ordinary'] if not x['match']),', '.join(x['name'] for x in output['bounds'] if not x['pass']))
+    output['ordinary_matching']=sum(x['match'] for x in output['ordinary']);output['ordinary_total']=len(output['ordinary']);output['bounds_passing']=sum(x['pass'] for x in output['bounds']);output['bounds_total']=len(output['bounds']);output['bound_sources']='original' if a.original_bounds else 'bounds-corrected.json';a.output.parent.mkdir(parents=True,exist_ok=True);a.output.write_text(json.dumps(output,indent=2,ensure_ascii=False)+'\n', encoding="utf-8");print(json.dumps({k:v for k,v in output.items() if not isinstance(v,list)}));print('Failures:',', '.join(x['name'] for x in output['ordinary'] if not x['match']),', '.join(x['name'] for x in output['bounds'] if not x['pass']))
 if __name__=='__main__':main()

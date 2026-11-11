@@ -340,7 +340,7 @@ def parse_output(path):
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--rustc',default='rustc')
-    parser.add_argument('--output',type=Path,default=Path('tiff-report.json'))
+    parser.add_argument('--output',type=Path,default=Path('results/verification/tiff-report.json'))
     parser.add_argument('--artifacts',type=Path)
     parser.add_argument('--write-demos',action='store_true')
     args=parser.parse_args()
@@ -348,7 +348,7 @@ def main():
         work=args.artifacts or Path(temporary)
         work.mkdir(parents=True,exist_ok=True)
         source=PROBE.replace('IMAGE',json.dumps(str(ROOT/'src/image.rs'))).replace('JPEG',json.dumps(str(ROOT/'src/jpeg.rs'))).replace('COMPRESSION',json.dumps(str(ROOT/'src/compression.rs')))
-        (work/'probe.rs').write_text(source)
+        (work/'probe.rs').write_text(source, encoding="utf-8")
         probe=work/'probe'
         subprocess.run([args.rustc,'--edition=2021','-O',str(work/'probe.rs'),'-o',str(probe)],check=True)
         cases,rgb=make_cases()
@@ -466,7 +466,7 @@ def main():
                 'jpeg_source_sha256':hashlib.sha256((ROOT/'src/jpeg.rs').read_bytes()).hexdigest(),
                 'cases':reports,'rejections':negatives}
         args.output.parent.mkdir(parents=True,exist_ok=True)
-        args.output.write_text(json.dumps(report,indent=2)+'\n')
+        args.output.write_text(json.dumps(report,indent=2)+'\n', encoding="utf-8")
         print(json.dumps({k:v for k,v in report.items()if k not in ('cases','rejections')},indent=2))
 
 

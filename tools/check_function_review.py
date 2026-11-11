@@ -17,7 +17,7 @@ import tempfile
 
 sys.dont_write_bytecode=True
 ROOT=Path(__file__).resolve().parents[1]
-HELPER=ROOT/"tools/verification-0.39/check_javascript-inventory-helper.py"
+HELPER=ROOT/"tools/check_javascript.py"
 
 CASES=[
     ("function-constructor-call-and-new", r"""
@@ -107,7 +107,7 @@ def main():
     root=options.source_root.resolve();before=source_manifest(root);results=[];host_results=[]
     with tempfile.TemporaryDirectory(prefix="chezcat-function-review-") as directory:
         directory=Path(directory);probe=directory/"probe";rust=directory/"probe.rs"
-        rust.write_text(helper.PROBE.replace("JAVASCRIPT_SOURCE",json.dumps(str(root/"src/javascript.rs"))))
+        rust.write_text(helper.PROBE.replace("JAVASCRIPT_SOURCE",json.dumps(str(root/"src/javascript.rs"))), encoding="utf-8")
         subprocess.run(["rustc","--edition=2021","-O",str(rust),"-o",str(probe)],capture_output=True,text=True,timeout=120,check=True)
         for name,source in CASES:
             source=source.strip()+"\n'ok';\n";reference=helper.run_node("node",source,browser=True);actual=helper.run_own(probe,source,browser=True)
@@ -124,7 +124,7 @@ def main():
         'rustc':subprocess.check_output(['rustc','--version'],text=True).strip(),'source_manifest':before,'checker_sha256':digest(Path(__file__)),
         'helper_sha256':digest(HELPER),'cases':len(results),'matches':sum(x['matches_node'] for x in results),
         'host_cases':len(host_results),'host_passed':sum(x['passed'] for x in host_results),'results':results,'host_results':host_results}
-    options.output.parent.mkdir(parents=True,exist_ok=True);options.output.write_text(json.dumps(report,indent=2)+'\n')
+    options.output.parent.mkdir(parents=True,exist_ok=True);options.output.write_text(json.dumps(report,indent=2)+'\n', encoding="utf-8")
     print(json.dumps({k:report[k] for k in ['label','cases','matches','host_cases','host_passed']},indent=2))
     return 0 if options.allow_gaps or (report['matches']==len(results) and report['host_passed']==len(host_results)) else 1
 

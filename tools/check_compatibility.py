@@ -26,7 +26,7 @@ CASE_FILE = ROOT / "tools/compatibility_cases.json"
 HELPER_FILE = ROOT / "tools/check_javascript.py"
 PROMISE_HELPER_FILE = ROOT / "tools/check_promises.py"
 COHORT_FILE = ROOT / "tools/compatibility-progress-cohort.json"
-UPSTREAM = ROOT / "tools/verification-0.34/test262"
+UPSTREAM = ROOT / "tools/reference/test262"
 
 
 def digest(path):
@@ -95,7 +95,7 @@ def run_test262(helper, probe, node):
     manifest_path = UPSTREAM / "manifest.json"
     if not manifest_path.is_file():
         return {"status": "not_run", "reason": "No pinned upstream selection is available."}
-    manifest = json.loads(manifest_path.read_text())
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     good = {entry["path"]: entry for entry in manifest["files"] if entry["ok"]}
     for path, entry in good.items():
         if digest(UPSTREAM / path) != entry["sha256"]:
@@ -104,7 +104,7 @@ def run_test262(helper, probe, node):
     for path in good:
         if not path.startswith("test/"):
             continue
-        source = (UPSTREAM / path).read_text()
+        source = (UPSTREAM / path).read_text(encoding="utf-8")
         includes_match = re.search(r"^includes:\s*\[([^\]]*)\]", source, re.MULTILINE)
         includes = [item.strip().strip("\"'") for item in
                     includes_match.group(1).split(",")] if includes_match else []
@@ -122,7 +122,7 @@ def run_test262(helper, probe, node):
         modes = ["strict"] if "onlyStrict" in flags else ["default"] if "noStrict" in flags else ["default", "strict"]
         for mode in modes:
             program = ("\"use strict\";\n" if mode == "strict" else "")
-            program += "\n".join((UPSTREAM / item).read_text() for item in harness)
+            program += "\n".join((UPSTREAM / item).read_text(encoding="utf-8") for item in harness)
             program += "\n" + source
             expected = helper.run_node(node, program)
             actual = helper.run_own(probe, program)
@@ -155,7 +155,7 @@ def comparison(previous, results):
 
 
 def progress_cohort(results):
-    cohort = json.loads(COHORT_FILE.read_text())
+    cohort = json.loads(COHORT_FILE.read_text(encoding="utf-8"))
     by_id = {row["id"]: row for row in results}
     incomparable = [row["id"] for row in cohort["probes"]
                     if row["id"] not in by_id or
@@ -229,11 +229,11 @@ def render_matrix(report):
     else:
         lines.append(f"Pinned official repository revision: `{upstream['revision']}`. "
                      f"Selected execution results: `{json.dumps(upstream['counts'], sort_keys=True)}`. "
-                     "Files, license, harness and download hashes are retained under `tools/verification-0.34/test262/`. "
+                     "Files, license, harness and download hashes are retained under `tools/reference/test262/`. "
                      "Default and strict executions are separate results. This is a small selection, not a full Test262 run.")
     lines += ["", "## Reproduce", "", "```sh",
-              "python tools/check_compatibility.py --helper-file tools/verification-0.41/check_javascript-inventory-helper.py --promise-helper-file tools/verification-0.41/check_promises-inventory-helper.py --source-root PATH_TO_BASELINE --label 0.40.0 --output tools/verification-0.41/compatibility-baseline.json",
-              "python tools/check_compatibility.py --helper-file tools/verification-0.41/check_javascript-inventory-helper.py --promise-helper-file tools/verification-0.41/check_promises-inventory-helper.py --label 0.41.0 --compare tools/verification-0.41/compatibility-baseline.json --output tools/verification-0.41/compatibility-final.json --matrix COMPATIBILITY_MATRIX.md",
+              "python tools/check_compatibility.py --source-root PATH_TO_BASELINE --label baseline --output results/verification/compatibility-baseline.json",
+              "python tools/check_compatibility.py --label current --compare results/verification/compatibility-baseline.json --output results/verification/compatibility.json --matrix docs/COMPATIBILITY_MATRIX.md",
               "```", "", f"Current source-manifest SHA256: `{report['source_manifest']['sha256']}`. "
               f"Original-fixture file SHA256: `{report['fixture_file_sha256']}`. "
               f"Reference: `{report['node']}`; compiler: `{report['rustc']}`.", "",
@@ -257,7 +257,7 @@ def main():
                         help="Separate explicit-checkpoint helper for probes marked microtasks")
     options = parser.parse_args()
     source_root = options.source_root.resolve()
-    data = json.loads(CASE_FILE.read_text())
+    data = json.loads(CASE_FILE.read_text(encoding="utf-8"))
     cases = data["probes"]
     if not 1 <= len(cases) <= 256 or len({case['id'] for case in cases}) != len(cases):
         parser.error("Expected between 1 and 256 distinct independent probes.")
@@ -266,7 +266,7 @@ def main():
     promise_helper_file = options.promise_helper_file.resolve()
     promise_helper = load_helpers(promise_helper_file) if any(case.get("microtasks") for case in cases) else None
     review_file = source_root / "tools/compatibility_cases.json"
-    browser_inventory = json.loads(review_file.read_text())["browser_inventory"]
+    browser_inventory = json.loads(review_file.read_text(encoding="utf-8"))["browser_inventory"]
     before = source_manifest(source_root)
     input_paths = [Path(__file__), CASE_FILE, COHORT_FILE, helper_file, review_file]
     if promise_helper:
@@ -285,7 +285,7 @@ def main():
             directory = Path(directory)
             source = directory / "probe.rs"
             probe = directory / ("probe.exe" if os.name == "nt" else "probe")
-            source.write_text(helper.PROBE.replace("JAVASCRIPT_SOURCE", json.dumps(str(source_root / "src/javascript.rs"))))
+            source.write_text(helper.PROBE.replace("JAVASCRIPT_SOURCE", json.dumps(str(source_root / "src/javascript.rs"))), encoding="utf-8")
             subprocess.run([options.rustc, "--edition=2021", "-O", str(source), "-o", str(probe)],
                            capture_output=True, text=True, timeout=120, check=True)
             promise_probe, checkpoint_available = (promise_helper.compile_probe(source_root, directory, options.rustc)
@@ -319,13 +319,13 @@ def main():
               "microtask_checkpoint_available": checkpoint_available}
     report["progress_reference_cohort"] = progress_cohort(results)
     if options.compare:
-        previous = json.loads(options.compare.read_text())
+        previous = json.loads(options.compare.read_text(encoding="utf-8"))
         report["comparison"] = comparison(previous, results)
         report["progress_reference_cohort"]["baseline"] = progress_cohort(previous["probes"])
     options.output.parent.mkdir(parents=True, exist_ok=True)
-    options.output.write_text(json.dumps(report, indent=2) + "\n")
+    options.output.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     if options.matrix:
-        options.matrix.write_text(render_matrix(report))
+        options.matrix.write_text(render_matrix(report), encoding="utf-8")
     summary = {"label": report["label"], "counts": report["counts"],
                "test262": upstream.get("counts", upstream["status"]),
                "source_manifest_sha256": before["sha256"]}
