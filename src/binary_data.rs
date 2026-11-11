@@ -357,6 +357,13 @@ impl Runtime {
         ] {
             self.binary_method_property(typed, name, Op::TypedMethod(name))?;
         }
+        let values = self.get_property(typed, "values")?;
+        self.store_symbol_property(
+            typed,
+            self.symbol_iterator.unwrap(),
+            values,
+            Some((false, true, true)),
+        )?;
         let to_string = self.get_property(self.array_prototype.unwrap(), "toString")?;
         self.store_property(
             typed,

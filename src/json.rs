@@ -372,19 +372,32 @@ impl Runtime {
                 "JSON serialization of host objects is not implemented.",
             )),
             Value::Object(id) => {
-                self.json_depth(frames.len() + 1)?;
-                if frames.iter().any(|frame| frame.id == id) {
-                    return Err(Fault::exception(
-                        "TypeError",
-                        "JSON.stringify cannot serialize a circular object.",
-                    ));
-                }
                 if matches!(
                     self.get_property_with_host(id, "toJSON", host)?,
                     Value::Function(_)
                 ) {
                     return Err(Fault::new(
                         "JSON.stringify toJSON functions are not implemented.",
+                    ));
+                }
+                // Number unboxing uses observable ToNumber; Boolean unboxing
+                // reads the internal slot. Symbol wrappers remain ordinary
+                // JSON objects. toJSON lookup precedes all of these steps.
+                match self.wrapped_primitive(&Value::Object(id)) {
+                    Some(Value::Number(_)) => {
+                        let number = self.binary_number(&Value::Object(id), host)?;
+                        return self.json_write_value(Value::Number(number), output, frames, host);
+                    }
+                    Some(value @ Value::Bool(_)) => {
+                        return self.json_write_value(value, output, frames, host);
+                    }
+                    _ => {}
+                }
+                self.json_depth(frames.len() + 1)?;
+                if frames.iter().any(|frame| frame.id == id) {
+                    return Err(Fault::exception(
+                        "TypeError",
+                        "JSON.stringify cannot serialize a circular object.",
                     ));
                 }
                 let length = self.object(id)?.length;
@@ -419,7 +432,13 @@ impl Runtime {
                 "JSON.stringify replacer functions and property lists are not implemented.",
             ));
         }
-        let gap = match args.get(2) {
+        let converted_space = match args.get(2) {
+            Some(value) if matches!(self.wrapped_primitive(value), Some(Value::Number(_))) => {
+                Some(Value::Number(self.binary_number(value, host)?))
+            }
+            _ => None,
+        };
+        let gap = match converted_space.as_ref().or(args.get(2)) {
             Some(Value::Number(value)) => " ".repeat(if value.is_nan() {
                 0
             } else {
@@ -564,5 +583,67 @@ mod tests {
             )
             .unwrap();
         assert_eq!(result.to_text(), "TypeError");
+    }
+
+    #[test]
+    fn stringify_unboxes_numeric_and_boolean_wrappers_but_keeps_symbol_objects() {
+        let result = Runtime::new().execute(r#"
+var n=new Number(7),b=new Boolean(false),s=Object(Symbol('field'));
+n.self=n;b.self=b;s.field=3;
+if(JSON.stringify(n)!=='7'||JSON.stringify(b)!=='false'||JSON.stringify(s)!=='{"field":3}')throw 'wrapper values';
+if(JSON.stringify([n,b,s,new Number(NaN),new Number(Infinity),new Number(-0)])!=='[7,false,{"field":3},null,null,0]')throw 'array wrappers';
+if(JSON.stringify({number:n,boolean:b})!=='{"number":7,"boolean":false}')throw 'object wrappers';
+if(JSON.stringify(Number.prototype)!=='0'||JSON.stringify(Boolean.prototype)!=='false')throw 'intrinsic slots';
+var read=0;Object.defineProperty(n,'toJSON',{get:function(){read++;return undefined;}});
+Object.defineProperty(b,'toJSON',{get:function(){read++;return undefined;}});
+if(JSON.stringify([n,b])!=='[7,false]'||read!==2)throw 'toJSON lookup';
+s.self=s;var caught=false;try{JSON.stringify(s);}catch(e){caught=e.name==='TypeError';}
+if(!caught)throw 'symbol wrapper cycle';
+'ok';
+"#, &mut NoHost).unwrap();
+        assert_eq!(result.to_text(), "ok");
+    }
+
+    #[test]
+    fn stringify_wrapper_conversion_observes_hooks_and_preserves_exception_order() {
+        let result = Runtime::new().execute(r#"
+var n=Object(3),b=Object(false),s=Object(Symbol('field')),log='';
+Object.defineProperty(n,'toJSON',{get:function(){log+='j';return 0;},configurable:true});
+n[Symbol.toPrimitive]=function(hint){if(this!==n)throw 'receiver';log+=hint;return '9';};
+b[Symbol.toPrimitive]=function(){throw 'Boolean hook';};b.valueOf=function(){throw 'Boolean valueOf';};
+Object.defineProperty(s,Symbol.toPrimitive,{value:function(){throw 'Symbol hook';}});s.kept=2;
+if(JSON.stringify([n,b,s])!=='[9,false,{"kept":2}]'||log!=='jnumber')throw 'unboxing policy';
+var marker={},caught=0;
+n[Symbol.toPrimitive]=function(){throw marker;};
+try{JSON.stringify(n);}catch(e){if(e===marker)caught++;}
+Object.defineProperty(n,'toJSON',{get:function(){throw marker;},configurable:true});
+try{JSON.stringify(n);}catch(e){if(e===marker)caught++;}
+if(caught!==2)throw 'exception identity';
+'ok';
+"#, &mut NoHost).unwrap();
+        assert_eq!(result.to_text(), "ok");
+    }
+
+    #[test]
+    fn stringify_boxed_numeric_indentation_converts_before_omitted_root() {
+        let result = Runtime::new()
+            .execute(
+                r#"
+var gap=Object(2),log='',value={a:1};
+gap[Symbol.toPrimitive]=function(hint){if(this!==gap)throw 'gap receiver';log+=hint;return 2.8;};
+if(JSON.stringify(value,null,gap)!=='{\n  "a": 1\n}'||log!=='number')throw 'number gap';
+var ignored=Object(true);ignored[Symbol.toPrimitive]=function(){throw 'ignored gap';};
+if(JSON.stringify(value,null,ignored)!=='{"a":1}')throw 'Boolean gap';
+if(JSON.stringify(value,null,new Number(Infinity))!=='{\n          "a": 1\n}')throw 'gap clamp';
+if(JSON.stringify(value,null,new Number(NaN))!=='{"a":1}')throw 'NaN gap';
+var marker={},seen=false;gap[Symbol.toPrimitive]=function(){throw marker;};
+try{JSON.stringify(undefined,null,gap);}catch(e){seen=e===marker;}
+if(!seen)throw 'gap conversion before omitted root';
+'ok';
+"#,
+                &mut NoHost,
+            )
+            .unwrap();
+        assert_eq!(result.to_text(), "ok");
     }
 }

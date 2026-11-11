@@ -66,6 +66,7 @@ pub(super) enum Family {
     Array,
     Map,
     Set,
+    String,
 }
 #[derive(Clone, Copy)]
 pub(super) enum Mode {
@@ -73,12 +74,12 @@ pub(super) enum Mode {
     Values,
     Entries,
 }
-#[derive(Clone, Copy)]
 pub(super) struct IteratorData {
     pub family: Family,
     source: Option<usize>,
     next: usize,
     mode: Mode,
+    text: Option<String>,
 }
 impl IteratorData {
     pub(super) fn tag(&self) -> &'static str {
@@ -86,6 +87,7 @@ impl IteratorData {
             Family::Array => "Array Iterator",
             Family::Map => "Map Iterator",
             Family::Set => "Set Iterator",
+            Family::String => "String Iterator",
         }
     }
 }
@@ -96,6 +98,8 @@ pub(super) struct Roots {
     array_iterator: Option<usize>,
     map_iterator: Option<usize>,
     set_iterator: Option<usize>,
+    string_iterator: Option<usize>,
+    array_values: Option<usize>,
 }
 #[derive(Clone, Copy)]
 pub(super) enum Op {
@@ -168,13 +172,26 @@ impl Runtime {
                 self.store_property(prototype, "keys".into(), values, Some((false, true, true)))?;
             }
         }
-        for family in [Family::Array, Family::Map, Family::Set] {
+        let iterator_prototype = self.new_object(None)?;
+        let identity = self.native_function(
+            Builtin::Iterator(super::iterator_protocol::Op::Self_),
+            "[Symbol.iterator]",
+        )?;
+        self.store_symbol_property(
+            iterator_prototype,
+            self.symbol_iterator.unwrap(),
+            identity,
+            Some((false, true, true)),
+        )?;
+        for family in [Family::Array, Family::Map, Family::Set, Family::String] {
             let prototype = self.new_object(None)?;
             match family {
                 Family::Array => self.collection_roots.array_iterator = Some(prototype),
                 Family::Map => self.collection_roots.map_iterator = Some(prototype),
                 Family::Set => self.collection_roots.set_iterator = Some(prototype),
+                Family::String => self.collection_roots.string_iterator = Some(prototype),
             }
+            self.objects[prototype].prototype = Some(Ordinary::Object(iterator_prototype));
             self.prototype_method(prototype, "next", Builtin::Collection(Op::Next(family)))?;
         }
         let array = self.array_prototype.unwrap();
@@ -185,6 +202,39 @@ impl Runtime {
         ] {
             self.prototype_method(array, name, Builtin::Collection(Op::ArrayIterator(mode)))?;
         }
+        let values = self.get_property(array, "values")?;
+        let Value::Function(function) = values else {
+            unreachable!()
+        };
+        self.collection_roots.array_values = Some(function);
+        self.store_symbol_property(
+            array,
+            self.symbol_iterator.unwrap(),
+            values,
+            Some((false, true, true)),
+        )?;
+        for (prototype, name) in [
+            (self.collection_roots.map.unwrap(), "entries"),
+            (self.collection_roots.set.unwrap(), "values"),
+        ] {
+            let method = self.get_property(prototype, name)?;
+            self.store_symbol_property(
+                prototype,
+                self.symbol_iterator.unwrap(),
+                method,
+                Some((false, true, true)),
+            )?;
+        }
+        let string = self.native_function(
+            Builtin::Iterator(super::iterator_protocol::Op::String),
+            "[Symbol.iterator]",
+        )?;
+        self.store_symbol_property(
+            self.string_prototype.unwrap(),
+            self.symbol_iterator.unwrap(),
+            string,
+            Some((false, true, true)),
+        )?;
         Ok(())
     }
     fn collection(&self, id: usize, kind: Kind) -> Result<&Data, Fault> {
@@ -361,29 +411,76 @@ impl Runtime {
             source: Some(source),
             next: 0,
             mode,
+            text: None,
         });
         self.objects[id].prototype = match family {
             Family::Array => self.collection_roots.array_iterator,
             Family::Map => self.collection_roots.map_iterator,
             Family::Set => self.collection_roots.set_iterator,
+            Family::String => self.collection_roots.string_iterator,
         }
         .map(Ordinary::Object);
         Ok(id)
     }
+    pub(super) fn arguments_iterator_method(&self) -> Value {
+        Value::Function(self.collection_roots.array_values.unwrap())
+    }
+
+    pub(super) fn new_string_iterator(&mut self, text: String) -> Result<usize, Fault> {
+        if text.len() > MAX_STRING_BYTES {
+            return Err(Fault::new("String limit reached (128 KiB)."));
+        }
+        if self.value_bytes.saturating_add(text.len()) > MAX_RETAINED_VALUES {
+            return Err(Fault::new("Retained value limit reached (2 MiB)."));
+        }
+        self.work(text.len())?;
+        let id = self.new_object(None)?;
+        self.value_bytes += text.len();
+        self.objects[id].iterator = Some(IteratorData {
+            family: Family::String,
+            source: None,
+            next: 0,
+            mode: Mode::Values,
+            text: Some(text),
+        });
+        self.objects[id].prototype = self.collection_roots.string_iterator.map(Ordinary::Object);
+        Ok(id)
+    }
+
     pub(super) fn next_native_iterator(
         &mut self,
         id: usize,
         host: &mut dyn Host,
     ) -> Result<Option<Value>, Fault> {
         self.step()?;
-        let mut iterator = self
-            .object(id)?
-            .iterator
-            .ok_or_else(|| Fault::exception("TypeError", "An iterator receiver is required."))?;
-        let Some(source) = iterator.source else {
+        let iterator =
+            self.object(id)?.iterator.as_ref().ok_or_else(|| {
+                Fault::exception("TypeError", "An iterator receiver is required.")
+            })?;
+        let (family, source, next, mode) = (
+            iterator.family,
+            iterator.source,
+            iterator.next,
+            iterator.mode,
+        );
+        if family == Family::String {
+            let Some(text) = &iterator.text else {
+                return Ok(None);
+            };
+            let Some(ch) = text[next..].chars().next() else {
+                let bytes = text.len();
+                self.objects[id].iterator.as_mut().unwrap().text = None;
+                self.value_bytes -= bytes;
+                return Ok(None);
+            };
+            self.work(ch.len_utf8())?;
+            self.objects[id].iterator.as_mut().unwrap().next += ch.len_utf8();
+            return Ok(Some(Value::String(ch.to_string())));
+        }
+        let Some(source) = source else {
             return Ok(None);
         };
-        let pair = match iterator.family {
+        let pair = match family {
             Family::Array => {
                 let view = self.typed_view(source);
                 let length = if let Some(view) = view {
@@ -391,45 +488,43 @@ impl Runtime {
                 } else {
                     self.array_like_length(source, host)?
                 };
-                if iterator.next >= length {
+                if next >= length {
                     None
                 } else {
-                    let key = Value::Number(iterator.next as f64);
-                    let value = if matches!(iterator.mode, Mode::Keys) {
+                    // Commit the advance before an indexed getter can reenter
+                    // this iterator or throw; the next call must not repeat it.
+                    self.objects[id].iterator.as_mut().unwrap().next = next + 1;
+                    let key = Value::Number(next as f64);
+                    let value = if matches!(mode, Mode::Keys) {
                         Value::Undefined
                     } else if let Some(view) = view {
-                        Value::Number(self.typed_read(view, iterator.next)?)
+                        Value::Number(self.typed_read(view, next)?)
                     } else {
-                        self.get_property_with_host(source, &iterator.next.to_string(), host)?
+                        self.get_property_with_host(source, &next.to_string(), host)?
                     };
-                    iterator.next += 1;
                     Some((key, value))
                 }
             }
             Family::Map | Family::Set => {
-                if let Some((order, key, value)) =
-                    self.next_collection_entry(source, iterator.next)?
-                {
-                    iterator.next = order + 1;
+                if let Some((order, key, value)) = self.next_collection_entry(source, next)? {
+                    self.objects[id].iterator.as_mut().unwrap().next = order + 1;
                     Some((key, value))
                 } else {
                     None
                 }
             }
+            Family::String => unreachable!(),
         };
-        if pair.is_none() {
-            iterator.source = None;
-        }
-        self.objects[id].iterator = Some(iterator);
         let Some((key, value)) = pair else {
+            self.objects[id].iterator.as_mut().unwrap().source = None;
             return Ok(None);
         };
-        Ok(Some(match iterator.mode {
+        Ok(Some(match mode {
             Mode::Keys => key,
-            Mode::Values if iterator.family == Family::Set => key,
+            Mode::Values if family == Family::Set => key,
             Mode::Values => value,
             Mode::Entries => {
-                let value = if iterator.family == Family::Set {
+                let value = if family == Family::Set {
                     self.copy_value(&key)?
                 } else {
                     value
@@ -481,16 +576,21 @@ impl Runtime {
         let source = self.copy_value(source)?;
         let mut iterator = self.loop_iterator(source, true, host)?;
         while let Some(value) = self.loop_next(&mut iterator, host)? {
-            let values = if kind == Kind::Map {
-                let object = self.ordinary_required(&value)?;
-                vec![
-                    self.get_ordinary_property_with_host(object, "0", host)?,
-                    self.get_ordinary_property_with_host(object, "1", host)?,
-                ]
-            } else {
-                vec![value]
-            };
-            self.call_value(adder.clone(), &values, Value::Object(id), host)?;
+            let completion = (|| {
+                let values = if kind == Kind::Map {
+                    let object = self.ordinary_required(&value)?;
+                    vec![
+                        self.get_ordinary_property_with_host(object, "0", host)?,
+                        self.get_ordinary_property_with_host(object, "1", host)?,
+                    ]
+                } else {
+                    vec![value]
+                };
+                self.call_value(adder.clone(), &values, Value::Object(id), host)
+            })();
+            if let Err(error) = completion {
+                return self.loop_close(&mut iterator, Err(error), host);
+            }
         }
         Ok(Value::Object(id))
     }
@@ -541,6 +641,7 @@ impl Runtime {
                 if self
                     .object(id)?
                     .iterator
+                    .as_ref()
                     .is_none_or(|iterator| iterator.family != family)
                 {
                     return Err(Fault::exception(

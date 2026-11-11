@@ -5,7 +5,7 @@
 //! ECMAScript references: OrdinaryGet/SetPrototypeOf, OrdinaryHasInstance,
 //! Object.create/getPrototypeOf/setPrototypeOf, and ordinary property descriptors.
 //! Accessors use the original receiver and share the normal execution budgets.
-//! Proxies, boxed primitives and dynamic Function source compilation remain
+//! Proxies, boxed strings and dynamic Function source compilation remain
 //! explicit limitations.
 
 use super::{
@@ -55,6 +55,8 @@ impl Runtime {
         let length = match builtin {
             Builtin::Binary(operation) => operation.arity(),
             Builtin::Collection(operation) => operation.arity(),
+            Builtin::Iterable(operation) => operation.arity(),
+            Builtin::Iterator(_) => 0,
             Builtin::TextEncoding(operation) => operation.arity(),
             Builtin::Symbol(operation) => operation.arity(),
             Builtin::EmptyFunction | Builtin::ThrowTypeError => 0,
@@ -82,6 +84,7 @@ impl Runtime {
                 "toString" | "valueOf" | "trim" | "toLowerCase" | "toUpperCase",
             ) => 0,
             Builtin::StringMethod("split" | "slice" | "substring" | "replace") => 2,
+            Builtin::PrimitiveMethod("toString", true) => 1,
             Builtin::PrimitiveMethod(_, _) => 0,
             _ => 1,
         };
@@ -371,8 +374,12 @@ impl Runtime {
             let prototype = self.new_object(None)?;
             if number {
                 self.number_prototype = Some(prototype);
+                self.objects[prototype].primitive =
+                    Some(super::primitive_wrappers::Data::Number(0.0));
             } else {
                 self.boolean_prototype = Some(prototype);
+                self.objects[prototype].primitive =
+                    Some(super::primitive_wrappers::Data::Boolean(false));
             }
             self.constructor_prototype(name, Value::Object(prototype))?;
             for method in ["toString", "valueOf"] {
@@ -576,6 +583,9 @@ impl Runtime {
                 .properties
                 .get(&name)
                 .is_some_and(|property| !property.writable)
+                || name == "length"
+                    && self.objects[owner].length.is_some()
+                    && !self.objects[owner].length_writable
             {
                 return if self.strict {
                     Err(Fault::exception("TypeError", "The property is read-only."))
@@ -583,6 +593,16 @@ impl Runtime {
                     Ok(())
                 };
             }
+        }
+        if name == "length" && self.objects[id].length.is_some() {
+            // Ordinary Set has already checked the current property above.
+            // Its value can now run two conversions and change this array, so
+            // the descriptor application must read the live length again.
+            let length = self.array_length_value(&value, host)?;
+            if !self.apply_array_length(id, Some(length), None, true)? && self.strict {
+                return Err(Fault::exception("TypeError", "Cannot change array length."));
+            }
+            return Ok(());
         }
         self.set_property(id, name, value)
     }
@@ -1020,6 +1040,35 @@ impl Runtime {
         }
     }
 
+    pub(super) fn create_data_property(
+        &mut self,
+        target: &Value,
+        key: PropertyKey,
+        value: Value,
+        host: &mut dyn Host,
+    ) -> Result<(), Fault> {
+        // Creation defines an own data property; it must not call an inherited
+        // setter. Reuse descriptor checks for arrays, typed views and functions.
+        let descriptor = PropertyDescriptor {
+            value: Some(value),
+            enumerable: Some(true),
+            writable: Some(true),
+            configurable: Some(true),
+            get: None,
+            set: None,
+        };
+        match key {
+            PropertyKey::String(name) => {
+                let object = self.ordinary_required(target)?;
+                self.define_data_property(object, name, descriptor, host)
+            }
+            PropertyKey::Symbol(key) => {
+                self.ordinary_required(target)?;
+                self.define_symbol_data_property(target, key, descriptor)
+            }
+        }
+    }
+
     fn define_data_property(
         &mut self,
         object: Ordinary,
@@ -1029,6 +1078,29 @@ impl Runtime {
     ) -> Result<(), Fault> {
         self.property_name(&name)?;
         let id = self.ordinary_id(object)?;
+        if name == "length" && self.objects[id].length.is_some() {
+            // A value is converted before fixed-attribute checks, and each
+            // conversion may change length or make it read-only.
+            let length = descriptor
+                .value
+                .as_ref()
+                .map(|value| self.array_length_value(value, host))
+                .transpose()?;
+            if !self.apply_array_length(
+                id,
+                length,
+                descriptor.writable,
+                !descriptor.is_accessor()
+                    && descriptor.enumerable != Some(true)
+                    && descriptor.configurable != Some(true),
+            )? {
+                return Err(Fault::exception(
+                    "TypeError",
+                    "Cannot redefine array length.",
+                ));
+            }
+            return Ok(());
+        }
         if let Some(index) = self.typed_numeric_key(id, &name)? {
             if !self.typed_index_valid(id, index)
                 || descriptor.is_accessor()
@@ -1071,11 +1143,9 @@ impl Runtime {
         if self.objects[id].regexp.is_some()
             && self.owns_property(id, &name)?
             && !self.objects[id].properties.contains_key(&name)
-            || self.objects[id].length.is_some()
-                && (name == "length" || super::property_index(&name).is_some())
         {
             return Err(Fault::new(
-                "Array-index/length and RegExp accessor descriptor changes are not implemented.",
+                "RegExp accessor descriptor changes are not implemented.",
             ));
         }
         self.define_stored_property(id, PropertyKey::String(name), descriptor)
@@ -1334,6 +1404,15 @@ impl Runtime {
                 Ok(Value::Object(id))
             }
             "getOwnPropertyDescriptor" | "defineProperty" => {
+                if method == "getOwnPropertyDescriptor"
+                    && matches!(first, Value::Number(_) | Value::Bool(_) | Value::Symbol(_))
+                {
+                    // These temporary wrappers have no own properties. Still
+                    // observe key conversion, including its possible exception.
+                    let key = self.copy_value(args.get(1).unwrap_or(&Value::Undefined))?;
+                    self.property_key(key, host)?;
+                    return Ok(Value::Undefined);
+                }
                 if !matches!(
                     first,
                     Value::Object(_) | Value::Function(_) | Value::Host(_)
@@ -1407,11 +1486,26 @@ impl Runtime {
                 self.copy_value(first)
             }
             "assign" => {
+                let boxed;
+                let first = if matches!(first, Value::Number(_) | Value::Bool(_) | Value::Symbol(_))
+                {
+                    boxed = self.box_primitive(first.clone())?;
+                    &boxed
+                } else {
+                    first
+                };
                 if !matches!(first, Value::Host(_)) {
                     self.ordinary_required(first)?;
                 }
                 for source in args.get(1..).unwrap_or(&[]) {
-                    if matches!(source, Value::Null | Value::Undefined) {
+                    if matches!(
+                        source,
+                        Value::Null
+                            | Value::Undefined
+                            | Value::Number(_)
+                            | Value::Bool(_)
+                            | Value::Symbol(_)
+                    ) {
                         continue;
                     }
                     let keys = if let Value::Host(handle) = source {
@@ -1503,6 +1597,14 @@ impl Runtime {
         {
             self.ordinary_required(target)?;
         }
+        // Number/Boolean/Symbol wrappers have no own descriptor keys. ToObject
+        // does not inspect their prototypes or invoke conversion callbacks.
+        if matches!(
+            descriptors,
+            Value::Number(_) | Value::Bool(_) | Value::Symbol(_)
+        ) {
+            return Ok(());
+        }
         let descriptors = self.ordinary_required(descriptors)?;
         let id = self.ordinary_id(descriptors)?;
         let mut entries = Vec::new();
@@ -1582,7 +1684,9 @@ impl Runtime {
                 Value::Function(_) => "Function",
                 Value::Object(id) => {
                     let object = self.object(*id)?;
-                    if let Some(binary) = &object.binary {
+                    if let Some(primitive) = object.primitive {
+                        primitive.tag()
+                    } else if let Some(binary) = &object.binary {
                         binary.tag()
                     } else if let Some(collection) = &object.collection {
                         collection.tag()
@@ -1641,7 +1745,7 @@ impl Runtime {
             if matches!(this, Value::Object(_) | Value::Function(_) | Value::Host(_)) {
                 return Ok(this);
             }
-            return Err(Fault::new("Primitive wrapper objects are not implemented."));
+            return self.box_primitive(this);
         }
         // Both own-property methods convert their argument before ToObject on
         // the receiver, including when that receiver is null or undefined.
@@ -1838,27 +1942,7 @@ impl Runtime {
                 self.call_member(receiver, method, args, host)
             }
             Builtin::PrimitiveMethod(method, number) => {
-                let receiver = match this {
-                    Value::Object(id) if number && Some(id) == self.number_prototype => {
-                        Value::Number(0.0)
-                    }
-                    Value::Object(id) if !number && Some(id) == self.boolean_prototype => {
-                        Value::Bool(false)
-                    }
-                    Value::Number(_) if number => this,
-                    Value::Bool(_) if !number => this,
-                    _ => {
-                        return Err(Fault::exception(
-                            "TypeError",
-                            "Primitive value method has an incompatible receiver.",
-                        ))
-                    }
-                };
-                if method == "valueOf" {
-                    Ok(receiver)
-                } else {
-                    self.call_member(receiver, method, args, host)
-                }
+                self.primitive_value_method(method, number, this, args, host)
             }
             _ => Err(Fault::new("Invalid prototype builtin.")),
         }

@@ -103,7 +103,19 @@ impl Site {
                     let symbol_bootstrap = path.contains("-symbol");
                     let accessor_bootstrap = path.contains("-accessor");
                     let callable_bootstrap = path.contains("-callable");
-                    let kind = if callable_bootstrap {
+                    let descriptor_bootstrap = path.contains("-descriptors");
+                    let wrapper_bootstrap = path.contains("-wrappers");
+                    let iterator_bootstrap = path.contains("-iterators");
+                    let spread_bootstrap = path.contains("-spread");
+                    let kind = if spread_bootstrap {
+                        "area-script-spread"
+                    } else if iterator_bootstrap {
+                        "area-script-iterators"
+                    } else if wrapper_bootstrap {
+                        "area-script-wrappers"
+                    } else if descriptor_bootstrap {
+                        "area-script-descriptors"
+                    } else if callable_bootstrap {
                         "area-script-callable"
                     } else if accessor_bootstrap {
                         "area-script-accessor"
@@ -161,7 +173,95 @@ impl Site {
                     } else {
                         ""
                     };
-                    let bootstrap = if callable_bootstrap {
+                    let bootstrap = if spread_bootstrap {
+                        // Original syntax fixture executes array/call/new spread
+                        // and ordinary/arrow/method rest during actual searches.
+                        r#"function options(...pairs){return Object.fromEntries(pairs);}
+var config=options(['key','Enter'],['ready',true]);
+var combine=(...parts)=>parts.join('');
+function Packet(...parts){this.query=combine(...parts);}
+if(options.length!==0||Packet.length!==0||combine.length!==0||[...config.key].join('')!=='Enter')throw Error('spread/rest bootstrap');
+function querySequence(value){var iterable={};iterable[Symbol.iterator]=function(){var sent=false;return {next(){if(sent)return {done:true};sent=true;return {value:value,done:false};}};};return iterable;}
+var handlers={submit(event,...values){
+if(this!==document.f.q||values.length!==1)throw Error('rest handler receiver');
+var fragments=[...querySequence(values[0]),...[]];
+var packet=new Packet(...fragments);
+if(packet.query!==this.value||!config.ready)throw Error('spread query snapshot');
+this.form.submit();document.f.q.value='changed after submit';
+}};
+document.f.onsubmit=function(){throw Error('script submit dispatched a submit event');};
+document.f.q.onkeydown=function(event){if(event.key===config.key){event.preventDefault();handlers.submit.call(this,event,...[this.value]);}};
+document.f.setAttribute('data-spread','ready');"#
+                            .to_owned()
+                    } else if iterator_bootstrap {
+                        // Original protocol fixture runs the iterable helpers
+                        // and early-exit cleanup through actual search events.
+                        r#"var closeCount=0;
+function sequence(values){
+var source={};source[Symbol.iterator]=function(){var index=0;return {
+next(){return index<values.length?{value:values[index++],done:false}:{done:true};},
+return(){closeCount++;return {done:true};}
+};};return source;}
+var config=Object.fromEntries(sequence([['key','Enter'],['enabled',true]]));
+var keys=Array.from(new Set([config.key,config.key]),function(value,index){if(index!==0)throw Error('unique key');return value;});
+var first;for(var key of sequence(keys)){first=key;break;}
+if(first!=='Enter'||closeCount!==1||!config.enabled)throw Error('iterator bootstrap');
+document.f.onsubmit=function(){throw Error('script submit dispatched a submit event');};
+document.f.q.onkeydown=function(event){
+if(event.key===keys[0]){
+event.preventDefault();
+var packet=Object.fromEntries(sequence([['q',this.value],['source','fixture']]));
+var query=Array.from(sequence([packet.q]),function(value,index){if(index!==0)throw Error('query index');return value;}).join('');
+var before=closeCount;
+for(var item of sequence([query,'unused'])){if(item!==this.value)throw Error('query snapshot');break;}
+if(closeCount!==before+1)throw Error('query iterator cleanup');
+this.form.submit();document.f.q.value='changed after submit';
+}};
+document.f.setAttribute('data-iterators','ready');"#
+                            .to_owned()
+                    } else if wrapper_bootstrap {
+                        // Independent wrapper/conversion page. Query coercion
+                        // runs in the actual event handler on both searches.
+                        r#"var limit=new Number(1), enabled=new Boolean(true), key=Object(Symbol('search-state')), state={};
+state[key]='ready';
+if(state[key]!=='ready'||JSON.stringify({limit:limit,enabled:enabled})!=='{"limit":1,"enabled":true}')throw Error('wrapper bootstrap');
+function boxedReceiver(){return typeof this==='object'&&this.valueOf()===7;}
+if(!boxedReceiver.call(7))throw Error('receiver boxing');
+var query={};
+query[Symbol.toPrimitive]=function(hint){if(hint!=='string'||this!==query)throw Error('query conversion');return document.f.q.value;};
+document.f.onsubmit=function(){throw Error('script submit dispatched a submit event');};
+document.f.q.onkeydown=function(event){
+if(event.key==='Enter'){
+event.preventDefault();
+if(String(query)!==this.value||!enabled.valueOf())throw Error('query snapshot');
+this.form.submit();document.f.q.value='changed after submit';
+}};
+document.f.setAttribute('data-wrappers','ready');"#
+                            .to_owned()
+                    } else if descriptor_bootstrap {
+                        // Original accessor/array fixture: the actual event
+                        // handler reads the query through script accessors.
+                        r#"var queryState={
+get query(){return document.f.q.value;},
+set query(value){document.f.q.value=value;}
+};
+var keys=['Enter','old','unused'];
+Object.defineProperty(keys,'length',{value:1,writable:false});
+Object.defineProperty(keys,'0',{get:function(){return 'Enter';},enumerable:true,configurable:true});
+var shape=Object.getOwnPropertyDescriptors(keys);
+if(keys.length!==1||shape.length.writable||Object.hasOwn(keys,'1')||typeof shape[0].get!=='function')throw Error('array descriptor bootstrap');
+var queryShape=Object.getOwnPropertyDescriptor(queryState,'query');
+if(typeof queryShape.get!=='function'||typeof queryShape.set!=='function'||!queryShape.enumerable||!queryShape.configurable)throw Error('literal accessor bootstrap');
+document.f.onsubmit=function(){throw Error('script submit dispatched a submit event');};
+document.f.q.onkeydown=function(event){
+if(event.key===keys[0]){
+event.preventDefault();
+if(queryState.query!==this.value)throw Error('accessor query snapshot');
+this.form.submit();queryState.query='changed after submit';
+}};
+document.f.setAttribute('data-descriptors','ready');"#
+                            .to_owned()
+                    } else if callable_bootstrap {
                         // Original standard-helper bootstrap. The resulting
                         // bound handler must survive actual event dispatch.
                         r#"var hiddenReads=0,settings={first:'search',second:'ready'};
@@ -258,6 +358,8 @@ document.f.setAttribute('data-symbol','ready');
                         || symbol_bootstrap
                         || accessor_bootstrap
                         || callable_bootstrap
+                        || descriptor_bootstrap
+                        || wrapper_bootstrap
                     {
                         ""
                     } else {
@@ -392,9 +494,21 @@ fn run_search_flow(area: bool, scripted: bool, bootstrap: &str) {
     let symbol_bootstrap = bootstrap == "symbol";
     let accessor_bootstrap = bootstrap == "accessor";
     let callable_bootstrap = bootstrap == "callable";
+    let descriptor_bootstrap = bootstrap == "descriptors";
+    let wrapper_bootstrap = bootstrap == "wrappers";
+    let iterator_bootstrap = bootstrap == "iterators";
+    let spread_bootstrap = bootstrap == "spread";
     let result = Site::new(None);
     let search = Site::new(Some(result.url("")));
-    let kind = if callable_bootstrap {
+    let kind = if spread_bootstrap {
+        "area-script-spread"
+    } else if iterator_bootstrap {
+        "area-script-iterators"
+    } else if wrapper_bootstrap {
+        "area-script-wrappers"
+    } else if descriptor_bootstrap {
+        "area-script-descriptors"
+    } else if callable_bootstrap {
         "area-script-callable"
     } else if accessor_bootstrap {
         "area-script-accessor"
@@ -444,6 +558,30 @@ fn run_search_flow(area: bool, scripted: bool, bootstrap: &str) {
     if callable_bootstrap {
         assert_eq!(
             app.document.attr(id(&app, "f"), "data-callable"),
+            Some("ready")
+        );
+    }
+    if descriptor_bootstrap {
+        assert_eq!(
+            app.document.attr(id(&app, "f"), "data-descriptors"),
+            Some("ready")
+        );
+    }
+    if wrapper_bootstrap {
+        assert_eq!(
+            app.document.attr(id(&app, "f"), "data-wrappers"),
+            Some("ready")
+        );
+    }
+    if iterator_bootstrap {
+        assert_eq!(
+            app.document.attr(id(&app, "f"), "data-iterators"),
+            Some("ready")
+        );
+    }
+    if spread_bootstrap {
+        assert_eq!(
+            app.document.attr(id(&app, "f"), "data-spread"),
             Some("ready")
         );
     }
@@ -530,6 +668,30 @@ fn run_search_flow(area: bool, scripted: bool, bootstrap: &str) {
     if callable_bootstrap {
         assert_eq!(
             app.document.attr(id(&app, "f"), "data-callable"),
+            Some("ready")
+        );
+    }
+    if descriptor_bootstrap {
+        assert_eq!(
+            app.document.attr(id(&app, "f"), "data-descriptors"),
+            Some("ready")
+        );
+    }
+    if wrapper_bootstrap {
+        assert_eq!(
+            app.document.attr(id(&app, "f"), "data-wrappers"),
+            Some("ready")
+        );
+    }
+    if iterator_bootstrap {
+        assert_eq!(
+            app.document.attr(id(&app, "f"), "data-iterators"),
+            Some("ready")
+        );
+    }
+    if spread_bootstrap {
+        assert_eq!(
+            app.document.attr(id(&app, "f"), "data-spread"),
             Some("ready")
         );
     }
@@ -733,4 +895,24 @@ fn passive_accessor_probe_initializes_scripted_search_and_repeated_search() {
 #[test]
 fn callable_object_helpers_bootstrap_bound_search_and_repeated_search() {
     run_search_flow(true, true, "callable");
+}
+
+#[test]
+fn literal_accessors_and_array_descriptors_bootstrap_search_and_repeated_search() {
+    run_search_flow(true, true, "descriptors");
+}
+
+#[test]
+fn primitive_wrappers_and_conversion_hooks_bootstrap_search_and_repeated_search() {
+    run_search_flow(true, true, "wrappers");
+}
+
+#[test]
+fn iterator_protocol_and_iterable_helpers_bootstrap_search_and_repeated_search() {
+    run_search_flow(true, true, "iterators");
+}
+
+#[test]
+fn spread_and_rest_bootstrap_search_and_repeated_search() {
+    run_search_flow(true, true, "spread");
 }

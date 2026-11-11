@@ -24,6 +24,7 @@ import tempfile
 ROOT = Path(__file__).resolve().parents[1]
 CASE_FILE = ROOT / "tools/compatibility_cases.json"
 HELPER_FILE = ROOT / "tools/check_javascript.py"
+COHORT_FILE = ROOT / "tools/compatibility-progress-cohort.json"
 UPSTREAM = ROOT / "tools/verification-0.34/test262"
 
 
@@ -41,8 +42,8 @@ def source_manifest(root):
     return {"sha256": hashlib.sha256(joined.encode()).hexdigest(), "files": files}
 
 
-def load_helpers():
-    spec = importlib.util.spec_from_file_location("chezcat_existing_checks", HELPER_FILE)
+def load_helpers(helper_file):
+    spec = importlib.util.spec_from_file_location("chezcat_existing_checks", helper_file)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -143,6 +144,21 @@ def comparison(previous, results):
             "changes": changed, "regressions": regressions, "incomparable": incomparable}
 
 
+def progress_cohort(results):
+    cohort = json.loads(COHORT_FILE.read_text())
+    by_id = {row["id"]: row for row in results}
+    incomparable = [row["id"] for row in cohort["probes"]
+                    if row["id"] not in by_id or
+                    by_id[row["id"]]["fixture_sha256"] != row["fixture_sha256"]]
+    total = len(cohort["probes"])
+    matches = sum(by_id[row["id"]]["matches_node"] for row in cohort["probes"]
+                  if row["id"] not in incomparable)
+    return {"label": cohort["label"], "total": total, "matches_node": matches,
+            "percentage": None if incomparable else round(100 * matches / total, 1),
+            "incomparable": incomparable, "cohort_sha256": digest(COHORT_FILE),
+            "scope": cohort["scope"]}
+
+
 def render_matrix(report):
     counts = report["counts"]
     lines = ["# ChezCat compatibility matrix — " + report["label"], "",
@@ -159,6 +175,20 @@ def render_matrix(report):
     for area in sorted({row["area"] for row in report["probes"]}):
         rows = [row for row in report["probes"] if row["area"] == area]
         lines.append(f"| {area} | {sum(row['matches_node'] for row in rows)} | {len(rows)} |")
+    progress = report.get("progress_reference_cohort")
+    if progress:
+        percentage = (f"{progress['percentage']}%" if progress["percentage"] is not None
+                      else "percentage unavailable: changed or missing fixtures")
+        lines += ["", "## Stable progress measure", "",
+                  f"The fixed {progress['total']}-probe {progress['label']} has "
+                  f"**{progress['matches_node']}/{progress['total']} matches ({percentage})**. "
+                  "Its IDs and source hashes stay fixed as new probes are added to the expanded inventory.", "",
+                  "This percentage measures the selected probes, not overall browser completion, "
+                  "website coverage or remaining engineering effort. Partial source-review areas are not counted as complete."]
+        if "baseline" in progress:
+            baseline = progress["baseline"]
+            lines += ["", f"The comparison baseline matches **{baseline['matches_node']}/{baseline['total']} "
+                      f"({baseline['percentage']}%)** of this same cohort."]
     if "comparison" in report:
         lines += ["", "## Delta from " + report["comparison"]["baseline_label"], "",
                   "| Probe | Baseline | Current |", "| --- | --- | --- |"]
@@ -192,8 +222,8 @@ def render_matrix(report):
                      "Files, license, harness and download hashes are retained under `tools/verification-0.34/test262/`. "
                      "Default and strict executions are separate results. This is a small selection, not a full Test262 run.")
     lines += ["", "## Reproduce", "", "```sh",
-              "python tools/check_compatibility.py --source-root PATH_TO_BASELINE --label 0.33.5 --output tools/verification-0.34/compatibility-baseline.json",
-              "python tools/check_compatibility.py --label 0.34 --compare tools/verification-0.34/compatibility-baseline.json --output tools/verification-0.34/compatibility-final.json --matrix COMPATIBILITY_MATRIX.md",
+              "python tools/check_compatibility.py --helper-file tools/verification-0.38/check_javascript-inventory-helper.py --source-root PATH_TO_BASELINE --label 0.37.0 --output tools/verification-0.38/compatibility-baseline.json",
+              "python tools/check_compatibility.py --helper-file tools/verification-0.38/check_javascript-inventory-helper.py --label 0.38.0 --compare tools/verification-0.38/compatibility-baseline.json --output tools/verification-0.38/compatibility-final.json --matrix COMPATIBILITY_MATRIX.md",
               "```", "", f"Current source-manifest SHA256: `{report['source_manifest']['sha256']}`. "
               f"Original-fixture file SHA256: `{report['fixture_file_sha256']}`. "
               f"Reference: `{report['node']}`; compiler: `{report['rustc']}`.", "",
@@ -211,13 +241,16 @@ def main():
     parser.add_argument("--matrix", type=Path)
     parser.add_argument("--rustc", default="rustc")
     parser.add_argument("--node", default="node")
+    parser.add_argument("--helper-file", type=Path, default=HELPER_FILE,
+                        help="Existing JavaScript probe helper, optionally a pinned snapshot")
     options = parser.parse_args()
     source_root = options.source_root.resolve()
     data = json.loads(CASE_FILE.read_text())
     cases = data["probes"]
-    if not 1 <= len(cases) <= 100 or len({case['id'] for case in cases}) != len(cases):
-        parser.error("Expected between1 and100 distinct independent probes.")
-    helper = load_helpers()
+    if not 1 <= len(cases) <= 128 or len({case['id'] for case in cases}) != len(cases):
+        parser.error("Expected between 1 and 128 distinct independent probes.")
+    helper_file = options.helper_file.resolve()
+    helper = load_helpers(helper_file)
     before = source_manifest(source_root)
     for item in data["browser_inventory"]:
         for name in item["evidence_files"]:
@@ -245,13 +278,16 @@ def main():
     report = {"schema_version": 1, "label": options.label,
               "scope": "Original independent samples plus a bounded pinned Test262 selection; browser inventory is source review only.",
               "rustc": rustc, "node": node, "source_manifest": before,
-              "fixture_file_sha256": digest(CASE_FILE), "helper_sha256": digest(HELPER_FILE),
+              "fixture_file_sha256": digest(CASE_FILE), "helper_sha256": digest(helper_file),
               "checker_sha256": digest(Path(__file__)),
               "counts": {"total": len(results), "matches_node": sum(row["matches_node"] for row in results),
                          "statuses": dict(Counter(row["status"] for row in results))},
               "probes": results, "browser_inventory": data["browser_inventory"], "test262": upstream}
+    report["progress_reference_cohort"] = progress_cohort(results)
     if options.compare:
-        report["comparison"] = comparison(json.loads(options.compare.read_text()), results)
+        previous = json.loads(options.compare.read_text())
+        report["comparison"] = comparison(previous, results)
+        report["progress_reference_cohort"]["baseline"] = progress_cohort(previous["probes"])
     options.output.parent.mkdir(parents=True, exist_ok=True)
     options.output.write_text(json.dumps(report, indent=2) + "\n")
     if options.matrix:

@@ -14,6 +14,8 @@ use std::time::{Duration, Instant};
 
 #[path = "arguments.rs"]
 mod arguments;
+#[path = "array_descriptors.rs"]
+mod array_descriptors;
 #[path = "array_ops.rs"]
 mod array_ops;
 #[path = "javascript_base64.rs"]
@@ -26,14 +28,29 @@ mod bound_functions;
 mod collections;
 #[path = "host_objects.rs"]
 mod host_objects;
+#[path = "iterable_builtins.rs"]
+mod iterable_builtins;
+#[path = "iterator_protocol.rs"]
+mod iterator_protocol;
 #[path = "json.rs"]
 mod json;
 #[path = "object_inspection.rs"]
 mod object_inspection;
+#[path = "object_literals.rs"]
+mod object_literals;
+#[path = "primitive_conversion.rs"]
+mod primitive_conversion;
+#[path = "primitive_wrappers.rs"]
+mod primitive_wrappers;
 #[path = "prototypes.rs"]
 mod prototypes;
 #[path = "regexp.rs"]
 mod regexp;
+#[cfg(test)]
+#[path = "rest_parameters.rs"]
+mod rest_parameters;
+#[path = "spread.rs"]
+mod spread;
 #[path = "string_replacement.rs"]
 mod string_replacement;
 #[path = "symbols.rs"]
@@ -1096,19 +1113,19 @@ fn tokenize(source: &str, regexp_budget: &mut usize) -> Result<Vec<Token>, Fault
             }
             TokenKind::String(value)
         } else {
-            if ["...", "**", "??", "&&=", "||="]
+            if ["**", "??", "&&=", "||="]
                 .iter()
                 .any(|op| source[at..].starts_with(op))
                 || source[at..].starts_with("?.")
                     && !bytes.get(at + 2).is_some_and(u8::is_ascii_digit)
             {
-                return Err(Fault::new("Spread, exponentiation, optional chaining and logical assignments are not implemented.").at(source, at));
+                return Err(Fault::new("Exponentiation, optional chaining and logical assignments are not implemented.").at(source, at));
             }
             let Some(punct) = [
-                ">>>=", "<<=", ">>=", "===", "!==", ">>>", "=>", "==", "!=", "<=", ">=", "&&",
-                "||", "++", "--", "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "<<", ">>", "{",
-                "}", "(", ")", "[", "]", ".", ";", ",", "?", ":", "+", "-", "*", "/", "%", "<",
-                ">", "=", "!", "~", "&", "|", "^",
+                ">>>=", "<<=", ">>=", "===", "!==", ">>>", "...", "=>", "==", "!=", "<=", ">=",
+                "&&", "||", "++", "--", "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "<<", ">>",
+                "{", "}", "(", ")", "[", "]", ".", ";", ",", "?", ":", "+", "-", "*", "/", "%",
+                "<", ">", "=", "!", "~", "&", "|", "^",
             ]
             .into_iter()
             .find(|punct| source[at..].starts_with(punct)) else {
@@ -1159,6 +1176,12 @@ enum Declaration {
     Const,
 }
 
+#[derive(Clone, Copy)]
+struct Argument {
+    expression: ExprId,
+    spread: bool,
+}
+
 #[derive(Clone)]
 enum ExprKind {
     Literal(Value),
@@ -1172,11 +1195,11 @@ enum ExprKind {
     Assign(&'static str, ExprId, ExprId),
     Update(ExprId, bool, bool),
     Member(ExprId, ExprId),
-    Call(ExprId, Vec<ExprId>),
-    Construct(ExprId, Vec<ExprId>),
+    Call(ExprId, Vec<Argument>),
+    Construct(ExprId, Vec<Argument>),
     Function(usize),
-    Object(Vec<(ExprId, ExprId)>),
-    Array(Vec<Option<ExprId>>),
+    Object(Vec<object_literals::Member>),
+    Array(Vec<Option<Argument>>),
 }
 
 struct Expr {
@@ -1220,6 +1243,8 @@ struct Template {
     strict: bool,
     name: Option<String>,
     params: Vec<String>,
+    /// A non-simple rest list stores its final binding name in params.
+    rest: bool,
     body: Vec<StmtId>,
 }
 
@@ -1364,12 +1389,15 @@ impl Parser {
             self.labels.clear();
             self.expression_frames = 0;
             self.if_branches = 0;
-            let (statements, strict) = self.function_body()?;
+            let (statements, strict, own_strict) = self.function_body()?;
             if self.current != body.end + 1 {
                 return Err(self.error("Function body exceeded its token range."));
             }
             let template = &self.program.templates[body.template];
-            if strict
+            if template.rest && own_strict {
+                return Err(self.error("A rest parameter list cannot have a use strict directive."));
+            }
+            if (strict || template.rest)
                 && template.params.iter().collect::<HashSet<_>>().len() != template.params.len()
             {
                 return Err(self.error("Duplicate parameters are forbidden in strict functions."));
@@ -1480,9 +1508,9 @@ impl Parser {
         }
         Ok(body)
     }
-    fn directive(&mut self, statement: StmtId, active: &mut bool) {
+    fn directive(&mut self, statement: StmtId, active: &mut bool) -> bool {
         if !*active {
-            return;
+            return false;
         }
         let stmt = &self.program.stmts[statement];
         if let StmtKind::Expr(expression) = stmt.kind {
@@ -1491,28 +1519,31 @@ impl Parser {
                 let source = &self.program.source[stmt.at..];
                 if source.starts_with("\"use strict\"") || source.starts_with("'use strict'") {
                     self.strict = true;
+                    return true;
                 }
-                return;
+                return false;
             }
         }
         *active = false;
+        false
     }
-    fn function_body(&mut self) -> Result<(Vec<StmtId>, bool), Fault> {
+    fn function_body(&mut self) -> Result<(Vec<StmtId>, bool, bool), Fault> {
         self.need("{")?;
         let previous = self.strict;
         let mut body = Vec::new();
         let mut directives = true;
+        let mut own_strict = false;
         while !self.eat("}") {
             if matches!(self.token().kind, TokenKind::End) {
                 return Err(self.error("Unterminated function body."));
             }
             let statement = self.statement()?;
-            self.directive(statement, &mut directives);
+            own_strict |= self.directive(statement, &mut directives);
             body.push(statement);
         }
         let strict = self.strict;
         self.strict = previous;
-        Ok((body, strict))
+        Ok((body, strict, own_strict))
     }
     fn strict_binding(&self, name: &str, strict: bool) -> Result<(), Fault> {
         if strict && matches!(name, "eval" | "arguments") {
@@ -1749,29 +1780,51 @@ impl Parser {
         }
     }
 
-    fn function(&mut self, name: Option<String>) -> Result<usize, Fault> {
-        self.enter()?;
+    fn parameters(&mut self, unique: bool) -> Result<(Vec<String>, bool), Fault> {
         self.need("(")?;
         let mut params = Vec::new();
+        let mut rest = false;
         if !self.is(")") {
             loop {
                 if params.len() == MAX_ARGUMENTS {
                     return Err(self.unsupported("Function parameter limit reached (256)."));
                 }
+                rest = self.eat("...");
                 let name = self.name()?;
+                if unique && params.contains(&name) {
+                    return Err(self.error("Duplicate arrow parameters."));
+                }
                 params.push(name);
-                if !self.eat(",") {
+                if rest {
+                    if !self.is(")") {
+                        return Err(self.error(
+                            "A rest parameter must be last, without a default or trailing comma.",
+                        ));
+                    }
+                    break;
+                }
+                if !self.eat(",") || self.is(")") {
                     break;
                 }
             }
         }
         self.need(")")?;
+        if rest && params.iter().collect::<HashSet<_>>().len() != params.len() {
+            return Err(self.error("Duplicate parameters are forbidden in rest functions."));
+        }
+        Ok((params, rest))
+    }
+
+    fn function(&mut self, name: Option<String>) -> Result<usize, Fault> {
+        self.enter()?;
+        let (params, rest) = self.parameters(false)?;
         let id = self.defer_body(Template {
             arrow: false,
             constructible: true,
             strict: self.strict,
             name,
             params,
+            rest,
             body: Vec::new(),
         })?;
         self.depth -= 1;
@@ -1892,10 +1945,17 @@ impl Parser {
         at += 1;
         if !punct(tokens.get(at), ")") {
             loop {
+                let rest = punct(tokens.get(at), "...");
+                if rest {
+                    at += 1;
+                }
                 if !tokens.get(at).is_some_and(word) {
                     return false;
                 }
                 at += 1;
+                if rest {
+                    break;
+                }
                 if !punct(tokens.get(at), ",") {
                     break;
                 }
@@ -1911,25 +1971,11 @@ impl Parser {
     fn arrow(&mut self) -> Result<ExprId, Fault> {
         let at = self.at();
         self.enter()?;
-        let mut params = Vec::new();
-        if self.eat("(") {
-            while !self.eat(")") {
-                if params.len() == MAX_ARGUMENTS {
-                    return Err(self.unsupported("Function parameter limit reached (256)."));
-                }
-                let name = self.name()?;
-                if params.contains(&name) {
-                    return Err(self.error("Duplicate arrow parameters."));
-                }
-                params.push(name);
-                if !self.eat(",") {
-                    self.need(")")?;
-                    break;
-                }
-            }
+        let (params, rest) = if self.is("(") {
+            self.parameters(true)?
         } else {
-            params.push(self.name()?);
-        }
+            (vec![self.name()?], false)
+        };
         if self.token().newline {
             return Err(self.error("A line ending is not allowed before =>."));
         }
@@ -1941,6 +1987,7 @@ impl Parser {
                 strict: self.strict,
                 name: None,
                 params,
+                rest,
                 body: Vec::new(),
             })?;
             self.depth -= 1;
@@ -1973,6 +2020,7 @@ impl Parser {
             strict,
             name: None,
             params,
+            rest,
             body,
         });
         self.expr(ExprKind::Function(template), at)
@@ -2080,7 +2128,7 @@ impl Parser {
         }
         Ok(expression)
     }
-    fn arguments(&mut self) -> Result<Vec<ExprId>, Fault> {
+    fn arguments(&mut self) -> Result<Vec<Argument>, Fault> {
         self.need("(")?;
         let mut args = Vec::new();
         if !self.is(")") {
@@ -2088,7 +2136,11 @@ impl Parser {
                 if args.len() == MAX_ARGUMENTS {
                     return Err(self.unsupported("Call argument limit reached (256)."));
                 }
-                args.push(self.assignment_with_in()?);
+                let spread = self.eat("...");
+                args.push(Argument {
+                    expression: self.assignment_with_in()?,
+                    spread,
+                });
                 if !self.eat(",") || self.is(")") {
                     break;
                 }
@@ -2184,6 +2236,7 @@ impl Parser {
         self.expr(kind, at)
     }
     fn object_literal(&mut self) -> Result<ExprKind, Fault> {
+        use object_literals::{Kind, Member};
         self.current += 1;
         let mut properties = Vec::new();
         while !self.is("}") {
@@ -2191,6 +2244,37 @@ impl Parser {
                 return Err(self.unsupported("Object property limit reached (4096)."));
             }
             let position = self.at();
+            // get/set are also ordinary property names. An accessor prefix
+            // needs a following PropertyName, including a computed name.
+            let next_name = matches!(
+                self.tokens.get(self.current + 1).map(|token| &token.kind),
+                Some(
+                    TokenKind::Word(_)
+                        | TokenKind::String(_)
+                        | TokenKind::Number(_)
+                        | TokenKind::Punct("[")
+                )
+            );
+            let accessor = if next_name && (self.is("get") || self.is("set")) {
+                let kind = if self.eat("get") {
+                    Kind::Getter
+                } else {
+                    self.need("set")?;
+                    Kind::Setter
+                };
+                Some(kind)
+            } else {
+                if self.is("async")
+                    && (next_name
+                        || matches!(
+                            self.tokens.get(self.current + 1).map(|token| &token.kind),
+                            Some(TokenKind::Punct("*"))
+                        ))
+                {
+                    return Err(self.unsupported("Async method definitions are not implemented."));
+                }
+                None
+            };
             let (key, shorthand) = if self.eat("[") {
                 let key = self.assignment_with_in()?;
                 self.need("]")?;
@@ -2198,20 +2282,6 @@ impl Parser {
             } else {
                 let (name, shorthand) = match self.token().kind.clone() {
                     TokenKind::Word(name) => {
-                        if matches!(name.as_str(), "get" | "set" | "async")
-                            && matches!(
-                                self.tokens.get(self.current + 1).map(|token| &token.kind),
-                                Some(
-                                    TokenKind::Word(_)
-                                        | TokenKind::String(_)
-                                        | TokenKind::Number(_)
-                                )
-                            )
-                        {
-                            return Err(self.unsupported(
-                                "Accessor and async method definitions are not implemented.",
-                            ));
-                        }
                         let shorthand = (!reserved(&name)).then(|| name.clone());
                         (name, shorthand)
                     }
@@ -2233,22 +2303,41 @@ impl Parser {
                     shorthand,
                 )
             };
-            let value = if self.eat(":") {
-                self.assignment_with_in()?
-            } else if self.is("(") {
+            let (value, kind) = if accessor.is_some() || self.is("(") {
+                // The supported setter binding is one identifier. Its
+                // PropertySetParameterList forbids even a trailing comma.
+                if accessor == Some(Kind::Setter)
+                    && matches!(
+                        self.tokens.get(self.current + 2).map(|token| &token.kind),
+                        Some(TokenKind::Punct(","))
+                    )
+                {
+                    return Err(self.error("A setter parameter cannot be followed by a comma."));
+                }
                 let template = self.function(None)?;
                 let params = &self.program.templates[template].params;
+                let kind = accessor.unwrap_or(Kind::Method);
+                if kind == Kind::Getter && !params.is_empty() {
+                    return Err(self.error("A getter must have no parameters."));
+                }
+                if kind == Kind::Setter
+                    && (params.len() != 1 || self.program.templates[template].rest)
+                {
+                    return Err(self.error("A setter must have exactly one parameter."));
+                }
                 if params.iter().collect::<HashSet<_>>().len() != params.len() {
                     return Err(self.error("Duplicate method parameters are forbidden."));
                 }
                 self.program.templates[template].constructible = false;
-                self.expr(ExprKind::Function(template), position)?
+                (self.expr(ExprKind::Function(template), position)?, kind)
+            } else if self.eat(":") {
+                (self.assignment_with_in()?, Kind::Data)
             } else if let Some(name) = shorthand {
-                self.expr(ExprKind::Name(name), position)?
+                (self.expr(ExprKind::Name(name), position)?, Kind::Data)
             } else {
                 return Err(self.error("Expected ':' after the object property name."));
             };
-            properties.push((key, value));
+            properties.push(Member { key, value, kind });
             if !self.eat(",") {
                 break;
             }
@@ -2266,7 +2355,11 @@ impl Parser {
             if self.eat(",") {
                 elements.push(None);
             } else {
-                elements.push(Some(self.assignment_with_in()?));
+                let spread = self.eat("...");
+                elements.push(Some(Argument {
+                    expression: self.assignment_with_in()?,
+                    spread,
+                }));
                 if !self.eat(",") {
                     break;
                 }
@@ -2651,6 +2744,8 @@ enum Builtin {
     Symbol(symbols::Op),
     Binary(binary_data::Op),
     Collection(collections::Op),
+    Iterator(iterator_protocol::Op),
+    Iterable(iterable_builtins::Op),
     TextEncoding(text_encoding::Op),
     Eval,
     JsonParse,
@@ -2733,6 +2828,7 @@ struct Property {
 }
 
 struct Object {
+    primitive: Option<primitive_wrappers::Data>,
     arguments: Option<arguments::Data>,
     binary: Option<binary_data::Data>,
     collection: Option<collections::Data>,
@@ -2814,10 +2910,7 @@ enum Reference {
 
 enum LoopIterator {
     Keys(Value, std::vec::IntoIter<String>),
-    Array(usize, usize),
-    Typed(usize, usize),
-    Native(usize),
-    String(String, usize),
+    Values(iterator_protocol::Record),
 }
 
 /// One runtime belongs to one document. The host starts one job for the complete
@@ -2835,6 +2928,8 @@ pub struct Runtime {
     symbols: Vec<symbols::Data>,
     symbol_registry: BTreeMap<String, usize>,
     symbol_prototype: Option<usize>,
+    symbol_to_primitive: Option<usize>,
+    symbol_iterator: Option<usize>,
     binary_roots: binary_data::Roots,
     retained_binary: usize,
     collection_roots: collections::Roots,
@@ -2894,6 +2989,8 @@ impl Runtime {
             symbols: Vec::new(),
             symbol_registry: BTreeMap::new(),
             symbol_prototype: None,
+            symbol_to_primitive: None,
+            symbol_iterator: None,
             binary_roots: binary_data::Roots::default(),
             retained_binary: 0,
             collection_roots: collections::Roots::default(),
@@ -2965,6 +3062,7 @@ impl Runtime {
         runtime.initialize_symbols().unwrap();
         runtime.initialize_binary().unwrap();
         runtime.initialize_collections().unwrap();
+        runtime.initialize_iterable_builtins().unwrap();
         runtime.initialize_text_encoding().unwrap();
         for (name, value) in [
             ("undefined", Value::Undefined),
@@ -3342,6 +3440,7 @@ impl Runtime {
                         ExprKind::Function(template) => {
                             let function = &program.templates[template];
                             !function.arrow
+                                && !function.rest
                                 && function.name.is_none()
                                 && function.params.as_slice() == ["event"]
                         }
@@ -3721,7 +3820,8 @@ impl Runtime {
         });
         self.initialize_function_properties(
             program.templates[template].name.as_deref().unwrap_or(""),
-            program.templates[template].params.len(),
+            program.templates[template].params.len()
+                - usize::from(program.templates[template].rest),
             program.templates[template].constructible,
         )?;
         Ok(Value::Function(index))
@@ -4429,6 +4529,7 @@ impl Runtime {
         }
         let id = self.objects.len();
         self.objects.push(Object {
+            primitive: None,
             arguments: None,
             binary: None,
             collection: None,
@@ -4552,39 +4653,24 @@ impl Runtime {
         self.work(name.len())
     }
 
-    /// OrdinaryToPrimitive for operators, property keys and supported APIs.
-    /// Symbol primitives are preserved; @@toPrimitive hooks and primitive
-    /// wrappers remain outside the supported subset.
-    /// Native handles require an explicit host opt-in; no new capability follows
-    /// from being stored in an ordinary object or returned by a callback.
+    /// Number/string adapters for the supported conversion APIs. Addition and
+    /// loose equality use an explicit default hint. Native conversion still
+    /// requires host opt-in before any ordinary or symbol property is read.
     fn primitive_with_hint(
         &mut self,
         value: Value,
         string_hint: bool,
         host: &mut dyn Host,
     ) -> Result<Value, Fault> {
-        self.step()?;
-        if let Value::Host(object) = value {
-            if !host.primitive_conversion(object) {
-                return Err(Fault::new(if string_hint {
-                    "Native host object property-key conversion is not implemented."
-                } else {
-                    "Implicit native host object conversion is not implemented."
-                }));
-            }
-        } else if Ordinary::from_value(&value).is_none() {
-            return Ok(value);
-        }
-        // Native methods may themselves perform conversion (for example an
-        // Error whose name is another Error). Share the existing call-depth cap
-        // so such cycles cannot bypass the script-call or native-stack limits.
-        if self.call_depth >= MAX_CALL_DEPTH {
-            return Err(Fault::new("Object conversion call limit reached (32)."));
-        }
-        self.call_depth += 1;
-        let result = self.primitive_methods(value, string_hint, host);
-        self.call_depth -= 1;
-        result
+        self.primitive_with_preference(
+            value,
+            if string_hint {
+                primitive_conversion::Hint::String
+            } else {
+                primitive_conversion::Hint::Number
+            },
+            host,
+        )
     }
 
     fn primitive_methods(
@@ -4734,8 +4820,8 @@ impl Runtime {
             ));
         }
         if self.object(id)?.length.is_some() && name == "length" {
-            if !self.objects[id].length_writable {
-                return if self.strict || attributes.is_some() {
+            if attributes.is_none() && !self.objects[id].length_writable {
+                return if self.strict {
                     Err(Fault::exception("TypeError", "Array length is read-only."))
                 } else {
                     Ok(())
@@ -4744,19 +4830,27 @@ impl Runtime {
             value.primitive()?;
             self.work(value.bytes())?;
             let length = value.script_number()?;
-            if !length.is_finite() || length < 0.0 || length.fract() != 0.0 {
+            if length != (int32(length) as u32) as f64 {
                 return Err(Fault::exception("RangeError", "Invalid array length."));
             }
-            if length > MAX_ARRAY_LENGTH as f64 {
-                return Err(Fault::new("Array length limit reached (8192)."));
+            if let Some((enumerable, writable, configurable)) = attributes {
+                if !self.apply_array_length(
+                    id,
+                    Some(length as usize),
+                    Some(writable),
+                    !enumerable && !configurable && accessor.is_none(),
+                )? {
+                    return Err(Fault::exception(
+                        "TypeError",
+                        "Cannot redefine array length.",
+                    ));
+                }
+                return Ok(());
             }
             return self.set_array_length(id, length as usize);
         }
         let object = self.object(id)?;
         let array_index = object.length.and_then(|_| property_index(&name));
-        if array_index.is_some_and(|index| index >= MAX_ARRAY_LENGTH) {
-            return Err(Fault::new("Array length limit reached (8192)."));
-        }
         let previous = object.properties.get(&name);
         if previous.is_none() && !object.extensible {
             return if self.strict || attributes.is_some() {
@@ -4776,6 +4870,9 @@ impl Runtime {
             } else {
                 Ok(())
             };
+        }
+        if array_index.is_some_and(|index| index >= MAX_ARRAY_LENGTH) {
+            return Err(Fault::new("Array length limit reached (8192)."));
         }
         let old_bytes = previous.map_or(0, |property| property.value.bytes());
         let is_new = previous.is_none();
@@ -4865,53 +4962,6 @@ impl Runtime {
             self.value_bytes -= name.len() + property.value.bytes();
             self.properties -= 1;
         }
-        Ok(())
-    }
-
-    fn set_array_length(&mut self, id: usize, length: usize) -> Result<(), Fault> {
-        self.step()?;
-        let object = self.object(id)?;
-        let old_length = object
-            .length
-            .ok_or_else(|| Fault::new("Expected an array."))?;
-        if !object.length_writable {
-            return if self.strict {
-                Err(Fault::exception("TypeError", "Array length is read-only."))
-            } else {
-                Ok(())
-            };
-        }
-        if length > MAX_ARRAY_LENGTH {
-            return Err(Fault::new("Array length limit reached (8192)."));
-        }
-        if length < old_length {
-            self.work(object.properties.len().saturating_mul(MAX_PROPERTY_BYTES))?;
-            let mut keys = self.objects[id]
-                .properties
-                .iter()
-                .filter_map(|(name, property)| {
-                    property_index(name)
-                        .filter(|index| *index >= length)
-                        .map(|index| (index, name.clone(), property.configurable))
-                })
-                .collect::<Vec<_>>();
-            keys.sort_unstable_by_key(|item| std::cmp::Reverse(item.0));
-            for (index, name, configurable) in keys {
-                if !configurable {
-                    self.objects[id].length = Some(index + 1);
-                    return if self.strict {
-                        Err(Fault::exception(
-                            "TypeError",
-                            "Array length would remove a nonconfigurable element.",
-                        ))
-                    } else {
-                        Ok(())
-                    };
-                }
-                self.remove_property(id, &name)?;
-            }
-        }
-        self.objects[id].length = Some(length);
         Ok(())
     }
 
@@ -5068,15 +5118,18 @@ impl Runtime {
         if matches!(value, Value::Null | Value::Undefined) {
             return Ok(Vec::new());
         }
-        let Value::Object(id) = value else {
+        // Keep native handles outside this ordinary-object operation before
+        // reading length or invoking any script-controlled conversion.
+        if matches!(value, Value::Host(_)) {
             return Err(Fault::new(
-                "Function.apply requires an ordinary array or array-like object.",
+                "Function.apply on a native host array-like is not implemented.",
             ));
-        };
-        let length = self.get_property_with_host(*id, "length", host)?;
-        length.primitive()?;
-        self.work(length.bytes())?;
-        let numeric = length.script_number()?;
+        }
+        let object = Ordinary::from_value(value).ok_or_else(|| {
+            Fault::exception("TypeError", "Function.apply requires an array-like object.")
+        })?;
+        let length = self.get_ordinary_property_with_host(object, "length", host)?;
+        let numeric = self.binary_number(&length, host)?;
         let length = if numeric.is_nan() || numeric <= 0.0 {
             0
         } else {
@@ -5087,7 +5140,7 @@ impl Runtime {
         };
         let mut result = Vec::with_capacity(length);
         for index in 0..length {
-            result.push(self.get_property_with_host(*id, &index.to_string(), host)?);
+            result.push(self.get_ordinary_property_with_host(object, &index.to_string(), host)?);
         }
         Ok(result)
     }
@@ -5155,6 +5208,22 @@ impl Runtime {
                 let text = match value {
                     Value::Undefined | Value::Null => String::new(),
                     Value::Object(child) => {
+                        // Native array join retains its cycle-aware ordinary
+                        // array path, but exotic hooks must be observed first.
+                        if let Some(primitive) = self.primitive_exotic(
+                            Value::Object(child),
+                            primitive_conversion::Hint::String,
+                            host,
+                        )? {
+                            self.append_string(&mut output, &primitive.script_text()?)?;
+                            continue;
+                        }
+                        if self.wrapped_primitive(&Value::Object(child)).is_some() {
+                            let primitive =
+                                self.primitive_ordinary(Value::Object(child), true, host)?;
+                            self.append_string(&mut output, &primitive.script_text()?)?;
+                            continue;
+                        }
                         let to_string = self.get_property_with_host(child, "toString", host)?;
                         let value_of = self.get_property_with_host(child, "valueOf", host)?;
                         let array = self.object(child)?.length.is_some();
@@ -5743,54 +5812,55 @@ impl Runtime {
         let mut last = Some(Value::Undefined);
         while let Some(key) = self.loop_next(&mut iterator, host)? {
             self.step()?;
-            let body_env = if let Some((kind, name)) = lexical {
-                let scope = self.new_environment(env, false)?;
-                self.put_binding(scope, name.clone(), Some(key), kind, false)?;
-                scope
-            } else {
-                let target = match &program.stmts[*initial].kind {
-                    StmtKind::Declare(Declaration::Var, names) => {
-                        let name = &names[0].0;
-                        let scope = self
-                            .lookup(env, name)?
-                            .ok_or_else(|| Fault::new("Missing hoisted loop binding."))?;
-                        Reference::Binding(scope, name.clone())
-                    }
-                    StmtKind::Expr(expression) => {
-                        self.reference(program, *expression, env, this, host)?
-                    }
-                    _ => unreachable!(),
+            let completion = (|| {
+                let body_env = if let Some((kind, name)) = lexical {
+                    let scope = self.new_environment(env, false)?;
+                    self.put_binding(scope, name.clone(), Some(key), kind, false)?;
+                    scope
+                } else {
+                    let target = match &program.stmts[*initial].kind {
+                        StmtKind::Declare(Declaration::Var, names) => {
+                            let name = &names[0].0;
+                            let scope = self
+                                .lookup(env, name)?
+                                .ok_or_else(|| Fault::new("Missing hoisted loop binding."))?;
+                            Reference::Binding(scope, name.clone())
+                        }
+                        StmtKind::Expr(expression) => {
+                            self.reference(program, *expression, env, this, host)?
+                        }
+                        _ => unreachable!(),
+                    };
+                    self.write_reference(target, key, host)?;
+                    env
                 };
-                self.write_reference(target, key, host)?;
-                env
-            };
-            match self.statement(program, *body, body_env, this, host)? {
-                Control::Normal(value) => {
+                self.statement(program, *body, body_env, this, host)
+            })();
+            match completion {
+                Ok(Control::Normal(value)) => {
                     if value.is_some() {
                         last = value;
                     }
                 }
-                Control::Continue(target, value) if target == id => {
+                Ok(Control::Continue(target, value)) if target == id => {
                     if value.is_some() {
                         last = value;
                     }
                 }
-                Control::Break(target, value) if target == id => {
+                Ok(Control::Break(target, value)) if target == id => {
                     if value.is_some() {
                         last = value;
                     }
+                    self.loop_close(&mut iterator, Ok(()), host)?;
                     break;
                 }
-                abrupt => return Ok(abrupt.update_empty(last)),
+                Ok(abrupt) => {
+                    return self.loop_close(&mut iterator, Ok(abrupt.update_empty(last)), host);
+                }
+                Err(error) => return self.loop_close(&mut iterator, Err(error), host),
             }
         }
         Ok(Control::Normal(last))
-    }
-
-    fn native_iterable(&self, value: &Value) -> bool {
-        matches!(value, Value::String(_))
-            || matches!(value, Value::Object(id) if
-            self.objects.get(*id).is_some_and(|object| object.length.is_some() || object.collection.is_some() || object.iterator.is_some() || object.arguments.is_some()) || self.typed_view(*id).is_some())
     }
 
     fn collect_native_iterable(
@@ -5798,13 +5868,15 @@ impl Runtime {
         source: &Value,
         host: &mut dyn Host,
     ) -> Result<Option<Vec<Value>>, Fault> {
-        if !self.native_iterable(source) {
+        let Some(method) = self.iterator_method(source, host)? else {
             return Ok(None);
-        }
+        };
         let source = self.copy_value(source)?;
-        let mut iterator = self.loop_iterator(source, true, host)?;
+        let mut iterator = self.iterator_from_method(source, method, host)?;
         let mut values = Vec::new();
-        while let Some(value) = self.loop_next(&mut iterator, host)? {
+        while let Some(value) = self.iterator_next(&mut iterator, host)? {
+            // The shared copy budget bounds this temporary list, including an
+            // infinite custom iterator that never allocates a fresh result.
             self.work(8usize.saturating_add(value.bytes()))?;
             values.push(value);
         }
@@ -5821,30 +5893,22 @@ impl Runtime {
             let keys = self.for_in_keys(&source, host)?;
             return Ok(LoopIterator::Keys(source, keys.into_iter()));
         }
-        match source {
-            Value::Object(id)
-                if self.object(id)?.length.is_some() || self.object(id)?.arguments.is_some() =>
-            {
-                Ok(LoopIterator::Array(id, 0))
-            }
-            Value::Object(id) if self.typed_view(id).is_some() => Ok(LoopIterator::Typed(id, 0)),
-            Value::Object(id) if self.object(id)?.iterator.is_some() => {
-                Ok(LoopIterator::Native(id))
-            }
-            Value::Object(id) if self.object(id)?.collection.is_some() => {
-                let kind = self.objects[id].collection.as_ref().unwrap().kind;
-                let (family, mode) = if kind == collections::Kind::Map {
-                    (collections::Family::Map, collections::Mode::Entries)
-                } else {
-                    (collections::Family::Set, collections::Mode::Values)
-                };
-                Ok(LoopIterator::Native(
-                    self.new_native_iterator(id, family, mode)?,
-                ))
-            }
-            Value::String(text) => Ok(LoopIterator::String(text, 0)),
-            Value::Host(_) => Err(Fault::new("Host-object iteration is not implemented.")),
-            _ => Err(Fault::exception("TypeError", "The value is not iterable.")),
+        let method = self
+            .iterator_method(&source, host)?
+            .ok_or_else(|| Fault::exception("TypeError", "The value is not iterable."))?;
+        self.iterator_from_method(source, method, host)
+            .map(LoopIterator::Values)
+    }
+
+    fn loop_close<T>(
+        &mut self,
+        iterator: &mut LoopIterator,
+        completion: Result<T, Fault>,
+        host: &mut dyn Host,
+    ) -> Result<T, Fault> {
+        match iterator {
+            LoopIterator::Keys(_, _) => completion,
+            LoopIterator::Values(iterator) => self.iterator_close(iterator, completion, host),
         }
     }
 
@@ -5884,37 +5948,7 @@ impl Runtime {
                 }
                 Ok(None)
             }
-            LoopIterator::Array(id, next) => {
-                // Native array iteration reads the live length and current
-                // indexed value each time, including undefined for holes.
-                let length = self.array_like_length(*id, host)?;
-                if *next >= length {
-                    return Ok(None);
-                }
-                let value = self.get_property_with_host(*id, &next.to_string(), host)?;
-                *next += 1;
-                Ok(Some(value))
-            }
-            LoopIterator::Native(id) => self.next_native_iterator(*id, host),
-            LoopIterator::Typed(id, next) => {
-                let view = self
-                    .typed_view(*id)
-                    .ok_or_else(|| Fault::new("Invalid typed-array iterator."))?;
-                if *next >= view.length {
-                    return Ok(None);
-                }
-                let value = self.typed_read(view, *next)?;
-                *next += 1;
-                Ok(Some(Value::Number(value)))
-            }
-            LoopIterator::String(text, next) => {
-                let Some(ch) = text[*next..].chars().next() else {
-                    return Ok(None);
-                };
-                self.work(ch.len_utf8())?;
-                *next += ch.len_utf8();
-                Ok(Some(Value::String(ch.to_string())))
-            }
+            LoopIterator::Values(iterator) => self.iterator_next(iterator, host),
         }
     }
 
@@ -6073,28 +6107,16 @@ impl Runtime {
         match &program.exprs[id].kind {
             ExprKind::Object(properties) => {
                 let object = self.new_object(None)?;
-                for &(key, value) in properties {
-                    let key = self.eval(program, key, env, this, host)?;
+                for member in properties {
+                    let key = self.eval(program, member.key, env, this, host)?;
                     let key = self.property_key(key, host)?;
-                    let value = self.eval(program, value, env, this, host)?;
-                    match key {
-                        PropertyKey::String(name) => self.set_property(object, name, value)?,
-                        PropertyKey::Symbol(key) => {
-                            self.store_symbol_property(object, key, value, None)?
-                        }
-                    }
+                    let value = self.eval(program, member.value, env, this, host)?;
+                    self.define_literal_member(object, key, value, member.kind)?;
                 }
                 Ok(Value::Object(object))
             }
             ExprKind::Array(elements) => {
-                let object = self.new_object(Some(elements.len()))?;
-                for (index, value) in elements.iter().enumerate() {
-                    if let Some(expression) = value {
-                        let value = self.eval(program, *expression, env, this, host)?;
-                        self.set_property(object, index.to_string(), value)?;
-                    }
-                }
-                Ok(Value::Object(object))
+                self.eval_array_literal(program, elements, env, this, host)
             }
             _ => unreachable!(),
         }
@@ -6247,10 +6269,7 @@ impl Runtime {
                         };
                         let receiver = self.copy_value(&object)?;
                         let function = self.get_symbol_property(receiver, key, host)?;
-                        let mut args = Vec::with_capacity(arguments.len());
-                        for &argument in arguments {
-                            args.push(self.eval(program, argument, env, this, host)?);
-                        }
+                        let args = self.eval_argument_list(program, arguments, env, this, host)?;
                         return self.call_value(function, &args, object, host);
                     };
                     // Resolve an own or inherited method before arguments run.
@@ -6275,10 +6294,7 @@ impl Runtime {
                             Reference::Property(self.copy_value(&object)?, property.clone());
                         Some(self.read_reference(&reference, host)?)
                     };
-                    let mut args = Vec::with_capacity(arguments.len());
-                    for &argument in arguments {
-                        args.push(self.eval(program, argument, env, this, host)?);
-                    }
+                    let args = self.eval_argument_list(program, arguments, env, this, host)?;
                     if let Some(function) = own_function {
                         self.call_named_value(function, &args, object, &property, host)
                     } else {
@@ -6286,10 +6302,7 @@ impl Runtime {
                     }
                 } else {
                     let function = self.eval(program, *callee, env, this, host)?;
-                    let mut args = Vec::with_capacity(arguments.len());
-                    for &argument in arguments {
-                        args.push(self.eval(program, argument, env, this, host)?);
-                    }
+                    let args = self.eval_argument_list(program, arguments, env, this, host)?;
                     if matches!(&program.exprs[*callee].kind, ExprKind::Name(name) if name == "eval")
                         && self.is_eval(&function)
                     {
@@ -6321,10 +6334,7 @@ impl Runtime {
         // Resolve the constructor before arguments, then test constructability.
         // Even a non-constructor's argument expressions must run in order.
         let constructor = self.eval(program, *constructor, env, this, host)?;
-        let mut args = Vec::with_capacity(arguments.len());
-        for &argument in arguments {
-            args.push(self.eval(program, argument, env, this, host)?);
-        }
+        let args = self.eval_argument_list(program, arguments, env, this, host)?;
         self.construct_value(constructor, &args, host)
     }
 
@@ -6368,9 +6378,13 @@ impl Runtime {
             Some(Function::Native(
                 builtin @ (Builtin::Object | Builtin::Array | Builtin::Error(_)),
             )) => self.builtin(*builtin, args, host),
-            Some(Function::Native(Builtin::String | Builtin::Number | Builtin::Boolean)) => Err(
-                Fault::new("Primitive wrapper constructors are not implemented."),
-            ),
+            Some(Function::Native(builtin @ (Builtin::Number | Builtin::Boolean))) => {
+                let value = self.builtin(*builtin, args, host)?;
+                self.box_primitive(value)
+            }
+            Some(Function::Native(Builtin::String)) => Err(Fault::new(
+                "String primitive wrapper constructors are not implemented.",
+            )),
             Some(Function::Script {
                 program, template, ..
             }) if program.templates[*template].constructible => {
@@ -6562,6 +6576,7 @@ impl Runtime {
             }
             Reference::Property(Value::Object(object), property) => self.assign_ordinary_property(Ordinary::Object(object), property, value, host),
             Reference::Property(Value::Function(function), property) => self.assign_ordinary_property(Ordinary::Function(function), property, value, host),
+            Reference::Property(receiver @ (Value::Number(_) | Value::Bool(_) | Value::Symbol(_)), property) => self.assign_primitive_property(receiver, property, value, host),
             Reference::Property(_, _) => Err(Fault::new(
                 "Properties can only be assigned on ordinary objects, arrays or supported host objects.",
             )),
@@ -6886,12 +6901,12 @@ impl Runtime {
                 )
             };
             let left = if converts(&left, &right) {
-                self.primitive_with_hint(left, false, host)?
+                self.primitive_with_preference(left, primitive_conversion::Hint::Default, host)?
             } else {
                 left
             };
             let right = if converts(&right, &left) {
-                self.primitive_with_hint(right, false, host)?
+                self.primitive_with_preference(right, primitive_conversion::Hint::Default, host)?
             } else {
                 right
             };
@@ -6902,13 +6917,18 @@ impl Runtime {
         // convert both primitives before testing their types. Other numeric
         // operators finish ToNumber(left) first: a Symbol error must prevent
         // the right-hand object's conversion callback from running.
-        let left = self.primitive_with_hint(left, false, host)?;
+        let hint = if op == "+" {
+            primitive_conversion::Hint::Default
+        } else {
+            primitive_conversion::Hint::Number
+        };
+        let left = self.primitive_with_preference(left, hint, host)?;
         let numeric_left = if matches!(op, "+" | "<" | ">" | "<=" | ">=") {
             None
         } else {
             Some(left.script_number()?)
         };
-        let right = self.primitive_with_hint(right, false, host)?;
+        let right = self.primitive_with_preference(right, hint, host)?;
         left.primitive()?;
         right.primitive()?;
         if op == "+" && (matches!(left, Value::String(_)) || matches!(right, Value::String(_))) {
@@ -7037,6 +7057,12 @@ impl Runtime {
             Some(Function::Native(Builtin::Collection(operation))) => {
                 return self.collection_builtin(*operation, args, this, host);
             }
+            Some(Function::Native(Builtin::Iterator(operation))) => {
+                return self.iterator_builtin(*operation, this, host);
+            }
+            Some(Function::Native(Builtin::Iterable(operation))) => {
+                return self.iterable_builtin(*operation, args, this, host);
+            }
             Some(Function::Native(Builtin::Binary(operation))) => {
                 return self.binary_builtin(*operation, args, this, host);
             }
@@ -7131,7 +7157,7 @@ impl Runtime {
             match this {
                 Value::Null | Value::Undefined => self.global_this()?,
                 Value::Object(_) | Value::Function(_) | Value::Host(_) => this,
-                _ => return Err(Fault::new("Primitive receiver boxing is not implemented; use a strict function or an object receiver.")),
+                primitive => self.box_primitive(primitive)?,
             }
         } else {
             this
@@ -7143,9 +7169,13 @@ impl Runtime {
             let scope = self.new_environment(parent, true)?;
             let function = &program.templates[template];
             for (position, name) in function.params.iter().enumerate() {
-                let value = match args.get(position) {
-                    Some(value) => self.copy_value(value)?,
-                    None => Value::Undefined,
+                let value = if function.rest && position + 1 == function.params.len() {
+                    self.array_from_values(args.get(position..).unwrap_or(&[]))?
+                } else {
+                    match args.get(position) {
+                        Some(value) => self.copy_value(value)?,
+                        None => Value::Undefined,
+                    }
                 };
                 self.put_binding(scope, name.clone(), Some(value), Declaration::Var, true)?;
             }
@@ -7585,6 +7615,8 @@ impl Runtime {
             Builtin::Symbol(_)
             | Builtin::Binary(_)
             | Builtin::Collection(_)
+            | Builtin::Iterator(_)
+            | Builtin::Iterable(_)
             | Builtin::TextEncoding(_) => Err(Fault::new(
                 "Native data operations need an execution context.",
             )),
@@ -7631,7 +7663,10 @@ impl Runtime {
             Builtin::Object => match value {
                 Value::Null | Value::Undefined => self.new_object(None).map(Value::Object),
                 Value::Object(_) | Value::Function(_) | Value::Host(_) => self.copy_value(value),
-                _ => Err(Fault::new("Primitive wrapper objects are not implemented.")),
+                primitive => {
+                    let primitive = self.copy_value(primitive)?;
+                    self.box_primitive(primitive)
+                }
             },
             Builtin::Array => {
                 if let [Value::Number(length)] = args {
@@ -8963,7 +8998,7 @@ caught;
             ("try{for(var n=0;n<200;n++)eval('1');}catch(e){test.record('caught');}finally{test.record('finally');}".to_owned(), "Retained script limit"),
             (format!("try{{eval('{}1;');}}catch(e){{test.record('caught');}}finally{{test.record('finally');}}", "!".repeat(500)), "Parser nesting limit"),
             ("try{eval('class Unsupported {}');}catch(e){test.record('caught');}finally{test.record('finally');}".to_owned(), "Unsupported syntax"),
-            ("try{eval('({get value(){return 1;}})');}catch(e){test.record('caught');}finally{test.record('finally');}".to_owned(), "not implemented"),
+            ("try{eval('({async value(){return 1;}})');}catch(e){test.record('caught');}finally{test.record('finally');}".to_owned(), "not implemented"),
         ] {
             let (mut runtime, mut host) = test_runtime();
             host.eval_permission = Some(true);
@@ -9970,7 +10005,7 @@ caught;
     #[test]
     fn parsing_finishes_before_any_script_effects() {
         for source in [
-            "test.value=1; const thing={get x(){return 1;}};",
+            "test.value=1; const thing={async x(){return 1;}};",
             "test.value=1; class Nope {}",
             "test.value=1; let duplicate; let duplicate;",
             "test.value=1; function f(){break;}",

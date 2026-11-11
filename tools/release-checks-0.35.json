@@ -1,0 +1,167 @@
+{
+  "version": "0.35.0",
+  "stage": "Final object literal / array descriptor milestone",
+  "verified_utc": "2026-11-11T03:45:50.050225+00:00",
+  "baseline": {
+    "baseline_version": "0.34.0",
+    "baseline_archive_sha256": "e24da8dca369aaff820408f62a9afa5f29b09c00df222537542fb6a0dee611d9",
+    "baseline_paths_retained": 475,
+    "baseline_source_files_retained": 125,
+    "removed_paths": [],
+    "substantive_changed_sources": [
+      "src/app_search_tests.rs",
+      "src/javascript.rs",
+      "src/prototypes.rs"
+    ],
+    "new_sources": [
+      "src/array_descriptors.rs",
+      "src/object_literals.rs"
+    ],
+    "source_version_only_changes": [
+      "src/main.rs",
+      "src/http.rs",
+      "src/diagnostics.rs"
+    ],
+    "all_baseline_rust_test_names_retained": true,
+    "new_tests": [
+      "app::search_tests::literal_accessors_and_array_descriptors_bootstrap_search_and_repeated_search",
+      "javascript::array_descriptors::tests::array_descriptors_define_data_accessors_and_ordered_names",
+      "javascript::array_descriptors::tests::array_descriptors_define_properties_snapshots_before_partial_application",
+      "javascript::array_descriptors::tests::array_descriptors_enforce_existing_limits_without_length_or_property_growth",
+      "javascript::array_descriptors::tests::array_descriptors_length_conversion_runs_twice_and_rechecks_live_attributes",
+      "javascript::array_descriptors::tests::array_descriptors_mutators_throw_and_preserve_partial_changes",
+      "javascript::array_descriptors::tests::array_descriptors_readonly_length_allows_existing_indices_and_same_definitions",
+      "javascript::array_descriptors::tests::array_descriptors_reject_invalid_lengths_and_preserve_exception_order",
+      "javascript::array_descriptors::tests::array_descriptors_shrink_descending_and_lock_after_blocked_deletion",
+      "javascript::object_literals::tests::literal_accessor_allocations_and_execution_remain_bounded",
+      "javascript::object_literals::tests::literal_accessor_computed_keys_follow_order_and_own_definitions",
+      "javascript::object_literals::tests::literal_accessor_syntax_errors_are_atomic",
+      "javascript::object_literals::tests::literal_accessors_merge_override_and_preserve_descriptors",
+      "javascript::object_literals::tests::literal_accessors_names_keys_receivers_and_closures",
+      "javascript::object_literals::tests::literal_accessors_propagate_throws_and_observe_strict_calls"
+    ],
+    "obsolete_rust_negative_fixtures": "Two previously unsupported literal-getter examples now test unsupported async methods under the same atomicity test names.",
+    "assets_and_trust_files_byte_identical": true,
+    "tls_csp_cookie_profile_dom_layout_and_resource_policy_implementations_unchanged": true,
+    "frozen_build_inputs_verified": 211,
+    "third_party_cargo_dependencies": 0
+  },
+  "implemented": [
+    "Object-literal getter/setter definitions",
+    "Concise method/accessor function names",
+    "Array index data/accessor descriptors",
+    "Array length descriptors and ordered conversion",
+    "Descending partial shrink and writable-length rules",
+    "Accessor/array App search flow"
+  ],
+  "rust": {
+    "passed": 853,
+    "failed": 0,
+    "ignored": 0,
+    "baseline_tests_retained": 838,
+    "new_tests": 15,
+    "seconds": 6.05,
+    "app_search_tests_passed": 14,
+    "app_search_tests": [
+      "app::search_tests::callable_object_helpers_bootstrap_bound_search_and_repeated_search",
+      "app::search_tests::deferred_function_bootstrap_initializes_scripted_search_and_repeated_search",
+      "app::search_tests::form_action_csp_blocks_native_submits_with_scripting_enabled_or_disabled_and_script_submits",
+      "app::search_tests::input_search_renders_results_follows_cross_origin_result_and_searches_again",
+      "app::search_tests::literal_accessors_and_array_descriptors_bootstrap_search_and_repeated_search",
+      "app::search_tests::long_else_if_bootstrap_initializes_scripted_search_and_repeated_search",
+      "app::search_tests::passive_accessor_probe_initializes_scripted_search_and_repeated_search",
+      "app::search_tests::script_form_cross_origin_action_and_redirect_make_no_forbidden_request",
+      "app::search_tests::script_form_submit_bypasses_required_but_stop_discards_the_queued_request",
+      "app::search_tests::scripted_post_preserves_body_and_reload_confirmation",
+      "app::search_tests::symbol_bootstrap_initializes_scripted_search_and_repeated_search",
+      "app::search_tests::textarea_enter_edits_lines_and_submit_cancellation_preserves_the_current_document",
+      "app::search_tests::textarea_scripted_enter_submits_snapshots_and_subsequent_searches",
+      "app::search_tests::textarea_search_renders_results_follows_cross_origin_result_and_searches_again"
+    ]
+  },
+  "javascript": {
+    "oracle_passed": 919,
+    "oracle_cases": 919,
+    "negative_passed": 229,
+    "negative_cases": 229,
+    "new_comparisons": 15,
+    "node": "v24.22.1",
+    "rustc": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+    "obsolete_negative_replaced_by_positive": "prototype-array-descriptor-disabled-atomic",
+    "retained_atomicity_guards": "Unsupported getter syntax guards now use unsupported async methods; positive literal/eval checks added."
+  },
+  "capability_inventory": {
+    "original_probes": 87,
+    "unchanged_previous_probes": 75,
+    "new_probes": 12,
+    "source_review_areas": 24,
+    "baseline_matches_node": 48,
+    "current_matches_node": 60,
+    "improved": 12,
+    "current_status_counts": {
+      "supported": 60,
+      "missing": 24,
+      "intentionally_limited": 3
+    },
+    "regressions": [],
+    "incomparable_fixtures": [],
+    "source_manifest_sha256": "580165e71c18504c36d30de4421da3c014bc2d9394f753853a2fafbd82855361",
+    "fixture_file_sha256": "f9e622df27a2fa4e1fb99fa551b8fbccc420078a7226900317f75813038b791e",
+    "scope": "Original selected samples and source review; counts do not measure overall web compatibility."
+  },
+  "selected_test262": {
+    "repository": "https://github.com/tc39/test262",
+    "revision": "48221d7c1f7745dc13e420a2e850a248c0b2afb4",
+    "unchanged_files": 6,
+    "strict_default_executions": 12,
+    "baseline_passed": 8,
+    "current_passed": 12,
+    "current_failed": 0,
+    "node_references_passed": 12,
+    "remaining_failures_in_selected_subset": [],
+    "upstream_fixtures_license_and_hashes_retained": true,
+    "full_suite_run": false
+  },
+  "builds": {
+    "native_release": "passed",
+    "windows_x64_release": "passed",
+    "rustfmt": "passed",
+    "native_sha256": "cd7751565490ebfe6426ec0a13eddc74f6c1d1f8a558bf3eeb2b0f68176fe5b7",
+    "windows_sha256": "0f68f597e341eb14d2a1e553850a28d5f7ff80aa5d8c9c922fcfc547307ef6b8",
+    "windows_bytes": 3981312,
+    "windows_pe": "passed; 0.35.0.0, original icons and same 13 system imports",
+    "windows_runtime_executed": false
+  },
+  "verification_boundaries": {
+    "live_google_verified": false,
+    "live_bing_verified": false,
+    "captured_access_check_executed": false,
+    "wpt_run": false,
+    "broad_https_and_activity_process_matrices_rerun": false,
+    "clippy_rerun": false,
+    "reason": "Only JavaScript foundations and one original App test changed substantively; existing TLS/CSP/network regressions ran in the full Rust suite."
+  },
+  "security": {
+    "tls_validation_weakened": false,
+    "csp_weakened": false,
+    "cross_origin_policy_changed": false,
+    "profile_or_privacy_defaults_changed": false,
+    "execution_limits_increased": false,
+    "dependencies_added": 0,
+    "site_specific_rewriting": false,
+    "array_length_limit": 8192,
+    "object_property_limit": 4096,
+    "document_property_limit": 16384,
+    "retained_values_limit_bytes": 2097152
+  },
+  "recovery": {
+    "filename": "ChezCat_0_35_Source_Recovery.zip",
+    "bytes": 3892939,
+    "sha256": "8694e350000f4eebabc6d3fcf0002051dada4d17fa23a9e8effd8b0ccc20d6f4",
+    "files": 486,
+    "verified_manifest_entries": 485,
+    "source_version": "0.35.0",
+    "source_only": true,
+    "windows_version": null
+  }
+}

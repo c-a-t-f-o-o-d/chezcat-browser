@@ -1,7 +1,7 @@
-//! Original arguments objects for the supported simple parameter lists.
+//! Original arguments objects for simple and identifier-rest parameter lists.
 //! Values are retained lazily, so calls that never read arguments allocate no
 //! object. Sloppy parameter mappings share the actual environment binding;
-//! strict arguments are independent, with the standard throwing callee slot.
+//! strict and rest-list arguments are independent, with a throwing callee slot.
 //! https://tc39.es/ecma262/#sec-arguments-exotic-objects
 
 use super::{
@@ -12,7 +12,7 @@ use std::collections::{BTreeMap, HashSet};
 
 pub(super) struct Pending {
     function: usize,
-    strict: bool,
+    unmapped: bool,
     values: Vec<Value>,
     mapped: BTreeMap<String, String>,
 }
@@ -38,8 +38,8 @@ impl Runtime {
         values: &[Value],
     ) -> Result<(), Fault> {
         let function = &program.templates[template];
-        // All accepted parameter lists are simple identifiers. Rest/default/
-        // destructuring parameters remain parser errors, not mapped aliases.
+        // A named arguments parameter suppresses the implicit binding, including
+        // a rest binding. Arrows keep their outer arguments binding.
         if function.arrow || function.params.iter().any(|name| name == "arguments") {
             return Ok(());
         }
@@ -61,7 +61,7 @@ impl Runtime {
         }
         self.work(bytes)?;
         let mut mapped = BTreeMap::new();
-        if !function.strict {
+        if !function.strict && !function.rest {
             let mut seen = HashSet::new();
             // Only the final occurrence of a duplicate parameter can map.
             // A missing final argument also prevents an earlier duplicate
@@ -86,7 +86,7 @@ impl Runtime {
         )?;
         self.environment_mut(environment).arguments = Some(Pending {
             function: callee,
-            strict: function.strict,
+            unmapped: function.strict || function.rest,
             values: values.to_vec(),
             mapped,
         });
@@ -114,7 +114,7 @@ impl Runtime {
             Value::Number(length as f64),
             Some((false, true, true)),
         )?;
-        if pending.strict {
+        if pending.unmapped {
             let thrower = self.arguments_thrower()?;
             self.store_property(id, "callee".into(), thrower, Some((false, false, false)))?;
             self.objects[id]
@@ -130,6 +130,12 @@ impl Runtime {
                 Some((false, true, true)),
             )?;
         }
+        self.store_symbol_property(
+            id,
+            self.symbol_iterator.unwrap(),
+            self.arguments_iterator_method(),
+            Some((false, true, true)),
+        )?;
         self.objects[id].arguments = Some(Data {
             environment,
             mapped: pending.mapped,

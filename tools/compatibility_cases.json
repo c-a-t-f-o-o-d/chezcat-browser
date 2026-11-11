@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "purpose": "Bounded independent original capability probes plus a source-reviewed browser inventory. Probe success covers the tested sample only, not an entire standard.",
-  "probe_count": 75,
+  "probe_count": 127,
   "probes": [
     {
       "id": "language-arithmetic",
@@ -602,6 +602,444 @@
       "source": "let r=/a/g,seen=[];test.record(\"a a\".replace(r,function(match,offset){seen.push(r.lastIndex);if(offset===0){r.lastIndex=7;Object.freeze(r);}return \"$&\";}));test.record(seen.join());test.record(r.lastIndex);",
       "baseline_status": "missing",
       "note": ""
+    },
+    {
+      "id": "literal-accessors-receiver-descriptor",
+      "area": "Objects",
+      "label": "Literal accessor descriptors and inherited receiver",
+      "source": "let model={_v:2,get value(){return this._v+1;},set value(v){this._v=v*2;}};let d=Object.getOwnPropertyDescriptor(model,\"value\");test.record(typeof d.get);test.record(typeof d.set);test.record(d.enumerable);test.record(d.configurable);test.record(Object.hasOwn(d,\"value\"));test.record(Object.hasOwn(d,\"writable\"));model.value=4;test.record(model.value);let child=Object.create(model);child._v=5;test.record(child.value);child.value=6;test.record(child._v);test.record(model._v);",
+      "baseline_status": "missing",
+      "note": "Own enumerable/configurable getter and setter pair; inherited accessors keep the original receiver.",
+      "introduced_in": "0.35.0"
+    },
+    {
+      "id": "literal-accessors-merge-replace",
+      "area": "Objects",
+      "label": "Literal accessor pairs merge and replace data",
+      "source": "let saved=0;let pair={get x(){return 1;},set x(v){saved=v;},get x(){return 3;}};pair.x=8;test.record(pair.x);test.record(saved);let data={get x(){return 2;},set x(v){saved=v;},x:9};let d=Object.getOwnPropertyDescriptor(data,\"x\");test.record(data.x);test.record(d.writable);test.record(Object.hasOwn(d,\"get\"));let accessor={x:7,set x(v){saved=v;}};let a=Object.getOwnPropertyDescriptor(accessor,\"x\");test.record(accessor.x);test.record(a.get);test.record(typeof a.set);test.record(Object.hasOwn(a,\"value\"));accessor.x=11;test.record(saved);",
+      "baseline_status": "missing",
+      "note": "Duplicate literal properties preserve accessor counterparts or replace the descriptor kind as required.",
+      "introduced_in": "0.35.0"
+    },
+    {
+      "id": "literal-accessors-computed-order",
+      "area": "Objects",
+      "label": "Computed accessor keys evaluate once in source order",
+      "source": "let order=\"\";function key(k){order+=k;return k;}let o={get [key(\"x\")](){order+=\"g\";return 7;},set [key(\"x\")](v){order+=\"s\"+v;},[key(\"y\")]:2};test.record(order);test.record(o.x);o.x=3;test.record(order);test.record(Object.keys(o).join(\",\"));",
+      "baseline_status": "missing",
+      "note": "Computed keys are evaluated at creation; getter/setter bodies run only when invoked.",
+      "introduced_in": "0.35.0"
+    },
+    {
+      "id": "literal-accessors-metadata",
+      "area": "Objects",
+      "label": "Accessor names, lengths and nonconstructibility",
+      "source": "let symbol=Symbol(\"slot\");let o={get x(){return 1;},set x(v){},get [symbol](){return 2;}};let d=Object.getOwnPropertyDescriptor(o,\"x\"),s=Object.getOwnPropertyDescriptor(o,symbol);test.record(d.get.name);test.record(d.set.name);test.record(d.get.length);test.record(d.set.length);test.record(s.get.name);test.record(Object.hasOwn(d.get,\"prototype\"));try{new d.get();}catch(e){test.record(e.name);}test.record(s.get.call(o));let get=3,set=4;let plain={get,set};test.record(plain.get+plain.set);let methods={get(){return 5;},set(v){return v;}};test.record(methods.get()+methods.set(6));",
+      "baseline_status": "missing",
+      "note": "Accessor functions use get/set metadata and cannot be constructors; ordinary get/set property names remain usable.",
+      "introduced_in": "0.35.0"
+    },
+    {
+      "id": "literal-accessors-arity-errors",
+      "area": "Language",
+      "label": "Invalid getter/setter arities reject during parsing",
+      "source": "let cases=[\"({get x(a){return a;}})\",\"({set x(){}})\",\"({set x(a,b){}})\"];for(let i=0;i<cases.length;i++){try{eval(cases[i]);test.record(\"accepted\");}catch(e){test.record(e.name);}}",
+      "baseline_status": "missing",
+      "note": "Getters require zero parameters and setters exactly one supported parameter; invalid definitions raise SyntaxError.",
+      "introduced_in": "0.35.0"
+    },
+    {
+      "id": "array-length-descriptor",
+      "area": "Arrays",
+      "label": "Array length descriptors and batched definitions",
+      "source": "let a=[1,2,3];test.record(JSON.stringify(Object.getOwnPropertyDescriptor(a,\"length\")));Object.defineProperty(a,\"length\",{value:5});test.record(a.length);test.record(Object.keys(a).join(\",\"));Object.defineProperties(a,{length:{value:2},1:{value:9,writable:false}});test.record(a.join(\",\"));test.record(JSON.stringify(Object.getOwnPropertyDescriptor(a,\"1\")));test.record(Object.getOwnPropertyNames(a).join(\",\"));",
+      "baseline_status": "missing",
+      "note": "Array length stays nonenumerable/nonconfigurable and participates in defineProperty/defineProperties.",
+      "introduced_in": "0.35.0"
+    },
+    {
+      "id": "array-length-shrink-holes",
+      "area": "Arrays",
+      "label": "Array shrinking deletes indices while preserving named properties",
+      "source": "let a=[0,1,2,3];delete a[1];a.extra=7;Object.defineProperty(a,\"length\",{value:2});test.record(a.length);test.record(Object.keys(a).join(\",\"));test.record(Object.getOwnPropertyNames(a).join(\",\"));test.record(2 in a);a[4]=9;test.record(a.length);test.record(a[4]);test.record(a.extra);",
+      "baseline_status": "missing",
+      "note": "Shrinking removes existing elements beyond the new length; holes and named properties retain their distinct behavior.",
+      "introduced_in": "0.35.0"
+    },
+    {
+      "id": "array-length-blocked-shrink",
+      "area": "Arrays",
+      "label": "Descending shrink stops at a nonconfigurable index",
+      "source": "let a=[0,1,2,3,4];Object.defineProperty(a,\"2\",{configurable:false});try{Object.defineProperty(a,\"length\",{value:1,writable:false});}catch(e){test.record(e.name);}test.record(a.length);test.record(4 in a);test.record(3 in a);test.record(2 in a);test.record(Object.getOwnPropertyDescriptor(a,\"length\").writable);test.record(a.join(\",\"));",
+      "baseline_status": "missing",
+      "note": "Failed shrink keeps the blocking index, deletes higher configurable indices first and applies requested nonwritable length.",
+      "introduced_in": "0.35.0"
+    },
+    {
+      "id": "array-length-readonly-index",
+      "area": "Arrays",
+      "label": "Nonwritable length blocks new out-of-range indices",
+      "source": "let a=[1];Object.defineProperty(a,\"length\",{writable:false});a[1]=2;a[0]=3;test.record(a.length);test.record(a[0]);test.record(1 in a);try{Object.defineProperty(a,\"1\",{value:8});}catch(e){test.record(e.name);}Object.defineProperty(a,\"0\",{get:function(){return 7;}});test.record(a[0]);test.record(a.length);test.record(Object.getOwnPropertyDescriptor(a,\"length\").writable);",
+      "baseline_status": "missing",
+      "note": "Nonwritable length rejects extension but permits otherwise valid definitions of existing indices.",
+      "introduced_in": "0.35.0"
+    },
+    {
+      "id": "array-length-coercion",
+      "area": "Arrays",
+      "label": "Length conversion order and invalid numeric lengths",
+      "source": "let calls=0;let a=[1,2,3];Object.defineProperty(a,\"length\",{value:{valueOf(){calls++;return 2;}}});test.record(calls);test.record(a.length);calls=0;try{Object.defineProperty(a,\"length\",{value:{valueOf(){calls++;return calls===1?1:2;}}});}catch(e){test.record(e.name);}test.record(calls);test.record(a.length);try{Object.defineProperty(a,\"length\",{value:1.5});}catch(e){test.record(e.name);}test.record(a.length);",
+      "baseline_status": "missing",
+      "note": "Array length definition performs specified numeric conversions and rejects inconsistent or fractional results before mutation.",
+      "introduced_in": "0.35.0"
+    },
+    {
+      "id": "array-index-accessor",
+      "area": "Arrays",
+      "label": "Accessor indices update length and expose ordinary descriptors",
+      "source": "let saved=4;let a=[];Object.defineProperty(a,\"2\",{get:function(){return saved;},set:function(v){saved=v;},enumerable:true,configurable:true});test.record(a.length);test.record(a[2]);a[2]=9;test.record(saved);test.record(Object.entries(a)[0][1]);let d=Object.getOwnPropertyDescriptor(a,\"2\");test.record(typeof d.get);test.record(typeof d.set);test.record(Object.hasOwn(d,\"value\"));Object.defineProperty(a,\"length\",{value:1});test.record(a.length);test.record(2 in a);",
+      "baseline_status": "missing",
+      "note": "Numeric accessor definitions extend array length and are deleted by a valid shrink.",
+      "introduced_in": "0.35.0"
+    },
+    {
+      "id": "array-length-strict-mutators",
+      "area": "Arrays",
+      "label": "Strict writes and native mutators observe length descriptors",
+      "source": "let a=[1,2];Object.defineProperty(a,\"length\",{writable:false});function strictLength(){\"use strict\";a.length=1;}try{strictLength();}catch(e){test.record(e.name);}try{a.push(3);}catch(e){test.record(e.name);}try{a.pop();}catch(e){test.record(e.name);}test.record(a.length);test.record(1 in a);let b=[1,2,3];Object.defineProperty(b,\"1\",{configurable:false});b.length=0;test.record(b.length);test.record(2 in b);function strictShrink(){\"use strict\";b.length=0;}try{strictShrink();}catch(e){test.record(e.name);}test.record(b.length);",
+      "baseline_status": "missing",
+      "note": "Strict assignment and built-in mutators throw on failed writes; ordinary sloppy writes preserve required partial shrink effects.",
+      "introduced_in": "0.35.0"
+    },
+    {
+      "id": "wrapper-identities-and-primitives",
+      "area": "Objects",
+      "label": "Boxed primitive construction, identity and coercion",
+      "source": "let n=new Number(7),b=new Boolean(false),s=Symbol('box'),w=Object(s);test.record(Object(n)===n);test.record(new Object(n)===n);test.record(Object(7)!==Object(7));test.record(n.valueOf());test.record(new Number().valueOf());test.record(new Boolean().valueOf());test.record(Number(n));test.record(Boolean(b));test.record(typeof w);test.record(w.valueOf()===s);test.record(Object.getPrototypeOf(n)===Number.prototype);test.record(Object.getPrototypeOf(b)===Boolean.prototype);test.record(Object.getPrototypeOf(w)===Symbol.prototype);test.record(n instanceof Number);test.record(b instanceof Boolean);test.record(w instanceof Symbol);",
+      "baseline_status": "missing",
+      "note": "Wrappers preserve internal primitive values and object identity; wrapping an existing object does not replace it.",
+      "introduced_in": "0.36.0"
+    },
+    {
+      "id": "wrapper-prototypes-and-forged-receivers",
+      "area": "Objects",
+      "label": "Intrinsic primitive slots and branded method receivers",
+      "source": "test.record(Number.prototype.valueOf());test.record(Boolean.prototype.valueOf());test.record(Number.prototype.toString());test.record(Boolean.prototype.toString());let n=Object(-0),b=Object(false);test.record(1/Number.prototype.valueOf.call(n));test.record(Boolean.prototype.valueOf.call(b));test.record(Object.prototype.toString.call(n));test.record(Object.prototype.toString.call(b));let forged=Object.create(Number.prototype);try{Number.prototype.valueOf.call(forged);}catch(e){test.record(e.name);}try{Boolean.prototype.valueOf.call(n);}catch(e){test.record(e.name);}try{Symbol.prototype.valueOf.call(Symbol.prototype);}catch(e){test.record(e.name);}test.record(Object.prototype.toString.call(forged));",
+      "baseline_status": "missing",
+      "note": "Only genuine internal slots satisfy branded methods; Number/Boolean intrinsic prototypes have the standard primitive values.",
+      "introduced_in": "0.36.0"
+    },
+    {
+      "id": "wrapper-strict-sloppy-receivers",
+      "area": "Functions",
+      "label": "Primitive receiver boxing and strict receiver preservation",
+      "source": "function receiver(){return this;}function strictReceiver(){'use strict';return this;}let n=receiver.call(5),b=receiver.call(false),s=Symbol('this'),w=receiver.call(s);test.record(typeof n);test.record(n.valueOf());test.record(n instanceof Number);test.record(b.valueOf());test.record(b instanceof Boolean);test.record(w.valueOf()===s);test.record(receiver.call(5)!==receiver.call(5));test.record(strictReceiver.call(5)===5);test.record(strictReceiver.call(false)===false);test.record(strictReceiver.call(s)===s);let bound=receiver.bind(4);test.record(bound().valueOf());test.record(bound()!==bound());",
+      "baseline_status": "missing",
+      "note": "Non-strict calls box Number/Boolean/Symbol receivers per invocation; strict and bound-call semantics retain their required identities.",
+      "introduced_in": "0.36.0"
+    },
+    {
+      "id": "wrapper-symbol-keys-and-integrity",
+      "area": "Symbols",
+      "label": "Symbol wrappers, property keys and ordinary integrity",
+      "source": "let s=Symbol('key'),w=Object(s),o={};o[w]=6;test.record(Object.getOwnPropertySymbols(o)[0]===s);test.record(o[s]);test.record(w.description);test.record(Symbol.prototype.toString.call(w));test.record(Symbol.prototype.valueOf.call(w)===s);w.extra=3;Object.freeze(w);test.record(Object.isFrozen(w));test.record(w.valueOf()===s);test.record(w.extra);test.record(Object.keys(w).join(','));try{new Symbol('bad');}catch(e){test.record(e.name);}",
+      "baseline_status": "missing",
+      "note": "A Symbol wrapper remains an object with expandos and integrity while its primitive key identity is retained.",
+      "introduced_in": "0.36.0"
+    },
+    {
+      "id": "wrapper-json-unboxing",
+      "area": "Globals",
+      "label": "JSON primitive-wrapper conversion and ordinary Symbol objects",
+      "source": "let n=Object(7),b=Object(false),s=Object(Symbol('json'));let calls='';n.valueOf=function(){calls+='n';return 9;};b.valueOf=function(){throw 'boolean hook';};s.extra=2;test.record(JSON.stringify([n,b,s]));test.record(calls);test.record(JSON.stringify({a:new Number(NaN),b:new Number(Infinity),c:new Boolean(true)}));test.record(JSON.stringify(Object(-0)));",
+      "baseline_status": "missing",
+      "note": "JSON unwraps Number/Boolean values using the required conversion rules; Symbol wrappers serialize ordinary own fields.",
+      "introduced_in": "0.36.0"
+    },
+    {
+      "id": "conversion-primitive-hints",
+      "area": "Symbols",
+      "label": "Default, numeric and string conversion hints",
+      "source": "let log='',o={[Symbol.toPrimitive]:function(hint){log+=hint+';';return hint==='string'?'key':4;}};test.record(o+1);test.record(o==4);test.record(o<5);test.record(+o);test.record(String(o));let target={};target[o]=8;test.record(target.key);test.record(log);",
+      "baseline_status": "missing",
+      "note": "Addition/equality use default, numeric operators use number and property keys/string conversion use string.",
+      "introduced_in": "0.36.0"
+    },
+    {
+      "id": "conversion-lookup-errors-fallback",
+      "area": "Symbols",
+      "label": "Hook lookup, fallback, exception identity and result checks",
+      "source": "let key=Symbol.toPrimitive,log='',o={valueOf:function(){log+='v';return 3;}};Object.defineProperty(o,key,{get:function(){log+='g';return null;},configurable:true});test.record(+o);test.record(log);Object.defineProperty(o,key,{value:7});try{+o;}catch(e){test.record(e.name);}Object.defineProperty(o,key,{value:function(){return {};}});try{String(o);}catch(e){test.record(e.name);}let marker={};Object.defineProperty(o,key,{get:function(){throw marker;}});try{+o;}catch(e){test.record(e===marker);}test.record(log);",
+      "baseline_status": "missing",
+      "note": "The hook is read once; null/undefined fall back, non-callables and object results reject, and thrown values propagate.",
+      "introduced_in": "0.36.0"
+    },
+    {
+      "id": "conversion-inherited-receiver-symbol-result",
+      "area": "Symbols",
+      "label": "Inherited hooks, original receivers and Symbol return values",
+      "source": "let s=Symbol('result'),seen='',p={[Symbol.toPrimitive]:function(hint){seen+=hint+';';test.record(this===o);return s;}},o=Object.create(p),target={};target[o]=11;test.record(target[s]);try{String(o);}catch(e){test.record(e.name);}try{Number(o);}catch(e){test.record(e.name);}test.record(o==s);test.record(seen);",
+      "baseline_status": "missing",
+      "note": "Inherited conversion hooks see the original receiver; Symbol results remain Symbol keys and obey subsequent string/number restrictions.",
+      "introduced_in": "0.36.0"
+    },
+    {
+      "id": "conversion-native-helper-callers",
+      "area": "Globals",
+      "label": "Existing native helpers share ordered conversion hooks",
+      "source": "let log='',n={[Symbol.toPrimitive]:function(hint){log+=hint+';';return 66;}},t={[Symbol.toPrimitive]:function(hint){log+=hint+';';return '12';}};test.record(Math.floor(n));test.record(String.fromCharCode(n));test.record(parseInt(t,10));test.record([t].join('|'));test.record(new Uint8Array([n])[0]);let a=[];Object.defineProperty(a,'length',{value:n});test.record(a.length);test.record(log);",
+      "baseline_status": "missing",
+      "note": "Math, character construction, parsing, joins, typed storage and length conversion all observe the supported conversion protocol.",
+      "introduced_in": "0.36.0"
+    },
+    {
+      "id": "conversion-symbol-intrinsic-metadata",
+      "area": "Symbols",
+      "label": "Well-known Symbol identity and intrinsic conversion method",
+      "source": "let k=Symbol.toPrimitive,d=Object.getOwnPropertyDescriptor(Symbol,'toPrimitive'),p=Object.getOwnPropertyDescriptor(Symbol.prototype,k),f=p.value,s=Symbol('x');test.record(typeof k);test.record(k===Symbol.toPrimitive);test.record(d.writable);test.record(d.enumerable);test.record(d.configurable);test.record(f.name);test.record(f.length);test.record(p.writable);test.record(p.enumerable);test.record(p.configurable);test.record(f.call(s,'ignored')===s);test.record(f.call(Object(s),'number')===s);try{f.call({});}catch(e){test.record(e.name);}",
+      "baseline_status": "missing",
+      "note": "The well-known key and Symbol prototype hook expose the standard immutable key, function metadata and branded receiver behavior.",
+      "introduced_in": "0.36.0"
+    },
+    {
+      "id": "iterator-intrinsic-descriptors",
+      "area": "Symbols",
+      "label": "Symbol.iterator descriptors and native aliases",
+      "source": "var d=Object.getOwnPropertyDescriptor(Symbol,'iterator');test.record(typeof Symbol.iterator);test.record(d.writable+':'+d.enumerable+':'+d.configurable);test.record(Array.prototype[Symbol.iterator]===Array.prototype.values);test.record(Map.prototype[Symbol.iterator]===Map.prototype.entries);test.record(Set.prototype[Symbol.iterator]===Set.prototype.values);var it=[3].values();test.record(it[Symbol.iterator]()===it);test.record(it.next().value);",
+      "baseline_status": "missing",
+      "note": ""
+    },
+    {
+      "id": "iterator-custom-cached-next-order",
+      "area": "Iteration",
+      "label": "Custom iterator reads next once and skips value after done",
+      "source": "var log='',i=0,stream={},iterator={};Object.defineProperty(stream,Symbol.iterator,{get:function(){log+='get;';return function(){log+='call:'+String(this===stream)+';';return iterator;};}});Object.defineProperty(iterator,'next',{get:function(){log+='next-get;';return function(){log+='next:'+String(this===iterator)+';';var r={};Object.defineProperty(r,'done',{get:function(){log+='done;';return i===2;}});Object.defineProperty(r,'value',{get:function(){log+='value;';return ++i;}});return r;};}});var out='';for(var v of stream)out+=v;test.record(out);test.record(log);",
+      "baseline_status": "missing",
+      "note": ""
+    },
+    {
+      "id": "iterator-native-override",
+      "area": "Iteration",
+      "label": "Native arrays honor iterator overrides and null rejection",
+      "source": "var a=[1,2],closed=0;a[Symbol.iterator]=function(){return {next:function(){return {value:8,done:false};},return:function(){closed++;return {};}};};var out='';for(var v of a){out+=v;break;}test.record(out);test.record(closed);a[Symbol.iterator]=null;try{for(var x of a){}test.record('missed');}catch(e){test.record(e.name);}",
+      "baseline_status": "missing",
+      "note": ""
+    },
+    {
+      "id": "iterator-close-control-flow",
+      "area": "Iteration",
+      "label": "Break, return and outer continue close the correct iterators",
+      "source": "var log='';function make(tag){var n=0,o={};o[Symbol.iterator]=function(){return {next:function(){return {value:++n,done:n>2};},return:function(){log+=tag;return {};}};};return o;}function f(){for(var v of make('R'))return v;}test.record(f());for(var b of make('B'))break;outer:for(var x of make('O')){for(var y of make('I')){if(x===1)continue outer;break outer;}}test.record(log);",
+      "baseline_status": "missing",
+      "note": ""
+    },
+    {
+      "id": "iterator-close-exception-precedence",
+      "area": "Iteration",
+      "label": "Throw precedence and failing next without close",
+      "source": "var log='';function make(mode){var o={};o[Symbol.iterator]=function(){var it={next:function(){if(mode===3)throw 'next';return {value:1,done:false};}};Object.defineProperty(it,'return',{get:function(){log+='g';if(mode===0)throw 'get';return function(){log+='r';if(mode===1)throw 'close';return 2;};}});return it;};return o;}for(var mode=0;mode<4;mode++){try{for(var x of make(mode))throw 'body';}catch(e){test.record(e);}}try{for(var y of make(2))break;}catch(e){test.record(e.name);}test.record(log);",
+      "baseline_status": "missing",
+      "note": ""
+    },
+    {
+      "id": "iterator-invalid-protocol-values",
+      "area": "Iteration",
+      "label": "Invalid iterator methods and results produce TypeError",
+      "source": "function check(stream){try{for(var x of stream){}test.record('missed');}catch(e){test.record(e.name);}}var a={};a[Symbol.iterator]=3;check(a);a[Symbol.iterator]=function(){return 2;};check(a);a[Symbol.iterator]=function(){return {next:1};};check(a);a[Symbol.iterator]=function(){return {next:function(){return 1;}};};check(a);var b={},hits=0;b[Symbol.iterator]=function(){return {next:function(){return {done:true,get value(){hits++;return 4;}};}};};check(b);test.record(hits);",
+      "baseline_status": "missing",
+      "note": ""
+    },
+    {
+      "id": "iterator-native-families",
+      "area": "Iteration",
+      "label": "Native iterables cover text, arguments, collections and typed arrays",
+      "source": "function collect(o){var out='';for(var v of o)out+=String(v)+'|';return out;}test.record(collect('A😀B'));test.record(collect(new Set([4,4,5])));test.record(collect(new Map([['a',1],['b',2]]).keys()));test.record(collect(new Uint8Array([6,7])));function args(){test.record(collect(arguments));test.record(arguments[Symbol.iterator]===Array.prototype.values);}args(8,9);",
+      "baseline_status": "missing",
+      "note": ""
+    },
+    {
+      "id": "array-from-mapping-holes-conversion",
+      "area": "Arrays",
+      "label": "Array.from mapping, holes and length conversion",
+      "source": "var calls='',o={0:4,2:8,length:{}};o.length[Symbol.toPrimitive]=function(h){calls+=h+';';return 3.9;};var a=Array.from(o,function(v,i){calls+=i+':'+String(this.n)+';';return v===undefined?'hole':v+this.n;},{n:2});test.record(a.join('|'));test.record(Object.hasOwn(a,1));test.record(calls);test.record(Array.from('A😀').length);test.record(Array.from(4).length);",
+      "baseline_status": "missing",
+      "note": ""
+    },
+    {
+      "id": "array-from-constructor-order",
+      "area": "Arrays",
+      "label": "Array.from receiver constructors and iterator ordering",
+      "source": "var log='',o={};Object.defineProperty(o,Symbol.iterator,{get:function(){log+='get;';return function(){log+='call;';var n=0;return {next:function(){return {value:++n,done:n>1};}};};}});function Box(n){log+='ctor:'+arguments.length+':'+String(n)+';';}var a=Array.from.call(Box,o);test.record(a instanceof Box);test.record(a[0]+':'+a.length);test.record(log);log='';var b=Array.from.call(Box,{0:'x',get length(){log+='length;';return 1;}});test.record(log);test.record(b[0]+':'+b.length);test.record(Array.isArray(Array.from.call(()=>0,[2])));",
+      "baseline_status": "missing",
+      "note": ""
+    },
+    {
+      "id": "array-from-abrupt-close",
+      "area": "Arrays",
+      "label": "Array.from closes mapper and definition errors",
+      "source": "var log='';function stream(){var o={};o[Symbol.iterator]=function(){return {next:function(){return {value:1,done:false};},return:function(){log+='r';throw 'close';}};};return o;}try{Array.from(stream(),function(){throw 'map';});}catch(e){test.record(e);}function Frozen(){Object.preventExtensions(this);}try{Array.from.call(Frozen,stream());}catch(e){test.record(e.name);}test.record(log);var read=0,o={};Object.defineProperty(o,Symbol.iterator,{get:function(){read++;return undefined;}});try{Array.from(o,1);}catch(e){test.record(e.name);}test.record(read);",
+      "baseline_status": "missing",
+      "note": ""
+    },
+    {
+      "id": "entries-keys-descriptors-order",
+      "area": "Objects",
+      "label": "Object.fromEntries keys, duplicates and own data descriptors",
+      "source": "var log='',key={},symbol=Symbol('entry');key[Symbol.toPrimitive]=function(h){log+=h;return 'a';};var entry={get 0(){log+='0';return key;},get 1(){log+='1';return 3;}};var setter=0;Object.defineProperty(Object.prototype,'b',{set:function(){setter++;},configurable:true});var o=Object.fromEntries([entry,['a',5],[symbol,7],['b',9]]);var d=Object.getOwnPropertyDescriptor(o,'b');test.record(log);test.record(o.a+':'+o.b+':'+o[symbol]);test.record(d.writable+':'+d.enumerable+':'+d.configurable);test.record(setter);test.record(Object.getOwnPropertySymbols(o)[0]===symbol);",
+      "baseline_status": "missing",
+      "note": ""
+    },
+    {
+      "id": "entries-abrupt-close",
+      "area": "Objects",
+      "label": "Object.fromEntries closes invalid entries and key conversion errors",
+      "source": "var log='';function stream(value){var o={};o[Symbol.iterator]=function(){return {next:function(){return {value:value,done:false};},return:function(){log+='r';throw 'close';}};};return o;}try{Object.fromEntries(stream(4));}catch(e){test.record(e.name);}var key={};key[Symbol.toPrimitive]=function(h){log+=h;throw 'key';};var entry={get 0(){log+='0';return key;},get 1(){log+='1';return 5;}};try{Object.fromEntries(stream(entry));}catch(e){test.record(e);}test.record(log);",
+      "baseline_status": "missing",
+      "note": ""
+    },
+    {
+      "id": "conversion-apply-object-length",
+      "area": "Functions",
+      "label": "Function.apply converts object-valued array-like length",
+      "source": "var log='',length={};length[Symbol.toPrimitive]=function(h){log+=h;return 2.9;};function sum(a,b){return a+b;}test.record(sum.apply(null,{0:3,1:4,length:length}));test.record(log);var bad={};bad[Symbol.toPrimitive]=function(){throw 'length';};try{sum.apply(null,{length:bad});}catch(e){test.record(e);}",
+      "baseline_status": "missing",
+      "note": ""
+    },
+    {
+      "id": "conversion-defineproperties-scalar-source",
+      "area": "Objects",
+      "label": "Object.defineProperties accepts empty scalar descriptor sources",
+      "source": "var o={};test.record(Object.defineProperties(o,3)===o);test.record(Object.defineProperties(o,false)===o);test.record(Object.defineProperties(o,Symbol('empty'))===o);test.record(Object.keys(o).length);try{Object.defineProperties(o,null);}catch(e){test.record(e.name);}",
+      "baseline_status": "missing",
+      "note": ""
+    },
+    {
+      "id": "collections-custom-iterable-consumers",
+      "area": "Collections",
+      "label": "Map, Set and typed-array constructors consume custom iterables",
+      "source": "function stream(values){var o={};o[Symbol.iterator]=function(){var i=0;return {next:function(){return i<values.length?{value:values[i++],done:false}:{done:true};}};};return o;}var m=new Map(stream([['a',3],['b',4]]));test.record(m.get('a')+':'+m.get('b'));var s=new Set(stream([4,4,5]));test.record(s.size);var t=new Uint8Array(stream([257,2]));test.record(t[0]+':'+t[1]+':'+t.length);",
+      "baseline_status": "missing",
+      "note": ""
+    },
+    {
+      "id": "spread-array-native-mixed",
+      "area": "Arrays",
+      "label": "Array spread of native iterables and Unicode",
+      "source": "var items=[0,...[1,,3],...'😀é',...new Set([4,4,5]),...new Uint8Array([6,7]),8];test.record(JSON.stringify(items));test.record(Object.hasOwn(items,'2'));",
+      "baseline_status": "missing",
+      "note": ""
+    },
+    {
+      "id": "spread-array-custom-order",
+      "area": "Iteration",
+      "label": "Custom array spread lookup and result order",
+      "source": "var trace='',count=0,input={};Object.defineProperty(input,Symbol.iterator,{get:function(){trace+='I';return function(){trace+='C';var iter={};Object.defineProperty(iter,'next',{get:function(){trace+='N';return function(){trace+='S';return {get done(){trace+='D';return count===2;},get value(){trace+='V';return ++count;}};};}});return iter;};}});var output=[9,...input,10];test.record(JSON.stringify(output));test.record(trace);",
+      "baseline_status": "missing",
+      "note": ""
+    },
+    {
+      "id": "spread-array-holes-own-properties",
+      "area": "Arrays",
+      "label": "Spread densifies holes and bypasses inherited setters",
+      "source": "var writes=0;Object.defineProperty(Array.prototype,'0',{set:function(){writes++;},configurable:true});var empty=[,],output=[...empty];delete Array.prototype[0];test.record(writes);test.record(Object.hasOwn(empty,'0'));test.record(Object.hasOwn(output,'0'));test.record(output[0]);test.record(output.length);",
+      "baseline_status": "missing",
+      "note": ""
+    },
+    {
+      "id": "spread-call-receiver-and-order",
+      "area": "Functions",
+      "label": "Call spread preserves callee, receiver and argument order",
+      "source": "var trace='',owner={tag:'right',fn:function(){test.record(this===owner);return Array.prototype.join.call(arguments,'|');}},original=owner.fn;Object.defineProperty(owner,'fn',{get:function(){trace+='G';return original;},configurable:true});var input={[Symbol.iterator]:function(){trace+='I';Object.defineProperty(owner,'fn',{value:function(){throw 'replacement';},writable:true});return [2,3].values();}};function mark(value){trace+=value;return value;}test.record(owner.fn(mark(1),...input,mark(4)));test.record(trace);",
+      "baseline_status": "missing",
+      "note": ""
+    },
+    {
+      "id": "spread-constructor-bound-target",
+      "area": "Functions",
+      "label": "Spread arguments for ordinary and bound constructors",
+      "source": "function Box(a,b,c){this.total=a+b+c;this.count=arguments.length;}var Bound=Box.bind(null,1),box=new Bound(...new Set([2,3]));test.record(box.total);test.record(box.count);test.record(box instanceof Box);test.record(box instanceof Bound);",
+      "baseline_status": "missing",
+      "note": ""
+    },
+    {
+      "id": "spread-invalid-target-argument-order",
+      "area": "Functions",
+      "label": "Arguments run before callable and constructor rejection",
+      "source": "var trace='',input={[Symbol.iterator]:function(){trace+='I';return [1,2].values();}},target=7;try{target(...input);}catch(e){test.record(e.name);}try{new target(...input);}catch(e){test.record(e.name);}test.record(trace);for(var item of [null,undefined,7,false,{}]){try{[...item];}catch(e){test.record(e.name);}}",
+      "baseline_status": "missing",
+      "note": ""
+    },
+    {
+      "id": "spread-step-errors-no-close",
+      "area": "Iteration",
+      "label": "Spread propagates next/done/value failures without close",
+      "source": "var closes=0,caught=0,marker={};function broken(phase){return {[Symbol.iterator]:function(){return {next:function(){if(phase==='next')throw marker;return {get done(){if(phase==='done')throw marker;return false;},get value(){throw marker;}};},return:function(){closes++;return {};}};}};}function take(){}for(var phase of ['next','done','value']){try{[...broken(phase)];}catch(e){if(e===marker)caught++;}try{take(...broken(phase));}catch(e){if(e===marker)caught++;}try{new take(...broken(phase));}catch(e){if(e===marker)caught++;}}test.record(caught);test.record(closes);",
+      "baseline_status": "missing",
+      "note": ""
+    },
+    {
+      "id": "spread-direct-eval-reference-difference",
+      "area": "Language",
+      "label": "Direct eval with a sole spread argument list",
+      "source": "function inspect(){let local038=7;var alias=eval;test.record(eval('typeof local038',...[]));test.record(alias(...['typeof local038']));test.record(eval(...['typeof local038']));}inspect();",
+      "baseline_status": "missing",
+      "note": "Known Node 24 reference difference: current ECMA262 Function Calls uses direct eval for identifier eval with a sole spread argument list; Node evaluates that form indirectly. This probe remains visible as a behavioral difference rather than a matching pass."
+    },
+    {
+      "id": "rest-function-length-and-fresh-arrays",
+      "area": "Functions",
+      "label": "Rest arrays, omitted arguments and function length",
+      "source": "function choose(head,...tail){return tail;}var first=choose(1,2,3),second=choose(1,2,3);first[0]=9;test.record(choose.length);test.record(JSON.stringify(first));test.record(JSON.stringify(second));test.record(first!==second);test.record(first instanceof Array);test.record(choose().length);test.record(choose(1).length);",
+      "baseline_status": "missing",
+      "note": ""
+    },
+    {
+      "id": "rest-unmapped-arguments",
+      "area": "Functions",
+      "label": "Non-simple parameters use independent arguments values",
+      "source": "function inspect(first,...tail){first=8;tail[0]=9;test.record(arguments[0]);test.record(arguments[1]);arguments[0]=10;test.record(first);test.record(tail[0]);try{arguments.callee;}catch(e){test.record(e.name);}var d=Object.getOwnPropertyDescriptor(arguments,'callee');test.record(typeof d.get);test.record(d.get===d.set);test.record(d.configurable);}inspect(1,2,3);",
+      "baseline_status": "missing",
+      "note": ""
+    },
+    {
+      "id": "rest-arrow-lexical-context",
+      "area": "Functions",
+      "label": "Rest arrows preserve lexical this and arguments",
+      "source": "function make(seed){return (first,...tail)=>[this.tag,arguments[0],first,tail.join(':')].join('|');}var owner={tag:'original',make:make},fn=owner.make(9);test.record(fn.length);test.record(fn.call({tag:'wrong'},1,...[2,3]));",
+      "baseline_status": "missing",
+      "note": ""
+    },
+    {
+      "id": "rest-method-and-constructor",
+      "area": "Functions",
+      "label": "Rest parameters in methods and constructors",
+      "source": "var item={base:2,run(head,...tail){return this.base+head+tail.length;}};test.record(item.run.length);test.record(item.run(3,...[4,5]));function Pack(head,...tail){this.head=head;this.tail=tail;}var box=new Pack(1,2,3);test.record(box instanceof Pack);test.record(box.head);test.record(JSON.stringify(box.tail));",
+      "baseline_status": "missing",
+      "note": ""
+    },
+    {
+      "id": "rest-arguments-name-and-bindings",
+      "area": "Functions",
+      "label": "Rest identifiers shadow arguments and retain var binding",
+      "source": "function named(...arguments){return arguments.join(':');}function retained(...items){var items;return items.join(',');}function outer(seed){return (...items)=>arguments[0]+items[0];}test.record(named(1,2));test.record(retained(3,4));test.record(outer(5)(6,7));",
+      "baseline_status": "missing",
+      "note": ""
+    },
+    {
+      "id": "rest-early-errors-and-inherited-strict",
+      "area": "Language",
+      "label": "Rest syntax early errors and inherited strict mode",
+      "source": "var executed=0;for(var text of ['function f(...x,){}','function f(...x,y){}','function f(x,x,...r){}',\"function f(...x){'use strict';}\",'(...x,)=>0','({set field(...x){}})','({get field(...x){}})','function f(...x=1){}','function f(x,...r){let r;}']){try{eval('executed++;'+text);}catch(e){test.record(e.name);}}test.record(executed);function outer(){'use strict';function f(head,...tail){return this===undefined&&tail.length===2;}return f(1,2,3);}test.record(outer());",
+      "baseline_status": "missing",
+      "note": ""
+    },
+    {
+      "id": "rest-spread-argument-boundary",
+      "area": "Functions",
+      "label": "Rest and spread at the existing 256-argument boundary",
+      "source": "function boundary(first,...tail){return first+':'+tail.length+':'+tail[254];}test.record(boundary(7,...Array(255).fill(9)));var bound=boundary.bind(null,8);test.record(bound(...Array(255).fill(2)));",
+      "baseline_status": "missing",
+      "note": "The existing 256-argument cap remains an explicit implementation bound; this sample checks its accepted edge."
     }
   ],
   "browser_inventory": [

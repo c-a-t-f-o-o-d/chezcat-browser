@@ -3,9 +3,9 @@
 //! and registry keys share the retained-value and copy-work budgets.
 //!
 //! Symbol.dispose is a stable key; it does not run cleanup automatically.
-//! Unsupported well-known protocols are not advertised. In particular scripts
-//! can install their own iterator polyfill without a native placeholder
-//! suppressing feature detection. Primitive wrappers remain unsupported.
+//! Symbol.iterator supports the bounded native/custom iterator protocol. Other
+//! unsupported well-known protocols are not advertised. Number/Boolean/Symbol boxing uses explicit
+//! primitive slots; Symbol.prototype itself has no boxed Symbol value.
 
 use super::{
     Accessors, Builtin, Fault, Host, NativeGetter, Ordinary, Property, Runtime, Value,
@@ -27,13 +27,14 @@ pub(super) enum Op {
     Description,
     ToString,
     ValueOf,
+    ToPrimitive,
 }
 
 impl Op {
     pub(super) fn arity(self) -> usize {
         match self {
             Self::Constructor | Self::Description | Self::ToString | Self::ValueOf => 0,
-            Self::For | Self::KeyFor => 1,
+            Self::For | Self::KeyFor | Self::ToPrimitive => 1,
         }
     }
 }
@@ -103,16 +104,53 @@ impl Runtime {
             "dispose".into(),
             dispose,
             Some((false, false, false)),
+        )?;
+        let Value::Symbol(key) = self.new_symbol(Some("Symbol.toPrimitive".into()), false)? else {
+            unreachable!()
+        };
+        self.symbol_to_primitive = Some(key);
+        self.store_property(
+            owner,
+            "toPrimitive".into(),
+            Value::Symbol(key),
+            Some((false, false, false)),
+        )?;
+        let method =
+            self.native_function(Builtin::Symbol(Op::ToPrimitive), "[Symbol.toPrimitive]")?;
+        self.store_symbol_property(prototype, key, method, Some((false, false, true)))?;
+        let Value::Symbol(key) = self.new_symbol(Some("Symbol.iterator".into()), false)? else {
+            unreachable!()
+        };
+        self.symbol_iterator = Some(key);
+        self.store_property(
+            owner,
+            "iterator".into(),
+            Value::Symbol(key),
+            Some((false, false, false)),
         )
     }
 
-    pub(super) fn symbol_description(&mut self, receiver: Value) -> Result<Value, Fault> {
-        let Value::Symbol(id) = receiver else {
-            return Err(Fault::exception(
+    fn symbol_receiver(&self, receiver: &Value) -> Result<usize, Fault> {
+        let id = match receiver {
+            Value::Symbol(id) => Some(*id),
+            _ => match self.wrapped_primitive(receiver) {
+                Some(Value::Symbol(id)) => Some(id),
+                _ => None,
+            },
+        };
+        if let Some(id) = id {
+            self.symbol(id)?;
+            Ok(id)
+        } else {
+            Err(Fault::exception(
                 "TypeError",
                 "Symbol method has an incompatible receiver.",
-            ));
-        };
+            ))
+        }
+    }
+
+    pub(super) fn symbol_description(&mut self, receiver: Value) -> Result<Value, Fault> {
+        let id = self.symbol_receiver(&receiver)?;
         let bytes = self.symbol(id)?.description.as_ref().map_or(0, String::len);
         self.work(bytes)?;
         Ok(self
@@ -177,14 +215,8 @@ impl Runtime {
                 }
             }
             Op::Description => self.symbol_description(receiver),
-            Op::ToString | Op::ValueOf => {
-                let Value::Symbol(id) = receiver else {
-                    return Err(Fault::exception(
-                        "TypeError",
-                        "Symbol method has an incompatible receiver.",
-                    ));
-                };
-                self.symbol(id)?;
+            Op::ToString | Op::ValueOf | Op::ToPrimitive => {
+                let id = self.symbol_receiver(&receiver)?;
                 if matches!(operation, Op::ToString) {
                     self.symbol_text(id)
                 } else {
@@ -288,12 +320,18 @@ impl Runtime {
         host: &mut dyn Host,
     ) -> Result<(), Fault> {
         Self::require_property_receiver(&receiver)?;
-        let Some(object) = self.symbol_backing(&receiver)? else {
-            return Err(Fault::new(
-                "Symbol properties require an ordinary object or registered native expando store.",
-            ));
+        let backing = self.symbol_backing(&receiver)?;
+        let object = match backing {
+            Some(object) => object,
+            None => match receiver {
+                Value::Number(_) => Ordinary::Object(self.number_prototype.unwrap()),
+                Value::Bool(_) => Ordinary::Object(self.boolean_prototype.unwrap()),
+                Value::Symbol(_) => Ordinary::Object(self.symbol_prototype.unwrap()),
+                _ => return Err(Fault::new(
+                    "Symbol properties require an ordinary object, supported primitive or registered native expando store.",
+                )),
+            },
         };
-        let target = self.ordinary_id(object)?;
         if let Some(owner) = self.symbol_property_owner(object, key)? {
             let property = &self.objects[owner].symbol_properties[&key];
             if let Some(accessor) = property.accessor {
@@ -318,7 +356,17 @@ impl Runtime {
                 };
             }
         }
-        self.store_symbol_property(target, key, value, None)
+        if let Some(object) = backing {
+            let target = self.ordinary_id(object)?;
+            self.store_symbol_property(target, key, value, None)
+        } else if self.strict {
+            Err(Fault::exception(
+                "TypeError",
+                "A primitive value cannot retain an assigned property.",
+            ))
+        } else {
+            Ok(())
+        }
     }
 
     pub(super) fn store_symbol_property(
@@ -528,7 +576,8 @@ mod tests {
     #[test]
     fn symbol_properties_cannot_bypass_document_property_limit() {
         let mut runtime = Runtime::new();
-        let keys: Vec<_> = (0..MAX_OBJECT_PROPERTIES - 1)
+        let keys: Vec<_> = (0..(MAX_OBJECT_PROPERTIES - 1)
+            .min(MAX_SYMBOLS - runtime.symbols.len()))
             .map(|_| fresh(&mut runtime))
             .collect();
         let mut object = runtime.new_object(None).unwrap();
