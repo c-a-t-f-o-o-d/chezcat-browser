@@ -1,0 +1,965 @@
+{
+  "frozen_sha256": "ade255db3ea09ff6099a48e3da94c748ddf1287a7c20e2c4f2a0638d5b7ca573",
+  "source_sha256": "741f6cf0f5361675606724fd7d1379910d99e0689a10a074b41bd8b862f6ae63",
+  "ordinary": [
+    {
+      "name": "url-components",
+      "match": true,
+      "actual": [
+        "OK\tundefined",
+        "RECORD\tstring:68747470733a2f2f557365723a50617373406578616d706c652e6f72672f62253230633f783d68656c6c6f253230776f726c642374776f253230776f7264737c68747470733a2f2f6578616d706c652e6f72677c68747470733a7c557365727c506173737c6578616d706c652e6f72677c6578616d706c652e6f72677c7c2f62253230637c3f783d68656c6c6f253230776f726c647c2374776f253230776f726473"
+      ],
+      "expected": {
+        "ok": true,
+        "records": [
+          "string:68747470733a2f2f557365723a50617373406578616d706c652e6f72672f62253230633f783d68656c6c6f253230776f726c642374776f253230776f7264737c68747470733a2f2f6578616d706c652e6f72677c68747470733a7c557365727c506173737c6578616d706c652e6f72677c6578616d706c652e6f72677c7c2f62253230637c3f783d68656c6c6f253230776f726c647c2374776f253230776f726473"
+        ],
+        "error": null,
+        "value": "undefined"
+      }
+    },
+    {
+      "name": "url-relative",
+      "match": true,
+      "actual": [
+        "OK\tundefined",
+        "RECORD\tstring:68747470733a2f2f6578616d706c652e6f72672f612f6e657874",
+        "RECORD\tstring:68747470733a2f2f6578616d706c652e6f72672f7570",
+        "RECORD\tstring:68747470733a2f2f6578616d706c652e6f72672f612f",
+        "RECORD\tstring:68747470733a2f2f6578616d706c652e6f72672f726f6f74",
+        "RECORD\tstring:68747470733a2f2f6578616d706c652e6f72672f612f623f783d32",
+        "RECORD\tstring:68747470733a2f2f6578616d706c652e6f72672f612f623f6f6c643d7965732370617274",
+        "RECORD\tstring:68747470733a2f2f6578616d706c652e6f72672f612f623f6f6c643d796573",
+        "RECORD\tstring:68747470733a2f2f6578616d706c652e6f72672f",
+        "RECORD\tstring:68747470733a2f2f6f746865722e746573743a383434332f70"
+      ],
+      "expected": {
+        "ok": true,
+        "records": [
+          "string:68747470733a2f2f6578616d706c652e6f72672f612f6e657874",
+          "string:68747470733a2f2f6578616d706c652e6f72672f7570",
+          "string:68747470733a2f2f6578616d706c652e6f72672f612f",
+          "string:68747470733a2f2f6578616d706c652e6f72672f726f6f74",
+          "string:68747470733a2f2f6578616d706c652e6f72672f612f623f783d32",
+          "string:68747470733a2f2f6578616d706c652e6f72672f612f623f6f6c643d7965732370617274",
+          "string:68747470733a2f2f6578616d706c652e6f72672f612f623f6f6c643d796573",
+          "string:68747470733a2f2f6578616d706c652e6f72672f",
+          "string:68747470733a2f2f6f746865722e746573743a383434332f70"
+        ],
+        "error": null,
+        "value": "undefined"
+      }
+    },
+    {
+      "name": "url-same-scheme",
+      "match": true,
+      "actual": [
+        "OK\tundefined",
+        "RECORD\tstring:68747470733a2f2f6578616d706c652e6f72672f612f6e657874",
+        "RECORD\tstring:68747470733a2f2f6578616d706c652e6f72672f6e657874",
+        "RECORD\tstring:68747470733a2f2f6e6578742f",
+        "RECORD\tstring:687474703a2f2f6e6578742f",
+        "RECORD\tstring:68747470733a2f2f6578616d706c652e6f72672f612f62"
+      ],
+      "expected": {
+        "ok": true,
+        "records": [
+          "string:68747470733a2f2f6578616d706c652e6f72672f612f6e657874",
+          "string:68747470733a2f2f6578616d706c652e6f72672f6e657874",
+          "string:68747470733a2f2f6e6578742f",
+          "string:687474703a2f2f6e6578742f",
+          "string:68747470733a2f2f6578616d706c652e6f72672f612f62"
+        ],
+        "error": null,
+        "value": "undefined"
+      }
+    },
+    {
+      "name": "url-dot-encoding",
+      "match": true,
+      "actual": [
+        "OK\tundefined",
+        "RECORD\tstring:68747470733a2f2f6578616d706c652e6f72672f612f62",
+        "RECORD\tstring:68747470733a2f2f6578616d706c652e6f72672f63",
+        "RECORD\tstring:68747470733a2f2f6578616d706c652e6f72672f",
+        "RECORD\tstring:68747470733a2f2f6578616d706c652e6f72672f612f2f",
+        "RECORD\tstring:68747470733a2f2f6578616d706c652e6f72672f",
+        "RECORD\tstring:68747470733a2f2f6578616d706c652e6f72672f612f2e2e2e2f62"
+      ],
+      "expected": {
+        "ok": true,
+        "records": [
+          "string:68747470733a2f2f6578616d706c652e6f72672f612f62",
+          "string:68747470733a2f2f6578616d706c652e6f72672f63",
+          "string:68747470733a2f2f6578616d706c652e6f72672f",
+          "string:68747470733a2f2f6578616d706c652e6f72672f612f2f",
+          "string:68747470733a2f2f6578616d706c652e6f72672f",
+          "string:68747470733a2f2f6578616d706c652e6f72672f612f2e2e2e2f62"
+        ],
+        "error": null,
+        "value": "undefined"
+      }
+    },
+    {
+      "name": "url-hosts",
+      "match": true,
+      "actual": [
+        "OK\tundefined",
+        "RECORD\tstring:687474703a2f2f3132372e302e302e312f",
+        "RECORD\tstring:3132372e302e302e31",
+        "RECORD\tstring:68747470733a2f2f5b323030313a6462383a3a315d2f61",
+        "RECORD\tstring:5b323030313a6462383a3a315d",
+        "RECORD\tstring:68747470733a2f2f6578616d706c652e6f72672e2f",
+        "RECORD\tstring:6578616d706c652e6f72672e"
+      ],
+      "expected": {
+        "ok": true,
+        "records": [
+          "string:687474703a2f2f3132372e302e302e312f",
+          "string:3132372e302e302e31",
+          "string:68747470733a2f2f5b323030313a6462383a3a315d2f61",
+          "string:5b323030313a6462383a3a315d",
+          "string:68747470733a2f2f6578616d706c652e6f72672e2f",
+          "string:6578616d706c652e6f72672e"
+        ],
+        "error": null,
+        "value": "undefined"
+      }
+    },
+    {
+      "name": "url-ipv4-forms",
+      "match": true,
+      "actual": [
+        "OK\tundefined",
+        "RECORD\tstring:687474703a2f2f3132372e302e302e312f",
+        "RECORD\tstring:687474703a2f2f3132372e302e302e312f",
+        "RECORD\tstring:687474703a2f2f3132372e302e302e312f",
+        "RECORD\tstring:687474703a2f2f3132372e302e302e312f"
+      ],
+      "expected": {
+        "ok": true,
+        "records": [
+          "string:687474703a2f2f3132372e302e302e312f",
+          "string:687474703a2f2f3132372e302e302e312f",
+          "string:687474703a2f2f3132372e302e302e312f",
+          "string:687474703a2f2f3132372e302e302e312f"
+        ],
+        "error": null,
+        "value": "undefined"
+      }
+    },
+    {
+      "name": "url-normalize-input",
+      "match": true,
+      "actual": [
+        "OK\tundefined",
+        "RECORD\tstring:68747470733a2f2f6578616d706c652e6f72672f623f783d312368"
+      ],
+      "expected": {
+        "ok": true,
+        "records": [
+          "string:68747470733a2f2f6578616d706c652e6f72672f623f783d312368"
+        ],
+        "error": null,
+        "value": "undefined"
+      }
+    },
+    {
+      "name": "url-userinfo",
+      "match": true,
+      "actual": [
+        "OK\tundefined",
+        "RECORD\tstring:68747470733a2f2f6f6e6525343074776f3a7025334161406578616d706c652e6f72672f",
+        "RECORD\tstring:68747470733a2f2f61253430253246253341253230623a63253341253430253246253230406578616d706c652e6f72672f",
+        "RECORD\tstring:68747470733a2f2f6578616d706c652e6f7267"
+      ],
+      "expected": {
+        "ok": true,
+        "records": [
+          "string:68747470733a2f2f6f6e6525343074776f3a7025334161406578616d706c652e6f72672f",
+          "string:68747470733a2f2f61253430253246253341253230623a63253341253430253246253230406578616d706c652e6f72672f",
+          "string:68747470733a2f2f6578616d706c652e6f7267"
+        ],
+        "error": null,
+        "value": "undefined"
+      }
+    },
+    {
+      "name": "url-empty-query-hash",
+      "match": true,
+      "actual": [
+        "OK\tundefined",
+        "RECORD\tstring:68747470733a2f2f6578616d706c652e6f72672f3f237c7c",
+        "RECORD\tstring:68747470733a2f2f6578616d706c652e6f72672f23",
+        "RECORD\tstring:68747470733a2f2f6578616d706c652e6f72672f",
+        "RECORD\tstring:68747470733a2f2f6578616d706c652e6f72672f3f23",
+        "RECORD\tstring:68747470733a2f2f6578616d706c652e6f72672f23"
+      ],
+      "expected": {
+        "ok": true,
+        "records": [
+          "string:68747470733a2f2f6578616d706c652e6f72672f3f237c7c",
+          "string:68747470733a2f2f6578616d706c652e6f72672f23",
+          "string:68747470733a2f2f6578616d706c652e6f72672f",
+          "string:68747470733a2f2f6578616d706c652e6f72672f3f23",
+          "string:68747470733a2f2f6578616d706c652e6f72672f23"
+        ],
+        "error": null,
+        "value": "undefined"
+      }
+    },
+    {
+      "name": "url-setters",
+      "match": true,
+      "actual": [
+        "OK\tundefined",
+        "RECORD\tstring:687474703a2f2f6f746865722e746573742f7a25334678253233793f613d68656c6c6f253230776f726c6426783d7e2361253230622363",
+        "RECORD\tstring:68656c6c6f20776f726c64"
+      ],
+      "expected": {
+        "ok": true,
+        "records": [
+          "string:687474703a2f2f6f746865722e746573742f7a25334678253233793f613d68656c6c6f253230776f726c6426783d7e2361253230622363",
+          "string:68656c6c6f20776f726c64"
+        ],
+        "error": null,
+        "value": "undefined"
+      }
+    },
+    {
+      "name": "url-host-setters",
+      "match": true,
+      "actual": [
+        "OK\tundefined",
+        "RECORD\tstring:68747470733a2f2f6f746865722e746573743a383038302f",
+        "RECORD\tstring:68747470733a2f2f74686972642e746573742f",
+        "RECORD\tstring:68747470733a2f2f5b323030313a6462383a3a325d2f",
+        "RECORD\tstring:68747470733a2f2f5b323030313a6462383a3a325d2f",
+        "RECORD\tstring:68747470733a2f2f5b323030313a6462383a3a325d3a3132332f",
+        "RECORD\tstring:68747470733a2f2f5b323030313a6462383a3a325d3a3132332f"
+      ],
+      "expected": {
+        "ok": true,
+        "records": [
+          "string:68747470733a2f2f6f746865722e746573743a383038302f",
+          "string:68747470733a2f2f74686972642e746573742f",
+          "string:68747470733a2f2f5b323030313a6462383a3a325d2f",
+          "string:68747470733a2f2f5b323030313a6462383a3a325d2f",
+          "string:68747470733a2f2f5b323030313a6462383a3a325d3a3132332f",
+          "string:68747470733a2f2f5b323030313a6462383a3a325d3a3132332f"
+        ],
+        "error": null,
+        "value": "undefined"
+      }
+    },
+    {
+      "name": "url-href-live",
+      "match": true,
+      "actual": [
+        "OK\tundefined",
+        "RECORD\tboolean:true",
+        "RECORD\tstring:623d33",
+        "RECORD\tstring:687474703a2f2f6f746865722e746573742f623f623d3326633d612b622370",
+        "RECORD\tstring:7a3d34"
+      ],
+      "expected": {
+        "ok": true,
+        "records": [
+          "boolean:true",
+          "string:623d33",
+          "string:687474703a2f2f6f746865722e746573742f623f623d3326633d612b622370",
+          "string:7a3d34"
+        ],
+        "error": null,
+        "value": "undefined"
+      }
+    },
+    {
+      "name": "url-live-canonicalization",
+      "match": true,
+      "actual": [
+        "OK\tundefined",
+        "RECORD\tstring:68747470733a2f2f6578616d706c652e6f72672f3f623d74776f253230776f72647326613d7e",
+        "RECORD\tstring:68747470733a2f2f6578616d706c652e6f72672f3f613d25374526623d74776f2b776f726473",
+        "RECORD\tstring:68747470733a2f2f6578616d706c652e6f72672f3f623d74776f2b776f726473",
+        "RECORD\tstring:68747470733a2f2f6578616d706c652e6f72672f"
+      ],
+      "expected": {
+        "ok": true,
+        "records": [
+          "string:68747470733a2f2f6578616d706c652e6f72672f3f623d74776f253230776f72647326613d7e",
+          "string:68747470733a2f2f6578616d706c652e6f72672f3f613d25374526623d74776f2b776f726473",
+          "string:68747470733a2f2f6578616d706c652e6f72672f3f623d74776f2b776f726473",
+          "string:68747470733a2f2f6578616d706c652e6f72672f"
+        ],
+        "error": null,
+        "value": "undefined"
+      }
+    },
+    {
+      "name": "url-string-json",
+      "match": true,
+      "actual": [
+        "OK\tundefined",
+        "RECORD\tstring:68747470733a2f2f6578616d706c652e6f72672f613f783d312366",
+        "RECORD\tstring:68747470733a2f2f6578616d706c652e6f72672f613f783d312366",
+        "RECORD\tstring:68747470733a2f2f6578616d706c652e6f72672f613f783d312366",
+        "RECORD\tstring:7b2275223a2268747470733a2f2f6578616d706c652e6f72672f613f783d312366227d"
+      ],
+      "expected": {
+        "ok": true,
+        "records": [
+          "string:68747470733a2f2f6578616d706c652e6f72672f613f783d312366",
+          "string:68747470733a2f2f6578616d706c652e6f72672f613f783d312366",
+          "string:68747470733a2f2f6578616d706c652e6f72672f613f783d312366",
+          "string:7b2275223a2268747470733a2f2f6578616d706c652e6f72672f613f783d312366227d"
+        ],
+        "error": null,
+        "value": "undefined"
+      }
+    },
+    {
+      "name": "url-invalid",
+      "match": true,
+      "actual": [
+        "OK\tundefined",
+        "RECORD\tstring:547970654572726f72",
+        "RECORD\tstring:547970654572726f72",
+        "RECORD\tstring:547970654572726f72",
+        "RECORD\tstring:547970654572726f72",
+        "RECORD\tstring:547970654572726f72",
+        "RECORD\tstring:547970654572726f72",
+        "RECORD\tstring:547970654572726f72"
+      ],
+      "expected": {
+        "ok": true,
+        "records": [
+          "string:547970654572726f72",
+          "string:547970654572726f72",
+          "string:547970654572726f72",
+          "string:547970654572726f72",
+          "string:547970654572726f72",
+          "string:547970654572726f72",
+          "string:547970654572726f72"
+        ],
+        "error": null,
+        "value": "undefined"
+      }
+    },
+    {
+      "name": "url-static",
+      "match": true,
+      "actual": [
+        "OK\tundefined",
+        "RECORD\tboolean:true",
+        "RECORD\tboolean:false",
+        "RECORD\tnull",
+        "RECORD\tstring:68747470733a2f2f6578616d706c652e6f72672f6e657874",
+        "RECORD\tstring:547970654572726f72"
+      ],
+      "expected": {
+        "ok": true,
+        "records": [
+          "boolean:true",
+          "boolean:false",
+          "null",
+          "string:68747470733a2f2f6578616d706c652e6f72672f6e657874",
+          "string:547970654572726f72"
+        ],
+        "error": null,
+        "value": "undefined"
+      }
+    },
+    {
+      "name": "url-convert-order",
+      "match": true,
+      "actual": [
+        "OK\tundefined",
+        "RECORD\tstring:68747470733a2f2f6578616d706c652e6f72672f78",
+        "RECORD\tstring:6162",
+        "RECORD\tnumber:4020000000000000",
+        "RECORD\tstring:6162"
+      ],
+      "expected": {
+        "ok": true,
+        "records": [
+          "string:68747470733a2f2f6578616d706c652e6f72672f78",
+          "string:6162",
+          "number:4020000000000000",
+          "string:6162"
+        ],
+        "error": null,
+        "value": "undefined"
+      }
+    },
+    {
+      "name": "url-brand-errors",
+      "match": true,
+      "actual": [
+        "OK\tundefined",
+        "RECORD\tstring:547970654572726f72",
+        "RECORD\tstring:547970654572726f72",
+        "RECORD\tstring:547970654572726f72",
+        "RECORD\tstring:55524c",
+        "RECORD\tnumber:3ff0000000000000",
+        "RECORD\tboolean:true",
+        "RECORD\tboolean:true"
+      ],
+      "expected": {
+        "ok": true,
+        "records": [
+          "string:547970654572726f72",
+          "string:547970654572726f72",
+          "string:547970654572726f72",
+          "string:55524c",
+          "number:3ff0000000000000",
+          "boolean:true",
+          "boolean:true"
+        ],
+        "error": null,
+        "value": "undefined"
+      }
+    },
+    {
+      "name": "params-empty-input",
+      "match": false,
+      "actual": [
+        "OK\tundefined",
+        "RECORD\tstring:",
+        "RECORD\tstring:",
+        "RECORD\tstring:313d",
+        "RECORD\tstring:747275653d",
+        "RECORD\tstring:",
+        "RECORD\tstring:",
+        "RECORD\tstring:253346613d31"
+      ],
+      "expected": {
+        "ok": true,
+        "records": [
+          "string:",
+          "string:6e756c6c3d",
+          "string:313d",
+          "string:747275653d",
+          "string:",
+          "string:",
+          "string:253346613d31"
+        ],
+        "error": null,
+        "value": "undefined"
+      }
+    },
+    {
+      "name": "params-parse",
+      "match": true,
+      "actual": [
+        "OK\tundefined",
+        "RECORD\tstring:613d3126613d3226626172653d263d656d70747926783d612533446226706c75733d612b6226656e636f6465643d253236253344",
+        "RECORD\tnumber:401c000000000000",
+        "RECORD\tstring:317c32",
+        "RECORD\tnull",
+        "RECORD\tstring:613d62"
+      ],
+      "expected": {
+        "ok": true,
+        "records": [
+          "string:613d3126613d3226626172653d263d656d70747926783d612533446226706c75733d612b6226656e636f6465643d253236253344",
+          "number:401c000000000000",
+          "string:317c32",
+          "null",
+          "string:613d62"
+        ],
+        "error": null,
+        "value": "undefined"
+      }
+    },
+    {
+      "name": "params-encoding",
+      "match": true,
+      "actual": [
+        "OK\tundefined",
+        "RECORD\tstring:612b622532423d2543332541392546302539462539382538302537452532312a253238253239266c696e653d6125304425304162",
+        "RECORD\tstring:c3a9f09f98807e212a2829"
+      ],
+      "expected": {
+        "ok": true,
+        "records": [
+          "string:612b622532423d2543332541392546302539462539382538302537452532312a253238253239266c696e653d6125304425304162",
+          "string:c3a9f09f98807e212a2829"
+        ],
+        "error": null,
+        "value": "undefined"
+      }
+    },
+    {
+      "name": "params-malformed-utf8",
+      "match": true,
+      "actual": [
+        "OK\tundefined",
+        "RECORD\tstring:25",
+        "RECORD\tstring:783d253235",
+        "RECORD\tstring:254747",
+        "RECORD\tstring:783d2532354747",
+        "RECORD\tstring:efbfbd",
+        "RECORD\tstring:783d254546254246254244",
+        "RECORD\tstring:efbfbd",
+        "RECORD\tstring:783d254546254246254244",
+        "RECORD\tstring:efbfbd28efbfbd",
+        "RECORD\tstring:783d254546254246254244253238254546254246254244",
+        "RECORD\tstring:efbbbf",
+        "RECORD\tstring:783d254546254242254246",
+        "RECORD\tstring:00",
+        "RECORD\tstring:783d253030",
+        "RECORD\tstring:efbfbdefbfbd",
+        "RECORD\tstring:783d254546254246254244254546254246254244"
+      ],
+      "expected": {
+        "ok": true,
+        "records": [
+          "string:25",
+          "string:783d253235",
+          "string:254747",
+          "string:783d2532354747",
+          "string:efbfbd",
+          "string:783d254546254246254244",
+          "string:efbfbd",
+          "string:783d254546254246254244",
+          "string:efbfbd28efbfbd",
+          "string:783d254546254246254244253238254546254246254244",
+          "string:efbbbf",
+          "string:783d254546254242254246",
+          "string:00",
+          "string:783d253030",
+          "string:efbfbdefbfbd",
+          "string:783d254546254246254244254546254246254244"
+        ],
+        "error": null,
+        "value": "undefined"
+      }
+    },
+    {
+      "name": "params-record",
+      "match": true,
+      "actual": [
+        "OK\tundefined",
+        "RECORD\tstring:313d6f6e6526323d74776f267a3d3326613d6e756c6c26623d756e646566696e6564"
+      ],
+      "expected": {
+        "ok": true,
+        "records": [
+          "string:313d6f6e6526323d74776f267a3d3326613d6e756c6c26623d756e646566696e6564"
+        ],
+        "error": null,
+        "value": "undefined"
+      }
+    },
+    {
+      "name": "params-record-getters",
+      "match": true,
+      "actual": [
+        "OK\tundefined",
+        "RECORD\tstring:613d6f6e6526623d74776f",
+        "RECORD\tstring:614162"
+      ],
+      "expected": {
+        "ok": true,
+        "records": [
+          "string:613d6f6e6526623d74776f",
+          "string:614162"
+        ],
+        "error": null,
+        "value": "undefined"
+      }
+    },
+    {
+      "name": "params-iterable",
+      "match": true,
+      "actual": [
+        "OK\tundefined",
+        "RECORD\tstring:783d3126783d3226793d66616c7365",
+        "RECORD\tstring:783d3126783d3226793d66616c7365",
+        "RECORD\tstring:613d6226633d64"
+      ],
+      "expected": {
+        "ok": true,
+        "records": [
+          "string:783d3126783d3226793d66616c7365",
+          "string:783d3126783d3226793d66616c7365",
+          "string:613d6226633d64"
+        ],
+        "error": null,
+        "value": "undefined"
+      }
+    },
+    {
+      "name": "params-bad-pairs",
+      "match": true,
+      "actual": [
+        "OK\tundefined",
+        "RECORD\tstring:547970654572726f72",
+        "RECORD\tstring:547970654572726f72",
+        "RECORD\tstring:547970654572726f72",
+        "RECORD\tstring:547970654572726f72"
+      ],
+      "expected": {
+        "ok": true,
+        "records": [
+          "string:547970654572726f72",
+          "string:547970654572726f72",
+          "string:547970654572726f72",
+          "string:547970654572726f72"
+        ],
+        "error": null,
+        "value": "undefined"
+      }
+    },
+    {
+      "name": "params-get-set",
+      "match": true,
+      "actual": [
+        "OK\tundefined",
+        "RECORD\tundefined",
+        "RECORD\tstring:613d7826623d3226633d34",
+        "RECORD\tstring:613d7826623d3226633d34267a3d79",
+        "RECORD\tnumber:0000000000000000",
+        "RECORD\tboolean:true",
+        "RECORD\tboolean:true",
+        "RECORD\tboolean:false",
+        "RECORD\tboolean:true"
+      ],
+      "expected": {
+        "ok": true,
+        "records": [
+          "undefined",
+          "string:613d7826623d3226633d34",
+          "string:613d7826623d3226633d34267a3d79",
+          "number:0000000000000000",
+          "boolean:true",
+          "boolean:true",
+          "boolean:false",
+          "boolean:true"
+        ],
+        "error": null,
+        "value": "undefined"
+      }
+    },
+    {
+      "name": "params-delete-value",
+      "match": true,
+      "actual": [
+        "OK\tundefined",
+        "RECORD\tundefined",
+        "RECORD\tstring:613d3226623d33",
+        "RECORD\tstring:623d33",
+        "RECORD\tstring:623d33"
+      ],
+      "expected": {
+        "ok": true,
+        "records": [
+          "undefined",
+          "string:613d3226623d33",
+          "string:623d33",
+          "string:623d33"
+        ],
+        "error": null,
+        "value": "undefined"
+      }
+    },
+    {
+      "name": "params-stable-sort",
+      "match": true,
+      "actual": [
+        "OK\tundefined",
+        "RECORD\tundefined",
+        "RECORD\tstring:413d3626613d3126613d32267a3d30262543332541393d35262546302539462539382538303d33262545452538302538303d34",
+        "RECORD\tstring:417c617c617c7a7cc3a97cf09f98807cee8080"
+      ],
+      "expected": {
+        "ok": true,
+        "records": [
+          "undefined",
+          "string:413d3626613d3126613d32267a3d30262543332541393d35262546302539462539382538303d33262545452538302538303d34",
+          "string:417c617c617c7a7cc3a97cf09f98807cee8080"
+        ],
+        "error": null,
+        "value": "undefined"
+      }
+    },
+    {
+      "name": "params-iterators",
+      "match": false,
+      "actual": [
+        "OK\tundefined",
+        "RECORD\tboolean:true",
+        "RECORD\tstring:613a317c623a32",
+        "RECORD\tstring:617c62",
+        "RECORD\tstring:317c32",
+        "RECORD\tboolean:true",
+        "RECORD\tstring:613a31",
+        "RECORD\tstring:623a32",
+        "RECORD\tboolean:true",
+        "RECORD\tboolean:true"
+      ],
+      "expected": {
+        "ok": true,
+        "records": [
+          "boolean:true",
+          "string:613a317c623a32",
+          "string:617c62",
+          "string:317c32",
+          "boolean:true",
+          "string:613a31",
+          "string:623a32",
+          "boolean:true",
+          "boolean:false"
+        ],
+        "error": null,
+        "value": "undefined"
+      }
+    },
+    {
+      "name": "params-live-iterator",
+      "match": true,
+      "actual": [
+        "OK\tundefined",
+        "RECORD\tstring:613a31",
+        "RECORD\tstring:633a33",
+        "RECORD\tboolean:true"
+      ],
+      "expected": {
+        "ok": true,
+        "records": [
+          "string:613a31",
+          "string:633a33",
+          "boolean:true"
+        ],
+        "error": null,
+        "value": "undefined"
+      }
+    },
+    {
+      "name": "params-foreach",
+      "match": true,
+      "actual": [
+        "OK\tundefined",
+        "RECORD\tstring:613174727565747275656232747275657472756563337472756574727565"
+      ],
+      "expected": {
+        "ok": true,
+        "records": [
+          "string:613174727565747275656232747275657472756563337472756574727565"
+        ],
+        "error": null,
+        "value": "undefined"
+      }
+    },
+    {
+      "name": "params-coercion-mutation",
+      "match": true,
+      "actual": [
+        "OK\tundefined",
+        "RECORD\tstring:613d7826623d3226633d33"
+      ],
+      "expected": {
+        "ok": true,
+        "records": [
+          "string:613d7826623d3226633d33"
+        ],
+        "error": null,
+        "value": "undefined"
+      }
+    },
+    {
+      "name": "params-frozen",
+      "match": true,
+      "actual": [
+        "OK\tundefined",
+        "RECORD\tstring:613d3126623d32",
+        "RECORD\tstring:68747470733a2f2f6578616d706c652e6f72672f3f713d796573"
+      ],
+      "expected": {
+        "ok": true,
+        "records": [
+          "string:613d3126623d32",
+          "string:68747470733a2f2f6578616d706c652e6f72672f3f713d796573"
+        ],
+        "error": null,
+        "value": "undefined"
+      }
+    },
+    {
+      "name": "params-brands",
+      "match": true,
+      "actual": [
+        "OK\tundefined",
+        "RECORD\tstring:547970654572726f72",
+        "RECORD\tstring:547970654572726f72",
+        "RECORD\tstring:547970654572726f72",
+        "RECORD\tnumber:0000000000000000",
+        "RECORD\tnumber:4000000000000000",
+        "RECORD\tnumber:3ff0000000000000"
+      ],
+      "expected": {
+        "ok": true,
+        "records": [
+          "string:547970654572726f72",
+          "string:547970654572726f72",
+          "string:547970654572726f72",
+          "number:0000000000000000",
+          "number:4000000000000000",
+          "number:3ff0000000000000"
+        ],
+        "error": null,
+        "value": "undefined"
+      }
+    },
+    {
+      "name": "params-required",
+      "match": true,
+      "actual": [
+        "OK\tundefined",
+        "RECORD\tstring:547970654572726f72",
+        "RECORD\tstring:547970654572726f72",
+        "RECORD\tstring:547970654572726f72",
+        "RECORD\tstring:547970654572726f72",
+        "RECORD\tstring:547970654572726f72",
+        "RECORD\tstring:547970654572726f72",
+        "RECORD\tstring:547970654572726f72",
+        "RECORD\tstring:547970654572726f72"
+      ],
+      "expected": {
+        "ok": true,
+        "records": [
+          "string:547970654572726f72",
+          "string:547970654572726f72",
+          "string:547970654572726f72",
+          "string:547970654572726f72",
+          "string:547970654572726f72",
+          "string:547970654572726f72",
+          "string:547970654572726f72",
+          "string:547970654572726f72"
+        ],
+        "error": null,
+        "value": "undefined"
+      }
+    },
+    {
+      "name": "params-symbol-values",
+      "match": true,
+      "actual": [
+        "OK\tundefined",
+        "RECORD\tstring:547970654572726f72",
+        "RECORD\tstring:547970654572726f72",
+        "RECORD\tnumber:0000000000000000"
+      ],
+      "expected": {
+        "ok": true,
+        "records": [
+          "string:547970654572726f72",
+          "string:547970654572726f72",
+          "number:0000000000000000"
+        ],
+        "error": null,
+        "value": "undefined"
+      }
+    },
+    {
+      "name": "params-coercion-throw",
+      "match": true,
+      "actual": [
+        "OK\tundefined",
+        "RECORD\tnumber:4037000000000000",
+        "RECORD\tstring:613d31"
+      ],
+      "expected": {
+        "ok": true,
+        "records": [
+          "number:4037000000000000",
+          "string:613d31"
+        ],
+        "error": null,
+        "value": "undefined"
+      }
+    },
+    {
+      "name": "url-invalid-setter-atomic",
+      "match": true,
+      "actual": [
+        "OK\tundefined",
+        "RECORD\tstring:68747470733a2f2f6578616d706c652e6f72672f613f783d31",
+        "RECORD\tstring:547970654572726f72",
+        "RECORD\tstring:68747470733a2f2f6578616d706c652e6f72672f613f783d31"
+      ],
+      "expected": {
+        "ok": true,
+        "records": [
+          "string:68747470733a2f2f6578616d706c652e6f72672f613f783d31",
+          "string:547970654572726f72",
+          "string:68747470733a2f2f6578616d706c652e6f72672f613f783d31"
+        ],
+        "error": null,
+        "value": "undefined"
+      }
+    },
+    {
+      "name": "url-query-followup",
+      "match": true,
+      "actual": [
+        "OK\tundefined",
+        "RECORD\tstring:68747470733a2f2f6578616d706c652e6f72672f7365617263683f713d7365636f6e642b7465726d2673746172743d3130",
+        "RECORD\tstring:68747470733a2f2f6578616d706c652e6f72672f7365617263683f713d7468697264",
+        "RECORD\tstring:7468697264"
+      ],
+      "expected": {
+        "ok": true,
+        "records": [
+          "string:68747470733a2f2f6578616d706c652e6f72672f7365617263683f713d7365636f6e642b7465726d2673746172743d3130",
+          "string:68747470733a2f2f6578616d706c652e6f72672f7365617263683f713d7468697264",
+          "string:7468697264"
+        ],
+        "error": null,
+        "value": "undefined"
+      }
+    }
+  ],
+  "bounds": [
+    {
+      "name": "url-scheme-boundary",
+      "pass": true,
+      "actual": "ERROR\tJavaScript error at line 1, column 1: URL values support only HTTP(S) schemes. Source: [here]new URL(\\'data:text/plain,hello\\')"
+    },
+    {
+      "name": "url-idna-boundary",
+      "pass": true,
+      "actual": "ERROR\tJavaScript error at line 1, column 1: URL IDNA host conversion is not implemented. Source: [here]new URL(\\'https://é.test/\\')"
+    },
+    {
+      "name": "url-source-bound",
+      "pass": false,
+      "actual": "ERROR\tJavaScript error at line 1, column 33: The value is not a callable function. Actual value type: undefined. Attempted member \"repeat\". Source: new URL(\\'https://example.org/\\'+ [here]\\'x\\'.repeat(16384))"
+    },
+    {
+      "name": "params-source-bound",
+      "pass": false,
+      "actual": "ERROR\tJavaScript error at line 1, column 21: The value is not a callable function. Actual value type: undefined. Attempted member \"repeat\". Source: new URLSearchParams([here]\\'x\\'.repeat(65537))"
+    },
+    {
+      "name": "params-entry-bound",
+      "pass": false,
+      "actual": "ERROR\tJavaScript error at line 1, column 21: The value is not a callable function. Actual value type: undefined. Attempted member \"repeat\". Source: new URLSearchParams([here]\\'a=1&\\'.repeat(1025))"
+    },
+    {
+      "name": "url-attached-query-bound",
+      "pass": false,
+      "actual": "ERROR\tJavaScript error at line 1, column 62: The value is not a callable function. Actual value type: undefined. Attempted member \"repeat\". Source: ...L(\\'https://example.org/\\');u.searchParams.set(\\'x\\',[here]\\'a\\'.repeat(16384))"
+    },
+    {
+      "name": "params-recursive-coercion",
+      "pass": true,
+      "actual": "ERROR\tJavaScript error at line 1, column 48: Function call limit reached (32). Source: var p=new URLSearchParams,o={toString(){return [here]p.get(o)}};p.append(o,\\'x\\')"
+    }
+  ],
+  "ordinary_matching": 38,
+  "ordinary_total": 40,
+  "bounds_passing": 3,
+  "bounds_total": 7
+}

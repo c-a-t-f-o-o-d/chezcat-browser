@@ -5,7 +5,7 @@
 //! ECMAScript references: OrdinaryGet/SetPrototypeOf, OrdinaryHasInstance,
 //! Object.create/getPrototypeOf/setPrototypeOf, and ordinary property descriptors.
 //! Accessors use the original receiver and share the normal execution budgets.
-//! Proxies and boxed strings remain explicit limitations.
+//! Proxies remain an explicit limitation.
 
 use super::{
     strict_equal, Accessors, Builtin, Fault, Function, Host, Ordinary, PropertyKey, Runtime, Value,
@@ -60,6 +60,7 @@ impl Runtime {
             Builtin::Symbol(operation) => operation.arity(),
             Builtin::Promise(operation) => operation.arity(),
             Builtin::Date(operation) => operation.arity(),
+            Builtin::Url(operation) => operation.arity(),
             Builtin::EmptyFunction | Builtin::ThrowTypeError => 0,
             Builtin::RegExp | Builtin::ParseInt | Builtin::JsonParse => 2,
             Builtin::JsonStringify => 3,
@@ -68,6 +69,7 @@ impl Runtime {
             Builtin::ObjectStatic(
                 "create"
                 | "hasOwn"
+                | "is"
                 | "setPrototypeOf"
                 | "getOwnPropertyDescriptor"
                 | "defineProperties"
@@ -236,6 +238,7 @@ impl Runtime {
             "values",
             "entries",
             "hasOwn",
+            "is",
             "create",
             "getPrototypeOf",
             "setPrototypeOf",
@@ -343,6 +346,7 @@ impl Runtime {
         }
         let string = self.new_object(None)?;
         self.string_prototype = Some(string);
+        self.initialize_string_object(string, String::new())?;
         self.constructor_prototype("String", Value::Object(string))?;
         let Value::Function(string_constructor) = self.binding_value(0, "String")? else {
             unreachable!()
@@ -419,6 +423,7 @@ impl Runtime {
             return Ok(self.typed_index_valid(id, index));
         }
         Ok(object.properties.contains_key(name)
+            || self.string_object_index(id, name).is_some()
             || name == "length" && object.length.is_some()
             || object.regexp.is_some()
                 && matches!(
@@ -589,6 +594,7 @@ impl Runtime {
                 .properties
                 .get(&name)
                 .is_some_and(|property| !property.writable)
+                || self.string_object_index(owner, &name).is_some()
                 || name == "length"
                     && self.objects[owner].length.is_some()
                     && !self.objects[owner].length_writable
@@ -778,6 +784,8 @@ impl Runtime {
             .unwrap_or_else(|| {
                 if self.typed_numeric_key(id, name).ok().flatten().is_some() {
                     (true, true, true)
+                } else if self.string_object_index(id, name).is_some() {
+                    (true, false, false)
                 } else {
                     (
                         false,
@@ -1084,6 +1092,23 @@ impl Runtime {
     ) -> Result<(), Fault> {
         self.property_name(&name)?;
         let id = self.ordinary_id(object)?;
+        if let Some(index) = self.string_object_index(id, &name) {
+            let mut compatible = !descriptor.is_accessor()
+                && descriptor.enumerable != Some(false)
+                && descriptor.writable != Some(true)
+                && descriptor.configurable != Some(true);
+            if let Some(value) = descriptor.value.as_ref() {
+                compatible &= self.string_object_index_matches(id, index, value)?;
+            }
+            return if compatible {
+                Ok(())
+            } else {
+                Err(Fault::exception(
+                    "TypeError",
+                    "Cannot redefine a String index property.",
+                ))
+            };
+        }
         if name == "length" && self.objects[id].length.is_some() {
             // A value is converted before fixed-attribute checks, and each
             // conversion may change length or make it read-only.
@@ -1330,7 +1355,22 @@ impl Runtime {
         host: &mut dyn Host,
     ) -> Result<Value, Fault> {
         let first = args.first().unwrap_or(&Value::Undefined);
+        let boxed;
+        let first = if matches!(first, Value::String(_))
+            && matches!(method, "keys" | "getOwnPropertyDescriptor" | "assign")
+        {
+            let value = self.copy_value(first)?;
+            boxed = self.box_primitive(value)?;
+            &boxed
+        } else {
+            first
+        };
         match method {
+            "is" => {
+                let second = args.get(1).unwrap_or(&Value::Undefined);
+                self.work(first.bytes().saturating_add(second.bytes()))?;
+                Ok(Value::Bool(same_value(first, second)))
+            }
             "preventExtensions" | "seal" | "freeze" | "isExtensible" | "isSealed" | "isFrozen" => {
                 self.object_integrity(method, first)
             }
@@ -1504,6 +1544,14 @@ impl Runtime {
                     self.ordinary_required(first)?;
                 }
                 for source in args.get(1..).unwrap_or(&[]) {
+                    let boxed_source;
+                    let source = if matches!(source, Value::String(_)) {
+                        let value = self.copy_value(source)?;
+                        boxed_source = self.box_primitive(value)?;
+                        &boxed_source
+                    } else {
+                        source
+                    };
                     if matches!(
                         source,
                         Value::Null
@@ -1611,6 +1659,14 @@ impl Runtime {
         ) {
             return Ok(());
         }
+        let boxed_descriptors;
+        let descriptors = if matches!(descriptors, Value::String(_)) {
+            let value = self.copy_value(descriptors)?;
+            boxed_descriptors = self.box_primitive(value)?;
+            &boxed_descriptors
+        } else {
+            descriptors
+        };
         let descriptors = self.ordinary_required(descriptors)?;
         let id = self.ordinary_id(descriptors)?;
         let mut entries = Vec::new();
@@ -1690,7 +1746,7 @@ impl Runtime {
                 Value::Function(_) => "Function",
                 Value::Object(id) => {
                     let object = self.object(*id)?;
-                    if let Some(primitive) = object.primitive {
+                    if let Some(primitive) = &object.primitive {
                         primitive.tag()
                     } else if let Some(binary) = &object.binary {
                         binary.tag()
@@ -1700,6 +1756,8 @@ impl Runtime {
                         iterator.tag()
                     } else if let Some(text) = &object.text {
                         text.tag()
+                    } else if let Some(url) = &object.url {
+                        url.tag()
                     } else if object.date.is_some() {
                         "Date"
                     } else if object.promise.is_some() {
@@ -1931,10 +1989,17 @@ impl Runtime {
                 if method == "replaceAll" {
                     return self.string_replace_all(this, args, host);
                 }
-                let receiver = match this {
-                    Value::Object(id) if Some(id) == self.string_prototype => {
-                        Value::String(String::new())
+                let this = if matches!(method, "toString" | "valueOf") {
+                    match self.wrapped_data(&this) {
+                        Some(super::primitive_wrappers::Data::String { .. }) => {
+                            self.wrapped_primitive(&this)?.unwrap()
+                        }
+                        _ => this,
                     }
+                } else {
+                    this
+                };
+                let receiver = match this {
                     Value::String(_) => this,
                     Value::Null | Value::Undefined => {
                         return Err(Fault::exception(

@@ -72,6 +72,7 @@ impl Runtime {
                 Some(Function::Native(
                     Builtin::Object
                     | Builtin::Date(super::date::Op::Constructor)
+                    | Builtin::Url(super::url_api::Op::Constructor(_))
                     | Builtin::Promise(
                         super::promises::Op::Constructor | super::promises::Op::AggregateError,
                     )
@@ -496,11 +497,25 @@ if(count!==3)throw 'object requirements';
             assert_eq!(host.0, 0);
             assert_eq!(runtime.call_depth, 0);
         }
-        for source in [
-            "String.prototype[Symbol.iterator]=undefined;Array.from('x');",
-            "Object.fromEntries([['__proto__',1]]);",
-        ] {
+        for source in ["Object.fromEntries([['__proto__',1]]);"] {
             assert!(Runtime::new().execute(source, &mut NoHost).is_err());
         }
+    }
+
+    #[test]
+    fn string_arraylike_fallback_retains_the_original_supported_program() {
+        // Exact earlier rejection input, now enabled by String boxing.
+        let mut runtime = Runtime::new();
+        let Value::Object(array) = runtime
+            .execute(
+                "String.prototype[Symbol.iterator]=undefined;Array.from('x');",
+                &mut NoHost,
+            )
+            .unwrap()
+        else {
+            panic!("Array.from must return an array");
+        };
+        assert_eq!(runtime.objects[array].length, Some(1));
+        assert_eq!(runtime.own_property(array, "0").unwrap().to_text(), "x");
     }
 }

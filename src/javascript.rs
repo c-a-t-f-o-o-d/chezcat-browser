@@ -46,6 +46,8 @@ mod named_regexp;
 mod object_inspection;
 #[path = "object_literals.rs"]
 mod object_literals;
+#[path = "operators.rs"]
+mod operators;
 #[path = "optional_chaining.rs"]
 mod optional_chaining;
 #[path = "parameters.rs"]
@@ -65,6 +67,8 @@ mod regexp;
 mod rest_parameters;
 #[path = "spread.rs"]
 mod spread;
+#[path = "string_objects.rs"]
+mod string_objects;
 #[path = "string_replacement.rs"]
 mod string_replacement;
 #[path = "symbols.rs"]
@@ -73,6 +77,8 @@ mod symbols;
 mod template_literals;
 #[path = "text_encoding.rs"]
 mod text_encoding;
+#[path = "url_api.rs"]
+mod url_api;
 
 // Source/parse storage is separate from execution, strings and host work.
 // A bounded 512 KiB bundle can contain ordinary bootstrap code without giving
@@ -1185,20 +1191,11 @@ fn tokenize(source: &str, regexp_budget: &mut usize) -> Result<Vec<Token>, Fault
             }
             TokenKind::String(value)
         } else {
-            if ["**", "??=", "&&=", "||="]
-                .iter()
-                .any(|op| source[at..].starts_with(op))
-            {
-                return Err(Fault::new(
-                    "Exponentiation and logical assignments are not implemented.",
-                )
-                .at(source, at));
-            }
             let Some(punct) = [
-                ">>>=", "<<=", ">>=", "===", "!==", ">>>", "...", "=>", "==", "!=", "<=", ">=",
-                "&&", "||", "??", "?.", "++", "--", "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=",
-                "<<", ">>", "{", "}", "(", ")", "[", "]", ".", ";", ",", "?", ":", "+", "-", "*",
-                "/", "%", "<", ">", "=", "!", "~", "&", "|", "^",
+                ">>>=", "**=", "&&=", "||=", "??=", "<<=", ">>=", "===", "!==", ">>>", "...", "=>",
+                "==", "!=", "<=", ">=", "**", "&&", "||", "??", "?.", "++", "--", "+=", "-=", "*=",
+                "/=", "%=", "&=", "|=", "^=", "<<", ">>", "{", "}", "(", ")", "[", "]", ".", ";",
+                ",", "?", ":", "+", "-", "*", "/", "%", "<", ">", "=", "!", "~", "&", "|", "^",
             ]
             .into_iter()
             .find(|punct| {
@@ -2036,8 +2033,8 @@ impl Parser {
                     let previous_in = std::mem::replace(&mut self.allow_in, true);
                     Some(Pending::Yes(value, at, previous_in))
                 } else if let TokenKind::Punct(
-                    op @ ("=" | "+=" | "-=" | "*=" | "/=" | "%=" | "&=" | "|=" | "^=" | "<<="
-                    | ">>=" | ">>>="),
+                    op @ ("=" | "+=" | "-=" | "*=" | "**=" | "&&=" | "||=" | "??=" | "/=" | "%="
+                    | "&=" | "|=" | "^=" | "<<=" | ">>=" | ">>>="),
                 ) = self.token().kind
                 {
                     if !self.assignable(value)
@@ -2188,7 +2185,7 @@ impl Parser {
 
     fn binary(&mut self, minimum: u8) -> Result<ExprId, Fault> {
         let at = self.at();
-        let mut left = self.unary()?;
+        let mut left = self.exponentiation()?;
         loop {
             let op = match &self.token().kind {
                 TokenKind::Punct(op) => *op,
@@ -2934,6 +2931,7 @@ enum Builtin {
     TextEncoding(text_encoding::Op),
     Promise(promises::Op),
     Date(date::Op),
+    Url(url_api::Op),
     Eval,
     JsonParse,
     JsonStringify,
@@ -3016,6 +3014,7 @@ struct Property {
 
 struct Object {
     date: Option<f64>,
+    url: Option<url_api::Data>,
     primitive: Option<primitive_wrappers::Data>,
     promise: Option<promises::Data>,
     arguments: Option<arguments::Data>,
@@ -3133,6 +3132,7 @@ pub struct Runtime {
     active_array_joins: Vec<usize>,
     regexp_prototype: Option<usize>,
     date_prototype: Option<usize>,
+    url_roots: url_api::Roots,
     string_prototype: Option<usize>,
     number_prototype: Option<usize>,
     boolean_prototype: Option<usize>,
@@ -3198,6 +3198,7 @@ impl Runtime {
             active_array_joins: Vec::new(),
             regexp_prototype: None,
             date_prototype: None,
+            url_roots: url_api::Roots::default(),
             string_prototype: None,
             number_prototype: None,
             boolean_prototype: None,
@@ -3263,6 +3264,7 @@ impl Runtime {
         runtime.initialize_iterable_builtins().unwrap();
         runtime.initialize_promises().unwrap();
         runtime.initialize_date().unwrap();
+        runtime.initialize_url_api().unwrap();
         runtime.initialize_text_encoding().unwrap();
         for (name, value) in [
             ("undefined", Value::Undefined),
@@ -4781,6 +4783,7 @@ impl Runtime {
         let id = self.objects.len();
         self.objects.push(Object {
             date: None,
+            url: None,
             primitive: None,
             promise: None,
             arguments: None,
@@ -4846,6 +4849,9 @@ impl Runtime {
     }
 
     fn own_property(&mut self, id: usize, name: &str) -> Result<Value, Fault> {
+        if let Some(index) = self.string_object_index(id, name) {
+            return self.string_object_index_value(id, index);
+        }
         if self
             .object(id)?
             .properties
@@ -5039,6 +5045,16 @@ impl Runtime {
     ) -> Result<(), Fault> {
         self.step()?;
         self.property_name(&name)?;
+        if self.string_object_index(id, &name).is_some() {
+            return if self.strict || attributes.is_some() {
+                Err(Fault::exception(
+                    "TypeError",
+                    "The string property is read-only.",
+                ))
+            } else {
+                Ok(())
+            };
+        }
         if attributes.is_none()
             && self
                 .object(id)?
@@ -5236,8 +5252,11 @@ impl Runtime {
     // become enumerable and need no slot in assign/defineProperties snapshots.
     fn own_string_keys(&mut self, id: usize, enumerable_only: bool) -> Result<Vec<String>, Fault> {
         let object = self.object(id)?;
-        let typed_length = self.typed_view(id).map_or(0, |view| view.length);
-        if typed_length.saturating_add(object.properties.len()) > MAX_OBJECT_PROPERTIES {
+        let indexed_length = self.typed_view(id).map_or_else(
+            || self.string_object_length(id).unwrap_or(0),
+            |view| view.length,
+        );
+        if indexed_length.saturating_add(object.properties.len()) > MAX_OBJECT_PROPERTIES {
             return Err(Fault::new(
                 "Property enumeration limit reached (4096 keys).",
             ));
@@ -5247,7 +5266,7 @@ impl Runtime {
                 .properties
                 .len()
                 .saturating_mul(MAX_PROPERTY_BYTES * 2)
-                .saturating_add(typed_length.saturating_mul(16)),
+                .saturating_add(indexed_length.saturating_mul(16)),
         )?;
         let mut keys: Vec<_> = self.objects[id]
             .properties
@@ -5255,7 +5274,7 @@ impl Runtime {
             .filter(|(_, property)| !enumerable_only || property.enumerable)
             .map(|(name, property)| (name.clone(), property.order))
             .collect();
-        for index in 0..typed_length {
+        for index in 0..indexed_length {
             keys.push((index.to_string(), index));
         }
         // Canonical integer indices precede string keys. String keys retain
@@ -6432,13 +6451,29 @@ impl Runtime {
                     )?;
                     return Ok(result);
                 }
+                let logical = matches!(*op, "&&=" | "||=" | "??=");
                 let reference = self.reference(program, *left, env, this, host)?;
+                let reference = if logical || *op == "**=" {
+                    self.resolved_operator_reference(reference, host)?
+                } else {
+                    reference
+                };
                 let before = if *op == "=" {
                     None
                 } else {
-                    Some(self.read_reference(&reference, host)?)
+                    let before = self.read_reference(&reference, host)?;
+                    if (*op == "&&=" && !before.truthy())
+                        || (*op == "||=" && before.truthy())
+                        || (*op == "??=" && !matches!(before, Value::Null | Value::Undefined))
+                    {
+                        return Ok(before);
+                    }
+                    (!logical).then_some(before)
                 };
                 let mut value = self.eval(program, *right, env, this, host)?;
+                if logical {
+                    self.name_logical_assignment_result(program, *left, *right, &value)?;
+                }
                 if let Some(before) = before {
                     value = self.binary_value(&op[..op.len() - 1], before, value, host)?;
                 }
@@ -6574,6 +6609,9 @@ impl Runtime {
             Some(Function::Native(Builtin::Date(date::Op::Constructor))) => {
                 self.date_construct(args, host)
             }
+            Some(Function::Native(Builtin::Url(url_api::Op::Constructor(kind)))) => {
+                self.url_construct(*kind, args, host)
+            }
             Some(Function::Native(Builtin::Promise(promises::Op::Constructor))) => {
                 self.construct_promise(args, host)
             }
@@ -6606,9 +6644,7 @@ impl Runtime {
                 let value = self.builtin(*builtin, args, host)?;
                 self.box_primitive(value)
             }
-            Some(Function::Native(Builtin::String)) => Err(Fault::new(
-                "String primitive wrapper constructors are not implemented.",
-            )),
+            Some(Function::Native(Builtin::String)) => self.construct_string(args, host),
             Some(Function::Script {
                 program, template, ..
             }) if program.templates[*template].constructible => {
@@ -6798,7 +6834,7 @@ impl Runtime {
             }
             Reference::Property(Value::Object(object), property) => self.assign_ordinary_property(Ordinary::Object(object), property, value, host),
             Reference::Property(Value::Function(function), property) => self.assign_ordinary_property(Ordinary::Function(function), property, value, host),
-            Reference::Property(receiver @ (Value::Number(_) | Value::Bool(_) | Value::Symbol(_)), property) => self.assign_primitive_property(receiver, property, value, host),
+            Reference::Property(receiver @ (Value::String(_) | Value::Number(_) | Value::Bool(_) | Value::Symbol(_)), property) => self.assign_primitive_property(receiver, property, value, host),
             Reference::Property(_, _) => Err(Fault::new(
                 "Properties can only be assigned on ordinary objects, arrays or supported host objects.",
             )),
@@ -6859,6 +6895,7 @@ impl Runtime {
                 if self
                     .typed_numeric_key(id, &name)?
                     .is_some_and(|index| self.typed_index_valid(id, index))
+                    || self.string_object_index(id, &name).is_some()
                     || name == "length" && object.length.is_some()
                     || object
                         .properties
@@ -7192,6 +7229,7 @@ impl Runtime {
             "+" => a + b,
             "-" => a - b,
             "*" => a * b,
+            "**" => operators::number_exponentiate(a, b),
             "/" => a / b,
             "%" => a % b,
             "&" => f64::from(int32(a) & int32(b)),
@@ -7276,6 +7314,9 @@ impl Runtime {
             }
             Some(Function::Native(Builtin::Date(operation))) => {
                 return self.date_builtin(*operation, args, this, host);
+            }
+            Some(Function::Native(Builtin::Url(operation))) => {
+                return self.url_builtin(*operation, args, this, host);
             }
             Some(Function::Native(Builtin::Promise(operation))) => {
                 return self.promise_builtin(*operation, args, this, host);
@@ -7734,13 +7775,7 @@ impl Runtime {
             "log1p" => a.ln_1p(),
             "log2" => a.log2(),
             "log10" => a.log10(),
-            "pow" => {
-                if b.is_nan() || b.is_infinite() && a.abs() == 1.0 {
-                    f64::NAN
-                } else {
-                    a.powf(b)
-                }
-            }
+            "pow" => operators::number_exponentiate(a, b),
             "round" => {
                 if !a.is_finite() || a == 0.0 || a.abs() >= 4_503_599_627_370_496.0 {
                     a
@@ -7828,6 +7863,7 @@ impl Runtime {
             Builtin::Symbol(_)
             | Builtin::Promise(_)
             | Builtin::Date(_)
+            | Builtin::Url(_)
             | Builtin::Binary(_)
             | Builtin::Collection(_)
             | Builtin::Iterator(_)

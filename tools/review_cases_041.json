@@ -1,0 +1,454 @@
+{
+  "schema_version": 1,
+  "purpose": "Original finite independent 0.41 samples. Frozen before implementation. Not added to fixed177 inventory. All comparison programs must complete successfully and produce records in Node.",
+  "cases": [
+    {
+      "id": "string-wrapper-creation-brand-and-identity",
+      "group": "string-wrapper",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "let boxed=new String('cat'),again=Object(boxed),from=Object('cat');\ntest.record(typeof boxed);test.record(boxed instanceof String);test.record(again===boxed);test.record(from!==boxed);\ntest.record(Object.getPrototypeOf(boxed)===String.prototype);test.record(Object.prototype.toString.call(boxed));\ntest.record(String.prototype.valueOf.call(boxed));test.record(String.prototype.toString.call(boxed));\ntest.record(new String().valueOf());test.record(new String(undefined).valueOf());test.record(new String(null).valueOf());\n'ok';",
+      "source_sha256": "b74f8eab22c3caa1ae50e22e5c4bf9026cb695e2d49cc8a24207e12e33650a4d"
+    },
+    {
+      "id": "string-wrapper-character-and-length-descriptors",
+      "group": "string-wrapper",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "let boxed=new String('a\\u00f1');\nfor(let key of ['0','1','length']){let d=Object.getOwnPropertyDescriptor(boxed,key);test.record([d.value,d.writable,d.enumerable,d.configurable].join('|'));}\ntest.record(Object.getOwnPropertyDescriptor(boxed,'2'));test.record(boxed[0]);test.record(boxed.length);\n'ok';",
+      "source_sha256": "42458726fd0cbb47fa88d39ce1732c71dd48b7ebeac1fc20cd9e195c9167b995"
+    },
+    {
+      "id": "string-wrapper-canonical-index-and-order",
+      "group": "string-wrapper",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "let boxed=new String('ab'),key=Symbol('extra');boxed.tail=1;boxed['01']='leading';boxed['-0']='minus';boxed[10]='ten';boxed[2]='two';boxed[key]=4;\ntest.record(Object.keys(boxed).join('|'));test.record(Object.getOwnPropertyNames(boxed).join('|'));\ntest.record(Object.getOwnPropertySymbols(boxed)[0]===key);test.record(boxed['01']);test.record(boxed['-0']);\ntest.record(Object.entries(boxed).map(function(pair){return pair.join(':');}).join(','));\n'ok';",
+      "source_sha256": "d8cdc7fdc5eac453be71919ce0fb725f3208157dcc307014a813f86033b0806b"
+    },
+    {
+      "id": "string-wrapper-sloppy-write-and-delete",
+      "group": "string-wrapper",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "let boxed=new String('abc');boxed[0]='z';boxed.length=1;test.record(delete boxed[1]);test.record(delete boxed.length);\nboxed[3]='tail';test.record(boxed[0]);test.record(boxed[1]);test.record(boxed.length);test.record(boxed[3]);\ntest.record(delete boxed[3]);test.record(Object.keys(boxed).join(','));\n'ok';",
+      "source_sha256": "4ff96ff4d7b2f2bf9ff211b06a34181d6cdabf40b5d8e24531c3911400591208"
+    },
+    {
+      "id": "string-wrapper-strict-write-delete-errors",
+      "group": "string-wrapper",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "let boxed=new String('ab'),errors=[];\ntry{(function(){'use strict';boxed[0]='a';})();}catch(e){errors.push(e.name);}\ntry{(function(){'use strict';boxed.length=2;})();}catch(e){errors.push(e.name);}\ntry{(function(){'use strict';delete boxed[1];})();}catch(e){errors.push(e.name);}\ntry{(function(){'use strict';delete boxed.length;})();}catch(e){errors.push(e.name);}\ntest.record(errors.join('|'));test.record(boxed.valueOf());\n'ok';",
+      "source_sha256": "af34aaf5099afc0005de76be2aa7b5538c9d5fb7bdcb61b380b0d0ca481b04f9"
+    },
+    {
+      "id": "string-wrapper-compatible-define-and-rejections",
+      "group": "string-wrapper",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "let boxed=new String('ab'),errors=[];Object.defineProperty(boxed,'0',{});Object.defineProperty(boxed,'0',{value:'a',writable:false,enumerable:true,configurable:false});Object.defineProperty(boxed,'length',{value:2});\nfor(let descriptor of [{value:'z'},{writable:true},{enumerable:false},{configurable:true},{get:function(){return 'a';}}]){try{Object.defineProperty(boxed,'0',descriptor);}catch(e){errors.push(e.name);}}\ntry{Object.defineProperty(boxed,'length',{value:1});}catch(e){errors.push(e.name);}\ntest.record(errors.join(','));test.record(boxed[0]);test.record(boxed.length);\n'ok';",
+      "source_sha256": "37008aa579ae7eb8bfc6ae6a84fee35ddde276d6a028254133c3c2c562e8bc92"
+    },
+    {
+      "id": "string-wrapper-inherited-nonwritable-character",
+      "group": "string-wrapper",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "let parent=new String('ab'),child=Object.create(parent),errors=0;child[0]='z';child.length=9;test.record(Object.hasOwn(child,'0'));test.record(Object.hasOwn(child,'length'));\ntry{(function(){'use strict';child[1]='z';})();}catch(e){test.record(e.name);}\nObject.defineProperty(child,'0',{value:'own',enumerable:true});test.record(child[0]);test.record(parent[0]);\n'ok';",
+      "source_sha256": "a911036a934f0c5df729318f2bf8681656b8adc8db1d1eef1b0ac228601f7798"
+    },
+    {
+      "id": "string-wrapper-extensibility-seal-freeze",
+      "group": "string-wrapper",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "let first=new String('ab');test.record(Object.isSealed(first));test.record(Object.isFrozen(first));Object.preventExtensions(first);test.record(Object.isSealed(first));test.record(Object.isFrozen(first));\nlet second=new String('xy');second.extra=7;Object.seal(second);second.extra=9;test.record(second.extra);test.record(Object.isFrozen(second));Object.freeze(second);second.extra=10;test.record(second.extra);test.record(Object.isFrozen(second));\n'ok';",
+      "source_sha256": "d327f5e5e1da5e830a99f9440758295dde658195e298b25ddbae593d8e7c9dea"
+    },
+    {
+      "id": "string-wrapper-conversion-overrides-and-hints",
+      "group": "string-wrapper",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "let boxed=new String('12'),log='';test.record(+boxed);test.record(boxed+3);\nboxed.valueOf=function(){log+='v';return 7;};boxed.toString=function(){log+='s';return 'changed';};\ntest.record(String(boxed));test.record(log);log='';test.record(Number(boxed));test.record(log);log='';test.record(boxed+1);test.record(log);\n'ok';",
+      "source_sha256": "51a2fa2c8cd89326296d02054e4dfd88c5868fc19a4a126dda364affe03548d7"
+    },
+    {
+      "id": "string-wrapper-symbol-primitive-conversion",
+      "group": "string-wrapper",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "let boxed=new String('a'),log='';boxed[Symbol.toPrimitive]=function(hint){log+=hint+';';return 'Q';};test.record(String(boxed));test.record(boxed+'!');test.record(log);\nlet sym=Symbol('tag');test.record(String(sym));try{new String(sym);}catch(e){test.record(e.name);}\n'ok';",
+      "source_sha256": "dd43d0f843264e2b3847b36e94ceee166ac114fb64c3942fd4384931d443a4d6"
+    },
+    {
+      "id": "string-wrapper-receiver-brand-checks",
+      "group": "string-wrapper",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "let values=[{},[],7,true,null,undefined,Object.create(String.prototype)],errors=[];\nfor(let v of values){try{String.prototype.valueOf.call(v);}catch(e){errors.push(e.name);}try{String.prototype.toString.call(v);}catch(e){errors.push(e.name);}}\ntest.record(errors.join(','));test.record(String.prototype.valueOf.call('abc'));test.record(String.prototype.valueOf.call(String.prototype));\n'ok';",
+      "source_sha256": "90539a08581d0bbb523d5f44199b5aab2ff978b1f2f514a1e58289174495e381"
+    },
+    {
+      "id": "string-wrapper-json-unbox-and-conversion",
+      "group": "string-wrapper",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "let boxed=new String('abc');boxed.extra=4;test.record(JSON.stringify(boxed));test.record(JSON.stringify({text:boxed}));test.record(JSON.stringify([boxed,new String('')]));\nboxed.toString=function(){return 'changed';};test.record(JSON.stringify(boxed));test.record(JSON.stringify({a:1,b:2},[new String('b')]));\n'ok';",
+      "source_sha256": "f546e89a357c4b3721ae1d0c12216c3b796d2eb00260bb57b39eaaf86118281e"
+    },
+    {
+      "id": "string-wrapper-json-replacer-tojson-order",
+      "group": "string-wrapper",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "let boxed=new String('raw'),seen='';boxed.toJSON=function(key){seen+='j:'+key+';';return this;};\ntest.record(JSON.stringify({a:boxed},function(key,value){if(key==='a'){seen+='r:'+(value===boxed)+';';}return value;}));test.record(seen);\n'ok';",
+      "source_sha256": "cb3d00bd2ac4d40814096cc1a6cb7edac24539d860ba845f1a2f3c3cf0fdbcf6"
+    },
+    {
+      "id": "string-wrapper-string-methods-and-assign",
+      "group": "string-wrapper",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "let boxed=new String('aBc');test.record(boxed.charAt(1));test.record(boxed.slice(1));test.record(boxed.toLowerCase());test.record(boxed.includes('B'));\nlet copy=Object.assign({},boxed);test.record(JSON.stringify(copy));test.record(JSON.stringify({...boxed}));test.record(Array.from(boxed).join('|'));\n'ok';",
+      "source_sha256": "3c164a264ad21ffea97f2dc38cf7a2bd4123c2fafb61cb9aa476e9cb256f23a2"
+    },
+    {
+      "id": "string-wrapper-primitive-wrapper-preservation",
+      "group": "string-wrapper",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "let number=new Number(7),boolean=new Boolean(false),symbol=Object(Symbol('s'));test.record(number.valueOf());test.record(boolean.valueOf());test.record(typeof symbol.valueOf());\ntest.record(Object(number)===number);test.record(Object(boolean)===boolean);test.record(Object(symbol)===symbol);test.record(JSON.stringify([number,boolean]));\n'ok';",
+      "source_sha256": "6e647dccfbcbd954e643066ebe2c6d954c2aa98c4334d022161e4785727cd738"
+    },
+    {
+      "id": "string-wrapper-primitive-sloppy-this-boxing",
+      "group": "string-wrapper",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "function loose(){return [typeof this,this instanceof String,this.valueOf()].join('|');}function strict(){'use strict';return typeof this;}\ntest.record(loose.call('abc'));test.record(strict.call('abc'));test.record(Object.getPrototypeOf(Object(''))===String.prototype);\n'ok';",
+      "source_sha256": "95970fdde3375d4f0abb84d17366b7909f86e4bcb19e7440076917c4e03044c0"
+    },
+    {
+      "id": "string-wrapper-descriptor-inspection-without-index-read",
+      "group": "string-wrapper",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "let boxed=new String('ab'),d=Object.getOwnPropertyDescriptors(boxed);test.record(Object.keys(d).join(','));test.record(d[0].value);test.record(d.length.value);\nObject.defineProperty(boxed,'x',{get:function(){throw 'getter called';},enumerable:true});d=Object.getOwnPropertyDescriptors(boxed);test.record(typeof d.x.get);test.record(d.x.enumerable);\n'ok';",
+      "source_sha256": "78b318c4f0c8062ae5c7bf67aa327a306c559afdba2af78e75dd9ddd63bcfcb8"
+    },
+    {
+      "id": "string-wrapper-astral-length-without-surrogate-read",
+      "group": "string-wrapper",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "let boxed=new String('A😀Z');test.record(boxed.length);test.record(boxed[0]);test.record(boxed[3]);test.record(boxed.valueOf());test.record(boxed.charCodeAt(1));test.record(boxed.charCodeAt(2));test.record(Object.getOwnPropertyNames(boxed).join(','));\n'ok';",
+      "source_sha256": "dfe8f14efce081db190356a8f0424c08be7c5c95f13bea7802859abb83fce780"
+    },
+    {
+      "id": "operators-logical-values-and-rhs-skipping",
+      "group": "operators",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "let calls=0;function rhs(){calls++;return 9;}let a=0,b=1,c=null,d=false,e='',f=undefined;\ntest.record(a&&=rhs());test.record(b||=rhs());test.record(c??=rhs());test.record(d??=rhs());test.record(e||=rhs());test.record(f&&=rhs());test.record(calls);test.record([a,b,c,d,e,f].join('|'));\n'ok';",
+      "source_sha256": "b056f4bad62065b1ea0970c18ba485eb38b4fce3039a8e6bf3f87c2165257d3d"
+    },
+    {
+      "id": "operators-logical-reference-and-key-order",
+      "group": "operators",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "let log='',holder={_x:0,get x(){log+='g';return this._x;},set x(v){log+='s';this._x=v;}},key={toString:function(){log+='k';return 'x';}};function receiver(){log+='b';return holder;}function rhs(){log+='r';return 3;}\ntest.record(receiver()[key]||=rhs());test.record(log);log='';test.record(receiver()[key]||=rhs());test.record(log);log='';test.record(receiver()[key]&&=rhs());test.record(log);\n'ok';",
+      "source_sha256": "dc16733fb8e91872202fafac77f0691560bfd26f4d42a31ce4ec18af33ddc772"
+    },
+    {
+      "id": "operators-logical-receiver-kept-across-rhs",
+      "group": "operators",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "let first={x:0},second={x:1},current=first,log='';function rhs(){current=second;log+='r';return 8;}test.record(current.x||=rhs());test.record(first.x);test.record(second.x);test.record(current===second);test.record(log);\n'ok';",
+      "source_sha256": "7d4d3c1c9571c1949190124da7b4bb298df0fab73671bde4b2e7ea4fac9af82f"
+    },
+    {
+      "id": "operators-logical-getter-rhs-setter-errors",
+      "group": "operators",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "let marker={},log='',a={get x(){log+='g';throw marker;},set x(v){log+='s';}},b={get x(){log+='G';return 0;},set x(v){log+='S';throw marker;}};\ntry{a.x||=(log+='r',2);}catch(e){test.record(e===marker);}test.record(log);log='';\ntry{b.x||=(log+='R',2);}catch(e){test.record(e===marker);}test.record(log);log='';\ntry{b.x||=(function(){log+='r';throw marker;})();}catch(e){test.record(e===marker);}test.record(log);\n'ok';",
+      "source_sha256": "0c4e35a46d6b68dadc06d2de5c8184eee2bbad7944c70e28672654a8fcf17d27"
+    },
+    {
+      "id": "operators-logical-const-and-readonly-skips",
+      "group": "operators",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "const a=1,b=0,c=false;test.record(a||=2);test.record(b&&=2);test.record(c??=2);try{a&&=2;}catch(e){test.record(e.name);}\nlet holder={};Object.defineProperty(holder,'x',{value:0});Object.defineProperty(holder,'y',{value:1});\n(function(){'use strict';test.record(holder.x&&=2);test.record(holder.y||=2);try{holder.x||=2;}catch(e){test.record(e.name);}})();\n'ok';",
+      "source_sha256": "14d7db0523d079986bb78e19fd1eb5c297b2511bf60f8244ab21465901eee21a"
+    },
+    {
+      "id": "operators-logical-nesting-and-condition",
+      "group": "operators",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "let a=null,b=0,c=3;test.record(a??=b||=c&&=7);test.record([a,b,c].join('|'));let d=0;test.record((d||=false)?'yes':'no');test.record(d);\n'ok';",
+      "source_sha256": "4938ecb0c3efbf9af9a5d87d4c5f2294baf2c48bc10251d28bd6470bb6eb949a"
+    },
+    {
+      "id": "operators-logical-no-value-coercion",
+      "group": "operators",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "let calls=0,obj={valueOf:function(){calls++;throw 'coercion';},toString:function(){calls++;throw 'coercion';}},a=obj,b=obj,c=obj;\ntest.record((a||=9)===obj);test.record((b??=9)===obj);test.record(c&&=8);test.record(calls);\n'ok';",
+      "source_sha256": "e0993eb597c035ca5614d23ef069be1706b90cf1d6a990f3db253407e2e73b8e"
+    },
+    {
+      "id": "operators-power-precedence-association",
+      "group": "operators",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "test.record(2**3**2);test.record((2**3)**2);test.record(2*3**2+1);test.record(2**-2);test.record((-2)**3);test.record(2**(+3));test.record(-(2**2));let value=2;test.record(value**=3**2);test.record(value);\n'ok';",
+      "source_sha256": "b91a2b592f4f67dfcb9b44db7e72f052e0a52d44d0429f2177d628d5be4e6aa4"
+    },
+    {
+      "id": "operators-power-reference-key-coercion-order",
+      "group": "operators",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "let log='',holder={get x(){log+='g';return {valueOf:function(){log+='l';return 3;}};},set x(v){log+='s';test.record(v);}},key={toString:function(){log+='k';return 'x';}};\nfunction receiver(){log+='b';return holder;}function rhs(){log+='r';return {valueOf:function(){log+='e';return 2;}};}\ntest.record(receiver()[key]**=rhs());test.record(log);\n'ok';",
+      "source_sha256": "742b1c3d85f5864478cbebbc020b52a764087ec50239be8520e4864d3782e626"
+    },
+    {
+      "id": "operators-power-conversion-exceptions",
+      "group": "operators",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "let marker={},log='',left={valueOf:function(){log+='l';throw marker;}},right={valueOf:function(){log+='r';return 2;}};\ntry{left**right;}catch(e){test.record(e===marker);}test.record(log);log='';\ntry{2**{valueOf:function(){log+='r';throw marker;}};}catch(e){test.record(e===marker);}test.record(log);\ntry{Symbol('x')**2;}catch(e){test.record(e.name);}try{2**Symbol('x');}catch(e){test.record(e.name);}\n'ok';",
+      "source_sha256": "70a1ac223facd03bc934d8e03fcf7b3e31bbf562dc683ba79d2168080ffa7272"
+    },
+    {
+      "id": "operators-power-special-values",
+      "group": "operators",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "for(let pair of [[NaN,0],[1,Infinity],[-1,Infinity],[1,-Infinity],[-1,-Infinity],[0,-3],[-0,-3],[-0,3],[-0,2],[-Infinity,3],[-Infinity,2],[-Infinity,-3],[-2,0.5],[Infinity,0],[0,0]]){let value=pair[0]**pair[1];test.record(Object.is(value,-0)?'-0':String(value));}\n'ok';",
+      "source_sha256": "033a72473ecd3d1fc2df6949172517ca4cac67bffbf53beb842bf7633fa1ee6b"
+    },
+    {
+      "id": "operators-power-number-coercion-and-compound",
+      "group": "operators",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "test.record('2'**'4');test.record(null**false);test.record(true**9);test.record(undefined**0);let a=2,b=3;test.record(a**=b**=2);test.record(a);test.record(b);test.record(Math.pow(-0,-3));test.record(Math.pow(-1,Infinity));\n'ok';",
+      "source_sha256": "a41f6691551e3c1d69c3809db35e634acfc9fcbcd627211040901a196e9b27be"
+    },
+    {
+      "id": "operators-logical-unbound-get-before-rhs",
+      "group": "operators",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "let calls=0;try{reviewMissing041||=(calls++,2);}catch(e){test.record(e.name);}test.record(calls);try{null.x??=(calls++,3);}catch(e){test.record(e.name);}test.record(calls);\n'ok';",
+      "source_sha256": "19eaf52b710b972dabdcbf97b8d8aa7b2bab992b8cab23ad723b7745d8240c6e"
+    },
+    {
+      "id": "operators-power-unary-minus",
+      "group": "operators",
+      "kind": "early-error",
+      "browser_global": false,
+      "source": "test.record(\"effect\");-2**2;",
+      "source_sha256": "ef06c0c0b43efd902a09f1ad9509f21bea55b7a165417d475c62a788d769deee"
+    },
+    {
+      "id": "operators-power-unary-plus",
+      "group": "operators",
+      "kind": "early-error",
+      "browser_global": false,
+      "source": "test.record(\"effect\");+2**2;",
+      "source_sha256": "4c0f82e81ea53ee140e3b0f3cf78707a7eca3f7cc0e9e9bc8610086b842ba35e"
+    },
+    {
+      "id": "operators-power-unary-not",
+      "group": "operators",
+      "kind": "early-error",
+      "browser_global": false,
+      "source": "test.record(\"effect\");!2**2;",
+      "source_sha256": "6156314920c5e740e45572ceed7caf2abfa49f5d4c5f774b8254d7ced4118bc7"
+    },
+    {
+      "id": "operators-power-typeof",
+      "group": "operators",
+      "kind": "early-error",
+      "browser_global": false,
+      "source": "test.record(\"effect\");typeof 2**2;",
+      "source_sha256": "6cf0c06b35e848ba815e0a7ee8bebe32b869c91586cca686a9a38b9d41b99995"
+    },
+    {
+      "id": "operators-logical-invalid-target",
+      "group": "operators",
+      "kind": "early-error",
+      "browser_global": false,
+      "source": "test.record(\"effect\");(1+2)||=3;",
+      "source_sha256": "979fdec60aaaf809f1f1c0e87925ef51daa2df1f3044b82d3edfbc9277cf4cde"
+    },
+    {
+      "id": "operators-logical-optional-target",
+      "group": "operators",
+      "kind": "early-error",
+      "browser_global": false,
+      "source": "test.record(\"effect\");let o={};o?.x??=2;",
+      "source_sha256": "0af6f80f8cfa0faf7b4740e08c865327b4820f437651e9871cd7872bb1df8014"
+    },
+    {
+      "id": "operators-power-invalid-target",
+      "group": "operators",
+      "kind": "early-error",
+      "browser_global": false,
+      "source": "test.record(\"effect\");(1+2)**=3;",
+      "source_sha256": "6e2fdd2cdbceaed9e76e4f3b1f44b344daab34a0810078e722d95f76c54ea821"
+    },
+    {
+      "id": "url-absolute-components-and-serialization",
+      "group": "url",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "let u=new URL('HTTPS://Example.COM:443/a/../search?q=cat#part');for(let key of ['href','origin','protocol','host','hostname','port','pathname','search','hash'])test.record(u[key]);test.record(u.toString());test.record(u.toJSON());test.record(JSON.stringify(u));\n'ok';",
+      "source_sha256": "7628d368192cc63dc31709113edc4ccc177e834ae62984cdb889bb0aceb3a5f1"
+    },
+    {
+      "id": "url-relative-resolution-and-base",
+      "group": "url",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "let base='https://example.test/a/b?old=1#old';for(let relative of ['../c','./d','?q=new','#part','/root','//OTHER.test:80/x','','../../e'])test.record(new URL(relative,base).href);test.record(new URL('child',new URL(base)).href);\n'ok';",
+      "source_sha256": "0c8cce141e15ccfb6c64c6aaf09d5f5ce2597e55acb1991f30e2b85bf688d40e"
+    },
+    {
+      "id": "url-path-dot-encoding-and-backslash",
+      "group": "url",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "for(let input of ['https://EXAMPLE.test/a/%2e/b/%2E%2E/c','https:\\\\example.test\\\\a\\\\b','https://example.test/a b?q=a b#c d','http://127.0.0.1:80/a','https://[2001:db8::1]:443/a'])test.record(new URL(input).href);\n'ok';",
+      "source_sha256": "5fcdf46921e47d4132d89cc28908f1990e3676e4fd19624fa953bb32b60f2f3f"
+    },
+    {
+      "id": "url-credentials-and-component-mutation",
+      "group": "url",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "let u=new URL('https://alice:p%40ss@example.test/a?x=1#h');test.record(u.username);test.record(u.password);u.username='a b';u.password='x@y';u.hostname='OTHER.TEST';u.port='8443';u.pathname='/a b';u.search='q=a b';u.hash='x y';test.record(u.href);test.record(u.origin);u.protocol='http:';test.record(u.href);\n'ok';",
+      "source_sha256": "2a765f0272afe20d7227f765770a1c9db9a5ec4b1db609e1981d4024ebb6eaa2"
+    },
+    {
+      "id": "url-invalid-input-and-argument-conversion",
+      "group": "url",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "let log='',address={toString:function(){log+='u';return '../x';}},base={toString:function(){log+='b';return 'https://example.test/a/';}};test.record(new URL(address,base).href);test.record(log);\nfor(let input of ['not absolute','https://','https://host:99999/','https://[wrong]/']){try{new URL(input);}catch(e){test.record(e.name);}}\n'ok';",
+      "source_sha256": "dabdac84b262985f71d5d8328b657870488d506bac052766bcdb5ee0aea4fda1"
+    },
+    {
+      "id": "url-query-construction-decoding",
+      "group": "url",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "let query=new URLSearchParams('?a=one+two&a=%2B&empty&bad=%GG&utf=%E2%9C%93');test.record(query.toString());test.record(query.get('a'));test.record(query.getAll('a').join('|'));test.record(query.get('absent'));test.record(query.has('empty'));test.record(query.get('empty'));test.record(query.get('utf'));test.record(query.size);\n'ok';",
+      "source_sha256": "2ca933c1e5ec782991703bfcd2fa7c9721960aeb98535cb1885b0506b2da889c"
+    },
+    {
+      "id": "url-query-append-set-delete-has",
+      "group": "url",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "let query=new URLSearchParams('x=1&y=2&x=3&z=4');query.append('x','5');test.record(query.getAll('x').join('|'));test.record(query.has('x','3'));query.delete('x','3');test.record(query.toString());query.set('x','9');test.record(query.toString());query.delete('missing');query.delete('y');test.record(query.toString());test.record(query.size);\n'ok';",
+      "source_sha256": "0e8e2addd9e1d02c88d35b354406bd1062c176b82aa85241c87a48bd0d87e5cc"
+    },
+    {
+      "id": "url-query-stable-sort-and-encoding",
+      "group": "url",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "let query=new URLSearchParams('z=0&b=1&a=first&b=2&a=last');query.sort();test.record(query.toString());query.append('space key','~!*() +/');test.record(query.toString());test.record(query.getAll('a').join('|'));\n'ok';",
+      "source_sha256": "08018ec236ccbdef16e462e802813db0647b84efcf0b358598b9192d6386faeb"
+    },
+    {
+      "id": "url-query-record-and-sequence",
+      "group": "url",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "let query=new URLSearchParams({2:'two',a:1,b:false,c:null,d:undefined});test.record(query.toString());let other=new URLSearchParams([['x','1'],['x','2'],['y','3']]);test.record(other.toString());let clone=new URLSearchParams(other);other.append('x','4');test.record(clone.toString());\n'ok';",
+      "source_sha256": "aac898800050a6fe387862e6b21be0d5a6e0b9f98aebec5ecb79d90b2a6f97fb"
+    },
+    {
+      "id": "url-query-iteration-and-foreach-receiver",
+      "group": "url",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "let query=new URLSearchParams('a=1&a=2&b=3'),receiver={},seen=[];query.forEach(function(value,key,self){'use strict';seen.push([value,key,self===query,this===receiver].join(':'));},receiver);test.record(seen.join('|'));test.record(Array.from(query.keys()).join(','));test.record(Array.from(query.values()).join(','));test.record(Array.from(query.entries()).map(function(pair){return pair.join(':');}).join('|'));test.record(Array.from(query).length);\n'ok';",
+      "source_sha256": "b086766b6aa8cddba1a854e50bcfdd37128720a276f70a653cc48a294a4d8b50"
+    },
+    {
+      "id": "url-query-live-url-both-directions",
+      "group": "url",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "let u=new URL('https://example.test/search?q=a%20b&x=~#h'),query=u.searchParams;test.record(query===u.searchParams);query.append('q','cat');test.record(u.search);test.record(u.href);u.search='?new=1&new=2';test.record(query===u.searchParams);test.record(query.getAll('new').join('|'));query.set('new','3');test.record(u.href);u.href='https://other.test/z?last=4';test.record(query.get('last'));test.record(query===u.searchParams);\n'ok';",
+      "source_sha256": "dbe67054ad569ce5cddf6a6ceedabadd83552ae5bdb4f9a7b40cc58d452cf8fd"
+    },
+    {
+      "id": "url-query-live-iteration-after-mutation",
+      "group": "url",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "let query=new URLSearchParams('a=1&b=2'),iterator=query.entries();test.record(iterator.next().value.join(':'));query.append('c','3');test.record(iterator.next().value.join(':'));test.record(iterator.next().value.join(':'));test.record(iterator.next().done);let seen='';query.forEach(function(value,key){seen+=key+value;if(key==='a')query.delete('b');});test.record(seen);\n'ok';",
+      "source_sha256": "ef3557a016a56d4d3a0f789b62750463b3c94c0825bcdd5059836983f51e2ddd"
+    },
+    {
+      "id": "url-query-empty-and-clear-url-delimiters",
+      "group": "url",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "let u=new URL('https://example.test/path?#'),query=u.searchParams;test.record(u.href);test.record(u.search);test.record(u.hash);query.delete('missing');test.record(u.href);u.search='?a=1';query.delete('a');test.record(u.href);u.hash='';test.record(u.href);\n'ok';",
+      "source_sha256": "1dc565a26478b624444b00aa6b5a842c899ed2f1464941edca40a915c9373894"
+    },
+    {
+      "id": "url-query-conversion-and-abrupt-order",
+      "group": "url",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "let log='',query=new URLSearchParams(),key={toString:function(){log+='k';return 'x';}},value={toString:function(){log+='v';return 'y';}};query.append(key,value);test.record(log);test.record(query.toString());log='';let marker={};try{query.append(key,{toString:function(){log+='e';throw marker;}});}catch(e){test.record(e===marker);}test.record(log);test.record(query.toString());\n'ok';",
+      "source_sha256": "2aba7226070f168b45423610c27ec2e4920a4f02f436d9d7f9770bb4a34a2e2e"
+    },
+    {
+      "id": "url-query-iterable-entry-length-errors",
+      "group": "url",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "for(let data of [[['x']], [['x','y','z']], [7]]){try{new URLSearchParams(data);}catch(e){test.record(e.name);}}\nlet log='',iterable={};iterable[Symbol.iterator]=function(){let done=false;return {next:function(){log+='n';if(done)return {done:true};done=true;return {done:false,value:['x','1']};}};};test.record(new URLSearchParams(iterable).toString());test.record(log);\n'ok';",
+      "source_sha256": "7e86eddc76daca6cd8efa86ce3d0fb81761a62605e4bff256dc42ab95ecf944d"
+    },
+    {
+      "id": "url-query-record-getter-and-enumeration-order",
+      "group": "url",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "let log='',data={};Object.defineProperty(data,'a',{enumerable:true,get:function(){log+='a';return 1;}});Object.defineProperty(data,'b',{enumerable:true,get:function(){log+='b';return 2;}});test.record(new URLSearchParams(data).toString());test.record(log);\n'ok';",
+      "source_sha256": "280401eed765c78c0996ca464e8fe09e193cdcaae26b9d2c75f2c6208482efa2"
+    },
+    {
+      "id": "url-url-static-canparse-and-parse",
+      "group": "url",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "test.record(URL.canParse('../x','https://example.test/a/'));test.record(URL.canParse('bad'));test.record(URL.parse('bad'));test.record(URL.parse('/x','https://example.test/a').href);\n'ok';",
+      "source_sha256": "d47bc81c918b07d27e4c84c8b6e709b5bc457de71dbded14e3364a67ac835cff"
+    },
+    {
+      "id": "url-query-prototype-and-method-brands",
+      "group": "url",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "let query=new URLSearchParams('x=1'),u=new URL('https://example.test/');test.record(query instanceof URLSearchParams);test.record(u instanceof URL);test.record(Object.getPrototypeOf(query)===URLSearchParams.prototype);test.record(Object.getPrototypeOf(u)===URL.prototype);\ntry{URLSearchParams.prototype.get.call({},'x');}catch(e){test.record(e.name);}try{URL.prototype.toString.call({});}catch(e){test.record(e.name);}\n'ok';",
+      "source_sha256": "a7d9e092c75635f8eed1b82aae4c5842312ec30b4e1236ebfe0a89795d688216"
+    }
+  ]
+}

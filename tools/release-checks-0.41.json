@@ -1,0 +1,531 @@
+{
+  "version": "0.41.0",
+  "verified_utc": "2026-11-11T14:59:21.832910+00:00",
+  "authoritative_baseline": {
+    "version": "0.40.0",
+    "archive_sha256": "5ad936a65b9ab964c7e4aa2938e3bfc992e860133eebb71ce5240e710c64ca81"
+  },
+  "rust": {
+    "passed": 1104,
+    "failed": 0,
+    "ignored": 0,
+    "old_executed_tests_retained": 1061,
+    "new_tests": 43,
+    "app_search_tests_passed": 32,
+    "app_search_tests": [
+      "app::search_tests::callable_object_helpers_bootstrap_bound_search_and_repeated_search",
+      "app::search_tests::default_parameter_closures_submit_search_and_repeated_search",
+      "app::search_tests::common_builtins_callbacks_prepare_search_and_repeated_search",
+      "app::search_tests::destructuring_parameters_and_bindings_submit_search_and_repeated_search",
+      "app::search_tests::dynamic_function_handlers_submit_search_and_repeated_search",
+      "app::search_tests::form_action_csp_blocks_native_submits_with_scripting_enabled_or_disabled_and_script_submits",
+      "app::search_tests::input_search_renders_results_follows_cross_origin_result_and_searches_again",
+      "app::search_tests::iterator_protocol_and_iterable_helpers_bootstrap_search_and_repeated_search",
+      "app::search_tests::named_regexp_groups_prepare_search_and_repeated_search",
+      "app::search_tests::literal_accessors_and_array_descriptors_bootstrap_search_and_repeated_search",
+      "app::search_tests::object_spread_getters_and_symbols_submit_search_and_repeated_search",
+      "app::search_tests::long_else_if_bootstrap_initializes_scripted_search_and_repeated_search",
+      "app::search_tests::logical_assignments_and_power_submit_search_and_repeated_search",
+      "app::search_tests::optional_chaining_and_nullish_values_submit_search_and_repeated_search",
+      "app::search_tests::script_form_submit_bypasses_required_but_stop_discards_the_queued_request",
+      "app::search_tests::script_form_cross_origin_action_and_redirect_make_no_forbidden_request",
+      "app::search_tests::passive_accessor_probe_initializes_scripted_search_and_repeated_search",
+      "app::search_tests::scripted_post_preserves_body_and_reload_confirmation",
+      "app::search_tests::deferred_function_bootstrap_initializes_scripted_search_and_repeated_search",
+      "app::search_tests::textarea_enter_edits_lines_and_submit_cancellation_preserves_the_current_document",
+      "app::search_tests::promise_string_url_pipeline_navigates_and_searches_again",
+      "app::search_tests::spread_and_rest_bootstrap_search_and_repeated_search",
+      "app::search_tests::promise_thenables_and_microtasks_submit_search_and_repeated_search",
+      "app::search_tests::template_interpolation_prepares_search_and_repeated_search",
+      "app::search_tests::symbol_bootstrap_initializes_scripted_search_and_repeated_search",
+      "app::search_tests::textarea_search_renders_results_follows_cross_origin_result_and_searches_again",
+      "app::search_tests::textarea_scripted_enter_submits_snapshots_and_subsequent_searches",
+      "app::search_tests::string_objects_snapshot_queries_for_search_and_repeated_search",
+      "app::search_tests::utc_dates_and_json_callbacks_submit_search_and_repeated_search",
+      "app::search_tests::primitive_wrappers_and_conversion_hooks_bootstrap_search_and_repeated_search",
+      "app::search_tests::url_search_params_roundtrip_queries_and_repeated_search",
+      "app::search_tests::url_objects_navigate_results_follow_links_and_search_again"
+    ]
+  },
+  "javascript": {
+    "node": "v24.22.1",
+    "rustc": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+    "ordinary_comparisons": 1163,
+    "ordinary_matches": 1163,
+    "negative_cases": 288,
+    "negative_passed": 288,
+    "separate_current_spec_assertions": 3,
+    "separate_current_spec_assertions_passed": 3,
+    "original_fixture_tuples_retained": 1335,
+    "fixture_inputs_frozen": true,
+    "reference_differences_excluded_from_matching_totals": true
+  },
+  "progress": {
+    "schema_version": 1,
+    "version": "0.41.0",
+    "measurement": "Selected original capability samples, not whole-browser completion, engineering effort or live-site success.",
+    "fixed_reference_cohort": {
+      "definition_file": "tools/compatibility-progress-cohort.json",
+      "sha256": "dfdd9237d15e159164213fd26188cbd11dfbec69860d3c1258dd3f3961c9e163",
+      "baseline": {
+        "total": 112,
+        "matches_node": 101,
+        "percentage": 90.18
+      },
+      "current": {
+        "total": 112,
+        "matches_node": 103,
+        "percentage": 91.96
+      },
+      "historical_same_cohort": [
+        {
+          "version": "0.36.0",
+          "matches_node": 72,
+          "total": 112,
+          "percentage": 64.29
+        },
+        {
+          "version": "0.37.0",
+          "matches_node": 90,
+          "total": 112,
+          "percentage": 80.36
+        },
+        {
+          "version": "0.38.0",
+          "matches_node": 91,
+          "total": 112,
+          "percentage": 81.25
+        },
+        {
+          "version": "0.39.0",
+          "matches_node": 98,
+          "total": 112,
+          "percentage": 87.5
+        },
+        {
+          "version": "0.40.0",
+          "matches_node": 101,
+          "total": 112,
+          "percentage": 90.18
+        },
+        {
+          "version": "0.41.0",
+          "matches_node": 103,
+          "total": 112,
+          "percentage": 91.96
+        }
+      ],
+      "delta_matching_probes": 2,
+      "historical_note": "0.36 was measured retrospectively during 0.37."
+    },
+    "original_160_inventory": {
+      "baseline": {
+        "total": 160,
+        "matches_node": 148,
+        "percentage": 92.5,
+        "statuses": {
+          "supported": 148,
+          "missing": 9,
+          "intentionally_limited": 2,
+          "partial": 1
+        }
+      },
+      "current": {
+        "total": 160,
+        "matches_node": 150,
+        "percentage": 93.75,
+        "statuses": {
+          "supported": 150,
+          "missing": 7,
+          "intentionally_limited": 2,
+          "partial": 1
+        }
+      },
+      "records_retained_identically": 160,
+      "scope": "Historical 160 subset, reported separately without changing its programs."
+    },
+    "expanded_inventory": {
+      "baseline": {
+        "total": 177,
+        "matches_node": 164,
+        "percentage": 92.66,
+        "statuses": {
+          "supported": 164,
+          "missing": 9,
+          "intentionally_limited": 2,
+          "partial": 2
+        }
+      },
+      "current": {
+        "total": 177,
+        "matches_node": 166,
+        "percentage": 93.79,
+        "statuses": {
+          "supported": 166,
+          "missing": 7,
+          "intentionally_limited": 2,
+          "partial": 2
+        }
+      },
+      "new_probes": 0,
+      "previous_records_retained_identically": 177,
+      "regressions": [],
+      "incomparable": []
+    },
+    "previously_missing_samples": {
+      "previous_missing": 9,
+      "newly_matching": 2,
+      "remaining_missing": 7,
+      "closed_ids": [
+        "wrapper-string",
+        "url"
+      ],
+      "scope": "Previously missing samples among 177 unchanged definitions; not every browser gap."
+    },
+    "independent_review": {
+      "cases": 49,
+      "matches": 47,
+      "ordinary_cases": 47,
+      "ordinary_matches": 47,
+      "reference_difference_cases": 2,
+      "reference_differences_observed": 2,
+      "current_spec_assertions_passed": 2,
+      "early_error_cases": 7,
+      "early_errors_passed": 7,
+      "baseline_ordinary_matches": 2,
+      "groups": {
+        "string-wrapper": {
+          "ordinary_comparisons": 18,
+          "ordinary_matches": 18,
+          "reference_difference_cases": 0,
+          "current_spec_assertions_passed": 0,
+          "early_errors": 0,
+          "early_errors_passed": 0
+        },
+        "operators": {
+          "ordinary_comparisons": 11,
+          "ordinary_matches": 11,
+          "reference_difference_cases": 2,
+          "current_spec_assertions_passed": 2,
+          "early_errors": 7,
+          "early_errors_passed": 7
+        },
+        "url": {
+          "ordinary_comparisons": 18,
+          "ordinary_matches": 18,
+          "reference_difference_cases": 0,
+          "current_spec_assertions_passed": 0,
+          "early_errors": 0,
+          "early_errors_passed": 0
+        }
+      },
+      "scope": "49 original finite programs including 2 declared reference differences, plus 7 early errors. Separate evidence; none were added to the 177 inventory."
+    },
+    "remaining_samples": [
+      {
+        "id": "language-class",
+        "area": "Language",
+        "label": "Class syntax and instance method",
+        "status": "missing",
+        "note": ""
+      },
+      {
+        "id": "language-async",
+        "area": "Language",
+        "label": "Async function syntax and Promise result",
+        "status": "missing",
+        "note": ""
+      },
+      {
+        "id": "language-generator",
+        "area": "Language",
+        "label": "Generator syntax and next",
+        "status": "missing",
+        "note": ""
+      },
+      {
+        "id": "language-bigint",
+        "area": "Language",
+        "label": "BigInt values",
+        "status": "missing",
+        "note": ""
+      },
+      {
+        "id": "string-normalize",
+        "area": "Strings",
+        "label": "Unicode normalization",
+        "status": "missing",
+        "note": ""
+      },
+      {
+        "id": "intl",
+        "area": "Globals",
+        "label": "Intl.NumberFormat",
+        "status": "missing",
+        "note": ""
+      },
+      {
+        "id": "collections-weakmap",
+        "area": "Collections",
+        "label": "WeakMap identity API",
+        "status": "missing",
+        "note": "No garbage-collection semantics are assessed."
+      },
+      {
+        "id": "limit-call-depth",
+        "area": "Limits",
+        "label": "Bounded recursive calls",
+        "status": "intentionally_limited",
+        "note": "The implementation deliberately caps nested calls at32; this test exceeds that policy while Node completes."
+      },
+      {
+        "id": "limit-lone-surrogate",
+        "area": "Limits",
+        "label": "Explicit unpaired-surrogate rejection",
+        "status": "intentionally_limited",
+        "note": "Language strings use UTF-8; unmatched UTF-16 surrogates remain explicitly unsupported."
+      },
+      {
+        "id": "spread-direct-eval-reference-difference",
+        "area": "Language",
+        "label": "Direct eval with a sole spread argument list",
+        "status": "partial",
+        "note": "Known Node 24 reference difference: current ECMA262 Function Calls uses direct eval for identifier eval with a sole spread argument list; Node evaluates that form indirectly. This probe remains visible as a behavioral difference rather than a matching pass."
+      },
+      {
+        "id": "review040-date-utc-setter-snapshots-before-conversion",
+        "area": "Globals",
+        "label": "Date setter snapshots before observable conversion",
+        "status": "partial",
+        "note": "Deterministic timestamp/UTC subset only; does not claim local-zone or clock support. This sample also appears in the independent Date review."
+      }
+    ],
+    "source_review_domains": {
+      "total": 24,
+      "statuses": {
+        "supported": 2,
+        "partial": 14,
+        "intentionally_limited": 3,
+        "missing": 4,
+        "unassessed": 1
+      },
+      "scope": "Differently sized source-review domains; not feature-completion units."
+    },
+    "major_unfinished_groups": [
+      {
+        "area": "JavaScript language and built-ins",
+        "remaining": "Classes, generators, async syntax, tagged templates, BigInt, WeakMap and broader grammar/coercion edges."
+      },
+      {
+        "area": "Strings and Unicode",
+        "remaining": "Lone UTF-16 units, normalization and broader Unicode/Intl support; new String wrappers preserve the explicit lone-surrogate boundary."
+      },
+      {
+        "area": "URL coverage",
+        "remaining": "Only the implemented bounded HTTP(S)/ASCII-host subset is reviewed; other schemes, IDNA domains and broader URL/Web-IDL conformance remain outside the claim."
+      },
+      {
+        "area": "Async integration",
+        "remaining": "Async/await syntax, modules, workers/service workers, full rejection events and broader event-loop semantics; bounded Promise/microtask fundamentals remain."
+      },
+      {
+        "area": "DOM and events",
+        "remaining": "Wider parsing/mutation/lifecycle support, innerHTML, Shadow DOM, general event dispatch and collection iteration."
+      },
+      {
+        "area": "Script networking and site storage",
+        "remaining": "fetch, XMLHttpRequest, WebSocket and website storage with explicit origin, credential, CSP and privacy rules."
+      },
+      {
+        "area": "Rendering, text and media",
+        "remaining": "Broader CSS layout, advanced fonts/shaping, Canvas/WebGL, audio/video and unsupported image/color pipelines."
+      },
+      {
+        "area": "Network interoperability",
+        "remaining": "Broader TLS/certificate coverage and HTTP/2 or HTTP/3."
+      },
+      {
+        "area": "Live search workflows",
+        "remaining": "Allowed live Google results display/navigation/follow-up searches and Bing loading still need direct successful verification."
+      }
+    ],
+    "live_sites": {
+      "Google": "Not established by this independent review",
+      "Bing": "Not established by this independent review"
+    },
+    "selected_test262": {
+      "files": 6,
+      "executions": 12,
+      "passed": 12,
+      "full_suite_run": false
+    },
+    "reference_differences": {
+      "retained_inventory": [
+        "spread-direct-eval-reference-difference",
+        "review040-date-utc-setter-snapshots-before-conversion"
+      ],
+      "new_review": [
+        "operators-logical-reference-and-key-order",
+        "operators-power-reference-key-coercion-order"
+      ],
+      "scope": "Exact original Node references remain visible. New operator cases cache the converted object property key as required by the current GetValue/PutValue algorithms; Node 24 repeats conversion. These programs never count as Node matching passes."
+    },
+    "evidence": {
+      "source_manifest_sha256": "5cba529c71a0586de5dfc83fcfbed3502ef0c9721cb5e5fbfe6c24e6106138bf",
+      "baseline": "tools/verification-0.41/compatibility-baseline.json",
+      "final": "tools/verification-0.41/compatibility-final.json",
+      "independent": "tools/verification-0.41/review-final.json",
+      "audit": "tools/verification-0.41/final-evidence-audit.json",
+      "fixture_sha256": "904439f661f647864ace10b274eed40d42101c605974d823d82e6e01991bb908",
+      "executed_source_manifest_sha256": "5cba529c71a0586de5dfc83fcfbed3502ef0c9721cb5e5fbfe6c24e6106138bf",
+      "packaged_source_manifest_sha256": "754fca1744cca0153b73510a3e23e77e7b1d9411a908ea2d88b961010bcaab52"
+    },
+    "test_only_source_reconciliation": {
+      "passed": true,
+      "scope": "Exact cfg(test) assertion migration only; production implementation and every raw execution report remain unchanged.",
+      "changed_files": [
+        "src/iterable_builtins.rs"
+      ],
+      "unchanged_source_inputs": 148,
+      "explanation_file": "tools/verification-0.41/test-only-source-reconciliation.json",
+      "explanation_sha256": "4319c521e8523e7454278ffc03588b56c31192c829c38a5d15fa2276158187ea",
+      "preserved_source_file": "tools/verification-0.41/test-migration/iterable_builtins-before.rs.txt",
+      "old_file_sha256": "da090fa75833647a5300b42e2e91b48c1bf86b8a97a8b93958bd0bb97fd921e2",
+      "new_file_sha256": "30dc6ac7598253c1225af407ccbe03520ea8e4f26fa4af08c3bb676dd8780b5b",
+      "production_prefix_sha256": "fbb2483c3126704d7d26ffb9c1a58821f52233b4b110b63ef2c89cb03d467054",
+      "exact_known_test_suffix_replacement_verified": true,
+      "original_program": "String.prototype[Symbol.iterator]=undefined;Array.from('x');",
+      "positive_test": "string_arraylike_fallback_retains_the_original_supported_program",
+      "original_execution_reports_unchanged": {
+        "compatibility-baseline.json": "33586eca473993c0c7727c149c018784f0a12128f8511f08811e42886539f1c7",
+        "compatibility-final.json": "b2288ed7197e6b123c827655bbf381b72c50a0474ea490d2c2879166587c0fc7",
+        "review-baseline.json": "8a215e5ce6793fc07e27a041ce5226098bcc361b5e0844c1113c131e754c8a36",
+        "review-final.json": "cdc060af2121cc5754b792d3fb76cb658ab90832ae8eb5b67769dbef19482cef",
+        "baseline-replay-audit.json": "cc3096ca5e0070734088428df87a967e7fabb07a369514e9e615f28dff4663fd"
+      },
+      "executed_source_manifest_sha256": "5cba529c71a0586de5dfc83fcfbed3502ef0c9721cb5e5fbfe6c24e6106138bf",
+      "packaged_source_manifest_sha256": "754fca1744cca0153b73510a3e23e77e7b1d9411a908ea2d88b961010bcaab52",
+      "executed_rust_manifest_sha256": "696e84d1e491f39209f4449c88850aa2eb6ddfbb845f3c7490213665cb2be59e",
+      "packaged_rust_manifest_sha256": "c0189b9698fa5895b48113c3929c05e3127523b54b15d4f7a582d52834a913c8",
+      "comparisons_rerun": false,
+      "reason": "No runtime or JavaScript fixture changed. Original Array.from String input now has positive length/index assertions because String boxing enables array-like fallback. Full Rust tests and both binary builds are rerun separately by root."
+    }
+  },
+  "independent_checks": {
+    "ordinary_cases": 47,
+    "ordinary_matches": 47,
+    "separate_spec_cases": 2,
+    "separate_spec_passed": 2,
+    "early_error_cases": 7,
+    "early_errors_passed": 7,
+    "additional_string_review": "22/22 unchanged frozen Node programs; separate focused report"
+  },
+  "promise_preservation": {
+    "ordinary": "40/40 plus 10/10 supplemental",
+    "fatal_bounds": "3/3",
+    "separate_spec_assertions": "4/4"
+  },
+  "selected_test262": {
+    "files": 6,
+    "executions": 12,
+    "passed": 12,
+    "full_suite_run": false
+  },
+  "builds": {
+    "native_release": "passed",
+    "windows_x64_release": "passed",
+    "formatting": "passed",
+    "native_sha256": "56d25bd83b68a8490b28749321f2accf28d40d9a06b897190ca91c80f39cefe4",
+    "windows_sha256": "66929d871fced8a0d069d920405c85f2f1dc7ca09ac35dcbbdf42f2a4cd2d31f",
+    "windows_bytes": 4350976,
+    "windows_version": "0.41.0.0",
+    "original_icons_and_system_imports_verified": true,
+    "windows_runtime_executed": false,
+    "warnings": "Two pre-existing unused-method warnings; no new build warnings."
+  },
+  "local_release_smoke": {
+    "passed": true,
+    "fixture": "tools/fixtures/compatibility-0.41.html",
+    "fixture_sha256": "f847db3fe7326ef9ae7b626c900de48ae15ca72a982ed08c42bc39d7076ce008",
+    "native_binary_sha256": "56d25bd83b68a8490b28749321f2accf28d40d9a06b897190ca91c80f39cefe4",
+    "activity_report": "tools/verification-0.41/local-fixture-activity.txt",
+    "render_dimensions": [
+      1100,
+      680
+    ],
+    "render_visually_inspected": true,
+    "expected_heading_observed": "All eight local checks passed",
+    "visible_pass_rows": 8,
+    "script_errors": 0,
+    "live_requests": 0,
+    "scope": "Original local HTML rendered through final native release, including actual Promise checkpoint, original DOM bridge, layout and paint. Images are internal inspection artifacts, not included in release.",
+    "packaged_trust_file_loaded": true,
+    "trust_status": "TRUST FILE: /workspace/scratch/f479e3526363/work-041/ChezCat/trust/roots.pem (7 certificate(s), PEM SHA-256 2a24ed0679ee42f3efc2c8931645b4db87c97c8725a17c9b3e7da8772df99693)"
+  },
+  "verification_boundaries": {
+    "live_google_verified": false,
+    "live_bing_verified": false,
+    "live_requests_this_iteration": 0,
+    "previous_google_evidence": "0.40 development capture returned an access-check redirect; it was not followed or executed.",
+    "previous_bing_evidence": "0.40 production client diagnostic failed at DNS, before TCP/TLS/HTML.",
+    "windows_gui_run": false,
+    "full_test262_run": false,
+    "wpt_run": false,
+    "clippy_rerun": false
+  },
+  "security": {
+    "cargo_dependencies": 0,
+    "tls_validation_weakened": false,
+    "csp_weakened": false,
+    "cross_origin_rules_changed": false,
+    "profile_defaults_changed": false,
+    "site_specific_rewriting": false,
+    "url_scope": "Pure local HTTP(S) values and query algorithms; existing request parser, origin, credential, TLS and CSP policy remain unchanged."
+  },
+  "limits": {
+    "url_bytes": 16384,
+    "query_bytes": 65536,
+    "query_pairs": 1024,
+    "retained_values_bytes": 2097152,
+    "copy_work_per_job_bytes": 8388608,
+    "existing_interpreter_limits_unchanged": 27
+  },
+  "preservation": {
+    "audit_checks_passed": 64,
+    "old_main_fixture_tuples": 1335,
+    "main_expectation_migrations": 1,
+    "rust_assertion_migrations": 2,
+    "old_source_test_names": 1062,
+    "old_token_identical_test_bodies": 1060,
+    "test_only_source_reconciliation": {
+      "scope": "The sole source change after full JavaScript/inventory checks changes an assertion inside #[cfg(test)] mod tests. Non-test production prefix is byte-identical; no browser runtime implementation or fixture changed. Original successful source and before/after verification reports are preserved.",
+      "changed_files": [
+        "src/iterable_builtins.rs"
+      ],
+      "old_sha256": "da090fa75833647a5300b42e2e91b48c1bf86b8a97a8b93958bd0bb97fd921e2",
+      "new_sha256": "30dc6ac7598253c1225af407ccbe03520ea8e4f26fa4af08c3bb676dd8780b5b",
+      "unchanged_production_prefix_sha256": "fbb2483c3126704d7d26ffb9c1a58821f52233b4b110b63ef2c89cb03d467054",
+      "original_program": "String.prototype[Symbol.iterator]=undefined;Array.from('x');",
+      "reason": "String boxing enables Array.from array-like fallback when the String iterator is absent. The old unsupported assertion is now a positive regression with exact length/index assertions; all other limits and native gates remain.",
+      "positive_test": "string_arraylike_fallback_retains_the_original_supported_program"
+    },
+    "independent_audit": "tools/verification-0.41/final-evidence-audit.json"
+  },
+  "frozen_build_inputs": {
+    "files": 233,
+    "rust_files": 146,
+    "rust_source_manifest_sha256": "c0189b9698fa5895b48113c3929c05e3127523b54b15d4f7a582d52834a913c8"
+  },
+  "recoveries": [
+    {
+      "filename": "ChezCat_0_41_recovery.zip",
+      "bytes": 7382849,
+      "sha256": "521135c14ba7a2d0ccb97f37890119e2b55535c293f8c2b9dca377c06ae36620",
+      "files": 1047,
+      "verified_manifest_entries": 1046,
+      "source_version": "0.41.0",
+      "source_only": true,
+      "windows_version": null
+    }
+  ]
+}

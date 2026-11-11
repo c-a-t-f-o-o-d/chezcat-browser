@@ -5,8 +5,8 @@ LANGUAGE 9, 1
 101 ICON "assets/chezcat.ico"
 
 1 VERSIONINFO
-FILEVERSION 0,40,0,0
-PRODUCTVERSION 0,40,0,0
+FILEVERSION 0,41,0,0
+PRODUCTVERSION 0,41,0,0
 FILEFLAGSMASK 0x3f
 FILEFLAGS 0
 FILEOS 0x40004
@@ -18,11 +18,11 @@ BEGIN
         BLOCK "040904b0"
         BEGIN
             VALUE "FileDescription", "ChezCat web browser\0"
-            VALUE "FileVersion", "0.40.0\0"
+            VALUE "FileVersion", "0.41.0\0"
             VALUE "InternalName", "ChezCat\0"
             VALUE "OriginalFilename", "ChezCat.exe\0"
             VALUE "ProductName", "ChezCat\0"
-            VALUE "ProductVersion", "0.40.0\0"
+            VALUE "ProductVersion", "0.41.0\0"
         END
     END
     BLOCK "VarFileInfo"

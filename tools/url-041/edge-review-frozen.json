@@ -1,0 +1,204 @@
+{
+  "purpose": "Small postimplementation review; frozen before ChezCat replay. Distinct from preimplementation forty-program corpus.",
+  "cases": [
+    {
+      "name": "edge-numeric-authorities",
+      "source": "for(var h of ['0x100000000000000000000','18446744073709551616','4294967296','09','1.2.3.256','256.1','1.2.3.4.5','1..2','0x0000000000007f000001','0x','1.','.' ]){var s='http://'+h+'/';test.record(URL.canParse(s));var p=URL.parse(s);test.record(p===null?null:p.href)}'ok'",
+      "node": {
+        "ok": true,
+        "records": [
+          "boolean:false",
+          "null",
+          "boolean:false",
+          "null",
+          "boolean:false",
+          "null",
+          "boolean:false",
+          "null",
+          "boolean:false",
+          "null",
+          "boolean:false",
+          "null",
+          "boolean:false",
+          "null",
+          "boolean:false",
+          "null",
+          "boolean:true",
+          "string:687474703a2f2f3132372e302e302e312f",
+          "boolean:true",
+          "string:687474703a2f2f302e302e302e302f",
+          "boolean:true",
+          "string:687474703a2f2f302e302e302e312f",
+          "boolean:true",
+          "string:687474703a2f2f2e2f"
+        ],
+        "error": null,
+        "value": "string:6f6b"
+      }
+    },
+    {
+      "name": "edge-absolute-port-rejects",
+      "source": "for(var p of ['65536','9999999999999999999999','-1','+80','80rest','0x50',':80','00080','','0']){var s='http://example.org:'+p+'/';test.record(URL.canParse(s));var u=URL.parse(s);test.record(u===null?null:u.href)}'ok'",
+      "node": {
+        "ok": true,
+        "records": [
+          "boolean:false",
+          "null",
+          "boolean:false",
+          "null",
+          "boolean:false",
+          "null",
+          "boolean:false",
+          "null",
+          "boolean:false",
+          "null",
+          "boolean:false",
+          "null",
+          "boolean:false",
+          "null",
+          "boolean:true",
+          "string:687474703a2f2f6578616d706c652e6f72672f",
+          "boolean:true",
+          "string:687474703a2f2f6578616d706c652e6f72672f",
+          "boolean:true",
+          "string:687474703a2f2f6578616d706c652e6f72673a302f"
+        ],
+        "error": null,
+        "value": "string:6f6b"
+      }
+    },
+    {
+      "name": "edge-host-setter-progress",
+      "source": "for(var h of ['changed.test:bad','changed.test:9999999','changed.test:123rest','changed.test:','changed.test/path','[::1]:bad','[::1]:443','bad%23host:80']){var u=new URL('https://base.test:8080/a');u.host=h;test.record(u.href)}'ok'",
+      "node": {
+        "ok": true,
+        "records": [
+          "string:68747470733a2f2f6368616e6765642e746573743a383038302f61",
+          "string:68747470733a2f2f6368616e6765642e746573743a383038302f61",
+          "string:68747470733a2f2f6368616e6765642e746573743a3132332f61",
+          "string:68747470733a2f2f6368616e6765642e746573743a383038302f61",
+          "string:68747470733a2f2f6368616e6765642e746573743a383038302f61",
+          "string:68747470733a2f2f5b3a3a315d3a383038302f61",
+          "string:68747470733a2f2f5b3a3a315d2f61",
+          "string:68747470733a2f2f626173652e746573743a383038302f61"
+        ],
+        "error": null,
+        "value": "string:6f6b"
+      }
+    },
+    {
+      "name": "edge-credentials",
+      "source": "for(var s of ['http://one@two:p:a@host.test/','http://user:@host.test/','http://:pass@host.test/','http://:@host.test/','http://a%40b:c%3Ad@host.test/'])test.record(new URL(s).href);var u=new URL('https://host.test/');u.username='a\\tb:c';u.password='q\\nr@:/';test.record([u.href,u.username,u.password,u.origin].join('|'));'ok'",
+      "node": {
+        "ok": true,
+        "records": [
+          "string:687474703a2f2f6f6e6525343074776f3a702533416140686f73742e746573742f",
+          "string:687474703a2f2f7573657240686f73742e746573742f",
+          "string:687474703a2f2f3a7061737340686f73742e746573742f",
+          "string:687474703a2f2f686f73742e746573742f",
+          "string:687474703a2f2f61253430623a632533416440686f73742e746573742f",
+          "string:68747470733a2f2f6125303962253341633a712530417225343025334125324640686f73742e746573742f7c6125303962253341637c71253041722534302533412532467c68747470733a2f2f686f73742e74657374"
+        ],
+        "error": null,
+        "value": "string:6f6b"
+      }
+    },
+    {
+      "name": "edge-url-constructor-method-descriptors",
+      "source": "for(var C of [URL,URLSearchParams]){var d=Object.getOwnPropertyDescriptor(C,'prototype');test.record([C.name,C.length,d.enumerable,d.writable,d.configurable,Object.getPrototypeOf(C)===Function.prototype,Object.getPrototypeOf(C.prototype)===Object.prototype].join('|'))}for(var n of ['canParse','parse']){var d=Object.getOwnPropertyDescriptor(URL,n);test.record([n,d.value.name,d.value.length,d.enumerable,d.writable,d.configurable,d.value.hasOwnProperty('prototype')].join('|'))}'ok'",
+      "node": {
+        "ok": true,
+        "records": [
+          "string:55524c7c317c66616c73657c66616c73657c66616c73657c747275657c74727565",
+          "string:55524c536561726368506172616d737c307c66616c73657c66616c73657c66616c73657c747275657c74727565",
+          "string:63616e50617273657c63616e50617273657c317c747275657c747275657c747275657c66616c7365",
+          "string:70617273657c70617273657c317c747275657c747275657c747275657c66616c7365"
+        ],
+        "error": null,
+        "value": "string:6f6b"
+      }
+    },
+    {
+      "name": "edge-url-accessor-descriptors",
+      "source": "for(var n of ['href','origin','protocol','username','password','host','hostname','port','pathname','search','hash','searchParams']){var d=Object.getOwnPropertyDescriptor(URL.prototype,n);test.record([n,d.get.name,d.get.length,d.set===undefined?'none':d.set.name,d.set===undefined?'none':d.set.length,d.enumerable,d.configurable].join('|'))}'ok'",
+      "node": {
+        "ok": true,
+        "records": [
+          "string:687265667c67657420687265667c307c73657420687265667c317c747275657c74727565",
+          "string:6f726967696e7c676574206f726967696e7c307c6e6f6e657c6e6f6e657c747275657c74727565",
+          "string:70726f746f636f6c7c6765742070726f746f636f6c7c307c7365742070726f746f636f6c7c317c747275657c74727565",
+          "string:757365726e616d657c67657420757365726e616d657c307c73657420757365726e616d657c317c747275657c74727565",
+          "string:70617373776f72647c6765742070617373776f72647c307c7365742070617373776f72647c317c747275657c74727565",
+          "string:686f73747c67657420686f73747c307c73657420686f73747c317c747275657c74727565",
+          "string:686f73746e616d657c67657420686f73746e616d657c307c73657420686f73746e616d657c317c747275657c74727565",
+          "string:706f72747c67657420706f72747c307c73657420706f72747c317c747275657c74727565",
+          "string:706174686e616d657c67657420706174686e616d657c307c73657420706174686e616d657c317c747275657c74727565",
+          "string:7365617263687c676574207365617263687c307c736574207365617263687c317c747275657c74727565",
+          "string:686173687c67657420686173687c307c73657420686173687c317c747275657c74727565",
+          "string:736561726368506172616d737c67657420736561726368506172616d737c307c6e6f6e657c6e6f6e657c747275657c74727565"
+        ],
+        "error": null,
+        "value": "string:6f6b"
+      }
+    },
+    {
+      "name": "edge-query-method-descriptors",
+      "source": "for(var n of ['append','get','getAll','set','has','delete','sort','toString','keys','values','entries','forEach']){var d=Object.getOwnPropertyDescriptor(URLSearchParams.prototype,n);test.record([n,d.value.name,d.value.length,d.enumerable,d.writable,d.configurable,d.value.hasOwnProperty('prototype')].join('|'))}var p=new URLSearchParams('a=1');var ip=Object.getPrototypeOf(p.entries());var d=Object.getOwnPropertyDescriptor(ip,'next');test.record([d.value.name,d.value.length,d.enumerable,d.writable,d.configurable].join('|'));'ok'",
+      "node": {
+        "ok": true,
+        "records": [
+          "string:617070656e647c617070656e647c327c747275657c747275657c747275657c66616c7365",
+          "string:6765747c6765747c317c747275657c747275657c747275657c66616c7365",
+          "string:676574416c6c7c676574416c6c7c317c747275657c747275657c747275657c66616c7365",
+          "string:7365747c7365747c327c747275657c747275657c747275657c66616c7365",
+          "string:6861737c6861737c317c747275657c747275657c747275657c66616c7365",
+          "string:64656c6574657c64656c6574657c317c747275657c747275657c747275657c66616c7365",
+          "string:736f72747c736f72747c307c747275657c747275657c747275657c66616c7365",
+          "string:746f537472696e677c746f537472696e677c307c747275657c747275657c747275657c66616c7365",
+          "string:6b6579737c6b6579737c307c747275657c747275657c747275657c66616c7365",
+          "string:76616c7565737c76616c7565737c307c747275657c747275657c747275657c66616c7365",
+          "string:656e74726965737c656e74726965737c307c747275657c747275657c747275657c66616c7365",
+          "string:666f72456163687c666f72456163687c317c747275657c747275657c747275657c66616c7365",
+          "string:6e6578747c307c747275657c747275657c74727565"
+        ],
+        "error": null,
+        "value": "string:6f6b"
+      }
+    },
+    {
+      "name": "edge-bound-construction-and-accessors",
+      "source": "var B=URL.bind(null,'/next'),u=new B('https://host.test/a');var Q=URLSearchParams.bind(null,'x=1&x=2'),p=new Q;test.record(u.href);test.record(p.toString());var get=Object.getOwnPropertyDescriptor(URL.prototype,'href').get;test.record(get.bind(u)());test.record(URL.canParse.apply(null,['/next','https://host.test/a']));try{new URL.canParse('https://host.test/')}catch(e){test.record(e.name)}'ok'",
+      "node": {
+        "ok": true,
+        "records": [
+          "string:68747470733a2f2f686f73742e746573742f6e657874",
+          "string:783d3126783d32",
+          "string:68747470733a2f2f686f73742e746573742f6e657874",
+          "boolean:true",
+          "string:547970654572726f72"
+        ],
+        "error": null,
+        "value": "string:6f6b"
+      }
+    },
+    {
+      "name": "edge-coupling-empty-and-nonquery",
+      "source": "var u=new URL('https://host.test/?x=one%20two&x=three#f'),p=u.searchParams;u.pathname='/next';u.hash='#later';test.record(p.toString());p.set('x','last ~');test.record(u.href);u.search='';test.record(p===u.searchParams);test.record(p.size);p.append('','');test.record(u.href);u.href='https://other.test/?';test.record(p===u.searchParams);test.record(u.href);p.delete('absent');test.record(u.href);'ok'",
+      "node": {
+        "ok": true,
+        "records": [
+          "string:783d6f6e652b74776f26783d7468726565",
+          "string:68747470733a2f2f686f73742e746573742f6e6578743f783d6c6173742b253745236c61746572",
+          "boolean:true",
+          "number:0000000000000000",
+          "string:68747470733a2f2f686f73742e746573742f6e6578743f3d236c61746572",
+          "boolean:true",
+          "string:68747470733a2f2f6f746865722e746573742f3f",
+          "string:68747470733a2f2f6f746865722e746573742f"
+        ],
+        "error": null,
+        "value": "string:6f6b"
+      }
+    }
+  ]
+}

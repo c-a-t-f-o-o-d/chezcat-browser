@@ -472,6 +472,9 @@ impl Runtime {
         index.is_some_and(|index| self.typed_view(id).is_some_and(|view| index < view.length))
     }
     pub(super) fn own_enumerable(&self, id: usize, name: &str) -> Result<bool, Fault> {
+        if self.string_object_index(id, name).is_some() {
+            return Ok(true);
+        }
         if let Some(index) = self.typed_numeric_key(id, name)? {
             return Ok(self.typed_index_valid(id, index));
         }

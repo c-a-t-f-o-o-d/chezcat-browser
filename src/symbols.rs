@@ -143,8 +143,8 @@ impl Runtime {
     fn symbol_receiver(&self, receiver: &Value) -> Result<usize, Fault> {
         let id = match receiver {
             Value::Symbol(id) => Some(*id),
-            _ => match self.wrapped_primitive(receiver) {
-                Some(Value::Symbol(id)) => Some(id),
+            _ => match self.wrapped_data(receiver) {
+                Some(super::primitive_wrappers::Data::Symbol(id)) => Some(*id),
                 _ => None,
             },
         };
@@ -334,6 +334,7 @@ impl Runtime {
         let object = match backing {
             Some(object) => object,
             None => match receiver {
+                Value::String(_) => Ordinary::Object(self.string_prototype.unwrap()),
                 Value::Number(_) => Ordinary::Object(self.number_prototype.unwrap()),
                 Value::Bool(_) => Ordinary::Object(self.boolean_prototype.unwrap()),
                 Value::Symbol(_) => Ordinary::Object(self.symbol_prototype.unwrap()),

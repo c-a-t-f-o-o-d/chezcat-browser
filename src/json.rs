@@ -682,9 +682,15 @@ impl Runtime {
         }
         // Hooks run before wrapper conversion. A replacement object's toJSON
         // is not called a second time for the same property.
-        match self.wrapped_primitive(&value) {
-            Some(Value::Number(_)) => Ok(Value::Number(self.binary_number(&value, host)?)),
-            Some(value @ Value::Bool(_)) => Ok(value),
+        match self.wrapped_data(&value) {
+            Some(super::primitive_wrappers::Data::Number(_)) => {
+                Ok(Value::Number(self.binary_number(&value, host)?))
+            }
+            Some(super::primitive_wrappers::Data::Boolean(value)) => Ok(Value::Bool(*value)),
+            Some(super::primitive_wrappers::Data::String { .. }) => {
+                let primitive = self.primitive_with_hint(value, true, host)?;
+                self.checked_value(Value::String(primitive.script_text()?))
+            }
             _ => Ok(value),
         }
     }
@@ -709,7 +715,15 @@ impl Runtime {
             let key = match value {
                 Value::String(text) => Some(text),
                 Value::Number(number) => Some(number_text(number)),
-                value if matches!(self.wrapped_primitive(&value), Some(Value::Number(_))) => {
+                value
+                    if matches!(
+                        self.wrapped_data(&value),
+                        Some(
+                            super::primitive_wrappers::Data::Number(_)
+                                | super::primitive_wrappers::Data::String { .. }
+                        )
+                    ) =>
+                {
                     Some(self.primitive_with_hint(value, true, host)?.script_text()?)
                 }
                 _ => None,
@@ -750,8 +764,23 @@ impl Runtime {
             .filter(|value| matches!(value, Value::Function(_)));
         let property_list = self.json_property_list(args.get(1), host)?;
         let converted_space = match args.get(2) {
-            Some(value) if matches!(self.wrapped_primitive(value), Some(Value::Number(_))) => {
+            Some(value)
+                if matches!(
+                    self.wrapped_data(value),
+                    Some(super::primitive_wrappers::Data::Number(_))
+                ) =>
+            {
                 Some(Value::Number(self.binary_number(value, host)?))
+            }
+            Some(value)
+                if matches!(
+                    self.wrapped_data(value),
+                    Some(super::primitive_wrappers::Data::String { .. })
+                ) =>
+            {
+                let value = self.copy_value(value)?;
+                let value = self.primitive_with_hint(value, true, host)?;
+                Some(self.checked_value(Value::String(value.script_text()?))?)
             }
             _ => None,
         };

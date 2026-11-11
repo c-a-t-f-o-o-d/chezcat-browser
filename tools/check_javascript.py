@@ -781,7 +781,6 @@ NEGATIVE.extend([
     ('for-of-iteration-environment-bounded-atomic', 'try{for(let x of Array(4096)){}}catch(e){test.record(1);}finally{test.record(2);}'),
     ('new-parse-depth-atomic', 'test.record(1);'+'new '*1000+'Array;'),
     ('new-argument-limit-atomic', 'test.record(1);new Array('+','.join('1' for _ in range(257))+');'),
-    ('new-wrapper-constructor-cannot-catch-atomic', 'try{new String("x");}catch(e){test.record(1);}finally{test.record(2);}'),
     ('eval-missing-host-capability-atomic', 'test.denyEvalCapability=true;try{eval("test.record(1)");}catch(e){test.record(2);}finally{test.record(3);}'),
     ('eval-infinite-cannot-catch-atomic', 'try{eval("while(true){}");}catch(e){test.record(1);}finally{test.record(2);}'),
     ('eval-recursive-depth-cannot-catch-atomic', 'var code="eval(code)";try{eval(code);}catch(e){test.record(1);}finally{test.record(2);}'),
@@ -2458,6 +2457,59 @@ BROWSER_CASES.extend([
     ('spread-object-getter-throw', "var marker={},log='',o={get a(){log+='a';throw marker;},get b(){log+='b';return 2;}};try{var r={...o,later:(log+='z',3)};}catch(e){test.record(e===marker);}test.record(log);'ok';"),
 ])
 
+# 0.41: retain original fixture bytes and compare complete outcomes. These
+# development-only files and their original Node references were frozen before
+# implementation; independent review inputs remain separate.
+_041 = ROOT / "tools/verification-0.41"
+_FIXTURE_PATHS_041 = [
+    _041 / 'string-objects-cases.json',
+    _041 / 'object-is-original-node.json',
+    _041 / 'string-objects-boundary-adjudication.json',
+    _041 / 'operator-supplement-bound-adjudication.json',
+    ROOT / 'tools/operator_supplement_cases_041.json',
+    ROOT / 'tools/url-041/frozen.json',
+    ROOT / 'tools/url-041/edge-review-frozen.json',
+    ROOT / 'tools/url-041/bounds-corrected.json',
+]
+_FIXTURE_HASHES_041 = {str(path.relative_to(ROOT)): hashlib.sha256(path.read_bytes()).hexdigest() for path in _FIXTURE_PATHS_041}
+_string_objects_041 = json.loads((_041 / "string-objects-cases.json").read_text())['cases']
+_object_is_041 = json.loads((_041 / "object-is-original-node.json").read_text())['cases']
+_operators_041 = json.loads((ROOT / "tools/operator_supplement_cases_041.json").read_text())
+COMPLETION_CASES.append(('new-wrapper-constructor-cannot-catch-atomic', 'try{new String("x");}catch(e){test.record(1);}finally{test.record(2);}'))
+COMPLETION_CASES.extend((row['id'], row['source']) for row in _string_objects_041 if row['kind'] == 'comparison')
+COMPLETION_CASES.extend((row['id'], row['source']) for row in _object_is_041)
+COMPLETION_CASES.extend((row['id'], row['source']) for row in _operators_041['cases'] if row['kind'] == 'comparison' and 'current_spec_records' not in row)
+SPEC_DIFFERENCE_METADATA = {}
+for _row in _operators_041['cases']:
+    if 'current_spec_records' in _row:
+        SPEC_DIFFERENCE_CASES.append((_row['id'], _row['source'], _row['current_spec_records']))
+        SPEC_DIFFERENCE_METADATA[_row['id']] = {
+            'scope': 'New assignment operators cache computed keys per current GetValue; raw Node24 differences remain separate from matches.',
+            'primary_reference': 'https://tc39.es/ecma262/multipage/ecmascript-data-types-and-values.html#sec-getvalue',
+        }
+_limits_041 = [row for row in _string_objects_041 if row['kind'] == 'boundary']
+_limits_041 += [row for row in _operators_041['cases'] if row['kind'] == 'early-error']
+_limits_041 += _operators_041['bounds']
+NEGATIVE.extend((row['id'], row['source']) for row in _limits_041)
+ATOMIC_NEGATIVE_CASES.update(row['id'] for row in _limits_041)
+
+# The forty original URL programs retain their frozen source and completion
+# values. Corrected bound inputs are documented separately by the owner checker.
+_url_041 = json.loads((ROOT / "tools/url-041/frozen.json").read_text())
+COMPLETION_CASES.extend((row['name'], row['source']) for row in _url_041['ordinary'])
+_url_edges_041 = json.loads((ROOT / 'tools/url-041/edge-review-frozen.json').read_text())['cases']
+COMPLETION_CASES.extend((row['name'], row['source']) for row in _url_edges_041)
+_url_bounds_041 = json.loads((ROOT / 'tools/url-041/bounds-corrected.json').read_text())['bounds']
+NEGATIVE.extend((row['name'], row['source']) for row in _url_bounds_041)
+ATOMIC_NEGATIVE_CASES.update(row['name'] for row in _url_bounds_041)
+NEGATIVE_DIAGNOSTICS_041 = {row['name']: row['diagnostic'] for row in _url_bounds_041}
+NEGATIVE_DIAGNOSTICS_041.update({row['id']: row['error_contains'] for row in _string_objects_041 if row['kind'] == 'boundary'})
+NEGATIVE_DIAGNOSTICS_041.update({row['id']: row['error_fragment'] for row in _operators_041['bounds']})
+_string_bound_041 = json.loads((_041 / 'string-objects-boundary-adjudication.json').read_text())
+NEGATIVE_DIAGNOSTICS_041[_string_bound_041['id']] = _string_bound_041['accepted_error_contains']
+for _row in json.loads((_041 / 'operator-supplement-bound-adjudication.json').read_text())['cases']:
+    NEGATIVE_DIAGNOSTICS_041[_row['id']] = _row['adjudicated_error_fragment']
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--rustc", default=os.environ.get("RUSTC", "rustc"), help="Rust compiler executable")
@@ -2540,8 +2592,10 @@ def main():
                     "matches_node": (finished_normally(actual) and actual["ok"] == reference["ok"]
                                      and actual["records"] == reference["records"]
                                      and actual["value"] == reference["value"]),
-                    "scope": "Date slot snapshot precedes argument conversion; excluded from Node-match totals.",
-                    "primary_reference": "https://tc39.es/ecma262/multipage/numbers-and-dates.html#sec-date.prototype.setutcseconds",
+                    **SPEC_DIFFERENCE_METADATA.get(name, {
+                        "scope": "Date slot snapshot precedes argument conversion; excluded from Node-match totals.",
+                        "primary_reference": "https://tc39.es/ecma262/multipage/numbers-and-dates.html#sec-date.prototype.setutcseconds",
+                    }),
                 })
             for case in negative_cases:
                 name, source, *mode = case
@@ -2549,7 +2603,11 @@ def main():
                 passed = finished_normally(actual) and not actual["ok"]
                 if name.endswith("-atomic") or name in ATOMIC_NEGATIVE_CASES:
                     passed = passed and not actual["records"]
-                negatives.append({"case": name, "passed": passed, "actual": actual})
+                diagnostic = NEGATIVE_DIAGNOSTICS_041.get(name)
+                if diagnostic:
+                    passed = passed and diagnostic.lower() in (actual.get("error") or "").lower()
+                negatives.append({"case": name, "passed": passed, "actual": actual,
+                                  **({"expected_diagnostic": diagnostic} if diagnostic else {})})
     except (OSError, subprocess.SubprocessError, ValueError) as error:
         detail = getattr(error, "stderr", None)
         print(f"JavaScript checker could not finish: {error}", file=sys.stderr)
@@ -2559,6 +2617,8 @@ def main():
         return 2
 
     source_after = source_manifest()
+    fixture_after = {str(path.relative_to(ROOT)): hashlib.sha256(path.read_bytes()).hexdigest() for path in _FIXTURE_PATHS_041}
+    fixture_unchanged = _FIXTURE_HASHES_041 == fixture_after
     checker_after = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
     report = {
         "case_filter": {"prefixes": options.case_prefix, "selected": selected_counts},
@@ -2599,6 +2659,9 @@ def main():
         "source_files_unchanged_during_run": source_before == source_after,
         "checker_sha256": checker_before,
         "checker_unchanged_during_run": checker_before == checker_after,
+        "fixture_inputs_before": _FIXTURE_HASHES_041,
+        "fixture_inputs_after": fixture_after,
+        "fixture_inputs_unchanged_during_run": fixture_unchanged,
         "oracle_cases": len(results),
         "oracle_passed": sum(item["passed"] for item in results),
         "negative_cases": len(negatives),
@@ -2618,7 +2681,7 @@ def main():
     failed = [item for item in results + negatives + spec_differences if not item["passed"]]
     for item in failed:
         print(json.dumps(item, indent=2))
-    return 1 if failed or source_before != source_after or checker_before != checker_after else 0
+    return 1 if failed or source_before != source_after or checker_before != checker_after or not fixture_unchanged else 0
 
 
 if __name__ == "__main__":

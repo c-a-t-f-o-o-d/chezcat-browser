@@ -232,8 +232,8 @@ def render_matrix(report):
                      "Files, license, harness and download hashes are retained under `tools/verification-0.34/test262/`. "
                      "Default and strict executions are separate results. This is a small selection, not a full Test262 run.")
     lines += ["", "## Reproduce", "", "```sh",
-              "python tools/check_compatibility.py --helper-file tools/verification-0.40/check_javascript-inventory-helper.py --promise-helper-file tools/verification-0.40/check_promises-inventory-helper.py --source-root PATH_TO_BASELINE --label 0.39.0 --output tools/verification-0.40/compatibility-baseline.json",
-              "python tools/check_compatibility.py --helper-file tools/verification-0.40/check_javascript-inventory-helper.py --promise-helper-file tools/verification-0.40/check_promises-inventory-helper.py --label 0.40.0 --compare tools/verification-0.40/compatibility-baseline.json --output tools/verification-0.40/compatibility-final.json --matrix COMPATIBILITY_MATRIX.md",
+              "python tools/check_compatibility.py --helper-file tools/verification-0.41/check_javascript-inventory-helper.py --promise-helper-file tools/verification-0.41/check_promises-inventory-helper.py --source-root PATH_TO_BASELINE --label 0.40.0 --output tools/verification-0.41/compatibility-baseline.json",
+              "python tools/check_compatibility.py --helper-file tools/verification-0.41/check_javascript-inventory-helper.py --promise-helper-file tools/verification-0.41/check_promises-inventory-helper.py --label 0.41.0 --compare tools/verification-0.41/compatibility-baseline.json --output tools/verification-0.41/compatibility-final.json --matrix COMPATIBILITY_MATRIX.md",
               "```", "", f"Current source-manifest SHA256: `{report['source_manifest']['sha256']}`. "
               f"Original-fixture file SHA256: `{report['fixture_file_sha256']}`. "
               f"Reference: `{report['node']}`; compiler: `{report['rustc']}`.", "",
@@ -268,6 +268,12 @@ def main():
     review_file = source_root / "tools/compatibility_cases.json"
     browser_inventory = json.loads(review_file.read_text())["browser_inventory"]
     before = source_manifest(source_root)
+    input_paths = [Path(__file__), CASE_FILE, COHORT_FILE, helper_file, review_file]
+    if promise_helper:
+        input_paths.append(promise_helper_file)
+    if (UPSTREAM / "manifest.json").is_file():
+        input_paths.append(UPSTREAM / "manifest.json")
+    input_hashes = {path: digest(path) for path in input_paths}
     for item in browser_inventory:
         for name in item["evidence_files"]:
             if not (source_root / name).is_file():
@@ -286,8 +292,11 @@ def main():
                                                    if promise_helper else (None, False))
             results = run_originals(cases, helper, probe, options.node, promise_helper, promise_probe)
             upstream = run_test262(helper, probe, options.node)
-        if before != source_manifest(source_root):
+        after = source_manifest(source_root)
+        if before != after:
             raise ValueError("Source files changed during the check; results are not a frozen-source report.")
+        if any(digest(path) != sha for path, sha in input_hashes.items()):
+            raise ValueError("Checker, fixture or reference inputs changed during the check.")
     except (OSError, subprocess.SubprocessError, ValueError) as error:
         print("Compatibility checker failed: " + str(error), file=sys.stderr)
         if getattr(error, "stderr", None):
@@ -296,6 +305,9 @@ def main():
     report = {"schema_version": 1, "label": options.label,
               "scope": "Original independent samples plus a bounded pinned Test262 selection; browser inventory is source review only.",
               "rustc": rustc, "node": node, "source_manifest": before,
+              "source_manifest_after": after,
+              "checker_and_fixture_inputs_unchanged_during_run": True,
+              "input_manifest": {str(path): sha for path, sha in input_hashes.items()},
               "fixture_file_sha256": digest(CASE_FILE), "helper_sha256": digest(helper_file),
               "checker_sha256": digest(Path(__file__)),
               "counts": {"total": len(results), "matches_node": sum(row["matches_node"] for row in results),

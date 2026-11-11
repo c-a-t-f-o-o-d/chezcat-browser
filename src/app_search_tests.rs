@@ -117,7 +117,22 @@ impl Site {
                     let patterns_bootstrap = path.contains("-patterns");
                     let dates_bootstrap = path.contains("-dates");
                     let object_spread_bootstrap = path.contains("-objectspread");
-                    let kind = if object_spread_bootstrap {
+                    let string_object_bootstrap = path.contains("-stringobjects");
+                    let operators_bootstrap = path.contains("-operators");
+                    let url_object_bootstrap = path.contains("-urlobjects");
+                    let query_params_bootstrap = path.contains("-queryparams");
+                    let combined_041_bootstrap = path.contains("-combined041");
+                    let kind = if string_object_bootstrap {
+                        "area-script-stringobjects"
+                    } else if operators_bootstrap {
+                        "area-script-operators"
+                    } else if url_object_bootstrap {
+                        "area-script-urlobjects"
+                    } else if query_params_bootstrap {
+                        "area-script-queryparams"
+                    } else if combined_041_bootstrap {
+                        "area-script-combined041"
+                    } else if object_spread_bootstrap {
                         "area-script-objectspread"
                     } else if defaults_bootstrap {
                         "area-script-defaults"
@@ -203,7 +218,55 @@ impl Site {
                     } else {
                         ""
                     };
-                    let bootstrap = if object_spread_bootstrap {
+                    let bootstrap = if string_object_bootstrap {
+                        r#"var key=new String('Enter'),shape=Object.getOwnPropertyDescriptor(key,0);
+if(key.valueOf()!=='Enter'||shape.value!=='E'||shape.writable||shape.configurable||!shape.enumerable)throw Error('String key descriptor');
+if(Object.keys(key).join(',')!=='0,1,2,3,4'||Array.from(key).join('')!=='Enter')throw Error('String key enumeration');
+document.f.onsubmit=function(){throw Error('script submit dispatched a submit event');};
+document.f.q.onkeydown=function(event){if(event.key===key.valueOf()){event.preventDefault();
+var boxed=new String(this.value);boxed.ignored=7;
+if(JSON.parse(JSON.stringify(boxed))!==this.value||String.prototype.valueOf.call(boxed)!==this.value)throw Error('String query snapshot');
+this.form.submit();this.value='changed after submit';}};
+document.f.setAttribute('data-stringobjects','ready');"#.to_owned()
+                    } else if operators_bootstrap {
+                        r#"var config={},skipped=0;config.key||='Enter';config.limit??=2**3**2;config.key||=(skipped++,'wrong');
+if(config.limit!==512||skipped!==0||!Object.is((-0)**3,-0))throw Error('operator bootstrap');
+document.f.onsubmit=function(){throw Error('script submit dispatched a submit event');};
+document.f.q.onkeydown=function(event){if(event.key===config.key){event.preventDefault();
+var snapshot=null,enabled=true,power=2;snapshot??=this.value;enabled&&=snapshot===this.value;power**=3;
+if(!enabled||power!==8||snapshot!==this.value)throw Error('operator query snapshot');
+this.form.submit();this.value='changed after submit';}};
+document.f.setAttribute('data-operators','ready');"#.to_owned()
+                    } else if url_object_bootstrap {
+                        r#"if(window.URL!==URL||window.URLSearchParams!==URLSearchParams)throw Error('URL global surface');
+var here=new URL(location.href),current=here.searchParams;
+if(current!==here.searchParams||here.origin!==location.origin)throw Error('URL current document');
+document.f.q.onkeydown=function(event){if(event.key==='Enter'){event.preventDefault();
+var target=new URL(this.form.getAttribute('action'),location.href),params=target.searchParams;
+target.search='';if(params!==target.searchParams)throw Error('URL stable query identity');
+params.append('q',this.value);params.append('source','fixture');
+if(target.searchParams.get('q')!==this.value||new URL(target.href).searchParams.get('q')!==this.value)throw Error('URL query snapshot');
+location.href=target.href;this.value='changed after submit';}};
+document.f.setAttribute('data-urlobjects','ready');"#.to_owned()
+                    } else if query_params_bootstrap {
+                        r#"var config=new URLSearchParams([['key','Enter'],['duplicate','first'],['duplicate','second']]);
+if(config.getAll('duplicate').join(',')!=='first,second'||config.size!==3)throw Error('query bootstrap');
+document.f.onsubmit=function(){throw Error('script submit dispatched a submit event');};
+document.f.q.onkeydown=function(event){if(event.key===config.get('key')){event.preventDefault();
+var params=new URLSearchParams({q:this.value,source:'fixture'}),decoded=new URLSearchParams(params.toString()),copied=Object.fromEntries(decoded);
+if(copied.q!==this.value||copied.source!=='fixture'||Array.from(decoded.keys()).join(',')!=='q,source')throw Error('query encoding snapshot');
+this.value=copied.q;this.form.submit();this.value='changed after submit';}};
+document.f.setAttribute('data-queryparams','ready');"#.to_owned()
+                    } else if combined_041_bootstrap {
+                        r#"var config={};config.key??=new String('Enter');
+Promise.resolve({key:config.key}).then(function(settings){
+document.f.q.onkeydown=function(event){if(event.key===settings.key.valueOf()){event.preventDefault();var input=this,query=new String(input.value);
+Promise.resolve(query).then(function(value){var target=new URL(input.form.getAttribute('action'),location.href);target.search='';
+var params=target.searchParams;params.set('q',value);params.set('source','fixture');
+if(params.get('q')!==input.value||2**3!==8)throw Error('Promise URL snapshot');
+location.href=target.toString();input.value='changed after submit';});}};
+document.f.setAttribute('data-combined041','ready');});"#.to_owned()
+                    } else if object_spread_bootstrap {
                         r#"var marker=Symbol('query'),base={get key(){return 'Enter';}};
 Object.defineProperty(base,'ignored',{get(){throw Error('hidden spread getter');}});
 var config={...null,...base,...undefined,...{enabled:true}};
@@ -675,9 +738,24 @@ fn run_search_flow(area: bool, scripted: bool, bootstrap: &str) {
     let patterns_bootstrap = bootstrap == "patterns";
     let dates_bootstrap = bootstrap == "dates";
     let object_spread_bootstrap = bootstrap == "objectspread";
+    let string_object_bootstrap = bootstrap == "stringobjects";
+    let operators_bootstrap = bootstrap == "operators";
+    let url_object_bootstrap = bootstrap == "urlobjects";
+    let query_params_bootstrap = bootstrap == "queryparams";
+    let combined_041_bootstrap = bootstrap == "combined041";
     let result = Site::new(None);
     let search = Site::new(Some(result.url("")));
-    let kind = if object_spread_bootstrap {
+    let kind = if string_object_bootstrap {
+        "area-script-stringobjects"
+    } else if operators_bootstrap {
+        "area-script-operators"
+    } else if url_object_bootstrap {
+        "area-script-urlobjects"
+    } else if query_params_bootstrap {
+        "area-script-queryparams"
+    } else if combined_041_bootstrap {
+        "area-script-combined041"
+    } else if object_spread_bootstrap {
         "area-script-objectspread"
     } else if defaults_bootstrap {
         "area-script-defaults"
@@ -818,6 +896,11 @@ fn run_search_flow(area: bool, scripted: bool, bootstrap: &str) {
         (patterns_bootstrap, "data-patterns"),
         (dates_bootstrap, "data-dates"),
         (object_spread_bootstrap, "data-objectspread"),
+        (string_object_bootstrap, "data-stringobjects"),
+        (operators_bootstrap, "data-operators"),
+        (url_object_bootstrap, "data-urlobjects"),
+        (query_params_bootstrap, "data-queryparams"),
+        (combined_041_bootstrap, "data-combined041"),
     ] {
         if active {
             assert_eq!(app.document.attr(id(&app, "f"), attribute), Some("ready"));
@@ -969,6 +1052,11 @@ fn run_search_flow(area: bool, scripted: bool, bootstrap: &str) {
         (patterns_bootstrap, "data-patterns"),
         (dates_bootstrap, "data-dates"),
         (object_spread_bootstrap, "data-objectspread"),
+        (string_object_bootstrap, "data-stringobjects"),
+        (operators_bootstrap, "data-operators"),
+        (url_object_bootstrap, "data-urlobjects"),
+        (query_params_bootstrap, "data-queryparams"),
+        (combined_041_bootstrap, "data-combined041"),
     ] {
         if active {
             assert_eq!(app.document.attr(id(&app, "f"), attribute), Some("ready"));
@@ -1244,4 +1332,29 @@ fn utc_dates_and_json_callbacks_submit_search_and_repeated_search() {
 #[test]
 fn object_spread_getters_and_symbols_submit_search_and_repeated_search() {
     run_search_flow(true, true, "objectspread");
+}
+
+#[test]
+fn string_objects_snapshot_queries_for_search_and_repeated_search() {
+    run_search_flow(true, true, "stringobjects");
+}
+
+#[test]
+fn logical_assignments_and_power_submit_search_and_repeated_search() {
+    run_search_flow(true, true, "operators");
+}
+
+#[test]
+fn url_objects_navigate_results_follow_links_and_search_again() {
+    run_search_flow(true, true, "urlobjects");
+}
+
+#[test]
+fn url_search_params_roundtrip_queries_and_repeated_search() {
+    run_search_flow(true, true, "queryparams");
+}
+
+#[test]
+fn promise_string_url_pipeline_navigates_and_searches_again() {
+    run_search_flow(true, true, "combined041");
 }

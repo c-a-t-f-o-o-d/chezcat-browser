@@ -1,7 +1,6 @@
-//! Original bounded Number, Boolean and Symbol wrapper objects. Internal slots
-//! cannot be forged by setting script properties or changing prototypes. Scalar
-//! payloads own no strings and share the existing object arena and work budgets.
-//! String boxing remains explicit until indexed UTF-16 strings can be represented.
+//! Original bounded primitive wrapper objects. Internal slots cannot be forged
+//! by setting script properties or changing prototypes. String payloads and
+//! virtual code-unit properties are managed by the string_objects module.
 //!
 //! https://tc39.es/ecma262/#sec-toobject
 //! https://tc39.es/ecma262/#sec-number-constructor
@@ -9,37 +8,49 @@
 
 use super::{Fault, Host, NativeGetter, Ordinary, Runtime, Value};
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub(super) enum Data {
     Number(f64),
     Boolean(bool),
     Symbol(usize),
+    String { value: String, length: usize },
 }
 
 impl Data {
-    fn value(self) -> Value {
+    fn value(&self) -> Value {
         match self {
-            Self::Number(value) => Value::Number(value),
-            Self::Boolean(value) => Value::Bool(value),
-            Self::Symbol(value) => Value::Symbol(value),
+            Self::Number(value) => Value::Number(*value),
+            Self::Boolean(value) => Value::Bool(*value),
+            Self::Symbol(value) => Value::Symbol(*value),
+            Self::String { value, .. } => Value::String(value.clone()),
         }
     }
 
-    pub(super) fn tag(self) -> &'static str {
+    pub(super) fn tag(&self) -> &'static str {
         match self {
             Self::Number(_) => "Number",
             Self::Boolean(_) => "Boolean",
             Self::Symbol(_) => "Symbol",
+            Self::String { .. } => "String",
         }
     }
 }
 
 impl Runtime {
-    pub(super) fn wrapped_primitive(&self, value: &Value) -> Option<Value> {
+    pub(super) fn wrapped_data(&self, value: &Value) -> Option<&Data> {
         let Value::Object(id) = value else {
             return None;
         };
-        self.objects.get(*id)?.primitive.map(Data::value)
+        self.objects.get(*id)?.primitive.as_ref()
+    }
+
+    pub(super) fn wrapped_primitive(&mut self, value: &Value) -> Result<Option<Value>, Fault> {
+        let bytes = match self.wrapped_data(value) {
+            Some(Data::String { value, .. }) => value.len(),
+            _ => 0,
+        };
+        self.work(bytes)?;
+        Ok(self.wrapped_data(value).map(Data::value))
     }
 
     pub(super) fn box_primitive(&mut self, value: Value) -> Result<Value, Fault> {
@@ -50,9 +61,7 @@ impl Runtime {
                 self.symbol(value)?;
                 (Data::Symbol(value), self.symbol_prototype)
             }
-            Value::String(_) => {
-                return Err(Fault::new("String primitive boxing is not implemented."));
-            }
+            Value::String(value) => return self.box_string(value),
             _ => {
                 return Err(Fault::exception(
                     "TypeError",
@@ -74,10 +83,28 @@ impl Runtime {
         host: &mut dyn Host,
     ) -> Result<(), Fault> {
         self.property_name(&name)?;
-        let prototype = match receiver {
+        let prototype = match &receiver {
             Value::Number(_) => self.number_prototype,
             Value::Bool(_) => self.boolean_prototype,
             Value::Symbol(_) => self.symbol_prototype,
+            Value::String(text) => {
+                self.work(text.len())?;
+                // These immutable own properties shadow prototype setters.
+                if name == "length"
+                    || super::property_index(&name)
+                        .is_some_and(|index| index < text.encode_utf16().count())
+                {
+                    return if self.strict {
+                        Err(Fault::exception(
+                            "TypeError",
+                            "The string property is read-only.",
+                        ))
+                    } else {
+                        Ok(())
+                    };
+                }
+                self.string_prototype
+            }
             _ => return Err(Fault::new("Unsupported primitive property assignment.")),
         };
         if let Some(prototype) = prototype {
@@ -121,7 +148,7 @@ impl Runtime {
         host: &mut dyn Host,
     ) -> Result<Value, Fault> {
         // Branding happens before any user-observable radix conversion.
-        let receiver = self.wrapped_primitive(&receiver).unwrap_or(receiver);
+        let receiver = self.wrapped_primitive(&receiver)?.unwrap_or(receiver);
         if !matches!(&receiver, Value::Number(_) if number)
             && !matches!(&receiver, Value::Bool(_) if !number)
         {
@@ -330,13 +357,11 @@ if(Number.prototype.toString.call(Object(NaN),16)!=='NaN'||Number.prototype.toSt
             "Object('x');",
             "(function(){return this;}).call('x');",
         ] {
-            let before = runtime.objects.len();
             runtime.begin_job();
-            let error = runtime.execute(source, &mut NoHost).unwrap_err();
-            assert!(error.to_string().contains("String primitive"), "{error}");
-            if !source.contains("function") {
-                assert_eq!(runtime.objects.len(), before);
-            }
+            let value = runtime.execute(source, &mut NoHost).unwrap();
+            assert!(
+                matches!(runtime.wrapped_primitive(&value).unwrap(), Some(Value::String(value)) if value == "x")
+            );
         }
         let before = runtime.value_bytes;
         while runtime.objects.len() < super::super::MAX_OBJECTS {
