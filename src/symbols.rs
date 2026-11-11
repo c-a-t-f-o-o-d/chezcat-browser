@@ -127,6 +127,16 @@ impl Runtime {
             "iterator".into(),
             Value::Symbol(key),
             Some((false, false, false)),
+        )?;
+        let Value::Symbol(key) = self.new_symbol(Some("Symbol.species".into()), false)? else {
+            unreachable!()
+        };
+        self.symbol_species = Some(key);
+        self.store_property(
+            owner,
+            "species".into(),
+            Value::Symbol(key),
+            Some((false, false, false)),
         )
     }
 

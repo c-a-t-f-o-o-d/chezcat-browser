@@ -1,0 +1,697 @@
+{
+  "version": "0.39.0",
+  "verified_utc": "2026-11-11T06:12:43.699283+00:00",
+  "baseline": {
+    "baseline_version": "0.38.0",
+    "baseline_archive_sha256": "6d4eb01d02304f1f8ef2ac77a49f63f7a5bab927ae3868b52f54e1bb575453e8",
+    "baseline_paths_retained": 643,
+    "baseline_source_files_retained": 133,
+    "removed_paths": [],
+    "substantive_changed_sources": [
+      "src/app_script_tests.rs",
+      "src/app_search_tests.rs",
+      "src/array_ops.rs",
+      "src/iterable_builtins.rs",
+      "src/javascript.rs",
+      "src/json.rs",
+      "src/primitive_conversion.rs",
+      "src/prototypes.rs",
+      "src/regexp.rs",
+      "src/script_compat_tests.rs",
+      "src/script_resources.rs",
+      "src/scripting.rs",
+      "src/string_replacement.rs",
+      "src/symbols.rs"
+    ],
+    "new_sources": [
+      "src/function_constructor.rs",
+      "src/optional_chaining.rs",
+      "src/promises.rs",
+      "src/script_promises.rs",
+      "src/template_literals.rs"
+    ],
+    "source_version_only_changes": [
+      "src/main.rs",
+      "src/http.rs",
+      "src/diagnostics.rs"
+    ],
+    "all_baseline_executed_rust_test_names_retained": true,
+    "rust_test_token_audit": {
+      "scope": "All source-level #[test] function token sequences, ignoring formatting/comments but preserving literal contents. Runtime execution is verified separately.",
+      "baseline_test_functions": 911,
+      "identical_test_functions": 910,
+      "removed": [],
+      "changed": [
+        {
+          "path": "src/primitive_conversion.rs",
+          "test": "conversion_protocol_recursion_and_native_array_hook_cycles_are_bounded",
+          "baseline_sha256": "15b57a7ae20874ecd3dcb71536a9e6f8a0cf81e878d164e634dfaaadc1479936",
+          "current_sha256": "9792aac381fbdb211fef4a018f7837f1416a53fc675f1f460d7214a1aafbc012"
+        }
+      ],
+      "added": [
+        {
+          "path": "src/app_script_tests.rs",
+          "test": "pending_promises_survive_fragments_and_failed_navigation_but_not_replacement"
+        },
+        {
+          "path": "src/app_search_tests.rs",
+          "test": "promise_thenables_and_microtasks_submit_search_and_repeated_search"
+        },
+        {
+          "path": "src/app_search_tests.rs",
+          "test": "common_builtins_callbacks_prepare_search_and_repeated_search"
+        },
+        {
+          "path": "src/app_search_tests.rs",
+          "test": "template_interpolation_prepares_search_and_repeated_search"
+        },
+        {
+          "path": "src/app_search_tests.rs",
+          "test": "dynamic_function_handlers_submit_search_and_repeated_search"
+        },
+        {
+          "path": "src/app_search_tests.rs",
+          "test": "optional_chaining_and_nullish_values_submit_search_and_repeated_search"
+        },
+        {
+          "path": "src/array_ops.rs",
+          "test": "actual_array_join_observes_lazy_conversion_and_callable_values"
+        },
+        {
+          "path": "src/array_ops.rs",
+          "test": "actual_array_join_captures_length_before_separator_and_reads_live_indices"
+        },
+        {
+          "path": "src/array_ops.rs",
+          "test": "actual_array_join_nested_overrides_keep_lookup_and_fallback_order"
+        },
+        {
+          "path": "src/array_ops.rs",
+          "test": "actual_array_join_cycles_reentrancy_and_throw_cleanup_keep_native_depth"
+        },
+        {
+          "path": "src/array_ops.rs",
+          "test": "actual_array_join_fatal_limits_clear_cycle_state_without_cleanup_callbacks"
+        },
+        {
+          "path": "src/array_ops.rs",
+          "test": "actual_array_join_keeps_native_conversion_denied_before_host_reads"
+        },
+        {
+          "path": "src/array_ops.rs",
+          "test": "flatten_arrays_skip_holes_and_preserve_depth_and_nonarrays"
+        },
+        {
+          "path": "src/array_ops.rs",
+          "test": "flatten_arrays_observe_live_getters_and_inherited_indices"
+        },
+        {
+          "path": "src/array_ops.rs",
+          "test": "flatten_map_preserves_receiver_source_and_one_level_expansion"
+        },
+        {
+          "path": "src/array_ops.rs",
+          "test": "flatten_species_observes_order_and_creates_own_properties"
+        },
+        {
+          "path": "src/array_ops.rs",
+          "test": "flatten_limits_are_fatal_and_recover_on_the_next_job"
+        },
+        {
+          "path": "src/json.rs",
+          "test": "json_callbacks_reviver_postorder_holders_deletion_and_root"
+        },
+        {
+          "path": "src/json.rs",
+          "test": "json_callbacks_reviver_source_context_keeps_exact_last_parse_tokens"
+        },
+        {
+          "path": "src/json.rs",
+          "test": "json_callbacks_reviver_observes_mutation_and_ignores_definition_false"
+        },
+        {
+          "path": "src/json.rs",
+          "test": "json_callbacks_replacer_and_tojson_keep_holder_and_order"
+        },
+        {
+          "path": "src/json.rs",
+          "test": "json_callbacks_property_lists_keep_order_nonenum_and_inherited_keys"
+        },
+        {
+          "path": "src/json.rs",
+          "test": "json_callbacks_live_getters_omissions_cycles_and_thrown_identity"
+        },
+        {
+          "path": "src/json.rs",
+          "test": "json_callbacks_conversion_order_and_recursive_calls_preserve_values"
+        },
+        {
+          "path": "src/json.rs",
+          "test": "json_callbacks_never_roll_back_published_objects"
+        },
+        {
+          "path": "src/json.rs",
+          "test": "json_callbacks_created_cycles_and_hook_recursion_remain_bounded"
+        },
+        {
+          "path": "src/primitive_conversion.rs",
+          "test": "conversion_protocol_native_array_hook_cycle_uses_shared_join_guard"
+        },
+        {
+          "path": "src/regexp.rs",
+          "test": "legacy_closing_delimiters_match_literals_with_captures_and_quantifiers"
+        },
+        {
+          "path": "src/regexp.rs",
+          "test": "legacy_closing_delimiters_preserve_syntax_flags_and_work_limits"
+        },
+        {
+          "path": "src/script_compat_tests.rs",
+          "test": "dynamic_function_callbacks_keep_document_string_compilation_policy"
+        },
+        {
+          "path": "src/string_replacement.rs",
+          "test": "replace_all_literal_callbacks_empty_matches_and_nonoverlap"
+        },
+        {
+          "path": "src/string_replacement.rs",
+          "test": "replace_all_templates_generic_receiver_and_conversion_order"
+        },
+        {
+          "path": "src/string_replacement.rs",
+          "test": "replace_all_native_regexp_snapshots_and_early_global_validation"
+        },
+        {
+          "path": "src/string_replacement.rs",
+          "test": "replace_all_match_budget_is_fatal_before_callbacks"
+        },
+        {
+          "path": "src/function_constructor.rs",
+          "test": "dynamic_function_call_new_bound_constructor_and_metadata"
+        },
+        {
+          "path": "src/function_constructor.rs",
+          "test": "dynamic_function_uses_global_scope_without_anonymous_binding"
+        },
+        {
+          "path": "src/function_constructor.rs",
+          "test": "dynamic_function_strictness_arguments_and_rest_are_local_to_new_body"
+        },
+        {
+          "path": "src/function_constructor.rs",
+          "test": "dynamic_function_comments_fragments_templates_and_empty_body"
+        },
+        {
+          "path": "src/function_constructor.rs",
+          "test": "dynamic_function_converts_arguments_before_syntax_and_propagates_identity"
+        },
+        {
+          "path": "src/function_constructor.rs",
+          "test": "dynamic_function_separate_parses_reject_wrapper_and_comment_injection"
+        },
+        {
+          "path": "src/function_constructor.rs",
+          "test": "dynamic_function_policy_denial_happens_after_conversion_before_parsing"
+        },
+        {
+          "path": "src/function_constructor.rs",
+          "test": "dynamic_function_unavailable_capability_remains_fatal_and_cancels_jobs"
+        },
+        {
+          "path": "src/function_constructor.rs",
+          "test": "dynamic_function_validation_asts_are_not_retained_or_instantiated"
+        },
+        {
+          "path": "src/function_constructor.rs",
+          "test": "dynamic_function_retained_program_source_and_ast_caps_remain_fatal"
+        },
+        {
+          "path": "src/function_constructor.rs",
+          "test": "dynamic_function_assembled_source_and_parameter_caps_are_bounded"
+        },
+        {
+          "path": "src/function_constructor.rs",
+          "test": "dynamic_function_recursion_parse_and_body_work_share_fatal_job_limits"
+        },
+        {
+          "path": "src/optional_chaining.rs",
+          "test": "optional_chains_skip_only_nullish_contiguous_parts_and_effects"
+        },
+        {
+          "path": "src/optional_chaining.rs",
+          "test": "optional_chains_preserve_references_receivers_and_lookup_order"
+        },
+        {
+          "path": "src/optional_chaining.rs",
+          "test": "optional_calls_get_callee_before_arguments_and_check_callability_after_them"
+        },
+        {
+          "path": "src/optional_chaining.rs",
+          "test": "optional_delete_uses_final_reference_without_invoking_getters"
+        },
+        {
+          "path": "src/optional_chaining.rs",
+          "test": "optional_chains_leave_unresolvable_names_and_indirect_eval_observable"
+        },
+        {
+          "path": "src/optional_chaining.rs",
+          "test": "nullish_operators_preserve_falsy_values_order_and_parenthesized_precedence"
+        },
+        {
+          "path": "src/optional_chaining.rs",
+          "test": "optional_lexical_goals_keep_decimal_conditionals_reserved_names_and_regexps"
+        },
+        {
+          "path": "src/optional_chaining.rs",
+          "test": "optional_and_nullish_early_errors_are_atomic_and_catchable"
+        },
+        {
+          "path": "src/optional_chaining.rs",
+          "test": "optional_native_calls_preserve_registered_receivers_and_denied_capabilities"
+        },
+        {
+          "path": "src/optional_chaining.rs",
+          "test": "optional_chain_steps_are_bounded_counted_and_do_not_reset_execution"
+        },
+        {
+          "path": "src/promises.rs",
+          "test": "promise_constructor_and_resolution_have_real_identity_and_deferred_reactions"
+        },
+        {
+          "path": "src/promises.rs",
+          "test": "promise_thenable_lookup_is_sync_call_is_queued_and_resolution_is_once"
+        },
+        {
+          "path": "src/promises.rs",
+          "test": "promise_rejections_preserve_values_and_getter_exceptions"
+        },
+        {
+          "path": "src/promises.rs",
+          "test": "promise_self_resolution_and_chaining_cycles_reject"
+        },
+        {
+          "path": "src/promises.rs",
+          "test": "promise_adoption_preserves_async_order_and_resolution_lock"
+        },
+        {
+          "path": "src/promises.rs",
+          "test": "promise_finally_waits_and_preserves_or_replaces_completion"
+        },
+        {
+          "path": "src/promises.rs",
+          "test": "promise_generic_constructors_and_species_preserve_order_and_receiver"
+        },
+        {
+          "path": "src/promises.rs",
+          "test": "promise_constructor_and_method_errors_are_catchable_and_ordered"
+        },
+        {
+          "path": "src/promises.rs",
+          "test": "promise_queue_order_nested_jobs_and_unhandled_reporting_are_bounded"
+        },
+        {
+          "path": "src/promises.rs",
+          "test": "promise_cancellation_removes_queued_and_pending_reactions"
+        },
+        {
+          "path": "src/promises.rs",
+          "test": "promise_fatal_faults_cancel_callbacks_without_becoming_rejections"
+        },
+        {
+          "path": "src/promises.rs",
+          "test": "promise_microtask_queue_and_checkpoint_limits_remain_fatal"
+        },
+        {
+          "path": "src/promises.rs",
+          "test": "promise_host_assimilation_gate_runs_before_native_lookup"
+        },
+        {
+          "path": "src/promises.rs",
+          "test": "promise_retained_strings_are_accounted_and_reaction_storage_is_released"
+        },
+        {
+          "path": "src/promises.rs",
+          "test": "promise_all_preserves_input_order_and_dense_holes"
+        },
+        {
+          "path": "src/promises.rs",
+          "test": "promise_race_and_empty_combinators_keep_their_settlement_rules"
+        },
+        {
+          "path": "src/promises.rs",
+          "test": "promise_all_settled_and_any_keep_values_errors_and_input_order"
+        },
+        {
+          "path": "src/promises.rs",
+          "test": "promise_combinators_cache_resolve_and_guard_misbehaving_callbacks"
+        },
+        {
+          "path": "src/promises.rs",
+          "test": "promise_combinator_abrupt_consumers_close_active_iterators_only"
+        },
+        {
+          "path": "src/promises.rs",
+          "test": "promise_with_resolvers_and_aggregate_error_have_real_properties"
+        },
+        {
+          "path": "src/promises.rs",
+          "test": "promise_try_follows_current_callback_order_and_resolve_identity"
+        },
+        {
+          "path": "src/promises.rs",
+          "test": "promise_combinators_and_try_do_not_catch_resource_or_host_failures"
+        },
+        {
+          "path": "src/script_promises.rs",
+          "test": "promise_jobs_drain_before_the_next_classic_script_and_lifecycle_event"
+        },
+        {
+          "path": "src/script_promises.rs",
+          "test": "promise_jobs_run_after_catchable_script_errors_but_not_fatal_faults"
+        },
+        {
+          "path": "src/script_promises.rs",
+          "test": "promise_event_callbacks_checkpoint_before_next_listener_and_default_action"
+        },
+        {
+          "path": "src/script_promises.rs",
+          "test": "promise_timer_and_animation_callbacks_checkpoint_individually"
+        },
+        {
+          "path": "src/script_promises.rs",
+          "test": "promise_console_diagnostics_and_cancelled_document_jobs_are_bounded"
+        },
+        {
+          "path": "src/script_promises.rs",
+          "test": "promise_dynamic_script_jobs_precede_element_and_window_load_handlers"
+        },
+        {
+          "path": "src/script_promises.rs",
+          "test": "promise_reactions_keep_document_eval_policy_and_rejection_diagnostics"
+        },
+        {
+          "path": "src/script_promises.rs",
+          "test": "promise_resolution_explicitly_accepts_current_document_nodes_and_globals"
+        },
+        {
+          "path": "src/template_literals.rs",
+          "test": "template_values_and_substitutions_use_string_hint_in_order"
+        },
+        {
+          "path": "src/template_literals.rs",
+          "test": "template_abrupt_conversions_preserve_errors_and_stop_later_expressions"
+        },
+        {
+          "path": "src/template_literals.rs",
+          "test": "template_lexical_goals_preserve_nested_functions_regexps_and_division"
+        },
+        {
+          "path": "src/template_literals.rs",
+          "test": "template_cooking_preserves_escapes_unicode_and_line_terminators"
+        },
+        {
+          "path": "src/template_literals.rs",
+          "test": "template_expressions_keep_existing_grammar_and_dynamic_compilation"
+        },
+        {
+          "path": "src/template_literals.rs",
+          "test": "template_plain_text_is_not_a_use_strict_directive"
+        },
+        {
+          "path": "src/template_literals.rs",
+          "test": "template_invalid_grammar_and_escapes_are_atomic_syntax_errors"
+        },
+        {
+          "path": "src/template_literals.rs",
+          "test": "template_tagged_and_lone_surrogate_boundaries_stay_explicit_and_atomic"
+        },
+        {
+          "path": "src/template_literals.rs",
+          "test": "template_substitution_nesting_string_and_work_limits_remain_fatal"
+        },
+        {
+          "path": "src/template_literals.rs",
+          "test": "template_native_conversion_keeps_the_host_capability_gate"
+        }
+      ]
+    },
+    "rust_join_expectation_migration": {
+      "path": "src/primitive_conversion.rs",
+      "old_test": "conversion_protocol_recursion_and_native_array_hook_cycles_are_bounded",
+      "new_test": "conversion_protocol_native_array_hook_cycle_uses_shared_join_guard",
+      "source": "var o=[];o[0]=o;o[Symbol.toPrimitive]=Array.prototype.join;try{[o].join();}catch(e){caught=true;}finally{finalized=true;}",
+      "exact_source_retained": true,
+      "other_fatal_programs_and_assertions_unchanged": true,
+      "positive_completion_finally_and_cycle_cleanup_assertions_verified": true
+    },
+    "all_baseline_javascript_sources_and_ids_retained": true,
+    "expectation_migrations": [
+      "eval-unsupported-optional-chain-cannot-catch-atomic",
+      "json-implicit-input-coercion-unsupported-atomic",
+      "json-replacer-function-unsupported-atomic",
+      "json-replacer-list-unsupported-atomic",
+      "json-reviver-unsupported-atomic",
+      "json-tojson-hook-unsupported-atomic",
+      "prototype-dynamic-function-disabled-atomic",
+      "prototype-dynamic-function-indirect-disabled-atomic",
+      "prototype-inherited-join-conversion-disabled-atomic",
+      "unsupported-custom-join-coercion"
+    ],
+    "assets_and_trust_files_byte_identical": true,
+    "protected_security_navigation_layout_source_paths_byte_identical": [
+      "src/cookies.rs",
+      "src/crypto_aead.rs",
+      "src/crypto_aes_gcm.rs",
+      "src/crypto_ec.rs",
+      "src/crypto_hash.rs",
+      "src/crypto_p256_ecdh.rs",
+      "src/crypto_rsa.rs",
+      "src/crypto_sha512.rs",
+      "src/crypto_x25519.rs",
+      "src/csp.rs",
+      "src/layout.rs",
+      "src/navigation.rs",
+      "src/profile.rs",
+      "src/profile_bookmarks.rs",
+      "src/script_navigation.rs",
+      "src/tls.rs",
+      "src/tls12.rs",
+      "src/tls12_cbc.rs",
+      "src/tls12_crypto.rs",
+      "src/tls_crypto.rs",
+      "src/tls_retry.rs",
+      "src/x509.rs"
+    ],
+    "frozen_build_inputs_verified": 225,
+    "third_party_cargo_dependencies": 0
+  },
+  "rust": {
+    "passed": 1006,
+    "failed": 0,
+    "ignored": 0,
+    "baseline_linux_executed_tests_retained": 910,
+    "baseline_source_test_functions": 911,
+    "new_tests": 96,
+    "seconds": 6.63,
+    "app_search_tests_passed": 22,
+    "app_search_tests": [
+      "app::search_tests::callable_object_helpers_bootstrap_bound_search_and_repeated_search",
+      "app::search_tests::common_builtins_callbacks_prepare_search_and_repeated_search",
+      "app::search_tests::deferred_function_bootstrap_initializes_scripted_search_and_repeated_search",
+      "app::search_tests::dynamic_function_handlers_submit_search_and_repeated_search",
+      "app::search_tests::form_action_csp_blocks_native_submits_with_scripting_enabled_or_disabled_and_script_submits",
+      "app::search_tests::input_search_renders_results_follows_cross_origin_result_and_searches_again",
+      "app::search_tests::iterator_protocol_and_iterable_helpers_bootstrap_search_and_repeated_search",
+      "app::search_tests::literal_accessors_and_array_descriptors_bootstrap_search_and_repeated_search",
+      "app::search_tests::long_else_if_bootstrap_initializes_scripted_search_and_repeated_search",
+      "app::search_tests::optional_chaining_and_nullish_values_submit_search_and_repeated_search",
+      "app::search_tests::passive_accessor_probe_initializes_scripted_search_and_repeated_search",
+      "app::search_tests::primitive_wrappers_and_conversion_hooks_bootstrap_search_and_repeated_search",
+      "app::search_tests::promise_thenables_and_microtasks_submit_search_and_repeated_search",
+      "app::search_tests::script_form_cross_origin_action_and_redirect_make_no_forbidden_request",
+      "app::search_tests::script_form_submit_bypasses_required_but_stop_discards_the_queued_request",
+      "app::search_tests::scripted_post_preserves_body_and_reload_confirmation",
+      "app::search_tests::spread_and_rest_bootstrap_search_and_repeated_search",
+      "app::search_tests::symbol_bootstrap_initializes_scripted_search_and_repeated_search",
+      "app::search_tests::template_interpolation_prepares_search_and_repeated_search",
+      "app::search_tests::textarea_enter_edits_lines_and_submit_cancellation_preserves_the_current_document",
+      "app::search_tests::textarea_scripted_enter_submits_snapshots_and_subsequent_searches",
+      "app::search_tests::textarea_search_renders_results_follows_cross_origin_result_and_searches_again"
+    ]
+  },
+  "javascript": {
+    "oracle_cases": 1018,
+    "oracle_passed": 1018,
+    "negative_cases": 239,
+    "negative_passed": 239,
+    "node": "v24.22.1",
+    "rustc": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+    "original_programs_retained": 1194,
+    "original_expectation_migrations": [
+      "eval-unsupported-optional-chain-cannot-catch-atomic",
+      "json-implicit-input-coercion-unsupported-atomic",
+      "json-replacer-function-unsupported-atomic",
+      "json-replacer-list-unsupported-atomic",
+      "json-reviver-unsupported-atomic",
+      "json-tojson-hook-unsupported-atomic",
+      "prototype-dynamic-function-disabled-atomic",
+      "prototype-dynamic-function-indirect-disabled-atomic",
+      "prototype-inherited-join-conversion-disabled-atomic",
+      "unsupported-custom-join-coercion"
+    ],
+    "new_programs": 63,
+    "ordinary_comparison_count_excludes_explicit_reference_differences": true
+  },
+  "capability_inventory": {
+    "probes": 160,
+    "unchanged_previous_probes": 127,
+    "new_probes": 33,
+    "baseline_matches_node": 105,
+    "current_matches_node": 145,
+    "current_status_counts": {
+      "supported": 145,
+      "missing": 12,
+      "intentionally_limited": 2,
+      "partial": 1
+    },
+    "fixed_cohort": {
+      "label": "0.37 reference cohort",
+      "total": 112,
+      "matches_node": 98,
+      "percentage": 87.5,
+      "incomparable": [],
+      "cohort_sha256": "dfdd9237d15e159164213fd26188cbd11dfbec69860d3c1258dd3f3961c9e163",
+      "scope": "Fixed original probe IDs and exact source hashes for a stable progress denominator; not overall browser completeness or remaining effort.",
+      "baseline": {
+        "label": "0.37 reference cohort",
+        "total": 112,
+        "matches_node": 91,
+        "percentage": 81.2,
+        "incomparable": [],
+        "cohort_sha256": "dfdd9237d15e159164213fd26188cbd11dfbec69860d3c1258dd3f3961c9e163",
+        "scope": "Fixed original probe IDs and exact source hashes for a stable progress denominator; not overall browser completeness or remaining effort."
+      }
+    },
+    "source_manifest_sha256": "73becf7ccb546550355ebba05065be3578df232da788055999268faaa31a9ab1",
+    "fixture_sha256": "556039fe8ed8d0c225cf428f90ff5d39a7fa72ab122e30acdcece4978024a1e0",
+    "regressions": [],
+    "incomparable_fixtures": [],
+    "scope": "Selected capability samples; not whole-browser completeness, remaining effort or live-site success."
+  },
+  "selected_test262": {
+    "files": 6,
+    "executions": 12,
+    "passed": 12,
+    "full_suite_run": false,
+    "revision": "48221d7c1f7745dc13e420a2e850a248c0b2afb4"
+  },
+  "independent_checks": {
+    "promises-final.json": {
+      "comparisons": 40,
+      "passed": 40,
+      "negative_cases": 3,
+      "negative_passed": 3,
+      "checkpoint_available": true,
+      "references_only": false
+    },
+    "promise-supplemental-final.json": {
+      "ordinary_cases": 10,
+      "ordinary_matches": 10,
+      "reference_difference_cases": 4,
+      "observed_reference_differences": 4,
+      "current_spec_assertions_passed": 4
+    },
+    "templates-final.json": {
+      "cases": 5,
+      "matches": 5,
+      "boundary_cases": 4,
+      "boundaries_passed": 4
+    },
+    "function-final.json": {
+      "cases": 11,
+      "matches": 11,
+      "host_cases": 3,
+      "host_passed": 3,
+      "browser_global_mode": true
+    },
+    "optional-final.json": {
+      "cases": 12,
+      "matches": 12,
+      "early_error_cases": 5,
+      "early_errors_passed": 5
+    },
+    "promise-integration-final.json": {
+      "total": 8,
+      "passed": 8
+    }
+  },
+  "builds": {
+    "native_release": "passed",
+    "windows_x64_release": "passed",
+    "rustfmt": "passed",
+    "native_sha256": "ef55cd09b0e4aae0efa88bf60c0566d5a9956ed76a269152ceb5f9d39f70cff7",
+    "windows_sha256": "eee6455ecbf35355c05fbf02f4fe79e40296f3c0df24095673b5cf7d57a6f3ce",
+    "windows_bytes": 4139520,
+    "windows_version": "0.39.0.0",
+    "original_icons_and_system_imports_verified": true,
+    "windows_runtime_executed": false
+  },
+  "verification_boundaries": {
+    "live_google_verified": false,
+    "live_bing_verified": false,
+    "captured_access_check_executed": false,
+    "live_connection_checks": "One bounded final-native-binary diagnostic per site; both blocked by DNS resolution before TCP/TLS/HTML.",
+    "wpt_run": false,
+    "full_test262_run": false,
+    "clippy_rerun": false
+  },
+  "security": {
+    "tls_validation_weakened": false,
+    "csp_weakened": false,
+    "cross_origin_policy_changed": false,
+    "profile_or_privacy_defaults_changed": false,
+    "dependencies_added": 0,
+    "site_specific_rewriting": false,
+    "host_promise_resolution": "Explicit current-document Window/Document/DOM-node opt-in; other hosts default deny.",
+    "promise_arenas": 1024,
+    "pending_reactions": 1024,
+    "queued_microtasks": 1024,
+    "jobs_per_checkpoint": 4096,
+    "checkpoint_diagnostics": 32,
+    "existing_retained_values_bytes": 2097152,
+    "existing_job_step_budget": 250000
+  },
+  "recoveries": [
+    {
+      "filename": "ChezCat_0_39_Promise_Core_Recovery.zip",
+      "bytes": 5104074,
+      "sha256": "b325989b68d7dac5b4d3198c8ef2a26007fd3a873fc5fc43be79b4706002f8dc",
+      "files": 665,
+      "verified_manifest_entries": 664,
+      "source_version": "0.39.0",
+      "source_only": true,
+      "windows_version": null
+    },
+    {
+      "filename": "ChezCat_0_39_Promise_Builtins_Recovery.zip",
+      "bytes": 5301104,
+      "sha256": "76c35f6159ddd03a3a1a3ba51ab12a53ee96e9bf6d42bf871226e45a704976fa",
+      "files": 698,
+      "verified_manifest_entries": 697,
+      "source_version": "0.39.0",
+      "source_only": true,
+      "windows_version": null
+    },
+    {
+      "filename": "ChezCat_0_39_Templates_Conversion_Recovery.zip",
+      "bytes": 5443339,
+      "sha256": "170d5475ab4fa48fb9b71f9c8d9ff9825bd61fbc1408620fff3d64fcc8df45dd",
+      "files": 735,
+      "verified_manifest_entries": 734,
+      "source_version": "0.39.0",
+      "source_only": true,
+      "windows_version": null
+    }
+  ]
+}

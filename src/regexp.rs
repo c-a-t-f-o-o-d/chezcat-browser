@@ -7,6 +7,7 @@ const MAX_PATTERN: usize = 4096;
 const MAX_CODE: usize = 4096;
 const MAX_DEPTH: usize = 32;
 const MAX_GROUPS: usize = 16;
+const MAX_GROUP_NAME_BYTES: usize = 256;
 const MAX_MARKS: usize = 64;
 const MAX_STACK: usize = 1024;
 
@@ -132,6 +133,7 @@ enum Node {
     Start,
     End,
     Boundary(bool),
+    Reference(Reference),
     Sequence(Vec<usize>),
     Alternate(Vec<usize>),
     Group {
@@ -155,6 +157,20 @@ enum Node {
     },
 }
 
+#[derive(Debug)]
+enum Reference {
+    Number(usize),
+    Name(String),
+}
+
+struct NamedCapture {
+    name: String,
+    index: usize,
+    // Two equal names are permitted only when an enclosing disjunction puts
+    // them in different alternatives. Each path is at most MAX_DEPTH long.
+    alternatives: Vec<(usize, usize)>,
+}
+
 struct Parser {
     units: Vec<u16>,
     at: usize,
@@ -162,6 +178,10 @@ struct Parser {
     groups: usize,
     depth: usize,
     insensitive: bool,
+    named_mode: bool,
+    names: Vec<NamedCapture>,
+    alternatives: Vec<(usize, usize)>,
+    next_alternative: usize,
 }
 
 impl Parser {
@@ -191,10 +211,15 @@ impl Parser {
                 "Regular-expression nesting limit reached (32).",
             ));
         }
+        let id = self.next_alternative;
+        self.next_alternative += 1;
+        self.alternatives.push((id, 0));
         let mut branches = vec![self.sequence()?];
         while self.eat(b'|' as u16) {
+            self.alternatives.last_mut().unwrap().1 += 1;
             branches.push(self.sequence()?);
         }
+        self.alternatives.pop();
         self.depth -= 1;
         if branches.len() == 1 {
             Ok(branches[0])
@@ -320,30 +345,23 @@ impl Parser {
                         assertion = Some((false, false));
                         None
                     } else if self.eat(b'<' as u16) {
-                        let positive = if self.eat(b'=' as u16) {
-                            true
+                        if self.eat(b'=' as u16) {
+                            assertion = Some((true, true));
+                            None
                         } else if self.eat(b'!' as u16) {
-                            false
+                            assertion = Some((false, true));
+                            None
                         } else {
-                            return Err(Error::Unsupported(
-                                "Named regexp capture groups are not implemented.",
-                            ));
-                        };
-                        assertion = Some((positive, true));
-                        None
+                            let name = self.group_name()?;
+                            Some(self.capture(Some(name))?)
+                        }
                     } else {
                         return Err(Error::Unsupported(
                             "Regexp inline modifiers or this group extension are not implemented.",
                         ));
                     }
                 } else {
-                    self.groups += 1;
-                    if self.groups > MAX_GROUPS {
-                        return Err(Error::Limit(
-                            "Regular-expression capture limit reached (16).",
-                        ));
-                    }
-                    Some(self.groups)
+                    Some(self.capture(None)?)
                 };
                 let body = self.alternate()?;
                 if !self.eat(b')' as u16) {
@@ -375,6 +393,26 @@ impl Parser {
                     self.at += 1;
                     return self.push(Node::Boundary(true));
                 }
+                if self.peek() == Some(b'k' as u16) && self.named_mode {
+                    self.at += 1;
+                    if !self.eat(b'<' as u16) {
+                        return Err(Error::Syntax(
+                            "A named regexp reference needs a group name.",
+                        ));
+                    }
+                    let name = self.group_name()?;
+                    return self.push(Node::Reference(Reference::Name(name)));
+                }
+                if self.peek().is_some_and(|unit| (49..=57).contains(&unit)) {
+                    let mut number = 0usize;
+                    while let Some(unit @ 48..=57) = self.peek() {
+                        number = number
+                            .saturating_mul(10)
+                            .saturating_add((unit - 48) as usize);
+                        self.at += 1;
+                    }
+                    return self.push(Node::Reference(Reference::Number(number)));
+                }
                 let part = self.escape(false)?;
                 match part {
                     ClassPart::Range(low, high) if low == high => self.character(low),
@@ -384,11 +422,113 @@ impl Parser {
                     })),
                 }
             }
-            42 | 43 | 63 | 123 | 125 | 93 => Err(Error::Syntax(
+            // In the supported non-Unicode grammar, standalone closing braces
+            // and brackets are literal ExtendedPatternCharacters (Annex B.1.2).
+            // Counted repetitions and character classes consume their own
+            // closing delimiters before this atom path is reached.
+            42 | 43 | 63 | 123 => Err(Error::Syntax(
                 "Unexpected regular-expression quantifier or delimiter.",
             )),
             _ => self.character(unit),
         }
+    }
+    fn capture(&mut self, name: Option<String>) -> Result<usize, Error> {
+        self.groups += 1;
+        if self.groups > MAX_GROUPS {
+            return Err(Error::Limit(
+                "Regular-expression capture limit reached (16).",
+            ));
+        }
+        if let Some(name) = name {
+            for previous in self.names.iter().filter(|capture| capture.name == name) {
+                let separate = previous.alternatives.iter().any(|(id, branch)| {
+                    self.alternatives
+                        .iter()
+                        .any(|(other_id, other_branch)| id == other_id && branch != other_branch)
+                });
+                if !separate {
+                    return Err(Error::Syntax(
+                        "Duplicate regexp group names may occur only in separate alternatives.",
+                    ));
+                }
+            }
+            self.names.push(NamedCapture {
+                name,
+                index: self.groups,
+                alternatives: self.alternatives.clone(),
+            });
+        }
+        Ok(self.groups)
+    }
+
+    fn group_name(&mut self) -> Result<String, Error> {
+        let mut name = String::new();
+        while self.peek() != Some(b'>' as u16) {
+            let mut unit = self
+                .peek()
+                .ok_or(Error::Syntax("Unterminated regexp group name."))?;
+            self.at += 1;
+            if unit == b'\\' as u16 {
+                if !self.eat(b'u' as u16) {
+                    return Err(Error::Syntax(
+                        "A regexp group name allows only Unicode escapes.",
+                    ));
+                }
+                unit = if self.eat(b'{' as u16) {
+                    let mut value = 0u32;
+                    let mut digits = 0usize;
+                    while self.peek() != Some(b'}' as u16) {
+                        let digit = self
+                            .peek()
+                            .and_then(|u| char::from_u32(u as u32))
+                            .and_then(|c| c.to_digit(16))
+                            .ok_or(Error::Syntax("Invalid regexp group-name Unicode escape."))?;
+                        self.at += 1;
+                        digits += 1;
+                        value = value.saturating_mul(16).saturating_add(digit);
+                        if value > 0x10ffff {
+                            return Err(Error::Syntax("Invalid regexp group-name Unicode scalar."));
+                        }
+                    }
+                    self.at += 1;
+                    if digits == 0 {
+                        return Err(Error::Syntax("Empty regexp group-name Unicode escape."));
+                    }
+                    if value > 127 {
+                        return Err(Error::Unsupported(
+                            "Non-ASCII regexp group names are not implemented.",
+                        ));
+                    }
+                    value as u16
+                } else {
+                    self.hex(4)?
+                };
+            }
+            if unit >= 128 {
+                return Err(Error::Unsupported(
+                    "Non-ASCII regexp group names are not implemented.",
+                ));
+            }
+            let valid = matches!(unit, 36 | 95 | 65..=90 | 97..=122)
+                || !name.is_empty() && matches!(unit, 48..=57);
+            if !valid {
+                return Err(Error::Syntax("Invalid regexp group name."));
+            }
+            if name.len() == MAX_GROUP_NAME_BYTES {
+                return Err(Error::Limit("Regexp group-name limit reached (256 bytes)."));
+            }
+            name.push(unit as u8 as char);
+        }
+        self.at += 1;
+        if name.is_empty() {
+            return Err(Error::Syntax("A regexp group name cannot be empty."));
+        }
+        if name == "__proto__" {
+            return Err(Error::Unsupported(
+                "Protected regexp group names are not implemented.",
+            ));
+        }
+        Ok(name)
     }
     fn character(&mut self, unit: u16) -> Result<usize, Error> {
         if self.insensitive && unit >= 128 {
@@ -447,9 +587,14 @@ impl Parser {
                 }
                 0
             }
-            49..=57 | 107 => {
+            49..=57 => {
                 return Err(Error::Unsupported(
-                    "Regular-expression backreferences are not implemented.",
+                    "Legacy regexp octal/decimal class escapes are not implemented.",
+                ))
+            }
+            107 if self.named_mode => {
+                return Err(Error::Syntax(
+                    "A named regexp escape is invalid in a character class.",
                 ))
             }
             112 | 80 => {
@@ -538,6 +683,7 @@ enum Instruction {
     Start,
     End,
     Boundary(bool),
+    Reference(Vec<usize>),
     Save(usize),
     Clear(usize, usize),
     Mark(usize),
@@ -563,6 +709,8 @@ struct Compiler<'a> {
     code: Vec<Instruction>,
     marks: usize,
     budget: &'a mut usize,
+    names: &'a [NamedCapture],
+    groups: usize,
 }
 impl Compiler<'_> {
     fn emit(&mut self, instruction: Instruction) -> Result<usize, Error> {
@@ -603,6 +751,30 @@ impl Compiler<'_> {
             }
             Node::Boundary(inverted) => {
                 self.emit(Instruction::Boundary(*inverted))?;
+            }
+            Node::Reference(reference) => {
+                let indices = match reference {
+                    Reference::Number(index) if *index <= self.groups => vec![*index],
+                    Reference::Number(_) => {
+                        return Err(Error::Unsupported(
+                            "Legacy regexp octal/decimal escapes are not implemented.",
+                        ))
+                    }
+                    Reference::Name(name) => {
+                        let indices: Vec<_> = self
+                            .names
+                            .iter()
+                            .filter(|capture| &capture.name == name)
+                            .map(|capture| capture.index)
+                            .collect();
+                        if indices.is_empty() {
+                            return Err(Error::Syntax("Unknown named regexp capture reference."));
+                        }
+                        indices
+                    }
+                };
+                spend(self.budget, indices.len() * std::mem::size_of::<usize>())?;
+                self.emit(Instruction::Reference(indices))?;
             }
             Node::Sequence(parts) => {
                 if backwards {
@@ -744,6 +916,7 @@ pub struct Regex {
     pub flags: Flags,
     pub source: String,
     groups: usize,
+    capture_names: Vec<Option<String>>,
     marks: usize,
     pub retained_bytes: usize,
 }
@@ -766,8 +939,19 @@ struct Choice {
 #[derive(Debug)]
 pub struct Match {
     pub captures: Vec<Option<(usize, usize)>>,
+    pub named_captures: Vec<(String, Option<(usize, usize)>)>,
 }
 impl Match {
+    pub fn retained_bytes(&self) -> usize {
+        std::mem::size_of::<Self>()
+            + self.captures.len() * std::mem::size_of::<Option<(usize, usize)>>()
+            + self.named_captures.len() * std::mem::size_of::<(String, Option<(usize, usize)>)>()
+            + self
+                .named_captures
+                .iter()
+                .map(|(name, _)| name.len())
+                .sum::<usize>()
+    }
     pub fn start(&self) -> usize {
         self.captures[0].unwrap().0
     }
@@ -785,6 +969,36 @@ fn spend(budget: &mut usize, count: usize) -> Result<(), Error> {
     Ok(())
 }
 
+fn has_named_capture(units: &[u16]) -> bool {
+    // NamedCaptureGroups is a whole-pattern grammar parameter: a forward \k
+    // reference becomes meaningful even when its group appears later. Ignore
+    // escaped characters and character classes during this bounded first scan.
+    let mut at = 0;
+    let mut in_class = false;
+    while at < units.len() {
+        match units[at] {
+            92 => at += 2,
+            91 if !in_class => {
+                in_class = true;
+                at += 1;
+            }
+            93 if in_class => {
+                in_class = false;
+                at += 1;
+            }
+            40 if !in_class
+                && units.get(at + 1) == Some(&(b'?' as u16))
+                && units.get(at + 2) == Some(&(b'<' as u16))
+                && !matches!(units.get(at + 3), Some(61 | 33)) =>
+            {
+                return true
+            }
+            _ => at += 1,
+        }
+    }
+    false
+}
+
 impl Regex {
     pub fn compile(pattern: &str, flags: &str, budget: &mut usize) -> Result<Self, Error> {
         if pattern.len() > MAX_PATTERN {
@@ -794,13 +1008,20 @@ impl Regex {
         }
         spend(budget, pattern.len().saturating_add(flags.len()))?;
         let flags = Flags::parse(flags)?;
+        let units: Vec<_> = pattern.encode_utf16().collect();
+        spend(budget, units.len())?;
+        let named_mode = has_named_capture(&units);
         let mut parser = Parser {
-            units: pattern.encode_utf16().collect(),
+            units,
             at: 0,
             nodes: Vec::new(),
             groups: 0,
             depth: 0,
             insensitive: flags.insensitive,
+            named_mode,
+            names: Vec::new(),
+            alternatives: Vec::new(),
+            next_alternative: 0,
         };
         let root = parser.alternate()?;
         if parser.at != parser.units.len() {
@@ -812,6 +1033,8 @@ impl Regex {
             code: Vec::new(),
             marks: 0,
             budget,
+            names: &parser.names,
+            groups: parser.groups,
         };
         compiler.emit(Instruction::Save(0))?;
         compiler.node(&parser.nodes, root, false)?;
@@ -841,7 +1064,18 @@ impl Regex {
         if source.is_empty() {
             source.push_str("(?:)");
         }
+        let mut capture_names = vec![None; parser.groups + 1];
+        for capture in &parser.names {
+            spend(compiler.budget, capture.name.len())?;
+            capture_names[capture.index] = Some(capture.name.clone());
+        }
         let retained_bytes = source.len()
+            + capture_names.len() * std::mem::size_of::<Option<String>>()
+            + capture_names
+                .iter()
+                .flatten()
+                .map(String::len)
+                .sum::<usize>()
             + compiler.code.len() * std::mem::size_of::<Instruction>()
             + compiler
                 .code
@@ -852,6 +1086,7 @@ impl Regex {
                         atom: Atom::Class(class),
                         ..
                     } => class.parts.len() * std::mem::size_of::<ClassPart>(),
+                    Instruction::Reference(indices) => indices.len() * std::mem::size_of::<usize>(),
                     _ => 0,
                 })
                 .sum::<usize>();
@@ -860,6 +1095,7 @@ impl Regex {
             flags,
             source,
             groups: parser.groups,
+            capture_names,
             marks: compiler.marks,
             retained_bytes,
         })
@@ -884,7 +1120,7 @@ impl Regex {
                 marks: vec![None; self.marks],
             };
             if let Some(state) = self.run(input, state, false, budget, 0, 0)? {
-                let captures = state
+                let captures: Vec<_> = state
                     .captures
                     .as_chunks::<2>()
                     .0
@@ -894,7 +1130,25 @@ impl Regex {
                         _ => None,
                     })
                     .collect();
-                return Ok(Some(Match { captures }));
+                let mut named_captures: Vec<(String, Option<(usize, usize)>)> = Vec::new();
+                for (index, name) in self.capture_names.iter().enumerate() {
+                    if let Some(name) = name {
+                        spend(budget, name.len() + named_captures.len() + 1)?;
+                        if let Some((_, current)) =
+                            named_captures.iter_mut().find(|(known, _)| known == name)
+                        {
+                            if captures[index].is_some() {
+                                *current = captures[index];
+                            }
+                        } else {
+                            named_captures.push((name.clone(), captures[index]));
+                        }
+                    }
+                }
+                return Ok(Some(Match {
+                    captures,
+                    named_captures,
+                }));
             }
         }
         Ok(None)
@@ -959,6 +1213,52 @@ impl Regex {
                     let before = state.position > 0 && word(input[state.position - 1]);
                     let after = following.is_some_and(word);
                     (before != after) != *inverted
+                }
+                Instruction::Reference(indices) => {
+                    spend(budget, indices.len())?;
+                    let capture = indices.iter().find_map(|index| {
+                        match (state.captures[index * 2], state.captures[index * 2 + 1]) {
+                            (Some(start), Some(end)) => Some((start, end)),
+                            _ => None,
+                        }
+                    });
+                    if let Some((start, end)) = capture {
+                        let length = end - start;
+                        let target = if backwards {
+                            state.position.checked_sub(length)
+                        } else if length <= input.len() - state.position {
+                            Some(state.position)
+                        } else {
+                            None
+                        };
+                        if let Some(target) = target {
+                            spend(budget, length.saturating_mul(2))?;
+                            if self.flags.insensitive
+                                && input[start..end]
+                                    .iter()
+                                    .chain(&input[target..target + length])
+                                    .any(|unit| *unit >= 128)
+                            {
+                                return Err(Error::Unsupported("Case-insensitive non-ASCII regexp backreferences are not implemented."));
+                            }
+                            let matched = input[start..end]
+                                .iter()
+                                .zip(&input[target..target + length])
+                                .all(|(a, b)| {
+                                    a == b
+                                        || self.flags.insensitive
+                                            && ascii_fold(*a) == ascii_fold(*b)
+                                });
+                            if matched {
+                                state.position = if backwards { target } else { target + length };
+                            }
+                            matched
+                        } else {
+                            false
+                        }
+                    } else {
+                        true
+                    }
                 }
                 Instruction::Save(slot) => {
                     state.captures[*slot] = Some(state.position);
@@ -1115,5 +1415,202 @@ impl Regex {
                 return Ok(None);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn named_capture_alternatives_resolve_to_the_participating_group() {
+        let mut budget = 100_000;
+        let regex = Regex::compile(r"^(?:(?<x>a)|(?<x>b))\k<x>$", "", &mut budget).unwrap();
+        for (text, expected) in [("aa", Some((0, 1))), ("bb", Some((0, 1))), ("ab", None)] {
+            let input: Vec<_> = text.encode_utf16().collect();
+            let found = regex.find(&input, 0, false, &mut budget).unwrap();
+            assert_eq!(found.is_some(), expected.is_some(), "{text}");
+            if let Some(found) = found {
+                assert_eq!(found.named_captures, vec![("x".into(), expected)]);
+                assert!(found.retained_bytes() >= found.captures.len() * 16 + 1);
+            }
+        }
+        for pattern in [
+            r"(?<x>a)(?<x>b)",
+            r"(?<x>(?<x>a))",
+            r"(?<x>a)|(?<x>b)(?<x>c)",
+        ] {
+            assert!(
+                matches!(
+                    Regex::compile(pattern, "", &mut budget),
+                    Err(Error::Syntax(_))
+                ),
+                "{pattern}"
+            );
+        }
+    }
+
+    #[test]
+    fn named_and_numbered_references_keep_direction_and_unmatched_semantics() {
+        for (pattern, text, expected) in [
+            (r"^\k<x>(?<x>a)$", "a", true),
+            (r"^(?<x>\k<x>a)$", "a", true),
+            (r"^(?<x>a)?\k<x>b$", "b", true),
+            (r"^(?<x>a)(b)\2\1$", "abba", true),
+            (r"^(a|ab)\1$", "abab", true),
+            (r"(?<=\k<x>(?<x>ab))c", "ababc", true),
+            (r"^(?:(?<x>a)|(?<x>b))+\k<x>$", "abb", true),
+            (r"^(?:(?<x>a)|(?<x>b))+\k<x>$", "aba", false),
+            (r"^(?<x>猫é)\k<x>$", "猫é猫é", true),
+        ] {
+            let mut budget = 100_000;
+            let regex = Regex::compile(pattern, "", &mut budget).unwrap();
+            let input: Vec<_> = text.encode_utf16().collect();
+            assert_eq!(
+                regex.find(&input, 0, false, &mut budget).unwrap().is_some(),
+                expected,
+                "{pattern}: {text}"
+            );
+        }
+    }
+
+    #[test]
+    fn named_capture_grammar_is_whole_pattern_and_names_are_bounded() {
+        let mut budget = 100_000;
+        for (pattern, text) in [
+            (r"\k<x>", "k<x>"),
+            (r"[\k]", "k"),
+            (r"(?<\u0061>a)\k<a>", "aa"),
+            (r"(?<\u{61}>a)\k<\u0061>", "aa"),
+        ] {
+            let regex = Regex::compile(pattern, "", &mut budget).unwrap();
+            assert!(regex
+                .find(
+                    &text.encode_utf16().collect::<Vec<_>>(),
+                    0,
+                    false,
+                    &mut budget
+                )
+                .unwrap()
+                .is_some());
+        }
+        for pattern in [
+            r"(?<x>a)[\k]",
+            r"(?<x>a)\k",
+            r"\k<missing>(?<x>a)",
+            r"(?<>a)",
+            r"(?<1x>a)",
+        ] {
+            assert!(
+                matches!(
+                    Regex::compile(pattern, "", &mut budget),
+                    Err(Error::Syntax(_))
+                ),
+                "{pattern}"
+            );
+        }
+        for pattern in [r"(?<猫>a)", r"(?<__proto__>a)", r"(a)\2"] {
+            assert!(
+                matches!(
+                    Regex::compile(pattern, "", &mut budget),
+                    Err(Error::Unsupported(_))
+                ),
+                "{pattern}"
+            );
+        }
+        assert!(matches!(
+            Regex::compile(&format!("(?<{}>a)", "x".repeat(257)), "", &mut budget),
+            Err(Error::Limit(_))
+        ));
+        let too_many = (0..17).map(|i| format!("(?<g{i}>a)")).collect::<String>();
+        assert!(matches!(
+            Regex::compile(&too_many, "", &mut budget),
+            Err(Error::Limit(_))
+        ));
+    }
+
+    #[test]
+    fn backreferences_spend_work_and_preserve_case_folding_boundary() {
+        let mut budget = 100_000;
+        let regex = Regex::compile(r"(?<x>.+)\k<x>", "i", &mut budget).unwrap();
+        assert!(regex
+            .find(
+                &"aBab".encode_utf16().collect::<Vec<_>>(),
+                0,
+                false,
+                &mut budget
+            )
+            .unwrap()
+            .is_some());
+        assert!(matches!(
+            regex.find(
+                &"éé".encode_utf16().collect::<Vec<_>>(),
+                0,
+                false,
+                &mut budget
+            ),
+            Err(Error::Unsupported(_))
+        ));
+        let regex = Regex::compile(r"(?<x>a{64})\k<x>", "", &mut budget).unwrap();
+        assert!(matches!(
+            regex.find(&vec![97; 128], 0, false, &mut 100),
+            Err(Error::Limit(_))
+        ));
+        let plain = Regex::compile("(a)", "", &mut budget).unwrap();
+        let named = Regex::compile("(?<entry>a)", "", &mut budget).unwrap();
+        assert!(named.retained_bytes > plain.retained_bytes);
+    }
+
+    #[test]
+    fn legacy_closing_delimiters_match_literals_with_captures_and_quantifiers() {
+        let mut budget = 100_000;
+        let regex = Regex::compile("^(})]{2,3}}$", "", &mut budget).unwrap();
+        for (text, expected) in [
+            ("}]]}", true),
+            ("}]]]}", true),
+            ("}]}", false),
+            ("}]]]]}", false),
+        ] {
+            let input: Vec<_> = text.encode_utf16().collect();
+            let found = regex.find(&input, 0, false, &mut budget).unwrap();
+            assert_eq!(found.is_some(), expected, "{text}");
+            if let Some(found) = found {
+                assert_eq!((found.start(), found.end()), (0, input.len()));
+                assert_eq!(found.captures[1], Some((0, 1)));
+            }
+        }
+        let regex = Regex::compile("}]", "g", &mut budget).unwrap();
+        let input: Vec<_> = "a}]b".encode_utf16().collect();
+        let found = regex.find(&input, 0, false, &mut budget).unwrap().unwrap();
+        assert_eq!((found.start(), found.end()), (1, 3));
+    }
+
+    #[test]
+    fn legacy_closing_delimiters_preserve_syntax_flags_and_work_limits() {
+        for pattern in ["*}", "+]", "?]", "}**", "}a{2,1}", "}("] {
+            assert!(
+                matches!(
+                    Regex::compile(pattern, "", &mut 100_000),
+                    Err(Error::Syntax(_))
+                ),
+                "{pattern}"
+            );
+        }
+        for flags in ["u", "v", "d"] {
+            assert!(matches!(
+                Regex::compile("}", flags, &mut 100_000),
+                Err(Error::Unsupported(_))
+            ));
+        }
+        assert!(matches!(
+            Regex::compile("}", "", &mut 0),
+            Err(Error::Limit(_))
+        ));
+        let mut budget = 100_000;
+        let regex = Regex::compile("}+", "", &mut budget).unwrap();
+        assert!(matches!(
+            regex.find(&[125], 0, false, &mut 0),
+            Err(Error::Limit(_))
+        ));
     }
 }

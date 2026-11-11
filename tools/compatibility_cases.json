@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "purpose": "Bounded independent original capability probes plus a source-reviewed browser inventory. Probe success covers the tested sample only, not an entire standard.",
-  "probe_count": 127,
+  "probe_count": 177,
   "probes": [
     {
       "id": "language-arithmetic",
@@ -367,7 +367,7 @@
       "id": "string-utf16",
       "area": "Strings",
       "label": "UTF-16 length and valid surrogate pairs",
-      "source": "let s=\"A😀B\";test.record(s.length);test.record(s.charCodeAt(1));test.record(s.slice(1,3));",
+      "source": "let s=\"A\ud83d\ude00B\";test.record(s.length);test.record(s.charCodeAt(1));test.record(s.slice(1,3));",
       "baseline_status": "supported",
       "note": ""
     },
@@ -415,7 +415,7 @@
       "id": "string-normalize",
       "area": "Strings",
       "label": "Unicode normalization",
-      "source": "test.record(\"é\".normalize(\"NFC\"));",
+      "source": "test.record(\"e\u0301\".normalize(\"NFC\"));",
       "baseline_status": "missing",
       "note": ""
     },
@@ -535,7 +535,7 @@
       "id": "text-encoding",
       "area": "Binary",
       "label": "UTF-8 text encoding/decoding",
-      "source": "let a=new TextEncoder().encode(\"café😀\");test.record(a.length);test.record(new TextDecoder().decode(a));",
+      "source": "let a=new TextEncoder().encode(\"caf\u00e9\ud83d\ude00\");test.record(a.length);test.record(new TextDecoder().decode(a));",
       "baseline_status": "supported",
       "note": ""
     },
@@ -559,7 +559,7 @@
       "id": "uri",
       "area": "Globals",
       "label": "URI component coding",
-      "source": "test.record(encodeURIComponent(\"a b/é\"));test.record(decodeURIComponent(\"a%20b%2F%C3%A9\"));",
+      "source": "test.record(encodeURIComponent(\"a b/\u00e9\"));test.record(decodeURIComponent(\"a%20b%2F%C3%A9\"));",
       "baseline_status": "supported",
       "note": ""
     },
@@ -591,7 +591,7 @@
       "id": "string-replace-unmatched-utf16",
       "area": "Strings",
       "label": "Replacement callbacks receive undefined captures and UTF-16 offsets",
-      "source": "let seen=[];test.record(\"😀a a\".replace(/(z)?a/g,function(match,capture,offset){seen.push((capture===undefined)+\":\"+offset);return \"x\";}));test.record(seen.join(\"|\"));",
+      "source": "let seen=[];test.record(\"\ud83d\ude00a a\".replace(/(z)?a/g,function(match,capture,offset){seen.push((capture===undefined)+\":\"+offset);return \"x\";}));test.record(seen.join(\"|\"));",
       "baseline_status": "missing",
       "note": ""
     },
@@ -853,7 +853,7 @@
       "id": "iterator-native-families",
       "area": "Iteration",
       "label": "Native iterables cover text, arguments, collections and typed arrays",
-      "source": "function collect(o){var out='';for(var v of o)out+=String(v)+'|';return out;}test.record(collect('A😀B'));test.record(collect(new Set([4,4,5])));test.record(collect(new Map([['a',1],['b',2]]).keys()));test.record(collect(new Uint8Array([6,7])));function args(){test.record(collect(arguments));test.record(arguments[Symbol.iterator]===Array.prototype.values);}args(8,9);",
+      "source": "function collect(o){var out='';for(var v of o)out+=String(v)+'|';return out;}test.record(collect('A\ud83d\ude00B'));test.record(collect(new Set([4,4,5])));test.record(collect(new Map([['a',1],['b',2]]).keys()));test.record(collect(new Uint8Array([6,7])));function args(){test.record(collect(arguments));test.record(arguments[Symbol.iterator]===Array.prototype.values);}args(8,9);",
       "baseline_status": "missing",
       "note": ""
     },
@@ -861,7 +861,7 @@
       "id": "array-from-mapping-holes-conversion",
       "area": "Arrays",
       "label": "Array.from mapping, holes and length conversion",
-      "source": "var calls='',o={0:4,2:8,length:{}};o.length[Symbol.toPrimitive]=function(h){calls+=h+';';return 3.9;};var a=Array.from(o,function(v,i){calls+=i+':'+String(this.n)+';';return v===undefined?'hole':v+this.n;},{n:2});test.record(a.join('|'));test.record(Object.hasOwn(a,1));test.record(calls);test.record(Array.from('A😀').length);test.record(Array.from(4).length);",
+      "source": "var calls='',o={0:4,2:8,length:{}};o.length[Symbol.toPrimitive]=function(h){calls+=h+';';return 3.9;};var a=Array.from(o,function(v,i){calls+=i+':'+String(this.n)+';';return v===undefined?'hole':v+this.n;},{n:2});test.record(a.join('|'));test.record(Object.hasOwn(a,1));test.record(calls);test.record(Array.from('A\ud83d\ude00').length);test.record(Array.from(4).length);",
       "baseline_status": "missing",
       "note": ""
     },
@@ -925,7 +925,7 @@
       "id": "spread-array-native-mixed",
       "area": "Arrays",
       "label": "Array spread of native iterables and Unicode",
-      "source": "var items=[0,...[1,,3],...'😀é',...new Set([4,4,5]),...new Uint8Array([6,7]),8];test.record(JSON.stringify(items));test.record(Object.hasOwn(items,'2'));",
+      "source": "var items=[0,...[1,,3],...'\ud83d\ude00\u00e9',...new Set([4,4,5]),...new Uint8Array([6,7]),8];test.record(JSON.stringify(items));test.record(Object.hasOwn(items,'2'));",
       "baseline_status": "missing",
       "note": ""
     },
@@ -1040,6 +1040,427 @@
       "source": "function boundary(first,...tail){return first+':'+tail.length+':'+tail[254];}test.record(boundary(7,...Array(255).fill(9)));var bound=boundary.bind(null,8);test.record(bound(...Array(255).fill(2)));",
       "baseline_status": "missing",
       "note": "The existing 256-argument cap remains an explicit implementation bound; this sample checks its accepted edge."
+    },
+    {
+      "id": "promise-executor-and-reactions",
+      "area": "Promises",
+      "label": "Synchronous executor and asynchronous reactions",
+      "baseline_status": "missing",
+      "source": "var log='';var p=new Promise(function(resolve){log+='e';resolve(21);});p.then(function(v){test.record(log);test.record(v);});log+='s';test.record(log);\n'ok';\n",
+      "note": "",
+      "microtasks": true
+    },
+    {
+      "id": "promise-resolution-and-identity",
+      "area": "Promises",
+      "label": "Promise.resolve identity and ordinary values",
+      "baseline_status": "missing",
+      "source": "var p=Promise.resolve(22);test.record(Promise.resolve(p)===p);p.then(function(v){test.record(v);});var o={then:null};Promise.resolve(o).then(function(v){test.record(v===o);});\n'ok';\n",
+      "note": "",
+      "microtasks": true
+    },
+    {
+      "id": "promise-thenable-assimilation-order",
+      "area": "Promises",
+      "label": "Thenable getter, delayed call and receiver",
+      "baseline_status": "missing",
+      "source": "var log='',o={get then(){log+='g';return function(resolve){log+=this===o?'t':'x';resolve(23);};}};Promise.resolve(o).then(function(v){test.record(log);test.record(v);});log+='s';test.record(log);\n'ok';\n",
+      "note": "",
+      "microtasks": true
+    },
+    {
+      "id": "promise-resolution-lock",
+      "area": "Promises",
+      "label": "Only the first resolve or reject is effective",
+      "baseline_status": "missing",
+      "source": "var resolve,p=new Promise(function(r,j){resolve=r;r({then:function(done){queueMicrotask(function(){done(24);});}});j(99);r(98);});p.then(function(v){test.record(v);});test.record('queued');\n'ok';\n",
+      "note": "",
+      "microtasks": true
+    },
+    {
+      "id": "promise-thenable-abrupt",
+      "area": "Promises",
+      "label": "Thenable getter and call exceptions reject",
+      "baseline_status": "missing",
+      "source": "var marker={};Promise.resolve({get then(){throw marker;}}).catch(function(e){test.record(e===marker);});Promise.resolve({then:function(){throw marker;}}).catch(function(e){test.record(e===marker);});test.record('queued');\n'ok';\n",
+      "note": "",
+      "microtasks": true
+    },
+    {
+      "id": "promise-chains-and-recovery",
+      "area": "Promises",
+      "label": "Return values, throws, catch and propagation",
+      "baseline_status": "missing",
+      "source": "Promise.resolve(2).then(function(v){return v+3;}).then(function(v){test.record(v);throw 6;}).catch(function(e){test.record(e);return 7;}).then(function(v){test.record(v);});Promise.reject(8).then().catch(function(e){test.record(e);});test.record('queued');\n'ok';\n",
+      "note": "",
+      "microtasks": true
+    },
+    {
+      "id": "promise-self-cycle",
+      "area": "Promises",
+      "label": "Self resolution and a returned chaining cycle",
+      "baseline_status": "missing",
+      "source": "var resolve,p=new Promise(function(r){resolve=r;});resolve(p);p.catch(function(e){test.record(e.name);});var q=Promise.resolve().then(function(){return q;});q.catch(function(e){test.record(e.name);});test.record('queued');\n'ok';\n",
+      "note": "",
+      "microtasks": true
+    },
+    {
+      "id": "promise-adoption",
+      "area": "Promises",
+      "label": "Pending native Promise adoption",
+      "baseline_status": "missing",
+      "source": "var settle,inner=new Promise(function(r){settle=r;}),outer=new Promise(function(r){r(inner);});outer.then(function(v){test.record(v);});settle(25);test.record('queued');\n'ok';\n",
+      "note": "",
+      "microtasks": true
+    },
+    {
+      "id": "promise-finally-pass-through",
+      "area": "Promises",
+      "label": "Finally preserves fulfillment and rejection",
+      "baseline_status": "missing",
+      "source": "Promise.resolve(26).finally(function(){test.record('cleanup');return 99;}).then(function(v){test.record(v);});Promise.reject(27).finally(function(){}).catch(function(e){test.record(e);});test.record('queued');\n'ok';\n",
+      "note": "",
+      "microtasks": true
+    },
+    {
+      "id": "promise-finally-wait-and-override",
+      "area": "Promises",
+      "label": "Finally waits for return and propagates failure",
+      "baseline_status": "missing",
+      "source": "Promise.resolve(1).finally(function(){return Promise.resolve().then(function(){test.record('waited');});}).then(function(v){test.record(v);});Promise.resolve(2).finally(function(){return Promise.reject(28);}).catch(function(e){test.record(e);});test.record('queued');\n'ok';\n",
+      "note": "",
+      "microtasks": true
+    },
+    {
+      "id": "promise-generic-static-capability",
+      "area": "Promises",
+      "label": "Static methods use a custom capability constructor",
+      "baseline_status": "missing",
+      "source": "function C(executor){var self=this;executor(function(v){self.value=v;},function(v){self.reason=v;});}var a=Promise.resolve.call(C,29),b=Promise.reject.call(C,30);test.record(a instanceof C);test.record(a.value);test.record(b.reason);\n'ok';\n",
+      "note": "",
+      "microtasks": true
+    },
+    {
+      "id": "promise-species-custom-result",
+      "area": "Promises",
+      "label": "Then creates the configured species capability",
+      "baseline_status": "missing",
+      "source": "var p=Promise.resolve(30);function C(executor){var self=this;executor(function(v){self.value=v;},function(v){self.reason=v;});}p.constructor={};p.constructor[Symbol.species]=C;var q=p.then(function(v){return v+1;});test.record(q instanceof C);queueMicrotask(function(){test.record(q.value);});\n'ok';\n",
+      "note": "",
+      "microtasks": true
+    },
+    {
+      "id": "microtask-fifo-nested",
+      "area": "Promises",
+      "label": "Promise and queueMicrotask jobs share FIFO order",
+      "baseline_status": "missing",
+      "source": "queueMicrotask(function(){test.record('a');queueMicrotask(function(){test.record('c');});});Promise.resolve().then(function(){test.record('b');});test.record('s');\n'ok';\n",
+      "note": "",
+      "microtasks": true
+    },
+    {
+      "id": "microtask-between-host-jobs",
+      "area": "Promises",
+      "label": "Explicit checkpoints drain before the next host job",
+      "baseline_status": "missing",
+      "source": "var release,p=new Promise(function(r){release=r;});p.then(function(v){test.record(v);});Promise.resolve().then(function(){test.record('first checkpoint');});test.record('first source');\n//---NEXT JOB---\ntest.record('second source');release(32);\n'ok';\n",
+      "note": "",
+      "microtasks": true
+    },
+    {
+      "id": "promise-all-iterable-order",
+      "area": "Promises",
+      "label": "Promise.all preserves iterable order",
+      "baseline_status": "missing",
+      "source": "Promise.all([Promise.resolve(33),{then:function(r){r(34);}},35]).then(function(v){test.record(v.join(','));});Promise.all([]).then(function(v){test.record(v.length);});test.record('queued');\n'ok';\n",
+      "note": "",
+      "microtasks": true
+    },
+    {
+      "id": "promise-race-first-settlement",
+      "area": "Promises",
+      "label": "Promise.race settles from the first result",
+      "baseline_status": "missing",
+      "source": "Promise.race([Promise.resolve(36),37]).then(function(v){test.record(v);});Promise.race([Promise.reject(38),39]).catch(function(v){test.record(v);});Promise.race([]).then(function(){test.record('wrong');});test.record('queued');\n'ok';\n",
+      "note": "",
+      "microtasks": true
+    },
+    {
+      "id": "promise-allsettled-results",
+      "area": "Promises",
+      "label": "Promise.allSettled exposes ordered result records",
+      "baseline_status": "missing",
+      "source": "Promise.allSettled([40,Promise.reject(41)]).then(function(v){test.record(v[0].status+':'+v[0].value);test.record(v[1].status+':'+v[1].reason);});test.record('queued');\n'ok';\n",
+      "note": "",
+      "microtasks": true
+    },
+    {
+      "id": "promise-any-aggregate-errors",
+      "area": "Promises",
+      "label": "Promise.any fulfills or rejects with ordered errors",
+      "baseline_status": "missing",
+      "source": "Promise.any([Promise.reject(42),43]).then(function(v){test.record(v);});Promise.any([Promise.reject(44),Promise.reject(45)]).catch(function(e){test.record(e.name);test.record(e.errors.join(','));});test.record('queued');\n'ok';\n",
+      "note": "",
+      "microtasks": true
+    },
+    {
+      "id": "promise-withresolvers",
+      "area": "Promises",
+      "label": "Promise.withResolvers returns settlement capabilities",
+      "baseline_status": "missing",
+      "source": "var c=Promise.withResolvers();test.record(Object.keys(c).join(','));c.promise.then(function(v){test.record(v);});c.resolve(46);c.reject(47);\n'ok';\n",
+      "note": "",
+      "microtasks": true
+    },
+    {
+      "id": "promise-combinator-iterator-cleanup",
+      "area": "Promises",
+      "label": "Combinator closes iterable on resolve callback failure",
+      "baseline_status": "missing",
+      "source": "var closed=0,iter={};iter[Symbol.iterator]=function(){return {next:function(){return {value:1,done:false};},return:function(){closed++;return {};}};};function C(executor){return new Promise(executor);}C.resolve=function(){throw 48;};Promise.all.call(C,iter).catch(function(e){test.record(e);test.record(closed);});test.record('queued');\n'ok';\n",
+      "note": "",
+      "microtasks": true
+    },
+    {
+      "id": "array-flat-holes-and-depth",
+      "area": "Arrays",
+      "label": "Flattening removes visited holes and honors depth",
+      "baseline_status": "missing",
+      "source": "var a=[1,,[2,,[3]]];test.record(JSON.stringify(a.flat()));test.record(JSON.stringify(a.flat(2)));test.record(JSON.stringify(a.flat(0)));\n'ok';\n",
+      "note": ""
+    },
+    {
+      "id": "array-flat-generic-getters",
+      "area": "Arrays",
+      "label": "Generic flat reads inherited indices and live getters",
+      "baseline_status": "missing",
+      "source": "var o=Object.create({1:[3]});o.length=3;o[0]=[1,2];Object.defineProperty(o,'2',{get:function(){return [4];}});test.record(Array.prototype.flat.call(o).join(','));\n'ok';\n",
+      "note": ""
+    },
+    {
+      "id": "array-flatmap-callback-shape",
+      "area": "Arrays",
+      "label": "flatMap receiver, callback arguments and single-depth flatten",
+      "baseline_status": "missing",
+      "source": "var a=[1,,3],receiver={},seen='';var b=a.flatMap(function(v,i,o){seen+=i;test.record(this===receiver&&o===a);return [v,[v+1]];},receiver);test.record(seen);test.record(JSON.stringify(b));\n'ok';\n",
+      "note": ""
+    },
+    {
+      "id": "replaceall-callback-order",
+      "area": "Strings",
+      "label": "replaceAll invokes callbacks with index and original input",
+      "baseline_status": "missing",
+      "source": "var seen='';test.record('ababa'.replaceAll('a',function(m,i,s){seen+=i;test.record(s==='ababa');return i;}));test.record(seen);\n'ok';\n",
+      "note": ""
+    },
+    {
+      "id": "replaceall-empty-and-global-regexp",
+      "area": "Strings",
+      "label": "replaceAll empty matches and global RegExp rule",
+      "baseline_status": "missing",
+      "source": "test.record('ab'.replaceAll('',function(m,i){return i;}));test.record('aba'.replaceAll(/a/g,function(m,i){return '['+i+']';}));try{'aba'.replaceAll(/a/,'x');}catch(e){test.record(e.name);}\n'ok';\n",
+      "note": ""
+    },
+    {
+      "id": "replaceall-result-conversion",
+      "area": "Strings",
+      "label": "replaceAll converts each callback result in order",
+      "baseline_status": "missing",
+      "source": "var log='';test.record('xx'.replaceAll('x',function(m,i){log+='c'+i;return {toString:function(){log+='s'+i;return i;}};}));test.record(log);\n'ok';\n",
+      "note": ""
+    },
+    {
+      "id": "json-reviver-postorder-deletion",
+      "area": "Globals",
+      "label": "JSON.parse reviver sees postorder holders and deletes properties",
+      "baseline_status": "missing",
+      "source": "var seen='';var o=JSON.parse('{\"a\":1,\"b\":[2,3]}',function(k,v){seen+=k+',';if(k==='0')return undefined;if(k==='a')return 4;return v;});test.record(seen);test.record(o.a);test.record(0 in o.b);test.record(o.b[1]);\n'ok';\n",
+      "note": ""
+    },
+    {
+      "id": "json-replacer-holder-and-omission",
+      "area": "Globals",
+      "label": "JSON.stringify replacer receives holder and can omit properties",
+      "baseline_status": "missing",
+      "source": "var o={a:1,b:2},seen='';test.record(JSON.stringify(o,function(k,v){seen+=k+',';if(k==='a'){test.record(this===o);return 3;}if(k==='b')return undefined;return v;}));test.record(seen);\n'ok';\n",
+      "note": ""
+    },
+    {
+      "id": "json-property-list-and-tojson",
+      "area": "Globals",
+      "label": "JSON property lists deduplicate and toJSON precedes replacer",
+      "baseline_status": "missing",
+      "source": "test.record(JSON.stringify({a:1,b:2},['b','a','b']));var log='';test.record(JSON.stringify({x:{toJSON:function(k){log+='j'+k;return 3;}}},function(k,v){log+='r'+k;return v;}));test.record(log);\n'ok';\n",
+      "note": ""
+    },
+    {
+      "id": "template-cooked-text-and-lines",
+      "area": "Language",
+      "label": "Cooked escapes and multiline interpolation",
+      "baseline_status": "missing",
+      "source": "var n=4;\ntest.record(`tick:\\` dollar:\\${literal} slash:\\\\ \\x41\\u0042 ${n}`);\ntest.record(`one\ntwo:${n+1}`);\n'ok';\n",
+      "note": ""
+    },
+    {
+      "id": "template-nested-expression-lexing",
+      "area": "Language",
+      "label": "Nested templates, braces, comments and regex literals",
+      "baseline_status": "missing",
+      "source": "var n=3;\ntest.record(`start ${`inner:${n+2}`} ${({x:'}'}).x} end`);\ntest.record(`fn:${(function(){return 'a}';})()} comment:${1 /* } */ +2} regex:${/}/.test('}')}`);\n'ok';\n",
+      "note": ""
+    },
+    {
+      "id": "template-conversion-and-abrupt-order",
+      "area": "Language",
+      "label": "String conversion precedes later expressions and abrupt completion stops them",
+      "baseline_status": "missing",
+      "source": "var log='',a={toString:function(){log+='s';return 'A';},valueOf:function(){log+='v';return 1;}};\nfunction later(){log+='e';return 'B';}\ntest.record(`${a}${later()}`);test.record(log);\nvar ran=false;try{`${{toString:function(){throw 13;}}}${ran=true}`;}catch(e){test.record(e);}test.record(ran);\n'ok';\n",
+      "note": ""
+    },
+    {
+      "id": "template-expression-reference-and-precedence",
+      "area": "Language",
+      "label": "Interpolation preserves reference updates, expression precedence and function returns",
+      "baseline_status": "missing",
+      "source": "var n=0,o={x:7};test.record(`${n++}:${o['x']}:${true?2:3}:${(4+5)*2}`);test.record(n);\nfunction render(v){return `(${v})`;}test.record(render(8));\n'ok';\n",
+      "note": ""
+    },
+    {
+      "id": "review040-default-undefined-only",
+      "area": "Functions",
+      "label": "Default parameters and undefined-only initialization",
+      "source": "function f(a=7,b=9){test.record(a);test.record(b);}\nf();f(undefined,null);f(0,false);f('',NaN);\n'ok';\n",
+      "baseline_status": "missing",
+      "note": "Original finite sample also covered by the independent 0.40 review; counts are not additive."
+    },
+    {
+      "id": "review040-default-body-environment-isolation",
+      "area": "Functions",
+      "label": "Default parameter and body environments",
+      "source": "var outer=13;function f(a=outer,read=function(){return a;}){var outer=17;var a=19;return [a,read(),outer].join(',');}\ntest.record(f());function g(a=function(){return bodyOnly;}){var bodyOnly=23;return a;}\ntry{g()();}catch(e){test.record(e.name);}test.record(outer);\n'ok';\n",
+      "baseline_status": "missing",
+      "note": "Original finite sample also covered by the independent 0.40 review; counts are not additive."
+    },
+    {
+      "id": "review040-default-arguments-are-unmapped",
+      "area": "Functions",
+      "label": "Unmapped arguments with non-simple parameters",
+      "source": "function f(a=3,b=4){arguments[0]=30;a=31;b=32;test.record(arguments.length);test.record(arguments[0]);test.record(arguments[1]);return a+b;}\ntest.record(f(10,20));test.record(f());\nfunction g(a=arguments.length,b=arguments[0]){test.record(a);test.record(b);}\ng(undefined,8);g();\n'ok';\n",
+      "baseline_status": "missing",
+      "note": "Original finite sample also covered by the independent 0.40 review; counts are not additive."
+    },
+    {
+      "id": "review040-default-length-rest-and-bind",
+      "area": "Functions",
+      "label": "Default parameter length and rest interaction",
+      "source": "function a(x,y=4,z){}function b(x=3,y){}function c(x,...tail){}function d(x,y=5,...tail){return [x,y,tail.join('|')].join(',');}\ntest.record(a.length);test.record(b.length);test.record(c.length);test.record(d.length);test.record(d.bind(null,2).length);test.record(d(2,undefined,6,7));\n'ok';\n",
+      "baseline_status": "missing",
+      "note": "Original finite sample also covered by the independent 0.40 review; counts are not additive."
+    },
+    {
+      "id": "review040-destructure-binding-nested-defaults",
+      "area": "Language",
+      "label": "Nested destructuring binding defaults",
+      "source": "let [a,[b=3],c=4]=[1,[],undefined];const {x:y=7,nested:{z=8}={}}={};\ntest.record([a,b,c,y,z].join(','));var {p:{q=9}={}}={p:{}};test.record(q);\n'ok';\n",
+      "baseline_status": "missing",
+      "note": "Original finite sample also covered by the independent 0.40 review; counts are not additive."
+    },
+    {
+      "id": "review040-destructure-iterator-close-normal-and-elision",
+      "area": "Language",
+      "label": "Destructuring iterator close and elisions",
+      "source": "var log='',it={};it[Symbol.iterator]=function(){log+='i';var n=0;return {next:function(){log+='n';return {value:++n,done:false};},return:function(){log+='r';return {};}};};\nlet [a,,b]=it;test.record(a);test.record(b);test.record(log);log='';let []=it;test.record(log);\n'ok';\n",
+      "baseline_status": "missing",
+      "note": "Original finite sample also covered by the independent 0.40 review; counts are not additive."
+    },
+    {
+      "id": "review040-destructure-iterator-close-on-default-throw",
+      "area": "Language",
+      "label": "Destructuring abrupt default and IteratorClose",
+      "source": "var log='',marker={},it={};it[Symbol.iterator]=function(){return {next:function(){log+='n';return {value:undefined,done:false};},return:function(){log+='r';throw 99;}};};\nfunction fail(){log+='f';throw marker;}try{let [a=fail()]=it;}catch(e){test.record(e===marker);}test.record(log);\n'ok';\n",
+      "baseline_status": "missing",
+      "note": "Original finite sample also covered by the independent 0.40 review; counts are not additive."
+    },
+    {
+      "id": "review040-destructure-object-rest-symbols-and-descriptors",
+      "area": "Objects",
+      "label": "Object rest own enumerable strings and Symbols",
+      "source": "var s=Symbol('side'),o=Object.create({inherited:1});o.x=2;o[s]=3;\nObject.defineProperty(o,'hidden',{value:4});Object.defineProperty(o,'value',{enumerable:true,get:function(){return 5;}});\nlet {x,...rest}=o;test.record(x);test.record(Object.keys(rest).join(','));test.record(rest[s]);test.record(rest.inherited);\nvar d=Object.getOwnPropertyDescriptor(rest,'value');test.record(d.value);test.record(d.writable&&d.enumerable&&d.configurable);\nlet {[s]:side,...other}=o;test.record(side);test.record(Object.getOwnPropertySymbols(other).length);\n'ok';\n",
+      "baseline_status": "missing",
+      "note": "Original finite sample also covered by the independent 0.40 review; counts are not additive."
+    },
+    {
+      "id": "review040-destructure-assignment-return-and-target-order",
+      "area": "Language",
+      "label": "Destructuring assignment references and result",
+      "source": "var log='',o={},source={get x(){log+='g';return 11;}},a;\nfunction target(){log+='t';return o;}var result=({x:target().value}=source);\ntest.record(result===source);test.record(o.value);test.record(log);[a,o.value]=[12,13];test.record(a);test.record(o.value);\n'ok';\n",
+      "baseline_status": "missing",
+      "note": "Original finite sample also covered by the independent 0.40 review; counts are not additive.",
+      "browser_global": true
+    },
+    {
+      "id": "review040-named-capture-exec-groups-shape",
+      "area": "RegExp",
+      "label": "Named capture groups object and descriptors",
+      "source": "var m=/(?<left>a)(b)(?<right>c)?/.exec('ab');test.record(m[0]);test.record(m[1]);test.record(m[2]);test.record(m[3]);\ntest.record(Object.getPrototypeOf(m.groups)===null);test.record(Object.keys(m.groups).join(','));test.record(m.groups.left);test.record(m.groups.right);\nvar d=Object.getOwnPropertyDescriptor(m.groups,'left');test.record(d.writable&&d.enumerable&&d.configurable);\n'ok';\n",
+      "baseline_status": "missing",
+      "note": "Original finite sample also covered by the independent 0.40 review; counts are not additive."
+    },
+    {
+      "id": "review040-named-capture-replacer-argument-and-receiver",
+      "area": "RegExp",
+      "label": "Callable replacement receives named groups",
+      "source": "var out='xab'.replace(/(?<first>a)(?<last>b)/,function(match,a,b,offset,input,groups){'use strict';\ntest.record(this===undefined);test.record(arguments.length);test.record(match);test.record(offset);test.record(input);\ntest.record(Object.getPrototypeOf(groups)===null);return groups.last+groups.first;});test.record(out);\n'ok';\n",
+      "baseline_status": "missing",
+      "note": "Original finite sample also covered by the independent 0.40 review; counts are not additive."
+    },
+    {
+      "id": "review040-named-capture-disjoint-duplicate-alternatives",
+      "area": "RegExp",
+      "label": "Duplicate capture names in disjoint alternatives",
+      "source": "var re=/(?:(?<x>a)|(?<x>b))\\k<x>/g,m=re.exec('aabb');test.record(m[0]);test.record(m.groups.x);test.record(Object.keys(m.groups).join(','));\nm=re.exec('aabb');test.record(m[0]);test.record(m.groups.x);test.record(m[1]);test.record(m[2]);\ntest.record('a b'.replace(/(?<x>a)|(?<x>b)/g,'$<x>!'));\n'ok';\n",
+      "baseline_status": "missing",
+      "note": "Original finite sample also covered by the independent 0.40 review; counts are not additive."
+    },
+    {
+      "id": "review040-named-capture-backreference",
+      "area": "RegExp",
+      "label": "Named forward and unmatched backreferences",
+      "source": "var re=/(?<letter>a|b)\\k<letter>/g;test.record(re.exec('abba')[0]);test.record(re.lastIndex);test.record(re.exec('abba'));\ntest.record(/\\k<later>(?<later>x)/.test('x'));test.record(/(?<x>a)?\\k<x>b/.test('b'));\n'ok';\n",
+      "baseline_status": "missing",
+      "note": "Original finite sample also covered by the independent 0.40 review; counts are not additive."
+    },
+    {
+      "id": "review040-date-timestamp-and-utc-fields",
+      "area": "Globals",
+      "label": "Date timestamps and UTC field getters",
+      "source": "for(var value of [0,-1,951827696789]){var d=new Date(value);test.record(d.getTime());test.record(d.valueOf());test.record(d.toISOString());\ntest.record([d.getUTCFullYear(),d.getUTCMonth(),d.getUTCDate(),d.getUTCDay(),d.getUTCHours(),d.getUTCMinutes(),d.getUTCSeconds(),d.getUTCMilliseconds()].join(','));}\n'ok';\n",
+      "baseline_status": "missing",
+      "note": "Deterministic timestamp/UTC subset only; does not claim local-zone or clock support. This sample also appears in the independent Date review."
+    },
+    {
+      "id": "review040-date-utc-conversion-rollovers-and-short-years",
+      "area": "Globals",
+      "label": "Date.UTC rollover and short-year conversion",
+      "source": "for(var args of [[0],[99,0],[100,0],[-1,0],[2000,1,29],[2001,1,29],[2000,12,0],[2000,-1,1],[2000,0,1,25,61,61,1001]]){\nvar value=Date.UTC.apply(null,args);test.record(value);test.record(new Date(value).toISOString());}\ntest.record(Number.isNaN(Date.UTC(2000,undefined)));test.record(Number.isNaN(Date.UTC()));\n'ok';\n",
+      "baseline_status": "missing",
+      "note": "Deterministic timestamp/UTC subset only; does not claim local-zone or clock support. This sample also appears in the independent Date review."
+    },
+    {
+      "id": "review040-date-utc-setter-snapshots-before-conversion",
+      "area": "Globals",
+      "label": "Date setter snapshots before observable conversion",
+      "source": "var d=new Date(0),log='';var year={valueOf:function(){log+='y';d.setTime(86400000);return 2000;}};\ntest.record(d.setUTCFullYear(year));test.record(d.toISOString());test.record(log);\nlog='';var month={valueOf:function(){log+='m';d.setTime(0);return 1;}},day={valueOf:function(){log+='d';return 29;}};\ntest.record(d.setUTCMonth(month,day));test.record(d.toISOString());test.record(log);\n'ok';\n",
+      "baseline_status": "missing",
+      "note": "Deterministic timestamp/UTC subset only; does not claim local-zone or clock support. This sample also appears in the independent Date review."
+    },
+    {
+      "id": "review040-date-generic-tojson-order-and-invalid-shortcut",
+      "area": "Globals",
+      "label": "Generic Date.toJSON and invalid-date shortcut",
+      "source": "var log='',o={valueOf:function(){log+='v';return 5;},toISOString:function(){log+='i';return 'custom';}};\ntest.record(Date.prototype.toJSON.call(o,'key'));test.record(log);\nvar invalid={valueOf:function(){return NaN;},get toISOString(){throw 'must not read';}};test.record(Date.prototype.toJSON.call(invalid));\nvar text={valueOf:function(){return 'value';},toISOString:function(){return 19;}};test.record(Date.prototype.toJSON.call(text));\ntest.record(JSON.stringify({d:new Date(0),invalid:new Date(NaN)}));\n'ok';\n",
+      "baseline_status": "missing",
+      "note": "Deterministic timestamp/UTC subset only; does not claim local-zone or clock support. This sample also appears in the independent Date review."
     }
   ],
   "browser_inventory": [
@@ -1109,13 +1530,14 @@
     },
     {
       "id": "timers",
-      "area": "Timers and animation frames",
+      "area": "Timers, animation frames and microtasks",
       "status": "partial",
-      "scope": "Function timers and requestAnimationFrame driven by the native App queue.",
-      "limits": "64 pending timers,4096 timer callbacks per document,64 pending frames; no Promise microtask queue.",
+      "scope": "Function timers and requestAnimationFrame driven by the native App queue; bounded Promise and queueMicrotask jobs use explicit document checkpoints.",
+      "limits": "Existing timer/frame limits remain; bounded FIFO microtasks do not supply async syntax, module loading or a complete HTML event loop.",
       "evidence_files": [
         "src/scripting.rs",
-        "src/app_scripts.rs"
+        "src/app_scripts.rs",
+        "src/promises.rs"
       ],
       "verification": "Source review only in this inventory; separate project Rust/integration results are not rerun or counted by this tool."
     },

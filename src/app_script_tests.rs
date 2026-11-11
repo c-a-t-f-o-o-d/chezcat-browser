@@ -197,6 +197,44 @@ fn timers_survive_fragments_but_not_document_replacement_or_script_disable() {
 }
 
 #[test]
+fn pending_promises_survive_fragments_and_failed_navigation_but_not_replacement() {
+    let fixture = ScriptFixture::new();
+    let markup = r#"<title>Waiting</title><p id=anchor>Anchor</p><script>
+var complete;new Promise(function(resolve){complete=resolve;}).then(function(value){document.title=value;});
+setTimeout(function(){complete('Promise completed');},0);
+</script>"#;
+    let mut app = fixture.open(markup);
+    app.follow("#anchor");
+    assert!(app.poll_script_timer());
+    assert_eq!(
+        app.document.title,
+        "Promise completed",
+        "{}",
+        script_report(&app)
+    );
+    let original = fixture.write("promises.html", markup);
+    app.open(&original);
+    app.follow("missing-promise-page.html");
+    assert!(app.failed);
+    assert!(app.poll_script_timer());
+    assert_eq!(
+        app.document.title,
+        "Promise completed",
+        "{}",
+        script_report(&app)
+    );
+    app.open(&original);
+    let replacement = fixture.write("replacement-promise.html", "<title>Replacement</title>");
+    app.open(&replacement);
+    assert!(!app.poll_script_timer());
+    assert_eq!(app.document.title, "Replacement");
+    app.open(&original);
+    app.set_javascript_enabled(false);
+    assert!(!app.poll_script_timer());
+    assert_eq!(app.document.title, "Waiting");
+}
+
+#[test]
 fn browser_namespaces_queries_arrows_and_exceptions_run_through_real_controls() {
     let fixture = ScriptFixture::new();
     let mut app = fixture.open(r#"<html><body><div id="scope" class="panel"><input id="toggle" type="checkbox"><p id="first" data-state="ready">First</p><p id="second" class="target">Second</p></div><p id="outside" class="target">Outside</p><p id="out">Waiting</p><button id="go" type="button">Run</button><script>

@@ -1,13 +1,27 @@
 //! Original bounded JSON support. Parsing and serialization use explicit frame
 //! stacks and the enclosing Runtime's object, retained-value and work budgets.
-//! Revivers, replacers, callable toJSON hooks and lone UTF-16 surrogates remain
-//! explicit limitations; they are never silently ignored or evaluated as code.
+//! Callback walks retain source snapshots and real holders without recursive
+//! native traversal. Lone UTF-16 surrogates remain an explicit limitation.
 
-use super::{number_text, Fault, Host, Runtime, Value, MAX_PARSE_DEPTH, MAX_STRING_BYTES};
+use super::{
+    number_text, property_index, strict_equal, Fault, Host, Ordinary, PropertyKey, Reference,
+    Runtime, Value, MAX_OBJECT_PROPERTIES, MAX_PARSE_DEPTH, MAX_RETAINED_VALUES, MAX_STRING_BYTES,
+};
+use std::collections::{BTreeMap, BTreeSet};
+
+struct ParseSnapshot {
+    value: Value,
+    start: usize,
+    end: usize,
+}
+
+type Snapshots = BTreeMap<(usize, String), ParseSnapshot>;
 
 struct Reader<'a> {
     source: &'a str,
     at: usize,
+    snapshots: Option<Snapshots>,
+    snapshot_bytes: usize,
 }
 
 struct ParseFrame {
@@ -19,6 +33,49 @@ struct ParseFrame {
 }
 
 impl Reader<'_> {
+    fn snapshot(
+        &mut self,
+        runtime: &mut Runtime,
+        holder: usize,
+        key: &str,
+        value: &Value,
+        start: usize,
+    ) -> Result<(), Fault> {
+        let Some(snapshots) = self.snapshots.as_mut() else {
+            return Ok(());
+        };
+        let key = (holder, key.to_owned());
+        let old = snapshots.get(&key).map_or(0, |old| {
+            std::mem::size_of::<((usize, String), ParseSnapshot)>()
+                + 3 * std::mem::size_of::<usize>()
+                + key.1.len()
+                + old.value.bytes()
+        });
+        let bytes = std::mem::size_of::<((usize, String), ParseSnapshot)>()
+            + 3 * std::mem::size_of::<usize>()
+            + key.1.len()
+            + value.bytes();
+        let retained = self
+            .snapshot_bytes
+            .saturating_sub(old)
+            .saturating_add(bytes);
+        if retained > MAX_RETAINED_VALUES {
+            return Err(Fault::new("JSON reviver snapshot limit reached (2 MiB)."));
+        }
+        runtime.work(bytes)?;
+        let value = runtime.copy_value(value)?;
+        snapshots.insert(
+            key,
+            ParseSnapshot {
+                value,
+                start,
+                end: self.at,
+            },
+        );
+        self.snapshot_bytes = retained;
+        Ok(())
+    }
+
     fn byte(&self) -> Option<u8> {
         self.source.as_bytes().get(self.at).copied()
     }
@@ -214,7 +271,10 @@ impl Reader<'_> {
     }
 
     fn parse(&mut self, runtime: &mut Runtime) -> Result<Value, Fault> {
+        self.space();
+        let start = self.at;
         let (root, frame) = self.value(runtime, 0)?;
+        self.snapshot(runtime, usize::MAX, "", &root, start)?;
         let mut frames = Vec::new();
         frames.extend(frame);
         while let Some(mut frame) = frames.pop() {
@@ -238,7 +298,10 @@ impl Reader<'_> {
                     }
                     key
                 };
+                self.space();
+                let start = self.at;
                 let (value, child) = self.value(runtime, frames.len() + 1)?;
+                self.snapshot(runtime, frame.id, &key, &value, start)?;
                 runtime.set_property(frame.id, key, value)?;
                 frame.entry = false;
                 frames.push(frame);
@@ -264,12 +327,31 @@ impl Reader<'_> {
 enum Entries {
     Array { next: usize, length: usize },
     Object(std::vec::IntoIter<String>),
+    Listed { next: usize },
 }
 
 struct WriteFrame {
     id: usize,
     entries: Entries,
     wrote: bool,
+}
+
+struct ReviveFrame {
+    holder: Value,
+    key: String,
+    value: Value,
+    context: usize,
+    entries: Option<Entries>,
+    snapshot_matches: bool,
+}
+
+fn json_same_value(left: &Value, right: &Value) -> bool {
+    match (left, right) {
+        (Value::Number(a), Value::Number(b)) => {
+            a.is_nan() && b.is_nan() || a.to_bits() == b.to_bits()
+        }
+        _ => strict_equal(left, right),
+    }
 }
 
 impl Runtime {
@@ -284,24 +366,33 @@ impl Runtime {
     }
 
     pub(super) fn json_parse(&mut self, args: &[Value]) -> Result<Value, Fault> {
-        if matches!(args.get(1), Some(Value::Function(_))) {
-            return Err(Fault::new(
-                "JSON.parse reviver functions are not implemented.",
-            ));
-        }
+        // Host-free parsing is retained for the original internal allocation
+        // assertions. The public builtin below performs observable conversion
+        // and callback processing with its caller's host.
         let value = args.first().unwrap_or(&Value::Undefined);
         self.work(value.bytes())?;
         let source = value.script_text()?;
+        self.json_parse_source(&source, false)
+            .map(|(value, _)| value)
+    }
+
+    fn json_parse_source(
+        &mut self,
+        source: &str,
+        capture: bool,
+    ) -> Result<(Value, Snapshots), Fault> {
         if source.len() > MAX_STRING_BYTES {
             return Err(Fault::new("JSON source limit reached (128 KiB)."));
         }
         self.work(source.len())?;
         let checkpoint = (self.objects.len(), self.properties, self.value_bytes);
-        let result = Reader {
-            source: &source,
+        let mut reader = Reader {
+            source,
             at: 0,
-        }
-        .parse(self);
+            snapshots: capture.then(BTreeMap::new),
+            snapshot_bytes: 0,
+        };
+        let result = reader.parse(self);
         if result.is_err() {
             // Invalid JSON cannot publish any of these fresh identities. Undo
             // only its allocations; spent execution/copy budgets stay spent.
@@ -309,7 +400,166 @@ impl Runtime {
             self.properties = checkpoint.1;
             self.value_bytes = checkpoint.2;
         }
-        result
+        result.map(|value| (value, reader.snapshots.unwrap_or_default()))
+    }
+
+    pub(super) fn json_parse_builtin(
+        &mut self,
+        args: &[Value],
+        host: &mut dyn Host,
+    ) -> Result<Value, Fault> {
+        let source = self.copy_value(args.first().unwrap_or(&Value::Undefined))?;
+        let source = self
+            .primitive_with_hint(source, true, host)?
+            .script_text()?;
+        let callback = args
+            .get(1)
+            .filter(|value| matches!(value, Value::Function(_)));
+        let (root, snapshots) = self.json_parse_source(&source, callback.is_some())?;
+        let Some(callback) = callback else {
+            return Ok(root);
+        };
+        let holder = self.new_object(None)?;
+        self.store_property(holder, "".into(), root, Some((true, true, true)))?;
+        let first = self.json_revive_frame(
+            Value::Object(holder),
+            String::new(),
+            snapshots.get(&(usize::MAX, String::new())),
+            &source,
+            host,
+        )?;
+        let mut frames = vec![first];
+        loop {
+            self.step()?;
+            let frame = frames.last_mut().unwrap();
+            let key = match frame.entries.as_mut() {
+                Some(Entries::Array { next, length }) if *next < *length => {
+                    let key = next.to_string();
+                    *next += 1;
+                    Some(key)
+                }
+                Some(Entries::Object(keys)) => keys.next(),
+                _ => None,
+            };
+            if let Some(key) = key {
+                let holder = frame.value.clone();
+                let id = self.ordinary_id(self.ordinary_required(&holder)?)?;
+                let snapshot = if frame.snapshot_matches {
+                    self.work(key.len())?;
+                    snapshots.get(&(id, key.clone()))
+                } else {
+                    None
+                };
+                self.json_depth(frames.len() + 1)?;
+                let child = self.json_revive_frame(holder, key, snapshot, &source, host)?;
+                frames.push(child);
+                continue;
+            }
+            let frame = frames.pop().unwrap();
+            let key_value = Value::String(frame.key.clone());
+            let result = self.call_value(
+                callback.clone(),
+                &[key_value, frame.value, Value::Object(frame.context)],
+                frame.holder.clone(),
+                host,
+            )?;
+            if frames.is_empty() {
+                return Ok(result);
+            }
+            self.json_revive_property(&frame.holder, frame.key, result, host)?;
+        }
+    }
+
+    fn json_revive_frame(
+        &mut self,
+        holder: Value,
+        key: String,
+        snapshot: Option<&ParseSnapshot>,
+        source: &str,
+        host: &mut dyn Host,
+    ) -> Result<ReviveFrame, Fault> {
+        self.work(key.len())?;
+        let value = self.read_reference(&Reference::Property(holder.clone(), key.clone()), host)?;
+        if matches!(value, Value::Host(_)) {
+            return Err(Fault::new(
+                "JSON reviver traversal of native host objects is not implemented.",
+            ));
+        }
+        let context = self.new_object(None)?;
+        let snapshot_matches =
+            snapshot.is_some_and(|snapshot| json_same_value(&snapshot.value, &value));
+        if snapshot_matches && !matches!(value, Value::Object(_) | Value::Function(_)) {
+            let snapshot = snapshot.unwrap();
+            let text = &source[snapshot.start..snapshot.end];
+            self.work(text.len())?;
+            self.store_property(
+                context,
+                "source".into(),
+                Value::String(text.into()),
+                Some((true, true, true)),
+            )?;
+        }
+        let entries = if let Some(object) = Ordinary::from_value(&value) {
+            let id = self.ordinary_id(object)?;
+            Some(if let Some(length) = self.object(id)?.length {
+                Entries::Array { next: 0, length }
+            } else {
+                Entries::Object(self.enumerable_keys(id)?.into_iter())
+            })
+        } else {
+            None
+        };
+        Ok(ReviveFrame {
+            holder,
+            key,
+            value,
+            context,
+            entries,
+            snapshot_matches,
+        })
+    }
+
+    fn json_revive_property(
+        &mut self,
+        holder: &Value,
+        key: String,
+        value: Value,
+        host: &mut dyn Host,
+    ) -> Result<(), Fault> {
+        if matches!(value, Value::Undefined) {
+            let previous = self.strict;
+            self.strict = false;
+            let result = self.delete_reference(Reference::Property(holder.clone(), key), host);
+            self.strict = previous;
+            return result.map(|_| ());
+        }
+        let id = self.ordinary_id(self.ordinary_required(holder)?)?;
+        // InternalizeJSONProperty ignores a false definition result. Check
+        // descriptor rejection before the throwing general-purpose helper;
+        // abrupt typed-value conversions must still propagate unchanged.
+        if let Some(index) = self.typed_numeric_key(id, &key)? {
+            if !self.typed_index_valid(id, index) {
+                return Ok(());
+            }
+        } else {
+            if self.objects[id]
+                .properties
+                .get(&key)
+                .is_some_and(|property| !property.configurable)
+                || !self.objects[id].properties.contains_key(&key) && !self.objects[id].extensible
+            {
+                return Ok(());
+            }
+            if let Some(length) = self.objects[id].length {
+                if key == "length"
+                    || property_index(&key).is_some_and(|index| index >= length)
+                        && !self.objects[id].length_writable
+                {
+                    return Ok(());
+                }
+            }
+        }
+        self.create_data_property(holder, PropertyKey::String(key), value, host)
     }
 
     fn json_quote(&mut self, output: &mut String, text: &str) -> Result<(), Fault> {
@@ -351,7 +601,7 @@ impl Runtime {
         value: Value,
         output: &mut String,
         frames: &mut Vec<WriteFrame>,
-        host: &mut dyn Host,
+        listed: bool,
     ) -> Result<(), Fault> {
         self.step()?;
         match value {
@@ -372,27 +622,6 @@ impl Runtime {
                 "JSON serialization of host objects is not implemented.",
             )),
             Value::Object(id) => {
-                if matches!(
-                    self.get_property_with_host(id, "toJSON", host)?,
-                    Value::Function(_)
-                ) {
-                    return Err(Fault::new(
-                        "JSON.stringify toJSON functions are not implemented.",
-                    ));
-                }
-                // Number unboxing uses observable ToNumber; Boolean unboxing
-                // reads the internal slot. Symbol wrappers remain ordinary
-                // JSON objects. toJSON lookup precedes all of these steps.
-                match self.wrapped_primitive(&Value::Object(id)) {
-                    Some(Value::Number(_)) => {
-                        let number = self.binary_number(&Value::Object(id), host)?;
-                        return self.json_write_value(Value::Number(number), output, frames, host);
-                    }
-                    Some(value @ Value::Bool(_)) => {
-                        return self.json_write_value(value, output, frames, host);
-                    }
-                    _ => {}
-                }
                 self.json_depth(frames.len() + 1)?;
                 if frames.iter().any(|frame| frame.id == id) {
                     return Err(Fault::exception(
@@ -403,6 +632,8 @@ impl Runtime {
                 let length = self.object(id)?.length;
                 let entries = if let Some(length) = length {
                     Entries::Array { next: 0, length }
+                } else if listed {
+                    Entries::Listed { next: 0 }
                 } else {
                     // JSON visits enumerable string keys only. Symbol-keyed
                     // properties are not read, even when their values cycle.
@@ -419,19 +650,105 @@ impl Runtime {
         }
     }
 
+    fn json_property_value(
+        &mut self,
+        holder: &Value,
+        key: &str,
+        replacer: Option<&Value>,
+        host: &mut dyn Host,
+    ) -> Result<Value, Fault> {
+        self.work(key.len())?;
+        let mut value =
+            self.read_reference(&Reference::Property(holder.clone(), key.into()), host)?;
+        if matches!(value, Value::Host(_)) {
+            return Err(Fault::new(
+                "JSON serialization of host objects is not implemented.",
+            ));
+        }
+        if matches!(value, Value::Object(_) | Value::Function(_)) {
+            let hook =
+                self.read_reference(&Reference::Property(value.clone(), "toJSON".into()), host)?;
+            if matches!(hook, Value::Function(_)) {
+                value = self.call_value(hook, &[Value::String(key.into())], value, host)?;
+            }
+        }
+        if let Some(replacer) = replacer {
+            value = self.call_value(
+                replacer.clone(),
+                &[Value::String(key.into()), value],
+                holder.clone(),
+                host,
+            )?;
+        }
+        // Hooks run before wrapper conversion. A replacement object's toJSON
+        // is not called a second time for the same property.
+        match self.wrapped_primitive(&value) {
+            Some(Value::Number(_)) => Ok(Value::Number(self.binary_number(&value, host)?)),
+            Some(value @ Value::Bool(_)) => Ok(value),
+            _ => Ok(value),
+        }
+    }
+
+    fn json_property_list(
+        &mut self,
+        value: Option<&Value>,
+        host: &mut dyn Host,
+    ) -> Result<Option<Vec<String>>, Fault> {
+        let Some(Value::Object(id)) = value else {
+            return Ok(None);
+        };
+        let Some(length) = self.object(*id)?.length else {
+            return Ok(None);
+        };
+        let mut keys = Vec::new();
+        let mut seen = BTreeSet::new();
+        let mut bytes = 0usize;
+        for index in 0..length {
+            self.step()?;
+            let value = self.get_property_with_host(*id, &index.to_string(), host)?;
+            let key = match value {
+                Value::String(text) => Some(text),
+                Value::Number(number) => Some(number_text(number)),
+                value if matches!(self.wrapped_primitive(&value), Some(Value::Number(_))) => {
+                    Some(self.primitive_with_hint(value, true, host)?.script_text()?)
+                }
+                _ => None,
+            };
+            if let Some(key) = key {
+                self.property_name(&key)?;
+                self.work(key.len())?;
+                if !seen.contains(&key) {
+                    if keys.len() == MAX_OBJECT_PROPERTIES {
+                        return Err(Fault::new("JSON property list limit reached (4096)."));
+                    }
+                    let added = key.len() * 2
+                        + 2 * std::mem::size_of::<String>()
+                        + 3 * std::mem::size_of::<usize>();
+                    bytes = bytes.saturating_add(added);
+                    if bytes > MAX_RETAINED_VALUES {
+                        return Err(Fault::new(
+                            "JSON property list snapshot limit reached (2 MiB).",
+                        ));
+                    }
+                    self.work(added)?;
+                    seen.insert(key.clone());
+                    keys.push(key);
+                }
+            }
+        }
+        Ok(Some(keys))
+    }
+
     pub(super) fn json_stringify(
         &mut self,
         args: &[Value],
         host: &mut dyn Host,
     ) -> Result<Value, Fault> {
         let value = args.first().unwrap_or(&Value::Undefined);
-        if matches!(args.get(1), Some(Value::Function(_)))
-            || matches!(args.get(1), Some(Value::Object(id)) if self.object(*id)?.length.is_some())
-        {
-            return Err(Fault::new(
-                "JSON.stringify replacer functions and property lists are not implemented.",
-            ));
-        }
+        let replacer = args
+            .get(1)
+            .filter(|value| matches!(value, Value::Function(_)));
+        let property_list = self.json_property_list(args.get(1), host)?;
         let converted_space = match args.get(2) {
             Some(value) if matches!(self.wrapped_primitive(value), Some(Value::Number(_))) => {
                 Some(Value::Number(self.binary_number(value, host)?))
@@ -462,6 +779,10 @@ impl Runtime {
             }
             _ => String::new(),
         };
+        let holder = self.new_object(None)?;
+        let value = self.copy_value(value)?;
+        self.store_property(holder, "".into(), value, Some((true, true, true)))?;
+        let value = self.json_property_value(&Value::Object(holder), "", replacer, host)?;
         if matches!(
             value,
             Value::Undefined | Value::Function(_) | Value::Symbol(_)
@@ -470,8 +791,7 @@ impl Runtime {
         }
         let mut output = String::new();
         let mut frames = Vec::new();
-        let value = self.copy_value(value)?;
-        self.json_write_value(value, &mut output, &mut frames, host)?;
+        self.json_write_value(value, &mut output, &mut frames, property_list.is_some())?;
         while let Some(mut frame) = frames.pop() {
             self.step()?;
             let array = matches!(frame.entries, Entries::Array { .. });
@@ -486,9 +806,20 @@ impl Runtime {
                     }
                 }
                 Entries::Object(keys) => keys.next(),
+                Entries::Listed { next } => {
+                    let keys = property_list.as_ref().unwrap();
+                    if let Some(key) = keys.get(*next) {
+                        self.work(key.len())?;
+                        *next += 1;
+                        Some(key.clone())
+                    } else {
+                        None
+                    }
+                }
             };
             if let Some(key) = key {
-                let value = self.get_property_with_host(frame.id, &key, host)?;
+                let value =
+                    self.json_property_value(&Value::Object(frame.id), &key, replacer, host)?;
                 if !array
                     && matches!(
                         value,
@@ -508,7 +839,7 @@ impl Runtime {
                     self.append_string(&mut output, if gap.is_empty() { ":" } else { ": " })?;
                 }
                 frames.push(frame);
-                self.json_write_value(value, &mut output, &mut frames, host)?;
+                self.json_write_value(value, &mut output, &mut frames, property_list.is_some())?;
             } else {
                 if frame.wrote {
                     self.json_indent(&mut output, &gap, frames.len())?;
@@ -535,6 +866,159 @@ mod tests {
         }
         fn call(&mut self, _: u32, _: &str, _: &[Value]) -> Result<Value, String> {
             Err("No host object is exposed in this test.".into())
+        }
+    }
+
+    fn callback_succeeds(source: &str) {
+        assert_eq!(
+            Runtime::new()
+                .execute(source, &mut NoHost)
+                .unwrap()
+                .to_text(),
+            "ok"
+        );
+    }
+
+    #[test]
+    fn json_callbacks_reviver_postorder_holders_deletion_and_root() {
+        callback_succeeds(
+            r#"
+var order=[],root;
+var value=JSON.parse('{"b":[1,2],"a":3}',function(key,value,context){
+if(arguments.length!==3||Object.getPrototypeOf(context)!==Object.prototype)throw 'context';
+order.push(key+':'+(Array.isArray(this)?'array':'object'));
+if(key==='0')return undefined;if(key==='1')return value+5;if(key==='a')return undefined;
+if(key==='')root=this;return value;});
+if(order.join('|')!=='0:array|1:array|b:object|a:object|:object')throw 'postorder';
+if(root['']!==value||JSON.stringify(value)!=='{"b":[null,7]}'||Object.hasOwn(value.b,0))throw 'holder and deletion';
+if(JSON.parse('2',function(k,v){return k===''?v+4:v;})!==6||JSON.parse('2',function(){})!==undefined)throw 'root';
+'ok';
+"#,
+        );
+    }
+
+    #[test]
+    fn json_callbacks_reviver_source_context_keeps_exact_last_parse_tokens() {
+        callback_succeeds(
+            r#"
+var sources=[],contexts=[];
+var result=JSON.parse('{"n":1.20e+2,"s":"a\\nb","z":-0,"n":5,"a":[true,null]}',function(k,v,c){contexts.push(c);sources.push(k+':'+Object.hasOwn(c,'source')+':'+c.source);return v;});
+if(sources.join('|')!=='n:true:5|s:true:"a\\nb"|z:true:-0|0:true:true|1:true:null|a:false:undefined|:false:undefined')throw sources.join('|');
+if(contexts[0]===contexts[1]||1/result.z!==-Infinity)throw 'fresh context or negative zero';
+var raw='';JSON.parse(' 1.20e+2 ',function(k,v,c){raw=c.source;return v;});if(raw!=='1.20e+2')throw 'source range';
+var d=Object.getOwnPropertyDescriptor(contexts[0],'source');if(!d.writable||!d.enumerable||!d.configurable)throw 'context descriptor';
+'ok';
+"#,
+        );
+    }
+
+    #[test]
+    fn json_callbacks_reviver_observes_mutation_and_ignores_definition_false() {
+        callback_succeeds(
+            r#"
+var contexts='';
+var result=JSON.parse('{"first":1,"later":2,"child":{"x":3}}',function(k,v,c){
+if(k==='first'){this.later=9;this.child={x:3};this.added=4;Object.defineProperty(this,'first',{value:8,configurable:false});return undefined;}
+contexts+=k+':'+Object.hasOwn(c,'source')+'|';return v;});
+if(JSON.stringify(result)!=='{"first":8,"later":9,"child":{"x":3},"added":4}')throw 'mutation';
+if(contexts!=='later:false|x:false|child:false|:false|')throw contexts;
+var array=JSON.parse('[1,2]',function(k,v){if(k==='0'){Object.freeze(this);return 8;}return v;});
+if(JSON.stringify(array)!=='[1,2]')throw 'frozen definitions';
+var seen='';JSON.parse('{"a":1,"b":-0}',function(k,v,c){if(k==='a')this.b=0;if(k==='b')seen=Object.hasOwn(c,'source');return v;});
+if(seen!==false)throw 'SameValue negative zero';
+'ok';
+"#,
+        );
+    }
+
+    #[test]
+    fn json_callbacks_replacer_and_tojson_keep_holder_and_order() {
+        callback_succeeds(
+            r#"
+var order=[],leaf={toJSON:function(key){order.push('j:'+key+':'+(this===leaf));return {v:2};}},root={a:leaf,b:3};
+var output=JSON.stringify(root,function(key,value){order.push('r:'+key+':'+(this===root));if(key==='v')return value+5;if(key==='b')return undefined;return value;});
+if(output!=='{"a":{"v":7}}'||order.join('|')!=='r::false|j:a:true|r:a:true|r:v:false|r:b:true')throw 'hook order';
+if(JSON.stringify(undefined,function(){return 4;})!=='4')throw 'undefined replacement';
+var f=function(){};f.toJSON=function(k){return k+'function';};if(JSON.stringify({f:f})!=='{"f":"ffunction"}')throw 'function toJSON';
+var fresh={toJSON(){throw 'second toJSON';}};if(JSON.stringify(1,function(k,v){return k===''?fresh:v;})!=='{}')throw 'replacer object';
+'ok';
+"#,
+        );
+    }
+
+    #[test]
+    fn json_callbacks_property_lists_keep_order_nonenum_and_inherited_keys() {
+        callback_succeeds(
+            r#"
+var parent={inherited:7},o=Object.create(parent);o.b=2;o.a=1;o[2]=9;Object.defineProperty(o,'hidden',{value:4});
+var boxed=Object(2),calls=0;boxed.toString=function(){calls++;return '2';};
+var output=JSON.stringify(o,['b','a','b',boxed,'hidden','inherited',true,{},Symbol()]);
+if(output!=='{"b":2,"a":1,"2":9,"hidden":4,"inherited":7}'||calls!==1)throw 'property list';
+if(JSON.stringify({a:{b:2,a:1},b:3},['b','a'])!=='{"b":3,"a":{"b":2,"a":1}}')throw 'nested list';
+if(JSON.stringify([1,2],['1'])!=='[1,2]')throw 'array list ignored';
+'ok';
+"#,
+        );
+    }
+
+    #[test]
+    fn json_callbacks_live_getters_omissions_cycles_and_thrown_identity() {
+        callback_succeeds(
+            r#"
+var log='',o={};Object.defineProperty(o,'a',{enumerable:true,get:function(){log+='a';delete o.b;o.c=3;return 1;}});o.b=2;
+if(JSON.stringify(o)!=='{"a":1}'||log!=='a')throw 'live keys';
+if(JSON.stringify({s:Symbol(),f:function(){},u:undefined,a:[Symbol(),function(){},undefined]})!=='{"a":[null,null,null]}')throw 'omissions';
+var a={};a.self=a;if(JSON.stringify(a,function(k,v){return k==='self'?'stopped':v;})!=='{"self":"stopped"}')throw 'cycle filtered';
+var marker={},calls=0,caught=false;try{JSON.stringify({a:1,b:2},function(k,v){calls++;if(k==='a')throw marker;return v;});}catch(e){caught=e===marker;}
+if(!caught||calls!==2)throw 'replacer throw';
+var cyclic=false;try{JSON.stringify(1,function(k,v){return a;});}catch(e){cyclic=e.name==='TypeError';}if(!cyclic)throw 'replacement cycle';
+'ok';
+"#,
+        );
+    }
+
+    #[test]
+    fn json_callbacks_conversion_order_and_recursive_calls_preserve_values() {
+        callback_succeeds(
+            r#"
+var order='',text={toString(){order+='s';return '{"x":2}';}};
+if(JSON.parse(text,function(k,v){order+=k;return v;}).x!==2||order!=='sx')throw 'parse conversion';
+order='';var list=[];Object.defineProperty(list,0,{get:function(){order+='l';return 'a';}});list.length=1;
+var gap=Object(2);gap.valueOf=function(){order+='g';return 2;};var value={toJSON:function(){order+='j';return {a:1};}};
+if(JSON.stringify(value,list,gap)!=='{\n  "a": 1\n}'||order!=='lgj')throw 'list space hook order';
+if(JSON.stringify({a:1},function(k,v){if(k==='a')return JSON.parse(JSON.stringify(v+1));return v;})!=='{"a":2}')throw 'reentrant callbacks';
+'ok';
+"#,
+        );
+    }
+
+    #[test]
+    fn json_callbacks_never_roll_back_published_objects() {
+        callback_succeeds(
+            r#"
+var saved,marker={},caught=false;
+try{JSON.parse('{"a":1,"b":{"x":2}}',function(k,v){if(k==='a'){saved=this;throw marker;}return v;});}catch(e){caught=e===marker;}
+if(!caught||saved.a!==1||saved.b.x!==2)throw 'published parsed object';
+caught=false;try{JSON.parse({toString(){saved={keep:9};return '{bad';}});}catch(e){caught=e.name==='SyntaxError';}
+if(!caught||saved.keep!==9)throw 'source conversion publication';
+'ok';
+"#,
+        );
+    }
+
+    #[test]
+    fn json_callbacks_created_cycles_and_hook_recursion_remain_bounded() {
+        for source in [
+            "try{JSON.parse('{\"a\":1,\"b\":{}}',function(k,v){if(k==='a')this.b=this;return v;});}catch(e){caught=true;}finally{finished=true;}",
+            "var a={toJSON(){return JSON.stringify(this);}};try{JSON.stringify(a);}catch(e){caught=true;}finally{finished=true;}",
+        ] {
+            let mut runtime=Runtime::new();
+            runtime.execute("var caught=false,finished=false;",&mut NoHost).unwrap();
+            let error=runtime.execute(source,&mut NoHost).unwrap_err();
+            assert!(error.contains("limit"),"{error}");
+            assert_eq!(runtime.call_depth,0);assert_eq!(runtime.eval_depth,0);
+            runtime.begin_job();
+            assert_eq!(runtime.execute("!caught&&!finished;",&mut NoHost).unwrap().to_text(),"true");
         }
     }
 

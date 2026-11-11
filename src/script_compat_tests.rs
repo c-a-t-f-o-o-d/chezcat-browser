@@ -26,6 +26,61 @@ fn page(markup: &str, scripts: &[&str]) -> (Document, Forms, Page, Outcome) {
 }
 
 #[test]
+fn page_date_clock_is_integral_utc_and_preserves_monotonic_performance_origin() {
+    let before = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as f64;
+    let (doc, _, page, outcome) = page(
+        "<p>UTC clock</p>",
+        &[r#"
+var now=Date.now(),current=new Date(),mono=performance.now();
+if(!Number.isInteger(now)||!Number.isInteger(current.getTime())||!Number.isInteger(mono))throw 'clock units';
+if(Date!==window.Date||Date!==globalThis.Date)throw 'global Date';
+if(!Number.isFinite(current.getTime())||mono<0||mono>=86400000)throw 'clock origins';
+if(Date.parse(current.toISOString())!==current.getTime())throw 'UTC roundtrip';
+if(JSON.parse(JSON.stringify({when:new Date(0)})).when!=='1970-01-01T00:00:00.000Z')throw 'Date JSON';
+document.title=String(now);
+"#],
+    );
+    let after = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as f64;
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    let observed: f64 = doc.title.parse().unwrap();
+    assert!(observed >= before.min(after) && observed <= before.max(after));
+}
+
+#[test]
+fn page_date_clock_requires_active_scripting_and_charges_host_work() {
+    let (mut doc, mut forms, mut page, outcome) = page("<p>Clock capability</p>", &[]);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    page.state.host_work = 1;
+    let mut bridge = Bridge {
+        doc: &mut doc,
+        forms: &mut forms,
+        state: &mut page.state,
+    };
+    let timestamp = bridge.date_now().unwrap();
+    assert!(timestamp.is_finite() && timestamp == timestamp.trunc());
+    assert_eq!(bridge.state.host_work, 0);
+    assert!(bridge.date_now().unwrap_err().contains("DOM work limit"));
+    bridge.state.host_work = 10;
+    bridge.state.enabled = false;
+    assert!(bridge
+        .date_now()
+        .unwrap_err()
+        .contains("scripting is disabled"));
+    bridge.state.enabled = true;
+    bridge.doc.scripting_enabled = false;
+    assert!(bridge
+        .date_now()
+        .unwrap_err()
+        .contains("scripting is disabled"));
+}
+
+#[test]
 fn dataset_is_live_reflected_and_enumerable_with_stable_identity() {
     let (doc, _, page, outcome) = page(
         "<div id=p data-first-name='Ada' data-x--y='double' data-α='unicode'></div>",
@@ -796,4 +851,52 @@ fn live_tag_collections_keep_retention_and_repeated_walks_bounded() {
     assert_eq!(outcome.errors, 1, "{}", page.report());
     assert_eq!(doc.title, "live work recovered");
     assert!(page.report().contains("DOM work limit"));
+}
+
+#[test]
+fn dynamic_function_callbacks_keep_document_string_compilation_policy() {
+    for (header, allowed) in [
+        ("script-src 'nonce-original-function-fixture'", false),
+        ("script-src 'nonce-original-function-fixture' 'unsafe-eval'", true),
+        ("default-src 'none'; script-src-elem 'nonce-original-function-fixture' 'unsafe-eval'", false),
+        ("script-src 'nonce-original-function-fixture' 'unsafe-eval', script-src 'nonce-original-function-fixture'", false),
+    ] {
+        let mut policy = crate::csp::PolicySet::default();
+        policy.add_header(header);
+        let mut doc = crate::html::parse("<p id=out></p>");
+        doc.scripting_enabled = true;
+        let mut forms = Forms::new(&doc);
+        let mut page = Page::new();
+        let location = crate::navigation::address(
+            "http://127.0.0.1:1/function-policy",
+            &crate::navigation::Location::home(),
+        ).unwrap();
+        page.set_location(&location);
+        let source = r#"
+var log='';
+function attempt(label){
+try{
+var body="document.getElementById('out').textContent+=label;";
+var compiled=label==='timer'?new Function('label',body):Function('label',body);
+compiled(label);log+=label+':allowed;';
+}catch(error){if(error.name!=='EvalError')throw error;log+=label+':blocked;';}
+document.title=log;
+}
+attempt('script');
+Promise.resolve().then(function(){attempt('promise');});
+setTimeout(function(){attempt('timer');},0);
+"#;
+        assert!(policy.allows_inline(0, Some("original-function-fixture"), source).is_ok());
+        let scripts = [Script { node: 0, label: "original Function CSP fixture".into(), source: source.into() }];
+        let outcome = page.start_with_policy(&mut doc, &mut forms, &scripts, &policy);
+        assert_eq!(outcome.errors, 0, "{header}: {}", page.report());
+        let result = if allowed { "allowed" } else { "blocked" };
+        assert_eq!(doc.title, format!("script:{result};promise:{result};"));
+        let outcome = page.poll_timer_at(&mut doc, &mut forms, Instant::now() + Duration::from_secs(1)).unwrap();
+        assert_eq!(outcome.errors, 0, "{header}: {}", page.report());
+        assert_eq!(doc.title, format!("script:{result};promise:{result};timer:{result};"));
+        let out = doc.nodes.iter().enumerate().find_map(|(id, _)| (doc.attr(id, "id") == Some("out")).then_some(id)).unwrap();
+        let text = Bridge { doc: &mut doc, forms: &mut forms, state: &mut page.state }.text_content(out).unwrap();
+        assert_eq!(text, if allowed { "scriptpromisetimer" } else { "" });
+    }
 }

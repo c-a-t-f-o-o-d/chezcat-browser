@@ -5,8 +5,7 @@
 //! ECMAScript references: OrdinaryGet/SetPrototypeOf, OrdinaryHasInstance,
 //! Object.create/getPrototypeOf/setPrototypeOf, and ordinary property descriptors.
 //! Accessors use the original receiver and share the normal execution budgets.
-//! Proxies, boxed strings and dynamic Function source compilation remain
-//! explicit limitations.
+//! Proxies and boxed strings remain explicit limitations.
 
 use super::{
     strict_equal, Accessors, Builtin, Fault, Function, Host, Ordinary, PropertyKey, Runtime, Value,
@@ -59,6 +58,8 @@ impl Runtime {
             Builtin::Iterator(_) => 0,
             Builtin::TextEncoding(operation) => operation.arity(),
             Builtin::Symbol(operation) => operation.arity(),
+            Builtin::Promise(operation) => operation.arity(),
+            Builtin::Date(operation) => operation.arity(),
             Builtin::EmptyFunction | Builtin::ThrowTypeError => 0,
             Builtin::RegExp | Builtin::ParseInt | Builtin::JsonParse => 2,
             Builtin::JsonStringify => 3,
@@ -77,13 +78,15 @@ impl Runtime {
             Builtin::FunctionMethod("toString")
             | Builtin::ObjectMethod("toString" | "valueOf")
             | Builtin::ErrorToString => 0,
-            Builtin::ArrayMethod("pop" | "toString" | "shift" | "reverse" | "toReversed") => 0,
+            Builtin::ArrayMethod(
+                "pop" | "toString" | "shift" | "reverse" | "toReversed" | "flat",
+            ) => 0,
             Builtin::ArrayMethod("slice" | "splice" | "copyWithin" | "with" | "toSpliced") => 2,
             Builtin::RegExpMethod("toString") => 0,
             Builtin::StringMethod(
                 "toString" | "valueOf" | "trim" | "toLowerCase" | "toUpperCase",
             ) => 0,
-            Builtin::StringMethod("split" | "slice" | "substring" | "replace") => 2,
+            Builtin::StringMethod("split" | "slice" | "substring" | "replace" | "replaceAll") => 2,
             Builtin::PrimitiveMethod("toString", true) => 1,
             Builtin::PrimitiveMethod(_, _) => 0,
             _ => 1,
@@ -286,6 +289,8 @@ impl Runtime {
             "toReversed",
             "with",
             "toSpliced",
+            "flat",
+            "flatMap",
         ] {
             self.prototype_method(array, name, Builtin::ArrayMethod(name))?;
         }
@@ -367,6 +372,7 @@ impl Runtime {
             "search",
             "match",
             "replace",
+            "replaceAll",
         ] {
             self.prototype_method(string, name, Builtin::StringMethod(name))?;
         }
@@ -1694,6 +1700,10 @@ impl Runtime {
                         iterator.tag()
                     } else if let Some(text) = &object.text {
                         text.tag()
+                    } else if object.date.is_some() {
+                        "Date"
+                    } else if object.promise.is_some() {
+                        "Promise"
                     } else if object.arguments.is_some() {
                         "Arguments"
                     } else if object.length.is_some() {
@@ -1863,6 +1873,9 @@ impl Runtime {
                 }
             }
             Builtin::ArrayMethod(method) => {
+                if matches!(method, "flat" | "flatMap") {
+                    return self.array_flat(this, method == "flatMap", args, host);
+                }
                 let Value::Object(id) = this else {
                     return Err(Fault::new(
                         "Borrowed array methods require an ordinary object in this subset.",
@@ -1915,6 +1928,9 @@ impl Runtime {
                 self.units_string(&units).map(Value::String)
             }
             Builtin::StringMethod(method) => {
+                if method == "replaceAll" {
+                    return self.string_replace_all(this, args, host);
+                }
                 let receiver = match this {
                     Value::Object(id) if Some(id) == self.string_prototype => {
                         Value::String(String::new())

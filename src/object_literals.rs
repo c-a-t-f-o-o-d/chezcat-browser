@@ -17,10 +17,13 @@ pub(super) enum Kind {
 }
 
 #[derive(Clone)]
-pub(super) struct Member {
-    pub(super) key: ExprId,
-    pub(super) value: ExprId,
-    pub(super) kind: Kind,
+pub(super) enum Member {
+    Property {
+        key: ExprId,
+        value: ExprId,
+        kind: Kind,
+    },
+    Spread(ExprId),
 }
 
 impl Runtime {
@@ -250,7 +253,6 @@ mod tests {
             "({set x(a,b){}});",
             "({set x(a,){}});",
             "({set x(...a){}});",
-            "({set x([a]){}});",
             "({get x:1});",
             "({get __proto__(){return 1;}});",
             "({get x(){super.x;}});",
@@ -283,6 +285,124 @@ mod tests {
             try{eval('untouched=1;({get x(v){}});');}catch(e){seen=e.name==='SyntaxError';}
             if(!seen || untouched!==0)throw 'catchable arity syntax error';
         "#);
+    }
+
+    #[test]
+    fn literal_setter_original_pattern_program_is_now_supported() {
+        // Exact 0.39 unsupported program retained as a positive 0.40 test.
+        run("({set x([a]){}});");
+        run("var o={set x([a=3,...tail]){this.value=a+tail.length;}};o.x=[undefined,4,5];if(o.value!==5)throw 'setter pattern';");
+    }
+
+    #[test]
+    fn literal_spread_copies_nullish_primitives_strings_arrays_and_merged_values() {
+        run(r#"
+var side=Symbol('side'),original={a:1,[side]:4};
+var copy={before:0,...null,...undefined,...true,...3,...'ab',...original,a:9,after:2};
+if(Object.keys(copy).join()!=='0,1,before,a,after'||copy[0]!=='a'||copy[1]!=='b'||copy.a!==9||copy[side]!==4||copy.after!==2)throw 'spread values';
+var arrayCopy={...[7,,9]};if(Object.keys(arrayCopy).join()!=='0,2'||arrayCopy[0]!==7||arrayCopy[2]!==9||Object.hasOwn(arrayCopy,'length'))throw 'array own keys';
+var empty={...false,...Symbol('none')};if(Object.keys(empty).length!==0)throw 'scalar own keys';
+var fresh={...copy};if(fresh===copy||Object.getPrototypeOf(fresh)!==Object.prototype)throw 'fresh object';
+"#);
+    }
+
+    #[test]
+    fn literal_spread_snapshots_keys_but_uses_live_descriptors_and_getters() {
+        run(r#"
+var log='',symbol=Symbol('side');
+var source={get a(){log+='a';delete source.b;source.added=9;Object.defineProperty(source,'later',{enumerable:true});return 1;},b:2};
+Object.defineProperty(source,'later',{value:3,enumerable:false,configurable:true});source[symbol]=4;
+Object.setPrototypeOf(source,{inherited:5});
+var copy={...source};
+if(log!=='a'||Object.keys(copy).join()!=='a,later'||copy.a!==1||copy.later!==3||copy[symbol]!==4||copy.added!==undefined||copy.inherited!==undefined)throw 'copy key snapshot';
+var descriptor=Object.getOwnPropertyDescriptor(copy,'a');
+if(descriptor.value!==1||!descriptor.writable||!descriptor.enumerable||!descriptor.configurable||descriptor.get!==undefined)throw 'own data descriptor';
+var order='';function input(){order+='s';return {get x(){order+='g';return 2;}};}
+copy={before:(order+='a',1),...input(),after:(order+='b',3)};if(order!=='asgb'||copy.x!==2)throw 'left to right';
+"#);
+    }
+
+    #[test]
+    fn literal_spread_uses_own_data_definitions_without_setters() {
+        run(r#"
+var calls=0,symbol=Symbol('trap');
+Object.defineProperty(Object.prototype,'trap',{set(v){calls++;},configurable:true});
+Object.defineProperty(Object.prototype,symbol,{set(v){calls++;},configurable:true});
+var source={trap:7,[symbol]:8};
+var copy={set trap(v){calls++;},set [symbol](v){calls++;},...source};
+delete Object.prototype.trap;delete Object.prototype[symbol];
+var descriptor=Object.getOwnPropertyDescriptor(copy,'trap');
+if(copy.trap!==7||copy[symbol]!==8||calls!==0||descriptor.set!==undefined||!descriptor.writable||!descriptor.enumerable||!descriptor.configurable)throw 'own data write';
+copy={...source,get trap(){return 9;}};if(copy.trap!==9||Object.getOwnPropertyDescriptor(copy,'trap').value!==undefined)throw 'later accessor';
+"#);
+    }
+
+    #[test]
+    fn literal_spread_getter_throw_preserves_identity_and_stops_later_members() {
+        run(r#"
+var marker={},log='',source={get a(){log+='a';throw marker;},get b(){log+='b';return 2;}};
+try{var copy={...source,later:(log+='z',3)};throw 'missing throw';}catch(e){if(e!==marker)throw e;}
+if(log!=='a'||copy!==undefined)throw 'spread abrupt completion';
+"#);
+    }
+
+    #[test]
+    fn literal_spread_invalid_syntax_is_atomic() {
+        for source in ["var o={...};", "var o={...a:1};", "var o={...a,...};"] {
+            let mut runtime = Runtime::new();
+            runtime.execute("var effect=false;", &mut NoHost).unwrap();
+            assert!(runtime
+                .execute(&format!("effect=true;{source}"), &mut NoHost)
+                .is_err());
+            runtime.begin_job();
+            assert_eq!(
+                runtime.execute("effect;", &mut NoHost).unwrap().to_text(),
+                "false"
+            );
+        }
+    }
+
+    #[test]
+    fn literal_spread_native_and_property_limits_remain_fatal() {
+        let mut runtime = Runtime::new();
+        runtime.define_global("native", Value::Host(7)).unwrap();
+        runtime
+            .execute("var caught=false,finalized=false,later=false;", &mut NoHost)
+            .unwrap();
+        let error=runtime.execute("try{({...native,later:(later=true)});}catch(e){caught=true;}finally{finalized=true;}", &mut NoHost).unwrap_err();
+        assert!(error.contains("Native-host object rest/spread"), "{error}");
+        runtime.begin_job();
+        assert_eq!(
+            runtime
+                .execute("!caught&&!finalized&&!later;", &mut NoHost)
+                .unwrap()
+                .to_text(),
+            "true"
+        );
+        let mut runtime = Runtime::new();
+        runtime
+            .define_global(
+                "textSource",
+                Value::String("x".repeat(super::super::MAX_OBJECT_PROPERTIES)),
+            )
+            .unwrap();
+        runtime
+            .execute("var caught=false,finalized=false,later=false;", &mut NoHost)
+            .unwrap();
+        runtime.begin_job();
+        let error=runtime.execute("try{({before:0,...textSource,later:(later=true)});}catch(e){caught=true;}finally{finalized=true;}", &mut NoHost).unwrap_err();
+        assert!(error.contains("limit"), "{error}");
+        assert_eq!(runtime.call_depth, 0);
+        assert_eq!(runtime.eval_depth, 0);
+        assert!(runtime.properties <= super::super::MAX_PROPERTIES);
+        runtime.begin_job();
+        assert_eq!(
+            runtime
+                .execute("!caught&&!finalized&&!later;", &mut NoHost)
+                .unwrap()
+                .to_text(),
+            "true"
+        );
     }
 
     #[test]

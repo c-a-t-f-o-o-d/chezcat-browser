@@ -1,0 +1,279 @@
+{
+  "version": "0.40.0",
+  "verified_utc": "2026-11-11T13:59:09.516643+00:00",
+  "authoritative_baseline": {
+    "version": "0.39.0",
+    "archive_sha256": "73e785f7e638a110bdf856dc894be4693c610204cd26e179bafd898de8cfcd65",
+    "files_retained": 797,
+    "original_rust_sources_retained": 138
+  },
+  "rust": {
+    "passed": 1061,
+    "failed": 0,
+    "ignored": 0,
+    "old_executed_tests_retained": 1006,
+    "new_tests": 55,
+    "app_search_tests_passed": 27,
+    "app_search_tests": [
+      "app::search_tests::callable_object_helpers_bootstrap_bound_search_and_repeated_search",
+      "app::search_tests::common_builtins_callbacks_prepare_search_and_repeated_search",
+      "app::search_tests::default_parameter_closures_submit_search_and_repeated_search",
+      "app::search_tests::deferred_function_bootstrap_initializes_scripted_search_and_repeated_search",
+      "app::search_tests::destructuring_parameters_and_bindings_submit_search_and_repeated_search",
+      "app::search_tests::dynamic_function_handlers_submit_search_and_repeated_search",
+      "app::search_tests::form_action_csp_blocks_native_submits_with_scripting_enabled_or_disabled_and_script_submits",
+      "app::search_tests::input_search_renders_results_follows_cross_origin_result_and_searches_again",
+      "app::search_tests::iterator_protocol_and_iterable_helpers_bootstrap_search_and_repeated_search",
+      "app::search_tests::literal_accessors_and_array_descriptors_bootstrap_search_and_repeated_search",
+      "app::search_tests::long_else_if_bootstrap_initializes_scripted_search_and_repeated_search",
+      "app::search_tests::named_regexp_groups_prepare_search_and_repeated_search",
+      "app::search_tests::object_spread_getters_and_symbols_submit_search_and_repeated_search",
+      "app::search_tests::optional_chaining_and_nullish_values_submit_search_and_repeated_search",
+      "app::search_tests::passive_accessor_probe_initializes_scripted_search_and_repeated_search",
+      "app::search_tests::primitive_wrappers_and_conversion_hooks_bootstrap_search_and_repeated_search",
+      "app::search_tests::promise_thenables_and_microtasks_submit_search_and_repeated_search",
+      "app::search_tests::script_form_cross_origin_action_and_redirect_make_no_forbidden_request",
+      "app::search_tests::script_form_submit_bypasses_required_but_stop_discards_the_queued_request",
+      "app::search_tests::scripted_post_preserves_body_and_reload_confirmation",
+      "app::search_tests::spread_and_rest_bootstrap_search_and_repeated_search",
+      "app::search_tests::symbol_bootstrap_initializes_scripted_search_and_repeated_search",
+      "app::search_tests::template_interpolation_prepares_search_and_repeated_search",
+      "app::search_tests::textarea_enter_edits_lines_and_submit_cancellation_preserves_the_current_document",
+      "app::search_tests::textarea_scripted_enter_submits_snapshots_and_subsequent_searches",
+      "app::search_tests::textarea_search_renders_results_follows_cross_origin_result_and_searches_again",
+      "app::search_tests::utc_dates_and_json_callbacks_submit_search_and_repeated_search"
+    ]
+  },
+  "javascript": {
+    "node": "v24.22.1",
+    "rustc": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+    "ordinary_comparisons": 1078,
+    "ordinary_matches": 1078,
+    "negative_cases": 256,
+    "negative_passed": 256,
+    "separate_current_spec_assertions": 1,
+    "separate_current_spec_assertions_passed": 1,
+    "original_fixture_tuples_retained": 1257,
+    "source_and_checker_frozen": true,
+    "reference_differences_excluded_from_matching_totals": true
+  },
+  "progress": {
+    "fixed112": {
+      "definition_file": "tools/compatibility-progress-cohort.json",
+      "sha256": "dfdd9237d15e159164213fd26188cbd11dfbec69860d3c1258dd3f3961c9e163",
+      "baseline": {
+        "version": "0.39.0",
+        "matches_node": 98,
+        "total": 112,
+        "percentage": 87.5
+      },
+      "current": {
+        "version": "0.40.0",
+        "matches_node": 101,
+        "total": 112,
+        "percentage": 90.18
+      },
+      "historical_same_cohort": [
+        {
+          "version": "0.36.0",
+          "matches_node": 72,
+          "total": 112,
+          "percentage": 64.29
+        },
+        {
+          "version": "0.37.0",
+          "matches_node": 90,
+          "total": 112,
+          "percentage": 80.36
+        },
+        {
+          "version": "0.38.0",
+          "matches_node": 91,
+          "total": 112,
+          "percentage": 81.25
+        },
+        {
+          "version": "0.39.0",
+          "matches_node": 98,
+          "total": 112,
+          "percentage": 87.5
+        },
+        {
+          "version": "0.40.0",
+          "matches_node": 101,
+          "total": 112,
+          "percentage": 90.18
+        }
+      ],
+      "delta_matching_probes": 3,
+      "historical_note": "0.36 was measured retrospectively during 0.37."
+    },
+    "original160": {
+      "baseline": {
+        "total": 160,
+        "matches_node": 145,
+        "percentage": 90.62,
+        "statuses": {
+          "supported": 145,
+          "missing": 12,
+          "intentionally_limited": 2,
+          "partial": 1
+        }
+      },
+      "current": {
+        "total": 160,
+        "matches_node": 148,
+        "percentage": 92.5,
+        "statuses": {
+          "supported": 148,
+          "missing": 9,
+          "intentionally_limited": 2,
+          "partial": 1
+        }
+      },
+      "records_retained_identically": 160,
+      "scope": "The unchanged prior inventory, shown separately from the 17 new probes."
+    },
+    "expanded177": {
+      "baseline": {
+        "total": 177,
+        "matches_node": 145,
+        "statuses": {
+          "supported": 145,
+          "missing": 29,
+          "intentionally_limited": 2,
+          "partial": 1
+        }
+      },
+      "current": {
+        "total": 177,
+        "matches_node": 164,
+        "statuses": {
+          "supported": 164,
+          "missing": 9,
+          "intentionally_limited": 2,
+          "partial": 2
+        }
+      },
+      "current_percentage": 92.6554,
+      "new_probes": 17,
+      "new_matching_probes": 16,
+      "previous_records_retained_identically": 160,
+      "regressions": [],
+      "incomparable": []
+    },
+    "scope": "Selected original capability samples, not whole-browser completion, engineering effort or live-site success."
+  },
+  "independent_checks": {
+    "review-final.json": {
+      "cases": 38,
+      "matches": 38,
+      "early_error_cases": 15,
+      "early_errors_passed": 15,
+      "bound_cases": 3,
+      "bounds_passed": 3
+    },
+    "date-final.json": {
+      "ordinary_cases": 10,
+      "ordinary_matches": 10,
+      "reference_difference_cases": 2,
+      "current_spec_assertions_passed": 2,
+      "bound_cases": 4,
+      "bounds_passed": 4
+    },
+    "object-spread-final.json": {
+      "cases": 8,
+      "matches": 8,
+      "early_error_cases": 2,
+      "early_errors_passed": 2,
+      "bound_cases": 2,
+      "bounds_passed": 2
+    },
+    "promises-final.json": {
+      "comparisons": 40,
+      "passed": 40,
+      "negative_cases": 3,
+      "negative_passed": 3
+    },
+    "promise-supplemental-final.json": {
+      "ordinary_cases": 10,
+      "ordinary_matches": 10,
+      "reference_difference_cases": 4,
+      "current_spec_assertions_passed": 4
+    }
+  },
+  "selected_test262": {
+    "files": 6,
+    "executions": 12,
+    "passed": 12,
+    "full_suite_run": false
+  },
+  "builds": {
+    "native_release": "passed",
+    "windows_x64_release": "passed",
+    "formatting": "passed",
+    "native_sha256": "a30618dc3fcbaee70f830542ff578ac807ca1ab644373dd0b8983246a5ffdb47",
+    "windows_sha256": "f33c6998dabf786e89292ac9c5ce0128baf8fb4e5a5ceced8faafb810bae3ff0",
+    "windows_bytes": 4249088,
+    "windows_version": "0.40.0.0",
+    "original_icons_and_system_imports_verified": true,
+    "windows_runtime_executed": false,
+    "warnings": "Same two pre-existing unused-method warnings as0.39."
+  },
+  "local_release_smoke": {
+    "passed": true,
+    "assertions": 6,
+    "script_errors": 0,
+    "render": [
+      1100,
+      650
+    ],
+    "scope": "Original local HTML through the final native release binary, with Promise checkpoint and Date page-clock interaction."
+  },
+  "verification_boundaries": {
+    "live_google_verified": false,
+    "live_bing_verified": false,
+    "google_capture": "Development HTTPS capture302redirected to access check; stopped without following or executing; Google not retried.",
+    "bing_native_diagnostic": "Final native production-binary diagnostic blocked at DNS before TCP/TLS/HTML.",
+    "windows_gui_run": false,
+    "full_test262_run": false,
+    "wpt_run": false,
+    "clippy_rerun": false
+  },
+  "security": {
+    "tls_validation_weakened": false,
+    "csp_weakened": false,
+    "cross_origin_rules_changed": false,
+    "profile_defaults_changed": false,
+    "site_specific_rewriting": false,
+    "cargo_dependencies": 0,
+    "date_clock_exception": "Page host explicitly grants UTC whole-millisecond wall time only while scripting is active, charged to host work. Language hosts default deny. OS timezone and local-time Date operations remain unavailable."
+  },
+  "preservation": {
+    "checks_passed": 32,
+    "original_rust_test_functions": 1007,
+    "original_token_identical_test_bodies": 1005,
+    "exact_rust_negative_to_positive_program_migrations": 2,
+    "exact_main_negative_to_positive_program_migrations": 4,
+    "original160_inventory_records_preserved": true,
+    "fixed112_cohort_byte_identical": true
+  },
+  "frozen_build_inputs": {
+    "files": 229,
+    "rust_files": 142,
+    "rust_source_manifest_sha256": "2523bcc95c77aca6a937889a561ff7b6d3803b94e07ec256f9c77fd8d42b0ac0",
+    "independent145_input_manifest_sha256": "4325efb2ef1c8b3b171095247a89f26e62f6eb3e5e101a41a9851e9021337222"
+  },
+  "recoveries": [
+    {
+      "filename": "ChezCat_0_40_Defaults_RegExp_Recovery.zip",
+      "bytes": 6075350,
+      "sha256": "62e4b8b1cef46e239df66836deb168dd3a38538445ddf772100fce38404ae5dd",
+      "files": 834,
+      "verified_manifest_entries": 833,
+      "source_version": "0.40.0",
+      "source_only": true,
+      "windows_version": null
+    }
+  ]
+}

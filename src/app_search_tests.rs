@@ -107,7 +107,37 @@ impl Site {
                     let wrapper_bootstrap = path.contains("-wrappers");
                     let iterator_bootstrap = path.contains("-iterators");
                     let spread_bootstrap = path.contains("-spread");
-                    let kind = if spread_bootstrap {
+                    let promise_bootstrap = path.contains("-promise");
+                    let builtin_bootstrap = path.contains("-builtins");
+                    let template_bootstrap = path.contains("-templates");
+                    let function_bootstrap = path.contains("-functions");
+                    let optional_bootstrap = path.contains("-optional");
+                    let defaults_bootstrap = path.contains("-defaults");
+                    let named_regexp_bootstrap = path.contains("-namedregexp");
+                    let patterns_bootstrap = path.contains("-patterns");
+                    let dates_bootstrap = path.contains("-dates");
+                    let object_spread_bootstrap = path.contains("-objectspread");
+                    let kind = if object_spread_bootstrap {
+                        "area-script-objectspread"
+                    } else if defaults_bootstrap {
+                        "area-script-defaults"
+                    } else if named_regexp_bootstrap {
+                        "area-script-namedregexp"
+                    } else if patterns_bootstrap {
+                        "area-script-patterns"
+                    } else if dates_bootstrap {
+                        "area-script-dates"
+                    } else if function_bootstrap {
+                        "area-script-functions"
+                    } else if optional_bootstrap {
+                        "area-script-optional"
+                    } else if template_bootstrap {
+                        "area-script-templates"
+                    } else if builtin_bootstrap {
+                        "area-script-builtins"
+                    } else if promise_bootstrap {
+                        "area-script-promise"
+                    } else if spread_bootstrap {
                         "area-script-spread"
                     } else if iterator_bootstrap {
                         "area-script-iterators"
@@ -173,7 +203,132 @@ impl Site {
                     } else {
                         ""
                     };
-                    let bootstrap = if spread_bootstrap {
+                    let bootstrap = if object_spread_bootstrap {
+                        r#"var marker=Symbol('query'),base={get key(){return 'Enter';}};
+Object.defineProperty(base,'ignored',{get(){throw Error('hidden spread getter');}});
+var config={...null,...base,...undefined,...{enabled:true}};
+if(config.key!=='Enter'||!config.enabled||Object.hasOwn(config,'ignored'))throw Error('spread configuration');
+document.f.onsubmit=function(){throw Error('script submit dispatched a submit event');};
+document.f.q.onkeydown=function(event){if(event.key===config.key){event.preventDefault();
+var input=this,reads=0,source={get query(){reads++;return input.value;},[marker]:'kept'};
+var packet={query:'old',...source,tail:1},shape=Object.getOwnPropertyDescriptor(packet,'query');
+if(reads!==1||shape.value!==this.value||!shape.writable||!shape.enumerable||!shape.configurable||packet[marker]!=='kept')throw Error('spread query snapshot');
+this.form.submit();this.value='changed after submit';}};
+document.f.setAttribute('data-objectspread','ready');"#.to_owned()
+                    } else if defaults_bootstrap {
+                        r#"function keyword(first='Ent',last='er'){return first+last;}
+var key=keyword();
+document.f.onsubmit=function(){throw Error('script submit dispatched a submit event');};
+document.f.q.onkeydown=function(event,query=this.value,read=()=>query){
+var query='body binding';
+if(event.key===key){event.preventDefault();if(read()!==this.value||arguments.length!==1)throw Error('parameter snapshot');this.form.submit();this.value='changed after submit';}
+};
+if(document.f.q.onkeydown.length!==1)throw Error('default function length');
+document.f.setAttribute('data-defaults',keyword('rea','dy'));"#.to_owned()
+                    } else if named_regexp_bootstrap {
+                        r#"var key=/^(?<first>Ent)(?<last>er)$/.exec('Enter').groups;
+if(Object.getPrototypeOf(key)!==null||key.first+key.last!=='Enter')throw Error('named groups bootstrap');
+document.f.onsubmit=function(){throw Error('script submit dispatched a submit event');};
+document.f.q.onkeydown=function(event){
+if(event.key===key.first+key.last){event.preventDefault();var snapshot=/^(?<query>.*)$/s.exec(this.value).groups.query;
+if(snapshot!==this.value||this.value.replace(/(?<query>.*)/s,'$<query>')!==snapshot)throw Error('named query snapshot');
+this.form.submit();this.value='changed after submit';}
+};
+document.f.setAttribute('data-namedregexp','ready');"#.to_owned()
+                    } else if patterns_bootstrap {
+                        r#"var {keys:[keyword],options:{enabled=true}={}}={keys:['Enter'],options:{}};
+var [first,...tail]=['re','a','dy'];if(!enabled||first+tail.join('')!=='ready')throw Error('patterns bootstrap');
+document.f.onsubmit=function(){throw Error('script submit dispatched a submit event');};
+function snapshot({query=value}={},value='missing'){return query;}
+document.f.q.onkeydown=function(event){var {key}=event;
+if(key===keyword){event.preventDefault();var {value:query}=this, [copy]=[query];
+if(snapshot({query:copy})!==this.value)throw Error('pattern query snapshot');
+this.form.submit();this.value='changed after submit';}
+};
+document.f.setAttribute('data-patterns',first+tail.join(''));"#.to_owned()
+                    } else if dates_bootstrap {
+                        r#"var stamp=new Date(Date.UTC(2024,1,29,12,34,56,789));
+if(stamp.toISOString()!=='2024-02-29T12:34:56.789Z'||Date.parse(stamp.toISOString())!==stamp.getTime())throw Error('Date bootstrap');
+if(typeof Date.now()!=='number'||!Number.isFinite(new Date().getTime()))throw Error('Date clock');
+document.f.onsubmit=function(){throw Error('script submit dispatched a submit event');};
+document.f.q.onkeydown=function(event){if(event.key==='Enter'){event.preventDefault();var packet=JSON.stringify({query:this.value,stamp:stamp});var parsed=JSON.parse(packet);
+if(parsed.query!==this.value||parsed.stamp!==stamp.toISOString())throw Error('Date query snapshot');
+this.form.submit();this.value='changed after submit';}};
+document.f.setAttribute('data-dates','ready');"#.to_owned()
+                    } else if function_bootstrap {
+                        r#"var keyword=Function('first','last','return first+last;')('Ent','er');
+var Packet=new Function('value','this.value=value;');
+if(Function('return this;')()!==window||Function('return typeof anonymous;')()!=='undefined')throw Error('Function global scope');
+document.f.onsubmit=function(){throw Error('script submit dispatched a submit event');};
+function install(){
+var hidden='caller scope';
+document.f.q.onkeydown=Function('event',"if(typeof hidden!=='undefined')throw Error('captured caller');if(event.key===keyword){event.preventDefault();var packet=new Packet(this.value);if(packet.value!==this.value)throw Error('Function query snapshot');this.form.submit();this.value='changed after submit';}");
+}
+install();document.f.setAttribute('data-functions',Function("return 'ready';")());"#.to_owned()
+                    } else if optional_bootstrap {
+                        r#"var config={search:{key:'Enter'}},absent=null,touches=0;
+var keyword=config?.search?.key??'Escape',ignored=absent?.[touches++]?.(touches++);
+if(touches!==0||ignored!==undefined||(0??9)!==0||(false??true)!==false)throw Error('optional short circuit');
+document.f.onsubmit=function(){throw Error('script submit dispatched a submit event');};
+document.f.q.onkeydown=function(event){
+if(event?.key===keyword){
+event.preventDefault();var input=this,snapshot=input?.value??'missing';
+if(snapshot!==input.value)throw Error('optional query snapshot');
+input?.form?.submit();input.value='changed after submit';
+}};
+document.f.setAttribute('data-optional',config?.missing?.value??'ready');"#.to_owned()
+                    } else if template_bootstrap {
+                        r#"var key=`${'Ent'}er`,seen='';
+function describe(query){return `query:${{toString(){seen+='convert';return query;}}}:${`length=${query.length}`}`;}
+if(`${/}/.test('}')} ${({value:'ready'}).value}`!=='true ready')throw Error('template delimiters');
+document.f.onsubmit=function(){throw Error('script submit dispatched a submit event');};
+document.f.q.onkeydown=function(event){
+if(event.key===key){
+event.preventDefault();var snapshot=this.value;seen='';
+var description=describe(snapshot);
+if(description!=='query:'+snapshot+':length='+snapshot.length||seen!=='convert')throw Error('template conversion');
+this.form.submit();this.value=`changed ${'after'} submit`;
+}};
+document.f.setAttribute('data-templates',`${'rea'}dy`);"#.to_owned()
+                    } else if builtin_bootstrap {
+                        r#"var config=JSON.parse('{"key":"Enter","discard":0}',function(key,value){if(key==='discard')return undefined;return value;});
+var keys=[['q'],['source']].flat();
+if(keys.join(',')!=='q,source'||Object.hasOwn(config,'discard'))throw Error('JSON/flat bootstrap');
+document.f.onsubmit=function(){throw Error('script submit dispatched a submit event');};
+document.f.q.onkeydown=function(event){
+if(event.key===config.key){
+event.preventDefault();var snapshot=this.value,calls=0;
+var clean=('#'+snapshot+'#').replaceAll('#',function(match,offset,text){
+if(match!=='#'||text!=='#'+snapshot+'#'||offset!==(calls===0?0:snapshot.length+1))throw Error('replaceAll callback');calls++;return '';
+});
+if(calls!==2||clean!==snapshot)throw Error('replacement snapshot');
+var packet={q:{toJSON(key){if(key!=='q')throw Error('toJSON holder');return clean;}},source:'fixture',discard:1};
+var wire=JSON.stringify(packet,function(key,value){if(key==='discard')return undefined;return value;});
+var parsed=JSON.parse(wire);
+var names=keys.flatMap(function(key){return [key,Object.hasOwn(parsed,key)];});
+if(names.join(',')!=='q,true,source,true'||parsed.q!==snapshot||Object.hasOwn(parsed,'discard'))throw Error('JSON roundtrip');
+this.form.submit();this.value='changed after submit';
+}};
+document.f.setAttribute('data-builtins','ready');"#.to_owned()
+                    } else if promise_bootstrap {
+                        r#"var bootstrapOrder='executor';
+var settings={then(resolve){queueMicrotask(function(){resolve({key:'Enter'});});}};
+Promise.resolve(settings).then(function(config){
+if(bootstrapOrder!=='executor:script')throw Error('synchronous Promise reaction');
+document.f.onsubmit=function(){throw Error('script submit dispatched a submit event');};
+document.f.q.onkeydown=function(event){
+if(event.key===config.key){
+event.preventDefault();var input=this;var query=input.value;
+Promise.resolve(query).then(function(value){
+if(input.value!==value)throw Error('Promise query snapshot');
+input.form.submit();input.value='changed after submit';
+});
+}};
+return 'ready';
+}).finally(function(){document.f.setAttribute('data-promise','ready');});
+bootstrapOrder+=':script';"#
+                            .to_owned()
+                    } else if spread_bootstrap {
                         // Original syntax fixture executes array/call/new spread
                         // and ordinary/arrow/method rest during actual searches.
                         r#"function options(...pairs){return Object.fromEntries(pairs);}
@@ -360,6 +515,18 @@ document.f.setAttribute('data-symbol','ready');
                         || callable_bootstrap
                         || descriptor_bootstrap
                         || wrapper_bootstrap
+                        || iterator_bootstrap
+                        || spread_bootstrap
+                        || promise_bootstrap
+                        || builtin_bootstrap
+                        || template_bootstrap
+                        || function_bootstrap
+                        || optional_bootstrap
+                        || defaults_bootstrap
+                        || named_regexp_bootstrap
+                        || patterns_bootstrap
+                        || dates_bootstrap
+                        || object_spread_bootstrap
                     {
                         ""
                     } else {
@@ -498,9 +665,39 @@ fn run_search_flow(area: bool, scripted: bool, bootstrap: &str) {
     let wrapper_bootstrap = bootstrap == "wrappers";
     let iterator_bootstrap = bootstrap == "iterators";
     let spread_bootstrap = bootstrap == "spread";
+    let promise_bootstrap = bootstrap == "promise";
+    let builtin_bootstrap = bootstrap == "builtins";
+    let template_bootstrap = bootstrap == "templates";
+    let function_bootstrap = bootstrap == "functions";
+    let optional_bootstrap = bootstrap == "optional";
+    let defaults_bootstrap = bootstrap == "defaults";
+    let named_regexp_bootstrap = bootstrap == "namedregexp";
+    let patterns_bootstrap = bootstrap == "patterns";
+    let dates_bootstrap = bootstrap == "dates";
+    let object_spread_bootstrap = bootstrap == "objectspread";
     let result = Site::new(None);
     let search = Site::new(Some(result.url("")));
-    let kind = if spread_bootstrap {
+    let kind = if object_spread_bootstrap {
+        "area-script-objectspread"
+    } else if defaults_bootstrap {
+        "area-script-defaults"
+    } else if named_regexp_bootstrap {
+        "area-script-namedregexp"
+    } else if patterns_bootstrap {
+        "area-script-patterns"
+    } else if dates_bootstrap {
+        "area-script-dates"
+    } else if function_bootstrap {
+        "area-script-functions"
+    } else if optional_bootstrap {
+        "area-script-optional"
+    } else if template_bootstrap {
+        "area-script-templates"
+    } else if builtin_bootstrap {
+        "area-script-builtins"
+    } else if promise_bootstrap {
+        "area-script-promise"
+    } else if spread_bootstrap {
         "area-script-spread"
     } else if iterator_bootstrap {
         "area-script-iterators"
@@ -584,6 +781,47 @@ fn run_search_flow(area: bool, scripted: bool, bootstrap: &str) {
             app.document.attr(id(&app, "f"), "data-spread"),
             Some("ready")
         );
+    }
+    if promise_bootstrap {
+        assert_eq!(
+            app.document.attr(id(&app, "f"), "data-promise"),
+            Some("ready")
+        );
+    }
+    if builtin_bootstrap {
+        assert_eq!(
+            app.document.attr(id(&app, "f"), "data-builtins"),
+            Some("ready")
+        );
+    }
+    if template_bootstrap {
+        assert_eq!(
+            app.document.attr(id(&app, "f"), "data-templates"),
+            Some("ready")
+        );
+    }
+    if function_bootstrap {
+        assert_eq!(
+            app.document.attr(id(&app, "f"), "data-functions"),
+            Some("ready")
+        );
+    }
+    if optional_bootstrap {
+        assert_eq!(
+            app.document.attr(id(&app, "f"), "data-optional"),
+            Some("ready")
+        );
+    }
+    for (active, attribute) in [
+        (defaults_bootstrap, "data-defaults"),
+        (named_regexp_bootstrap, "data-namedregexp"),
+        (patterns_bootstrap, "data-patterns"),
+        (dates_bootstrap, "data-dates"),
+        (object_spread_bootstrap, "data-objectspread"),
+    ] {
+        if active {
+            assert_eq!(app.document.attr(id(&app, "f"), attribute), Some("ready"));
+        }
     }
     edit_query(&mut app, "alpha");
     if area && !scripted {
@@ -694,6 +932,47 @@ fn run_search_flow(area: bool, scripted: bool, bootstrap: &str) {
             app.document.attr(id(&app, "f"), "data-spread"),
             Some("ready")
         );
+    }
+    if promise_bootstrap {
+        assert_eq!(
+            app.document.attr(id(&app, "f"), "data-promise"),
+            Some("ready")
+        );
+    }
+    if builtin_bootstrap {
+        assert_eq!(
+            app.document.attr(id(&app, "f"), "data-builtins"),
+            Some("ready")
+        );
+    }
+    if template_bootstrap {
+        assert_eq!(
+            app.document.attr(id(&app, "f"), "data-templates"),
+            Some("ready")
+        );
+    }
+    if function_bootstrap {
+        assert_eq!(
+            app.document.attr(id(&app, "f"), "data-functions"),
+            Some("ready")
+        );
+    }
+    if optional_bootstrap {
+        assert_eq!(
+            app.document.attr(id(&app, "f"), "data-optional"),
+            Some("ready")
+        );
+    }
+    for (active, attribute) in [
+        (defaults_bootstrap, "data-defaults"),
+        (named_regexp_bootstrap, "data-namedregexp"),
+        (patterns_bootstrap, "data-patterns"),
+        (dates_bootstrap, "data-dates"),
+        (object_spread_bootstrap, "data-objectspread"),
+    ] {
+        if active {
+            assert_eq!(app.document.attr(id(&app, "f"), attribute), Some("ready"));
+        }
     }
     let image = app.draw();
     assert_eq!(image.width, 1000);
@@ -915,4 +1194,54 @@ fn iterator_protocol_and_iterable_helpers_bootstrap_search_and_repeated_search()
 #[test]
 fn spread_and_rest_bootstrap_search_and_repeated_search() {
     run_search_flow(true, true, "spread");
+}
+
+#[test]
+fn promise_thenables_and_microtasks_submit_search_and_repeated_search() {
+    run_search_flow(true, true, "promise");
+}
+
+#[test]
+fn common_builtins_callbacks_prepare_search_and_repeated_search() {
+    run_search_flow(true, true, "builtins");
+}
+
+#[test]
+fn template_interpolation_prepares_search_and_repeated_search() {
+    run_search_flow(true, true, "templates");
+}
+
+#[test]
+fn dynamic_function_handlers_submit_search_and_repeated_search() {
+    run_search_flow(true, true, "functions");
+}
+
+#[test]
+fn optional_chaining_and_nullish_values_submit_search_and_repeated_search() {
+    run_search_flow(true, true, "optional");
+}
+
+#[test]
+fn default_parameter_closures_submit_search_and_repeated_search() {
+    run_search_flow(true, true, "defaults");
+}
+
+#[test]
+fn named_regexp_groups_prepare_search_and_repeated_search() {
+    run_search_flow(true, true, "namedregexp");
+}
+
+#[test]
+fn destructuring_parameters_and_bindings_submit_search_and_repeated_search() {
+    run_search_flow(true, true, "patterns");
+}
+
+#[test]
+fn utc_dates_and_json_callbacks_submit_search_and_repeated_search() {
+    run_search_flow(true, true, "dates");
+}
+
+#[test]
+fn object_spread_getters_and_symbols_submit_search_and_repeated_search() {
+    run_search_flow(true, true, "objectspread");
 }

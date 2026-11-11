@@ -13,6 +13,9 @@ use std::time::{Duration, Instant};
 use crate::forms::{self, Forms, Kind};
 use crate::html::{Document, Node, NodeKind};
 use crate::javascript::{Host, Runtime, Value};
+
+#[path = "script_promises.rs"]
+mod script_promises;
 use crate::loader::Script;
 
 #[path = "script_dom_compat.rs"]
@@ -817,6 +820,7 @@ impl Page {
                 .error(&format!("setTimeout callback {}", timer.id), &error);
         }
         self.state.timer_nesting = 0;
+        self.microtask_checkpoint(doc, forms);
         Some(Outcome {
             prevented: false,
             layout_changed: std::mem::take(&mut self.state.changed),
@@ -825,6 +829,7 @@ impl Page {
     }
 
     pub fn stop_timers(&mut self, reason: &str) {
+        self.runtime.cancel_microtasks();
         self.state.timers.clear();
         self.state.animation_frames.clear();
         self.state.animation_due = None;
@@ -875,6 +880,7 @@ impl Page {
                 self.state
                     .error(&format!("requestAnimationFrame callback {id}"), &error);
             }
+            self.microtask_checkpoint(doc, forms);
         }
         if self.state.animation_frames.is_empty() {
             self.state.animation_due = None;
@@ -925,6 +931,7 @@ impl Page {
                 }
                 Err(error) => self.state.error("Inspector console", &error),
             }
+            self.microtask_checkpoint(doc, forms);
         }
         Outcome {
             prevented: false,
@@ -1122,6 +1129,9 @@ impl Page {
                     &error,
                 );
             }
+            // Reactions run before the next classic script and consume this
+            // script's allowance, including the aggregate startup budget.
+            self.microtask_checkpoint(doc, forms);
             let (steps, copies, regexp) = self.runtime.job_usage();
             startup_steps = startup_steps.saturating_add(steps);
             startup_copy = startup_copy
@@ -1368,6 +1378,10 @@ impl Page {
                     Err(error) => self.state.error(&format!("{event} listener"), &error),
                     _ => {}
                 }
+                // This dispatch is entered by the native host, with no outer
+                // JavaScript stack. Each completed callback reaches a checkpoint
+                // while this event's cancellation/passive state is still live.
+                self.microtask_checkpoint(doc, forms);
                 if let Some(active) = &mut self.state.event {
                     active.passive = false;
                 }
@@ -2301,6 +2315,14 @@ impl Host for Bridge<'_> {
             || (DATASET_BASE..EVENT_BASE).contains(&object)
     }
 
+    fn promise_resolution_receiver(&self, object: u32) -> bool {
+        // Promise resolution performs only the normal `then` property lookup.
+        // Authorize this protocol explicitly for this realm's Window, Document
+        // and real DOM nodes; other native capabilities keep the default deny.
+        matches!(object, WINDOW | DOCUMENT)
+            || node_index(object).is_some_and(|node| self.doc.nodes.get(node).is_some())
+    }
+
     fn is_instance(&self, object: u32, constructor: u32, method: &str) -> Option<bool> {
         (constructor == IMAGE_FACTORY && method == "Image")
             .then(|| node_index(object).is_some_and(|node| tag(self.doc, node) == "img"))
@@ -2497,6 +2519,22 @@ impl Host for Bridge<'_> {
         } else {
             self.call(object, method, args)
         }
+    }
+
+    fn date_now(&mut self) -> Result<f64, String> {
+        self.state.work(1)?;
+        if !self.state.enabled || !self.doc.scripting_enabled {
+            return Err("Date clock access is unavailable while scripting is disabled.".into());
+        }
+        // The page host explicitly grants UTC wall time at whole-millisecond
+        // resolution. The language runtime remains default-deny; this does not
+        // reveal the OS timezone or change performance.now's monotonic origin.
+        Ok(
+            match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
+                Ok(duration) => duration.as_millis() as f64,
+                Err(error) => -(error.duration().as_millis() as f64),
+            },
+        )
     }
 
     fn random(&mut self) -> Result<f64, String> {
@@ -3011,6 +3049,10 @@ impl Host for Bridge<'_> {
                 }
             }
             _ if tag(self.doc, node) == "form" => self.named_form_property(node, property),
+            // Ordinary DOM nodes have no built-in then method. Recognizing
+            // this absence permits the explicitly authorized Promise protocol;
+            // form named properties above retain their normal lookup behavior.
+            "then" => Ok(Value::Undefined),
             _ => Err(format!("Element property {property:?} is not supported.")),
         }
     }

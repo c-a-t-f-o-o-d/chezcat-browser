@@ -55,7 +55,7 @@ impl Runtime {
         result
     }
 
-    fn from_constructor(&mut self, value: &Value) -> Result<bool, Fault> {
+    pub(super) fn from_constructor(&mut self, value: &Value) -> Result<bool, Fault> {
         let Value::Function(mut index) = *value else {
             return Ok(false);
         };
@@ -71,6 +71,10 @@ impl Runtime {
                 Some(Function::Host { constructible, .. }) => return Ok(*constructible),
                 Some(Function::Native(
                     Builtin::Object
+                    | Builtin::Date(super::date::Op::Constructor)
+                    | Builtin::Promise(
+                        super::promises::Op::Constructor | super::promises::Op::AggregateError,
+                    )
                     | Builtin::Array
                     | Builtin::Number
                     | Builtin::Boolean

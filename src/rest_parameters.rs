@@ -150,8 +150,6 @@ fn rest_parameters_reject_invalid_lists_before_any_execution() {
         "function f(...tail,next){}",
         "function f(...tail,){}",
         "function f(...tail=[]){}",
-        // Valid ECMAScript destructuring remains outside this identifier-rest subset.
-        "function f(...[tail]){}",
         "var f=(a,...a)=>a;",
         "var f=(...tail,)=>tail;",
         "var o={set x(...tail){}};",
@@ -182,6 +180,20 @@ fn rest_parameters_reject_invalid_lists_before_any_execution() {
             "{tail}"
         );
     }
+}
+
+#[test]
+fn rest_parameters_original_array_pattern_program_is_now_supported() {
+    // Exact 0.39 rejection program preserved as a positive 0.40 regression.
+    let mut runtime = Runtime::new();
+    runtime
+        .execute("function f(...[tail]){}", &mut NoHost)
+        .unwrap();
+    assert_eq!(
+        runtime.execute("f.length;", &mut NoHost).unwrap().to_text(),
+        "0"
+    );
+    succeeds("function values(...[first,...tail]){return first+':'+tail.join();}if(values(1,2,3)!=='1:2,3')throw 'rest pattern values';'ok';");
 }
 
 #[test]

@@ -22,10 +22,16 @@ mod array_ops;
 mod base64;
 #[path = "binary_data.rs"]
 mod binary_data;
+#[path = "binding_patterns.rs"]
+mod binding_patterns;
 #[path = "bound_functions.rs"]
 mod bound_functions;
 #[path = "collections.rs"]
 mod collections;
+#[path = "date.rs"]
+mod date;
+#[path = "function_constructor.rs"]
+mod function_constructor;
 #[path = "host_objects.rs"]
 mod host_objects;
 #[path = "iterable_builtins.rs"]
@@ -34,14 +40,22 @@ mod iterable_builtins;
 mod iterator_protocol;
 #[path = "json.rs"]
 mod json;
+#[path = "named_regexp.rs"]
+mod named_regexp;
 #[path = "object_inspection.rs"]
 mod object_inspection;
 #[path = "object_literals.rs"]
 mod object_literals;
+#[path = "optional_chaining.rs"]
+mod optional_chaining;
+#[path = "parameters.rs"]
+mod parameters;
 #[path = "primitive_conversion.rs"]
 mod primitive_conversion;
 #[path = "primitive_wrappers.rs"]
 mod primitive_wrappers;
+#[path = "promises.rs"]
+mod promises;
 #[path = "prototypes.rs"]
 mod prototypes;
 #[path = "regexp.rs"]
@@ -55,6 +69,8 @@ mod spread;
 mod string_replacement;
 #[path = "symbols.rs"]
 mod symbols;
+#[path = "template_literals.rs"]
+mod template_literals;
 #[path = "text_encoding.rs"]
 mod text_encoding;
 
@@ -199,6 +215,17 @@ impl Value {
 }
 
 pub trait Host {
+    /// Explicit wall-clock capability for Date.now and zero-argument construction.
+    /// Return a finite integral UTC Unix timestamp in milliseconds. No implicit
+    /// OS clock read or local timezone access is granted by the language runtime.
+    fn date_now(&mut self) -> Result<f64, String> {
+        Err("Date clock access is not available in this host.".into())
+    }
+    /// Opt a current-realm native receiver into Promise then-property lookup.
+    /// Unregistered/opaque handles remain denied; this grants no new methods.
+    fn promise_resolution_receiver(&self, _object: u32) -> bool {
+        false
+    }
     /// Native attributes take precedence over a realm-owned expando store.
     fn owns_property(&self, _object: u32, _property: &str) -> bool {
         true
@@ -554,6 +581,7 @@ enum TokenKind {
     Word(String),
     Number(f64),
     String(String),
+    Template(String, template_literals::Part),
     RegExp(Rc<regexp::Regex>),
     Punct(&'static str),
     End,
@@ -675,7 +703,7 @@ impl LexGoal {
         let switch_body = std::mem::take(&mut self.switch_body);
         match token {
             TokenKind::Word(word) => {
-                let property = self.previous == ".";
+                let property = matches!(self.previous.as_str(), "." | "?.");
                 let label = !reserved(word)
                     && (self.statement || newline && self.end_expression)
                     && !property;
@@ -691,11 +719,11 @@ impl LexGoal {
                     self.case_expressions.push((self.delimiters.len(), 0));
                     self.end_expression = false;
                     self.statement = false;
-                } else if word == "function" && self.previous != "." {
+                } else if word == "function" && !property {
                     self.function_head = Some(!(self.statement || newline && self.end_expression));
                     self.end_expression = false;
                     self.statement = false;
-                } else if self.previous != "."
+                } else if !property
                     && (word == "of"
                         && self.end_expression
                         && matches!(self.delimiters.last(), Some(LexDelimiter::ForControl))
@@ -718,7 +746,7 @@ impl LexGoal {
                 {
                     self.end_expression = false;
                     self.statement = false;
-                } else if self.previous != "."
+                } else if !property
                     && matches!(
                         word.as_str(),
                         "else" | "do" | "try" | "finally" | "break" | "continue"
@@ -861,7 +889,13 @@ impl LexGoal {
                 self.previous_is_label = false;
                 self.jump_end = false;
             }
-            TokenKind::Number(_) | TokenKind::String(_) | TokenKind::RegExp(_) => {
+            TokenKind::Number(_)
+            | TokenKind::String(_)
+            | TokenKind::RegExp(_)
+            | TokenKind::Template(
+                _,
+                template_literals::Part::NoSubstitution | template_literals::Part::Tail,
+            ) => {
                 self.end_expression = true;
                 self.statement = false;
                 self.previous.clear();
@@ -869,7 +903,11 @@ impl LexGoal {
                 self.previous_is_label = false;
                 self.jump_end = false;
             }
-            TokenKind::End => {}
+            TokenKind::Template(
+                _,
+                template_literals::Part::Head | template_literals::Part::Middle,
+            )
+            | TokenKind::End => {}
         }
     }
 }
@@ -931,6 +969,9 @@ fn tokenize(source: &str, regexp_budget: &mut usize) -> Result<Vec<Token>, Fault
     let (mut at, mut newline) = (0, false);
     let mut tokens = Vec::new();
     let mut goal = LexGoal::new();
+    // Moving lexical goals into bounded interpolation frames preserves their
+    // regexp/division context without copying enclosing delimiter stacks.
+    let mut templates: Vec<(LexGoal, usize)> = Vec::new();
     let mut regexp_bytes = 0usize;
     while at < source.len() {
         let ch = source[at..].chars().next().unwrap();
@@ -970,7 +1011,38 @@ fn tokenize(source: &str, regexp_budget: &mut usize) -> Result<Vec<Token>, Fault
             goal.statement = true;
         }
         let start = at;
-        let kind = if ch == '/' && !goal.end_expression {
+        let kind = if ch == '`'
+            || ch == '}' && templates.last().is_some_and(|(_, braces)| *braces == 0)
+        {
+            use template_literals::Part;
+            let initial = ch == '`';
+            at += 1;
+            let (text, tail) = template_literals::chunk(source, &mut at, start)?;
+            let part = match (initial, tail) {
+                (true, true) => Part::NoSubstitution,
+                (true, false) => {
+                    if templates.len() >= MAX_PARSE_DEPTH {
+                        return Err(
+                            Fault::new("Template nesting limit reached (64).").at(source, start)
+                        );
+                    }
+                    let mut expression_goal = LexGoal::new();
+                    expression_goal.statement = false;
+                    templates.push((std::mem::replace(&mut goal, expression_goal), 0));
+                    Part::Head
+                }
+                (false, true) => {
+                    goal = templates.pop().unwrap().0;
+                    Part::Tail
+                }
+                (false, false) => {
+                    goal = LexGoal::new();
+                    goal.statement = false;
+                    Part::Middle
+                }
+            };
+            TokenKind::Template(text, part)
+        } else if ch == '/' && !goal.end_expression {
             let expression = regexp_literal(source, &mut at, regexp_budget)?;
             regexp_bytes = regexp_bytes.saturating_add(expression.retained_bytes);
             if regexp_bytes > MAX_RETAINED_REGEXP {
@@ -1113,22 +1185,26 @@ fn tokenize(source: &str, regexp_budget: &mut usize) -> Result<Vec<Token>, Fault
             }
             TokenKind::String(value)
         } else {
-            if ["**", "??", "&&=", "||="]
+            if ["**", "??=", "&&=", "||="]
                 .iter()
                 .any(|op| source[at..].starts_with(op))
-                || source[at..].starts_with("?.")
-                    && !bytes.get(at + 2).is_some_and(u8::is_ascii_digit)
             {
-                return Err(Fault::new("Exponentiation, optional chaining and logical assignments are not implemented.").at(source, at));
+                return Err(Fault::new(
+                    "Exponentiation and logical assignments are not implemented.",
+                )
+                .at(source, at));
             }
             let Some(punct) = [
                 ">>>=", "<<=", ">>=", "===", "!==", ">>>", "...", "=>", "==", "!=", "<=", ">=",
-                "&&", "||", "++", "--", "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "<<", ">>",
-                "{", "}", "(", ")", "[", "]", ".", ";", ",", "?", ":", "+", "-", "*", "/", "%",
-                "<", ">", "=", "!", "~", "&", "|", "^",
+                "&&", "||", "??", "?.", "++", "--", "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=",
+                "<<", ">>", "{", "}", "(", ")", "[", "]", ".", ";", ",", "?", ":", "+", "-", "*",
+                "/", "%", "<", ">", "=", "!", "~", "&", "|", "^",
             ]
             .into_iter()
-            .find(|punct| source[at..].starts_with(punct)) else {
+            .find(|punct| {
+                source[at..].starts_with(punct)
+                    && (*punct != "?." || !bytes.get(at + 2).is_some_and(u8::is_ascii_digit))
+            }) else {
                 return Err(Fault::new(format!(
                     "Unsupported token {ch:?}. This syntax is outside the JavaScript subset."
                 ))
@@ -1137,6 +1213,13 @@ fn tokenize(source: &str, regexp_budget: &mut usize) -> Result<Vec<Token>, Fault
             at += punct.len();
             TokenKind::Punct(punct)
         };
+        if let Some((_, braces)) = templates.last_mut() {
+            match kind {
+                TokenKind::Punct("{") => *braces += 1,
+                TokenKind::Punct("}") => *braces -= 1,
+                _ => {}
+            }
+        }
         goal.accept(&kind, newline);
         tokens.push(Token {
             kind,
@@ -1144,6 +1227,11 @@ fn tokenize(source: &str, regexp_budget: &mut usize) -> Result<Vec<Token>, Fault
             newline,
         });
         newline = false;
+    }
+    if !templates.is_empty() {
+        return Err(
+            Fault::exception("SyntaxError", "Unterminated template substitution.").at(source, at),
+        );
     }
     tokens.push(Token {
         kind: TokenKind::End,
@@ -1185,6 +1273,7 @@ struct Argument {
 #[derive(Clone)]
 enum ExprKind {
     Literal(Value),
+    TemplateLiteral(String, Vec<(ExprId, String)>),
     RegExp(Rc<regexp::Regex>),
     Name(String),
     This,
@@ -1196,15 +1285,18 @@ enum ExprKind {
     Update(ExprId, bool, bool),
     Member(ExprId, ExprId),
     Call(ExprId, Vec<Argument>),
+    OptionalChain(ExprId, Vec<optional_chaining::Step>),
     Construct(ExprId, Vec<Argument>),
     Function(usize),
     Object(Vec<object_literals::Member>),
     Array(Vec<Option<Argument>>),
+    Pattern(binding_patterns::Id),
 }
 
 struct Expr {
     kind: ExprKind,
     at: usize,
+    parenthesized: bool,
 }
 
 #[derive(Clone)]
@@ -1212,7 +1304,7 @@ enum StmtKind {
     Empty,
     Expr(ExprId),
     Block(Vec<StmtId>),
-    Declare(Declaration, Vec<(String, Option<ExprId>)>),
+    Declare(Declaration, Vec<(binding_patterns::Id, Option<ExprId>)>),
     Function(String, usize),
     If(ExprId, StmtId, Option<StmtId>),
     While(ExprId, StmtId),
@@ -1227,7 +1319,11 @@ enum StmtKind {
     },
     Return(Option<ExprId>),
     Throw(ExprId),
-    Try(StmtId, Option<(Option<String>, StmtId)>, Option<StmtId>),
+    Try(
+        StmtId,
+        Option<(Option<binding_patterns::Id>, StmtId)>,
+        Option<StmtId>,
+    ),
     Break(StmtId),
     Continue(StmtId),
 }
@@ -1237,14 +1333,20 @@ struct Stmt {
     at: usize,
 }
 
+struct Parameter {
+    pattern: binding_patterns::Id,
+    initial: Option<ExprId>,
+}
+
 struct Template {
     arrow: bool,
     constructible: bool,
     strict: bool,
     name: Option<String>,
-    params: Vec<String>,
+    params: Vec<Parameter>,
     /// A non-simple rest list stores its final binding name in params.
     rest: bool,
+    trailing_parameter_comma: bool,
     body: Vec<StmtId>,
 }
 
@@ -1254,7 +1356,15 @@ struct Program {
     exprs: Vec<Expr>,
     stmts: Vec<Stmt>,
     templates: Vec<Template>,
+    patterns: Vec<binding_patterns::Pattern>,
     body: Vec<StmtId>,
+    chain_steps: usize,
+}
+
+impl Program {
+    fn node_count(&self) -> usize {
+        self.exprs.len() + self.stmts.len() + self.chain_steps + self.patterns.len()
+    }
 }
 
 struct DeferredBody {
@@ -1317,7 +1427,9 @@ impl Parser {
                 exprs: Vec::new(),
                 stmts: Vec::new(),
                 templates: Vec::new(),
+                patterns: Vec::new(),
                 body: Vec::new(),
+                chain_steps: 0,
             },
             tokens,
             body_ends,
@@ -1394,15 +1506,18 @@ impl Parser {
                 return Err(self.error("Function body exceeded its token range."));
             }
             let template = &self.program.templates[body.template];
-            if template.rest && own_strict {
-                return Err(self.error("A rest parameter list cannot have a use strict directive."));
+            if template.non_simple(&self.program) && own_strict {
+                return Err(
+                    self.error("A non-simple parameter list cannot have a use strict directive.")
+                );
             }
-            if (strict || template.rest)
-                && template.params.iter().collect::<HashSet<_>>().len() != template.params.len()
+            let names = template.parameter_names(&self.program);
+            if (strict || template.non_simple(&self.program))
+                && names.iter().collect::<HashSet<_>>().len() != names.len()
             {
                 return Err(self.error("Duplicate parameters are forbidden in strict functions."));
             }
-            for parameter in &template.params {
+            for parameter in &names {
                 self.strict_binding(parameter, strict)?;
             }
             if let Some(name) = &template.name {
@@ -1476,11 +1591,15 @@ impl Parser {
     fn expr(&mut self, kind: ExprKind, at: usize) -> Result<ExprId, Fault> {
         self.check_nodes()?;
         let id = self.program.exprs.len();
-        self.program.exprs.push(Expr { kind, at });
+        self.program.exprs.push(Expr {
+            kind,
+            at,
+            parenthesized: false,
+        });
         Ok(id)
     }
     fn check_nodes(&self) -> Result<(), Fault> {
-        if self.program.stmts.len() + self.program.exprs.len() >= MAX_AST {
+        if self.program.node_count() >= MAX_AST {
             Err(self.unsupported(format!("AST node limit reached ({MAX_AST}).")))
         } else {
             Ok(())
@@ -1563,20 +1682,25 @@ impl Parser {
         };
         let mut declarations = Vec::new();
         loop {
-            let name = self.name()?;
-            self.strict_binding(&name, self.strict)?;
+            let pattern = self.binding_pattern(true)?;
             let initializer = if self.eat("=") {
                 Some(self.assignment_expression()?)
             } else {
                 None
             };
-            if kind == Declaration::Const
+            if (kind == Declaration::Const
+                || !matches!(
+                    self.program.patterns[pattern].kind,
+                    binding_patterns::Kind::Name(_)
+                ))
                 && initializer.is_none()
                 && !(for_head && (self.is("in") || self.is("of")))
             {
-                return Err(self.error("A const declaration needs an initializer."));
+                return Err(
+                    self.error("A const or destructuring declaration needs an initializer.")
+                );
             }
-            declarations.push((name, initializer));
+            declarations.push((pattern, initializer));
             if !self.eat(",") {
                 break;
             }
@@ -1780,21 +1904,24 @@ impl Parser {
         }
     }
 
-    fn parameters(&mut self, unique: bool) -> Result<(Vec<String>, bool), Fault> {
+    fn parameters(&mut self, unique: bool) -> Result<(Vec<Parameter>, bool, bool), Fault> {
         self.need("(")?;
         let mut params = Vec::new();
         let mut rest = false;
+        let mut trailing = false;
         if !self.is(")") {
             loop {
                 if params.len() == MAX_ARGUMENTS {
                     return Err(self.unsupported("Function parameter limit reached (256)."));
                 }
                 rest = self.eat("...");
-                let name = self.name()?;
-                if unique && params.contains(&name) {
-                    return Err(self.error("Duplicate arrow parameters."));
-                }
-                params.push(name);
+                let pattern = self.binding_pattern(true)?;
+                let initial = if !rest && self.eat("=") {
+                    Some(self.assignment_with_in()?)
+                } else {
+                    None
+                };
+                params.push(Parameter { pattern, initial });
                 if rest {
                     if !self.is(")") {
                         return Err(self.error(
@@ -1803,21 +1930,39 @@ impl Parser {
                     }
                     break;
                 }
-                if !self.eat(",") || self.is(")") {
+                if !self.eat(",") {
+                    break;
+                }
+                if self.is(")") {
+                    trailing = true;
                     break;
                 }
             }
         }
         self.need(")")?;
-        if rest && params.iter().collect::<HashSet<_>>().len() != params.len() {
-            return Err(self.error("Duplicate parameters are forbidden in rest functions."));
+        let names = params
+            .iter()
+            .flat_map(|p| self.program.pattern_names(p.pattern))
+            .collect::<Vec<_>>();
+        if (unique
+            || rest
+            || params.iter().any(|p| {
+                p.initial.is_some()
+                    || !matches!(
+                        self.program.patterns[p.pattern].kind,
+                        binding_patterns::Kind::Name(_)
+                    )
+            }))
+            && names.iter().collect::<HashSet<_>>().len() != names.len()
+        {
+            return Err(self.error("Duplicate parameters are forbidden in non-simple functions."));
         }
-        Ok((params, rest))
+        Ok((params, rest, trailing))
     }
 
     fn function(&mut self, name: Option<String>) -> Result<usize, Fault> {
         self.enter()?;
-        let (params, rest) = self.parameters(false)?;
+        let (params, rest, trailing_parameter_comma) = self.parameters(false)?;
         let id = self.defer_body(Template {
             arrow: false,
             constructible: true,
@@ -1825,6 +1970,7 @@ impl Parser {
             name,
             params,
             rest,
+            trailing_parameter_comma,
             body: Vec::new(),
         })?;
         self.depth -= 1;
@@ -1879,6 +2025,9 @@ impl Parser {
             let arrow = self.arrow_ahead();
             let mut value = if arrow {
                 self.arrow()?
+            } else if self.pattern_ahead() {
+                let pattern = self.binding_pattern(false)?;
+                self.expr(ExprKind::Pattern(pattern), at)?
             } else {
                 self.binary(1)?
             };
@@ -1891,7 +2040,10 @@ impl Parser {
                     | ">>=" | ">>>="),
                 ) = self.token().kind
                 {
-                    if !self.assignable(value) {
+                    if !self.assignable(value)
+                        && !(op == "="
+                            && matches!(self.program.exprs[value].kind, ExprKind::Pattern(_)))
+                    {
                         return Err(self.error("Invalid assignment target."));
                     }
                     if let ExprKind::Name(name) = &self.program.exprs[value].kind {
@@ -1942,39 +2094,42 @@ impl Parser {
         if !punct(tokens.get(at), "(") {
             return false;
         }
+        // Defaults may contain nested calls, function expressions or arrows.
+        // Tokens already isolate strings/regexps; balance the outer parentheses
+        // without parsing an expression twice or treating default effects as code.
+        let mut depth = 1usize;
         at += 1;
-        if !punct(tokens.get(at), ")") {
-            loop {
-                let rest = punct(tokens.get(at), "...");
-                if rest {
-                    at += 1;
+        while let Some(token) = tokens.get(at) {
+            match token.kind {
+                TokenKind::Punct("(") => depth += 1,
+                TokenKind::Punct(")") => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return punct(tokens.get(at + 1), "=>");
+                    }
                 }
-                if !tokens.get(at).is_some_and(word) {
-                    return false;
-                }
-                at += 1;
-                if rest {
-                    break;
-                }
-                if !punct(tokens.get(at), ",") {
-                    break;
-                }
-                at += 1;
-                if punct(tokens.get(at), ")") {
-                    break;
-                }
+                TokenKind::End => return false,
+                _ => {}
             }
+            at += 1;
         }
-        punct(tokens.get(at), ")") && punct(tokens.get(at + 1), "=>")
+        false
     }
 
     fn arrow(&mut self) -> Result<ExprId, Fault> {
         let at = self.at();
         self.enter()?;
-        let (params, rest) = if self.is("(") {
+        let (params, rest, trailing_parameter_comma) = if self.is("(") {
             self.parameters(true)?
         } else {
-            (vec![self.name()?], false)
+            (
+                vec![Parameter {
+                    pattern: self.binding_pattern(true)?,
+                    initial: None,
+                }],
+                false,
+                false,
+            )
         };
         if self.token().newline {
             return Err(self.error("A line ending is not allowed before =>."));
@@ -1988,6 +2143,7 @@ impl Parser {
                 name: None,
                 params,
                 rest,
+                trailing_parameter_comma,
                 body: Vec::new(),
             })?;
             self.depth -= 1;
@@ -2004,8 +2160,11 @@ impl Parser {
         let expression = self.assignment_expression()?;
         let body = vec![self.stmt(StmtKind::Return(Some(expression)), at)?];
         let strict = self.strict;
-        for parameter in &params {
-            self.strict_binding(parameter, strict)?;
+        for name in params
+            .iter()
+            .flat_map(|p| self.program.pattern_names(p.pattern))
+        {
+            self.strict_binding(&name, strict)?;
         }
         self.loops = loops;
         self.labels = labels;
@@ -2021,6 +2180,7 @@ impl Parser {
             name: None,
             params,
             rest,
+            trailing_parameter_comma,
             body,
         });
         self.expr(ExprKind::Function(template), at)
@@ -2037,7 +2197,7 @@ impl Parser {
                 _ => break,
             };
             let precedence = match op {
-                "||" => 1,
+                "||" | "??" => 1,
                 "&&" => 2,
                 "|" => 3,
                 "^" => 4,
@@ -2054,6 +2214,7 @@ impl Parser {
             }
             self.current += 1;
             let right = self.binary(precedence + 1)?;
+            self.check_coalescing(op, left, right)?;
             left = self.expr(ExprKind::Binary(op, left, right), at)?;
         }
         Ok(left)
@@ -2091,28 +2252,8 @@ impl Parser {
             }
             return self.expr(ExprKind::Unary(op, argument), at);
         }
-        let mut expression = self.member_expression()?;
-        loop {
-            if self.eat(".") {
-                let TokenKind::Word(name) = &self.token().kind else {
-                    return Err(self.error("Expected a property name."));
-                };
-                let name = name.clone();
-                let position = self.at();
-                self.current += 1;
-                let property = self.expr(ExprKind::Literal(Value::String(name)), position)?;
-                expression = self.expr(ExprKind::Member(expression, property), at)?;
-            } else if self.eat("[") {
-                let property = self.expression_with_in()?;
-                self.need("]")?;
-                expression = self.expr(ExprKind::Member(expression, property), at)?;
-            } else if self.is("(") {
-                let args = self.arguments()?;
-                expression = self.expr(ExprKind::Call(expression, args), at)?;
-            } else {
-                break;
-            }
-        }
+        let expression = self.member_expression()?;
+        let mut expression = self.postfix_chain(expression, at)?;
         if !self.token().newline && (self.is("++") || self.is("--")) {
             if !self.assignable(expression) {
                 return Err(self.error("Invalid update target."));
@@ -2154,6 +2295,9 @@ impl Parser {
         let mut expression = if self.eat("new") {
             self.enter()?;
             let constructor = self.member_expression()?;
+            if self.is("?.") {
+                return Err(self.error("An optional chain cannot be the constructor in new."));
+            }
             let args = if self.is("(") {
                 self.arguments()?
             } else {
@@ -2177,6 +2321,14 @@ impl Parser {
                 let property = self.expression_with_in()?;
                 self.need("]")?;
                 expression = self.expr(ExprKind::Member(expression, property), at)?;
+            } else if matches!(
+                self.token().kind,
+                TokenKind::Template(
+                    _,
+                    template_literals::Part::NoSubstitution | template_literals::Part::Head
+                )
+            ) {
+                return Err(self.unsupported("Tagged template literals are not implemented."));
             } else {
                 break;
             }
@@ -2185,54 +2337,60 @@ impl Parser {
     }
     fn primary(&mut self) -> Result<ExprId, Fault> {
         let at = self.at();
-        let kind =
-            match self.token().kind.clone() {
-                TokenKind::Number(value) => {
-                    self.current += 1;
-                    ExprKind::Literal(Value::Number(value))
-                }
-                TokenKind::String(value) => {
-                    self.current += 1;
-                    ExprKind::Literal(Value::String(value))
-                }
-                TokenKind::RegExp(expression) => {
-                    self.current += 1;
-                    ExprKind::RegExp(expression)
-                }
-                TokenKind::Word(word) => {
-                    self.current += 1;
-                    match word.as_str() {
-                        "true" => ExprKind::Literal(Value::Bool(true)),
-                        "false" => ExprKind::Literal(Value::Bool(false)),
-                        "null" => ExprKind::Literal(Value::Null),
-                        "this" => ExprKind::This,
-                        "function" => {
-                            let name = if self.is("(") {
-                                None
-                            } else {
-                                Some(self.name()?)
-                            };
-                            ExprKind::Function(self.function(name)?)
-                        }
-                        _ if !reserved(&word) => ExprKind::Name(word),
-                        _ => {
-                            return Err(Fault::new(format!("Unsupported syntax {word:?}."))
-                                .at(&self.program.source, at))
-                        }
+        let kind = match self.token().kind.clone() {
+            TokenKind::Number(value) => {
+                self.current += 1;
+                ExprKind::Literal(Value::Number(value))
+            }
+            TokenKind::String(value) => {
+                self.current += 1;
+                ExprKind::Literal(Value::String(value))
+            }
+            TokenKind::Template(
+                value,
+                part @ (template_literals::Part::NoSubstitution | template_literals::Part::Head),
+            ) => self.template_literal(value, matches!(part, template_literals::Part::Head))?,
+            TokenKind::RegExp(expression) => {
+                self.current += 1;
+                ExprKind::RegExp(expression)
+            }
+            TokenKind::Word(word) => {
+                self.current += 1;
+                match word.as_str() {
+                    "true" => ExprKind::Literal(Value::Bool(true)),
+                    "false" => ExprKind::Literal(Value::Bool(false)),
+                    "null" => ExprKind::Literal(Value::Null),
+                    "this" => ExprKind::This,
+                    "function" => {
+                        let name = if self.is("(") {
+                            None
+                        } else {
+                            Some(self.name()?)
+                        };
+                        ExprKind::Function(self.function(name)?)
+                    }
+                    _ if !reserved(&word) => ExprKind::Name(word),
+                    _ => {
+                        return Err(Fault::new(format!("Unsupported syntax {word:?}."))
+                            .at(&self.program.source, at))
                     }
                 }
-                TokenKind::Punct("{") => self.object_literal()?,
-                TokenKind::Punct("[") => self.array_literal()?,
-                TokenKind::Punct("(") => {
-                    self.current += 1;
-                    let expression = self.expression_with_in()?;
-                    self.need(")")?;
-                    return Ok(expression);
-                }
-                _ => return Err(self.error(
+            }
+            TokenKind::Punct("{") => self.object_literal()?,
+            TokenKind::Punct("[") => self.array_literal()?,
+            TokenKind::Punct("(") => {
+                self.current += 1;
+                let expression = self.expression_with_in()?;
+                self.need(")")?;
+                self.program.exprs[expression].parenthesized = true;
+                return Ok(expression);
+            }
+            _ => {
+                return Err(self.error(
                     "Expected an expression. This JavaScript subset does not support this syntax.",
-                )),
-            };
+                ))
+            }
+        };
         self.expr(kind, at)
     }
     fn object_literal(&mut self) -> Result<ExprKind, Fault> {
@@ -2242,6 +2400,13 @@ impl Parser {
         while !self.is("}") {
             if properties.len() == MAX_OBJECT_PROPERTIES {
                 return Err(self.unsupported("Object property limit reached (4096)."));
+            }
+            if self.eat("...") {
+                properties.push(Member::Spread(self.assignment_with_in()?));
+                if !self.eat(",") {
+                    break;
+                }
+                continue;
             }
             let position = self.at();
             // get/set are also ordinary property names. An accessor prefix
@@ -2304,7 +2469,7 @@ impl Parser {
                 )
             };
             let (value, kind) = if accessor.is_some() || self.is("(") {
-                // The supported setter binding is one identifier. Its
+                // A setter has one binding parameter. Its
                 // PropertySetParameterList forbids even a trailing comma.
                 if accessor == Some(Kind::Setter)
                     && matches!(
@@ -2321,11 +2486,14 @@ impl Parser {
                     return Err(self.error("A getter must have no parameters."));
                 }
                 if kind == Kind::Setter
-                    && (params.len() != 1 || self.program.templates[template].rest)
+                    && (params.len() != 1
+                        || self.program.templates[template].rest
+                        || self.program.templates[template].trailing_parameter_comma)
                 {
                     return Err(self.error("A setter must have exactly one parameter."));
                 }
-                if params.iter().collect::<HashSet<_>>().len() != params.len() {
+                let names = self.program.templates[template].parameter_names(&self.program);
+                if names.iter().collect::<HashSet<_>>().len() != names.len() {
                     return Err(self.error("Duplicate method parameters are forbidden."));
                 }
                 self.program.templates[template].constructible = false;
@@ -2337,7 +2505,7 @@ impl Parser {
             } else {
                 return Err(self.error("Expected ':' after the object property name."));
             };
-            properties.push(Member { key, value, kind });
+            properties.push(Member::Property { key, value, kind });
             if !self.eat(",") {
                 break;
             }
@@ -2400,7 +2568,13 @@ impl Parser {
                             "Legacy initialized for-in declarations are not implemented.",
                         ));
                     }
-                    StmtKind::Expr(expression) if self.assignable(*expression) => {
+                    StmtKind::Expr(expression)
+                        if self.assignable(*expression)
+                            || matches!(
+                                self.program.exprs[*expression].kind,
+                                ExprKind::Pattern(_)
+                            ) =>
+                    {
                         if let ExprKind::Name(name) = &self.program.exprs[*expression].kind {
                             self.strict_binding(name, self.strict)?;
                             if of && async_head && name == "async" {
@@ -2505,10 +2679,9 @@ impl Parser {
             let body = self.statement()?;
             let catch = if self.eat("catch") {
                 let binding = if self.eat("(") {
-                    let name = self.name()?;
-                    self.strict_binding(&name, self.strict)?;
+                    let pattern = self.binding_pattern(true)?;
                     self.need(")")?;
-                    Some(name)
+                    Some(pattern)
                 } else {
                     None
                 };
@@ -2556,9 +2729,8 @@ fn collect_var_names_with_work(
         charge(std::mem::size_of::<StmtId>())?;
         match &program.stmts[statement].kind {
             StmtKind::Declare(Declaration::Var, declarations) => {
-                for (name, _) in declarations {
-                    charge(std::mem::size_of::<String>() + name.len())?;
-                    names.push(name.clone());
+                for (pattern, _) in declarations {
+                    names.extend(program.pattern_names_with_work(*pattern, &mut charge)?);
                 }
             }
             StmtKind::Block(body) | StmtKind::Switch { body, .. } => {
@@ -2603,10 +2775,13 @@ fn validate_program(program: &Program) -> Result<(), Fault> {
         for &statement in body {
             match &program.stmts[statement].kind {
                 StmtKind::Declare(Declaration::Let | Declaration::Const, declarations) => {
-                    for (name, _) in declarations {
-                        if !lexical.insert(name.as_str())
+                    for name in declarations
+                        .iter()
+                        .flat_map(|(p, _)| program.pattern_names(*p))
+                    {
+                        if !lexical.insert(name.clone())
                             || functions.contains(name.as_str())
-                            || params.contains(name)
+                            || params.contains(&name)
                         {
                             return Err(Fault::exception(
                                 "SyntaxError",
@@ -2618,7 +2793,7 @@ fn validate_program(program: &Program) -> Result<(), Fault> {
                 }
                 StmtKind::Function(name, _) => {
                     if lexical.contains(name.as_str())
-                        || (!function && !functions.insert(name.as_str()))
+                        || (!function && !functions.insert(name.clone()))
                     {
                         return Err(Fault::exception(
                             "SyntaxError",
@@ -2626,7 +2801,7 @@ fn validate_program(program: &Program) -> Result<(), Fault> {
                         )
                         .at(&program.source, program.stmts[statement].at));
                     }
-                    functions.insert(name.as_str());
+                    functions.insert(name.clone());
                 }
                 _ => {}
             }
@@ -2643,7 +2818,8 @@ fn validate_program(program: &Program) -> Result<(), Fault> {
     }
     scope(program, &program.body, &[], true)?;
     for template in &program.templates {
-        scope(program, &template.body, &template.params, true)?;
+        let names = template.parameter_names(program);
+        scope(program, &template.body, &names, true)?;
     }
     for statement in &program.stmts {
         match &statement.kind {
@@ -2673,13 +2849,19 @@ fn validate_program(program: &Program) -> Result<(), Fault> {
             | StmtKind::For(_, _, _, body)
             | StmtKind::ForIn(_, _, body)
             | StmtKind::ForOf(_, _, body) => validate_body(program, *body)?,
-            StmtKind::Try(_, Some((Some(name), body)), _) => {
+            StmtKind::Try(_, Some((Some(pattern), body)), _) => {
                 let StmtKind::Block(body) = &program.stmts[*body].kind else {
                     unreachable!()
                 };
-                scope(program, body, std::slice::from_ref(name), false)?;
-                if body.iter().any(|id| matches!(&program.stmts[*id].kind, StmtKind::Function(function, _) if function == name)) {
-                    return Err(Fault::exception("SyntaxError", format!("Catch parameter conflicts with declaration {name:?}."))
+                let names = program.pattern_names(*pattern);
+                if names.iter().collect::<HashSet<_>>().len() != names.len() {
+                    return Err(Fault::exception("SyntaxError", "Duplicate catch binding."));
+                }
+                scope(program, body, &names, false)?;
+                if body.iter().any(|id| matches!(&program.stmts[*id].kind, StmtKind::Function(function, _) if names.contains(function)))
+                    || (!matches!(program.patterns[*pattern].kind, binding_patterns::Kind::Name(_))
+                        && collect_var_names(program, body).iter().any(|name| names.contains(name))) {
+                    return Err(Fault::exception("SyntaxError", "Catch parameter conflicts with declaration.")
                         .at(&program.source, statement.at));
                 }
             }
@@ -2695,8 +2877,11 @@ fn validate_program(program: &Program) -> Result<(), Fault> {
                 let variables: HashSet<_> =
                     collect_var_names(program, &[*body]).into_iter().collect();
                 let mut names = HashSet::new();
-                for (name, _) in declarations {
-                    if !names.insert(name) || variables.contains(name) {
+                for name in declarations
+                    .iter()
+                    .flat_map(|(p, _)| program.pattern_names(*p))
+                {
+                    if !names.insert(name.clone()) || variables.contains(&name) {
                         return Err(Fault::exception(
                             "SyntaxError",
                             format!("Conflicting loop declaration {name:?}."),
@@ -2747,6 +2932,8 @@ enum Builtin {
     Iterator(iterator_protocol::Op),
     Iterable(iterable_builtins::Op),
     TextEncoding(text_encoding::Op),
+    Promise(promises::Op),
+    Date(date::Op),
     Eval,
     JsonParse,
     JsonStringify,
@@ -2828,7 +3015,9 @@ struct Property {
 }
 
 struct Object {
+    date: Option<f64>,
     primitive: Option<primitive_wrappers::Data>,
+    promise: Option<promises::Data>,
     arguments: Option<arguments::Data>,
     binary: Option<binary_data::Data>,
     collection: Option<collections::Data>,
@@ -2848,6 +3037,7 @@ struct Object {
 
 enum Function {
     Native(Builtin),
+    Promise(promises::Closure),
     Bound(bound_functions::Bound),
     Host {
         object: u32,
@@ -2881,7 +3071,7 @@ impl Control {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq, Hash)]
 enum PropertyKey {
     String(String),
     Symbol(usize),
@@ -2916,7 +3106,7 @@ enum LoopIterator {
 /// One runtime belongs to one document. The host starts one job for the complete
 /// load batch and one for an event dispatch, so adding callbacks cannot multiply
 /// the execution allowance. Eval requires an explicit host policy and shares
-/// these budgets. The Function constructor is not implemented.
+/// these budgets. The Function constructor uses the same host compilation gate.
 pub struct Runtime {
     environments: Vec<Option<Environment>>,
     free_environments: Vec<usize>,
@@ -2930,6 +3120,8 @@ pub struct Runtime {
     symbol_prototype: Option<usize>,
     symbol_to_primitive: Option<usize>,
     symbol_iterator: Option<usize>,
+    symbol_species: Option<usize>,
+    promises: promises::Arena,
     binary_roots: binary_data::Roots,
     retained_binary: usize,
     collection_roots: collections::Roots,
@@ -2938,7 +3130,9 @@ pub struct Runtime {
     object_prototype: Option<usize>,
     function_prototype: Option<usize>,
     array_prototype: Option<usize>,
+    active_array_joins: Vec<usize>,
     regexp_prototype: Option<usize>,
+    date_prototype: Option<usize>,
     string_prototype: Option<usize>,
     number_prototype: Option<usize>,
     boolean_prototype: Option<usize>,
@@ -2991,6 +3185,8 @@ impl Runtime {
             symbol_prototype: None,
             symbol_to_primitive: None,
             symbol_iterator: None,
+            symbol_species: None,
+            promises: promises::Arena::default(),
             binary_roots: binary_data::Roots::default(),
             retained_binary: 0,
             collection_roots: collections::Roots::default(),
@@ -2999,7 +3195,9 @@ impl Runtime {
             object_prototype: None,
             function_prototype: None,
             array_prototype: None,
+            active_array_joins: Vec::new(),
             regexp_prototype: None,
+            date_prototype: None,
             string_prototype: None,
             number_prototype: None,
             boolean_prototype: None,
@@ -3063,6 +3261,8 @@ impl Runtime {
         runtime.initialize_binary().unwrap();
         runtime.initialize_collections().unwrap();
         runtime.initialize_iterable_builtins().unwrap();
+        runtime.initialize_promises().unwrap();
+        runtime.initialize_date().unwrap();
         runtime.initialize_text_encoding().unwrap();
         for (name, value) in [
             ("undefined", Value::Undefined),
@@ -3263,6 +3463,12 @@ impl Runtime {
             }
         })();
         self.strict = previous_strict;
+        if result
+            .as_ref()
+            .is_err_and(|error| error.exception.is_none())
+        {
+            self.cancel_microtasks();
+        }
         self.collect_environments();
         result.map_err(Fault::display)
     }
@@ -3394,6 +3600,12 @@ impl Runtime {
             };
             self.make_function(&program, template, 0, &Value::Undefined)
         })();
+        if result
+            .as_ref()
+            .is_err_and(|error| error.exception.is_none())
+        {
+            self.cancel_microtasks();
+        }
         self.collect_environments();
         result.map_err(Fault::display)
     }
@@ -3406,6 +3618,12 @@ impl Runtime {
         host: &mut dyn Host,
     ) -> Result<Value, String> {
         let result = self.call_value(function, args, this, host);
+        if result
+            .as_ref()
+            .is_err_and(|error| error.exception.is_none())
+        {
+            self.cancel_microtasks();
+        }
         self.collect_environments();
         result.map_err(Fault::display)
     }
@@ -3440,9 +3658,10 @@ impl Runtime {
                         ExprKind::Function(template) => {
                             let function = &program.templates[template];
                             !function.arrow
-                                && !function.rest
+                                && !function.non_simple(&program)
                                 && function.name.is_none()
-                                && function.params.as_slice() == ["event"]
+                                && function.params.len() == 1
+                                && program.pattern_name(function.params[0].pattern) == Some("event")
                         }
                         _ => false,
                     },
@@ -3454,6 +3673,17 @@ impl Runtime {
                 return Err(Fault::new("Invalid inline event-handler body.").at(source, 0));
             }
         }
+        self.retain_parsed_program(program)
+    }
+
+    fn retain_parsed_program(&mut self, program: Rc<Program>) -> Result<Rc<Program>, Fault> {
+        if self.programs.len() >= MAX_PROGRAMS
+            || self.retained_source.saturating_add(program.source.len()) > MAX_RETAINED_SOURCE
+        {
+            return Err(Fault::new(
+                "Retained script limit reached (128 scripts / 2 MiB source).",
+            ));
+        }
         let regexp_bytes = program
             .exprs
             .iter()
@@ -3462,12 +3692,12 @@ impl Runtime {
                 _ => 0,
             })
             .sum::<usize>();
-        let nodes = program.exprs.len() + program.stmts.len();
+        let nodes = program.node_count();
         if self.retained_ast.saturating_add(nodes) > MAX_RETAINED_AST {
             return Err(Fault::new("Retained AST limit reached (262144 nodes)."));
         }
         self.retain_regexp(regexp_bytes)?;
-        self.retained_source += source.len();
+        self.retained_source += program.source.len();
         self.retained_ast += nodes;
         self.programs.push(program.clone());
         Ok(program)
@@ -3820,8 +4050,7 @@ impl Runtime {
         });
         self.initialize_function_properties(
             program.templates[template].name.as_deref().unwrap_or(""),
-            program.templates[template].params.len()
-                - usize::from(program.templates[template].rest),
+            program.templates[template].parameter_length(),
             program.templates[template].constructible,
         )?;
         Ok(Value::Function(index))
@@ -3864,10 +4093,14 @@ impl Runtime {
             self.step()?;
             match &program.stmts[statement].kind {
                 StmtKind::Declare(Declaration::Let | Declaration::Const, names) => {
-                    for (name, _) in names {
-                        if self.environment(environment).bindings.contains_key(name) {
-                            return Err(Fault::new(format!("Duplicate lexical binding {name:?}."))
+                    for (pattern, _) in names {
+                        for name in program.pattern_names_with_work(*pattern, |n| self.work(n))? {
+                            if self.environment(environment).bindings.contains_key(&name) {
+                                return Err(Fault::new(format!(
+                                    "Duplicate lexical binding {name:?}."
+                                ))
                                 .at(&program.source, program.stmts[statement].at));
+                            }
                         }
                     }
                 }
@@ -3962,8 +4195,10 @@ impl Runtime {
             self.step()?;
             match &program.stmts[statement].kind {
                 StmtKind::Declare(kind @ (Declaration::Let | Declaration::Const), names) => {
-                    for (name, _) in names {
-                        self.put_binding(environment, name.clone(), None, *kind, false)?;
+                    for (pattern, _) in names {
+                        for name in program.pattern_names_with_work(*pattern, |n| self.work(n))? {
+                            self.put_binding(environment, name, None, *kind, false)?;
+                        }
                     }
                 }
                 StmtKind::Function(name, template) => {
@@ -4189,7 +4424,8 @@ impl Runtime {
         };
         self.set_property_throw(id, "index".into(), Value::Number(found.start() as f64))?;
         self.set_property_throw(id, "input".into(), Value::String(text.into()))?;
-        self.set_property_throw(id, "groups".into(), Value::Undefined)?;
+        let groups = self.regexp_named_groups(found, input)?;
+        self.set_property_throw(id, "groups".into(), groups)?;
         Ok(Value::Object(id))
     }
 
@@ -4408,6 +4644,21 @@ impl Runtime {
         while at < bytes.len() {
             if bytes[at] == b'$' {
                 let next = bytes.get(at + 1).copied();
+                if next == Some(b'<') && !found.named_captures.is_empty() {
+                    if let Some(end) = replacement[at + 2..].find('>') {
+                        let end = at + 2 + end;
+                        let name = &replacement[at + 2..end];
+                        self.work(name.len() + found.named_captures.len())?;
+                        if let Some((_, Some((start, finish)))) =
+                            found.named_captures.iter().find(|(key, _)| key == name)
+                        {
+                            let captured = self.units_string(&input[*start..*finish])?;
+                            self.append_string(&mut output, &captured)?;
+                        }
+                        at = end + 1;
+                        continue;
+                    }
+                }
                 let capture = match next {
                     Some(b'&') => Some(Some((found.start(), found.end()))),
                     Some(b'`') => Some(Some((0, found.start()))),
@@ -4529,7 +4780,9 @@ impl Runtime {
         }
         let id = self.objects.len();
         self.objects.push(Object {
+            date: None,
             primitive: None,
+            promise: None,
             arguments: None,
             binary: None,
             collection: None,
@@ -5145,126 +5398,6 @@ impl Runtime {
         Ok(result)
     }
 
-    fn array_join(
-        &mut self,
-        id: usize,
-        separator: &str,
-        path: &mut Vec<usize>,
-        host: &mut dyn Host,
-    ) -> Result<String, Fault> {
-        self.step()?;
-        if path.contains(&id) {
-            return Ok(String::new());
-        }
-        if path.len() >= MAX_CALL_DEPTH {
-            return Err(Fault::new(
-                "Array string conversion nesting limit reached (32).",
-            ));
-        }
-        let length = self
-            .object(id)?
-            .length
-            .ok_or_else(|| Fault::new("Expected an array."))?;
-        // An entirely holey array can be joined without visiting every hole.
-        // Check inherited indices too: Array.prototype[1] must still be read.
-        // All property walks and the final bounded allocation are charged.
-        let mut parent = Some(Ordinary::Object(id));
-        let mut has_indices = false;
-        while let Some(object) = parent {
-            self.step()?;
-            let object = self.ordinary_id(object)?;
-            self.work(
-                self.objects[object]
-                    .properties
-                    .len()
-                    .saturating_mul(MAX_PROPERTY_BYTES),
-            )?;
-            if self.objects[object]
-                .properties
-                .keys()
-                .any(|key| property_index(key).is_some_and(|index| index < length))
-            {
-                has_indices = true;
-                break;
-            }
-            parent = self.objects[object].prototype;
-        }
-        if !has_indices {
-            let bytes = length.saturating_sub(1).saturating_mul(separator.len());
-            if bytes > MAX_STRING_BYTES {
-                return Err(Fault::new("String limit reached (128 KiB)."));
-            }
-            self.work(bytes)?;
-            return Ok(separator.repeat(length.saturating_sub(1)));
-        }
-        path.push(id);
-        let result = (|| {
-            let mut output = String::new();
-            for index in 0..length {
-                if index != 0 {
-                    self.append_string(&mut output, separator)?;
-                }
-                let value = self.get_property_with_host(id, &index.to_string(), host)?;
-                let text = match value {
-                    Value::Undefined | Value::Null => String::new(),
-                    Value::Object(child) => {
-                        // Native array join retains its cycle-aware ordinary
-                        // array path, but exotic hooks must be observed first.
-                        if let Some(primitive) = self.primitive_exotic(
-                            Value::Object(child),
-                            primitive_conversion::Hint::String,
-                            host,
-                        )? {
-                            self.append_string(&mut output, &primitive.script_text()?)?;
-                            continue;
-                        }
-                        if self.wrapped_primitive(&Value::Object(child)).is_some() {
-                            let primitive =
-                                self.primitive_ordinary(Value::Object(child), true, host)?;
-                            self.append_string(&mut output, &primitive.script_text()?)?;
-                            continue;
-                        }
-                        let to_string = self.get_property_with_host(child, "toString", host)?;
-                        let value_of = self.get_property_with_host(child, "valueOf", host)?;
-                        let array = self.object(child)?.length.is_some();
-                        let standard_to_string = matches!(to_string, Value::Function(function) if match self.functions.get(function) {
-                            Some(Function::Native(Builtin::ArrayMethod("toString"))) => array,
-                            Some(Function::Native(Builtin::ObjectMethod("toString"))) => !array,
-                            _ => false,
-                        });
-                        let standard_value_of = matches!(value_of, Value::Function(function) if matches!(self.functions.get(function), Some(Function::Native(Builtin::ObjectMethod("valueOf")))));
-                        let standard_join = if array {
-                            let join = self.get_property_with_host(child, "join", host)?;
-                            matches!(join, Value::Function(function) if matches!(self.functions.get(function), Some(Function::Native(Builtin::ArrayMethod("join")))))
-                        } else {
-                            true
-                        };
-                        if !standard_to_string || !standard_value_of || !standard_join {
-                            return Err(Fault::new(
-                                "Custom object string conversion is not implemented.",
-                            ));
-                        }
-                        if array {
-                            self.array_join(child, ",", path, host)?
-                        } else {
-                            "[object Object]".into()
-                        }
-                    }
-                    Value::Host(_) | Value::Function(_) => {
-                        return Err(Fault::new(
-                            "Array join cannot implicitly convert host objects or functions.",
-                        ))
-                    }
-                    value => value.script_text()?,
-                };
-                self.append_string(&mut output, &text)?;
-            }
-            Ok(output)
-        })();
-        path.pop();
-        result
-    }
-
     fn append_string(&mut self, output: &mut String, text: &str) -> Result<(), Fault> {
         if output.len().saturating_add(text.len()) > MAX_STRING_BYTES {
             return Err(Fault::new("String limit reached (128 KiB)."));
@@ -5357,7 +5490,7 @@ impl Runtime {
                     self.primitive_with_hint(value, true, host)?.script_text()?
                 };
                 let text = if self.objects[id].length.is_some() {
-                    self.array_join(id, &separator, &mut Vec::new(), host)?
+                    self.array_join(id, length, &separator, host)?
                 } else {
                     self.array_like_join(id, length, &separator, host)?
                 };
@@ -5595,25 +5728,26 @@ impl Runtime {
                 } else {
                     env
                 };
-                for (name, initial) in declarations {
+                for (pattern, initial) in declarations {
                     self.step()?;
                     if let Some(expression) = initial {
-                        // A var in a simple-identifier catch still hoists to the
-                        // function, but its initializer writes the catch binding.
-                        let target = if *kind == Declaration::Var {
-                            self.lookup(env, name)?
-                                .filter(|scope| {
-                                    self.environment(*scope).catch_parameter.as_deref()
-                                        == Some(name)
-                                })
-                                .unwrap_or(target)
-                        } else {
-                            target
-                        };
                         let value = self.eval(program, *expression, env, this, host)?;
-                        self.write_binding(target, name, value, *kind != Declaration::Var, host)?;
+                        let mode = if *kind == Declaration::Var {
+                            binding_patterns::Mode::Var(target)
+                        } else {
+                            binding_patterns::Mode::Initialize(target)
+                        };
+                        self.initialize_pattern(program, *pattern, value, mode, env, this, host)?;
                     } else if *kind == Declaration::Let {
-                        self.store_binding(target, name, Value::Undefined, true)?;
+                        self.initialize_pattern(
+                            program,
+                            *pattern,
+                            Value::Undefined,
+                            binding_patterns::Mode::Initialize(target),
+                            env,
+                            this,
+                            host,
+                        )?;
                     }
                 }
                 Ok(Control::Normal(None))
@@ -5722,10 +5856,14 @@ impl Runtime {
                         declarations,
                     ) = &program.stmts[*initial].kind
                     {
-                        for (name, _) in declarations {
-                            self.put_binding(loop_env, name.clone(), None, *kind, false)?;
-                            if *kind == Declaration::Let {
-                                per_iteration.push(name.clone());
+                        for (pattern, _) in declarations {
+                            for name in
+                                program.pattern_names_with_work(*pattern, |n| self.work(n))?
+                            {
+                                self.put_binding(loop_env, name.clone(), None, *kind, false)?;
+                                if *kind == Declaration::Let {
+                                    per_iteration.push(name);
+                                }
                             }
                         }
                     }
@@ -5800,9 +5938,11 @@ impl Runtime {
         };
         // The lexical name is uninitialized while evaluating the right side,
         // but each body iteration gets a separate initialized binding.
-        let right_env = if let Some((kind, name)) = lexical {
+        let right_env = if let Some((kind, pattern)) = lexical {
             let scope = self.new_environment(env, false)?;
-            self.put_binding(scope, name.clone(), None, kind, false)?;
+            for name in program.pattern_names_with_work(*pattern, |n| self.work(n))? {
+                self.put_binding(scope, name, None, kind, false)?;
+            }
             scope
         } else {
             env
@@ -5813,25 +5953,54 @@ impl Runtime {
         while let Some(key) = self.loop_next(&mut iterator, host)? {
             self.step()?;
             let completion = (|| {
-                let body_env = if let Some((kind, name)) = lexical {
+                let body_env = if let Some((kind, pattern)) = lexical {
                     let scope = self.new_environment(env, false)?;
-                    self.put_binding(scope, name.clone(), Some(key), kind, false)?;
+                    for name in program.pattern_names_with_work(*pattern, |n| self.work(n))? {
+                        self.put_binding(scope, name, None, kind, false)?;
+                    }
+                    self.initialize_pattern(
+                        program,
+                        *pattern,
+                        key,
+                        binding_patterns::Mode::Initialize(scope),
+                        scope,
+                        this,
+                        host,
+                    )?;
                     scope
                 } else {
-                    let target = match &program.stmts[*initial].kind {
+                    match &program.stmts[*initial].kind {
                         StmtKind::Declare(Declaration::Var, names) => {
-                            let name = &names[0].0;
-                            let scope = self
-                                .lookup(env, name)?
-                                .ok_or_else(|| Fault::new("Missing hoisted loop binding."))?;
-                            Reference::Binding(scope, name.clone())
+                            let scope = self.var_environment(env)?;
+                            self.initialize_pattern(
+                                program,
+                                names[0].0,
+                                key,
+                                binding_patterns::Mode::Var(scope),
+                                env,
+                                this,
+                                host,
+                            )?;
                         }
                         StmtKind::Expr(expression) => {
-                            self.reference(program, *expression, env, this, host)?
+                            if let ExprKind::Pattern(pattern) = program.exprs[*expression].kind {
+                                self.initialize_pattern(
+                                    program,
+                                    pattern,
+                                    key,
+                                    binding_patterns::Mode::Assign,
+                                    env,
+                                    this,
+                                    host,
+                                )?;
+                            } else {
+                                let target =
+                                    self.reference(program, *expression, env, this, host)?;
+                                self.write_reference(target, key, host)?;
+                            }
                         }
                         _ => unreachable!(),
-                    };
-                    self.write_reference(target, key, host)?;
+                    }
                     env
                 };
                 self.statement(program, *body, body_env, this, host)
@@ -5978,18 +6147,27 @@ impl Runtime {
                 Exception::Value(value) => value,
                 Exception::Error(kind) => self.error_object(kind, Some(error.message.clone()))?,
             };
-            let catch_env = self.new_environment(env, false)?;
-            if let Some(name) = binding {
-                self.put_binding(
-                    catch_env,
-                    name.clone(),
-                    Some(value),
-                    Declaration::Let,
-                    false,
-                )?;
-                self.environment_mut(catch_env).catch_parameter = Some(name.clone());
-            }
-            completion = self.statement(program, *catch_body, catch_env, this, host);
+            completion = (|| {
+                let catch_env = self.new_environment(env, false)?;
+                if let Some(pattern) = binding {
+                    for name in program.pattern_names_with_work(*pattern, |n| self.work(n))? {
+                        self.put_binding(catch_env, name, None, Declaration::Let, false)?;
+                    }
+                    if let binding_patterns::Kind::Name(name) = &program.patterns[*pattern].kind {
+                        self.environment_mut(catch_env).catch_parameter = Some(name.clone());
+                    }
+                    self.initialize_pattern(
+                        program,
+                        *pattern,
+                        value,
+                        binding_patterns::Mode::Initialize(catch_env),
+                        catch_env,
+                        this,
+                        host,
+                    )?;
+                }
+                self.statement(program, *catch_body, catch_env, this, host)
+            })();
         }
         if completion
             .as_ref()
@@ -6062,6 +6240,9 @@ impl Runtime {
         }
         match &program.exprs[id].kind {
             ExprKind::Literal(value) => self.copy_value(value),
+            ExprKind::TemplateLiteral(head, spans) => {
+                self.eval_template(program, head, spans, env, this, host)
+            }
             ExprKind::RegExp(expression) => self.regexp_object(expression.clone()),
             ExprKind::Name(name) => match self.lookup(env, name)? {
                 Some(scope) => self.read_binding(scope, name, host),
@@ -6091,7 +6272,9 @@ impl Runtime {
                 self.read_reference(&reference, host)
             }
             ExprKind::Call(_, _) => self.eval_call(program, id, env, this, host),
+            ExprKind::OptionalChain(_, _) => self.eval_optional_chain(program, id, env, this, host),
             ExprKind::Construct(_, _) => self.eval_construct(program, id, env, this, host),
+            ExprKind::Pattern(_) => Err(Fault::new("A destructuring target is not an expression.")),
         }
         .map_err(|error| error.at(&program.source, program.exprs[id].at))
     }
@@ -6108,10 +6291,18 @@ impl Runtime {
             ExprKind::Object(properties) => {
                 let object = self.new_object(None)?;
                 for member in properties {
-                    let key = self.eval(program, member.key, env, this, host)?;
-                    let key = self.property_key(key, host)?;
-                    let value = self.eval(program, member.value, env, this, host)?;
-                    self.define_literal_member(object, key, value, member.kind)?;
+                    match member {
+                        object_literals::Member::Property { key, value, kind } => {
+                            let key = self.eval(program, *key, env, this, host)?;
+                            let key = self.property_key(key, host)?;
+                            let value = self.eval(program, *value, env, this, host)?;
+                            self.define_literal_member(object, key, value, *kind)?;
+                        }
+                        object_literals::Member::Spread(expression) => {
+                            let source = self.eval(program, *expression, env, this, host)?;
+                            self.copy_data_properties(object, &source, &HashSet::new(), host)?;
+                        }
+                    }
                 }
                 Ok(Value::Object(object))
             }
@@ -6133,6 +6324,9 @@ impl Runtime {
         match &program.exprs[id].kind {
             ExprKind::Unary(op, argument) => {
                 if *op == "delete" {
+                    if matches!(program.exprs[*argument].kind, ExprKind::OptionalChain(_, _)) {
+                        return self.delete_optional_chain(program, *argument, env, this, host);
+                    }
                     if matches!(
                         program.exprs[*argument].kind,
                         ExprKind::Name(_) | ExprKind::Member(_, _)
@@ -6193,11 +6387,14 @@ impl Runtime {
         match &program.exprs[id].kind {
             ExprKind::Binary(op, left, right) => {
                 let left = self.eval(program, *left, env, this, host)?;
-                if (*op == "&&" && !left.truthy()) || (*op == "||" && left.truthy()) {
+                if (*op == "&&" && !left.truthy())
+                    || (*op == "||" && left.truthy())
+                    || (*op == "??" && !matches!(left, Value::Null | Value::Undefined))
+                {
                     return Ok(left);
                 }
                 let right = self.eval(program, *right, env, this, host)?;
-                if matches!(*op, "&&" | "||") {
+                if matches!(*op, "&&" | "||" | "??") {
                     Ok(right)
                 } else if *op == "in" {
                     self.has_property_value(left, right, host)
@@ -6221,6 +6418,20 @@ impl Runtime {
     ) -> Result<Value, Fault> {
         match &program.exprs[id].kind {
             ExprKind::Assign(op, left, right) => {
+                if let ExprKind::Pattern(pattern) = program.exprs[*left].kind {
+                    let value = self.eval(program, *right, env, this, host)?;
+                    let result = self.copy_value(&value)?;
+                    self.initialize_pattern(
+                        program,
+                        pattern,
+                        value,
+                        binding_patterns::Mode::Assign,
+                        env,
+                        this,
+                        host,
+                    )?;
+                    return Ok(result);
+                }
                 let reference = self.reference(program, *left, env, this, host)?;
                 let before = if *op == "=" {
                     None
@@ -6258,6 +6469,10 @@ impl Runtime {
     ) -> Result<Value, Fault> {
         match &program.exprs[id].kind {
             ExprKind::Call(callee, arguments) => {
+                if matches!(program.exprs[*callee].kind, ExprKind::OptionalChain(_, _)) {
+                    return self
+                        .call_parenthesized_chain(program, *callee, arguments, env, this, host);
+                }
                 if let ExprKind::Member(object, property) = &program.exprs[*callee].kind {
                     let object = self.eval(program, *object, env, this, host)?;
                     let property = self.eval(program, *property, env, this, host)?;
@@ -6356,6 +6571,15 @@ impl Runtime {
                 let (target, arguments, _) = self.bound_arguments(index, args, false)?;
                 return self.construct_value(Value::Function(target), &arguments, host);
             }
+            Some(Function::Native(Builtin::Date(date::Op::Constructor))) => {
+                self.date_construct(args, host)
+            }
+            Some(Function::Native(Builtin::Promise(promises::Op::Constructor))) => {
+                self.construct_promise(args, host)
+            }
+            Some(Function::Native(Builtin::Promise(promises::Op::AggregateError))) => {
+                self.promise_builtin(promises::Op::AggregateError, args, Value::Undefined, host)
+            }
             Some(Function::Native(Builtin::TextEncoding(text_encoding::Op::Constructor(
                 encoder,
             )))) => self.construct_text_encoding(*encoder, args, host),
@@ -6415,9 +6639,7 @@ impl Runtime {
                     },
                 )
             }
-            Some(Function::Native(Builtin::Function)) => Err(Fault::new(
-                "The dynamic Function constructor is not implemented.",
-            )),
+            Some(Function::Native(Builtin::Function)) => self.function_constructor(args, host),
             Some(Function::Host {
                 object,
                 method,
@@ -7048,6 +7270,16 @@ impl Runtime {
                 let (target, arguments, receiver) = self.bound_arguments(index, args, true)?;
                 return self.call_value(Value::Function(target), &arguments, receiver, host);
             }
+            Some(Function::Promise(closure)) => {
+                let closure = closure.clone();
+                return self.promise_closure_call(closure, args, host);
+            }
+            Some(Function::Native(Builtin::Date(operation))) => {
+                return self.date_builtin(*operation, args, this, host);
+            }
+            Some(Function::Native(Builtin::Promise(operation))) => {
+                return self.promise_builtin(*operation, args, this, host);
+            }
             Some(Function::Native(Builtin::Symbol(operation))) => {
                 return self.symbol_builtin(*operation, args, this, host);
             }
@@ -7166,26 +7398,7 @@ impl Runtime {
         let previous_strict = self.strict;
         self.strict = program.templates[template].strict;
         let result = (|| {
-            let scope = self.new_environment(parent, true)?;
-            let function = &program.templates[template];
-            for (position, name) in function.params.iter().enumerate() {
-                let value = if function.rest && position + 1 == function.params.len() {
-                    self.array_from_values(args.get(position..).unwrap_or(&[]))?
-                } else {
-                    match args.get(position) {
-                        Some(value) => self.copy_value(value)?,
-                        None => Value::Undefined,
-                    }
-                };
-                self.put_binding(scope, name.clone(), Some(value), Declaration::Var, true)?;
-            }
-            self.prepare_arguments(scope, index, &program, template, args)?;
-            self.prepare(&program, &function.body, scope, true, host)?;
-            match self.statements(&program, &function.body, scope, &this, host)? {
-                Control::Return(value) => Ok(value),
-                Control::Normal(_) => Ok(Value::Undefined),
-                _ => Err(Fault::new("Unexpected loop control outside a loop.")),
-            }
+            self.script_parameters_and_body(&program, template, index, parent, args, &this, host)
         })();
         self.call_depth -= 1;
         self.strict = previous_strict;
@@ -7613,6 +7826,8 @@ impl Runtime {
                 "Strict arguments callee access is forbidden.",
             )),
             Builtin::Symbol(_)
+            | Builtin::Promise(_)
+            | Builtin::Date(_)
             | Builtin::Binary(_)
             | Builtin::Collection(_)
             | Builtin::Iterator(_)
@@ -7621,9 +7836,7 @@ impl Runtime {
                 "Native data operations need an execution context.",
             )),
             Builtin::EmptyFunction => Ok(Value::Undefined),
-            Builtin::Function => Err(Fault::new(
-                "The dynamic Function constructor is not implemented.",
-            )),
+            Builtin::Function => self.function_constructor(args, host),
             Builtin::ObjectStatic(_)
             | Builtin::ObjectMethod(_)
             | Builtin::FunctionMethod(_)
@@ -7637,7 +7850,7 @@ impl Runtime {
             }
             Builtin::Math(name) => self.math_builtin(name, args, host),
             Builtin::Eval => Err(Fault::new("Intrinsic eval needs an execution context.")),
-            Builtin::JsonParse => self.json_parse(args),
+            Builtin::JsonParse => self.json_parse_builtin(args, host),
             Builtin::JsonStringify => self.json_stringify(args, host),
             Builtin::RegExp => self.regexp_factory(args),
             Builtin::EncodeUri(component) => {

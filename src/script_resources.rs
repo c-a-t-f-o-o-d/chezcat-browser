@@ -89,6 +89,7 @@ impl Page {
                             &error,
                         );
                     }
+                    self.microtask_checkpoint(doc, forms);
                     "load"
                 }
             }

@@ -78,6 +78,23 @@ impl Runtime {
         record: &mut Record,
         host: &mut dyn Host,
     ) -> Result<Option<Value>, Fault> {
+        self.iterator_advance(record, true, host)
+    }
+
+    pub(super) fn iterator_skip(
+        &mut self,
+        record: &mut Record,
+        host: &mut dyn Host,
+    ) -> Result<(), Fault> {
+        self.iterator_advance(record, false, host).map(|_| ())
+    }
+
+    fn iterator_advance(
+        &mut self,
+        record: &mut Record,
+        read_value: bool,
+        host: &mut dyn Host,
+    ) -> Result<Option<Value>, Fault> {
         self.step()?;
         if record.done {
             return Ok(None);
@@ -117,8 +134,14 @@ impl Runtime {
             if done.truthy() {
                 return Ok(None);
             }
-            self.get_ordinary_property_with_host(object, "value", host)
-                .map(Some)
+            if read_value {
+                self.get_ordinary_property_with_host(object, "value", host)
+                    .map(Some)
+            } else {
+                // An elision advances the iterator without reading a custom
+                // iterator result's observable value getter.
+                Ok(Some(Value::Undefined))
+            }
         })();
         // A failed next call/result/done/value read is not followed by return.
         if !matches!(&result, Ok(Some(_))) {

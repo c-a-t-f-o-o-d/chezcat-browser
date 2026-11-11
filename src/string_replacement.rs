@@ -1,18 +1,66 @@
-//! Bounded String.prototype.replace for literal and native RegExp patterns.
+//! Bounded String.prototype.replace/replaceAll for literal and native RegExp patterns.
 //! Callable replacements receive the native captures, UTF-16 position and
-//! original string. Global matching finishes before the first callback.
-//! Custom Symbol.replace/RegExp execution protocols and named groups remain
-//! outside the existing subset; template substitutions use the original helper.
+//! original string, followed by a null-prototype named-groups object when needed.
+//! Global matching finishes before the first callback. Custom Symbol.replace/
+//! RegExp execution protocols remain outside the existing subset.
 
 use super::{regexp, Fault, Host, Runtime, Value, MAX_ARRAY_LENGTH, MAX_RETAINED_VALUES};
 
 impl Runtime {
+    pub(super) fn string_replace_all(
+        &mut self,
+        receiver: Value,
+        args: &[Value],
+        host: &mut dyn Host,
+    ) -> Result<Value, Fault> {
+        Self::require_property_receiver(&receiver)?;
+        let pattern = args.first().unwrap_or(&Value::Undefined);
+        let regex = match pattern {
+            Value::Object(id) if self.object(*id)?.regexp.is_some() => Some(*id),
+            _ => None,
+        };
+        // RegExp validation precedes observable receiver/replacement conversion.
+        // Custom Symbol.replace protocols remain outside the RegExp subset.
+        if let Some(id) = regex {
+            let flags = self.get_property_with_host(id, "flags", host)?;
+            Self::require_property_receiver(&flags)?;
+            if !self.replacement_string_value(flags, host)?.contains('g') {
+                return Err(Fault::exception(
+                    "TypeError",
+                    "replaceAll requires a global RegExp.",
+                ));
+            }
+        }
+        let text = self.replacement_string_value(receiver, host)?;
+        self.work(text.len().saturating_mul(3))?;
+        self.string_replace_mode(
+            &text,
+            pattern,
+            regex,
+            args.get(1).unwrap_or(&Value::Undefined),
+            true,
+            host,
+        )
+    }
+
     pub(super) fn string_replace(
         &mut self,
         text: &str,
         pattern: &Value,
         regex: Option<usize>,
         replacement: &Value,
+        host: &mut dyn Host,
+    ) -> Result<Value, Fault> {
+        self.string_replace_mode(text, pattern, regex, replacement, false, host)
+    }
+
+    fn string_replace_mode(
+        &mut self,
+        text: &str,
+        pattern: &Value,
+        regex: Option<usize>,
+        replacement: &Value,
+        all: bool,
         host: &mut dyn Host,
     ) -> Result<Value, Fault> {
         let callable = matches!(replacement, Value::Function(_));
@@ -35,26 +83,27 @@ impl Runtime {
         let global = if let Some(id) = regex {
             self.object(id)?.regexp.as_ref().unwrap().flags.global
         } else {
-            false
+            all
         };
-        if global {
-            self.set_property_throw(regex.unwrap(), "lastIndex".into(), Value::Number(0.0))?;
+        if let Some(id) = regex.filter(|_| global) {
+            self.set_property_throw(id, "lastIndex".into(), Value::Number(0.0))?;
         }
 
         if callable {
             let mut matches = Vec::new();
             let mut snapshot_bytes = 0usize;
+            let mut search_from = 0usize;
             loop {
                 self.step()?;
-                let Some(found) = self.next_replacement_match(regex, literal.as_deref(), &input)?
+                let Some(found) =
+                    self.next_replacement_match(regex, literal.as_deref(), &input, search_from)?
                 else {
                     break;
                 };
                 if matches.len() >= MAX_ARRAY_LENGTH {
                     return Err(Fault::new("Replacement match limit reached (8192)."));
                 }
-                let bytes = std::mem::size_of::<regexp::Match>()
-                    + found.captures.len() * std::mem::size_of::<Option<(usize, usize)>>();
+                let bytes = found.retained_bytes();
                 snapshot_bytes = snapshot_bytes.saturating_add(bytes);
                 if snapshot_bytes > MAX_RETAINED_VALUES {
                     return Err(Fault::new("Replacement snapshot limit reached (2 MiB)."));
@@ -63,13 +112,14 @@ impl Runtime {
                 // spend the shared job allowance, including across recursion.
                 self.work(bytes)?;
                 let empty_end = (found.start() == found.end()).then_some(found.end());
+                search_from = found.end().max(found.start() + 1);
                 matches.push(found);
                 if !global {
                     break;
                 }
-                if let Some(end) = empty_end {
+                if let (Some(end), Some(id)) = (empty_end, regex) {
                     self.set_property_throw(
-                        regex.unwrap(),
+                        id,
                         "lastIndex".into(),
                         Value::Number((end + 1) as f64),
                     )?;
@@ -79,7 +129,7 @@ impl Runtime {
             let mut cursor = 0;
             for found in matches {
                 self.step()?;
-                let mut arguments = Vec::with_capacity(found.captures.len() + 2);
+                let mut arguments = Vec::with_capacity(found.captures.len() + 3);
                 for capture in &found.captures {
                     arguments.push(if let Some((start, end)) = capture {
                         Value::String(self.units_string(&input[*start..*end])?)
@@ -90,6 +140,9 @@ impl Runtime {
                 arguments.push(Value::Number(found.start() as f64));
                 self.work(text.len())?;
                 arguments.push(Value::String(text.into()));
+                if !found.named_captures.is_empty() {
+                    arguments.push(self.regexp_named_groups(&found, &input)?);
+                }
                 let value =
                     self.call_value(replacement.clone(), &arguments, Value::Undefined, host)?;
                 let replace = self.replacement_string_value(value, host)?;
@@ -110,9 +163,11 @@ impl Runtime {
         let template = template.unwrap();
         let mut output = String::new();
         let mut cursor = 0;
+        let mut search_from = 0;
         loop {
             self.step()?;
-            let Some(found) = self.next_replacement_match(regex, literal.as_deref(), &input)?
+            let Some(found) =
+                self.next_replacement_match(regex, literal.as_deref(), &input, search_from)?
             else {
                 break;
             };
@@ -121,10 +176,11 @@ impl Runtime {
             let replace = self.replacement_text(&template, &found, &input)?;
             self.append_string(&mut output, &replace)?;
             cursor = found.end();
+            search_from = found.end().max(found.start() + 1);
             if !global {
                 break;
             }
-            if found.start() == found.end() {
+            if found.start() == found.end() && regex.is_some() {
                 self.set_property_throw(
                     regex.unwrap(),
                     "lastIndex".into(),
@@ -152,25 +208,30 @@ impl Runtime {
         regex: Option<usize>,
         literal: Option<&[u16]>,
         input: &[u16],
+        from: usize,
     ) -> Result<Option<regexp::Match>, Fault> {
         if let Some(id) = regex {
             return self.regexp_run(id, input);
         }
         let needle = literal.unwrap();
+        if from > input.len() {
+            return Ok(None);
+        }
         let mut position = None;
         if needle.is_empty() {
-            position = Some(0);
-        } else if needle.len() <= input.len() {
-            for (at, part) in input.windows(needle.len()).enumerate() {
+            position = Some(from);
+        } else if needle.len() <= input.len() - from {
+            for (at, part) in input[from..].windows(needle.len()).enumerate() {
                 self.work(needle.len().saturating_mul(2))?;
                 if part == needle {
-                    position = Some(at);
+                    position = Some(from + at);
                     break;
                 }
             }
         }
         Ok(position.map(|start| regexp::Match {
             captures: vec![Some((start, start + needle.len()))],
+            named_captures: Vec::new(),
         }))
     }
 }
@@ -199,6 +260,85 @@ mod tests {
                 .unwrap()
                 .to_text(),
             "ok"
+        );
+    }
+
+    #[test]
+    fn replace_all_literal_callbacks_empty_matches_and_nonoverlap() {
+        succeeds(
+            r#"
+var calls=[];
+var result='😀aba'.replaceAll('a',function(match,index,text){'use strict';
+if(this!==undefined||arguments.length!==3||match!=='a'||text!=='😀aba')throw 'arguments';calls.push(index);return '$&';});
+if(result!=='😀$&b$&'||calls.join()!=='2,4')throw 'positions';
+if('aaaaa'.replaceAll('aa','x')!=='xxa')throw 'nonoverlap';
+if('ab'.replaceAll('',function(match,index){return index;})!=='0a1b2'||''.replaceAll('',()=>'-')!=='-')throw 'empty';
+if('abc'.replaceAll('missing',function(){throw 'unexpected';})!=='abc')throw 'missing';
+if(String.prototype.replaceAll.length!==2||String.prototype.replaceAll.name!=='replaceAll')throw 'metadata';
+'ok';
+"#,
+        );
+    }
+
+    #[test]
+    fn replace_all_templates_generic_receiver_and_conversion_order() {
+        succeeds(
+            r#"
+var order='',receiver={toString(){order+='o';return 'aba';}},search={toString(){order+='s';return 'a';}},replacement={toString(){order+='r';return '<$&>';}};
+if(String.prototype.replaceAll.call(receiver,search,replacement)!=='<a>b<a>'||order!=='osr')throw 'conversion';
+if(String.prototype.replaceAll.call(121,1,()=>9)!=='929')throw 'generic receiver';
+if('aba'.replaceAll('a','[$$][$&][$`][$\']')!=='[$][a][][ba]b[$][a][ab][]')throw 'template';
+if('undefined undefined'.replaceAll(undefined,'x')!=='x x')throw 'undefined';
+var marker={},calls=0;try{'aaa'.replaceAll('a',function(){calls++;throw marker;});}catch(e){if(e!==marker)throw e;}
+if(calls!==1)throw 'callback throw';
+var caught=false;try{'a'.replaceAll('a',()=>Symbol());}catch(e){caught=e.name==='TypeError';}if(!caught)throw 'symbol return';
+'ok';
+"#,
+        );
+    }
+
+    #[test]
+    fn replace_all_native_regexp_snapshots_and_early_global_validation() {
+        succeeds(
+            r#"
+var r=/(a)|(b)/g,seen=[];r.lastIndex=19;
+var result='ab'.replaceAll(r,function(match,a,b,index,input){'use strict';
+if(this!==undefined||arguments.length!==5||input!=='ab')throw 'captures';seen.push(index+':'+r.lastIndex);r.lastIndex=7;return index;});
+if(result!=='01'||seen.join('|')!=='0:0|1:7'||r.lastIndex!==7)throw 'snapshot';
+var order='',receiver={toString(){order+='receiver';return 'aaa';}},replacement={toString(){order+='replacement';return 'x';}},caught=false;
+try{String.prototype.replaceAll.call(receiver,/a/,replacement);}catch(e){caught=e.name==='TypeError';}
+if(!caught||order!=='')throw 'nonglobal order';
+'ok';
+"#,
+        );
+        // Native RegExp configuration still uses the pre-existing virtual
+        // properties. Keep the unsupported descriptor boundary explicit;
+        // replaceAll does not claim custom RegExp accessors or protocols.
+        let error = Runtime::new().execute(r#"
+var order='',receiver={toString(){order+='receiver';return 'aaa';}},replacement={toString(){order+='replacement';return 'x';}};
+var marker={},reg=/a/g;Object.defineProperty(reg,'flags',{get:function(){throw marker;}});
+try{String.prototype.replaceAll.call(receiver,reg,replacement);}catch(e){if(e!==marker)throw e;}
+if(order!=='')throw 'flags read before receiver';
+"#, &mut NoHost).unwrap_err();
+        assert!(
+            error.contains("RegExp accessor descriptor changes are not implemented"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn replace_all_match_budget_is_fatal_before_callbacks() {
+        let mut runtime = Runtime::new();
+        runtime.execute("var caught=false,finished=false,called=false,text='a';for(var i=0;i<14;i++)text+=text;",&mut NoHost).unwrap();
+        let error=runtime.execute("try{text.replaceAll('a',function(){called=true;return '';});}catch(e){caught=true;}finally{finished=true;}",&mut NoHost).unwrap_err();
+        assert!(error.contains("limit"), "{error}");
+        runtime.begin_job();
+        assert_eq!(
+            runtime
+                .execute("!called&&!caught&&!finished;", &mut NoHost)
+                .unwrap()
+                .to_text(),
+            "true"
         );
     }
 

@@ -283,7 +283,6 @@ if(caught!==3)throw 'strict primitive assignments';
             for source in [
                 "var o={};o[Symbol.toPrimitive]=function(){return +o;};try{+o;}catch(e){caught=true;}finally{finalized=true;}",
                 "var o={};Object.defineProperty(o,Symbol.toPrimitive,{get:function(){return +o;}});try{+o;}catch(e){caught=true;}finally{finalized=true;}",
-                "var o=[];o[0]=o;o[Symbol.toPrimitive]=Array.prototype.join;try{[o].join();}catch(e){caught=true;}finally{finalized=true;}",
             ] {
                 let mut runtime = Runtime::new();
                 runtime.execute("var caught=false,finalized=false;", &mut NoHost).unwrap();
@@ -295,6 +294,27 @@ if(caught!==3)throw 'strict primitive assignments';
                 assert_eq!(runtime.execute("!caught&&!finalized;", &mut NoHost).unwrap().to_text(), "true");
             }
         }).unwrap().join().unwrap();
+    }
+
+    #[test]
+    fn conversion_protocol_native_array_hook_cycle_uses_shared_join_guard() {
+        // The third original program from the fatal recursion test is retained
+        // verbatim. Native join now recognizes this active array through the
+        // Symbol.toPrimitive callback; the two genuine recursion programs above
+        // remain fatal. Node returns normally and executes the finally block.
+        let mut runtime = Runtime::new();
+        runtime
+            .execute("var caught=false,finalized=false;", &mut NoHost)
+            .unwrap();
+        runtime.execute("var o=[];o[0]=o;o[Symbol.toPrimitive]=Array.prototype.join;try{[o].join();}catch(e){caught=true;}finally{finalized=true;}", &mut NoHost).unwrap();
+        assert_eq!(
+            runtime
+                .execute("!caught&&finalized&&[o].join()==='';", &mut NoHost)
+                .unwrap()
+                .to_text(),
+            "true"
+        );
+        assert!(runtime.active_array_joins.is_empty());
     }
 }
 

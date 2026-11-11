@@ -40,15 +40,35 @@ impl Runtime {
         let function = &program.templates[template];
         // A named arguments parameter suppresses the implicit binding, including
         // a rest binding. Arrows keep their outer arguments binding.
-        if function.arrow || function.params.iter().any(|name| name == "arguments") {
+        if function.arrow {
             return Ok(());
         }
-        for &statement in &function.body {
+        for p in &function.params {
+            if program
+                .pattern_names_with_work(p.pattern, |n| self.work(n))?
+                .iter()
+                .any(|name| name == "arguments")
+            {
+                return Ok(());
+            }
+        }
+        for &statement in function
+            .body
+            .iter()
+            .filter(|_| !function.has_parameter_expressions(program))
+        {
             self.step()?;
             if match &program.stmts[statement].kind {
                 StmtKind::Function(name, _) => name == "arguments",
                 StmtKind::Declare(Declaration::Let | Declaration::Const, names) => {
-                    names.iter().any(|(name, _)| name == "arguments")
+                    let mut found = false;
+                    for (pattern, _) in names {
+                        found |= program
+                            .pattern_names_with_work(*pattern, |n| self.work(n))?
+                            .iter()
+                            .any(|name| name == "arguments");
+                    }
+                    found
                 }
                 _ => false,
             } {
@@ -61,15 +81,18 @@ impl Runtime {
         }
         self.work(bytes)?;
         let mut mapped = BTreeMap::new();
-        if !function.strict && !function.rest {
+        if !function.strict && !function.non_simple(program) {
             let mut seen = HashSet::new();
             // Only the final occurrence of a duplicate parameter can map.
             // A missing final argument also prevents an earlier duplicate
             // from mapping, as required by CreateMappedArgumentsObject.
-            for (index, name) in function.params.iter().enumerate().rev() {
+            for (index, parameter) in function.params.iter().enumerate().rev() {
+                let name = program
+                    .pattern_name(parameter.pattern)
+                    .expect("simple parameter name");
                 self.work(name.len())?;
-                if seen.insert(name.as_str()) && index < values.len() {
-                    mapped.insert(index.to_string(), name.clone());
+                if seen.insert(name) && index < values.len() {
+                    mapped.insert(index.to_string(), name.to_owned());
                 }
             }
         }
@@ -86,7 +109,7 @@ impl Runtime {
         )?;
         self.environment_mut(environment).arguments = Some(Pending {
             function: callee,
-            unmapped: function.strict || function.rest,
+            unmapped: function.strict || function.non_simple(program),
             values: values.to_vec(),
             mapped,
         });

@@ -24,6 +24,7 @@ import tempfile
 ROOT = Path(__file__).resolve().parents[1]
 CASE_FILE = ROOT / "tools/compatibility_cases.json"
 HELPER_FILE = ROOT / "tools/check_javascript.py"
+PROMISE_HELPER_FILE = ROOT / "tools/check_promises.py"
 COHORT_FILE = ROOT / "tools/compatibility-progress-cohort.json"
 UPSTREAM = ROOT / "tools/verification-0.34/test262"
 
@@ -62,17 +63,26 @@ def probe_status(case, actual, expected, matches):
     return "missing"
 
 
-def run_originals(cases, helper, probe, node):
+def run_originals(cases, helper, probe, node, promise_helper=None, promise_probe=None):
     results = []
     for case in cases:
         try:
-            expected = helper.run_node(node, case["source"])
-            actual = helper.run_own(probe, case["source"])
+            selected = promise_helper if case.get("microtasks") else helper
+            executable = promise_probe if case.get("microtasks") else probe
+            if case.get("microtasks"):
+                expected = selected.run_node(node, case["source"])
+                actual = selected.run_own(executable, case["source"])
+            else:
+                browser = bool(case.get("browser_global", False))
+                expected = selected.run_node(node, case["source"], browser=browser)
+                actual = selected.run_own(executable, case["source"], browser=browser)
         except (OSError, subprocess.SubprocessError, ValueError) as error:
             expected = {"ok": False, "tool_error": str(error)}
             actual = {"ok": False, "tool_error": str(error)}
         matches = bool(expected.get("ok") and helper.finished_normally(actual)
                        and actual.get("ok") and actual["records"] == expected["records"])
+        if case.get("microtasks"):
+            matches = promise_helper.compare(actual, expected, case.get("expected_diagnostics", 0))
         results.append({"id": case["id"], "area": case["area"], "label": case["label"],
                         "fixture_sha256": hashlib.sha256(case["source"].encode()).hexdigest(),
                         "status": probe_status(case, actual, expected, matches),
@@ -154,7 +164,7 @@ def progress_cohort(results):
     matches = sum(by_id[row["id"]]["matches_node"] for row in cohort["probes"]
                   if row["id"] not in incomparable)
     return {"label": cohort["label"], "total": total, "matches_node": matches,
-            "percentage": None if incomparable else round(100 * matches / total, 1),
+            "percentage": None if incomparable else round(100 * matches / total, 2),
             "incomparable": incomparable, "cohort_sha256": digest(COHORT_FILE),
             "scope": cohort["scope"]}
 
@@ -222,8 +232,8 @@ def render_matrix(report):
                      "Files, license, harness and download hashes are retained under `tools/verification-0.34/test262/`. "
                      "Default and strict executions are separate results. This is a small selection, not a full Test262 run.")
     lines += ["", "## Reproduce", "", "```sh",
-              "python tools/check_compatibility.py --helper-file tools/verification-0.38/check_javascript-inventory-helper.py --source-root PATH_TO_BASELINE --label 0.37.0 --output tools/verification-0.38/compatibility-baseline.json",
-              "python tools/check_compatibility.py --helper-file tools/verification-0.38/check_javascript-inventory-helper.py --label 0.38.0 --compare tools/verification-0.38/compatibility-baseline.json --output tools/verification-0.38/compatibility-final.json --matrix COMPATIBILITY_MATRIX.md",
+              "python tools/check_compatibility.py --helper-file tools/verification-0.40/check_javascript-inventory-helper.py --promise-helper-file tools/verification-0.40/check_promises-inventory-helper.py --source-root PATH_TO_BASELINE --label 0.39.0 --output tools/verification-0.40/compatibility-baseline.json",
+              "python tools/check_compatibility.py --helper-file tools/verification-0.40/check_javascript-inventory-helper.py --promise-helper-file tools/verification-0.40/check_promises-inventory-helper.py --label 0.40.0 --compare tools/verification-0.40/compatibility-baseline.json --output tools/verification-0.40/compatibility-final.json --matrix COMPATIBILITY_MATRIX.md",
               "```", "", f"Current source-manifest SHA256: `{report['source_manifest']['sha256']}`. "
               f"Original-fixture file SHA256: `{report['fixture_file_sha256']}`. "
               f"Reference: `{report['node']}`; compiler: `{report['rustc']}`.", "",
@@ -243,16 +253,22 @@ def main():
     parser.add_argument("--node", default="node")
     parser.add_argument("--helper-file", type=Path, default=HELPER_FILE,
                         help="Existing JavaScript probe helper, optionally a pinned snapshot")
+    parser.add_argument("--promise-helper-file", type=Path, default=PROMISE_HELPER_FILE,
+                        help="Separate explicit-checkpoint helper for probes marked microtasks")
     options = parser.parse_args()
     source_root = options.source_root.resolve()
     data = json.loads(CASE_FILE.read_text())
     cases = data["probes"]
-    if not 1 <= len(cases) <= 128 or len({case['id'] for case in cases}) != len(cases):
-        parser.error("Expected between 1 and 128 distinct independent probes.")
+    if not 1 <= len(cases) <= 256 or len({case['id'] for case in cases}) != len(cases):
+        parser.error("Expected between 1 and 256 distinct independent probes.")
     helper_file = options.helper_file.resolve()
     helper = load_helpers(helper_file)
+    promise_helper_file = options.promise_helper_file.resolve()
+    promise_helper = load_helpers(promise_helper_file) if any(case.get("microtasks") for case in cases) else None
+    review_file = source_root / "tools/compatibility_cases.json"
+    browser_inventory = json.loads(review_file.read_text())["browser_inventory"]
     before = source_manifest(source_root)
-    for item in data["browser_inventory"]:
+    for item in browser_inventory:
         for name in item["evidence_files"]:
             if not (source_root / name).is_file():
                 parser.error("Missing inventory source evidence: " + name)
@@ -266,7 +282,9 @@ def main():
             source.write_text(helper.PROBE.replace("JAVASCRIPT_SOURCE", json.dumps(str(source_root / "src/javascript.rs"))))
             subprocess.run([options.rustc, "--edition=2021", "-O", str(source), "-o", str(probe)],
                            capture_output=True, text=True, timeout=120, check=True)
-            results = run_originals(cases, helper, probe, options.node)
+            promise_probe, checkpoint_available = (promise_helper.compile_probe(source_root, directory, options.rustc)
+                                                   if promise_helper else (None, False))
+            results = run_originals(cases, helper, probe, options.node, promise_helper, promise_probe)
             upstream = run_test262(helper, probe, options.node)
         if before != source_manifest(source_root):
             raise ValueError("Source files changed during the check; results are not a frozen-source report.")
@@ -282,7 +300,11 @@ def main():
               "checker_sha256": digest(Path(__file__)),
               "counts": {"total": len(results), "matches_node": sum(row["matches_node"] for row in results),
                          "statuses": dict(Counter(row["status"] for row in results))},
-              "probes": results, "browser_inventory": data["browser_inventory"], "test262": upstream}
+              "probes": results, "browser_inventory": browser_inventory, "test262": upstream,
+              "browser_inventory_file_sha256": digest(review_file),
+              "promise_helper_sha256": digest(promise_helper_file) if promise_helper else None,
+              "microtask_probes": sum(bool(case.get("microtasks")) for case in cases),
+              "microtask_checkpoint_available": checkpoint_available}
     report["progress_reference_cohort"] = progress_cohort(results)
     if options.compare:
         previous = json.loads(options.compare.read_text())

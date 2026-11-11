@@ -1,0 +1,182 @@
+{
+  "schema_version": 1,
+  "scope": "Original local Promise and microtask comparisons. Positive records/completion and diagnostic count must match actual Node queues. Resource limits are ChezCat-only.",
+  "cases": [
+    {
+      "id": "promise-executor-sync-handler-async",
+      "source": "var log=[];var p=new Promise(function(resolve){log.push('executor');resolve(4);log.push('resolved');});p.then(function(x){test.record(log.join(','));test.record(x);});log.push('tail');test.record(log.join(','));\n'ok';\n"
+    },
+    {
+      "id": "promise-resolution-identity-and-constructor-getter",
+      "source": "var p=Promise.resolve(3),reads=0;test.record(Promise.resolve(p)===p);Object.defineProperty(p,'constructor',{get:function(){reads++;return Promise;}});test.record(Promise.resolve(p)===p);test.record(reads);p.then(function(x){test.record(x);});\n'ok';\n"
+    },
+    {
+      "id": "promise-primitive-object-and-noncallable-then",
+      "source": "var o={then:7};Promise.resolve(o).then(function(x){test.record(x===o);});Promise.resolve().then(function(x){test.record(x===undefined);});Promise.resolve(Symbol('value')).then(function(x){test.record(typeof x);});Promise.resolve(null).then(function(x){test.record(x===null);});test.record('queued');\n'ok';\n"
+    },
+    {
+      "id": "promise-thenable-getter-sync-call-async",
+      "source": "var log=[],o={get then(){log.push('get');return function(resolve,reject){log.push(this===o?'call':'bad receiver');test.record(arguments.length);resolve(8);};}};var p=Promise.resolve(o);log.push('after resolve');p.then(function(x){log.push('handler');test.record(x);test.record(log.join(','));});test.record(log.join(','));\n'ok';\n"
+    },
+    {
+      "id": "promise-executor-once-and-late-throw",
+      "source": "var marker={};new Promise(function(resolve,reject){resolve(5);reject(marker);resolve(7);throw marker;}).then(function(x){test.record(x);},function(){test.record('wrong');});new Promise(function(resolve,reject){reject(marker);resolve(6);}).catch(function(x){test.record(x===marker);});test.record('sync');\n'ok';\n"
+    },
+    {
+      "id": "promise-thenable-once-and-late-throw",
+      "source": "var marker={};Promise.resolve({then:function(resolve,reject){resolve(6);reject(marker);throw marker;}}).then(function(x){test.record(x);});Promise.resolve({then:function(resolve,reject){reject(marker);resolve(8);throw 9;}}).catch(function(x){test.record(x===marker);});test.record('sync');\n'ok';\n"
+    },
+    {
+      "id": "promise-thenable-getter-and-call-throws",
+      "source": "var marker={},reads=0;Promise.resolve({get then(){reads++;throw marker;}}).catch(function(x){test.record(x===marker);});Promise.resolve({then:function(){throw marker;}}).catch(function(x){test.record(x===marker);});test.record(reads);\n'ok';\n"
+    },
+    {
+      "id": "promise-self-resolution-and-chain-cycle",
+      "source": "var resolve,p=new Promise(function(r){resolve=r;});resolve(p);p.catch(function(e){test.record(e.name);});var child=Promise.resolve(1).then(function(){return child;});child.catch(function(e){test.record(e.name);});test.record('start');\n'ok';\n"
+    },
+    {
+      "id": "promise-native-adoption-and-lock",
+      "source": "var settle,inner=new Promise(function(r){settle=r;}),out=new Promise(function(resolve,reject){resolve(inner);reject('ignored');});out.then(function(v){test.record('outer:'+v);});inner.then(function(v){test.record('inner:'+v);});settle(9);test.record('tail');\n'ok';\n"
+    },
+    {
+      "id": "promise-pending-thenable-settlement-lock",
+      "source": "var resolveLater;var p=new Promise(function(resolve,reject){resolve({then:function(r){resolveLater=r;}});reject('ignored');resolve(99);});p.then(function(x){test.record(x);},function(){test.record('wrong');});queueMicrotask(function(){resolveLater(12);});test.record('tail');\n'ok';\n"
+    },
+    {
+      "id": "promise-fifo-reactions-and-new-reactions",
+      "source": "var resolve,p=new Promise(function(r){resolve=r;});p.then(function(){test.record('one');p.then(function(){test.record('nested');});});p.then(function(){test.record('two');});resolve();p.then(function(){test.record('three');});Promise.resolve().then(function(){test.record('other');});test.record('tail');\n'ok';\n"
+    },
+    {
+      "id": "promise-propagation-and-noncallable-handlers",
+      "source": "var marker={};Promise.resolve(marker).then(7,{}).then(function(x){test.record(x===marker);});Promise.reject(marker).then().catch(function(x){test.record(x===marker);return 8;}).then(function(x){test.record(x);});Promise.resolve(4).then(function(){}).then(function(x){test.record(x===undefined);});test.record('tail');\n'ok';\n"
+    },
+    {
+      "id": "promise-callback-throws-and-recovery",
+      "source": "var marker={};Promise.resolve(1).then(function(){throw marker;}).catch(function(e){test.record(e===marker);return 13;}).then(function(x){test.record(x);});Promise.reject(2).then(null,function(x){test.record(x);throw marker;}).catch(function(e){test.record(e===marker);});test.record('tail');\n'ok';\n"
+    },
+    {
+      "id": "promise-handler-receiver-and-arity",
+      "source": "Promise.resolve(3).then(function(x){'use strict';test.record(this===undefined);test.record(arguments.length);test.record(x);});Promise.reject(4).catch(function(x){'use strict';test.record(this===undefined);test.record(arguments.length);test.record(x);});new Promise(function(resolve,reject){'use strict';test.record(this===undefined);test.record(arguments.length);resolve();});\n'ok';\n"
+    },
+    {
+      "id": "promise-returned-thenable-resolution-order",
+      "source": "var log=[];Promise.resolve().then(function(){log.push('handler');return {get then(){log.push('get');return function(r){log.push('call');r(5);};}};}).then(function(x){log.push('next');test.record(x);test.record(log.join(','));});queueMicrotask(function(){log.push('microtask');});test.record('tail');\n'ok';\n"
+    },
+    {
+      "id": "promise-branding-and-constructor-errors",
+      "source": "for(var v of [undefined,null,4,{},function(){}]){try{Promise.prototype.then.call(v,function(){});}catch(e){test.record(e.name);}}try{Promise(function(){});}catch(e){test.record(e.name);}try{new Promise(2);}catch(e){test.record(e.name);}var p=Promise.resolve(1);test.record(typeof p);test.record(p instanceof Promise);test.record(Object.getPrototypeOf(p)===Promise.prototype);\n'ok';\n"
+    },
+    {
+      "id": "promise-function-and-method-metadata",
+      "source": "test.record(Promise.name);test.record(Promise.length);for(var name of ['resolve','reject','all','race','allSettled','any']){var f=Promise[name],d=Object.getOwnPropertyDescriptor(Promise,name);test.record(f.name+':'+f.length);test.record(d.writable+','+d.enumerable+','+d.configurable);test.record(f.hasOwnProperty('prototype'));}for(var name of ['then','catch','finally'])test.record(Promise.prototype[name].name+':'+Promise.prototype[name].length);\n'ok';\n"
+    },
+    {
+      "id": "promise-generic-resolve-and-reject",
+      "source": "function C(executor){var self=this;executor(function(v){self.value=v;},function(v){self.reason=v;});}var a=Promise.resolve.call(C,7),b=Promise.reject.call(C,8);test.record(a instanceof C);test.record(a.value);test.record(b.reason);for(var target of [undefined,null,3,{}]){try{Promise.resolve.call(target,1);}catch(e){test.record(e.name);}}\n'ok';\n"
+    },
+    {
+      "id": "promise-catch-generic-then-dispatch",
+      "source": "var callback=function(){},holder={then:function(a,b){test.record(this===holder);test.record(a===undefined);test.record(b===callback);return 9;}};test.record(Promise.prototype.catch.call(holder,callback));var p=Promise.resolve(1);p.then=function(a,b){test.record(a===undefined);test.record(b===callback);return 'override';};test.record(p.catch(callback));\n'ok';\n"
+    },
+    {
+      "id": "promise-finally-preserves-original-completion",
+      "source": "var marker={};Promise.resolve(marker).finally(function(){'use strict';test.record(this===undefined);test.record(arguments.length);return 999;}).then(function(v){test.record(v===marker);});Promise.reject(marker).finally(function(){return 999;}).catch(function(v){test.record(v===marker);});Promise.resolve(3).finally(4).then(function(v){test.record(v);});test.record('tail');\n'ok';\n"
+    },
+    {
+      "id": "promise-finally-waits-and-overrides",
+      "source": "var log=[];Promise.resolve(4).finally(function(){log.push('finally');return Promise.resolve().then(function(){log.push('wait');});}).then(function(v){log.push('then');test.record(v);test.record(log.join(','));});Promise.resolve(1).finally(function(){throw 8;}).catch(function(e){test.record(e);});Promise.reject(2).finally(function(){return Promise.reject(9);}).catch(function(e){test.record(e);});test.record('tail');\n'ok';\n"
+    },
+    {
+      "id": "promise-finally-generic-and-noncallable",
+      "source": "var f=function(){},o={then:function(a,b){test.record(this===o);test.record(a===f);test.record(b===f);return 2;}};test.record(Promise.prototype.finally.call(o,f));var p={then:function(a,b){test.record(a===7);test.record(b===7);return 3;}};test.record(Promise.prototype.finally.call(p,7));\n'ok';\n"
+    },
+    {
+      "id": "promise-species-default-null-and-custom",
+      "source": "var p=Promise.resolve(3);test.record(Promise[Symbol.species]===Promise);p.constructor={};p.constructor[Symbol.species]=null;test.record(p.then() instanceof Promise);function C(executor){var self=this;executor(function(v){self.value=v;},function(v){self.reason=v;});}p.constructor[Symbol.species]=C;var child=p.then(function(v){return v+1;});test.record(child instanceof C);queueMicrotask(function(){test.record(child.value);});\n'ok';\n"
+    },
+    {
+      "id": "promise-species-abrupt-and-invalid",
+      "source": "var p=Promise.resolve(1),marker={};Object.defineProperty(p,'constructor',{configurable:true,get:function(){throw marker;}});try{p.then();}catch(e){test.record(e===marker);}Object.defineProperty(p,'constructor',{value:2,writable:true,configurable:true});try{p.then();}catch(e){test.record(e.name);}p.constructor={};p.constructor[Symbol.species]=3;try{p.then();}catch(e){test.record(e.name);}\n'ok';\n"
+    },
+    {
+      "id": "microtask-native-fifo-and-nesting",
+      "source": "queueMicrotask(function(){test.record('q1');queueMicrotask(function(){test.record('nested q');});Promise.resolve().then(function(){test.record('nested p');});});Promise.resolve().then(function(){test.record('p1');});queueMicrotask(function(){test.record('q2');});test.record('sync');\n'ok';\n"
+    },
+    {
+      "id": "microtask-callback-validation-and-this",
+      "source": "for(var x of [undefined,null,2,{}]){try{queueMicrotask(x);}catch(e){test.record(e.name);}}queueMicrotask(function(){'use strict';test.record(this===undefined);test.record(arguments.length);});test.record(queueMicrotask.length);\n'ok';\n"
+    },
+    {
+      "id": "promise-multiple-host-checkpoints",
+      "source": "var later,p=new Promise(function(r){later=r;});p.then(function(x){test.record(x);});Promise.resolve().then(function(){test.record('first queue');});test.record('first script');\n//---NEXT JOB---\ntest.record('second script');later(11);p.then(function(x){test.record(x+1);});\n'ok';\n"
+    },
+    {
+      "id": "microtask-exception-reports-and-continues",
+      "source": "queueMicrotask(function(){throw 7;});queueMicrotask(function(){test.record('continued');});test.record('sync');\n'ok';\n",
+      "expected_diagnostics": 1
+    },
+    {
+      "id": "promise-unhandled-rejection-report",
+      "source": "Promise.reject('unhandled marker');Promise.reject('handled marker').catch(function(){test.record('handled');});test.record('sync');\n'ok';\n",
+      "expected_diagnostics": 1
+    },
+    {
+      "id": "promise-all-order-native-thenables-and-empty",
+      "source": "Promise.all([Promise.resolve(3),{then:function(r){r(4);}},5]).then(function(a){test.record(a.join(','));});Promise.all([]).then(function(a){test.record(a.length);});test.record('tail');\n'ok';\n"
+    },
+    {
+      "id": "promise-all-first-rejection",
+      "source": "var a={},b={};Promise.all([Promise.reject(a),Promise.reject(b)]).catch(function(e){test.record(e===a);});test.record('tail');\n'ok';\n"
+    },
+    {
+      "id": "promise-race-empty-and-first-settled",
+      "source": "Promise.race([]).then(function(){test.record('wrong');});Promise.race([Promise.resolve(6),7]).then(function(v){test.record(v);});Promise.race([Promise.reject(9),10]).catch(function(v){test.record(v);});test.record('tail');\n'ok';\n"
+    },
+    {
+      "id": "promise-allsettled-order-and-fields",
+      "source": "Promise.allSettled([Promise.resolve(1),Promise.reject(2),3]).then(function(a){test.record(a.length);test.record(a[0].status+':'+a[0].value);test.record(a[1].status+':'+a[1].reason);test.record(a[2].status+':'+a[2].value);test.record(Object.keys(a[0]).join(','));test.record(Object.keys(a[1]).join(','));});Promise.allSettled([]).then(function(a){test.record(a.length);});test.record('tail');\n'ok';\n"
+    },
+    {
+      "id": "promise-any-success-and-aggregate-order",
+      "source": "Promise.any([Promise.reject('first'),Promise.resolve('ok value'),Promise.reject('third')]).then(function(v){test.record(v);});Promise.any([Promise.reject(4),Promise.reject(5)]).catch(function(e){test.record(e.name);test.record(e.errors.join(','));test.record(e instanceof AggregateError);});Promise.any([]).catch(function(e){test.record(e.name);test.record(e.errors.length);});test.record('tail');\n'ok';\n"
+    },
+    {
+      "id": "promise-withresolvers-shape-and-once",
+      "source": "var cap=Promise.withResolvers();test.record(Object.keys(cap).join(','));test.record(cap.promise instanceof Promise);test.record(typeof cap.resolve+','+typeof cap.reject);cap.promise.then(function(v){test.record(v);});cap.resolve(18);cap.reject(19);test.record('tail');\n'ok';\n"
+    },
+    {
+      "id": "promise-combinator-iterator-close-on-resolve-error",
+      "source": "var marker={},closed=0,source={};source[Symbol.iterator]=function(){return {next:function(){return {done:false,value:1};},return:function(){closed++;return {};}};};function C(executor){return new Promise(executor);}C.resolve=function(){throw marker;};Promise.all.call(C,source).catch(function(e){test.record(e===marker);test.record(closed);});test.record('tail');\n'ok';\n"
+    },
+    {
+      "id": "promise-combinator-caches-resolve-getter",
+      "source": "var calls=0,gets=0;function C(executor){return new Promise(executor);}Object.defineProperty(C,'resolve',{get:function(){gets++;return function(x){calls++;test.record(this===C);return Promise.resolve(x);};}});Promise.all.call(C,[2,4]).then(function(a){test.record(a.join(','));test.record(gets);test.record(calls);});test.record('tail');\n'ok';\n"
+    },
+    {
+      "id": "promise-all-duplicate-element-fulfillment",
+      "source": "function C(executor){return new Promise(executor);}C.resolve=function(x){return {then:function(resolve){resolve(x);resolve(99);}};};Promise.all.call(C,[1,2]).then(function(a){test.record(a.join(','));});test.record('tail');\n'ok';\n"
+    },
+    {
+      "id": "promise-allsettled-duplicate-element-settlement",
+      "source": "function C(executor){return new Promise(executor);}C.resolve=function(x){return {then:function(resolve,reject){resolve(x);reject(99);resolve(100);}};};Promise.allSettled.call(C,[1,2]).then(function(a){test.record(a[0].status+':'+a[0].value);test.record(a[1].status+':'+a[1].value);});test.record('tail');\n'ok';\n"
+    },
+    {
+      "id": "promise-any-duplicate-element-rejections",
+      "source": "function C(executor){return new Promise(executor);}C.resolve=function(x){return {then:function(resolve,reject){reject(x);reject(99);}};};Promise.any.call(C,[1,2]).catch(function(e){test.record(e.errors.join(','));});test.record('tail');\n'ok';\n"
+    }
+  ],
+  "negative_cases": [
+    {
+      "id": "microtask-queue-bound-atomic",
+      "source": "function cb(){};try{for(var i=0;i<10000;i++)queueMicrotask(cb);}catch(e){test.record('caught');}finally{test.record('finally');}"
+    },
+    {
+      "id": "promise-infinite-reaction-chain-atomic",
+      "source": "function next(){Promise.resolve().then(next);}try{next();}catch(e){test.record('caught');}finally{}"
+    },
+    {
+      "id": "promise-retained-state-bound-atomic",
+      "source": "function keep(){};try{for(var i=0;i<100000;i++)new Promise(keep);}catch(e){test.record('caught');}finally{test.record('finally');}"
+    }
+  ]
+}
