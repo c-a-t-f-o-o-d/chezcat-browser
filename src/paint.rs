@@ -6,6 +6,13 @@ pub const GLYPH_HEIGHT: i32 = 7;
 // unexpected window dimensions. An unavailable surface is represented as empty.
 const MAX_CANVAS_PIXELS: usize = 64 * 1024 * 1024;
 
+#[path = "paint_area.rs"]
+mod area;
+
+#[cfg(test)]
+#[path = "paint_resample_tests.rs"]
+mod resample_tests;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ClipRect {
     pub left: i32,
@@ -248,9 +255,34 @@ impl Canvas {
         }
     }
 
-    /// Nearest-neighbor scaling and straight-alpha compositing, entirely on our surface.
+    /// Smooth scaling on our surface. Source pixels remain straight alpha;
+    /// interpolation and compositing use premultiplied contributions to avoid
+    /// colored fringes from RGB stored underneath transparent pixels.
     pub fn image(&mut self, x: i32, y: i32, w: i32, h: i32, bitmap: &crate::image::Bitmap) {
+        self.image_filtered(x, y, w, h, bitmap, crate::css::ImageRendering::Auto);
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn image_filtered(
+        &mut self,
+        x: i32,
+        y: i32,
+        w: i32,
+        h: i32,
+        bitmap: &crate::image::Bitmap,
+        rendering: crate::css::ImageRendering,
+    ) {
         if w <= 0 || h <= 0 || bitmap.width == 0 || bitmap.height == 0 || self.pixels.is_empty() {
+            return;
+        }
+        let Some(count) = bitmap.width.checked_mul(bitmap.height) else {
+            return;
+        };
+        if count > bitmap.pixels.len()
+            || count > crate::image::MAX_PIXELS
+            || bitmap.width > 16_384
+            || bitmap.height > 16_384
+        {
             return;
         }
         let left = i64::from(x)
@@ -265,36 +297,188 @@ impl Canvas {
         let bottom = (i64::from(y) + i64::from(h))
             .clamp(0, self.height as i64)
             .min(i64::from(self.clip.bottom)) as usize;
-        for py in top..bottom {
-            let sy = ((py as i64 - i64::from(y)) * bitmap.height as i64 / i64::from(h)) as usize;
+        if left >= right || top >= bottom {
+            return;
+        }
+        if matches!(
+            rendering,
+            crate::css::ImageRendering::Auto
+                | crate::css::ImageRendering::Smooth
+                | crate::css::ImageRendering::HighQuality
+        ) && ((w as usize) < bitmap.width || (h as usize) < bitmap.height)
+            && area::image(
+                self,
+                (x, y),
+                (w as usize, h as usize),
+                bitmap,
+                (left, top, right, bottom),
+            )
+        {
+            return;
+        }
+        // Only visible columns are prepared. No intermediate scaled bitmap is
+        // allocated, even for extreme CSS dimensions or image-rendering's
+        // virtual integer expansion. At most 16K small column descriptors.
+        let mut columns = Vec::new();
+        if right - left <= 16_384 && columns.try_reserve_exact(right - left).is_ok() {
             for px in left..right {
-                let sx = ((px as i64 - i64::from(x)) * bitmap.width as i64 / i64::from(w)) as usize;
-                let Some(&src) = bitmap.pixels.get(sy * bitmap.width + sx) else {
-                    continue;
-                };
-                let alpha = src >> 24;
+                columns.push(image_axis(
+                    (px as i64 - i64::from(x)) as u64,
+                    w as u64,
+                    bitmap.width,
+                    rendering,
+                ));
+            }
+        }
+        for py in top..bottom {
+            let vertical = image_axis(
+                (py as i64 - i64::from(y)) as u64,
+                h as u64,
+                bitmap.height,
+                rendering,
+            );
+            for px in left..right {
+                let horizontal = columns.get(px - left).copied().unwrap_or_else(|| {
+                    image_axis(
+                        (px as i64 - i64::from(x)) as u64,
+                        w as u64,
+                        bitmap.width,
+                        rendering,
+                    )
+                });
                 let dst = &mut self.pixels[py * self.width + px];
-                if alpha == 255 {
-                    *dst = src & 0xffffff;
-                } else if alpha != 0 {
-                    let mut mixed = 0;
-                    for shift in [0, 8, 16] {
-                        let channel = (((src >> shift) & 255) * alpha
-                            + ((*dst >> shift) & 255) * (255 - alpha)
-                            + 127)
-                            / 255;
-                        mixed |= channel << shift;
-                    }
-                    *dst = mixed;
-                }
+                let samples = [
+                    bitmap.pixels[vertical.first * bitmap.width + horizontal.first],
+                    bitmap.pixels[vertical.first * bitmap.width + horizontal.second],
+                    bitmap.pixels[vertical.second * bitmap.width + horizontal.first],
+                    bitmap.pixels[vertical.second * bitmap.width + horizontal.second],
+                ];
+                *dst = image_mix(samples, horizontal.weight, vertical.weight, *dst);
             }
         }
     }
 }
 
+#[derive(Clone, Copy)]
+struct ImageAxis {
+    first: usize,
+    second: usize,
+    weight: u32,
+}
+
+fn image_axis(
+    offset: u64,
+    destination: u64,
+    source: usize,
+    rendering: crate::css::ImageRendering,
+) -> ImageAxis {
+    use crate::css::ImageRendering;
+    let source = source as u64;
+    let denominator = destination * 2;
+    if rendering == ImageRendering::CrispEdges {
+        let index = (((offset * 2 + 1) * source) / denominator).min(source - 1) as usize;
+        return ImageAxis {
+            first: index,
+            second: index,
+            weight: 0,
+        };
+    }
+    // Pixelated first chooses the nearest integer expansion on each axis,
+    // then smooths any residual fractional scaling. Mapping its virtual grid
+    // back to the original image costs four samples, not a huge temporary.
+    let integer = if rendering == ImageRendering::Pixelated {
+        ((destination + source / 2) / source).max(1)
+    } else {
+        1
+    };
+    let extent = source * integer;
+    let numerator = (offset * 2 + 1) * extent;
+    // Quotient/remainder avoids multiplying a huge CSS coordinate by 256
+    // before division. Each term is bounded by i32 destination dimensions
+    // and our existing four-megapixel source limit.
+    let fixed = ((numerator / denominator) * 256 + (numerator % denominator) * 256 / denominator)
+        as i64
+        - 128;
+    if fixed <= 0 {
+        return ImageAxis {
+            first: 0,
+            second: 0,
+            weight: 0,
+        };
+    }
+    let first = ((fixed as u64) >> 8).min(extent - 1);
+    let second = (first + 1).min(extent - 1);
+    ImageAxis {
+        first: (first / integer) as usize,
+        second: (second / integer) as usize,
+        weight: (fixed as u32) & 255,
+    }
+}
+
+fn image_mix(samples: [u32; 4], x: u32, y: u32, background: u32) -> u32 {
+    if x == 0 && y == 0 {
+        let pixel = samples[0];
+        let alpha = pixel >> 24;
+        if alpha == 0 {
+            return background;
+        }
+        if alpha == 255 {
+            return pixel & 0xffffff;
+        }
+        let mut output = 0;
+        for shift in [0, 8, 16] {
+            output |= ((((pixel >> shift) & 255) * alpha
+                + ((background >> shift) & 255) * (255 - alpha)
+                + 127)
+                / 255)
+                << shift;
+        }
+        return output;
+    }
+    let weights = [(256 - x) * (256 - y), x * (256 - y), (256 - x) * y, x * y];
+    if samples.iter().all(|pixel| pixel >> 24 == 255) {
+        let mut output = 0;
+        for shift in [0, 8, 16] {
+            let mixed: u32 = samples
+                .iter()
+                .zip(weights)
+                .map(|(pixel, weight)| ((pixel >> shift) & 255) * weight)
+                .sum();
+            output |= ((mixed + 32_768) >> 16) << shift;
+        }
+        return output;
+    }
+    let alpha: u64 = samples
+        .iter()
+        .zip(weights)
+        .map(|(pixel, weight)| u64::from(pixel >> 24) * u64::from(weight))
+        .sum();
+    if alpha == 0 {
+        return background;
+    }
+    let denominator = 255u64 * 65_536;
+    let remaining = denominator - alpha;
+    let mut output = 0;
+    for shift in [0, 8, 16] {
+        let premultiplied: u64 = samples
+            .iter()
+            .zip(weights)
+            .map(|(pixel, weight)| {
+                u64::from((pixel >> shift) & 255) * u64::from(pixel >> 24) * u64::from(weight)
+            })
+            .sum();
+        let channel =
+            (premultiplied + u64::from((background >> shift) & 255) * remaining + denominator / 2)
+                / denominator;
+        output |= (channel as u32) << shift;
+    }
+    output
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct ImagePresentation {
     pub fit: crate::css::ObjectFit,
+    pub rendering: crate::css::ImageRendering,
     /// Each axis is an alignment fraction of the leftover space plus pixels.
     pub position: [(f32, f32); 2],
     pub natural: (f32, f32),
@@ -354,13 +538,13 @@ impl Canvas {
             .clamp(-1_000_000_000.0, 1_000_000_000.0) as i32;
         let clip = self.clip();
         self.set_clip(Some(clip.intersect(rect)));
-        self.image(
-            x,
-            y,
-            dw.round().clamp(1.0, 1_000_000_000.0) as i32,
-            dh.round().clamp(1.0, 1_000_000_000.0) as i32,
-            bitmap,
-        );
+        let width = dw.round().clamp(1.0, 1_000_000_000.0) as i32;
+        let height = dh.round().clamp(1.0, 1_000_000_000.0) as i32;
+        if presentation.rendering == crate::css::ImageRendering::Auto {
+            self.image(x, y, width, height, bitmap);
+        } else {
+            self.image_filtered(x, y, width, height, bitmap, presentation.rendering);
+        }
         self.set_clip(Some(clip));
     }
 }
@@ -845,6 +1029,7 @@ mod tests {
                 &bitmap,
                 ImagePresentation {
                     fit,
+                    rendering: crate::css::ImageRendering::CrispEdges,
                     position,
                     natural,
                 },
@@ -892,7 +1077,7 @@ mod tests {
         let small = render(ObjectFit::ScaleDown, center, (2.0, 1.0));
         assert_eq!(
             &small.pixels[4 * 8 + 2..4 * 8 + 6],
-            &[0x123456, 0xff0000, 0x0000ff, 0x123456]
+            &[0x123456, 0xffff00, 0x00ffff, 0x123456]
         );
         assert_eq!(
             render(ObjectFit::ScaleDown, center, (8.0, 4.0)).pixels,
@@ -927,7 +1112,14 @@ mod tests {
             height: 1,
             pixels: vec![0xff00ff00, 0xff0000ff],
         };
-        canvas.image(0, 0, 20, 20, &bitmap);
+        canvas.image_filtered(
+            0,
+            0,
+            20,
+            20,
+            &bitmap,
+            crate::css::ImageRendering::CrispEdges,
+        );
         for y in 0..24 {
             for x in 0..30 {
                 assert_eq!(

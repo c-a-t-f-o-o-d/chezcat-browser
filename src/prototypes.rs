@@ -3,13 +3,14 @@
 //! into a script-controlled prototype chain. Traversal is iterative.
 //!
 //! ECMAScript references: OrdinaryGet/SetPrototypeOf, OrdinaryHasInstance,
-//! Object.create/getPrototypeOf/setPrototypeOf, and data property descriptors.
-//! Accessor descriptors, proxies, boxed primitives and dynamic Function source
-//! compilation remain explicit limitations.
+//! Object.create/getPrototypeOf/setPrototypeOf, and ordinary property descriptors.
+//! Accessors use the original receiver and share the normal execution budgets.
+//! Proxies, boxed primitives and dynamic Function source compilation remain
+//! explicit limitations.
 
 use super::{
-    strict_equal, Builtin, Fault, Function, Host, Ordinary, Runtime, Value, MAX_CALL_DEPTH,
-    MAX_FUNCTIONS, MAX_OBJECT_PROPERTIES,
+    strict_equal, Accessors, Builtin, Fault, Function, Host, Ordinary, PropertyKey, Runtime, Value,
+    MAX_CALL_DEPTH, MAX_FUNCTIONS, MAX_OBJECT_PROPERTIES,
 };
 use std::collections::HashSet;
 
@@ -18,11 +19,23 @@ enum DescriptorTarget {
     GlobalBinding,
 }
 
-struct DataDescriptor {
+struct PropertyDescriptor {
     value: Option<Value>,
     enumerable: Option<bool>,
     writable: Option<bool>,
     configurable: Option<bool>,
+    get: Option<Option<usize>>,
+    set: Option<Option<usize>>,
+}
+
+impl PropertyDescriptor {
+    fn is_accessor(&self) -> bool {
+        self.get.is_some() || self.set.is_some()
+    }
+
+    fn is_data(&self) -> bool {
+        self.value.is_some() || self.writable.is_some()
+    }
 }
 
 impl Runtime {
@@ -43,6 +56,7 @@ impl Runtime {
             Builtin::Binary(operation) => operation.arity(),
             Builtin::Collection(operation) => operation.arity(),
             Builtin::TextEncoding(operation) => operation.arity(),
+            Builtin::Symbol(operation) => operation.arity(),
             Builtin::EmptyFunction | Builtin::ThrowTypeError => 0,
             Builtin::RegExp | Builtin::ParseInt | Builtin::JsonParse => 2,
             Builtin::JsonStringify => 3,
@@ -50,6 +64,7 @@ impl Runtime {
             Builtin::Math("atan2" | "hypot" | "imul" | "max" | "min" | "pow") => 2,
             Builtin::ObjectStatic(
                 "create"
+                | "hasOwn"
                 | "setPrototypeOf"
                 | "getOwnPropertyDescriptor"
                 | "defineProperties"
@@ -96,14 +111,14 @@ impl Runtime {
         }
         self.store_property(
             properties,
-            "name".into(),
-            Value::String(name.into()),
+            "length".into(),
+            Value::Number(length as f64),
             Some((false, false, true)),
         )?;
         self.store_property(
             properties,
-            "length".into(),
-            Value::Number(length as f64),
+            "name".into(),
+            Value::String(name.into()),
             Some((false, false, true)),
         )?;
         if constructible {
@@ -160,6 +175,7 @@ impl Runtime {
             super::NativeGetter::Binary(field) => self.binary_getter(field, receiver),
             super::NativeGetter::CollectionSize(kind) => self.collection_size(receiver, kind),
             super::NativeGetter::TextEncoding(field) => self.text_getter(field, receiver),
+            super::NativeGetter::SymbolDescription => self.symbol_description(receiver),
         }
     }
 
@@ -200,7 +216,7 @@ impl Runtime {
             self.prototype_method(object, name, Builtin::ObjectMethod(name))?;
         }
         let function_properties = self.ordinary_id(Ordinary::Function(function))?;
-        for name in ["call", "apply", "toString"] {
+        for name in ["call", "apply", "bind", "toString"] {
             self.prototype_method(function_properties, name, Builtin::FunctionMethod(name))?;
         }
         let Value::Function(object_constructor) = self.binding_value(0, "Object")? else {
@@ -209,10 +225,16 @@ impl Runtime {
         let object_constructor = self.ordinary_id(Ordinary::Function(object_constructor))?;
         for name in [
             "keys",
+            "getOwnPropertyNames",
+            "getOwnPropertyDescriptors",
+            "values",
+            "entries",
+            "hasOwn",
             "create",
             "getPrototypeOf",
             "setPrototypeOf",
             "getOwnPropertyDescriptor",
+            "getOwnPropertySymbols",
             "defineProperty",
             "defineProperties",
             "assign",
@@ -314,6 +336,15 @@ impl Runtime {
         let string = self.new_object(None)?;
         self.string_prototype = Some(string);
         self.constructor_prototype("String", Value::Object(string))?;
+        let Value::Function(string_constructor) = self.binding_value(0, "String")? else {
+            unreachable!()
+        };
+        let string_constructor = self.ordinary_id(Ordinary::Function(string_constructor))?;
+        self.prototype_method(
+            string_constructor,
+            "fromCharCode",
+            Builtin::StringFromCharCode,
+        )?;
         for name in [
             "toString",
             "valueOf",
@@ -423,6 +454,15 @@ impl Runtime {
         self.property_name(name)?;
         match self.property_owner(value, name)? {
             Some(owner) => {
+                if self.objects[owner]
+                    .properties
+                    .get(name)
+                    .is_some_and(|property| property.accessor.is_some())
+                {
+                    return Err(Fault::new(
+                        "Script accessor read requires an execution context.",
+                    ));
+                }
                 if let Some(field) = self.objects[owner]
                     .properties
                     .get(name)
@@ -437,11 +477,59 @@ impl Runtime {
         }
     }
 
+    pub(super) fn get_ordinary_property_with_host(
+        &mut self,
+        object: Ordinary,
+        name: &str,
+        host: &mut dyn Host,
+    ) -> Result<Value, Fault> {
+        self.get_ordinary_property_with_receiver(object, name, object.value(), host)
+    }
+
+    pub(super) fn get_ordinary_property_with_receiver(
+        &mut self,
+        object: Ordinary,
+        name: &str,
+        receiver: Value,
+        host: &mut dyn Host,
+    ) -> Result<Value, Fault> {
+        self.property_name(name)?;
+        let Some(owner) = self.property_owner(object, name)? else {
+            return Ok(Value::Undefined);
+        };
+        if let Some(accessor) = self.objects[owner]
+            .properties
+            .get(name)
+            .and_then(|property| property.accessor)
+        {
+            return self.call_accessor(accessor.get, receiver, &[], host);
+        }
+        if let Some(field) = self.objects[owner]
+            .properties
+            .get(name)
+            .and_then(|property| property.getter)
+        {
+            return self.native_getter(field, receiver);
+        }
+        self.own_property(owner, name)
+    }
+
     pub(super) fn assign_ordinary_property(
         &mut self,
         object: Ordinary,
         name: String,
         value: Value,
+        host: &mut dyn Host,
+    ) -> Result<(), Fault> {
+        self.assign_ordinary_property_with_receiver(object, name, value, object.value(), host)
+    }
+
+    pub(super) fn assign_ordinary_property_with_receiver(
+        &mut self,
+        object: Ordinary,
+        name: String,
+        value: Value,
+        receiver: Value,
         host: &mut dyn Host,
     ) -> Result<(), Fault> {
         self.property_name(&name)?;
@@ -457,6 +545,21 @@ impl Runtime {
             return Ok(());
         }
         if let Some(owner) = self.property_owner(object, &name)? {
+            if let Some(accessor) = self.objects[owner]
+                .properties
+                .get(&name)
+                .and_then(|property| property.accessor)
+            {
+                if accessor.set.is_none() {
+                    return if self.strict {
+                        Err(Fault::exception("TypeError", "The property has no setter."))
+                    } else {
+                        Ok(())
+                    };
+                }
+                self.call_accessor(accessor.set, receiver, &[value], host)?;
+                return Ok(());
+            }
             if self.objects[owner]
                 .properties
                 .get(&name)
@@ -597,6 +700,15 @@ impl Runtime {
         if !self.owns_property(id, name)? {
             return Ok(Value::Undefined);
         }
+        if let Some(property) = self.objects[id].properties.get(name) {
+            if let Some(accessor) = property.accessor {
+                return self.accessor_descriptor(
+                    accessor,
+                    property.enumerable,
+                    property.configurable,
+                );
+            }
+        }
         if let Some(field) = self.objects[id]
             .properties
             .get(name)
@@ -660,48 +772,266 @@ impl Runtime {
         Ok(Value::Object(descriptor))
     }
 
-    fn data_descriptor(&mut self, descriptor: Ordinary) -> Result<DataDescriptor, Fault> {
-        // Accessors require ordinary [[Get]]/[[Set]] callback semantics; do not
-        // install a partial descriptor or silently replace one with a value.
-        if self.property_owner(descriptor, "get")?.is_some()
-            || self.property_owner(descriptor, "set")?.is_some()
-        {
-            return Err(Fault::new(
-                "Accessor property descriptors are not implemented.",
-            ));
+    fn own_symbol_descriptor(&mut self, object: Ordinary, key: usize) -> Result<Value, Fault> {
+        let id = self.ordinary_id(object)?;
+        let Some(property) = self.objects[id].symbol_properties.get(&key) else {
+            return Ok(Value::Undefined);
+        };
+        if let Some(accessor) = property.accessor {
+            return self.accessor_descriptor(accessor, property.enumerable, property.configurable);
         }
-        let mut data = DataDescriptor {
+        let (enumerable, writable, configurable, getter) = (
+            property.enumerable,
+            property.writable,
+            property.configurable,
+            property.getter,
+        );
+        self.work(property.value.bytes())?;
+        let value = self.objects[id].symbol_properties[&key].value.clone();
+        let descriptor = self.new_object(None)?;
+        if getter.is_some() {
+            self.set_property(descriptor, "get".into(), value)?;
+            self.set_property(descriptor, "set".into(), Value::Undefined)?;
+        } else {
+            self.set_property(descriptor, "value".into(), value)?;
+            self.set_property(descriptor, "writable".into(), Value::Bool(writable))?;
+        }
+        self.set_property(descriptor, "enumerable".into(), Value::Bool(enumerable))?;
+        self.set_property(descriptor, "configurable".into(), Value::Bool(configurable))?;
+        Ok(Value::Object(descriptor))
+    }
+
+    fn accessor_descriptor(
+        &mut self,
+        accessor: Accessors,
+        enumerable: bool,
+        configurable: bool,
+    ) -> Result<Value, Fault> {
+        let descriptor = self.new_object(None)?;
+        for (name, value) in [
+            (
+                "get",
+                accessor.get.map_or(Value::Undefined, Value::Function),
+            ),
+            (
+                "set",
+                accessor.set.map_or(Value::Undefined, Value::Function),
+            ),
+            ("enumerable", Value::Bool(enumerable)),
+            ("configurable", Value::Bool(configurable)),
+        ] {
+            self.set_property(descriptor, name.into(), value)?;
+        }
+        Ok(Value::Object(descriptor))
+    }
+
+    fn define_symbol_data_property(
+        &mut self,
+        target: &Value,
+        key: usize,
+        descriptor: PropertyDescriptor,
+    ) -> Result<(), Fault> {
+        let object = self.symbol_backing(target)?.ok_or_else(|| {
+            Fault::new("Symbol properties of this native object are not implemented.")
+        })?;
+        let id = self.ordinary_id(object)?;
+        self.define_stored_property(id, PropertyKey::Symbol(key), descriptor)
+    }
+
+    fn property_descriptor(
+        &mut self,
+        descriptor: Ordinary,
+        host: &mut dyn Host,
+    ) -> Result<PropertyDescriptor, Fault> {
+        let mut data = PropertyDescriptor {
             value: None,
             enumerable: None,
             writable: None,
             configurable: None,
+            get: None,
+            set: None,
         };
-        for (key, target) in [
-            ("enumerable", &mut data.enumerable),
-            ("writable", &mut data.writable),
-            ("configurable", &mut data.configurable),
+        // HasProperty and Get are separate, in the specified field order. A
+        // field getter can mutate a later field or throw before it is read.
+        for key in [
+            "enumerable",
+            "configurable",
+            "value",
+            "writable",
+            "get",
+            "set",
         ] {
-            if self.property_owner(descriptor, key)?.is_some() {
-                *target = Some(self.get_ordinary_property(descriptor, key)?.truthy());
+            if self.property_owner(descriptor, key)?.is_none() {
+                continue;
+            }
+            let value = self.get_ordinary_property_with_host(descriptor, key, host)?;
+            match key {
+                "enumerable" => data.enumerable = Some(value.truthy()),
+                "configurable" => data.configurable = Some(value.truthy()),
+                "value" => data.value = Some(value),
+                "writable" => data.writable = Some(value.truthy()),
+                "get" | "set" => {
+                    let callback = match value {
+                        Value::Undefined => None,
+                        Value::Function(id) => Some(id),
+                        _ => {
+                            return Err(Fault::exception(
+                                "TypeError",
+                                "A property getter or setter must be callable or undefined.",
+                            ))
+                        }
+                    };
+                    if key == "get" {
+                        data.get = Some(callback);
+                    } else {
+                        data.set = Some(callback);
+                    }
+                }
+                _ => unreachable!(),
             }
         }
-        if self.property_owner(descriptor, "value")?.is_some() {
-            data.value = Some(self.get_ordinary_property(descriptor, "value")?);
+        if data.is_accessor() && data.is_data() {
+            return Err(Fault::exception(
+                "TypeError",
+                "A property descriptor cannot combine accessors with value or writable.",
+            ));
         }
         Ok(data)
+    }
+
+    fn stored_descriptor_property(&self, id: usize, key: &PropertyKey) -> Option<&super::Property> {
+        match key {
+            PropertyKey::String(name) => self.objects[id].properties.get(name),
+            PropertyKey::Symbol(key) => self.objects[id].symbol_properties.get(key),
+        }
+    }
+
+    fn define_stored_property(
+        &mut self,
+        id: usize,
+        key: PropertyKey,
+        descriptor: PropertyDescriptor,
+    ) -> Result<(), Fault> {
+        let previous = self.stored_descriptor_property(id, &key);
+        if previous.is_some_and(|property| property.getter.is_some()) {
+            return Err(Fault::new(
+                "Changing built-in accessor descriptors is not implemented.",
+            ));
+        }
+        let old_attrs = previous.map(|property| {
+            (
+                property.enumerable,
+                property.writable,
+                property.configurable,
+            )
+        });
+        let old_accessor = previous.and_then(|property| property.accessor);
+        let old = old_attrs.unwrap_or((false, false, false));
+        let accessor = descriptor.is_accessor() || old_accessor.is_some() && !descriptor.is_data();
+        let enumerable = descriptor.enumerable.unwrap_or(old.0);
+        let configurable = descriptor.configurable.unwrap_or(old.2);
+        if old_attrs.is_some() && !old.2 {
+            if configurable || enumerable != old.0 || accessor != old_accessor.is_some() {
+                return Err(Fault::exception(
+                    "TypeError",
+                    "Cannot redefine a nonconfigurable property.",
+                ));
+            }
+            if let Some(old_accessor) = old_accessor {
+                if descriptor.get.is_some_and(|get| get != old_accessor.get)
+                    || descriptor.set.is_some_and(|set| set != old_accessor.set)
+                {
+                    return Err(Fault::exception(
+                        "TypeError",
+                        "Cannot change a nonconfigurable accessor.",
+                    ));
+                }
+            } else if !old.1 {
+                let bytes = previous
+                    .map_or(0, |property| property.value.bytes())
+                    .saturating_add(descriptor.value.as_ref().map_or(0, Value::bytes));
+                self.work(bytes)?;
+                if descriptor.writable == Some(true)
+                    || descriptor.value.as_ref().is_some_and(|value| {
+                        !same_value(
+                            &self.stored_descriptor_property(id, &key).unwrap().value,
+                            value,
+                        )
+                    })
+                {
+                    return Err(Fault::exception(
+                        "TypeError",
+                        "Cannot redefine a nonconfigurable property.",
+                    ));
+                }
+            }
+        }
+        if accessor {
+            let old = old_accessor.unwrap_or(Accessors {
+                get: None,
+                set: None,
+            });
+            let accessor = Accessors {
+                get: descriptor.get.unwrap_or(old.get),
+                set: descriptor.set.unwrap_or(old.set),
+            };
+            match key {
+                PropertyKey::String(name) => {
+                    self.store_accessor_property(id, name, accessor, (enumerable, configurable))
+                }
+                PropertyKey::Symbol(key) => self.store_symbol_accessor_property(
+                    id,
+                    key,
+                    accessor,
+                    (enumerable, configurable),
+                ),
+            }
+        } else {
+            let writable = descriptor
+                .writable
+                .unwrap_or(old_accessor.is_none() && old.1);
+            let value = if let Some(value) = descriptor.value {
+                value
+            } else if old_attrs.is_some() && old_accessor.is_none() {
+                // Descriptor inspection retains a data value without calling
+                // user code; a conversion from accessor starts with undefined.
+                match &key {
+                    PropertyKey::String(name) => self.own_property(id, name)?,
+                    PropertyKey::Symbol(symbol) => {
+                        let bytes = self.objects[id].symbol_properties[symbol].value.bytes();
+                        self.work(bytes)?;
+                        self.objects[id].symbol_properties[symbol].value.clone()
+                    }
+                }
+            } else {
+                Value::Undefined
+            };
+            match key {
+                PropertyKey::String(name) => {
+                    self.store_property(id, name, value, Some((enumerable, writable, configurable)))
+                }
+                PropertyKey::Symbol(key) => self.store_symbol_property(
+                    id,
+                    key,
+                    value,
+                    Some((enumerable, writable, configurable)),
+                ),
+            }
+        }
     }
 
     fn define_data_property(
         &mut self,
         object: Ordinary,
         name: String,
-        descriptor: DataDescriptor,
+        descriptor: PropertyDescriptor,
         host: &mut dyn Host,
     ) -> Result<(), Fault> {
         self.property_name(&name)?;
         let id = self.ordinary_id(object)?;
         if let Some(index) = self.typed_numeric_key(id, &name)? {
             if !self.typed_index_valid(id, index)
+                || descriptor.is_accessor()
                 || descriptor.enumerable == Some(false)
                 || descriptor.writable == Some(false)
                 || descriptor.configurable == Some(false)
@@ -717,34 +1047,26 @@ impl Runtime {
             }
             return Ok(());
         }
-        if self.objects[id]
-            .properties
-            .get(&name)
-            .is_some_and(|property| {
-                matches!(property.getter, Some(super::NativeGetter::ArgumentsCallee))
-            })
-        {
-            return if descriptor.value.is_some()
-                || descriptor.writable.is_some()
-                || descriptor.enumerable == Some(true)
-                || descriptor.configurable == Some(true)
-            {
-                Err(Fault::exception(
-                    "TypeError",
-                    "Cannot redefine the strict arguments callee accessor.",
-                ))
-            } else {
-                Ok(())
-            };
-        }
-        if self.objects[id]
-            .properties
-            .get(&name)
-            .is_some_and(|property| property.getter.is_some())
-        {
-            return Err(Fault::new(
-                "Changing built-in accessor descriptors is not implemented.",
-            ));
+        if let Some(property) = self.objects[id].properties.get(&name) {
+            if matches!(property.getter, Some(super::NativeGetter::ArgumentsCallee)) {
+                let callback = match property.value {
+                    Value::Function(callback) => Some(callback),
+                    _ => None,
+                };
+                return if descriptor.is_data()
+                    || descriptor.get.is_some_and(|get| get != callback)
+                    || descriptor.set.is_some_and(|set| set != callback)
+                    || descriptor.enumerable == Some(true)
+                    || descriptor.configurable == Some(true)
+                {
+                    Err(Fault::exception(
+                        "TypeError",
+                        "Cannot redefine the strict arguments callee accessor.",
+                    ))
+                } else {
+                    Ok(())
+                };
+            }
         }
         if self.objects[id].regexp.is_some()
             && self.owns_property(id, &name)?
@@ -756,42 +1078,7 @@ impl Runtime {
                 "Array-index/length and RegExp accessor descriptor changes are not implemented.",
             ));
         }
-        let previous = self.objects[id].properties.get(&name);
-        let old_attrs = previous.map(|property| {
-            (
-                property.enumerable,
-                property.writable,
-                property.configurable,
-            )
-        });
-        let old = old_attrs.unwrap_or((false, false, false));
-        let attrs = (
-            descriptor.enumerable.unwrap_or(old.0),
-            descriptor.writable.unwrap_or(old.1),
-            descriptor.configurable.unwrap_or(old.2),
-        );
-        let value = if let Some(value) = descriptor.value {
-            value
-        } else if old_attrs.is_some() {
-            self.own_property(id, &name)?
-        } else {
-            Value::Undefined
-        };
-        if let Some(old) = old_attrs {
-            if !old.2
-                && (attrs.2
-                    || old.0 != attrs.0
-                    || !old.1
-                        && (attrs.1
-                            || !same_value(&self.objects[id].properties[&name].value, &value)))
-            {
-                return Err(Fault::exception(
-                    "TypeError",
-                    "Cannot redefine a nonconfigurable property.",
-                ));
-            }
-        }
-        self.store_property(id, name, value, Some(attrs))
+        self.define_stored_property(id, PropertyKey::String(name), descriptor)
     }
 
     fn target_descriptor(&mut self, target: DescriptorTarget, name: &str) -> Result<Value, Fault> {
@@ -820,11 +1107,17 @@ impl Runtime {
         &mut self,
         target: DescriptorTarget,
         name: String,
-        descriptor: DataDescriptor,
+        descriptor: PropertyDescriptor,
         host: &mut dyn Host,
     ) -> Result<(), Fault> {
         if let DescriptorTarget::Ordinary(object) = target {
             return self.define_data_property(object, name, descriptor, host);
+        }
+        if descriptor.is_accessor() {
+            return Err(Fault::exception(
+                "TypeError",
+                "Declared global bindings cannot be replaced by accessor properties.",
+            ));
         }
         let old = self
             .global_attributes
@@ -872,6 +1165,7 @@ impl Runtime {
             self.objects[id]
                 .properties
                 .len()
+                .saturating_add(self.objects[id].symbol_properties.len())
                 .saturating_mul(std::mem::size_of::<super::Property>()),
         )?;
         if method == "isExtensible" {
@@ -882,10 +1176,17 @@ impl Runtime {
             let frozen = method == "isFrozen";
             let has_elements = self.typed_view(id).is_some_and(|view| view.length != 0);
             let result = !object.extensible
-                && object.properties.values().all(|property| {
-                    !property.configurable
-                        && (!frozen || property.getter.is_some() || !property.writable)
-                })
+                && object
+                    .properties
+                    .values()
+                    .chain(object.symbol_properties.values())
+                    .all(|property| {
+                        !property.configurable
+                            && (!frozen
+                                || property.getter.is_some()
+                                || property.accessor.is_some()
+                                || !property.writable)
+                    })
                 && (!frozen
                     || (!has_elements && (object.length.is_none() || !object.length_writable)));
             return Ok(Value::Bool(result));
@@ -905,9 +1206,13 @@ impl Runtime {
             self.disconnect_arguments(id)?;
         }
         let object = &mut self.objects[id];
-        for property in object.properties.values_mut() {
+        for property in object
+            .properties
+            .values_mut()
+            .chain(object.symbol_properties.values_mut())
+        {
             property.configurable = false;
-            if frozen && property.getter.is_none() {
+            if frozen && property.getter.is_none() && property.accessor.is_none() {
                 property.writable = false;
             }
         }
@@ -924,6 +1229,9 @@ impl Runtime {
         host: &dyn Host,
     ) -> Result<DescriptorTarget, Fault> {
         if let Value::Host(handle) = value {
+            if let Some(object) = self.host_ordinary(*handle, name, host) {
+                return Ok(DescriptorTarget::Ordinary(object));
+            }
             if self.is_browser_global(*handle) {
                 if host.owns_global_property(name) || self.host_globals.contains(name) {
                     return Err(Fault::new("Descriptors of native or declared global properties cannot be changed by this subset."));
@@ -950,7 +1258,35 @@ impl Runtime {
             "preventExtensions" | "seal" | "freeze" | "isExtensible" | "isSealed" | "isFrozen" => {
                 self.object_integrity(method, first)
             }
-            "keys" => self.object_keys(first),
+            "keys" => self.object_keys(first, host),
+            "getOwnPropertyNames" | "getOwnPropertyDescriptors" | "values" | "entries" => {
+                self.object_inspection(method, first, host)
+            }
+            "hasOwn" => {
+                // This static method checks ToObject before converting its key.
+                Self::require_property_receiver(first)?;
+                let receiver = self.copy_value(first)?;
+                self.object_method(
+                    "hasOwnProperty",
+                    receiver,
+                    args.get(1..).unwrap_or(&[]),
+                    host,
+                )
+            }
+            "getOwnPropertySymbols" => {
+                Self::require_property_receiver(first)?;
+                let keys = if let Some(object) = self.symbol_backing(first)? {
+                    let id = self.ordinary_id(object)?;
+                    self.own_symbol_keys(id, false)?
+                } else {
+                    Vec::new()
+                };
+                let array = self.new_object(Some(keys.len()))?;
+                for (index, key) in keys.into_iter().enumerate() {
+                    self.set_property(array, index.to_string(), Value::Symbol(key))?;
+                }
+                Ok(Value::Object(array))
+            }
             "isArray" => Ok(Value::Bool(
                 matches!(first, Value::Object(id) if self.object(*id)?.length.is_some()),
             )),
@@ -959,6 +1295,7 @@ impl Runtime {
                     Value::String(_) => self.string_prototype.map(Ordinary::Object),
                     Value::Number(_) => self.number_prototype.map(Ordinary::Object),
                     Value::Bool(_) => self.boolean_prototype.map(Ordinary::Object),
+                    Value::Symbol(_) => self.symbol_prototype.map(Ordinary::Object),
                     _ => {
                         let object = self.ordinary_required(first)?;
                         self.ordinary_prototype(object)?
@@ -1008,13 +1345,60 @@ impl Runtime {
                 }
                 let key = self.copy_value(args.get(1).unwrap_or(&Value::Undefined))?;
                 let key = self.property_key(key, host)?;
+                let key = match key {
+                    PropertyKey::Symbol(key) => {
+                        if method == "getOwnPropertyDescriptor" {
+                            return if let Some(object) = self.symbol_backing(first)? {
+                                self.own_symbol_descriptor(object, key)
+                            } else {
+                                Ok(Value::Undefined)
+                            };
+                        }
+                        let descriptor =
+                            self.ordinary_required(args.get(2).unwrap_or(&Value::Undefined))?;
+                        let descriptor = self.property_descriptor(descriptor, host)?;
+                        self.define_symbol_data_property(first, key, descriptor)?;
+                        return self.copy_value(first);
+                    }
+                    PropertyKey::String(key) => key,
+                };
+                if method == "getOwnPropertyDescriptor" {
+                    if let Value::Host(handle) = first {
+                        if !self.is_browser_global(*handle) {
+                            return self.host_descriptor(*handle, &key, host);
+                        }
+                    }
+                }
+                if method == "defineProperty" {
+                    if let Value::Host(handle) = first {
+                        if host.ordinary_prototype(*handle) {
+                            let descriptor =
+                                self.ordinary_required(args.get(2).unwrap_or(&Value::Undefined))?;
+                            let descriptor = self.property_descriptor(descriptor, host)?;
+                            if descriptor.is_accessor()
+                                || descriptor.enumerable == Some(false)
+                                || descriptor.writable == Some(false)
+                                || descriptor.configurable == Some(false)
+                            {
+                                return Err(Fault::exception("TypeError", "Named dataset properties must remain writable, enumerable and configurable data properties."));
+                            }
+                            self.host_write(
+                                *handle,
+                                key,
+                                descriptor.value.unwrap_or(Value::Undefined),
+                                host,
+                            )?;
+                            return self.copy_value(first);
+                        }
+                    }
+                }
                 let object = self.descriptor_target(first, &key, host)?;
                 if method == "getOwnPropertyDescriptor" {
                     return self.target_descriptor(object, &key);
                 }
                 let descriptor =
                     self.ordinary_required(args.get(2).unwrap_or(&Value::Undefined))?;
-                let descriptor = self.data_descriptor(descriptor)?;
+                let descriptor = self.property_descriptor(descriptor, host)?;
                 self.define_target_property(object, key, descriptor, host)?;
                 self.copy_value(first)
             }
@@ -1023,20 +1407,81 @@ impl Runtime {
                 self.copy_value(first)
             }
             "assign" => {
-                let target = self.ordinary_required(first)?;
+                if !matches!(first, Value::Host(_)) {
+                    self.ordinary_required(first)?;
+                }
                 for source in args.get(1..).unwrap_or(&[]) {
                     if matches!(source, Value::Null | Value::Undefined) {
                         continue;
                     }
-                    let source = self.ordinary_required(source)?;
-                    let id = self.ordinary_id(source)?;
-                    for key in self.enumerable_keys(id)? {
-                        let value = self.get_ordinary_property(source, &key)?;
+                    let keys = if let Value::Host(handle) = source {
+                        if let Some(&id) = self.host_objects.get(handle) {
+                            self.own_string_keys(id, false)?
+                        } else {
+                            self.host_keys(*handle, false, host)?
+                        }
+                    } else {
+                        let ordinary = self.ordinary_required(source)?;
+                        let id = self.ordinary_id(ordinary)?;
+                        self.own_string_keys(id, false)?
+                    };
+                    // Snapshot symbol keys before the first write too. A host
+                    // setter can mutate a source; newly added keys are not part
+                    // of this source's copy operation.
+                    let symbols = if let Some(object) = self.symbol_backing(source)? {
+                        let id = self.ordinary_id(object)?;
+                        self.own_symbol_keys(id, false)?
+                    } else {
+                        Vec::new()
+                    };
+                    if keys.len().saturating_add(symbols.len()) > MAX_OBJECT_PROPERTIES {
+                        return Err(Fault::new(
+                            "Property enumeration limit reached (4096 keys).",
+                        ));
+                    }
+                    for key in keys {
+                        let enumerable = if let Value::Host(handle) = source {
+                            self.host_owned(*handle, &key, true, host)?
+                        } else {
+                            let object = self.ordinary_required(source)?;
+                            let id = self.ordinary_id(object)?;
+                            self.own_enumerable(id, &key)?
+                        };
+                        if !enumerable {
+                            continue;
+                        }
+                        let value = self.read_reference(
+                            &super::Reference::Property(source.clone(), key.clone()),
+                            host,
+                        )?;
                         // Object.assign uses Set with Throw=true in every
                         // caller, including a non-strict script.
                         let previous_strict = self.strict;
                         self.strict = true;
-                        let result = self.assign_ordinary_property(target, key, value, host);
+                        let result = self.write_reference(
+                            super::Reference::Property(first.clone(), key),
+                            value,
+                            host,
+                        );
+                        self.strict = previous_strict;
+                        result?;
+                    }
+                    for key in symbols {
+                        let Some(object) = self.symbol_backing(source)? else {
+                            continue;
+                        };
+                        let id = self.ordinary_id(object)?;
+                        if !self.objects[id]
+                            .symbol_properties
+                            .get(&key)
+                            .is_some_and(|property| property.enumerable)
+                        {
+                            continue;
+                        }
+                        let value = self.get_symbol_property(source.clone(), key, host)?;
+                        let previous_strict = self.strict;
+                        self.strict = true;
+                        let result = self.assign_symbol_property(first.clone(), key, value, host);
                         self.strict = previous_strict;
                         result?;
                     }
@@ -1054,20 +1499,50 @@ impl Runtime {
         host: &mut dyn Host,
     ) -> Result<(), Fault> {
         // Reject an invalid target even when the descriptor list is empty.
-        if !matches!(target, Value::Host(handle) if self.is_browser_global(*handle)) {
+        if !matches!(target, Value::Host(handle) if self.is_browser_global(*handle) || self.host_objects.contains_key(handle))
+        {
             self.ordinary_required(target)?;
         }
         let descriptors = self.ordinary_required(descriptors)?;
         let id = self.ordinary_id(descriptors)?;
         let mut entries = Vec::new();
         let mut snapshot_bytes = 0usize;
-        for key in self.enumerable_keys(id)? {
-            let value = self.get_ordinary_property(descriptors, &key)?;
+        let mut keys: Vec<_> = self
+            .own_string_keys(id, false)?
+            .into_iter()
+            .map(PropertyKey::String)
+            .collect();
+        let symbols = self.own_symbol_keys(id, false)?;
+        if keys.len().saturating_add(symbols.len()) > MAX_OBJECT_PROPERTIES {
+            return Err(Fault::new(
+                "Property enumeration limit reached (4096 keys).",
+            ));
+        }
+        keys.extend(symbols.into_iter().map(PropertyKey::Symbol));
+        for key in keys {
+            let enumerable = match &key {
+                PropertyKey::String(key) => self.own_enumerable(id, key)?,
+                PropertyKey::Symbol(key) => self.objects[id]
+                    .symbol_properties
+                    .get(key)
+                    .is_some_and(|property| property.enumerable),
+            };
+            if !enumerable {
+                continue;
+            }
+            let value = match &key {
+                PropertyKey::String(key) => {
+                    self.get_ordinary_property_with_host(descriptors, key, host)?
+                }
+                PropertyKey::Symbol(key) => {
+                    self.get_symbol_property(descriptors.value(), *key, host)?
+                }
+            };
             let descriptor = self.ordinary_required(&value)?;
             // Snapshot every field before applying the first property. A
             // descriptor object may itself be the destination of an earlier
             // definition; retaining its handle would read the mutated value.
-            let descriptor = self.data_descriptor(descriptor)?;
+            let descriptor = self.property_descriptor(descriptor, host)?;
             snapshot_bytes =
                 snapshot_bytes.saturating_add(descriptor.value.as_ref().map_or(0, Value::bytes));
             if snapshot_bytes > super::MAX_RETAINED_VALUES {
@@ -1076,8 +1551,15 @@ impl Runtime {
             entries.push((key, descriptor));
         }
         for (key, descriptor) in entries {
-            let target = self.descriptor_target(target, &key, host)?;
-            self.define_target_property(target, key, descriptor, host)?;
+            match key {
+                PropertyKey::String(key) => {
+                    let target = self.descriptor_target(target, &key, host)?;
+                    self.define_target_property(target, key, descriptor, host)?;
+                }
+                PropertyKey::Symbol(key) => {
+                    self.define_symbol_data_property(target, key, descriptor)?;
+                }
+            }
         }
         Ok(())
     }
@@ -1096,6 +1578,7 @@ impl Runtime {
                 Value::Bool(_) => "Boolean",
                 Value::Number(_) => "Number",
                 Value::String(_) => "String",
+                Value::Symbol(_) => "Symbol",
                 Value::Function(_) => "Function",
                 Value::Object(id) => {
                     let object = self.object(*id)?;
@@ -1121,6 +1604,8 @@ impl Runtime {
                         "Number"
                     } else if Some(*id) == self.boolean_prototype {
                         "Boolean"
+                    } else if Some(*id) == self.symbol_prototype {
+                        "Symbol"
                     } else {
                         "Object"
                     }
@@ -1163,6 +1648,23 @@ impl Runtime {
         let key = self.copy_value(args.first().unwrap_or(&Value::Undefined))?;
         let key = self.property_key(key, host)?;
         Self::require_property_receiver(&this)?;
+        let key = match key {
+            PropertyKey::Symbol(key) => {
+                let owned = if let Some(object) = self.symbol_backing(&this)? {
+                    let id = self.ordinary_id(object)?;
+                    self.objects[id]
+                        .symbol_properties
+                        .get(&key)
+                        .is_some_and(|property| {
+                            method != "propertyIsEnumerable" || property.enumerable
+                        })
+                } else {
+                    false
+                };
+                return Ok(Value::Bool(owned));
+            }
+            PropertyKey::String(key) => key,
+        };
         let owned = if let Some(value) = Ordinary::from_value(&this) {
             let id = self.ordinary_id(value)?;
             if method == "propertyIsEnumerable" {
@@ -1175,10 +1677,8 @@ impl Runtime {
             let index = super::property_index(&key)
                 .is_some_and(|index| index < text.encode_utf16().count());
             index || method != "propertyIsEnumerable" && key == "length"
-        } else if matches!(this, Value::Host(_)) {
-            return Err(Fault::new(
-                "Native host own-property descriptors are not implemented.",
-            ));
+        } else if let Value::Host(handle) = this {
+            self.host_owned(handle, &key, method == "propertyIsEnumerable", host)?
         } else {
             false
         };
@@ -1218,13 +1718,23 @@ impl Runtime {
                         "Function method requires a callable receiver.",
                     ));
                 };
+                if method == "bind" {
+                    return self.bind_function(index, args, host);
+                }
                 if method == "toString" {
+                    if matches!(self.functions.get(index), Some(Function::Bound(_))) {
+                        return Ok(Value::String("function () { [native code] }".into()));
+                    }
                     if matches!(self.functions.get(index), Some(Function::Script { .. })) {
                         return Err(Fault::new(
                             "Script function source-string conversion is not implemented.",
                         ));
                     }
-                    let name = self.get_ordinary_property(Ordinary::Function(index), "name")?;
+                    let name = self.get_ordinary_property_with_host(
+                        Ordinary::Function(index),
+                        "name",
+                        host,
+                    )?;
                     let name = if let Value::String(name) = name {
                         name
                     } else {
@@ -1237,7 +1747,7 @@ impl Runtime {
                 let receiver = self.copy_value(args.first().unwrap_or(&Value::Undefined))?;
                 if method == "apply" {
                     let arguments =
-                        self.apply_arguments(args.get(1).unwrap_or(&Value::Undefined))?;
+                        self.apply_arguments(args.get(1).unwrap_or(&Value::Undefined), host)?;
                     self.call_value(Value::Function(index), &arguments, receiver, host)
                 } else {
                     self.call_value(
@@ -1255,7 +1765,7 @@ impl Runtime {
                     ));
                 };
                 if method == "toString" {
-                    let join = self.get_property(id, "join")?;
+                    let join = self.get_property_with_host(id, "join", host)?;
                     if matches!(join, Value::Function(_)) {
                         self.call_value(join, &[], Value::Object(id), host)
                     } else {
@@ -1283,7 +1793,22 @@ impl Runtime {
             Builtin::ErrorToString => {
                 let object = self.ordinary_required(&this)?;
                 let id = self.ordinary_id(object)?;
-                self.error_text(id)
+                self.error_text(id, host)
+            }
+            Builtin::StringFromCharCode => {
+                // call_value bounds the argument count. Decode only after all
+                // conversions so adjacent UTF-16 units can form a surrogate pair.
+                let mut units = Vec::with_capacity(args.len());
+                for value in args {
+                    let number = self.binary_number(value, host)?;
+                    let unit = if number.is_finite() {
+                        number.trunc().rem_euclid(65536.0) as u16
+                    } else {
+                        0
+                    };
+                    units.push(unit);
+                }
+                self.units_string(&units).map(Value::String)
             }
             Builtin::StringMethod(method) => {
                 let receiver = match this {
@@ -1305,9 +1830,9 @@ impl Runtime {
                         ));
                     }
                     value => {
-                        value.primitive()?;
+                        let value = self.primitive_with_hint(value, true, host)?;
                         self.work(value.bytes())?;
-                        Value::String(value.to_text())
+                        Value::String(value.script_text()?)
                     }
                 };
                 self.call_member(receiver, method, args, host)
@@ -1342,9 +1867,638 @@ impl Runtime {
 
 fn same_value(left: &Value, right: &Value) -> bool {
     match (left, right) {
+        (Value::Symbol(a), Value::Symbol(b)) => a == b,
         (Value::Number(a), Value::Number(b)) => {
             a.is_nan() && b.is_nan() || a.to_bits() == b.to_bits()
         }
         _ => strict_equal(left, right),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct NoHost;
+
+    impl Host for NoHost {
+        fn owns_property(&self, object: u32, property: &str) -> bool {
+            object != 11 || property == "reserved"
+        }
+
+        fn get(&mut self, _: u32, _: &str) -> Result<Value, String> {
+            Err("Unexpected native property read.".into())
+        }
+
+        fn set(&mut self, _: u32, _: &str, _: Value) -> Result<(), String> {
+            Err("Unexpected native property write.".into())
+        }
+
+        fn call(&mut self, _: u32, _: &str, _: &[Value]) -> Result<Value, String> {
+            Err("Unexpected native method call.".into())
+        }
+    }
+
+    fn succeeds(source: &str) {
+        let mut runtime = Runtime::new();
+        assert_eq!(
+            runtime.execute(source, &mut NoHost).unwrap().to_text(),
+            "ok"
+        );
+    }
+
+    #[test]
+    fn object_has_own_checks_own_keys_without_reading_values() {
+        let mut runtime = Runtime::new();
+        runtime.bind_host_object(11, &[]).unwrap();
+        runtime.define_global("native", Value::Host(11)).unwrap();
+        assert_eq!(
+            runtime
+                .execute(
+                    r#"
+                    let reads=0, key=Symbol('own'), inherited=Symbol('inherited'), parent={inherited:1};
+                    parent[inherited]=2;
+                    let object=Object.create(parent);object.hasOwnProperty=0;object.empty=undefined;object[key]=3;
+                    Object.defineProperty(object,'hidden',{get:function(){reads++;throw 'getter invoked';}});
+                    if(!Object.hasOwn(object,'hasOwnProperty')||!Object.hasOwn(object,'empty')||!Object.hasOwn(object,'hidden')||!Object.hasOwn(object,key))throw 'own keys';
+                    if(Object.hasOwn(object,'inherited')||Object.hasOwn(object,inherited)||Object.hasOwn(object,'absent')||reads)throw 'inherited or getter';
+                    let bare=Object.create(null);bare.key=1;
+                    if(!Object.hasOwn(bare,'key')||Object.hasOwn(bare,'hasOwnProperty'))throw 'null prototype';
+                    if(!Object.hasOwn('😀',0)||!Object.hasOwn('😀',1)||!Object.hasOwn('😀','length')||Object.hasOwn('😀',2)||Object.hasOwn('😀','charAt'))throw 'string own keys';
+                    if(Object.hasOwn(7,'toString')||Object.hasOwn(false,'valueOf')||Object.hasOwn(key,'description'))throw 'primitive own keys';
+                    let array=Array(2);array[1]=undefined;
+                    if(Object.hasOwn(array,0)||!Object.hasOwn(array,1)||!Object.hasOwn(array,'length'))throw 'array holes';
+                    native.expando=4;native[key]=5;
+                    if(!Object.hasOwn(native,'expando')||!Object.hasOwn(native,key)||Object.hasOwn(native,'absent'))throw 'registered native expandos';
+                    'ok';
+                    "#,
+                    &mut NoHost,
+                )
+                .unwrap()
+                .to_text(),
+            "ok"
+        );
+    }
+
+    #[test]
+    fn object_has_own_checks_null_before_key_conversion_and_has_static_metadata() {
+        succeeds(
+            r#"
+            let f=Object.hasOwn, d=Object.getOwnPropertyDescriptor(Object,'hasOwn');
+            if(f.name!=='hasOwn'||f.length!==2||d.value!==f||d.enumerable||!d.writable||!d.configurable||f.hasOwnProperty('prototype'))throw 'metadata';
+            let order='', key={toString:function(){order+='k';return 'name';}}, object={name:1,undefined:2};
+            function argument(value){order+='a';return value;}
+            let caught=0;
+            try{Object.hasOwn(null,argument(key));}catch(e){if(e.name==='TypeError')caught++;}
+            try{Object.hasOwn(undefined,key);}catch(e){if(e.name==='TypeError')caught++;}
+            try{Object.hasOwn();}catch(e){if(e.name==='TypeError')caught++;}
+            if(caught!==3||order!=='a')throw 'null before coercion';
+            if(!f.call(null,object,key)||order!=='ak'||!Object.hasOwn(object))throw 'static receiver or key default';
+            let symbol=Symbol('key');object[symbol]=3;
+            if(!Object.hasOwn(object,{toString:function(){return symbol;}}))throw 'symbol key conversion';
+            let thrown=Symbol('throw'), seen=false;
+            try{Object.hasOwn(object,{toString:function(){throw thrown;}});}catch(e){seen=e===thrown;}
+            if(!seen)throw 'key exception';
+            try{new f(object,'name');}catch(e){if(e.name==='TypeError')caught++;}
+            if(caught!==4)throw 'constructible';
+            'ok';
+            "#,
+        );
+    }
+
+    #[test]
+    fn string_from_char_code_coerces_uint16_and_combines_surrogate_pairs() {
+        succeeds(
+            r#"
+            if(String.fromCharCode()!=='')throw 'empty';
+            let text=String.fromCharCode(NaN,Infinity,-Infinity,0,-0,null,undefined,false,true,'65.9',65.9,-65535.9,-1.9,65537,131138,4294967363,9007199254740991,1e100,-0.5,'invalid');
+            let expected=[0,0,0,0,0,0,0,0,1,65,65,1,65535,1,66,67,65535,0,0,0];
+            if(text.length!==expected.length)throw 'unit count';
+            for(let i=0;i<expected.length;i++)if(text.charCodeAt(i)!==expected[i])throw 'ToUint16';
+            text=String.fromCharCode(0x41,0x3A9,0xD7FF,0xE000,0xFFFF);
+            if(text.charAt(0)!=='A'||text.charAt(1)!=='Ω'||text.charCodeAt(2)!==0xD7FF||text.charCodeAt(3)!==0xE000||text.charCodeAt(4)!==0xFFFF)throw 'BMP';
+            text=String.fromCharCode(0xD83D,0xDE00,0xD834,0xDD1E,0xDBFF,0xDFFF);
+            if(text.length!==6||text.codePointAt(0)!==0x1F600||text.codePointAt(2)!==0x1D11E||text.codePointAt(4)!==0x10FFFF)throw 'surrogate pairs';
+            if(String.fromCharCode(0x1F600).charCodeAt(0)!==0xF600)throw 'not fromCodePoint';
+            'ok';
+            "#,
+        );
+    }
+
+    #[test]
+    fn string_from_char_code_orders_coercions_and_stops_at_abrupt_completion() {
+        succeeds(
+            r#"
+            let order='';
+            function argument(letter,value){order+=letter;return value;}
+            let first={valueOf:function(){order+='v';return {};},toString:function(){order+='s';return '65.9';}};
+            let second={valueOf:function(){order+='w';return 66;}};
+            if(String.fromCharCode(argument('a',first),argument('b',second))!=='AB'||order!=='abvsw')throw 'conversion order';
+            let key=Symbol('failure'), caught=false;
+            order='';
+            try{String.fromCharCode(argument('a',key),argument('b',second));}catch(e){caught=e.name==='TypeError';}
+            if(!caught||order!=='ab')throw 'Symbol must stop coercion';
+            let failing={valueOf:function(){order+='x';throw key;}};
+            order='';caught=false;
+            try{String.fromCharCode(argument('a',failing),argument('b',second));}catch(e){caught=e===key;}
+            if(!caught||order!=='abx')throw 'throw identity or later conversion';
+            let observed={};
+            Object.defineProperty(observed,'valueOf',{get:function(){order+='g';return function(){if(this!==observed)throw 'receiver';order+='c';return 67;};}});
+            order='';
+            if(String.fromCharCode(observed)!=='C'||order!=='gc')throw 'conversion accessor';
+            'ok';
+            "#,
+        );
+    }
+
+    #[test]
+    fn string_from_char_code_has_standard_metadata_and_ignores_receiver() {
+        succeeds(
+            r#"
+            let f=String.fromCharCode, d=Object.getOwnPropertyDescriptor(String,'fromCharCode');
+            if(typeof f!=='function'||f.name!=='fromCharCode'||f.length!==1||d.value!==f||d.enumerable||!d.writable||!d.configurable)throw 'static descriptor';
+            let name=Object.getOwnPropertyDescriptor(f,'name'), length=Object.getOwnPropertyDescriptor(f,'length');
+            if(name.enumerable||name.writable||!name.configurable||length.enumerable||length.writable||!length.configurable||f.hasOwnProperty('prototype'))throw 'function descriptor';
+            let receiver={valueOf:function(){throw 'receiver conversion';},toString:function(){throw 'receiver conversion';}};
+            if(f.call(receiver,65,66)!=='AB'||f.call(Symbol(),67)!=='C'||f.apply(null,[68,69])!=='DE')throw 'borrowed static';
+            let caught=false;
+            try{new f(65);}catch(e){caught=e.name==='TypeError';}
+            if(!caught)throw 'constructible';
+            String.fromCharCode=function(){return 'changed';};
+            if(String.fromCharCode()!=='changed'||f(70)!=='F')throw 'writable method';
+            if(!delete String.fromCharCode||'fromCharCode' in String)throw 'configurable method';
+            'ok';
+            "#,
+        );
+    }
+
+    #[test]
+    fn string_from_char_code_preserves_explicit_lone_surrogate_limitation() {
+        for source in [
+            "String.fromCharCode(0xD800);",
+            "String.fromCharCode(0xDC00);",
+            "String.fromCharCode(0xD800,65);",
+            "String.fromCharCode(0xDC00,0xD800);",
+        ] {
+            let mut runtime = Runtime::new();
+            let error = runtime.execute(source, &mut NoHost).unwrap_err();
+            assert!(error.contains("lone UTF-16 surrogate"), "{source}: {error}");
+        }
+        let mut runtime = Runtime::new();
+        let error = runtime
+            .execute(
+                "let calls=0,done=false;try{String.fromCharCode(0xD800,{valueOf:function(){calls++;return 65;}});}catch(e){calls+=10;}done=true;",
+                &mut NoHost,
+            )
+            .unwrap_err();
+        assert!(error.contains("lone UTF-16 surrogate"), "{error}");
+        runtime.begin_job();
+        assert_eq!(
+            runtime
+                .execute("calls+':'+done;", &mut NoHost)
+                .unwrap()
+                .to_text(),
+            "1:false"
+        );
+    }
+
+    #[test]
+    fn string_from_char_code_retains_call_and_work_limits() {
+        let arguments = vec!["65"; super::super::MAX_ARGUMENTS].join(",");
+        let mut runtime = Runtime::new();
+        let result = runtime
+            .execute(&format!("String.fromCharCode({arguments});"), &mut NoHost)
+            .unwrap();
+        assert_eq!(result.to_text(), "A".repeat(super::super::MAX_ARGUMENTS));
+        let error = runtime
+            .execute(
+                &format!("String.fromCharCode({arguments},65);"),
+                &mut NoHost,
+            )
+            .unwrap_err();
+        assert!(
+            error.contains("Call argument limit reached (256)"),
+            "{error}"
+        );
+        runtime.begin_job();
+        let error = runtime
+            .execute("String.fromCharCode.apply(null,Array(257));", &mut NoHost)
+            .unwrap_err();
+        assert!(
+            error.contains("Call argument limit reached (256)"),
+            "{error}"
+        );
+
+        let mut runtime = Runtime::new();
+        let constructor = runtime.binding_value(0, "String").unwrap();
+        let function = runtime
+            .get_ordinary_property_with_host(
+                Ordinary::from_value(&constructor).unwrap(),
+                "fromCharCode",
+                &mut NoHost,
+            )
+            .unwrap();
+        runtime.copy_bytes = 1;
+        let error = runtime
+            .call_value(
+                function,
+                &[Value::Number(65.0)],
+                Value::Undefined,
+                &mut NoHost,
+            )
+            .unwrap_err();
+        assert!(error.display().contains("String/copy work limit"));
+        assert_eq!(runtime.copy_bytes, 0);
+    }
+
+    #[test]
+    fn accessor_reads_writes_and_inspection_preserve_receivers_and_identity() {
+        succeeds(
+            r#"
+            let reads=0, writes=0, parent={}, child=Object.create(parent), key=Symbol('accessor');
+            let get=function(){reads++;return this.base;};
+            let set=function(value){writes++;this.base=value;return 999;};
+            Object.defineProperty(parent,'amount',{get:get,set:set,enumerable:true,configurable:true});
+            Object.defineProperty(parent,key,{get:get,set:set,enumerable:true,configurable:true});
+            child.base=4;
+            let d=Object.getOwnPropertyDescriptor(parent,'amount');
+            let sd=Object.getOwnPropertyDescriptor(parent,key);
+            if(d.get!==get||d.set!==set||'value' in d||'writable' in d||sd.get!==get)throw 'descriptor';
+            if(!parent.hasOwnProperty('amount')||child.hasOwnProperty('amount')||!('amount' in child)||!(key in child))throw 'presence';
+            if(Object.keys(parent).join(',')!=='amount'||Object.getOwnPropertySymbols(parent)[0]!==key||reads)throw 'inspection invoked getter';
+            if(child.amount!==4||child[key]!==4||reads!==2)throw 'getter receiver';
+            if((child.amount=7)!==7||(child[key]=8)!==8||writes!==2||child.base!==8||parent.base!==undefined)throw 'setter receiver';
+            if(child.hasOwnProperty('amount')||child.hasOwnProperty(key))throw 'inherited accessor shadowed';
+            Object.defineProperty(child,'empty',{get:undefined,set:undefined});
+            if(child.empty!==undefined)throw 'empty accessor';
+            child.empty=5; let caught=false;
+            try{(function(){'use strict';child.empty=6;})();}catch(e){caught=e.name==='TypeError';}
+            if(!caught||child.empty!==undefined)throw 'missing setter';
+            'ok';
+            "#,
+        );
+    }
+
+    #[test]
+    fn accessor_descriptor_fields_follow_order_inheritance_and_early_errors() {
+        succeeds(
+            r#"
+            let order='', descriptor={}, target={};
+            function field(name,letter,value){Object.defineProperty(descriptor,name,{get:function(){order+=letter;return value;},configurable:true});}
+            field('enumerable','e',true);field('configurable','c',true);field('value','v',1);
+            field('writable','w',true);field('get','g',undefined);field('set','s',undefined);
+            let caught=false;
+            try{Object.defineProperty(target,'mixed',descriptor);}catch(e){caught=e.name==='TypeError';}
+            if(!caught||order!=='ecvwgs'||'mixed' in target)throw 'field order or mixed descriptor';
+            order='';field('get','g',42);caught=false;
+            try{Object.defineProperty(target,'invalid',descriptor);}catch(e){caught=e.name==='TypeError';}
+            if(!caught||order!=='ecvwg'||'invalid' in target)throw 'invalid getter did not stop';
+            let inherited={};Object.defineProperty(inherited,'value',{get:function(){if(this===inherited)throw 'descriptor receiver';return 13;}});
+            Object.defineProperty(target,'inherited',Object.create(inherited));
+            if(target.inherited!==13)throw 'inherited descriptor field';
+            let thrown=Symbol('throw'), failure={};
+            Object.defineProperty(failure,'value',{get:function(){throw thrown;}});caught=false;
+            try{Object.defineProperty(target,'failed',failure);}catch(e){caught=e===thrown;}
+            if(!caught||'failed' in target)throw 'getter exception changed';
+            'ok';
+            "#,
+        );
+    }
+
+    #[test]
+    fn accessor_redefinitions_switch_kinds_without_calling_getters() {
+        succeeds(
+            r#"
+            let reads=0, stored=0, o={}, key=Symbol();
+            let get=function(){reads++;return 1;}, set=function(value){stored=value;};
+            Object.defineProperty(o,key,{get:get,configurable:true});
+            Object.defineProperty(o,key,{enumerable:true});
+            if(Object.getOwnPropertyDescriptor(o,key).get!==get||reads)throw 'generic descriptor';
+            Object.defineProperty(o,key,{value:5});
+            let d=Object.getOwnPropertyDescriptor(o,key);
+            if(d.value!==5||d.writable||!d.enumerable||!d.configurable||'get' in d||reads)throw 'accessor to data';
+            Object.defineProperty(o,key,{set:set});d=Object.getOwnPropertyDescriptor(o,key);
+            if(d.get!==undefined||d.set!==set||'value' in d||reads)throw 'data to accessor';
+            Object.defineProperty(o,key,{configurable:false});
+            Object.defineProperty(o,key,{set:set});Object.defineProperty(o,key,{});
+            let failures=0;
+            function reject(descriptor){try{Object.defineProperty(o,key,descriptor);}catch(e){if(e.name==='TypeError'){failures++;return;}}throw 'accepted invalid descriptor';}
+            reject({get:get});reject({set:undefined});reject({set:function(){}});reject({value:4});
+            reject({writable:false});reject({enumerable:false});reject({configurable:true});
+            if(failures!==7||reads)throw 'nonconfigurable accessor';
+            o[key]=9;if(stored!==9||o[key]!==undefined)throw 'retained setter';
+            let plain={};Object.defineProperty(plain,'data',{value:7,configurable:true});
+            Object.defineProperty(plain,'data',{get:get});
+            if(plain.data!==1||reads!==1)throw 'string transition';
+            'ok';
+            "#,
+        );
+    }
+
+    #[test]
+    fn frozen_accessors_keep_their_setters_and_do_not_run_getters_during_integrity_checks() {
+        succeeds(
+            r#"
+            let reads=0, result=0, key=Symbol(), o={};
+            let get=function(){reads++;return result;}, set=function(value){result=value;};
+            Object.defineProperty(o,'named',{get:get,set:set,enumerable:true,configurable:true});
+            Object.defineProperty(o,key,{get:get,set:set,configurable:true});
+            Object.freeze(o);
+            if(!Object.isFrozen(o)||!Object.isSealed(o)||Object.isExtensible(o)||reads)throw 'integrity';
+            let d=Object.getOwnPropertyDescriptor(o,'named'), sd=Object.getOwnPropertyDescriptor(o,key);
+            if(d.configurable||sd.configurable||d.set!==set||sd.get!==get||reads)throw 'frozen descriptor';
+            o.named=4;o[key]=8;if(result!==8||reads)throw 'frozen setter';
+            if(o.named!==8||reads!==1||delete o.named||delete o[key])throw 'frozen getter';
+            let child=Object.create(o);child.named=11;
+            if(result!==11||child.hasOwnProperty('named'))throw 'frozen inherited setter';
+            'ok';
+            "#,
+        );
+    }
+
+    #[test]
+    fn accessor_assign_snapshots_all_keys_and_rechecks_own_enumerability() {
+        succeeds(
+            r#"
+            let order='', key=Symbol('old'), added=Symbol('new'), parent={}, source=Object.create(parent), target={};
+            Object.defineProperty(parent,'deleted',{get:function(){throw 'inherited getter ran';}});
+            Object.defineProperty(source,'first',{enumerable:true,get:function(){
+              order+='a';delete source.deleted;Object.defineProperty(source,'later',{enumerable:true});
+              Object.defineProperty(source,key,{enumerable:true});source.added=9;source[added]=10;return 1;
+            }});
+            Object.defineProperty(source,'deleted',{value:2,enumerable:true,configurable:true});
+            Object.defineProperty(source,'later',{get:function(){order+='b';return 3;},configurable:true});
+            Object.defineProperty(source,key,{get:function(){order+='c';return 4;},configurable:true});
+            Object.defineProperty(target,'first',{set:function(value){if(this!==target||value!==1)throw 'first setter';order+='A';}});
+            Object.defineProperty(target,'later',{set:function(value){if(value!==3)throw 'later setter';order+='B';}});
+            Object.defineProperty(target,key,{set:function(value){if(value!==4)throw 'symbol setter';order+='C';}});
+            if(Object.assign(target,source)!==target||order!=='aAbBcC')throw 'copy order';
+            if('deleted' in target||'added' in target||added in target)throw 'key snapshot';
+            'ok';
+            "#,
+        );
+    }
+
+    #[test]
+    fn accessor_define_properties_snapshots_converted_descriptors_before_mutation() {
+        succeeds(
+            r#"
+            let order='', calls=0, target={}, descriptors={}, key=Symbol(), get=function(){calls++;return 7;};
+            Object.defineProperty(descriptors,'first',{enumerable:true,get:function(){
+              order+='a';Object.defineProperty(descriptors,'later',{enumerable:true});
+              Object.defineProperty(descriptors,key,{enumerable:true});return {get:get};
+            }});
+            Object.defineProperty(descriptors,'later',{configurable:true,get:function(){
+              order+='b';if('first' in target)throw 'early mutation';return {value:2};
+            }});
+            Object.defineProperty(descriptors,key,{configurable:true,get:function(){
+              order+='c';if('later' in target)throw 'early symbol mutation';return {get:get};
+            }});
+            Object.defineProperties(target,descriptors);
+            if(order!=='abc'||calls||target.later!==2)throw 'descriptor conversion';
+            if(Object.getOwnPropertyDescriptor(target,'first').get!==get||Object.getOwnPropertyDescriptor(target,key).get!==get||calls)throw 'inspection';
+            if(target.first!==7||target[key]!==7||calls!==2)throw 'stored accessors';
+            let rejected={}, invalid={ok:{value:1}};
+            Object.defineProperty(invalid,key,{enumerable:true,get:function(){return {get:3};}});
+            let caught=false;try{Object.defineProperties(rejected,invalid);}catch(e){caught=e.name==='TypeError';}
+            if(!caught||'ok' in rejected||Object.getOwnPropertySymbols(rejected).length)throw 'partial definition';
+            'ok';
+            "#,
+        );
+    }
+
+    #[test]
+    fn accessor_raw_reads_fail_without_invoking_script() {
+        let mut runtime = Runtime::new();
+        let Value::Object(object) = runtime.execute(
+            "var reads=0;var object={};Object.defineProperty(object,'x',{get:function(){reads++;return 9;}});object;",
+            &mut NoHost,
+        ).unwrap() else { panic!("expected an object"); };
+        assert!(runtime.get_property(object, "x").is_err());
+        assert!(runtime.own_property(object, "x").is_err());
+        assert_eq!(
+            runtime.execute("reads;", &mut NoHost).unwrap().to_text(),
+            "0"
+        );
+        assert_eq!(
+            runtime
+                .get_property_with_host(object, "x", &mut NoHost)
+                .unwrap()
+                .to_text(),
+            "9"
+        );
+        assert_eq!(
+            runtime.execute("reads;", &mut NoHost).unwrap().to_text(),
+            "1"
+        );
+    }
+
+    #[test]
+    fn accessor_registered_host_expandos_keep_the_native_receiver_and_reserved_names() {
+        let mut runtime = Runtime::new();
+        runtime.bind_host_object(11, &[]).unwrap();
+        runtime.define_global("native", Value::Host(11)).unwrap();
+        assert_eq!(
+            runtime
+                .execute(
+                    r#"
+            var stored=0, reads=0, key=Symbol('host');
+            var get=function(){if(this!==native)throw 'getter receiver';reads++;return stored;};
+            var set=function(value){if(this!==native)throw 'setter receiver';stored=value;};
+            var descriptors={amount:{get:get,set:set,enumerable:true}};
+            descriptors[key]={get:get,set:set,enumerable:true};
+            Object.defineProperties(native,descriptors);
+            native.amount=4;native[key]=5;
+            if(stored!==5||native.amount!==5||native[key]!==5||reads!==2)throw 'host accessor';
+            var source={amount:7};source[key]=8;Object.assign(native,source);
+            if(stored!==8)throw 'host assign setter';
+            var copy=Object.assign({},native);
+            if(copy.amount!==8||copy[key]!==8||reads!==4)throw 'host assign getter';
+            'ok';
+        "#,
+                    &mut NoHost
+                )
+                .unwrap()
+                .to_text(),
+            "ok"
+        );
+        assert!(runtime
+            .execute(
+                "Object.defineProperty(native,'reserved',{get:function(){return 1;}});",
+                &mut NoHost,
+            )
+            .is_err());
+        let backing = runtime.host_objects[&11];
+        assert!(!runtime.objects[backing].properties.contains_key("reserved"));
+    }
+
+    #[test]
+    fn symbol_descriptors_enumerate_own_keys_by_insertion_order() {
+        succeeds(
+            r#"
+            let a=Symbol('same'), b=Symbol('same'), inherited=Symbol('parent');
+            let parent={}; parent[inherited]=8;
+            let o=Object.create(parent); o[b]=2; o.plain=3; o[a]=1;
+            Object.defineProperty(o,b,{enumerable:false});
+            let keys=Object.getOwnPropertySymbols(o);
+            let d=Object.getOwnPropertyDescriptor(o,b);
+            if(keys.length!==2||keys[0]!==b||keys[1]!==a)throw 'order';
+            if(d.value!==2||d.enumerable||!d.writable||!d.configurable)throw 'descriptor';
+            if(!o.hasOwnProperty(b)||o.propertyIsEnumerable(b)||!o.propertyIsEnumerable(a))throw 'own';
+            if(o.hasOwnProperty(inherited)||Object.getOwnPropertyDescriptor(o,inherited)!==undefined)throw 'inherited descriptor';
+            if(o[inherited]!==8||!(inherited in o)||Object.keys(o).join(',')!=='plain')throw 'inheritance';
+            let seen=''; for(let key in o)seen+=key;
+            if(seen!=='plain')throw 'for-in';
+            delete o[b]; o[b]=4; keys=Object.getOwnPropertySymbols(o);
+            if(keys[0]!==a||keys[1]!==b)throw 'reinsertion';
+            function F(){}; Object.defineProperty(F,a,{value:9});
+            if(F[a]!==9||Object.getOwnPropertySymbols(F)[0]!==a)throw 'function';
+            'ok';
+            "#,
+        );
+    }
+
+    #[test]
+    fn symbol_descriptor_redefinition_preserves_same_value_rules() {
+        succeeds(
+            r#"
+            let key=Symbol(), value=Symbol('value'), o={};
+            Object.defineProperty(o,key,{value:value});
+            Object.defineProperty(o,key,{value:value});
+            let d=Object.getOwnPropertyDescriptor(o,key), failures=0;
+            if(d.value!==value||d.writable||d.enumerable||d.configurable)throw 'defaults';
+            try{Object.defineProperty(o,key,{value:Symbol('value')});}catch(e){if(e.name==='TypeError')failures++;}
+            try{Object.defineProperty(o,key,{writable:true});}catch(e){if(e.name==='TypeError')failures++;}
+            try{Object.defineProperty(o,key,{configurable:true});}catch(e){if(e.name==='TypeError')failures++;}
+            try{Object.defineProperty(o,key,{enumerable:true});}catch(e){if(e.name==='TypeError')failures++;}
+            let zero=Symbol(), nan=Symbol();
+            Object.defineProperty(o,zero,{value:-0});
+            Object.defineProperty(o,nan,{value:NaN});
+            Object.defineProperty(o,nan,{value:NaN});
+            try{Object.defineProperty(o,zero,{value:0});}catch(e){if(e.name==='TypeError')failures++;}
+            if(failures!==5||o[key]!==value||delete o[key])throw 'nonconfigurable';
+            'ok';
+            "#,
+        );
+    }
+
+    #[test]
+    fn symbol_define_properties_snapshots_strings_and_symbols_before_writes() {
+        succeeds(
+            r#"
+            let a=Symbol(), b=Symbol(), target={value:7}, defs={value:{value:9}};
+            defs[a]=target; defs[b]={value:5,enumerable:true};
+            Object.defineProperties(target,defs);
+            if(target.value!==9||target[a]!==7||target[b]!==5)throw 'snapshot';
+            let keys=Object.getOwnPropertySymbols(target);
+            if(keys[0]!==a||keys[1]!==b||!target.propertyIsEnumerable(b))throw 'symbol descriptors';
+            let rejected={}, invalid={first:{value:1}}; invalid[a]=0;
+            let caught=false;
+            try{Object.defineProperties(rejected,invalid);}catch(e){caught=e.name==='TypeError';}
+            if(!caught||'first' in rejected||Object.getOwnPropertySymbols(rejected).length)throw 'partial mutation';
+            let created=Object.create(null,defs);
+            if(created[a]!==9||created[b]!==5||Object.getPrototypeOf(created)!==null)throw 'create';
+            'ok';
+            "#,
+        );
+    }
+
+    #[test]
+    fn symbol_assign_copies_enumerable_own_keys_and_uses_throwing_set() {
+        succeeds(
+            r#"
+            let a=Symbol(), b=Symbol(), hidden=Symbol(), inherited=Symbol();
+            let parent={}; parent[inherited]=99;
+            let source=Object.create(parent); source[b]=2; source.text=3; source[a]=1;
+            Object.defineProperty(source,hidden,{value:4});
+            let copy=Object.assign({},source), keys=Object.getOwnPropertySymbols(copy);
+            if(keys.length!==2||keys[0]!==b||keys[1]!==a)throw 'copy order';
+            if(copy[a]!==1||copy[b]!==2||copy.text!==3||hidden in copy||inherited in copy)throw 'copy values';
+            let target={}; Object.defineProperty(target,b,{value:8});
+            let caught=false;
+            try{Object.assign(target,source);}catch(e){caught=e.name==='TypeError';}
+            if(!caught||target.text!==3||target[b]!==8||a in target)throw 'throwing order';
+            let frozen=Object.freeze({}); caught=false;
+            try{Object.assign(frozen,copy);}catch(e){caught=e.name==='TypeError';}
+            if(!caught||Object.getOwnPropertySymbols(frozen).length)throw 'not extensible';
+            'ok';
+            "#,
+        );
+    }
+
+    #[test]
+    fn symbol_integrity_includes_symbol_properties_and_inherited_writability() {
+        succeeds(
+            r#"
+            let key=Symbol(), o={}; o[key]=1;
+            Object.preventExtensions(o);
+            if(Object.isSealed(o)||Object.isFrozen(o))throw 'unsealed symbol';
+            Object.seal(o); o[key]=2;
+            if(!Object.isSealed(o)||Object.isFrozen(o)||delete o[key]||o[key]!==2)throw 'seal';
+            Object.freeze(o); o[key]=3;
+            if(!Object.isFrozen(o)||o[key]!==2)throw 'freeze';
+            let d=Object.getOwnPropertyDescriptor(o,key);
+            if(d.writable||d.configurable||!d.enumerable)throw 'frozen descriptor';
+            let child=Object.create(o); child[key]=4;
+            if(child.hasOwnProperty(key)||child[key]!==2)throw 'inherited readonly';
+            let caught=false;
+            try{(function(){'use strict';child[key]=5;})();}catch(e){caught=e.name==='TypeError';}
+            if(!caught)throw 'strict inherited readonly';
+            let fresh=Symbol(); o[fresh]=9;
+            if(fresh in o)throw 'prevent extension';
+            'ok';
+            "#,
+        );
+    }
+
+    #[test]
+    fn symbol_primitive_introspection_and_borrowed_string_conversion() {
+        succeeds(
+            r#"
+            let symbol=Symbol('token');
+            if(Object.getPrototypeOf(symbol)!==Symbol.prototype)throw 'prototype';
+            if(Object.prototype.toString.call(symbol)!=='[object Symbol]')throw 'tag';
+            if(Object.getOwnPropertySymbols(symbol).length)throw 'primitive own keys';
+            if(Object.prototype.hasOwnProperty.call(symbol,symbol))throw 'primitive own property';
+            let failures=0;
+            try{String.prototype.trim.call(symbol);}catch(e){if(e.name==='TypeError')failures++;}
+            try{Object.getOwnPropertySymbols(null);}catch(e){if(e.name==='TypeError')failures++;}
+            if(failures!==2)throw 'conversion';
+            'ok';
+            "#,
+        );
+    }
+
+    #[test]
+    fn symbol_descriptors_use_registered_host_backing_without_native_calls() {
+        let mut runtime = Runtime::new();
+        runtime.bind_host_object(11, &[]).unwrap();
+        runtime.define_global("native", Value::Host(11)).unwrap();
+        runtime.define_global("opaque", Value::Host(12)).unwrap();
+        assert_eq!(
+            runtime
+                .execute(
+                    r#"
+                    let key=Symbol('native'), source={}; source[key]=8;
+                    Object.assign(native,source);
+                    Object.defineProperty(native,key,{enumerable:false});
+                    let d=Object.getOwnPropertyDescriptor(native,key);
+                    if(d.value!==8||d.enumerable||!d.writable||!d.configurable)throw 'host descriptor';
+                    if(!Object.prototype.hasOwnProperty.call(native,key))throw 'host own';
+                    if(Object.getOwnPropertySymbols(native)[0]!==key)throw 'host keys';
+                    if(Object.getOwnPropertySymbols(opaque).length)throw 'opaque keys';
+                    if(Object.getOwnPropertyDescriptor(opaque,key)!==undefined)throw 'opaque descriptor';
+                    'ok';
+                    "#,
+                    &mut NoHost,
+                )
+                .unwrap()
+                .to_text(),
+            "ok"
+        );
+        assert!(runtime
+            .execute("Object.defineProperty(opaque,key,{value:9});", &mut NoHost)
+            .is_err());
+        assert!(!runtime.host_objects.contains_key(&12));
     }
 }

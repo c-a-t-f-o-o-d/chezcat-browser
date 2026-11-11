@@ -1,0 +1,143 @@
+{
+  "schema_version": 1,
+  "project": "ChezCat",
+  "version": "0.33.3",
+  "stage": "final",
+  "assembled_utc": "2026-11-11T01:21:39.457124+00:00",
+  "scope": "Supplied 0.33.2 Google capture: bounded Symbol primitives, property keys and checked conversion. Live Google Search remains unverified end to end.",
+  "baseline": {
+    "filename": "ChezCat_0_33_2.zip",
+    "sha256": "4c39671c9b45011dce3658d877c35645a6c6dfd4b0887760673104ab2c623fc9",
+    "manifest_entries_verified": 339,
+    "original_paths_retained": 340,
+    "rust_tests_passed": 760,
+    "all_prior_rust_test_names_retained": true,
+    "older_implementation_substituted": false
+  },
+  "tests": {
+    "rust_passed": 782,
+    "rust_failed": 0,
+    "new_rust_tests": [
+      "app::search_tests::symbol_bootstrap_initializes_scripted_search_and_repeated_search",
+      "javascript::array_ops::tests::default_comparison_finishes_left_string_conversion_before_right_callback",
+      "javascript::collections::tests::map_symbol_keys_preserve_identity_updates_and_reinsertion_order",
+      "javascript::collections::tests::set_symbol_keys_are_distinct_from_other_key_types",
+      "javascript::json::tests::parse_symbol_source_throws_a_catchable_type_error",
+      "javascript::json::tests::stringify_ignores_symbol_keys_without_reading_their_values",
+      "javascript::json::tests::stringify_omits_symbol_values_and_uses_null_for_array_entries",
+      "javascript::prototypes::tests::symbol_assign_copies_enumerable_own_keys_and_uses_throwing_set",
+      "javascript::prototypes::tests::symbol_define_properties_snapshots_strings_and_symbols_before_writes",
+      "javascript::prototypes::tests::symbol_descriptor_redefinition_preserves_same_value_rules",
+      "javascript::prototypes::tests::symbol_descriptors_enumerate_own_keys_by_insertion_order",
+      "javascript::prototypes::tests::symbol_descriptors_use_registered_host_backing_without_native_calls",
+      "javascript::prototypes::tests::symbol_integrity_includes_symbol_properties_and_inherited_writability",
+      "javascript::prototypes::tests::symbol_primitive_introspection_and_borrowed_string_conversion",
+      "javascript::symbols::tests::string_and_symbol_properties_share_object_limit_and_retained_storage",
+      "javascript::symbols::tests::symbol_descriptions_and_registry_share_retained_value_budget",
+      "javascript::symbols::tests::symbol_identity_limit_persists_across_jobs_and_cannot_be_caught",
+      "javascript::symbols::tests::symbol_properties_cannot_bypass_document_property_limit",
+      "scripting::tests::symbol_dom_setters_throw_before_mutating_text_attributes_or_controls",
+      "scripting::tests::symbol_host_call_arguments_throw_without_timer_listener_or_style_side_effects",
+      "scripting::tests::symbol_navigation_and_resource_conversions_do_not_queue_requests",
+      "scripting::tests::symbol_rejection_preserves_null_boolean_and_timer_argument_behavior"
+    ],
+    "node_comparisons_passed": 826,
+    "node_negative_cases_passed": 226,
+    "new_node_comparisons": 46,
+    "new_node_negative_cases": 2,
+    "app_search_tests_passed": 11,
+    "host_rejection_cases_in_four_tests": 56,
+    "https_script_policy_checks_passed": 26,
+    "activity_source_checks_passed": 21,
+    "activity_processes": 24
+  },
+  "gates": {
+    "formatting": true,
+    "clippy_native_all_targets_deny_warnings": true,
+    "clippy_windows_all_targets_deny_warnings": true,
+    "all_201_frozen_build_inputs_match": true,
+    "cargo_dependencies": 0
+  },
+  "builds": {
+    "native": {
+      "passed": true,
+      "sha256": "e7c6ebe6b41faec35fedfca07651016e5c1e35e2ff4a2ac9aeb6cf250ee3785f",
+      "bytes": 3629280
+    },
+    "windows": {
+      "passed": true,
+      "sha256": "f5d524d09009ca795b8b583af11acaa4ac53453d71b0de2d2a4aa93adaaf844a",
+      "bytes": 3928064,
+      "target": "x86_64-pc-windows-gnu",
+      "version": "0.33.3.0",
+      "system_dll_import_count": 13,
+      "original_icons_preserved": true,
+      "delay_imports": [],
+      "runtime_executed": false
+    }
+  },
+  "bounds": {
+    "symbols_per_document_including_dispose": 4096,
+    "combined_properties_per_object": 4096,
+    "combined_properties_per_document": 16384,
+    "retained_values_bytes": 2097152,
+    "copy_work_per_job_bytes": 8388608,
+    "source_bytes_per_script": 524288,
+    "aggregate_source_bytes": 2097152,
+    "job_steps": 250000,
+    "job_seconds": 1,
+    "call_depth": 32,
+    "evaluation_depth": 128
+  },
+  "preservation": {
+    "baseline_files_modified": [
+      "Cargo.lock",
+      "Cargo.toml",
+      "ChezCat.exe",
+      "FEATURES.md",
+      "README.md",
+      "SHA256SUMS.txt",
+      "pages/start.html",
+      "resources/SHA256SUMS.txt",
+      "resources/chezcat-x64.o",
+      "resources/chezcat.rc",
+      "resources/chezcat.res",
+      "src/app_search_tests.rs",
+      "src/array_ops.rs",
+      "src/binary_data.rs",
+      "src/collections.rs",
+      "src/diagnostics.rs",
+      "src/host_objects.rs",
+      "src/http.rs",
+      "src/javascript.rs",
+      "src/json.rs",
+      "src/main.rs",
+      "src/prototypes.rs",
+      "src/scripting.rs",
+      "src/text_encoding.rs",
+      "tools/check_javascript.py"
+    ],
+    "historical_evidence_files_unchanged": 54,
+    "security_assets_profile_privacy_defaults_preserved": true,
+    "source_audit": "tools/verification-0.33.3/source-preservation-audit.json"
+  },
+  "google": {
+    "live_search_end_to_end_verified": false,
+    "captured_scripts_executed": false,
+    "google_requests_or_retries": 0,
+    "captured_page_has_forms_or_results": false,
+    "exact_csp_directives_available": false,
+    "static_analysis": "tools/verification-0.33.3/google-capture-symbol-analysis.json"
+  },
+  "recovery": {
+    "filename": "ChezCat_0_33_3_Recovery_1.zip",
+    "bytes": 5101010,
+    "sha256": "cd6428116ae7a6d515ff8598bfb443772ebd0188d3f42a13888dd67ba5bdaa45",
+    "files": 352,
+    "verified_manifest_entries": 351,
+    "source_version": "0.33.3",
+    "windows_version": "0.33.3.0"
+  },
+  "remaining_issues": "GOOGLE_SEARCH_REMAINING_0.33.3.txt",
+  "evidence_directory": "tools/verification-0.33.3"
+}

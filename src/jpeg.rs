@@ -4,6 +4,8 @@
 //! JFIF sample placement and YCbCr conversion follow ITU-T T.871/JFIF 1.02.
 //! Exif IFD0 orientation follows CIPA DC-008. Other metadata is not executed.
 
+// Shared with PNG eXIf and WebP EXIF; this remains our bounded IFD0 reader.
+use crate::image::metadata::jpeg_orientation as exif_orientation;
 use crate::image::{Bitmap, MAX_INPUT_BYTES, MAX_PIXELS};
 
 type Result<T> = std::result::Result<T, String>;
@@ -665,55 +667,6 @@ fn decode_scan(
     Ok(())
 }
 
-fn exif_orientation(data: &[u8]) -> Option<u8> {
-    let tiff = data.strip_prefix(b"Exif\0\0")?;
-    let little = match tiff.get(..2)? {
-        b"II" => true,
-        b"MM" => false,
-        _ => return None,
-    };
-    let u16_at = |at: usize| -> Option<u16> {
-        let b: [u8; 2] = tiff.get(at..at.checked_add(2)?)?.try_into().ok()?;
-        Some(if little {
-            u16::from_le_bytes(b)
-        } else {
-            u16::from_be_bytes(b)
-        })
-    };
-    let u32_at = |at: usize| -> Option<u32> {
-        let b: [u8; 4] = tiff.get(at..at.checked_add(4)?)?.try_into().ok()?;
-        Some(if little {
-            u32::from_le_bytes(b)
-        } else {
-            u32::from_be_bytes(b)
-        })
-    };
-    if u16_at(2)? != 42 {
-        return None;
-    }
-    let start = u32_at(4)? as usize;
-    if start < 8 {
-        return None;
-    }
-    let entries = usize::from(u16_at(start)?);
-    if entries > 1024 {
-        return None;
-    }
-    let end = start.checked_add(2 + 12 * entries + 4)?;
-    if end > tiff.len() {
-        return None;
-    }
-    for index in 0..entries {
-        let at = start + 2 + 12 * index;
-        if u16_at(at)? == 0x112 && u16_at(at + 2)? == 3 && u32_at(at + 4)? == 1 {
-            return u8::try_from(u16_at(at + 8)?)
-                .ok()
-                .filter(|n| (1..=8).contains(n));
-        }
-    }
-    None
-}
-
 #[allow(clippy::needless_range_loop)] // The indices name the two transform axes.
 fn idct(coefficients: &[i16], quant: &[u16; 64], basis: &[[f64; 8]; 8]) -> [u8; 64] {
     let mut output = [0; 64];
@@ -815,11 +768,8 @@ fn render(mut frame: Frame, orientation: u8, color: Color, check: Check<'_>) -> 
         component.coefficients = Vec::new();
         planes.push(plane);
     }
-    let (width, height) = if orientation >= 5 {
-        (frame.height, frame.width)
-    } else {
-        (frame.width, frame.height)
-    };
+    let (width, height) =
+        crate::image::metadata::oriented_dimensions(frame.width, frame.height, orientation);
     let mut pixels = allocated(width * height, 0u32)?;
     let axes: Vec<Vec<Sample>> = frame
         .components
@@ -847,16 +797,13 @@ fn render(mut frame: Frame, orientation: u8, color: Color, check: Check<'_>) -> 
                 values[index] = sample(&planes[index], c.width, axes[index][x], vertical[index]);
             }
             let [red, green, blue] = color.rgb(values);
-            let (target_x, target_y) = match orientation {
-                2 => (frame.width - 1 - x, y),
-                3 => (frame.width - 1 - x, frame.height - 1 - y),
-                4 => (x, frame.height - 1 - y),
-                5 => (y, x),
-                6 => (frame.height - 1 - y, x),
-                7 => (frame.height - 1 - y, frame.width - 1 - x),
-                8 => (y, frame.width - 1 - x),
-                _ => (x, y),
-            };
+            let (target_x, target_y) = crate::image::metadata::oriented_pixel(
+                frame.width,
+                frame.height,
+                x,
+                y,
+                orientation,
+            );
             pixels[target_y * width + target_x] =
                 0xff000000 | (u32::from(red) << 16) | (u32::from(green) << 8) | u32::from(blue);
         }

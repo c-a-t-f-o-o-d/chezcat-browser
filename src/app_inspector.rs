@@ -72,6 +72,7 @@ enum Action {
     ClearConsole,
     Run,
     Row(usize, bool),
+    Request(u64),
 }
 
 #[derive(Clone, Copy)]
@@ -80,6 +81,15 @@ struct Rect {
     y: i32,
     w: i32,
     h: i32,
+}
+
+struct NetworkGeometry {
+    table_header: Rect,
+    table_rows: Rect,
+    divider: Rect,
+    axis: Rect,
+    lanes: Rect,
+    details: Rect,
 }
 
 impl Rect {
@@ -113,6 +123,7 @@ struct Snapshot {
     label: String,
     total: usize,
     truncated: bool,
+    network: Option<crate::network_trace::Snapshot>,
 }
 
 pub(super) struct Inspector {
@@ -122,11 +133,16 @@ pub(super) struct Inspector {
     tab: Tab,
     pane: Pane,
     font_scale: i32,
+    network_font_scale: i32,
     scroll: usize,
     detail_scroll: usize,
     horizontal: usize,
     wheel_remainder: i32,
     selected: Option<usize>,
+    network_selected: Option<u64>,
+    network_split: i32,
+    network_resize: bool,
+    network_revision: Cell<u64>,
     collapsed: HashSet<usize>,
     filter: Editor,
     command: Editor,
@@ -153,11 +169,16 @@ impl Default for Inspector {
             tab: Tab::Elements,
             pane: Pane::Content,
             font_scale: 2,
+            network_font_scale: 1,
             scroll: 0,
             detail_scroll: 0,
             horizontal: 0,
             wheel_remainder: 0,
             selected: None,
+            network_selected: None,
+            network_split: 54,
+            network_resize: false,
+            network_revision: Cell::new(0),
             collapsed: HashSet::new(),
             filter: Editor::default(),
             command: Editor::default(),
@@ -178,6 +199,9 @@ impl Default for Inspector {
 }
 
 impl Inspector {
+    pub(super) fn network_visible(&self) -> bool {
+        self.mode != Mode::Closed && self.tab == Tab::Network
+    }
     pub(super) fn invalidate(&self) {
         self.dirty.set(true);
     }
@@ -196,6 +220,7 @@ impl Inspector {
                 .push((truncate(&script.label, 512), script.source.clone()));
         }
         self.selected = None;
+        self.network_selected = None;
         self.collapsed.clear();
         self.source_index = 0;
         self.scroll = 0;
@@ -208,9 +233,17 @@ impl Inspector {
         self.pressed = None;
         self.resize_drag = None;
         self.scrollbar_drag = None;
+        self.network_resize = false;
     }
     fn line_height(&self) -> i32 {
         9 * self.font_scale + 4
+    }
+    fn active_scale(&mut self) -> &mut i32 {
+        if self.tab == Tab::Network {
+            &mut self.network_font_scale
+        } else {
+            &mut self.font_scale
+        }
     }
 }
 
@@ -360,6 +393,9 @@ impl App {
 
     fn inspector_panes(&self) -> (Rect, Option<Rect>) {
         let body = self.inspector_body();
+        if self.inspector.tab == Tab::Network {
+            return (self.network_geometry().table_rows, None);
+        }
         if self.inspector.tab == Tab::Elements && body.w >= 360 {
             let left = (body.w * 45 / 100).clamp(160, body.w - 160);
             (
@@ -530,14 +566,34 @@ impl App {
     }
 
     fn inspector_snapshot(&self) -> Ref<'_, Snapshot> {
-        if self.inspector.dirty.replace(false) {
-            let snapshot = build_snapshot(self);
-            *self.inspector.snapshot.borrow_mut() = snapshot;
+        if self.inspector.tab == Tab::Network {
+            let revision = self.network.revision();
+            if self.inspector.network_revision.get() != revision {
+                self.inspector.invalidate();
+            }
+        }
+        if self.inspector.dirty.get() {
+            // Workers can add network measurements during a paint. Nested
+            // geometry reads keep one coherent snapshot until the next paint.
+            if let Ok(mut current) = self.inspector.snapshot.try_borrow_mut() {
+                let snapshot = build_snapshot(self);
+                if let Some(network) = &snapshot.network {
+                    self.inspector.network_revision.set(network.revision);
+                }
+                *current = snapshot;
+                self.inspector.dirty.set(false);
+            }
         }
         self.inspector.snapshot.borrow()
     }
 
     fn inspector_visible_rows(&self) -> usize {
+        if self.inspector.tab == Tab::Network {
+            let area = self.network_geometry();
+            return (area.table_rows.h / self.network_row_height())
+                .min(area.lanes.h / self.network_lane_height())
+                .max(1) as usize;
+        }
         (self.inspector_body().h / self.inspector.line_height()).max(1) as usize
     }
 
@@ -584,6 +640,25 @@ impl App {
             return Some(*action);
         }
         let (body, _) = self.inspector_panes();
+        if self.inspector.tab == Tab::Network {
+            let area = self.network_geometry();
+            let index =
+                if area.table_rows.has(x, y) && x < area.table_rows.x + area.table_rows.w - 12 {
+                    Some(((y - area.table_rows.y) / self.network_row_height()) as usize)
+                } else if area.lanes.has(x, y) {
+                    Some(((y - area.lanes.y) / self.network_lane_height()) as usize)
+                } else {
+                    None
+                };
+            if let Some(index) = index.filter(|index| *index < self.inspector_visible_rows()) {
+                let snapshot = self.inspector_snapshot();
+                let first = self.inspector.scroll.min(self.inspector_max_scroll(false));
+                return snapshot
+                    .rows
+                    .get(first + index)
+                    .map(|row| Action::Request((row.number - 1) as u64));
+            }
+        }
         if self.inspector.tab == Tab::Elements && body.has(x, y) && x < body.x + body.w - 12 {
             let row = self.inspector.scroll.min(self.inspector_max_scroll(false))
                 + ((y - body.y) / self.inspector.line_height()) as usize;
@@ -598,9 +673,12 @@ impl App {
 
     pub fn inspector_resize_cursor(&self, x: i32, y: i32) -> bool {
         !self.menu
-            && self.inspector.mode == Mode::Docked
-            && self.inspector_rect().has(x, y)
-            && y < self.inspector_rect().y + 5
+            && ((self.inspector.mode != Mode::Closed
+                && self.inspector.tab == Tab::Network
+                && self.network_geometry().divider.has(x, y))
+                || (self.inspector.mode == Mode::Docked
+                    && self.inspector_rect().has(x, y)
+                    && y < self.inspector_rect().y + 5))
     }
 
     pub fn inspector_wants_hand(&self, x: i32, y: i32) -> bool {
@@ -623,6 +701,10 @@ impl App {
         self.select_popup = None;
         self.drag = Drag::None;
         self.inspector.cancel_pointer();
+        if self.inspector.tab == Tab::Network && self.network_geometry().divider.has(x, y) {
+            self.inspector.network_resize = true;
+            return;
+        }
         if self.inspector_resize_cursor(x, y) {
             self.inspector.resize_drag = Some((y, self.inspector_dock_height()));
             return;
@@ -669,6 +751,12 @@ impl App {
     pub fn inspector_pointer_move(&mut self, _x: i32, y: i32, dragging: bool) -> bool {
         if !dragging {
             return false;
+        }
+        if self.inspector.network_resize {
+            let body = self.inspector_body();
+            let available = (self.network_geometry().details.y - body.y - 6).max(1);
+            self.inspector.network_split = ((y - body.y) * 100 / available).clamp(28, 75);
+            return true;
         }
         if let Some((start_y, height)) = self.inspector.resize_drag {
             let height = height
@@ -774,6 +862,10 @@ impl App {
                     self.inspector.invalidate();
                 }
             }
+            Action::Request(id) => {
+                self.inspector.network_selected = Some(id);
+                self.inspector.invalidate();
+            }
         }
         PlatformAction::None
     }
@@ -818,7 +910,8 @@ impl App {
 
     pub fn inspector_wheel(&mut self, x: i32, y: i32, delta: i32, ctrl: bool, shift: bool) {
         if ctrl {
-            self.inspector.font_scale = (self.inspector.font_scale + delta.signum()).clamp(1, 3);
+            let scale = self.inspector.active_scale();
+            *scale = (*scale + delta.signum()).clamp(1, 3);
             self.inspector_sync_editor();
             return;
         }
@@ -885,9 +978,22 @@ impl App {
                     Pane::Command => self.inspector.command.select_all(),
                     _ => {}
                 },
-                0xbb | 0x6b => self.inspector.font_scale = (self.inspector.font_scale + 1).min(3),
-                0xbd | 0x6d => self.inspector.font_scale = (self.inspector.font_scale - 1).max(1),
-                0x30 | 0x60 => self.inspector.font_scale = 2,
+                0xbb | 0x6b => {
+                    let scale = self.inspector.active_scale();
+                    *scale = (*scale + 1).min(3);
+                }
+                0xbd | 0x6d => {
+                    let scale = self.inspector.active_scale();
+                    *scale = (*scale - 1).max(1);
+                }
+                0x30 | 0x60 => {
+                    let reset = if self.inspector.tab == Tab::Network {
+                        1
+                    } else {
+                        2
+                    };
+                    *self.inspector.active_scale() = reset;
+                }
                 0x24 => self.inspector.scroll = 0,
                 0x23 => self.inspector.scroll = self.inspector_max_scroll(false),
                 _ => {}
@@ -1103,6 +1209,9 @@ impl App {
     }
 
     fn inspector_copy(&self) -> String {
+        if self.inspector.tab == Tab::Network {
+            return self.network_copy();
+        }
         let snapshot = self.inspector_snapshot();
         let mut output = String::new();
         for row in &snapshot.rows {
@@ -1145,20 +1254,508 @@ impl App {
         canvas
     }
 
+    fn network_row_height(&self) -> i32 {
+        (7 * self.inspector.network_font_scale + 8).max(18)
+    }
+    fn network_lane_height(&self) -> i32 {
+        (self.network_row_height() - 5).max(12)
+    }
+
+    fn network_geometry(&self) -> NetworkGeometry {
+        let body = self.inspector_body();
+        let detail_height = if body.h >= 200 {
+            64
+        } else if body.h >= 130 {
+            42
+        } else {
+            0
+        };
+        let available = (body.h - detail_height - 6).max(0);
+        let upper = (available * self.inspector.network_split / 100).clamp(0, available);
+        let header_height = 21.min(upper);
+        let divider = Rect {
+            y: body.y + upper,
+            h: 6.min(body.h),
+            ..body
+        };
+        let graph_y = divider.y + divider.h;
+        let graph_h = (body.y + available + 6 - graph_y).max(0);
+        let axis_h = 28.min(graph_h);
+        NetworkGeometry {
+            table_header: Rect {
+                h: header_height,
+                ..body
+            },
+            table_rows: Rect {
+                y: body.y + header_height,
+                h: upper - header_height,
+                ..body
+            },
+            divider,
+            axis: Rect {
+                y: graph_y,
+                h: axis_h,
+                ..body
+            },
+            lanes: Rect {
+                y: graph_y + axis_h,
+                h: (graph_h - axis_h).max(0),
+                ..body
+            },
+            details: Rect {
+                y: body.y + body.h - detail_height,
+                h: detail_height,
+                ..body
+            },
+        }
+    }
+
+    fn network_copy(&self) -> String {
+        let snapshot = self.inspector_snapshot();
+        let mut text = format!(
+            "DISPLAYED DOCUMENT: {}\nCONTENT TYPE: {}\nTRUST: {}\nLAST FAILED NAVIGATION: {}\n\nMeasured HTTP requests for the latest navigation (times from its monotonic start):\n",
+            self.location.display(), self.document.content_type, self.trust.description(),
+            self.last_failed_navigation.as_deref().unwrap_or("None"));
+        if let Some(network) = &snapshot.network {
+            let now = if network.rows.iter().any(|r| r.end.is_none()) {
+                self.network.elapsed()
+            } else {
+                network.elapsed
+            };
+            for row in &snapshot.rows {
+                let request = &network.rows[row.number - 1];
+                let _ = writeln!(text, "#{} {} {}\n  {} | {} | {} | start {} | total {} | HTTP received {} bytes | encoded body {} | decoded body {}{}",
+                    request.id + 1, request.method, request.url,
+                    request.kind, network_status(request), network_protocol(request),
+                    milliseconds(request.start), milliseconds(request.duration(now)),
+                    request.http_bytes, optional_bytes(request.encoded_bytes), optional_bytes(request.decoded_bytes),
+                    if request.reused_connection { " | connection reused" } else { "" });
+                for phase in &request.phases {
+                    let _ = writeln!(
+                        text,
+                        "  {}: start {}, duration {}{}",
+                        phase.kind.label(),
+                        milliseconds(phase.start),
+                        milliseconds(phase.end.unwrap_or(now).saturating_sub(phase.start)),
+                        if phase.end.is_none() {
+                            " (in progress)"
+                        } else {
+                            ""
+                        }
+                    );
+                }
+                if !request.note.is_empty() {
+                    let _ = writeln!(text, "  {}", request.note);
+                }
+            }
+            let _ = writeln!(text, "{} recorded; {} omitted at the bounded trace limit.\nHTTP byte counts include received headers/framing, exclude TLS/TCP overhead. Missing phases were not measured; literal addresses skip DNS.\n", network.rows.len(), network.omitted);
+        }
+        text.push_str("Current displayed page activity (Ctrl+I):\n");
+        let query = self.inspector.filter.text().to_lowercase();
+        for event in &self.events {
+            if !query.is_empty() && !event.to_lowercase().contains(&query) {
+                continue;
+            }
+            if text.len().saturating_add(event.len() + 2) > MAX_VIEW_BYTES {
+                break;
+            }
+            text.push_str(event);
+            text.push_str("\n\n");
+        }
+        text
+    }
+
+    fn draw_network(&self, canvas: &mut Canvas) {
+        use crate::network_trace::{Outcome, PhaseKind};
+        let palette = self.browser_palette();
+        let outer = self.inspector_rect();
+        let clip = canvas.clip();
+        let area = self.network_geometry();
+        let snapshot = self.inspector_snapshot();
+        let Some(network) = &snapshot.network else {
+            return;
+        };
+        let now = if network.rows.iter().any(|r| r.end.is_none()) {
+            self.network.elapsed()
+        } else {
+            network.elapsed
+        };
+        let first = self.inspector.scroll.min(
+            snapshot
+                .rows
+                .len()
+                .saturating_sub(self.inspector_visible_rows()),
+        );
+        let visible = snapshot
+            .rows
+            .iter()
+            .skip(first)
+            .take(self.inspector_visible_rows())
+            .collect::<Vec<_>>();
+        let scale = self.inspector.network_font_scale;
+        let columns = network_columns(area.table_header.w, scale);
+        canvas.fill_rect(
+            area.table_header.x,
+            area.table_header.y,
+            area.table_header.w,
+            area.table_header.h,
+            palette.panel_alt,
+        );
+        canvas.set_clip(Some(area.table_header.clip().intersect(clip)));
+        for (x, width, label) in &columns {
+            canvas.text(
+                area.table_header.x + x + 5,
+                area.table_header.y + 7,
+                &fit_text(label, ((width - 8) / 6).max(0) as usize),
+                1,
+                palette.muted,
+            );
+        }
+        canvas.set_clip(Some(area.table_rows.clip().intersect(clip)));
+        for (lane, row) in visible.iter().enumerate() {
+            let request = &network.rows[row.number - 1];
+            let selected = Some(request.id) == self.inspector.network_selected;
+            let y = area.table_rows.y + lane as i32 * self.network_row_height();
+            canvas.set_clip(Some(area.table_rows.clip().intersect(clip)));
+            canvas.fill_rect(
+                area.table_rows.x,
+                y,
+                area.table_rows.w - 11,
+                self.network_row_height(),
+                if selected {
+                    palette.selected
+                } else if (first + lane) % 2 == 1 {
+                    palette.panel_alt
+                } else {
+                    palette.panel
+                },
+            );
+            let color = match request.outcome {
+                Outcome::Failed => palette.error,
+                _ if request.status.is_some_and(|status| status >= 400) => palette.error,
+                Outcome::Blocked => palette.muted,
+                _ => palette.foreground,
+            };
+            for (x, width, label) in &columns {
+                let value = match *label {
+                    "#" => (request.id + 1).to_string(),
+                    "Request" => network_name(&request.url).to_owned(),
+                    "Method" => request.method.to_owned(),
+                    "Status" => network_status(request),
+                    "Type" => request.kind.to_lowercase(),
+                    "Received" => {
+                        if matches!(request.outcome, Outcome::Blocked | Outcome::Reused) {
+                            "--".into()
+                        } else {
+                            compact_bytes(request.http_bytes)
+                        }
+                    }
+                    "Time" => {
+                        if matches!(request.outcome, Outcome::Blocked | Outcome::Reused) {
+                            "--".into()
+                        } else {
+                            milliseconds(request.duration(now))
+                        }
+                    }
+                    _ => String::new(),
+                };
+                let field = Rect {
+                    x: area.table_rows.x + x + 5,
+                    y,
+                    w: width - 8,
+                    h: self.network_row_height(),
+                };
+                canvas.set_clip(Some(
+                    field
+                        .clip()
+                        .intersect(area.table_rows.clip())
+                        .intersect(clip),
+                ));
+                let text = if *label == "Request" {
+                    horizontal_slice(
+                        &value,
+                        self.inspector.horizontal,
+                        ((width - 8) / (6 * scale)).max(0) as usize,
+                    )
+                } else {
+                    fit_text(&value, ((width - 8) / (6 * scale)).max(0) as usize)
+                };
+                canvas.text(field.x, y + 4, &text, scale, color);
+            }
+        }
+        canvas.set_clip(Some(area.table_rows.clip().intersect(clip)));
+        if snapshot.rows.is_empty() {
+            canvas.text(
+                area.table_rows.x + 8,
+                area.table_rows.y + 5,
+                &fit_text(
+                    if network.rows.is_empty() {
+                        "No HTTP requests recorded. Open a website to measure its requests."
+                    } else {
+                        "No requests match the filter."
+                    },
+                    ((area.table_rows.w - 20) / 6).max(0) as usize,
+                ),
+                1,
+                palette.muted,
+            );
+        }
+        if let Some(thumb) = self.inspector_scrollbar(area.table_rows, false) {
+            ui::rounded_rect(
+                canvas,
+                (thumb.x + 2, thumb.y, 6, thumb.h),
+                3.0,
+                palette.muted,
+            );
+        }
+        canvas.set_clip(Some(outer.clip().intersect(clip)));
+        canvas.fill_rect(
+            area.divider.x,
+            area.divider.y,
+            area.divider.w,
+            area.divider.h,
+            palette.border,
+        );
+        canvas.fill_rect(
+            area.divider.x + area.divider.w / 2 - 18,
+            area.divider.y + 2,
+            36,
+            2,
+            palette.muted,
+        );
+        canvas.fill_rect(
+            area.axis.x,
+            area.axis.y,
+            area.axis.w,
+            area.axis.h,
+            palette.panel_alt,
+        );
+        canvas.fill_rect(
+            area.lanes.x,
+            area.lanes.y,
+            area.lanes.w,
+            area.lanes.h,
+            palette.background,
+        );
+        let label_width = (area.lanes.w / 4).clamp(74, 160);
+        let plot_x = area.lanes.x + label_width;
+        let plot_w = (area.lanes.w - label_width - 16).max(1);
+        let span = network
+            .rows
+            .iter()
+            .map(|r| r.end.unwrap_or(now))
+            .max()
+            .unwrap_or_default()
+            .as_secs_f64()
+            .max(0.001);
+        canvas.set_clip(Some(area.axis.clip().intersect(clip)));
+        canvas.text(
+            area.axis.x + 7,
+            area.axis.y + 4,
+            "TIMELINE",
+            1,
+            palette.foreground,
+        );
+        let legend = [
+            (PhaseKind::Queue, "Queue"),
+            (PhaseKind::Dns, "DNS"),
+            (PhaseKind::Connect, "TCP"),
+            (PhaseKind::Tls, "TLS"),
+            (PhaseKind::Send, "Send"),
+            (PhaseKind::Wait, "Wait"),
+            (PhaseKind::Receive, "Receive"),
+            (PhaseKind::Decode, "Decode"),
+        ];
+        let mut legend_x = plot_x;
+        for (phase, label) in legend {
+            if legend_x + label.len() as i32 * 6 + 15 > outer.w - 8 {
+                break;
+            }
+            canvas.fill_rect(legend_x, area.axis.y + 3, 6, 7, network_phase_color(phase));
+            canvas.text(legend_x + 9, area.axis.y + 3, label, 1, palette.muted);
+            legend_x += label.len() as i32 * 6 + 22;
+        }
+        let ticks = if plot_w >= 550 { 5 } else { 3 };
+        for tick in 0..=ticks {
+            let x = plot_x + plot_w * tick / ticks;
+            let label = format!(
+                "{:.0}ms",
+                span * 1000.0 * f64::from(tick) / f64::from(ticks)
+            );
+            canvas.set_clip(Some(area.axis.clip().intersect(clip)));
+            canvas.text(
+                (x - if tick == ticks {
+                    label.len() as i32 * 6
+                } else {
+                    0
+                })
+                .max(plot_x),
+                area.axis.y + 17,
+                &label,
+                1,
+                palette.muted,
+            );
+            canvas.set_clip(Some(area.lanes.clip().intersect(clip)));
+            canvas.fill_rect(x, area.lanes.y, 1, area.lanes.h, palette.border);
+        }
+        for (lane, row) in visible.iter().enumerate() {
+            let request = &network.rows[row.number - 1];
+            let selected = Some(request.id) == self.inspector.network_selected;
+            let y = area.lanes.y + lane as i32 * self.network_lane_height();
+            canvas.set_clip(Some(area.lanes.clip().intersect(clip)));
+            if selected {
+                canvas.fill_rect(
+                    area.lanes.x,
+                    y,
+                    area.lanes.w,
+                    self.network_lane_height(),
+                    palette.selected,
+                );
+            }
+            canvas.text(
+                area.lanes.x + 7,
+                y + 3,
+                &fit_text(
+                    &format!("{} {}", request.id + 1, network_name(&request.url)),
+                    ((label_width - 12) / 6).max(0) as usize,
+                ),
+                1,
+                if selected {
+                    palette.foreground
+                } else {
+                    palette.muted
+                },
+            );
+            let position = |time: std::time::Duration| {
+                plot_x
+                    + (time.as_secs_f64() / span * f64::from(plot_w)).clamp(0.0, f64::from(plot_w))
+                        as i32
+            };
+            let start = position(request.start);
+            let end = position(request.end.unwrap_or(now));
+            let bar_height = (self.network_lane_height() - 5).max(5);
+            if request.phases.is_empty() {
+                canvas.fill_rect(
+                    start,
+                    y + 2,
+                    3,
+                    bar_height,
+                    if request.outcome == Outcome::Failed {
+                        palette.error
+                    } else {
+                        palette.muted
+                    },
+                );
+            } else {
+                canvas.fill_rect(
+                    start,
+                    y + 2,
+                    (end - start).max(1),
+                    bar_height,
+                    palette.border,
+                );
+                for phase in &request.phases {
+                    let x = position(phase.start);
+                    let end = position(phase.end.unwrap_or(now));
+                    canvas.fill_rect(
+                        x,
+                        y + 2,
+                        (end - x).max(1),
+                        bar_height,
+                        network_phase_color(phase.kind),
+                    );
+                }
+            }
+            if selected {
+                ui::rounded_border(
+                    canvas,
+                    (start - 1, y + 1, (end - start).max(3) + 2, bar_height + 2),
+                    1.0,
+                    1.0,
+                    palette.foreground,
+                );
+            }
+        }
+        canvas.set_clip(Some(area.details.clip().intersect(clip)));
+        canvas.fill_rect(
+            area.details.x,
+            area.details.y,
+            area.details.w,
+            area.details.h,
+            palette.panel_alt,
+        );
+        canvas.fill_rect(
+            area.details.x,
+            area.details.y,
+            area.details.w,
+            1,
+            palette.border,
+        );
+        let selected = self
+            .inspector
+            .network_selected
+            .and_then(|id| network.rows.get(id as usize));
+        let detail_lines = if let Some(request) = selected {
+            network_details(request, now)
+        } else {
+            vec!["Select a request above or a timeline row for its measured phases. Drag the divider to resize.".into(),
+            "Received = HTTP headers + framing + encoded body; TLS/TCP overhead is excluded. Ctrl+I keeps the full activity log.".into()]
+        };
+        for (index, line) in detail_lines.iter().enumerate() {
+            canvas.text(
+                area.details.x + 8,
+                area.details.y + 6 + index as i32 * 14,
+                &horizontal_slice(
+                    line,
+                    self.inspector.horizontal,
+                    ((area.details.w - 16) / 6).max(0) as usize,
+                ),
+                1,
+                if index == 0 {
+                    palette.foreground
+                } else {
+                    palette.muted
+                },
+            );
+        }
+        canvas.set_clip(Some(outer.clip().intersect(clip)));
+        let bottom = outer.y + outer.h - FOOTER;
+        canvas.fill_rect(outer.x, bottom, outer.w, FOOTER, palette.chrome);
+        let received: usize = network.rows.iter().map(|r| r.http_bytes).sum();
+        let footer = format!("{} / {} requests | {} received | {} total{} | Filter: URL/type/status | Ctrl+C copies measurements + activity",
+            snapshot.rows.len(), network.rows.len(), compact_bytes(received), milliseconds(std::time::Duration::from_secs_f64(span)),
+            if network.omitted != 0 { format!(" | {} omitted", network.omitted) } else { String::new() });
+        canvas.text(
+            outer.x + 8,
+            bottom + 8,
+            &fit_text(&footer, ((outer.w - 16) / 6).max(0) as usize),
+            1,
+            palette.chrome_text,
+        );
+        canvas.set_clip(Some(clip));
+    }
+
     pub(super) fn draw_inspector(&self, canvas: &mut Canvas) {
         if self.inspector.mode == Mode::Closed {
             return;
         }
         let outer = self.inspector_rect();
+        let palette = self.browser_palette();
         if outer.h <= 0 || outer.w <= 0 {
             return;
         }
         let original_clip = canvas.clip();
         canvas.set_clip(Some(outer.clip()));
-        canvas.fill_rect(outer.x, outer.y, outer.w, outer.h, ui::CARD);
+        canvas.fill_rect(outer.x, outer.y, outer.w, outer.h, palette.panel);
         canvas.fill_rect(outer.x, outer.y, outer.w, HEADER, ui::NAVY);
         canvas.fill_rect(outer.x, outer.y, outer.w, 3, ui::TEAL);
-        canvas.fill_rect(outer.x, outer.y + HEADER, outer.w, TOOLS, ui::SURFACE);
+        canvas.fill_rect(
+            outer.x,
+            outer.y + HEADER,
+            outer.w,
+            TOOLS,
+            palette.background,
+        );
         for (action, rect, label) in self.inspector_buttons() {
             let active = matches!(action, Action::Tab(tab) if tab == self.inspector.tab);
             let header = rect.y < outer.y + HEADER;
@@ -1168,24 +1765,24 @@ impl App {
                 rect.tuple(),
                 4.0,
                 if pressed {
-                    ui::TEAL_DARK
+                    palette.accent
                 } else if active {
                     ui::TEAL
                 } else if header {
                     ui::NAVY_LIGHT
                 } else {
-                    ui::CARD
+                    palette.panel
                 },
             );
             if !header {
-                ui::rounded_border(canvas, rect.tuple(), 4.0, 1.0, ui::BORDER);
+                ui::rounded_border(canvas, rect.tuple(), 4.0, 1.0, palette.border);
             }
             let color = if active {
                 ui::NAVY
             } else if header || pressed {
                 ui::CREAM
             } else {
-                ui::INK
+                palette.foreground
             };
             let text = fit_text(label, ((rect.w - 4) / 6).max(0) as usize);
             canvas.text(
@@ -1204,7 +1801,13 @@ impl App {
             self.inspector.focused && self.inspector.pane == Pane::Filter,
             false,
             1,
+            palette,
         );
+        if self.inspector.tab == Tab::Network {
+            self.draw_network(canvas);
+            canvas.set_clip(Some(original_clip));
+            return;
+        }
         let snapshot = self.inspector_snapshot();
         let (left, right) = self.inspector_panes();
         let scale = self.inspector.font_scale;
@@ -1226,7 +1829,7 @@ impl App {
             let y = left.y + (index - first) as i32 * line_height;
             let selected = row.node.is_some() && row.node == self.inspector.selected;
             if selected {
-                canvas.fill_rect(left.x, y, left.w - 10, line_height, ui::SELECTED);
+                canvas.fill_rect(left.x, y, left.w - 10, line_height, palette.selected);
             }
             let mut x = left.x + 8;
             if self.inspector.tab == Tab::Elements {
@@ -1244,12 +1847,18 @@ impl App {
                             "-"
                         },
                         scale,
-                        ui::TEAL_DARK,
+                        palette.accent,
                     );
                 }
                 x += 10;
             } else if row.number > 0 {
-                canvas.text(x, y + 4, &format!("{:>5}", row.number), scale, ui::MUTED);
+                canvas.text(
+                    x,
+                    y + 4,
+                    &format!("{:>5}", row.number),
+                    scale,
+                    palette.muted,
+                );
                 x += 40 * scale;
             }
             let text = horizontal_slice(
@@ -1257,11 +1866,22 @@ impl App {
                 self.inspector.horizontal,
                 ((left.x + left.w - 15 - x) / (6 * scale)).max(0) as usize,
             );
-            canvas.text(x, y + 4, &text, scale, row.color);
+            canvas.text(
+                x,
+                y + 4,
+                &text,
+                scale,
+                match row.color {
+                    ui::INK => palette.foreground,
+                    ui::MUTED => palette.muted,
+                    ui::ERROR => palette.error,
+                    color => color,
+                },
+            );
         }
         if let Some(right) = right {
             canvas.set_clip(Some(right.clip().intersect(original_clip)));
-            canvas.fill_rect(right.x, right.y, 1, right.h, ui::BORDER);
+            canvas.fill_rect(right.x, right.y, 1, right.h, palette.border);
             let first = self.inspector.detail_scroll.min(
                 snapshot
                     .details
@@ -1287,9 +1907,9 @@ impl App {
                     &text,
                     scale,
                     if line.ends_with(':') {
-                        ui::TEAL_DARK
+                        palette.accent
                     } else {
-                        ui::INK
+                        palette.foreground
                     },
                 );
             }
@@ -1297,7 +1917,12 @@ impl App {
         canvas.set_clip(Some(outer.clip().intersect(original_clip)));
         for (rect, details) in [(Some(left), false), (right, true)] {
             if let Some(thumb) = rect.and_then(|rect| self.inspector_scrollbar(rect, details)) {
-                ui::rounded_rect(canvas, (thumb.x + 2, thumb.y, 6, thumb.h), 3.0, ui::MUTED);
+                ui::rounded_rect(
+                    canvas,
+                    (thumb.x + 2, thumb.y, 6, thumb.h),
+                    3.0,
+                    palette.muted,
+                );
             }
         }
         if self.inspector.tab == Tab::Console {
@@ -1310,6 +1935,7 @@ impl App {
                 self.inspector.focused && self.inspector.pane == Pane::Command,
                 true,
                 scale,
+                palette,
             );
         }
         let bottom = outer.y + outer.h - FOOTER;
@@ -1354,6 +1980,162 @@ fn truncate(text: &str, bytes: usize) -> String {
     format!("{}...", &text[..end])
 }
 
+fn network_columns(width: i32, scale: i32) -> Vec<(i32, i32, &'static str)> {
+    let available = (width - 12).max(0);
+    let cell = 6 * scale;
+    let compact = available < 82 * cell;
+    let mut widths = vec![("#", 4 * cell + 8), ("Request", 0)];
+    if !compact {
+        widths.push(("Method", 7 * cell + 8));
+    }
+    widths.push(("Status", 8 * cell + 8));
+    if !compact {
+        widths.push(("Type", 7 * cell + 8));
+    }
+    if available >= 50 * cell {
+        widths.push(("Received", 9 * cell + 8));
+    }
+    widths.push(("Time", 9 * cell + 8));
+    let fixed: i32 = widths.iter().map(|(_, w)| w).sum();
+    widths[1].1 = (available - fixed).max(48);
+    let mut x = 0;
+    widths
+        .into_iter()
+        .map(|(label, w)| {
+            let column = (x, w, label);
+            x += w;
+            column
+        })
+        .collect()
+}
+
+fn network_name(url: &str) -> &str {
+    url.split_once("://").map_or(url, |(_, rest)| {
+        rest.find('/').map_or(rest, |index| {
+            if index + 1 == rest.len() {
+                rest
+            } else {
+                &rest[index..]
+            }
+        })
+    })
+}
+fn network_status(request: &crate::network_trace::Exchange) -> String {
+    match request.outcome {
+        crate::network_trace::Outcome::Complete => request
+            .status
+            .map_or_else(|| "complete".into(), |status| status.to_string()),
+        crate::network_trace::Outcome::Failed if request.status.is_some() => {
+            format!("{} fail", request.status.unwrap())
+        }
+        crate::network_trace::Outcome::Pending if request.status.is_some() => {
+            format!("{} ...", request.status.unwrap())
+        }
+        _ => request.outcome.label().into(),
+    }
+}
+fn network_protocol(request: &crate::network_trace::Exchange) -> &'static str {
+    if matches!(
+        request.outcome,
+        crate::network_trace::Outcome::Blocked | crate::network_trace::Outcome::Reused
+    ) {
+        "No HTTP exchange"
+    } else if let Some(protocol) = request.protocol {
+        protocol
+    } else if request.url.starts_with("https://") {
+        "TLS not established"
+    } else {
+        "HTTP/1.1 over TCP"
+    }
+}
+fn milliseconds(value: std::time::Duration) -> String {
+    let ms = value.as_secs_f64() * 1000.0;
+    if ms < 10.0 {
+        format!("{ms:.2}ms")
+    } else if ms < 1000.0 {
+        format!("{ms:.1}ms")
+    } else {
+        format!("{:.2}s", ms / 1000.0)
+    }
+}
+fn compact_bytes(value: usize) -> String {
+    if value < 1024 {
+        format!("{value}B")
+    } else if value < 1024 * 1024 {
+        format!("{:.1}KiB", value as f64 / 1024.0)
+    } else {
+        format!("{:.1}MiB", value as f64 / (1024.0 * 1024.0))
+    }
+}
+fn optional_bytes(value: Option<usize>) -> String {
+    value.map_or_else(|| "not measured".into(), compact_bytes)
+}
+fn network_phase_color(phase: crate::network_trace::PhaseKind) -> u32 {
+    use crate::network_trace::PhaseKind::*;
+    match phase {
+        Queue => 0x8996a8,
+        Dns => 0xb5a1ed,
+        Connect => 0xd89352,
+        Tls => 0x9673d7,
+        Send => 0xc2ac43,
+        Wait => 0x439b80,
+        Receive => 0x488acb,
+        Decode => 0xc276a0,
+    }
+}
+fn network_details(
+    request: &crate::network_trace::Exchange,
+    now: std::time::Duration,
+) -> Vec<String> {
+    use crate::network_trace::PhaseKind::*;
+    let phases = request
+        .phases
+        .iter()
+        .map(|phase| {
+            let name = match phase.kind {
+                Queue => "Queue",
+                Dns => "DNS",
+                Connect => "TCP",
+                Tls => "TLS",
+                Send => "Send",
+                Wait => "Wait",
+                Receive => "Receive",
+                Decode => "Decode",
+            };
+            format!(
+                "{name} {}{}",
+                milliseconds(phase.end.unwrap_or(now).saturating_sub(phase.start)),
+                if phase.end.is_none() { "+" } else { "" }
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(" | ");
+    vec![
+        format!("#{} {} {}", request.id + 1, request.method, request.url),
+        format!(
+            "{} | {} | start {} | total {} | received {} | encoded {} | decoded {}{}",
+            network_status(request),
+            network_protocol(request),
+            milliseconds(request.start),
+            milliseconds(request.duration(now)),
+            compact_bytes(request.http_bytes),
+            optional_bytes(request.encoded_bytes),
+            optional_bytes(request.decoded_bytes),
+            if request.reused_connection {
+                " | connection reused"
+            } else {
+                ""
+            }
+        ),
+        if phases.is_empty() {
+            "No network phases: no HTTP exchange was performed.".into()
+        } else {
+            phases
+        },
+        request.note.clone(),
+    ]
+}
+
 fn horizontal_slice(text: &str, offset: usize, count: usize) -> String {
     text.chars()
         .skip(offset)
@@ -1362,6 +2144,7 @@ fn horizontal_slice(text: &str, offset: usize, count: usize) -> String {
         .collect()
 }
 
+#[allow(clippy::too_many_arguments)]
 fn draw_editor(
     canvas: &mut Canvas,
     rect: Rect,
@@ -1370,14 +2153,19 @@ fn draw_editor(
     focused: bool,
     command: bool,
     scale: i32,
+    palette: ui::Palette,
 ) {
-    ui::rounded_rect(canvas, rect.tuple(), 4.0, ui::CARD);
+    ui::rounded_rect(canvas, rect.tuple(), 4.0, palette.panel);
     ui::rounded_border(
         canvas,
         rect.tuple(),
         4.0,
         1.0,
-        if focused { ui::TEAL_DARK } else { ui::BORDER },
+        if focused {
+            palette.accent
+        } else {
+            palette.border
+        },
     );
     let clip = canvas.clip();
     canvas.set_clip(Some(rect.clip().intersect(clip)));
@@ -1385,7 +2173,7 @@ fn draw_editor(
     let advance = 6 * scale;
     let text_top = rect.y + (rect.h - 7 * scale) / 2;
     if command {
-        canvas.text(rect.x + 5, text_top, ">", scale, ui::TEAL_DARK);
+        canvas.text(rect.x + 5, text_top, ">", scale, palette.accent);
     }
     let cells = ((rect.w - prefix - 8) / advance).max(1) as usize;
     let offset = editor.offset.min(editor.chars.len().saturating_sub(cells));
@@ -1395,7 +2183,7 @@ fn draw_editor(
             text_top,
             &fit_text(placeholder, cells),
             scale,
-            ui::MUTED,
+            palette.muted,
         );
     } else {
         let selected = editor.range();
@@ -1407,7 +2195,7 @@ fn draw_editor(
                 text_top - 2,
                 (to - from) as i32 * advance,
                 7 * scale + 4,
-                ui::SELECTED,
+                palette.selected,
             );
         }
         let text = editor
@@ -1417,7 +2205,7 @@ fn draw_editor(
             .take(cells)
             .map(|ch| if ch.is_control() { ' ' } else { *ch })
             .collect::<String>();
-        canvas.text(rect.x + prefix, text_top, &text, scale, ui::INK);
+        canvas.text(rect.x + prefix, text_top, &text, scale, palette.foreground);
         if focused {
             let cursor = editor.cursor.saturating_sub(offset).min(cells) as i32 * advance;
             canvas.fill_rect(
@@ -1425,7 +2213,7 @@ fn draw_editor(
                 text_top - 2,
                 1,
                 7 * scale + 4,
-                ui::TEAL_DARK,
+                palette.accent,
             );
         }
     }
@@ -1550,23 +2338,30 @@ fn build_snapshot(app: &App) -> Snapshot {
             add_lines(&mut snapshot, &report, false);
         }
         Tab::Network => {
-            snapshot.label = "Actual resource activity / current document".into();
-            let mut text = format!(
-                "DOCUMENT: {}\nCONTENT TYPE: {}\nTRUST: {}\nLAST FAILED NAVIGATION: {}\n\n",
-                app.location.display(),
-                app.document.content_type,
-                app.trust.description(),
-                app.last_failed_navigation.as_deref().unwrap_or("None")
-            );
-            for event in &app.events {
-                if text.len().saturating_add(event.len()).saturating_add(2) > MAX_VIEW_BYTES {
-                    snapshot.truncated = true;
-                    break;
-                }
-                text.push_str(event);
-                text.push_str("\n\n");
+            snapshot.label = "Measured HTTP requests / latest navigation".into();
+            let network = app.network.snapshot();
+            snapshot.truncated = network.omitted != 0;
+            for request in &network.rows {
+                snapshot.rows.push(Row {
+                    text: format!(
+                        "{} {} {} {} {} {}",
+                        request.method,
+                        request.url,
+                        request
+                            .status
+                            .map_or_else(|| request.outcome.label().into(), |s| s.to_string()),
+                        request.kind,
+                        request.outcome.label(),
+                        request.note
+                    ),
+                    node: None,
+                    depth: 0,
+                    children: false,
+                    number: request.id as usize + 1,
+                    color: ui::INK,
+                });
             }
-            add_lines(&mut snapshot, &text, false);
+            snapshot.network = Some(network);
         }
     }
     snapshot.total = snapshot.rows.len();
@@ -1678,6 +2473,7 @@ fn selected_details(app: &App) -> Vec<String> {
             format!("  display: {:?}", style.display),
             format!("  position: {:?}", style.position),
             format!("  object-fit: {:?}", style.object_fit),
+            format!("  image-rendering: {:?}", style.image_rendering),
             format!(
                 "  object-position: {}% + {}; {}% + {}",
                 style.object_position[0].fraction * 100.0,
@@ -1794,3 +2590,7 @@ fn insert_command(editor: &mut Editor, text: &str) {
 #[cfg(test)]
 #[path = "app_inspector_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "app_network_tests.rs"]
+mod network_tests;

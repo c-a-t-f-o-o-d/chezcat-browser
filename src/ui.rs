@@ -15,9 +15,58 @@ pub const BORDER: u32 = 0xd7e1e3;
 pub const INK: u32 = 0x182647;
 pub const MUTED: u32 = 0x5e7184;
 pub const ERROR: u32 = 0xa63f48;
-pub const ERROR_BG: u32 = 0xf9e7e6;
 pub const SELECTED: u32 = 0xdcefe9;
 pub const DISABLED: u32 = 0x60718b;
+
+/// Browser-owned surfaces. Webpage colors are kept separate from this palette.
+#[derive(Clone, Copy, Debug)]
+pub struct Palette {
+    pub background: u32,
+    pub panel: u32,
+    pub panel_alt: u32,
+    pub foreground: u32,
+    pub muted: u32,
+    pub border: u32,
+    pub accent: u32,
+    pub selected: u32,
+    pub error: u32,
+    pub chrome: u32,
+    pub chrome_text: u32,
+}
+
+impl Palette {
+    pub fn new(dark: bool) -> Self {
+        if dark {
+            Self {
+                background: 0x0d1424,
+                panel: 0x151f33,
+                panel_alt: 0x1d2b42,
+                foreground: 0xe4ebf5,
+                muted: 0x9cacc4,
+                border: 0x354761,
+                accent: 0x67d8c6,
+                selected: 0x24483f,
+                error: 0xffa0a4,
+                chrome: NAVY,
+                chrome_text: CREAM,
+            }
+        } else {
+            Self {
+                background: SURFACE,
+                panel: CARD,
+                panel_alt: 0xeaf0f2,
+                foreground: INK,
+                muted: MUTED,
+                border: BORDER,
+                accent: TEAL_DARK,
+                selected: SELECTED,
+                error: ERROR,
+                chrome: NAVY,
+                chrome_text: CREAM,
+            }
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Icon {
@@ -30,6 +79,7 @@ pub enum Icon {
     Search,
     Close,
     Bookmark,
+    Bookmarked,
     Bookmarks,
     History,
     Settings,
@@ -42,6 +92,9 @@ pub enum Icon {
     Check,
     Up,
     Down,
+    Folder,
+    Download,
+    Trash,
 }
 
 fn coverage(distance: f32) -> u8 {
@@ -312,6 +365,14 @@ pub fn icon(
                 ],
             );
         }
+        Icon::Bookmarked => {
+            g.mask(0, (6.3, 4.0, 17.7, 20.5), |x, y| {
+                let body = (x - 12.0).abs() - 5.7;
+                let top = 4.0 - y;
+                let notch = y - (16.5 + (x - 12.0).abs() * 4.0 / 5.7);
+                body.max(top).max(notch)
+            });
+        }
         Icon::Bookmarks => {
             g.path(1, &[(9.5, 3.0), (20.0, 3.0), (20.0, 17.0)]);
             g.path(
@@ -389,6 +450,34 @@ pub fn icon(
             );
         }
         Icon::Check => g.path(0, &[(5.0, 12.0), (10.0, 17.0), (19.0, 7.0)]),
+        Icon::Folder => {
+            g.path(
+                0,
+                &[
+                    (3.0, 7.0),
+                    (3.0, 19.0),
+                    (21.0, 19.0),
+                    (21.0, 7.0),
+                    (12.0, 7.0),
+                    (9.0, 4.5),
+                    (3.0, 4.5),
+                    (3.0, 7.0),
+                ],
+            );
+            g.path(1, &[(3.5, 9.5), (20.5, 9.5)]);
+        }
+        Icon::Download => {
+            g.path(0, &[(12.0, 3.0), (12.0, 15.0)]);
+            g.path(0, &[(6.5, 10.5), (12.0, 16.0), (17.5, 10.5)]);
+            g.path(1, &[(4.0, 16.0), (4.0, 21.0), (20.0, 21.0), (20.0, 16.0)]);
+        }
+        Icon::Trash => {
+            g.path(0, &[(6.0, 7.0), (7.0, 21.0), (17.0, 21.0), (18.0, 7.0)]);
+            g.path(1, &[(4.0, 6.0), (20.0, 6.0)]);
+            g.path(0, &[(9.0, 6.0), (9.0, 3.0), (15.0, 3.0), (15.0, 6.0)]);
+            g.path(0, &[(10.0, 10.0), (10.0, 17.5)]);
+            g.path(0, &[(14.0, 10.0), (14.0, 17.5)]);
+        }
     }
     for (layer, color) in [foreground, accent].into_iter().enumerate() {
         for row in 0..g.size {

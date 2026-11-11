@@ -205,7 +205,7 @@ fn image_form(path: &str) -> String {
         _ => "",
     };
     format!(
-        "<title>Image form</title><style>body{{margin:20px}} #picture{{width:120px;height:60px;padding:8px;border:2px solid #234567}} {position}</style>{lead}<form id=f action='{action}' method={method}><input id=q name=q{value}><input type=hidden name=token value=fixture><p><label for=picture>Activate</label></p><input id=picture type=image name=picture src='{source}' alt='Send image' width=16 height=8 value=unused{disabled}></form><div style='height:1600px'></div><script>{script}</script>"
+        "<title>Image form</title><style>body{{margin:20px}} #picture{{width:120px;height:60px;padding:8px;border:2px solid #234567;image-rendering:crisp-edges}} {position}</style>{lead}<form id=f action='{action}' method={method}><input id=q name=q{value}><input type=hidden name=token value=fixture><p><label for=picture>Activate</label></p><input id=picture type=image name=picture src='{source}' alt='Send image' width=16 height=8 value=unused{disabled}></form><div style='height:1600px'></div><script>{script}</script>"
     )
 }
 
@@ -455,11 +455,13 @@ fn native_post_controls_keep_action_query_and_resources_use_get() {
     assert!(app
         .events
         .join("\n")
-        .contains("2 Set-Cookie header(s) ignored"));
+        .contains("Set-Cookie headers: 2 processed by the bounded session store; 0 declined"));
     assert!(!app.events.join("\n").contains("do-not-record-this"));
-    assert!(requests
-        .iter()
-        .all(|r| !r.headers.contains("\r\nCookie:") && !r.headers.contains("\r\nReferer:")));
+    assert!(!requests[0].headers.contains("\r\nCookie:"));
+    assert!(requests[1]
+        .headers
+        .contains("\r\nCookie: tpag=do-not-record-this; ppag=also-private\r\n"));
+    assert!(requests.iter().all(|r| !r.headers.contains("\r\nReferer:")));
 }
 
 #[test]

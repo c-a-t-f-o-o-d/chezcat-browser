@@ -888,6 +888,8 @@ pub(super) fn decode_asset(
     let mut animated = false;
     let mut animation = None;
     let mut frames = Vec::new();
+    let mut exif_seen = false;
+    let mut orientation = None;
     while at < data.len() {
         check()?;
         chunks += 1;
@@ -898,6 +900,14 @@ pub(super) fn decode_asset(
         let (kind, payload) = chunk_at(data, &mut at)?;
         let length = payload.len();
         match kind {
+            b"EXIF" => {
+                // The container permits ignoring duplicate EXIF chunks after
+                // the first. Malformed optional metadata stays non-fatal.
+                if !exif_seen {
+                    orientation = super::metadata::webp_orientation(payload);
+                }
+                exif_seen = true;
+            }
             b"VP8X" => {
                 if start != 12 || canvas.is_some() || length < 10 {
                     return Err("Invalid WebP extended header or chunk order.".into());
@@ -945,13 +955,14 @@ pub(super) fn decode_asset(
                 }
                 profile_seen = true; // Metadata is inert; color-profile conversion is not implemented.
             }
-            _ => {} // EXIF, XMP and unknown metadata do not execute code or fetch anything.
+            _ => {} // XMP and unknown metadata do not execute code or fetch anything.
         }
     }
     if animated {
         let (background, plays) = animation.ok_or("Animated WebP is missing its ANIM header.")?;
         let (width, height) = canvas.ok_or("WebP animation canvas is missing.")?;
-        return compose(width, height, background, plays, &frames, check);
+        let decoded = compose(width, height, background, plays, &frames, check)?;
+        return super::metadata::orient_asset(decoded, orientation.unwrap_or(1), check);
     }
     let (is_lossless, payload) = image.ok_or("WebP image chunk is missing.")?;
     if is_lossless && alpha.is_some() {
@@ -968,7 +979,7 @@ pub(super) fn decode_asset(
     if let Some(payload) = alpha {
         apply_alpha(&mut bitmap, payload, check)?;
     }
-    Ok(DecodedImage::still(bitmap))
+    super::metadata::orient_asset(DecodedImage::still(bitmap), orientation.unwrap_or(1), check)
 }
 
 // Composites straight alpha in encoded sample space. ICC conversion and

@@ -1,7 +1,8 @@
 //! Bounded HTTP/1.1 GET/form-POST transport, using standard-library sockets.
 //! Message framing follows RFC 9110 / RFC 9112. HTTPS uses our TLS implementation.
 //! Gzip/zlib content decoding follows framing and precedes document/image parsing.
-//! No proxy, HTTP credentials, cookies, or response cache. A document load can
+//! No proxy, HTTP credentials or response cache. Browser loads can attach a
+//! bounded memory-only cookie session. A document load can
 //! share at most three authenticated connections, each with one exchange at a
 //! time. Only complete, unambiguous HTTP/1.1 messages permit another request.
 
@@ -13,11 +14,16 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
 use crate::url::HttpUrl;
-use crate::{compression, random, tls, trust};
+use crate::{compression, network_trace, random, tls, trust};
+use network_trace::PhaseKind;
+
+#[cfg(test)]
+#[path = "http_network_tests.rs"]
+mod network_tests;
 
 const MAX_BODY_BYTES: usize = 32 * 1024 * 1024;
 pub const MAX_FORM_BYTES: usize = 128 * 1024;
-pub const USER_AGENT: &str = "ChezCat/0.29";
+pub const USER_AGENT: &str = "ChezCat/0.34.0";
 const MAX_HEADER_BYTES: usize = 32 * 1024;
 const MAX_LINE_BYTES: usize = 8 * 1024;
 const MAX_CHUNK_METADATA: usize = 512 * 1024;
@@ -98,6 +104,9 @@ pub struct Response {
     /// The final exchange can be GET after a POST redirect. Callers use this
     /// to avoid an automatic POST replay during refresh/history navigation.
     pub request_is_post: bool,
+    /// Final cookie request context, retained even when no Cookie field was
+    /// sent. UI reloads must not upgrade an originally cross-site navigation.
+    pub cookie_same_site: bool,
     /// Original headers; Content-Encoding and Content-Length describe the
     /// encoded representation. `body` contains the fully decoded bytes.
     pub headers: Vec<(String, String)>,
@@ -141,6 +150,10 @@ pub fn fetch_request(
         same_origin,
         mode,
         false,
+        "document",
+        false,
+        None,
+        None,
     )
 }
 
@@ -153,6 +166,10 @@ fn fetch_in_pool(
     same_origin: Option<&HttpUrl>,
     mode: FetchMode,
     retain: bool,
+    kind: &'static str,
+    document: bool,
+    classic_origin: Option<&HttpUrl>,
+    resource_guard: Option<&ResourceFilter<'_>>,
 ) -> Result<Response, String> {
     let cancel = pool.cancel;
     if limit > MAX_BODY_BYTES {
@@ -167,24 +184,101 @@ fn fetch_in_pool(
     let mut fragment = None;
     let mut visited = HashSet::new();
     let mut events = Vec::new();
+    let mut same_site_redirects = true;
+    // Once a classic-script redirect leaves its document origin, credentials
+    // remain omitted for the rest of the chain, even when it returns.
+    let mut resource_credentials = true;
+    let script_origin = if document {
+        pool.document_origin.as_ref()
+    } else {
+        None
+    };
 
     let result = (|| {
         for redirects in 0..=MAX_REDIRECTS {
             check(cancel, deadline)?;
-            if same_origin.is_some() {
-                // Check every resource destination before DNS, connecting or
-                // sending bytes, including an allowed URL's redirected target.
-                pool.check_resource(&current)?;
+            if same_origin.is_some() || classic_origin.is_some() || script_origin.is_some() {
+                // Check every automatic destination before DNS, connecting
+                // or sending bytes, including a permitted URL's redirect.
+                // User-initiated document navigation remains unrestricted.
+                if let Err(error) = pool.check_resource(&current) {
+                    pool.network.blocked(&current.display(), kind, &error);
+                    return Err(error);
+                }
             }
-            let request = request(&current, &outgoing, mode)?;
+            if document {
+                if let Some(guard) = pool.document_filter {
+                    if let Err(error) = guard(&current) {
+                        pool.network.blocked(&current.display(), kind, &error);
+                        return Err(error);
+                    }
+                }
+            }
+            if let Some(origin) = classic_origin {
+                if let Err(error) = check_classic_script_origin(origin, &current) {
+                    pool.network.blocked(&current.display(), kind, &error);
+                    return Err(error);
+                }
+                resource_credentials &= current.same_origin(origin);
+            }
+            if let Some(guard) = resource_guard {
+                if let Err(error) = guard(&current) {
+                    pool.network.blocked(&current.display(), kind, &error);
+                    return Err(error);
+                }
+            }
             if same_origin.is_some_and(|origin| !current.same_origin(origin)) {
+                pool.network.blocked(
+                    &current.display(),
+                    kind,
+                    "Cross-origin resource redirect blocked.",
+                );
                 return Err("Cross-origin resource navigation or redirect was blocked.".into());
             }
+            if script_origin.is_some_and(|origin| !current.same_origin(origin)) {
+                pool.network.blocked(
+                    &current.display(),
+                    kind,
+                    "Cross-origin script navigation redirect blocked.",
+                );
+                return Err("Cross-origin script navigation or redirect was blocked.".into());
+            }
+            let mut request = request(&current, &outgoing, mode)?;
             let address = current.display();
             if !visited.insert((outgoing.method(), address.clone())) {
                 return Err("HTTP redirect loop detected.".into());
             }
             events.push(format!("{} {address}", outgoing.method()));
+            let cookie_same_site = if document {
+                pool.cookie_context != Some(false)
+                    && same_site_redirects
+                    && pool.cookie_origin.as_ref().is_some_and(|origin| {
+                        origin.secure == current.secure && origin.host == current.host
+                    })
+            } else {
+                // Resource requests have their own already-checked document
+                // origin. A top-level reload override must not affect them.
+                resource_credentials
+                    && same_origin.or(classic_origin).is_some_and(|origin| {
+                        origin.secure == current.secure && origin.host == current.host
+                    })
+            };
+            if let Some(cookies) = pool.cookies.as_ref().filter(|_| resource_credentials) {
+                let value = cookies.request_header(
+                    &current,
+                    cookie_same_site,
+                    document && !outgoing.is_post(),
+                );
+                if !value.is_empty() {
+                    request.truncate(request.len() - 2);
+                    request.push_str("Cookie: ");
+                    request.push_str(&value);
+                    request.push_str("\r\n\r\n");
+                    events.push(
+                        "Session Cookie header sent; values omitted from this report.".into(),
+                    );
+                }
+            }
             if outgoing.is_post() {
                 events.push(format!(
                     "FORM BODY: {} bytes; values omitted from this report.",
@@ -199,6 +293,8 @@ fn fetch_in_pool(
                 deadline,
                 retain,
                 &mut events,
+                kind,
+                document,
             )?;
             events.push(
                 if is_redirect(message.status) && header(&message.headers, "location").is_some() {
@@ -214,13 +310,35 @@ fn fetch_in_pool(
                     )
                 },
             );
-            let cookies = message
+            if let Some(origin) = classic_origin {
+                check_classic_script_corp(origin, &current, &message.headers)?;
+            }
+            let cookie_headers = message
                 .headers
                 .iter()
                 .filter(|(name, _)| name.eq_ignore_ascii_case("set-cookie"))
-                .count();
-            if cookies > 0 {
-                events.push(format!("{cookies} Set-Cookie header(s) ignored: cookie storage and transmission are not implemented. Values are omitted from this report."));
+                .map(|(_, value)| value);
+            let mut accepted = 0;
+            let mut declined = 0;
+            let can_store_cookies = document
+                || resource_credentials
+                    && same_origin
+                        .or(classic_origin)
+                        .is_some_and(|origin| current.same_origin(origin));
+            for value in cookie_headers {
+                if can_store_cookies
+                    && pool
+                        .cookies
+                        .as_ref()
+                        .is_some_and(|cookies| cookies.set_http(&current, value).is_ok())
+                {
+                    accepted += 1;
+                } else {
+                    declined += 1;
+                }
+            }
+            if accepted + declined > 0 {
+                events.push(format!("Set-Cookie headers: {accepted} processed by the bounded session store; {declined} declined. Cookie values are omitted from this report."));
             }
             if is_redirect(message.status) {
                 if let Some(location) = unique_header(&message.headers, "location")? {
@@ -244,6 +362,12 @@ fn fetch_in_pool(
                             .into(),
                     );
                     }
+                    // Once a redirect leaves the initiating scheme/host chain,
+                    // returning to the original host cannot restore Strict
+                    // cookies for this automatic navigation. Ports do not
+                    // broaden host scope and are not a SameSite distinction.
+                    same_site_redirects &=
+                        current.secure == next.secure && current.host == next.host;
                     current = next;
                     continue;
                 }
@@ -272,6 +396,7 @@ fn fetch_in_pool(
                 status: message.status,
                 protocol,
                 request_is_post: outgoing.is_post(),
+                cookie_same_site,
                 headers: message.headers,
                 body: message.body,
                 events: std::mem::take(&mut events),
@@ -280,6 +405,54 @@ fn fetch_in_pool(
         Err("HTTP redirect limit reached.".into())
     })();
     result.map_err(|error| failure_with_activity(error, &events))
+}
+
+/// Deliberately narrower than general no-CORS fetching: only secure pages
+/// may include another secure origin. No scheme downgrade or local-file path
+/// can enter this API, and callers still enforce CSP and JavaScript MIME.
+pub(crate) fn check_classic_script_origin(
+    origin: &HttpUrl,
+    target: &HttpUrl,
+) -> Result<(), String> {
+    if origin.same_origin(target) || origin.secure && target.secure {
+        Ok(())
+    } else {
+        Err("Cross-origin classic scripts require an HTTPS document and HTTPS destination; HTTP origin changes and mixed content are blocked.".into())
+    }
+}
+
+/// Check no-CORS response restrictions on every classic-script exchange,
+/// including redirects, before following another URL or accepting cookies.
+/// same-site is conservative: exact scheme/host only; no guessed registrable
+/// domains or public-suffix data are used. Ordinary resource origins are unchanged.
+fn check_classic_script_corp(
+    origin: &HttpUrl,
+    target: &HttpUrl,
+    headers: &[(String, String)],
+) -> Result<(), String> {
+    if origin.same_origin(target) {
+        return Ok(());
+    }
+    let mut fields = headers
+        .iter()
+        .filter(|(name, _)| name.eq_ignore_ascii_case("cross-origin-resource-policy"));
+    let Some((_, value)) = fields.next() else {
+        return Ok(());
+    };
+    if fields.next().is_some() {
+        return Err(
+            "Ambiguous Cross-Origin-Resource-Policy headers; cross-origin script declined.".into(),
+        );
+    }
+    match value.trim() {
+        "same-origin" => Err("Cross-Origin-Resource-Policy same-origin blocked this script response.".into()),
+        "same-site" if origin.secure != target.secure || origin.host != target.host => {
+            Err("Cross-Origin-Resource-Policy same-site requires the exact scheme and host in this build.".into())
+        }
+        // The defined header values are case-sensitive. Invalid single values
+        // are ignored, while ambiguous repeated fields fail conservatively.
+        _ => Ok(()),
+    }
 }
 
 fn failure_with_activity(error: String, events: &[String]) -> String {
@@ -389,6 +562,12 @@ pub struct Pool<'a> {
     state: Mutex<PoolState<'a>>,
     available: Condvar,
     resource_filter: Option<&'a ResourceFilter<'a>>,
+    network: network_trace::Trace,
+    cookies: Option<Arc<crate::cookies::Session>>,
+    cookie_origin: Option<HttpUrl>,
+    cookie_context: Option<bool>,
+    document_origin: Option<HttpUrl>,
+    document_filter: Option<&'a ResourceFilter<'a>>,
 }
 
 type ResourceFilter<'a> = dyn Fn(&HttpUrl) -> Result<(), String> + Sync + 'a;
@@ -424,12 +603,60 @@ impl<'a> Pool<'a> {
             }),
             available: Condvar::new(),
             resource_filter: None,
+            network: network_trace::Trace::default(),
+            cookies: None,
+            cookie_origin: None,
+            cookie_context: None,
+            document_origin: None,
+            document_filter: None,
         }
     }
 
     pub fn with_resource_filter(mut self, filter: &'a ResourceFilter<'a>) -> Self {
         self.resource_filter = Some(filter);
         self
+    }
+
+    pub fn with_cookie_session(
+        mut self,
+        cookies: Arc<crate::cookies::Session>,
+        origin: Option<HttpUrl>,
+    ) -> Self {
+        self.cookies = Some(cookies);
+        self.cookie_origin = origin;
+        self
+    }
+
+    /// Preserve a committed document's context for a user-initiated reload.
+    /// A true override never grants same-site status without a matching
+    /// initiator or after a scheme/host-changing redirect.
+    pub fn with_cookie_context(mut self, same_site: Option<bool>) -> Self {
+        self.cookie_context = same_site;
+        self
+    }
+
+    /// Restrict script-triggered document requests and every redirected target
+    /// to the initiating document's origin and the configured request filter.
+    /// Ordinary user document navigation leaves this unset.
+    pub fn with_document_origin(mut self, origin: Option<HttpUrl>) -> Self {
+        self.document_origin = origin;
+        self
+    }
+
+    /// A form-action snapshot guards only navigation exchanges, not the
+    /// destination document's later subresources. It runs before every hop.
+    pub fn with_document_filter(mut self, filter: &'a ResourceFilter<'a>) -> Self {
+        self.document_filter = Some(filter);
+        self
+    }
+
+    pub fn with_network_trace(mut self, trace: network_trace::Trace) -> Self {
+        self.network = trace;
+        self
+    }
+
+    pub fn network_trace(&self) -> &network_trace::Trace {
+        &self.network
     }
 
     pub fn check_resource(&self, url: &HttpUrl) -> Result<(), String> {
@@ -439,6 +666,7 @@ impl<'a> Pool<'a> {
         }
     }
 
+    #[allow(dead_code)] // Retained pooled GET convenience API for transport callers.
     pub fn fetch(
         &self,
         url: &HttpUrl,
@@ -446,9 +674,10 @@ impl<'a> Pool<'a> {
         same_origin: Option<&HttpUrl>,
         mode: FetchMode,
     ) -> Result<Response, String> {
-        self.fetch_request(url, &Request::Get, limit, same_origin, mode)
+        self.fetch_kind(url, limit, same_origin, mode, "resource")
     }
 
+    #[allow(dead_code)] // Retained pooled form API; navigation uses fetch_document.
     pub fn fetch_request(
         &self,
         url: &HttpUrl,
@@ -457,7 +686,119 @@ impl<'a> Pool<'a> {
         same_origin: Option<&HttpUrl>,
         mode: FetchMode,
     ) -> Result<Response, String> {
-        fetch_in_pool(self, url, initial, limit, same_origin, mode, true)
+        fetch_in_pool(
+            self,
+            url,
+            initial,
+            limit,
+            same_origin,
+            mode,
+            true,
+            "document",
+            false,
+            None,
+            None,
+        )
+    }
+
+    pub fn fetch_kind(
+        &self,
+        url: &HttpUrl,
+        limit: usize,
+        same_origin: Option<&HttpUrl>,
+        mode: FetchMode,
+        kind: &'static str,
+    ) -> Result<Response, String> {
+        fetch_in_pool(
+            self,
+            url,
+            &Request::Get,
+            limit,
+            same_origin,
+            mode,
+            true,
+            kind,
+            false,
+            None,
+            None,
+        )
+    }
+
+    /// Same-origin resource fetching with an additional per-element policy.
+    /// Both filters run before every destination, including redirect hops.
+    #[allow(clippy::too_many_arguments)]
+    pub fn fetch_kind_checked(
+        &self,
+        url: &HttpUrl,
+        limit: usize,
+        origin: &HttpUrl,
+        mode: FetchMode,
+        kind: &'static str,
+        guard: &ResourceFilter<'_>,
+    ) -> Result<Response, String> {
+        fetch_in_pool(
+            self,
+            url,
+            &Request::Get,
+            limit,
+            Some(origin),
+            mode,
+            true,
+            kind,
+            false,
+            None,
+            Some(guard),
+        )
+    }
+
+    /// Classic script inclusion only: same-origin HTTP(S), or HTTPS from an
+    /// HTTPS document. This does not grant fetch/XHR or other resource access.
+    /// Third-party sends and Set-Cookie are omitted permanently after origin
+    /// exit. TLS, request blocking and the supplied CSP check remain mandatory.
+    pub fn fetch_classic_script(
+        &self,
+        url: &HttpUrl,
+        limit: usize,
+        origin: &HttpUrl,
+        mode: FetchMode,
+        guard: &ResourceFilter<'_>,
+    ) -> Result<Response, String> {
+        fetch_in_pool(
+            self,
+            url,
+            &Request::Get,
+            limit,
+            None,
+            mode,
+            true,
+            "SCRIPT",
+            false,
+            Some(origin),
+            Some(guard),
+        )
+    }
+
+    /// Apply the document's small body limit after headers, while allowing an
+    /// explicit attachment to use the download limit without replaying a POST.
+    pub fn fetch_document(
+        &self,
+        url: &HttpUrl,
+        request: &Request,
+        mode: FetchMode,
+    ) -> Result<Response, String> {
+        fetch_in_pool(
+            self,
+            url,
+            request,
+            MAX_BODY_BYTES,
+            None,
+            mode,
+            true,
+            "document",
+            true,
+            None,
+            None,
+        )
     }
 
     fn acquire(
@@ -466,7 +807,9 @@ impl<'a> Pool<'a> {
         deadline: Instant,
         allow_reuse: bool,
         events: &mut Vec<String>,
+        trace: &network_trace::Ticket,
     ) -> Result<Lease<'_, 'a>, String> {
+        trace.phase(PhaseKind::Queue);
         loop {
             check(self.cancel, deadline)?;
             let mut state = self
@@ -505,6 +848,7 @@ impl<'a> Pool<'a> {
                         "HTTP pool reused {} connection.",
                         connection.stream.protocol().unwrap_or("TCP")
                     ));
+                    trace.end_phase();
                     return Ok(lease);
                 }
             }
@@ -529,6 +873,7 @@ impl<'a> Pool<'a> {
                 };
                 let clock = Arc::new(Mutex::new(deadline));
                 let io = Arc::new(ExchangeIo::default());
+                trace.end_phase();
                 let stream = open(
                     url,
                     self.trust,
@@ -537,6 +882,7 @@ impl<'a> Pool<'a> {
                     clock.clone(),
                     io.clone(),
                     events,
+                    trace,
                 )?;
                 io.reset(); // Handshake bytes are not HTTP response bytes.
                 lease.connection = Some(Connection {
@@ -566,13 +912,25 @@ impl<'a> Pool<'a> {
         deadline: Instant,
         retain: bool,
         events: &mut Vec<String>,
+        kind: &'static str,
+        document: bool,
     ) -> Result<(Message, Option<&'static str>), String> {
         for attempt in 0..2 {
-            let mut lease = self.acquire(url, deadline, attempt == 0 && retain, events)?;
+            let trace = self.network.begin(outgoing.method(), &url.display(), kind);
+            let mut lease =
+                match self.acquire(url, deadline, attempt == 0 && retain, events, &trace) {
+                    Ok(lease) => lease,
+                    Err(error) => {
+                        trace.fail(&error);
+                        return Err(error);
+                    }
+                };
             let reused = lease.reused;
             let connection = lease.connection.as_mut().unwrap();
             let protocol = connection.stream.protocol();
+            trace.connection(reused, protocol);
             let result = (|| {
+                trace.phase(PhaseKind::Send);
                 send(
                     &mut connection.stream,
                     request.as_bytes(),
@@ -590,12 +948,33 @@ impl<'a> Pool<'a> {
                     .map_err(ResponseFailure::before_response)?;
                 }
                 events.push("HTTP request sent; awaiting response.".into());
+                trace.phase(PhaseKind::Wait);
                 // Redirect bodies are not downloaded; their connections are
                 // never retained, including redirects with an empty body.
-                read_response_detailed(&mut connection.stream, limit, self.cancel, deadline, true)
+                read_response_traced(
+                    &mut connection.stream,
+                    limit,
+                    self.cancel,
+                    deadline,
+                    true,
+                    Some(&trace),
+                    document,
+                )
             })();
             match result {
                 Ok(message) => {
+                    let redirect = is_redirect(message.status)
+                        && header(&message.headers, "location").is_some();
+                    trace.complete(
+                        message.status,
+                        (!redirect).then_some(message.encoded_bytes),
+                        (!redirect).then_some(message.body.len()),
+                        if redirect {
+                            "Redirect response; body intentionally skipped."
+                        } else {
+                            ""
+                        },
+                    );
                     if retain && message.reusable && connection.stream.reusable() {
                         check(self.cancel, deadline)?;
                         lease.retain()?;
@@ -613,12 +992,17 @@ impl<'a> Pool<'a> {
                         && (connection.io.closed_without_bytes()
                             || connection.stream.peer_closed());
                     if attempt == 0 && reused && !outgoing.is_post() && stale {
+                        trace.fail(&format!(
+                            "{}\nStale connection: retrying GET once on a fresh connection.",
+                            error.text
+                        ));
                         check(self.cancel, deadline)?;
                         events.push("HTTP pool stale GET: no HTTP response bytes; retrying once on a fresh connection.".into());
                         // Drop the failed lease before acquiring its replacement.
                         drop(lease);
                         continue;
                     }
+                    trace.fail(&error.text);
                     return Err(error.text);
                 }
             }
@@ -798,6 +1182,7 @@ impl NetworkStream<'_> {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn open<'a>(
     url: &HttpUrl,
     trust: &trust::Store,
@@ -806,10 +1191,11 @@ fn open<'a>(
     clock: Arc<Mutex<Instant>>,
     io: Arc<ExchangeIo>,
     events: &mut Vec<String>,
+    trace: &network_trace::Ticket,
 ) -> Result<NetworkStream<'a>, String> {
     if !url.secure {
         return Ok(NetworkStream::Plain(Socket {
-            stream: connect(url, cancel, deadline, events)?,
+            stream: connect(url, cancel, deadline, events, trace)?,
             io,
         }));
     }
@@ -819,7 +1205,7 @@ fn open<'a>(
     let mut entropy = [0u8; 64];
     random::fill(&mut entropy)?;
     let stream = Socket {
-        stream: connect(url, cancel, deadline, events)?,
+        stream: connect(url, cancel, deadline, events, trace)?,
         io,
     };
     let deadline_check: DeadlineCheck<'a> = Box::new(move || {
@@ -827,6 +1213,7 @@ fn open<'a>(
         check(cancel, deadline)
     });
     let started = Instant::now();
+    trace.phase(PhaseKind::Tls);
     let secure = tls::TlsStream::connect(
         stream,
         &url.host,
@@ -840,6 +1227,7 @@ fn open<'a>(
         started.elapsed().as_millis(),
         if secure.is_ok() { "verified" } else { "failed" }
     ));
+    trace.end_phase();
     let secure = secure?;
     events.push(format!("HTTPS trust: {}", trust.description()));
     events.push(secure.certificate_summary().to_owned());
@@ -868,6 +1256,7 @@ fn connect(
     cancel: &AtomicBool,
     deadline: Instant,
     events: &mut Vec<String>,
+    trace: &network_trace::Ticket,
 ) -> Result<TcpStream, String> {
     check(cancel, deadline)?;
     // At most two summaries per attempt sequence. Resolved IPs and request
@@ -876,6 +1265,9 @@ fn connect(
     // put on an unbounded series of detached resolver threads.
     let started = Instant::now();
     let literal = url.host.parse::<IpAddr>();
+    if literal.is_err() {
+        trace.phase(PhaseKind::Dns);
+    }
     let addresses: Result<Vec<SocketAddr>, String> = match literal {
         Ok(ip) => Ok(vec![SocketAddr::new(ip, url.port)]),
         Err(_) => (url.host.as_str(), url.port)
@@ -895,8 +1287,10 @@ fn connect(
         },
         addresses.as_ref().map_or(0, Vec::len)
     ));
+    trace.end_phase();
     let addresses = addresses?;
     let started = Instant::now();
+    trace.phase(PhaseKind::Connect);
     let mut attempts = 0;
     let result = (|| {
         check(cancel, deadline)?;
@@ -937,6 +1331,7 @@ fn connect(
             "failed"
         }
     ));
+    trace.end_phase();
     result
 }
 
@@ -1154,6 +1549,7 @@ struct Message {
     reusable: bool,
 }
 
+#[derive(Debug)]
 struct ResponseFailure {
     text: String,
     http_bytes: usize,
@@ -1199,6 +1595,7 @@ fn read_response<R: Read>(
         .map_err(|error| error.text)
 }
 
+#[cfg(test)]
 fn read_response_detailed<R: Read>(
     source: R,
     limit: usize,
@@ -1206,12 +1603,46 @@ fn read_response_detailed<R: Read>(
     deadline: Instant,
     skip_redirect_body: bool,
 ) -> Result<Message, ResponseFailure> {
+    read_response_traced(
+        source,
+        limit,
+        cancel,
+        deadline,
+        skip_redirect_body,
+        None,
+        false,
+    )
+}
+
+struct TracedRead<'a, R> {
+    source: R,
+    trace: Option<&'a network_trace::Ticket>,
+}
+impl<R: Read> Read for TracedRead<'_, R> {
+    fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
+        let count = self.source.read(bytes)?;
+        if let Some(trace) = self.trace.filter(|_| count != 0) {
+            trace.received(count);
+        }
+        Ok(count)
+    }
+}
+
+fn read_response_traced<R: Read>(
+    source: R,
+    limit: usize,
+    cancel: &AtomicBool,
+    deadline: Instant,
+    skip_redirect_body: bool,
+    trace: Option<&network_trace::Ticket>,
+    document: bool,
+) -> Result<Message, ResponseFailure> {
     if limit > MAX_BODY_BYTES {
         return Err(ResponseFailure::before_response(
             "HTTP body limit cannot exceed 32 MiB.".into(),
         ));
     }
-    let mut input = Input::new(source, limit, cancel, deadline);
+    let mut input = Input::new(TracedRead { source, trace }, limit, cancel, deadline);
     let result = (|| {
         let mut connection_persistent = true;
         for information in 0..=MAX_INFORMATIONAL {
@@ -1236,6 +1667,9 @@ fn read_response_detailed<R: Read>(
                 continue;
             }
             input.stage = "framing headers";
+            if let Some(trace) = trace {
+                trace.response(status);
+            }
             let framing = framing(status, version_10, &headers)?;
             input.framing = Some(framing);
             let redirect = is_redirect(status) && unique_header(&headers, "location")?.is_some();
@@ -1250,7 +1684,16 @@ fn read_response_detailed<R: Read>(
                     codings = content_codings(&headers)?;
                 }
                 input.codings = codings.clone();
-                let body_limit = if status == 205 { 0 } else { limit };
+                let attachment = header(&headers, "content-disposition")
+                    .and_then(|value| value.split(';').next())
+                    .is_some_and(|value| value.trim().eq_ignore_ascii_case("attachment"));
+                let body_limit = if status == 205 {
+                    0
+                } else if document && !attachment {
+                    limit.min(2 * 1024 * 1024)
+                } else {
+                    limit
+                };
                 input.stage = "body";
                 match framing {
                     Framing::Length(count) => input.body_bytes(&mut body, count, body_limit)?,
@@ -1260,6 +1703,9 @@ fn read_response_detailed<R: Read>(
                 }
                 encoded_bytes = body.len();
                 input.stage = "content decoding";
+                if let Some(trace) = trace.filter(|_| !codings.is_empty()) {
+                    trace.phase(PhaseKind::Decode);
+                }
                 // Each intermediate result obeys the same resource limit. Keep the
                 // original headers for inspection; framing was already completed
                 // using the encoded representation's length, never the decoded one.
@@ -1679,6 +2125,63 @@ fn extensions(mut rest: &[u8]) -> Result<(), String> {
 mod tests {
     use super::*;
     use std::io::Cursor;
+
+    #[test]
+    fn classic_script_origin_policy_is_secure_and_does_not_change_general_resources() {
+        let url = |text| crate::url::parse(text).unwrap().0;
+        let secure = url("https://example.test/page");
+        let plain = url("http://example.test/page");
+        for target in [
+            "https://example.test/a.js",
+            "https://cdn.test/a.js",
+            "https://cdn.test:8443/a.js",
+        ] {
+            assert!(check_classic_script_origin(&secure, &url(target)).is_ok());
+        }
+        assert!(check_classic_script_origin(&plain, &url("http://example.test/a.js")).is_ok());
+        for (origin, target) in [
+            (&secure, "http://example.test/a.js"),
+            (&secure, "http://cdn.test/a.js"),
+            (&plain, "http://cdn.test/a.js"),
+            (&plain, "https://cdn.test/a.js"),
+        ] {
+            assert!(check_classic_script_origin(origin, &url(target)).is_err());
+        }
+        let cancel = AtomicBool::new(false);
+        let trust = trust::Store::unconfigured();
+        let pool = Pool::new(&cancel, &trust);
+        // This is rejected before DNS/TLS; generic resources keep exact origin.
+        let error = pool
+            .fetch_kind(
+                &url("https://cdn.test/a.css"),
+                1024,
+                Some(&secure),
+                FetchMode::Normal,
+                "CSS",
+            )
+            .unwrap_err();
+        assert!(error.contains("Cross-origin resource"), "{error}");
+    }
+
+    #[test]
+    fn classic_script_corp_checks_exact_origin_and_conservative_site_scope() {
+        let url = |text| crate::url::parse(text).unwrap().0;
+        let origin = url("https://example.test/page");
+        let same = url("https://example.test/app.js");
+        let port = url("https://example.test:8443/app.js");
+        let other = url("https://cdn.example.test/app.js");
+        let headers = |value: &str| vec![("cross-origin-resource-policy".into(), value.into())];
+        assert!(check_classic_script_corp(&origin, &same, &headers("same-origin")).is_ok());
+        assert!(check_classic_script_corp(&origin, &port, &headers("same-origin")).is_err());
+        assert!(check_classic_script_corp(&origin, &port, &headers("same-site")).is_ok());
+        assert!(check_classic_script_corp(&origin, &other, &headers("same-site")).is_err());
+        assert!(check_classic_script_corp(&origin, &other, &headers("cross-origin")).is_ok());
+        assert!(check_classic_script_corp(&origin, &other, &[]).is_ok());
+        assert!(check_classic_script_corp(&origin, &other, &headers("SAME-ORIGIN")).is_ok());
+        let mut duplicate = headers("cross-origin");
+        duplicate.extend(headers("same-origin"));
+        assert!(check_classic_script_corp(&origin, &other, &duplicate).is_err());
+    }
 
     // Exercise parser boundaries independently of the socket's read sizes.
     struct Pieces<'a> {
@@ -2257,6 +2760,10 @@ mod tests {
                                         status.parse::<u16>().unwrap(),
                                         Some(format!("http://localhost:{port}/done")),
                                     )
+                                } else if path == "/cookie-away" {
+                                    (302, Some(format!("http://localhost:{port}/cookie-return")))
+                                } else if path == "/cookie-return" {
+                                    (302, Some(format!("http://127.0.0.1:{port}/done")))
                                 } else if path == "/same" && method == "POST" {
                                     (303, Some("/same".to_owned()))
                                 } else if path == "/loop" {
@@ -2317,6 +2824,173 @@ mod tests {
             self.stop.store(true, Ordering::Relaxed);
             self.thread.take().unwrap().join().unwrap();
         }
+    }
+
+    #[test]
+    fn document_policy_guards_redirects_without_restricting_later_resources() {
+        let site = PostSite::new();
+        let cancel = AtomicBool::new(false);
+        let trust = trust::Store::unconfigured();
+        let filter = |target: &HttpUrl| {
+            if target.path == "/done" {
+                Err("form-action fixture refusal".into())
+            } else {
+                Ok(())
+            }
+        };
+        let pool = Pool::new(&cancel, &trust).with_document_filter(&filter);
+        let target = site.url.resolve("/redirect/303").unwrap().0;
+        let error = pool
+            .fetch_document(
+                &target,
+                &Request::FormPost {
+                    body: b"q=kept".to_vec(),
+                    origin: Some(site.url.clone()),
+                },
+                FetchMode::Normal,
+            )
+            .unwrap_err();
+        assert!(error.contains("form-action fixture"), "{error}");
+        assert_eq!(site.requests.lock().unwrap().len(), 1);
+        let done = site.url.resolve("/done").unwrap().0;
+        assert_eq!(
+            pool.fetch_kind(&done, 1024, Some(&site.url), FetchMode::Normal, "CSS")
+                .unwrap()
+                .status,
+            200
+        );
+        assert_eq!(site.requests.lock().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn document_cookie_context_survives_redirects_and_ui_reload() {
+        let site = PostSite::new();
+        let cancelled = AtomicBool::new(false);
+        let trust = trust::Store::unconfigured();
+        let cookies = Arc::new(crate::cookies::Session::default());
+        cookies
+            .set_http(&site.url, "strict=one; Path=/; SameSite=Strict")
+            .unwrap();
+        cookies
+            .set_http(&site.url, "lax=two; Path=/; SameSite=Lax")
+            .unwrap();
+        let cookie_fields = || {
+            site.take()
+                .into_iter()
+                .map(|wire| {
+                    String::from_utf8(wire)
+                        .unwrap()
+                        .lines()
+                        .find_map(|line| line.strip_prefix("Cookie: "))
+                        .unwrap_or("")
+                        .to_owned()
+                })
+                .collect::<Vec<_>>()
+        };
+        let pool = Pool::new(&cancelled, &trust)
+            .with_cookie_session(cookies.clone(), Some(site.url.clone()));
+        let response = pool
+            .fetch_document(&site.url, &Request::Get, FetchMode::Normal)
+            .unwrap();
+        assert!(response.cookie_same_site);
+        assert_eq!(cookie_fields(), ["strict=one; lax=two"]);
+
+        // The redirect leaves the initiating host, then returns. Its final
+        // request remains cross-site even though its destination matches.
+        let (away, _) = site.url.resolve("/cookie-away").unwrap();
+        let response = pool
+            .fetch_document(&away, &Request::Get, FetchMode::Normal)
+            .unwrap();
+        assert_eq!(response.url.host, site.url.host);
+        assert!(!response.cookie_same_site);
+        assert_eq!(cookie_fields(), ["strict=one; lax=two", "", "lax=two"]);
+
+        // A user reload preserves that context: safe navigation can send
+        // Lax cookies, while a reissued unsafe POST cannot.
+        let pool = Pool::new(&cancelled, &trust)
+            .with_cookie_session(cookies.clone(), Some(site.url.clone()))
+            .with_cookie_context(Some(response.cookie_same_site));
+        assert!(
+            !pool
+                .fetch_document(&site.url, &Request::Get, FetchMode::FullReload)
+                .unwrap()
+                .cookie_same_site
+        );
+        assert_eq!(cookie_fields(), ["lax=two"]);
+        assert!(
+            !pool
+                .fetch_document(
+                    &site.url,
+                    &Request::FormPost {
+                        body: b"x=one".to_vec(),
+                        origin: Some(site.url.clone()),
+                    },
+                    FetchMode::Normal,
+                )
+                .unwrap()
+                .cookie_same_site
+        );
+        assert_eq!(cookie_fields(), [""]);
+
+        // Resources use the checked document origin independently of the
+        // context of the document's original top-level request.
+        assert!(
+            pool.fetch_kind(
+                &site.url,
+                1024,
+                Some(&site.url),
+                FetchMode::Normal,
+                "SCRIPT",
+            )
+            .unwrap()
+            .cookie_same_site
+        );
+        assert_eq!(cookie_fields(), ["strict=one; lax=two"]);
+
+        // A true override grants nothing to a mismatching initiator. Scheme
+        // participates in this comparison; a differing port does not.
+        let mut origin = site.url.clone();
+        origin.secure = true;
+        let pool = Pool::new(&cancelled, &trust)
+            .with_cookie_session(cookies.clone(), Some(origin))
+            .with_cookie_context(Some(true));
+        assert!(
+            !pool
+                .fetch_document(&site.url, &Request::Get, FetchMode::Normal)
+                .unwrap()
+                .cookie_same_site
+        );
+        assert_eq!(cookie_fields(), ["lax=two"]);
+        let mut origin = site.url.clone();
+        origin.port = if origin.port == 80 { 81 } else { 80 };
+        let pool = Pool::new(&cancelled, &trust).with_cookie_session(cookies, Some(origin));
+        assert!(
+            pool.fetch_document(&site.url, &Request::Get, FetchMode::Normal)
+                .unwrap()
+                .cookie_same_site
+        );
+        assert_eq!(cookie_fields(), ["strict=one; lax=two"]);
+
+        // The returned context describes the request, independently of
+        // whether the current jar has any cookie to serialize.
+        let pool = Pool::new(&cancelled, &trust).with_cookie_session(
+            Arc::new(crate::cookies::Session::default()),
+            Some(site.url.clone()),
+        );
+        assert!(
+            pool.fetch_document(&site.url, &Request::Get, FetchMode::Normal)
+                .unwrap()
+                .cookie_same_site
+        );
+        assert_eq!(cookie_fields(), [""]);
+        assert!(
+            !Pool::new(&cancelled, &trust)
+                .with_cookie_context(Some(true))
+                .fetch_document(&site.url, &Request::Get, FetchMode::Normal)
+                .unwrap()
+                .cookie_same_site
+        );
+        assert_eq!(cookie_fields(), [""]);
     }
 
     #[test]

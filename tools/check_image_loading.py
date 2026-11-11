@@ -43,7 +43,7 @@ ASSETS = [
     ('format-gray16.pgm', 'image/x-portable-graymap', 1),
 ]
 WIDTH = 800
-TOOLBAR = 68
+TOOLBAR = 102
 STATUS = 32
 MARKER = (243, 17, 167)
 OFF = 'JavaScript is OFF. Ctrl+J enables it and reloads the page.'

@@ -1,0 +1,923 @@
+{
+  "schema_version": 1,
+  "purpose": "Bounded independent original capability probes plus a source-reviewed browser inventory. Probe success covers the tested sample only, not an entire standard.",
+  "probe_count": 75,
+  "probes": [
+    {
+      "id": "language-arithmetic",
+      "area": "Language",
+      "label": "Arithmetic and coercion",
+      "source": "test.record(2+3*4);test.record(\"a\"+2);test.record(7/2);test.record(1==\"1\");test.record(1===\"1\");",
+      "baseline_status": "supported",
+      "note": ""
+    },
+    {
+      "id": "language-block-scopes",
+      "area": "Language",
+      "label": "Block lexical scopes",
+      "source": "let x=1;{let x=2;test.record(x);}test.record(x);",
+      "baseline_status": "supported",
+      "note": ""
+    },
+    {
+      "id": "language-closures",
+      "area": "Language",
+      "label": "Closures retain mutable bindings",
+      "source": "function make(){let x=0;return function(){return ++x;};}let f=make();test.record(f());test.record(f());",
+      "baseline_status": "supported",
+      "note": ""
+    },
+    {
+      "id": "language-control-flow",
+      "area": "Language",
+      "label": "Loops and abrupt completion",
+      "source": "let result=\"\";outer:for(let i=0;i<3;i++){for(let j=0;j<3;j++){if(j===2)continue outer;result+=i+\":\"+j+\";\";}}test.record(result);try{throw 7;}catch(e){test.record(e);}finally{test.record(\"finally\");}",
+      "baseline_status": "supported",
+      "note": ""
+    },
+    {
+      "id": "language-template",
+      "area": "Language",
+      "label": "Template interpolation",
+      "source": "let x=3;test.record(`value ${x+1}`);",
+      "baseline_status": "missing",
+      "note": ""
+    },
+    {
+      "id": "language-optional-nullish",
+      "area": "Language",
+      "label": "Optional chaining and nullish coalescing",
+      "source": "let a=null;test.record(a?.x??7);test.record(({x:0}).x??9);",
+      "baseline_status": "missing",
+      "note": ""
+    },
+    {
+      "id": "language-destructuring",
+      "area": "Language",
+      "label": "Array and object destructuring",
+      "source": "let [a,b]=[2,3];let {x}= {x:4};test.record(a+b+x);",
+      "baseline_status": "missing",
+      "note": ""
+    },
+    {
+      "id": "language-rest-spread",
+      "area": "Language",
+      "label": "Rest parameters and array spread",
+      "source": "function f(...args){return args.join(\"-\");}test.record(f(...[1,2,3]));",
+      "baseline_status": "missing",
+      "note": ""
+    },
+    {
+      "id": "language-class",
+      "area": "Language",
+      "label": "Class syntax and instance method",
+      "source": "class Box{constructor(x){this.x=x;}read(){return this.x;}}test.record(new Box(8).read());",
+      "baseline_status": "missing",
+      "note": ""
+    },
+    {
+      "id": "language-async",
+      "area": "Language",
+      "label": "Async function syntax and Promise result",
+      "source": "async function f(){return 2;}test.record(typeof f().then);",
+      "baseline_status": "missing",
+      "note": ""
+    },
+    {
+      "id": "language-generator",
+      "area": "Language",
+      "label": "Generator syntax and next",
+      "source": "function* f(){yield 2;}test.record(f().next().value);",
+      "baseline_status": "missing",
+      "note": ""
+    },
+    {
+      "id": "language-bigint",
+      "area": "Language",
+      "label": "BigInt values",
+      "source": "test.record(String(2n+3n));",
+      "baseline_status": "missing",
+      "note": ""
+    },
+    {
+      "id": "function-call-apply",
+      "area": "Functions",
+      "label": "call and apply receiver/arguments",
+      "source": "function f(a,b){return this.n+a+b;}test.record(f.call({n:1},2,3));test.record(f.apply({n:4},[5,6]));",
+      "baseline_status": "supported",
+      "note": ""
+    },
+    {
+      "id": "function-arguments",
+      "area": "Functions",
+      "label": "Mapped arguments and strict arguments",
+      "source": "function f(a){arguments[0]=3;return a;}function g(a){\"use strict\";arguments[0]=3;return a;}test.record(f(1));test.record(g(1));",
+      "baseline_status": "supported",
+      "note": ""
+    },
+    {
+      "id": "function-constructor",
+      "area": "Functions",
+      "label": "Function constructor",
+      "source": "let f=Function(\"a\",\"return a+3;\");test.record(f(4));",
+      "baseline_status": "missing",
+      "note": ""
+    },
+    {
+      "id": "function-eval",
+      "area": "Functions",
+      "label": "Direct eval lexical access",
+      "source": "let x=3;test.record(eval(\"x+2\"));",
+      "baseline_status": "supported",
+      "note": ""
+    },
+    {
+      "id": "function-bind-this",
+      "area": "Functions",
+      "label": "bind fixes the receiver",
+      "source": "function f(){return this.x;}let f2=f.bind({x:7});test.record(f2.call({x:9}));",
+      "baseline_status": "missing",
+      "note": ""
+    },
+    {
+      "id": "function-bind-arguments",
+      "area": "Functions",
+      "label": "bind prepends arguments and composes",
+      "source": "function f(a,b,c){return this.x+\":\"+a+\":\"+b+\":\"+c;}let b=f.bind({x:4},1).bind({x:8},2);test.record(b(3));",
+      "baseline_status": "missing",
+      "note": ""
+    },
+    {
+      "id": "function-bind-metadata",
+      "area": "Functions",
+      "label": "bind name, length and prototype ownership",
+      "source": "function sum(a,b,c){}let b=sum.bind(null,1);test.record(b.name);test.record(b.length);test.record(Object.hasOwn(b,\"prototype\"));",
+      "baseline_status": "missing",
+      "note": ""
+    },
+    {
+      "id": "function-bind-constructor",
+      "area": "Functions",
+      "label": "Bound ordinary construction and instanceof",
+      "source": "function Box(a,b){this.total=a+b;}let Bound=Box.bind({ignored:true},3);let value=new Bound(4);test.record(value.total);test.record(value instanceof Box);test.record(value instanceof Bound);",
+      "baseline_status": "missing",
+      "note": ""
+    },
+    {
+      "id": "function-bind-nonconstructor",
+      "area": "Functions",
+      "label": "Bound arrow remains nonconstructible",
+      "source": "let f=(()=>1).bind(null);try{new f();}catch(e){test.record(e.name);}test.record(f());",
+      "baseline_status": "missing",
+      "note": ""
+    },
+    {
+      "id": "object-prototype",
+      "area": "Objects",
+      "label": "Custom and null prototypes",
+      "source": "let p={x:3},o=Object.create(p);test.record(o.x);test.record(Object.getPrototypeOf(o)===p);test.record(Object.create(null).toString);",
+      "baseline_status": "supported",
+      "note": ""
+    },
+    {
+      "id": "object-accessors",
+      "area": "Objects",
+      "label": "Getter/setter descriptors and receiver",
+      "source": "let value=2,p={};Object.defineProperty(p,\"x\",{get:function(){return this.y+value;},set:function(v){value=v;}});let o=Object.create(p);o.y=4;test.record(o.x);o.x=7;test.record(o.x);",
+      "baseline_status": "supported",
+      "note": ""
+    },
+    {
+      "id": "object-descriptor",
+      "area": "Objects",
+      "label": "Own descriptor reflection does not invoke getter",
+      "source": "let n=0,o={};function get(){n++;return 7;}Object.defineProperty(o,\"x\",{get:get,enumerable:true});let d=Object.getOwnPropertyDescriptor(o,\"x\");test.record(d.get===get);test.record(d.enumerable);test.record(n);",
+      "baseline_status": "supported",
+      "note": ""
+    },
+    {
+      "id": "object-hasown",
+      "area": "Objects",
+      "label": "Static own property checks",
+      "source": "let o=Object.create({inherited:2});o.x=undefined;test.record(Object.hasOwn(o,\"x\"));test.record(Object.hasOwn(o,\"inherited\"));test.record(Object.hasOwn(\"cat\",1));",
+      "baseline_status": "supported",
+      "note": ""
+    },
+    {
+      "id": "object-own-names",
+      "area": "Objects",
+      "label": "Own names include nonenumerable keys and omit symbols",
+      "source": "let o={b:2};Object.defineProperty(o,\"hidden\",{value:3});o[Symbol(\"s\")]=4;test.record(Object.getOwnPropertyNames(o).join(\"|\"));",
+      "baseline_status": "missing",
+      "note": ""
+    },
+    {
+      "id": "object-own-descriptors",
+      "area": "Objects",
+      "label": "Own descriptors preserve getters and symbol keys",
+      "source": "let s=Symbol(\"s\"),o={};function read(){return 2;}Object.defineProperty(o,\"x\",{get:read,enumerable:true});o[s]=3;let d=Object.getOwnPropertyDescriptors(o);test.record(d.x.get===read);test.record(d[s].value);",
+      "baseline_status": "missing",
+      "note": ""
+    },
+    {
+      "id": "object-entries",
+      "area": "Objects",
+      "label": "Entries enumerate own enumerable strings in order",
+      "source": "let o=Object.create({inherited:9});o.b=2;o[1]=1;Object.defineProperty(o,\"hidden\",{value:4});o[Symbol()]=5;test.record(JSON.stringify(Object.entries(o)));",
+      "baseline_status": "missing",
+      "note": ""
+    },
+    {
+      "id": "object-values",
+      "area": "Objects",
+      "label": "Values read accessors once",
+      "source": "let n=0,o={a:1};Object.defineProperty(o,\"b\",{enumerable:true,get:function(){n++;return 2;}});test.record(Object.values(o).join(\"|\"));test.record(n);",
+      "baseline_status": "missing",
+      "note": ""
+    },
+    {
+      "id": "object-assign",
+      "area": "Objects",
+      "label": "Assign invokes getter and copies symbols",
+      "source": "let n=0,s=Symbol(),o={};Object.defineProperty(o,\"x\",{enumerable:true,get:function(){n++;return 7;}});o[s]=3;let copy=Object.assign({},o);test.record(copy.x);test.record(copy[s]);test.record(n);",
+      "baseline_status": "supported",
+      "note": ""
+    },
+    {
+      "id": "object-freeze",
+      "area": "Objects",
+      "label": "Freeze writable/configurable state",
+      "source": "let o=Object.freeze({x:2});o.x=4;test.record(o.x);test.record(Object.isFrozen(o));test.record(delete o.x);",
+      "baseline_status": "supported",
+      "note": ""
+    },
+    {
+      "id": "object-from-entries",
+      "area": "Objects",
+      "label": "Object.fromEntries",
+      "source": "let o=Object.fromEntries([[\"a\",1],[\"b\",2]]);test.record(o.a+o.b);",
+      "baseline_status": "missing",
+      "note": ""
+    },
+    {
+      "id": "wrapper-string",
+      "area": "Objects",
+      "label": "String wrapper construction",
+      "source": "let value=new String(\"cat\");test.record(value.valueOf());test.record(value.length);",
+      "baseline_status": "missing",
+      "note": "Primitive string properties work separately; wrapper objects remain a distinct capability."
+    },
+    {
+      "id": "wrapper-number",
+      "area": "Objects",
+      "label": "Number wrapper construction",
+      "source": "let value=new Number(7);test.record(value.valueOf());test.record(typeof value);",
+      "baseline_status": "missing",
+      "note": ""
+    },
+    {
+      "id": "wrapper-boolean",
+      "area": "Objects",
+      "label": "Boolean wrapper construction",
+      "source": "let value=new Boolean(false);test.record(value.valueOf());test.record(typeof value);",
+      "baseline_status": "missing",
+      "note": ""
+    },
+    {
+      "id": "symbol-identity",
+      "area": "Symbols",
+      "label": "Symbol identity, registry and description",
+      "source": "let a=Symbol(\"x\"),b=Symbol(\"x\");test.record(a===b);test.record(typeof a);test.record(a.description);test.record(Symbol.for(\"x\")===Symbol.for(\"x\"));test.record(Symbol.keyFor(Symbol.for(\"x\")));",
+      "baseline_status": "supported",
+      "note": ""
+    },
+    {
+      "id": "symbol-property",
+      "area": "Symbols",
+      "label": "Distinct symbol property keys",
+      "source": "let a=Symbol(\"a\"),o={};o[a]=3;test.record(o[a]);test.record(Object.keys(o).length);test.record(Object.getOwnPropertySymbols(o)[0]===a);",
+      "baseline_status": "supported",
+      "note": ""
+    },
+    {
+      "id": "symbol-dispose",
+      "area": "Symbols",
+      "label": "Explicit Symbol.dispose method call",
+      "source": "function Resource(){}Resource.prototype[Symbol.dispose]=function(){this.closed=true;};let r=new Resource();r[Symbol.dispose]();test.record(r.closed);",
+      "baseline_status": "partial",
+      "note": "No using syntax or automatic resource-disposal protocol is provided."
+    },
+    {
+      "id": "symbol-iterator",
+      "area": "Symbols",
+      "label": "Native iterable protocol",
+      "source": "let iterator=[2,3][Symbol.iterator]();test.record(iterator.next().value);test.record(iterator.next().value);test.record(iterator.next().done);",
+      "baseline_status": "intentionally_limited",
+      "note": "Symbol.iterator is not advertised until native iterator protocol support exists; page-defined polyfills remain possible."
+    },
+    {
+      "id": "array-callbacks",
+      "area": "Arrays",
+      "label": "Array map/filter/reduce",
+      "source": "test.record([1,2,3].map(x=>x*2).filter(x=>x>2).reduce((a,b)=>a+b,0));",
+      "baseline_status": "supported",
+      "note": ""
+    },
+    {
+      "id": "array-sort",
+      "area": "Arrays",
+      "label": "Array comparator sort",
+      "source": "let a=[3,1,2];a.sort((x,y)=>x-y);test.record(a.join());",
+      "baseline_status": "supported",
+      "note": ""
+    },
+    {
+      "id": "array-holes",
+      "area": "Arrays",
+      "label": "Array holes and slice",
+      "source": "let a=[,undefined,3],b=a.slice();test.record(Object.hasOwn(b,0));test.record(Object.hasOwn(b,1));test.record(b.join(\"|\"));",
+      "baseline_status": "supported",
+      "note": ""
+    },
+    {
+      "id": "array-flat",
+      "area": "Arrays",
+      "label": "Array flat and flatMap",
+      "source": "test.record([1,[2,[3]]].flat(2).join());test.record([1,2].flatMap(x=>[x,x]).join());",
+      "baseline_status": "missing",
+      "note": ""
+    },
+    {
+      "id": "array-from",
+      "area": "Arrays",
+      "label": "Array.from array-like input",
+      "source": "test.record(Array.from({0:\"a\",1:\"b\",length:2}).join());",
+      "baseline_status": "missing",
+      "note": ""
+    },
+    {
+      "id": "iteration-array-forof",
+      "area": "Arrays",
+      "label": "for-of array values",
+      "source": "let out=\"\";for(let x of [1,2])out+=x;test.record(out);",
+      "baseline_status": "partial",
+      "note": "This small test does not establish user-defined iterator semantics."
+    },
+    {
+      "id": "string-utf16",
+      "area": "Strings",
+      "label": "UTF-16 length and valid surrogate pairs",
+      "source": "let s=\"A😀B\";test.record(s.length);test.record(s.charCodeAt(1));test.record(s.slice(1,3));",
+      "baseline_status": "supported",
+      "note": ""
+    },
+    {
+      "id": "string-fromcharcode",
+      "area": "Strings",
+      "label": "fromCharCode wrapping and valid pair",
+      "source": "test.record(String.fromCharCode(65537,-1));test.record(String.fromCharCode(0xD83D,0xDE00));",
+      "baseline_status": "supported",
+      "note": ""
+    },
+    {
+      "id": "string-replace-text",
+      "area": "Strings",
+      "label": "String and regexp textual replacement",
+      "source": "test.record(\"cat cat\".replace(\"cat\",\"dog\"));test.record(\"a1 b2\".replace(/([a-z])(\\d)/g,\"$2$1\"));",
+      "baseline_status": "supported",
+      "note": ""
+    },
+    {
+      "id": "string-replace-callback",
+      "area": "Strings",
+      "label": "String replace callback receiver and arguments",
+      "source": "let seen=\"\";test.record(\"cat cat\".replace(\"cat\",function(match,index,input){\"use strict\";seen=match+\":\"+index+\":\"+input+\":\"+(this===undefined);return \"dog\";}));test.record(seen);",
+      "baseline_status": "missing",
+      "note": ""
+    },
+    {
+      "id": "string-replace-regexp-callback",
+      "area": "Strings",
+      "label": "Global regexp replacement callbacks and captures",
+      "source": "let seen=[];let value=\"a1 b2\".replace(/([a-z])(\\d)/g,function(match,a,b,offset,input){seen.push(a+b+\":\"+offset+\":\"+input);return b+a;});test.record(value);test.record(seen.join(\"|\"));",
+      "baseline_status": "missing",
+      "note": ""
+    },
+    {
+      "id": "string-replaceall-callback",
+      "area": "Strings",
+      "label": "replaceAll callbacks",
+      "source": "let offsets=[];test.record(\"aba\".replaceAll(\"a\",function(match,offset){offsets.push(offset);return \"x\";}));test.record(offsets.join());",
+      "baseline_status": "missing",
+      "note": ""
+    },
+    {
+      "id": "string-normalize",
+      "area": "Strings",
+      "label": "Unicode normalization",
+      "source": "test.record(\"é\".normalize(\"NFC\"));",
+      "baseline_status": "missing",
+      "note": ""
+    },
+    {
+      "id": "regexp-captures",
+      "area": "RegExp",
+      "label": "Captures, anchors and global lastIndex",
+      "source": "let r=/a(\\d+)/g,m=r.exec(\"a12 a3\");test.record(m[1]);test.record(m.index);test.record(r.lastIndex);test.record(r.exec(\"a12 a3\")[1]);",
+      "baseline_status": "supported",
+      "note": ""
+    },
+    {
+      "id": "regexp-lookbehind",
+      "area": "RegExp",
+      "label": "Lookbehind",
+      "source": "test.record(/(?<=a)b/.test(\"ab\"));",
+      "baseline_status": "supported",
+      "note": "One original lookbehind sample; named captures and full regexp conformance are separate."
+    },
+    {
+      "id": "regexp-named-captures",
+      "area": "RegExp",
+      "label": "Named captures",
+      "source": "test.record(/(?<letter>a)/.exec(\"a\").groups.letter);",
+      "baseline_status": "missing",
+      "note": ""
+    },
+    {
+      "id": "number-parsing",
+      "area": "Numbers",
+      "label": "Numeric parsing and finite checks",
+      "source": "test.record(parseInt(\"ff\",16));test.record(parseFloat(\"2.5x\"));test.record(Number.isFinite(Infinity));test.record(Number.isNaN(NaN));",
+      "baseline_status": "supported",
+      "note": ""
+    },
+    {
+      "id": "number-math",
+      "area": "Numbers",
+      "label": "Math functions",
+      "source": "test.record(Math.max(2,4));test.record(Math.floor(-1.5));test.record(Math.sqrt(9));test.record(Math.imul(7,9));",
+      "baseline_status": "supported",
+      "note": ""
+    },
+    {
+      "id": "date",
+      "area": "Globals",
+      "label": "Date constructor and UTC formatting",
+      "source": "test.record(new Date(0).toISOString());",
+      "baseline_status": "missing",
+      "note": ""
+    },
+    {
+      "id": "promise",
+      "area": "Globals",
+      "label": "Promise resolution object",
+      "source": "let p=Promise.resolve(2);test.record(typeof p.then);",
+      "baseline_status": "missing",
+      "note": "Does not test scheduling or microtask ordering."
+    },
+    {
+      "id": "intl",
+      "area": "Globals",
+      "label": "Intl.NumberFormat",
+      "source": "test.record(typeof new Intl.NumberFormat(\"en\").format(123));",
+      "baseline_status": "missing",
+      "note": ""
+    },
+    {
+      "id": "url",
+      "area": "Globals",
+      "label": "URL constructor",
+      "source": "let url=new URL(\"../b?x=2\",\"https://example.test/a/c\");test.record(url.href);",
+      "baseline_status": "missing",
+      "note": "Constructs a local URL value; performs no network request."
+    },
+    {
+      "id": "collections-map-set",
+      "area": "Collections",
+      "label": "Map and Set identity/values",
+      "source": "let key={},m=new Map();m.set(key,7);test.record(m.get(key));test.record(m.has({}));let s=new Set([1,1,2]);test.record(s.size);",
+      "baseline_status": "supported",
+      "note": ""
+    },
+    {
+      "id": "collections-weakmap",
+      "area": "Collections",
+      "label": "WeakMap identity API",
+      "source": "let key={},m=new WeakMap();m.set(key,3);test.record(m.get(key));",
+      "baseline_status": "missing",
+      "note": "No garbage-collection semantics are assessed."
+    },
+    {
+      "id": "collections-iterator",
+      "area": "Collections",
+      "label": "Map entries iterator",
+      "source": "let it=new Map([[\"a\",1]]).entries();test.record(it.next().value.join());",
+      "baseline_status": "supported",
+      "note": "Collection-specific entries()/next() works independently of the unadvertised Symbol.iterator protocol."
+    },
+    {
+      "id": "binary-typed-array",
+      "area": "Binary",
+      "label": "Typed array numeric conversion and shared views",
+      "source": "let a=new Uint8Array([257,-1,3]);let b=a.subarray(1);b[0]=7;test.record(a.join());test.record(a.buffer===b.buffer);",
+      "baseline_status": "supported",
+      "note": ""
+    },
+    {
+      "id": "binary-dataview",
+      "area": "Binary",
+      "label": "DataView endianness",
+      "source": "let b=new ArrayBuffer(4),v=new DataView(b);v.setUint16(0,0x1234,true);test.record(v.getUint16(0,false));",
+      "baseline_status": "supported",
+      "note": ""
+    },
+    {
+      "id": "text-encoding",
+      "area": "Binary",
+      "label": "UTF-8 text encoding/decoding",
+      "source": "let a=new TextEncoder().encode(\"café😀\");test.record(a.length);test.record(new TextDecoder().decode(a));",
+      "baseline_status": "supported",
+      "note": ""
+    },
+    {
+      "id": "json",
+      "area": "Globals",
+      "label": "JSON callbacks and symbol omission",
+      "source": "let s=Symbol();test.record(JSON.stringify({a:1,b:s},function(k,v){return k===\"a\"?2:v;}));test.record(JSON.parse('{\"x\":2}',function(k,v){return k===\"x\"?v+1:v;}).x);",
+      "baseline_status": "supported",
+      "note": ""
+    },
+    {
+      "id": "base64",
+      "area": "Globals",
+      "label": "Pure binary-string Base64",
+      "source": "let bytes=String.fromCharCode(0,128,255);test.record(atob(btoa(bytes))===bytes);test.record(atob(\" Y2F0 \"));",
+      "baseline_status": "supported",
+      "note": ""
+    },
+    {
+      "id": "uri",
+      "area": "Globals",
+      "label": "URI component coding",
+      "source": "test.record(encodeURIComponent(\"a b/é\"));test.record(decodeURIComponent(\"a%20b%2F%C3%A9\"));",
+      "baseline_status": "supported",
+      "note": ""
+    },
+    {
+      "id": "errors",
+      "area": "Globals",
+      "label": "Error subclasses and catch",
+      "source": "let e=new TypeError(\"x\");test.record(e.name);test.record(e.message);test.record(e instanceof Error);",
+      "baseline_status": "supported",
+      "note": ""
+    },
+    {
+      "id": "limit-call-depth",
+      "area": "Limits",
+      "label": "Bounded recursive calls",
+      "source": "function f(n){return n?f(n-1)+1:0;}test.record(f(64));",
+      "baseline_status": "intentionally_limited",
+      "note": "The implementation deliberately caps nested calls at32; this test exceeds that policy while Node completes."
+    },
+    {
+      "id": "limit-lone-surrogate",
+      "area": "Limits",
+      "label": "Explicit unpaired-surrogate rejection",
+      "source": "test.record(String.fromCharCode(0xD800).length);",
+      "baseline_status": "intentionally_limited",
+      "note": "Language strings use UTF-8; unmatched UTF-16 surrogates remain explicitly unsupported."
+    },
+    {
+      "id": "string-replace-unmatched-utf16",
+      "area": "Strings",
+      "label": "Replacement callbacks receive undefined captures and UTF-16 offsets",
+      "source": "let seen=[];test.record(\"😀a a\".replace(/(z)?a/g,function(match,capture,offset){seen.push((capture===undefined)+\":\"+offset);return \"x\";}));test.record(seen.join(\"|\"));",
+      "baseline_status": "missing",
+      "note": ""
+    },
+    {
+      "id": "string-replace-snapshot-lastindex",
+      "area": "Strings",
+      "label": "Global matches are collected before callbacks and result dollars are literal",
+      "source": "let r=/a/g,seen=[];test.record(\"a a\".replace(r,function(match,offset){seen.push(r.lastIndex);if(offset===0){r.lastIndex=7;Object.freeze(r);}return \"$&\";}));test.record(seen.join());test.record(r.lastIndex);",
+      "baseline_status": "missing",
+      "note": ""
+    }
+  ],
+  "browser_inventory": [
+    {
+      "id": "architecture",
+      "area": "Architecture",
+      "status": "supported",
+      "scope": "Original Rust standard-library implementation; no third-party Cargo dependencies or embedded browser/JS engine.",
+      "limits": "Targeted checks do not constitute an independent security audit.",
+      "evidence_files": [
+        "Cargo.toml",
+        "src/main.rs",
+        "src/javascript.rs"
+      ],
+      "verification": "Source review only in this inventory; separate project Rust/integration results are not rerun or counted by this tool."
+    },
+    {
+      "id": "html",
+      "area": "HTML parsing",
+      "status": "partial",
+      "scope": "Original bounded tokenization/tree building, entities, raw script/style text and textarea RCDATA.",
+      "limits": "20,000 nodes and128 open elements; no claim of complete HTML parsing conformance.",
+      "evidence_files": [
+        "src/html.rs"
+      ],
+      "verification": "Source review only in this inventory; separate project Rust/integration results are not rerun or counted by this tool."
+    },
+    {
+      "id": "dom",
+      "area": "DOM/query/tree",
+      "status": "partial",
+      "scope": "Selectors, node lists/live tag collections, supported element/text creation, attributes and bounded tree mutation.",
+      "limits": "256 added nodes, depth128 and1MiB retained growth; innerHTML, Shadow DOM and full DOM coverage unavailable.",
+      "evidence_files": [
+        "src/scripting.rs",
+        "src/script_dom_tree.rs",
+        "src/script_queries.rs",
+        "src/script_collections.rs"
+      ],
+      "verification": "Source review only in this inventory; separate project Rust/integration results are not rerun or counted by this tool."
+    },
+    {
+      "id": "forms",
+      "area": "Forms/search navigation",
+      "status": "partial",
+      "scope": "Native controls including textarea, GET/URL-encoded POST, validation, submit events and queued form.submit().",
+      "limits": "No requestSubmit/full form model; script submissions same-origin HTTP(S), CSP form-action enforced.",
+      "evidence_files": [
+        "src/forms.rs",
+        "src/script_forms.rs",
+        "src/app_search_tests.rs",
+        "src/app_post_tests.rs"
+      ],
+      "verification": "Source review only in this inventory; separate project Rust/integration results are not rerun or counted by this tool."
+    },
+    {
+      "id": "events",
+      "area": "Events",
+      "status": "partial",
+      "scope": "Supported native input/lifecycle/resource events, capture/bubble listeners, once/passive options and bounded custom-name registration.",
+      "limits": "64 listeners; custom registration is inert without a native event source; no general dispatchEvent interface.",
+      "evidence_files": [
+        "src/scripting.rs",
+        "src/script_compat_tests.rs"
+      ],
+      "verification": "Source review only in this inventory; separate project Rust/integration results are not rerun or counted by this tool."
+    },
+    {
+      "id": "timers",
+      "area": "Timers and animation frames",
+      "status": "partial",
+      "scope": "Function timers and requestAnimationFrame driven by the native App queue.",
+      "limits": "64 pending timers,4096 timer callbacks per document,64 pending frames; no Promise microtask queue.",
+      "evidence_files": [
+        "src/scripting.rs",
+        "src/app_scripts.rs"
+      ],
+      "verification": "Source review only in this inventory; separate project Rust/integration results are not rerun or counted by this tool."
+    },
+    {
+      "id": "navigation",
+      "area": "Navigation/history",
+      "status": "partial",
+      "scope": "Links, address navigation, Back/Forward, reload, bounded script Location writes and POST resubmission protections.",
+      "limits": "Script navigation remains same-origin with rate/count limits; not the Navigation API.",
+      "evidence_files": [
+        "src/navigation.rs",
+        "src/history.rs",
+        "src/script_navigation.rs",
+        "src/app_script_navigation_tests.rs"
+      ],
+      "verification": "Source review only in this inventory; separate project Rust/integration results are not rerun or counted by this tool."
+    },
+    {
+      "id": "http",
+      "area": "HTTP/content decoding",
+      "status": "partial",
+      "scope": "Original HTTP/1.1, redirects, framing, per-load connection reuse, gzip/zlib deflate and cancellation.",
+      "limits": "No HTTP/2 or HTTP/3; five redirects,3 connections/load and bounded body/header/metadata sizes.",
+      "evidence_files": [
+        "src/http.rs",
+        "src/compression.rs",
+        "src/loader.rs"
+      ],
+      "verification": "Source review only in this inventory; separate project Rust/integration results are not rerun or counted by this tool."
+    },
+    {
+      "id": "tls",
+      "area": "TLS/certificates",
+      "status": "partial",
+      "scope": "Authenticated TLS1.2/1.3 subset, explicit trust roots, hostname/signature/Finished verification and one bounded TLS1.3 retry.",
+      "limits": "Restricted suites/key types/chains; revocation/CT/full TLS ecosystem support not claimed.",
+      "evidence_files": [
+        "src/tls.rs",
+        "src/tls_retry.rs",
+        "src/x509.rs",
+        "src/trust.rs"
+      ],
+      "verification": "Source review only in this inventory; separate project Rust/integration results are not rerun or counted by this tool."
+    },
+    {
+      "id": "csp",
+      "area": "CSP/resource origins",
+      "status": "intentionally_limited",
+      "scope": "CSP and request blocking apply to supported loads; cross-origin HTTPS classic scripts have an explicit credential-free policy.",
+      "limits": "Other automatic resources retain origin restrictions; full CSP/CORS/Fetch conformance is not claimed.",
+      "evidence_files": [
+        "src/csp.rs",
+        "src/blocking.rs",
+        "src/loader.rs",
+        "src/app_scripts.rs"
+      ],
+      "verification": "Source review only in this inventory; separate project Rust/integration results are not rerun or counted by this tool."
+    },
+    {
+      "id": "script-network",
+      "area": "Script network APIs",
+      "status": "missing",
+      "scope": "No fetch, XMLHttpRequest or WebSocket implementation.",
+      "limits": "navigator.sendBeacon deliberately returns false without transmission.",
+      "evidence_files": [
+        "src/scripting.rs",
+        "src/host_objects.rs"
+      ],
+      "verification": "Source review only in this inventory; separate project Rust/integration results are not rerun or counted by this tool."
+    },
+    {
+      "id": "cookies",
+      "area": "Cookies",
+      "status": "intentionally_limited",
+      "scope": "Memory-only session cookies, exact-host policy and HttpOnly exclusion from document.cookie.",
+      "limits": "256 cookies total,50 per host,64KiB stored; not a complete public-suffix/SameSite/partitioned-cookie system.",
+      "evidence_files": [
+        "src/cookies.rs",
+        "src/scripting.rs"
+      ],
+      "verification": "Source review only in this inventory; separate project Rust/integration results are not rerun or counted by this tool."
+    },
+    {
+      "id": "web-storage",
+      "area": "Web storage",
+      "status": "missing",
+      "scope": "No localStorage, sessionStorage, IndexedDB or Cache API.",
+      "limits": "Existing local browser profile files are separate from website storage permissions.",
+      "evidence_files": [
+        "src/scripting.rs",
+        "src/profile.rs"
+      ],
+      "verification": "Source review only in this inventory; separate project Rust/integration results are not rerun or counted by this tool."
+    },
+    {
+      "id": "profile",
+      "area": "Profile/settings",
+      "status": "supported",
+      "scope": "Local settings, bookmark tree and optional browsing history retained.",
+      "limits": "This inventory does not alter defaults or migrate user data.",
+      "evidence_files": [
+        "src/profile.rs",
+        "src/profile_bookmarks.rs",
+        "src/history.rs"
+      ],
+      "verification": "Source review only in this inventory; separate project Rust/integration results are not rerun or counted by this tool."
+    },
+    {
+      "id": "css",
+      "area": "CSS parsing/cascade/selectors",
+      "status": "partial",
+      "scope": "Original style parsing/cascade, supported selectors, media and font-face rules.",
+      "limits": "1MiB combined CSS,2048 rules and bounded selector work; unsupported selectors reject rather than broaden matching.",
+      "evidence_files": [
+        "src/css.rs"
+      ],
+      "verification": "Source review only in this inventory; separate project Rust/integration results are not rerun or counted by this tool."
+    },
+    {
+      "id": "layout",
+      "area": "Layout/painting",
+      "status": "partial",
+      "scope": "Blocks, inline/inline-block, basic tables, flex, positioned content and supported clipping/paint.",
+      "limits": "No full CSS grid/transforms/layout ecosystem; bounded depth/items/work, no standards-wide rendering claim.",
+      "evidence_files": [
+        "src/layout.rs",
+        "src/paint_area.rs",
+        "src/paint.rs"
+      ],
+      "verification": "Source review only in this inventory; separate project Rust/integration results are not rerun or counted by this tool."
+    },
+    {
+      "id": "stylesheets",
+      "area": "Dynamic stylesheets",
+      "status": "partial",
+      "scope": "Created same-origin LINK sheets load/apply before supported completion events; cancellation invalidates stale work.",
+      "limits": "Bounded attempts/source bytes; no complete CSSOM.",
+      "evidence_files": [
+        "src/script_stylesheets.rs",
+        "src/app_stylesheets.rs"
+      ],
+      "verification": "Source review only in this inventory; separate project Rust/integration results are not rerun or counted by this tool."
+    },
+    {
+      "id": "geometry",
+      "area": "DOM geometry",
+      "status": "partial",
+      "scope": "Supported client geometry derives from native layout and is reused within a job.",
+      "limits": "At most4 synchronous layouts per job; no broad viewport/intersection observer APIs.",
+      "evidence_files": [
+        "src/script_geometry.rs",
+        "src/app_geometry_tests.rs"
+      ],
+      "verification": "Source review only in this inventory; separate project Rust/integration results are not rerun or counted by this tool."
+    },
+    {
+      "id": "fonts",
+      "area": "Fonts/text",
+      "status": "partial",
+      "scope": "Original TrueType/WOFF1 reader/rasterizer, font-face selection, glyph caching and fallback.",
+      "limits": "WOFF2,CFF,variable fonts,complex shaping and cross-origin webfont loads unavailable.",
+      "evidence_files": [
+        "src/font.rs",
+        "src/fonts.rs",
+        "src/text.rs",
+        "src/loader.rs"
+      ],
+      "verification": "Source review only in this inventory; separate project Rust/integration results are not rerun or counted by this tool."
+    },
+    {
+      "id": "images",
+      "area": "Images/animation",
+      "status": "partial",
+      "scope": "Original JPEG,PNG/APNG,GIF,BMP,ICO/CUR,static SVG,WebP,TIFF,QOI,Netpbm,TGA and PCX decode paths.",
+      "limits": "Bounded per-format work/pixels; no AVIF/HEIF/JPEGXL, full SVG, HDR/color-managed pipeline or video.",
+      "evidence_files": [
+        "src/image.rs",
+        "src/image_svg.rs",
+        "src/image_webp.rs",
+        "src/image_tiff.rs"
+      ],
+      "verification": "Source review only in this inventory; separate project Rust/integration results are not rerun or counted by this tool."
+    },
+    {
+      "id": "canvas-media",
+      "area": "Canvas/audio/video",
+      "status": "missing",
+      "scope": "No Canvas2D/WebGL, audio or video playback APIs.",
+      "limits": "Supported still/animated image formats do not supply browser media pipelines.",
+      "evidence_files": [
+        "src/scripting.rs",
+        "src/image.rs",
+        "src/platform.rs"
+      ],
+      "verification": "Source review only in this inventory; separate project Rust/integration results are not rerun or counted by this tool."
+    },
+    {
+      "id": "modules-workers",
+      "area": "Modules/workers",
+      "status": "missing",
+      "scope": "No ES module loader, worker or service-worker implementation.",
+      "limits": "Classic scripts remain bounded; no page background worker runtime.",
+      "evidence_files": [
+        "src/javascript.rs",
+        "src/loader.rs",
+        "src/scripting.rs"
+      ],
+      "verification": "Source review only in this inventory; separate project Rust/integration results are not rerun or counted by this tool."
+    },
+    {
+      "id": "limits",
+      "area": "Resource/execution bounds",
+      "status": "intentionally_limited",
+      "scope": "Source/token/AST, retained values, properties, recursion, steps/deadlines, DOM/network/image/font budgets remain enforced.",
+      "limits": "512KiB/script,2MiB/document sources,250000 steps/1second per job,32 calls,128KiB strings; these are not a total-process-memory guarantee.",
+      "evidence_files": [
+        "src/javascript.rs",
+        "src/scripting.rs",
+        "src/loader.rs",
+        "src/http.rs",
+        "src/layout.rs"
+      ],
+      "verification": "Source review only in this inventory; separate project Rust/integration results are not rerun or counted by this tool."
+    },
+    {
+      "id": "live-sites",
+      "area": "Live-site compatibility",
+      "status": "unassessed",
+      "scope": "This milestone does not execute captured Google access-check code or make live-site requests.",
+      "limits": "No end-to-end Google/Bing or general modern-web compatibility claim follows from independent capability probes.",
+      "evidence_files": [
+        "src/app_search_tests.rs",
+        "tools/check_javascript.py"
+      ],
+      "verification": "Source review only in this inventory; separate project Rust/integration results are not rerun or counted by this tool."
+    }
+  ],
+  "standards_references": [
+    "https://tc39.es/ecma262/",
+    "https://html.spec.whatwg.org/",
+    "https://dom.spec.whatwg.org/"
+  ]
+}

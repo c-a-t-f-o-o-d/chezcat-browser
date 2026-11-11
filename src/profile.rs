@@ -13,11 +13,39 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
+#[path = "profile_bookmarks.rs"]
+mod bookmark_tree;
+pub use bookmark_tree::BookmarkItem;
+
+pub fn parse_color(value: &str) -> Result<Option<u32>, String> {
+    let value = value.trim();
+    if value.is_empty() {
+        return Ok(None);
+    }
+    let hex = value.strip_prefix('#').unwrap_or(value);
+    if hex.len() != 6 || !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err(
+            "Use a six-digit color such as #67D8C6, or leave it empty to use the page's colors."
+                .into(),
+        );
+    }
+    u32::from_str_radix(hex, 16)
+        .map(Some)
+        .map_err(|_| "Invalid RGB color.".into())
+}
+
+pub fn format_color(value: Option<u32>) -> String {
+    value.map(|v| format!("#{v:06X}")).unwrap_or_default()
+}
+
 pub const MAX_BOOKMARKS: usize = 512;
 pub const MAX_TITLE_BYTES: usize = 1024;
 pub const MAX_ADDRESS_BYTES: usize = 16 * 1024;
 pub const MAX_PROFILE_BYTES: usize = 1024 * 1024;
-const HEADER: &str = "OwnBrowser profile 1";
+const HEADER: &str = "OwnBrowser profile 2";
+const LEGACY_HEADER: &str = "OwnBrowser profile 1";
+pub const MAX_FOLDERS: usize = 128;
+pub const MAX_FOLDER_DEPTH: usize = 16;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Settings {
@@ -26,6 +54,12 @@ pub struct Settings {
     pub blocking: crate::blocking::Config,
     pub default_zoom: u16,
     pub home: Option<String>,
+    pub dark_mode: bool,
+    pub dark_pages: bool,
+    pub bookmark_bar: bool,
+    pub link_color: Option<u32>,
+    pub visited_color: Option<u32>,
+    pub download_folder: Option<String>,
 }
 
 impl Default for Settings {
@@ -36,20 +70,37 @@ impl Default for Settings {
             blocking: crate::blocking::Config::default(),
             default_zoom: 100,
             home: None,
+            dark_mode: false,
+            dark_pages: false,
+            bookmark_bar: true,
+            link_color: None,
+            visited_color: None,
+            download_folder: None,
         }
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Bookmark {
     pub title: String,
     pub url: String,
+    pub folder: u32,
+    pub order: u32,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BookmarkFolder {
+    pub id: u32,
+    pub parent: u32,
+    pub title: String,
+    pub order: u32,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Data {
     pub settings: Settings,
     pub bookmarks: Vec<Bookmark>,
+    pub folders: Vec<BookmarkFolder>,
 }
 
 #[derive(Debug)]
@@ -242,6 +293,18 @@ fn read_snapshot(path: &Path) -> Result<Option<Vec<u8>>, String> {
 
 fn normalize(data: &mut Data) -> Result<(), String> {
     data.settings.blocking.normalize()?;
+    data.validate_folders()?;
+    if data.settings.link_color.is_some_and(|c| c > 0xffffff)
+        || data.settings.visited_color.is_some_and(|c| c > 0xffffff)
+    {
+        return Err("Link colors must be six-digit RGB values.".into());
+    }
+    if let Some(folder) = &data.settings.download_folder {
+        if folder.len() > MAX_ADDRESS_BYTES || folder.chars().any(char::is_control) {
+            return Err("The downloads folder is invalid or too long.".into());
+        }
+        crate::downloads::validate_folder(Path::new(folder))?;
+    }
     if !(50..=300).contains(&data.settings.default_zoom) {
         return Err("Default zoom must be between 50 and 300 percent.".into());
     }
@@ -293,15 +356,17 @@ fn decode(bytes: &[u8]) -> Result<Data, String> {
     let text = std::str::from_utf8(bytes).map_err(|_| "The profile is not valid UTF-8.")?;
     let text = text.strip_prefix('\u{feff}').unwrap_or(text);
     let mut lines = text.lines();
-    if lines.next() != Some(HEADER) {
+    let header = lines.next();
+    if header != Some(HEADER) && header != Some(LEGACY_HEADER) {
         return Err(
             "The profile header or version is not supported. Its file has not been changed.".into(),
         );
     }
     let mut data = Data::default();
     let mut settings = 0u8;
+    let mut extension_settings = std::collections::HashSet::new();
     for (index, line) in lines.enumerate() {
-        let fields: Vec<_> = line.splitn(4, '\t').collect();
+        let fields: Vec<_> = line.split('\t').collect();
         let bad = || format!("Invalid profile record on line {}.", index + 2);
         match fields.as_slice() {
             ["javascript", value] | ["images", value] => {
@@ -363,6 +428,62 @@ fn decode(bytes: &[u8]) -> Result<Data, String> {
                     data.settings.home = Some(unescape(value, MAX_ADDRESS_BYTES)?);
                 }
             }
+            [name @ ("dark_mode" | "dark_pages" | "bookmark_bar"), value] => {
+                if !extension_settings.insert(*name) {
+                    return Err(bad());
+                }
+                let enabled = match *value {
+                    "true" => true,
+                    "false" => false,
+                    _ => return Err(bad()),
+                };
+                match *name {
+                    "dark_mode" => data.settings.dark_mode = enabled,
+                    "dark_pages" => data.settings.dark_pages = enabled,
+                    _ => data.settings.bookmark_bar = enabled,
+                }
+            }
+            [name @ ("link_color" | "visited_color"), value] => {
+                if !extension_settings.insert(*name) {
+                    return Err(bad());
+                }
+                let color = parse_color(value)?;
+                if *name == "link_color" {
+                    data.settings.link_color = color;
+                } else {
+                    data.settings.visited_color = color;
+                }
+            }
+            ["download_folder", value] => {
+                if !extension_settings.insert("download_folder") {
+                    return Err(bad());
+                }
+                if !value.is_empty() {
+                    data.settings.download_folder = Some(unescape(value, MAX_ADDRESS_BYTES)?);
+                }
+            }
+            ["folder", id, parent, order, title] => {
+                if data.folders.len() >= MAX_FOLDERS {
+                    return Err("Too many bookmark folders.".into());
+                }
+                data.folders.push(BookmarkFolder {
+                    id: id.parse().map_err(|_| bad())?,
+                    parent: parent.parse().map_err(|_| bad())?,
+                    order: order.parse().map_err(|_| bad())?,
+                    title: unescape(title, MAX_TITLE_BYTES)?,
+                });
+            }
+            ["bookmark2", folder, order, title, url] => {
+                if data.bookmarks.len() >= MAX_BOOKMARKS {
+                    return Err("Too many bookmarks.".into());
+                }
+                data.bookmarks.push(Bookmark {
+                    title: unescape(title, MAX_TITLE_BYTES)?,
+                    url: unescape(url, MAX_ADDRESS_BYTES)?,
+                    folder: folder.parse().map_err(|_| bad())?,
+                    order: order.parse().map_err(|_| bad())?,
+                });
+            }
             ["bookmark", title, url] => {
                 if data.bookmarks.len() == MAX_BOOKMARKS {
                     return Err(format!("The profile exceeds {MAX_BOOKMARKS} bookmarks."));
@@ -370,6 +491,8 @@ fn decode(bytes: &[u8]) -> Result<Data, String> {
                 data.bookmarks.push(Bookmark {
                     title: unescape(title, MAX_TITLE_BYTES)?,
                     url: unescape(url, MAX_ADDRESS_BYTES)?,
+                    folder: 0,
+                    order: data.bookmarks.len() as u32,
                 });
             }
             _ => return Err(bad()),
@@ -420,8 +543,8 @@ fn encode(data: &Data) -> Result<Vec<u8>, String> {
     );
     escaped(&mut text, data.settings.home.as_deref().unwrap_or(""))?;
     text.push('\n');
-    // Omit default extension records so an unchanged old profile stays readable
-    // by old builds. Existing 0.26 profiles acquire no new enabled capability.
+    // Omit inactive blocking records. Reading a legacy file does not rewrite it;
+    // an actual save uses the current header and preserves its existing choices.
     if data.settings.blocking != crate::blocking::Config::default() {
         text.push_str(&format!(
             "blocking\t{}\nblocking_builtins\t{}\n",
@@ -433,11 +556,30 @@ fn encode(data: &Data) -> Result<Vec<u8>, String> {
             text.push('\n');
         }
     }
+    text.push_str(&format!("dark_mode\t{}\ndark_pages\t{}\nbookmark_bar\t{}\nlink_color\t{}\nvisited_color\t{}\ndownload_folder\t",
+        data.settings.dark_mode, data.settings.dark_pages, data.settings.bookmark_bar,
+        format_color(data.settings.link_color), format_color(data.settings.visited_color)));
+    escaped(
+        &mut text,
+        data.settings.download_folder.as_deref().unwrap_or(""),
+    )?;
+    text.push('\n');
+    for folder in &data.folders {
+        text.push_str(&format!(
+            "folder\t{}\t{}\t{}\t",
+            folder.id, folder.parent, folder.order
+        ));
+        escaped(&mut text, &folder.title)?;
+        text.push('\n');
+    }
     for bookmark in &data.bookmarks {
         if text.len() + 11 > MAX_PROFILE_BYTES {
             return Err("The profile exceeds the 1 MiB file limit.".into());
         }
-        text.push_str("bookmark\t");
+        text.push_str(&format!(
+            "bookmark2\t{}\t{}\t",
+            bookmark.folder, bookmark.order
+        ));
         escaped(&mut text, &bookmark.title)?;
         text.push('\t');
         escaped(&mut text, &bookmark.url)?;
@@ -589,15 +731,19 @@ mod tests {
                 default_zoom: 125,
                 home: Some("https://example.com/home#top".into()),
                 blocking: crate::blocking::Config::default(),
+                ..Settings::default()
             },
+            folders: Vec::new(),
             bookmarks: vec![
                 Bookmark {
                     title: "Café 😀 \\ tab\tline\nreturn\r".into(),
                     url: "https://example.com/path?q=one%26two#part".into(),
+                    ..Bookmark::default()
                 },
                 Bookmark {
                     title: "Home".into(),
                     url: "about:home".into(),
+                    ..Bookmark::default()
                 },
             ],
         }
@@ -757,7 +903,7 @@ mod tests {
         let valid = String::from_utf8(encode(&sample()).unwrap()).unwrap();
         for text in [
             "".to_owned(),
-            valid.replace(HEADER, "OwnBrowser profile 2"),
+            valid.replace(HEADER, "OwnBrowser profile 999"),
             valid.replace("images\tfalse", "images\tfalse\nimages\ttrue"),
             valid.replace("images\tfalse\n", ""),
             valid.replace("default_zoom\t125", "default_zoom\t499"),
@@ -798,6 +944,7 @@ mod tests {
         next.bookmarks.push(Bookmark {
             title: "Missing local page".into(),
             url: location.display(),
+            ..Bookmark::default()
         });
         store.save(next.clone()).unwrap();
         assert_eq!(decode(&encode(&next).unwrap()).unwrap(), next);
@@ -827,6 +974,7 @@ mod tests {
             many.bookmarks.push(Bookmark {
                 title: format!("Bookmark {index}"),
                 url: format!("https://example.com/{index}"),
+                ..Bookmark::default()
             });
         }
         assert!(store.save(many).is_err());
@@ -835,6 +983,7 @@ mod tests {
             too_large.bookmarks.push(Bookmark {
                 title: format!("Bookmark {index}"),
                 url: format!("https://example.com/{index}/{}", "x".repeat(4096)),
+                ..Bookmark::default()
             });
         }
         assert!(store.save(too_large).unwrap_err().contains("1 MiB"));

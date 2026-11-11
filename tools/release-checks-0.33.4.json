@@ -1,0 +1,172 @@
+{
+  "version": "0.33.4",
+  "stage": "Final release verification",
+  "verified_utc": "2026-11-11T02:00:08.935525+00:00",
+  "baseline": {
+    "version": "0.33.3",
+    "archive_sha256": "704f0684d4b8322c53e2f91e84c5f45a9b765c6d5f9a78a5e1efaf3016125728",
+    "complete_archive_verified": true,
+    "prior_paths_retained": 373,
+    "source_files_retained": 120,
+    "removed_paths": []
+  },
+  "scope": "Observed passive accessor and custom-listener probe; general bounded capabilities, original fixtures only",
+  "capture": {
+    "html_bytes": 92830,
+    "html_sha256": "8e50b35a02493776c0ebba59cb2674237695b495307291282158ab737a328c89",
+    "inline_scripts": 5,
+    "external_scripts": 0,
+    "linked_stylesheets": 0,
+    "forms": 0,
+    "input_controls": 0,
+    "search_results_present": false,
+    "classification": "Access/retry response; not successful Search results",
+    "reported_error": "Accessor property descriptors are not implemented.",
+    "reported_location": {
+      "line": 1587,
+      "column": 45109
+    },
+    "assembled_source_bytes": 63014,
+    "assembled_source_sha256": "1240d0e4ac37fef7c4f115738d2a446cf60c4aae78167e4fa3df64ef3d2f9406",
+    "source_execution": false,
+    "analysis": "Static parsing, counts, hashes and exact diagnostic-column match"
+  },
+  "rust_tests": {
+    "baseline_passed": 782,
+    "passed": 800,
+    "failed": 0,
+    "all_baseline_tests_retained": true,
+    "new_tests": [
+      "app::search_tests::passive_accessor_probe_initializes_scripted_search_and_repeated_search",
+      "javascript::prototypes::tests::accessor_assign_snapshots_all_keys_and_rechecks_own_enumerability",
+      "javascript::prototypes::tests::accessor_define_properties_snapshots_converted_descriptors_before_mutation",
+      "javascript::prototypes::tests::accessor_descriptor_fields_follow_order_inheritance_and_early_errors",
+      "javascript::prototypes::tests::accessor_raw_reads_fail_without_invoking_script",
+      "javascript::prototypes::tests::accessor_reads_writes_and_inspection_preserve_receivers_and_identity",
+      "javascript::prototypes::tests::accessor_redefinitions_switch_kinds_without_calling_getters",
+      "javascript::prototypes::tests::accessor_registered_host_expandos_keep_the_native_receiver_and_reserved_names",
+      "javascript::prototypes::tests::frozen_accessors_keep_their_setters_and_do_not_run_getters_during_integrity_checks",
+      "javascript::tests::accessor_callbacks_share_job_work_and_keep_closures_between_jobs",
+      "javascript::tests::accessor_recursion_and_native_getter_cycles_stop_on_a_one_mib_stack",
+      "javascript::tests::global_accessor_declarations_fail_before_getters_or_scope_mutation",
+      "javascript::tests::global_accessor_preflight_allows_local_and_strict_eval_shadows_and_data_migration",
+      "scripting::tests::custom_event_methods_retain_native_receiver_checks",
+      "scripting::tests::custom_event_names_and_listener_storage_remain_bounded",
+      "scripting::tests::custom_event_names_preserve_case_identity_and_native_dispatch",
+      "scripting::tests::custom_event_options_are_read_before_null_listener_noops_and_mutation",
+      "scripting::tests::custom_event_probe_reads_accessor_options_and_removes_the_listener"
+    ]
+  },
+  "javascript": {
+    "oracle_passed": 860,
+    "oracle_cases": 860,
+    "negative_passed": 229,
+    "negative_cases": 229,
+    "all_826_previous_positive_cases_retained": true,
+    "obsolete_negative_replaced_by_positive": "prototype-accessor-descriptor-disabled-atomic",
+    "node_version": "v24.22.1",
+    "rustc_version": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+    "harness_reference_boundary": "Node contextified-global receiver identity isolated in an original probe; actual Window receiver assertions are in the App fixture",
+    "checker_sha256": "173c8000a134b726a398f2a43306dc4cb671d26a5aa7f5876756be6171032c34",
+    "node_or_external_engine_used_by_browser": false
+  },
+  "app_search_tests": {
+    "passed": 12,
+    "names": [
+      "app::search_tests::deferred_function_bootstrap_initializes_scripted_search_and_repeated_search",
+      "app::search_tests::form_action_csp_blocks_native_submits_with_scripting_enabled_or_disabled_and_script_submits",
+      "app::search_tests::input_search_renders_results_follows_cross_origin_result_and_searches_again",
+      "app::search_tests::long_else_if_bootstrap_initializes_scripted_search_and_repeated_search",
+      "app::search_tests::passive_accessor_probe_initializes_scripted_search_and_repeated_search",
+      "app::search_tests::script_form_cross_origin_action_and_redirect_make_no_forbidden_request",
+      "app::search_tests::script_form_submit_bypasses_required_but_stop_discards_the_queued_request",
+      "app::search_tests::scripted_post_preserves_body_and_reload_confirmation",
+      "app::search_tests::symbol_bootstrap_initializes_scripted_search_and_repeated_search",
+      "app::search_tests::textarea_enter_edits_lines_and_submit_cancellation_preserves_the_current_document",
+      "app::search_tests::textarea_scripted_enter_submits_snapshots_and_subsequent_searches",
+      "app::search_tests::textarea_search_renders_results_follows_cross_origin_result_and_searches_again"
+    ],
+    "flow": [
+      "passive probe",
+      "search submission",
+      "rendered results",
+      "result navigation",
+      "Back",
+      "subsequent search"
+    ],
+    "content": "Original controlled loopback fixtures; no Google HTML rewriting or hardcoded Google results"
+  },
+  "network_policy": {
+    "passed": true,
+    "checks": 26,
+    "scope": "Original loopback TLS fixtures; no live Google validation",
+    "browser_sha256": "1a2355e8b042382034df403fe752e174d75c1b34b6cbe606d2e50f564ad59324"
+  },
+  "activity_source": {
+    "passed": true,
+    "checks": 21,
+    "process_runs": 24,
+    "browser_sha256": "1a2355e8b042382034df403fe752e174d75c1b34b6cbe606d2e50f564ad59324"
+  },
+  "builds": {
+    "native_release": "passed",
+    "windows_x64_release": "passed",
+    "native_clippy_all_targets_deny_warnings": "passed",
+    "windows_clippy_all_targets_deny_warnings": "passed",
+    "rustfmt": "passed",
+    "third_party_cargo_dependencies": 0,
+    "native_executable_sha256": "1a2355e8b042382034df403fe752e174d75c1b34b6cbe606d2e50f564ad59324",
+    "windows_executable_sha256": "4897b69ccd8fcebf244598a319c7cdb769fd3d6eb871b9fe63aa1a0aa51452ac",
+    "windows_bytes": 3932160,
+    "windows_pe32_plus_amd64": true,
+    "windows_version": "0.33.4.0",
+    "windows_system_imports_only": true,
+    "windows_import_dll_count": 13,
+    "original_icon_payloads_verified": 7,
+    "windows_executed": false
+  },
+  "limits": {
+    "existing_core_limits_changed": false,
+    "source_bytes": 524288,
+    "aggregate_source_bytes": 2097152,
+    "steps_per_job": 250000,
+    "seconds_per_job": 1,
+    "copy_work_bytes_per_job": 8388608,
+    "call_frames": 32,
+    "retained_value_bytes": 2097152,
+    "object_properties": 4096,
+    "document_properties": 16384,
+    "event_name_utf8_bytes": 256,
+    "event_listener_count": 64
+  },
+  "security": {
+    "tls_validation_preserved": true,
+    "csp_enforcement_preserved": true,
+    "cross_origin_policy_changed": false,
+    "native_ownership_preserved": true,
+    "profile_privacy_defaults_changed": false,
+    "google_specific_rewriting_or_results": false,
+    "captured_access_check_executed": false,
+    "google_network_attempts_this_iteration": 0
+  },
+  "recovery": {
+    "filename": "ChezCat_0_33_4_Recovery_1.zip",
+    "bytes": 5308483,
+    "sha256": "0c6f8de6e9fb0441a8f0e31c459f0568c4ea5446269be2acafc77967c9b56044",
+    "files": 385,
+    "verified_manifest_entries": 384,
+    "source_version": "0.33.4",
+    "windows_version": "0.33.4.0"
+  },
+  "build_input_manifest": "tools/verification-0.33.4/build-inputs.json",
+  "build_input_manifest_sha256": "cc9e5b094ddb2f24824d1891f22735909c2df7ef0ff9aa5f7c2897e10fec2f28",
+  "live_google_search_end_to_end_verified": false,
+  "remaining_issues_file": "GOOGLE_SEARCH_REMAINING_0.33.4.txt",
+  "references": [
+    "https://tc39.es/ecma262/multipage/ecmascript-data-types-and-values.html#sec-topropertydescriptor",
+    "https://tc39.es/ecma262/multipage/ordinary-and-exotic-objects-behaviours.html#sec-ordinaryget",
+    "https://tc39.es/ecma262/multipage/ordinary-and-exotic-objects-behaviours.html#sec-ordinarysetwithowndescriptor",
+    "https://dom.spec.whatwg.org/#interface-eventtarget",
+    "https://webidl.spec.whatwg.org/#es-dictionary"
+  ]
+}

@@ -3,7 +3,7 @@
 //! Revivers, replacers, callable toJSON hooks and lone UTF-16 surrogates remain
 //! explicit limitations; they are never silently ignored or evaluated as code.
 
-use super::{number_text, Fault, Runtime, Value, MAX_PARSE_DEPTH, MAX_STRING_BYTES};
+use super::{number_text, Fault, Host, Runtime, Value, MAX_PARSE_DEPTH, MAX_STRING_BYTES};
 
 struct Reader<'a> {
     source: &'a str,
@@ -290,9 +290,8 @@ impl Runtime {
             ));
         }
         let value = args.first().unwrap_or(&Value::Undefined);
-        value.primitive()?;
         self.work(value.bytes())?;
-        let source = value.to_text();
+        let source = value.script_text()?;
         if source.len() > MAX_STRING_BYTES {
             return Err(Fault::new("JSON source limit reached (128 KiB)."));
         }
@@ -352,10 +351,11 @@ impl Runtime {
         value: Value,
         output: &mut String,
         frames: &mut Vec<WriteFrame>,
+        host: &mut dyn Host,
     ) -> Result<(), Fault> {
         self.step()?;
         match value {
-            Value::Null | Value::Undefined | Value::Function(_) => {
+            Value::Null | Value::Undefined | Value::Function(_) | Value::Symbol(_) => {
                 self.append_string(output, "null")
             }
             Value::Bool(value) => self.append_string(output, if value { "true" } else { "false" }),
@@ -379,7 +379,10 @@ impl Runtime {
                         "JSON.stringify cannot serialize a circular object.",
                     ));
                 }
-                if matches!(self.get_property(id, "toJSON")?, Value::Function(_)) {
+                if matches!(
+                    self.get_property_with_host(id, "toJSON", host)?,
+                    Value::Function(_)
+                ) {
                     return Err(Fault::new(
                         "JSON.stringify toJSON functions are not implemented.",
                     ));
@@ -388,6 +391,8 @@ impl Runtime {
                 let entries = if let Some(length) = length {
                     Entries::Array { next: 0, length }
                 } else {
+                    // JSON visits enumerable string keys only. Symbol-keyed
+                    // properties are not read, even when their values cycle.
                     Entries::Object(self.enumerable_keys(id)?.into_iter())
                 };
                 self.append_string(output, if length.is_some() { "[" } else { "{" })?;
@@ -401,7 +406,11 @@ impl Runtime {
         }
     }
 
-    pub(super) fn json_stringify(&mut self, args: &[Value]) -> Result<Value, Fault> {
+    pub(super) fn json_stringify(
+        &mut self,
+        args: &[Value],
+        host: &mut dyn Host,
+    ) -> Result<Value, Fault> {
         let value = args.first().unwrap_or(&Value::Undefined);
         if matches!(args.get(1), Some(Value::Function(_)))
             || matches!(args.get(1), Some(Value::Object(id)) if self.object(*id)?.length.is_some())
@@ -434,13 +443,16 @@ impl Runtime {
             }
             _ => String::new(),
         };
-        if matches!(value, Value::Undefined | Value::Function(_)) {
+        if matches!(
+            value,
+            Value::Undefined | Value::Function(_) | Value::Symbol(_)
+        ) {
             return Ok(Value::Undefined);
         }
         let mut output = String::new();
         let mut frames = Vec::new();
         let value = self.copy_value(value)?;
-        self.json_write_value(value, &mut output, &mut frames)?;
+        self.json_write_value(value, &mut output, &mut frames, host)?;
         while let Some(mut frame) = frames.pop() {
             self.step()?;
             let array = matches!(frame.entries, Entries::Array { .. });
@@ -457,8 +469,13 @@ impl Runtime {
                 Entries::Object(keys) => keys.next(),
             };
             if let Some(key) = key {
-                let value = self.get_property(frame.id, &key)?;
-                if !array && matches!(value, Value::Undefined | Value::Function(_)) {
+                let value = self.get_property_with_host(frame.id, &key, host)?;
+                if !array
+                    && matches!(
+                        value,
+                        Value::Undefined | Value::Function(_) | Value::Symbol(_)
+                    )
+                {
                     frames.push(frame);
                     continue;
                 }
@@ -472,7 +489,7 @@ impl Runtime {
                     self.append_string(&mut output, if gap.is_empty() { ":" } else { ": " })?;
                 }
                 frames.push(frame);
-                self.json_write_value(value, &mut output, &mut frames)?;
+                self.json_write_value(value, &mut output, &mut frames, host)?;
             } else {
                 if frame.wrote {
                     self.json_indent(&mut output, &gap, frames.len())?;
@@ -481,5 +498,71 @@ impl Runtime {
             }
         }
         self.checked_value(Value::String(output))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::javascript::Host;
+
+    struct NoHost;
+    impl Host for NoHost {
+        fn get(&mut self, _: u32, _: &str) -> Result<Value, String> {
+            Err("No host object is exposed in this test.".into())
+        }
+        fn set(&mut self, _: u32, _: &str, _: Value) -> Result<(), String> {
+            Err("No host object is exposed in this test.".into())
+        }
+        fn call(&mut self, _: u32, _: &str, _: &[Value]) -> Result<Value, String> {
+            Err("No host object is exposed in this test.".into())
+        }
+    }
+
+    #[test]
+    fn stringify_omits_symbol_values_and_uses_null_for_array_entries() {
+        let result = Runtime::new()
+            .execute(
+                r#"var symbol=Symbol("value");
+                [JSON.stringify(symbol)===undefined,
+                 JSON.stringify({left:1,skipped:symbol,right:2}),
+                 JSON.stringify([symbol,undefined,{skipped:symbol,kept:3}]),
+                 JSON.stringify({kept:4},symbol,symbol)].join("|");"#,
+                &mut NoHost,
+            )
+            .unwrap();
+        assert_eq!(
+            result.to_text(),
+            "true|{\"left\":1,\"right\":2}|[null,null,{\"kept\":3}]|{\"kept\":4}"
+        );
+    }
+
+    #[test]
+    fn stringify_ignores_symbol_keys_without_reading_their_values() {
+        let result = Runtime::new()
+            .execute(
+                r#"var symbol=Symbol("hidden");
+                var object={"Symbol(hidden)":5,visible:7};
+                object[symbol]=object;
+                object[Symbol("hidden")]=[object];
+                JSON.stringify(object);"#,
+                &mut NoHost,
+            )
+            .unwrap();
+        assert_eq!(result.to_text(), "{\"Symbol(hidden)\":5,\"visible\":7}");
+    }
+
+    #[test]
+    fn parse_symbol_source_throws_a_catchable_type_error() {
+        let result = Runtime::new()
+            .execute(
+                r#"var result="missing";
+                try {JSON.parse(Symbol("source"));}
+                catch(error) {result=error.name;}
+                result;"#,
+                &mut NoHost,
+            )
+            .unwrap();
+        assert_eq!(result.to_text(), "TypeError");
     }
 }

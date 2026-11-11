@@ -49,6 +49,8 @@ pub(super) unsafe fn sync(owner: Handle, state: *mut App) {
     if detached {
         if let Some((parent, window)) = existing {
             if parent == owner as usize {
+                let colors = (&*state).title_bar_colors();
+                sync_frame_colors(window as Handle, colors);
                 InvalidateRect(window as Handle, null(), 0);
             }
             return;
@@ -81,6 +83,8 @@ pub(super) unsafe fn sync(owner: Handle, state: *mut App) {
             return;
         }
         WINDOW.with(|slot| slot.set(Some((owner as usize, window as usize))));
+        let colors = (&*state).title_bar_colors();
+        sync_frame_colors(window, colors);
         ShowWindow(window, 5);
         UpdateWindow(window);
     } else if let Some((parent, window)) = existing {
@@ -103,6 +107,7 @@ unsafe fn app(window: Handle) -> Option<(Handle, *mut App)> {
 unsafe fn action(window: Handle, owner: Handle, state: *mut App, action: PlatformAction) {
     let result = match action {
         PlatformAction::None | PlatformAction::OpenFile => Ok(()),
+        PlatformAction::OpenFolder(path) => open_folder(window, &path),
         PlatformAction::Copy(text) => write_clipboard(window, &text),
         PlatformAction::Cut(text) => match write_clipboard(window, &text) {
             Ok(()) => {
@@ -150,6 +155,7 @@ unsafe extern "system" fn procedure(
             return 1;
         }
         0x0082 => {
+            forget_frame_colors(window);
             WINDOW.with(|slot| {
                 if slot
                     .get()
@@ -174,6 +180,12 @@ unsafe extern "system" fn procedure(
         return DefWindowProcW(window, message, wparam, lparam);
     };
     match message {
+        0x031a | 0x0320 => {
+            forget_frame_colors(window);
+            let colors = (&*state).title_bar_colors();
+            sync_frame_colors(window, colors);
+            DefWindowProcW(window, message, wparam, lparam)
+        }
         0x0010 => {
             (&mut *state).close_inspector();
             refresh(owner, state);

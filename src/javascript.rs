@@ -10,39 +10,62 @@
 
 use std::collections::{BTreeMap, HashSet};
 use std::rc::Rc;
+use std::time::{Duration, Instant};
 
 #[path = "arguments.rs"]
 mod arguments;
 #[path = "array_ops.rs"]
 mod array_ops;
+#[path = "javascript_base64.rs"]
+mod base64;
 #[path = "binary_data.rs"]
 mod binary_data;
+#[path = "bound_functions.rs"]
+mod bound_functions;
 #[path = "collections.rs"]
 mod collections;
+#[path = "host_objects.rs"]
+mod host_objects;
 #[path = "json.rs"]
 mod json;
+#[path = "object_inspection.rs"]
+mod object_inspection;
 #[path = "prototypes.rs"]
 mod prototypes;
 #[path = "regexp.rs"]
 mod regexp;
+#[path = "string_replacement.rs"]
+mod string_replacement;
+#[path = "symbols.rs"]
+mod symbols;
 #[path = "text_encoding.rs"]
 mod text_encoding;
 
-pub const MAX_SOURCE_BYTES: usize = 128 * 1024;
+// Source/parse storage is separate from execution, strings and host work.
+// A bounded 512 KiB bundle can contain ordinary bootstrap code without giving
+// its loops, recursive calls or callbacks a larger execution allowance.
+pub const MAX_SOURCE_BYTES: usize = 512 * 1024;
 pub const MAX_STRING_BYTES: usize = 128 * 1024;
 const MAX_REGEXP_WORK: usize = 2_000_000;
 const MAX_RETAINED_REGEXP: usize = 2 * 1024 * 1024;
-const MAX_TOKENS: usize = 65_536;
-const MAX_AST: usize = 65_536;
+const MAX_TOKENS: usize = 131_072;
+const MAX_AST: usize = 131_072;
 const MAX_PARSE_DEPTH: usize = 64;
+// Right-associative dispatch/assignment chains use heap frames rather than the
+// native call stack. This shared cap also counts chains inside grouped syntax.
+const MAX_EXPRESSION_FRAMES: usize = 4096;
+// Flat else-if dispatchers do not consume native parser/evaluator frames.
+// Pending branches across nested statements still share a finite allowance.
+const MAX_IF_BRANCHES: usize = 4096;
 const MAX_EVAL_DEPTH: usize = 128;
 const MAX_CALL_DEPTH: usize = 32;
-const MAX_ARGUMENTS: usize = 32;
-const MAX_STEPS: usize = 50_000;
+const MAX_ARGUMENTS: usize = 256;
+const MAX_STEPS: usize = 250_000;
+const MAX_JOB_TIME: Duration = Duration::from_secs(1);
 const MAX_COPY_BYTES: usize = 8 * 1024 * 1024;
 const MAX_PROGRAMS: usize = 128;
-const MAX_RETAINED_SOURCE: usize = 1024 * 1024;
-const MAX_RETAINED_AST: usize = 131_072;
+const MAX_RETAINED_SOURCE: usize = 2 * 1024 * 1024;
+const MAX_RETAINED_AST: usize = 262_144;
 const MAX_FUNCTIONS: usize = 1024;
 const MAX_ENVIRONMENTS: usize = 4096;
 const MAX_BINDINGS: usize = 4096;
@@ -62,6 +85,8 @@ pub enum Value {
     Bool(bool),
     Number(f64),
     String(String),
+    /// Unique primitive identity in this document's bounded symbol arena.
+    Symbol(usize),
     Function(usize),
     /// Stable identity in this document's bounded object arena.
     Object(usize),
@@ -75,7 +100,7 @@ impl Value {
             Self::Bool(value) => *value,
             Self::Number(value) => *value != 0.0 && !value.is_nan(),
             Self::String(value) => !value.is_empty(),
-            Self::Function(_) | Self::Object(_) | Self::Host(_) => true,
+            Self::Symbol(_) | Self::Function(_) | Self::Object(_) | Self::Host(_) => true,
         }
     }
 
@@ -88,6 +113,7 @@ impl Value {
             Self::Bool(value) => value.to_string(),
             Self::Number(value) => number_text(*value),
             Self::String(value) => value.clone(),
+            Self::Symbol(_) => "[symbol]".into(),
             Self::Function(_) => "[function]".into(),
             Self::Object(_) => "[script object]".into(),
             Self::Host(_) => "[host object]".into(),
@@ -96,7 +122,11 @@ impl Value {
 
     pub fn to_number(&self) -> f64 {
         match self {
-            Self::Undefined | Self::Function(_) | Self::Object(_) | Self::Host(_) => f64::NAN,
+            Self::Undefined
+            | Self::Symbol(_)
+            | Self::Function(_)
+            | Self::Object(_)
+            | Self::Host(_) => f64::NAN,
             Self::Null => 0.0,
             Self::Bool(value) => f64::from(*value),
             Self::Number(value) => *value,
@@ -111,16 +141,126 @@ impl Value {
         }
     }
 
+    fn diagnostic_type(&self) -> &'static str {
+        match self {
+            Self::Undefined => "undefined",
+            Self::Null => "null",
+            Self::Bool(_) => "boolean",
+            Self::Number(_) => "number",
+            Self::String(_) => "string",
+            Self::Symbol(_) => "symbol",
+            Self::Function(_) => "function",
+            Self::Object(_) => "object",
+            Self::Host(_) => "native object",
+        }
+    }
+
     fn primitive(&self) -> Result<(), Fault> {
-        if matches!(self, Self::Function(_) | Self::Object(_) | Self::Host(_)) {
+        if matches!(self, Self::Symbol(_)) {
+            Err(Fault::exception(
+                "TypeError",
+                "Cannot convert a Symbol to a string or number.",
+            ))
+        } else if matches!(self, Self::Function(_) | Self::Object(_) | Self::Host(_)) {
             Err(Fault::new("Implicit object conversion is not implemented."))
         } else {
             Ok(())
         }
     }
+
+    /// Checked implicit conversion, after the runtime has applied ToPrimitive.
+    /// Diagnostic labels must never become script-visible coercion results.
+    fn script_text(&self) -> Result<String, Fault> {
+        self.primitive()?;
+        Ok(self.to_text())
+    }
+
+    fn script_number(&self) -> Result<f64, Fault> {
+        self.primitive()?;
+        Ok(self.to_number())
+    }
 }
 
 pub trait Host {
+    /// Native attributes take precedence over a realm-owned expando store.
+    fn owns_property(&self, _object: u32, _property: &str) -> bool {
+        true
+    }
+    fn readonly_property(&self, _object: u32, _property: &str) -> bool {
+        false
+    }
+    /// Named DOMStringMap setters use ordinary ECMAScript ToString before the
+    /// host applies the attribute mutation. This never grants network access.
+    fn string_setter(&self, _object: u32, _property: &str) -> bool {
+        false
+    }
+    fn validate_set(
+        &self,
+        _object: u32,
+        _property: &str,
+        _value: &Value,
+    ) -> Result<(), (&'static str, String)> {
+        Ok(())
+    }
+    fn own_keys(&mut self, _object: u32) -> Result<Vec<String>, String> {
+        Err("Enumerating this native host object is not implemented.".into())
+    }
+    /// Present named data properties have writable/enumerable/configurable
+    /// descriptors. Native accessor/prototype attributes are not own data.
+    fn own_data(&mut self, _object: u32, _property: &str) -> Result<Option<Value>, String> {
+        Err("Own-property inspection is not implemented for this host object.".into())
+    }
+    fn delete(&mut self, _object: u32, _property: &str) -> Result<bool, String> {
+        Err("Deleting this native host property is not implemented.".into())
+    }
+    fn ordinary_prototype(&self, _object: u32) -> bool {
+        false
+    }
+    /// Native named properties can shadow a method. Opt those interfaces
+    /// into normal member lookup before arguments, without granting expandos
+    /// or an ordinary prototype to otherwise protected host objects.
+    fn resolve_member_before_call(&self, _object: u32) -> bool {
+        false
+    }
+    /// Explicitly opt a native value into ordinary toString/valueOf conversion.
+    /// The runtime keeps the native receiver and all calls remain host-owned.
+    fn primitive_conversion(&self, _object: u32) -> bool {
+        false
+    }
+    fn is_instance(&self, _object: u32, _constructor: u32, _method: &str) -> Option<bool> {
+        None
+    }
+    fn method(&self, _object: u32, _property: &str) -> Option<&'static str> {
+        None
+    }
+    /// Native methods may be borrowed by another object implementing the same
+    /// supported interface. The default keeps an individual host capability
+    /// bound to its original receiver.
+    fn accepts_receiver(&self, object: u32, _method: &str, receiver: u32) -> bool {
+        object == receiver
+    }
+    /// A bounded, read-only indexed host collection can request the ordinary
+    /// callback loop without gaining access to the runtime or resetting jobs.
+    fn indexed_for_each(&self, _object: u32, _method: &str) -> bool {
+        false
+    }
+    fn argument_conversions(&self, _object: u32, _method: &str) -> &'static [(usize, bool)] {
+        &[]
+    }
+    fn required_arguments(&self, _object: u32, _method: &str) -> usize {
+        0
+    }
+    fn validate_call(
+        &self,
+        _object: u32,
+        _method: &str,
+        _args: &[Value],
+    ) -> Result<(), (&'static str, String)> {
+        Ok(())
+    }
+    fn number_setter(&self, _object: u32, _property: &str) -> bool {
+        false
+    }
     /// Optional native dictionary conversion. The runtime reads only these
     /// named fields, under its ordinary property and copy budgets; the host
     /// never gains arbitrary access to the interpreter's object arena.
@@ -768,7 +908,7 @@ fn regexp_literal(
 
 fn tokenize(source: &str, regexp_budget: &mut usize) -> Result<Vec<Token>, Fault> {
     if source.len() > MAX_SOURCE_BYTES {
-        return Err(Fault::new("Script source limit reached (128 KiB)."));
+        return Err(Fault::new("Script source limit reached (512 KiB)."));
     }
     let bytes = source.as_bytes();
     let (mut at, mut newline) = (0, false);
@@ -1092,11 +1232,23 @@ struct Program {
     body: Vec<StmtId>,
 }
 
+struct DeferredBody {
+    template: usize,
+    start: usize,
+    end: usize,
+    strict: bool,
+    function_depth: usize,
+}
+
 struct Parser {
     program: Program,
     tokens: Vec<Token>,
+    body_ends: Vec<usize>,
+    deferred_bodies: Vec<DeferredBody>,
     current: usize,
     depth: usize,
+    expression_frames: usize,
+    if_branches: usize,
     strict: bool,
     loops: Vec<StmtId>,
     breakables: Vec<StmtId>,
@@ -1116,6 +1268,23 @@ impl Parser {
         active_depth: usize,
     ) -> Result<Program, Fault> {
         let tokens = tokenize(source, regexp_budget)?;
+        // Index braces once. Deferring nested bodies must not rescan enclosing
+        // token ranges quadratically or copy their source/tokens into each job.
+        // Both arrays are bounded by the existing token limit and die with the
+        // parser; strings, comments and regular expressions are single tokens.
+        let mut body_ends = vec![usize::MAX; tokens.len()];
+        let mut braces = Vec::new();
+        for (index, token) in tokens.iter().enumerate() {
+            match token.kind {
+                TokenKind::Punct("{") => braces.push(index),
+                TokenKind::Punct("}") => {
+                    if let Some(start) = braces.pop() {
+                        body_ends[start] = index;
+                    }
+                }
+                _ => {}
+            }
+        }
         let mut parser = Self {
             program: Program {
                 source: source.into(),
@@ -1126,10 +1295,14 @@ impl Parser {
                 body: Vec::new(),
             },
             tokens,
+            body_ends,
+            deferred_bodies: Vec::new(),
             current: 0,
             // Dynamic compilation runs on the caller's native stack. Account
             // for live evaluator frames instead of granting a fresh parse stack.
             depth: active_depth,
+            expression_frames: 0,
+            if_branches: 0,
             strict,
             loops: Vec::new(),
             breakables: Vec::new(),
@@ -1144,8 +1317,74 @@ impl Parser {
             parser.program.body.push(stmt);
         }
         parser.program.strict = parser.strict;
+        parser.parse_deferred_bodies(active_depth)?;
         validate_program(&parser.program)?;
         Ok(parser.program)
+    }
+
+    fn defer_body(&mut self, template: Template) -> Result<usize, Fault> {
+        if self.functions >= MAX_PARSE_DEPTH {
+            return Err(self.unsupported("Function syntax nesting limit reached (64)."));
+        }
+        let start = self.current;
+        self.need("{")?;
+        let end = self.body_ends[start];
+        if end == usize::MAX {
+            return Err(self.error("Unterminated function body."));
+        }
+        let id = self.program.templates.len();
+        self.program.templates.push(template);
+        // Each queued body has a function AST node; the existing source/token/
+        // AST limits therefore bound the queue as well as the retained program.
+        self.deferred_bodies.push(DeferredBody {
+            template: id,
+            start,
+            end,
+            strict: self.strict,
+            function_depth: self.functions + 1,
+        });
+        self.current = end + 1;
+        Ok(id)
+    }
+
+    fn parse_deferred_bodies(&mut self, active_depth: usize) -> Result<(), Fault> {
+        while let Some(body) = self.deferred_bodies.pop() {
+            self.current = body.start;
+            // The outer expression's parser stack has unwound, but eval's live
+            // evaluator stack has not. Keep its original allowance and charge
+            // one function-body frame. Lexical function nesting is bounded
+            // separately, even though those bodies no longer recurse in Rust.
+            self.depth = active_depth;
+            self.enter()?;
+            self.functions = body.function_depth;
+            self.strict = body.strict;
+            self.allow_in = true;
+            self.loops.clear();
+            self.breakables.clear();
+            self.labels.clear();
+            self.expression_frames = 0;
+            self.if_branches = 0;
+            let (statements, strict) = self.function_body()?;
+            if self.current != body.end + 1 {
+                return Err(self.error("Function body exceeded its token range."));
+            }
+            let template = &self.program.templates[body.template];
+            if strict
+                && template.params.iter().collect::<HashSet<_>>().len() != template.params.len()
+            {
+                return Err(self.error("Duplicate parameters are forbidden in strict functions."));
+            }
+            for parameter in &template.params {
+                self.strict_binding(parameter, strict)?;
+            }
+            if let Some(name) = &template.name {
+                self.strict_binding(name, strict)?;
+            }
+            let template = &mut self.program.templates[body.template];
+            template.strict = strict;
+            template.body = statements;
+        }
+        Ok(())
     }
 
     fn token(&self) -> &Token {
@@ -1407,19 +1646,9 @@ impl Parser {
         } else if self.eat("function") {
             let name = self.name()?;
             let function = self.function(None)?;
-            self.strict_binding(&name, self.program.templates[function].strict)?;
             StmtKind::Function(name, function)
         } else if self.eat("if") {
-            self.need("(")?;
-            let condition = self.expression()?;
-            self.need(")")?;
-            let yes = self.statement()?;
-            let no = if self.eat("else") {
-                Some(self.statement()?)
-            } else {
-                None
-            };
-            StmtKind::If(condition, yes, no)
+            self.if_statement(id)?
         } else if self.eat("while") {
             self.need("(")?;
             let condition = self.expression()?;
@@ -1478,6 +1707,48 @@ impl Parser {
         };
         Ok(kind)
     }
+
+    fn if_statement(&mut self, id: StmtId) -> Result<StmtKind, Fault> {
+        let previous = self.if_branches;
+        let mut current = id;
+        let mut first = StmtKind::Empty;
+        loop {
+            if self.if_branches >= MAX_IF_BRANCHES {
+                return Err(self.unsupported("Pending if-branch limit reached (4096)."));
+            }
+            self.if_branches += 1;
+            self.need("(")?;
+            let condition = self.expression()?;
+            self.need(")")?;
+            let yes = self.statement()?;
+            let has_else = self.eat("else");
+            let at = self.at();
+            let next = has_else && self.eat("if");
+            let no = if next {
+                Some(self.stmt(StmtKind::Empty, at)?)
+            } else if has_else {
+                Some(self.statement()?)
+            } else {
+                None
+            };
+            let kind = StmtKind::If(condition, yes, no);
+            if current == id {
+                first = kind;
+            } else {
+                self.program.stmts[current].kind = kind;
+            }
+            if next {
+                // Only a literal else-if tail is flat. Then branches, blocks
+                // and labelled else statements keep their ordinary depth and
+                // label handling, including the nearest-if dangling else rule.
+                current = no.expect("an else-if tail has a reserved statement");
+            } else {
+                self.if_branches = previous;
+                return Ok(first);
+            }
+        }
+    }
+
     fn function(&mut self, name: Option<String>) -> Result<usize, Fault> {
         self.enter()?;
         self.need("(")?;
@@ -1485,7 +1756,7 @@ impl Parser {
         if !self.is(")") {
             loop {
                 if params.len() == MAX_ARGUMENTS {
-                    return Err(self.unsupported("Function parameter limit reached (32)."));
+                    return Err(self.unsupported("Function parameter limit reached (256)."));
                 }
                 let name = self.name()?;
                 params.push(name);
@@ -1495,36 +1766,15 @@ impl Parser {
             }
         }
         self.need(")")?;
-        let loops = std::mem::take(&mut self.loops);
-        let breakables = std::mem::take(&mut self.breakables);
-        let labels = std::mem::take(&mut self.labels);
-        let previous_in = std::mem::replace(&mut self.allow_in, true);
-        self.functions += 1;
-        let (body, strict) = self.function_body()?;
-        if strict && params.iter().collect::<HashSet<_>>().len() != params.len() {
-            return Err(self.error("Duplicate parameters are forbidden in strict functions."));
-        }
-        for parameter in &params {
-            self.strict_binding(parameter, strict)?;
-        }
-        if let Some(name) = &name {
-            self.strict_binding(name, strict)?;
-        }
-        self.loops = loops;
-        self.breakables = breakables;
-        self.labels = labels;
-        self.allow_in = previous_in;
-        self.functions -= 1;
-        self.depth -= 1;
-        let id = self.program.templates.len();
-        self.program.templates.push(Template {
+        let id = self.defer_body(Template {
             arrow: false,
             constructible: true,
-            strict,
+            strict: self.strict,
             name,
             params,
-            body,
-        });
+            body: Vec::new(),
+        })?;
+        self.depth -= 1;
         Ok(id)
     }
     fn expression(&mut self) -> Result<ExprId, Fault> {
@@ -1561,33 +1811,72 @@ impl Parser {
         )
     }
     fn assignment(&mut self) -> Result<ExprId, Fault> {
-        let at = self.at();
-        if self.arrow_ahead() {
-            return self.arrow();
+        enum Pending {
+            Yes(ExprId, usize, bool),
+            No(ExprId, ExprId, usize),
+            Assign(&'static str, ExprId, usize),
         }
-        let mut left = self.binary(1)?;
-        if self.eat("?") {
-            let yes = self.assignment_with_in()?;
-            self.need(":")?;
-            let no = self.assignment_expression()?;
-            left = self.expr(ExprKind::Conditional(left, yes, no), at)?;
-        }
-        if let TokenKind::Punct(
-            op @ ("=" | "+=" | "-=" | "*=" | "/=" | "%=" | "&=" | "|=" | "^=" | "<<=" | ">>="
-            | ">>>="),
-        ) = self.token().kind
-        {
-            if !self.assignable(left) {
-                return Err(self.error("Invalid assignment target."));
+        // A minified state dispatcher can have hundreds of `a ? b : c ? d :`
+        // arms without nested grouping. Both branches and assignment RHSs are
+        // processed explicitly, preserving right associativity and the grammar's
+        // +In true arm while keeping actual grouping/function nesting at 64.
+        let mut pending = Vec::new();
+        'next: loop {
+            let at = self.at();
+            let arrow = self.arrow_ahead();
+            let mut value = if arrow {
+                self.arrow()?
+            } else {
+                self.binary(1)?
+            };
+            if !arrow {
+                let next = if self.eat("?") {
+                    let previous_in = std::mem::replace(&mut self.allow_in, true);
+                    Some(Pending::Yes(value, at, previous_in))
+                } else if let TokenKind::Punct(
+                    op @ ("=" | "+=" | "-=" | "*=" | "/=" | "%=" | "&=" | "|=" | "^=" | "<<="
+                    | ">>=" | ">>>="),
+                ) = self.token().kind
+                {
+                    if !self.assignable(value) {
+                        return Err(self.error("Invalid assignment target."));
+                    }
+                    if let ExprKind::Name(name) = &self.program.exprs[value].kind {
+                        self.strict_binding(name, self.strict)?;
+                    }
+                    self.current += 1;
+                    Some(Pending::Assign(op, value, at))
+                } else {
+                    None
+                };
+                if let Some(frame) = next {
+                    if self.expression_frames == MAX_EXPRESSION_FRAMES {
+                        return Err(self.unsupported("Pending expression limit reached (4096)."));
+                    }
+                    self.expression_frames += 1;
+                    pending.push(frame);
+                    continue;
+                }
             }
-            if let ExprKind::Name(name) = &self.program.exprs[left].kind {
-                self.strict_binding(name, self.strict)?;
+            while let Some(frame) = pending.pop() {
+                match frame {
+                    Pending::Yes(condition, at, previous_in) => {
+                        self.need(":")?;
+                        self.allow_in = previous_in;
+                        pending.push(Pending::No(condition, value, at));
+                        continue 'next;
+                    }
+                    Pending::No(condition, yes, at) => {
+                        value = self.expr(ExprKind::Conditional(condition, yes, value), at)?;
+                    }
+                    Pending::Assign(op, left, at) => {
+                        value = self.expr(ExprKind::Assign(op, left, value), at)?;
+                    }
+                }
+                self.expression_frames -= 1;
             }
-            self.current += 1;
-            let right = self.assignment_expression()?;
-            left = self.expr(ExprKind::Assign(op, left, right), at)?;
+            return Ok(value);
         }
-        Ok(left)
     }
     fn arrow_ahead(&self) -> bool {
         let tokens = &self.tokens;
@@ -1626,7 +1915,7 @@ impl Parser {
         if self.eat("(") {
             while !self.eat(")") {
                 if params.len() == MAX_ARGUMENTS {
-                    return Err(self.unsupported("Function parameter limit reached (32)."));
+                    return Err(self.unsupported("Function parameter limit reached (256)."));
                 }
                 let name = self.name()?;
                 if params.contains(&name) {
@@ -1645,21 +1934,29 @@ impl Parser {
             return Err(self.error("A line ending is not allowed before =>."));
         }
         self.need("=>")?;
+        if self.is("{") {
+            let template = self.defer_body(Template {
+                arrow: true,
+                constructible: false,
+                strict: self.strict,
+                name: None,
+                params,
+                body: Vec::new(),
+            })?;
+            self.depth -= 1;
+            return self.expr(ExprKind::Function(template), at);
+        }
+        if self.functions >= MAX_PARSE_DEPTH {
+            return Err(self.unsupported("Function syntax nesting limit reached (64)."));
+        }
         let loops = std::mem::take(&mut self.loops);
         let breakables = std::mem::take(&mut self.breakables);
         let labels = std::mem::take(&mut self.labels);
         let previous_in = self.allow_in;
         self.functions += 1;
-        let (body, strict) = if self.is("{") {
-            self.allow_in = true;
-            self.function_body()?
-        } else {
-            let expression = self.assignment_expression()?;
-            (
-                vec![self.stmt(StmtKind::Return(Some(expression)), at)?],
-                self.strict,
-            )
-        };
+        let expression = self.assignment_expression()?;
+        let body = vec![self.stmt(StmtKind::Return(Some(expression)), at)?];
+        let strict = self.strict;
         for parameter in &params {
             self.strict_binding(parameter, strict)?;
         }
@@ -1789,7 +2086,7 @@ impl Parser {
         if !self.is(")") {
             loop {
                 if args.len() == MAX_ARGUMENTS {
-                    return Err(self.unsupported("Call argument limit reached (32)."));
+                    return Err(self.unsupported("Call argument limit reached (256)."));
                 }
                 args.push(self.assignment_with_in()?);
                 if !self.eat(",") || self.is(")") {
@@ -2257,6 +2554,19 @@ fn validate_program(program: &Program) -> Result<(), Fault> {
     }
     for statement in &program.stmts {
         match &statement.kind {
+            StmtKind::Function(name, template)
+                if program.templates[*template].strict
+                    && matches!(name.as_str(), "eval" | "arguments") =>
+            {
+                // A declaration's binding is not a named-function-expression
+                // binding. Check its name after the deferred directive prologue
+                // establishes strictness, without changing Template.name.
+                return Err(Fault::exception(
+                    "SyntaxError",
+                    "eval and arguments cannot be bound or assigned in strict code.",
+                )
+                .at(&program.source, statement.at));
+            }
             StmtKind::Block(body) | StmtKind::Switch { body, .. } => {
                 scope(program, body, &[], false)?
             }
@@ -2338,6 +2648,7 @@ struct Environment {
 #[derive(Clone, Copy)]
 enum Builtin {
     ThrowTypeError,
+    Symbol(symbols::Op),
     Binary(binary_data::Op),
     Collection(collections::Op),
     TextEncoding(text_encoding::Op),
@@ -2348,9 +2659,11 @@ enum Builtin {
     Error(&'static str),
     EncodeUri(bool),
     DecodeUri(bool),
+    Base64(bool),
     Object,
     Array,
     String,
+    StringFromCharCode,
     Number,
     Boolean,
     ParseInt,
@@ -2395,15 +2708,24 @@ impl Ordinary {
 #[derive(Clone, Copy)]
 enum NativeGetter {
     ArgumentsCallee,
+    SymbolDescription,
     Binary(binary_data::Field),
     CollectionSize(collections::Kind),
     TextEncoding(text_encoding::Field),
 }
 
+#[derive(Clone, Copy)]
+struct Accessors {
+    get: Option<usize>,
+    set: Option<usize>,
+}
+
 struct Property {
     value: Value,
-    /// Read-only native getters; scripts cannot install arbitrary accessors.
+    /// Read-only native getters retain their built-in receiver checks.
     getter: Option<NativeGetter>,
+    /// Script callbacks use the existing callable arena, not recursive ownership.
+    accessor: Option<Accessors>,
     order: usize,
     enumerable: bool,
     writable: bool,
@@ -2417,6 +2739,7 @@ struct Object {
     iterator: Option<collections::IteratorData>,
     text: Option<text_encoding::Data>,
     properties: BTreeMap<String, Property>,
+    symbol_properties: BTreeMap<usize, Property>,
     /// Arrays retain holes without allocating a Value for each missing index.
     length: Option<usize>,
     length_writable: bool,
@@ -2429,10 +2752,12 @@ struct Object {
 
 enum Function {
     Native(Builtin),
+    Bound(bound_functions::Bound),
     Host {
         object: u32,
         method: &'static str,
         receiver_required: bool,
+        constructible: bool,
     },
     Script {
         program: Rc<Program>,
@@ -2460,11 +2785,27 @@ impl Control {
     }
 }
 
+#[derive(Clone)]
+enum PropertyKey {
+    String(String),
+    Symbol(usize),
+}
+
+impl PropertyKey {
+    fn reference(self, receiver: Value) -> Reference {
+        match self {
+            Self::String(name) => Reference::Property(receiver, name),
+            Self::Symbol(id) => Reference::SymbolProperty(receiver, id),
+        }
+    }
+}
+
 enum Reference {
     Binding(usize, String),
     Missing(String),
     Global(String),
     Property(Value, String),
+    SymbolProperty(Value, usize),
     // Keep the evaluated key value until GetValue/PutValue/Delete. In a plain
     // assignment the RHS runs first; compound operations convert independently
     // for their read and write, as required for observable user callbacks.
@@ -2491,6 +2832,9 @@ pub struct Runtime {
     function_properties: Vec<usize>,
     programs: Vec<Rc<Program>>,
     objects: Vec<Object>,
+    symbols: Vec<symbols::Data>,
+    symbol_registry: BTreeMap<String, usize>,
+    symbol_prototype: Option<usize>,
     binary_roots: binary_data::Roots,
     retained_binary: usize,
     collection_roots: collections::Roots,
@@ -2505,6 +2849,8 @@ pub struct Runtime {
     boolean_prototype: Option<usize>,
     error_prototypes: BTreeMap<&'static str, usize>,
     browser_global: Option<(u32, usize)>,
+    host_objects: BTreeMap<u32, usize>,
+    host_method_values: BTreeMap<(u32, &'static str), Value>,
     global_attributes: BTreeMap<String, (bool, bool, bool)>,
     host_globals: HashSet<String>,
     arguments_thrower: Option<usize>,
@@ -2516,6 +2862,8 @@ pub struct Runtime {
     bindings: usize,
     value_bytes: usize,
     steps: usize,
+    job_deadline: Instant,
+    job_allowance: (usize, usize, usize),
     copy_bytes: usize,
     eval_depth: usize,
     call_depth: usize,
@@ -2543,6 +2891,9 @@ impl Runtime {
             function_properties: Vec::new(),
             programs: Vec::new(),
             objects: Vec::new(),
+            symbols: Vec::new(),
+            symbol_registry: BTreeMap::new(),
+            symbol_prototype: None,
             binary_roots: binary_data::Roots::default(),
             retained_binary: 0,
             collection_roots: collections::Roots::default(),
@@ -2557,6 +2908,8 @@ impl Runtime {
             boolean_prototype: None,
             error_prototypes: BTreeMap::new(),
             browser_global: None,
+            host_objects: BTreeMap::new(),
+            host_method_values: BTreeMap::new(),
             global_attributes: BTreeMap::new(),
             host_globals: HashSet::new(),
             arguments_thrower: None,
@@ -2568,6 +2921,8 @@ impl Runtime {
             bindings: 0,
             value_bytes: 0,
             steps: MAX_STEPS,
+            job_deadline: Instant::now() + MAX_JOB_TIME,
+            job_allowance: (MAX_STEPS, MAX_COPY_BYTES, MAX_REGEXP_WORK),
             copy_bytes: MAX_COPY_BYTES,
             eval_depth: 0,
             call_depth: 0,
@@ -2588,9 +2943,12 @@ impl Runtime {
             ("decodeURIComponent", Builtin::DecodeUri(true)),
             ("encodeURI", Builtin::EncodeUri(false)),
             ("decodeURI", Builtin::DecodeUri(false)),
+            ("atob", Builtin::Base64(false)),
+            ("btoa", Builtin::Base64(true)),
             ("Object", Builtin::Object),
             ("Array", Builtin::Array),
             ("String", Builtin::String),
+            ("Symbol", Builtin::Symbol(symbols::Op::Constructor)),
             ("Number", Builtin::Number),
             ("Boolean", Builtin::Boolean),
             ("parseInt", Builtin::ParseInt),
@@ -2604,6 +2962,7 @@ impl Runtime {
                 .unwrap();
         }
         runtime.initialize_intrinsic_prototypes().unwrap();
+        runtime.initialize_symbols().unwrap();
         runtime.initialize_binary().unwrap();
         runtime.initialize_collections().unwrap();
         runtime.initialize_text_encoding().unwrap();
@@ -2731,6 +3090,7 @@ impl Runtime {
             object,
             method,
             receiver_required: false,
+            constructible: false,
         });
         self.initialize_function_properties(method, 0, false)
             .map_err(Fault::display)?;
@@ -2752,8 +3112,26 @@ impl Runtime {
 
     pub fn begin_job(&mut self) {
         self.steps = MAX_STEPS;
+        self.job_deadline = Instant::now() + MAX_JOB_TIME;
         self.copy_bytes = MAX_COPY_BYTES;
         self.regexp_work = MAX_REGEXP_WORK;
+        self.job_allowance = (MAX_STEPS, MAX_COPY_BYTES, MAX_REGEXP_WORK);
+    }
+
+    pub fn constrain_job(&mut self, steps: usize, copies: usize, regexp: usize, deadline: Instant) {
+        self.steps = self.steps.min(steps);
+        self.copy_bytes = self.copy_bytes.min(copies);
+        self.regexp_work = self.regexp_work.min(regexp);
+        self.job_deadline = self.job_deadline.min(deadline);
+        self.job_allowance = (self.steps, self.copy_bytes, self.regexp_work);
+    }
+
+    pub fn job_usage(&self) -> (usize, usize, usize) {
+        (
+            self.job_allowance.0 - self.steps,
+            self.job_allowance.1 - self.copy_bytes,
+            self.job_allowance.2 - self.regexp_work,
+        )
     }
 
     pub fn define_global(&mut self, name: &str, value: Value) -> Result<(), String> {
@@ -2906,7 +3284,7 @@ impl Runtime {
     pub fn compile_handler(&mut self, source: &str) -> Result<Value, String> {
         let result = (|| {
             if source.len() > MAX_SOURCE_BYTES {
-                return Err(Fault::new("Script source limit reached (128 KiB)."));
+                return Err(Fault::new("Script source limit reached (512 KiB)."));
             }
             let wrapped = format!("(function(event) {{\n{source}\n}})");
             let program = self.register_program(&wrapped, true)?;
@@ -2948,7 +3326,7 @@ impl Runtime {
             || self.retained_source.saturating_add(source.len()) > MAX_RETAINED_SOURCE
         {
             return Err(Fault::new(
-                "Retained script limit reached (128 scripts / 1 MiB source).",
+                "Retained script limit reached (128 scripts / 2 MiB source).",
             ));
         }
         self.work(source.len())?;
@@ -2987,7 +3365,7 @@ impl Runtime {
             .sum::<usize>();
         let nodes = program.exprs.len() + program.stmts.len();
         if self.retained_ast.saturating_add(nodes) > MAX_RETAINED_AST {
-            return Err(Fault::new("Retained AST limit reached (131072 nodes)."));
+            return Err(Fault::new("Retained AST limit reached (262144 nodes)."));
         }
         self.retain_regexp(regexp_bytes)?;
         self.retained_source += source.len();
@@ -3008,7 +3386,13 @@ impl Runtime {
     }
     fn step(&mut self) -> Result<(), Fault> {
         if self.steps == 0 {
-            return Err(Fault::new("Execution step limit reached (50000 per job)."));
+            return Err(Fault::new("Execution step limit reached (250000 per job)."));
+        }
+        if self.steps & 255 == 0 && Instant::now() >= self.job_deadline {
+            self.steps = 0;
+            return Err(Fault::new(
+                "Execution time limit reached (1 second per job).",
+            ));
         }
         self.steps -= 1;
         Ok(())
@@ -3151,7 +3535,12 @@ impl Runtime {
         } else if self.global_binding(name) {
             self.binding_value(0, name)
         } else {
-            self.get_property(properties, name)
+            self.get_ordinary_property_with_receiver(
+                Ordinary::Object(properties),
+                name,
+                Value::Host(handle),
+                host,
+            )
         }
     }
 
@@ -3159,12 +3548,19 @@ impl Runtime {
         let (handle, properties) = self.browser_global.expect("bound browser global");
         self.property_name(&name)?;
         if host.owns_global_property(&name) {
-            let value = self.checked_value(value)?;
-            host.set(handle, &name, value).map_err(Fault::new)
+            // Native globals such as Window.location need the same checked
+            // conversions and validation as member assignments on other hosts.
+            self.host_write(handle, name, value, host)
         } else if self.global_binding(&name) {
             self.store_binding(0, &name, value, false)
         } else {
-            self.set_property(properties, name, value)
+            self.assign_ordinary_property_with_receiver(
+                Ordinary::Object(properties),
+                name,
+                value,
+                Value::Host(handle),
+                host,
+            )
         }
     }
 
@@ -3402,6 +3798,35 @@ impl Runtime {
                 )));
             }
         }
+        if variable_environment == 0 {
+            if let Some((_, properties)) = self.browser_global {
+                // Global bindings and Window expandos have separate storage in
+                // this subset. Migrating an accessor would invoke its getter
+                // and discard its descriptor. Reject the complete declaration
+                // set before any binding, function or host side effect instead.
+                let function_names =
+                    body.iter()
+                        .filter_map(|&statement| match &program.stmts[statement].kind {
+                            StmtKind::Function(name, _) => Some(name),
+                            _ => None,
+                        });
+                for name in variable_names.iter().chain(function_names) {
+                    self.step()?;
+                    if self
+                        .object(properties)?
+                        .properties
+                        .get(name)
+                        .is_some_and(|property| {
+                            property.accessor.is_some() || property.getter.is_some()
+                        })
+                    {
+                        return Err(Fault::new(format!(
+                            "Global var/function declarations over accessor property {name:?} are not implemented."
+                        )));
+                    }
+                }
+            }
+        }
         for name in variable_names {
             self.step()?;
             if !self
@@ -3412,7 +3837,7 @@ impl Runtime {
                 let value = if variable_environment == 0 {
                     if let Some((_, properties)) = self.browser_global {
                         if self.object(properties)?.properties.contains_key(&name) {
-                            let value = self.get_property(properties, &name)?;
+                            let value = self.get_property_with_host(properties, &name, host)?;
                             self.remove_property(properties, &name)?;
                             value
                         } else {
@@ -3583,7 +4008,7 @@ impl Runtime {
         } else {
             pattern.primitive()?;
             self.work(pattern.bytes())?;
-            pattern.to_text()
+            pattern.script_text()?
         };
         let flags = if matches!(flags, Value::Undefined) {
             existing
@@ -3592,7 +4017,7 @@ impl Runtime {
         } else {
             flags.primitive()?;
             self.work(flags.bytes())?;
-            flags.to_text()
+            flags.script_text()?
         };
         self.work(pattern.len().saturating_add(flags.len()))?;
         let expression = Rc::new(
@@ -3612,7 +4037,7 @@ impl Runtime {
         let index = self.get_property(id, "lastIndex")?;
         index.primitive()?;
         self.work(index.bytes())?;
-        let number = index.to_number();
+        let number = index.script_number()?;
         let stateful = expression.flags.global || expression.flags.sticky;
         let start = if stateful && !number.is_nan() && number > 0.0 {
             number.trunc() as usize
@@ -3680,7 +4105,7 @@ impl Runtime {
         let value = args.first().unwrap_or(&Value::Undefined);
         value.primitive()?;
         self.work(value.bytes().saturating_mul(3))?;
-        let text = value.to_text();
+        let text = value.script_text()?;
         let input: Vec<_> = text.encode_utf16().collect();
         let found = self.regexp_run(id, &input)?;
         if method == "test" {
@@ -3698,6 +4123,7 @@ impl Runtime {
         text: &str,
         method: &str,
         args: &[Value],
+        host: &mut dyn Host,
     ) -> Result<Value, Fault> {
         self.work(text.len().saturating_mul(3))?;
         let pattern = args.first().unwrap_or(&Value::Undefined);
@@ -3711,6 +4137,7 @@ impl Runtime {
                 pattern,
                 regex_id,
                 args.get(1).unwrap_or(&Value::Undefined),
+                host,
             );
         }
         let id = if let Some(id) = regex_id {
@@ -3778,7 +4205,7 @@ impl Runtime {
         let limit = if matches!(limit_value, Value::Undefined) {
             u32::MAX as usize
         } else {
-            int32(limit_value.to_number()) as u32 as usize
+            int32(limit_value.script_number()?) as u32 as usize
         };
         let mut pieces = Vec::new();
         if limit == 0 {
@@ -3835,7 +4262,7 @@ impl Runtime {
             self.push_split(&mut pieces, value, limit)?;
         } else {
             self.work(separator.bytes())?;
-            let separator = separator.to_text();
+            let separator = separator.script_text()?;
             if separator.is_empty() {
                 for unit in input {
                     let value = Value::String(self.units_string(&[unit])?);
@@ -3925,82 +4352,6 @@ impl Runtime {
         Ok(output)
     }
 
-    fn string_replace(
-        &mut self,
-        text: &str,
-        pattern: &Value,
-        regex: Option<usize>,
-        replacement: &Value,
-    ) -> Result<Value, Fault> {
-        if matches!(replacement, Value::Function(_)) {
-            return Err(Fault::new("Function replacers are not implemented yet."));
-        }
-        replacement.primitive()?;
-        self.work(replacement.bytes())?;
-        let replacement = replacement.to_text();
-        let input: Vec<_> = text.encode_utf16().collect();
-        let global = if let Some(id) = regex {
-            self.object(id)?.regexp.as_ref().unwrap().flags.global
-        } else {
-            false
-        };
-        if global {
-            self.set_property_throw(regex.unwrap(), "lastIndex".into(), Value::Number(0.0))?;
-        }
-        let literal = if regex.is_none() {
-            pattern.primitive()?;
-            self.work(pattern.bytes())?;
-            Some(pattern.to_text().encode_utf16().collect::<Vec<_>>())
-        } else {
-            None
-        };
-        let mut cursor = 0;
-        let mut output = String::new();
-        loop {
-            let found = if let Some(id) = regex {
-                self.regexp_run(id, &input)?
-            } else {
-                let needle = literal.as_ref().unwrap();
-                let mut position = None;
-                if needle.is_empty() {
-                    position = Some(0);
-                } else if needle.len() <= input.len() {
-                    for (at, part) in input.windows(needle.len()).enumerate() {
-                        self.work(needle.len().saturating_mul(2))?;
-                        if part == needle {
-                            position = Some(at);
-                            break;
-                        }
-                    }
-                }
-                position.map(|start| regexp::Match {
-                    captures: vec![Some((start, start + needle.len()))],
-                })
-            };
-            let Some(found) = found else {
-                break;
-            };
-            let prefix = self.units_string(&input[cursor..found.start()])?;
-            self.append_string(&mut output, &prefix)?;
-            let replace = self.replacement_text(&replacement, &found, &input)?;
-            self.append_string(&mut output, &replace)?;
-            cursor = found.end();
-            if !global {
-                break;
-            }
-            if found.start() == found.end() {
-                self.set_property_throw(
-                    regex.unwrap(),
-                    "lastIndex".into(),
-                    Value::Number((found.end() + 1) as f64),
-                )?;
-            }
-        }
-        let suffix = self.units_string(&input[cursor..])?;
-        self.append_string(&mut output, &suffix)?;
-        self.checked_value(Value::String(output))
-    }
-
     fn error_object(
         &mut self,
         kind: &'static str,
@@ -4011,8 +4362,17 @@ impl Runtime {
         self.objects[id].prototype = self
             .error_prototypes
             .get(kind)
+            .or_else(|| self.error_prototypes.get("Error"))
             .copied()
             .map(Ordinary::Object);
+        if !self.error_prototypes.contains_key(kind) {
+            self.store_property(
+                id,
+                "name".into(),
+                Value::String(kind.into()),
+                Some((false, true, true)),
+            )?;
+        }
         if let Some(message) = message {
             self.set_property_throw(id, "message".into(), Value::String(message))?;
             self.objects[id]
@@ -4024,20 +4384,21 @@ impl Runtime {
         Ok(Value::Object(id))
     }
 
-    fn error_text(&mut self, id: usize) -> Result<Value, Fault> {
-        let name = self.get_property(id, "name")?;
-        let message = self.get_property(id, "message")?;
-        name.primitive()?;
-        message.primitive()?;
+    fn error_text(&mut self, id: usize, host: &mut dyn Host) -> Result<Value, Fault> {
+        let name = self.get_property_with_host(id, "name", host)?;
         let name = if matches!(name, Value::Undefined) {
             "Error".into()
         } else {
-            name.to_text()
+            self.primitive_with_hint(name, true, host)?.script_text()?
         };
+        // Name conversion can mutate message or throw. Observe that before
+        // reading the message, as Error.prototype.toString requires.
+        let message = self.get_property_with_host(id, "message", host)?;
         let message = if matches!(message, Value::Undefined) {
             String::new()
         } else {
-            message.to_text()
+            self.primitive_with_hint(message, true, host)?
+                .script_text()?
         };
         self.work(name.len().saturating_add(message.len()))?;
         let text = if name.is_empty() {
@@ -4074,6 +4435,7 @@ impl Runtime {
             iterator: None,
             text: None,
             properties: BTreeMap::new(),
+            symbol_properties: BTreeMap::new(),
             length,
             length_writable: true,
             extensible: true,
@@ -4096,7 +4458,50 @@ impl Runtime {
         self.get_ordinary_property(Ordinary::Object(id), name)
     }
 
+    fn get_property_with_host(
+        &mut self,
+        id: usize,
+        name: &str,
+        host: &mut dyn Host,
+    ) -> Result<Value, Fault> {
+        self.step()?;
+        self.get_ordinary_property_with_host(Ordinary::Object(id), name, host)
+    }
+
+    /// Accessor callbacks, including borrowed native functions, share the
+    /// active job and call-depth budget. The guard also bounds native-method
+    /// getter cycles which do not themselves enter a script function frame.
+    fn call_accessor(
+        &mut self,
+        callback: Option<usize>,
+        receiver: Value,
+        args: &[Value],
+        host: &mut dyn Host,
+    ) -> Result<Value, Fault> {
+        self.step()?;
+        let Some(callback) = callback else {
+            return Ok(Value::Undefined);
+        };
+        if self.call_depth >= MAX_CALL_DEPTH {
+            return Err(Fault::new("Accessor call limit reached (32)."));
+        }
+        self.call_depth += 1;
+        let result = self.call_value(Value::Function(callback), args, receiver, host);
+        self.call_depth -= 1;
+        result
+    }
+
     fn own_property(&mut self, id: usize, name: &str) -> Result<Value, Fault> {
+        if self
+            .object(id)?
+            .properties
+            .get(name)
+            .is_some_and(|property| property.accessor.is_some())
+        {
+            return Err(Fault::new(
+                "An accessor read requires an execution context.",
+            ));
+        }
         if let Some((environment, binding)) = self.mapped_argument(id, name) {
             return self.binding_value(environment, &binding);
         }
@@ -4147,10 +4552,11 @@ impl Runtime {
         self.work(name.len())
     }
 
-    /// The OrdinaryToPrimitive path used by property keys and numeric APIs. There
-    /// is no native Symbol value/@@toPrimitive in this subset. A script's
-    /// Symbol-like object therefore uses its ordinary toString/valueOf methods.
-    /// Native host values are never implicitly inspected or invoked here.
+    /// OrdinaryToPrimitive for operators, property keys and supported APIs.
+    /// Symbol primitives are preserved; @@toPrimitive hooks and primitive
+    /// wrappers remain outside the supported subset.
+    /// Native handles require an explicit host opt-in; no new capability follows
+    /// from being stored in an ordinary object or returned by a callback.
     fn primitive_with_hint(
         &mut self,
         value: Value,
@@ -4158,16 +4564,35 @@ impl Runtime {
         host: &mut dyn Host,
     ) -> Result<Value, Fault> {
         self.step()?;
-        let Some(object) = Ordinary::from_value(&value) else {
-            if matches!(value, Value::Host(_)) {
+        if let Value::Host(object) = value {
+            if !host.primitive_conversion(object) {
                 return Err(Fault::new(if string_hint {
                     "Native host object property-key conversion is not implemented."
                 } else {
                     "Implicit native host object conversion is not implemented."
                 }));
             }
+        } else if Ordinary::from_value(&value).is_none() {
             return Ok(value);
-        };
+        }
+        // Native methods may themselves perform conversion (for example an
+        // Error whose name is another Error). Share the existing call-depth cap
+        // so such cycles cannot bypass the script-call or native-stack limits.
+        if self.call_depth >= MAX_CALL_DEPTH {
+            return Err(Fault::new("Object conversion call limit reached (32)."));
+        }
+        self.call_depth += 1;
+        let result = self.primitive_methods(value, string_hint, host);
+        self.call_depth -= 1;
+        result
+    }
+
+    fn primitive_methods(
+        &mut self,
+        value: Value,
+        string_hint: bool,
+        host: &mut dyn Host,
+    ) -> Result<Value, Fault> {
         let methods = if string_hint {
             ["toString", "valueOf"]
         } else {
@@ -4176,9 +4601,17 @@ impl Runtime {
         for name in methods {
             // Do not cache both methods. The first callback may replace the
             // second method, alter the prototype, or throw an arbitrary value.
-            let method = self.get_ordinary_property(object, name)?;
+            let method = if let Value::Host(object) = value {
+                self.host_read(object, name, host)?
+            } else {
+                self.get_ordinary_property_with_host(
+                    Ordinary::from_value(&value).unwrap(),
+                    name,
+                    host,
+                )?
+            };
             if matches!(method, Value::Function(_)) {
-                let primitive = self.call_value(method, &[], object.value(), host)?;
+                let primitive = self.call_value(method, &[], value.clone(), host)?;
                 if !matches!(
                     primitive,
                     Value::Object(_) | Value::Function(_) | Value::Host(_)
@@ -4193,16 +4626,20 @@ impl Runtime {
         ))
     }
 
-    fn property_key(&mut self, value: Value, host: &mut dyn Host) -> Result<String, Fault> {
+    fn property_key(&mut self, value: Value, host: &mut dyn Host) -> Result<PropertyKey, Fault> {
         let primitive = self.primitive_with_hint(value, true, host)?;
+        if let Value::Symbol(id) = primitive {
+            self.symbol(id)?;
+            return Ok(PropertyKey::Symbol(id));
+        }
         self.work(primitive.bytes())?;
         let key = if let Value::String(text) = primitive {
             text
         } else {
-            primitive.to_text()
+            primitive.script_text()?
         };
         self.property_name(&key)?;
-        Ok(key)
+        Ok(PropertyKey::String(key))
     }
 
     fn require_property_receiver(value: &Value) -> Result<(), Fault> {
@@ -4233,6 +4670,33 @@ impl Runtime {
         name: String,
         value: Value,
         attributes: Option<(bool, bool, bool)>,
+    ) -> Result<(), Fault> {
+        self.store_property_kind(id, name, value, attributes, None)
+    }
+
+    fn store_accessor_property(
+        &mut self,
+        id: usize,
+        name: String,
+        accessor: Accessors,
+        attributes: (bool, bool),
+    ) -> Result<(), Fault> {
+        self.store_property_kind(
+            id,
+            name,
+            Value::Undefined,
+            Some((attributes.0, false, attributes.1)),
+            Some(accessor),
+        )
+    }
+
+    fn store_property_kind(
+        &mut self,
+        id: usize,
+        name: String,
+        value: Value,
+        attributes: Option<(bool, bool, bool)>,
+        accessor: Option<Accessors>,
     ) -> Result<(), Fault> {
         self.step()?;
         self.property_name(&name)?;
@@ -4279,7 +4743,7 @@ impl Runtime {
             }
             value.primitive()?;
             self.work(value.bytes())?;
-            let length = value.to_number();
+            let length = value.script_number()?;
             if !length.is_finite() || length < 0.0 || length.fract() != 0.0 {
                 return Err(Fault::exception("RangeError", "Invalid array length."));
             }
@@ -4316,7 +4780,7 @@ impl Runtime {
         let old_bytes = previous.map_or(0, |property| property.value.bytes());
         let is_new = previous.is_none();
         if is_new
-            && (object.properties.len() >= MAX_OBJECT_PROPERTIES
+            && (object.properties.len() + object.symbol_properties.len() >= MAX_OBJECT_PROPERTIES
                 || self.properties >= MAX_PROPERTIES)
         {
             return Err(Fault::new(
@@ -4348,11 +4812,13 @@ impl Runtime {
         }
         self.work(new_bytes)?;
         if let Some((environment, binding)) = self.mapped_argument(id, &name) {
-            let parameter = self.copy_value(&value)?;
-            self.store_binding(environment, &binding, parameter, false)?;
+            if accessor.is_none() {
+                let parameter = self.copy_value(&value)?;
+                self.store_binding(environment, &binding, parameter, false)?;
+            }
             // The parameter write has its own retained-value accounting.
             // Recalculate the property total after that write.
-            if !writable {
+            if !writable || accessor.is_some() {
                 self.objects[id]
                     .arguments
                     .as_mut()
@@ -4372,6 +4838,7 @@ impl Runtime {
             Property {
                 value,
                 getter: None,
+                accessor,
                 order,
                 enumerable,
                 writable,
@@ -4458,6 +4925,13 @@ impl Runtime {
     }
 
     fn enumerable_keys(&mut self, id: usize) -> Result<Vec<String>, Fault> {
+        self.own_string_keys(id, true)
+    }
+
+    // Snapshot stored string keys and integer-indexed entries. Fixed,
+    // nonenumerable virtual properties (array length / RegExp metadata) cannot
+    // become enumerable and need no slot in assign/defineProperties snapshots.
+    fn own_string_keys(&mut self, id: usize, enumerable_only: bool) -> Result<Vec<String>, Fault> {
         let object = self.object(id)?;
         let typed_length = self.typed_view(id).map_or(0, |view| view.length);
         if typed_length.saturating_add(object.properties.len()) > MAX_OBJECT_PROPERTIES {
@@ -4475,7 +4949,7 @@ impl Runtime {
         let mut keys: Vec<_> = self.objects[id]
             .properties
             .iter()
-            .filter(|(_, property)| property.enumerable)
+            .filter(|(_, property)| !enumerable_only || property.enumerable)
             .map(|(name, property)| (name.clone(), property.order))
             .collect();
         for index in 0..typed_length {
@@ -4489,10 +4963,14 @@ impl Runtime {
         Ok(keys.into_iter().map(|(name, _)| name).collect())
     }
 
-    fn object_keys(&mut self, value: &Value) -> Result<Value, Fault> {
-        let object = self.ordinary_required(value)?;
-        let id = self.ordinary_id(object)?;
-        let keys = self.enumerable_keys(id)?;
+    fn object_keys(&mut self, value: &Value, host: &mut dyn Host) -> Result<Value, Fault> {
+        let keys = if let Value::Host(handle) = value {
+            self.host_keys(*handle, false, host)?
+        } else {
+            let object = self.ordinary_required(value)?;
+            let id = self.ordinary_id(object)?;
+            self.enumerable_keys(id)?
+        };
         let result = self.new_object(Some(keys.len()))?;
         for (index, name) in keys.into_iter().enumerate() {
             self.set_property(result, index.to_string(), Value::String(name))?;
@@ -4500,7 +4978,7 @@ impl Runtime {
         Ok(Value::Object(result))
     }
 
-    fn for_in_keys(&mut self, value: &Value) -> Result<Vec<String>, Fault> {
+    fn for_in_keys(&mut self, value: &Value, host: &mut dyn Host) -> Result<Vec<String>, Fault> {
         match value {
             Value::Object(id) => self.inherited_keys(Ordinary::Object(*id)),
             Value::Function(id) => self.inherited_keys(Ordinary::Function(*id)),
@@ -4513,10 +4991,12 @@ impl Runtime {
                 self.work(length.saturating_mul(8))?;
                 Ok((0..length).map(|index| index.to_string()).collect())
             }
-            Value::Host(_) => Err(Fault::new(
-                "Enumerating host-object properties is not implemented.",
-            )),
-            Value::Undefined | Value::Null | Value::Bool(_) | Value::Number(_) => Ok(Vec::new()),
+            Value::Host(handle) => self.host_keys(*handle, true, host),
+            Value::Undefined
+            | Value::Null
+            | Value::Bool(_)
+            | Value::Number(_)
+            | Value::Symbol(_) => Ok(Vec::new()),
         }
     }
 
@@ -4539,13 +5019,27 @@ impl Runtime {
             ));
         }
         let name = self.property_key(key, host)?;
+        let PropertyKey::String(name) = name else {
+            let PropertyKey::Symbol(key) = name else {
+                unreachable!()
+            };
+            return Ok(Value::Bool(
+                if let Some(backing) = self.symbol_backing(&object)? {
+                    self.symbol_property_owner(backing, key)?.is_some()
+                } else {
+                    false
+                },
+            ));
+        };
         let present = match object {
             Value::Object(id) => self.property_owner(Ordinary::Object(id), &name)?.is_some(),
             Value::Function(id) => self
                 .property_owner(Ordinary::Function(id), &name)?
                 .is_some(),
             Value::Host(handle) => {
-                if self.is_browser_global(handle) && !host.owns_global_property(&name) {
+                if let Some(object) = self.host_ordinary(handle, &name, host) {
+                    self.property_owner(object, &name)?.is_some()
+                } else if self.is_browser_global(handle) && !host.owns_global_property(&name) {
                     let (_, properties) = self.browser_global.unwrap();
                     if self.global_binding(&name)
                         || self.object(properties)?.properties.contains_key(&name)
@@ -4556,6 +5050,13 @@ impl Runtime {
                     }
                 } else {
                     host.has(handle, &name).map_err(Fault::new)?
+                        || host.ordinary_prototype(handle)
+                            && self
+                                .property_owner(
+                                    Ordinary::Object(self.object_prototype.unwrap()),
+                                    &name,
+                                )?
+                                .is_some()
                 }
             }
             _ => unreachable!(),
@@ -4563,7 +5064,7 @@ impl Runtime {
         Ok(Value::Bool(present))
     }
 
-    fn apply_arguments(&mut self, value: &Value) -> Result<Vec<Value>, Fault> {
+    fn apply_arguments(&mut self, value: &Value, host: &mut dyn Host) -> Result<Vec<Value>, Fault> {
         if matches!(value, Value::Null | Value::Undefined) {
             return Ok(Vec::new());
         }
@@ -4572,21 +5073,21 @@ impl Runtime {
                 "Function.apply requires an ordinary array or array-like object.",
             ));
         };
-        let length = self.get_property(*id, "length")?;
+        let length = self.get_property_with_host(*id, "length", host)?;
         length.primitive()?;
         self.work(length.bytes())?;
-        let numeric = length.to_number();
+        let numeric = length.script_number()?;
         let length = if numeric.is_nan() || numeric <= 0.0 {
             0
         } else {
             if numeric.trunc() > MAX_ARGUMENTS as f64 {
-                return Err(Fault::new("Call argument limit reached (32)."));
+                return Err(Fault::new("Call argument limit reached (256)."));
             }
             numeric.trunc() as usize
         };
         let mut result = Vec::with_capacity(length);
         for index in 0..length {
-            result.push(self.get_property(*id, &index.to_string())?);
+            result.push(self.get_property_with_host(*id, &index.to_string(), host)?);
         }
         Ok(result)
     }
@@ -4596,6 +5097,7 @@ impl Runtime {
         id: usize,
         separator: &str,
         path: &mut Vec<usize>,
+        host: &mut dyn Host,
     ) -> Result<String, Fault> {
         self.step()?;
         if path.contains(&id) {
@@ -4649,12 +5151,12 @@ impl Runtime {
                 if index != 0 {
                     self.append_string(&mut output, separator)?;
                 }
-                let value = self.get_property(id, &index.to_string())?;
+                let value = self.get_property_with_host(id, &index.to_string(), host)?;
                 let text = match value {
                     Value::Undefined | Value::Null => String::new(),
                     Value::Object(child) => {
-                        let to_string = self.get_property(child, "toString")?;
-                        let value_of = self.get_property(child, "valueOf")?;
+                        let to_string = self.get_property_with_host(child, "toString", host)?;
+                        let value_of = self.get_property_with_host(child, "valueOf", host)?;
                         let array = self.object(child)?.length.is_some();
                         let standard_to_string = matches!(to_string, Value::Function(function) if match self.functions.get(function) {
                             Some(Function::Native(Builtin::ArrayMethod("toString"))) => array,
@@ -4663,7 +5165,7 @@ impl Runtime {
                         });
                         let standard_value_of = matches!(value_of, Value::Function(function) if matches!(self.functions.get(function), Some(Function::Native(Builtin::ObjectMethod("valueOf")))));
                         let standard_join = if array {
-                            let join = self.get_property(child, "join")?;
+                            let join = self.get_property_with_host(child, "join", host)?;
                             matches!(join, Value::Function(function) if matches!(self.functions.get(function), Some(Function::Native(Builtin::ArrayMethod("join")))))
                         } else {
                             true
@@ -4674,7 +5176,7 @@ impl Runtime {
                             ));
                         }
                         if array {
-                            self.array_join(child, ",", path)?
+                            self.array_join(child, ",", path, host)?
                         } else {
                             "[object Object]".into()
                         }
@@ -4684,7 +5186,7 @@ impl Runtime {
                             "Array join cannot implicitly convert host objects or functions.",
                         ))
                     }
-                    value => value.to_text(),
+                    value => value.script_text()?,
                 };
                 self.append_string(&mut output, &text)?;
             }
@@ -4755,7 +5257,7 @@ impl Runtime {
                     Value::Undefined
                 } else {
                     let key = (length - 1).to_string();
-                    let value = self.get_property(id, &key)?;
+                    let value = self.get_property_with_host(id, &key, host)?;
                     if self.objects[id]
                         .properties
                         .get(&key)
@@ -4783,10 +5285,10 @@ impl Runtime {
                     ",".into()
                 } else {
                     let value = self.copy_value(&args[0])?;
-                    self.primitive_with_hint(value, true, host)?.to_text()
+                    self.primitive_with_hint(value, true, host)?.script_text()?
                 };
                 let text = if self.objects[id].length.is_some() {
-                    self.array_join(id, &separator, &mut Vec::new())?
+                    self.array_join(id, &separator, &mut Vec::new(), host)?
                 } else {
                     self.array_like_join(id, length, &separator, host)?
                 };
@@ -4810,7 +5312,7 @@ impl Runtime {
                     {
                         continue;
                     }
-                    let value = self.get_property(id, &key)?;
+                    let value = self.get_property_with_host(id, &key, host)?;
                     self.work(value.bytes().saturating_add(needle.bytes()))?;
                     let matches = strict_equal(&value, needle)
                         || (method == "includes"
@@ -4837,7 +5339,7 @@ impl Runtime {
                     self.step()?;
                     let key = index.to_string();
                     if self.property_owner(Ordinary::Object(id), &key)?.is_some() {
-                        let value = self.get_property(id, &key)?;
+                        let value = self.get_property_with_host(id, &key, host)?;
                         self.set_property(result, (index - start).to_string(), value)?;
                     }
                 }
@@ -4927,16 +5429,7 @@ impl Runtime {
                 self.statements(program, body, scope, this, host)
             }
             StmtKind::Declare(_, _) => self.declaration_statement(program, id, env, this, host),
-            StmtKind::If(condition, yes, no) => {
-                let completion = if self.eval(program, *condition, env, this, host)?.truthy() {
-                    self.statement(program, *yes, env, this, host)
-                } else if let Some(no) = no {
-                    self.statement(program, *no, env, this, host)
-                } else {
-                    Ok(Control::Normal(Some(Value::Undefined)))
-                };
-                completion.map(|control| control.update_empty(Some(Value::Undefined)))
-            }
+            StmtKind::If(_, _, _) => self.if_statement(program, id, env, this, host),
             StmtKind::While(_, _) | StmtKind::DoWhile(_, _) => {
                 self.while_statement(program, id, env, this, host)
             }
@@ -4957,6 +5450,64 @@ impl Runtime {
             })),
             StmtKind::Break(target) => Ok(Control::Break(*target, None)),
             StmtKind::Continue(target) => Ok(Control::Continue(*target, None)),
+        }
+    }
+
+    fn if_statement(
+        &mut self,
+        program: &Rc<Program>,
+        id: StmtId,
+        env: usize,
+        this: &Value,
+        host: &mut dyn Host,
+    ) -> Result<Control, Fault> {
+        let mut current = id;
+        let mut ancestors = Vec::new();
+        loop {
+            let at = program.stmts[current].at;
+            let StmtKind::If(condition, yes, no) = &program.stmts[current].kind else {
+                unreachable!("only if statements enter a flat false-branch tail")
+            };
+            let selected = self
+                .eval(program, *condition, env, this, host)
+                .map_err(|error| error.at(&program.source, at))?
+                .truthy();
+            if !selected {
+                if let Some(next) = no {
+                    if matches!(program.stmts[*next].kind, StmtKind::If(_, _, _)) {
+                        // The parser's shared branch cap also bounds this path.
+                        // Each visited if keeps its execution and copy charges;
+                        // only native-stack growth is removed.
+                        self.work(std::mem::size_of::<StmtId>())
+                            .map_err(|error| error.at(&program.source, at))?;
+                        ancestors.push(current);
+                        current = *next;
+                        self.step().map_err(|error| {
+                            error.at(&program.source, program.stmts[current].at)
+                        })?;
+                        continue;
+                    }
+                }
+            }
+            let branch = if selected { Some(*yes) } else { *no };
+            let completion = if let Some(branch) = branch {
+                self.statement(program, branch, env, this, host)
+            } else {
+                Ok(Control::Normal(None))
+            };
+            return completion
+                .map(|control| control.update_empty(Some(Value::Undefined)))
+                .map(|control| match control {
+                    // A labelled else-if can be represented by the same AST
+                    // shape. Retain every visited target when unwinding once.
+                    Control::Break(target, value)
+                        if target == current || ancestors.contains(&target) =>
+                    {
+                        Control::Normal(value)
+                    }
+                    other => other,
+                })
+                .map_err(|error| error.at(&program.source, at));
         }
     }
 
@@ -5188,7 +5739,7 @@ impl Runtime {
             env
         };
         let source = self.eval(program, *source, right_env, this, host)?;
-        let mut iterator = self.loop_iterator(source, of)?;
+        let mut iterator = self.loop_iterator(source, of, host)?;
         let mut last = Some(Value::Undefined);
         while let Some(key) = self.loop_next(&mut iterator, host)? {
             self.step()?;
@@ -5251,7 +5802,7 @@ impl Runtime {
             return Ok(None);
         }
         let source = self.copy_value(source)?;
-        let mut iterator = self.loop_iterator(source, true)?;
+        let mut iterator = self.loop_iterator(source, true, host)?;
         let mut values = Vec::new();
         while let Some(value) = self.loop_next(&mut iterator, host)? {
             self.work(8usize.saturating_add(value.bytes()))?;
@@ -5260,9 +5811,14 @@ impl Runtime {
         Ok(Some(values))
     }
 
-    fn loop_iterator(&mut self, source: Value, of: bool) -> Result<LoopIterator, Fault> {
+    fn loop_iterator(
+        &mut self,
+        source: Value,
+        of: bool,
+        host: &mut dyn Host,
+    ) -> Result<LoopIterator, Fault> {
         if !of {
-            let keys = self.for_in_keys(&source)?;
+            let keys = self.for_in_keys(&source, host)?;
             return Ok(LoopIterator::Keys(source, keys.into_iter()));
         }
         match source {
@@ -5312,6 +5868,17 @@ impl Runtime {
                         if !self.own_enumerable(owner, &name)? {
                             continue;
                         }
+                    } else if let Value::Host(handle) = source {
+                        if let Some(object) = self.host_ordinary(*handle, &name, host) {
+                            let Some(owner) = self.property_owner(object, &name)? else {
+                                continue;
+                            };
+                            if !self.own_enumerable(owner, &name)? {
+                                continue;
+                            }
+                        } else if host.own_data(*handle, &name).map_err(Fault::new)?.is_none() {
+                            continue;
+                        }
                     }
                     return Ok(Some(Value::String(name)));
                 }
@@ -5324,7 +5891,7 @@ impl Runtime {
                 if *next >= length {
                     return Ok(None);
                 }
-                let value = self.get_property(*id, &next.to_string())?;
+                let value = self.get_property_with_host(*id, &next.to_string(), host)?;
                 *next += 1;
                 Ok(Some(value))
             }
@@ -5443,11 +6010,22 @@ impl Runtime {
     fn eval_inner(
         &mut self,
         program: &Rc<Program>,
-        id: ExprId,
+        mut id: ExprId,
         env: usize,
         this: &Value,
         host: &mut dyn Host,
     ) -> Result<Value, Fault> {
+        // Selecting a conditional arm is a tail operation. Charge every arm,
+        // but do not keep hundreds of native frames for a flat dispatcher.
+        while let ExprKind::Conditional(condition, yes, no) = &program.exprs[id].kind {
+            id = if self.eval(program, *condition, env, this, host)?.truthy() {
+                *yes
+            } else {
+                *no
+            };
+            self.step()
+                .map_err(|error| error.at(&program.source, program.exprs[id].at))?;
+        }
         match &program.exprs[id].kind {
             ExprKind::Literal(value) => self.copy_value(value),
             ExprKind::RegExp(expression) => self.regexp_object(expression.clone()),
@@ -5470,14 +6048,7 @@ impl Runtime {
                 self.eval(program, *first, env, this, host)?;
                 self.eval(program, *last, env, this, host)
             }
-            ExprKind::Conditional(condition, yes, no) => {
-                let selected = if self.eval(program, *condition, env, this, host)?.truthy() {
-                    yes
-                } else {
-                    no
-                };
-                self.eval(program, *selected, env, this, host)
-            }
+            ExprKind::Conditional(..) => unreachable!(),
             ExprKind::Assign(_, _, _) | ExprKind::Update(_, _, _) => {
                 self.eval_assignment(program, id, env, this, host)
             }
@@ -5488,6 +6059,7 @@ impl Runtime {
             ExprKind::Call(_, _) => self.eval_call(program, id, env, this, host),
             ExprKind::Construct(_, _) => self.eval_construct(program, id, env, this, host),
         }
+        .map_err(|error| error.at(&program.source, program.exprs[id].at))
     }
 
     fn eval_collection(
@@ -5505,7 +6077,12 @@ impl Runtime {
                     let key = self.eval(program, key, env, this, host)?;
                     let key = self.property_key(key, host)?;
                     let value = self.eval(program, value, env, this, host)?;
-                    self.set_property(object, key, value)?;
+                    match key {
+                        PropertyKey::String(name) => self.set_property(object, name, value)?,
+                        PropertyKey::Symbol(key) => {
+                            self.store_symbol_property(object, key, value, None)?
+                        }
+                    }
                 }
                 Ok(Value::Object(object))
             }
@@ -5562,13 +6139,14 @@ impl Runtime {
                             Value::Bool(_) => "boolean",
                             Value::Number(_) => "number",
                             Value::String(_) => "string",
+                            Value::Symbol(_) => "symbol",
                             Value::Function(_) => "function",
                         }
                         .into(),
                     )),
                     "+" | "-" | "~" => {
-                        value.primitive()?;
-                        let n = value.to_number();
+                        let value = self.primitive_with_hint(value, false, host)?;
+                        let n = value.script_number()?;
                         Ok(Value::Number(match *op {
                             "+" => n,
                             "-" => -n,
@@ -5602,9 +6180,9 @@ impl Runtime {
                 } else if *op == "in" {
                     self.has_property_value(left, right, host)
                 } else if *op == "instanceof" {
-                    self.instance_of(left, right)
+                    self.instance_of(left, right, host)
                 } else {
-                    self.binary_value(op, left, right)
+                    self.binary_value(op, left, right, host)
                 }
             }
             _ => unreachable!(),
@@ -5629,7 +6207,7 @@ impl Runtime {
                 };
                 let mut value = self.eval(program, *right, env, this, host)?;
                 if let Some(before) = before {
-                    value = self.binary_value(&op[..op.len() - 1], before, value)?;
+                    value = self.binary_value(&op[..op.len() - 1], before, value, host)?;
                 }
                 let result = self.copy_value(&value)?;
                 self.write_reference(reference, value, host)?;
@@ -5638,8 +6216,8 @@ impl Runtime {
             ExprKind::Update(target, increase, prefix) => {
                 let reference = self.reference(program, *target, env, this, host)?;
                 let previous = self.read_reference(&reference, host)?;
-                previous.primitive()?;
-                let before = previous.to_number();
+                let previous = self.primitive_with_hint(previous, false, host)?;
+                let before = previous.script_number()?;
                 let after = before + if *increase { 1.0 } else { -1.0 };
                 self.write_reference(reference, Value::Number(after), host)?;
                 Ok(Value::Number(if *prefix { after } else { before }))
@@ -5663,12 +6241,30 @@ impl Runtime {
                     let property = self.eval(program, *property, env, this, host)?;
                     Self::require_property_receiver(&object)?;
                     let property = self.property_key(property, host)?;
+                    let PropertyKey::String(property) = property else {
+                        let PropertyKey::Symbol(key) = property else {
+                            unreachable!()
+                        };
+                        let receiver = self.copy_value(&object)?;
+                        let function = self.get_symbol_property(receiver, key, host)?;
+                        let mut args = Vec::with_capacity(arguments.len());
+                        for &argument in arguments {
+                            args.push(self.eval(program, argument, env, this, host)?);
+                        }
+                        return self.call_value(function, &args, object, host);
+                    };
                     // Resolve an own or inherited method before arguments run.
                     // An argument may replace that property on the receiver.
                     let own_function = if let Some(ordinary) = Ordinary::from_value(&object) {
-                        Some(self.get_ordinary_property(ordinary, &property)?)
+                        Some(self.get_ordinary_property_with_host(ordinary, &property, host)?)
                     } else if let Value::Host(handle) = &object {
-                        if self.is_browser_global(*handle) && !host.owns_global_property(&property)
+                        if self.host_ordinary(*handle, &property, host).is_some()
+                            || host.ordinary_prototype(*handle)
+                            || host.resolve_member_before_call(*handle)
+                        {
+                            Some(self.host_read(*handle, &property, host)?)
+                        } else if self.is_browser_global(*handle)
+                            && !host.owns_global_property(&property)
                         {
                             Some(self.global_value(&property, host)?)
                         } else {
@@ -5684,7 +6280,7 @@ impl Runtime {
                         args.push(self.eval(program, argument, env, this, host)?);
                     }
                     if let Some(function) = own_function {
-                        self.call_value(function, &args, object, host)
+                        self.call_named_value(function, &args, object, &property, host)
                     } else {
                         self.call_member(object, &property, &args, host)
                     }
@@ -5746,6 +6342,10 @@ impl Runtime {
             ));
         };
         match self.functions.get(index) {
+            Some(Function::Bound(_)) => {
+                let (target, arguments, _) = self.bound_arguments(index, args, false)?;
+                return self.construct_value(Value::Function(target), &arguments, host);
+            }
             Some(Function::Native(Builtin::TextEncoding(text_encoding::Op::Constructor(
                 encoder,
             )))) => self.construct_text_encoding(*encoder, args, host),
@@ -5767,15 +6367,18 @@ impl Runtime {
             }
             Some(Function::Native(
                 builtin @ (Builtin::Object | Builtin::Array | Builtin::Error(_)),
-            )) => self.builtin(*builtin, args),
+            )) => self.builtin(*builtin, args, host),
             Some(Function::Native(Builtin::String | Builtin::Number | Builtin::Boolean)) => Err(
                 Fault::new("Primitive wrapper constructors are not implemented."),
             ),
             Some(Function::Script {
                 program, template, ..
             }) if program.templates[*template].constructible => {
-                let prototype =
-                    self.get_ordinary_property(Ordinary::Function(index), "prototype")?;
+                let prototype = self.get_ordinary_property_with_host(
+                    Ordinary::Function(index),
+                    "prototype",
+                    host,
+                )?;
                 if matches!(prototype, Value::Host(_)) {
                     return Err(Fault::new(
                         "Native host object prototypes are not implemented.",
@@ -5801,6 +6404,15 @@ impl Runtime {
             Some(Function::Native(Builtin::Function)) => Err(Fault::new(
                 "The dynamic Function constructor is not implemented.",
             )),
+            Some(Function::Host {
+                object,
+                method,
+                constructible: true,
+                ..
+            }) => {
+                let (object, method) = (*object, *method);
+                self.call_host(object, method, args, host)
+            }
             Some(Function::Host { .. }) => {
                 Err(Fault::new("Host constructors are not implemented."))
             }
@@ -5848,7 +6460,10 @@ impl Runtime {
                 let key = self.copy_value(key)?;
                 let key = self.property_key(key, host)?;
                 let object = self.copy_value(object)?;
-                self.read_reference(&Reference::Property(object, key), host)
+                self.read_reference(&key.reference(object), host)
+            }
+            Reference::SymbolProperty(object, key) => {
+                self.get_symbol_property(object.clone(), *key, host)
             }
             Reference::Binding(env, name) => self.read_binding(*env, name, host),
             Reference::Global(name) => self.global_value(name, host),
@@ -5860,14 +6475,13 @@ impl Runtime {
                 if self.is_browser_global(*object) {
                     return self.global_value(property, host);
                 }
-                let value = host.get(*object, property).map_err(Fault::new)?;
-                self.checked_value(value)
+                self.host_read(*object, property, host)
             }
             Reference::Property(Value::Object(object), property) => {
-                self.get_property(*object, property)
+                self.get_property_with_host(*object, property, host)
             }
             Reference::Property(Value::Function(function), property) => {
-                self.get_ordinary_property(Ordinary::Function(*function), property)
+                self.get_ordinary_property_with_host(Ordinary::Function(*function), property, host)
             }
             Reference::Property(Value::String(text), property) if property == "length" => {
                 self.work(text.len())?;
@@ -5883,17 +6497,41 @@ impl Runtime {
                     self.units_string(&units[index..index + 1])
                         .map(Value::String)
                 } else {
-                    self.get_property(self.string_prototype.unwrap(), property)
+                    self.work(text.len())?;
+                    let receiver = Value::String(text.clone());
+                    self.get_ordinary_property_with_receiver(
+                        Ordinary::Object(self.string_prototype.unwrap()),
+                        property,
+                        receiver,
+                        host,
+                    )
                 }
             }
-            Reference::Property(Value::String(_), property) => {
-                self.get_property(self.string_prototype.unwrap(), property)
+            Reference::Property(value @ Value::String(_), property) => {
+                let receiver = self.copy_value(value)?;
+                self.get_ordinary_property_with_receiver(
+                    Ordinary::Object(self.string_prototype.unwrap()),
+                    property,
+                    receiver,
+                    host,
+                )
             }
-            Reference::Property(Value::Number(_), property) => {
-                self.get_property(self.number_prototype.unwrap(), property)
-            }
-            Reference::Property(Value::Bool(_), property) => {
-                self.get_property(self.boolean_prototype.unwrap(), property)
+            Reference::Property(value @ Value::Number(_), property) => self
+                .get_ordinary_property_with_receiver(
+                    Ordinary::Object(self.number_prototype.unwrap()),
+                    property,
+                    value.clone(),
+                    host,
+                ),
+            Reference::Property(value @ Value::Bool(_), property) => self
+                .get_ordinary_property_with_receiver(
+                    Ordinary::Object(self.boolean_prototype.unwrap()),
+                    property,
+                    value.clone(),
+                    host,
+                ),
+            Reference::Property(Value::Symbol(id), property) => {
+                self.symbol_string_property(*id, property, host)
             }
             Reference::Property(_, _) => Ok(Value::Undefined),
         }
@@ -5910,8 +6548,9 @@ impl Runtime {
             Reference::ComputedProperty(object, key) => {
                 Self::require_property_receiver(&object)?;
                 let key = self.property_key(key, host)?;
-                self.write_reference(Reference::Property(object, key), value, host)
+                self.write_reference(key.reference(object), value, host)
             }
+            Reference::SymbolProperty(object, key) => self.assign_symbol_property(object, key, value, host),
             Reference::Binding(env, name) => self.write_binding(env, &name, value, false, host),
             Reference::Global(name) => self.set_global(name, value, host),
             Reference::Missing(name) => Err(Fault::new(format!(
@@ -5919,8 +6558,7 @@ impl Runtime {
             ))),
             Reference::Property(Value::Host(object), property) => {
                 if self.is_browser_global(object) { return self.set_global(property, value, host); }
-                let value = self.checked_value(value)?;
-                host.set(object, &property, value).map_err(Fault::new)
+                self.host_write(object, property, value, host)
             }
             Reference::Property(Value::Object(object), property) => self.assign_ordinary_property(Ordinary::Object(object), property, value, host),
             Reference::Property(Value::Function(function), property) => self.assign_ordinary_property(Ordinary::Function(function), property, value, host),
@@ -5939,10 +6577,28 @@ impl Runtime {
         if let Reference::ComputedProperty(object, key) = reference {
             Self::require_property_receiver(&object)?;
             let key = self.property_key(key, host)?;
-            return self.delete_reference(Reference::Property(object, key), host);
+            return self.delete_reference(key.reference(object), host);
         }
         let deleted = match reference {
             Reference::ComputedProperty(_, _) => unreachable!(),
+            Reference::SymbolProperty(object, key) => {
+                Self::require_property_receiver(&object)?;
+                if let Some(backing) = self.symbol_backing(&object)? {
+                    let id = self.ordinary_id(backing)?;
+                    if self.objects[id]
+                        .symbol_properties
+                        .get(&key)
+                        .is_some_and(|property| !property.configurable)
+                    {
+                        false
+                    } else {
+                        self.remove_symbol_property(id, key)?;
+                        true
+                    }
+                } else {
+                    true
+                }
+            }
             Reference::Missing(_) => true,
             Reference::Binding(0, name)
                 if self.browser_global.is_some() && self.global_attributes.contains_key(&name) =>
@@ -5953,6 +6609,12 @@ impl Runtime {
             Reference::Global(name) => self.delete_global(&name, host)?,
             Reference::Property(Value::Host(handle), name) if self.is_browser_global(handle) => {
                 self.delete_global(&name, host)?
+            }
+            Reference::Property(Value::Host(handle), name) => {
+                if let Some(object) = self.host_ordinary(handle, &name, host) {
+                    return self.delete_reference(Reference::Property(object.value(), name), host);
+                }
+                host.delete(handle, &name).map_err(Fault::new)?
             }
             Reference::Property(Value::Object(id), name) => {
                 self.property_name(&name)?;
@@ -5994,7 +6656,7 @@ impl Runtime {
                     .filter(|index| index.to_string() == name);
                 name != "length" && !index.is_some_and(|index| index < text.encode_utf16().count())
             }
-            Reference::Property(Value::Number(_) | Value::Bool(_), _) => true,
+            Reference::Property(Value::Number(_) | Value::Bool(_) | Value::Symbol(_), _) => true,
             Reference::Property(_, _) => {
                 return Err(Fault::new(
                     "Deleting native host properties is not implemented.",
@@ -6042,21 +6704,47 @@ impl Runtime {
         Ok(true)
     }
 
-    fn instance_of(&mut self, value: Value, constructor: Value) -> Result<Value, Fault> {
+    fn instance_of(
+        &mut self,
+        value: Value,
+        constructor: Value,
+        host: &mut dyn Host,
+    ) -> Result<Value, Fault> {
         self.step()?;
-        let Value::Function(id) = constructor else {
+        let Value::Function(mut id) = constructor else {
             return Err(Fault::exception(
                 "TypeError",
                 "The right side of instanceof must be callable.",
             ));
         };
+        // Bound functions delegate instanceof to their original target. Walk
+        // the arena links without adding native stack frames for each binding.
+        while let Some(Function::Bound(bound)) = self.functions.get(id) {
+            id = bound.target;
+            self.step()?;
+        }
         if !matches!(
             value,
             Value::Object(_) | Value::Function(_) | Value::Host(_)
         ) {
             return Ok(Value::Bool(false));
         }
-        let prototype = self.get_ordinary_property(Ordinary::Function(id), "prototype")?;
+        if let (
+            Value::Host(handle),
+            Some(Function::Host {
+                object,
+                method,
+                constructible: true,
+                ..
+            }),
+        ) = (&value, self.functions.get(id))
+        {
+            if let Some(matches) = host.is_instance(*handle, *object, method) {
+                return Ok(Value::Bool(matches));
+            }
+        }
+        let prototype =
+            self.get_ordinary_property_with_host(Ordinary::Function(id), "prototype", host)?;
         if matches!(prototype, Value::Host(_)) {
             return Err(Fault::new(
                 "Native host prototype checks are not implemented.",
@@ -6093,13 +6781,73 @@ impl Runtime {
         args: &[Value],
         host: &mut dyn Host,
     ) -> Result<Value, Fault> {
+        let required = host.required_arguments(object, method);
+        if args.len() < required {
+            return Err(Fault::exception(
+                "TypeError",
+                format!("{method} requires at least {required} argument(s)."),
+            ));
+        }
+        let conversions = host.argument_conversions(object, method);
+        let mut converted;
+        let args = if conversions.is_empty() {
+            args
+        } else {
+            converted = Vec::with_capacity(args.len());
+            for value in args {
+                converted.push(self.copy_value(value)?);
+            }
+            for &(index, string_hint) in conversions {
+                if let Some(value) = converted.get(index).cloned() {
+                    let primitive = self.primitive_with_hint(value, string_hint, host)?;
+                    self.work(primitive.bytes())?;
+                    converted[index] = self.checked_value(if string_hint {
+                        Value::String(primitive.script_text()?)
+                    } else {
+                        Value::Number(primitive.script_number()?)
+                    })?;
+                }
+            }
+            &converted
+        };
+        host.validate_call(object, method, args)
+            .map_err(|(kind, message)| Fault::exception(kind, message))?;
+        if host.indexed_for_each(object, method) {
+            let callback = args.first().cloned().unwrap_or(Value::Undefined);
+            if !matches!(callback, Value::Function(_)) {
+                return Err(Fault::exception(
+                    "TypeError",
+                    "forEach requires a callable callback.",
+                ));
+            }
+            let Value::Number(length) = host.get(object, "length").map_err(Fault::new)? else {
+                return Err(Fault::new("Invalid native collection length."));
+            };
+            if length < 0.0 || length.fract() != 0.0 || length > MAX_OBJECT_PROPERTIES as f64 {
+                return Err(Fault::new(
+                    "Native collection iteration limit reached (4096 entries).",
+                ));
+            }
+            let this_arg = args.get(1).cloned().unwrap_or(Value::Undefined);
+            for index in 0..length as usize {
+                self.step()?;
+                let value = self.host_read(object, &index.to_string(), host)?;
+                self.call_value(
+                    callback.clone(),
+                    &[value, Value::Number(index as f64), Value::Host(object)],
+                    this_arg.clone(),
+                    host,
+                )?;
+            }
+            return Ok(Value::Undefined);
+        }
         let mut fields = None;
         if let Some((index, names)) = host.dictionary_argument(object, method) {
             if let Some(value @ (Value::Object(_) | Value::Host(_) | Value::Function(_))) =
                 args.get(index)
             {
                 if names.len() > MAX_ARGUMENTS {
-                    return Err(Fault::new("Native dictionary field limit reached (32)."));
+                    return Err(Fault::new("Native dictionary field limit reached (256)."));
                 }
                 let mut values = Vec::with_capacity(names.len());
                 for &name in names {
@@ -6113,7 +6861,13 @@ impl Runtime {
             .map_err(Fault::new)
     }
 
-    fn binary_value(&mut self, op: &str, left: Value, right: Value) -> Result<Value, Fault> {
+    fn binary_value(
+        &mut self,
+        op: &str,
+        left: Value,
+        right: Value,
+        host: &mut dyn Host,
+    ) -> Result<Value, Fault> {
         self.step()?;
         // Equality and coercion also inspect strings; they share the same work
         // allowance as concatenation, searches, and value copying.
@@ -6122,8 +6876,39 @@ impl Runtime {
             return Ok(Value::Bool(strict_equal(&left, &right) == (op == "===")));
         }
         if matches!(op, "==" | "!=") {
+            let converts = |value: &Value, other: &Value| {
+                matches!(
+                    value,
+                    Value::Object(_) | Value::Function(_) | Value::Host(_)
+                ) && matches!(
+                    other,
+                    Value::Number(_) | Value::String(_) | Value::Bool(_) | Value::Symbol(_)
+                )
+            };
+            let left = if converts(&left, &right) {
+                self.primitive_with_hint(left, false, host)?
+            } else {
+                left
+            };
+            let right = if converts(&right, &left) {
+                self.primitive_with_hint(right, false, host)?
+            } else {
+                right
+            };
+            self.work(left.bytes().saturating_add(right.bytes()))?;
             return Ok(Value::Bool(loose_equal(&left, &right)? == (op == "==")));
         }
+        // Both operands have already been evaluated. Addition and comparisons
+        // convert both primitives before testing their types. Other numeric
+        // operators finish ToNumber(left) first: a Symbol error must prevent
+        // the right-hand object's conversion callback from running.
+        let left = self.primitive_with_hint(left, false, host)?;
+        let numeric_left = if matches!(op, "+" | "<" | ">" | "<=" | ">=") {
+            None
+        } else {
+            Some(left.script_number()?)
+        };
+        let right = self.primitive_with_hint(right, false, host)?;
         left.primitive()?;
         right.primitive()?;
         if op == "+" && (matches!(left, Value::String(_)) || matches!(right, Value::String(_))) {
@@ -6132,8 +6917,8 @@ impl Runtime {
                     .saturating_add(right.bytes())
                     .saturating_add(64),
             )?;
-            let mut text = left.to_text();
-            let right = right.to_text();
+            let mut text = left.script_text()?;
+            let right = right.script_text()?;
             if text.len().saturating_add(right.len()) > MAX_STRING_BYTES {
                 return Err(Fault::new("String limit reached (128 KiB)."));
             }
@@ -6145,7 +6930,7 @@ impl Runtime {
                 self.work(left.len().saturating_add(right.len()))?;
                 Some(left.encode_utf16().cmp(right.encode_utf16()))
             } else {
-                left.to_number().partial_cmp(&right.to_number())
+                left.script_number()?.partial_cmp(&right.script_number()?)
             };
             let value = order.is_some_and(|order| match op {
                 "<" => order.is_lt(),
@@ -6156,7 +6941,11 @@ impl Runtime {
             return Ok(Value::Bool(value));
         }
         self.work(left.bytes().saturating_add(right.bytes()))?;
-        let (a, b) = (left.to_number(), right.to_number());
+        let a = match numeric_left {
+            Some(number) => number,
+            None => left.script_number()?,
+        };
+        let b = right.script_number()?;
         Ok(Value::Number(match op {
             "+" => a + b,
             "-" => a - b,
@@ -6173,6 +6962,39 @@ impl Runtime {
         }))
     }
 
+    fn call_named_value(
+        &mut self,
+        function: Value,
+        args: &[Value],
+        this: Value,
+        property: &str,
+        host: &mut dyn Host,
+    ) -> Result<Value, Fault> {
+        let noncallable = !matches!(function, Value::Function(_));
+        match self.call_value(function, args, this, host) {
+            Err(mut fault)
+                if noncallable
+                    && matches!(
+                        fault.exception.as_deref(),
+                        Some(Exception::Error("TypeError"))
+                    ) =>
+            {
+                // Use only the previously resolved key and value type. Never
+                // reread a getter, coerce a value or annotate a callee's throw.
+                let mut escaped = property.chars().flat_map(char::escape_default);
+                let name: String = escaped.by_ref().take(80).collect();
+                fault.message.push_str(" Attempted member \"");
+                fault.message.push_str(&name);
+                if escaped.next().is_some() {
+                    fault.message.push_str("...");
+                }
+                fault.message.push_str("\".");
+                Err(fault)
+            }
+            result => result,
+        }
+    }
+
     fn call_value(
         &mut self,
         function: Value,
@@ -6182,7 +7004,7 @@ impl Runtime {
     ) -> Result<Value, Fault> {
         self.step()?;
         if args.len() > MAX_ARGUMENTS {
-            return Err(Fault::new("Call argument limit reached (32)."));
+            return Err(Fault::new("Call argument limit reached (256)."));
         }
         for value in args {
             if value.bytes() > MAX_STRING_BYTES {
@@ -6195,10 +7017,20 @@ impl Runtime {
         let Value::Function(index) = function else {
             return Err(Fault::exception(
                 "TypeError",
-                "The value is not a callable function.",
+                format!(
+                    "The value is not a callable function. Actual value type: {}.",
+                    function.diagnostic_type()
+                ),
             ));
         };
         match self.functions.get(index) {
+            Some(Function::Bound(_)) => {
+                let (target, arguments, receiver) = self.bound_arguments(index, args, true)?;
+                return self.call_value(Value::Function(target), &arguments, receiver, host);
+            }
+            Some(Function::Native(Builtin::Symbol(operation))) => {
+                return self.symbol_builtin(*operation, args, this, host);
+            }
             Some(Function::Native(Builtin::TextEncoding(operation))) => {
                 return self.text_encoding_builtin(*operation, args, this, host);
             }
@@ -6227,24 +7059,41 @@ impl Runtime {
                 | Builtin::ArrayMethod(_)
                 | Builtin::RegExpMethod(_)
                 | Builtin::StringMethod(_)
+                | Builtin::StringFromCharCode
                 | Builtin::PrimitiveMethod(_, _)
                 | Builtin::ErrorToString),
             )) => {
                 return self.prototype_builtin(*builtin, args, this, host);
             }
-            Some(Function::Native(builtin)) => return self.builtin(*builtin, args),
+            Some(Function::Native(builtin)) => return self.builtin(*builtin, args, host),
             Some(Function::Host {
                 object,
                 method,
                 receiver_required,
+                constructible,
             }) => {
-                let (object, method, receiver_required) = (*object, *method, *receiver_required);
-                if receiver_required && !matches!(this, Value::Host(receiver) if receiver == object)
-                {
+                if *constructible {
                     return Err(Fault::exception(
                         "TypeError",
-                        "Native method called with an incompatible receiver.",
+                        "This native constructor requires new.",
                     ));
+                }
+                let (mut object, method, receiver_required) =
+                    (*object, *method, *receiver_required);
+                if receiver_required {
+                    match this {
+                        Value::Host(receiver)
+                            if host.accepts_receiver(object, method, receiver) =>
+                        {
+                            object = receiver;
+                        }
+                        _ => {
+                            return Err(Fault::exception(
+                                "TypeError",
+                                "Native method called with an incompatible receiver.",
+                            ))
+                        }
+                    }
                 }
                 if self.call_depth >= MAX_CALL_DEPTH {
                     return Err(Fault::new("Function call limit reached (32)."));
@@ -6334,7 +7183,8 @@ impl Runtime {
                 }
                 "apply" => {
                     let this = self.copy_value(args.first().unwrap_or(&Value::Undefined))?;
-                    let values = self.apply_arguments(args.get(1).unwrap_or(&Value::Undefined))?;
+                    let values =
+                        self.apply_arguments(args.get(1).unwrap_or(&Value::Undefined), host)?;
                     self.call_value(Value::Function(index), &values, this, host)
                 }
                 "keys"
@@ -6343,7 +7193,7 @@ impl Runtime {
                         Some(Function::Native(Builtin::Object))
                     ) =>
                 {
-                    self.object_keys(args.first().unwrap_or(&Value::Undefined))
+                    self.object_keys(args.first().unwrap_or(&Value::Undefined), host)
                 }
                 "isArray"
                     if matches!(
@@ -6369,14 +7219,19 @@ impl Runtime {
             if method == "hasOwnProperty" {
                 let key = self.copy_value(args.first().unwrap_or(&Value::Undefined))?;
                 let key = self.property_key(key, host)?;
-                return Ok(Value::Bool(self.owns_property(id, &key)?));
+                return Ok(Value::Bool(match key {
+                    PropertyKey::String(name) => self.owns_property(id, &name)?,
+                    PropertyKey::Symbol(key) => {
+                        self.object(id)?.symbol_properties.contains_key(&key)
+                    }
+                }));
             }
             if method == "valueOf" {
                 return Ok(Value::Object(id));
             }
             if self.object(id)?.length.is_some() {
                 if method == "toString" && self.object(id)?.properties.contains_key("join") {
-                    let join = self.get_property(id, "join")?;
+                    let join = self.get_property_with_host(id, "join", host)?;
                     return if matches!(join, Value::Function(_)) {
                         self.call_value(join, &[], Value::Object(id), host)
                     } else {
@@ -6386,7 +7241,7 @@ impl Runtime {
                 return self.array_method(id, method, args, host);
             }
             return if method == "toString" && self.object(id)?.error_name.is_some() {
-                self.error_text(id)
+                self.error_text(id, host)
             } else if method == "toString" {
                 Ok(Value::String("[object Object]".into()))
             } else {
@@ -6401,7 +7256,7 @@ impl Runtime {
         }
         if let Value::String(text) = object {
             if matches!(method, "search" | "match" | "replace") {
-                return self.regexp_string_method(&text, method, args);
+                return self.regexp_string_method(&text, method, args, host);
             }
             self.work(text.len().saturating_mul(3))?;
             return match method {
@@ -6412,7 +7267,7 @@ impl Runtime {
                     let start = args.first().unwrap_or(&Value::Undefined);
                     start.primitive()?;
                     self.work(start.bytes().saturating_mul(2))?;
-                    let start = start.to_number();
+                    let start = start.script_number()?;
                     if matches!(method, "charAt" | "charCodeAt" | "codePointAt") {
                         let position = if start.is_nan() { 0.0 } else { start.trunc() };
                         if position < 0.0 || position >= length as f64 {
@@ -6447,7 +7302,7 @@ impl Runtime {
                     let end = if matches!(end, Value::Undefined) {
                         length as f64
                     } else {
-                        end.to_number()
+                        end.script_number()?
                     };
                     let index = |value: f64| {
                         if method == "slice" && value < 0.0 {
@@ -6474,7 +7329,7 @@ impl Runtime {
                     let search = args.first().unwrap_or(&Value::Undefined);
                     search.primitive()?;
                     self.work(search.bytes())?;
-                    let search = search.to_text();
+                    let search = search.script_text()?;
                     let units: Vec<_> = text.encode_utf16().collect();
                     let needle: Vec<_> = search.encode_utf16().collect();
                     let length = units.len();
@@ -6530,7 +7385,7 @@ impl Runtime {
                     && (args.is_empty()
                         || matches!(args.first(), Some(Value::Number(radix)) if *radix == 10.0)) =>
             {
-                self.checked_value(Value::String(object.to_text()))
+                self.checked_value(Value::String(object.script_text()?))
             }
             _ => Err(Fault::new(format!(
                 "Method {method:?} is not callable on this value."
@@ -6594,10 +7449,12 @@ impl Runtime {
         self.checked_value(Value::String(decoded))
     }
 
-    fn math_builtin(&mut self, name: &str, args: &[Value]) -> Result<Value, Fault> {
-        // These methods intentionally accept primitive values under the same
-        // conversion limits as Number(). User-defined valueOf coercion remains
-        // outside this runtime's subset.
+    fn math_builtin(
+        &mut self,
+        name: &str,
+        args: &[Value],
+        host: &mut dyn Host,
+    ) -> Result<Value, Fault> {
         let count = match name {
             "min" | "max" | "hypot" => args.len(),
             "atan2" | "pow" | "imul" => 2,
@@ -6607,9 +7464,7 @@ impl Runtime {
         for index in 0..count {
             self.step()?;
             let value = args.get(index).unwrap_or(&Value::Undefined);
-            self.work(value.bytes().saturating_mul(2))?;
-            value.primitive()?;
-            values.push(value.to_number());
+            values.push(self.binary_number(value, host)?);
         }
         let a = values.first().copied().unwrap_or(f64::NAN);
         let b = values.get(1).copied().unwrap_or(f64::NAN);
@@ -6714,7 +7569,12 @@ impl Runtime {
         Ok(Value::Number(result))
     }
 
-    fn builtin(&mut self, builtin: Builtin, args: &[Value]) -> Result<Value, Fault> {
+    fn builtin(
+        &mut self,
+        builtin: Builtin,
+        args: &[Value],
+        host: &mut dyn Host,
+    ) -> Result<Value, Fault> {
         let value = args.first().unwrap_or(&Value::Undefined);
         self.work(value.bytes().saturating_mul(2))?;
         match builtin {
@@ -6722,9 +7582,12 @@ impl Runtime {
                 "TypeError",
                 "Strict arguments callee access is forbidden.",
             )),
-            Builtin::Binary(_) | Builtin::Collection(_) | Builtin::TextEncoding(_) => Err(
-                Fault::new("Native data operations need an execution context."),
-            ),
+            Builtin::Symbol(_)
+            | Builtin::Binary(_)
+            | Builtin::Collection(_)
+            | Builtin::TextEncoding(_) => Err(Fault::new(
+                "Native data operations need an execution context.",
+            )),
             Builtin::EmptyFunction => Ok(Value::Undefined),
             Builtin::Function => Err(Fault::new(
                 "The dynamic Function constructor is not implemented.",
@@ -6735,29 +7598,33 @@ impl Runtime {
             | Builtin::ArrayMethod(_)
             | Builtin::RegExpMethod(_)
             | Builtin::StringMethod(_)
+            | Builtin::StringFromCharCode
             | Builtin::PrimitiveMethod(_, _)
             | Builtin::ErrorToString => {
                 Err(Fault::new("Prototype methods need an execution context."))
             }
-            Builtin::Math(name) => self.math_builtin(name, args),
+            Builtin::Math(name) => self.math_builtin(name, args, host),
             Builtin::Eval => Err(Fault::new("Intrinsic eval needs an execution context.")),
             Builtin::JsonParse => self.json_parse(args),
-            Builtin::JsonStringify => self.json_stringify(args),
+            Builtin::JsonStringify => self.json_stringify(args, host),
             Builtin::RegExp => self.regexp_factory(args),
             Builtin::EncodeUri(component) => {
-                value.primitive()?;
-                self.encode_uri(&value.to_text(), component)
+                let value = self.copy_value(value)?;
+                let value = self.primitive_with_hint(value, true, host)?;
+                self.encode_uri(&value.script_text()?, component)
             }
             Builtin::DecodeUri(component) => {
-                value.primitive()?;
-                self.decode_uri(&value.to_text(), component)
+                let value = self.copy_value(value)?;
+                let value = self.primitive_with_hint(value, true, host)?;
+                self.decode_uri(&value.script_text()?, component)
             }
+            Builtin::Base64(encode) => self.base64_builtin(encode, args, host),
             Builtin::Error(kind) => {
                 let message = if matches!(value, Value::Undefined) {
                     None
                 } else {
-                    value.primitive()?;
-                    Some(value.to_text())
+                    let value = self.copy_value(value)?;
+                    Some(self.primitive_with_hint(value, true, host)?.script_text()?)
                 };
                 self.error_object(kind, message)
             }
@@ -6783,26 +7650,23 @@ impl Runtime {
             Builtin::String => {
                 if args.is_empty() {
                     Ok(Value::String(String::new()))
+                } else if let Value::Symbol(id) = value {
+                    self.symbol_text(*id)
                 } else {
-                    value.primitive()?;
-                    self.checked_value(Value::String(value.to_text()))
+                    let value = self.copy_value(value)?;
+                    let value = self.primitive_with_hint(value, true, host)?;
+                    self.checked_value(Value::String(value.script_text()?))
                 }
             }
-            Builtin::Number => {
-                value.primitive()?;
-                Ok(Value::Number(if args.is_empty() {
-                    0.0
-                } else {
-                    value.to_number()
-                }))
-            }
-            Builtin::IsNaN => {
-                value.primitive()?;
-                Ok(Value::Bool(value.to_number().is_nan()))
-            }
+            Builtin::Number => Ok(Value::Number(if args.is_empty() {
+                0.0
+            } else {
+                self.binary_number(value, host)?
+            })),
+            Builtin::IsNaN => Ok(Value::Bool(self.binary_number(value, host)?.is_nan())),
             Builtin::ParseFloat => {
-                value.primitive()?;
-                let text = value.to_text();
+                let value = self.copy_value(value)?;
+                let text = self.primitive_with_hint(value, true, host)?.script_text()?;
                 let text = text.trim_start_matches(js_space);
                 let number = if text.starts_with("Infinity") || text.starts_with("+Infinity") {
                     f64::INFINITY
@@ -6816,16 +7680,15 @@ impl Runtime {
                 Ok(Value::Number(number))
             }
             Builtin::ParseInt => {
-                value.primitive()?;
-                let text = value.to_text();
+                let value = self.copy_value(value)?;
+                let text = self.primitive_with_hint(value, true, host)?.script_text()?;
                 let mut text = text.trim_start_matches(js_space);
                 let negative = text.starts_with('-');
                 if text.starts_with(['+', '-']) {
                     text = &text[1..];
                 }
                 let radix = if let Some(radix) = args.get(1) {
-                    radix.primitive()?;
-                    int32(radix.to_number())
+                    int32(self.binary_number(radix, host)?)
                 } else {
                     0
                 };
@@ -6881,6 +7744,7 @@ fn strict_equal(left: &Value, right: &Value) -> bool {
         (Value::Bool(a), Value::Bool(b)) => a == b,
         (Value::Number(a), Value::Number(b)) => a == b,
         (Value::String(a), Value::String(b)) => a == b,
+        (Value::Symbol(a), Value::Symbol(b)) => a == b,
         (Value::Function(a), Value::Function(b)) => a == b,
         (Value::Object(a), Value::Object(b)) => a == b,
         (Value::Host(a), Value::Host(b)) => a == b,
@@ -6895,10 +7759,10 @@ fn loose_equal(left: &Value, right: &Value) -> Result<bool, Fault> {
     match (left, right) {
         (Value::Undefined, Value::Null) | (Value::Null, Value::Undefined) => Ok(true),
         (Value::Number(_), Value::String(_)) | (Value::String(_), Value::Number(_)) => {
-            Ok(left.to_number() == right.to_number())
+            Ok(left.script_number()? == right.script_number()?)
         }
-        (Value::Bool(_), _) => loose_equal(&Value::Number(left.to_number()), right),
-        (_, Value::Bool(_)) => loose_equal(left, &Value::Number(right.to_number())),
+        (Value::Bool(_), _) => loose_equal(&Value::Number(left.script_number()?), right),
+        (_, Value::Bool(_)) => loose_equal(left, &Value::Number(right.script_number()?)),
         (
             Value::Function(_) | Value::Object(_) | Value::Host(_),
             Value::String(_) | Value::Number(_),
@@ -6924,6 +7788,9 @@ mod tests {
     }
 
     impl Host for TestHost {
+        fn resolve_member_before_call(&self, object: u32) -> bool {
+            object == 3
+        }
         fn allow_eval(&mut self) -> Result<bool, String> {
             self.eval_permission
                 .ok_or_else(|| "Eval is unavailable in this test host.".into())
@@ -6984,6 +7851,28 @@ mod tests {
     }
 
     #[test]
+    fn native_named_member_lookup_precedes_arguments_and_preserves_shadowing() {
+        let (mut runtime, mut host) = test_runtime();
+        runtime.define_global("native", Value::Host(3)).unwrap();
+        runtime
+            .execute(
+                r#"
+native.submit=function(){test.record('old');};
+native.submit((test.record('argument'), native.submit=function(){test.record('new');}));
+native.submit();
+native.submit=7;
+try{native.submit(test.record('shadow argument'));}catch(e){test.record(e.name);}
+"#,
+                &mut host,
+            )
+            .unwrap();
+        assert_eq!(
+            host.records,
+            ["argument", "old", "new", "shadow argument", "TypeError"]
+        );
+    }
+
+    #[test]
     fn diagnostics_mark_the_actual_token_with_a_bounded_utf8_source_excerpt() {
         let (mut runtime, mut host) = test_runtime();
         let error = runtime
@@ -7000,6 +7889,66 @@ mod tests {
             error.contains("Source: ...") && error.contains("[here]missing()"),
             "{error}"
         );
+        assert!(error.len() < 512, "{error}");
+    }
+
+    #[test]
+    fn call_diagnostics_preserve_member_getter_and_argument_order() {
+        let (mut runtime, mut host) = test_runtime();
+        runtime.execute(r#"
+var log='',object={number:17};
+Object.defineProperty(object,'missing',{configurable:true,get:function(){log+='g';return undefined;}});
+try{object.missing((log+='a',Object.defineProperty(object,'missing',{value:function(){log+='wrong';}})));}
+catch(e){test.record(log);test.record(e.name);test.record(e.message);}
+try{object.number();}catch(e){test.record(e.message);}
+object.value={toString:function(){log+='coerced';return 'text';}};
+try{object.value();}catch(e){test.record(e.message);}
+test.record(log);
+"#, &mut host).unwrap();
+        assert_eq!(host.records[0], "ga");
+        assert_eq!(host.records[1], "TypeError");
+        assert_eq!(host.records[2], "The value is not a callable function. Actual value type: undefined. Attempted member \"missing\".");
+        assert_eq!(host.records[3], "The value is not a callable function. Actual value type: number. Attempted member \"number\".");
+        assert_eq!(host.records[4], "The value is not a callable function. Actual value type: object. Attempted member \"value\".");
+        assert_eq!(host.records[5], "ga");
+    }
+
+    #[test]
+    fn call_diagnostics_leave_callee_throws_unchanged_and_bound_member_text() {
+        let (mut runtime, mut host) = test_runtime();
+        runtime
+            .execute(
+                r#"
+var marker=new TypeError('The value is not a callable function.'),getterMarker={},log='';
+var object={run:function(){throw marker;}};
+try{object.run(log+='argument');}catch(e){test.record(e===marker);test.record(e.message);}
+Object.defineProperty(object,'unread',{get:function(){throw getterMarker;}});
+try{object.unread(log+='wrong');}catch(e){test.record(e===getterMarker);}
+test.record(log);
+"#,
+                &mut host,
+            )
+            .unwrap();
+        assert_eq!(
+            host.records,
+            [
+                "true",
+                "The value is not a callable function.",
+                "true",
+                "argument"
+            ]
+        );
+        runtime.begin_job();
+        let source = format!("({{}})['{}']();", "\\u0001".repeat(120));
+        let error = runtime.execute(&source, &mut host).unwrap_err();
+        assert!(
+            error.contains("The value is not a callable function."),
+            "{error}"
+        );
+        assert!(error.contains("Actual value type: undefined."), "{error}");
+        assert!(error.contains("Attempted member \"\\u{1}"), "{error}");
+        assert!(error.contains("...\"."), "{error}");
+        assert!(!error.contains('\u{1}'));
         assert!(error.len() < 512, "{error}");
     }
 
@@ -7040,10 +7989,464 @@ strictFailure;
             "true"
         );
         let (mut runtime, mut host) = test_runtime();
-        assert!(runtime
-            .execute("Math.abs({valueOf:function(){return 1;}})", &mut host)
-            .unwrap_err()
-            .contains("Implicit object conversion"));
+        assert_eq!(
+            runtime
+                .execute("Math.abs({valueOf:function(){return 1;}})", &mut host)
+                .unwrap()
+                .to_text(),
+            "1"
+        );
+    }
+
+    #[test]
+    fn flat_conditional_dispatchers_run_on_a_one_mib_stack() {
+        std::thread::Builder::new()
+            .stack_size(1024 * 1024)
+            .spawn(|| {
+                let alternatives = format!(
+                    "var n=0;{}n;",
+                    "(++n<0)?missing():".repeat(512)
+                );
+                assert_eq!(result(&alternatives), "512");
+                let true_arms = format!(
+                    "{}7{};",
+                    "true?".repeat(512),
+                    ":missing()".repeat(512)
+                );
+                assert_eq!(result(&true_arms), "7");
+                let mut dispatch = String::from("var u=511,total=0;for(;u!==-1;)");
+                for index in 0..512 {
+                    dispatch.push_str(&format!(
+                        "u=={index}?(total=u,u=-1):"
+                    ));
+                }
+                dispatch.push_str("missing();total;");
+                assert_eq!(result(&dispatch), "511");
+                assert_eq!(
+                    result("var a=0,b=0;var f=true?(x=>x+1):(x=>x-1);for(var ok=true?'a' in {a:1}:false;ok;ok=false)a=f(4);false?a=8:b=a=7;[a,b].join();"),
+                    "7,7"
+                );
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    #[test]
+    fn deferred_function_bodies_execute_on_a_one_mib_stack() {
+        std::thread::Builder::new()
+            .stack_size(1024 * 1024)
+            .spawn(|| {
+                let inner = format!("{}7{}", "keep(".repeat(20), ")".repeat(20));
+                for function in [
+                    format!("function(){{return {inner};}}"),
+                    format!("()=>{{return {inner};}}"),
+                    format!("{{method(){{return {inner};}}}}.method"),
+                ] {
+                    let source = format!(
+                        "function keep(x){{return x;}}var factory={}{}{};factory();",
+                        "keep(".repeat(44),
+                        function,
+                        ")".repeat(44)
+                    );
+                    assert_eq!(result(&source), "7");
+                }
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    #[test]
+    fn deferred_function_nesting_and_local_syntax_remain_bounded() {
+        std::thread::Builder::new()
+            .stack_size(1024 * 1024)
+            .spawn(|| {
+                let source = format!(
+                    "{}return 7;{}test.record('parsed');",
+                    "function nested(){".repeat(MAX_PARSE_DEPTH),
+                    "}".repeat(MAX_PARSE_DEPTH)
+                );
+                let (mut runtime, mut host) = test_runtime();
+                runtime.execute(&source, &mut host).unwrap();
+                assert_eq!(host.records, ["parsed"]);
+                for (source, message) in [
+                    (
+                        format!(
+                            "test.record('early');{}return 7;{}",
+                            "function nested(){".repeat(MAX_PARSE_DEPTH + 1),
+                            "}".repeat(MAX_PARSE_DEPTH + 1)
+                        ),
+                        "Function syntax nesting limit reached (64)",
+                    ),
+                    (
+                        format!(
+                            "test.record('early');function unused(){{return {}0{};}}",
+                            "keep(".repeat(MAX_PARSE_DEPTH + 1),
+                            ")".repeat(MAX_PARSE_DEPTH + 1)
+                        ),
+                        "Parser nesting limit reached (64)",
+                    ),
+                ] {
+                    let (mut runtime, mut host) = test_runtime();
+                    let error = runtime.execute(&source, &mut host).unwrap_err();
+                    assert!(error.contains(message), "{error}");
+                    assert!(host.records.is_empty());
+                    assert!(runtime.programs.is_empty());
+                    runtime.begin_job();
+                    assert_eq!(runtime.execute("2+2;", &mut host).unwrap().to_text(), "4");
+                }
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    #[test]
+    fn every_deferred_body_is_validated_before_any_script_effects() {
+        for source in [
+            "test.record('early');function unused(){return 1+;}",
+            "test.record('early');function unused(){let x;let x;}",
+            "test.record('early');function unused(a,a){'use strict';}",
+            "test.record('early');function eval(){'use strict';}",
+            "test.record('early');var f=(arguments)=>{'use strict';};",
+            "test.record('early');var o={method(eval){'use strict';}};",
+            "test.record('early');outer:while(false){function unused(){break outer;}}",
+        ] {
+            let (mut runtime, mut host) = test_runtime();
+            assert!(runtime.execute(source, &mut host).is_err(), "{source}");
+            assert!(host.records.is_empty());
+            assert!(runtime.programs.is_empty());
+        }
+    }
+
+    #[test]
+    fn deferred_eval_bodies_keep_policy_and_active_stack_guards() {
+        let inner = format!("{}7{}", "keep(".repeat(20), ")".repeat(20));
+        let source = format!(
+            "function keep(x){{return x;}}var factory={}function(){{return {inner};}}{};factory();",
+            "keep(".repeat(44),
+            ")".repeat(44)
+        );
+        let (mut runtime, mut host) = test_runtime();
+        host.eval_permission = Some(false);
+        runtime
+            .define_global("code", Value::String(source))
+            .unwrap();
+        runtime
+            .execute("try{eval(code);}catch(e){test.record(e.name);}", &mut host)
+            .unwrap();
+        assert_eq!(host.records, ["EvalError"]);
+        assert_eq!(runtime.programs.len(), 1);
+
+        host.eval_permission = Some(true);
+        runtime.begin_job();
+        assert_eq!(
+            runtime
+                .execute("function run(){return eval(code);}run();", &mut host)
+                .unwrap()
+                .to_text(),
+            "7"
+        );
+        let nested = format!(
+            "function inactive(){{return {}1{};}}",
+            "(".repeat(60),
+            ")".repeat(60)
+        );
+        // This body fits a standalone job but must not get a fresh stack
+        // allowance when compiled by eval inside another live execution job.
+        Parser::parse(&nested, &mut MAX_REGEXP_WORK.clone()).unwrap();
+        runtime
+            .define_global("nested", Value::String(nested))
+            .unwrap();
+        host.records.clear();
+        runtime.begin_job();
+        let error = runtime
+            .execute(
+                "try{eval(nested);}catch(e){test.record('caught');}finally{test.record('finally');}",
+                &mut host,
+            )
+            .unwrap_err();
+        assert!(
+            error.contains("Parser nesting limit reached (64)"),
+            "{error}"
+        );
+        assert!(host.records.is_empty());
+        assert_eq!(runtime.eval_depth, 0);
+        assert_eq!(runtime.call_depth, 0);
+        runtime.begin_job();
+        assert_eq!(runtime.execute("2+2;", &mut host).unwrap().to_text(), "4");
+    }
+
+    #[test]
+    fn flat_if_dispatchers_run_on_a_one_mib_stack() {
+        std::thread::Builder::new()
+            .stack_size(1024 * 1024)
+            .spawn(|| {
+                for selected in [0, 512, 1023, -1] {
+                    let mut source = format!("var selected={selected},seen=0,answer=-1;");
+                    for index in 0..1024 {
+                        source.push_str(&format!(
+                            "if((++seen,selected=={index}))answer={index};else "
+                        ));
+                    }
+                    source.push_str("answer=-2;[seen,answer].join(':');");
+                    let expected = if selected < 0 {
+                        "1024:-2".into()
+                    } else {
+                        format!("{}:{selected}", selected + 1)
+                    };
+                    assert_eq!(result(&source), expected);
+                }
+                assert_eq!(
+                    result(&format!("{}7;", "if(false);else ".repeat(MAX_IF_BRANCHES))),
+                    "7"
+                );
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    #[test]
+    fn pending_if_bound_is_shared_and_parse_rejection_is_atomic() {
+        std::thread::Builder::new()
+            .stack_size(1024 * 1024)
+            .spawn(|| {
+                for (source, message) in [
+                    (
+                        format!(
+                            "test.record('early');{}0;",
+                            "if(false);else ".repeat(MAX_IF_BRANCHES + 1)
+                        ),
+                        "Pending if-branch limit reached (4096)",
+                    ),
+                    (
+                        format!(
+                            "test.record('early');{}{{{}0;}}",
+                            "if(false);else ".repeat(2048),
+                            "if(false);else ".repeat(2049)
+                        ),
+                        "Pending if-branch limit reached (4096)",
+                    ),
+                    (
+                        format!("test.record('early');{}0;", "if(true)".repeat(100)),
+                        "Parser nesting limit reached (64)",
+                    ),
+                    (
+                        format!(
+                            "test.record('early');{}{}0;{}",
+                            "if(false);else ".repeat(512),
+                            "{".repeat(100),
+                            "}".repeat(100)
+                        ),
+                        "Parser nesting limit reached (64)",
+                    ),
+                ] {
+                    let (mut runtime, mut host) = test_runtime();
+                    let error = runtime.execute(&source, &mut host).unwrap_err();
+                    assert!(error.contains(message), "{error}");
+                    assert!(host.records.is_empty());
+                    assert!(runtime.programs.is_empty());
+                    runtime.begin_job();
+                    assert_eq!(runtime.execute("2+2;", &mut host).unwrap().to_text(), "4");
+                }
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    #[test]
+    fn flat_if_execution_exhaustion_is_fatal_and_next_job_recovers() {
+        let (mut runtime, mut host) = test_runtime();
+        runtime.steps = 300;
+        let source = format!(
+            "try{{{}test.record('late');}}catch(e){{test.record('caught');}}finally{{test.record('finally');}}",
+            "if(false);else ".repeat(1024)
+        );
+        let error = runtime.execute(&source, &mut host).unwrap_err();
+        assert!(error.contains("Execution step limit reached"), "{error}");
+        assert!(host.records.is_empty());
+        assert_eq!(runtime.eval_depth, 0);
+        assert_eq!(runtime.call_depth, 0);
+        runtime.begin_job();
+        assert_eq!(runtime.execute("2+2;", &mut host).unwrap().to_text(), "4");
+    }
+
+    #[test]
+    fn flat_if_errors_keep_the_selected_branch_source_position() {
+        let (mut runtime, mut host) = test_runtime();
+        let source = format!("{}if(true) missing();", "if(false);else\n".repeat(256));
+        let error = runtime.execute(&source, &mut host).unwrap_err();
+        assert!(error.contains("line 257,"), "{error}");
+        assert!(error.contains("missing is not defined"), "{error}");
+        assert_eq!(runtime.eval_depth, 0);
+        assert_eq!(runtime.call_depth, 0);
+    }
+
+    #[test]
+    fn pending_expression_bound_is_shared_and_parse_rejection_is_atomic() {
+        std::thread::Builder::new()
+            .stack_size(1024 * 1024)
+            .spawn(|| {
+                assert_eq!(
+                    result(&format!("{}9;", "false?0:".repeat(MAX_EXPRESSION_FRAMES))),
+                    "9"
+                );
+                for source in [
+                    format!(
+                        "test.record(1);{}9;",
+                        "false?0:".repeat(MAX_EXPRESSION_FRAMES + 1)
+                    ),
+                    format!(
+                        "test.record(1);{}({}9);",
+                        "false?0:".repeat(2048),
+                        "false?0:".repeat(2049)
+                    ),
+                    format!(
+                        "test.record(1);var x;{}1;",
+                        "x=".repeat(MAX_EXPRESSION_FRAMES + 1)
+                    ),
+                ] {
+                    let (mut runtime, mut host) = test_runtime();
+                    let error = runtime.execute(&source, &mut host).unwrap_err();
+                    assert!(
+                        error.contains("Pending expression limit reached (4096)"),
+                        "{error}"
+                    );
+                    assert!(host.records.is_empty());
+                    assert!(runtime.programs.is_empty());
+                    runtime.begin_job();
+                    assert_eq!(runtime.execute("2+2;", &mut host).unwrap().to_text(), "4");
+                }
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    #[test]
+    fn ordinary_operator_conversion_keeps_hint_order_and_abrupt_completion() {
+        assert_eq!(
+            result(
+                r#"
+var log='',left={valueOf(){log+='L';return 2;}};
+function right(){log+='R';return {valueOf(){log+='V';return 3;}};}
+if(left+right()!==5 || log!=='RLV')throw 'operand order';
+var obj={valueOf(){return 7;},toString(){return 'text';}};
+if(''+obj!=='7' || String(obj)!=='text' || Number(obj)!==7)throw 'hint';
+if('error='+TypeError('bad')!=='error=TypeError: bad')throw 'error text';
+if('value='+{}!=='value=[object Object]')throw 'default text';
+obj.valueOf=function(){this.toString=function(){return 'changed';};return this;};
+if(''+obj!=='changed')throw 'live fallback';
+var calls=0,zero={valueOf(){calls++;return 0;}};
+if(zero!=false || zero!==zero || zero==null || zero==undefined || zero=={})throw 'equality';
+if(calls!==1)throw 'unwanted conversion';
+var number={valueOf(){return 4;}};
+if(+number!==4 || -number!==-4 || ~number!==-5 || number*2!==8)throw 'numeric';
+var old=number++;if(old!==4 || number!==5)throw 'update';
+var marker={},bad={valueOf(){throw marker;}};
+try{''+bad;throw 'missing throw';}catch(e){if(e!==marker)throw 'wrong throw';}
+var invalid={valueOf(){return {};},toString(){return {};}};
+try{String(invalid);throw 'missing type error';}catch(e){if(e.name!=='TypeError')throw e;}
+true;
+"#
+            ),
+            "true"
+        );
+    }
+
+    #[test]
+    fn error_and_builtin_string_conversion_observe_live_fields() {
+        assert_eq!(
+            result(
+                r#"
+var e=Error('old'),log='';
+e.name={toString(){log+='n';e.message={toString(){log+='m';return 'changed';}};return 'Custom';}};
+if(String(e)!=='Custom: changed' || log!=='nm')throw 'error field order';
+if(new Error({toString(){return 'message';}}).message!=='message')throw 'constructor';
+if(Error.prototype.toString.call({name:'',message:{toString(){return 'only';}}})!=='only')throw 'borrow';
+var text={toString(){return '  12.5tail';}};
+if(parseFloat(text)!==12.5 || parseInt(text)!==12)throw 'parse';
+if(encodeURIComponent({toString(){return 'a b';}})!=='a%20b')throw 'encode';
+if(decodeURIComponent({toString(){return 'a%20b';}})!=='a b')throw 'decode';
+if(String.prototype.trim.call({toString(){return '  cat  ';}})!=='cat')throw 'generic';
+var seen='';Math.min({valueOf(){seen+='a';return NaN;}},{valueOf(){seen+='b';return 1;}});
+if(seen!=='ab')throw 'math order';
+true;
+"#
+            ),
+            "true"
+        );
+    }
+
+    #[test]
+    fn conversion_cycles_are_fatal_and_recover_on_a_one_mib_stack() {
+        std::thread::Builder::new()
+            .stack_size(1024 * 1024)
+            .spawn(|| {
+                for source in [
+                    "var e=Error();e.name=e;String(e);",
+                    "var e=Error();e.message=e;e.toString();",
+                    "var o={valueOf(){return +o;}};o+1;",
+                    "var o={toString(){return String(o);}};String(o);",
+                ] {
+                    let (mut runtime, mut host) = test_runtime();
+                    let wrapped = format!("try{{{source}}}catch(e){{test.record('caught');}}finally{{test.record('finally');}}");
+                    let error = runtime.execute(&wrapped, &mut host).unwrap_err();
+                    assert!(error.contains("limit"), "{source}: {error}");
+                    assert!(host.records.is_empty());
+                    assert_eq!(runtime.call_depth, 0);
+                    assert_eq!(runtime.eval_depth, 0);
+                    runtime.begin_job();
+                    assert_eq!(runtime.execute("String(Error('ok'));", &mut host).unwrap().to_text(), "Error: ok");
+                }
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    #[test]
+    fn native_primitive_conversion_is_explicit_and_keeps_the_receiver() {
+        #[derive(Default)]
+        struct NativeText {
+            calls: usize,
+        }
+        impl Host for NativeText {
+            fn primitive_conversion(&self, object: u32) -> bool {
+                object == 1
+            }
+            fn method(&self, _: u32, name: &str) -> Option<&'static str> {
+                (name == "toString").then_some("toString")
+            }
+            fn get(&mut self, _: u32, name: &str) -> Result<Value, String> {
+                assert_eq!(name, "valueOf");
+                Ok(Value::Undefined)
+            }
+            fn set(&mut self, _: u32, _: &str, _: Value) -> Result<(), String> {
+                unreachable!()
+            }
+            fn call(&mut self, object: u32, method: &str, _: &[Value]) -> Result<Value, String> {
+                assert_eq!((object, method), (1, "toString"));
+                self.calls += 1;
+                Ok(Value::String("https://example.test/".into()))
+            }
+        }
+        let mut runtime = Runtime::new();
+        runtime.define_global("native", Value::Host(1)).unwrap();
+        runtime.define_global("opaque", Value::Host(2)).unwrap();
+        let mut host = NativeText::default();
+        assert_eq!(runtime.execute("String(native)==='https://example.test/' && ''+native==='https://example.test/' && native=='https://example.test/';", &mut host).unwrap().to_text(), "true");
+        assert_eq!(host.calls, 3);
+        runtime.begin_job();
+        let error = runtime.execute("''+opaque;", &mut host).unwrap_err();
+        assert!(
+            error.contains("Implicit native host object conversion"),
+            "{error}"
+        );
+        assert_eq!(host.calls, 3);
     }
 
     #[test]
@@ -7421,7 +8824,7 @@ caught;
 
     #[test]
     fn json_parse_rolls_back_unpublished_allocations_without_refunding_work() {
-        let (mut runtime, _) = test_runtime();
+        let (mut runtime, mut host) = test_runtime();
         let checkpoint = (
             runtime.objects.len(),
             runtime.properties,
@@ -7461,17 +8864,20 @@ caught;
             .json_parse(&[Value::String("{\"keep\":1}".into())])
             .unwrap();
         assert_eq!(
-            runtime.json_stringify(&[value]).unwrap().to_text(),
+            runtime
+                .json_stringify(&[value], &mut host)
+                .unwrap()
+                .to_text(),
             "{\"keep\":1}"
         );
     }
 
     #[test]
     fn json_copy_and_output_limits_are_shared_with_the_document_job() {
-        let (mut runtime, _) = test_runtime();
+        let (mut runtime, mut host) = test_runtime();
         let argument = Value::String("x".repeat(MAX_STRING_BYTES / 2));
         let error = loop {
-            match runtime.json_stringify(std::slice::from_ref(&argument)) {
+            match runtime.json_stringify(std::slice::from_ref(&argument), &mut host) {
                 Ok(_) => (),
                 Err(error) => break error,
             }
@@ -7487,7 +8893,7 @@ caught;
             "1"
         );
         let error = runtime
-            .json_stringify(&[Value::String("\n".repeat(MAX_STRING_BYTES))])
+            .json_stringify(&[Value::String("\n".repeat(MAX_STRING_BYTES))], &mut host)
             .unwrap_err();
         assert!(error.display().contains("String limit"));
     }
@@ -7642,45 +9048,57 @@ caught;
 
     #[test]
     fn dense_script_caps_preserve_atomic_rejection_on_one_mib_stack() {
-        std::thread::Builder::new().stack_size(1024 * 1024).spawn(|| {
-            let tokens = ";".repeat(MAX_TOKENS);
-            let program = Parser::parse(&tokens, &mut MAX_REGEXP_WORK.clone()).unwrap();
-            assert_eq!(program.stmts.len(), MAX_TOKENS);
-            drop(program);
-            let nodes = "0\n".repeat(MAX_AST / 2);
-            let program = Parser::parse(&nodes, &mut MAX_REGEXP_WORK.clone()).unwrap();
-            assert_eq!(program.exprs.len() + program.stmts.len(), MAX_AST);
-            drop(program);
-            for (source, message) in [
-                (format!("test.record(1);{tokens}"), "Script token limit reached (65536)"),
-                (format!("test.record(1);{nodes}"), "AST node limit reached (65536)"),
-            ] {
-                let (mut runtime, mut host) = test_runtime();
-                host.eval_permission = Some(true);
-                runtime.define_global("payload", Value::String(source.clone())).unwrap();
-                let error = runtime.execute(&source, &mut host).unwrap_err();
-                assert!(error.contains(message), "{error}");
-                assert_eq!(runtime.programs.len(), 0);
-                assert!(host.records.is_empty());
-                runtime.begin_job();
-                let error = runtime.execute("try{eval(payload);}catch(e){test.record('caught');}finally{test.record('finally');}", &mut host).unwrap_err();
-                assert!(error.contains(message), "{error}");
-                assert_eq!(runtime.programs.len(), 1);
-                assert!(host.records.is_empty());
-                assert_eq!(runtime.call_depth, 0);
-                assert_eq!(runtime.eval_depth, 0);
-            }
-            let mut runtime = Runtime::new();
-            runtime.register_program(&nodes, false).unwrap();
-            runtime.register_program(&nodes, false).unwrap();
-            assert_eq!(runtime.retained_ast, MAX_RETAINED_AST);
-            let source_before = runtime.retained_source;
-            let error = runtime.register_program("0;", false).err().unwrap();
-            assert!(error.display().contains("Retained AST limit"));
-            assert_eq!(runtime.retained_ast, MAX_RETAINED_AST);
-            assert_eq!(runtime.retained_source, source_before);
-            assert_eq!(runtime.programs.len(), 2);
-        }).unwrap().join().unwrap();
+        std::thread::Builder::new()
+            .stack_size(1024 * 1024)
+            .spawn(|| {
+                let tokens = ";".repeat(MAX_TOKENS);
+                let program = Parser::parse(&tokens, &mut MAX_REGEXP_WORK.clone()).unwrap();
+                assert_eq!(program.stmts.len(), MAX_TOKENS);
+                drop(program);
+                let nodes = "0\n".repeat(MAX_AST / 2);
+                let program = Parser::parse(&nodes, &mut MAX_REGEXP_WORK.clone()).unwrap();
+                assert_eq!(program.exprs.len() + program.stmts.len(), MAX_AST);
+                drop(program);
+                for (source, message) in [
+                    (
+                        format!("test.record(1);{tokens}"),
+                        "Script token limit reached (131072)",
+                    ),
+                    (
+                        format!("test.record(1);{nodes}"),
+                        "AST node limit reached (131072)",
+                    ),
+                ] {
+                    let (mut runtime, mut host) = test_runtime();
+                    host.eval_permission = Some(true);
+                    let error = runtime.execute(&source, &mut host).unwrap_err();
+                    assert!(error.contains(message), "{error}");
+                    assert_eq!(runtime.programs.len(), 0);
+                    assert!(host.records.is_empty());
+                    // Eval cannot manufacture a source above MAX_STRING_BYTES;
+                    // that independent string cap remains smaller than this bundle.
+                    runtime.begin_job();
+                    assert!(runtime
+                        .define_global("payload", Value::String(source))
+                        .is_err());
+                    assert!(host.records.is_empty());
+                    assert_eq!(runtime.call_depth, 0);
+                    assert_eq!(runtime.eval_depth, 0);
+                }
+                let mut runtime = Runtime::new();
+                runtime.register_program(&nodes, false).unwrap();
+                runtime.register_program(&nodes, false).unwrap();
+                assert_eq!(runtime.retained_ast, MAX_RETAINED_AST);
+                let source_before = runtime.retained_source;
+                let error = runtime.register_program("0;", false).err().unwrap();
+                assert!(error.display().contains("Retained AST limit"));
+                assert_eq!(runtime.retained_ast, MAX_RETAINED_AST);
+                assert_eq!(runtime.retained_source, source_before);
+                assert_eq!(runtime.programs.len(), 2);
+            })
+            .unwrap()
+            .join()
+            .unwrap();
     }
 
     #[test]
@@ -8064,6 +9482,97 @@ caught;
             .unwrap_err();
         assert!(error.contains("conflicts"));
         assert!(host.records.is_empty());
+    }
+
+    #[test]
+    fn global_accessor_declarations_fail_before_getters_or_scope_mutation() {
+        for descriptor in [
+            "{get:function(){reads++;return 7;},set:function(value){writes++;},enumerable:true,configurable:true}",
+            "{get:function(){reads++;return 7;},configurable:false}",
+            "{set:function(value){writes++;},configurable:false}",
+            "{get:undefined,set:undefined,configurable:true}",
+        ] {
+            for source in [
+                "var fresh;test.record('ran');var blocked;",
+                "var fresh;function freshFunction(){}function blocked(){}test.record('ran');",
+                "eval(\"var fresh;var blocked;test.record('ran');\");",
+                "eval(\"var fresh;function freshFunction(){}function blocked(){}test.record('ran');\");",
+                "eval.call(null,\"var fresh;var blocked;test.record('ran');\");",
+            ] {
+                let (mut runtime, mut host) = test_runtime();
+                runtime.bind_browser_global(2).unwrap();
+                host.eval_permission = Some(true);
+                runtime.execute(&format!(
+                    "var reads=0,writes=0;Object.defineProperty(window,'blocked',{descriptor});"
+                ), &mut host).unwrap();
+                let (_, properties) = runtime.browser_global.unwrap();
+                let property = &runtime.objects[properties].properties["blocked"];
+                let before = (
+                    property.accessor.unwrap().get,
+                    property.accessor.unwrap().set,
+                    property.order,
+                    property.enumerable,
+                    property.writable,
+                    property.configurable,
+                );
+                let counts = (runtime.bindings, runtime.functions.len(), runtime.properties, runtime.value_bytes);
+                let error = runtime.execute(source, &mut host).unwrap_err();
+                assert!(error.contains("Global var/function declarations over accessor property"), "{source}: {error}");
+                assert!(host.records.is_empty(), "{source}");
+                for name in ["fresh", "freshFunction", "blocked"] {
+                    assert!(!runtime.environment(0).bindings.contains_key(name), "{source}: {name}");
+                }
+                assert_eq!(runtime.binding_value(0, "reads").unwrap().to_text(), "0", "{source}");
+                assert_eq!(runtime.binding_value(0, "writes").unwrap().to_text(), "0", "{source}");
+                let property = &runtime.objects[properties].properties["blocked"];
+                assert_eq!(before, (
+                    property.accessor.unwrap().get,
+                    property.accessor.unwrap().set,
+                    property.order,
+                    property.enumerable,
+                    property.writable,
+                    property.configurable,
+                ), "{source}");
+                assert_eq!(counts, (runtime.bindings, runtime.functions.len(), runtime.properties, runtime.value_bytes), "{source}");
+            }
+        }
+    }
+
+    #[test]
+    fn global_accessor_preflight_allows_local_and_strict_eval_shadows_and_data_migration() {
+        let (mut runtime, mut host) = test_runtime();
+        runtime.bind_browser_global(2).unwrap();
+        host.eval_permission = Some(true);
+        runtime.execute(
+            "var reads=0;Object.defineProperty(window,'blocked',{get:function(){reads++;return 11;}});window.data=7;window.replaceMe=8;",
+            &mut host,
+        ).unwrap();
+        let result = runtime.execute(r#"
+            let local=(function(){var blocked=3;return blocked;})();
+            let localFunction=(function(){function blocked(){return 4;}return blocked();})();
+            let strictVar=eval("'use strict';var blocked=5;blocked;");
+            let strictFunction=eval("'use strict';function blocked(){return 6;}blocked();");
+            let inheritedStrict=(function(){'use strict';return eval('var blocked=9;blocked;');})();
+            var data;function replaceMe(){return 10;}
+            [local,localFunction,strictVar,strictFunction,inheritedStrict,data,replaceMe(),reads].join(':');
+        "#, &mut host).unwrap();
+        assert_eq!(result.to_text(), "3:4:5:6:9:7:10:0");
+        let (_, properties) = runtime.browser_global.unwrap();
+        assert!(runtime.objects[properties].properties["blocked"]
+            .accessor
+            .is_some());
+        assert!(!runtime.environment(0).bindings.contains_key("blocked"));
+        assert!(!runtime.objects[properties].properties.contains_key("data"));
+        assert!(!runtime.objects[properties]
+            .properties
+            .contains_key("replaceMe"));
+        assert_eq!(
+            runtime
+                .execute("window.blocked+':'+reads;", &mut host)
+                .unwrap()
+                .to_text(),
+            "11:1"
+        );
     }
 
     #[test]
@@ -8539,7 +10048,7 @@ caught;
                     break;
                 }
             }
-            assert!(completed < 10);
+            assert!(completed < 50);
         }
         assert!(completed > 1);
         assert!(runtime
@@ -8555,6 +10064,89 @@ caught;
             "1000"
         );
         assert_eq!(runtime.eval_depth, 0);
+        assert_eq!(runtime.call_depth, 0);
+    }
+
+    #[test]
+    fn expired_execution_clock_is_fatal_and_next_job_recovers() {
+        let (mut runtime, mut host) = test_runtime();
+        runtime.begin_job();
+        runtime.job_deadline = Instant::now() - Duration::from_millis(1);
+        runtime.steps = MAX_STEPS & !255;
+        let error = runtime
+            .execute(
+                "try{while(true);}catch(e){test.record('caught');}finally{test.record('finally');}",
+                &mut host,
+            )
+            .unwrap_err();
+        assert!(error.contains("Execution time limit"), "{error}");
+        assert!(host.records.is_empty());
+        runtime.begin_job();
+        runtime
+            .execute("test.record('recovered');", &mut host)
+            .unwrap();
+        assert_eq!(host.records, ["recovered"]);
+    }
+
+    #[test]
+    fn accessor_recursion_and_native_getter_cycles_stop_on_a_one_mib_stack() {
+        std::thread::Builder::new()
+            .stack_size(1024 * 1024)
+            .spawn(|| {
+                for source in [
+                    "var o={};Object.defineProperty(o,'x',{get:function(){return this.x;}});o.x;",
+                    "var o={};Object.defineProperty(o,'x',{set:function(v){this.x=v;}});o.x=1;",
+                    "var o={},k=Symbol();Object.defineProperty(o,k,{get:function(){return this[k];}});o[k];",
+                    // A borrowed native getter can recurse without entering a
+                    // script-function frame. The accessor itself must guard it.
+                    "var a=[];Object.defineProperty(a,'join',{get:Array.prototype.toString});a.join;",
+                ] {
+                    let (mut runtime, mut host) = test_runtime();
+                    let error = runtime.execute(source, &mut host).unwrap_err();
+                    assert!(error.contains("limit"), "{error}");
+                    assert_eq!(runtime.call_depth, 0);
+                    assert_eq!(runtime.eval_depth, 0);
+                    runtime.begin_job();
+                    assert_eq!(runtime.execute("6*7;", &mut host).unwrap().to_text(), "42");
+                }
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    #[test]
+    fn accessor_callbacks_share_job_work_and_keep_closures_between_jobs() {
+        let (mut runtime, mut host) = test_runtime();
+        runtime
+            .define_global("payload", Value::String("x".repeat(MAX_STRING_BYTES / 2)))
+            .unwrap();
+        let error = runtime.execute(
+            "var o={};Object.defineProperty(o,'x',{get:function(){return payload;}});try{while(true){o.x;}}catch(e){test.record('caught');}",
+            &mut host,
+        ).unwrap_err();
+        assert!(error.contains("String/copy work limit"), "{error}");
+        assert!(host.records.is_empty());
+        assert_eq!(runtime.call_depth, 0);
+        runtime.begin_job();
+        runtime.execute(
+            "var kept=(function(){let value=5;var o={};Object.defineProperty(o,'x',{get:function(){return value;},set:function(v){value=v;}});return o;})();",
+            &mut host,
+        ).unwrap();
+        runtime.begin_job();
+        assert_eq!(
+            runtime
+                .execute("kept.x=9;kept.x;", &mut host)
+                .unwrap()
+                .to_text(),
+            "9"
+        );
+        runtime.begin_job();
+        let error = runtime.execute(
+            "var endless={};Object.defineProperty(endless,'x',{get:function(){while(true){}}});endless.x;",
+            &mut host,
+        ).unwrap_err();
+        assert!(error.contains("limit"), "{error}");
         assert_eq!(runtime.call_depth, 0);
     }
 
@@ -8609,6 +10201,52 @@ caught;
             .unwrap()
             .join()
             .unwrap();
+    }
+
+    #[test]
+    fn large_bundle_source_and_dense_code_run_with_unchanged_execution_bounds() {
+        let (mut runtime, mut host) = test_runtime();
+        let source = format!(
+            "/*{}*/test.record('bootstrap');",
+            "original fixture ".repeat(24_000)
+        );
+        assert!(source.len() > 369_762 && source.len() < MAX_SOURCE_BYTES);
+        runtime.execute(&source, &mut host).unwrap();
+        assert_eq!(host.records, ["bootstrap"]);
+        runtime.begin_job();
+        let dense = format!("{}test.record('parsed');", ";".repeat(70_000));
+        runtime.execute(&dense, &mut host).unwrap();
+        assert_eq!(host.records, ["bootstrap", "parsed"]);
+        runtime.begin_job();
+        let error = runtime.execute("while(true){}", &mut host).unwrap_err();
+        assert!(error.contains("limit"), "{error}");
+        runtime.begin_job();
+        runtime
+            .execute("test.record('recovered');", &mut host)
+            .unwrap();
+        assert_eq!(host.records.last().unwrap(), "recovered");
+    }
+
+    #[test]
+    fn retained_bundle_source_limit_rejects_before_executing() {
+        let (mut runtime, mut host) = test_runtime();
+        let source = format!("/*{}*/", "x".repeat(MAX_SOURCE_BYTES - 4));
+        for _ in 0..MAX_RETAINED_SOURCE / MAX_SOURCE_BYTES {
+            runtime.begin_job();
+            runtime.execute(&source, &mut host).unwrap();
+        }
+        let retained = runtime.retained_source;
+        runtime.begin_job();
+        let error = runtime
+            .execute("test.record('overflow');", &mut host)
+            .unwrap_err();
+        assert!(error.contains("Retained script limit"), "{error}");
+        assert_eq!(runtime.retained_source, retained);
+        assert!(host.records.is_empty());
+        assert_eq!(
+            runtime.programs.len(),
+            MAX_RETAINED_SOURCE / MAX_SOURCE_BYTES
+        );
     }
 
     #[test]

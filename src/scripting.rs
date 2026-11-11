@@ -1,18 +1,45 @@
 //! The deliberately small DOM boundary of the original JavaScript interpreter.
-//! A Page is one document realm. It never opens files, makes requests, navigates,
-//! or injects HTML. Its document-owned timer queue is pumped by the App;
+//! A Page is one document realm. It never opens files or performs network I/O.
+//! Bounded navigation/resource requests are handed to the App after each job.
+//! Its document-owned timer queue is pumped by the App;
 //! callbacks never execute on a background thread.
 //!
 //! Classic scripts run once, in source order, after parsing. Event jobs share
 //! both interpreter and host-work limits; dispatch never resets those limits.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
 use crate::forms::{self, Forms, Kind};
 use crate::html::{Document, Node, NodeKind};
 use crate::javascript::{Host, Runtime, Value};
 use crate::loader::Script;
+
+#[path = "script_dom_compat.rs"]
+mod dom_compat;
+use dom_compat::{dataset_attribute, dataset_key, navigator_readonly};
+#[path = "script_queries.rs"]
+mod queries;
+use queries::node_list_index;
+#[path = "script_collections.rs"]
+mod dom_collections;
+use dom_collections::collection_handle_index;
+#[path = "script_dom_tree.rs"]
+mod dom_tree;
+use dom_tree::DomState;
+#[path = "script_navigation.rs"]
+mod page_navigation;
+pub use page_navigation::Navigation;
+#[path = "script_forms.rs"]
+mod script_forms;
+#[path = "script_resources.rs"]
+mod script_resources;
+pub use script_resources::DynamicScript;
+use script_resources::DynamicState;
+#[path = "script_stylesheets.rs"]
+mod script_stylesheets;
+pub use script_stylesheets::DynamicStylesheet;
+use script_stylesheets::StylesheetState;
 
 const WINDOW: u32 = 1;
 const DOCUMENT: u32 = 2;
@@ -23,10 +50,16 @@ const MIME_TYPES: u32 = 6;
 const DOCUMENT_IMAGES: u32 = 7;
 const LOCATION: u32 = 8;
 const PERFORMANCE: u32 = 9;
+const IMAGE_FACTORY: u32 = 10;
+const NODE_LIST_BASE: u32 = 32;
+const MAX_NODE_LISTS: usize = 128;
+const MAX_NODE_LIST_REFERENCES: usize = 16_384;
 const NODE_BASE: u32 = 1024;
 const STYLE_BASE: u32 = 1_000_000;
+const DATASET_BASE: u32 = 1_500_000;
 const EVENT_BASE: u32 = 2_000_000;
 const MAX_LISTENERS: usize = 64;
+const MAX_EVENT_TYPE_BYTES: usize = 256;
 const MAX_HOST_WORK: usize = 100_000;
 const MAX_COPY_WORK: usize = 8 * 1024 * 1024;
 const MAX_STRING: usize = 32 * 1024;
@@ -42,6 +75,11 @@ const MAX_TIMER_BYTES: usize = 256 * 1024;
 const MAX_TIMER_CALLBACKS: usize = 4096;
 const MAX_ANIMATION_FRAMES: usize = 64;
 const FRAME_INTERVAL: Duration = Duration::from_millis(16);
+const MAX_STARTUP_STEPS: usize = 1_000_000;
+const MAX_STARTUP_COPY: usize = 64 * 1024 * 1024;
+const MAX_STARTUP_REGEXP: usize = 8_000_000;
+const MAX_STARTUP_HOST_WORK: usize = 500_000;
+const MAX_STARTUP_TIME: Duration = Duration::from_secs(2);
 pub const MAX_CONSOLE_SOURCE: usize = 8192;
 
 /// Values supplied by the native input path, never by document code.
@@ -129,6 +167,7 @@ struct Tree {
 /// reflect its existing URL serialization; the content root and HTML base URL
 /// are deliberately not part of this script-visible snapshot.
 struct LocationView {
+    source: crate::navigation::Location,
     href: String,
     protocol: String,
     host: String,
@@ -196,6 +235,7 @@ impl LocationView {
                 )
             };
         Self {
+            source: location.clone(),
             href,
             protocol,
             host,
@@ -227,9 +267,21 @@ impl LocationView {
 struct State {
     geometry: Option<crate::script_geometry::Geometry>,
     location: Option<LocationView>,
+    navigation: Option<Navigation>,
+    navigation_requests: usize,
+    cookies: std::sync::Arc<crate::cookies::Session>,
+    dom: DomState,
+    dynamic: DynamicState,
+    stylesheets: StylesheetState,
     listeners: Vec<Listener>,
     native_functions: HashMap<&'static str, Value>,
     native_methods: Vec<(u32, &'static str, Value)>,
+    detached_images: HashSet<usize>,
+    detached_nodes: HashSet<usize>,
+    node_lists: Vec<Vec<usize>>,
+    node_list_references: usize,
+    declined_images: usize,
+    declined_beacons: usize,
     eval_allowed: bool,
     timers: Vec<Timer>,
     animation_frames: Vec<AnimationFrame>,
@@ -267,9 +319,21 @@ impl State {
         Self {
             geometry: None,
             location: None,
+            navigation: None,
+            navigation_requests: 0,
+            cookies: std::sync::Arc::new(crate::cookies::Session::default()),
+            dom: DomState::default(),
+            dynamic: DynamicState::default(),
+            stylesheets: StylesheetState::default(),
             listeners: Vec::new(),
             native_functions: HashMap::new(),
             native_methods: Vec::new(),
+            detached_images: HashSet::new(),
+            detached_nodes: HashSet::new(),
+            node_lists: Vec::new(),
+            node_list_references: 0,
+            declined_images: 0,
+            declined_beacons: 0,
             eval_allowed: false,
             timers: Vec::new(),
             animation_frames: Vec::new(),
@@ -484,64 +548,7 @@ impl State {
     }
 
     fn rebuild(&mut self, doc: &Document) -> Result<(), String> {
-        if !self.dirty {
-            return Ok(());
-        }
-        self.work(doc.nodes.len())?;
-        let mut tree = Tree {
-            active: vec![false; doc.nodes.len()],
-            parents: vec![None; doc.nodes.len()],
-            ..Tree::default()
-        };
-        let mut stack = if doc.nodes.is_empty() {
-            Vec::new()
-        } else {
-            vec![(0, None)]
-        };
-        while let Some((node, parent)) = stack.pop() {
-            self.work(1)?;
-            if node >= doc.nodes.len() || tree.active[node] {
-                continue;
-            }
-            let tag = tag(doc, node);
-            if matches!(tag, "script" | "style" | "template" | "iframe" | "object")
-                || tag == "noscript" && doc.scripting_enabled
-            {
-                continue;
-            }
-            tree.active[node] = true;
-            tree.parents[node] = parent;
-            tree.order.push(node);
-            if tag == "body" && tree.body.is_none() {
-                tree.body = Some(node);
-            }
-            if tag == "head" && tree.head.is_none() {
-                tree.head = Some(node);
-            }
-            if parent == Some(0)
-                && tree.document_element.is_none()
-                && matches!(doc.nodes[node].kind, NodeKind::Element { .. })
-            {
-                tree.document_element = Some(node);
-            }
-            if let Some(id) = doc
-                .attr(node, "id")
-                .filter(|id| !id.is_empty() && id.len() <= MAX_STRING)
-            {
-                self.copies(id.len())?;
-                tree.ids.entry(id.to_owned()).or_insert(node);
-            }
-            stack.extend(
-                doc.nodes[node]
-                    .children
-                    .iter()
-                    .rev()
-                    .map(|&child| (child, Some(node))),
-            );
-        }
-        self.tree = tree;
-        self.dirty = false;
-        Ok(())
+        self.rebuild_dom_tree(doc)
     }
 
     fn add_listener(
@@ -637,6 +644,7 @@ impl Page {
         }
         for (object, method) in [
             (NAVIGATOR, "javaEnabled"),
+            (NAVIGATOR, "sendBeacon"),
             (PLUGINS, "item"),
             (PLUGINS, "namedItem"),
             (PLUGINS, "refresh"),
@@ -645,9 +653,16 @@ impl Page {
             (DOCUMENT_IMAGES, "item"),
             (DOCUMENT_IMAGES, "namedItem"),
             (LOCATION, "toString"),
+            (LOCATION, "assign"),
+            (LOCATION, "replace"),
+            (LOCATION, "reload"),
             (PERFORMANCE, "now"),
             (DOCUMENT, "getElementById"),
+            (DOCUMENT, "getElementsByTagName"),
             (DOCUMENT, "querySelector"),
+            (DOCUMENT, "querySelectorAll"),
+            (DOCUMENT, "createElement"),
+            (DOCUMENT, "createTextNode"),
             (DOCUMENT, "addEventListener"),
             (DOCUMENT, "removeEventListener"),
         ] {
@@ -656,6 +671,19 @@ impl Page {
                 .expect("fixed navigator method");
             state.native_methods.push((object, method, function));
         }
+        let navigator_methods: Vec<_> = state
+            .native_methods
+            .iter()
+            .filter(|(target, _, _)| *target == NAVIGATOR)
+            .map(|(_, method, function)| (*method, function.clone()))
+            .collect();
+        runtime
+            .bind_host_object(NAVIGATOR, &navigator_methods)
+            .expect("fixed navigator object");
+        let image = runtime
+            .define_host_constructor("Image", IMAGE_FACTORY, "Image")
+            .expect("fixed image constructor");
+        state.native_functions.insert("Image", image);
         Self { runtime, state }
     }
 
@@ -715,6 +743,9 @@ impl Page {
     pub fn next_timer_deadline(&self) -> Option<Instant> {
         if !self.state.enabled {
             return None;
+        }
+        if self.has_host_tasks() {
+            return Some(Instant::now());
         }
         self.state
             .timers
@@ -946,9 +977,18 @@ impl Page {
     ) -> Outcome {
         let geometry = self.state.geometry.take();
         let location = self.state.location.take();
+        let cookies = self.state.cookies.clone();
+        let resource_base = self.state.dynamic.base.take();
+        let stylesheet_bytes = self.state.stylesheets.source_bytes;
         *self = Self::new();
         self.state.geometry = geometry;
         self.state.location = location;
+        self.state.cookies = cookies;
+        self.state.dynamic.base = resource_base;
+        self.state.stylesheets.source_bytes = stylesheet_bytes;
+        self.state.dynamic.policy = policy.clone();
+        self.state.dynamic.script_count = sources.len();
+        self.state.dynamic.source_bytes = sources.iter().map(|script| script.source.len()).sum();
         self.begin_job();
         self.state.enabled = doc.scripting_enabled;
         self.state.eval_allowed = policy.allows_eval().is_ok();
@@ -1037,7 +1077,37 @@ impl Page {
                 }
             }
         }
+        let started = Instant::now();
+        let mut startup_steps = 0usize;
+        let mut startup_copy = 0usize;
+        let mut startup_regexp = 0usize;
+        let mut startup_host = 0usize;
         for source in sources {
+            if startup_steps >= MAX_STARTUP_STEPS
+                || startup_copy >= MAX_STARTUP_COPY
+                || startup_regexp >= MAX_STARTUP_REGEXP
+                || startup_host >= MAX_STARTUP_HOST_WORK
+                || started.elapsed() >= MAX_STARTUP_TIME
+            {
+                self.state.error("JavaScript startup", "Aggregate startup work/time limit reached; remaining classic scripts were skipped.");
+                break;
+            }
+            // Each classic script is an independent execution job. An earlier
+            // exception or exhausted allowance must not poison the next one.
+            // Retained AST/object/binding caps still cover the entire realm.
+            self.begin_job();
+            let remaining_copy = MAX_STARTUP_COPY - startup_copy;
+            let runtime_copy = (remaining_copy / 2).min(MAX_COPY_WORK);
+            self.state.copy_work = (remaining_copy - runtime_copy).min(MAX_COPY_WORK);
+            self.state.host_work = (MAX_STARTUP_HOST_WORK - startup_host).min(MAX_HOST_WORK);
+            let host_copy = self.state.copy_work;
+            let host_work = self.state.host_work;
+            self.runtime.constrain_job(
+                MAX_STARTUP_STEPS - startup_steps,
+                runtime_copy,
+                MAX_STARTUP_REGEXP - startup_regexp,
+                started + MAX_STARTUP_TIME,
+            );
             self.state.executed += 1;
             if let Err(error) = self.runtime.execute(
                 &source.source,
@@ -1052,13 +1122,22 @@ impl Page {
                     &error,
                 );
             }
+            let (steps, copies, regexp) = self.runtime.job_usage();
+            startup_steps = startup_steps.saturating_add(steps);
+            startup_copy = startup_copy
+                .saturating_add(copies)
+                .saturating_add(host_copy - self.state.copy_work);
+            startup_regexp = startup_regexp.saturating_add(regexp);
+            startup_host = startup_host.saturating_add(host_work - self.state.host_work);
         }
+        self.begin_job();
         self.dispatch_to(doc, forms, DOCUMENT, "DOMContentLoaded", false, true);
-        if !defer_load {
-            self.state.ready = "complete";
-            self.dispatch_to(doc, forms, WINDOW, "load", false, false);
-        }
-        let changed = std::mem::take(&mut self.state.changed);
+        let loaded = if defer_load {
+            Outcome::default()
+        } else {
+            self.finish_loading(doc, forms)
+        };
+        let changed = std::mem::take(&mut self.state.changed) | loaded.layout_changed;
         Outcome {
             prevented: false,
             layout_changed: changed,
@@ -1070,6 +1149,10 @@ impl Page {
     /// replacing a load does not call this method for the abandoned document.
     pub fn finish_loading(&mut self, doc: &mut Document, forms: &mut Forms) -> Outcome {
         if !self.state.enabled || !doc.scripting_enabled || self.state.ready != "interactive" {
+            return Outcome::default();
+        }
+        self.state.dynamic.load_ready = true;
+        if self.state.dynamic.in_flight != 0 || self.state.stylesheets.in_flight != 0 {
             return Outcome::default();
         }
         self.begin_job();
@@ -1149,12 +1232,23 @@ impl Page {
                 .get(&target)
                 .is_some_and(|c| !matches!(c.kind, Kind::Hidden | Kind::Unsupported)),
             "submit" | "reset" => tag(doc, target) == "form",
+            "load" | "error" => {
+                matches!(tag(doc, target), "script" | "link")
+                    && self.state.dom.created.contains(&target)
+            }
             _ => false,
         };
         if !supported {
             return Outcome::default();
         }
-        let prevented = self.dispatch_to(doc, forms, node_handle(target), event, cancelable, true);
+        let prevented = self.dispatch_to(
+            doc,
+            forms,
+            node_handle(target),
+            event,
+            cancelable,
+            !matches!(event, "load" | "error"),
+        );
         Outcome {
             prevented,
             layout_changed: std::mem::take(&mut self.state.changed),
@@ -1297,7 +1391,9 @@ impl Page {
             return Ok(vec![DOCUMENT, WINDOW]);
         }
         let node = node_index(target).ok_or("Unknown event target.")?;
-        if !self.state.tree.active.get(node).copied().unwrap_or(false) {
+        if !self.state.tree.active.get(node).copied().unwrap_or(false)
+            && !(tag(doc, node) == "script" && self.state.dom.created.contains(&node))
+        {
             return Err("Event target is no longer connected.".into());
         }
         let mut path = vec![target];
@@ -1310,7 +1406,9 @@ impl Page {
                 }
                 parent = self.state.tree.parents[node];
             }
-            path.extend([DOCUMENT, WINDOW]);
+            if self.state.dom.connected.get(node).copied().unwrap_or(false) {
+                path.extend([DOCUMENT, WINDOW]);
+            }
         }
         Ok(path)
     }
@@ -1319,12 +1417,13 @@ impl Page {
         if !self.state.enabled {
             return "JavaScript did not run for this document (disabled or blocked by document policy).\n".into();
         }
-        let mut text = format!("ChezCat JavaScript subset\n{} script(s), {} active listener(s), {} error(s).\n{} pending timer(s), {} timer callback(s) executed.\nClassic scripts run after parsing. Events come from supported controls/forms.\nFunction timers use the document queue. Bounded eval follows the document CSP.\nLocation and document URL inspection are read-only and reflect the displayed document.\nHTML injection, script navigation, storage and network APIs are not implemented.\n\n", self.state.executed, self.state.listeners.len(), self.state.errors, self.state.timers.len(), self.state.timer_callbacks);
+        let mut text = format!("ChezCat JavaScript subset\n{} script(s), {} active listener(s), {} error(s).\n{} pending timer(s), {} timer callback(s) executed.\nClassic scripts run after parsing. Events come from supported controls/forms and completed dynamic scripts/stylesheets.\nFunction timers use the document queue. Bounded eval follows the document CSP.\nLocation inspection reflects the displayed document; same-origin assign/replace/reload and href/search/hash writes queue navigation.\nSession cookies are memory-only and exact-host scoped; document.cookie excludes HttpOnly entries.\nDynamic external classic scripts use CSP, MIME, request-blocking and bounded source checks; cross-origin HTTPS scripts omit credentials. Dynamic LINK stylesheets retain exact-origin checks. HTML injection, modules, persistent storage, fetch and XHR are not implemented.\n\n", self.state.executed, self.state.listeners.len(), self.state.errors, self.state.timers.len(), self.state.timer_callbacks);
         for line in &self.state.logs {
             text.push_str(line);
             text.push('\n');
         }
         text.push_str(&format!("Animation frames: {} pending callback(s), {} executed. Whole-millisecond monotonic timestamps; 16 ms minimum frame interval.\n", self.state.animation_frames.len(), self.state.animation_callbacks));
+        text.push_str(&format!("Classic scripts have independent execution jobs (250000 steps / 1 second), with aggregate startup work/time limits.\nDynamic image requests declined: {}. Detached Image nodes reflect attributes; no request or load event was fabricated.\nBeacon requests declined: {}. sendBeacon returns false; no data was queued or transmitted.\n", self.state.declined_images, self.state.declined_beacons));
         if self.state.omitted > 0 {
             text.push_str(&format!(
                 "{} further log entries omitted by the report limit.\n",
@@ -1344,6 +1443,9 @@ struct Bridge<'a> {
 // Web IDL long conversion used by timer delays/identifiers. Object coercion is
 // deliberately outside this bridge; primitive conversion matches the runtime.
 fn timer_integer(value: &Value) -> Result<i32, String> {
+    if matches!(value, Value::Symbol(_)) {
+        return Err("Cannot convert a Symbol value to a timer delay or identifier.".into());
+    }
     if matches!(
         value,
         Value::Function(_) | Value::Object(_) | Value::Host(_)
@@ -1443,60 +1545,29 @@ impl Bridge<'_> {
         })
     }
 
-    fn query_selector(&mut self, object: u32, source: &str) -> Result<Value, String> {
-        self.state.rebuild(self.doc)?;
-        let root = if object == DOCUMENT {
-            0
-        } else {
-            self.node(object)?
-        };
-        let mut candidates = Vec::new();
-        let mut stack = self.doc.nodes[root]
-            .children
-            .iter()
-            .rev()
-            .copied()
-            .collect::<Vec<_>>();
-        while let Some(node) = stack.pop() {
-            self.state.work(1)?;
-            if !self.state.tree.active.get(node).copied().unwrap_or(false) {
-                continue;
-            }
-            if matches!(self.doc.nodes[node].kind, NodeKind::Element { .. }) {
-                candidates.push(node);
-            }
-            stack.extend(self.doc.nodes[node].children.iter().rev().copied());
-        }
-        let checked = |node| {
-            self.forms
-                .controls
-                .get(&node)
-                .filter(|control| matches!(control.kind, Kind::Checkbox | Kind::Radio))
-                .map(|control| control.checked)
-        };
-        let found = crate::css::query_first(
-            self.doc,
-            source,
-            &candidates,
-            Some(&checked),
-            &mut self.state.host_work,
-        )?;
-        Ok(found.map_or(Value::Null, |node| Value::Host(node_handle(node))))
-    }
-
     fn node(&mut self, handle: u32) -> Result<usize, String> {
         self.state.rebuild(self.doc)?;
         let node = node_index(handle).ok_or("This is not an element handle.")?;
-        if !self.state.tree.active.get(node).copied().unwrap_or(false)
-            || !matches!(self.doc.nodes[node].kind, NodeKind::Element { .. })
+        if (!self.state.tree.active.get(node).copied().unwrap_or(false)
+            && !self.state.detached_images.contains(&node)
+            && !self.state.detached_nodes.contains(&node)
+            && !self.state.dom.created.contains(&node))
+            || !self
+                .doc
+                .nodes
+                .get(node)
+                .is_some_and(|node| matches!(node.kind, NodeKind::Element { .. }))
             || node == 0
         {
-            return Err("Element is disconnected, inert, or unavailable in this subset.".into());
+            return Err("Element is inert or unavailable in this subset.".into());
         }
         Ok(node)
     }
 
     fn text(&mut self, value: &Value) -> Result<String, String> {
+        if matches!(value, Value::Symbol(_)) {
+            return Err("Cannot convert a Symbol value to a DOM string.".into());
+        }
         if matches!(
             value,
             Value::Function(_) | Value::Host(_) | Value::Object(_)
@@ -1534,7 +1605,7 @@ impl Bridge<'_> {
             .as_ref()
             .ok_or("The document Location is unavailable without a committed URL context.")?;
         let value = location.property(property).ok_or_else(|| {
-            format!("Location property {property:?} is not supported; URL inspection is read-only.")
+            format!("Location property {property:?} is not supported by this subset.")
         })?;
         if value.len() > MAX_STRING {
             return Err("Location result exceeds 32 KiB.".into());
@@ -1554,6 +1625,13 @@ impl Bridge<'_> {
     }
 
     fn attribute(&mut self, node: usize, name: &str, value: Option<String>) -> Result<(), String> {
+        let NodeKind::Element { attrs, .. } = &self.doc.nodes[node].kind else {
+            return Err("Not an element.".into());
+        };
+        self.state.work(attrs.len())?;
+        if attrs.len() >= 4096 && value.is_some() && !attrs.iter().any(|(key, _)| key == name) {
+            return Err("Element attribute limit reached (4096).".into());
+        }
         if name == "id" && self.doc.attr(node, "id") != value.as_deref() {
             self.state.work(self.forms.controls.len())?;
             self.state.copies(
@@ -1578,12 +1656,15 @@ impl Bridge<'_> {
         if name == "disabled" {
             self.charge_disabled_refresh(node, value.is_some())?;
         }
-        let old = self.doc.attr(node, name).map_or(0, str::len);
-        let new = value.as_ref().map_or(0, String::len);
-        self.state.replace_bytes(
-            old * if name == "id" { 2 } else { 1 },
-            new * if name == "id" { 2 } else { 1 },
-        )?;
+        let factor = if name == "id" { 2 } else { 1 };
+        let old = self
+            .doc
+            .attr(node, name)
+            .map_or(0, |value| value.len() * factor + name.len());
+        let new = value
+            .as_ref()
+            .map_or(0, |value| value.len() * factor + name.len());
+        self.state.replace_bytes(old, new)?;
         let NodeKind::Element { attrs, id, .. } = &mut self.doc.nodes[node].kind else {
             return Err("Not an element.".into());
         };
@@ -1603,7 +1684,9 @@ impl Bridge<'_> {
         if name == "disabled" {
             self.forms.refresh_disabled(self.doc);
         }
-        self.state.layout_changed();
+        if self.state.tree.active.get(node).copied().unwrap_or(false) {
+            self.state.layout_changed();
+        }
         Ok(())
     }
 
@@ -1650,10 +1733,16 @@ impl Bridge<'_> {
     fn text_content(&mut self, node: usize) -> Result<String, String> {
         self.state.rebuild(self.doc)?;
         let mut result = String::new();
+        let root = node;
         let mut stack = vec![node];
         while let Some(node) = stack.pop() {
             self.state.work(1)?;
-            if !self.state.tree.active[node] {
+            if node != root
+                && dom_tree::inert_dom_tag(tag(self.doc, node), self.doc.scripting_enabled)
+            {
+                continue;
+            }
+            if !self.state.tree.active[node] && !self.state.detached_nodes.contains(&node) {
                 continue;
             }
             if let NodeKind::Text(text) = &self.doc.nodes[node].kind {
@@ -1708,14 +1797,14 @@ impl Bridge<'_> {
             }
             current = self.state.tree.parents.get(index).copied().flatten();
         }
-        self.state.replace_bytes(old_bytes, text.len())?;
+        // Detached nodes remain real objects for saved handles/NodeLists. Their
+        // contents remain charged to the document budget until realm teardown.
+        self.state
+            .replace_bytes(if reuse.is_some() { old_bytes } else { 0 }, text.len())?;
         if let Some(child) = reuse {
             self.doc.nodes[child].kind = NodeKind::Text(text);
         } else {
-            for child in descendants {
-                self.doc.nodes[child].children.clear();
-                self.doc.nodes[child].kind = NodeKind::Text(String::new());
-            }
+            self.state.detached_nodes.extend(descendants);
             self.doc.nodes[node].children.clear();
             if !text.is_empty() {
                 let child = self.doc.nodes.len();
@@ -1724,6 +1813,9 @@ impl Bridge<'_> {
                     children: Vec::new(),
                 });
                 self.doc.nodes[node].children.push(child);
+                if self.state.detached_nodes.contains(&node) {
+                    self.state.detached_nodes.insert(child);
+                }
             }
         }
         // Updating a span inside a button must update the native caption too.
@@ -1733,18 +1825,17 @@ impl Bridge<'_> {
             }
         }
         self.state.dirty |= reuse.is_none();
-        self.state.layout_changed();
+        if self.state.tree.active.get(node).copied().unwrap_or(false) {
+            self.state.layout_changed();
+        }
         Ok(())
     }
 
     fn listener_target(&mut self, handle: u32, event: &str) -> Result<(), String> {
-        let allowed = matches!(
-            event,
-            "click" | "input" | "change" | "submit" | "reset" | "keydown" | "keyup"
-        ) || event == "DOMContentLoaded" && matches!(handle, DOCUMENT | WINDOW)
-            || event == "load" && handle == WINDOW;
-        if !allowed {
-            return Err(format!("Event {event:?} is not supported on this target."));
+        // Event types are case-sensitive DOM strings, including custom and
+        // empty names. Registering one does not create a native event source.
+        if event.len() > MAX_EVENT_TYPE_BYTES {
+            return Err("Event type exceeds the 256-byte limit.".into());
         }
         if !matches!(handle, DOCUMENT | WINDOW) {
             self.node(handle)?;
@@ -1752,12 +1843,32 @@ impl Bridge<'_> {
         Ok(())
     }
 
+    fn handler_event_target(&mut self, handle: u32, event: &str) -> Result<(), String> {
+        // Keep native on* property availability unchanged. Custom names are
+        // accepted through add/removeEventListener on existing EventTargets.
+        let allowed = matches!(
+            event,
+            "click" | "input" | "change" | "submit" | "reset" | "keydown" | "keyup"
+        ) || event == "DOMContentLoaded" && matches!(handle, DOCUMENT | WINDOW)
+            || event == "load" && handle == WINDOW
+            || matches!(event, "load" | "error")
+                && node_index(handle).is_some_and(|node| {
+                    tag(self.doc, node) == "img"
+                        || matches!(tag(self.doc, node), "script" | "link")
+                            && self.state.dom.created.contains(&node)
+                });
+        if !allowed {
+            return Err(format!("Event {event:?} is not supported on this target."));
+        }
+        self.listener_target(handle, event)
+    }
+
     fn handler(&mut self, object: u32, property: &str) -> Result<Option<Value>, String> {
         let Some(event) = handler_event(property) else {
             return Ok(None);
         };
         let object = self.handler_target(object, event);
-        self.listener_target(object, event)?;
+        self.handler_event_target(object, event)?;
         Ok(Some(
             self.state
                 .listeners
@@ -1772,7 +1883,7 @@ impl Bridge<'_> {
             return Ok(false);
         };
         let object = self.handler_target(object, event);
-        self.listener_target(object, event)?;
+        self.handler_event_target(object, event)?;
         match value {
             Value::Function(_) => {
                 self.state
@@ -1854,7 +1965,7 @@ impl Bridge<'_> {
     }
 
     fn style_node(&mut self, handle: u32) -> Result<usize, String> {
-        if !(STYLE_BASE..EVENT_BASE).contains(&handle) {
+        if !(STYLE_BASE..DATASET_BASE).contains(&handle) {
             return Err("Unknown style handle.".into());
         }
         self.node(node_handle((handle - STYLE_BASE) as usize))
@@ -1921,6 +2032,446 @@ impl Bridge<'_> {
 }
 
 impl Host for Bridge<'_> {
+    fn primitive_conversion(&self, object: u32) -> bool {
+        object == LOCATION
+    }
+
+    fn owns_property(&self, object: u32, property: &str) -> bool {
+        object != NAVIGATOR || navigator_readonly(property)
+    }
+
+    fn readonly_property(&self, object: u32, property: &str) -> bool {
+        self.dom_readonly(object, property)
+            || collection_handle_index(object).is_some()
+            || node_list_index(object).is_some()
+                && (property == "length" || collection_index(property).is_some())
+            || object == NAVIGATOR && navigator_readonly(property)
+            || node_index(object).is_some() && property == "dataset"
+            || node_index(object).is_some_and(|node| tag(self.doc, node) == "img")
+                && matches!(
+                    property,
+                    "complete" | "naturalWidth" | "naturalHeight" | "currentSrc"
+                )
+    }
+
+    fn string_setter(&self, object: u32, property: &str) -> bool {
+        self.dom_string_setter(object, property)
+            || Self::location_string_setter(object, property)
+            || object == DOCUMENT && property == "cookie"
+            || (DATASET_BASE..EVENT_BASE).contains(&object)
+            || node_index(object).is_some_and(|node| tag(self.doc, node) == "img")
+                && matches!(property, "src" | "alt")
+    }
+
+    fn number_setter(&self, object: u32, property: &str) -> bool {
+        node_index(object).is_some_and(|node| tag(self.doc, node) == "img")
+            && matches!(property, "width" | "height")
+    }
+
+    fn argument_conversions(&self, object: u32, method: &str) -> &'static [(usize, bool)] {
+        if collection_handle_index(object).is_some() {
+            return match method {
+                "item" => &[(0, false)],
+                "namedItem" => &[(0, true)],
+                _ => &[],
+            };
+        }
+        if (object == DOCUMENT || node_index(object).is_some()) && method == "getElementsByTagName"
+        {
+            return &[(0, true)];
+        }
+        if object == LOCATION && matches!(method, "assign" | "replace") {
+            return &[(0, true)];
+        }
+        if object == IMAGE_FACTORY && method == "Image" {
+            return &[(0, false), (1, false)];
+        }
+        if object == NAVIGATOR && method == "sendBeacon"
+            || object == DOCUMENT && matches!(method, "createElement" | "createTextNode")
+        {
+            return &[(0, true)];
+        }
+        if node_list_index(object).is_some() && method == "item" {
+            return &[(0, false)];
+        }
+        if object == DOCUMENT && method == "getElementById"
+            || (object == DOCUMENT || node_index(object).is_some())
+                && matches!(
+                    method,
+                    "querySelector" | "querySelectorAll" | "matches" | "closest"
+                )
+            || node_index(object).is_some()
+                && matches!(method, "getAttribute" | "hasAttribute" | "removeAttribute")
+        {
+            return &[(0, true)];
+        }
+        if node_index(object).is_some() && method == "setAttribute" {
+            return &[(0, true), (1, true)];
+        }
+        &[]
+    }
+
+    fn required_arguments(&self, object: u32, method: &str) -> usize {
+        if collection_handle_index(object).is_some() && matches!(method, "item" | "namedItem")
+            || (object == DOCUMENT || node_index(object).is_some())
+                && method == "getElementsByTagName"
+        {
+            return 1;
+        }
+        if object == LOCATION && matches!(method, "assign" | "replace") {
+            return 1;
+        }
+        if node_index(object).is_some() && matches!(method, "setAttribute" | "insertBefore") {
+            2
+        } else if (object == DOCUMENT || node_index(object).is_some())
+            && matches!(
+                method,
+                "querySelector" | "querySelectorAll" | "matches" | "closest"
+            )
+            || object == DOCUMENT
+                && matches!(
+                    method,
+                    "getElementById" | "createElement" | "createTextNode"
+                )
+            || node_index(object).is_some()
+                && matches!(
+                    method,
+                    "getAttribute"
+                        | "hasAttribute"
+                        | "removeAttribute"
+                        | "appendChild"
+                        | "removeChild"
+                )
+            || node_list_index(object).is_some() && matches!(method, "item" | "forEach")
+            || object == NAVIGATOR && method == "sendBeacon"
+        {
+            1
+        } else {
+            0
+        }
+    }
+
+    fn validate_call(
+        &self,
+        object: u32,
+        method: &str,
+        args: &[Value],
+    ) -> Result<(), (&'static str, String)> {
+        // These existing methods still convert primitive arguments inside the
+        // bridge. Reject Symbol before that boundary so the error is catchable
+        // and no timer, listener or style mutation has begun. Timer callback
+        // arguments and boolean listener options are deliberately untouched.
+        let symbols_rejected = if object == WINDOW {
+            match method {
+                "setTimeout" => args
+                    .iter()
+                    .take(2)
+                    .any(|value| matches!(value, Value::Symbol(_))),
+                "clearTimeout" | "requestAnimationFrame" | "cancelAnimationFrame" => {
+                    matches!(args.first(), Some(Value::Symbol(_)))
+                }
+                _ => false,
+            }
+        } else {
+            false
+        } || matches!(method, "addEventListener" | "removeEventListener")
+            && args.len() >= 2
+            && args
+                .iter()
+                .take(2)
+                .any(|value| matches!(value, Value::Symbol(_)))
+            || (STYLE_BASE..DATASET_BASE).contains(&object)
+                && (method == "setProperty" && (2..=3).contains(&args.len())
+                    || matches!(method, "getPropertyValue" | "removeProperty") && args.len() == 1)
+                && args.iter().any(|value| matches!(value, Value::Symbol(_)))
+            || matches!(object, PLUGINS | MIME_TYPES | DOCUMENT_IMAGES)
+                && matches!(method, "item" | "namedItem")
+                && matches!(args.first(), Some(Value::Symbol(_)));
+        if symbols_rejected {
+            return Err((
+                "TypeError",
+                format!("{method} cannot convert a Symbol argument to its required type."),
+            ));
+        }
+        self.dom_validate_call(object, method, args)?;
+        if (object == DOCUMENT || node_index(object).is_some())
+            && matches!(
+                method,
+                "querySelector" | "querySelectorAll" | "matches" | "closest"
+            )
+        {
+            let Some(Value::String(source)) = args.first() else {
+                return Err((
+                    "TypeError",
+                    "Selector methods require a selector string.".into(),
+                ));
+            };
+            if !crate::css::valid_query_selector(source) {
+                return Err((
+                    "SyntaxError",
+                    "Invalid selector or selector syntax outside the supported subset.".into(),
+                ));
+            }
+        }
+        if (node_list_index(object).is_some() && method == "item"
+            || object == DOCUMENT && method == "getElementById"
+            || node_index(object).is_some()
+                && matches!(method, "getAttribute" | "hasAttribute" | "removeAttribute"))
+            && args.is_empty()
+        {
+            return Err(("TypeError", format!("{method} requires one argument.")));
+        }
+        if node_index(object).is_some() && method == "setAttribute" && args.len() < 2 {
+            return Err(("TypeError", "setAttribute requires two arguments.".into()));
+        }
+        if object == NAVIGATOR && method == "sendBeacon" {
+            let Some(Value::String(source)) = args.first() else {
+                return Err(("TypeError", "sendBeacon requires a URL.".into()));
+            };
+            if !self.beacon_url_valid(source) {
+                return Err((
+                    "TypeError",
+                    "sendBeacon requires a valid HTTP or HTTPS URL.".into(),
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_set(
+        &self,
+        object: u32,
+        property: &str,
+        value: &Value,
+    ) -> Result<(), (&'static str, String)> {
+        if matches!(value, Value::Symbol(_)) {
+            let text_or_index = object == DOCUMENT && property == "title"
+                || (STYLE_BASE..DATASET_BASE).contains(&object) && css_name(property).is_ok()
+                || node_index(object).is_some_and(|node| {
+                    matches!(
+                        property,
+                        "textContent" | "id" | "className" | "title" | "value" | "selectedIndex"
+                    ) || self.doc.nodes.get(node).is_some_and(|node| {
+                        matches!(node.kind, NodeKind::Text(_))
+                            && matches!(property, "data" | "nodeValue")
+                    }) || property == "text"
+                        && tag(self.doc, node) == "script"
+                        && self.state.dom.created.contains(&node)
+                });
+            if text_or_index {
+                return Err((
+                    "TypeError",
+                    format!("{property} cannot convert a Symbol value to its required type."),
+                ));
+            }
+        }
+        if (DATASET_BASE..EVENT_BASE).contains(&object) {
+            if property
+                .as_bytes()
+                .windows(2)
+                .any(|pair| pair[0] == b'-' && pair[1].is_ascii_lowercase())
+            {
+                return Err((
+                    "SyntaxError",
+                    "Dataset keys cannot contain a hyphen followed by a lowercase ASCII letter."
+                        .into(),
+                ));
+            }
+            if property.chars().any(|ch| {
+                ch == '\0'
+                    || ch.is_ascii_whitespace()
+                    || matches!(ch, '/' | '>' | '=' | '\'' | '"' | '<')
+            }) {
+                return Err((
+                    "InvalidCharacterError",
+                    "Dataset key is not a valid attribute name.".into(),
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    fn resolve_member_before_call(&self, object: u32) -> bool {
+        self.form_receiver(object)
+    }
+
+    fn ordinary_prototype(&self, object: u32) -> bool {
+        node_list_index(object).is_some()
+            || collection_handle_index(object).is_some()
+            || (DATASET_BASE..EVENT_BASE).contains(&object)
+    }
+
+    fn is_instance(&self, object: u32, constructor: u32, method: &str) -> Option<bool> {
+        (constructor == IMAGE_FACTORY && method == "Image")
+            .then(|| node_index(object).is_some_and(|node| tag(self.doc, node) == "img"))
+    }
+
+    fn method(&self, object: u32, property: &str) -> Option<&'static str> {
+        if property == "submit" {
+            return self.form_submit_method(object);
+        }
+        if collection_handle_index(object).is_some() {
+            return match property {
+                "item" => Some("item"),
+                "namedItem" => Some("namedItem"),
+                _ => None,
+            };
+        }
+        if let Some(method) = self.dom_method(object, property) {
+            return Some(method);
+        }
+        if node_list_index(object).is_some() {
+            return match property {
+                "item" => Some("item"),
+                "forEach" => Some("forEach"),
+                _ => None,
+            };
+        }
+        if node_index(object).is_some_and(|node| {
+            self.doc
+                .nodes
+                .get(node)
+                .is_some_and(|node| matches!(node.kind, NodeKind::Element { .. }))
+        }) {
+            return match property {
+                "getAttribute" => Some("getAttribute"),
+                "getElementsByTagName" => Some("getElementsByTagName"),
+                "hasAttribute" => Some("hasAttribute"),
+                "setAttribute" => Some("setAttribute"),
+                "removeAttribute" => Some("removeAttribute"),
+                "querySelector" => Some("querySelector"),
+                "querySelectorAll" => Some("querySelectorAll"),
+                "matches" => Some("matches"),
+                "closest" => Some("closest"),
+                "addEventListener" => Some("addEventListener"),
+                "removeEventListener" => Some("removeEventListener"),
+                _ => None,
+            };
+        }
+        None
+    }
+
+    fn accepts_receiver(&self, object: u32, method: &str, receiver: u32) -> bool {
+        if method == "submit" {
+            return self.form_receiver(object) && self.form_receiver(receiver);
+        }
+        if matches!(method, "item" | "namedItem")
+            && (collection_handle_index(object).is_some() || object == DOCUMENT_IMAGES)
+        {
+            return collection_handle_index(receiver).is_some() || receiver == DOCUMENT_IMAGES;
+        }
+        if matches!(method, "appendChild" | "insertBefore" | "removeChild") {
+            let node = |handle| {
+                node_index(handle).is_some_and(|node| node > 0 && node < self.doc.nodes.len())
+            };
+            return node(object) && node(receiver);
+        }
+        let element = |handle| {
+            node_index(handle).is_some_and(|node| {
+                self.doc
+                    .nodes
+                    .get(node)
+                    .is_some_and(|node| matches!(node.kind, NodeKind::Element { .. }))
+            })
+        };
+        if matches!(method, "addEventListener" | "removeEventListener") {
+            let target = |handle| matches!(handle, WINDOW | DOCUMENT) || element(handle);
+            return target(object) && target(receiver);
+        }
+        if element(object) && self.method(object, method).is_some() {
+            return element(receiver);
+        }
+        if node_list_index(object).is_some() {
+            return node_list_index(receiver).is_some();
+        }
+        object == receiver
+    }
+
+    fn indexed_for_each(&self, object: u32, method: &str) -> bool {
+        node_list_index(object).is_some() && method == "forEach"
+    }
+
+    fn own_keys(&mut self, object: u32) -> Result<Vec<String>, String> {
+        self.state.work(1)?;
+        if collection_handle_index(object).is_some() {
+            return self.tag_collection_keys(object);
+        }
+        if node_list_index(object).is_some() {
+            return self.node_list_keys(object);
+        }
+        if (DATASET_BASE..EVENT_BASE).contains(&object) {
+            let node = self.dataset_node(object)?;
+            let NodeKind::Element { attrs, .. } = &self.doc.nodes[node].kind else {
+                unreachable!();
+            };
+            if attrs.len() > 4096 {
+                return Err("Dataset enumeration limit reached (4096 attributes).".into());
+            }
+            self.state.work(attrs.len())?;
+            self.state
+                .copies(attrs.iter().map(|(key, _)| key.len()).sum())?;
+            return Ok(attrs
+                .iter()
+                .filter_map(|(key, _)| dataset_key(key))
+                .collect());
+        }
+        Err("Enumerating this native host object is not implemented.".into())
+    }
+
+    fn own_data(&mut self, object: u32, property: &str) -> Result<Option<Value>, String> {
+        self.state.work(1)?;
+        if collection_handle_index(object).is_some() {
+            return self.tag_collection_own_data(object, property);
+        }
+        if node_list_index(object).is_some() {
+            let value = self.node_list_get(object, property)?;
+            return Ok((collection_index(property).is_some()
+                && !matches!(value, Value::Undefined))
+            .then_some(value));
+        }
+        if (DATASET_BASE..EVENT_BASE).contains(&object) {
+            return self.dataset_get(object, property).map(|value| {
+                if matches!(value, Value::Undefined) {
+                    None
+                } else {
+                    Some(value)
+                }
+            });
+        }
+        if object == NAVIGATOR {
+            return Ok(None);
+        }
+        Err("Own-property inspection is not implemented for this host object.".into())
+    }
+
+    fn delete(&mut self, object: u32, property: &str) -> Result<bool, String> {
+        self.state.work(1)?;
+        if collection_handle_index(object).is_some() {
+            return if matches!(property, "length" | "item" | "namedItem") {
+                Ok(true)
+            } else {
+                self.tag_collection_get(object, property)
+                    .map(|value| matches!(value, Value::Undefined))
+            };
+        }
+        if node_list_index(object).is_some() {
+            return Ok(collection_index(property).is_none()
+                || matches!(self.node_list_get(object, property)?, Value::Undefined));
+        }
+        if (DATASET_BASE..EVENT_BASE).contains(&object) {
+            if !matches!(self.dataset_get(object, property)?, Value::Undefined) {
+                let node = self.dataset_node(object)?;
+                self.attribute(node, &dataset_attribute(property), None)?;
+            }
+            return Ok(true);
+        }
+        // Native Navigator attributes live on its fixed prototype. Deleting an
+        // absent own property does not remove or alter that native information.
+        if object == NAVIGATOR {
+            return Ok(true);
+        }
+        Err("Deleting this native host property is not implemented.".into())
+    }
     fn dictionary_argument(
         &self,
         _object: u32,
@@ -1980,17 +2531,35 @@ impl Host for Bridge<'_> {
                 | "requestAnimationFrame"
                 | "cancelAnimationFrame"
                 | "performance"
-        ) || handler_event(property).is_some()
+                | "Image"
+        ) || handler_event(property).is_some_and(|event| event != "error")
     }
 
     fn has(&mut self, object: u32, property: &str) -> Result<bool, String> {
         self.state.work(1)?;
+        if property == "submit" && self.form_submit_method(object).is_some() {
+            return Ok(true);
+        }
+        if collection_handle_index(object).is_some() {
+            return Ok(matches!(property, "length" | "item" | "namedItem")
+                || !matches!(self.tag_collection_get(object, property)?, Value::Undefined));
+        }
+        if node_list_index(object).is_some() {
+            return Ok(matches!(property, "length" | "item" | "forEach")
+                || !matches!(self.node_list_get(object, property)?, Value::Undefined));
+        }
+        if (DATASET_BASE..EVENT_BASE).contains(&object) {
+            return self
+                .dataset_get(object, property)
+                .map(|value| !matches!(value, Value::Undefined));
+        }
         if object == PERFORMANCE {
             return Ok(property == "now");
         }
         if object == LOCATION {
             return Ok(self.state.location.as_ref().is_some_and(|location| {
-                property == "toString" || location.property(property).is_some()
+                matches!(property, "toString" | "assign" | "replace" | "reload")
+                    || location.property(property).is_some()
             }));
         }
         if object == NAVIGATOR {
@@ -2062,10 +2631,15 @@ impl Host for Bridge<'_> {
             return Ok(matches!(property, "log" | "info" | "warn" | "error"));
         }
         if let Some(event) = handler_event(property) {
-            return if event == "load" {
-                Ok(self.handler_target(object, event) == WINDOW)
+            return if matches!(event, "load" | "error") {
+                Ok(self.handler_target(object, event) == WINDOW
+                    || node_index(object).is_some_and(|node| {
+                        tag(self.doc, node) == "img"
+                            || matches!(tag(self.doc, node), "script" | "link")
+                                && self.state.dom.created.contains(&node)
+                    }))
             } else {
-                self.listener_target(object, event)?;
+                self.handler_event_target(object, event)?;
                 Ok(true)
             };
         }
@@ -2091,6 +2665,7 @@ impl Host for Bridge<'_> {
                     | "requestAnimationFrame"
                     | "cancelAnimationFrame"
                     | "performance"
+                    | "Image"
             ));
         }
         if object == DOCUMENT {
@@ -2100,6 +2675,7 @@ impl Host for Bridge<'_> {
             return Ok(matches!(
                 property,
                 "title"
+                    | "cookie"
                     | "contentType"
                     | "body"
                     | "head"
@@ -2113,14 +2689,36 @@ impl Host for Bridge<'_> {
                     | "compatMode"
                     | "prerendering"
                     | "getElementById"
+                    | "getElementsByTagName"
                     | "querySelector"
+                    | "querySelectorAll"
+                    | "createElement"
+                    | "createTextNode"
                     | "addEventListener"
                     | "removeEventListener"
-            ));
+            ) || !matches!(self.named_document_property(property)?, Value::Undefined));
+        }
+        if let Some(has) = self.dom_has(object, property)? {
+            return Ok(has);
         }
         let node = self.node(object)?;
+        if tag(self.doc, node) == "img"
+            && matches!(
+                property,
+                "src"
+                    | "alt"
+                    | "width"
+                    | "height"
+                    | "naturalWidth"
+                    | "naturalHeight"
+                    | "complete"
+                    | "currentSrc"
+            )
+        {
+            return Ok(true);
+        }
         Ok(match property {
-            "value" => self.forms.controls.contains_key(&node),
+            "value" | "form" => self.forms.controls.contains_key(&node),
             "selectedIndex" => self
                 .forms
                 .controls
@@ -2131,38 +2729,56 @@ impl Host for Bridge<'_> {
                 .controls
                 .get(&node)
                 .is_some_and(|control| matches!(control.kind, Kind::Checkbox | Kind::Radio)),
-            _ => matches!(
-                property,
-                "tagName"
-                    | "nodeName"
-                    | "nodeType"
-                    | "parentElement"
-                    | "parentNode"
-                    | "ownerDocument"
-                    | "clientWidth"
-                    | "clientHeight"
-                    | "clientLeft"
-                    | "clientTop"
-                    | "textContent"
-                    | "style"
-                    | "id"
-                    | "className"
-                    | "title"
-                    | "hidden"
-                    | "disabled"
-                    | "querySelector"
-                    | "getAttribute"
-                    | "hasAttribute"
-                    | "setAttribute"
-                    | "removeAttribute"
-                    | "addEventListener"
-                    | "removeEventListener"
-            ),
+            _ => {
+                matches!(
+                    property,
+                    "tagName"
+                        | "nodeName"
+                        | "nodeType"
+                        | "parentElement"
+                        | "parentNode"
+                        | "ownerDocument"
+                        | "clientWidth"
+                        | "clientHeight"
+                        | "clientLeft"
+                        | "clientTop"
+                        | "textContent"
+                        | "style"
+                        | "dataset"
+                        | "isConnected"
+                        | "id"
+                        | "className"
+                        | "title"
+                        | "hidden"
+                        | "disabled"
+                        | "querySelector"
+                        | "querySelectorAll"
+                        | "matches"
+                        | "closest"
+                        | "getAttribute"
+                        | "getElementsByTagName"
+                        | "hasAttribute"
+                        | "setAttribute"
+                        | "removeAttribute"
+                        | "addEventListener"
+                        | "removeEventListener"
+                ) || tag(self.doc, node) == "form"
+                    && !matches!(self.named_form_property(node, property)?, Value::Undefined)
+            }
         })
     }
 
     fn get(&mut self, object: u32, property: &str) -> Result<Value, String> {
         self.state.work(1)?;
+        if collection_handle_index(object).is_some() {
+            return self.tag_collection_get(object, property);
+        }
+        if node_list_index(object).is_some() {
+            return self.node_list_get(object, property);
+        }
+        if (DATASET_BASE..EVENT_BASE).contains(&object) {
+            return self.dataset_get(object, property);
+        }
         if let Some((_, _, function)) = self
             .state
             .native_methods
@@ -2193,7 +2809,8 @@ impl Host for Bridge<'_> {
                 // The browser UI currently has one fixed English language.
                 // No system locale, installed fonts or hardware are consulted.
                 "language" => Value::String("en".into()),
-                "cookieEnabled" | "webdriver" | "pdfViewerEnabled" => Value::Bool(false),
+                "cookieEnabled" => Value::Bool(true),
+                "webdriver" | "pdfViewerEnabled" => Value::Bool(false),
                 "plugins" => Value::Host(PLUGINS),
                 "mimeTypes" => Value::Host(MIME_TYPES),
                 _ => Value::Undefined,
@@ -2210,6 +2827,9 @@ impl Host for Bridge<'_> {
             return self.image_collection_get(property);
         }
         if object == LOCATION {
+            if property == "valueOf" {
+                return Ok(Value::Undefined);
+            }
             return self.location_property(property);
         }
         if object >= EVENT_BASE {
@@ -2274,6 +2894,7 @@ impl Host for Bridge<'_> {
         if object == DOCUMENT {
             return match property {
                 "location" => self.location_handle(),
+                "cookie" => self.document_cookie(),
                 "URL" | "documentURI" => self.location_property("href"),
                 "contentType" => {
                     let content_type = self.doc.content_type.clone();
@@ -2306,13 +2927,20 @@ impl Host for Bridge<'_> {
                 "prerendering" => Ok(Value::Bool(false)),
                 "images" => Ok(Value::Host(DOCUMENT_IMAGES)),
                 "parentElement" | "parentNode" | "ownerDocument" => Ok(Value::Null),
-                _ => Err(format!("Document property {property:?} is not supported.")),
+                _ => self.named_document_property(property),
             };
         }
+        if let Some(value) = self.dom_get(object, property)? {
+            return Ok(value);
+        }
         let node = self.node(object)?;
+        if let Some(value) = self.image_get(node, property)? {
+            return Ok(value);
+        }
         match property {
             "tagName" | "nodeName" => self.string(&tag(self.doc, node).to_ascii_uppercase()),
             "nodeType" => Ok(Value::Number(1.0)),
+            "isConnected" => Ok(Value::Bool(self.state.tree.active[node])),
             "parentElement" => self.element_parent(node, false),
             "parentNode" => self.element_parent(node, true),
             "ownerDocument" => Ok(Value::Host(DOCUMENT)),
@@ -2335,6 +2963,7 @@ impl Host for Bridge<'_> {
             }
             "textContent" => Ok(Value::String(self.text_content(node)?)),
             "style" => Ok(Value::Host(STYLE_BASE + node as u32)),
+            "dataset" => Ok(Value::Host(DATASET_BASE + node as u32)),
             "id" | "className" | "title" => {
                 let name = if property == "className" {
                     "class"
@@ -2349,6 +2978,9 @@ impl Host for Bridge<'_> {
                 self.string(&value)
             }
             "hidden" | "disabled" => Ok(Value::Bool(self.doc.attr(node, property).is_some())),
+            "form" if self.forms.controls.contains_key(&node) => Ok(self.forms.controls[&node]
+                .owner
+                .map_or(Value::Null, |owner| Value::Host(node_handle(owner)))),
             "checked" | "value" | "selectedIndex" => {
                 let control = self
                     .forms
@@ -2378,17 +3010,37 @@ impl Host for Bridge<'_> {
                     }
                 }
             }
+            _ if tag(self.doc, node) == "form" => self.named_form_property(node, property),
             _ => Err(format!("Element property {property:?} is not supported.")),
         }
     }
 
     fn set(&mut self, object: u32, property: &str, value: Value) -> Result<(), String> {
         self.state.work(1)?;
+        if collection_handle_index(object).is_some() {
+            return Err("Native HTMLCollection properties are read-only in this subset.".into());
+        }
+        if Self::location_string_setter(object, property) {
+            return self.set_location_value(object, property, &value);
+        }
+        if object == DOCUMENT && property == "cookie" {
+            return self.set_document_cookie(&value);
+        }
+        if node_list_index(object).is_some() {
+            return Err(
+                "Adding arbitrary properties to a native NodeList is not implemented.".into(),
+            );
+        }
+        if (DATASET_BASE..EVENT_BASE).contains(&object) {
+            let node = self.dataset_node(object)?;
+            let value = self.text(&value)?;
+            return self.attribute(node, &dataset_attribute(property), Some(value));
+        }
         if object == PERFORMANCE {
             return Err("Performance is read-only in this subset.".into());
         }
         if object == LOCATION {
-            return Err("Location is read-only; script navigation is not implemented.".into());
+            return Err("This Location property is read-only or unsupported.".into());
         }
         if object == DOCUMENT_IMAGES {
             return Err("The document image collection is read-only.".into());
@@ -2427,7 +3079,13 @@ impl Host for Bridge<'_> {
                 }
             ));
         }
+        if self.dom_set(object, property, &value)? {
+            return Ok(());
+        }
         let node = self.node(object)?;
+        if self.image_set(node, property, &value)? {
+            return Ok(());
+        }
         match property {
             "textContent" => {
                 let text = if matches!(value, Value::Null | Value::Undefined) {
@@ -2514,7 +3172,7 @@ impl Host for Bridge<'_> {
                             .sum(),
                     )?;
                 }
-                if !matches!(kind, Kind::Text | Kind::Select) {
+                if !matches!(kind, Kind::Text | Kind::TextArea | Kind::Select) {
                     let old = self.doc.attr(node, "value").map_or(0, str::len);
                     if self
                         .state
@@ -2533,7 +3191,7 @@ impl Host for Bridge<'_> {
                 }
                 self.forms.script_set_value(node, &value)?;
                 let control = &self.forms.controls[&node];
-                if !matches!(control.kind, Kind::Text | Kind::Select) {
+                if !matches!(control.kind, Kind::Text | Kind::TextArea | Kind::Select) {
                     self.attribute(node, "value", Some(value))?;
                     if tag(self.doc, node) == "input" {
                         let control = self.forms.controls.get_mut(&node).unwrap();
@@ -2551,6 +3209,41 @@ impl Host for Bridge<'_> {
 
     fn call(&mut self, object: u32, method: &str, args: &[Value]) -> Result<Value, String> {
         self.state.work(1)?;
+        if method == "submit" {
+            return self.submit_form(object);
+        }
+        if collection_handle_index(object).is_some() {
+            return self.tag_collection_call(object, method, args);
+        }
+        if (object == DOCUMENT || node_index(object).is_some()) && method == "getElementsByTagName"
+        {
+            return self.create_tag_collection(
+                object,
+                args.first()
+                    .ok_or("getElementsByTagName requires a tag name.")?,
+            );
+        }
+        if let Some(value) = self.dom_call(object, method, args)? {
+            return Ok(value);
+        }
+        if node_list_index(object).is_some() {
+            if method == "item" {
+                let index = timer_integer(args.first().ok_or("item requires an index.")?)? as u32;
+                let value = self.node_list_get(object, &index.to_string())?;
+                return Ok(if matches!(value, Value::Undefined) {
+                    Value::Null
+                } else {
+                    value
+                });
+            }
+            return Err("This NodeList method is not implemented.".into());
+        }
+        if object == IMAGE_FACTORY && method == "Image" {
+            return self.create_image(args);
+        }
+        if object == NAVIGATOR && method == "sendBeacon" {
+            return self.send_beacon(args);
+        }
         if object == PERFORMANCE {
             return if method == "now" {
                 Ok(Value::Number(self.state.clock_ms(Instant::now())))
@@ -2559,11 +3252,7 @@ impl Host for Bridge<'_> {
             };
         }
         if object == LOCATION {
-            return if method == "toString" {
-                self.location_property("href")
-            } else {
-                Err(format!("Location method {method:?} is not supported; script navigation is not implemented."))
-            };
+            return self.location_call(method, args);
         }
         if object == DOCUMENT_IMAGES {
             if args.is_empty() {
@@ -2621,12 +3310,15 @@ impl Host for Bridge<'_> {
                 _ => {}
             }
         }
-        if method == "querySelector" && (object == DOCUMENT || node_index(object).is_some()) {
-            if args.len() != 1 {
-                return Err("querySelector needs one selector string.".into());
-            }
-            let selector = self.text(&args[0])?;
-            return self.query_selector(object, &selector);
+        if matches!(method, "querySelector" | "querySelectorAll")
+            && (object == DOCUMENT || node_index(object).is_some())
+            || matches!(method, "matches" | "closest") && node_index(object).is_some()
+        {
+            let selector = self.text(
+                args.first()
+                    .ok_or("Selector methods require a selector string.")?,
+            )?;
+            return self.selector_query(object, method, &selector);
         }
         if object >= EVENT_BASE {
             if !args.is_empty() {
@@ -2670,7 +3362,7 @@ impl Host for Bridge<'_> {
             return self.event_listener(object, method, args, None);
         }
         if object == DOCUMENT && method == "getElementById" {
-            if args.len() != 1 {
+            if args.is_empty() {
                 return Err("getElementById needs one id.".into());
             }
             let id = self.text(&args[0])?;
@@ -2729,10 +3421,28 @@ impl Host for Bridge<'_> {
             "getAttribute" | "hasAttribute" | "setAttribute" | "removeAttribute"
         ) {
             let count = if method == "setAttribute" { 2 } else { 1 };
-            if args.len() != count {
+            if args.len() < count {
                 return Err("Wrong number of attribute arguments.".into());
             }
             let name = self.text(&args[0])?.to_ascii_lowercase();
+            if matches!(method, "getAttribute" | "hasAttribute") {
+                if let NodeKind::Element { attrs, .. } = &self.doc.nodes[node].kind {
+                    self.state.work(attrs.len())?;
+                    self.state
+                        .copies(attrs.iter().map(|(key, _)| key.len()).sum())?;
+                }
+                let value = self.doc.attr(node, &name);
+                if method == "hasAttribute" {
+                    return Ok(Value::Bool(value.is_some()));
+                }
+                if value.is_some_and(|value| value.len() > MAX_STRING) {
+                    return Err("Attribute value exceeds 32 KiB.".into());
+                }
+                let value = value.map(str::to_owned);
+                return value.map_or(Ok(Value::Null), |value| self.string(&value));
+            }
+            let image_attribute = tag(self.doc, node) == "img"
+                && matches!(name.as_str(), "src" | "alt" | "width" | "height");
             if !matches!(
                 name.as_str(),
                 "id" | "class"
@@ -2744,22 +3454,23 @@ impl Host for Bridge<'_> {
                     | "lang"
                     | "dir"
             ) && !inert_attribute_name(&name)
+                && !image_attribute
             {
                 return Err("Supported attributes are id, class, style, title, hidden, disabled, role, lang, dir, data-* and aria-*; use .value/.checked for live controls.".into());
             }
             match method {
-                "getAttribute" => {
-                    let value = self.doc.attr(node, &name);
-                    if value.is_some_and(|value| value.len() > MAX_STRING) {
-                        return Err("Attribute value exceeds 32 KiB.".into());
+                "removeAttribute" => {
+                    if name == "src" && !self.state.detached_images.contains(&node) {
+                        return Err("Changing a connected image source is not implemented.".into());
                     }
-                    let value = value.map(str::to_owned);
-                    return value.map_or(Ok(Value::Null), |value| self.string(&value));
+                    self.attribute(node, &name, None)?;
                 }
-                "hasAttribute" => return Ok(Value::Bool(self.doc.attr(node, &name).is_some())),
-                "removeAttribute" => self.attribute(node, &name, None)?,
                 _ => {
                     let value = self.text(&args[1])?;
+                    if name == "src" && image_attribute {
+                        self.image_set(node, "src", &Value::String(value))?;
+                        return Ok(Value::Undefined);
+                    }
                     if name == "style" {
                         validate_style(&value)?;
                     }
@@ -2776,7 +3487,7 @@ fn node_handle(node: usize) -> u32 {
     NODE_BASE + node as u32
 }
 fn inert_attribute_name(name: &str) -> bool {
-    (name.starts_with("data-") && name.len() > 5 || name.starts_with("aria-") && name.len() > 5)
+    (name.starts_with("data-") || name.starts_with("aria-") && name.len() > 5)
         && name.len() <= 256
         && name.bytes().all(|byte| {
             byte.is_ascii_lowercase()
@@ -2827,7 +3538,7 @@ fn keyboard_property(property: &str) -> bool {
 fn handler_event(property: &str) -> Option<&str> {
     match property {
         "onclick" | "oninput" | "onchange" | "onsubmit" | "onreset" | "onload" | "onkeydown"
-        | "onkeyup" => Some(&property[2..]),
+        | "onkeyup" | "onerror" => Some(&property[2..]),
         _ => None,
     }
 }
@@ -3014,6 +3725,10 @@ fn validate_style(style: &str) -> Result<(), String> {
 }
 
 #[cfg(test)]
+#[path = "script_compat_tests.rs"]
+mod compatibility_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::html;
@@ -3071,6 +3786,170 @@ mod tests {
     fn click(page: &mut Page, doc: &mut Document, forms: &mut Forms, node: usize) -> Outcome {
         page.begin_job();
         page.dispatch(doc, forms, node, "click", true)
+    }
+
+    #[test]
+    fn symbol_dom_setters_throw_before_mutating_text_attributes_or_controls() {
+        let (doc, forms, page, start) = setup(
+            "<head><title>Stable</title></head><body><p id=p class=before title=caption style='color: blue'>Before</p><input id=field value=original><textarea id=area>seed</textarea><select id=choice><option value=a>A</option><option value=b>B</option></select></body>",
+            &[r#"
+var symbol=Symbol('blocked'), caught=0;
+function reject(action){try{action();}catch(e){if(e.name==='TypeError'){caught++;return;}}throw Error('expected TypeError');}
+var p=document.getElementById('p'), field=document.getElementById('field');
+var area=document.getElementById('area'), choice=document.getElementById('choice');
+var text=document.createTextNode('Text'), script=document.createElement('script');
+var checks=[
+ function(){document.title=symbol;}, function(){p.textContent=symbol;},
+ function(){p.id=symbol;}, function(){p.className=symbol;}, function(){p.title=symbol;},
+ function(){p.style.color=symbol;}, function(){field.value=symbol;},
+ function(){area.value=symbol;}, function(){choice.value=symbol;}, function(){choice.selectedIndex=symbol;},
+ function(){text.data=symbol;}, function(){text.nodeValue=symbol;}, function(){text.textContent=symbol;},
+ function(){script.text=symbol;}, function(){script.textContent=symbol;},
+ function(){p.setAttribute('title',symbol);}, function(){p.dataset.note=symbol;},
+ function(){script.src=symbol;}
+];
+checks.forEach(reject);
+if(caught!==checks.length||document.title!=='Stable'||p.textContent!=='Before')throw Error('text changed');
+if(p.id!=='p'||p.className!=='before'||p.title!=='caption'||p.style.color!=='blue')throw Error('attribute changed');
+if(field.value!=='original'||area.value!=='seed'||choice.value!=='a'||choice.selectedIndex!==0)throw Error('control changed');
+if(text.data!=='Text'||script.text!==''||script.src!==''||p.getAttribute('data-note')!==null)throw Error('detached value changed');
+"#],
+        );
+        assert_eq!(start.errors, 0, "{}", page.report());
+        assert_eq!(doc.title, "Stable");
+        assert_eq!(text(&doc, id(&doc, "p")), "Before");
+        assert_eq!(forms.controls[&id(&doc, "field")].value.text(), "original");
+        assert!(!page.has_host_tasks());
+        assert!(page.state.timers.is_empty());
+    }
+
+    #[test]
+    fn symbol_host_call_arguments_throw_without_timer_listener_or_style_side_effects() {
+        let (doc, _, page, start) = setup(
+            "<head><title>Stable</title></head><body><p id=p style='color: blue'>Calls</p><img id=picture></body>",
+            &[r#"
+var symbol=Symbol('blocked'), caught=0, p=document.getElementById('p');
+function reject(action){try{action();}catch(e){if(e.name==='TypeError'){caught++;return;}}throw Error('expected TypeError');}
+function callback(){};
+setTimeout(callback,60000); requestAnimationFrame(callback); p.addEventListener('click',callback);
+var checks=[
+ function(){setTimeout(callback,symbol);}, function(){setTimeout(symbol,0);},
+ function(){clearTimeout(symbol);}, function(){requestAnimationFrame(symbol);}, function(){cancelAnimationFrame(symbol);},
+ function(){p.addEventListener(symbol,callback);}, function(){p.removeEventListener(symbol,callback);},
+ function(){p.addEventListener('click',symbol);}, function(){p.removeEventListener('click',symbol);},
+ function(){p.style.setProperty(symbol,'red');}, function(){p.style.setProperty('color',symbol);},
+ function(){p.style.setProperty('color','red',symbol);}, function(){p.style.getPropertyValue(symbol);}, function(){p.style.removeProperty(symbol);},
+ function(){navigator.plugins.item(symbol);}, function(){navigator.plugins.namedItem(symbol);},
+ function(){navigator.mimeTypes.item(symbol);}, function(){navigator.mimeTypes.namedItem(symbol);},
+ function(){document.images.item(symbol);}, function(){document.images.namedItem(symbol);}
+];
+checks.forEach(reject);
+if(caught!==checks.length||p.style.color!=='blue')throw Error('call changed state');
+"#],
+        );
+        assert_eq!(start.errors, 0, "{}", page.report());
+        assert_eq!(doc.title, "Stable");
+        assert_eq!(doc.attr(id(&doc, "p"), "style"), Some("color: blue"));
+        assert_eq!(page.state.timers.len(), 1);
+        assert_eq!(page.state.next_timer, 1);
+        assert_eq!(page.state.animation_frames.len(), 1);
+        assert_eq!(page.state.next_animation_frame, 1);
+        assert_eq!(page.state.listeners.len(), 1);
+        assert!(!page.has_host_tasks());
+    }
+
+    #[test]
+    fn symbol_navigation_and_resource_conversions_do_not_queue_requests() {
+        let location = crate::navigation::address(
+            "https://example.test/search?q=first",
+            &crate::navigation::Location::home(),
+        )
+        .unwrap();
+        let (doc, _, mut page, start) = setup_at(
+            "<head><title>Stable</title></head><body><p>Navigation</p></body>",
+            &[r#"
+var symbol=Symbol('blocked'), caught=0;
+function reject(action){try{action();}catch(e){if(e.name==='TypeError'){caught++;return;}}throw Error('expected TypeError');}
+var image=new Image(), link=document.createElement('link'), script=document.createElement('script');
+var checks=[
+ function(){location.href=symbol;}, function(){location.search=symbol;}, function(){location.hash=symbol;},
+ function(){location.assign(symbol);}, function(){location.replace(symbol);},
+ function(){location=symbol;}, function(){window.location=symbol;}, function(){document.location=symbol;}, function(){document.cookie=symbol;},
+ function(){image.src=symbol;}, function(){image.alt=symbol;}, function(){image.width=symbol;}, function(){image.height=symbol;},
+ function(){new Image(symbol);}, function(){new Image(1,symbol);},
+ function(){link.href=symbol;}, function(){link.rel=symbol;}, function(){script.src=symbol;}
+];
+checks.forEach(reject);
+if(caught!==checks.length||location.href!=='https://example.test/search?q=first')throw Error('navigation changed');
+if(image.src!==''||image.alt!==''||image.width!==0||image.height!==0||link.href!==''||link.rel!==''||script.src!=='')throw Error('resource changed');
+"#],
+            Some(&location),
+        );
+        assert_eq!(start.errors, 0, "{}", page.report());
+        assert_eq!(doc.title, "Stable");
+        assert!(page.take_navigation().is_none());
+        assert_eq!(page.state.navigation_requests, 0);
+        assert_eq!(page.state.declined_images, 0);
+        assert!(!page.has_host_tasks());
+    }
+
+    #[test]
+    fn symbol_rejection_preserves_null_boolean_and_timer_argument_behavior() {
+        let (mut doc, mut forms, mut page, start) = setup(
+            "<body><p id=p>Before</p><input id=field value=original><textarea id=area>seed</textarea><input id=check type=checkbox><select id=choice><option value=a>A</option><option value=b selected>B</option></select></body>",
+            &[r#"
+var symbol=Symbol('timer token'), p=document.getElementById('p'), field=document.getElementById('field');
+var area=document.getElementById('area'), check=document.getElementById('check'), choice=document.getElementById('choice');
+p.hidden=symbol; field.disabled=symbol; check.checked=symbol;
+if(!p.hidden||!field.disabled||!check.checked)throw Error('boolean Symbol');
+document.title=null; p.title=null; p.textContent=null; field.value=null; area.value=null;
+if(document.title!=='null'||p.title!=='null'||p.textContent!==''||field.value!==''||area.value!=='')throw Error('null conversion');
+p.textContent=undefined; field.value=undefined; choice.selectedIndex=null;
+var text=document.createTextNode('old'); text.nodeValue=null;
+if(text.data!==''||p.textContent!==''||field.value!=='undefined'||choice.value!=='a')throw Error('existing defaults');
+text.data=null; if(text.data!=='null')throw Error('data null');
+text.textContent=undefined; if(text.data!=='undefined')throw Error('text undefined');
+p.addEventListener('click',function(){},symbol);
+setTimeout(function(value){if(value!==symbol||typeof value!=='symbol')throw Error('argument identity');document.title=value.description;},0,symbol);
+"#],
+        );
+        assert_eq!(start.errors, 0, "{}", page.report());
+        assert_eq!(doc.title, "null");
+        assert_eq!(page.state.listeners.len(), 1);
+        assert!(page.state.listeners[0].options.capture);
+        assert_eq!(page.state.timers.len(), 1);
+        assert!(matches!(
+            page.state.timers[0].arguments.as_slice(),
+            [Value::Symbol(_)]
+        ));
+        let outcome = page
+            .poll_timer_at(
+                &mut doc,
+                &mut forms,
+                Instant::now() + Duration::from_millis(1),
+            )
+            .unwrap();
+        assert_eq!(outcome.errors, 0, "{}", page.report());
+        assert_eq!(doc.title, "timer token");
+        assert!(page.state.timers.is_empty());
+        assert_eq!(page.state.timer_bytes, 0);
+
+        // The raw bridge helpers are also used by native tests/callers. They
+        // must fail rather than serialize the runtime's diagnostic label.
+        assert!(timer_integer(&Value::Symbol(0))
+            .unwrap_err()
+            .contains("Symbol"));
+        let mut bridge = Bridge {
+            doc: &mut doc,
+            forms: &mut forms,
+            state: &mut page.state,
+        };
+        assert!(bridge
+            .text(&Value::Symbol(0))
+            .unwrap_err()
+            .contains("Symbol"));
+        assert!(bridge.set(DOCUMENT, "title", Value::Symbol(0)).is_err());
+        assert_eq!(bridge.doc.title, "timer token");
     }
 
     #[test]
@@ -3265,7 +4144,7 @@ var l=location;
 if(l!==window.location || l!==document.location || l!==self.location || l!==globalThis.location)throw Error('location identity');
 if(document.URL!==l.href || document.documentURI!==l.href)throw Error('document URL');
 if(!('location' in window) || !('location' in document) || !('URL' in document) || !('documentURI' in document))throw Error('URL presence');
-if('baseURI' in document || 'assign' in l || 'replace' in l || 'reload' in l)throw Error('unsupported capability advertised');
+if('baseURI' in document || !('assign' in l) || !('replace' in l) || !('reload' in l))throw Error('Location capability mismatch');
 var stringify=l.toString;
 if(typeof stringify!=='function' || stringify!==l.toString || stringify.call(l)!==l.href)throw Error('native string method');
 var rejected=false;try{stringify.call(window);}catch(e){rejected=e.name==='TypeError';}
@@ -3511,6 +4390,158 @@ document.title='Images inspected';
     }
 
     #[test]
+    fn custom_event_probe_reads_accessor_options_and_removes_the_listener() {
+        let (doc, _, page, outcome) = setup(
+            "<html><body><p>Probe</p></body></html>",
+            &[r#"
+var reads='', detected=false, options={};
+Object.defineProperty(options,'capture',{get:function(){reads+='c';return false;}});
+Object.defineProperty(options,'once',{get:function(){reads+='o';return false;}});
+Object.defineProperty(options,'passive',{get:function(){reads+='p';detected=true;}});
+Object.defineProperty(options,'signal',{get:function(){reads+='s';}});
+function callback(){throw Error('custom probe event was invented');}
+window.addEventListener('test',callback,options);
+window.removeEventListener('test',callback,options);
+if(!detected || reads!=='copsc')throw Error('listener option conversion');
+document.title='Custom probe complete';
+"#],
+        );
+        assert_eq!(outcome.errors, 0, "{}", page.report());
+        assert_eq!(doc.title, "Custom probe complete");
+        assert!(page.state.listeners.is_empty());
+    }
+
+    #[test]
+    fn custom_event_names_preserve_case_identity_and_native_dispatch() {
+        let (mut doc, mut forms, mut page, outcome) = setup(
+            "<html><body><button id=b type=button>Go</button></body></html>",
+            &[r#"
+var b=document.getElementById('b');document.title='';
+function custom(){throw Error('custom event was invented');}
+b.addEventListener('Click',custom);
+b.addEventListener('click',function(){document.title+='click';});
+document.addEventListener('not a native event',custom);
+window.addEventListener('',custom);
+window.addEventListener('Test',custom,{capture:true,once:true,passive:true});
+window.addEventListener('Test',custom,{capture:true,once:false,passive:false});
+window.removeEventListener('test',custom,true);
+window.removeEventListener('Test',custom,false);
+window.addEventListener('test',custom);
+window.removeEventListener('test',custom);
+if('dispatchEvent' in b || 'dispatchEvent' in window)throw Error('new dispatch capability');
+"#],
+        );
+        assert_eq!(outcome.errors, 0, "{}", page.report());
+        assert_eq!(doc.title, "");
+        assert_eq!(page.state.listeners.len(), 5);
+        let custom = page
+            .state
+            .listeners
+            .iter()
+            .find(|listener| listener.event == "Test")
+            .unwrap();
+        assert!(custom.options.capture && custom.options.once && custom.options.passive);
+        assert!(page
+            .state
+            .listeners
+            .iter()
+            .any(|listener| listener.event.is_empty()));
+        let button = id(&doc, "b");
+        assert_eq!(click(&mut page, &mut doc, &mut forms, button).errors, 0);
+        assert_eq!(doc.title, "click");
+        assert_eq!(page.state.listeners.len(), 5);
+    }
+
+    #[test]
+    fn custom_event_names_and_listener_storage_remain_bounded() {
+        let boundary = "é".repeat(128);
+        let ascii_overflow = "x".repeat(257);
+        let unicode_overflow = "é".repeat(129);
+        let scripts = [
+            format!("function callback(){{}} window.addEventListener({boundary:?},callback);"),
+            format!("window.addEventListener({ascii_overflow:?},callback);"),
+            format!("window.addEventListener({unicode_overflow:?},callback);"),
+            format!("window.removeEventListener({ascii_overflow:?},callback);"),
+        ];
+        let scripts: Vec<_> = scripts.iter().map(String::as_str).collect();
+        let (_, _, page, outcome) = setup("<body><p>Bounds</p></body>", &scripts);
+        assert_eq!(outcome.errors, 3, "{}", page.report());
+        assert!(page
+            .report()
+            .contains("Event type exceeds the 256-byte limit"));
+        assert_eq!(page.state.listeners.len(), 1);
+        assert_eq!(page.state.listeners[0].event.len(), MAX_EVENT_TYPE_BYTES);
+        assert_eq!(page.state.listeners[0].event.chars().count(), 128);
+
+        let (_, _, page, outcome) = setup(
+            "<body><p>Capacity</p></body>",
+            &[
+                "function callback(){} for(var i=0;i<64;i++){window.addEventListener('custom-'+i,callback);} window.addEventListener('overflow',callback);",
+                "window.addEventListener('custom-0',callback,{once:true}); window.removeEventListener('custom-0',callback); window.addEventListener('replacement',callback);",
+            ],
+        );
+        assert_eq!(outcome.errors, 1, "{}", page.report());
+        assert!(page.report().contains("Event listener limit reached"));
+        assert_eq!(page.state.listeners.len(), MAX_LISTENERS);
+        assert!(page
+            .state
+            .listeners
+            .iter()
+            .any(|listener| listener.event == "replacement"));
+        assert!(!page
+            .state
+            .listeners
+            .iter()
+            .any(|listener| matches!(listener.event.as_str(), "overflow" | "custom-0")));
+    }
+
+    #[test]
+    fn custom_event_options_are_read_before_null_listener_noops_and_mutation() {
+        let (doc, _, page, outcome) = setup(
+            "<body><p>Options</p></body>",
+            &[r#"
+var reads='', options={};
+Object.defineProperty(options,'capture',{get:function(){reads+='c';return false;}});
+Object.defineProperty(options,'once',{get:function(){reads+='o';return false;}});
+Object.defineProperty(options,'passive',{get:function(){reads+='p';return false;}});
+Object.defineProperty(options,'signal',{get:function(){reads+='s';}});
+window.addEventListener('custom-null',null,options);
+window.addEventListener('custom-undefined',undefined,options);
+window.removeEventListener('custom-null',null,options);
+var rejected=0, bad={};
+Object.defineProperty(bad,'capture',{get:function(){throw Error('options fail');}});
+try{window.addEventListener('custom-null',null,bad);}catch(error){if(error.message==='options fail')rejected++;}
+try{window.addEventListener('custom-live',function(){},bad);}catch(error){if(error.message==='options fail')rejected++;}
+document.title=reads+'|'+rejected;
+"#],
+        );
+        assert_eq!(outcome.errors, 0, "{}", page.report());
+        assert_eq!(doc.title, "copscopsc|2");
+        assert!(page.state.listeners.is_empty());
+    }
+
+    #[test]
+    fn custom_event_methods_retain_native_receiver_checks() {
+        let (doc, _, page, outcome) = setup(
+            "<body><p>Receivers</p></body>",
+            &[r#"
+var add=document.addEventListener, remove=document.removeEventListener;
+var reads=0, options={}, rejected=0;
+Object.defineProperty(options,'capture',{get:function(){reads++;return false;}});
+var receivers=[navigator,console,document.body.style,document.querySelectorAll('p'),{}];
+for(var i=0;i<receivers.length;i++){
+    try{add.call(receivers[i],'test',function(){},options);}catch(error){if(error.name==='TypeError')rejected++;}
+    try{remove.call(receivers[i],'test',null,options);}catch(error){if(error.name==='TypeError')rejected++;}
+}
+document.title=rejected+'|'+reads;
+"#],
+        );
+        assert_eq!(outcome.errors, 0, "{}", page.report());
+        assert_eq!(doc.title, "10|0");
+        assert!(page.state.listeners.is_empty());
+    }
+
+    #[test]
     fn capture_once_passive_and_listener_removal_follow_event_phases() {
         let (mut doc, mut forms, mut page, outcome)=setup("<html><body><form id='f'><button id='b' type='button'>Go</button></form></body></html>", &[r#"
 var b=document.getElementById('b');var f=document.getElementById('f');
@@ -3614,7 +4645,7 @@ var checks=[
  'setTimeout' in window, 'clearTimeout' in self, 'document' in globalThis,
  !('location' in window), !('fetch' in window), 'navigator' in window,
  'querySelector' in document, 'getElementById' in document, 'readyState' in document,
- 'referrer' in document, document.referrer==='', !('cookie' in document),
+ 'referrer' in document, document.referrer==='', 'cookie' in document, document.cookie==='',
  !('onload' in document), 'onload' in window, 'onclick' in p,
  'textContent' in p, !('value' in p), 'value' in name,
  'checked' in box, !('checked' in name), 'querySelector' in p,
@@ -3635,7 +4666,7 @@ document.title='Supported capabilities only';
             r#"
 if(navigator !== window.navigator || navigator !== clientInformation || navigator !== self.clientInformation) throw Error('identity');
 if(navigator.userAgent !== '{}' || navigator.platform !== '{}') throw Error('browser');
-if(navigator.cookieEnabled || navigator.pdfViewerEnabled || navigator.javaEnabled()) throw Error('capabilities');
+if(!navigator.cookieEnabled || navigator.pdfViewerEnabled || navigator.javaEnabled()) throw Error('capabilities');
 if(navigator.webdriver !== false || navigator.language !== 'en') throw Error('state');
 if(navigator.plugins.length !== 0 || navigator.mimeTypes.length !== 0) throw Error('plugins');
 if(navigator.plugins.item(0) !== null || navigator.plugins.namedItem('PDF') !== null || navigator.mimeTypes.item(-1) !== null) throw Error('empty');
@@ -3655,12 +4686,15 @@ document.title='Navigator matches browser';
         let (doc, _, page, outcome) = setup(
             "<body></body>",
             &[
-                "navigator.cookieEnabled=true;",
+                "navigator.cookieEnabled=false;",
                 "document.title=String(navigator.cookieEnabled);",
             ],
         );
-        assert_eq!(outcome.errors, 1, "{}", page.report());
-        assert_eq!(doc.title, "false");
+        // A readonly Web IDL attribute ignores an ordinary sloppy assignment;
+        // it still reports the browser's actual capability. Strict assignment
+        // is covered by the native-property regression tests.
+        assert_eq!(outcome.errors, 0, "{}", page.report());
+        assert_eq!(doc.title, "true");
     }
 
     #[test]

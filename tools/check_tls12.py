@@ -52,7 +52,7 @@ ROOT = Path(__file__).resolve().parents[1]
 MARKER = b"TLS12_FIXTURE_OK"
 FORM = b"payload=" + b"x" * (128 * 1024 - len(b"payload="))
 MODULES = [
-    "http", "url", "compression", "random", "tls", "trust", "x509", "tls_crypto",
+    "http", "cookies", "network_trace", "url", "compression", "random", "tls", "trust", "x509", "tls_crypto",
     "crypto_hash", "crypto_sha512", "crypto_aead", "crypto_aes_gcm",
     "crypto_x25519", "crypto_rsa", "crypto_ec",
 ]

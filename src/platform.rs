@@ -1,9 +1,9 @@
 //! Windows events, file picking, clipboard, and pixel presentation.
 //! Windows draws native frames/dialogs; client-area layout and text remain ours.
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::ffi::c_void;
 use std::mem::{size_of, zeroed};
-use std::os::windows::ffi::OsStringExt;
+use std::os::windows::ffi::{OsStrExt, OsStringExt};
 use std::path::PathBuf;
 use std::ptr::{null, null_mut};
 
@@ -22,12 +22,15 @@ const MAX_CLIPBOARD_BYTES: usize = 2 * 1024 * 1024;
 const CF_UNICODETEXT: u32 = 13;
 const SCRIPT_TIMER_ID: usize = 0x4f42;
 const HISTORY_TIMER_ID: usize = 0x4f43;
+const DOWNLOAD_TIMER_ID: usize = 0x4f44;
 const APP_ICON_ID: usize = 101;
 std::thread_local! {
     // The shell owns one window. Remember its armed deadline so mouse/paint
     // activity cannot keep resetting and postponing the same timer.
     static SCRIPT_TIMER_WAKE: Cell<Option<(usize, std::time::Instant)>> = const { Cell::new(None) };
     static HISTORY_TIMER_WAKE: Cell<Option<(usize, std::time::Instant)>> = const { Cell::new(None) };
+    static DOWNLOAD_TIMER_OWNER: Cell<Option<(usize, u32)>> = const { Cell::new(None) };
+    static FRAME_COLORS: RefCell<Vec<(usize, u32, u32)>> = const { RefCell::new(Vec::new()) };
 }
 
 #[repr(C)]
@@ -280,6 +283,28 @@ extern "system" {
     fn DragAcceptFiles(window: Handle, accept: i32);
     fn DragQueryFileW(drop: Handle, index: u32, file: *mut u16, count: u32) -> u32;
     fn DragFinish(drop: Handle);
+    fn ShellExecuteW(
+        owner: Handle,
+        operation: *const u16,
+        file: *const u16,
+        parameters: *const u16,
+        directory: *const u16,
+        show: i32,
+    ) -> Handle;
+}
+#[link(name = "ole32")]
+extern "system" {
+    fn CoInitializeEx(reserved: *mut c_void, flags: u32) -> i32;
+    fn CoUninitialize();
+}
+#[link(name = "dwmapi")]
+extern "system" {
+    fn DwmSetWindowAttribute(
+        window: Handle,
+        attribute: u32,
+        value: *const c_void,
+        size: u32,
+    ) -> i32;
 }
 #[link(name = "comdlg32")]
 extern "system" {
@@ -424,6 +449,8 @@ pub fn run(app: App) -> Result<(), String> {
         }
         SendMessageW(window, 0x0080, 1, icons.large as isize); // WM_SETICON / ICON_BIG
         SendMessageW(window, 0x0080, 0, icons.small as isize); // WM_SETICON / ICON_SMALL
+        let colors = state.title_bar_colors();
+        sync_frame_colors(window, colors);
         DragAcceptFiles(window, 1);
         let wake_window = window as usize;
         state.set_load_wake(std::sync::Arc::new(move || {
@@ -435,6 +462,7 @@ pub fn run(app: App) -> Result<(), String> {
         }
         sync_script_timer(window, state_ptr);
         sync_history_timer(window, state_ptr);
+        sync_download_timer(window, state_ptr);
         ShowWindow(window, 5);
         UpdateWindow(window);
         let mut message: Message = zeroed();
@@ -497,6 +525,16 @@ unsafe extern "system" fn window_proc(
             // WM_NCDESTROY: no later callback may access application state.
             KillTimer(window, SCRIPT_TIMER_ID);
             KillTimer(window, HISTORY_TIMER_ID);
+            KillTimer(window, DOWNLOAD_TIMER_ID);
+            DOWNLOAD_TIMER_OWNER.with(|owner| {
+                if owner
+                    .get()
+                    .is_some_and(|(handle, _)| handle == window as usize)
+                {
+                    owner.set(None);
+                }
+            });
+            forget_frame_colors(window);
             SCRIPT_TIMER_WAKE.with(|wake| {
                 if wake
                     .get()
@@ -537,6 +575,14 @@ unsafe extern "system" fn window_proc(
     // Do not retain &mut App across Win32 calls: some APIs synchronously re-enter
     // this procedure. App methods themselves do not invoke the windowing APIs.
     match message {
+        0x0113 if wparam == DOWNLOAD_TIMER_ID => {
+            // Visible request bars advance every 100 ms; a downloads-only popup
+            // needs just one elapsed-time update per second. These are measured
+            // durations, never fabricated byte percentages.
+            (&mut *state).poll_load();
+            refresh(window, state);
+            0
+        }
         0x0113 if wparam == HISTORY_TIMER_ID => {
             KillTimer(window, HISTORY_TIMER_ID);
             HISTORY_TIMER_WAKE.with(|wake| wake.set(None));
@@ -564,6 +610,13 @@ unsafe extern "system" fn window_proc(
                 refresh(window, state);
             }
             0
+        }
+        0x031a | 0x0320 => {
+            // WM_THEMECHANGED / WM_DWMCOLORIZATIONCOLORCHANGED.
+            forget_frame_colors(window);
+            let colors = (&*state).title_bar_colors();
+            sync_frame_colors(window, colors);
+            DefWindowProcW(window, message, wparam, lparam)
         }
         0x000f => {
             // WM_PAINT
@@ -712,6 +765,11 @@ unsafe extern "system" fn window_proc(
             let (x, y) = mouse_coordinates(lparam);
             let shift = key_is_down(0x10);
             SetFocus(window);
+            if key_is_down(0x12) && !key_is_down(0x11) && !shift && (&mut *state).download_at(x, y)
+            {
+                refresh(window, state);
+                return 0;
+            }
             SetCapture(window);
             let action = { (&mut *state).pointer_down(x, y, shift) };
             perform_action(window, state, action);
@@ -833,8 +891,11 @@ unsafe fn refresh(window: Handle, state: *mut App) {
     }
     let title = { wide(&(*state).title()) };
     SetWindowTextW(window, title.as_ptr());
+    let colors = (&*state).title_bar_colors();
+    sync_frame_colors(window, colors);
     sync_script_timer(window, state);
     sync_history_timer(window, state);
+    sync_download_timer(window, state);
     inspector_window::sync(window, state);
     InvalidateRect(window, null(), 0);
 }
@@ -931,6 +992,89 @@ unsafe fn sync_script_timer(window: Handle, state: *mut App) {
     }
 }
 
+unsafe fn sync_download_timer(window: Handle, state: *mut App) {
+    if !state_is_attached(window, state) {
+        return;
+    }
+    let desired = if (&*state).network_needs_tick() {
+        Some((window as usize, 100))
+    } else if (&*state).downloads_open() && (&*state).downloads_active() {
+        Some((window as usize, 1000))
+    } else {
+        None
+    };
+    if DOWNLOAD_TIMER_OWNER.with(|owner| owner.get() == desired) {
+        return;
+    }
+    KillTimer(window, DOWNLOAD_TIMER_ID);
+    DOWNLOAD_TIMER_OWNER.with(|owner| owner.set(None));
+    if let Some((_, milliseconds)) = desired {
+        if SetTimer(window, DOWNLOAD_TIMER_ID, milliseconds, None) != 0 {
+            DOWNLOAD_TIMER_OWNER.with(|owner| owner.set(desired));
+        }
+    }
+}
+
+fn colorref(rgb: u32) -> u32 {
+    ((rgb & 0xff) << 16) | (rgb & 0xff00) | ((rgb >> 16) & 0xff)
+}
+
+fn forget_frame_colors(window: Handle) {
+    FRAME_COLORS.with(|colors| {
+        colors
+            .borrow_mut()
+            .retain(|entry| entry.0 != window as usize)
+    });
+}
+
+unsafe fn sync_frame_colors(window: Handle, colors: (u32, u32)) {
+    let changed = FRAME_COLORS.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        if let Some(previous) = cache.iter_mut().find(|entry| entry.0 == window as usize) {
+            if previous.1 == colors.0 && previous.2 == colors.1 {
+                return false;
+            }
+            *previous = (window as usize, colors.0, colors.1);
+        } else {
+            // Only the main window and its one detached inspector use this.
+            if cache.len() >= 4 {
+                cache.clear();
+            }
+            cache.push((window as usize, colors.0, colors.1));
+        }
+        true
+    });
+    if !changed {
+        return;
+    }
+    // Record the values before OS calls because a frame update may re-enter the
+    // window procedure. Unsupported attributes return an HRESULT on older
+    // Windows; the ordinary native frame remains usable in that case.
+    let caption = colorref(colors.0);
+    let text = colorref(colors.1);
+    let luminance =
+        ((colors.0 >> 16) & 255) * 299 + ((colors.0 >> 8) & 255) * 587 + (colors.0 & 255) * 114;
+    let dark: i32 = i32::from(luminance < 128_000);
+    let _ = DwmSetWindowAttribute(
+        window,
+        20,
+        (&dark as *const i32).cast(),
+        size_of::<i32>() as u32,
+    );
+    let _ = DwmSetWindowAttribute(
+        window,
+        35,
+        (&caption as *const u32).cast(),
+        size_of::<u32>() as u32,
+    );
+    let _ = DwmSetWindowAttribute(
+        window,
+        36,
+        (&text as *const u32).cast(),
+        size_of::<u32>() as u32,
+    );
+}
+
 fn mouse_coordinates(lparam: isize) -> (i32, i32) {
     (
         (lparam & 0xffff) as u16 as i16 as i32,
@@ -982,6 +1126,7 @@ unsafe fn perform_action(window: Handle, state: *mut App, action: PlatformAction
                 Err(error) => Err(error),
             }
         }
+        PlatformAction::OpenFolder(path) => open_folder(window, &path),
         PlatformAction::Copy(text) => write_clipboard(window, &text),
         PlatformAction::Cut(text) => match write_clipboard(window, &text) {
             Ok(()) => {
@@ -1009,6 +1154,53 @@ unsafe fn perform_action(window: Handle, state: *mut App, action: PlatformAction
             let caption = wide("ChezCat");
             MessageBoxW(window, text.as_ptr(), caption.as_ptr(), 0x10);
         }
+    }
+}
+
+/// This action accepts only a real local directory, then asks Explorer to
+/// explore it. No command line is constructed and downloaded files are never
+/// handed to a file association or launched by this browser.
+unsafe fn open_folder(window: Handle, path: &std::path::Path) -> Result<(), String> {
+    let path = crate::downloads::prepare_folder(path)?;
+    if !std::fs::symlink_metadata(&path)
+        .map_err(|e| format!("Cannot inspect the folder: {e}"))?
+        .is_dir()
+    {
+        return Err("Only a download folder can be opened with this action.".into());
+    }
+    let mut filename: Vec<u16> = path.as_os_str().encode_wide().collect();
+    // The shell expects a normal DOS path rather than canonicalize()'s extended
+    // path prefix. prepare_folder admits local drive paths, never UNC/devices.
+    if filename.starts_with(&[92, 92, 63, 92]) {
+        filename.drain(..4);
+    }
+    if filename.contains(&0) {
+        return Err("The folder path contains a NUL character.".into());
+    }
+    filename.push(0);
+    let operation = wide("explore");
+    let initialized = CoInitializeEx(null_mut(), 0x2 | 0x4); // STA, disable OLE1 DDE.
+    if initialized < 0 {
+        return Err(format!(
+            "Cannot initialize Windows folder browsing (HRESULT {initialized:#010x})."
+        ));
+    }
+    // No App reference is held across this call; Explorer may dispatch messages.
+    let result = ShellExecuteW(
+        window,
+        operation.as_ptr(),
+        filename.as_ptr(),
+        null(),
+        null(),
+        1,
+    ) as isize;
+    CoUninitialize();
+    if result <= 32 {
+        Err(format!(
+            "Windows could not open the download folder (shell error {result})."
+        ))
+    } else {
+        Ok(())
     }
 }
 

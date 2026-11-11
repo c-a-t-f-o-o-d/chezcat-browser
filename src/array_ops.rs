@@ -33,9 +33,9 @@ impl Runtime {
             if index != 0 {
                 self.append_string(&mut output, separator)?;
             }
-            let value = self.get_property(id, &index.to_string())?;
+            let value = self.get_property_with_host(id, &index.to_string(), host)?;
             if !matches!(value, Value::Null | Value::Undefined) {
-                let text = self.primitive_with_hint(value, true, host)?.to_text();
+                let text = self.primitive_with_hint(value, true, host)?.script_text()?;
                 self.append_string(&mut output, &text)?;
             }
         }
@@ -46,8 +46,13 @@ impl Runtime {
             .property_owner(Ordinary::Object(id), &index.to_string())?
             .is_some())
     }
-    fn array_get_index(&mut self, id: usize, index: usize) -> Result<Value, Fault> {
-        self.get_property(id, &index.to_string())
+    fn array_get_index(
+        &mut self,
+        id: usize,
+        index: usize,
+        host: &mut dyn Host,
+    ) -> Result<Value, Fault> {
+        self.get_property_with_host(id, &index.to_string(), host)
     }
     fn array_put_index(
         &mut self,
@@ -108,7 +113,7 @@ impl Runtime {
         host: &mut dyn Host,
     ) -> Result<(), Fault> {
         if self.array_has_index(id, source)? {
-            let value = self.array_get_index(id, source)?;
+            let value = self.array_get_index(id, source, host)?;
             self.array_put_index(id, target, value, host)
         } else {
             self.array_delete_index(id, target)
@@ -127,7 +132,7 @@ impl Runtime {
                 let first = if length == 0 {
                     Value::Undefined
                 } else {
-                    self.array_get_index(id, 0)?
+                    self.array_get_index(id, 0, host)?
                 };
                 for index in 1..length {
                     self.array_move_index(id, index, index - 1, host)?;
@@ -167,7 +172,7 @@ impl Runtime {
                 if index < 0.0 || index >= length as f64 {
                     Ok(Value::Undefined)
                 } else {
-                    self.array_get_index(id, index as usize)
+                    self.array_get_index(id, index as usize, host)
                 }
             }
             "lastIndexOf" => {
@@ -188,7 +193,7 @@ impl Runtime {
                 if index >= 0.0 {
                     for index in (0..=index.min(length as f64 - 1.0) as usize).rev() {
                         if self.array_has_index(id, index)? {
-                            let value = self.array_get_index(id, index)?;
+                            let value = self.array_get_index(id, index, host)?;
                             self.work(value.bytes().saturating_add(needle.bytes()))?;
                             if strict_equal(needle, &value) {
                                 return Ok(Value::Number(index as f64));
@@ -227,13 +232,13 @@ impl Runtime {
                     let right = length - 1 - left;
                     let has_left = self.array_has_index(id, left)?;
                     let left_value = if has_left {
-                        Some(self.array_get_index(id, left)?)
+                        Some(self.array_get_index(id, left, host)?)
                     } else {
                         None
                     };
                     let has_right = self.array_has_index(id, right)?;
                     let right_value = if has_right {
-                        Some(self.array_get_index(id, right)?)
+                        Some(self.array_get_index(id, right, host)?)
                     } else {
                         None
                     };
@@ -285,6 +290,7 @@ impl Runtime {
                             } else {
                                 index
                             },
+                            host,
                         )?
                     };
                     self.set_property(result, index.to_string(), value)?;
@@ -302,7 +308,7 @@ impl Runtime {
                             }
                             for index in 0..length {
                                 if self.array_has_index(*source, index)? {
-                                    let value = self.array_get_index(*source, index)?;
+                                    let value = self.array_get_index(*source, index, host)?;
                                     self.set_property(result, (at + index).to_string(), value)?;
                                 }
                             }
@@ -333,7 +339,7 @@ impl Runtime {
                 let mut values = Vec::new();
                 for index in 0..length {
                     if method == "toSorted" || self.array_has_index(id, index)? {
-                        let value = self.array_get_index(id, index)?;
+                        let value = self.array_get_index(id, index, host)?;
                         self.work(8usize.saturating_add(value.bytes()))?;
                         values.push(value);
                     }
@@ -397,6 +403,7 @@ impl Runtime {
                         } else {
                             index + deleted - added
                         },
+                        host,
                     )?
                 };
                 self.set_property(result, index.to_string(), value)?;
@@ -406,7 +413,7 @@ impl Runtime {
         let result = self.new_object(Some(deleted))?;
         for index in 0..deleted {
             if self.array_has_index(id, start + index)? {
-                let value = self.array_get_index(id, start + index)?;
+                let value = self.array_get_index(id, start + index, host)?;
                 self.set_property(result, index.to_string(), value)?;
             }
         }
@@ -466,7 +473,7 @@ impl Runtime {
             if !visit_holes && !self.array_has_index(id, index)? {
                 continue;
             }
-            let value = self.array_get_index(id, index)?;
+            let value = self.array_get_index(id, index, host)?;
             if reduce && accumulator.is_none() {
                 accumulator = Some(value);
                 continue;
@@ -616,12 +623,90 @@ impl Runtime {
         }
         let a = self.copy_value(a)?;
         let a = self.primitive_with_hint(a, true, host)?;
+        self.work(a.bytes())?;
+        // Complete ToString on the left before invoking conversion callbacks
+        // on the right. A Symbol result is an abrupt completion here.
+        let a = a.script_text()?;
         let b = self.copy_value(b)?;
         let b = self.primitive_with_hint(b, true, host)?;
-        self.work(a.bytes().saturating_add(b.bytes()))?;
-        let a = a.to_text();
-        let b = b.to_text();
+        self.work(b.bytes())?;
+        let b = b.script_text()?;
         self.work(a.len().saturating_add(b.len()).saturating_mul(2))?;
         Ok(a.encode_utf16().cmp(b.encode_utf16()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct NoHost;
+    impl Host for NoHost {
+        fn get(&mut self, _: u32, _: &str) -> Result<Value, String> {
+            Err("No host object is exposed in this test.".into())
+        }
+        fn set(&mut self, _: u32, _: &str, _: Value) -> Result<(), String> {
+            Err("No host object is exposed in this test.".into())
+        }
+        fn call(&mut self, _: u32, _: &str, _: &[Value]) -> Result<Value, String> {
+            Err("No host object is exposed in this test.".into())
+        }
+    }
+
+    #[test]
+    fn default_comparison_finishes_left_string_conversion_before_right_callback() {
+        for object_left in [false, true] {
+            let mut runtime = Runtime::new();
+            let mut host = NoHost;
+            runtime
+                .execute(
+                    "var leftCalls=0,rightCalls=0;var key=Symbol('left');",
+                    &mut host,
+                )
+                .unwrap();
+            let left = runtime
+                .execute(
+                    if object_left {
+                        "({toString(){leftCalls++;return key;}});"
+                    } else {
+                        "key;"
+                    },
+                    &mut host,
+                )
+                .unwrap();
+            let right = runtime
+                .execute("({toString(){rightCalls++;return 'right';}});", &mut host)
+                .unwrap();
+            let fault = runtime
+                .compare_array_values(&left, &right, None, false, &mut host)
+                .unwrap_err();
+            assert!(matches!(
+                fault.exception.as_deref(),
+                Some(super::super::Exception::Error("TypeError"))
+            ));
+            assert_eq!(
+                runtime
+                    .execute("leftCalls+':'+rightCalls;", &mut host)
+                    .unwrap()
+                    .to_text(),
+                if object_left { "1:0" } else { "0:0" }
+            );
+
+            // A supplied comparator consumes the values directly. The default
+            // string-conversion rule must not reject its Symbol arguments.
+            let comparator = runtime
+                .execute("(function(){return 0;});", &mut host)
+                .unwrap();
+            assert_eq!(
+                runtime
+                    .compare_array_values(&left, &right, Some(&comparator), false, &mut host)
+                    .unwrap(),
+                Ordering::Equal
+            );
+            assert_eq!(
+                runtime.execute("rightCalls;", &mut host).unwrap().to_text(),
+                "0"
+            );
+        }
     }
 }

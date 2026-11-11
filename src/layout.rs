@@ -264,6 +264,7 @@ pub struct Layout {
     pub anchors: Vec<(String, i32)>,
     pub controls: Vec<ControlBox>,
     targets: Vec<String>,
+    target_nodes: Vec<usize>,
     hits: Vec<HitRegion>,
     pub height: i32,
     pub client_boxes: Vec<Option<ClientBox>>,
@@ -281,6 +282,24 @@ pub struct Layout {
 }
 
 impl Layout {
+    pub fn link_targets(&self) -> impl Iterator<Item = &str> {
+        self.targets.iter().map(String::as_str)
+    }
+    pub fn link_node_at(&self, x: i32, y: i32) -> Option<usize> {
+        for hit in self.hits.iter().rev() {
+            if x >= hit.x
+                && x < hit.x.saturating_add(hit.width)
+                && y >= hit.y
+                && y < hit.y.saturating_add(hit.height)
+            {
+                return hit
+                    .link
+                    .and_then(|index| self.target_nodes.get(index))
+                    .copied();
+            }
+        }
+        None
+    }
     /// Fixed content uses the same document-coordinate interface as ordinary
     /// content. Translate only its geometry when the viewport scroll changes;
     /// no layout or paint pass is repeated and a down/up round trip is exact.
@@ -576,6 +595,7 @@ pub fn build_viewport_with_fonts(
         anchors: Vec::new(),
         controls: Vec::new(),
         targets: Vec::new(),
+        target_nodes: Vec::new(),
         hits: Vec::new(),
         height: 0,
         client_boxes: vec![None; doc.nodes.len()],
@@ -1663,6 +1683,7 @@ impl Engine<'_> {
                     if let Some(href) = href {
                         link = Some(self.layout.targets.len());
                         self.layout.targets.push(href.clone());
+                        self.layout.target_nodes.push(index);
                     }
                 }
                 if tag == "label" {
@@ -2417,9 +2438,16 @@ impl Engine<'_> {
                     let scale = self.scale(&style);
                     let width = if matches!(kind, Kind::Checkbox | Kind::Radio) {
                         (GLYPH_HEIGHT + 4) * scale
-                    } else if kind == Kind::Text {
+                    } else if matches!(kind, Kind::Text | Kind::TextArea) {
                         self.doc
-                            .attr(node, "size")
+                            .attr(
+                                node,
+                                if kind == Kind::TextArea {
+                                    "cols"
+                                } else {
+                                    "size"
+                                },
+                            )
                             .and_then(|s| s.parse::<i32>().ok())
                             .filter(|n| *n > 0)
                             .unwrap_or(20)
@@ -3741,10 +3769,17 @@ impl Engine<'_> {
         let toggle = matches!(kind, Kind::Checkbox | Kind::Radio);
         let default_width = if toggle {
             (GLYPH_HEIGHT + 4) * scale
-        } else if kind == Kind::Text {
+        } else if matches!(kind, Kind::Text | Kind::TextArea) {
             let cells = self
                 .doc
-                .attr(node, "size")
+                .attr(
+                    node,
+                    if kind == Kind::TextArea {
+                        "cols"
+                    } else {
+                        "size"
+                    },
+                )
                 .and_then(|s| s.parse::<i32>().ok())
                 .filter(|&v| v > 0)
                 .unwrap_or(20)
@@ -3775,12 +3810,25 @@ impl Engine<'_> {
         if style.width == Length::Auto {
             width = width.min(available);
         }
+        let default_height = if kind == Kind::TextArea {
+            let rows = self
+                .doc
+                .attr(node, "rows")
+                .and_then(|value| value.parse::<i32>().ok())
+                .filter(|&value| value > 0)
+                .unwrap_or(2)
+                .clamp(1, 100);
+            let line = self
+                .font_spec(style)
+                .map_or((GLYPH_HEIGHT + 2) * scale, |font| font.height() + 2);
+            rows * line + 8
+        } else {
+            self.font_spec(style)
+                .map_or((GLYPH_HEIGHT + 6) * scale, |font| font.height() + 10)
+        };
         let height = self
             .length(style.height, 0, style)
-            .unwrap_or(
-                self.font_spec(style)
-                    .map_or((GLYPH_HEIGHT + 6) * scale, |font| font.height() + 10),
-            )
+            .unwrap_or(default_height)
             .clamp(0, MAX_WIDTH);
         if width == 0 || height == 0 {
             return;
@@ -3972,6 +4020,7 @@ impl Engine<'_> {
         let natural = self.image_sizes.get(&node).copied().unwrap_or((0, 0));
         crate::paint::ImagePresentation {
             fit: style.object_fit,
+            rendering: style.image_rendering,
             position: style.object_position.map(|position| {
                 (
                     position.fraction,

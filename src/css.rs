@@ -119,6 +119,15 @@ pub enum ObjectFit {
     ScaleDown,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ImageRendering {
+    Auto,
+    Smooth,
+    HighQuality,
+    CrispEdges,
+    Pixelated,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ObjectPosition {
     pub fraction: f32,
@@ -157,6 +166,7 @@ pub struct Style {
     pub color: u32,
     pub background: Option<u32>,
     pub object_fit: ObjectFit,
+    pub image_rendering: ImageRendering,
     pub object_position: [ObjectPosition; 2],
     pub font_size: f32,
     pub root_font_size: f32,
@@ -206,6 +216,7 @@ impl Default for Style {
             color: 0x26364a,
             background: None,
             object_fit: ObjectFit::Fill,
+            image_rendering: ImageRendering::Auto,
             object_position: [ObjectPosition::CENTER; 2],
             font_size: 16.0,
             root_font_size: 16.0,
@@ -250,6 +261,7 @@ impl Style {
     fn inherited(parent: &Self) -> Self {
         Self {
             color: parent.color,
+            image_rendering: parent.image_rendering,
             font_size: parent.font_size,
             root_font_size: parent.root_font_size,
             font_families: parent.font_families.clone(),
@@ -422,6 +434,34 @@ pub fn query_first(
     checked: Option<&dyn Fn(usize) -> Option<bool>>,
     budget: &mut usize,
 ) -> Result<Option<usize>, String> {
+    query_matches(doc, source, candidates, checked, budget, true)
+        .map(|matches| matches.first().copied())
+}
+
+/// Match the supported selector grammar in candidate order, once per candidate.
+/// Snapshot callers retain at most 4096 references, regardless of document size.
+pub fn query_all(
+    doc: &Document,
+    source: &str,
+    candidates: &[usize],
+    checked: Option<&dyn Fn(usize) -> Option<bool>>,
+    budget: &mut usize,
+) -> Result<Vec<usize>, String> {
+    query_matches(doc, source, candidates, checked, budget, false)
+}
+
+pub fn valid_query_selector(source: &str) -> bool {
+    source.len() <= MAX_SELECTOR_BYTES * 16 && parse_selector_list(source).is_some()
+}
+
+fn query_matches(
+    doc: &Document,
+    source: &str,
+    candidates: &[usize],
+    checked: Option<&dyn Fn(usize) -> Option<bool>>,
+    budget: &mut usize,
+    first_only: bool,
+) -> Result<Vec<usize>, String> {
     if source.len() > MAX_SELECTOR_BYTES * 16 {
         return Err("Selector query exceeds 8 KiB.".into());
     }
@@ -454,18 +494,25 @@ pub fn query_first(
         checked,
         charge_text: true,
     };
+    let mut matched = Vec::new();
     for &node in candidates {
         if selectors
             .iter()
             .any(|selector| matches_selector(selector, node, &context, budget))
         {
-            return Ok(Some(node));
+            if matched.len() == 4096 {
+                return Err("DOM selector result limit reached (4096 elements).".into());
+            }
+            matched.push(node);
+            if first_only {
+                return Ok(matched);
+            }
         }
         if *budget == 0 {
             return Err("DOM selector work limit reached.".into());
         }
     }
-    Ok(None)
+    Ok(matched)
 }
 
 // Form controls can have live checkedness different from their original HTML.
@@ -496,10 +543,35 @@ pub fn compute_with_state(
         checked,
         charge_text: false,
     };
-    // The parser stores parents before children. Inert content does not supply
-    // stylesheets or change the live document's root font size.
+    // Script moves preserve arena identity, so a parent can have a later arena
+    // index than its child. Visit the connected physical tree in preorder for
+    // inheritance and stylesheet order. Retained detached nodes keep defaults.
+    let mut order = Vec::new();
+    let mut visited = vec![false; doc.nodes.len()];
+    let mut stack = if doc.nodes.is_empty() {
+        Vec::new()
+    } else {
+        vec![0]
+    };
+    while let Some(index) = stack.pop() {
+        if index >= doc.nodes.len() || visited[index] {
+            continue;
+        }
+        visited[index] = true;
+        order.push(index);
+        stack.extend(
+            doc.nodes[index]
+                .children
+                .iter()
+                .rev()
+                .copied()
+                .filter(|&child| child != 0 && parents.get(child) == Some(&Some(index))),
+        );
+    }
+    // Inert content does not supply stylesheets or change the live document's
+    // root font size, even when its children were created before their parent.
     let mut inert = vec![false; doc.nodes.len()];
-    for index in 0..doc.nodes.len() {
+    for &index in &order {
         if let Some(parent) = parents[index] {
             inert[index] = inert[parent]
                 || matches!(&doc.nodes[parent].kind, NodeKind::Element { tag, .. }
@@ -508,7 +580,8 @@ pub fn compute_with_state(
     }
     let mut rules = Vec::new();
     let mut bytes_left = MAX_CSS_BYTES;
-    for (index, node) in doc.nodes.iter().enumerate() {
+    for &index in &order {
+        let node = &doc.nodes[index];
         if inert[index] {
             continue;
         }
@@ -550,10 +623,11 @@ pub fn compute_with_state(
         }
     }
 
-    let mut computed = Vec::with_capacity(doc.nodes.len());
+    let mut computed = vec![Style::default(); doc.nodes.len()];
     let mut budget = MAX_MATCH_STEPS;
     let mut root_font_size = 16.0;
-    for (index, node) in doc.nodes.iter().enumerate() {
+    for &index in &order {
+        let node = &doc.nodes[index];
         let parent = parents[index]
             .and_then(|parent| computed.get(parent))
             .cloned()
@@ -564,11 +638,11 @@ pub fn compute_with_state(
         {
             let mut style = Style::inherited(&parent);
             style.display = Display::None;
-            computed.push(style);
+            computed[index] = style;
             continue;
         }
         let NodeKind::Element { tag, href, .. } = &node.kind else {
-            computed.push(parent);
+            computed[index] = parent;
             continue;
         };
         let mut style = Style::inherited(&parent);
@@ -704,7 +778,7 @@ pub fn compute_with_state(
             root_font_size = style.font_size;
             style.root_font_size = root_font_size;
         }
-        computed.push(style);
+        computed[index] = style;
     }
     computed
 }
@@ -1541,7 +1615,7 @@ fn parse_selector(source: &str) -> Option<Selector> {
         };
         if bytes[position] == b'*' {
             position += 1;
-        } else if ident_start(bytes[position]) {
+        } else if starts_selector_ident(bytes, position) {
             let start = position;
             while bytes.get(position).is_some_and(|b| ident(*b)) {
                 position += 1;
@@ -1554,6 +1628,9 @@ fn parse_selector(source: &str) -> Option<Selector> {
                 Some(b'.' | b'#') => {
                     let id = bytes[position] == b'#';
                     position += 1;
+                    if !starts_selector_ident(bytes, position) {
+                        return None;
+                    }
                     let start = position;
                     while bytes.get(position).is_some_and(|b| ident(*b)) {
                         position += 1;
@@ -2293,6 +2370,19 @@ fn apply(style: &mut Style, parent: &Style, declaration: &Declaration) {
                 style.object_fit = fit;
             }
         }
+        "image-rendering" => {
+            if let Some(rendering) = match value.as_str() {
+                "auto" | "initial" => Some(ImageRendering::Auto),
+                "smooth" | "optimizequality" => Some(ImageRendering::Smooth),
+                "high-quality" => Some(ImageRendering::HighQuality),
+                "crisp-edges" | "optimizespeed" => Some(ImageRendering::CrispEdges),
+                "pixelated" => Some(ImageRendering::Pixelated),
+                "inherit" | "unset" => Some(parent.image_rendering),
+                _ => None,
+            } {
+                style.image_rendering = rendering;
+            }
+        }
         "object-position" => {
             if value == "inherit" {
                 style.object_position = parent.object_position;
@@ -2812,6 +2902,32 @@ fn color(value: &str) -> Option<u32> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn image_rendering_inherits_and_preserves_valid_cascade_values() {
+        use super::ImageRendering::*;
+        let doc = crate::html::parse("<style>img{image-rendering:auto}.sharp{image-rendering:pixelated!important}</style><div style='image-rendering:crisp-edges'><span id=inherited></span><img id=auto><img id=unset style='image-rendering:unset'><img id=smooth style='image-rendering:smooth;image-rendering:bogus'><img id=pixel class=sharp style='image-rendering:smooth'><img id=initial style='image-rendering:initial'><img id=quality style='image-rendering:high-quality'><img id=speed style='image-rendering:optimizeSpeed'><img id=legacy-quality style='image-rendering:optimizeQuality'></div>");
+        let styles = super::compute(&doc, &std::collections::HashMap::new());
+        for (id, expected) in [
+            ("inherited", CrispEdges),
+            ("auto", Auto),
+            ("unset", CrispEdges),
+            ("smooth", Smooth),
+            ("pixel", Pixelated),
+            ("initial", Auto),
+            ("quality", HighQuality),
+            ("speed", CrispEdges),
+            ("legacy-quality", Smooth),
+        ] {
+            let node = doc
+                .nodes
+                .iter()
+                .enumerate()
+                .find(|(i, _)| doc.attr(*i, "id") == Some(id))
+                .unwrap()
+                .0;
+            assert_eq!(styles[node].image_rendering, expected, "{id}");
+        }
+    }
     #[test]
     fn image_fit_and_position_parse_axis_keywords_offsets_and_cascade() {
         use super::{Length, ObjectFit, ObjectPosition};
@@ -3469,6 +3585,59 @@ mod tests {
         assert_eq!(styles[live].display, Display::Block);
         assert_eq!(styles[live].font_size, 16.0);
         assert!(styles[live].bold);
+    }
+
+    #[test]
+    fn reparented_older_nodes_inherit_from_newer_parents_in_physical_tree_order() {
+        let mut doc = parse("<p id=older>child<b id=inner>nested</b></p><div id=newer style='color:#123456;font-size:23px'>parent</div>");
+        let older = (0..doc.nodes.len())
+            .find(|&node| doc.attr(node, "id") == Some("older"))
+            .unwrap();
+        let inner = (0..doc.nodes.len())
+            .find(|&node| doc.attr(node, "id") == Some("inner"))
+            .unwrap();
+        let newer = (0..doc.nodes.len())
+            .find(|&node| doc.attr(node, "id") == Some("newer"))
+            .unwrap();
+        assert!(older < newer);
+        doc.nodes[0].children.retain(|&node| node != older);
+        doc.nodes[newer].children.push(older);
+        let styles = compute(&doc, &HashMap::new());
+        assert_eq!(styles.len(), doc.nodes.len());
+        assert_eq!(styles[older].color, 0x123456);
+        assert_eq!(styles[inner].color, 0x123456);
+        assert_eq!(styles[older].font_size, 23.0);
+        assert_eq!(styles[inner].font_size, 23.0);
+        assert!(styles[inner].bold);
+
+        doc.nodes[0].children.retain(|&node| node != newer);
+        let detached = compute(&doc, &HashMap::new());
+        assert_eq!(detached[newer].color, Style::default().color);
+        assert_eq!(detached[older].font_size, Style::default().font_size);
+    }
+
+    #[test]
+    fn reparented_older_stylesheets_remain_inert_under_newer_containers() {
+        let mut doc = parse("<style id=older>p{color:red}</style><style>p{color:blue}</style><p id=live>visible</p><template id=newer></template>");
+        let older = (0..doc.nodes.len())
+            .find(|&node| doc.attr(node, "id") == Some("older"))
+            .unwrap();
+        let newer = (0..doc.nodes.len())
+            .find(|&node| doc.attr(node, "id") == Some("newer"))
+            .unwrap();
+        let live = (0..doc.nodes.len())
+            .find(|&node| doc.attr(node, "id") == Some("live"))
+            .unwrap();
+        doc.nodes[0].children.retain(|&node| node != older);
+        doc.nodes[newer].children.push(older);
+        let styles = compute(&doc, &HashMap::new());
+        assert_eq!(styles[live].color, 0x0000ff);
+        assert_eq!(styles[older].display, Display::None);
+
+        // A detached sheet must not affect the connected document either.
+        doc.nodes[0].children.retain(|&node| node != newer);
+        let styles = compute(&doc, &HashMap::new());
+        assert_eq!(styles[live].color, 0x0000ff);
     }
 
     #[test]

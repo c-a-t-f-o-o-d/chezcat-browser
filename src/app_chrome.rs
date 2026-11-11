@@ -12,6 +12,8 @@ pub(super) enum ChromeAction {
     Forward,
     Reload,
     Home,
+    Bookmark,
+    Downloads,
     Menu,
     FindPrevious,
     FindNext,
@@ -66,20 +68,30 @@ impl App {
 
     pub(super) fn chrome_rect(&self, action: ChromeAction) -> Option<Rect> {
         use ChromeAction::*;
+        let compact = self.width < 680;
         Some(match action {
+            Back if compact => (8, 14, 32, 40),
+            Forward if compact => (44, 14, 32, 40),
+            Reload if compact => (80, 14, 32, 40),
+            Home if compact => (116, 14, 32, 40),
+            Bookmark if compact => (self.width - 116, 14, 30, 40),
+            Downloads if compact => (self.width - 80, 14, 34, 40),
+            Menu if compact => (self.width - 42, 14, 34, 40),
             Back => (10, 14, 40, 40),
             Forward => (56, 14, 40, 40),
             Reload => (102, 14, 40, 40),
             Home => (148, 14, 40, 40),
+            Bookmark => (self.width - 148, 14, 38, 40),
+            Downloads => (self.width - 100, 14, 40, 40),
             Menu => (self.width - 52, 14, 40, 40),
             FindPrevious if self.find_open && self.browser_panel.is_none() => {
-                (self.width - 128, BAR_HEIGHT + 6, 36, 30)
+                (self.width - 128, self.chrome_bottom() + 6, 36, 30)
             }
             FindNext if self.find_open && self.browser_panel.is_none() => {
-                (self.width - 84, BAR_HEIGHT + 6, 36, 30)
+                (self.width - 84, self.chrome_bottom() + 6, 36, 30)
             }
             FindClose if self.find_open && self.browser_panel.is_none() => {
-                (self.width - 40, BAR_HEIGHT + 6, 28, 30)
+                (self.width - 40, self.chrome_bottom() + 6, 28, 30)
             }
             MenuItem(index)
                 if self.menu
@@ -124,6 +136,8 @@ impl App {
             Forward,
             Reload,
             Home,
+            Bookmark,
+            Downloads,
             Menu,
             FindPrevious,
             FindNext,
@@ -137,6 +151,8 @@ impl App {
     }
 
     pub(super) fn open_menu(&mut self, keyboard: bool) {
+        self.close_downloads();
+        self.close_bookmark_popup();
         self.inspector.focused = false;
         if self.browser_panel.is_some() {
             self.close_browser_panel();
@@ -165,6 +181,8 @@ impl App {
             Reload if self.is_loading() => self.stop_loading(),
             Reload => self.reload(),
             Home => self.home(),
+            Bookmark => self.add_current_bookmark(),
+            Downloads => self.toggle_downloads(),
             Menu => {
                 if self.menu {
                     self.menu = false;
@@ -224,6 +242,9 @@ impl App {
             self.chrome.hover = Some(action);
             self.chrome.pressed = self.chrome_enabled(action).then_some(action);
             self.chrome.pressed_stop = action == ChromeAction::Reload && self.is_loading();
+            if action == ChromeAction::Bookmark {
+                self.arm_current_bookmark_drag(x, y);
+            }
             if let ChromeAction::MenuItem(index) = action {
                 self.chrome.menu_selected = Some(index);
             } else if action != ChromeAction::Menu {
@@ -253,8 +274,12 @@ impl App {
             self.sync_editors();
             return true;
         }
-        if self.find_open && (BAR_HEIGHT..self.content_top()).contains(&y) {
-            if contains((72, BAR_HEIGHT + 5, (self.width - 304).max(40), 32), x, y) {
+        if self.find_open && (self.chrome_bottom()..self.content_top()).contains(&y) {
+            if contains(
+                (72, self.chrome_bottom() + 5, (self.width - 304).max(40), 32),
+                x,
+                y,
+            ) {
                 self.focus = Focus::Find;
                 let pos = self.find.offset + ((x - 80).max(0) / 12) as usize;
                 self.find.move_to(pos, shift);
@@ -332,6 +357,8 @@ impl App {
             Some(Reload),
             Some(Home),
             None,
+            Some(Bookmark),
+            Some(Downloads),
             Some(Menu),
         ];
         let index = if self.focus == Focus::Address {
@@ -340,7 +367,7 @@ impl App {
             targets
                 .iter()
                 .position(|item| *item == current)
-                .unwrap_or(5)
+                .unwrap_or(7)
         };
         let mut next = if previous {
             index as i32 - 1
@@ -465,17 +492,19 @@ impl App {
         let hovered = self.chrome.hover == Some(action) && enabled;
         let focused = self.chrome.focus == Some(action);
         let pressed = self.chrome.pressed == Some(action) && hovered;
-        let active = action == ChromeAction::Menu && self.menu;
+        let palette = self.browser_palette();
+        let active = action == ChromeAction::Menu && self.menu
+            || action == ChromeAction::Downloads && self.downloads_open();
         let background = if pressed || active {
             ui::TEAL_DARK
         } else if hovered {
             if light {
-                ui::SELECTED
+                palette.selected
             } else {
                 ui::NAVY_LIGHT
             }
         } else if light {
-            ui::SURFACE
+            palette.background
         } else {
             ui::NAVY
         };
@@ -488,13 +517,13 @@ impl App {
                 rect,
                 8.0,
                 1.0,
-                if light { ui::BORDER } else { ui::TEAL_DARK },
+                if light { palette.border } else { ui::TEAL_DARK },
             );
         }
         let foreground = if !enabled {
             ui::DISABLED
         } else if light && !pressed {
-            ui::INK
+            palette.foreground
         } else {
             ui::CREAM
         };
@@ -526,12 +555,21 @@ impl App {
                 },
             ),
             (Home, Icon::Home),
+            (
+                Bookmark,
+                if self.current_bookmarked() {
+                    Icon::Bookmarked
+                } else {
+                    Icon::Bookmark
+                },
+            ),
+            (Downloads, Icon::Download),
             (Menu, Icon::Menu),
         ] {
             self.draw_icon_button(canvas, action, icon, false);
         }
         let (x, width) = self.address_rect();
-        field_at_offset(
+        field_at_offset_themed(
             canvas,
             &self.address,
             (x, 14, width, 40),
@@ -541,29 +579,62 @@ impl App {
             } else {
                 0
             },
+            self.browser_palette(),
         );
+        if self.current_bookmarked() {
+            if let Some((x, y, w, h)) = self.chrome_rect(Bookmark) {
+                ui::icon(
+                    canvas,
+                    Icon::Bookmarked,
+                    x + (w - 22) / 2,
+                    y + (h - 22) / 2,
+                    22,
+                    ui::TEAL,
+                    ui::TEAL,
+                );
+            }
+        }
+        if self.downloads_active() {
+            if let Some((x, y, _, _)) = self.chrome_rect(Downloads) {
+                ui::rounded_rect(canvas, (x + 28, y + 4, 7, 7), 3.5, ui::TEAL);
+            }
+        }
     }
 
     pub(super) fn draw_find_bar(&self, canvas: &mut Canvas) {
         if !self.find_open {
             return;
         }
-        canvas.fill_rect(0, BAR_HEIGHT, self.width, FIND_HEIGHT, ui::SURFACE);
-        canvas.fill_rect(0, BAR_HEIGHT + FIND_HEIGHT - 1, self.width, 1, ui::BORDER);
+        let palette = self.browser_palette();
+        canvas.fill_rect(
+            0,
+            self.chrome_bottom(),
+            self.width,
+            FIND_HEIGHT,
+            palette.background,
+        );
+        canvas.fill_rect(
+            0,
+            self.chrome_bottom() + FIND_HEIGHT - 1,
+            self.width,
+            1,
+            palette.border,
+        );
         ui::icon(
             canvas,
             Icon::Search,
             18,
-            BAR_HEIGHT + 12,
+            self.chrome_bottom() + 12,
             18,
-            ui::INK,
+            palette.foreground,
             ui::TEAL_DARK,
         );
-        field(
+        field_themed(
             canvas,
             &self.find,
-            (72, BAR_HEIGHT + 5, (self.width - 304).max(40), 32),
+            (72, self.chrome_bottom() + 5, (self.width - 304).max(40), 32),
             self.focus == Focus::Find,
+            palette,
         );
         let count = if self.find.chars.is_empty() {
             String::new()
@@ -579,13 +650,13 @@ impl App {
         };
         canvas.text(
             self.width - 218,
-            BAR_HEIGHT + 17,
+            self.chrome_bottom() + 17,
             &count,
             1,
             if self.matches.is_empty() {
                 ui::ERROR
             } else {
-                ui::MUTED
+                palette.muted
             },
         );
         for (action, icon) in [
@@ -601,6 +672,7 @@ impl App {
         if !self.menu {
             return;
         }
+        let palette = self.browser_palette();
         let (left, top, width, height) = self.menu_geometry();
         // A small two-step shadow, drawn by us rather than an OS menu theme.
         ui::rounded_rect(
@@ -609,7 +681,7 @@ impl App {
             11.0,
             0x9aa4ac,
         );
-        ui::rounded_rect(canvas, (left, top, width, height), 10.0, ui::NAVY);
+        ui::rounded_rect(canvas, (left, top, width, height), 10.0, palette.chrome);
         ui::rounded_border(
             canvas,
             (left, top, width, height),
@@ -636,7 +708,7 @@ impl App {
                 "Ctrl+J",
             ),
             (Icon::Bookmark, "Bookmark this page", "Ctrl+D"),
-            (Icon::Bookmarks, "Bookmarks", "Ctrl+Shift+B"),
+            (Icon::Bookmarks, "Bookmarks", "Ctrl+B"),
             (Icon::Settings, "Settings", "Ctrl+,"),
             (Icon::History, "History", "Ctrl+H"),
             (Icon::Code, "Developer tools", "F12"),
@@ -671,10 +743,10 @@ impl App {
                 x + 8,
                 y + (h - 17) / 2,
                 17,
-                ui::CREAM,
+                palette.chrome_text,
                 ui::TEAL,
             );
-            canvas.text(x + 34, y + (h - 14) / 2, label, 2, ui::CREAM);
+            canvas.text(x + 34, y + (h - 14) / 2, label, 2, palette.chrome_text);
             canvas.text(
                 x + w - 12 - shortcut.len() as i32 * 6,
                 y + (h - 7) / 2,
@@ -715,6 +787,11 @@ impl App {
             Reload if self.is_loading() => "Stop loading  Esc",
             Reload => "Reload  F5 | Full reload  Ctrl+F5",
             Home => "Home  Alt+Home",
+            Bookmark if self.current_bookmarked() => {
+                "Edit bookmark  Ctrl+D | Drag to bookmarks bar"
+            }
+            Bookmark => "Bookmark page  Ctrl+D | Drag to bookmarks bar",
+            Downloads => "Downloads | Save current page  Ctrl+S",
             Menu => "Menu  Alt+F",
             FindPrevious => "Previous match  Shift+F3",
             FindNext => "Next match  F3",

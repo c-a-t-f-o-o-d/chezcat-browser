@@ -118,7 +118,8 @@ fn bookmark_keyboard_edit_clipboard_roundtrip_and_missing_file() {
         app.profile.data().bookmarks,
         vec![Bookmark {
             title: expected.into(),
-            url: original.clone()
+            url: original.clone(),
+            ..Bookmark::default()
         }]
     );
     assert_eq!(
@@ -189,6 +190,8 @@ fn bookmark_mouse_scrolling_keyboard_delete_and_small_window_menu() {
         data.bookmarks.push(Bookmark {
             title: format!("Saved page {i:02}"),
             url: format!("about:home#page{i}"),
+            order: i,
+            ..Bookmark::default()
         });
     }
     app.profile.save(data).unwrap();
@@ -275,6 +278,13 @@ fn settings_apply_controls_scripts_images_zoom_home_and_persists() {
     key(&mut app, 0x09);
     assert!(focus(&app) == Action::BlockingOptions);
     key(&mut app, 0x09);
+    assert_eq!(focus(&app), Action::DarkMode);
+    for _ in 0..12 {
+        if focus(&app) == Action::Apply {
+            break;
+        }
+        key(&mut app, 0x09);
+    }
     assert!(focus(&app) == Action::Apply);
     key(&mut app, 0x0d);
     assert!(app.browser_panel.is_none());
@@ -813,4 +823,242 @@ fn post_bookmarks_open_with_get_and_setting_reload_keeps_resubmit_prompt() {
     assert_eq!(results[0].body, "q=private-body");
     assert_eq!(results[1].method, "GET");
     assert!(results[1].body.is_empty());
+}
+
+fn click_visible(app: &mut App, action: Action) {
+    app.browser_panel.as_mut().unwrap().focus = action;
+    app.ensure_browser_focus_visible();
+    click(app, action);
+}
+
+#[test]
+fn bookmark_folders_edit_move_and_preserve_the_settings_draft() {
+    let fixture = Fixture::new();
+    let mut app = fixture.app("<title>Local reference</title><p>Reference</p>");
+    app.show_settings();
+    click(&mut app, Action::JavaScript);
+    assert!(!app.browser_panel.as_ref().unwrap().javascript);
+    click_visible(&mut app, Action::BookmarksOptions);
+    click(&mut app, Action::NewFolder);
+    app.paste("Research");
+    key(&mut app, 0x0d);
+    let research = app.profile.data().folders[0].id;
+    assert_eq!(
+        app.browser_panel.as_ref().unwrap().selected_folder,
+        Some(research)
+    );
+    click(&mut app, Action::Open);
+    click(&mut app, Action::NewFolder);
+    app.paste("Standards");
+    key(&mut app, 0x0d);
+    let standards = app
+        .profile
+        .data()
+        .folders
+        .iter()
+        .find(|f| f.parent == research)
+        .unwrap()
+        .id;
+    click(&mut app, Action::Edit);
+    app.paste("Specs");
+    key(&mut app, 0x0d);
+    assert_eq!(app.profile.data().folder(standards).unwrap().title, "Specs");
+    click(&mut app, Action::Move);
+    click_visible(&mut app, Action::DestinationRow(standards));
+    assert!(!app.browser_panel.as_ref().unwrap().error.is_empty());
+    assert_eq!(
+        app.profile.data().folder(standards).unwrap().parent,
+        research
+    );
+    click(&mut app, Action::Cancel);
+    click(&mut app, Action::Move);
+    click_visible(&mut app, Action::DestinationRow(0));
+    assert_eq!(app.profile.data().folder(standards).unwrap().parent, 0);
+    app.browser_activate(Action::FolderRow(research));
+    click(&mut app, Action::Open);
+    click(&mut app, Action::Add);
+    key(&mut app, 0x0d);
+    assert_eq!(app.profile.data().bookmarks[0].folder, research);
+    click(&mut app, Action::Edit);
+    click_visible(&mut app, Action::Destination);
+    click_visible(&mut app, Action::DestinationRow(standards));
+    click(&mut app, Action::SaveBookmark);
+    assert_eq!(app.profile.data().bookmarks[0].folder, standards);
+    assert_eq!(app.browser_panel.as_ref().unwrap().folder, standards);
+    click(&mut app, Action::SettingsBack);
+    assert!(matches!(
+        app.browser_panel.as_ref().unwrap().kind,
+        PanelKind::Settings
+    ));
+    assert!(!app.browser_panel.as_ref().unwrap().javascript);
+    assert!(app.scripts_enabled && app.profile.data().settings.javascript);
+    click(&mut app, Action::Cancel);
+    assert_eq!(
+        Store::open(fixture.profile()).unwrap().data(),
+        app.profile.data()
+    );
+}
+
+#[test]
+fn bookmark_folder_delete_confirms_subtree_and_retains_other_bookmarks() {
+    let mut app = App::new();
+    let mut data = app.profile.data().clone();
+    let parent = data.add_folder(0, "Delete me".into()).unwrap();
+    let child = data.add_folder(parent, "Child".into()).unwrap();
+    for (folder, url) in [
+        (parent, "about:home#one"),
+        (child, "about:home#two"),
+        (0, "about:home#keep"),
+    ] {
+        data.bookmarks.push(Bookmark {
+            title: url.into(),
+            url: url.into(),
+            folder,
+            order: data.next_order(folder),
+        });
+    }
+    app.profile.save(data).unwrap();
+    app.show_bookmarks();
+    app.browser_activate(Action::FolderRow(parent));
+    click(&mut app, Action::Delete);
+    assert!(
+        matches!(app.browser_panel.as_ref().unwrap().kind,PanelKind::DeleteFolder{id} if id==parent)
+    );
+    assert_eq!(app.profile.data().bookmarks.len(), 3);
+    key(&mut app, 0x1b);
+    assert_eq!(app.profile.data().folders.len(), 2);
+    click(&mut app, Action::Delete);
+    click(&mut app, Action::ConfirmDeleteFolder);
+    assert!(app.profile.data().folders.is_empty());
+    assert_eq!(app.profile.data().bookmarks.len(), 1);
+    assert_eq!(app.profile.data().bookmarks[0].url, "about:home#keep");
+}
+
+#[test]
+fn bookmark_tree_reorders_mixed_rows_and_keyboard_enters_parent_folders() {
+    use crate::profile::BookmarkItem;
+    let mut app = App::new();
+    let mut data = app.profile.data().clone();
+    let folder = data.add_folder(0, "Folder".into()).unwrap();
+    for n in 0..2 {
+        data.bookmarks.push(Bookmark {
+            title: format!("Link {n}"),
+            url: format!("about:home#{n}"),
+            order: n + 1,
+            ..Bookmark::default()
+        });
+    }
+    app.profile.save(data).unwrap();
+    shortcut(&mut app, 0x42);
+    app.browser_activate(Action::Row(0));
+    click(&mut app, Action::MoveDown);
+    assert_eq!(
+        app.profile.data().items(0),
+        vec![
+            BookmarkItem::Folder(folder),
+            BookmarkItem::Link(1),
+            BookmarkItem::Link(0)
+        ]
+    );
+    click(&mut app, Action::MoveUp);
+    assert_eq!(app.profile.data().items(0)[1], BookmarkItem::Link(0));
+    app.browser_activate(Action::FolderRow(folder));
+    key(&mut app, 0x0d);
+    assert_eq!(app.browser_panel.as_ref().unwrap().folder, folder);
+    key(&mut app, 0x08);
+    assert_eq!(app.browser_panel.as_ref().unwrap().folder, 0);
+    assert_eq!(
+        app.browser_panel.as_ref().unwrap().selected_folder,
+        Some(folder)
+    );
+}
+
+#[test]
+fn dark_native_panels_share_palette_and_small_controls_remain_reachable() {
+    let mut app = App::new();
+    let mut data = app.profile.data().clone();
+    data.settings.dark_mode = true;
+    let folder = data.add_folder(0, "Research".into()).unwrap();
+    data.add_folder(folder, "Specifications".into()).unwrap();
+    data.bookmarks.push(Bookmark {
+        title: "Browser testing".into(),
+        url: "https://example.com/".into(),
+        order: 1,
+        ..Bookmark::default()
+    });
+    app.profile.save(data).unwrap();
+    app.show_bookmarks();
+    shot(&app, "bookmarks-tree-dark.ppm");
+    let colors = app.browser_palette();
+    for show in [App::show_bookmarks, App::show_settings, App::show_history] {
+        show(&mut app);
+        let canvas = app.draw();
+        let body = app.browser_body();
+        assert_eq!(
+            canvas.pixels[(body.y + 4) as usize * canvas.width + 1],
+            colors.background
+        );
+    }
+    app.show_settings();
+    shot(&app, "settings-dark.ppm");
+    app.resize(420, 260);
+    for action in [
+        Action::JavaScript,
+        Action::LinkColor,
+        Action::VisitedColor,
+        Action::DownloadFolder,
+    ] {
+        app.browser_panel.as_mut().unwrap().focus = action;
+        app.ensure_browser_focus_visible();
+        let body = app.browser_body();
+        let control = app
+            .browser_controls()
+            .into_iter()
+            .find(|c| c.action == action)
+            .unwrap();
+        assert!(
+            control.rect.y >= body.y && control.rect.y + control.rect.h <= body.y + body.h,
+            "field {action:?} is clipped"
+        );
+    }
+    shot(&app, "settings-dark-small.ppm");
+}
+
+#[test]
+fn deleting_history_rebuilds_visited_colors_after_the_last_retained_visit() {
+    let mut app = App::new();
+    app.document = html::parse("<a href='https://example.com/read#section'>Read</a>");
+    app.forms = Forms::new(&app.document);
+    let mut data = app.profile.data().clone();
+    data.settings.link_color = Some(0x123456);
+    data.settings.visited_color = Some(0x789abc);
+    app.profile.save(data).unwrap();
+    let now = crate::history::now();
+    app.browsing_history
+        .configure(
+            crate::history::Policy {
+                enabled: true,
+                retention_days: None,
+                clear_on_exit: false,
+            },
+            now,
+        )
+        .unwrap();
+    for fragment in ["first", "second"] {
+        app.browsing_history
+            .record(now, "Read", &format!("https://example.com/read#{fragment}"))
+            .unwrap();
+    }
+    app.visited.insert("https://example.com/read".into());
+    app.reflow();
+    assert_eq!(app.link_paint.get(&0), Some(&0x789abc));
+    shortcut(&mut app, 0x48);
+    key(&mut app, 0x2e);
+    assert_eq!(app.browsing_history.data().entries.len(), 1);
+    assert!(!app.visited.contains("https://example.com/read"));
+    assert_eq!(app.link_paint.get(&0), Some(&0x789abc));
+    key(&mut app, 0x28);
+    key(&mut app, 0x2e);
+    assert!(app.browsing_history.data().entries.is_empty());
+    assert_eq!(app.link_paint.get(&0), Some(&0x123456));
 }

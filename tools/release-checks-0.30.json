@@ -1,0 +1,3457 @@
+{
+  "release": "0.30.0",
+  "date_utc": "2026-11-10",
+  "native_rust_tests": 667,
+  "formatting": "pass",
+  "native_all_target_clippy_warnings_denied": "pass",
+  "windows_all_target_clippy_warnings_denied": "pass",
+  "optimized_builds": [
+    "x86_64-unknown-linux-gnu",
+    "x86_64-pc-windows-gnu"
+  ],
+  "production_cargo_dependencies": 0,
+  "rust_source_modules": 105,
+  "native_executable_sha256": "ba4f15bbe4c4576ba3645218480a24557d18a8a70103c85bf066620243779fbe",
+  "windows_executable": {
+    "machine": "0x8664",
+    "subsystem": 2,
+    "file_version": "0.30.0.0",
+    "imports": [
+      "api-ms-win-core-synch-l1-2-0.dll",
+      "bcrypt.dll",
+      "bcryptprimitives.dll",
+      "comdlg32.dll",
+      "dwmapi.dll",
+      "gdi32.dll",
+      "kernel32.dll",
+      "msvcrt.dll",
+      "ntdll.dll",
+      "ole32.dll",
+      "shell32.dll",
+      "user32.dll",
+      "ws2_32.dll"
+    ],
+    "bytes": 3655168,
+    "sha256": "82b80353b248d4051ab494b83cee3059cb889c3bb89d4ea0655c1c92bb8ce87d",
+    "icon_payload_count": 7,
+    "original_icon_payloads_match": true,
+    "new_imports_from_029": [
+      "dwmapi.dll",
+      "ole32.dll"
+    ],
+    "new_import_reasons": {
+      "dwmapi.dll": "DwmSetWindowAttribute for caption colors",
+      "ole32.dll": "CoInitializeEx/CoUninitialize for native directory ShellExecuteW"
+    },
+    "native_windows_runtime_tested": false
+  },
+  "browser_ui": {
+    "validated": [
+      "profile1-to-profile2 migration and atomic saves",
+      "bookmark folders, subfolders, rename, move, reorder and subtree confirmation",
+      "toolbar/page/address bookmark drag and pointer capture release",
+      "current bookmark icon state",
+      "Settings draft preservation",
+      "dark/compact browser panels and controls",
+      "paint-only link colors and history clearing",
+      "download settings and session list",
+      "actual docked/detached Network input and selected table/graph pixels"
+    ],
+    "visual_inspection": [
+      "home light/dark",
+      "Appearance and Downloads section jumps",
+      "bookmark tree",
+      "downloads light/dark/compact/completed",
+      "Network light/dark/docked/detached",
+      "compatibility workshop and activity report"
+    ],
+    "native_windows_desktop_runtime_tested": false
+  },
+  "javascript": {
+    "dataset": "live, writable, deletable and enumerable native attribute reflection",
+    "image": "real detached nodes; source fetch explicitly declined",
+    "navigator": "ordinary expandos/method polyfills; actual capability fields protected",
+    "send_beacon": "returns false; no request queued",
+    "parameters_and_arguments": 256,
+    "per_job_steps": 250000,
+    "per_job_elapsed_seconds": 1,
+    "startup_steps": 1000000,
+    "startup_elapsed_seconds": 2,
+    "workshop_object_checks": 11,
+    "workshop_script_errors": 0,
+    "workshop_independent_finite_jobs": 2,
+    "google_search_end_to_end_verified": false
+  },
+  "downloads": {
+    "max_file_bytes": 33554432,
+    "max_concurrent": 3,
+    "max_session_records": 50,
+    "focused_tests": 23,
+    "additional_actual_app_attachment_tests": 3,
+    "received_post_test": "exact original body; one POST; exact saved NUL/non-UTF8 bytes; displayed document/current request/scroll/resource log/session history/persistent history unchanged",
+    "coalesced_progress_error": "destination rejection retained",
+    "cancellation": "final measured trace wake without stale attachment/document delivery",
+    "clear_list_deletes_files": false,
+    "automatic_file_execution": false,
+    "streaming_progress": "indeterminate during bounded buffered HTTP receive",
+    "resumption_and_persistence": false
+  },
+  "network": {
+    "focused_initial_tests": 15,
+    "actual_delayed_loopback_transport": true,
+    "request_table_and_linked_graph": true,
+    "max_entries_per_navigation": 384,
+    "phases": [
+      "connection queue",
+      "DNS",
+      "TCP",
+      "TLS",
+      "send",
+      "wait for first byte",
+      "receive HTTP headers/body",
+      "HTTP content decode"
+    ],
+    "received_byte_definition": "HTTP bytes after TLS decryption, including HTTP headers/framing; excludes TLS and TCP/IP overhead",
+    "image_decode_is_not_http_decode_phase": true,
+    "unmeasured_skipped_body_sizes_preserved": true,
+    "cross_navigation_capture": false
+  },
+  "image_presentation": {
+    "passed": true,
+    "browser_runs": 16,
+    "checks": 31,
+    "loopback_only": true,
+    "javascript_enabled": false,
+    "profile_access": false,
+    "browser_version": "ChezCat 0.30",
+    "browser_sha256": "ba4f15bbe4c4576ba3645218480a24557d18a8a70103c85bf066620243779fbe",
+    "elapsed_seconds": 0.868,
+    "checks_detail": [
+      {
+        "case": "picture-media-small",
+        "selected": "/red.png",
+        "natural_display_size": [
+          160,
+          80
+        ],
+        "rendered_viewport_width": 788,
+        "image_http_requests": 1,
+        "maximum_channel_error": 0
+      },
+      {
+        "case": "picture-media-large",
+        "selected": "/green.png",
+        "natural_display_size": [
+          320,
+          160
+        ],
+        "rendered_viewport_width": 948,
+        "image_http_requests": 1,
+        "maximum_channel_error": 0
+      },
+      {
+        "case": "density-corrected-2x",
+        "selected": "/green.png",
+        "natural_display_size": [
+          160,
+          80
+        ],
+        "rendered_viewport_width": 788,
+        "image_http_requests": 1,
+        "maximum_channel_error": 0
+      },
+      {
+        "case": "zoom-selects-2x",
+        "selected": "/green.png",
+        "natural_display_size": [
+          320,
+          160
+        ],
+        "rendered_viewport_width": 788,
+        "image_http_requests": 1,
+        "maximum_channel_error": 0
+      },
+      {
+        "case": "width-srcset-640",
+        "selected": "/green.png",
+        "natural_display_size": [
+          314,
+          157
+        ],
+        "rendered_viewport_width": 628,
+        "image_http_requests": 1,
+        "maximum_channel_error": 0
+      },
+      {
+        "case": "width-srcset-960",
+        "selected": "/blue.png",
+        "natural_display_size": [
+          474,
+          237
+        ],
+        "rendered_viewport_width": 948,
+        "image_http_requests": 1,
+        "maximum_channel_error": 0
+      },
+      {
+        "case": "sizes-media-small",
+        "selected": "/red.png",
+        "natural_display_size": [
+          160,
+          80
+        ],
+        "rendered_viewport_width": 788,
+        "image_http_requests": 1,
+        "maximum_channel_error": 0
+      },
+      {
+        "case": "sizes-media-large",
+        "selected": "/blue.png",
+        "natural_display_size": [
+          480,
+          240
+        ],
+        "rendered_viewport_width": 948,
+        "image_http_requests": 1,
+        "maximum_channel_error": 0
+      },
+      {
+        "case": "sizes-calc",
+        "selected": "/green.png",
+        "natural_display_size": [
+          314,
+          157
+        ],
+        "rendered_viewport_width": 788,
+        "image_http_requests": 1,
+        "maximum_channel_error": 0
+      },
+      {
+        "case": "embedded-base64-percent-and-repeated-references",
+        "image_count": 5,
+        "image_http_requests": 0,
+        "maximum_channel_error": 0
+      },
+      {
+        "case": "object-fit",
+        "fit": "fill",
+        "position": "center",
+        "maximum_channel_error": 0
+      },
+      {
+        "case": "object-fit",
+        "fit": "fill",
+        "position": "10px 5px",
+        "maximum_channel_error": 0
+      },
+      {
+        "case": "object-fit",
+        "fit": "contain",
+        "position": "center",
+        "maximum_channel_error": 0
+      },
+      {
+        "case": "object-fit",
+        "fit": "contain",
+        "position": "right bottom",
+        "maximum_channel_error": 0
+      },
+      {
+        "case": "object-fit",
+        "fit": "contain",
+        "position": "right 0px bottom 5px",
+        "maximum_channel_error": 0
+      },
+      {
+        "case": "object-fit",
+        "fit": "cover",
+        "position": "center",
+        "maximum_channel_error": 0
+      },
+      {
+        "case": "object-fit",
+        "fit": "cover",
+        "position": "left top",
+        "maximum_channel_error": 0
+      },
+      {
+        "case": "object-fit",
+        "fit": "cover",
+        "position": "right bottom",
+        "maximum_channel_error": 0
+      },
+      {
+        "case": "object-fit",
+        "fit": "none",
+        "position": "center",
+        "maximum_channel_error": 0
+      },
+      {
+        "case": "object-fit",
+        "fit": "scale-down",
+        "position": "center",
+        "maximum_channel_error": 0
+      },
+      {
+        "case": "object-fit",
+        "fit": "scale-down",
+        "position": "left top",
+        "maximum_channel_error": 0
+      },
+      {
+        "case": "object-fit-none-density-corrected",
+        "maximum_channel_error": 0
+      },
+      {
+        "case": "image-submit-object-fit-cover-and-position",
+        "maximum_channel_error": 0
+      },
+      {
+        "case": "smooth-image-rendering",
+        "value": "auto",
+        "maximum_channel_error": 1,
+        "oracle": "Pillow bilinear"
+      },
+      {
+        "case": "smooth-image-rendering",
+        "value": "smooth",
+        "maximum_channel_error": 1,
+        "oracle": "Pillow bilinear"
+      },
+      {
+        "case": "smooth-image-rendering",
+        "value": "high-quality",
+        "maximum_channel_error": 1,
+        "oracle": "Pillow bilinear"
+      },
+      {
+        "case": "legacy-embedded-repeat",
+        "source": "/direct-tga",
+        "image_http_requests": 1,
+        "maximum_channel_error": 0,
+        "oracle": "Pillow"
+      },
+      {
+        "case": "legacy-embedded-repeat",
+        "source": "/direct-pcx",
+        "image_http_requests": 1,
+        "maximum_channel_error": 0,
+        "oracle": "Pillow"
+      },
+      {
+        "case": "legacy-direct-MIME",
+        "source": "/direct-tga",
+        "image_rectangle": [
+          274,
+          209,
+          514,
+          353
+        ],
+        "total_http_requests": 1,
+        "maximum_channel_error": 0,
+        "oracle": "Pillow"
+      },
+      {
+        "case": "legacy-direct-MIME",
+        "source": "/direct-pcx",
+        "image_rectangle": [
+          274,
+          209,
+          514,
+          353
+        ],
+        "total_http_requests": 1,
+        "maximum_channel_error": 0,
+        "oracle": "Pillow"
+      },
+      {
+        "case": "images-disabled-including-data-URIs",
+        "image_http_requests": 0,
+        "source_image_colors_painted": 0
+      }
+    ],
+    "runs": [
+      {
+        "name": "picture-media-small",
+        "requests": [
+          {
+            "path": "/picture",
+            "status": 200,
+            "mime": "text/html",
+            "bytes": 668
+          },
+          {
+            "path": "/red.png",
+            "status": 200,
+            "mime": "image/png",
+            "bytes": 272
+          }
+        ],
+        "render_sha256": "d1fb0abc594da4564e2ba37ec7597539e614a4ae4e5c633502dac46b4882e876"
+      },
+      {
+        "name": "picture-media-large",
+        "requests": [
+          {
+            "path": "/picture",
+            "status": 200,
+            "mime": "text/html",
+            "bytes": 668
+          },
+          {
+            "path": "/green.png",
+            "status": 200,
+            "mime": "image/png",
+            "bytes": 551
+          }
+        ],
+        "render_sha256": "590fca1c456e5b774f13d214abe6866e232e6e884f933d140f4a67ab816afd86"
+      },
+      {
+        "name": "density-corrected-2x",
+        "requests": [
+          {
+            "path": "/density",
+            "status": 200,
+            "mime": "text/html",
+            "bytes": 357
+          },
+          {
+            "path": "/green.png",
+            "status": 200,
+            "mime": "image/png",
+            "bytes": 551
+          }
+        ],
+        "render_sha256": "74eb1471e1dc8314878c317a329c8e625b9a26858fde7919bc44faee48a0668f"
+      },
+      {
+        "name": "zoom-selects-2x",
+        "requests": [
+          {
+            "path": "/zoom",
+            "status": 200,
+            "mime": "text/html",
+            "bytes": 388
+          },
+          {
+            "path": "/green.png",
+            "status": 200,
+            "mime": "image/png",
+            "bytes": 551
+          }
+        ],
+        "render_sha256": "1ab1b8359804294ff92a0b7141cb44c87c882b5871742bc4d2eee0a991ccdb3a"
+      },
+      {
+        "name": "width-srcset-640",
+        "requests": [
+          {
+            "path": "/width-set",
+            "status": 200,
+            "mime": "text/html",
+            "bytes": 421
+          },
+          {
+            "path": "/green.png",
+            "status": 200,
+            "mime": "image/png",
+            "bytes": 551
+          }
+        ],
+        "render_sha256": "781ef5190e3dad7a826a111de379f4f58e1fb5cef15713561cc001d91188f48a"
+      },
+      {
+        "name": "width-srcset-960",
+        "requests": [
+          {
+            "path": "/width-set",
+            "status": 200,
+            "mime": "text/html",
+            "bytes": 421
+          },
+          {
+            "path": "/blue.png",
+            "status": 200,
+            "mime": "image/png",
+            "bytes": 1331
+          }
+        ],
+        "render_sha256": "74a6be3e6bd80803f4ecf3931f958f669785d24ba84892c5d667a3c81779e44b"
+      },
+      {
+        "name": "sizes-media-small",
+        "requests": [
+          {
+            "path": "/sizes-media",
+            "status": 200,
+            "mime": "text/html",
+            "bytes": 429
+          },
+          {
+            "path": "/red.png",
+            "status": 200,
+            "mime": "image/png",
+            "bytes": 272
+          }
+        ],
+        "render_sha256": "091c8dae8515fd2ded1101244870278dba09abe3082d99165cfe5c04b1dd33d5"
+      },
+      {
+        "name": "sizes-media-large",
+        "requests": [
+          {
+            "path": "/sizes-media",
+            "status": 200,
+            "mime": "text/html",
+            "bytes": 429
+          },
+          {
+            "path": "/blue.png",
+            "status": 200,
+            "mime": "image/png",
+            "bytes": 1331
+          }
+        ],
+        "render_sha256": "ff0d1abfc4c9c9341aec0eafd19fb8ad286df8e0f35486937515f7ba3929e4f3"
+      },
+      {
+        "name": "sizes-calc",
+        "requests": [
+          {
+            "path": "/sizes-calc",
+            "status": 200,
+            "mime": "text/html",
+            "bytes": 416
+          },
+          {
+            "path": "/green.png",
+            "status": 200,
+            "mime": "image/png",
+            "bytes": 551
+          }
+        ],
+        "render_sha256": "d31a6625f48b753c48f278a19e2c942dea5bc26d75aad6745b57b3ad8267509a"
+      },
+      {
+        "name": "embedded-data",
+        "requests": [
+          {
+            "path": "/embedded-data",
+            "status": 200,
+            "mime": "text/html",
+            "bytes": 1274
+          }
+        ],
+        "render_sha256": "ef6c5f925e27bacdf3d10f52c4cdd9f467bfc5db11e2c0555f88702e8e41c416"
+      },
+      {
+        "name": "object-fitting",
+        "requests": [
+          {
+            "path": "/fitting",
+            "status": 200,
+            "mime": "text/html",
+            "bytes": 2036
+          },
+          {
+            "path": "/pattern.png",
+            "status": 200,
+            "mime": "image/png",
+            "bytes": 175
+          },
+          {
+            "path": "/small.png",
+            "status": 200,
+            "mime": "image/png",
+            "bytes": 80
+          }
+        ],
+        "render_sha256": "0c32c9bfe8b6f480fd608c54df589e37311fbaa022cbfa0afac7ffa4ea372127"
+      },
+      {
+        "name": "smooth-image-rendering",
+        "requests": [
+          {
+            "path": "/smooth",
+            "status": 200,
+            "mime": "text/html",
+            "bytes": 648
+          },
+          {
+            "path": "/pattern.png",
+            "status": 200,
+            "mime": "image/png",
+            "bytes": 175
+          }
+        ],
+        "render_sha256": "032eed668d2fb2aa4bf912f5b8f8052264d38bdac3be06f126662a72d988ca10"
+      },
+      {
+        "name": "legacy-embedded",
+        "requests": [
+          {
+            "path": "/legacy",
+            "status": 200,
+            "mime": "text/html",
+            "bytes": 621
+          },
+          {
+            "path": "/direct-tga",
+            "status": 200,
+            "mime": "image/x-tga",
+            "bytes": 8939
+          },
+          {
+            "path": "/direct-pcx",
+            "status": 200,
+            "mime": "image/x-pcx",
+            "bytes": 8330
+          }
+        ],
+        "render_sha256": "1485fa7e8e7df5f8cc5ee1d3d66c94a33e3867e0b73ae9f99e3d9784492783d4"
+      },
+      {
+        "name": "direct-tga",
+        "requests": [
+          {
+            "path": "/direct-tga",
+            "status": 200,
+            "mime": "image/x-tga",
+            "bytes": 8939
+          }
+        ],
+        "render_sha256": "471b7e15fa7e2a93d547cbea98ee031923a68a922dbd1ec79c92f0e991c4b715"
+      },
+      {
+        "name": "direct-pcx",
+        "requests": [
+          {
+            "path": "/direct-pcx",
+            "status": 200,
+            "mime": "image/x-pcx",
+            "bytes": 8330
+          }
+        ],
+        "render_sha256": "908a560fb5a49e7f7642008ed239a4de228b0c810bab5244cdb61b1e241cd4e9"
+      },
+      {
+        "name": "images-disabled",
+        "requests": [
+          {
+            "path": "/disabled",
+            "status": 200,
+            "mime": "text/html",
+            "bytes": 1905
+          }
+        ],
+        "render_sha256": "d2fce4451ae2471dcf85737bbd6b05600ca5764cd43fb318f0ac1dd3dfd99cd7"
+      }
+    ]
+  },
+  "image_loading_and_animation": {
+    "browser_runs": 17,
+    "checks": 35,
+    "passed": 35,
+    "loopback_only": true,
+    "javascript_enabled": false,
+    "elapsed_seconds": 3.762,
+    "browser_sha256": "ba4f15bbe4c4576ba3645218480a24557d18a8a70103c85bf066620243779fbe",
+    "assets": {
+      "format-animated.gif": {
+        "sha256": "196d1475f75d8067346dd4f61d30766dfd1856907a9b6678d9cf8f90cc7f1d74",
+        "mime": "image/gif",
+        "reference_frames": 17
+      },
+      "format-animated.apng": {
+        "sha256": "737d61a6cbb27f0606d70af5de02e2d3f391931c607fecaeb240fa6950b958bd",
+        "mime": "image/apng",
+        "reference_frames": 17
+      },
+      "format-animated.webp": {
+        "sha256": "9df925327e12ef2ae8f9d4702ff2d458c80e57b7eafd04fe34e5b483b7dc7267",
+        "mime": "image/webp",
+        "reference_frames": 12
+      },
+      "format-lossy.webp": {
+        "sha256": "df254d37482df5243e2cd0d3eb2026d14c09f03e9ed2b152354754798f9f70ac",
+        "mime": "image/webp",
+        "reference_frames": 1
+      },
+      "format-tiled.tiff": {
+        "sha256": "cce06a96053b61fcb1e01fcac64f3eb3b64fed589ce993b0fa5b5ba511f5f168",
+        "mime": "image/tiff",
+        "reference_frames": 1
+      },
+      "format-cmyk.jpg": {
+        "sha256": "f49043af7e671beac39a838d843d2bded4d1de1bfde3536bf66dae8db414eea3",
+        "mime": "image/jpeg",
+        "reference_frames": 1
+      },
+      "format-pattern.qoi": {
+        "sha256": "f6ad66707bd92126f017b223909d4723d25170f640eae3b1c4bea637fe6f90a8",
+        "mime": "image/qoi",
+        "reference_frames": 1
+      },
+      "format-alpha.pam": {
+        "sha256": "e48b0b48dccfb4161fc15bf28cb15aedbe298f5c43bdae099fc648f5c92c7f99",
+        "mime": "image/x-portable-arbitrarymap",
+        "reference_frames": 1
+      },
+      "format-gray16.pgm": {
+        "sha256": "7a855a5fa02fd07358a0e2f57c01d6d63ad55de6a8359e557b965f66d8250be1",
+        "mime": "image/x-portable-graymap",
+        "reference_frames": 1
+      }
+    },
+    "checks_detail": [
+      {
+        "case": "embedded-reference-pixels-and-one-fetch",
+        "image": "format-animated.gif",
+        "wait_ms": 0,
+        "oracle": "Pillow",
+        "frame": 0,
+        "maximum_channel_error": 0,
+        "mean_channel_error": 0.0
+      },
+      {
+        "case": "embedded-reference-pixels-and-one-fetch",
+        "image": "format-animated.apng",
+        "wait_ms": 0,
+        "oracle": "FFmpeg",
+        "frame": 0,
+        "maximum_channel_error": 0,
+        "mean_channel_error": 0.0
+      },
+      {
+        "case": "embedded-reference-pixels-and-one-fetch",
+        "image": "format-animated.webp",
+        "wait_ms": 0,
+        "oracle": "Pillow",
+        "frame": 0,
+        "maximum_channel_error": 1,
+        "mean_channel_error": 0.0036226851851851854
+      },
+      {
+        "case": "embedded-reference-pixels-and-one-fetch",
+        "image": "format-lossy.webp",
+        "wait_ms": 0,
+        "oracle": "Pillow",
+        "frame": 0,
+        "maximum_channel_error": 1,
+        "mean_channel_error": 0.002384259259259259
+      },
+      {
+        "case": "embedded-reference-pixels-and-one-fetch",
+        "image": "format-tiled.tiff",
+        "wait_ms": 0,
+        "oracle": "Pillow",
+        "frame": 0,
+        "maximum_channel_error": 0,
+        "mean_channel_error": 0.0
+      },
+      {
+        "case": "embedded-reference-pixels-and-one-fetch",
+        "image": "format-cmyk.jpg",
+        "wait_ms": 0,
+        "oracle": "Pillow",
+        "frame": 0,
+        "maximum_channel_error": 1,
+        "mean_channel_error": 0.003472222222222222
+      },
+      {
+        "case": "embedded-reference-pixels-and-one-fetch",
+        "image": "format-pattern.qoi",
+        "wait_ms": 0,
+        "oracle": "Pillow",
+        "frame": 0,
+        "maximum_channel_error": 0,
+        "mean_channel_error": 0.0
+      },
+      {
+        "case": "embedded-reference-pixels-and-one-fetch",
+        "image": "format-alpha.pam",
+        "wait_ms": 0,
+        "oracle": "ImageMagick",
+        "frame": 0,
+        "maximum_channel_error": 0,
+        "mean_channel_error": 0.0
+      },
+      {
+        "case": "embedded-reference-pixels-and-one-fetch",
+        "image": "format-gray16.pgm",
+        "wait_ms": 0,
+        "oracle": "Pillow",
+        "frame": 0,
+        "maximum_channel_error": 0,
+        "mean_channel_error": 0.0
+      },
+      {
+        "case": "embedded-reference-pixels-and-one-fetch",
+        "image": "format-animated.gif",
+        "wait_ms": 250,
+        "oracle": "Pillow",
+        "frame": 2,
+        "maximum_channel_error": 0,
+        "mean_channel_error": 0.0
+      },
+      {
+        "case": "embedded-reference-pixels-and-one-fetch",
+        "image": "format-animated.apng",
+        "wait_ms": 250,
+        "oracle": "FFmpeg",
+        "frame": 2,
+        "maximum_channel_error": 0,
+        "mean_channel_error": 0.0
+      },
+      {
+        "case": "embedded-reference-pixels-and-one-fetch",
+        "image": "format-animated.webp",
+        "wait_ms": 250,
+        "oracle": "Pillow",
+        "frame": 2,
+        "maximum_channel_error": 1,
+        "mean_channel_error": 0.0037094907407407406
+      },
+      {
+        "case": "embedded-reference-pixels-and-one-fetch",
+        "image": "format-lossy.webp",
+        "wait_ms": 250,
+        "oracle": "Pillow",
+        "frame": 0,
+        "maximum_channel_error": 1,
+        "mean_channel_error": 0.002384259259259259
+      },
+      {
+        "case": "embedded-reference-pixels-and-one-fetch",
+        "image": "format-tiled.tiff",
+        "wait_ms": 250,
+        "oracle": "Pillow",
+        "frame": 0,
+        "maximum_channel_error": 0,
+        "mean_channel_error": 0.0
+      },
+      {
+        "case": "embedded-reference-pixels-and-one-fetch",
+        "image": "format-cmyk.jpg",
+        "wait_ms": 250,
+        "oracle": "Pillow",
+        "frame": 0,
+        "maximum_channel_error": 1,
+        "mean_channel_error": 0.003472222222222222
+      },
+      {
+        "case": "embedded-reference-pixels-and-one-fetch",
+        "image": "format-pattern.qoi",
+        "wait_ms": 250,
+        "oracle": "Pillow",
+        "frame": 0,
+        "maximum_channel_error": 0,
+        "mean_channel_error": 0.0
+      },
+      {
+        "case": "embedded-reference-pixels-and-one-fetch",
+        "image": "format-alpha.pam",
+        "wait_ms": 250,
+        "oracle": "ImageMagick",
+        "frame": 0,
+        "maximum_channel_error": 0,
+        "mean_channel_error": 0.0
+      },
+      {
+        "case": "embedded-reference-pixels-and-one-fetch",
+        "image": "format-gray16.pgm",
+        "wait_ms": 250,
+        "oracle": "Pillow",
+        "frame": 0,
+        "maximum_channel_error": 0,
+        "mean_channel_error": 0.0
+      },
+      {
+        "case": "embedded-animation-without-javascript",
+        "image": "format-animated.gif",
+        "changed_image_pixels": 221
+      },
+      {
+        "case": "embedded-animation-without-javascript",
+        "image": "format-animated.apng",
+        "changed_image_pixels": 384
+      },
+      {
+        "case": "embedded-animation-without-javascript",
+        "image": "format-animated.webp",
+        "changed_image_pixels": 3924
+      },
+      {
+        "case": "images-disabled",
+        "image_fetches": 0,
+        "javascript_fetches": 0
+      },
+      {
+        "case": "resource-report",
+        "javascript_off_line_visible": true,
+        "javascript_fetches": 0,
+        "image_fetches": 9
+      },
+      {
+        "case": "direct-image-document",
+        "image": "format-animated.gif",
+        "mime": "image/gif",
+        "image_rectangle": [
+          314,
+          209,
+          474,
+          305
+        ],
+        "network_fetches": 1,
+        "frame": 0,
+        "maximum_channel_error": 0,
+        "mean_channel_error": 0.0
+      },
+      {
+        "case": "direct-animation-without-javascript",
+        "image": "format-animated.gif",
+        "changed_image_pixels": 221,
+        "network_fetches": 1,
+        "frame": 2,
+        "maximum_channel_error": 0,
+        "mean_channel_error": 0.0
+      },
+      {
+        "case": "direct-image-document",
+        "image": "format-animated.apng",
+        "mime": "image/apng",
+        "image_rectangle": [
+          314,
+          209,
+          474,
+          305
+        ],
+        "network_fetches": 1,
+        "frame": 0,
+        "maximum_channel_error": 0,
+        "mean_channel_error": 0.0
+      },
+      {
+        "case": "direct-animation-without-javascript",
+        "image": "format-animated.apng",
+        "changed_image_pixels": 384,
+        "network_fetches": 1,
+        "frame": 2,
+        "maximum_channel_error": 0,
+        "mean_channel_error": 0.0
+      },
+      {
+        "case": "direct-image-document",
+        "image": "format-animated.webp",
+        "mime": "image/webp",
+        "image_rectangle": [
+          234,
+          209,
+          554,
+          389
+        ],
+        "network_fetches": 1,
+        "frame": 0,
+        "maximum_channel_error": 1,
+        "mean_channel_error": 0.0036226851851851854
+      },
+      {
+        "case": "direct-animation-without-javascript",
+        "image": "format-animated.webp",
+        "changed_image_pixels": 3924,
+        "network_fetches": 1,
+        "frame": 2,
+        "maximum_channel_error": 1,
+        "mean_channel_error": 0.0037094907407407406
+      },
+      {
+        "case": "direct-image-document",
+        "image": "format-lossy.webp",
+        "mime": "image/webp",
+        "image_rectangle": [
+          234,
+          209,
+          554,
+          389
+        ],
+        "network_fetches": 1,
+        "frame": 0,
+        "maximum_channel_error": 1,
+        "mean_channel_error": 0.002384259259259259
+      },
+      {
+        "case": "direct-image-document",
+        "image": "format-tiled.tiff",
+        "mime": "image/tiff",
+        "image_rectangle": [
+          298,
+          209,
+          490,
+          337
+        ],
+        "network_fetches": 1,
+        "frame": 0,
+        "maximum_channel_error": 0,
+        "mean_channel_error": 0.0
+      },
+      {
+        "case": "direct-image-document",
+        "image": "format-cmyk.jpg",
+        "mime": "image/jpeg",
+        "image_rectangle": [
+          298,
+          209,
+          490,
+          337
+        ],
+        "network_fetches": 1,
+        "frame": 0,
+        "maximum_channel_error": 1,
+        "mean_channel_error": 0.003472222222222222
+      },
+      {
+        "case": "direct-image-document",
+        "image": "format-pattern.qoi",
+        "mime": "image/qoi",
+        "image_rectangle": [
+          274,
+          209,
+          514,
+          353
+        ],
+        "network_fetches": 1,
+        "frame": 0,
+        "maximum_channel_error": 0,
+        "mean_channel_error": 0.0
+      },
+      {
+        "case": "direct-image-document",
+        "image": "format-alpha.pam",
+        "mime": "image/x-portable-arbitrarymap",
+        "image_rectangle": [
+          274,
+          209,
+          514,
+          353
+        ],
+        "network_fetches": 1,
+        "frame": 0,
+        "maximum_channel_error": 0,
+        "mean_channel_error": 0.0
+      },
+      {
+        "case": "direct-image-document",
+        "image": "format-gray16.pgm",
+        "mime": "image/x-portable-graymap",
+        "image_rectangle": [
+          274,
+          209,
+          514,
+          353
+        ],
+        "network_fetches": 1,
+        "frame": 0,
+        "maximum_channel_error": 0,
+        "mean_channel_error": 0.0
+      }
+    ],
+    "runs": [
+      {
+        "run": "embedded-0",
+        "wait_ms": 0,
+        "requests": [
+          {
+            "path": "/all",
+            "status": 200,
+            "mime": "text/html; charset=utf-8",
+            "bytes": 1620
+          },
+          {
+            "path": "/asset/format-animated.gif",
+            "status": 200,
+            "mime": "image/gif",
+            "bytes": 18912
+          },
+          {
+            "path": "/asset/format-animated.apng",
+            "status": 200,
+            "mime": "image/apng",
+            "bytes": 3317
+          },
+          {
+            "path": "/asset/format-animated.webp",
+            "status": 200,
+            "mime": "image/webp",
+            "bytes": 15652
+          },
+          {
+            "path": "/asset/format-lossy.webp",
+            "status": 200,
+            "mime": "image/webp",
+            "bytes": 3944
+          },
+          {
+            "path": "/asset/format-tiled.tiff",
+            "status": 200,
+            "mime": "image/tiff",
+            "bytes": 13542
+          },
+          {
+            "path": "/asset/format-cmyk.jpg",
+            "status": 200,
+            "mime": "image/jpeg",
+            "bytes": 5462
+          },
+          {
+            "path": "/asset/format-alpha.pam",
+            "status": 200,
+            "mime": "image/x-portable-arbitrarymap",
+            "bytes": 138336
+          },
+          {
+            "path": "/asset/format-pattern.qoi",
+            "status": 200,
+            "mime": "image/qoi",
+            "bytes": 3332
+          },
+          {
+            "path": "/asset/format-gray16.pgm",
+            "status": 200,
+            "mime": "image/x-portable-graymap",
+            "bytes": 69164
+          }
+        ],
+        "render_sha256": "baf928ce78a95ff61b33be5c5052b2540118c5e11a45c5e7690b9bbf5d15ee28"
+      },
+      {
+        "run": "embedded-250",
+        "wait_ms": 250,
+        "requests": [
+          {
+            "path": "/all",
+            "status": 200,
+            "mime": "text/html; charset=utf-8",
+            "bytes": 1620
+          },
+          {
+            "path": "/asset/format-animated.gif",
+            "status": 200,
+            "mime": "image/gif",
+            "bytes": 18912
+          },
+          {
+            "path": "/asset/format-animated.webp",
+            "status": 200,
+            "mime": "image/webp",
+            "bytes": 15652
+          },
+          {
+            "path": "/asset/format-animated.apng",
+            "status": 200,
+            "mime": "image/apng",
+            "bytes": 3317
+          },
+          {
+            "path": "/asset/format-lossy.webp",
+            "status": 200,
+            "mime": "image/webp",
+            "bytes": 3944
+          },
+          {
+            "path": "/asset/format-tiled.tiff",
+            "status": 200,
+            "mime": "image/tiff",
+            "bytes": 13542
+          },
+          {
+            "path": "/asset/format-cmyk.jpg",
+            "status": 200,
+            "mime": "image/jpeg",
+            "bytes": 5462
+          },
+          {
+            "path": "/asset/format-pattern.qoi",
+            "status": 200,
+            "mime": "image/qoi",
+            "bytes": 3332
+          },
+          {
+            "path": "/asset/format-alpha.pam",
+            "status": 200,
+            "mime": "image/x-portable-arbitrarymap",
+            "bytes": 138336
+          },
+          {
+            "path": "/asset/format-gray16.pgm",
+            "status": 200,
+            "mime": "image/x-portable-graymap",
+            "bytes": 69164
+          }
+        ],
+        "render_sha256": "b4b21f50a2cc0e17368865ea1a43ddef2ce1ab9a2810558b465d5ac50925b305"
+      },
+      {
+        "run": "images-disabled",
+        "wait_ms": 0,
+        "requests": [
+          {
+            "path": "/all",
+            "status": 200,
+            "mime": "text/html; charset=utf-8",
+            "bytes": 1620
+          }
+        ],
+        "render_sha256": "bec60c5490dc3cf431b9a0572647792d6ca31f19920a830d88a750f928f4d968"
+      },
+      {
+        "run": "off-text-reference",
+        "wait_ms": 0,
+        "requests": [
+          {
+            "path": "/off-reference",
+            "status": 200,
+            "mime": "text/html; charset=utf-8",
+            "bytes": 154
+          }
+        ],
+        "render_sha256": "84816a8e8ce744b71851924ddefebf8284e65073b4a42cdce200ba78c2ddce7a"
+      },
+      {
+        "run": "resource-report",
+        "wait_ms": 0,
+        "requests": [
+          {
+            "path": "/all",
+            "status": 200,
+            "mime": "text/html; charset=utf-8",
+            "bytes": 1620
+          },
+          {
+            "path": "/asset/format-animated.gif",
+            "status": 200,
+            "mime": "image/gif",
+            "bytes": 18912
+          },
+          {
+            "path": "/asset/format-animated.apng",
+            "status": 200,
+            "mime": "image/apng",
+            "bytes": 3317
+          },
+          {
+            "path": "/asset/format-animated.webp",
+            "status": 200,
+            "mime": "image/webp",
+            "bytes": 15652
+          },
+          {
+            "path": "/asset/format-lossy.webp",
+            "status": 200,
+            "mime": "image/webp",
+            "bytes": 3944
+          },
+          {
+            "path": "/asset/format-cmyk.jpg",
+            "status": 200,
+            "mime": "image/jpeg",
+            "bytes": 5462
+          },
+          {
+            "path": "/asset/format-tiled.tiff",
+            "status": 200,
+            "mime": "image/tiff",
+            "bytes": 13542
+          },
+          {
+            "path": "/asset/format-pattern.qoi",
+            "status": 200,
+            "mime": "image/qoi",
+            "bytes": 3332
+          },
+          {
+            "path": "/asset/format-gray16.pgm",
+            "status": 200,
+            "mime": "image/x-portable-graymap",
+            "bytes": 69164
+          },
+          {
+            "path": "/asset/format-alpha.pam",
+            "status": 200,
+            "mime": "image/x-portable-arbitrarymap",
+            "bytes": 138336
+          }
+        ],
+        "render_sha256": "684c90826b6dc4ff944ebfb2762d334bae9d1164ed6f9e3736e3adfbcd9c2358"
+      },
+      {
+        "run": "direct-0-0",
+        "wait_ms": 0,
+        "requests": [
+          {
+            "path": "/direct/0",
+            "status": 200,
+            "mime": "image/gif",
+            "bytes": 18912
+          }
+        ],
+        "render_sha256": "697970b897b4d631d3ca2978a9e903f32dcd6ce2ec9f1834772cb5c218096636"
+      },
+      {
+        "run": "direct-0-250",
+        "wait_ms": 250,
+        "requests": [
+          {
+            "path": "/direct/0",
+            "status": 200,
+            "mime": "image/gif",
+            "bytes": 18912
+          }
+        ],
+        "render_sha256": "6685eed48d025ad6decfe53e932e1654fe0f89317f825355d96154077bd4d23b"
+      },
+      {
+        "run": "direct-1-0",
+        "wait_ms": 0,
+        "requests": [
+          {
+            "path": "/direct/1",
+            "status": 200,
+            "mime": "image/apng",
+            "bytes": 3317
+          }
+        ],
+        "render_sha256": "2a0e13c37f66ab9451772044f3fa277379600717a0c2af804ea5b868224b76b6"
+      },
+      {
+        "run": "direct-1-250",
+        "wait_ms": 250,
+        "requests": [
+          {
+            "path": "/direct/1",
+            "status": 200,
+            "mime": "image/apng",
+            "bytes": 3317
+          }
+        ],
+        "render_sha256": "bc72ed09cd9f4475b2a6334ea700a9b0fdc01987c34e0769369c915bff755f2f"
+      },
+      {
+        "run": "direct-2-0",
+        "wait_ms": 0,
+        "requests": [
+          {
+            "path": "/direct/2",
+            "status": 200,
+            "mime": "image/webp",
+            "bytes": 15652
+          }
+        ],
+        "render_sha256": "ce036aca3bd56f3043f5645c3c328b5b90270e6939c5ce87e49626b29cc9d7a9"
+      },
+      {
+        "run": "direct-2-250",
+        "wait_ms": 250,
+        "requests": [
+          {
+            "path": "/direct/2",
+            "status": 200,
+            "mime": "image/webp",
+            "bytes": 15652
+          }
+        ],
+        "render_sha256": "ada255223b21c1cc332bf30e2da1cf54887c72f53fb9854e4fcf4784c5c2b75a"
+      },
+      {
+        "run": "direct-3-0",
+        "wait_ms": 0,
+        "requests": [
+          {
+            "path": "/direct/3",
+            "status": 200,
+            "mime": "image/webp",
+            "bytes": 3944
+          }
+        ],
+        "render_sha256": "cc555e280921bca1d52deeef41d23b8fd1923dea5fa7b3951ac80892ddcefe29"
+      },
+      {
+        "run": "direct-4-0",
+        "wait_ms": 0,
+        "requests": [
+          {
+            "path": "/direct/4",
+            "status": 200,
+            "mime": "image/tiff",
+            "bytes": 13542
+          }
+        ],
+        "render_sha256": "fc21524df0da868269746f3a04f3486714895779216c4eaf4b5c00a2b3231a8a"
+      },
+      {
+        "run": "direct-5-0",
+        "wait_ms": 0,
+        "requests": [
+          {
+            "path": "/direct/5",
+            "status": 200,
+            "mime": "image/jpeg",
+            "bytes": 5462
+          }
+        ],
+        "render_sha256": "10d68337ee992e030d23c49d40cd39b25033502d952670bdca605cf8649e93d1"
+      },
+      {
+        "run": "direct-6-0",
+        "wait_ms": 0,
+        "requests": [
+          {
+            "path": "/direct/6",
+            "status": 200,
+            "mime": "image/qoi",
+            "bytes": 3332
+          }
+        ],
+        "render_sha256": "bc4291e5665bacd2e9302cc5b8ad5f1d363ca8ee607a4441c4455e30b4a3ed21"
+      },
+      {
+        "run": "direct-7-0",
+        "wait_ms": 0,
+        "requests": [
+          {
+            "path": "/direct/7",
+            "status": 200,
+            "mime": "image/x-portable-arbitrarymap",
+            "bytes": 138336
+          }
+        ],
+        "render_sha256": "95130dfa0ea263d5d3f5ccd7f1f84081086858dc03ee61b17df88794c02c50f1"
+      },
+      {
+        "run": "direct-8-0",
+        "wait_ms": 0,
+        "requests": [
+          {
+            "path": "/direct/8",
+            "status": 200,
+            "mime": "image/x-portable-graymap",
+            "bytes": 69164
+          }
+        ],
+        "render_sha256": "b70b60d1a10d0d067221eed26f7e47bef97fd4d0df619f95125796aaf826812a"
+      }
+    ]
+  },
+  "image_orientation": {
+    "passed": true,
+    "decoder_checks": 180,
+    "browser_checks": 16,
+    "independent_reference": "Pillow transforms and PNG/APNG/libwebp lossless composited pixels; lossy decoder geometry is checked against its unrotated output",
+    "loopback_only": true,
+    "elapsed_seconds": 8.923,
+    "results": [
+      {
+        "format": "png",
+        "endian": "MM",
+        "orientation": 1,
+        "exif_identifier": false,
+        "canvas": [
+          96,
+          64
+        ],
+        "frames": 0
+      },
+      {
+        "format": "png",
+        "endian": "MM",
+        "orientation": 2,
+        "exif_identifier": false,
+        "canvas": [
+          96,
+          64
+        ],
+        "frames": 0
+      },
+      {
+        "format": "png",
+        "endian": "MM",
+        "orientation": 3,
+        "exif_identifier": false,
+        "canvas": [
+          96,
+          64
+        ],
+        "frames": 0
+      },
+      {
+        "format": "png",
+        "endian": "MM",
+        "orientation": 4,
+        "exif_identifier": false,
+        "canvas": [
+          96,
+          64
+        ],
+        "frames": 0
+      },
+      {
+        "format": "png",
+        "endian": "MM",
+        "orientation": 5,
+        "exif_identifier": false,
+        "canvas": [
+          64,
+          96
+        ],
+        "frames": 0
+      },
+      {
+        "format": "png",
+        "endian": "MM",
+        "orientation": 6,
+        "exif_identifier": false,
+        "canvas": [
+          64,
+          96
+        ],
+        "frames": 0
+      },
+      {
+        "format": "png",
+        "endian": "MM",
+        "orientation": 7,
+        "exif_identifier": false,
+        "canvas": [
+          64,
+          96
+        ],
+        "frames": 0
+      },
+      {
+        "format": "png",
+        "endian": "MM",
+        "orientation": 8,
+        "exif_identifier": false,
+        "canvas": [
+          64,
+          96
+        ],
+        "frames": 0
+      },
+      {
+        "format": "png",
+        "endian": "II",
+        "orientation": 1,
+        "exif_identifier": false,
+        "canvas": [
+          96,
+          64
+        ],
+        "frames": 0
+      },
+      {
+        "format": "png",
+        "endian": "II",
+        "orientation": 2,
+        "exif_identifier": false,
+        "canvas": [
+          96,
+          64
+        ],
+        "frames": 0
+      },
+      {
+        "format": "png",
+        "endian": "II",
+        "orientation": 3,
+        "exif_identifier": false,
+        "canvas": [
+          96,
+          64
+        ],
+        "frames": 0
+      },
+      {
+        "format": "png",
+        "endian": "II",
+        "orientation": 4,
+        "exif_identifier": false,
+        "canvas": [
+          96,
+          64
+        ],
+        "frames": 0
+      },
+      {
+        "format": "png",
+        "endian": "II",
+        "orientation": 5,
+        "exif_identifier": false,
+        "canvas": [
+          64,
+          96
+        ],
+        "frames": 0
+      },
+      {
+        "format": "png",
+        "endian": "II",
+        "orientation": 6,
+        "exif_identifier": false,
+        "canvas": [
+          64,
+          96
+        ],
+        "frames": 0
+      },
+      {
+        "format": "png",
+        "endian": "II",
+        "orientation": 7,
+        "exif_identifier": false,
+        "canvas": [
+          64,
+          96
+        ],
+        "frames": 0
+      },
+      {
+        "format": "png",
+        "endian": "II",
+        "orientation": 8,
+        "exif_identifier": false,
+        "canvas": [
+          64,
+          96
+        ],
+        "frames": 0
+      },
+      {
+        "format": "png",
+        "invalid_metadata_ignored": true,
+        "metadata_bytes": 0
+      },
+      {
+        "format": "png",
+        "invalid_metadata_ignored": true,
+        "metadata_bytes": 8
+      },
+      {
+        "format": "png",
+        "invalid_metadata_ignored": true,
+        "metadata_bytes": 26
+      },
+      {
+        "format": "png",
+        "invalid_metadata_ignored": true,
+        "metadata_bytes": 26
+      },
+      {
+        "format": "png",
+        "invalid_metadata_ignored": true,
+        "metadata_bytes": 17
+      },
+      {
+        "format": "png",
+        "invalid_metadata_ignored": true,
+        "metadata_bytes": 8
+      },
+      {
+        "format": "webp-lossless",
+        "endian": "MM",
+        "orientation": 1,
+        "exif_identifier": false,
+        "canvas": [
+          96,
+          64
+        ],
+        "frames": 0
+      },
+      {
+        "format": "webp-lossless",
+        "endian": "MM",
+        "orientation": 1,
+        "exif_identifier": true,
+        "canvas": [
+          96,
+          64
+        ],
+        "frames": 0
+      },
+      {
+        "format": "webp-lossless",
+        "endian": "MM",
+        "orientation": 2,
+        "exif_identifier": false,
+        "canvas": [
+          96,
+          64
+        ],
+        "frames": 0
+      },
+      {
+        "format": "webp-lossless",
+        "endian": "MM",
+        "orientation": 2,
+        "exif_identifier": true,
+        "canvas": [
+          96,
+          64
+        ],
+        "frames": 0
+      },
+      {
+        "format": "webp-lossless",
+        "endian": "MM",
+        "orientation": 3,
+        "exif_identifier": false,
+        "canvas": [
+          96,
+          64
+        ],
+        "frames": 0
+      },
+      {
+        "format": "webp-lossless",
+        "endian": "MM",
+        "orientation": 3,
+        "exif_identifier": true,
+        "canvas": [
+          96,
+          64
+        ],
+        "frames": 0
+      },
+      {
+        "format": "webp-lossless",
+        "endian": "MM",
+        "orientation": 4,
+        "exif_identifier": false,
+        "canvas": [
+          96,
+          64
+        ],
+        "frames": 0
+      },
+      {
+        "format": "webp-lossless",
+        "endian": "MM",
+        "orientation": 4,
+        "exif_identifier": true,
+        "canvas": [
+          96,
+          64
+        ],
+        "frames": 0
+      },
+      {
+        "format": "webp-lossless",
+        "endian": "MM",
+        "orientation": 5,
+        "exif_identifier": false,
+        "canvas": [
+          64,
+          96
+        ],
+        "frames": 0
+      },
+      {
+        "format": "webp-lossless",
+        "endian": "MM",
+        "orientation": 5,
+        "exif_identifier": true,
+        "canvas": [
+          64,
+          96
+        ],
+        "frames": 0
+      },
+      {
+        "format": "webp-lossless",
+        "endian": "MM",
+        "orientation": 6,
+        "exif_identifier": false,
+        "canvas": [
+          64,
+          96
+        ],
+        "frames": 0
+      },
+      {
+        "format": "webp-lossless",
+        "endian": "MM",
+        "orientation": 6,
+        "exif_identifier": true,
+        "canvas": [
+          64,
+          96
+        ],
+        "frames": 0
+      },
+      {
+        "format": "webp-lossless",
+        "endian": "MM",
+        "orientation": 7,
+        "exif_identifier": false,
+        "canvas": [
+          64,
+          96
+        ],
+        "frames": 0
+      },
+      {
+        "format": "webp-lossless",
+        "endian": "MM",
+        "orientation": 7,
+        "exif_identifier": true,
+        "canvas": [
+          64,
+          96
+        ],
+        "frames": 0
+      },
+      {
+        "format": "webp-lossless",
+        "endian": "MM",
+        "orientation": 8,
+        "exif_identifier": false,
+        "canvas": [
+          64,
+          96
+        ],
+        "frames": 0
+      },
+      {
+        "format": "webp-lossless",
+        "endian": "MM",
+        "orientation": 8,
+        "exif_identifier": true,
+        "canvas": [
+          64,
+          96
+        ],
+        "frames": 0
+      },
+      {
+        "format": "webp-lossless",
+        "endian": "II",
+        "orientation": 1,
+        "exif_identifier": false,
+        "canvas": [
+          96,
+          64
+        ],
+        "frames": 0
+      },
+      {
+        "format": "webp-lossless",
+        "endian": "II",
+        "orientation": 1,
+        "exif_identifier": true,
+        "canvas": [
+          96,
+          64
+        ],
+        "frames": 0
+      },
+      {
+        "format": "webp-lossless",
+        "endian": "II",
+        "orientation": 2,
+        "exif_identifier": false,
+        "canvas": [
+          96,
+          64
+        ],
+        "frames": 0
+      },
+      {
+        "format": "webp-lossless",
+        "endian": "II",
+        "orientation": 2,
+        "exif_identifier": true,
+        "canvas": [
+          96,
+          64
+        ],
+        "frames": 0
+      },
+      {
+        "format": "webp-lossless",
+        "endian": "II",
+        "orientation": 3,
+        "exif_identifier": false,
+        "canvas": [
+          96,
+          64
+        ],
+        "frames": 0
+      },
+      {
+        "format": "webp-lossless",
+        "endian": "II",
+        "orientation": 3,
+        "exif_identifier": true,
+        "canvas": [
+          96,
+          64
+        ],
+        "frames": 0
+      },
+      {
+        "format": "webp-lossless",
+        "endian": "II",
+        "orientation": 4,
+        "exif_identifier": false,
+        "canvas": [
+          96,
+          64
+        ],
+        "frames": 0
+      },
+      {
+        "format": "webp-lossless",
+        "endian": "II",
+        "orientation": 4,
+        "exif_identifier": true,
+        "canvas": [
+          96,
+          64
+        ],
+        "frames": 0
+      },
+      {
+        "format": "webp-lossless",
+        "endian": "II",
+        "orientation": 5,
+        "exif_identifier": false,
+        "canvas": [
+          64,
+          96
+        ],
+        "frames": 0
+      },
+      {
+        "format": "webp-lossless",
+        "endian": "II",
+        "orientation": 5,
+        "exif_identifier": true,
+        "canvas": [
+          64,
+          96
+        ],
+        "frames": 0
+      },
+      {
+        "format": "webp-lossless",
+        "endian": "II",
+        "orientation": 6,
+        "exif_identifier": false,
+        "canvas": [
+          64,
+          96
+        ],
+        "frames": 0
+      },
+      {
+        "format": "webp-lossless",
+        "endian": "II",
+        "orientation": 6,
+        "exif_identifier": true,
+        "canvas": [
+          64,
+          96
+        ],
+        "frames": 0
+      },
+      {
+        "format": "webp-lossless",
+        "endian": "II",
+        "orientation": 7,
+        "exif_identifier": false,
+        "canvas": [
+          64,
+          96
+        ],
+        "frames": 0
+      },
+      {
+        "format": "webp-lossless",
+        "endian": "II",
+        "orientation": 7,
+        "exif_identifier": true,
+        "canvas": [
+          64,
+          96
+        ],
+        "frames": 0
+      },
+      {
+        "format": "webp-lossless",
+        "endian": "II",
+        "orientation": 8,
+        "exif_identifier": false,
+        "canvas": [
+          64,
+          96
+        ],
+        "frames": 0
+      },
+      {
+        "format": "webp-lossless",
+        "endian": "II",
+        "orientation": 8,
+        "exif_identifier": true,
+        "canvas": [
+          64,
+          96
+        ],
+        "frames": 0
+      },
+      {
+        "format": "webp-lossless",
+        "invalid_metadata_ignored": true,
+        "metadata_bytes": 0
+      },
+      {
+        "format": "webp-lossless",
+        "invalid_metadata_ignored": true,
+        "metadata_bytes": 8
+      },
+      {
+        "format": "webp-lossless",
+        "invalid_metadata_ignored": true,
+        "metadata_bytes": 26
+      },
+      {
+        "format": "webp-lossless",
+        "invalid_metadata_ignored": true,
+        "metadata_bytes": 26
+      },
+      {
+        "format": "webp-lossless",
+        "invalid_metadata_ignored": true,
+        "metadata_bytes": 17
+      },
+      {
+        "format": "webp-lossless",
+        "invalid_metadata_ignored": true,
+        "metadata_bytes": 8
+      },
+      {
+        "format": "webp-lossy",
+        "endian": "MM",
+        "orientation": 1,
+        "exif_identifier": false,
+        "canvas": [
+          96,
+          64
+        ],
+        "frames": 0
+      },
+      {
+        "format": "webp-lossy",
+        "endian": "MM",
+        "orientation": 1,
+        "exif_identifier": true,
+        "canvas": [
+          96,
+          64
+        ],
+        "frames": 0
+      },
+      {
+        "format": "webp-lossy",
+        "endian": "MM",
+        "orientation": 2,
+        "exif_identifier": false,
+        "canvas": [
+          96,
+          64
+        ],
+        "frames": 0
+      },
+      {
+        "format": "webp-lossy",
+        "endian": "MM",
+        "orientation": 2,
+        "exif_identifier": true,
+        "canvas": [
+          96,
+          64
+        ],
+        "frames": 0
+      },
+      {
+        "format": "webp-lossy",
+        "endian": "MM",
+        "orientation": 3,
+        "exif_identifier": false,
+        "canvas": [
+          96,
+          64
+        ],
+        "frames": 0
+      },
+      {
+        "format": "webp-lossy",
+        "endian": "MM",
+        "orientation": 3,
+        "exif_identifier": true,
+        "canvas": [
+          96,
+          64
+        ],
+        "frames": 0
+      },
+      {
+        "format": "webp-lossy",
+        "endian": "MM",
+        "orientation": 4,
+        "exif_identifier": false,
+        "canvas": [
+          96,
+          64
+        ],
+        "frames": 0
+      },
+      {
+        "format": "webp-lossy",
+        "endian": "MM",
+        "orientation": 4,
+        "exif_identifier": true,
+        "canvas": [
+          96,
+          64
+        ],
+        "frames": 0
+      },
+      {
+        "format": "webp-lossy",
+        "endian": "MM",
+        "orientation": 5,
+        "exif_identifier": false,
+        "canvas": [
+          64,
+          96
+        ],
+        "frames": 0
+      },
+      {
+        "format": "webp-lossy",
+        "endian": "MM",
+        "orientation": 5,
+        "exif_identifier": true,
+        "canvas": [
+          64,
+          96
+        ],
+        "frames": 0
+      },
+      {
+        "format": "webp-lossy",
+        "endian": "MM",
+        "orientation": 6,
+        "exif_identifier": false,
+        "canvas": [
+          64,
+          96
+        ],
+        "frames": 0
+      },
+      {
+        "format": "webp-lossy",
+        "endian": "MM",
+        "orientation": 6,
+        "exif_identifier": true,
+        "canvas": [
+          64,
+          96
+        ],
+        "frames": 0
+      },
+      {
+        "format": "webp-lossy",
+        "endian": "MM",
+        "orientation": 7,
+        "exif_identifier": false,
+        "canvas": [
+          64,
+          96
+        ],
+        "frames": 0
+      },
+      {
+        "format": "webp-lossy",
+        "endian": "MM",
+        "orientation": 7,
+        "exif_identifier": true,
+        "canvas": [
+          64,
+          96
+        ],
+        "frames": 0
+      },
+      {
+        "format": "webp-lossy",
+        "endian": "MM",
+        "orientation": 8,
+        "exif_identifier": false,
+        "canvas": [
+          64,
+          96
+        ],
+        "frames": 0
+      },
+      {
+        "format": "webp-lossy",
+        "endian": "MM",
+        "orientation": 8,
+        "exif_identifier": true,
+        "canvas": [
+          64,
+          96
+        ],
+        "frames": 0
+      },
+      {
+        "format": "webp-lossy",
+        "endian": "II",
+        "orientation": 1,
+        "exif_identifier": false,
+        "canvas": [
+          96,
+          64
+        ],
+        "frames": 0
+      },
+      {
+        "format": "webp-lossy",
+        "endian": "II",
+        "orientation": 1,
+        "exif_identifier": true,
+        "canvas": [
+          96,
+          64
+        ],
+        "frames": 0
+      },
+      {
+        "format": "webp-lossy",
+        "endian": "II",
+        "orientation": 2,
+        "exif_identifier": false,
+        "canvas": [
+          96,
+          64
+        ],
+        "frames": 0
+      },
+      {
+        "format": "webp-lossy",
+        "endian": "II",
+        "orientation": 2,
+        "exif_identifier": true,
+        "canvas": [
+          96,
+          64
+        ],
+        "frames": 0
+      },
+      {
+        "format": "webp-lossy",
+        "endian": "II",
+        "orientation": 3,
+        "exif_identifier": false,
+        "canvas": [
+          96,
+          64
+        ],
+        "frames": 0
+      },
+      {
+        "format": "webp-lossy",
+        "endian": "II",
+        "orientation": 3,
+        "exif_identifier": true,
+        "canvas": [
+          96,
+          64
+        ],
+        "frames": 0
+      },
+      {
+        "format": "webp-lossy",
+        "endian": "II",
+        "orientation": 4,
+        "exif_identifier": false,
+        "canvas": [
+          96,
+          64
+        ],
+        "frames": 0
+      },
+      {
+        "format": "webp-lossy",
+        "endian": "II",
+        "orientation": 4,
+        "exif_identifier": true,
+        "canvas": [
+          96,
+          64
+        ],
+        "frames": 0
+      },
+      {
+        "format": "webp-lossy",
+        "endian": "II",
+        "orientation": 5,
+        "exif_identifier": false,
+        "canvas": [
+          64,
+          96
+        ],
+        "frames": 0
+      },
+      {
+        "format": "webp-lossy",
+        "endian": "II",
+        "orientation": 5,
+        "exif_identifier": true,
+        "canvas": [
+          64,
+          96
+        ],
+        "frames": 0
+      },
+      {
+        "format": "webp-lossy",
+        "endian": "II",
+        "orientation": 6,
+        "exif_identifier": false,
+        "canvas": [
+          64,
+          96
+        ],
+        "frames": 0
+      },
+      {
+        "format": "webp-lossy",
+        "endian": "II",
+        "orientation": 6,
+        "exif_identifier": true,
+        "canvas": [
+          64,
+          96
+        ],
+        "frames": 0
+      },
+      {
+        "format": "webp-lossy",
+        "endian": "II",
+        "orientation": 7,
+        "exif_identifier": false,
+        "canvas": [
+          64,
+          96
+        ],
+        "frames": 0
+      },
+      {
+        "format": "webp-lossy",
+        "endian": "II",
+        "orientation": 7,
+        "exif_identifier": true,
+        "canvas": [
+          64,
+          96
+        ],
+        "frames": 0
+      },
+      {
+        "format": "webp-lossy",
+        "endian": "II",
+        "orientation": 8,
+        "exif_identifier": false,
+        "canvas": [
+          64,
+          96
+        ],
+        "frames": 0
+      },
+      {
+        "format": "webp-lossy",
+        "endian": "II",
+        "orientation": 8,
+        "exif_identifier": true,
+        "canvas": [
+          64,
+          96
+        ],
+        "frames": 0
+      },
+      {
+        "format": "webp-lossy",
+        "invalid_metadata_ignored": true,
+        "metadata_bytes": 0
+      },
+      {
+        "format": "webp-lossy",
+        "invalid_metadata_ignored": true,
+        "metadata_bytes": 8
+      },
+      {
+        "format": "webp-lossy",
+        "invalid_metadata_ignored": true,
+        "metadata_bytes": 26
+      },
+      {
+        "format": "webp-lossy",
+        "invalid_metadata_ignored": true,
+        "metadata_bytes": 26
+      },
+      {
+        "format": "webp-lossy",
+        "invalid_metadata_ignored": true,
+        "metadata_bytes": 17
+      },
+      {
+        "format": "webp-lossy",
+        "invalid_metadata_ignored": true,
+        "metadata_bytes": 8
+      },
+      {
+        "format": "jpeg",
+        "endian": "MM",
+        "orientation": 1,
+        "exif_identifier": false,
+        "canvas": [
+          96,
+          64
+        ],
+        "frames": 0
+      },
+      {
+        "format": "jpeg",
+        "endian": "MM",
+        "orientation": 2,
+        "exif_identifier": false,
+        "canvas": [
+          96,
+          64
+        ],
+        "frames": 0
+      },
+      {
+        "format": "jpeg",
+        "endian": "MM",
+        "orientation": 3,
+        "exif_identifier": false,
+        "canvas": [
+          96,
+          64
+        ],
+        "frames": 0
+      },
+      {
+        "format": "jpeg",
+        "endian": "MM",
+        "orientation": 4,
+        "exif_identifier": false,
+        "canvas": [
+          96,
+          64
+        ],
+        "frames": 0
+      },
+      {
+        "format": "jpeg",
+        "endian": "MM",
+        "orientation": 5,
+        "exif_identifier": false,
+        "canvas": [
+          64,
+          96
+        ],
+        "frames": 0
+      },
+      {
+        "format": "jpeg",
+        "endian": "MM",
+        "orientation": 6,
+        "exif_identifier": false,
+        "canvas": [
+          64,
+          96
+        ],
+        "frames": 0
+      },
+      {
+        "format": "jpeg",
+        "endian": "MM",
+        "orientation": 7,
+        "exif_identifier": false,
+        "canvas": [
+          64,
+          96
+        ],
+        "frames": 0
+      },
+      {
+        "format": "jpeg",
+        "endian": "MM",
+        "orientation": 8,
+        "exif_identifier": false,
+        "canvas": [
+          64,
+          96
+        ],
+        "frames": 0
+      },
+      {
+        "format": "jpeg",
+        "endian": "II",
+        "orientation": 1,
+        "exif_identifier": false,
+        "canvas": [
+          96,
+          64
+        ],
+        "frames": 0
+      },
+      {
+        "format": "jpeg",
+        "endian": "II",
+        "orientation": 2,
+        "exif_identifier": false,
+        "canvas": [
+          96,
+          64
+        ],
+        "frames": 0
+      },
+      {
+        "format": "jpeg",
+        "endian": "II",
+        "orientation": 3,
+        "exif_identifier": false,
+        "canvas": [
+          96,
+          64
+        ],
+        "frames": 0
+      },
+      {
+        "format": "jpeg",
+        "endian": "II",
+        "orientation": 4,
+        "exif_identifier": false,
+        "canvas": [
+          96,
+          64
+        ],
+        "frames": 0
+      },
+      {
+        "format": "jpeg",
+        "endian": "II",
+        "orientation": 5,
+        "exif_identifier": false,
+        "canvas": [
+          64,
+          96
+        ],
+        "frames": 0
+      },
+      {
+        "format": "jpeg",
+        "endian": "II",
+        "orientation": 6,
+        "exif_identifier": false,
+        "canvas": [
+          64,
+          96
+        ],
+        "frames": 0
+      },
+      {
+        "format": "jpeg",
+        "endian": "II",
+        "orientation": 7,
+        "exif_identifier": false,
+        "canvas": [
+          64,
+          96
+        ],
+        "frames": 0
+      },
+      {
+        "format": "jpeg",
+        "endian": "II",
+        "orientation": 8,
+        "exif_identifier": false,
+        "canvas": [
+          64,
+          96
+        ],
+        "frames": 0
+      },
+      {
+        "format": "jpeg",
+        "invalid_metadata_ignored": true,
+        "metadata_bytes": 0
+      },
+      {
+        "format": "jpeg",
+        "invalid_metadata_ignored": true,
+        "metadata_bytes": 8
+      },
+      {
+        "format": "jpeg",
+        "invalid_metadata_ignored": true,
+        "metadata_bytes": 26
+      },
+      {
+        "format": "jpeg",
+        "invalid_metadata_ignored": true,
+        "metadata_bytes": 26
+      },
+      {
+        "format": "jpeg",
+        "invalid_metadata_ignored": true,
+        "metadata_bytes": 17
+      },
+      {
+        "format": "jpeg",
+        "invalid_metadata_ignored": true,
+        "metadata_bytes": 8
+      },
+      {
+        "format": "apng",
+        "endian": "MM",
+        "orientation": 1,
+        "exif_identifier": false,
+        "canvas": [
+          96,
+          64
+        ],
+        "frames": 3
+      },
+      {
+        "format": "apng",
+        "endian": "MM",
+        "orientation": 2,
+        "exif_identifier": false,
+        "canvas": [
+          96,
+          64
+        ],
+        "frames": 3
+      },
+      {
+        "format": "apng",
+        "endian": "MM",
+        "orientation": 3,
+        "exif_identifier": false,
+        "canvas": [
+          96,
+          64
+        ],
+        "frames": 3
+      },
+      {
+        "format": "apng",
+        "endian": "MM",
+        "orientation": 4,
+        "exif_identifier": false,
+        "canvas": [
+          96,
+          64
+        ],
+        "frames": 3
+      },
+      {
+        "format": "apng",
+        "endian": "MM",
+        "orientation": 5,
+        "exif_identifier": false,
+        "canvas": [
+          64,
+          96
+        ],
+        "frames": 3
+      },
+      {
+        "format": "apng",
+        "endian": "MM",
+        "orientation": 6,
+        "exif_identifier": false,
+        "canvas": [
+          64,
+          96
+        ],
+        "frames": 3
+      },
+      {
+        "format": "apng",
+        "endian": "MM",
+        "orientation": 7,
+        "exif_identifier": false,
+        "canvas": [
+          64,
+          96
+        ],
+        "frames": 3
+      },
+      {
+        "format": "apng",
+        "endian": "MM",
+        "orientation": 8,
+        "exif_identifier": false,
+        "canvas": [
+          64,
+          96
+        ],
+        "frames": 3
+      },
+      {
+        "format": "apng",
+        "endian": "II",
+        "orientation": 1,
+        "exif_identifier": false,
+        "canvas": [
+          96,
+          64
+        ],
+        "frames": 3
+      },
+      {
+        "format": "apng",
+        "endian": "II",
+        "orientation": 2,
+        "exif_identifier": false,
+        "canvas": [
+          96,
+          64
+        ],
+        "frames": 3
+      },
+      {
+        "format": "apng",
+        "endian": "II",
+        "orientation": 3,
+        "exif_identifier": false,
+        "canvas": [
+          96,
+          64
+        ],
+        "frames": 3
+      },
+      {
+        "format": "apng",
+        "endian": "II",
+        "orientation": 4,
+        "exif_identifier": false,
+        "canvas": [
+          96,
+          64
+        ],
+        "frames": 3
+      },
+      {
+        "format": "apng",
+        "endian": "II",
+        "orientation": 5,
+        "exif_identifier": false,
+        "canvas": [
+          64,
+          96
+        ],
+        "frames": 3
+      },
+      {
+        "format": "apng",
+        "endian": "II",
+        "orientation": 6,
+        "exif_identifier": false,
+        "canvas": [
+          64,
+          96
+        ],
+        "frames": 3
+      },
+      {
+        "format": "apng",
+        "endian": "II",
+        "orientation": 7,
+        "exif_identifier": false,
+        "canvas": [
+          64,
+          96
+        ],
+        "frames": 3
+      },
+      {
+        "format": "apng",
+        "endian": "II",
+        "orientation": 8,
+        "exif_identifier": false,
+        "canvas": [
+          64,
+          96
+        ],
+        "frames": 3
+      },
+      {
+        "format": "apng",
+        "invalid_metadata_ignored": true,
+        "metadata_bytes": 0
+      },
+      {
+        "format": "apng",
+        "invalid_metadata_ignored": true,
+        "metadata_bytes": 8
+      },
+      {
+        "format": "apng",
+        "invalid_metadata_ignored": true,
+        "metadata_bytes": 26
+      },
+      {
+        "format": "apng",
+        "invalid_metadata_ignored": true,
+        "metadata_bytes": 26
+      },
+      {
+        "format": "apng",
+        "invalid_metadata_ignored": true,
+        "metadata_bytes": 17
+      },
+      {
+        "format": "apng",
+        "invalid_metadata_ignored": true,
+        "metadata_bytes": 8
+      },
+      {
+        "format": "animated-webp",
+        "endian": "MM",
+        "orientation": 1,
+        "exif_identifier": false,
+        "canvas": [
+          96,
+          64
+        ],
+        "frames": 3
+      },
+      {
+        "format": "animated-webp",
+        "endian": "MM",
+        "orientation": 1,
+        "exif_identifier": true,
+        "canvas": [
+          96,
+          64
+        ],
+        "frames": 3
+      },
+      {
+        "format": "animated-webp",
+        "endian": "MM",
+        "orientation": 2,
+        "exif_identifier": false,
+        "canvas": [
+          96,
+          64
+        ],
+        "frames": 3
+      },
+      {
+        "format": "animated-webp",
+        "endian": "MM",
+        "orientation": 2,
+        "exif_identifier": true,
+        "canvas": [
+          96,
+          64
+        ],
+        "frames": 3
+      },
+      {
+        "format": "animated-webp",
+        "endian": "MM",
+        "orientation": 3,
+        "exif_identifier": false,
+        "canvas": [
+          96,
+          64
+        ],
+        "frames": 3
+      },
+      {
+        "format": "animated-webp",
+        "endian": "MM",
+        "orientation": 3,
+        "exif_identifier": true,
+        "canvas": [
+          96,
+          64
+        ],
+        "frames": 3
+      },
+      {
+        "format": "animated-webp",
+        "endian": "MM",
+        "orientation": 4,
+        "exif_identifier": false,
+        "canvas": [
+          96,
+          64
+        ],
+        "frames": 3
+      },
+      {
+        "format": "animated-webp",
+        "endian": "MM",
+        "orientation": 4,
+        "exif_identifier": true,
+        "canvas": [
+          96,
+          64
+        ],
+        "frames": 3
+      },
+      {
+        "format": "animated-webp",
+        "endian": "MM",
+        "orientation": 5,
+        "exif_identifier": false,
+        "canvas": [
+          64,
+          96
+        ],
+        "frames": 3
+      },
+      {
+        "format": "animated-webp",
+        "endian": "MM",
+        "orientation": 5,
+        "exif_identifier": true,
+        "canvas": [
+          64,
+          96
+        ],
+        "frames": 3
+      },
+      {
+        "format": "animated-webp",
+        "endian": "MM",
+        "orientation": 6,
+        "exif_identifier": false,
+        "canvas": [
+          64,
+          96
+        ],
+        "frames": 3
+      },
+      {
+        "format": "animated-webp",
+        "endian": "MM",
+        "orientation": 6,
+        "exif_identifier": true,
+        "canvas": [
+          64,
+          96
+        ],
+        "frames": 3
+      },
+      {
+        "format": "animated-webp",
+        "endian": "MM",
+        "orientation": 7,
+        "exif_identifier": false,
+        "canvas": [
+          64,
+          96
+        ],
+        "frames": 3
+      },
+      {
+        "format": "animated-webp",
+        "endian": "MM",
+        "orientation": 7,
+        "exif_identifier": true,
+        "canvas": [
+          64,
+          96
+        ],
+        "frames": 3
+      },
+      {
+        "format": "animated-webp",
+        "endian": "MM",
+        "orientation": 8,
+        "exif_identifier": false,
+        "canvas": [
+          64,
+          96
+        ],
+        "frames": 3
+      },
+      {
+        "format": "animated-webp",
+        "endian": "MM",
+        "orientation": 8,
+        "exif_identifier": true,
+        "canvas": [
+          64,
+          96
+        ],
+        "frames": 3
+      },
+      {
+        "format": "animated-webp",
+        "endian": "II",
+        "orientation": 1,
+        "exif_identifier": false,
+        "canvas": [
+          96,
+          64
+        ],
+        "frames": 3
+      },
+      {
+        "format": "animated-webp",
+        "endian": "II",
+        "orientation": 1,
+        "exif_identifier": true,
+        "canvas": [
+          96,
+          64
+        ],
+        "frames": 3
+      },
+      {
+        "format": "animated-webp",
+        "endian": "II",
+        "orientation": 2,
+        "exif_identifier": false,
+        "canvas": [
+          96,
+          64
+        ],
+        "frames": 3
+      },
+      {
+        "format": "animated-webp",
+        "endian": "II",
+        "orientation": 2,
+        "exif_identifier": true,
+        "canvas": [
+          96,
+          64
+        ],
+        "frames": 3
+      },
+      {
+        "format": "animated-webp",
+        "endian": "II",
+        "orientation": 3,
+        "exif_identifier": false,
+        "canvas": [
+          96,
+          64
+        ],
+        "frames": 3
+      },
+      {
+        "format": "animated-webp",
+        "endian": "II",
+        "orientation": 3,
+        "exif_identifier": true,
+        "canvas": [
+          96,
+          64
+        ],
+        "frames": 3
+      },
+      {
+        "format": "animated-webp",
+        "endian": "II",
+        "orientation": 4,
+        "exif_identifier": false,
+        "canvas": [
+          96,
+          64
+        ],
+        "frames": 3
+      },
+      {
+        "format": "animated-webp",
+        "endian": "II",
+        "orientation": 4,
+        "exif_identifier": true,
+        "canvas": [
+          96,
+          64
+        ],
+        "frames": 3
+      },
+      {
+        "format": "animated-webp",
+        "endian": "II",
+        "orientation": 5,
+        "exif_identifier": false,
+        "canvas": [
+          64,
+          96
+        ],
+        "frames": 3
+      },
+      {
+        "format": "animated-webp",
+        "endian": "II",
+        "orientation": 5,
+        "exif_identifier": true,
+        "canvas": [
+          64,
+          96
+        ],
+        "frames": 3
+      },
+      {
+        "format": "animated-webp",
+        "endian": "II",
+        "orientation": 6,
+        "exif_identifier": false,
+        "canvas": [
+          64,
+          96
+        ],
+        "frames": 3
+      },
+      {
+        "format": "animated-webp",
+        "endian": "II",
+        "orientation": 6,
+        "exif_identifier": true,
+        "canvas": [
+          64,
+          96
+        ],
+        "frames": 3
+      },
+      {
+        "format": "animated-webp",
+        "endian": "II",
+        "orientation": 7,
+        "exif_identifier": false,
+        "canvas": [
+          64,
+          96
+        ],
+        "frames": 3
+      },
+      {
+        "format": "animated-webp",
+        "endian": "II",
+        "orientation": 7,
+        "exif_identifier": true,
+        "canvas": [
+          64,
+          96
+        ],
+        "frames": 3
+      },
+      {
+        "format": "animated-webp",
+        "endian": "II",
+        "orientation": 8,
+        "exif_identifier": false,
+        "canvas": [
+          64,
+          96
+        ],
+        "frames": 3
+      },
+      {
+        "format": "animated-webp",
+        "endian": "II",
+        "orientation": 8,
+        "exif_identifier": true,
+        "canvas": [
+          64,
+          96
+        ],
+        "frames": 3
+      },
+      {
+        "format": "animated-webp",
+        "invalid_metadata_ignored": true,
+        "metadata_bytes": 0
+      },
+      {
+        "format": "animated-webp",
+        "invalid_metadata_ignored": true,
+        "metadata_bytes": 8
+      },
+      {
+        "format": "animated-webp",
+        "invalid_metadata_ignored": true,
+        "metadata_bytes": 26
+      },
+      {
+        "format": "animated-webp",
+        "invalid_metadata_ignored": true,
+        "metadata_bytes": 26
+      },
+      {
+        "format": "animated-webp",
+        "invalid_metadata_ignored": true,
+        "metadata_bytes": 17
+      },
+      {
+        "format": "animated-webp",
+        "invalid_metadata_ignored": true,
+        "metadata_bytes": 8
+      }
+    ],
+    "presentation": [
+      {
+        "case": "png-6-page-embedded",
+        "upright_size": [
+          64,
+          96
+        ],
+        "image_rectangle": [
+          0,
+          105
+        ],
+        "animation_finished": false,
+        "maximum_channel_error": 0,
+        "http_requests": 2
+      },
+      {
+        "case": "png-6-direct",
+        "upright_size": [
+          64,
+          96
+        ],
+        "image_rectangle": [
+          362,
+          209
+        ],
+        "animation_finished": false,
+        "maximum_channel_error": 0,
+        "http_requests": 1
+      },
+      {
+        "case": "png-8-page-embedded",
+        "upright_size": [
+          64,
+          96
+        ],
+        "image_rectangle": [
+          0,
+          105
+        ],
+        "animation_finished": false,
+        "maximum_channel_error": 0,
+        "http_requests": 2
+      },
+      {
+        "case": "png-8-direct",
+        "upright_size": [
+          64,
+          96
+        ],
+        "image_rectangle": [
+          362,
+          209
+        ],
+        "animation_finished": false,
+        "maximum_channel_error": 0,
+        "http_requests": 1
+      },
+      {
+        "case": "webp-lossless-6-page-embedded",
+        "upright_size": [
+          64,
+          96
+        ],
+        "image_rectangle": [
+          0,
+          105
+        ],
+        "animation_finished": false,
+        "maximum_channel_error": 0,
+        "http_requests": 2
+      },
+      {
+        "case": "webp-lossless-6-direct",
+        "upright_size": [
+          64,
+          96
+        ],
+        "image_rectangle": [
+          362,
+          209
+        ],
+        "animation_finished": false,
+        "maximum_channel_error": 0,
+        "http_requests": 1
+      },
+      {
+        "case": "webp-lossless-8-page-embedded",
+        "upright_size": [
+          64,
+          96
+        ],
+        "image_rectangle": [
+          0,
+          105
+        ],
+        "animation_finished": false,
+        "maximum_channel_error": 0,
+        "http_requests": 2
+      },
+      {
+        "case": "webp-lossless-8-direct",
+        "upright_size": [
+          64,
+          96
+        ],
+        "image_rectangle": [
+          362,
+          209
+        ],
+        "animation_finished": false,
+        "maximum_channel_error": 0,
+        "http_requests": 1
+      },
+      {
+        "case": "apng-6-page-embedded",
+        "upright_size": [
+          64,
+          96
+        ],
+        "image_rectangle": [
+          0,
+          105
+        ],
+        "animation_finished": true,
+        "maximum_channel_error": 0,
+        "http_requests": 2
+      },
+      {
+        "case": "apng-6-direct",
+        "upright_size": [
+          64,
+          96
+        ],
+        "image_rectangle": [
+          362,
+          209
+        ],
+        "animation_finished": true,
+        "maximum_channel_error": 0,
+        "http_requests": 1
+      },
+      {
+        "case": "apng-8-page-embedded",
+        "upright_size": [
+          64,
+          96
+        ],
+        "image_rectangle": [
+          0,
+          105
+        ],
+        "animation_finished": true,
+        "maximum_channel_error": 0,
+        "http_requests": 2
+      },
+      {
+        "case": "apng-8-direct",
+        "upright_size": [
+          64,
+          96
+        ],
+        "image_rectangle": [
+          362,
+          209
+        ],
+        "animation_finished": true,
+        "maximum_channel_error": 0,
+        "http_requests": 1
+      },
+      {
+        "case": "animated-webp-6-page-embedded",
+        "upright_size": [
+          64,
+          96
+        ],
+        "image_rectangle": [
+          0,
+          105
+        ],
+        "animation_finished": true,
+        "maximum_channel_error": 0,
+        "http_requests": 2
+      },
+      {
+        "case": "animated-webp-6-direct",
+        "upright_size": [
+          64,
+          96
+        ],
+        "image_rectangle": [
+          362,
+          209
+        ],
+        "animation_finished": true,
+        "maximum_channel_error": 0,
+        "http_requests": 1
+      },
+      {
+        "case": "animated-webp-8-page-embedded",
+        "upright_size": [
+          64,
+          96
+        ],
+        "image_rectangle": [
+          0,
+          105
+        ],
+        "animation_finished": true,
+        "maximum_channel_error": 0,
+        "http_requests": 2
+      },
+      {
+        "case": "animated-webp-8-direct",
+        "upright_size": [
+          64,
+          96
+        ],
+        "image_rectangle": [
+          362,
+          209
+        ],
+        "animation_finished": true,
+        "maximum_channel_error": 0,
+        "http_requests": 1
+      }
+    ]
+  },
+  "public_site_scope": "No successful Google Search, ChatGPT or complete EFF scripted workflow is claimed. Network/scanner tests used loopback, not public scanning services.",
+  "remaining_image_limits": [
+    "AVIF",
+    "HEIF/HEIC",
+    "JPEG XL",
+    "ICC/color management",
+    "HDR",
+    "area filtering",
+    "image-orientation:none",
+    "automatic responsive reselection"
+  ],
+  "independence": "All production decoding, networking, JS, layout and rendering use original Rust code. Pillow/ImageMagick/FFmpeg are development oracles only; standard-library and Windows platform boundaries remain explicit."
+}

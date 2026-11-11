@@ -79,7 +79,7 @@ impl App {
         &self,
         key: u32,
         ctrl: bool,
-        shift: bool,
+        _shift: bool,
         alt: bool,
         meta: bool,
     ) -> bool {
@@ -88,6 +88,8 @@ impl App {
             || self.view != View::Page
             || self.browser_panel.is_some()
             || self.menu
+            || self.downloads_open()
+            || self.bookmark_popup_open()
             || self.chrome.focus.is_some()
             || self.inspector.focused
             || !matches!(self.focus, Focus::Page | Focus::Control(_))
@@ -124,7 +126,7 @@ impl App {
                     | 0x6d
                     | 0x30
                     | 0x60
-            ) || key == 0x42 && shift)
+            ) || matches!(key, 0x42 | 0x53))
         {
             return false;
         }

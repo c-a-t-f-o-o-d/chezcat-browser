@@ -269,11 +269,16 @@ impl Runtime {
         let input = self.copy_value(input)?;
         let input = self.primitive_with_hint(input, true, host)?;
         self.work(input.bytes())?;
-        let text = input.to_text();
+        let text = input.script_text()?;
         self.work(text.len())?;
         Ok(text)
     }
-    fn text_options(&mut self, input: Option<&Value>, names: &[&str]) -> Result<Vec<bool>, Fault> {
+    fn text_options(
+        &mut self,
+        input: Option<&Value>,
+        names: &[&str],
+        host: &mut dyn Host,
+    ) -> Result<Vec<bool>, Fault> {
         let Some(input) = input.filter(|input| !matches!(input, Value::Null | Value::Undefined))
         else {
             return Ok(vec![false; names.len()]);
@@ -282,7 +287,7 @@ impl Runtime {
         names
             .iter()
             .map(|name| {
-                self.get_ordinary_property(object, name)
+                self.get_ordinary_property_with_host(object, name, host)
                     .map(|value| value.truthy())
             })
             .collect()
@@ -311,7 +316,7 @@ impl Runtime {
                 };
                 // WebIDL dictionary members are converted before constructor
                 // steps validate the already-converted encoding label.
-                let options = self.text_options(args.get(1), &["fatal", "ignoreBOM"])?;
+                let options = self.text_options(args.get(1), &["fatal", "ignoreBOM"], host)?;
                 let label = label
                     .trim_matches(|ch| matches!(ch, '\t' | '\n' | '\u{c}' | '\r' | ' '))
                     .to_ascii_lowercase();
@@ -438,7 +443,7 @@ impl Runtime {
                 } else {
                     Some(self.binary_source_range(&args[0])?)
                 };
-                let stream = self.text_options(args.get(1), &["stream"])?[0];
+                let stream = self.text_options(args.get(1), &["stream"], host)?[0];
                 let Some(Data::Decoder(mut decoder)) = self.objects[id].text else {
                     unreachable!()
                 };

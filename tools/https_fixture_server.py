@@ -48,7 +48,7 @@ class TlsFixtureServer(FixtureServer):
 
 
 class TlsFixtureHandler(FixtureHandler):
-    server_version = "ChezCatHttpsFixture/0.29"
+    server_version = "ChezCatHttpsFixture/0.30"
 
     def route(self, send_body: bool) -> None:
         path = self.path.split("?", 1)[0]

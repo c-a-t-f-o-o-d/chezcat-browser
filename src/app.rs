@@ -15,14 +15,29 @@ mod animation;
 #[path = "app_browser_ui.rs"]
 mod browser_ui;
 use browser_ui::BrowserPanel;
+#[path = "app_appearance.rs"]
+mod appearance;
+#[path = "app_bookmarks_bar.rs"]
+mod bookmarks_bar;
 #[path = "app_history.rs"]
 mod browsing_history;
 #[path = "app_chrome.rs"]
 mod chrome;
+#[path = "app_downloads.rs"]
+mod download_ui;
 #[path = "app_inspector.rs"]
 mod inspector;
 #[path = "app_keyboard.rs"]
 pub(crate) mod keyboard;
+#[path = "app_scripts.rs"]
+mod script_jobs;
+#[cfg(test)]
+#[path = "app_search_tests.rs"]
+mod search_tests;
+#[path = "app_stylesheets.rs"]
+mod style_jobs;
+#[path = "app_textarea.rs"]
+mod textarea;
 
 pub const BAR_HEIGHT: i32 = 68;
 pub const FOOT_HEIGHT: i32 = 32;
@@ -32,6 +47,7 @@ const START: &str = include_str!("../pages/start.html");
 pub enum PlatformAction {
     None,
     OpenFile,
+    OpenFolder(PathBuf),
     Copy(String),
     Cut(String),
     Paste,
@@ -126,7 +142,9 @@ struct HistoryEntry {
 #[derive(Clone, Copy)]
 enum NavigationKind {
     New,
+    ScriptNew,
     Reload(i32),
+    ScriptReplace(Option<i32>),
     History(usize, i32),
 }
 #[derive(Clone, Copy)]
@@ -177,6 +195,13 @@ pub struct App {
     scripts_enabled: bool,
     images_enabled: bool,
     profile: crate::profile::Store,
+    downloads: crate::downloads::Manager,
+    downloads_ui: download_ui::DownloadsUi,
+    bookmarks_bar: bookmarks_bar::BookmarkBar,
+    visited: std::collections::HashSet<String>,
+    link_paint: HashMap<usize, u32>,
+    network: crate::network_trace::Trace,
+    last_network_revision: u64,
     browsing_history: crate::history::Store,
     browsing_history_error: Option<String>,
     history_maintenance: Option<std::time::Instant>,
@@ -184,6 +209,16 @@ pub struct App {
     browser_panel: Option<BrowserPanel>,
     scripting: Option<crate::scripting::Page>,
     scripting_blocked: Option<String>,
+    document_policy: crate::csp::PolicySet,
+    cookies: std::sync::Arc<crate::cookies::Session>,
+    cookie_same_site: bool,
+    dynamic_scripts: Option<script_jobs::Worker>,
+    dynamic_pending: usize,
+    dynamic_stylesheets: Option<style_jobs::Worker>,
+    pending_stylesheets: usize,
+    script_epoch: u64,
+    script_navigation_count: usize,
+    script_navigation_since: std::time::Instant,
     history: Vec<HistoryEntry>,
     history_index: usize,
     zoom: f32,
@@ -222,7 +257,7 @@ impl App {
         let page = layout::build_viewport(
             &document,
             1068,
-            760 - BAR_HEIGHT - FOOT_HEIGHT,
+            760 - BAR_HEIGHT - bookmarks_bar::HEIGHT - FOOT_HEIGHT,
             1.0,
             &HashMap::new(),
             &HashMap::new(),
@@ -255,6 +290,13 @@ impl App {
             scripts_enabled: true,
             images_enabled: true,
             profile: crate::profile::Store::memory(),
+            downloads: crate::downloads::Manager::default(),
+            downloads_ui: download_ui::DownloadsUi::default(),
+            bookmarks_bar: bookmarks_bar::BookmarkBar::default(),
+            visited: std::collections::HashSet::new(),
+            link_paint: HashMap::new(),
+            network: crate::network_trace::Trace::default(),
+            last_network_revision: 0,
             browsing_history: crate::history::Store::memory(),
             browsing_history_error: None,
             history_maintenance: None,
@@ -262,6 +304,16 @@ impl App {
             browser_panel: None,
             scripting: None,
             scripting_blocked: None,
+            document_policy: crate::csp::PolicySet::default(),
+            cookies: std::sync::Arc::new(crate::cookies::Session::default()),
+            cookie_same_site: false,
+            dynamic_scripts: None,
+            dynamic_pending: 0,
+            dynamic_stylesheets: None,
+            pending_stylesheets: 0,
+            script_epoch: 0,
+            script_navigation_count: 0,
+            script_navigation_since: std::time::Instant::now(),
             history: vec![HistoryEntry {
                 location,
                 scroll: 0,
@@ -323,11 +375,17 @@ impl App {
         self.status = error;
         self.failed = true;
     }
+    fn navigation_error(&mut self, attempted: &str, error: String) {
+        self.last_failed_navigation = Some(format!(
+            "{attempted}\n{error}\nThe previous page is still displayed."
+        ));
+        self.error(format!("{}: {error}", fit_text(attempted, 100)));
+    }
     pub fn open(&mut self, path: &Path) {
         self.cancel_pending();
         match navigation::explicit(path) {
             Ok(location) => self.navigate(location),
-            Err(e) => self.error(e),
+            Err(e) => self.navigation_error(&path.to_string_lossy(), e),
         }
     }
     pub fn open_address(&mut self, address: &str) {
@@ -335,7 +393,7 @@ impl App {
             Ok(location) => self.navigate_location(location, address.contains('#')),
             Err(error) => {
                 self.cancel_pending();
-                self.error(error);
+                self.navigation_error(address, error);
             }
         }
     }
@@ -351,10 +409,10 @@ impl App {
                 if let Some(text) = address.to_str() {
                     match navigation::address(text, &Location::home()) {
                         Ok(location) => self.navigate(location),
-                        Err(error) => self.error(error),
+                        Err(error) => self.navigation_error(text, error),
                     }
                 } else {
-                    self.error(file_error);
+                    self.navigation_error(&address.to_string_lossy(), file_error);
                 }
             }
         }
@@ -363,16 +421,26 @@ impl App {
         if let Some(worker) = &self.worker {
             worker.set_wake(wake.clone());
         }
+        if let Some(worker) = &self.dynamic_scripts {
+            worker.set_wake(wake.clone());
+        }
+        if let Some(worker) = &self.dynamic_stylesheets {
+            worker.set_wake(wake.clone());
+        }
         self.wake = wake;
     }
     /// Called at startup; trust is immutable for all requests in this worker.
     pub fn use_trust_store(&mut self, trust: std::sync::Arc<crate::trust::Store>) {
         self.cancel_pending();
+        self.cancel_script_requests();
+        self.dynamic_scripts = None;
+        self.dynamic_stylesheets = None;
         self.worker = None;
         self.trust = trust;
     }
     pub fn set_javascript_enabled(&mut self, enabled: bool) {
         if self.scripts_enabled != enabled {
+            self.cancel_script_requests();
             self.scripts_enabled = enabled;
             self.scripting = None;
             if !enabled {
@@ -407,6 +475,10 @@ impl App {
                 .round()
                 .max(1.0) as u32,
             density_milli: (self.zoom * 1000.0).round().max(1.0) as u32,
+            cookie_origin: self.location.url.clone(),
+            cookie_same_site: None,
+            script_origin: None,
+            form_policy: None,
         }
     }
     fn toggle_javascript(&mut self) {
@@ -420,6 +492,12 @@ impl App {
     }
     pub fn is_loading(&self) -> bool {
         self.pending.is_some()
+            || self.dynamic_pending != 0
+            || self.pending_stylesheets != 0
+            || self
+                .scripting
+                .as_ref()
+                .is_some_and(|page| page.has_host_tasks())
     }
     fn cancel_pending(&mut self) {
         if let Some(worker) = &self.worker {
@@ -429,9 +507,10 @@ impl App {
         self.resubmission = None;
     }
     pub fn stop_loading(&mut self) {
-        if self.pending.is_none() {
+        if !self.is_loading() {
             return;
         }
+        self.cancel_script_requests();
         self.cancel_pending();
         self.address.set(&self.location.display());
         self.status = "Loading stopped.".to_owned();
@@ -452,10 +531,25 @@ impl App {
         mode: crate::http::FetchMode,
         request: crate::http::Request,
     ) {
+        self.start_network_request_with_policy(location, kind, mode, request, None);
+    }
+    fn start_network_request_with_policy(
+        &mut self,
+        location: Location,
+        kind: NavigationKind,
+        mode: crate::http::FetchMode,
+        request: crate::http::Request,
+        form_policy: Option<crate::csp::PolicySet>,
+    ) {
+        self.cancel_script_requests();
         self.select_popup = None;
         self.resubmission = None;
         if self.worker.is_none() {
-            match loader::Worker::new(self.wake.clone(), self.trust.clone()) {
+            match loader::Worker::with_cookie_session(
+                self.wake.clone(),
+                self.trust.clone(),
+                self.cookies.clone(),
+            ) {
                 Ok(worker) => self.worker = Some(worker),
                 Err(error) => {
                     self.error(error);
@@ -487,21 +581,46 @@ impl App {
             committed: false,
             scroll_target: None,
         });
-        self.worker.as_ref().unwrap().submit_request_with_options(
-            id,
-            location,
-            mode,
-            self.load_options(),
-            request,
-        );
+        let mut options = self.load_options();
+        options.form_policy = form_policy.map(std::sync::Arc::new);
+        if matches!(kind, NavigationKind::Reload(_)) {
+            // A UI reload preserves how the committed document was reached;
+            // it cannot upgrade a cross-site POST into a same-site request.
+            options.cookie_same_site = Some(self.cookie_same_site);
+        }
+        if matches!(
+            kind,
+            NavigationKind::ScriptNew | NavigationKind::ScriptReplace(_)
+        ) {
+            options.script_origin = self.location.url.clone();
+        }
+        self.worker
+            .as_ref()
+            .unwrap()
+            .submit_request_with_options(id, location, mode, options, request);
+        if let Some((_, trace)) = self.worker.as_ref().and_then(loader::Worker::network_trace) {
+            self.network = trace;
+        }
+    }
+    pub fn network_needs_tick(&self) -> bool {
+        (self.pending.is_some() || self.dynamic_pending != 0 || self.pending_stylesheets != 0)
+            && self.inspector.network_visible()
     }
     pub fn poll_load(&mut self) -> bool {
         self.inspector.invalidate();
+        let script_changed = self.poll_dynamic_scripts()
+            | self.process_script_requests()
+            | self.poll_dynamic_stylesheets()
+            | self.process_stylesheet_requests();
+        let revision = self.network.revision();
+        let mut changed = script_changed | self.poll_downloads()
+            || revision != self.last_network_revision
+            || self.network_needs_tick();
+        self.last_network_revision = revision;
         let Some(worker) = &self.worker else {
-            return false;
+            return changed;
         };
         let poll = worker.poll();
-        let mut changed = false;
         if let Some((id, text)) = poll.progress {
             if self
                 .pending
@@ -509,6 +628,17 @@ impl App {
                 .is_some_and(|pending| pending.id == id)
             {
                 self.status = format!("{} | Esc stops", text);
+                changed = true;
+            }
+        }
+        if let Some((id, response)) = poll.download {
+            if self
+                .pending
+                .as_ref()
+                .is_some_and(|pending| pending.id == id)
+            {
+                self.download_received(response);
+                self.address.set(&self.location.display());
                 changed = true;
             }
         }
@@ -524,10 +654,16 @@ impl App {
                 pending.request = loaded.request.clone();
                 let kind = pending.kind;
                 pending.scroll_target = match kind {
-                    NavigationKind::Reload(scroll) | NavigationKind::History(_, scroll) => {
+                    NavigationKind::Reload(scroll)
+                    | NavigationKind::History(_, scroll)
+                    | NavigationKind::ScriptReplace(Some(scroll)) => {
                         Some(LoadingScroll::Offset(scroll))
                     }
-                    NavigationKind::New if !loaded.location.fragment.is_empty() => {
+                    NavigationKind::New
+                    | NavigationKind::ScriptNew
+                    | NavigationKind::ScriptReplace(None)
+                        if !loaded.location.fragment.is_empty() =>
+                    {
                         Some(LoadingScroll::Fragment)
                     }
                     _ => None,
@@ -569,6 +705,9 @@ impl App {
                 let pending = self.pending.take().unwrap();
                 changed = true;
                 match completion.result {
+                    Ok(end) if end.download => {
+                        self.address.set(&self.location.display());
+                    }
                     Ok(end) if pending.committed => {
                         self.events.extend(end.events);
                         self.set_load_status(&end.notice, end.skipped);
@@ -686,6 +825,9 @@ impl App {
 
     pub fn poll_script_timer(&mut self) -> bool {
         self.inspector.invalidate();
+        if self.process_script_requests() {
+            return true;
+        }
         if self.next_script_timer().is_none() {
             return false;
         }
@@ -713,6 +855,7 @@ impl App {
             // the reader's scroll position and the underlying page position.
             self.refresh_resource_view();
         }
+        self.process_script_requests();
         true
     }
 
@@ -762,12 +905,16 @@ impl App {
     pub fn wait_for_script_timers(&mut self, duration: std::time::Duration) {
         let deadline = std::time::Instant::now() + duration;
         while std::time::Instant::now() < deadline {
-            let Some(due) = self.next_page_timer() else {
-                break;
-            };
-            if self.poll_page_timer() {
+            if self.poll_load() | self.poll_page_timer() {
                 continue;
             }
+            let due = match self.next_page_timer() {
+                Some(due) => due,
+                None if self.is_loading() => {
+                    std::time::Instant::now() + std::time::Duration::from_millis(10)
+                }
+                None => break,
+            };
             let wait = due
                 .min(deadline)
                 .saturating_duration_since(std::time::Instant::now());
@@ -782,7 +929,7 @@ impl App {
         let same = self.location == location && self.current_request == loaded.request;
         self.commit(location.clone(), loaded, images_pending);
         match kind {
-            NavigationKind::New => {
+            NavigationKind::New | NavigationKind::ScriptNew => {
                 if !same {
                     self.history.truncate(self.history_index + 1);
                     self.history.push(HistoryEntry {
@@ -798,6 +945,13 @@ impl App {
             }
             NavigationKind::Reload(scroll) => {
                 self.set_scroll(scroll.clamp(0, self.max_scroll()));
+                self.history[self.history_index].location = location;
+                self.history[self.history_index].request = self.current_request.clone();
+            }
+            NavigationKind::ScriptReplace(scroll) => {
+                if let Some(scroll) = scroll {
+                    self.set_scroll(scroll.clamp(0, self.max_scroll()));
+                }
                 self.history[self.history_index].location = location;
                 self.history[self.history_index].request = self.current_request.clone();
             }
@@ -930,6 +1084,14 @@ impl App {
         self.navigate_location(location, false);
     }
     fn navigate_location(&mut self, location: Location, fragment_navigation: bool) {
+        self.navigate_location_mode(location, fragment_navigation, false);
+    }
+    fn navigate_location_mode(
+        &mut self,
+        location: Location,
+        fragment_navigation: bool,
+        replace: bool,
+    ) {
         let location = if location.url.is_none()
             && location.path.is_none()
             && self.home_location.path.is_some()
@@ -963,7 +1125,11 @@ impl App {
         if !same_document && location.url.is_some() {
             self.start_network(
                 location,
-                NavigationKind::New,
+                if replace {
+                    NavigationKind::ScriptReplace(None)
+                } else {
+                    NavigationKind::New
+                },
                 crate::http::FetchMode::Normal,
             );
             return;
@@ -974,7 +1140,7 @@ impl App {
             match loader::local_with_options(&location, self.load_options()) {
                 Ok(loaded) => Some(loaded),
                 Err(e) => {
-                    self.error(e);
+                    self.navigation_error(&location.display(), e);
                     return;
                 }
             }
@@ -1009,6 +1175,14 @@ impl App {
             self.jump_fragment();
         }
         if !same {
+            if replace {
+                self.history[self.history_index] = HistoryEntry {
+                    location,
+                    scroll: self.scroll,
+                    request: self.current_request.clone(),
+                };
+                return;
+            }
             self.history.truncate(self.history_index + 1);
             self.history.push(HistoryEntry {
                 location,
@@ -1107,11 +1281,16 @@ impl App {
         }
     }
     fn commit(&mut self, location: Location, loaded: Loaded, images_pending: bool) {
+        self.cancel_script_requests();
+        self.script_epoch = self.script_epoch.wrapping_add(1);
+        self.network = loaded.network.clone();
+        self.cookie_same_site = loaded.cookie_same_site;
         self.current_request = loaded.request;
         self.resubmission = None;
         let scripts = loaded.scripts;
         self.inspector.navigation(&scripts);
         self.scripting_blocked = loaded.scripting_blocked;
+        self.document_policy = loaded.csp.clone();
         self.scripting = None;
         self.base_location = loaded.base;
         self.document = loaded.document;
@@ -1129,6 +1308,8 @@ impl App {
         self.last_failed_navigation = None;
         self.source = location.path.clone();
         self.location = location;
+        self.remember_visit();
+        self.close_bookmark_popup();
         self.view = View::Page;
         self.alternate = None;
         self.set_scroll(0);
@@ -1145,6 +1326,9 @@ impl App {
         if self.document.scripting_enabled {
             let mut page = crate::scripting::Page::new();
             page.set_location(&self.location);
+            page.set_cookie_session(self.cookies.clone());
+            page.set_resource_base(&self.base_location);
+            page.set_stylesheet_bytes(self.styles.values().map(String::len).sum());
             page.set_geometry(crate::script_geometry::Geometry::new(
                 self.width - 12,
                 self.viewport_height(),
@@ -1229,6 +1413,7 @@ impl App {
                 &self.fonts,
             )
         };
+        self.rebuild_link_colors();
         if self.alternate.is_none() {
             let viewport_height = self.viewport_height();
             if let Some(scripting) = &mut self.scripting {
@@ -1275,7 +1460,7 @@ impl App {
         self.sync_editors();
     }
     pub fn content_top(&self) -> i32 {
-        BAR_HEIGHT + if self.find_open { FIND_HEIGHT } else { 0 }
+        self.chrome_bottom() + if self.find_open { FIND_HEIGHT } else { 0 }
     }
     pub fn viewport_height(&self) -> i32 {
         (self.content_bottom() - self.content_top()).max(1)
@@ -1300,6 +1485,9 @@ impl App {
         );
     }
     pub fn wheel(&mut self, delta: i32, ctrl: bool) {
+        if self.downloads_wheel(delta) || self.bookmark_bar_wheel(delta) {
+            return;
+        }
         if self.menu {
             self.chrome_wheel(delta);
             return;
@@ -1360,6 +1548,41 @@ impl App {
     pub fn show_resources(&mut self) {
         self.toggle_view(View::Resources);
     }
+    fn script_activity(&self) -> String {
+        if !self.scripts_enabled {
+            "JavaScript is OFF. Ctrl+J enables it and reloads the page.".to_owned()
+        } else if let Some(reason) = &self.scripting_blocked {
+            format!("JavaScript blocked on this page: {reason}")
+        } else {
+            self.scripting
+                .as_ref()
+                .map(|page| page.report())
+                .unwrap_or_else(|| "No active page runtime.".into())
+        }
+    }
+    /// Original decoded source of the displayed document, before DOM mutations.
+    pub fn document_source(&self) -> &str {
+        &self.raw
+    }
+    /// Export the current activity without changing the view or executing code.
+    pub fn activity_report(&self) -> String {
+        format!(
+            "{} activity report\nStatus: {}\nPage title: {}\nJavaScript enabled: {}\nImages enabled: {}\n\nTRUST FILE: {}\n\nLAST FAILED NAVIGATION: {}\n\nDOCUMENT: {}\nCONTENT ROOT / ORIGIN: {}\n\n{}\n\nJavaScript\n{}\n",
+            crate::http::USER_AGENT,
+            self.status,
+            self.document.title,
+            self.scripts_enabled,
+            self.images_enabled,
+            self.trust.description(),
+            self.last_failed_navigation.as_deref().unwrap_or("None"),
+            self.location.display(),
+            self.location.root.as_ref().map(|p| p.display().to_string())
+                .or_else(|| self.location.url.as_ref().map(|u| format!("{}://{}", if u.secure { "https" } else { "http" }, u.host_header())))
+                .unwrap_or_else(|| "bundled".to_owned()),
+            self.events.join("\n\n"),
+            self.script_activity(),
+        )
+    }
     fn toggle_view(&mut self, requested: View) {
         let view = if self.view == requested {
             View::Page
@@ -1377,13 +1600,7 @@ impl App {
             View::Page => None,
             View::Source => Some(html::parse(&format!("<title>Page source</title><style>body {{ margin: 24px; }} pre {{ font-size: 14px; white-space: pre-wrap; }}</style><body><h1>Page source</h1><p>Ctrl+U returns to the page. Ctrl+F searches this view.</p><pre>{}</pre></body>", escape(&self.raw)))),
             View::Resources => {
-                let scripting = if !self.scripts_enabled {
-                    "JavaScript is OFF. Ctrl+J enables it and reloads the page.".to_owned()
-                } else if let Some(reason) = &self.scripting_blocked {
-                    format!("JavaScript blocked on this page: {reason}")
-                } else {
-                    self.scripting.as_ref().map(|page| page.report()).unwrap_or_else(|| "No active page runtime.".into())
-                };
+                let scripting = self.script_activity();
                 Some(html::parse(&format!(
                     "<title>Resource activity</title><style>body {{ margin: 24px; }} pre {{ font-size: 14px; white-space: pre-wrap; }}</style><body><h1>Resource activity</h1><p>Ctrl+I returns to the page. The document list belongs to the page still displayed.</p><pre>TRUST FILE: {}\n\nLAST FAILED NAVIGATION: {}\n\nDOCUMENT: {}\nCONTENT ROOT / ORIGIN: {}\n\n{}</pre><h2>JavaScript</h2><pre>{}</pre><p>Ctrl+J toggles scripting and reloads the page. The first language and DOM subset is limited; unsupported syntax and APIs are reported above.</p></body>",
                     escape(self.trust.description()),
@@ -1404,7 +1621,11 @@ impl App {
 
 impl App {
     fn address_rect(&self) -> (i32, i32) {
-        (202, (self.width - 266).max(20))
+        if self.width < 680 {
+            (160, (self.width - 282).max(20))
+        } else {
+            (202, (self.width - 356).max(20))
+        }
     }
     fn sync_editors(&mut self) {
         self.sync_browser_panel();
@@ -1415,7 +1636,9 @@ impl App {
         if let Focus::Control(node) = self.focus {
             if let Some(rect) = self.page.controls.iter().find(|c| c.node == node) {
                 if let Some(control) = self.forms.controls.get_mut(&node) {
-                    if let Some(font) = &rect.text_font {
+                    if control.kind == Kind::TextArea {
+                        textarea::sync(rect, &mut control.value);
+                    } else if let Some(font) = &rect.text_font {
                         let shape = font.shape(&control.value.text());
                         let value = &mut control.value;
                         value.offset = value.offset.min(value.cursor).min(value.chars.len());
@@ -1441,7 +1664,7 @@ impl App {
                 .forms
                 .controls
                 .get(&node)
-                .is_some_and(|c| c.kind == Kind::Text && !c.disabled),
+                .is_some_and(|c| matches!(c.kind, Kind::Text | Kind::TextArea) && !c.disabled),
             Focus::Page => false,
         }
     }
@@ -1567,12 +1790,20 @@ impl App {
             &self.base_location,
         ) {
             Ok(submission) => {
+                if let Err(error) = self
+                    .document_policy
+                    .allows_form_action(&submission.location)
+                {
+                    self.error(error);
+                    return;
+                }
                 self.drag = Drag::None;
-                self.start_network_request(
+                self.start_network_request_with_policy(
                     submission.location,
                     NavigationKind::New,
                     crate::http::FetchMode::Normal,
                     submission.request,
+                    Some(self.document_policy.clone()),
                 );
             }
             Err(error) => self.error(error),
@@ -2173,6 +2404,12 @@ impl App {
         if ctrl && alt {
             return PlatformAction::None;
         }
+        if let Some(action) = self.downloads_key(key, ctrl, shift, alt) {
+            return action;
+        }
+        if self.bookmark_bar_key(key, ctrl, shift, alt) {
+            return PlatformAction::None;
+        }
         if !alt && (key == 0x7b || ctrl && shift && key == 0x49) {
             self.toggle_inspector();
             return PlatformAction::None;
@@ -2182,7 +2419,7 @@ impl App {
                 || ctrl
                     && matches!(
                         key,
-                        0x4c | 0x52 | 0x74 | 0x4f | 0xbc | 0x48 | 0x44 | 0x4a | 0x42
+                        0x4c | 0x52 | 0x74 | 0x4f | 0xbc | 0x48 | 0x44 | 0x4a | 0x42 | 0x53
                     )
             {
                 self.inspector.focused = false;
@@ -2242,11 +2479,12 @@ impl App {
         if ctrl {
             match key {
                 0x44 => self.add_current_bookmark(),
-                0x42 if shift => self.show_bookmarks(),
+                0x42 => self.show_bookmarks(),
                 0x48 => self.show_history(),
                 0xbc => self.show_settings(),
                 0x4c => self.focus_address(),
                 0x4f => return PlatformAction::OpenFile,
+                0x53 => self.download_current(),
                 0x52 if !shift => self.reload(),
                 0x52 | 0x74 => self.reload_with_mode(crate::http::FetchMode::FullReload),
                 0x46 => self.open_find(),
@@ -2366,7 +2604,10 @@ impl App {
                 }
                 return PlatformAction::None;
             }
-            if kind != Kind::Text {
+            if kind == Kind::TextArea && self.textarea_key(node, key, shift) {
+                return PlatformAction::None;
+            }
+            if !matches!(kind, Kind::Text | Kind::TextArea) {
                 if matches!(key, 0x0d | 0x20) {
                     self.activate_control(node);
                 }
@@ -2415,6 +2656,9 @@ impl App {
         PlatformAction::None
     }
     pub fn text_input(&mut self, ch: char) {
+        if self.downloads_open() || self.bookmark_popup_open() {
+            return;
+        }
         if self.inspector.focused && self.inspector.mode != inspector::Mode::Closed {
             if !ch.is_control() {
                 let mut buffer = [0u8; 4];
@@ -2457,6 +2701,9 @@ impl App {
         }
     }
     pub fn paste(&mut self, text: &str) {
+        if self.downloads_open() || self.bookmark_popup_open() {
+            return;
+        }
         if self.inspector.focused && self.inspector.mode != inspector::Mode::Closed {
             self.inspector_paste(text);
             return;
@@ -2699,6 +2946,12 @@ impl App {
         (y, thumb, track)
     }
     pub fn pointer_down(&mut self, x: i32, y: i32, shift: bool) -> PlatformAction {
+        if self.downloads_pointer_down(x, y) {
+            return PlatformAction::None;
+        }
+        if !self.menu && self.bookmark_bar_pointer_down(x, y) {
+            return PlatformAction::None;
+        }
         if !self.menu && self.inspector_main_pointer_down(x, y) {
             return PlatformAction::None;
         }
@@ -2760,10 +3013,18 @@ impl App {
                     // Pointer focus must not move the target between press and
                     // release. Keyboard focus still brings controls into view.
                     self.focus_control_with_scroll(node, false);
-                    if kind == Kind::Text {
+                    if matches!(kind, Kind::Text | Kind::TextArea) {
                         if let Some(rect) = self.page.controls.iter().find(|c| c.node == node) {
-                            let pos =
-                                control_character_at(rect, &self.forms.controls[&node].value, x);
+                            let pos = if kind == Kind::TextArea {
+                                textarea::character_at(
+                                    rect,
+                                    &self.forms.controls[&node].value,
+                                    x,
+                                    y - self.content_top() + self.scroll,
+                                )
+                            } else {
+                                control_character_at(rect, &self.forms.controls[&node].value, x)
+                            };
                             self.forms
                                 .controls
                                 .get_mut(&node)
@@ -2792,6 +3053,11 @@ impl App {
             .page
             .link_at(x, y - self.content_top() + self.scroll)
             .map(str::to_owned);
+        if !shift {
+            if let Some(href) = &href {
+                self.arm_page_bookmark_drag(href, x, y);
+            }
+        }
         self.drag = Drag::Text {
             x,
             y,
@@ -2801,6 +3067,16 @@ impl App {
         PlatformAction::None
     }
     pub fn pointer_move(&mut self, x: i32, y: i32, dragging: bool) -> bool {
+        if self.downloads_open() {
+            return self.downloads_pointer_move(x, y);
+        }
+        let bookmark_changed = self.bookmark_bar_pointer_move(x, y, dragging);
+        if self.bookmark_drag_active()
+            || self.bookmark_popup_open()
+            || (BAR_HEIGHT..self.chrome_bottom()).contains(&y)
+        {
+            return bookmark_changed;
+        }
         if self.inspector.mode == inspector::Mode::Docked
             && self.inspector.focused
             && self.inspector_pointer_move(x, y, dragging)
@@ -2877,7 +3153,17 @@ impl App {
             Drag::Field => {
                 if let Focus::Control(node) = self.focus {
                     if let Some(rect) = self.page.controls.iter().find(|rect| rect.node == node) {
-                        let pos = control_character_at(rect, &self.forms.controls[&node].value, x);
+                        let control = &self.forms.controls[&node];
+                        let pos = if control.kind == Kind::TextArea {
+                            textarea::character_at(
+                                rect,
+                                &control.value,
+                                x,
+                                y - self.content_top() + self.scroll,
+                            )
+                        } else {
+                            control_character_at(rect, &control.value, x)
+                        };
                         self.editor().move_to(pos, true);
                         self.sync_editors();
                         return true;
@@ -2903,6 +3189,12 @@ impl App {
         changed || !matches!(self.drag, Drag::None)
     }
     pub fn pointer_up(&mut self, x: i32, y: i32) -> PlatformAction {
+        if let Some(action) = self.downloads_pointer_up(x, y) {
+            return action;
+        }
+        if self.bookmark_bar_pointer_up(x, y) {
+            return PlatformAction::None;
+        }
         if self.inspector.mode == inspector::Mode::Docked && self.inspector.focused && !self.menu {
             return self.inspector_pointer_up(x, y);
         }
@@ -2967,12 +3259,23 @@ impl App {
                 && y < self.content_bottom()
                 && self.page.link_at(x, y - self.content_top() + self.scroll) == Some(href.as_str())
             {
-                self.follow(&href);
+                let download = self
+                    .page
+                    .link_node_at(x, y - self.content_top() + self.scroll)
+                    .and_then(|node| self.document.attr(node, "download"))
+                    .map(str::to_owned);
+                if let Some(name) = download {
+                    self.download_link(&href, (!name.is_empty()).then_some(name));
+                } else {
+                    self.follow(&href);
+                }
             }
         }
         PlatformAction::None
     }
     pub fn pointer_cancel(&mut self) {
+        self.downloads_pointer_cancel();
+        self.cancel_bookmark_pointer();
         self.inspector.cancel_pointer();
         self.drag = Drag::None;
         self.chrome.hover = None;
@@ -2983,6 +3286,12 @@ impl App {
         }
     }
     pub fn wants_hand(&self, x: i32, y: i32) -> bool {
+        if self.downloads_open() {
+            return self.downloads_wants_hand(x, y);
+        }
+        if self.bookmark_bar_wants_hand(x, y) {
+            return true;
+        }
         if let Some(action) = self.chrome_hit(x, y) {
             return self.chrome_enabled(action);
         }
@@ -3006,11 +3315,9 @@ impl App {
                 .page
                 .control_at(x, y - self.content_top() + self.scroll)
             {
-                return self
-                    .forms
-                    .controls
-                    .get(&node)
-                    .is_some_and(|c| c.focusable() && c.kind != Kind::Text);
+                return self.forms.controls.get(&node).is_some_and(|c| {
+                    c.focusable() && !matches!(c.kind, Kind::Text | Kind::TextArea)
+                });
             }
         }
         y >= self.content_top()
@@ -3025,7 +3332,13 @@ impl App {
 impl App {
     pub fn draw(&self) -> Canvas {
         let mut canvas = Canvas::new(self.width as usize, self.height as usize);
-        canvas.fill_rect(0, 0, self.width, self.height, 0xffffff);
+        canvas.fill_rect(
+            0,
+            0,
+            self.width,
+            self.height,
+            self.page_background_color(0xffffff),
+        );
         let top = self.content_top();
         let bottom = self.content_bottom();
         for (item_index, item) in self.page.items.iter().enumerate() {
@@ -3066,7 +3379,7 @@ impl App {
                 } => {
                     let y = y + top - self.scroll;
                     if y < bottom && y.saturating_add(height) > top {
-                        canvas.fill_rect(x, y, width, height, color);
+                        canvas.fill_rect(x, y, width, height, self.page_background_color(color));
                     }
                 }
                 PaintItem::Image {
@@ -3112,6 +3425,7 @@ impl App {
                 }
                 PaintItem::Text(index) => {
                     let run = &self.page.runs[index];
+                    let color = self.page_text_color(run);
                     let y = run.y + top - self.scroll;
                     let h = run.height();
                     if y + h <= top || y >= bottom {
@@ -3150,23 +3464,16 @@ impl App {
                         );
                     }
                     if let Some(shape) = &run.shaped {
-                        shape.draw(&mut canvas, run.x, y, run.color);
+                        shape.draw(&mut canvas, run.x, y, color);
                     } else {
                         let text = run.text.replace('\u{a0}', " ");
-                        canvas.styled_text(run.x, y, &text, run.scale, run.color, run.italic);
+                        canvas.styled_text(run.x, y, &text, run.scale, color, run.italic);
                         if run.bold {
-                            canvas.styled_text(
-                                run.x + 1,
-                                y,
-                                &text,
-                                run.scale,
-                                run.color,
-                                run.italic,
-                            );
+                            canvas.styled_text(run.x + 1, y, &text, run.scale, color, run.italic);
                         }
                     }
                     if run.underline {
-                        canvas.fill_rect(run.x, y + run.ascent() + 2, run.width(), 1, run.color);
+                        canvas.fill_rect(run.x, y + run.ascent() + 2, run.width(), 1, color);
                     }
                     // Keep search/selection readable on dark pages with light text.
                     for found in self
@@ -3198,6 +3505,7 @@ impl App {
         let bottom = self.height - FOOT_HEIGHT;
         // Chrome is painted last so document content cannot cover the controls.
         self.draw_toolbar(&mut canvas);
+        self.draw_bookmarks_bar(&mut canvas);
         self.draw_find_bar(&mut canvas);
         let profile_warning = self.profile.problem().is_some() && !self.failed;
         let history_warning = self.browsing_history_error.is_some() && !self.failed;
@@ -3272,6 +3580,8 @@ impl App {
             },
         );
         self.draw_browser_panel(&mut canvas);
+        self.draw_bookmark_popup(&mut canvas);
+        self.draw_downloads(&mut canvas);
         self.draw_menu(&mut canvas);
         self.draw_chrome_tooltip(&mut canvas);
         canvas
@@ -3567,6 +3877,10 @@ fn draw_control(
         }
         return;
     }
+    if control.kind == Kind::TextArea {
+        textarea::draw(canvas, rect, y, control, placeholder, focused, color);
+        return;
+    }
     if rect.text_font.is_some() {
         draw_control_text(canvas, rect, y, control, placeholder, focused, color);
         return;
@@ -3644,41 +3958,62 @@ fn draw_control(
         canvas.text(text_x, text_y, &caption, scale, color);
     }
 }
-fn field(canvas: &mut Canvas, editor: &Editor, rect: (i32, i32, i32, i32), focused: bool) {
-    field_at_offset(canvas, editor, rect, focused, editor.offset);
+fn field_themed(
+    canvas: &mut Canvas,
+    editor: &Editor,
+    rect: (i32, i32, i32, i32),
+    focused: bool,
+    palette: ui::Palette,
+) {
+    field_at_offset_themed(canvas, editor, rect, focused, editor.offset, palette);
 }
 // The idle address field starts at the origin; focused editing still follows
 // the caret. Other native fields keep their existing editing offset.
-fn field_at_offset(
+fn field_at_offset_themed(
     canvas: &mut Canvas,
     editor: &Editor,
     rect: (i32, i32, i32, i32),
     focused: bool,
     offset: usize,
+    palette: ui::Palette,
 ) {
     let (x, y, w, h) = rect;
     ui::rounded_rect(
         canvas,
         rect,
         7.0,
-        if focused { ui::CARD } else { ui::SURFACE },
+        if focused {
+            palette.panel
+        } else {
+            palette.panel_alt
+        },
     );
     ui::rounded_border(
         canvas,
         rect,
         7.0,
         if focused { 2.0 } else { 1.0 },
-        if focused { ui::TEAL } else { ui::BORDER },
+        if focused {
+            palette.accent
+        } else {
+            palette.border
+        },
     );
     let cells = ((w - 16) / 12).max(0) as usize;
     let range = editor.range();
     for (i, ch) in editor.chars.iter().enumerate().skip(offset).take(cells) {
         let px = x + 8 + (i - offset) as i32 * 12;
         if focused && range.contains(&i) {
-            canvas.fill_rect(px, y + 5, 12, h - 10, ui::SELECTED);
+            canvas.fill_rect(px, y + 5, 12, h - 10, palette.selected);
         }
         let mut bytes = [0u8; 4];
-        canvas.text(px, y + (h - 14) / 2, ch.encode_utf8(&mut bytes), 2, ui::INK);
+        canvas.text(
+            px,
+            y + (h - 14) / 2,
+            ch.encode_utf8(&mut bytes),
+            2,
+            palette.foreground,
+        );
     }
     if focused && editor.cursor >= offset && editor.cursor - offset <= cells {
         canvas.fill_rect(
@@ -3686,7 +4021,7 @@ fn field_at_offset(
             y + 6,
             1,
             h - 12,
-            ui::INK,
+            palette.foreground,
         );
     }
 }
@@ -3736,6 +4071,10 @@ mod script_tests;
 mod loading_tests;
 
 #[cfg(test)]
+#[path = "app_script_navigation_tests.rs"]
+mod script_navigation_tests;
+
+#[cfg(test)]
 #[path = "app_select_tests.rs"]
 mod select_tests;
 
@@ -3752,7 +4091,7 @@ mod tests {
     fn responsive_density_and_object_fit_reach_layout_paint_links_and_image_controls() {
         let files = Fixture::new();
         let picture="data:image/x-portable-pixmap,P3%204%202%20255%20255%200%200%200%20255%200%200%200%20255%20255%20255%20255%200%200%200%20255%20255%200%20255%200%20255%200%20255%20255";
-        let path=files.write("presentation.html",&format!("<title>Image presentation</title><body style='margin:0;background:#123456'><a href=next.html><img id=contained src='{picture}' style='display:block;width:4px;height:4px;object-fit:contain;object-position:left bottom'></a><img id=density srcset='{picture} 2x' style='display:block'><form action=next.html><input id=button type=image src='{picture}' style='display:block;width:4px;height:4px;border:0;padding:0;object-fit:cover;object-position:left top'></form>"));
+        let path=files.write("presentation.html",&format!("<title>Image presentation</title><body style='margin:0;background:#123456;image-rendering:crisp-edges'><a href=next.html><img id=contained src='{picture}' style='display:block;width:4px;height:4px;object-fit:contain;object-position:left bottom'></a><img id=density srcset='{picture} 2x' style='display:block'><form action=next.html><input id=button type=image src='{picture}' style='display:block;width:4px;height:4px;border:0;padding:0;object-fit:cover;object-position:left top'></form>"));
         files.write("next.html", "<title>Image link reached</title>");
         let mut app = App::new();
         app.open(&path);
@@ -4023,6 +4362,13 @@ mod tests {
         assert_eq!(app.location, before);
         assert_eq!(app.document.title, "Current page");
         assert_eq!(app.address.text(), before.display());
+        let report = app.activity_report();
+        assert!(report.starts_with(crate::http::USER_AGENT));
+        assert!(report.contains("LAST FAILED NAVIGATION:"));
+        assert!(report.contains("https://127.0.0.1:9/"));
+        assert!(report.contains("Page title: Current page"));
+        assert_eq!(app.location, before);
+        assert!(matches!(app.view, View::Page));
         app.show_resources();
         let text = app
             .page
@@ -4035,6 +4381,12 @@ mod tests {
         assert!(text.contains("https://127.0.0.1:9/"), "{text}");
         assert!(text.contains("TRUST FILE:"), "{text}");
         app.show_resources();
+        let missing = files.0.join("missing-page.html");
+        app.open_argument(missing.as_os_str());
+        assert!(app.failed);
+        assert!(app.activity_report().contains("missing-page.html"));
+        assert_eq!(app.location, before);
+        assert_eq!(app.document.title, "Current page");
         app.open(&path);
         assert!(app.last_failed_navigation.is_none());
     }
@@ -4554,8 +4906,8 @@ mod tests {
         app.key(0x46, true, false, false);
         assert_eq!(app.matches.len(), count);
         app.scroll = app.max_scroll();
-        app.pointer_down(app.width - 20, BAR_HEIGHT + 20, false);
-        app.pointer_up(app.width - 20, BAR_HEIGHT + 20);
+        app.pointer_down(app.width - 20, app.chrome_bottom() + 20, false);
+        app.pointer_up(app.width - 20, app.chrome_bottom() + 20);
         assert!(!app.find_open);
         assert_eq!(app.scroll, app.max_scroll());
         app.show_source();
@@ -4575,7 +4927,7 @@ mod tests {
         let mut app = App::new();
         app.open(&file);
         let run = &app.page.runs[0];
-        let (x, y) = (run.x + 1, run.y + BAR_HEIGHT + 1);
+        let (x, y) = (run.x + 1, run.y + app.content_top() + 1);
         app.pointer_down(x, y, false);
         app.pointer_move(x + 20, y, true);
         app.pointer_up(x + 20, y);

@@ -238,6 +238,7 @@ impl App {
         body: Rect,
         panel: &BrowserPanel,
     ) {
+        let palette = self.browser_palette();
         let y = body.y - panel.scroll;
         for (offset, text) in [
             (44, "doubleclick.net, googleadservices.com, googlesyndication.com, google-analytics.com"),
@@ -245,15 +246,21 @@ impl App {
             (182, "Prefix @@ to allow a matching request. Allow rules win over block rules."),
             (198, "Done returns to Settings. Apply there saves your changes."),
         ] {
-            canvas.text(body.x, y + offset, &fit_text(text, (body.w / 6).max(0) as usize), 1, ui::MUTED);
+            canvas.text(body.x, y + offset, &fit_text(text, (body.w / 6).max(0) as usize), 1, palette.muted);
         }
         let list = self.blocking_list_rect();
-        ui::rounded_rect(canvas, list.tuple(), 8.0, ui::CARD);
+        ui::rounded_rect(canvas, list.tuple(), 8.0, palette.panel);
         if panel.focus == Action::RuleList {
-            ui::rounded_border(canvas, list.tuple(), 8.0, 2.0, ui::TEAL);
+            ui::rounded_border(canvas, list.tuple(), 8.0, 2.0, palette.accent);
         }
         if panel.blocking.rules.is_empty() {
-            canvas.text(list.x + 12, list.y + 14, "No custom rules.", 2, ui::INK);
+            canvas.text(
+                list.x + 12,
+                list.y + 14,
+                "No custom rules.",
+                2,
+                palette.foreground,
+            );
             return;
         }
         for (index, rule) in panel
@@ -270,7 +277,7 @@ impl App {
             }
             let selected = panel.selected == Some(index);
             let hovered = panel.hover == Some(Action::RuleRow(index));
-            panel_list_row(canvas, list, top, selected, hovered);
+            panel_list_row(canvas, list, top, selected, hovered, palette);
             canvas.text(
                 list.x + 12,
                 top + 7,
@@ -280,14 +287,14 @@ impl App {
                     "Block"
                 },
                 1,
-                ui::TEAL_DARK,
+                palette.accent,
             );
             canvas.text(
                 list.x + 12,
                 top + 25,
                 &fit_text(rule, ((list.w - 24) / 12).max(0) as usize),
                 2,
-                ui::INK,
+                palette.foreground,
             );
         }
     }

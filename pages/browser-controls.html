@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Browser objects workshop - ChezCat</title>
+<link rel="stylesheet" href="styles.css">
+<style>
+main { max-width: 940px; }
+.hero { background: #17394a; color: #eef8fc; padding: 26px; }
+.hero a, .eyebrow { color: #9fe9d2; }
+.eyebrow { font-size: 14px; font-weight: bold; }
+h1 { font-size: 34px; }
+h2 { font-size: 23px; }
+button { padding: 9px 14px; border: 1px solid #6d9f9a; background: #e4f1ee; color: #17394a; }
+.ready { background: #ccefe0; color: #184d41; padding: 14px; }
+.result { background: #e4edf2; padding: 14px; white-space: pre-wrap; }
+.small { font-size: 14px; color: #5d7180; }
+</style>
+</head>
+<body><main>
+<section class="hero">
+<p class="eyebrow">CHEZCAT / BROWSER OBJECTS WORKSHOP</p>
+<h1>Small browser objects. Real behavior.</h1>
+<p>Try live data attributes, detached images, script-owned navigator properties and independent script jobs in our own interpreter. The notes below describe the new bounded DOM and page-request support in 0.32.</p>
+<p><a href="start.html">Home</a> &middot; <a href="javascript-demo.html">JavaScript workshop</a> &middot; <a href="binary-demo.html">Bytes and collections</a></p>
+</section>
+
+<p class="ready" id="workshop-status">Waiting for JavaScript. Enable it in Settings to run these checks.</p>
+<noscript><p class="card">JavaScript is disabled. Enable it in Settings, or press Ctrl+J, then reload.</p></noscript>
+<p><button type="button" id="run-workshop">Run object checks again</button></p>
+<p class="small">This workshop makes no image or beacon request in ChezCat. The source-assignment and beacon checks are skipped in other browsers so they cannot send data there. These checks do not establish Google Search compatibility.</p>
+
+<section class="card">
+<h2>1. A live view of data attributes</h2>
+<p id="dataset-example" data-site-name="ChezCat" data-visit-count="1">This paragraph owns the data attributes. The checks change them through both dataset and the attribute methods.</p>
+<pre class="result" id="dataset-output">Waiting for dataset checks.</pre>
+<p class="small">A saved dataset reference stays live. A camelCase property maps to a data-* attribute; deleting it removes that attribute.</p>
+</section>
+
+<section class="card">
+<h2>2. An image outside the document</h2>
+<p>An Image is a real detached element with width, height, alt text and attributes. It stays outside document.images and document ID lookup. Connecting newly created images is not implemented yet.</p>
+<pre class="result" id="image-output">Waiting for Image checks.</pre>
+<p class="small">Dynamic image fetching is not implemented. Assigning a source here leaves complete false, natural size zero and currentSrc empty. No successful load event is invented.</p>
+</section>
+
+<section class="card">
+<h2>3. Navigator properties owned by a script</h2>
+<p>A script can add a value or helper function to navigator and remove it afterward. Actual browser facts such as userAgent remain protected.</p>
+<pre class="result" id="navigator-output">Waiting for navigator checks.</pre>
+</section>
+
+<section class="card">
+<h2>4. An honest beacon result</h2>
+<p>The native sendBeacon method currently declines every request and returns false. That means no data was queued; it does not mean a server received anything.</p>
+<pre class="result" id="beacon-output">Waiting for the declined-queue check.</pre>
+<p class="small">An HTTP copy uses its own origin. A local-file copy uses a loopback URL only as a value for validation. ChezCat performs no request in either case. Ctrl+I reports the declined count without the payload.</p>
+</section>
+
+<section class="card">
+<h2>5. Two finite script jobs</h2>
+<p>Two separate classic scripts each count to 6,000. Both should finish. Every script has its own execution allowance, and the page also has an aggregate startup limit.</p>
+<pre class="result" id="jobs-output">Waiting for the two script jobs.</pre>
+<p class="small">These are finite loops, with no timer and no intentional error. Reload the page to run both jobs again. The button above reruns only the object checks.</p>
+</section>
+
+<section class="card">
+<h2>6. Find, inspect and keep a snapshot</h2>
+<p>Selector lists preserve document order. A saved list keeps its original members while new queries see the current attributes.</p>
+<div id="query-example" class="query-group"><p id="query-first" class="query-card"><a id="query-link" href="start.html">First card</a></p><p id="query-second" class="query-card">Second card</p></div>
+<pre class="result" id="query-output">Waiting for DOM query checks.</pre>
+<p class="small">Try querySelectorAll, matches, closest, indexed reads, item and forEach. ChezCat uses its existing supported CSS selector grammar. These NodeLists are static snapshots; the new getElementsByTagName collections stay live.</p>
+</section>
+
+<section class="card">
+<h2>7. What 0.32 adds</h2>
+<p>Supported createElement/createTextNode and appendChild/insertBefore/removeChild operations maintain real parent, sibling and connected-state relationships. Live tag collections expose indices, length, item and namedItem. Unique named forms and their owned controls can be found, and a supported control's focus method requests actual browser focus. Parsed script elements expose their nonce without rendering their contents or running again.</p>
+<ul>
+<li>DOM growth remains bounded to 256 added nodes, depth 128 and 1 MiB. Connecting new controls, images or styles and arbitrary HTML injection remain unavailable.</li>
+<li>HTTP and document.cookie share memory-only, exact-host cookies with Path, expiry, Secure, HttpOnly and conservative SameSite checks. Nothing is saved to the profile; local/internal documents have no cookie store.</li>
+<li>Supported Location writes and assign/replace/reload queue same-origin HTTP(S) navigation after the script job, with origin and request-blocker checks at every request/redirect hop. Created external classic scripts use actual requests with the existing origin, CSP, blocker, MIME and source-size limits.</li>
+<li>Pending script loads delay the final window load; their completion handlers run first. Stop or replacement navigation cancels stale work. Dynamic inline scripts, modules and LINK stylesheet loading remain unsupported.</li>
+<li>Assignment/ternary parsing now permits 4,096 pending frames. Recursive syntax stays at 64 levels, evaluation at 128 and calls at 32. Supported operators, numeric/string helpers and Error conversion use ordinary valueOf/toString behavior; full ECMAScript conversion remains incomplete.</li>
+</ul>
+<p class="small">These notes describe supported subsets, not additional checks run by this workshop. The existing object/query checks above still exercise their original behavior.</p>
+</section>
+
+<section class="card">
+<h2>8. Capture the page and its actual activity</h2>
+<pre class="result">ChezCat.exe URL --activity-report activity.txt --save-source page.html --wait-ms 2500</pre>
+<p>--save-source writes the displayed document's original decoded source as UTF-8, before script DOM changes. It works alone or with a report/render, after the optional bounded wait. Failed navigation creates no source file; a diagnostic report can still be saved with a nonzero exit status. Use distinct output files. These headless runs ignore the personal profile unless a profile directory is explicit, and never read or write saved history.</p>
+<p class="small">The User-Agent is ChezCat/0.32. Private Google homepage replay advanced past element creation, HEAD lookup and named forms, then reached unsupported LINK behavior, two cross-origin gstatic script requests and an oversized same-origin XJS source. That one captured HTTP 200 asset was 128,525 encoded bytes and 369,762 decoded bytes, exceeding the 64 KiB per-script and 256 KiB combined-source limits. Loopback replay changed the origin/cookie context, used no images and returned 404 for uncaptured paths. The separate live Search attempt returned HTTP 429/CAPTCHA and was not retried or bypassed. Google Search is not verified end to end.</p>
+</section>
+
+<p class="small">F12 opens the inspector. Ctrl+I shows the script log and capability limits. The README and FEATURES file describe the remaining DOM, persistent-storage and network gaps. Final release evidence is in tools/release-checks-0.32.json.</p>
+<p><a href="start.html">Back to Home</a></p>
+
+<script>
+// Original examples for ChezCat's bounded native-object bridge.
+var workshopPassed = 0;
+var workshopTotal = 0;
+var workshopJobsComplete = false;
+var workshopImage = null;
+var workshopCreatedImage = null;
+var workshopChezCat = navigator.userAgent.indexOf('ChezCat/') === 0;
+
+function workshopById(id) { return document.getElementById(id); }
+function workshopCheck(lines, condition, label) {
+  workshopTotal++;
+  if (condition) workshopPassed++;
+  lines.push((condition ? 'PASS  ' : 'FAIL  ') + label);
+}
+function workshopStatus() {
+  workshopById('workshop-status').textContent = workshopPassed + ' / ' + workshopTotal +
+    ' object checks passed. ' + (workshopJobsComplete ? 'Both finite script jobs completed.' : 'Script jobs are still pending.');
+}
+function runQueryWorkshop() {
+  var lines = [], passed = 0, total = 0;
+  function check(condition, label) {
+    total++;
+    if (condition) passed++;
+    lines.push((condition ? 'PASS  ' : 'FAIL  ') + label);
+  }
+  var group = workshopById('query-example'), first = workshopById('query-first'), second = workshopById('query-second');
+  first.className = 'query-card';
+  second.className = 'query-card';
+  var list = group.querySelectorAll('.query-card,#query-second');
+  check(list.length === 2 && list[0] === first && list.item(1) === second && list.item(2) === null,
+    'Ordered, duplicate-free snapshot and indexed access');
+  check(first.matches('div > p.query-card') && workshopById('query-link').closest('.query-group') === group,
+    'Element matching and nearest ancestor');
+  var names = [];
+  list.forEach(function (node, index, snapshot) { if (snapshot === list) names.push(node.id + ':' + index); });
+  check(names.join(',') === 'query-first:0,query-second:1', 'forEach receives element, index and the saved list');
+  second.className = 'query-muted';
+  check(list.length === 2 && group.querySelectorAll('.query-card').length === 1, 'New queries see changes while snapshots keep their members');
+  check(first.getAttribute.call(workshopById('query-link'), 'href') === 'start.html', 'Borrowed attribute method inspects another element');
+  check(group.querySelector({toString:function () { return '#query-link'; }}) === workshopById('query-link'),
+    'Selector arguments use ordinary string conversion');
+  var rejected = false;
+  try { group.querySelectorAll('['); } catch (error) { rejected = error.name === 'SyntaxError'; }
+  check(rejected, 'Invalid selectors report SyntaxError');
+  second.className = 'query-card';
+  workshopById('query-output').textContent = passed + ' / ' + total + ' DOM query checks passed.\n' + lines.join('\n');
+  console.log('DOM query workshop: ' + passed + ' / ' + total + ' checks passed.');
+}
+function runObjectWorkshop() {
+  workshopPassed = 0;
+  workshopTotal = 0;
+  var lines = [];
+  var element = workshopById('dataset-example');
+  var data = element.dataset;
+  element.setAttribute('data-site-name', 'ChezCat');
+  workshopCheck(lines, data === element.dataset && data.siteName === 'ChezCat', 'Stable identity and attribute read');
+  data.visitCount = 2;
+  workshopCheck(lines, element.getAttribute('data-visit-count') === '2', 'Dataset write becomes an attribute string');
+  element.setAttribute('data-visit-count', '3');
+  workshopCheck(lines, data.visitCount === '3', 'Attribute writes update the saved dataset view');
+  var keys = Object.keys(data);
+  var enumerated = [];
+  for (var name in data) enumerated.push(name);
+  workshopCheck(lines, keys.indexOf('siteName') >= 0 && keys.indexOf('visitCount') >= 0 && enumerated.join(',') === keys.join(','), 'Object.keys and for-in enumerate the live attributes');
+  data.temporaryNote = 'remove me';
+  delete data.temporaryNote;
+  workshopCheck(lines, !element.hasAttribute('data-temporary-note') && !('temporaryNote' in data), 'Delete removes the reflected attribute');
+  lines.push('Current keys: ' + keys.join(', '));
+  lines.push('data-visit-count: ' + element.getAttribute('data-visit-count'));
+  workshopById('dataset-output').textContent = lines.join('\n');
+
+  lines = [];
+  if (workshopImage === null) {
+    workshopImage = new Image(64, 32);
+    workshopCreatedImage = document.createElement('img');
+  }
+  var image = workshopImage;
+  image.id = 'workshop-detached-image';
+  image.alt = 'Detached workshop image';
+  workshopCheck(lines, image instanceof Image && workshopCreatedImage instanceof Image && image !== workshopCreatedImage &&
+    image.width === 64 && image.height === 32 && image.parentNode === null && !image.isConnected &&
+    image.ownerDocument === document && document.getElementById(image.id) === null && document.images.length === 0,
+    'Real distinct image elements stay outside the document');
+  if (workshopChezCat) {
+    image.src = 'images/chezcat-icon.png';
+    workshopCheck(lines, image.getAttribute('src') === 'images/chezcat-icon.png' && !image.complete &&
+      image.naturalWidth === 0 && image.naturalHeight === 0 && image.currentSrc === '',
+      'Source is reflected without claiming a completed download');
+  } else {
+    lines.push('SKIP  Source assignment is only exercised in ChezCat.');
+  }
+  lines.push('Size: ' + image.width + ' x ' + image.height + '; connected: ' + image.isConnected);
+  lines.push('complete: ' + image.complete + '; natural size: ' + image.naturalWidth + ' x ' + image.naturalHeight);
+  workshopById('image-output').textContent = lines.join('\n');
+
+  lines = [];
+  var originalAgent = navigator.userAgent;
+  navigator.chezcatWorkshopValue = 7;
+  navigator.chezcatWorkshopHelper = function (value) { return this === navigator ? value + this.chezcatWorkshopValue : -1; };
+  workshopCheck(lines, clientInformation.chezcatWorkshopValue === 7 && navigator.chezcatWorkshopHelper(5) === 12,
+    'Ordinary values and callable helpers share navigator identity');
+  navigator.userAgent = 'workshop attempted override';
+  workshopCheck(lines, navigator.userAgent === originalAgent, 'Actual userAgent remains unchanged');
+  delete navigator.chezcatWorkshopHelper;
+  delete navigator.chezcatWorkshopValue;
+  workshopCheck(lines, !('chezcatWorkshopHelper' in navigator) && !('chezcatWorkshopValue' in navigator),
+    'Script-created properties can be removed');
+  lines.push('Reported browser: ' + navigator.userAgent);
+  workshopById('navigator-output').textContent = lines.join('\n');
+
+  lines = [];
+  if (workshopChezCat) {
+    var destination = location.protocol === 'http:' || location.protocol === 'https:' ? location.origin : 'http://127.0.0.1:8765';
+    var queued = navigator.sendBeacon(destination + '/__chezcat_workshop_declined', 'local workshop');
+    workshopCheck(lines, queued === false, 'sendBeacon returned false: no data queued');
+    lines.push('Queued: ' + queued + '. No request was sent.');
+  } else {
+    lines.push('SKIP  This check does not invoke sendBeacon outside ChezCat.');
+  }
+  workshopById('beacon-output').textContent = lines.join('\n');
+  runQueryWorkshop();
+  workshopStatus();
+  console.log('Browser objects workshop: ' + workshopPassed + ' / ' + workshopTotal + ' object checks passed.');
+}
+workshopById('run-workshop').addEventListener('click', runObjectWorkshop);
+runObjectWorkshop();
+</script>
+<script>
+var workshopJobOne = 0;
+for (var workshopFirstIndex = 0; workshopFirstIndex < 6000; workshopFirstIndex++) workshopJobOne++;
+workshopById('jobs-output').textContent = 'First script: ' + workshopJobOne + ' / 6000. Waiting for the second script.';
+</script>
+<script>
+var workshopJobTwo = 0;
+for (var workshopSecondIndex = 0; workshopSecondIndex < 6000; workshopSecondIndex++) workshopJobTwo++;
+workshopJobsComplete = workshopJobOne === 6000 && workshopJobTwo === 6000;
+workshopById('jobs-output').textContent = (workshopJobsComplete ? 'PASS  ' : 'FAIL  ') +
+  'Both independent jobs completed.\nFirst script: ' + workshopJobOne + ' / 6000\nSecond script: ' + workshopJobTwo + ' / 6000';
+workshopStatus();
+console.log('Browser objects workshop: two finite jobs completed = ' + workshopJobsComplete + '.');
+</script>
+</main></body>
+</html>

@@ -1,0 +1,724 @@
+{
+  "schema_version": 1,
+  "project": "ChezCat",
+  "version": "0.33.0",
+  "stage": "final",
+  "assembled_utc": "2026-11-10T21:45:51.881946+00:00",
+  "scope": "Google Search compatibility only. Live Google Search remains unverified end to end.",
+  "baseline": {
+    "filename": "ChezCat_0_32(2).zip",
+    "sha256": "3397d61a264a150b3d102fb02c7f3ddbdb9840b4b3ac708479d969b59631036d",
+    "manifest_entries_verified": 286,
+    "original_files_retained": 287,
+    "removed_files": [],
+    "rust_tests_passed": 720,
+    "node_comparisons_passed": 741,
+    "negative_cases_passed": 204,
+    "older_implementation_substituted": false
+  },
+  "preservation": {
+    "directories": {
+      "assets": {
+        "files": 4,
+        "byte_identical": true
+      },
+      "trust": {
+        "files": 2,
+        "byte_identical": true
+      },
+      "notices": {
+        "files": 16,
+        "byte_identical": true
+      }
+    },
+    "profile_settings_history_files_unchanged": [
+      "src/profile.rs",
+      "src/app_history_ui_tests.rs",
+      "src/app_history_tests.rs",
+      "src/app_history.rs",
+      "src/app_browser_ui.rs",
+      "src/history.rs",
+      "src/profile_bookmarks.rs"
+    ],
+    "third_party_cargo_packages": 0,
+    "cargo_lock_packages": 1,
+    "external_browser_javascript_renderer_crypto_codec_runtime_added": false,
+    "trust_file_sha256": "2a24ed0679ee42f3efc2c8931645b4db87c97c8725a17c9b3e7da8772df99693"
+  },
+  "builds": {
+    "native": {
+      "target": "x86_64-unknown-linux-gnu",
+      "sha256": "fc675252b6fff43d8f83662ddd4a8841db27cd6815fd6d0f0ef74912c2efe957",
+      "bytes": 3567976,
+      "executed_in_final_app_checks": true
+    },
+    "windows": {
+      "passed": true,
+      "sha256": "95df6e9ec50e75e1d0b857747766943ff09f6747fd526030736e40e9dd20cadc",
+      "bytes": 3867136,
+      "machine": "x86_64",
+      "format": "PE32+",
+      "subsystem": "Windows GUI",
+      "versions": [
+        {
+          "resource": [
+            16,
+            1,
+            1033
+          ],
+          "file_version": [
+            0,
+            33,
+            0,
+            0
+          ],
+          "product_version": [
+            0,
+            33,
+            0,
+            0
+          ]
+        }
+      ],
+      "icons": [
+        {
+          "id": 1,
+          "bytes": 31046,
+          "sha256": "ad6d50570385380d902ce744bf6e66af1cc5d4afa8d30f4687edd8c133dae3d9"
+        },
+        {
+          "id": 2,
+          "bytes": 67624,
+          "sha256": "6ca22eaf3505af36c4ca437b728206db708526bec588f945da21fbe6fdbf5326"
+        },
+        {
+          "id": 3,
+          "bytes": 16936,
+          "sha256": "b7a21e65c7a1bc8205290afbf9f55628172f3cada9109e23577e87a2b936417b"
+        },
+        {
+          "id": 4,
+          "bytes": 9640,
+          "sha256": "f2c66915bd554a48c25bbdb9f6f05b758018fd7a9a9844136cf8b0fc357ef936"
+        },
+        {
+          "id": 5,
+          "bytes": 4264,
+          "sha256": "8318191b779a42712dd925665449df039afc4576d278eb326ac121df8f351053"
+        },
+        {
+          "id": 6,
+          "bytes": 2440,
+          "sha256": "a1092e61be13234ed786833a818ffea431839d589787a16def85e04240ff93d6"
+        },
+        {
+          "id": 7,
+          "bytes": 1128,
+          "sha256": "a67111ab70c59207f2065e349905c5873ecbe2f1a3d3dd63648d5e59837ec9cd"
+        }
+      ],
+      "all_seven_icon_payloads_match_original": true,
+      "imports": [
+        "api-ms-win-core-synch-l1-2-0.dll",
+        "bcryptprimitives.dll",
+        "bcrypt.dll",
+        "comdlg32.dll",
+        "dwmapi.dll",
+        "GDI32.dll",
+        "KERNEL32.dll",
+        "msvcrt.dll",
+        "ntdll.dll",
+        "ole32.dll",
+        "SHELL32.dll",
+        "USER32.dll",
+        "WS2_32.dll"
+      ],
+      "imports_system_only": true,
+      "imports_match_032": true,
+      "delay_imports": [],
+      "runtime_executed_on_windows": false,
+      "scope": "Static PE/import/version/icon verification only"
+    },
+    "input_hashes": {
+      "Cargo.lock": "aafcf7d941bc501b688c4a35ae941e6407fe1cd38e76566760d9c0791706c3e3",
+      "Cargo.toml": "ec142c99aa3e8ef7eb77e8b181b3e2f58ebaae6ef38d862a459e6e4050fe2e04",
+      "build.rs": "5a3202737db6c4731088e38bfa5c13f09d36cd7af30b6066f44b425530dc62bc",
+      "pages/start.html": "2550373237d6f4988d0144cd9c4a793bb557419bb510268c942a9cbd498c3275",
+      "resources/SHA256SUMS.txt": "a5bff503d11ffbe2dea0e9e783d4f37f766acb9826503a2a53534b4afa48a2eb",
+      "resources/chezcat-x64.o": "b1a5a74ae9256f470b3909e1acc037326b1e895d3aa7758331e57cd13da73c3f",
+      "resources/chezcat.rc": "025d08afdab8481d52a1f8cba66594a663e0de16251983f57233460789813e8d",
+      "resources/chezcat.res": "8cc7daef0c248b985157386b71bdae3a0494e9d00f1510a4cf56f578aa2f6c3f",
+      "src/app.rs": "aecd05828be868850706d1276dd04ce6bce063723ac9ee2cdb8442f6b4bc787b",
+      "src/app_animation.rs": "efb7e3b3f53bfa5c453942d9fcb627d9951476d74163ee521bc32614f612f58a",
+      "src/app_appearance.rs": "09c0f7e1093146f85845aa8132ac7aa648f79a37e1b67908a68db19fe5876d21",
+      "src/app_appearance_ui.rs": "e6ebb0c43cdb250adda7ed6a7b2a3eacb5318ca11d6643887eada7920b3320f9",
+      "src/app_attachment_tests.rs": "92275fc7f9422da976926cbcbb92c3e2ef2cf5b8cf32e7ea5fcc414b4648fa58",
+      "src/app_blocking_ui.rs": "39deccba93a1b038dd2d3bd75898a2394cbabcc6246dd06106b0a4915799cd4f",
+      "src/app_bookmark_tree_ui.rs": "d47fc0f6446059cff037960c47c773d9be3698be12b357042a39c76785dc3b23",
+      "src/app_bookmarks_bar.rs": "c153d12adcbacc8918802a3ba6f41c1cbee14ff884c5bd74b7ebb670ad3b499d",
+      "src/app_browser_ui.rs": "c1b15417cf9027257e147dfda8a76a68418832669f33f31f2bdfc2732940323f",
+      "src/app_browser_ui_tests.rs": "25cdc0434f9a54f5d94b2c45c9404b31afb805f97ffd94f4e8027f772c36c3d8",
+      "src/app_chrome.rs": "7f66010081f1cfc9cf449f22f6f02c64fed74d68db73bed3ec1e264ca182f055",
+      "src/app_chrome_tests.rs": "58acd5ed459ec6e085713d737cb00e28f1772a2297a3dd81e615d4c2f2c65119",
+      "src/app_downloads.rs": "f33b4cb6168704093f133de6980ddd67e081a9b9f5d5314181730693d83b9f0d",
+      "src/app_font_tests.rs": "ff4c3456b35f568d97c10acc8cfe3aaf1476e5202bb0ad99e45bc408f6d742a2",
+      "src/app_geometry_tests.rs": "7b81d53696c87637f38d27c631ecac95487a54025980524d0d687ef33fe5a0af",
+      "src/app_history.rs": "1f1e2828c9fcb9a0e1ed1512ee81f3b7f8e1aaf763c6ee37529722ef14252c2e",
+      "src/app_history_tests.rs": "7f2539e0ae38355e38f3ad9f8e6447aee32df36aca9a3f75ffc858091a8ca9c4",
+      "src/app_history_ui_tests.rs": "a2f8c639c89014df6aceed90f762d4fd96f4d9c9fb7e081fa5b2cf829940eb7e",
+      "src/app_inspector.rs": "560fd2ad4441ac98c8857342176ef1311c063247cfaa0f0f729c487e2ac6c284",
+      "src/app_inspector_tests.rs": "57ad287286cb1a89bf07ff3e5ca9a5a5454209dcfaa2c7689051523b26980cf8",
+      "src/app_keyboard.rs": "0a65d73f284683ade8cae639daf0db96677580d1fb4102605e11b06192575599",
+      "src/app_keyboard_tests.rs": "994590618587a255369372cd6042545eda1434825f605a24764295ffecf316d0",
+      "src/app_loading_tests.rs": "ee7f12cbb61207bf1a61e04dc9304d2901b574ece5a6d92cc035efc5e0a198dd",
+      "src/app_network_tests.rs": "d0a433ae86d6b1049c9c852b17cbd39f03a49c456d1bdb33d50880820ee667b7",
+      "src/app_post_tests.rs": "a9d944f27a44e5063de4f0cae8f676e81e05fcb147b57fab56afce187d73e3fb",
+      "src/app_script_navigation_tests.rs": "60751ac4a97e29236948475b8703299999c4812b57a607aa0d718a094dcfca52",
+      "src/app_script_tests.rs": "3e244546981ad835667d975d53bee1649dc5d42fad3deffded622a17ee13bb2e",
+      "src/app_scripts.rs": "40d288ec1e227ccb8fa8e75a44f58473fb03018e9967a9c97cdac81f228754d7",
+      "src/app_search_tests.rs": "78c1ba5380f727067611da27c102d890ea81cfb68f96a46e823715004debab48",
+      "src/app_select_tests.rs": "d249d83365f2efb0836bf77d6d8de48c3a33f56b194701a1de25dad799fed201",
+      "src/app_stylesheets.rs": "5f7828ee24e705f9b8e8fa0f72f6a7ce758b5b5acf4d59ef73cca0277e4f4dd7",
+      "src/app_textarea.rs": "8a004c070dad44e5d78761736240cda14802c8bae40245995cac77dc38270726",
+      "src/arguments.rs": "e29e2b2220b5156aa41230f0843d27eb39e3d64384a7c220ba8da9478a3625f9",
+      "src/array_ops.rs": "46a62d39021e5deb151c498bac3ee9c6dfbd3b2321b67793f1fa71c5dd0a818d",
+      "src/binary_data.rs": "bc5268ed8956c2947b5ba107cb5cc8dcf1ad6b74889fbd68e055b24ef6cdc294",
+      "src/blocking.rs": "57801f4a13d71b89be76f50a746c503ea36980547f56c2b6366fd69a43c77bda",
+      "src/collections.rs": "9dff7bf5c42b059939b0ae36a1bb070616ecba57d1c1692f5b9b811e32fa2c49",
+      "src/compression.rs": "0ca3ce3b7c6c7e337da5375ca4373c94e28d94ac3b494f4fd630a06351db3dee",
+      "src/cookies.rs": "487bc04a6dcf7a49ea9060ec1c3215725fc7ba814e69e0b891e007e593404ffb",
+      "src/crypto_aead.rs": "d641a5d889145ed3a8e1e83e4497fbdbfb297dc9b175c38455e0c6a14ce570e4",
+      "src/crypto_aes_gcm.rs": "b92e15642c254703645c37f517486404ab5ce27308c93dcd6d8edc96d98c5382",
+      "src/crypto_ec.rs": "fdb04839c4e8e5b9e84e40597a8a9316754ed8760ff8d938c71305f2143dedce",
+      "src/crypto_hash.rs": "bb9d56e49ad4fc92d28c263e8d702bd7d04e69768c4bb4f921aa95575f22d919",
+      "src/crypto_p256_ecdh.rs": "9b60c00c5f9050e61845a7743ac3c6a6f48abec844379bf3baff008c33e1bdf4",
+      "src/crypto_rsa.rs": "835d791c73cb14c52fa4df90f0c0dad882775469cc216731efd29ccc81864a87",
+      "src/crypto_sha512.rs": "cf29ddb53480b3b18438d265c9990191d233d003f88050b6b3ec9cec718c6d68",
+      "src/crypto_x25519.rs": "785647a427573747fe3d69a667d2711ece578f38d9d7b01b18f24d4239ed3709",
+      "src/csp.rs": "1081554927b4779af2eab7eb33498685fe24a82843c29c65800cb3f45c486df7",
+      "src/css.rs": "313db258f19a3a1b2f957058bf923a4a4ae41070482f532734944c5839d60d68",
+      "src/diagnostics.rs": "4ccc9686c31667794b4991e5bcc7baf1a482ab44d6b0e6a66c3d0bc9b93a2be8",
+      "src/downloads.rs": "5b3188cb0cdca1d26ebafb18cb52cd7fb8b938df2195ea2936ffbec4be1475ce",
+      "src/downloads_tests.rs": "df2516b0f34745c3f2f7a7a1e2112f97ecec6cf22f2fd163b033f79bb23e3cdd",
+      "src/editor.rs": "5ee1253059b7211c307ade5a19b678855d1796a77c4b8c53ef5dc8de3625b77f",
+      "src/font.rs": "c971fa32acfce64f2afff749dded082383698cacdcc854c5490ad8debef3dc22",
+      "src/font_tests.rs": "7a590a040b7e9ba8f7c387b391e51feef759a0e84d1f27de77cb6de55fea55c0",
+      "src/fonts.rs": "8f592d56257eb932229d1bbc9013b06d709cbd5312210897dd03b2b5184ad820",
+      "src/forms.rs": "61be715af084f6ef1dce41544208c369ebb63b411ef9c3ed7a57ef032ef3f27a",
+      "src/gif.rs": "83423a5cc2654feaf6acdca1f3246f338beb28bf061c60e650847a24c5abf67c",
+      "src/history.rs": "f8eceb098ec2be0077e60b499dd6b0e3e2cf2ef2c8fc9a0a9bf28f77bc07eb09",
+      "src/host_objects.rs": "37ab85c644456b497cb547eb9b70815182cee460e8fc8a393339b800632804ce",
+      "src/html.rs": "19b37732a6a0b3277ab7d79c35e0e47744b60cff48c1a2e68b78c9d3ee11993d",
+      "src/http.rs": "103d51a236ae718bac2b7886d9e0270b00fd3acade9f4e949587fb58b321b9af",
+      "src/http_network_tests.rs": "e1b71391e7d3fd5635945d01bc78abdff9f3089533e1672efa98df9419c3bb04",
+      "src/image.rs": "d656fd2a5d2935419a7fa24d9bcce7fb2ea138848667ce67a6d863be48d4f05e",
+      "src/image_bmp.rs": "9004b88091321e1978b700d839519710355a4120a455d4d8f77c232d30592a96",
+      "src/image_data.rs": "df58e082004b08dcc504b5d3e11792a2dc5c7429cc8c78e4477e1976a8799cae",
+      "src/image_legacy.rs": "e8b5104c56954e2d015158ee4f3132670d53e91dc2e2ad853edcda5bbf2146d7",
+      "src/image_metadata.rs": "e286202d4feac265d2400c8cdb75ee0d3b38043aed12778e419224887b3720d9",
+      "src/image_metadata_tests.rs": "2dd2d515d40cee492bdd4b499620a657fab79046af2f4f906b7872f5ee3f161b",
+      "src/image_png.rs": "8e2dc6e41e2d7aebc90e15589d1a101b3c7a3231b78434e8e7af3eeda52eeb90",
+      "src/image_selection.rs": "5e5dd5be7aaa5fd827722d89e195238620e43d61d39eb7cc7899a4166613a537",
+      "src/image_simple.rs": "286772469ec9cf68eabc8fac2161eb49c9bd32ddba4f56134a720c2eef15d51c",
+      "src/image_svg.rs": "f776df096dd2de78c6a7cb60929e05a1956df99d489b4779d72c3b95451dca49",
+      "src/image_tiff.rs": "7a89112f9b395d36244e78e0686a2177ceafbb015c4c0f88a64427bbdaea5071",
+      "src/image_vp8.rs": "27eca32fb572dd2868050dba75848578d078f2a89ccb60a06c7f6abd9606f537",
+      "src/image_vp8_tables.rs": "369b5cb44434a83c56862ad1b6a440dbff2ffa9ec224b762e87aa19a9e04d461",
+      "src/image_webp.rs": "6d7c30903e7b675e0abe2b9190ac9ac413bfbef2dcf4822a1d1dbd0ed406e9a5",
+      "src/javascript.rs": "286e6cd31a73214758370b2ccc31dc1c2b2de9351769226c2c591f8ec50ca686",
+      "src/jpeg.rs": "3f3ed9bceb10fc9143b889a7dbd52a581519a045ddf96c37374697751a9766df",
+      "src/json.rs": "fc44e83ac8d7a6fb16ad3950e92098e24ebdf4f926b112378c5d9e38cc947298",
+      "src/layout.rs": "5024219cdd1c8586d2c2ea92324090525b6860fc88b232eecb8add8c8ee67dcd",
+      "src/loader.rs": "6b9be5e55e06187217c428e34cadd14aa47adabc9fa6b4027bf85fc6924e8041",
+      "src/main.rs": "377ac64b8f1ebd2550cbb27823ed96b2a2393c30def9803949db5397616d5fc1",
+      "src/navigation.rs": "d5cc29072609f12ff338280f78fcc7db2fa5b96e5227686ac513487f774872f9",
+      "src/network_trace.rs": "03a519d4fcca29f5f3a2d409f5437196ff9f7f23ebe7fa99ea43740b52bcb8da",
+      "src/paint.rs": "dd66dd794696854800a5d127e640fced7ab73ccfa4b1dbda98f4453684e10e73",
+      "src/paint_area.rs": "38a6c892e83d6c6df99c26c2c47af21ed7ef9c9e351b38a0328bb3bc62f502b0",
+      "src/paint_resample_tests.rs": "1aac8e785be29c7b552293d101f7259b581fa84de4964af21f61976b687c705a",
+      "src/platform.rs": "d448c4dfde86261e05c7966db35211bc1f2e354148caf11a7d56053382dcbc3d",
+      "src/platform_inspector.rs": "e9a70614a9fb1a913af21a022101ef647c35b3c82657f5ef3f9c8d9e14ec6d63",
+      "src/platform_keyboard.rs": "4dbf06d650b92b5cd2f0abd4c87d081f4549970525de426b45ea7ae3046fe553",
+      "src/profile.rs": "3557ee1063a6a02da83503f25f99bf80206fa13c22f29b907a0f6bb7b98e3031",
+      "src/profile_bookmarks.rs": "ba5681d6c0b4d1ec110a53e7be2e79529db14495c48cbe376b25a2c3882587c8",
+      "src/prototypes.rs": "760ef9ece1a0e65c4f557e9a62cf54b214c7b8c12095c318a613f4565b66450c",
+      "src/random.rs": "fdb170eed9d2cb99857e2054f5a18ab32fee6a962449a04c8e23ecd63252f986",
+      "src/regexp.rs": "39d958b4eadbfa48777ccdb68e5cf5c03e98fa90651a13c7a645457e538509f0",
+      "src/script_collections.rs": "57ccaeabf7d3746a3e0404134a9bcf587ce8fe00b46bb7ca7645a70ec3e65f67",
+      "src/script_compat_tests.rs": "cea994c4feabec82bdd8d3899f85389688c6ef2966058df8de3349a9ed3420b9",
+      "src/script_dom_compat.rs": "c6c7b397681e48e89a4dd212889325d2dc09262e2107a1eba8a71d0c946e5b00",
+      "src/script_dom_tree.rs": "023ee74184d67e8d9e20e02220ef7440f0a34050e8289ef42c8a04a021297044",
+      "src/script_forms.rs": "be3c52fb9c21f38ec8c41bb8e6847741f343979c4758716f71de04b45faee20d",
+      "src/script_geometry.rs": "8465671ee32d661b640652d3f32651324563861414254cc4bc2fe2c2042f633d",
+      "src/script_navigation.rs": "9008308d5c595cd3f2e40d8b4ed24da0a24dbce5954198f3b8d9933ffa809e65",
+      "src/script_queries.rs": "fc0737691d989c3f4db3a4c58d52c5efde288ef7e57683f566dae3d9f2633c73",
+      "src/script_resources.rs": "c61ff1a901e99d974cc4ebfef88998c0de128491044e8e0bfcc00235a887ce54",
+      "src/script_stylesheets.rs": "c59ca272339624e4c850da994b1e5201f583f508e6badeb463de3a5d33fd2894",
+      "src/scripting.rs": "632ca56cb6cafa4c234cb01d41bad571895949ed00c6357239e5132e59cb86dc",
+      "src/text.rs": "c218e6ad37cba07e6bdfa5bd97763dd8e0cf1ae5a2383a12de0ee05288a309b7",
+      "src/text_encoding.rs": "f14ce08c6aa97bdedd8822b34934451ce29c74392fb4186aeb40abae9497a5e6",
+      "src/text_tests.rs": "0edd7babb7872cde1326190116163accd362e6514f7af2d1fea5f85a3024dfcf",
+      "src/tls.rs": "388485392ec14f9d9ce9edd8931ae47fd1cb0e8d3eba3d60ad7dae35097ad513",
+      "src/tls12.rs": "58e92f1c6cff3ae514edf6f0f629e5d9666d74e580e5a80b2c77f8673a0ec3d5",
+      "src/tls12_cbc.rs": "4cd0420d98b9f16fe1242f57c403840191a8ea65b49a78ec0e79cdbbd5a9e147",
+      "src/tls12_crypto.rs": "c4f68743779dea32f7569b87e8e056c26081656816169d37ecd2db716783205b",
+      "src/tls_crypto.rs": "5e582d5d1d787e6c73768bab60522ea45f3514d2aeff0078ac7dc2a256b7aeb9",
+      "src/trust.rs": "f8377a4b1fbb579c305e331cbcfc06af64293bbac67810dec79ac15b87481941",
+      "src/ui.rs": "0d309de1f0fe1ad75f7371043d131d2fbce5f6a243d04f633c2dde86c91b1888",
+      "src/url.rs": "cb6cf54eb3473ec479262b82f8d4a14bdb04b7fed6e30af753ece4d0ffe9069e",
+      "src/x509.rs": "0496effa9ae3789be0b316016d1b4d30b3f9f2874c68e6abcfdb5d4e1bb2a25b"
+    },
+    "input_hashes_rechecked_after_checks": true
+  },
+  "gates": {
+    "formatting": true,
+    "native_all_target_strict_clippy": true,
+    "windows_all_target_strict_clippy": true,
+    "native_release": true,
+    "windows_x64_release": true
+  },
+  "rust_tests": {
+    "passed": 750,
+    "failed": 0,
+    "all_720_baseline_test_names_retained": true,
+    "new_tests": [
+      "app::search_tests::form_action_csp_blocks_native_submits_with_scripting_enabled_or_disabled_and_script_submits",
+      "app::search_tests::input_search_renders_results_follows_cross_origin_result_and_searches_again",
+      "app::search_tests::script_form_cross_origin_action_and_redirect_make_no_forbidden_request",
+      "app::search_tests::script_form_submit_bypasses_required_but_stop_discards_the_queued_request",
+      "app::search_tests::scripted_post_preserves_body_and_reload_confirmation",
+      "app::search_tests::textarea_enter_edits_lines_and_submit_cancellation_preserves_the_current_document",
+      "app::search_tests::textarea_scripted_enter_submits_snapshots_and_subsequent_searches",
+      "app::search_tests::textarea_search_renders_results_follows_cross_origin_result_and_searches_again",
+      "app::style_jobs::tests::dynamic_stylesheet_discards_removed_or_stopped_inflight_completion",
+      "app::style_jobs::tests::dynamic_stylesheet_enforces_csp_origin_mime_integrity_and_redirect_origin",
+      "app::style_jobs::tests::dynamic_stylesheet_reflects_applies_before_load_and_keeps_dom_order",
+      "app::style_jobs::tests::stop_flushes_a_stylesheet_mutation_before_the_next_poll",
+      "app::textarea::tests::textarea_wraps_without_changing_values_and_hit_testing_tracks_visible_rows",
+      "csp::tests::form_action_has_no_default_fallback_and_uses_all_installed_policies",
+      "csp::tests::linked_styles_use_style_fallback_nonces_and_intersecting_policies",
+      "csp::tests::restrictive_embedder_headers_keep_classic_scripts_at_exact_origin",
+      "forms::tests::textarea_required_readonly_disabled_and_utf16_limits_are_preserved",
+      "forms::tests::textarea_values_edit_normalize_submit_and_reset_without_changing_the_default",
+      "html::tests::duplicate_attributes_keep_script_and_stylesheet_nonce_evidence",
+      "http::tests::classic_script_corp_checks_exact_origin_and_conservative_site_scope",
+      "http::tests::classic_script_origin_policy_is_secure_and_does_not_change_general_resources",
+      "http::tests::document_policy_guards_redirects_without_restricting_later_resources",
+      "javascript::tests::large_bundle_source_and_dense_code_run_with_unchanged_execution_bounds",
+      "javascript::tests::native_named_member_lookup_precedes_arguments_and_preserves_shadowing",
+      "javascript::tests::retained_bundle_source_limit_rejects_before_executing",
+      "loader::tests::linked_style_csp_precedes_reuse_and_cors_scripts_are_not_fetched",
+      "scripting::script_forms::tests::form_submit_policy_origin_and_navigation_limits_precede_queueing",
+      "scripting::script_forms::tests::form_submit_preserves_name_shadow_and_rejects_incompatible_receivers",
+      "scripting::script_forms::tests::form_submit_snapshots_values_bypasses_validation_and_omits_submitter",
+      "scripting::script_forms::tests::local_form_submit_cannot_acquire_network_navigation"
+    ],
+    "log": "verification-0.33/rust-tests.txt"
+  },
+  "javascript_reference": {
+    "rustc": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+    "node": "v24.22.1",
+    "source_sha256": "286e6cd31a73214758370b2ccc31dc1c2b2de9351769226c2c591f8ec50ca686",
+    "json_source_sha256": "fc44e83ac8d7a6fb16ad3950e92098e24ebdf4f926b112378c5d9e38cc947298",
+    "regexp_source_sha256": "39d958b4eadbfa48777ccdb68e5cf5c03e98fa90651a13c7a645457e538509f0",
+    "prototypes_source_sha256": "760ef9ece1a0e65c4f557e9a62cf54b214c7b8c12095c318a613f4565b66450c",
+    "binary_source_sha256": "bc5268ed8956c2947b5ba107cb5cc8dcf1ad6b74889fbd68e055b24ef6cdc294",
+    "arguments_source_sha256": "e29e2b2220b5156aa41230f0843d27eb39e3d64384a7c220ba8da9478a3625f9",
+    "array_ops_source_sha256": "46a62d39021e5deb151c498bac3ee9c6dfbd3b2321b67793f1fa71c5dd0a818d",
+    "collections_source_sha256": "9dff7bf5c42b059939b0ae36a1bb070616ecba57d1c1692f5b9b811e32fa2c49",
+    "text_encoding_source_sha256": "f14ce08c6aa97bdedd8822b34934451ce29c74392fb4186aeb40abae9497a5e6",
+    "oracle_cases": 743,
+    "oracle_passed": 743,
+    "negative_cases": 204,
+    "negative_passed": 204
+  },
+  "actual_app_search_forms": {
+    "passed": 8,
+    "tests": [
+      "app::search_tests::form_action_csp_blocks_native_submits_with_scripting_enabled_or_disabled_and_script_submits",
+      "app::search_tests::input_search_renders_results_follows_cross_origin_result_and_searches_again",
+      "app::search_tests::script_form_cross_origin_action_and_redirect_make_no_forbidden_request",
+      "app::search_tests::script_form_submit_bypasses_required_but_stop_discards_the_queued_request",
+      "app::search_tests::scripted_post_preserves_body_and_reload_confirmation",
+      "app::search_tests::textarea_enter_edits_lines_and_submit_cancellation_preserves_the_current_document",
+      "app::search_tests::textarea_scripted_enter_submits_snapshots_and_subsequent_searches",
+      "app::search_tests::textarea_search_renders_results_follows_cross_origin_result_and_searches_again"
+    ],
+    "scope": "Original loopback responses; real keyboard/pointer, HTTP, layout, redirect, history and repeated query; not Google"
+  },
+  "actual_app_stylesheets": {
+    "passed": 4,
+    "tests": [
+      "app::style_jobs::tests::dynamic_stylesheet_discards_removed_or_stopped_inflight_completion",
+      "app::style_jobs::tests::dynamic_stylesheet_enforces_csp_origin_mime_integrity_and_redirect_origin",
+      "app::style_jobs::tests::dynamic_stylesheet_reflects_applies_before_load_and_keeps_dom_order",
+      "app::style_jobs::tests::stop_flushes_a_stylesheet_mutation_before_the_next_poll"
+    ]
+  },
+  "optimized_app_checks": {
+    "tls_script_policy": {
+      "tool": "check_script_policy.py",
+      "browser_sha256": "fc675252b6fff43d8f83662ddd4a8841db27cd6815fd6d0f0ef74912c2efe957",
+      "checks": [
+        {
+          "case": "/parser",
+          "passed": true,
+          "requests": [
+            "/parser",
+            "/asset.js"
+          ],
+          "report_sha256": "89346620826c9535de0ac74922ba907b706841109c60575cc0389bd95ca5f02a"
+        },
+        {
+          "case": "/dynamic",
+          "passed": true,
+          "requests": [
+            "/dynamic",
+            "/asset.js"
+          ],
+          "report_sha256": "bc63461f8b0d48d3b92d7bc912e9a14692c75688a020553855a3b4341e6cdc81"
+        },
+        {
+          "case": "/redirect",
+          "passed": true,
+          "requests": [
+            "/redirect",
+            "/leave.js",
+            "/returned.js",
+            "/bounce.js"
+          ],
+          "report_sha256": "8e25253ed22f431dce9d26086fd60945d8b99aeb322b9f5dd9ed37d1533fef98"
+        },
+        {
+          "case": "/csp-direct",
+          "passed": true,
+          "requests": [
+            "/csp-direct"
+          ],
+          "report_sha256": "d2a4d055723fbeb4c09684ee262391f1700191fc4b2e3ce607f655b6e64f3ae3"
+        },
+        {
+          "case": "/csp-redirect",
+          "passed": true,
+          "requests": [
+            "/csp-redirect",
+            "/leave.js"
+          ],
+          "report_sha256": "f50a360013b8167e4b4c3ee0af44efcd736a1299d060cf9f33c91d8be27133e4"
+        },
+        {
+          "case": "/parser-csp-redirect",
+          "passed": true,
+          "requests": [
+            "/parser-csp-redirect",
+            "/leave.js"
+          ],
+          "report_sha256": "df0c0979062786845a9edf089e759b0c7b703efd504c9cd5606a1590a185587b"
+        },
+        {
+          "case": "/cors",
+          "passed": true,
+          "requests": [
+            "/cors"
+          ],
+          "report_sha256": "ab19f8d7a2090e2d4b261b4b134c332762d273e31d40487c713b8a6a28d69d17"
+        },
+        {
+          "case": "/parser-cors",
+          "passed": true,
+          "requests": [
+            "/parser-cors"
+          ],
+          "report_sha256": "7f08f152cb84c1204cbf6d2f39fd81bd5365e019543e2177b2435d0bcb888cb9"
+        },
+        {
+          "case": "/integrity",
+          "passed": true,
+          "requests": [
+            "/integrity"
+          ],
+          "report_sha256": "1383a8f5f3068d762c57056dda10b2905e38282d1239822131932c3596e0e85c"
+        },
+        {
+          "case": "/mixed",
+          "passed": true,
+          "requests": [
+            "/mixed"
+          ],
+          "report_sha256": "b6ab68bcf2d90cc7ef73e92650bbb94d915e868c6995f7216ef00e46c1f65d94"
+        },
+        {
+          "case": "/mime",
+          "passed": true,
+          "requests": [
+            "/mime",
+            "/not-js.js"
+          ],
+          "report_sha256": "b4d22a3a4c167ee4861578e1bc331e2f8a55664a8e2a2b3910a8b22440bb0d65"
+        },
+        {
+          "case": "/large",
+          "passed": true,
+          "requests": [
+            "/large",
+            "/large.js"
+          ],
+          "report_sha256": "6c364f6a5ae68888786ae583fb67f3034b80520ee209ce0efbd109b8c0fefe0f"
+        },
+        {
+          "case": "/oversize",
+          "passed": true,
+          "requests": [
+            "/oversize",
+            "/oversize.js"
+          ],
+          "report_sha256": "5779d3d82f9c04d1b326ff747fc96fb92be1fd193a4bb68857a3e3bb80da172e"
+        },
+        {
+          "case": "/corp",
+          "passed": true,
+          "requests": [
+            "/corp",
+            "/corp.js"
+          ],
+          "report_sha256": "793cdf2d149a324fbae2c1857968ad7a96a1edd0152be1e7587ba24742804a79"
+        },
+        {
+          "case": "/corp-site-allow",
+          "passed": true,
+          "requests": [
+            "/corp-site-allow",
+            "/corp-site.js"
+          ],
+          "report_sha256": "5c1fe0d9d87bca06667e8dd5835a95a691a20cea83e3b1a407865b34c32ae565"
+        },
+        {
+          "case": "/corp-site-deny",
+          "passed": true,
+          "requests": [
+            "/corp-site-deny",
+            "/corp-site.js"
+          ],
+          "report_sha256": "486729cfa2a6c964b2d4b29f7b6f238d78fb4a393016d9c43bb6fe282ce52403"
+        },
+        {
+          "case": "/corp-cross",
+          "passed": true,
+          "requests": [
+            "/corp-cross",
+            "/corp-cross.js"
+          ],
+          "report_sha256": "0ae16e6b6b1d6a580c000e3e87e50aefe4fb11133ab097c569fd4faa54626b1e"
+        },
+        {
+          "case": "/corp-redirect",
+          "passed": true,
+          "requests": [
+            "/corp-redirect",
+            "/corp-bounce.js"
+          ],
+          "report_sha256": "8e70ca55797e4f0b291fdb73eeb7b649e4327509ab30eb593f3d5d907922bdad"
+        },
+        {
+          "case": "/parser-corp",
+          "passed": true,
+          "requests": [
+            "/parser-corp",
+            "/corp.js"
+          ],
+          "report_sha256": "02dbcb7f2635e138d8f26c7a77f000e1edd0f3a886b67c2f5b3c4f5d177204a2"
+        },
+        {
+          "case": "/coep",
+          "passed": true,
+          "requests": [
+            "/coep"
+          ],
+          "report_sha256": "3c3e062bea0b9d79122b6958f421be6bee467d6885e421e504081c60bdce0711"
+        },
+        {
+          "case": "/coep-credentialless",
+          "passed": true,
+          "requests": [
+            "/coep-credentialless"
+          ],
+          "report_sha256": "f19584571e6b33c0ed67febac6a7e57028f1f8e05c4985d95add8f930aec5e35"
+        },
+        {
+          "case": "/coep-same",
+          "passed": true,
+          "requests": [
+            "/coep-same",
+            "/same.js"
+          ],
+          "report_sha256": "610f6293ac17d627a54c1e02f4861e17478c5b0f4d1c4cdf80cdce66e6913ff8"
+        },
+        {
+          "case": "/coep-report",
+          "passed": true,
+          "requests": [
+            "/coep-report",
+            "/asset.js"
+          ],
+          "report_sha256": "c677e7d8aac6d1d29f8e0ee3fa9a503c8afa3848684db9138ae4da71325c9483"
+        },
+        {
+          "case": "/parser-coep",
+          "passed": true,
+          "requests": [
+            "/parser-coep"
+          ],
+          "report_sha256": "b3f4233a97150c8c90aa7814d92b4be6cac348a9de6c5463fce504476b8ff336"
+        },
+        {
+          "case": "/redirect-downgrade",
+          "passed": true,
+          "requests": [
+            "/redirect-downgrade",
+            "/downgrade.js"
+          ],
+          "report_sha256": "7cf6c179c57c92191e8e756bf6876b4873197c261a06127d08c1c720d2feb744"
+        },
+        {
+          "case": "/untrusted",
+          "passed": true,
+          "requests": [],
+          "report_sha256": "cc6dec1c20d78312803333f6e0610b7cfb3ea7d019a04a99070807831488de73"
+        }
+      ],
+      "passed": true,
+      "scope": "Original loopback TLS fixtures; no live Google validation"
+    },
+    "activity_source_cli": {
+      "passed": 21,
+      "browser_runs": 24,
+      "report": "verification-0.33/activity-source.json"
+    },
+    "image_presentation": {
+      "passed": 31,
+      "browser_runs": 16
+    },
+    "image_loading": {
+      "passed": 35,
+      "browser_runs": 17
+    },
+    "search_render": {
+      "passed": true,
+      "browser_sha256": "fc675252b6fff43d8f83662ddd4a8841db27cd6815fd6d0f0ef74912c2efe957",
+      "scope": "Original loopback results fixture; inspected final native 1000x700 render",
+      "visible_checks": [
+        "Two textarea lines visible",
+        "Search button visible",
+        "Result headings/descriptions/links do not overlap",
+        "Real dynamic CSS HTTP200 applied before completion title"
+      ],
+      "javascript_errors": 0,
+      "google_capture": false
+    }
+  },
+  "http_tls_closure": {
+    "passed": 36,
+    "total": 36,
+    "report": "verification-0.33/http-tls-closure.json"
+  },
+  "limits": {
+    "per_script_source_bytes": 524288,
+    "document_script_source_bytes": 2097152,
+    "program_tokens": 131072,
+    "program_ast_nodes": 131072,
+    "retained_program_source_bytes": 2097152,
+    "retained_ast_nodes": 262144,
+    "execution_steps_per_job": 250000,
+    "execution_seconds_per_job": 1,
+    "dynamic_stylesheet_bytes": 131072,
+    "cumulative_external_stylesheet_bytes": 1048576,
+    "dynamic_stylesheet_attempts": 16
+  },
+  "security_scope": {
+    "cross_origin_scripts": "HTTPS documents may include HTTPS classic sources only; other resource origin rules retained",
+    "credentials": "No cross-origin sends or Set-Cookie; permanent taint after origin exit",
+    "csp": "Script, linked stylesheet and form-action checks before each request/redirect; TLS/blocking/MIME retained",
+    "corp": "Checked on every script response including redirects; same-site requires exact scheme/host",
+    "coep": "Enforced require-corp/credentialless conservatively require same-origin scripts",
+    "cors_sri_modules": "Refused until implemented"
+  },
+  "google_validation": {
+    "end_to_end_verified": false,
+    "search_html_or_activity_attached": false,
+    "ordinary_https_search_status": 429,
+    "attempts": 1,
+    "retries_or_bypasses": 0,
+    "homepage_replay_from_032_not_repeated": true,
+    "third_party_capture_contents_in_package": false,
+    "fixture_results_not_presented_as_google": true
+  },
+  "remaining": [
+    "Exact successful Google Search response has not been tested",
+    "Bounded JavaScript/DOM subset can still reject website code",
+    "Modules/CORS-mode/SRI/fetch/XHR/requestSubmit/synthetic click/full async scheduling unsupported",
+    "Created LINK stylesheets use exact-origin and simple-media subset",
+    "Conservative CORP/COEP policies and finite source/execution budgets remain",
+    "Windows executable cross-built and statically checked, not run on Windows"
+  ],
+  "changes": {
+    "existing_files_changed": [
+      "Cargo.lock",
+      "Cargo.toml",
+      "ChezCat.exe",
+      "FEATURES.md",
+      "README.md",
+      "SHA256SUMS.txt",
+      "pages/start.html",
+      "resources/SHA256SUMS.txt",
+      "resources/chezcat-x64.o",
+      "resources/chezcat.rc",
+      "resources/chezcat.res",
+      "src/app.rs",
+      "src/app_script_navigation_tests.rs",
+      "src/app_scripts.rs",
+      "src/csp.rs",
+      "src/diagnostics.rs",
+      "src/forms.rs",
+      "src/html.rs",
+      "src/http.rs",
+      "src/javascript.rs",
+      "src/layout.rs",
+      "src/loader.rs",
+      "src/main.rs",
+      "src/script_dom_tree.rs",
+      "src/script_geometry.rs",
+      "src/script_navigation.rs",
+      "src/script_resources.rs",
+      "src/scripting.rs",
+      "tools/check_javascript.py"
+    ],
+    "new_source_files": [
+      "src/app_search_tests.rs",
+      "src/app_stylesheets.rs",
+      "src/app_textarea.rs",
+      "src/script_forms.rs",
+      "src/script_stylesheets.rs"
+    ]
+  },
+  "records": {
+    "verification-0.33/activity-source.json": "8820e6ca5fbede6852e4a4e3408acc9c67157232dc6e6fff099c46390e805306",
+    "verification-0.33/formatting.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "verification-0.33/http-tls-closure.json": "dbea78acc01ce9a882ded831a8c081ad12654dda86a8563c0b16f1101b5c5932",
+    "verification-0.33/image-loading.json": "25597f265080643e26a6d15a5c127a4515f8e4c07582da88cf85e07d7103ee31",
+    "verification-0.33/image-presentation.json": "c69f68d3652296d6edcd4806ded0c2d5948660b58cecd766bb6f656bb16b44b9",
+    "verification-0.33/javascript.json": "f0b37b429215c4349bcf1682445c541929ff6f57ae38730773db6bfb31b16a54",
+    "verification-0.33/native-build.txt": "a579bb3a5166da8796a2c6ec9f8ab5f8e212d15a850616aec0c8c932d2282c40",
+    "verification-0.33/native-clippy.txt": "c0f8c80f1c4a37117d63490f63eea80cdc62189a25ef2b83c03c2a2c0da741a8",
+    "verification-0.33/rust-tests.txt": "b172008f240e4ed9eee2e4615fc0e8eb9049798a26d1a56573ff1ef13ed9ddf8",
+    "verification-0.33/script-policy.json": "e7a3855254e1cd0c1cf9d8e3b1916329b5b86e9ac40f7ff67bcfa2c5122b7adc",
+    "verification-0.33/search-render.json": "60212191729157904c40be39ad7602c4e5d5cedaec29a837dd8fc42c18d43133",
+    "verification-0.33/windows-build.txt": "8eac770d80413cc0ecf7c30deb9f5291b16c5d2680a4f645381a96025eaba92a",
+    "verification-0.33/windows-clippy.txt": "37032ce6bcb85c149a247094a6030ba99e527ba6085ba8add055f652ff738c0c",
+    "verification-0.33/windows-pe.json": "d5f0e47dbe46f19e941e768ee12a736d047382c91e9d940cb4c89a17b1be2ce2"
+  },
+  "recovery": {
+    "filename": "ChezCat_0_33_Recovery_1.zip",
+    "sha256": "8206e3da12ae2b03fe848db4ef44600be17393fe2f068fbc542487df37735fc6",
+    "saved_before_form_and_response_policy_follow_up": true
+  }
+}

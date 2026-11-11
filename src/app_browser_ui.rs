@@ -5,8 +5,12 @@ use super::*;
 use crate::profile::{Bookmark, Store, MAX_ADDRESS_BYTES, MAX_BOOKMARKS, MAX_TITLE_BYTES};
 use crate::ui::{self, Icon};
 
+#[path = "app_appearance_ui.rs"]
+mod appearance_ui;
 #[path = "app_blocking_ui.rs"]
 mod blocking_ui;
+#[path = "app_bookmark_tree_ui.rs"]
+mod bookmark_tree_ui;
 
 const ROW: i32 = 52;
 const PANEL_HEADER: i32 = 60;
@@ -54,6 +58,28 @@ enum Action {
     ApplyHistory,
     ClearRange(crate::history::ClearRange),
     ConfirmClear,
+    DarkMode,
+    DarkPages,
+    BookmarkBar,
+    LinkColor,
+    VisitedColor,
+    ResetColors,
+    DownloadFolder,
+    DefaultDownloads,
+    BookmarksOptions,
+    AppearanceOptions,
+    DownloadOptions,
+    FolderRow(u32),
+    NewFolder,
+    FolderUp,
+    SettingsBack,
+    Destination,
+    DestinationRow(u32),
+    SaveFolder,
+    ConfirmDeleteFolder,
+    Move,
+    MoveUp,
+    MoveDown,
 }
 
 #[derive(Clone, Copy)]
@@ -66,6 +92,9 @@ enum PanelKind {
     HistoryOptions,
     HistorySearch,
     HistoryClear,
+    EditFolder { id: Option<u32> },
+    FolderDestination,
+    DeleteFolder { id: u32 },
 }
 
 pub(super) struct BrowserPanel {
@@ -78,6 +107,16 @@ pub(super) struct BrowserPanel {
     address: Editor,
     zoom: Editor,
     javascript: bool,
+    dark_mode: bool,
+    dark_pages: bool,
+    bookmark_bar: bool,
+    link_color: Editor,
+    visited_color: Editor,
+    download_folder: Editor,
+    folder: u32,
+    selected_folder: Option<u32>,
+    destination: u32,
+
     images: bool,
     blocking: crate::blocking::Config,
     error: String,
@@ -104,6 +143,16 @@ impl BrowserPanel {
             address: Editor::default(),
             zoom: Editor::default(),
             javascript: true,
+            dark_mode: false,
+            dark_pages: false,
+            bookmark_bar: true,
+            link_color: Editor::default(),
+            visited_color: Editor::default(),
+            download_folder: Editor::default(),
+            folder: 0,
+            selected_folder: None,
+            destination: 0,
+
             images: true,
             blocking: crate::blocking::Config::default(),
             error: String::new(),
@@ -123,6 +172,9 @@ impl BrowserPanel {
             Action::Title => Some(&mut self.title),
             Action::Address | Action::Home | Action::RuleEntry => Some(&mut self.address),
             Action::Zoom => Some(&mut self.zoom),
+            Action::LinkColor => Some(&mut self.link_color),
+            Action::VisitedColor => Some(&mut self.visited_color),
+            Action::DownloadFolder => Some(&mut self.download_folder),
             Action::SearchField => Some(&mut self.search),
             _ => None,
         }
@@ -190,6 +242,8 @@ impl App {
 
     fn begin_browser_panel(&mut self, panel: BrowserPanel) {
         self.reset_chrome();
+        self.close_downloads();
+        self.close_bookmark_popup();
         self.inspector.focused = false;
         self.browser_panel = Some(panel);
         self.select_popup = None;
@@ -340,6 +394,8 @@ impl App {
         match self.browsing_history.clear(range, crate::history::now()) {
             Ok(count) => {
                 self.browsing_history_changed();
+                self.visited.clear();
+                self.rebuild_link_colors();
                 self.leave_browser_panel();
                 if let Some(panel) = &mut self.browser_panel {
                     panel.error.clear();
@@ -456,8 +512,20 @@ impl App {
         else {
             return;
         };
+        let removed_url = self
+            .browsing_history
+            .data()
+            .entries
+            .iter()
+            .find(|entry| entry.id == id)
+            .map(|entry| entry.url.split('#').next().unwrap_or(&entry.url).to_owned());
         match self.browsing_history.remove(id, crate::history::now()) {
             Ok(removed) => {
+                if removed {
+                    if let Some(url) = removed_url {
+                        self.visited.remove(&url);
+                    }
+                }
                 self.browsing_history_changed();
                 self.sync_browser_panel();
                 if let Some(panel) = &mut self.browser_panel {
@@ -476,12 +544,7 @@ impl App {
     }
 
     pub fn show_bookmarks(&mut self) {
-        let mut panel = BrowserPanel::new(PanelKind::Bookmarks, Action::List);
-        panel.selected = (!self.profile.data().bookmarks.is_empty()).then_some(0);
-        if let Some(problem) = self.profile.problem() {
-            panel.error = problem.to_owned();
-        }
-        self.begin_browser_panel(panel);
+        self.show_bookmark_folder(0);
     }
 
     pub fn show_settings(&mut self) {
@@ -492,6 +555,18 @@ impl App {
         panel.javascript = self.scripts_enabled;
         panel.images = self.images_enabled;
         panel.blocking = settings.blocking.clone();
+        panel.dark_mode = settings.dark_mode;
+        panel.dark_pages = settings.dark_pages;
+        panel.bookmark_bar = settings.bookmark_bar;
+        panel
+            .link_color
+            .set(&crate::profile::format_color(settings.link_color));
+        panel
+            .visited_color
+            .set(&crate::profile::format_color(settings.visited_color));
+        panel
+            .download_folder
+            .set(settings.download_folder.as_deref().unwrap_or(""));
         panel.zoom.set(&settings.default_zoom.to_string());
         panel
             .address
@@ -516,11 +591,14 @@ impl App {
             self.edit_bookmark(index);
             return;
         }
+        let folder = self.browser_panel.as_ref().map_or(0, |p| p.folder);
         let title = bookmark_title(&self.document.title, &url);
         let mut panel = BrowserPanel::new(PanelKind::EditBookmark { index: None }, Action::Title);
+        panel.folder = folder;
         panel.title.set(&title);
         panel.title.select_all();
         panel.address.set(&url);
+        panel.return_panel = self.bookmark_editor_return();
         self.begin_browser_panel(panel);
     }
 
@@ -532,9 +610,11 @@ impl App {
             PanelKind::EditBookmark { index: Some(index) },
             Action::Title,
         );
+        panel.folder = bookmark.folder;
         panel.title.set(&bookmark.title);
         panel.title.select_all();
         panel.address.set(&bookmark.url);
+        panel.return_panel = self.bookmark_editor_return();
         self.begin_browser_panel(panel);
     }
 
@@ -578,7 +658,17 @@ impl App {
             );
             return;
         }
-        let value = Bookmark { title, url };
+        let folder = panel.folder;
+        let order = index
+            .and_then(|i| data.bookmarks.get(i))
+            .filter(|b| b.folder == folder)
+            .map_or_else(|| data.next_order(folder), |b| b.order);
+        let value = Bookmark {
+            title,
+            url,
+            folder,
+            order,
+        };
         let selected = if let Some(index) = index {
             let Some(entry) = data.bookmarks.get_mut(index) else {
                 return;
@@ -599,9 +689,10 @@ impl App {
             self.profile_error(error);
             return;
         }
-        self.show_bookmarks();
+        self.show_bookmark_folder(folder);
         if let Some(panel) = &mut self.browser_panel {
             panel.selected = Some(selected);
+            panel.selected_folder = None;
         }
         self.ensure_bookmark_visible();
         self.status = "Bookmark saved.".into();
@@ -612,6 +703,12 @@ impl App {
         let Some(index) = self.browser_panel.as_ref().and_then(|panel| panel.selected) else {
             return;
         };
+        let folder = self.browser_panel.as_ref().map_or(0, |panel| panel.folder);
+        let position = self
+            .bookmark_tree_items()
+            .iter()
+            .position(|item| *item == crate::profile::BookmarkItem::Link(index))
+            .unwrap_or(0);
         let mut data = self.profile.data().clone();
         if index >= data.bookmarks.len() {
             return;
@@ -621,10 +718,14 @@ impl App {
             self.profile_error(error);
             return;
         }
-        let len = self.profile.data().bookmarks.len();
-        if let Some(panel) = &mut self.browser_panel {
-            panel.selected = (len > 0).then(|| index.min(len - 1));
-            panel.error.clear();
+        self.show_bookmark_folder(folder);
+        let rows = self.bookmark_tree_items();
+        if let Some(item) = rows.get(position.min(rows.len().saturating_sub(1))) {
+            let action = match item {
+                crate::profile::BookmarkItem::Link(i) => Action::Row(*i),
+                crate::profile::BookmarkItem::Folder(id) => Action::FolderRow(*id),
+            };
+            self.bookmark_tree_activate(action);
         }
         self.ensure_bookmark_visible();
         self.status = "Bookmark removed.".into();
@@ -681,7 +782,34 @@ impl App {
         let reload = self.scripts_enabled != javascript
             || self.images_enabled != images
             || self.profile.data().settings.blocking != blocking;
+        let link_color = match crate::profile::parse_color(&panel.link_color.text()) {
+            Ok(v) => v,
+            Err(e) => {
+                self.profile_error(e);
+                return;
+            }
+        };
+        let visited_color = match crate::profile::parse_color(&panel.visited_color.text()) {
+            Ok(v) => v,
+            Err(e) => {
+                self.profile_error(e);
+                return;
+            }
+        };
+        let folder = panel.download_folder.text().trim().to_owned();
+        if !folder.is_empty() {
+            if let Err(e) = crate::downloads::validate_folder(Path::new(&folder)) {
+                self.profile_error(e);
+                return;
+            }
+        }
         let mut data = self.profile.data().clone();
+        data.settings.dark_mode = panel.dark_mode;
+        data.settings.dark_pages = panel.dark_pages;
+        data.settings.bookmark_bar = panel.bookmark_bar;
+        data.settings.link_color = link_color;
+        data.settings.visited_color = visited_color;
+        data.settings.download_folder = (!folder.is_empty()).then_some(folder);
         data.settings.javascript = javascript;
         data.settings.images = images;
         data.settings.blocking = blocking;
@@ -709,13 +837,42 @@ impl App {
         }
     }
 
+    fn browser_header_height(&self) -> i32 {
+        if self.content_bottom() - self.chrome_bottom() < 170 {
+            44
+        } else {
+            PANEL_HEADER
+        }
+    }
+
+    fn browser_footer_height(&self) -> i32 {
+        if self.browser_header_height() == 44 {
+            44
+        } else {
+            PANEL_FOOTER
+        }
+    }
+
+    fn browser_footer_y(&self) -> i32 {
+        self.content_bottom()
+            - if self.browser_header_height() == 44 {
+                38
+            } else {
+                44
+            }
+    }
+
     fn browser_body(&self) -> Rect {
         let margin = 20.min((self.width / 8).max(0));
         Rect {
             x: margin,
-            y: BAR_HEIGHT + PANEL_HEADER,
+            y: self.chrome_bottom() + self.browser_header_height(),
             w: (self.width - margin * 2).max(1),
-            h: (self.content_bottom() - PANEL_FOOTER - BAR_HEIGHT - PANEL_HEADER).max(1),
+            h: (self.content_bottom()
+                - self.browser_footer_height()
+                - self.chrome_bottom()
+                - self.browser_header_height())
+            .max(1),
         }
     }
 
@@ -728,18 +885,27 @@ impl App {
             return Vec::new();
         };
         let body = self.browser_body();
+        if matches!(
+            panel.kind,
+            PanelKind::Bookmarks
+                | PanelKind::EditFolder { .. }
+                | PanelKind::FolderDestination
+                | PanelKind::DeleteFolder { .. }
+        ) {
+            return self.bookmark_tree_controls(body, panel);
+        }
         let mut controls = vec![Control {
             action: Action::Close,
             rect: Rect {
                 x: (self.width - 52).max(0),
-                y: BAR_HEIGHT + 12,
+                y: self.chrome_bottom() + 12,
                 w: 32,
                 h: 32,
             },
             label: "Close",
             enabled: true,
         }];
-        let footer = self.content_bottom() - 44;
+        let footer = self.browser_footer_y();
         let mut add = |action, rect, label, enabled| {
             controls.push(Control {
                 action,
@@ -759,7 +925,7 @@ impl App {
                     },
                     Rect {
                         x: (self.width - 186).max(body.x),
-                        y: BAR_HEIGHT + 12,
+                        y: self.chrome_bottom() + 12,
                         w: 124,
                         h: 32,
                     },
@@ -976,6 +1142,9 @@ impl App {
                     true,
                 );
             }
+            PanelKind::EditFolder { .. }
+            | PanelKind::FolderDestination
+            | PanelKind::DeleteFolder { .. } => {}
             PanelKind::BlockingRules => {
                 controls.extend(self.blocking_controls(body, footer, panel));
             }
@@ -1131,6 +1300,12 @@ impl App {
                 );
             }
         }
+        if matches!(panel.kind, PanelKind::Settings) {
+            controls.extend(self.appearance_controls(body, panel));
+        }
+        if matches!(panel.kind, PanelKind::EditBookmark { .. }) {
+            controls.extend(self.bookmark_editor_controls(body, panel));
+        }
         controls
     }
 
@@ -1157,6 +1332,17 @@ impl App {
                 | Action::RuleList
                 | Action::Zoom
                 | Action::Home
+                | Action::DarkMode
+                | Action::DarkPages
+                | Action::BookmarkBar
+                | Action::LinkColor
+                | Action::VisitedColor
+                | Action::ResetColors
+                | Action::DownloadFolder
+                | Action::DefaultDownloads
+                | Action::Destination
+                | Action::DestinationRow(_)
+                | Action::BookmarksOptions
                 | Action::CurrentHome
                 | Action::BundledHome
                 | Action::SearchField
@@ -1188,8 +1374,7 @@ impl App {
                             .copied()
                             .map(Action::HistoryRow);
                     }
-                    return (index < self.profile.data().bookmarks.len())
-                        .then_some(Action::Row(index));
+                    return self.bookmark_tree_row(index);
                 }
                 return Some(control.action);
             }
@@ -1201,7 +1386,47 @@ impl App {
         let Some(panel) = &self.browser_panel else {
             return Vec::new();
         };
+        if matches!(
+            panel.kind,
+            PanelKind::Bookmarks
+                | PanelKind::EditFolder { .. }
+                | PanelKind::FolderDestination
+                | PanelKind::DeleteFolder { .. }
+        ) {
+            let controls = self.bookmark_tree_controls(self.browser_body(), panel);
+            if matches!(panel.kind, PanelKind::Bookmarks) {
+                return [
+                    Action::List,
+                    Action::Add,
+                    Action::Open,
+                    Action::Edit,
+                    Action::Move,
+                    Action::Delete,
+                    Action::NewFolder,
+                    Action::FolderUp,
+                    Action::MoveUp,
+                    Action::MoveDown,
+                    Action::SettingsBack,
+                    Action::Close,
+                ]
+                .into_iter()
+                .filter(|action| {
+                    controls
+                        .iter()
+                        .any(|control| control.action == *action && control.enabled)
+                })
+                .collect();
+            }
+            return controls
+                .into_iter()
+                .filter(|c| c.enabled)
+                .map(|c| c.action)
+                .collect();
+        }
         let order: &[Action] = match panel.kind {
+            PanelKind::EditFolder { .. }
+            | PanelKind::FolderDestination
+            | PanelKind::DeleteFolder { .. } => &[],
             PanelKind::Bookmarks => &[
                 Action::List,
                 Action::Add,
@@ -1213,6 +1438,7 @@ impl App {
             PanelKind::EditBookmark { .. } => &[
                 Action::Title,
                 Action::Address,
+                Action::Destination,
                 Action::SaveBookmark,
                 Action::CancelBookmark,
                 Action::Close,
@@ -1227,6 +1453,15 @@ impl App {
                 Action::BundledHome,
                 Action::HistoryOptions,
                 Action::BlockingOptions,
+                Action::DarkMode,
+                Action::DarkPages,
+                Action::BookmarkBar,
+                Action::LinkColor,
+                Action::VisitedColor,
+                Action::ResetColors,
+                Action::BookmarksOptions,
+                Action::DownloadFolder,
+                Action::DefaultDownloads,
                 Action::Apply,
                 Action::Cancel,
                 Action::Close,
@@ -1292,12 +1527,15 @@ impl App {
 
     fn browser_content_height(&self) -> i32 {
         match self.browser_panel.as_ref().map(|panel| panel.kind) {
-            Some(PanelKind::Settings) => 500,
+            Some(PanelKind::Settings) => 1140,
             Some(PanelKind::BlockingRules) => self.browser_body().h.max(272),
             Some(PanelKind::HistoryOptions) => 390,
             Some(PanelKind::HistoryClear) => 300,
             Some(PanelKind::HistorySearch) => 102,
-            Some(PanelKind::EditBookmark { .. }) => 190,
+            Some(PanelKind::EditBookmark { .. }) => 280,
+            Some(PanelKind::EditFolder { .. }) => 180,
+            Some(PanelKind::FolderDestination) => self.folder_destination_height(),
+            Some(PanelKind::DeleteFolder { .. }) => 160,
             _ => 0,
         }
     }
@@ -1330,10 +1568,13 @@ impl App {
     }
 
     fn ensure_bookmark_visible(&mut self) {
-        let count = self.profile.data().bookmarks.len();
+        let items = self.bookmark_tree_items();
+        let selected = self.bookmark_selected_item();
+        let selected_index = selected.and_then(|item| items.iter().position(|i| *i == item));
+        let count = items.len();
         let rows = self.bookmark_rows();
         if let Some(panel) = &mut self.browser_panel {
-            if let Some(index) = panel.selected {
+            if let Some(index) = selected_index {
                 if index < panel.first {
                     panel.first = index;
                 }
@@ -1363,10 +1604,23 @@ impl App {
             panel
                 .search
                 .ensure_visible(((body.w - 16) / 12).max(1) as usize);
+            panel
+                .link_color
+                .ensure_visible(((body.w - 16) / 12).max(1) as usize);
+            panel
+                .visited_color
+                .ensure_visible(((body.w - 16) / 12).max(1) as usize);
+            panel
+                .download_folder
+                .ensure_visible(((body.w - 16) / 12).max(1) as usize);
         }
     }
 
     fn browser_activate(&mut self, action: Action) {
+        if self.bookmark_tree_activate(action) || self.appearance_activate(action) {
+            self.sync_browser_panel();
+            return;
+        }
         match action {
             Action::Close | Action::Cancel => self.leave_browser_panel(),
             Action::Add => self.add_current_bookmark(),
@@ -1398,7 +1652,18 @@ impl App {
                 }
             }
             Action::SaveBookmark => self.save_bookmark(),
-            Action::CancelBookmark => self.show_bookmarks(),
+            Action::CancelBookmark => {
+                if self
+                    .browser_panel
+                    .as_ref()
+                    .is_some_and(|panel| panel.return_panel.is_some())
+                {
+                    self.leave_browser_panel();
+                } else {
+                    let folder = self.browser_panel.as_ref().map_or(0, |panel| panel.folder);
+                    self.show_bookmark_folder(folder);
+                }
+            }
             Action::JavaScript => {
                 if let Some(panel) = &mut self.browser_panel {
                     panel.javascript = !panel.javascript;
@@ -1517,7 +1782,7 @@ impl App {
             self.add_current_bookmark();
             return PlatformAction::None;
         }
-        if ctrl && shift && key == 0x42 {
+        if ctrl && key == 0x42 {
             self.show_bookmarks();
             return PlatformAction::None;
         }
@@ -1619,6 +1884,14 @@ impl App {
             }
             return PlatformAction::None;
         }
+        if self
+            .browser_panel
+            .as_ref()
+            .is_some_and(|p| matches!(p.kind, PanelKind::Bookmarks) && p.focus == Action::List)
+        {
+            self.bookmark_tree_key(key);
+            return PlatformAction::None;
+        }
         let rows = self.bookmark_rows();
         let panel = self.browser_panel.as_mut().unwrap();
         if panel.focus == Action::List {
@@ -1655,6 +1928,7 @@ impl App {
                 0x23 => editor.move_to(editor.chars.len(), shift),
                 0x0d => match kind {
                     PanelKind::EditBookmark { .. } => self.save_bookmark(),
+                    PanelKind::EditFolder { .. } => self.save_folder(),
                     PanelKind::Settings => self.apply_browser_settings(),
                     PanelKind::BlockingRules => self.add_blocking_rule(),
                     PanelKind::HistorySearch => self.apply_history_search(),
@@ -1704,7 +1978,7 @@ impl App {
         {
             self.history_matches().len()
         } else {
-            self.profile.data().bookmarks.len()
+            self.bookmark_tree_items().len()
         };
         let rules = self
             .browser_panel
@@ -1740,13 +2014,18 @@ impl App {
     }
 
     pub(super) fn browser_pointer_down(&mut self, x: i32, y: i32, shift: bool) -> bool {
-        if y < BAR_HEIGHT {
+        if y < self.chrome_bottom() {
             self.close_browser_panel();
             return false;
         }
         self.pending_surrogate = None;
         let action = self.browser_action_at(x, y);
-        if let Some(action @ (Action::Row(_) | Action::HistoryRow(_) | Action::RuleRow(_))) = action
+        if let Some(
+            action @ (Action::Row(_)
+            | Action::FolderRow(_)
+            | Action::HistoryRow(_)
+            | Action::RuleRow(_)),
+        ) = action
         {
             if let Some(panel) = &mut self.browser_panel {
                 panel.cancel_pointer();
@@ -1832,6 +2111,9 @@ impl App {
                     | Action::Home
                     | Action::SearchField
                     | Action::RuleEntry
+                    | Action::LinkColor
+                    | Action::VisitedColor
+                    | Action::DownloadFolder
                     | Action::RuleList
                     | Action::List
             )
@@ -1842,26 +2124,49 @@ impl App {
         let Some(panel) = &self.browser_panel else {
             return;
         };
+        let palette = self.browser_palette();
         let bottom = self.content_bottom();
         canvas.set_clip(Some(crate::paint::ClipRect::new(
             0,
-            BAR_HEIGHT,
+            self.chrome_bottom(),
             self.width,
-            (bottom - BAR_HEIGHT).max(0),
+            (bottom - self.chrome_bottom()).max(0),
         )));
-        canvas.fill_rect(0, BAR_HEIGHT, self.width, bottom - BAR_HEIGHT, ui::SURFACE);
-        let body = self.browser_body();
-        canvas.fill_rect(0, BAR_HEIGHT, self.width, PANEL_HEADER - 5, ui::CARD);
         canvas.fill_rect(
             0,
-            bottom - PANEL_FOOTER + 2,
+            self.chrome_bottom(),
             self.width,
-            PANEL_FOOTER,
-            ui::CARD,
+            bottom - self.chrome_bottom(),
+            palette.background,
         );
-        canvas.fill_rect(body.x, bottom - PANEL_FOOTER + 2, body.w, 1, ui::BORDER);
+        let body = self.browser_body();
+        canvas.fill_rect(
+            0,
+            self.chrome_bottom(),
+            self.width,
+            self.browser_header_height() - 5,
+            palette.panel,
+        );
+        canvas.fill_rect(
+            0,
+            bottom - self.browser_footer_height() + 2,
+            self.width,
+            self.browser_footer_height(),
+            palette.panel,
+        );
+        canvas.fill_rect(
+            body.x,
+            bottom - self.browser_footer_height() + 2,
+            body.w,
+            1,
+            palette.border,
+        );
         let title = match panel.kind {
-            PanelKind::Bookmarks => "Bookmarks",
+            PanelKind::Bookmarks => "Settings / Bookmarks",
+            PanelKind::EditFolder { id: None } => "New bookmark folder",
+            PanelKind::EditFolder { .. } => "Edit bookmark folder",
+            PanelKind::FolderDestination => "Choose destination folder",
+            PanelKind::DeleteFolder { .. } => "Delete bookmark folder",
             PanelKind::Settings => "Settings",
             PanelKind::BlockingRules => "Request blocking",
             PanelKind::History => "History",
@@ -1873,6 +2178,9 @@ impl App {
         };
         let title_icon = match panel.kind {
             PanelKind::Bookmarks => Icon::Bookmarks,
+            PanelKind::EditFolder { .. }
+            | PanelKind::FolderDestination
+            | PanelKind::DeleteFolder { .. } => Icon::Folder,
             PanelKind::Settings | PanelKind::HistoryOptions | PanelKind::BlockingRules => {
                 Icon::Settings
             }
@@ -1880,27 +2188,34 @@ impl App {
             PanelKind::HistorySearch => Icon::Search,
             PanelKind::EditBookmark { .. } => Icon::Bookmark,
         };
-        ui::rounded_rect(canvas, (body.x, BAR_HEIGHT + 13, 30, 30), 9.0, ui::NAVY);
+        ui::rounded_rect(
+            canvas,
+            (body.x, self.chrome_bottom() + 13, 30, 30),
+            9.0,
+            palette.chrome,
+        );
         ui::icon(
             canvas,
             title_icon,
             body.x + 5,
-            BAR_HEIGHT + 18,
+            self.chrome_bottom() + 18,
             20,
-            ui::CREAM,
-            ui::TEAL,
+            palette.chrome_text,
+            palette.accent,
         );
-        let title_right = if matches!(panel.kind, PanelKind::Bookmarks | PanelKind::History) {
+        let title_right = if matches!(panel.kind, PanelKind::Bookmarks) && self.width >= 760 {
+            (self.width - 316).max(body.x)
+        } else if matches!(panel.kind, PanelKind::Bookmarks | PanelKind::History) {
             (self.width - 198).max(body.x)
         } else {
             (self.width - 64).max(body.x)
         };
         canvas.text(
             body.x + 40,
-            BAR_HEIGHT + 20,
+            self.chrome_bottom() + 20,
             &fit_text(title, ((title_right - body.x - 40) / 12).max(0) as usize),
             2,
-            ui::INK,
+            palette.foreground,
         );
         let history_panel = matches!(
             panel.kind,
@@ -1915,6 +2230,12 @@ impl App {
             "Done returns to Settings. Apply saves your rules.".into()
         } else if matches!(panel.kind, PanelKind::HistorySearch) {
             "Title or address. Blank shows all visits.".into()
+        } else if matches!(panel.kind, PanelKind::Bookmarks) {
+            format!(
+                "{} / {} item(s)",
+                self.profile.data().folder_path(panel.folder),
+                self.bookmark_tree_items().len()
+            )
         } else if matches!(panel.kind, PanelKind::History) {
             let count = self.history_matches().len();
             let enabled = if self.browsing_history.data().policy.enabled {
@@ -1937,107 +2258,29 @@ impl App {
         } else {
             "Saved locally on this computer.".into()
         };
-        canvas.text(
-            body.x,
-            BAR_HEIGHT + 46,
-            &fit_text(&message, (body.w / 6).max(0) as usize),
-            1,
-            if panel.error.is_empty() {
-                ui::MUTED
-            } else {
-                ui::ERROR
-            },
-        );
+        if self.browser_header_height() >= PANEL_HEADER {
+            canvas.text(
+                body.x,
+                self.chrome_bottom() + 46,
+                &fit_text(&message, (body.w / 6).max(0) as usize),
+                1,
+                if panel.error.is_empty() {
+                    palette.muted
+                } else {
+                    palette.error
+                },
+            );
+        }
         canvas.set_clip(Some(crate::paint::ClipRect::new(
             body.x, body.y, body.w, body.h,
         )));
         match panel.kind {
-            PanelKind::Bookmarks => {
-                ui::rounded_rect(canvas, body.tuple(), 8.0, ui::CARD);
-                if self.profile.data().bookmarks.is_empty() {
-                    ui::icon(
-                        canvas,
-                        Icon::Bookmark,
-                        body.x + 14,
-                        body.y + 10,
-                        20,
-                        ui::TEAL_DARK,
-                        ui::TEAL,
-                    );
-                    canvas.text(body.x + 46, body.y + 10, "No bookmarks yet.", 2, ui::INK);
-                    canvas.text(
-                        body.x + 12,
-                        body.y + 33,
-                        &fit_text(
-                            "Use Add page or Ctrl+D to save this page.",
-                            ((body.w - 24) / 6).max(0) as usize,
-                        ),
-                        1,
-                        ui::MUTED,
-                    );
-                }
-                for (offset, (index, bookmark)) in self
-                    .profile
-                    .data()
-                    .bookmarks
-                    .iter()
-                    .enumerate()
-                    .skip(panel.first)
-                    .take(self.bookmark_rows() + 1)
-                    .enumerate()
-                {
-                    let y = body.y + offset as i32 * ROW;
-                    let selected = panel.selected == Some(index);
-                    let hover = panel.hover == Some(Action::Row(index));
-                    panel_list_row(canvas, body, y, selected, hover);
-                    ui::icon(
-                        canvas,
-                        Icon::Bookmark,
-                        body.x + 14,
-                        y + 14,
-                        20,
-                        if selected { ui::TEAL_DARK } else { ui::MUTED },
-                        ui::TEAL,
-                    );
-                    canvas.text(
-                        body.x + 46,
-                        y + 10,
-                        &fit_text(&bookmark.title, ((body.w - 60) / 12).max(0) as usize),
-                        2,
-                        ui::INK,
-                    );
-                    canvas.text(
-                        body.x + 46,
-                        y + 33,
-                        &fit_text(&bookmark.url, ((body.w - 60) / 6).max(0) as usize),
-                        1,
-                        ui::MUTED,
-                    );
-                }
-                let total = self.profile.data().bookmarks.len();
-                if total > self.bookmark_rows() {
-                    let thumb = (body.h * self.bookmark_rows() as i32 / total as i32)
-                        .max(8)
-                        .min(body.h);
-                    let y = body.y
-                        + (body.h - thumb) * panel.first as i32
-                            / total.saturating_sub(self.bookmark_rows()).max(1) as i32;
-                    ui::rounded_rect(
-                        canvas,
-                        (body.x + body.w - 5, body.y, 5, body.h),
-                        2.5,
-                        ui::SURFACE,
-                    );
-                    ui::rounded_rect(
-                        canvas,
-                        (body.x + body.w - 5, y, 5, thumb),
-                        2.5,
-                        ui::TEAL_DARK,
-                    );
-                }
-            }
+            PanelKind::Bookmarks
+            | PanelKind::EditFolder { .. }
+            | PanelKind::FolderDestination
+            | PanelKind::DeleteFolder { .. } => self.paint_bookmark_tree(canvas, body, panel),
             PanelKind::History => {
-                ui::rounded_rect(canvas, body.tuple(), 8.0, ui::CARD);
+                ui::rounded_rect(canvas, body.tuple(), 8.0, palette.panel);
                 let matches = self.history_matches();
                 if matches.is_empty() {
                     ui::icon(
@@ -2046,8 +2289,8 @@ impl App {
                         body.x + 14,
                         body.y + 10,
                         20,
-                        ui::TEAL_DARK,
-                        ui::TEAL,
+                        palette.accent,
+                        palette.accent,
                     );
                     canvas.text(
                         body.x + 46,
@@ -2058,7 +2301,7 @@ impl App {
                             "No matching visits."
                         },
                         2,
-                        ui::INK,
+                        palette.foreground,
                     );
                     let help = if !panel.search.chars.is_empty() {
                         "Search again with no text to show every visit."
@@ -2072,7 +2315,7 @@ impl App {
                         body.y + 33,
                         &fit_text(help, ((body.w - 22) / 6).max(0) as usize),
                         1,
-                        ui::MUTED,
+                        palette.muted,
                     );
                 }
                 for (offset, id) in matches
@@ -2093,22 +2336,26 @@ impl App {
                     let y = body.y + offset as i32 * ROW;
                     let selected = panel.history_selected == Some(*id);
                     let hover = panel.hover == Some(Action::HistoryRow(*id));
-                    panel_list_row(canvas, body, y, selected, hover);
+                    panel_list_row(canvas, body, y, selected, hover, palette);
                     ui::icon(
                         canvas,
                         Icon::History,
                         body.x + 14,
                         y + 14,
                         20,
-                        if selected { ui::TEAL_DARK } else { ui::MUTED },
-                        ui::TEAL,
+                        if selected {
+                            palette.accent
+                        } else {
+                            palette.muted
+                        },
+                        palette.accent,
                     );
                     canvas.text(
                         body.x + 46,
                         y + 8,
                         &fit_text(&entry.title, ((body.w - 60) / 12).max(0) as usize),
                         2,
-                        ui::INK,
+                        palette.foreground,
                     );
                     let detail = format!("{}  {}", history_date(entry.timestamp), entry.url);
                     canvas.text(
@@ -2116,7 +2363,7 @@ impl App {
                         y + 31,
                         &fit_text(&detail, ((body.w - 60) / 6).max(0) as usize),
                         1,
-                        ui::MUTED,
+                        palette.muted,
                     );
                 }
                 let total = matches.len();
@@ -2131,13 +2378,13 @@ impl App {
                         canvas,
                         (body.x + body.w - 5, body.y, 5, body.h),
                         2.5,
-                        ui::SURFACE,
+                        palette.background,
                     );
                     ui::rounded_rect(
                         canvas,
                         (body.x + body.w - 5, y, 5, thumb),
                         2.5,
-                        ui::TEAL_DARK,
+                        palette.accent,
                     );
                 }
             }
@@ -2147,14 +2394,14 @@ impl App {
                     body.y + 62 - panel.scroll,
                     "Leave blank to show all visits.",
                     1,
-                    ui::MUTED,
+                    palette.muted,
                 );
                 canvas.text(
                     body.x,
                     body.y + 78 - panel.scroll,
                     "Search stays in this window.",
                     1,
-                    ui::MUTED,
+                    palette.muted,
                 );
             }
             PanelKind::HistoryOptions => {
@@ -2163,28 +2410,28 @@ impl App {
                     body.y + 58 - panel.scroll,
                     "Automatically remove after",
                     2,
-                    ui::INK,
+                    palette.foreground,
                 );
                 canvas.text(
                     body.x,
                     body.y + 342 - panel.scroll,
                     "Turning recording off keeps earlier visits.",
                     1,
-                    ui::MUTED,
+                    palette.muted,
                 );
                 canvas.text(
                     body.x,
                     body.y + 358 - panel.scroll,
                     "Apply removes visits older than your age limit.",
                     1,
-                    ui::MUTED,
+                    palette.muted,
                 );
                 canvas.text(
                     body.x,
                     body.y + 374 - panel.scroll,
                     "Exit cleanup runs on a normal window close.",
                     1,
-                    ui::MUTED,
+                    palette.muted,
                 );
             }
             PanelKind::HistoryClear => {
@@ -2193,14 +2440,14 @@ impl App {
                     body.y + 5 - panel.scroll,
                     "Choose the visits to remove.",
                     2,
-                    ui::INK,
+                    palette.foreground,
                 );
                 canvas.text(
                     body.x,
                     body.y + 32 - panel.scroll,
                     "Bookmarks and Back/Forward stay available.",
                     1,
-                    ui::MUTED,
+                    palette.muted,
                 );
                 let now = crate::history::now();
                 let cutoff = history_clear_cutoff(panel.clear_range, now);
@@ -2216,21 +2463,21 @@ impl App {
                     })
                     .count();
                 let note = format!("Clear history removes {count} matching visit(s).");
-                canvas.text(body.x, body.y + 236 - panel.scroll, &note, 1, ui::MUTED);
+                canvas.text(body.x, body.y + 236 - panel.scroll, &note, 1, palette.muted);
                 if self.browsing_history.problem().is_some() {
                     canvas.text(
                         body.x,
                         body.y + 256 - panel.scroll,
                         "All time also resets corrupt history settings.",
                         1,
-                        ui::ERROR,
+                        palette.error,
                     );
                     canvas.text(
                         body.x,
                         body.y + 272 - panel.scroll,
                         "Recording will be off after that reset.",
                         1,
-                        ui::ERROR,
+                        palette.error,
                     );
                 } else {
                     canvas.text(
@@ -2238,43 +2485,72 @@ impl App {
                         body.y + 256 - panel.scroll,
                         "Cancel leaves these visits in history.",
                         1,
-                        ui::MUTED,
+                        palette.muted,
                     );
                 }
             }
             PanelKind::EditBookmark { .. } => {
-                canvas.text(body.x, body.y + 7 - panel.scroll, "Name", 2, ui::INK);
-                canvas.text(body.x, body.y + 87 - panel.scroll, "Address", 2, ui::INK);
+                canvas.text(
+                    body.x,
+                    body.y + 7 - panel.scroll,
+                    "Name",
+                    2,
+                    palette.foreground,
+                );
+                canvas.text(
+                    body.x,
+                    body.y + 87 - panel.scroll,
+                    "Address",
+                    2,
+                    palette.foreground,
+                );
+                canvas.text(
+                    body.x,
+                    body.y + 184 - panel.scroll,
+                    &fit_text(
+                        &self.profile.data().folder_path(panel.folder),
+                        (body.w / 6).max(0) as usize,
+                    ),
+                    1,
+                    palette.muted,
+                );
                 canvas.text(
                     body.x,
                     body.y + 160 - panel.scroll,
                     "Only the address is saved; form data is not stored.",
                     1,
-                    ui::MUTED,
+                    palette.muted,
                 );
             }
             PanelKind::Settings => {
+                self.paint_appearance_settings(canvas, body, panel);
                 canvas.text(
                     body.x,
                     body.y + 153 - panel.scroll,
                     "Default zoom (%)",
                     2,
-                    ui::INK,
+                    palette.foreground,
                 );
-                canvas.text(body.x, body.y + 233 - panel.scroll, "Home page", 2, ui::INK);
+                canvas.text(
+                    body.x,
+                    body.y + 233 - panel.scroll,
+                    "Home page",
+                    2,
+                    palette.foreground,
+                );
                 canvas.text(
                     body.x,
                     body.y + 355 - panel.scroll,
                     "JavaScript, images and blocking changes reload.",
                     1,
-                    ui::MUTED,
+                    palette.muted,
                 );
                 canvas.text(
                     body.x,
                     body.y + 369 - panel.scroll,
                     "Home changes apply when you use Home or start again.",
                     1,
-                    ui::MUTED,
+                    palette.muted,
                 );
             }
             PanelKind::BlockingRules => self.paint_blocking_rules(canvas, body, panel),
@@ -2287,7 +2563,12 @@ impl App {
             canvas.set_clip(Some(if content {
                 crate::paint::ClipRect::new(body.x, body.y, body.w, body.h)
             } else {
-                crate::paint::ClipRect::new(0, BAR_HEIGHT, self.width, (bottom - BAR_HEIGHT).max(0))
+                crate::paint::ClipRect::new(
+                    0,
+                    self.chrome_bottom(),
+                    self.width,
+                    (bottom - self.chrome_bottom()).max(0),
+                )
             }));
             let focused = panel.focus == control.action;
             let hovered = panel.hover == Some(control.action);
@@ -2296,18 +2577,24 @@ impl App {
                 Action::Title => Some(&panel.title),
                 Action::Address | Action::Home | Action::RuleEntry => Some(&panel.address),
                 Action::Zoom => Some(&panel.zoom),
+                Action::LinkColor => Some(&panel.link_color),
+                Action::VisitedColor => Some(&panel.visited_color),
+                Action::DownloadFolder => Some(&panel.download_folder),
                 Action::SearchField => Some(&panel.search),
                 _ => None,
             };
             if let Some(editor) = editor {
-                field(canvas, editor, control.rect.tuple(), focused);
+                field_themed(canvas, editor, control.rect.tuple(), focused, palette);
                 if hovered && !focused {
-                    ui::rounded_border(canvas, control.rect.tuple(), 7.0, 1.0, ui::TEAL_DARK);
+                    ui::rounded_border(canvas, control.rect.tuple(), 7.0, 1.0, palette.accent);
                 }
             } else if matches!(
                 control.action,
                 Action::JavaScript
                     | Action::Images
+                    | Action::DarkMode
+                    | Action::DarkPages
+                    | Action::BookmarkBar
                     | Action::BlockingEnabled
                     | Action::BuiltinBlocking
                     | Action::RecordHistory
@@ -2318,6 +2605,9 @@ impl App {
                 let checked = match control.action {
                     Action::JavaScript => panel.javascript,
                     Action::Images => panel.images,
+                    Action::DarkMode => panel.dark_mode,
+                    Action::DarkPages => panel.dark_pages,
+                    Action::BookmarkBar => panel.bookmark_bar,
                     Action::BlockingEnabled => panel.blocking.enabled,
                     Action::BuiltinBlocking => panel.blocking.builtins,
                     Action::RecordHistory => panel.history_policy.enabled,
@@ -2331,9 +2621,9 @@ impl App {
                     control.rect.tuple(),
                     7.0,
                     if hovered || pressed {
-                        ui::SELECTED
+                        palette.selected
                     } else {
-                        ui::CARD
+                        palette.panel
                     },
                 );
                 ui::rounded_border(
@@ -2341,7 +2631,11 @@ impl App {
                     control.rect.tuple(),
                     7.0,
                     if focused { 2.0 } else { 1.0 },
-                    if focused { ui::TEAL_DARK } else { ui::BORDER },
+                    if focused {
+                        palette.accent
+                    } else {
+                        palette.border
+                    },
                 );
                 let radio = matches!(control.action, Action::Retention(_) | Action::ClearRange(_));
                 let marker = (control.rect.x + 9, control.rect.y + 8, 20, 20);
@@ -2351,9 +2645,9 @@ impl App {
                     marker,
                     radius,
                     if checked && !radio {
-                        ui::NAVY
+                        palette.chrome
                     } else {
-                        ui::CARD
+                        palette.panel
                     },
                 );
                 ui::rounded_border(
@@ -2361,14 +2655,18 @@ impl App {
                     marker,
                     radius,
                     1.0,
-                    if checked { ui::TEAL_DARK } else { ui::MUTED },
+                    if checked {
+                        palette.accent
+                    } else {
+                        palette.muted
+                    },
                 );
                 if checked && radio {
                     ui::rounded_rect(
                         canvas,
                         (control.rect.x + 15, control.rect.y + 14, 8, 8),
                         4.0,
-                        ui::TEAL_DARK,
+                        palette.accent,
                     );
                 } else if checked {
                     ui::icon(
@@ -2377,8 +2675,8 @@ impl App {
                         control.rect.x + 11,
                         control.rect.y + 10,
                         16,
-                        ui::CREAM,
-                        ui::TEAL,
+                        palette.chrome_text,
+                        palette.accent,
                     );
                 }
                 let scale = if control.label.chars().count() as i32 * 12 <= control.rect.w - 50 {
@@ -2394,25 +2692,37 @@ impl App {
                         ((control.rect.w - 50) / (6 * scale)).max(0) as usize,
                     ),
                     scale,
-                    ui::INK,
+                    palette.foreground,
                 );
             } else {
-                panel_button(canvas, &control, focused, hovered, pressed);
+                panel_button(canvas, &control, focused, hovered, pressed, palette);
+                if let Action::DestinationRow(id) = control.action {
+                    canvas.text(
+                        control.rect.x + 12,
+                        control.rect.y + 10,
+                        &fit_text(
+                            &self.profile.data().folder_path(id),
+                            ((control.rect.w - 24) / 6).max(0) as usize,
+                        ),
+                        1,
+                        palette.foreground,
+                    );
+                }
             }
         }
         if panel.focus == Action::List {
             canvas.set_clip(Some(crate::paint::ClipRect::new(
                 body.x, body.y, body.w, body.h,
             )));
-            ui::rounded_border(canvas, body.tuple(), 8.0, 1.5, ui::TEAL_DARK);
+            ui::rounded_border(canvas, body.tuple(), 8.0, 1.5, palette.accent);
         }
         let content_height = self.browser_content_height();
         if content_height > body.h {
             canvas.set_clip(Some(crate::paint::ClipRect::new(
                 0,
-                BAR_HEIGHT,
+                self.chrome_bottom(),
                 self.width,
-                (bottom - BAR_HEIGHT).max(0),
+                (bottom - self.chrome_bottom()).max(0),
             )));
             let thumb = (body.h * body.h / content_height).max(12).min(body.h);
             let y = body.y + (body.h - thumb) * panel.scroll / (content_height - body.h);
@@ -2420,26 +2730,37 @@ impl App {
                 canvas,
                 (body.x + body.w + 8, body.y, 4, body.h),
                 2.0,
-                ui::BORDER,
+                palette.border,
             );
             ui::rounded_rect(
                 canvas,
                 (body.x + body.w + 8, y, 4, thumb),
                 2.0,
-                ui::TEAL_DARK,
+                palette.accent,
             );
         }
         canvas.set_clip(None);
     }
 }
 
-fn panel_list_row(canvas: &mut Canvas, body: Rect, y: i32, selected: bool, hovered: bool) {
+fn panel_list_row(
+    canvas: &mut Canvas,
+    body: Rect,
+    y: i32,
+    selected: bool,
+    hovered: bool,
+    palette: ui::Palette,
+) {
     if selected || hovered {
         ui::rounded_rect(
             canvas,
             (body.x + 3, y + 2, body.w - 11, ROW - 4),
             7.0,
-            if selected { ui::SELECTED } else { ui::SURFACE },
+            if selected {
+                palette.selected
+            } else {
+                palette.background
+            },
         );
     }
     if selected {
@@ -2447,7 +2768,7 @@ fn panel_list_row(canvas: &mut Canvas, body: Rect, y: i32, selected: bool, hover
             canvas,
             (body.x + 4, y + 10, 3, ROW - 20),
             1.5,
-            ui::TEAL_DARK,
+            palette.accent,
         );
     }
     canvas.fill_rect(
@@ -2455,7 +2776,7 @@ fn panel_list_row(canvas: &mut Canvas, body: Rect, y: i32, selected: bool, hover
         y + ROW - 1,
         (body.w - 60).max(0),
         1,
-        ui::BORDER,
+        palette.border,
     );
 }
 
@@ -2465,34 +2786,53 @@ fn panel_button(
     focused: bool,
     hovered: bool,
     pressed: bool,
+    palette: ui::Palette,
 ) {
     let primary = matches!(
         control.action,
         Action::Add
             | Action::Open
             | Action::SaveBookmark
+            | Action::SaveFolder
             | Action::Apply
             | Action::ApplySearch
             | Action::ApplyHistory
     );
-    let destructive = matches!(control.action, Action::Delete | Action::ConfirmClear);
+    let destructive = matches!(
+        control.action,
+        Action::Delete | Action::ConfirmClear | Action::ConfirmDeleteFolder
+    );
     let (background, foreground) = if !control.enabled {
-        (ui::SURFACE, ui::DISABLED)
+        (palette.background, palette.muted)
     } else if pressed {
         (
             if destructive {
-                ui::ERROR
+                palette.error
             } else {
-                ui::TEAL_DARK
+                palette.accent
             },
-            ui::CREAM,
+            palette.chrome_text,
         )
     } else if primary {
-        (if hovered { ui::NAVY_LIGHT } else { ui::NAVY }, ui::CREAM)
+        (
+            if hovered {
+                ui::NAVY_LIGHT
+            } else {
+                palette.chrome
+            },
+            palette.chrome_text,
+        )
     } else if destructive {
-        (ui::ERROR_BG, ui::ERROR)
+        (palette.panel_alt, palette.error)
     } else {
-        (if hovered { ui::SELECTED } else { ui::CARD }, ui::INK)
+        (
+            if hovered {
+                palette.selected
+            } else {
+                palette.panel
+            },
+            palette.foreground,
+        )
     };
     let rect = control.rect;
     ui::rounded_rect(canvas, rect.tuple(), 7.0, background);
@@ -2502,18 +2842,26 @@ fn panel_button(
         7.0,
         1.0,
         if destructive && hovered {
-            ui::ERROR
+            palette.error
         } else if primary && control.enabled {
-            ui::NAVY
+            palette.chrome
         } else {
-            ui::BORDER
+            palette.border
         },
     );
     let icon = match control.action {
         Action::Close | Action::Cancel | Action::CancelBookmark => Some(Icon::Close),
         Action::Add => Some(Icon::Plus),
+        Action::NewFolder | Action::Destination => Some(Icon::Folder),
+        Action::FolderUp | Action::MoveUp => Some(Icon::Up),
+        Action::MoveDown => Some(Icon::Down),
+        Action::Delete | Action::ConfirmDeleteFolder => Some(Icon::Trash),
+        Action::Move => Some(Icon::Forward),
+        Action::SettingsBack => Some(Icon::Settings),
         Action::Open => Some(Icon::Forward),
-        Action::SaveBookmark | Action::Apply | Action::ApplyHistory => Some(Icon::Check),
+        Action::SaveBookmark | Action::SaveFolder | Action::Apply | Action::ApplyHistory => {
+            Some(Icon::Check)
+        }
         Action::HistorySearch | Action::ApplySearch => Some(Icon::Search),
         Action::HistoryOptions => Some(Icon::Settings),
         Action::CurrentHome | Action::BundledHome => Some(Icon::Home),
@@ -2527,7 +2875,7 @@ fn panel_button(
             rect.y + (rect.h - 18) / 2,
             18,
             foreground,
-            ui::TEAL,
+            palette.accent,
         );
     } else {
         let scale = if rect.w >= 160 && control.label.chars().count() as i32 * 12 + 40 <= rect.w {
@@ -2552,9 +2900,9 @@ fn panel_button(
                 16,
                 foreground,
                 if control.enabled {
-                    ui::TEAL
+                    palette.accent
                 } else {
-                    ui::DISABLED
+                    palette.muted
                 },
             );
         }
@@ -2572,11 +2920,7 @@ fn panel_button(
             (rect.x + 2, rect.y + 2, rect.w - 4, rect.h - 4),
             5.0,
             2.0,
-            if primary || pressed {
-                ui::TEAL
-            } else {
-                ui::TEAL_DARK
-            },
+            palette.accent,
         );
     }
 }

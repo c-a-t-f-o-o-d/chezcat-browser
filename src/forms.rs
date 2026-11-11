@@ -26,6 +26,7 @@ pub struct Submission {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
     Text,
+    TextArea,
     Hidden,
     Checkbox,
     Radio,
@@ -77,7 +78,8 @@ pub fn kind(doc: &Document, node: usize) -> Option<Kind> {
         {
             Kind::Select
         }
-        "select" | "textarea" => Kind::Unsupported,
+        "textarea" => Kind::TextArea,
+        "select" => Kind::Unsupported,
         _ => return None,
     })
 }
@@ -332,24 +334,34 @@ fn select_state(doc: &Document, node: usize) -> (SelectState, bool, usize) {
 
 pub fn label_targets(doc: &Document) -> HashMap<usize, usize> {
     let mut ids = HashMap::new();
-    let mut inactive = vec![false; doc.nodes.len()];
-    for (index, _) in doc.nodes.iter().enumerate() {
-        inactive[index] |= matches!(
-            tag(doc, index),
-            "head" | "script" | "style" | "template" | "iframe" | "object" | "datalist"
-        ) || doc.scripting_enabled && tag(doc, index) == "noscript";
-        for &child in &doc.nodes[index].children {
-            inactive[child] = inactive[index];
+    let mut active = vec![false; doc.nodes.len()];
+    let mut order = Vec::new();
+    let mut stack = if doc.nodes.is_empty() {
+        Vec::new()
+    } else {
+        vec![0]
+    };
+    while let Some(index) = stack.pop() {
+        if index >= doc.nodes.len()
+            || active[index]
+            || matches!(
+                tag(doc, index),
+                "head" | "script" | "style" | "template" | "iframe" | "object" | "datalist"
+            )
+            || doc.scripting_enabled && tag(doc, index) == "noscript"
+        {
+            continue;
         }
-        if !inactive[index] {
-            if let Some(id) = doc.attr(index, "id") {
-                ids.entry(id).or_insert(index);
-            }
+        active[index] = true;
+        order.push(index);
+        if let Some(id) = doc.attr(index, "id") {
+            ids.entry(id).or_insert(index);
         }
+        stack.extend(doc.nodes[index].children.iter().rev().copied());
     }
     let mut labels = HashMap::new();
-    for (node, item) in doc.nodes.iter().enumerate() {
-        if inactive[node] || tag(doc, node) != "label" {
+    for node in order {
+        if tag(doc, node) != "label" {
             continue;
         }
         let target = if let Some(id) = doc.attr(node, "for") {
@@ -357,10 +369,10 @@ pub fn label_targets(doc: &Document) -> HashMap<usize, usize> {
                 .copied()
                 .filter(|&index| kind(doc, index).is_some_and(|k| k != Kind::Hidden))
         } else {
-            let mut stack: Vec<_> = item.children.iter().rev().copied().collect();
+            let mut stack: Vec<_> = doc.nodes[node].children.iter().rev().copied().collect();
             let mut found = None;
             while let Some(child) = stack.pop() {
-                if inactive[child] {
+                if !active[child] {
                     continue;
                 }
                 if kind(doc, child).is_some_and(|k| k != Kind::Hidden) {
@@ -405,13 +417,13 @@ pub struct Control {
 
 impl Control {
     pub fn editable(&self) -> bool {
-        self.kind == Kind::Text && !self.disabled && !self.readonly
+        matches!(self.kind, Kind::Text | Kind::TextArea) && !self.disabled && !self.readonly
     }
     pub fn focusable(&self) -> bool {
         !self.disabled && !matches!(self.kind, Kind::Hidden | Kind::Unsupported)
     }
     fn submitted_value(&self) -> String {
-        if matches!(self.kind, Kind::Text | Kind::Select) {
+        if matches!(self.kind, Kind::Text | Kind::TextArea | Kind::Select) {
             self.value.text()
         } else {
             self.initial.clone()
@@ -443,9 +455,8 @@ impl Control {
         self.value.delete_selection();
         let used: usize = self.value.chars.iter().map(|ch| ch.len_utf16()).sum();
         let mut available = self.max_length.saturating_sub(used);
-        let incoming: Vec<char> = text
-            .chars()
-            .filter(|ch| !matches!(ch, '\r' | '\n'))
+        let incoming: Vec<char> = normalized_chars(text)
+            .filter(|ch| self.kind == Kind::TextArea || *ch != '\n')
             .take_while(|ch| {
                 if ch.len_utf16() > available {
                     return false;
@@ -463,12 +474,53 @@ impl Control {
     }
 }
 
-fn set_form_value(editor: &mut Editor, text: &str) {
-    // A single-line HTML input removes CR/LF; tabs remain part of its value.
-    editor.chars = text
-        .chars()
-        .filter(|ch| !matches!(ch, '\r' | '\n'))
-        .take(MAX_VALUE_UNITS)
+fn normalized_chars(text: &str) -> impl Iterator<Item = char> + '_ {
+    let mut previous_cr = false;
+    text.chars().filter_map(move |ch| {
+        let skip = previous_cr && ch == '\n';
+        previous_cr = ch == '\r';
+        (!skip).then_some(if ch == '\r' { '\n' } else { ch })
+    })
+}
+
+fn textarea_initial(doc: &Document, node: usize) -> (String, bool) {
+    let mut text = String::new();
+    let mut stack: Vec<_> = doc.nodes[node].children.iter().rev().copied().collect();
+    let (mut walked, mut units) = (0, 0);
+    while let Some(child) = stack.pop() {
+        walked += 1;
+        if walked > MAX_SELECT_WALK {
+            return (text, true);
+        }
+        match &doc.nodes[child].kind {
+            NodeKind::Text(value) => {
+                for ch in value.chars() {
+                    units += ch.len_utf16();
+                    if units > MAX_VALUE_UNITS {
+                        return (text, true);
+                    }
+                    text.push(ch);
+                }
+            }
+            NodeKind::Element { .. } => {
+                stack.extend(doc.nodes[child].children.iter().rev().copied());
+            }
+        }
+    }
+    (normalized_chars(&text).collect(), false)
+}
+
+fn set_form_value(editor: &mut Editor, text: &str, kind: Kind) {
+    // Textarea API values normalize CR/CRLF to LF. Single-line inputs remove
+    // CR/LF, while tabs remain part of either value. Submission normalizes LF
+    // back to CRLF through the existing URL-encoded form serializer.
+    let mut units = 0;
+    editor.chars = normalized_chars(text)
+        .filter(|ch| kind == Kind::TextArea || *ch != '\n')
+        .take_while(|ch| {
+            units += ch.len_utf16();
+            units <= MAX_VALUE_UNITS
+        })
         .collect();
     editor.cursor = editor.chars.len();
     editor.anchor = editor.cursor;
@@ -534,8 +586,12 @@ impl Forms {
                 p
             };
             let disabled = disabled(doc, node, &parents);
-            let initial = if kind == Kind::Select {
-                ""
+            let initial = if kind == Kind::TextArea {
+                let (text, limited) = textarea_initial(doc, node);
+                result.limited |= limited;
+                text
+            } else if kind == Kind::Select {
+                String::new()
             } else {
                 doc.attr(node, "value")
                     .unwrap_or(if matches!(kind, Kind::Checkbox | Kind::Radio) {
@@ -543,6 +599,7 @@ impl Forms {
                     } else {
                         ""
                     })
+                    .to_owned()
             };
             let name = doc.attr(node, "name").unwrap_or("");
             total = total
@@ -563,7 +620,7 @@ impl Forms {
                 })
                 .collect();
             let mut value = Editor::default();
-            set_form_value(&mut value, &initial);
+            set_form_value(&mut value, &initial, kind);
             let checked = doc.attr(node, "checked").is_some();
             let select = if kind == Kind::Select {
                 let (state, limited, bytes) = select_state(doc, node);
@@ -697,10 +754,14 @@ impl Forms {
         if kind == Kind::Unsupported {
             return Err("This form control does not support scripted values yet.".into());
         }
-        let text: String = text
-            .chars()
-            .filter(|ch| kind != Kind::Text || !matches!(ch, '\r' | '\n'))
-            .collect();
+        let text: String = if kind == Kind::TextArea {
+            normalized_chars(text).take(MAX_VALUE_UNITS + 1).collect()
+        } else {
+            text.chars()
+                .filter(|ch| kind != Kind::Text || !matches!(ch, '\r' | '\n'))
+                .take(MAX_VALUE_UNITS + 1)
+                .collect()
+        };
         if text.encode_utf16().count() > MAX_VALUE_UNITS {
             return Err("A form value is limited to 4096 UTF-16 units.".into());
         }
@@ -735,7 +796,7 @@ impl Forms {
         control.value.offset = 0;
         // Text inputs keep their original default for Reset. The other supported
         // input types use the value attribute/default-value mode.
-        if kind != Kind::Text {
+        if !matches!(kind, Kind::Text | Kind::TextArea) {
             control.initial = text;
         }
         Ok(())
@@ -807,7 +868,7 @@ impl Forms {
                     control.set_selection(selected);
                     continue;
                 }
-                set_form_value(&mut control.value, &control.initial);
+                set_form_value(&mut control.value, &control.initial, control.kind);
                 control.checked = control.initially_checked;
                 if control.kind == Kind::Radio && control.checked {
                     radios.push(node);
@@ -882,9 +943,12 @@ impl Forms {
                             && c.name == control.name
                             && c.required
                     });
-            if validate && required && !(control.kind == Kind::Text && control.readonly) {
+            if validate
+                && required
+                && !(matches!(control.kind, Kind::Text | Kind::TextArea) && control.readonly)
+            {
                 let missing = match control.kind {
-                    Kind::Text => control.value.chars.is_empty(),
+                    Kind::Text | Kind::TextArea => control.value.chars.is_empty(),
                     Kind::Select => control
                         .select
                         .as_ref()
@@ -923,6 +987,34 @@ impl Forms {
         current: &Location,
         base: &Location,
     ) -> Result<Submission, String> {
+        self.serialize_submission(doc, owner, submitter, current, base, true)
+    }
+
+    /// HTMLFormElement.submit() bypasses interactive constraint validation and
+    /// has no submitter. Encoding, unsupported-control, size and URL checks are
+    /// shared with a real button submission; no network request starts here.
+    pub fn script_submit_request(
+        &self,
+        doc: &Document,
+        owner: usize,
+        current: &Location,
+        base: &Location,
+    ) -> Result<Submission, String> {
+        self.serialize_submission(doc, owner, None, current, base, false)
+    }
+
+    fn serialize_submission(
+        &self,
+        doc: &Document,
+        owner: usize,
+        submitter: Option<usize>,
+        current: &Location,
+        base: &Location,
+        validate: bool,
+    ) -> Result<Submission, String> {
+        if owner >= doc.nodes.len() || tag(doc, owner) != "form" {
+            return Err("Submission requires an existing form.".into());
+        }
         if self.limited {
             return Err(
                 "This page exceeds the form value/control limits; nothing was submitted.".into(),
@@ -972,7 +1064,9 @@ impl Forms {
         if current.url.as_ref().is_some_and(|origin| origin.secure) && !url.secure {
             return Err("HTTPS form submission to unencrypted HTTP was blocked.".into());
         }
-        self.validate_submission(doc, owner, submitter)?;
+        if validate {
+            self.validate_submission(doc, owner, submitter)?;
+        }
         let mut query = String::new();
         for (&node, control) in &self.controls {
             if control.owner != Some(owner) || control.disabled {
@@ -1729,7 +1823,7 @@ mod tests {
             target.url.unwrap().display(),
             "http://example.test/doc?q=yes"
         );
-        let doc = html::parse("<form><textarea name=q>hello</textarea><button>Go</button></form>");
+        let doc = html::parse("<form><select name=q multiple><option>hello</option></select><button>Go</button></form>");
         let forms = Forms::new(&doc);
         let (&node, button) = forms
             .controls
@@ -1741,6 +1835,81 @@ mod tests {
             .unwrap_err()
             .contains("not implemented"));
     }
+    #[test]
+    fn textarea_values_edit_normalize_submit_and_reset_without_changing_the_default() {
+        let doc = html::parse("<form id=f action='/search'><textarea id=q name=q rows=2>\nfirst &amp; second\nthird</textarea><button id=send>Search</button></form>");
+        let mut forms = Forms::new(&doc);
+        let node = node_id(&doc, "q");
+        let owner = node_id(&doc, "f");
+        let send = node_id(&doc, "send");
+        assert_eq!(forms.controls[&node].kind, Kind::TextArea);
+        assert!(forms.controls[&node].editable());
+        assert_eq!(forms.controls[&node].value.text(), "first & second\nthird");
+        forms.controls.get_mut(&node).unwrap().value.select_all();
+        forms
+            .controls
+            .get_mut(&node)
+            .unwrap()
+            .insert("café +&\r\nnext\rlast");
+        assert_eq!(forms.controls[&node].value.text(), "café +&\nnext\nlast");
+        let current = location("https://example.test/home");
+        let result = forms
+            .submit(&doc, owner, Some(send), &current, &current)
+            .unwrap();
+        assert_eq!(
+            result.display(),
+            "https://example.test/search?q=caf%C3%A9+%2B%26%0D%0Anext%0D%0Alast"
+        );
+        forms.script_set_value(node, "script\r\nvalue").unwrap();
+        assert_eq!(forms.controls[&node].value.text(), "script\nvalue");
+        forms.reset(owner);
+        assert_eq!(forms.controls[&node].value.text(), "first & second\nthird");
+    }
+
+    #[test]
+    fn textarea_required_readonly_disabled_and_utf16_limits_are_preserved() {
+        let doc = html::parse("<form id=f><textarea id=q name=q required maxlength=3></textarea><textarea id=ro name=r readonly required></textarea><textarea name=skip disabled>omitted</textarea><button id=send>Search</button></form>");
+        let mut forms = Forms::new(&doc);
+        let (owner, node, send) = (
+            node_id(&doc, "f"),
+            node_id(&doc, "q"),
+            node_id(&doc, "send"),
+        );
+        let current = location("http://example.test/search");
+        assert!(forms
+            .submit(&doc, owner, Some(send), &current, &current)
+            .unwrap_err()
+            .contains("required"));
+        forms.controls.get_mut(&node).unwrap().insert("🦀ab");
+        assert_eq!(forms.controls[&node].value.text(), "🦀a");
+        assert!(!forms.controls[&node_id(&doc, "ro")].editable());
+        let result = forms
+            .submit(&doc, owner, Some(send), &current, &current)
+            .unwrap();
+        assert_eq!(
+            result.display(),
+            "http://example.test/search?q=%F0%9F%A6%80a&r="
+        );
+        assert!(forms
+            .script_set_value(node, &"🦀".repeat(MAX_VALUE_UNITS))
+            .is_err());
+        let oversized = html::parse(&format!(
+            "<form id=f><textarea name=q>{}</textarea></form>",
+            "x".repeat(MAX_VALUE_UNITS + 1)
+        ));
+        let forms = Forms::new(&oversized);
+        assert!(forms
+            .submit(
+                &oversized,
+                node_id(&oversized, "f"),
+                None,
+                &current,
+                &current
+            )
+            .unwrap_err()
+            .contains("limits"));
+    }
+
     #[test]
     fn post_keeps_action_query_submitter_spaces_and_source_origin() {
         let doc=html::parse("<form id=f method=post action='/send?token=target#result'><input type=hidden name=1 value='hidden &amp; value'><input name=q value='café'><input type=checkbox name=chosen value=yes checked><input name=ignored value=secret disabled><input type=submit name=12 value='    Proceed    '></form>");

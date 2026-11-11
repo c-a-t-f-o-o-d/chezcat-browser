@@ -33,6 +33,7 @@ enum Key {
     Bool(bool),
     Number(u64),
     String(String),
+    Symbol(usize),
     Object(usize),
     Function(usize),
     Host(u32),
@@ -230,6 +231,7 @@ impl Runtime {
                 value.to_bits()
             }),
             Value::String(value) => Key::String(value.clone()),
+            Value::Symbol(id) => Key::Symbol(*id),
             Value::Object(id) => Key::Object(*id),
             Value::Function(id) => Key::Function(*id),
             Value::Host(id) => Key::Host(*id),
@@ -398,7 +400,7 @@ impl Runtime {
                     } else if let Some(view) = view {
                         Value::Number(self.typed_read(view, iterator.next)?)
                     } else {
-                        self.get_property(source, &iterator.next.to_string())?
+                        self.get_property_with_host(source, &iterator.next.to_string(), host)?
                     };
                     iterator.next += 1;
                     Some((key, value))
@@ -468,7 +470,8 @@ impl Runtime {
         if matches!(source, Value::Null | Value::Undefined) {
             return Ok(Value::Object(id));
         }
-        let adder = self.get_property(id, if kind == Kind::Map { "set" } else { "add" })?;
+        let adder =
+            self.get_property_with_host(id, if kind == Kind::Map { "set" } else { "add" }, host)?;
         if !matches!(adder, Value::Function(_)) {
             return Err(Fault::exception(
                 "TypeError",
@@ -476,13 +479,13 @@ impl Runtime {
             ));
         }
         let source = self.copy_value(source)?;
-        let mut iterator = self.loop_iterator(source, true)?;
+        let mut iterator = self.loop_iterator(source, true, host)?;
         while let Some(value) = self.loop_next(&mut iterator, host)? {
             let values = if kind == Kind::Map {
                 let object = self.ordinary_required(&value)?;
                 vec![
-                    self.get_ordinary_property(object, "0")?,
-                    self.get_ordinary_property(object, "1")?,
+                    self.get_ordinary_property_with_host(object, "0", host)?,
+                    self.get_ordinary_property_with_host(object, "1", host)?,
                 ]
             } else {
                 vec![value]
@@ -743,5 +746,85 @@ mod tests {
             .display()
             .contains("Collection entry limit"));
         assert_eq!(runtime.collection_entries, MAX_DOCUMENT_ENTRIES);
+    }
+
+    #[test]
+    fn map_symbol_keys_preserve_identity_updates_and_reinsertion_order() {
+        let mut runtime = Runtime::new();
+        let id = new_map(&mut runtime);
+        let first = Value::Symbol(0);
+        let second = Value::Symbol(1);
+        for (key, value) in [
+            (&first, Value::Number(10.0)),
+            (&second, Value::Number(20.0)),
+            (&first, Value::Number(30.0)),
+        ] {
+            runtime.collection_put(id, Kind::Map, key, &value).unwrap();
+        }
+        let (order, key, value) = runtime.next_collection_entry(id, 0).unwrap().unwrap();
+        assert!(matches!(key, Value::Symbol(0)));
+        assert!(matches!(value, Value::Number(30.0)));
+        let (_, key, value) = runtime
+            .next_collection_entry(id, order + 1)
+            .unwrap()
+            .unwrap();
+        assert!(matches!(key, Value::Symbol(1)));
+        assert!(matches!(value, Value::Number(20.0)));
+        assert_eq!(runtime.collection_entries, 2);
+
+        assert!(matches!(
+            runtime.collection_delete(id, Kind::Map, &first).unwrap(),
+            Value::Bool(true)
+        ));
+        runtime
+            .collection_put(id, Kind::Map, &first, &Value::Symbol(1))
+            .unwrap();
+        let (order, key, _) = runtime.next_collection_entry(id, 0).unwrap().unwrap();
+        assert!(matches!(key, Value::Symbol(1)));
+        let (_, key, value) = runtime
+            .next_collection_entry(id, order + 1)
+            .unwrap()
+            .unwrap();
+        assert!(matches!(key, Value::Symbol(0)));
+        assert!(matches!(value, Value::Symbol(1)));
+    }
+
+    #[test]
+    fn set_symbol_keys_are_distinct_from_other_key_types() {
+        let mut runtime = Runtime::new();
+        let id = runtime.new_object(None).unwrap();
+        runtime.objects[id].collection = Some(Data::new(Kind::Set));
+        for key in [
+            Value::Symbol(0),
+            Value::Symbol(1),
+            Value::Symbol(0),
+            Value::Number(0.0),
+            Value::Number(-0.0),
+            Value::String("Symbol()".into()),
+            Value::Undefined,
+            Value::Number(f64::NAN),
+            Value::Number(-f64::NAN),
+        ] {
+            runtime
+                .collection_put(id, Kind::Set, &key, &Value::Undefined)
+                .unwrap();
+        }
+        assert_eq!(runtime.collection(id, Kind::Set).unwrap().ordered.len(), 6);
+        assert_eq!(runtime.collection_entries, 6);
+        runtime
+            .collection_delete(id, Kind::Set, &Value::Symbol(0))
+            .unwrap();
+        assert!(runtime
+            .collection(id, Kind::Set)
+            .unwrap()
+            .lookup
+            .contains_key(&Key::Symbol(1)));
+        assert!(runtime
+            .collection(id, Kind::Set)
+            .unwrap()
+            .lookup
+            .contains_key(&Key::Number(0)));
+        runtime.collection_clear(id, Kind::Set).unwrap();
+        assert_eq!(runtime.collection_entries, 0);
     }
 }

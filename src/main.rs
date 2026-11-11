@@ -5,6 +5,7 @@
 mod app;
 mod blocking;
 mod compression;
+mod cookies;
 mod crypto_aead;
 mod crypto_aes_gcm;
 mod crypto_ec;
@@ -15,6 +16,7 @@ mod crypto_x25519;
 mod csp;
 mod css;
 mod diagnostics;
+mod downloads;
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 mod editor;
 mod font;
@@ -34,6 +36,7 @@ mod layout;
 mod loader;
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 mod navigation;
+mod network_trace;
 mod paint;
 #[cfg(target_os = "windows")]
 mod platform;
@@ -58,7 +61,12 @@ fn main() {
         #[cfg(target_os = "windows")]
         {
             // Automated headless checks must get an exit code, not a modal box.
-            if std::env::args_os().any(|arg| arg == "--render" || arg == "--diagnose") {
+            if std::env::args_os().any(|arg| {
+                arg == "--render"
+                    || arg == "--diagnose"
+                    || arg == "--activity-report"
+                    || arg == "--save-source"
+            }) {
                 eprintln!("{}", error);
             } else {
                 platform::show_error(&error);
@@ -81,10 +89,13 @@ fn run() -> Result<(), String> {
     let mut resource_view = false;
     let mut inspector_view: Option<String> = None;
     let mut inspector_window = false;
+    let mut browser_view: Option<String> = None;
     let mut find = None;
     let mut trust_file: Option<PathBuf> = None;
     let mut diagnostic_urls = Vec::new();
     let mut diagnostic_report: Option<PathBuf> = None;
+    let mut activity_report: Option<PathBuf> = None;
+    let mut save_source: Option<PathBuf> = None;
     let mut scripts_enabled: Option<bool> = None;
     let mut images_enabled: Option<bool> = None;
     let mut profile_directory: Option<PathBuf> = None;
@@ -121,6 +132,19 @@ fn run() -> Result<(), String> {
                 inspector_view = Some(name);
             }
             Some("--inspector-window") => inspector_window = true,
+            Some("--browser-ui") => {
+                let name = args
+                    .next()
+                    .and_then(|value| value.into_string().ok())
+                    .ok_or("--browser-ui requires settings, appearance, bookmarks, downloads or download-settings")?;
+                if !matches!(
+                    name.as_str(),
+                    "settings" | "appearance" | "bookmarks" | "downloads" | "download-settings"
+                ) {
+                    return Err("--browser-ui requires settings, appearance, bookmarks, downloads or download-settings".into());
+                }
+                browser_view = Some(name);
+            }
             Some("--no-javascript") => scripts_enabled = Some(false),
             Some("--javascript") => scripts_enabled = Some(true),
             Some("--no-images") => images_enabled = Some(false),
@@ -164,6 +188,26 @@ fn run() -> Result<(), String> {
                         .into(),
                 );
             }
+            Some("--activity-report") => {
+                if activity_report.is_some() {
+                    return Err("Pass --activity-report at most once.".into());
+                }
+                activity_report = Some(
+                    args.next()
+                        .ok_or("--activity-report requires a text file path")?
+                        .into(),
+                );
+            }
+            Some("--save-source") => {
+                if save_source.is_some() {
+                    return Err("Pass --save-source at most once.".into());
+                }
+                save_source = Some(
+                    args.next()
+                        .ok_or("--save-source requires an HTML file path")?
+                        .into(),
+                );
+            }
             Some("--trust-file") => {
                 if trust_file.is_some() {
                     return Err("Pass --trust-file at most once.".into());
@@ -183,17 +227,18 @@ fn run() -> Result<(), String> {
                 )
             }
             Some("--help") | Some("-h") => {
-                let help = r#"ChezCat 0.29
+                let help = r#"ChezCat 0.34.0
 
 Open local HTML, UTF-8 text, supported images or a website address. Bare hosts such as google.com default to HTTPS; explicit http:// remains supported.
 Ctrl+O: file picker; Ctrl+L: address; Esc: stop loading.
 F5 / Ctrl+R: reload; Ctrl+F5 / Ctrl+Shift+R: full reload.
-Ctrl+D: add bookmark; Ctrl+Shift+B: bookmarks; Ctrl+H: history; Ctrl+comma: settings.
+Ctrl+D: add bookmark; Ctrl+B: bookmarks; Ctrl+H: history; Ctrl+comma: settings.
+Ctrl+S: download page file; Alt+click a link: download its target. The download icon opens recent downloads.
 Ctrl+F: find; Ctrl+U: source; Ctrl+I: resources and script errors; Ctrl+J: save JavaScript preference and reload.
 Alt+Left/Right or mouse side buttons: history; Ctrl +/-: zoom; Ctrl+0: saved default zoom.
 
 F12 / Ctrl+Shift+I: live inspector; Elements, Sources, Console and Network; dock or detach.
-Settings: JavaScript, images, request blocking, default zoom and home page. Use Menu > Settings, then Apply.
+Settings: JavaScript, images, request blocking, zoom, home, dark theme/page colors, bookmarks bar, custom link colors and Downloads folder. Use Menu > Settings, then Apply.
 History: Ctrl+H > Settings enables recording, age cleanup (1/7/30/90 days or no age limit), and clear on normal window exit.
 History starts disabled; clear time ranges and individual removal are available in the History panel.
 Bookmarks and settings are saved in %LOCALAPPDATA%/OwnBrowser/profile.txt on Windows.
@@ -205,13 +250,19 @@ Headless rendering:
 ChezCat.exe [file.html or https://host/path] --render output.ppm --width 1080 --height 760
 Optional: --scroll 200 --zoom 125 --source --resources --find text --no-javascript --no-images --wait-ms 500
 Inspector snapshots: --inspector elements|sources|console|network; add --inspector-window for its detached surface.
+Browser panels: --browser-ui settings|appearance|bookmarks|downloads|download-settings.
 Headless rendering ignores the personal profile unless --profile-dir is explicit. It never reads or changes saved browsing history.
+Page activity: URL --activity-report activity.txt (runs the page and exits; add --render page.ppm for an image).
+Activity reports use the same isolated-profile/history rules as headless rendering and include resource events and script errors.
+Page source: URL --save-source page.html (saves the displayed document's decoded source as UTF-8, then exits).
+Combine --save-source with --activity-report and --wait-ms to capture the final document after script navigation.
+Source export uses the same profile isolation as rendering. It saves the original loaded HTML, before DOM changes; failed navigation does not create a source file.
 --wait-ms adds timer settling time after page loading (0..10000; default 0).
 Trust: --trust-file roots.pem (replaces trust/roots.pem beside the executable)
 Connection report: --diagnose https://host/path --report connection.txt
 Repeat --diagnose up to eight times, or run Check-Connections.cmd. Diagnostics do not load a profile.
 
-HTTP, the TLS 1.3/1.2 HTTPS subset, gzip/deflate decoding, images, layout, controls and JavaScript use our own code. Page fonts use our TrueType/WOFF1 reader and renderer; try pages/fonts.html. GET and URL-encoded POST forms work; refresh/history asks before resending POST. The bounded JavaScript subset includes typed arrays, DataView, Map/Set, text encoding, animation frames and native keyboard events. Try the Cat Courier, binary-data, image and request-blocking workshops from Home. Cookies and script networking remain unimplemented. Try pages/browser-tests.html for scanner links and current limits."#;
+HTTP, the TLS 1.3/1.2 HTTPS subset, gzip/deflate decoding, images, layout, controls and JavaScript use our own code. Page fonts use our TrueType/WOFF1 reader and renderer; try pages/fonts.html. GET and URL-encoded POST forms work; refresh/history asks before resending POST. The bounded JavaScript subset includes typed arrays, DataView, Map/Set, text encoding, animation frames and native keyboard events. Session cookies stay in memory and are restricted to their exact host. Same-origin script navigation and external classic script insertion are supported within work, CSP and request-blocking limits. Fetch, XHR, persistent storage and HTML injection remain unavailable. Try the workshops and pages/browser-tests.html for current limits."#;
                 #[cfg(target_os = "windows")]
                 platform::show_info(help);
                 #[cfg(not(target_os = "windows"))]
@@ -227,14 +278,40 @@ HTTP, the TLS 1.3/1.2 HTTPS subset, gzip/deflate decoding, images, layout, contr
             }
         }
     }
-    if wait_ms > 0 && render.is_none() {
-        return Err("--wait-ms requires --render output.ppm.".into());
+    if wait_ms > 0 && render.is_none() && activity_report.is_none() && save_source.is_none() {
+        return Err(
+            "--wait-ms requires --render, --activity-report or --save-source output.".into(),
+        );
     }
     if inspector_window && (render.is_none() || inspector_view.is_none()) {
         return Err("--inspector-window requires --render and --inspector TAB.".into());
     }
     if no_profile && profile_directory.is_some() {
         return Err("Choose either --no-profile or --profile-dir, not both.".into());
+    }
+    let outputs = [
+        (&render, "--render"),
+        (&activity_report, "--activity-report"),
+        (&save_source, "--save-source"),
+    ];
+    for (index, (first, first_flag)) in outputs.iter().enumerate() {
+        for (second, second_flag) in outputs.iter().skip(index + 1) {
+            if let (Some(first), Some(second)) = (first, second) {
+                let first = output_destination(first)?;
+                let second = output_destination(second)?;
+                // Windows normally treats case variants as one destination.
+                #[cfg(target_os = "windows")]
+                let same = first.to_string_lossy().to_uppercase()
+                    == second.to_string_lossy().to_uppercase();
+                #[cfg(not(target_os = "windows"))]
+                let same = first == second;
+                if same {
+                    return Err(format!(
+                        "Choose different files for {first_flag} and {second_flag}."
+                    ));
+                }
+            }
+        }
     }
     if zoom.is_some_and(|value| !(50..=300).contains(&value)) {
         return Err("--zoom must be between 50 and 300 percent".into());
@@ -258,6 +335,9 @@ HTTP, the TLS 1.3/1.2 HTTPS subset, gzip/deflate decoding, images, layout, contr
             || source_view
             || resource_view
             || inspector_view.is_some()
+            || browser_view.is_some()
+            || activity_report.is_some()
+            || save_source.is_some()
             || find.is_some()
             || profile_directory.is_some()
         {
@@ -268,6 +348,7 @@ HTTP, the TLS 1.3/1.2 HTTPS subset, gzip/deflate decoding, images, layout, contr
         let path = diagnostic_report.ok_or("--diagnose requires --report output.txt")?;
         return diagnostics::write_report(&path, &diagnostic_urls, &trust);
     }
+    let headless = render.is_some() || activity_report.is_some() || save_source.is_some();
     let mut browser = app::App::new();
     browser.use_system_fonts();
     // Headless output is independent of personal settings unless a profile
@@ -283,7 +364,7 @@ HTTP, the TLS 1.3/1.2 HTTPS subset, gzip/deflate decoding, images, layout, contr
                 .join(directory)
         };
         Some(directory.join("profile.txt"))
-    } else if cfg!(target_os = "windows") && render.is_none() {
+    } else if cfg!(target_os = "windows") && !headless {
         Some(profile::default_path()?)
     } else {
         None
@@ -295,7 +376,7 @@ HTTP, the TLS 1.3/1.2 HTTPS subset, gzip/deflate decoding, images, layout, contr
         browser.attach_profile(store);
         // Renders may read explicit preferences, but never inspect, append,
         // expire or clear personal browsing history.
-        if cfg!(target_os = "windows") && render.is_none() {
+        if cfg!(target_os = "windows") && !headless {
             let history = history::Store::open(history_path.clone())
                 .unwrap_or_else(|error| history::Store::unavailable(history_path, error));
             browser.attach_browsing_history(history);
@@ -324,15 +405,27 @@ HTTP, the TLS 1.3/1.2 HTTPS subset, gzip/deflate decoding, images, layout, contr
     } else {
         browser.open_startup_home();
     }
-    if render.is_some()
-        || source_view
-        || resource_view
-        || find.is_some()
-        || inspector_view.is_some()
-    {
+    if headless || source_view || resource_view || find.is_some() || inspector_view.is_some() {
         browser.wait_for_load();
     }
     browser.wait_for_script_timers(std::time::Duration::from_millis(wait_ms as u64));
+    if let Some(path) = activity_report {
+        std::fs::write(&path, browser.activity_report())
+            .map_err(|error| format!("Cannot write activity report {}: {error}", path.display()))?;
+    }
+    if !browser.failed {
+        if let Some(path) = save_source {
+            std::fs::write(&path, browser.document_source())
+                .map_err(|error| format!("Cannot write page source {}: {error}", path.display()))?;
+        }
+    }
+    if headless && render.is_none() {
+        return if browser.failed {
+            Err(browser.status.clone())
+        } else {
+            Ok(())
+        };
+    }
     if source_view {
         browser.show_source();
     }
@@ -349,6 +442,16 @@ HTTP, the TLS 1.3/1.2 HTTPS subset, gzip/deflate decoding, images, layout, contr
         if inspector_window {
             browser.detach_inspector();
             browser.inspector_window_size(width, height);
+        }
+    }
+    if let Some(view) = browser_view {
+        match view.as_str() {
+            "settings" => browser.show_settings(),
+            "appearance" => browser.show_appearance_settings(),
+            "bookmarks" => browser.show_bookmarks(),
+            "downloads" => browser.show_downloads(),
+            "download-settings" => browser.show_download_settings(),
+            _ => {}
         }
     }
     if let Some(path) = render {
@@ -388,4 +491,19 @@ fn number(value: Option<std::ffi::OsString>, name: &str) -> Result<i32, String> 
         .and_then(|v| v.to_str().and_then(|s| s.parse::<i32>().ok()))
         .filter(|v| *v >= 0 && *v <= 8192)
         .ok_or_else(|| format!("{} requires an integer between 0 and 8192", name))
+}
+
+fn output_destination(path: &std::path::Path) -> Result<PathBuf, String> {
+    // Resolve an existing file or its parent so relative spelling and symlink
+    // aliases cannot silently overwrite the text report with rendered pixels.
+    if let Ok(path) = path.canonicalize() {
+        return Ok(path);
+    }
+    let absolute = std::path::absolute(path).map_err(|error| error.to_string())?;
+    if let (Some(parent), Some(name)) = (absolute.parent(), absolute.file_name()) {
+        if let Ok(parent) = parent.canonicalize() {
+            return Ok(parent.join(name));
+        }
+    }
+    Ok(absolute)
 }

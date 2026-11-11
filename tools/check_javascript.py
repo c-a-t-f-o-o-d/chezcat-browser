@@ -8,6 +8,7 @@ packages are installed or required. All programs below are local test fixtures.
 
 Run from any directory:
     python tools/check_javascript.py [--rustc PATH] [--node PATH] [--output report.json]
+    python tools/check_javascript.py --case-prefix fromcharcode- --case-prefix unicode-pair
 
 Primary reference: https://tc39.es/ecma262/
 These targeted comparisons are not the ECMAScript conformance suite or a claim
@@ -53,6 +54,7 @@ fn representation(value: &Value) -> String {
         Value::Number(value) if value.is_nan() => "number:NaN".into(),
         Value::Number(value) => format!("number:{:016x}", value.to_bits()),
         Value::String(value) => format!("string:{}", value.as_bytes().iter().map(|b| format!("{b:02x}")).collect::<String>()),
+        Value::Symbol(_) => "symbol".into(),
         Value::Function(_) => "function".into(),
         Value::Object(_) => "object".into(),
         Value::Host(id) => format!("host:{id}"),
@@ -159,6 +161,7 @@ function repr(value) {
         return 'number:' + bytes.toString('hex');
     }
     if (typeof value === 'string') return 'string:' + Buffer.from(value).toString('hex');
+    if (typeof value === 'symbol') return 'symbol';
     if (typeof value === 'function') return 'function';
     if (value === test) return 'host:1';
     if (value === browserWindow) return 'host:2';
@@ -676,20 +679,30 @@ NEGATIVE = [
     ('host-constructor-escape', 'test.constructor.constructor("return process")();'),
 ]
 
+# The 0.30 runtime raised the shared parameter/call allowance to 256. Check the
+# accepted boundary as well as rejection just above it; the former 33/40-value
+# negative fixtures no longer describe the production bound.
+_BOUNDARY_PARAMS = ','.join('p' + str(i) for i in range(256))
+_BOUNDARY_ARGS = ','.join(str(i) for i in range(256))
+CASES.append(('parameter-and-call-boundary-256',
+    'function boundary(' + _BOUNDARY_PARAMS + '){return arguments.length+p255;}'
+    'test.record(boundary(' + _BOUNDARY_ARGS + '));'
+    'test.record(boundary.apply(null,[' + _BOUNDARY_ARGS + ']));'
+    'test.record(new Array(' + _BOUNDARY_ARGS + ').length);'))
+
 NEGATIVE.extend([
     ('long-prefix-search', 'let text="' + 'a'*32000 + '";let needle="' + 'a'*15999 + 'b";text.indexOf(needle);'),
     ('handler-wrapper-escape-atomic', '});test.record("must not run");(function(){', True),
     ('handler-invocation-escape-atomic', '})();test.record("must not run");(function(event){', True),
     ('prototype-literal-atomic', 'test.record(1);let x={__proto__:{}};'),
     ('prototype-mutation', 'let o={};o["__proto__"]={};'),
-    ('unsupported-object-coercion', 'let o={};"value="+o;'),
     ('unsupported-custom-join-coercion', 'let a=[{toString(){return "custom";}}];a.join();'),
     ('array-huge-index', 'let a=[];a[4294967294]=1;'),
     ('array-huge-length', 'let a=[];a.length=4294967295;'),
     ('array-factory-huge-length', 'Array(4294967295);'),
     ('array-join-string-growth', 'let a=Array(4096);a.join("0123456789012345678901234567890123456789");'),
     ('array-deep-join', 'let a=[];for(var n=0;n<40;n++){a=[a];}a.join();'),
-    ('apply-argument-limit', 'function f(){}f.apply(null,Array(33));'),
+    ('apply-argument-limit', 'function f(){}f.apply(null,Array(257));'),
     ('apply-huge-arraylike', 'function f(){}f.apply(null,{length:Infinity});'),
     ('object-arena-limit', 'while(true){let o={};}'),
     ('property-name-limit', 'let key="' + 'a'*257 + '";let o={};o[key]=1;'),
@@ -732,7 +745,6 @@ NEGATIVE.extend([
     ('regex-bytecode-limit-atomic', 'test.record(1);let r=/(?:abcdefghijklmnop){1000}/;'),
     ('regex-work-limit-cannot-catch-atomic', 'try{/(a+)+$/.test("'+'a'*80+'!");}catch(e){test.record("caught");}finally{test.record("finally");}'),
     ('regex-lone-surrogate-result', 'test.record(/./.exec("😀")[0]);'),
-    ('regex-function-replacer-unsupported', '"a".replace(/a/,()=>"b");'),
     ('regex-non-ascii-ignorecase-unsupported-atomic', 'test.record(1);let r=/é/i;'),
 ])
 
@@ -771,16 +783,16 @@ NEGATIVE.extend([
     ('for-of-growth-bounded-atomic', 'let a=[1];try{for(var x of a)a.push(1);}catch(e){test.record(1);}finally{test.record(2);}'),
     ('for-of-iteration-environment-bounded-atomic', 'try{for(let x of Array(4096)){}}catch(e){test.record(1);}finally{test.record(2);}'),
     ('new-parse-depth-atomic', 'test.record(1);'+'new '*1000+'Array;'),
-    ('new-argument-limit-atomic', 'test.record(1);new Array('+','.join('1' for _ in range(33))+');'),
+    ('new-argument-limit-atomic', 'test.record(1);new Array('+','.join('1' for _ in range(257))+');'),
     ('new-wrapper-constructor-cannot-catch-atomic', 'try{new String("x");}catch(e){test.record(1);}finally{test.record(2);}'),
     ('eval-missing-host-capability-atomic', 'test.denyEvalCapability=true;try{eval("test.record(1)");}catch(e){test.record(2);}finally{test.record(3);}'),
     ('eval-infinite-cannot-catch-atomic', 'try{eval("while(true){}");}catch(e){test.record(1);}finally{test.record(2);}'),
     ('eval-recursive-depth-cannot-catch-atomic', 'var code="eval(code)";try{eval(code);}catch(e){test.record(1);}finally{test.record(2);}'),
     ('eval-retained-program-limit-atomic', 'try{for(var i=0;i<200;i++)eval("1");}catch(e){test.record(1);}finally{test.record(2);}'),
-    ('eval-retained-source-limit-atomic', 'var code='+json.dumps('/*'+' '*100000+'*/1;')+';try{for(var i=0;i<20;i++)eval(code);}catch(e){test.record(1);}finally{test.record(2);}'),
-    ('eval-retained-ast-limit-atomic', 'var code='+json.dumps('if(false){'+'1;'*4000+'}')+';try{for(var i=0;i<30;i++)eval(code);}catch(e){test.record(1);}finally{test.record(2);}'),
+    ('eval-retained-source-limit-atomic', 'var code='+json.dumps('/*'+' '*100000+'*/1;')+';try{for(var i=0;i<30;i++)eval(code);}catch(e){test.record(1);}finally{test.record(2);}'),
+    ('eval-retained-ast-limit-atomic', 'var code='+json.dumps('if(false){'+'1;'*4000+'}')+';try{for(var i=0;i<40;i++)eval(code);}catch(e){test.record(1);}finally{test.record(2);}'),
     ('eval-parser-limit-cannot-catch-atomic', 'try{eval('+json.dumps('!'*4000+'1;')+');}catch(e){test.record(1);}finally{test.record(2);}'),
-    ('eval-arrow-parameter-limit-cannot-catch-atomic', 'try{eval('+json.dumps('('+','.join('a'+str(i) for i in range(40))+')=>1')+');}catch(e){test.record(1);}finally{test.record(2);}'),
+    ('eval-arrow-parameter-limit-cannot-catch-atomic', 'try{eval('+json.dumps('('+','.join('a'+str(i) for i in range(257))+')=>1')+');}catch(e){test.record(1);}finally{test.record(2);}'),
     ('eval-unsupported-syntax-cannot-catch-atomic', 'try{eval("class Unsupported {}");}catch(e){test.record(1);}finally{test.record(2);}'),
     ('eval-unsupported-accessor-cannot-catch-atomic', 'try{eval("({get x(){return 1;}})");}catch(e){test.record(1);}finally{test.record(2);}'),
     ('eval-unsupported-optional-chain-cannot-catch-atomic', 'try{eval("let o={};o?.x");}catch(e){test.record(1);}finally{test.record(2);}'),
@@ -819,7 +831,6 @@ NEGATIVE.extend([
 ])
 
 NEGATIVE.extend([
-    ('math-object-coercion-unsupported-atomic', 'try{Math.abs({valueOf(){test.record(1);return 2;}});}catch(e){test.record(2);}'),
     ('string-split-array-bound-atomic', 'try{"'+'x'*4097+'".split("");}catch(e){test.record(1);}'),
     ('string-split-surrogate-unsupported-atomic', 'try{"😀".split("");}catch(e){test.record(1);}'),
 ])
@@ -902,7 +913,6 @@ NEGATIVE.extend([
     ('prototype-host-chain-disabled-atomic', 'try{Object.create(test);}catch(e){test.record(1);}finally{test.record(2);}'),
     ('prototype-host-target-disabled-atomic', 'try{Object.setPrototypeOf(test,{});}catch(e){test.record(1);}finally{test.record(2);}'),
     ('prototype-host-descriptor-disabled-atomic', 'try{Object.defineProperty(test,"number",{value:3});}catch(e){test.record(1);}finally{test.record(2);}'),
-    ('prototype-accessor-descriptor-disabled-atomic', 'try{Object.defineProperty({},"x",{get:function(){test.record(1);}});}catch(e){test.record(2);}finally{test.record(3);}'),
     ('prototype-array-descriptor-disabled-atomic', 'try{Object.defineProperty([],"0",{value:1});}catch(e){test.record(1);}finally{test.record(2);}'),
     ('prototype-chain-work-bound-atomic', 'let o={};try{for(let n=0;n<5000;n++){o=Object.create(o);o.missing;}}catch(e){test.record(1);}finally{test.record(2);}'),
     ('prototype-descriptor-retained-bound-atomic', 'let o={},s="'+'x'*32000+'";try{for(let n=0;n<100;n++)Object.defineProperty(o,"p"+n,{value:s});}catch(e){test.record(1);}finally{test.record(2);}'),
@@ -975,9 +985,9 @@ BROWSER_CASES.extend([
     ('key-window-script-descriptor', 'let key={toString(){return "customKey26";}};Object.defineProperty(window,key,{value:9,configurable:true});test.record(customKey26);test.record(window[key]);test.record(Object.getOwnPropertyDescriptor(window,key).value);test.record(key in window);test.record(delete window[key]);test.record(typeof customKey26);'),
 ])
 NEGATIVE.extend([
-    ('dense-token-cap-atomic', 'test.record(1);'+';'*65536),
-    ('dense-ast-cap-atomic', 'test.record(1);'+'0\n'*32768),
-    ('dense-eval-token-cap-atomic', 'try{eval('+json.dumps('test.record(1);'+';'*65536)+');}catch(e){test.record(2);}finally{test.record(3);}'),
+    ('dense-token-cap-atomic', 'test.record(1);'+';'*131072),
+    ('dense-ast-cap-atomic', 'test.record(1);'+'0\n'*65536),
+    ('dense-eval-string-cap-atomic', 'try{eval('+json.dumps('test.record(1);'+';'*131072)+');}catch(e){test.record(2);}finally{test.record(3);}'),
     ('key-host-value-unsupported-atomic', 'try{let o={};o[test]=1;}catch(e){test.record(1);}finally{test.record(2);}'),
     ('key-host-value-read-unsupported-atomic', 'try{({})[test];}catch(e){test.record(1);}finally{test.record(2);}'),
     ('key-callback-host-error-fatal-atomic', 'let key={toString(){return test.unavailable();}};try{({})[key];}catch(e){test.record(1);}finally{test.record(2);}'),
@@ -987,7 +997,6 @@ NEGATIVE.extend([
     ('key-callback-recursive-ownmethod-bound-atomic', 'let o={},key={toString(){return o.hasOwnProperty(key);}};try{o[key];}catch(e){test.record(1);}finally{test.record(2);}'),
     ('key-converted-name-bound-atomic', 'let key={toString(){return "'+'x'*257+'";}};try{({})[key];}catch(e){test.record(1);}finally{test.record(2);}'),
     ('key-prototype-access-remains-blocked-atomic', 'let key={toString(){return "__proto__";}};try{({})[key];}catch(e){test.record(1);}finally{test.record(2);}'),
-    ('key-arithmetic-coercion-still-unsupported-atomic', 'let key={toString(){test.record(1);return "x";}};try{key+"";}catch(e){test.record(2);}finally{test.record(3);}'),
 ])
 
 # Fixed binary-data regression cases: view identity, coercion/order, buffer
@@ -1251,6 +1260,834 @@ NEGATIVE.extend([
 ])
 
 
+# 0.32: real Search logs exposed flat conditional dispatch depth and Error
+# concatenation. These are original semantic fixtures, not copied site scripts.
+# Ordinary conversions are compared for order, receiver, hint and exceptions;
+# the negative fixtures retain explicit capability and resource boundaries.
+CASES.extend([
+    ('conditional-flat-false-chain', 'let n=0;test.record(' + '(++n<0)?missing():'*512 + 'n);test.record(n);'),
+    ('conditional-flat-true-chain', 'test.record(' + 'true?'*512 + '7' + ':missing()'*512 + ');'),
+    ('conditional-state-dispatch', 'let u=511,total=0;for(;u!==-1;)' + ''.join('u=='+str(i)+'?(total=u,u=-1):' for i in range(512)) + 'missing();test.record(total);'),
+    ('conditional-right-associativity-and-assignment', 'let a=0,b=0;test.record(true?false?1:2:3);test.record(false?1:true?2:3);test.record(a=b=false?5:7);test.record(a);test.record(b);test.record(false?a=1:b=3);test.record(a);test.record(b);'),
+    ('conditional-arrows-and-in-true-arm', 'let f=true?(x=>x+1):(x=>x-1),n=0;for(let ok=true?"a" in {a:1}:false;ok;ok=false)n=f(4);test.record(n);test.record((false?x=>x+1:x=>x-1)(8));'),
+    ('conditional-inherited-in-context', 'let n=0;for(let ok=false?false:true?"x" in {x:1}:false;ok;ok=false)n++;test.record(n);'),
+    ('conditional-comma-middle-is-invalid', 'test.record("must not run");true?1,2:3;'),
+    ('conditional-invalid-assignment-target', 'test.record("must not run");(true?1:2)=3;'),
+    ('ordinary-default-object-concatenation', 'test.record("value="+{});test.record({}+7);test.record([]+[]);test.record([1,2]+3);test.record(String(/a/g));'),
+    ('ordinary-error-concatenation', 'for(let e of [Error(),Error("bad"),TypeError("broken"),new RangeError("bound")]){test.record("error="+e);test.record(String(e));}'),
+    ('ordinary-default-and-string-hints', 'let log="",o={valueOf(){log+="v";return 7;},toString(){log+="s";return "text";}};test.record(""+o);test.record(String(o));test.record(Number(o));test.record(log);'),
+    ('ordinary-operand-evaluation-before-conversion', 'let log="",a={valueOf(){log+="a";return 2;}};function b(){log+="b";return {valueOf(){log+="c";return 3;}};}test.record(a+b());test.record(log);'),
+    ('ordinary-live-conversion-fallback', 'let log="",o={valueOf(){log+="v";this.toString=function(){log+="s";return "new";};return this;},toString(){return "old";}};test.record(""+o);test.record(log);'),
+    ('ordinary-noncallable-and-nonprimitive-methods', 'for(let o of [{valueOf:3,toString(){return "ok";}},{valueOf(){return {};},toString(){return {}; }},Object.create(null)]){try{test.record(""+o);}catch(e){test.record(e.name);}}'),
+    ('ordinary-conversion-receiver-and-throws', 'let marker={},o={valueOf(){test.record(this===o);throw marker;}};try{o+1;}catch(e){test.record(e===marker);}o={toString(){throw 9;}};try{String(o);}catch(e){test.record(e);}'),
+    ('ordinary-loose-equality-coercion-boundary', 'let calls=0,o={valueOf(){calls++;return 0;}};for(let v of [0,"0",false,null,undefined,{},o])test.record(o==v);test.record(calls);test.record(o===0);test.record(o!==o);'),
+    ('ordinary-relational-conversion-order', 'let log="",a={valueOf(){log+="a";return "11";}},b={valueOf(){log+="b";return "2";}};test.record(a<b);test.record(a>b);test.record(a<=b);test.record(a>=b);test.record(log);'),
+    ('ordinary-unary-binary-update', 'let o={valueOf(){return 4;}};test.record(+o);test.record(-o);test.record(~o);test.record(o*2);test.record(o<<1);test.record(o&3);let a=o;test.record(a++);test.record(a);let b=o;test.record(--b);'),
+    ('ordinary-compound-conversion-order', 'let log="",o={x:{valueOf(){log+="v";return 2;}}};function rhs(){log+="r";o.x=99;return 3;}test.record(o.x+=rhs());test.record(o.x);test.record(log);'),
+    ('ordinary-function-custom-conversion', 'function f(){}f.valueOf=function(){return 8;};f.toString=function(){return "fn";};test.record(f+2);test.record(String(f));test.record(f==8);'),
+    ('ordinary-error-live-name-message', 'let e=Error("old"),log="";e.name={toString(){log+="n";e.message={toString(){log+="m";return "changed";}};return "Custom";}};test.record(String(e));test.record(log);'),
+    ('ordinary-error-borrowed-and-constructor', 'test.record(new Error({toString(){return "message";}}).message);for(let o of [{},{name:"",message:{toString(){return "only";}}},{name:{toString(){return "N";}},message:""}])test.record(Error.prototype.toString.call(o));'),
+    ('ordinary-numeric-string-builtins', 'let o={valueOf(){return 6;},toString(){return "12.5tail";}};test.record(Number(o));test.record(isNaN(o));test.record(parseInt(o));test.record(parseFloat(o));test.record(encodeURIComponent({toString(){return "a b";}}));test.record(decodeURIComponent({toString(){return "a%20b";}}));'),
+    ('ordinary-parseint-input-before-radix', 'let log="";test.record(parseInt({toString(){log+="s";return "11";}},{valueOf(){log+="r";return 2;}}));test.record(log);'),
+    ('ordinary-generic-string-method-receiver', 'test.record(String.prototype.trim.call({toString(){return "  cat  ";}}));test.record(String.prototype.toUpperCase.call({toString(){return "cat";}}));'),
+    ('ordinary-math-conversion-order-and-nan', 'let log="";test.record(Math.abs({valueOf(){return -2;}}));test.record(Math.min({valueOf(){log+="a";return NaN;}},{valueOf(){log+="b";return 1;}}));test.record(log);'),
+    ('ordinary-former-property-key-arithmetic', 'let key={toString(){test.record("convert");return "x";}};try{test.record(key+"");}catch(e){test.record(e.name);}finally{test.record("finally");}'),
+])
+
+NEGATIVE.extend([
+    ('conditional-pending-frame-bound-atomic', 'test.record(1);'+'false?0:'*4097+'1;'),
+    ('conditional-shared-pending-frame-bound-atomic', 'test.record(1);'+'false?0:'*2048+'('+'false?0:'*2049+'1);'),
+    ('assignment-pending-frame-bound-atomic', 'test.record(1);var x;'+'x='*4097+'1;'),
+    ('ordinary-error-conversion-cycle-bound-atomic', 'let e=Error();e.name=e;try{String(e);}catch(e){test.record(1);}finally{test.record(2);}'),
+    ('ordinary-valueof-conversion-cycle-bound-atomic', 'let o={valueOf(){return +o;}};try{o+1;}catch(e){test.record(1);}finally{test.record(2);}'),
+    ('ordinary-conversion-loop-bound-atomic', 'let o={toString(){while(true){}}};try{String(o);}catch(e){test.record(1);}finally{test.record(2);}'),
+    ('ordinary-native-host-coercion-still-denied-atomic', 'try{""+test;}catch(e){test.record(1);}finally{test.record(2);}'),
+])
+
+
+
+CASES.extend([
+    ('large-bootstrap-source', '/*'+'original bundle '*26000+'*/test.record(7);'),
+    ('dense-bootstrap-tokens', ';'*70000+'test.record(9);'),
+])
+
+# Flat else-if chains are statements, not nested condition expressions. These
+# original fixtures independently check their branch semantics against Node;
+# no captured page or access-check program is reproduced or executed here.
+def else_if_fixture(branches, fallback=None):
+    source = " else ".join("if(" + condition + ")" + body
+                           for condition, body in branches)
+    return source if fallback is None else source + " else " + fallback
+
+
+CASES.extend([
+    ('else-if-150-condition-order-selected-body',
+     'function choose(target){let seen=[],bodies=0,result=-1;'
+     + else_if_fixture([(f'(seen.push({i}),target==={i})', f'{{bodies++;result={i};}}')
+                        for i in range(150)], '{bodies++;result=150;}')
+     + 'test.record(seen.join());test.record(bodies);test.record(result);}'
+       'choose(0);choose(75);choose(149);choose(150);'),
+    ('else-if-1000-last-branch',
+     'let value=999,result=-1;'
+     + else_if_fixture([(f'value==={i}', f'result={i};') for i in range(1000)], 'missing();')
+     + 'test.record(result);'),
+    ('else-if-1000-no-match-no-fallback',
+     'let seen=0;'
+     + else_if_fixture([('(++seen)<0', 'missing();') for _ in range(1000)])
+     + 'test.record(seen);'),
+    ('else-if-unselected-branches-stay-inert',
+     'let value=73;'
+     + else_if_fixture([(f'value==={i}', 'test.record("selected");' if i == 73 else 'missing();')
+                        for i in range(150)], 'missing();')),
+    ('else-if-dangling-else-binds-nearest-if',
+     'function choose(value,inner){'
+     + else_if_fixture([(f'value==={i}', 'test.record("earlier");') for i in range(149)]
+                       + [('value===149', 'if(inner)test.record("inner true");else test.record("inner false");')],
+                       'test.record("outer else");')
+     + '}choose(149,false);choose(149,true);choose(150,false);'),
+    ('else-if-dangling-else-inner-chain-with-outer-else',
+     'function choose(outer,value){if(outer)'
+     + else_if_fixture([(f'value==={i}', f'test.record({i});') for i in range(150)], 'test.record("inner fallback");')
+     + 'else test.record("outer fallback");}'
+       'choose(true,149);choose(true,150);choose(false,149);'),
+    ('else-if-labelled-break-preserves-finally',
+     'let value=149,trace="";done:{try{'
+     + else_if_fixture([(f'value==={i}', '{trace+="selected";break done;}') for i in range(150)], 'missing();')
+     + '}finally{trace+="-finally";}trace+="-unreachable";}test.record(trace);'),
+    ('else-if-labelled-if-break-target',
+     'let value=149,trace="";done:'
+     + else_if_fixture([(f'value==={i}', '{trace="selected";break done;}') for i in range(150)], 'missing();')
+     + 'test.record(trace);'),
+    ('else-if-labelled-fallback-is-not-flattened-away',
+     'let value=150,trace="";'
+     + else_if_fixture([(f'value==={i}', 'missing();') for i in range(150)],
+                       'tail:if(value===150){trace="tail";break tail;}else missing();')
+     + 'test.record(trace);'),
+    ('else-if-continue-preserves-finally',
+     'let sum=0;outer:for(let pass=0;pass<3;pass++){let value=149;try{'
+     + else_if_fixture([(f'value==={i}', '{sum+=pass;continue outer;}') for i in range(150)], 'missing();')
+     + '}finally{sum+=10;}sum+=1000;}test.record(sum);'),
+    ('else-if-return-preserves-finally',
+     'function choose(value){try{'
+     + else_if_fixture([(f'value==={i}', f'return {i};') for i in range(150)], 'return -1;')
+     + '}finally{test.record("cleanup");}}test.record(choose(149));test.record(choose(150));'),
+    ('else-if-throw-reaches-catch-and-finally',
+     'let value=149;try{'
+     + else_if_fixture([(f'value==={i}', f'throw {i};') for i in range(150)], 'throw -1;')
+     + '}catch(error){test.record(error);}finally{test.record("cleanup");}'),
+    ('else-if-condition-throw-skips-remaining-work',
+     'let seen=0,bodies=0;function check(i){seen++;if(i===73)throw "condition";return false;}try{'
+     + else_if_fixture([(f'check({i})', '{bodies++;}') for i in range(150)], '{bodies++;}')
+     + '}catch(error){test.record(error);}test.record(seen);test.record(bodies);'),
+    ('else-if-selected-block-retains-lexical-scope',
+     'let value=149,x="outer";'
+     + else_if_fixture([(f'value==={i}', f'{{let x={i};test.record(x);}}') for i in range(150)])
+     + 'test.record(x);'),
+    ('else-if-unselected-var-is-still-hoisted',
+     'function choose(){test.record(value);'
+     + else_if_fixture([('false', f'var value={i};') for i in range(150)])
+     + 'test.record(value);}choose();'),
+])
+
+COMPLETION_CASES.extend([
+    ('else-if-selected-expression-completion',
+     '7;let value=149;'
+     + else_if_fixture([(f'value==={i}', f'{{{i};}}') for i in range(150)], '{999;}')),
+    ('else-if-fallback-expression-completion',
+     '7;' + else_if_fixture([('false', '{3;}') for _ in range(150)], '{42;}')),
+    ('else-if-no-match-completion-is-undefined',
+     '7;' + else_if_fixture([('false', '{3;}') for _ in range(150)])),
+    ('else-if-selected-empty-block-completion-is-undefined',
+     '7;let value=149;'
+     + else_if_fixture([(f'value==={i}', '{}') for i in range(150)], '{42;}')),
+    ('else-if-selected-var-completion-is-undefined',
+     '7;let value=149;'
+     + else_if_fixture([(f'value==={i}', '{var result=4;}') for i in range(150)], '{42;}')),
+    ('else-if-labelled-break-value-completion',
+     '7;let value=149;done:{'
+     + else_if_fixture([(f'value==={i}', '{9;break done;}') for i in range(150)], '{42;}')
+     + '}'),
+])
+
+NEGATIVE.extend([
+    ('else-if-flat-chain-bound-atomic',
+     'test.record(1);' + else_if_fixture([('false', ';') for _ in range(4097)])),
+    ('else-if-shared-pending-branch-bound-atomic',
+     'test.record(1);'
+     + else_if_fixture([('false', ';') for _ in range(2048)],
+                       '{' + else_if_fixture([('false', ';') for _ in range(2049)]) + '}')),
+    ('else-if-nested-block-depth-atomic',
+     'test.record(1);'
+     + else_if_fixture([('false', ';') for _ in range(150)], '{' * 65 + ';' + '}' * 65)),
+    ('else-if-nested-condition-depth-atomic',
+     'test.record(1);'
+     + else_if_fixture([('false', ';') for _ in range(150)]
+                       + [('(' * 65 + 'true' + ')' * 65, ';')])),
+    ('else-if-nested-then-depth-atomic',
+     'test.record(1);'
+     + else_if_fixture([('false', ';') for _ in range(150)], 'if(true)' * 65 + ';')),
+])
+
+
+# Function bodies execute separately from the expressions that create them.
+# These original fixtures put a 20-call body inside 44 surrounding calls: each
+# unit is shallow enough on its own, but parsing both on one native stack used
+# to reject the source. No captured page or access-check code is used here.
+def nested_keep_calls(expression, count=44):
+    return 'keep(' * count + expression + ')' * count
+
+
+_KEEP_FUNCTION = 'function keep(value){return value;}'
+_DEFERRED_RETURN = 'return ' + nested_keep_calls('7', 20) + ';'
+_DEFERRED_FACTORY = nested_keep_calls('function(){' + _DEFERRED_RETURN + '}')
+
+CASES.extend([
+    ('deferred-function-call-argument-independent-depth',
+     _KEEP_FUNCTION + 'var factory=' + _DEFERRED_FACTORY + ';test.record(factory());'),
+    ('deferred-block-arrow-call-argument-independent-depth',
+     _KEEP_FUNCTION + 'var factory='
+     + nested_keep_calls('()=>{' + _DEFERRED_RETURN + '}')
+     + ';test.record(factory());'),
+    ('deferred-method-receiver-and-nonconstructibility',
+     _KEEP_FUNCTION + 'var object='
+     + nested_keep_calls('{value:7,read(){return ' + nested_keep_calls('this.value', 20) + ';}}')
+     + ';test.record(object.read());test.record(object.read.hasOwnProperty("prototype"));'
+       'try{new object.read();}catch(error){test.record(error.name);}'),
+    ('deferred-function-closure-and-private-name',
+     _KEEP_FUNCTION + 'function make(initial){let current=initial;return '
+     + nested_keep_calls('function step(amount){current+=' + nested_keep_calls('amount', 20) + ';return current;}')
+     + ';}var next=make(3);test.record(next(4));test.record(next(2));test.record(typeof step);'),
+    ('deferred-function-inherited-strict-this-and-arguments',
+     _KEEP_FUNCTION + 'function make(){"use strict";return '
+     + nested_keep_calls('function(value){value=' + nested_keep_calls('8', 20)
+                         + ';test.record(arguments[0]);return this;}')
+     + ';}var read=make();test.record(read.call(null,3));'),
+    ('deferred-function-local-strictness-does-not-leak',
+     _KEEP_FUNCTION + 'var strict='
+     + nested_keep_calls('function(){"use strict";return ' + nested_keep_calls('this', 20) + ';}')
+     + ';function sloppy(value,value){return value;}'
+       'test.record(strict.call(null));test.record(sloppy(1,2));'),
+    ('deferred-block-arrow-lexical-this-and-arguments',
+     _KEEP_FUNCTION + 'function make(value){return '
+     + nested_keep_calls('(extra)=>{return ' + nested_keep_calls('this.offset+arguments[0]+extra', 20) + ';}')
+     + ';}var next=make.call({offset:5},2);test.record(next.call({offset:99},3));'),
+    ('deferred-function-hoist-and-declaration-binding',
+     _KEEP_FUNCTION + 'var factory='
+     + nested_keep_calls('function(){local();return ' + nested_keep_calls('local', 20)
+                         + ';function local(){local=7;}}')
+     + ';test.record(factory());'),
+    ('deferred-function-and-arrow-for-head-allow-in',
+     _KEEP_FUNCTION + 'for(var factory='
+     + nested_keep_calls('function(){return ' + nested_keep_calls('"key" in {key:7}', 20) + ';}')
+     + ';;){test.record(factory());break;}for(var factory='
+     + nested_keep_calls('()=>{return ' + nested_keep_calls('"key" in {key:7}', 20) + ';}')
+     + ';;){test.record(factory());break;}'),
+    ('deferred-function-label-reuse-and-outer-restoration',
+     _KEEP_FUNCTION + 'outer:for(var pass=0;pass<1;pass++){var factory='
+     + nested_keep_calls('function(){var count=0;outer:for(var i=0;i<3;i++){count++;continue outer;}'
+                         + 'return ' + nested_keep_calls('count', 20) + ';}')
+     + ';test.record(factory());continue outer;}test.record(pass);'),
+    ('deferred-function-brace-tokens-in-strings-regex-and-comments',
+     _KEEP_FUNCTION + 'var factory='
+     + nested_keep_calls('function(){var text="}{",pattern=/[{}]/;/* } { */'
+                         'var object={read(){return "{";}};test.record(pattern.test(text));'
+                         + 'return ' + nested_keep_calls('object.read()', 20) + ';}')
+     + ';test.record(factory());'),
+    ('deferred-function-handler-wrapper',
+     _KEEP_FUNCTION + 'var factory=' + _DEFERRED_FACTORY + ';test.record(factory());', True, True),
+    ('deferred-function-direct-eval',
+     'eval(' + json.dumps(_KEEP_FUNCTION + 'var factory=' + _DEFERRED_FACTORY
+                          + ';test.record(factory());') + ');'),
+    ('deferred-function-lexical-nesting-boundary-64',
+     'function nested(){' * 64 + 'return 7;' + '}' * 64 + 'test.record("parsed");'),
+    ('deferred-function-many-sibling-bodies',
+     ''.join(f'function sibling{i}(){{return {i};}}' for i in range(96))
+     + 'test.record(sibling0());test.record(sibling95());'),
+    ('deferred-function-early-errors-remain-syntax-errors',
+     'for(let snippet of ' + json.dumps([
+         'test.record("must not run");var f=function(a,a){"use strict";};',
+         'test.record("must not run");function eval(){"use strict";}',
+         'test.record("must not run");var f=function arguments(){"use strict";};',
+         '"use strict";test.record("must not run");function outer(){function inner(eval){}}',
+         'test.record("must not run");var f=()=>{"use strict";arguments=7;};',
+         'test.record("must not run");function unused(){let same;let same;}',
+         'test.record("must not run");var object={method(a,a){}};',
+         'test.record("must not run");var f=(a,a)=>{};',
+     ]) + '){try{eval(snippet);}catch(error){test.record(error.name);}}'),
+])
+
+NEGATIVE.extend([
+    ('deferred-function-unused-invalid-body-atomic',
+     'test.record(1);' + _KEEP_FUNCTION + 'var unused='
+     + nested_keep_calls('function(){return 7;var invalid=;}') + ';'),
+    ('deferred-function-unused-lexical-conflict-atomic',
+     'test.record(1);' + _KEEP_FUNCTION + 'var unused='
+     + nested_keep_calls('function(){let same;var same;}') + ';'),
+    ('deferred-function-strict-duplicate-parameters-atomic',
+     'test.record(1);' + _KEEP_FUNCTION + 'var unused='
+     + nested_keep_calls('function(a,a){"use strict";}') + ';'),
+    ('deferred-function-strict-declaration-name-atomic',
+     'test.record(1);' + _KEEP_FUNCTION + 'var unused='
+     + nested_keep_calls('function(){function eval(){"use strict";}}') + ';'),
+    ('deferred-function-strict-expression-name-atomic',
+     'test.record(1);' + _KEEP_FUNCTION + 'var unused='
+     + nested_keep_calls('function arguments(){"use strict";}') + ';'),
+    ('deferred-function-inherited-strict-parameter-atomic',
+     'test.record(1);' + _KEEP_FUNCTION + 'var unused='
+     + nested_keep_calls('function(){"use strict";function inner(eval){}}') + ';'),
+    ('deferred-function-break-cannot-cross-boundary-atomic',
+     'test.record(1);' + _KEEP_FUNCTION + 'outer:{var unused='
+     + nested_keep_calls('function(){break outer;}') + ';}'),
+    ('deferred-arrow-continue-cannot-cross-boundary-atomic',
+     'test.record(1);' + _KEEP_FUNCTION + 'outer:while(false){var unused='
+     + nested_keep_calls('()=>{continue outer;}') + ';}'),
+    ('deferred-function-unlabelled-break-cannot-cross-boundary-atomic',
+     'test.record(1);' + _KEEP_FUNCTION + 'while(false){var unused='
+     + nested_keep_calls('function(){break;}') + ';}'),
+    ('deferred-function-call-depth-within-body-stays-bounded-atomic',
+     'test.record(1);' + _KEEP_FUNCTION + 'var unused=function(){return '
+     + nested_keep_calls('7', 65) + ';};'),
+    ('deferred-function-top-level-call-depth-stays-bounded-atomic',
+     'test.record(1);' + _KEEP_FUNCTION + nested_keep_calls('7', 65) + ';'),
+    ('deferred-function-block-depth-within-body-stays-bounded-atomic',
+     'test.record(1);function unused(){' + '{' * 65 + ';' + '}' * 65 + '}'),
+    ('deferred-function-lexical-nesting-limit-atomic',
+     'test.record(1);' + 'function nested(){' * 65 + 'return 7;' + '}' * 65),
+    ('deferred-block-arrow-lexical-nesting-limit-atomic',
+     'test.record(1);' + 'var nested=()=>{' * 65 + 'return 7;' + '};' * 65),
+    ('deferred-function-eval-preserves-active-depth-seed-atomic',
+     _KEEP_FUNCTION + 'try{'
+     + nested_keep_calls('eval(' + json.dumps('function unused(){return '
+                                             + nested_keep_calls('7', 30) + ';}1;') + ')', 40)
+     + ';}catch(error){test.record("caught");}finally{test.record("finally");}'),
+])
+
+
+# These are original Symbol fixtures, including explicit disposal and an
+# ordinary iterator polyfill. They do not execute captured page source or claim
+# support for using declarations, automatic disposal, or native @@iterator.
+CASES.extend([
+    ('symbol-unique-identity-type-and-truthiness',
+     'let a=Symbol("same"),b=Symbol("same");test.record(typeof a);test.record(a);'
+     'test.record(a===a);test.record(a===b);test.record(a==b);test.record(a=="Symbol(same)");'
+     'test.record(Boolean(a));test.record(!a);test.record(a==null);'),
+    ('symbol-optional-descriptions',
+     'for(let s of [Symbol(),Symbol(undefined),Symbol(""),Symbol("café😀"),Symbol(null),Symbol(7)])'
+     '{test.record(s.description);test.record(String(s));}'),
+    ('symbol-explicit-string-and-prototype-methods',
+     'let s=Symbol("query");test.record(String(s));test.record(s.toString());'
+     'test.record(Symbol.prototype.toString.call(s));test.record(s.valueOf()===s);'
+     'test.record(Symbol.prototype.valueOf.call(s)===s);'),
+    ('symbol-implicit-text-conversion-errors',
+     'let s=Symbol("query");for(let action of [()=>""+s,()=>s+"",()=>"x".concat(s),'
+     '()=>encodeURIComponent(s),()=>parseInt(s),()=>Symbol(s),()=>Symbol.for(s)])'
+     '{try{action();}catch(error){test.record(error.name);}}'),
+    ('symbol-implicit-numeric-conversion-errors',
+     'let s=Symbol();for(let action of [()=>Number(s),()=>+s,()=>-s,()=>s*2,()=>s<1,'
+     '()=>1<s,()=>isNaN(s),()=>Math.abs(s),()=>{let x=s;return x++;}])'
+     '{try{action();}catch(error){test.record(error.name);}}'),
+    ('symbol-description-object-conversion-order',
+     'let log="",s=Symbol({toString(){log+="description";return "value";}});'
+     'test.record(log);test.record(s.description);'
+     'for(let action of [()=>String({toString(){return s;}}),()=>Symbol({toString(){return s;}})])'
+     '{try{action();}catch(error){test.record(error.name);}}'),
+    ('symbol-registry-identity-and-keys',
+     'let a=Symbol.for("shared"),b=Symbol.for("shared");test.record(a===b);'
+     'test.record(a===Symbol("shared"));test.record(Symbol.keyFor(a));'
+     'test.record(Symbol.keyFor(Symbol("shared")));test.record(Symbol.keyFor(Symbol.dispose));'
+     'test.record(Symbol.keyFor(Symbol.for("")));test.record(Symbol.keyFor(Symbol.for(undefined)));'
+     'test.record(Symbol.for({toString(){return "shared";}})===a);'),
+    ('symbol-constructor-and-keyfor-type-errors',
+     'for(let action of [()=>new Symbol(),()=>Symbol.keyFor("x"),()=>Symbol.keyFor(7),'
+     '()=>Symbol.keyFor({}),()=>Symbol.keyFor(undefined)])'
+     '{try{action();}catch(error){test.record(error.name);}}'),
+    ('symbol-prototype-method-receiver-errors',
+     'for(let receiver of [undefined,null,1,"symbol",{}])'
+     '{try{Symbol.prototype.toString.call(receiver);}catch(error){test.record(error.name);}'
+     'try{Symbol.prototype.valueOf.call(receiver);}catch(error){test.record(error.name);}}'),
+    ('symbol-description-getter-descriptor',
+     'let descriptor=Object.getOwnPropertyDescriptor(Symbol.prototype,"description");'
+     'test.record(typeof descriptor.get);test.record(descriptor.set);'
+     'test.record(descriptor.enumerable);test.record(descriptor.configurable);'
+     'test.record(descriptor.get.call(Symbol("name")));test.record(descriptor.get.call(Symbol()));'
+     'try{descriptor.get.call({});}catch(error){test.record(error.name);}'),
+    ('symbol-dispose-stable-identity-and-descriptor',
+     'let s=Symbol.dispose,d=Object.getOwnPropertyDescriptor(Symbol,"dispose");'
+     'test.record(typeof s);test.record(s===Symbol.dispose);test.record(s.description);'
+     'test.record(String(s));test.record(s===Symbol("Symbol.dispose"));'
+     'test.record(s===Symbol.for("Symbol.dispose"));test.record(d.value===s);'
+     'test.record(d.writable);test.record(d.enumerable);test.record(d.configurable);'
+     'Symbol.dispose=Symbol();test.record(Symbol.dispose===s);test.record(delete Symbol.dispose);'
+     'try{(function(){"use strict";Symbol.dispose=Symbol();})();}catch(error){test.record(error.name);}'),
+    ('symbol-property-keys-do-not-alias-strings-or-each-other',
+     'let a=Symbol("same"),b=Symbol("same"),o={};o[a]=1;o[b]=2;o[String(a)]=3;'
+     'test.record(o[a]);test.record(o[b]);test.record(o["Symbol(same)"]);'
+     'test.record(a in o);test.record(Symbol("same") in o);test.record(Object.keys(o).join());'
+     'test.record(delete o[a]);test.record(a in o);test.record(o[b]);'),
+    ('symbol-property-key-object-conversion',
+     'let s=Symbol("key"),log="",key={toString(){log+="k";return s;}},o={};'
+     'o[key]=7;test.record(o[key]);test.record(key in o);'
+     'test.record(Object.getOwnPropertyDescriptor(o,key).value);test.record(log);'),
+    ('symbol-property-enumeration-and-insertion-order',
+     'let a=Symbol("a"),b=Symbol("b"),o={visible:1};o[a]=2;'
+     'Object.defineProperty(o,b,{value:3,configurable:true});'
+     'let keys=Object.getOwnPropertySymbols(o);test.record(keys.length);'
+     'test.record(keys[0]===a);test.record(keys[1]===b);'
+     'test.record(Object.keys(o).join());'
+     'let names=[];for(let key in o)names.push(key);test.record(names.join());'
+     'test.record(o.hasOwnProperty(a));test.record(o.propertyIsEnumerable(a));'
+     'test.record(o.propertyIsEnumerable(b));delete o[a];o[a]=4;'
+     'keys=Object.getOwnPropertySymbols(o);test.record(keys[0]===b);test.record(keys[1]===a);'),
+    ('symbol-prototype-inheritance-and-shadowing',
+     'let s=Symbol("method"),prototype={};prototype[s]=function(){return this.value;};'
+     'let o=Object.create(prototype);o.value=7;test.record(o[s]());test.record(s in o);'
+     'test.record(o.hasOwnProperty(s));o[s]=function(){return 9;};test.record(o[s]());'
+     'test.record(o.hasOwnProperty(s));delete o[s];test.record(o[s]());'),
+    ('symbol-property-descriptors-and-readonly-writes',
+     'let s=Symbol("fixed"),o={};Object.defineProperty(o,s,{value:7,enumerable:true});'
+     'let d=Object.getOwnPropertyDescriptor(o,s);test.record(d.value);test.record(d.writable);'
+     'test.record(d.enumerable);test.record(d.configurable);o[s]=9;test.record(o[s]);'
+     'test.record(delete o[s]);try{Object.defineProperty(o,s,{value:9});}'
+     'catch(error){test.record(error.name);}try{(function(){"use strict";o[s]=9;})();}'
+     'catch(error){test.record(error.name);}'),
+    ('symbol-defineproperties-uses-symbol-descriptor-keys',
+     'let a=Symbol("a"),b=Symbol("b"),descriptors={visible:{value:1,enumerable:true}};'
+     'descriptors[a]={value:2,enumerable:true,writable:true,configurable:true};'
+     'Object.defineProperty(descriptors,b,{value:{value:3},enumerable:false});'
+     'let o=Object.defineProperties({},descriptors);test.record(o.visible);test.record(o[a]);'
+     'test.record(o[b]);test.record(Object.getOwnPropertySymbols(o)[0]===a);'),
+    ('symbol-object-assign-copies-only-enumerable-symbols',
+     'let a=Symbol("a"),b=Symbol("b"),input={visible:1};input[a]=2;'
+     'Object.defineProperty(input,b,{value:3});let output=Object.assign({},input);'
+     'test.record(output.visible);test.record(output[a]);test.record(b in output);'
+     'test.record(Object.getOwnPropertySymbols(output).length);'
+     'test.record(Object.getOwnPropertyDescriptor(output,a).writable);'),
+    ('symbol-freeze-seal-and-preventextensions',
+     'let s=Symbol("state"),o={};o[s]=1;Object.freeze(o);o[s]=2;'
+     'test.record(o[s]);test.record(delete o[s]);test.record(Object.isFrozen(o));'
+     'test.record(Object.getOwnPropertyDescriptor(o,s).writable);'
+     'let sealed={};sealed[s]=3;Object.seal(sealed);sealed[s]=4;test.record(sealed[s]);'
+     'test.record(delete sealed[s]);test.record(Object.isSealed(sealed));'
+     'let closed=Object.preventExtensions({});closed[s]=5;test.record(s in closed);'
+     'try{Object.defineProperty(closed,s,{value:5});}catch(error){test.record(error.name);}'),
+    ('symbol-function-expando-keys-and-receivers',
+     'let s=Symbol("method"),hidden=Symbol("hidden");function f(){}'
+     'f[s]=function(){return this===f;};Object.defineProperty(f,hidden,{value:7});'
+     'test.record(f[s]());test.record(f[hidden]);test.record(Object.getOwnPropertySymbols(f).length);'
+     'test.record(Object.keys(f).join());test.record(delete f[s]);test.record(s in f);'),
+    ('symbol-array-properties-preserve-indexing-and-length',
+     'let s=Symbol("index"),a=[7,8];a[s]=9;test.record(a.length);test.record(a[0]);'
+     'test.record(a[s]);test.record(Object.keys(a).join());'
+     'test.record(Object.getOwnPropertySymbols(a)[0]===s);a.push(10);test.record(a.length);'),
+    ('symbol-explicit-dispose-prototype-call',
+     'function Disposable(){this.closed=false;}Disposable.prototype[Symbol.dispose]=function(){this.closed=true;};'
+     'let item=new Disposable();test.record(item.closed);test.record(Symbol.dispose in item);'
+     'item[Symbol.dispose]();test.record(item.closed);'
+     'test.record(item.hasOwnProperty(Symbol.dispose));'),
+    ('symbol-map-and-set-identity',
+     'let a=Symbol("same"),b=Symbol("same"),map=new Map(),set=new Set();'
+     'map.set(a,1);map.set(b,2);map.set(Symbol.for("shared"),3);'
+     'test.record(map.get(a));test.record(map.get(b));test.record(map.get(Symbol.for("shared")));'
+     'test.record(map.size);set.add(a);set.add(a);set.add(b);test.record(set.size);'
+     'test.record(set.has(Symbol("same")));test.record(map.delete(a));test.record(map.has(b));'),
+    ('symbol-json-omission-and-array-null',
+     'let s=Symbol("hidden"),o={value:s,visible:7};o[s]=9;'
+     'test.record(JSON.stringify(s));test.record(JSON.stringify(o));'
+     'test.record(JSON.stringify([s,7]));test.record(JSON.stringify({nested:[s]}));'),
+    ('symbol-throw-and-return-preserve-identity',
+     'let s=Symbol("thrown");function identity(value){return value;}test.record(identity(s)===s);'
+     'try{throw s;}catch(error){test.record(error===s);test.record(typeof error);test.record(error);}'),
+    ('symbol-ordinary-iterator-polyfill-explicit-next',
+     'if(!Symbol.iterator)Symbol.iterator=Symbol("iterator");'
+     'if(!Array.prototype[Symbol.iterator])Array.prototype[Symbol.iterator]=function(){'
+     'let list=this,index=0;return {next(){return index<list.length?'
+     '{value:list[index++],done:false}:{value:undefined,done:true};}};};'
+     'let iterator=[7,8][Symbol.iterator]();test.record(iterator.next().value);'
+     'test.record(iterator.next().value);test.record(iterator.next().done);'),
+    ('symbol-implicit-binary-text-regexp-and-join-api-errors',
+     'let s=Symbol("input");for(let action of [()=>new Uint8Array([s]),'
+     '()=>new Uint8Array(1).fill(s),()=>new TextEncoder().encode(s),()=>RegExp(s),'
+     '()=>/x/.test(s),()=>[s].join(),()=>["x","y"].join(s)])'
+     '{try{action();test.record("accepted");}catch(error){test.record(error.name);}}'),
+])
+
+# Numeric operators must reject the left Symbol before converting the right
+# object. Addition and relational operators first convert both operands to
+# primitives, so their observable valueOf call still occurs before TypeError.
+# These fifteen sources mirror the independent original coercion-order audit.
+COMPLETION_CASES.extend([
+    ('symbol-operator-coercion-order-' + name,
+     'var calls=0,kind="";try{Symbol() ' + operator
+     + ' {valueOf(){calls++;return 1;}};}catch(error){kind=error.name;}calls+"|"+kind;')
+    for name, operator in [
+        ('subtract', '-'),
+        ('multiply', '*'),
+        ('divide', '/'),
+        ('remainder', '%'),
+        ('shift-left', '<<'),
+        ('shift-right', '>>'),
+        ('unsigned-shift-right', '>>>'),
+        ('bitwise-and', '&'),
+        ('bitwise-xor', '^'),
+        ('bitwise-or', '|'),
+        ('add', '+'),
+        ('less-than', '<'),
+        ('greater-than', '>'),
+        ('less-or-equal', '<='),
+        ('greater-or-equal', '>='),
+    ]
+])
+
+BROWSER_CASES.extend([
+    ('symbol-browser-global-constructor-alias',
+     'test.record(window.Symbol===Symbol);test.record(self.Symbol===Symbol);'
+     'test.record(typeof globalThis.Symbol.dispose);'),
+    ('symbol-browser-registry-and-identity-across-jobs',
+     'var shared=Symbol.for("query"),fresh=Symbol("query");window[shared]=7;'
+     '\n//---NEXT SCRIPT---\n'
+     'test.record(Symbol.for("query")===shared);test.record(Symbol.for("query")===fresh);'
+     'test.record(window[shared]);test.record(Symbol.keyFor(shared));'),
+    ('symbol-browser-global-property-descriptor-and-delete',
+     'let s=Symbol("field");window[s]=7;window[String(s)]=8;'
+     'test.record(window[s]);test.record(window[String(s)]);'
+     'test.record(Object.getOwnPropertyDescriptor(window,s).value);'
+     'test.record(Object.getOwnPropertySymbols(window)[0]===s);'
+     'test.record(delete window[s]);test.record(s in window);'),
+])
+
+COMPLETION_CASES.append(('symbol-completion-value', 'Symbol("completion");'))
+
+NEGATIVE.extend([
+    ('symbol-identity-limit-cannot-catch-atomic',
+     'try{for(var i=0;i<4097;i++)Symbol();}catch(error){test.record("caught");}'
+     'finally{test.record("finally");}'),
+    ('symbol-registry-limit-cannot-catch-atomic',
+     'try{for(var i=0;i<4097;i++)Symbol.for("key"+i);}catch(error){test.record("caught");}'
+     'finally{test.record("finally");}'),
+])
+
+
+# Original descriptor-accessor fixtures. Object-literal getter/setter syntax
+# and restricted array-index/length descriptors keep their separate negatives.
+CASES.extend([
+    ('accessor-descriptor-creation-is-lazy',
+     'try{Object.defineProperty({},"x",{get:function(){test.record(1);}});}'
+     'catch(e){test.record(2);}finally{test.record(3);}'),
+    ('accessor-own-getter-setter-arguments-and-assignment-value',
+     'let stored=3,o={};Object.defineProperty(o,"value",{'
+     'get:function(){test.record(this===o);test.record(arguments.length);return stored;},'
+     'set:function(value){test.record(this===o);test.record(arguments.length);stored=value;return 99;}});'
+     'test.record(o.value);test.record(o.value=7);test.record(stored);'),
+    ('accessor-descriptor-fields-without-invocation',
+     'let calls=0,o={},getter=function(){calls++;return 7;},setter=function(value){calls++;};'
+     'Object.defineProperty(o,"x",{get:getter,set:setter});let d=Object.getOwnPropertyDescriptor(o,"x");'
+     'test.record(d.get===getter);test.record(d.set===setter);test.record(d.enumerable);'
+     'test.record(d.configurable);test.record(d.hasOwnProperty("value"));'
+     'test.record(d.hasOwnProperty("writable"));test.record(calls);'),
+    ('accessor-missing-getter-or-setter',
+     'let stored=0,o={};Object.defineProperty(o,"writeOnly",{set:function(value){stored=value;}});'
+     'Object.defineProperty(o,"readOnly",{get:function(){return 7;}});'
+     'test.record(o.writeOnly);test.record(o.writeOnly=3);test.record(stored);'
+     'o.readOnly=8;test.record(o.readOnly);try{(function(){"use strict";o.readOnly=8;})();}'
+     'catch(error){test.record(error.name);}'),
+    ('accessor-prototype-receiver-and-own-shadow',
+     'let prototype={};Object.defineProperty(prototype,"value",{configurable:true,'
+     'get:function(){return this.stored;},set:function(value){this.stored=value;}});'
+     'let a=Object.create(prototype),b=Object.create(prototype);a.value=3;b.value=7;'
+     'test.record(a.value);test.record(b.value);test.record(a.hasOwnProperty("value"));'
+     'Object.defineProperty(a,"value",{value:9,configurable:true});test.record(a.value);'
+     'delete a.value;test.record(a.value);'),
+    ('accessor-symbol-keys-and-inherited-receiver',
+     'let key=Symbol("value"),prototype={};Object.defineProperty(prototype,key,{'
+     'get:function(){return this.stored;},set:function(value){this.stored=value;},enumerable:true});'
+     'let o=Object.create(prototype);o[key]=7;test.record(o[key]);'
+     'test.record(Object.getOwnPropertySymbols(prototype)[0]===key);'
+     'test.record(Object.getOwnPropertyDescriptor(prototype,key).get.call({stored:9}));'
+     'test.record(Object.keys(prototype).join());'),
+    ('accessor-function-property-receiver',
+     'function f(){}let stored=0;Object.defineProperty(f,"value",{'
+     'get:function(){test.record(this===f);return stored;},'
+     'set:function(value){test.record(this===f);stored=value;}});'
+     'f.value=7;test.record(f.value);'),
+    ('accessor-object-create-with-descriptors',
+     'let prototype={base:3},key=Symbol("extra"),descriptors={value:{'
+     'get:function(){return this.base+4;},enumerable:true}};'
+     'descriptors[key]={get:function(){return this.base+6;}};'
+     'let o=Object.create(prototype,descriptors);test.record(o.value);test.record(o[key]);'
+     'test.record(Object.keys(o).join());'),
+    ('accessor-partial-update-and-explicit-undefined',
+     'let stored=3,o={},setter=function(value){stored=value;};'
+     'Object.defineProperty(o,"x",{get:function(){return stored;},set:setter,configurable:true});'
+     'Object.defineProperty(o,"x",{get:function(){return stored*2;}});o.x=4;test.record(o.x);'
+     'test.record(Object.getOwnPropertyDescriptor(o,"x").set===setter);'
+     'Object.defineProperty(o,"x",{get:undefined});test.record(o.x);o.x=5;test.record(stored);'),
+    ('accessor-data-accessor-data-transitions',
+     'let o={x:3};Object.defineProperty(o,"x",{get:function(){return 7;}});'
+     'let d=Object.getOwnPropertyDescriptor(o,"x");test.record(o.x);test.record(d.enumerable);'
+     'test.record(d.configurable);test.record(d.hasOwnProperty("writable"));'
+     'Object.defineProperty(o,"x",{value:9});d=Object.getOwnPropertyDescriptor(o,"x");'
+     'test.record(o.x);test.record(d.writable);test.record(d.enumerable);'
+     'test.record(d.configurable);test.record(d.hasOwnProperty("get"));'),
+    ('accessor-nonconfigurable-identity-and-transition-errors',
+     'let o={},getter=function(){return 7;};Object.defineProperty(o,"x",{get:getter});'
+     'Object.defineProperty(o,"x",{get:getter,set:undefined});'
+     'for(let descriptor of [{get:function(){return 7;}},{set:function(){}},{value:7},'
+     '{enumerable:true},{configurable:true}]){try{Object.defineProperty(o,"x",descriptor);}'
+     'catch(error){test.record(error.name);}}test.record(o.x);test.record(delete o.x);'),
+    ('accessor-invalid-callables-and-mixed-descriptors',
+     'let o={};for(let descriptor of [{get:null},{get:1},{set:false},{set:{}},'
+     '{get:undefined,value:7},{set:undefined,writable:false}])'
+     '{try{Object.defineProperty(o,"x",descriptor);}catch(error){test.record(error.name);}}'
+     'test.record(o.hasOwnProperty("x"));'),
+    ('accessor-inherited-descriptor-fields',
+     'let attributes=Object.create({get:function(){return this.base;},enumerable:true});'
+     'let o={base:7};Object.defineProperty(o,"x",attributes);test.record(o.x);'
+     'test.record(Object.keys(o).join());'),
+    ('accessor-descriptor-field-get-order',
+     'let log="",attributes={},o={};function field(name,value){Object.defineProperty(attributes,name,'
+     '{get:function(){log+=name+";";return value;}});}'
+     'field("enumerable",true);field("configurable",true);'
+     'field("get",function(){return 7;});field("set",function(){});'
+     'Object.defineProperty(o,"x",attributes);test.record(log);test.record(o.x);'),
+    ('accessor-getter-and-setter-throws-reach-catch-finally',
+     'let o={},log="";Object.defineProperty(o,"x",{get:function(){log+="g";throw "read";},'
+     'set:function(value){log+="s";throw value;}});'
+     'try{o.x;}catch(error){test.record(error);}finally{log+="f";}'
+     'try{o.x="write";}catch(error){test.record(error);}finally{log+="f";}test.record(log);'),
+    ('accessor-compound-update-evaluation-order',
+     'let stored=2,log="",o={};Object.defineProperty(o,"x",{'
+     'get:function(){log+="g";return stored;},set:function(value){log+="s";stored=value;}});'
+     'function key(){log+="k";return "x";}function right(){log+="r";return 3;}'
+     'test.record(o[key()]+=right());test.record(log);log="";'
+     'test.record(o[key()]++);test.record(stored);test.record(log);'),
+    ('accessor-method-lookup-before-arguments',
+     'let log="",o={},first=function(value){log+="c";test.record(this===o);return value;};'
+     'Object.defineProperty(o,"method",{get:function(){log+="g";return first;},configurable:true});'
+     'function argument(){log+="a";Object.defineProperty(o,"method",{value:function(){return 99;}});return 7;}'
+     'test.record(o.method(argument()));test.record(log);test.record(o.method());'),
+    ('accessor-noncallable-method-still-evaluates-arguments',
+     'let log="",o={};Object.defineProperty(o,"method",{get:function(){log+="g";return 7;}});'
+     'function argument(){log+="a";}try{o.method(argument());}catch(error){test.record(error.name);}'
+     'test.record(log);'),
+    ('accessor-assign-source-getter-and-target-setter',
+     'let log="",input={},output={};Object.defineProperty(input,"x",{enumerable:true,'
+     'get:function(){log+="g";test.record(this===input);return 7;}});'
+     'Object.defineProperty(output,"x",{set:function(value){log+="s";test.record(this===output);'
+     'this.stored=value;}});test.record(Object.assign(output,input)===output);'
+     'test.record(output.stored);test.record(log);'),
+    ('accessor-assign-own-key-snapshot-and-live-values',
+     'let input={};Object.defineProperty(input,"first",{enumerable:true,get:function(){'
+     'delete input.second;input.third=30;input.late=40;return 10;}});input.second=20;input.third=3;'
+     'let output=Object.assign({},input);test.record(JSON.stringify(output));'
+     'test.record(output.hasOwnProperty("second"));test.record(output.hasOwnProperty("late"));'),
+    ('accessor-defineproperties-prevalidates-before-target-writes',
+     'let target={},descriptors={first:{value:7}};'
+     'Object.defineProperty(descriptors,"second",{enumerable:true,get:function(){'
+     'test.record(target.hasOwnProperty("first"));throw "descriptor";}});'
+     'try{Object.defineProperties(target,descriptors);}catch(error){test.record(error);}'
+     'test.record(target.hasOwnProperty("first"));'),
+    ('accessor-defineproperties-own-key-snapshot-and-live-descriptors',
+     'let target={},descriptors={};Object.defineProperty(descriptors,"first",{enumerable:true,'
+     'get:function(){test.record(Object.keys(target).join());delete descriptors.second;'
+     'descriptors.third={value:30,enumerable:true};descriptors.late={value:40,enumerable:true};'
+     'return {value:10,enumerable:true};}});descriptors.second={value:20,enumerable:true};'
+     'descriptors.third={value:3,enumerable:true};Object.defineProperties(target,descriptors);'
+     'test.record(JSON.stringify(target));test.record(target.hasOwnProperty("late"));'),
+    ('accessor-enumeration-and-has-do-not-invoke-getters',
+     'let calls=0,o={};Object.defineProperty(o,"x",{enumerable:true,get:function(){calls++;return 7;}});'
+     'test.record(Object.keys(o).join());let names=[];for(let name in o)names.push(name);'
+     'test.record(names.join());test.record("x" in o);test.record(o.hasOwnProperty("x"));'
+     'test.record(o.propertyIsEnumerable("x"));test.record(calls);test.record(o.x);test.record(calls);'),
+    ('accessor-json-getter-values-and-own-key-snapshot',
+     'let o={};Object.defineProperty(o,"first",{enumerable:true,get:function(){'
+     'delete o.second;o.third=30;o.late=40;return 10;}});o.second=20;o.third=3;'
+     'test.record(JSON.stringify(o));'),
+    ('accessor-json-getter-exception',
+     'let o={};Object.defineProperty(o,"x",{enumerable:true,get:function(){throw "json read";}});'
+     'try{JSON.stringify(o);}catch(error){test.record(error);}'),
+    ('accessor-freeze-and-seal-retain-callable-setters',
+     'let stored=1,o={};Object.defineProperty(o,"x",{configurable:true,enumerable:true,'
+     'get:function(){return stored;},set:function(value){stored=value;}});'
+     'Object.freeze(o);o.x=7;test.record(o.x);test.record(Object.isFrozen(o));'
+     'let d=Object.getOwnPropertyDescriptor(o,"x");test.record(d.configurable);'
+     'test.record(d.hasOwnProperty("writable"));test.record(delete o.x);'
+     'let sealed={};Object.defineProperty(sealed,"x",{configurable:true,get:function(){return 9;}});'
+     'Object.seal(sealed);test.record(Object.isSealed(sealed));test.record(Object.isFrozen(sealed));'
+     'test.record(sealed.x);'),
+])
+
+CASES.extend([
+    ('accessor-primitive-receiver-' + name,
+     'let value=' + value + ',key=Symbol("receiver");'
+     'let getter=function(){"use strict";return this;};'
+     'Object.defineProperty(' + constructor + '.prototype,"fixtureAccessor",{get:getter,configurable:true});'
+     'Object.defineProperty(' + constructor + '.prototype,key,{get:getter,configurable:true});'
+     'test.record(value.fixtureAccessor===value);test.record(value[key]===value);'
+     'test.record(typeof value.fixtureAccessor);')
+    for name, constructor, value in [
+        ('string', 'String', '"text"'),
+        ('number', 'Number', '7'),
+        ('boolean', 'Boolean', 'true'),
+        ('symbol', 'Symbol', 'Symbol("primitive")'),
+    ]
+])
+
+CASES.extend([
+    ('accessor-mapped-arguments-conversion-disconnects-parameter',
+     'function check(parameter){let args=arguments,stored=3;Object.defineProperty(args,"0",{'
+     'get:function(){test.record(this===args);return stored;},'
+     'set:function(value){test.record(this===args);stored=value;}});'
+     'parameter=9;test.record(args[0]);args[0]=7;test.record(parameter);test.record(args[0]);}check(1);'),
+    ('accessor-mapped-arguments-undefined-getter-disconnects-parameter',
+     'function check(parameter){let args=arguments;Object.defineProperty(args,"0",{get:undefined});'
+     'parameter=9;test.record(args[0]);args[0]=7;test.record(parameter);'
+     'test.record(Object.getOwnPropertyDescriptor(args,"0").hasOwnProperty("get"));}check(1);'),
+])
+
+BROWSER_CASES.extend([
+    # Node's contextified VM globals expose a different accessor receiver than
+    # its non-contextified globals. Real Window receiver assertions therefore
+    # live in the App fixture; this comparison checks names and values only.
+    ('accessor-browser-global-name-alias-and-delete',
+     'let stored=3;Object.defineProperty(window,"fixtureAccessor",{configurable:true,'
+     'get:function(){return stored;},set:function(value){stored=value;}});'
+     'fixtureAccessor=7;test.record(fixtureAccessor);test.record(window.fixtureAccessor);'
+     'test.record(delete window.fixtureAccessor);test.record(typeof fixtureAccessor);'),
+    ('accessor-browser-closure-across-script-jobs',
+     'let stored=1;window.holder={};Object.defineProperty(holder,"value",{'
+     'get:function(){return stored;},set:function(value){stored=value;}});'
+     '\n//---NEXT SCRIPT---\nholder.value=7;test.record(holder.value);test.record(stored);'),
+])
+
+NEGATIVE.extend([
+    ('accessor-getter-recursion-cannot-catch-atomic',
+     'let o={};Object.defineProperty(o,"x",{get:function(){return o.x;}});'
+     'try{o.x;}catch(error){test.record("caught");}finally{test.record("finally");}'),
+    ('accessor-setter-recursion-cannot-catch-atomic',
+     'let o={};Object.defineProperty(o,"x",{set:function(value){o.x=value;}});'
+     'try{o.x=7;}catch(error){test.record("caught");}finally{test.record("finally");}'),
+    ('accessor-getter-loop-cannot-catch-atomic',
+     'let o={};Object.defineProperty(o,"x",{get:function(){while(true){}}});'
+     'try{o.x;}catch(error){test.record("caught");}finally{test.record("finally");}'),
+    ('accessor-native-getter-cycle-cannot-catch-atomic',
+     'let a=[];Object.defineProperty(a,"join",{get:Array.prototype.toString});'
+     'try{a.join;}catch(error){test.record("caught");}finally{test.record("finally");}'),
+])
+
+
+CASES.extend([
+    ('fromcharcode-empty-and-ascii',
+     'test.record(String.fromCharCode());test.record(String.fromCharCode(65));'
+     'test.record(String.fromCharCode(67,104,101,122,67,97,116));'),
+    ('fromcharcode-truncation-and-modulo',
+     'test.record(String.fromCharCode(65.9,65537,-65535,-1,131137));'
+     'test.record(String.fromCharCode(0.9,-0.9,1e20,-1e20,1e308,-1e308,9007199254740991));'),
+    ('fromcharcode-primitive-conversions',
+     'test.record(String.fromCharCode(undefined,null,false,true,"65","",NaN,Infinity,-Infinity,-0));'),
+    ('fromcharcode-bmp-and-paired-surrogates',
+     'test.record(String.fromCharCode(0,127,128,2047,2048,8364,65535));'
+     'let value=String.fromCharCode(0xD83D,0xDE00,0xDBFF,0xDFFF);'
+     'test.record(value);test.record(value.length);'),
+    ('fromcharcode-argument-and-primitive-conversion-order',
+     'let log="";function argument(name,code){log+=name;return {'
+     'valueOf(){log+=name.toUpperCase();return {};},toString(){log+=code;return String(code);}};}'
+     'test.record(String.fromCharCode(argument("a",65),argument("b",66)));test.record(log);'),
+    ('fromcharcode-abrupt-conversion-before-later-coercion-and-decoding',
+     'let log="";function right(){log+="expression";return {valueOf(){log+="conversion";return 66;}};}'
+     'try{String.fromCharCode(Symbol(),right());}catch(error){test.record(error.name);}test.record(log);'
+     'try{String.fromCharCode(0xD800,Symbol());}catch(error){test.record(error.name);}'),
+    ('fromcharcode-borrowed-call-apply-and-argument-boundary',
+     'let convert=String.fromCharCode;test.record(convert.call(null,65,66));'
+     'test.record(convert.apply({ignored:true},[67,68]));'
+     'test.record(convert.apply(null,Array(256).fill(65)).length);'),
+    ('fromcharcode-native-method-descriptor-and-nonconstructor',
+     'let convert=String.fromCharCode,descriptor=Object.getOwnPropertyDescriptor(String,"fromCharCode");'
+     'test.record(convert.name);test.record(convert.length);test.record(descriptor.value===convert);'
+     'test.record(descriptor.writable);test.record(descriptor.enumerable);test.record(descriptor.configurable);'
+     'try{new convert(65);}catch(error){test.record(error.name);}'),
+])
+
+NEGATIVE.extend([
+    ('fromcharcode-unpaired-high-surrogate-unsupported-atomic',
+     'try{String.fromCharCode(65,0xD800);}catch(error){test.record("caught");}'
+     'finally{test.record("finally");}'),
+    ('fromcharcode-unpaired-low-surrogate-unsupported-atomic',
+     'try{String.fromCharCode(0xDC00);}catch(error){test.record("caught");}'
+     'finally{test.record("finally");}'),
+])
+
+
+CASES.extend([
+    ('hasown-nullish-target-before-key-conversion',
+     'let log="";function argument(){log+="argument;";return {'
+     'toString(){log+="key;";return "field";}};}'
+     'try{Object.hasOwn(null,argument());}catch(error){test.record(error.name);}'
+     'try{Object.hasOwn(undefined,argument());}catch(error){test.record(error.name);}'
+     'try{Object.hasOwn();}catch(error){test.record(error.name);}test.record(log);'
+     'try{Object.prototype.hasOwnProperty.call(null,argument());}'
+     'catch(error){test.record(error.name);}test.record(log);'),
+    ('hasown-ordinary-null-prototype-shadow-and-symbol-keys',
+     'let key=Symbol("own"),parent={inherited:1},object=Object.create(parent);'
+     'object.hasOwnProperty=null;object.field=undefined;object[key]=7;'
+     'test.record(Object.hasOwn(object,"field"));test.record(Object.hasOwn(object,"inherited"));'
+     'test.record(Object.hasOwn(object,"hasOwnProperty"));test.record(Object.hasOwn(object,key));'
+     'test.record(Object.hasOwn(object,Symbol("own")));'
+     'let bare=Object.create(null);bare.field=1;test.record(Object.hasOwn(bare,"field"));'
+     'test.record(Object.hasOwn(bare,"toString"));'),
+    ('hasown-primitives-and-array-holes',
+     'test.record(Object.hasOwn("cat",0));test.record(Object.hasOwn("cat",3));'
+     'test.record(Object.hasOwn("cat","length"));test.record(Object.hasOwn("cat","trim"));'
+     'test.record(Object.hasOwn(7,"toString"));test.record(Object.hasOwn(true,"valueOf"));'
+     'test.record(Object.hasOwn(Symbol("s"),"description"));'
+     'let array=[,undefined];test.record(Object.hasOwn(array,0));'
+     'test.record(Object.hasOwn(array,1));test.record(Object.hasOwn(array,"length"));'),
+    ('hasown-getter-not-read-and-key-conversion',
+     'let log="",object={},symbol=Symbol("field"),marker={};object[symbol]=3;'
+     'Object.defineProperty(object,"field",{get:function(){throw marker;}});'
+     'let key={toString(){log+="string;";return "field";},valueOf(){log+="number;";return 1;}};'
+     'test.record(Object.hasOwn(object,key));test.record(log);'
+     'test.record(Object.hasOwn(object,{toString(){return symbol;}}));'
+     'try{Object.hasOwn(object,{toString(){throw marker;}});}'
+     'catch(error){test.record(error===marker);}'),
+    ('hasown-native-metadata-and-borrowed-call',
+     'let own=Object.hasOwn,descriptor=Object.getOwnPropertyDescriptor(Object,"hasOwn");'
+     'test.record(own.name);test.record(own.length);test.record(descriptor.value===own);'
+     'test.record(descriptor.writable);test.record(descriptor.enumerable);'
+     'test.record(descriptor.configurable);test.record(own.call(null,{field:1},"field"));'
+     'test.record(own.apply(7,[{field:1},"absent"]));'
+     'try{new own({},"field");}catch(error){test.record(error.name);}'),
+    ('base64-latin1-roundtrip-and-original-vectors',
+     'test.record(btoa(""));test.record(atob(""));test.record(btoa("ChezCat"));'
+     'test.record(atob("Q2hlekNhdA=="));'
+     'let bytes=String.fromCharCode(0,1,127,128,254,255),encoded=btoa(bytes);'
+     'test.record(encoded);test.record(atob(encoded)===bytes);test.record(atob(encoded));'),
+    ('base64-forgiving-whitespace-unpadded-and-pad-bits',
+     'for(let text of ["Zg","Zg==","Zh==","Zm8","Zm8=","Zm9","Zm9v",'
+     '" \\tZ\\ng\\r=\\f= "," \\t\\n\\f\\r"]){test.record(atob(text));}'),
+    ('base64-invalid-alphabet-length-and-padding',
+     'for(let text of ["A","Zg=","Zm9v=","AA=A","=AAA","AAAA====",'
+     '"AA-_=","AA\\u00a0==","AA\\v=="]){'
+     'try{atob(text);test.record("unexpected");}catch(error){test.record(error.name);}}'),
+    ('base64-invalid-latin1-and-symbol-conversions',
+     'for(let text of ["\\u0100","a😀"]){'
+     'try{btoa(text);test.record("unexpected");}catch(error){test.record(error.name);}}'
+     'try{btoa(Symbol("input"));}catch(error){test.record(error.name);}'
+     'try{atob(Symbol("input"));}catch(error){test.record(error.name);}'),
+    ('base64-string-coercion-callback-order-and-abrupt',
+     'let log="",marker={};function input(text){return {'
+     'toString(){log+="string;";return {};},valueOf(){log+="value;";return text;}};}'
+     'test.record(btoa(input("cat")));test.record(atob(input("Y2F0")));test.record(log);'
+     'try{btoa({toString(){throw marker;}});}catch(error){test.record(error===marker);}'
+     'try{atob({toString(){throw marker;}});}catch(error){test.record(error===marker);}'),
+    ('base64-function-metadata-borrowed-call-and-primitives',
+     'test.record(atob.name);test.record(atob.length);test.record(btoa.name);test.record(btoa.length);'
+     'test.record(btoa.call(null,"cat"));test.record(atob.apply({ignored:true},["Y2F0"]));'
+     'test.record(btoa(undefined));test.record(btoa(null));test.record(btoa(42));test.record(btoa(true));'
+     'try{atob();}catch(error){test.record(error.name);}'
+     'try{btoa();}catch(error){test.record(error.name);}'),
+])
+
+
 def run_own(probe, source, invoke=False, handler=False, browser=False):
     started = time.monotonic()
     flags = (["--invoke"] if invoke else []) + (["--handler"] if handler else []) + (["--browser-global"] if browser else [])
@@ -1291,12 +2128,61 @@ def finished_normally(result):
     return not any(result.get(key) for key in ("crash", "timeout", "protocol_error"))
 
 
+# 0.34 original callable/object foundation comparisons.
+CASES.extend([
+    ('bind-captured-receiver-chain', "function f(a,b,c){'use strict';return this.x+a+b+c;}let x={x:1},g=f.bind(x,2),h=g.bind({x:100},3);x.x=10;test.record(h(4));test.record(h.call({x:999},5));test.record(h.apply(null,[6]));"),
+    ('bind-native-pop', "let a=[1,2,3],p=Array.prototype.pop.bind(a);test.record(p());test.record(p.call([]));test.record(a.join(','));"),
+    ('bind-closure-and-arrow', 'function make(x){return function(a){return x+a;}.bind(null,3);}test.record(make(7)());function outer(){let f=()=>this;return f.bind({wrong:1})();}let o={};test.record(outer.call(o)===o);'),
+    ('bind-native-construction', "let B=Array.bind(null,2,3),a=new B();test.record(a.join(','));test.record(a instanceof Array);test.record(a instanceof B);test.record(B.hasOwnProperty('prototype'));"),
+    ('bind-construction-target-prototype', 'function F(a,b){this.sum=a+b;}let B=F.bind({sum:100},2),C=B.bind(null,3);B.prototype={fake:1};let a=new C();test.record(a.sum);test.record(a instanceof F);test.record(a instanceof B);test.record(a instanceof C);F.prototype={changed:1};test.record((new B(4)).changed);test.record(a instanceof B);'),
+    ('bind-nonconstructible-and-callable-rejection', "let caught=[];try{new ((()=>1).bind(null))();}catch(e){caught.push(e.name);}try{Function.prototype.bind.call({});}catch(e){caught.push(e.name);}try{new (Array.prototype.pop.bind([]))();}catch(e){caught.push(e.name);}test.record(caught.join(','));"),
+    ('bind-metadata-descriptors', "function bindingTarget(a,b,c){}let a=bindingTarget.bind(null,1),b=a.bind(null,2);test.record(a.name);test.record(a.length);test.record(b.name);test.record(b.length);let d=Object.getOwnPropertyDescriptor(a,'length');test.record(d.writable+','+d.enumerable+','+d.configurable);test.record(a.toString());"),
+    ('bind-metadata-read-order', "function f(){}let log='',old=Object.getPrototypeOf(f),next={};Object.defineProperty(f,'length',{get:function(){log+='l';Object.setPrototypeOf(f,next);return 4.9;},configurable:true});Object.defineProperty(f,'name',{get:function(){log+='n';return 'sample';},configurable:true});let b=Function.prototype.bind.call(f,null,1,2);test.record(log);test.record(b.name);test.record(b.length);test.record(Object.getPrototypeOf(b)===old);"),
+    ('bind-own-length-and-nonnumeric-metadata', "function f(){}let p={};Object.setPrototypeOf(f,p);delete f.length;Object.defineProperty(p,'length',{get:function(){throw 'inherited';}});test.record(Function.prototype.bind.call(f,null).length);Object.defineProperty(f,'length',{value:Infinity,configurable:true});test.record(Function.prototype.bind.call(f,null,1).length);Object.defineProperty(f,'length',{value:'12',configurable:true});Object.defineProperty(f,'name',{value:5,configurable:true});let b=Function.prototype.bind.call(f,null);test.record(b.length);test.record(b.name);"),
+    ('bind-indirect-eval', "var value=1;function f(){var value=2;return eval.bind(null)('value');}test.record(f());"),
+    ('bind-metadata-abrupt-completion', "function f(){}let marker={},seen='';Object.defineProperty(f,'length',{get:function(){seen+='l';throw marker;},configurable:true});Object.defineProperty(f,'name',{get:function(){seen+='n';return 'x';},configurable:true});try{f.bind(null);}catch(e){test.record(e===marker);}test.record(seen);"),
+    ('bind-null-prototype-target', "function f(a){'use strict';return this+a;}Object.setPrototypeOf(f,null);let b=Function.prototype.bind.call(f,4,5);test.record(b());test.record(Object.getPrototypeOf(b)===null);"),
+    ('regex-function-replacer-supported', 'test.record("a".replace(/a/,()=>"b"));'),
+    ('replace-callback-literal-utf16-receiver-and-arity', "\nlet calls=0;\ntest.record('😀cat-cat'.replace('cat',function(match,offset,input){'use strict';calls++;test.record(this===undefined);test.record(arguments.length);test.record(match);test.record(offset);test.record(input);return '$&';}));\ntest.record(calls);\ntest.record('abc'.replace('absent',function(){throw 'unexpected callback';}));\ntest.record('abc'.replace('',function(match,offset,input){return offset+input;}));\n"),
+    ('replace-callback-regexp-unmatched-captures', "\nlet calls=0;\ntest.record('ab'.replace(/(a)|(b)/g,function(match,a,b,offset,input){'use strict';test.record(this===undefined);test.record(arguments.length);test.record(match);test.record(a===undefined);test.record(b===undefined);test.record(offset);test.record(input);calls++;return '['+match+']';}));\ntest.record(calls);\n"),
+    ('replace-callback-global-snapshot-lastindex-and-freeze', "\nlet expression=/a/g,seen=0;expression.lastIndex=99;\ntest.record('aa'.replace(expression,function(match,offset,input){test.record(expression.lastIndex);test.record(offset);if(seen===0){expression.lastIndex=37;Object.freeze(expression);}seen++;return '$&';}));\ntest.record(seen);test.record(expression.lastIndex);\nlet missing=/z/g;missing.lastIndex=4;test.record('aa'.replace(missing,function(){throw 'unexpected callback';}));test.record(missing.lastIndex);\n"),
+    ('replace-callback-empty-progress-and-sticky-index', "\nlet empty=/(?:)/g,positions='';test.record('ab'.replace(empty,function(match,offset){positions+=offset;return '-';}));test.record(positions);test.record(empty.lastIndex);\nlet sticky=/a/y;sticky.lastIndex=1;test.record('ba'.replace(sticky,function(match,offset){test.record(offset);test.record(sticky.lastIndex);sticky.lastIndex=8;return 'x';}));test.record(sticky.lastIndex);\nlet plain=/a/;plain.lastIndex=5;test.record('ba'.replace(plain,function(){return 'x';}));test.record(plain.lastIndex);\n"),
+    ('replace-callback-result-conversion-and-abrupt-order', "\nlet log='',expression=/a/g;\ntest.record('aa'.replace(expression,function(match,index){log+='c'+index;return {toString:function(){log+='s'+index;return index;},valueOf:function(){throw 'wrong hint';}};}));test.record(log);\nlet marker=Symbol('failure'),calls=0;\ntry{'aa'.replace(expression,function(){calls++;throw marker;});}catch(error){test.record(error===marker);}test.record(calls);test.record(expression.lastIndex);\ncalls=0;try{'aa'.replace(expression,function(){calls++;return Symbol();});}catch(error){test.record(error.name);}test.record(calls);test.record(expression.lastIndex);\ntry{'a'.replace('a',function(){return {toString:function(){throw marker;}};});}catch(error){test.record(error===marker);}\ntest.record('a'.replace('a',function(){return undefined;}));test.record('a'.replace('a',function(){return null;}));\n"),
+    ('replace-template-preservation-and-literal-conversion-order', "\ntest.record('abc'.replace(/(b)/,'$$:$&:$`:$\\':$1:$2'));\ntest.record('ab'.replace(/(a)|(b)/g,'<$1$2>'));\nlet log='',search={toString:function(){log+='s';return 'a';}},replacement={toString:function(){log+='r';return '[$&]';}};\ntest.record('a'.replace(search,replacement));test.record(log);log='';\ntry{'a'.replace(Symbol(),replacement);}catch(error){test.record(error.name);}test.record(log);\ntest.record('undefined'.replace(undefined,function(){return 'matched';}));\n"),
+])
+
+# These cases intentionally compare the returned completion value.
+COMPLETION_CASES.extend([
+    ('object-inspection-order-and-symbols', "\nvar p={inherited:42},o=Object.create(p),key=Symbol('private');\no.tail='old';o[10]='ten';o[2]='two';o['01']='leading';\nObject.defineProperty(o,'hidden',{value:9});o[key]='symbol';delete o.tail;o.tail='new';\nvar d=Object.getOwnPropertyDescriptors(o);\n[Object.getOwnPropertyNames(o).join(','),JSON.stringify(Object.values(o)),JSON.stringify(Object.entries(o)),Object.getOwnPropertySymbols(d)[0]===key,d[key].value,d.hidden.enumerable,d.hidden.writable,d.hidden.configurable].join('|');\n"),
+    ('object-inspection-primitives-and-null', "\nvar methods=['getOwnPropertyNames','getOwnPropertyDescriptors','values','entries'],caught=[];\nfor(var i=0;i<methods.length;i++){try{Object[methods[i]](null);}catch(e){caught.push(e.name);}try{Object[methods[i]]();}catch(e){caught.push(e.name);}}\nvar d=Object.getOwnPropertyDescriptors('Z\\u00f1');\n[caught.join(','),Object.getOwnPropertyNames('Z\\u00f1').join(','),JSON.stringify(Object.values('Z\\u00f1')),JSON.stringify(Object.entries('Z\\u00f1')),d[1].value,d[1].writable,d[1].enumerable,d[1].configurable,d.length.value,d.length.enumerable,Object.entries(5).length,Object.values(true).length,Object.getOwnPropertyNames(Symbol()).length].join('|');\n"),
+    ('object-inspection-getter-shape-changes', "\nvar log='';function makeSubject(){var p={},o=Object.create(p);Object.defineProperty(p,'removed',{get:function(){throw 'inherited';}});\nObject.defineProperty(o,'first',{enumerable:true,get:function(){log+='f';delete o.removed;Object.defineProperty(o,'quiet',{enumerable:false});Object.defineProperty(o,'later',{enumerable:true});o.newKey=7;return 2;}});\nObject.defineProperty(o,'removed',{value:3,configurable:true,enumerable:true});\nObject.defineProperty(o,'quiet',{enumerable:true,configurable:true,get:function(){throw 'quiet';}});\nObject.defineProperty(o,'later',{enumerable:false,configurable:true,get:function(){log+='l';return this===o?8:99;}});return o;}\nvar values=Object.values(makeSubject()),entries=Object.entries(makeSubject());\n[JSON.stringify(values),JSON.stringify(entries),log].join('|');\n"),
+    ('object-inspection-descriptor-getters-and-throw', "\nvar calls=0,marker={},o={},s=Symbol('get'),get=function(){calls++;throw marker;},set=function(v){calls+=v;};\nObject.defineProperty(o,'data',{value:4,enumerable:true,writable:true,configurable:true});\nObject.defineProperty(o,'access',{get:get,set:set,enumerable:true,configurable:true});Object.defineProperty(o,s,{get:get});\nvar names=Object.getOwnPropertyNames(o),d=Object.getOwnPropertyDescriptors(o),before=calls,caught=0;\ntry{Object.values(o);}catch(e){if(e===marker)caught++;}try{Object.entries(o);}catch(e){if(e===marker)caught++;}\n[names.join(','),before,d.access.get===get,d.access.set===set,Object.hasOwn(d.access,'value'),d[s].get===get,d[s].enumerable,Object.getPrototypeOf(d)===Object.prototype,caught,calls].join('|');\n"),
+    ('object-inspection-result-data-properties', "\nvar calls=0,o={value:11};\nObject.defineProperty(Object.prototype,'0',{configurable:true,set:function(){calls++;}});\nObject.defineProperty(Object.prototype,'value',{configurable:true,set:function(){calls++;}});\nvar values=Object.values(o),entries=Object.entries(o),d=Object.getOwnPropertyDescriptors(o);\nvar correct=values[0]===11&&entries[0][0]==='value'&&entries[0][1]===11&&d.value.value===11;\ndelete Object.prototype['0'];delete Object.prototype.value;\n[correct,calls,Object.getOwnPropertyDescriptor(values,'0').writable,Object.getOwnPropertyDescriptor(d,'value').enumerable].join('|');\n"),
+    ('object-inspection-arrays-functions-typed', "\nvar a=[1,,3];a.extra=6;var d=Object.getOwnPropertyDescriptors(a);function inspect(a,b,c){}inspect.extra=9;var f=Object.getOwnPropertyDescriptors(inspect);\n[Object.getOwnPropertyNames(a).join(','),JSON.stringify(Object.entries(a)),d.length.value,d.length.writable,d.length.enumerable,d.length.configurable,JSON.stringify(Object.values(new Uint8Array([4,5]))),f.name.value,f.length.value,f.prototype.value===inspect.prototype,Object.getOwnPropertyNames(inspect).indexOf('prototype')>=0,JSON.stringify(Object.entries(inspect))].join('|');\n"),
+])
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--rustc", default=os.environ.get("RUSTC", "rustc"), help="Rust compiler executable")
     parser.add_argument("--node", default="node", help="Node.js executable (development comparison only)")
     parser.add_argument("--output", type=Path, help="Write the complete JSON report here")
+    parser.add_argument("--case-prefix", action="append", default=[], metavar="PREFIX",
+                        help="Select case names starting with PREFIX; repeat to select several groups")
     options = parser.parse_args()
+    if any(not prefix for prefix in options.case_prefix):
+        parser.error("Each --case-prefix value must be non-empty.")
+    def selected(collection):
+        return [case for case in collection if not options.case_prefix
+                or any(case[0].startswith(prefix) for prefix in options.case_prefix)]
+    cases = selected(CASES)
+    browser_cases = selected(BROWSER_CASES)
+    completion_cases = selected(COMPLETION_CASES)
+    negative_cases = selected(NEGATIVE)
+    selected_counts = {"positive": len(cases), "browser": len(browser_cases),
+                       "completion": len(completion_cases), "negative": len(negative_cases)}
+    if not sum(selected_counts.values()):
+        parser.error("No cases match the supplied --case-prefix filters.")
     source_path = ROOT / "src" / "javascript.rs"
     try:
         rust_version = subprocess.check_output([options.rustc, "--version"], text=True, timeout=10).strip()
@@ -1315,7 +2201,7 @@ def main():
                 [options.rustc, "--edition=2021", "-O", str(probe_source), "-o", str(probe)],
                 check=True, capture_output=True, text=True, encoding="utf-8", timeout=120,
             )
-            for case in CASES:
+            for case in cases:
                 name, source, *mode = case
                 invoke = bool(mode and mode[0])
                 handler = bool(len(mode) > 1 and mode[1])
@@ -1324,20 +2210,20 @@ def main():
                 passed = (finished_normally(actual) and actual["ok"] == expected["ok"]
                           and actual["records"] == expected["records"])
                 results.append({"case": name, "passed": passed, "actual": actual, "expected": expected})
-            for name, source in BROWSER_CASES:
+            for name, source in browser_cases:
                 expected = run_node(options.node, source, browser=True)
                 actual = run_own(probe, source, browser=True)
                 passed = (finished_normally(actual) and actual["ok"] == expected["ok"]
                           and actual["records"] == expected["records"])
                 results.append({"case": name, "passed": passed, "actual": actual, "expected": expected})
-            for name, source in COMPLETION_CASES:
+            for name, source in completion_cases:
                 expected = run_node(options.node, source)
                 actual = run_own(probe, source)
                 passed = (finished_normally(actual) and actual["ok"] == expected["ok"]
                           and actual["records"] == expected["records"]
                           and actual["value"] == expected["value"])
                 results.append({"case": name, "passed": passed, "actual": actual, "expected": expected})
-            for case in NEGATIVE:
+            for case in negative_cases:
                 name, source, *mode = case
                 actual = run_own(probe, source, handler=bool(mode and mode[0]))
                 passed = finished_normally(actual) and not actual["ok"]
@@ -1353,6 +2239,7 @@ def main():
         return 2
 
     report = {
+        "case_filter": {"prefixes": options.case_prefix, "selected": selected_counts},
         "rustc": rust_version,
         "node": node_version,
         "source_sha256": hashlib.sha256(source_path.read_bytes()).hexdigest(),
@@ -1364,6 +2251,11 @@ def main():
         "array_ops_source_sha256": hashlib.sha256((ROOT / "src/array_ops.rs").read_bytes()).hexdigest(),
         "collections_source_sha256": hashlib.sha256((ROOT / "src/collections.rs").read_bytes()).hexdigest(),
         "text_encoding_source_sha256": hashlib.sha256((ROOT / "src/text_encoding.rs").read_bytes()).hexdigest(),
+        "symbols_source_sha256": hashlib.sha256((ROOT / "src/symbols.rs").read_bytes()).hexdigest(),
+        "base64_source_sha256": hashlib.sha256((ROOT / "src/javascript_base64.rs").read_bytes()).hexdigest(),
+        "bound_functions_source_sha256": hashlib.sha256((ROOT / "src/bound_functions.rs").read_bytes()).hexdigest(),
+        "object_inspection_source_sha256": hashlib.sha256((ROOT / "src/object_inspection.rs").read_bytes()).hexdigest(),
+        "string_replacement_source_sha256": hashlib.sha256((ROOT / "src/string_replacement.rs").read_bytes()).hexdigest(),
         "oracle_cases": len(results),
         "oracle_passed": sum(item["passed"] for item in results),
         "negative_cases": len(negatives),

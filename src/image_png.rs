@@ -66,6 +66,11 @@ fn pass_size(size: usize, start: usize, step: usize) -> usize {
 }
 
 pub(super) fn decode(data: &[u8], check: &dyn Fn() -> ImageResult<()>) -> ImageResult<Bitmap> {
+    let (bitmap, orientation) = decode_raw(data, check)?;
+    super::metadata::orient_bitmap(bitmap, orientation, check)
+}
+
+fn decode_raw(data: &[u8], check: &dyn Fn() -> ImageResult<()>) -> ImageResult<(Bitmap, u8)> {
     check()?;
     if data.len() > MAX_INPUT_BYTES || !data.starts_with(b"\x89PNG\r\n\x1a\n") {
         return Err("Invalid PNG signature or input size.".into());
@@ -79,6 +84,8 @@ pub(super) fn decode(data: &[u8], check: &dyn Fn() -> ImageResult<()>) -> ImageR
     let mut data_finished = false;
     let mut seen_end = false;
     let mut chunks = 0usize;
+    let mut exif_seen = false;
+    let mut orientation = None;
 
     while position < data.len() {
         check()?;
@@ -110,6 +117,16 @@ pub(super) fn decode(data: &[u8], check: &dyn Fn() -> ImageResult<()>) -> ImageR
             data_finished = true;
         }
         match kind {
+            b"eXIf" => {
+                // Duplicate/invalid ancillary metadata is ignored rather than
+                // turning an otherwise valid raster into a broken image.
+                orientation = if exif_seen {
+                    None
+                } else {
+                    super::metadata::tiff_orientation(contents)
+                };
+                exif_seen = true;
+            }
             b"IHDR" => {
                 if header.is_some() || position != 8 || length != 13 {
                     return Err("Invalid or duplicate PNG image header.".into());
@@ -208,7 +225,10 @@ pub(super) fn decode(data: &[u8], check: &dyn Fn() -> ImageResult<()>) -> ImageR
         return Err("PNG end chunk is missing.".into());
     }
     let info = header.ok_or("PNG header is missing.")?;
-    raster(info, &palette, transparency.as_deref(), &compressed, check)
+    Ok((
+        raster(info, &palette, transparency.as_deref(), &compressed, check)?,
+        orientation.unwrap_or(1),
+    ))
 }
 
 fn raster(
@@ -594,7 +614,8 @@ pub(super) fn decode_asset(
 ) -> ImageResult<DecodedImage> {
     // The static parser validates every chunk boundary, CRC, critical chunk and
     // palette ordering, and decodes the mandatory default image exactly once.
-    let poster = Arc::new(decode(data, check)?);
+    let (poster, orientation) = decode_raw(data, check)?;
+    let poster = Arc::new(poster);
     let channels = match data[25] {
         0 | 3 => 1,
         2 => 3,
@@ -718,8 +739,8 @@ pub(super) fn decode_asset(
         }
         position += length + 12;
     }
-    if let Some(animation) = animation {
-        Ok(DecodedImage {
+    let decoded = if let Some(animation) = animation {
+        DecodedImage {
             bitmap: poster,
             animation: animation.retain.then(|| {
                 Arc::new(Animation {
@@ -728,14 +749,15 @@ pub(super) fn decode_asset(
                 })
             }),
             notice: animation.notice,
-        })
+        }
     } else {
-        Ok(DecodedImage {
+        DecodedImage {
             bitmap: poster,
             animation: None,
             notice: None,
-        })
-    }
+        }
+    };
+    super::metadata::orient_asset(decoded, orientation, check)
 }
 
 fn paeth(left: u8, above: u8, corner: u8) -> u8 {

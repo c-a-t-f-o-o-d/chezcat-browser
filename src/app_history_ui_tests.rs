@@ -263,6 +263,7 @@ fn clear_confirmation_applies_only_the_selected_time_range() {
     data.bookmarks.push(Bookmark {
         title: "Keep bookmark".into(),
         url: "https://example.com/".into(),
+        ..Bookmark::default()
     });
     app.profile.save(data.clone()).unwrap();
     let profile_bytes = std::fs::read(fixture.0.join("profile.txt")).unwrap();

@@ -72,7 +72,7 @@ class FixtureServer(ThreadingHTTPServer):
 
 class FixtureHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
-    server_version = "ChezCatFixture/0.29"
+    server_version = "ChezCatFixture/0.30"
     sys_version = ""
 
     def setup(self) -> None:

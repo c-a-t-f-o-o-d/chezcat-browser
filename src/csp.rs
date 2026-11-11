@@ -1,11 +1,12 @@
-//! Original, bounded Content Security Policy checks for classic scripts/fonts.
+//! Original, bounded Content Security Policy checks for classic scripts, linked stylesheets and fonts.
 //!
 //! CSP3 source-list, nonce/hash, fallback and multiple-policy semantics:
 //! https://www.w3.org/TR/CSP3/
-//! This is not full CSP: script sources, font-src and base-uri are implemented;
+//! This is not full CSP: script sources, linked style sources, font-src and base-uri are implemented;
 //! other resource/navigation directives are diagnosed but not implemented.
-//! Parser-inserted scripts are the only supported scripts, so strict-dynamic
-//! never grants dynamic trust. SRI-bearing external scripts remain unsupported.
+//! Both parser-loaded and inserted external classic scripts use the same bounded
+//! source checks. strict-dynamic never propagates trust in this subset;
+//! SRI-bearing external scripts remain unsupported.
 
 use crate::crypto_hash;
 use crate::crypto_sha512;
@@ -20,28 +21,34 @@ const MAX_SOURCES: usize = 128;
 const MAX_TOKEN_BYTES: usize = 2048;
 const MAX_DIAGNOSTICS: usize = 24;
 
-#[derive(Default, Debug)]
+#[derive(Clone, Default, Debug, PartialEq, Eq)]
 pub struct PolicySet {
     origin: Option<Location>,
     policies: Vec<Policy>,
     bytes: usize,
     blocked_from: Option<usize>,
     diagnostics: Vec<String>,
+    // Full cross-origin embedder isolation is outside this subset. An enforced
+    // restrictive policy conservatively retains exact-origin script loading.
+    restrict_cross_origin_scripts: bool,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct Policy {
     start: usize,
     default: Option<Vec<Source>>,
     scripts: Option<Vec<Source>>,
     elements: Option<Vec<Source>>,
     attributes: Option<Vec<Source>>,
+    styles: Option<Vec<Source>>,
+    style_elements: Option<Vec<Source>>,
     fonts: Option<Vec<Source>>,
     base: Option<Vec<Source>>,
+    forms: Option<Vec<Source>>,
     sandbox: bool,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 enum Source {
     SelfOrigin,
     AnyHttp,
@@ -60,7 +67,7 @@ enum Source {
     Deny,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Hash {
     Sha256,
     Sha384,
@@ -105,6 +112,17 @@ impl PolicySet {
         self.add(value, 0, false);
     }
 
+    /// Preserve restrictive document embedder policies without pretending
+    /// to implement cross-origin isolation or a CORS mode. Report-only headers
+    /// do not call this method. Multiple enforced headers only add restrictions.
+    pub fn add_embedder_header(&mut self, value: &str) {
+        let token = value.split(';').next().unwrap_or("").trim();
+        if matches!(token, "require-corp" | "credentialless") {
+            self.restrict_cross_origin_scripts = true;
+            self.note("Cross-Origin-Embedder-Policy: restrictive policy present; cross-origin scripts are conservatively declined because full embedder-policy isolation is not implemented.".into());
+        }
+    }
+
     pub fn add_meta(&mut self, value: &str, node: usize) {
         self.add(value, node.saturating_add(1), true);
     }
@@ -122,7 +140,7 @@ impl PolicySet {
     fn block_from(&mut self, start: usize, reason: &str) {
         self.blocked_from = Some(self.blocked_from.map_or(start, |old| old.min(start)));
         self.note(format!(
-            "CSP: {reason}; subsequent scripts, fonts and inline handlers are blocked."
+            "CSP: {reason}; subsequent scripts, linked stylesheets, fonts and inline handlers are blocked."
         ));
     }
 
@@ -147,7 +165,7 @@ impl PolicySet {
                 Ok((policy, unknown_sources, other_directives)) => {
                     self.policies.push(policy);
                     let delivery = if meta { "meta" } else { "header" };
-                    self.note(format!("CSP {delivery}: script/font/base-uri policy enforced; {unknown_sources} unsupported source expression(s) grant no permission; {other_directives} other directive(s) are outside this subset. No violation reports are sent."));
+                    self.note(format!("CSP {delivery}: script/linked-style/font/base-uri/form-action policy enforced; {unknown_sources} unsupported source expression(s) grant no permission; {other_directives} other directive(s) are outside this subset. No violation reports are sent."));
                 }
                 Err(reason) => self.block_from(start, reason),
             }
@@ -188,6 +206,17 @@ impl PolicySet {
         nonce: Option<&str>,
         target: &Location,
     ) -> Result<(), String> {
+        if self.restrict_cross_origin_scripts
+            && self
+                .origin
+                .as_ref()
+                .is_none_or(|origin| match (&origin.url, &target.url) {
+                    (Some(origin), Some(target)) => !origin.same_origin(target),
+                    _ => origin != target,
+                })
+        {
+            return Err("Cross-Origin-Embedder-Policy requires the document's exact origin for scripts in this build.".into());
+        }
         for policy in self.active(node)? {
             policy.allow_sandbox()?;
             if let Some(list) = policy.script_list(false) {
@@ -255,6 +284,52 @@ impl PolicySet {
         Ok(())
     }
 
+    /// Form navigation uses every installed policy and has no default-src
+    /// fallback. Script form submissions carry this snapshot through redirects.
+    pub fn allows_form_action(&self, target: &Location) -> Result<(), String> {
+        for policy in self.active(usize::MAX)? {
+            if let Some(list) = &policy.forms {
+                if !list
+                    .iter()
+                    .any(|source| url_matches(source, self.origin.as_ref(), target))
+                {
+                    return Err(
+                        "Content Security Policy form-action blocked this form destination.".into(),
+                    );
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// External LINK elements use style-src-elem, then style-src/default-src.
+    /// Script nonces never authorize styles unless a style directive matches.
+    /// Inline style elements/attributes remain outside this external-fetch API.
+    pub fn allows_external_style(
+        &self,
+        node: usize,
+        nonce: Option<&str>,
+        target: &Location,
+    ) -> Result<(), String> {
+        for policy in self.active(node)? {
+            if let Some(list) = policy
+                .style_elements
+                .as_ref()
+                .or(policy.styles.as_ref())
+                .or(policy.default.as_ref())
+            {
+                if !nonce_matches(list, nonce)
+                    && !list
+                        .iter()
+                        .any(|source| url_matches(source, self.origin.as_ref(), target))
+                {
+                    return Err("Content Security Policy style-src-elem/style-src/default-src blocked this stylesheet source.".into());
+                }
+            }
+        }
+        Ok(())
+    }
+
     pub fn allows_font(&self, node: usize, target: &Location) -> Result<(), String> {
         for policy in self.active(node)? {
             if let Some(list) = policy.fonts.as_ref().or(policy.default.as_ref()) {
@@ -306,8 +381,11 @@ fn parse_policy(
         scripts: None,
         elements: None,
         attributes: None,
+        styles: None,
+        style_elements: None,
         fonts: None,
         base: None,
+        forms: None,
         sandbox: false,
     };
     let mut seen = std::collections::HashSet::new();
@@ -338,8 +416,11 @@ fn parse_policy(
             "script-src" => &mut policy.scripts,
             "script-src-elem" => &mut policy.elements,
             "script-src-attr" => &mut policy.attributes,
+            "style-src" => &mut policy.styles,
+            "style-src-elem" => &mut policy.style_elements,
             "font-src" => &mut policy.fonts,
             "base-uri" => &mut policy.base,
+            "form-action" => &mut policy.forms,
             "sandbox" => {
                 policy.sandbox = !meta;
                 continue;
@@ -622,6 +703,95 @@ mod tests {
         let p = policy("img-src 'none'; made-up anything");
         assert!(p.allows_inline(1, None, "1;").is_ok());
         assert!(p.diagnostics()[0].contains("2 other directive"));
+    }
+
+    #[test]
+    fn form_action_has_no_default_fallback_and_uses_all_installed_policies() {
+        let same = location("https://example.test/search?q=one");
+        let other = location("https://other.test/search?q=one");
+        assert!(policy("default-src 'none'")
+            .allows_form_action(&other)
+            .is_ok());
+        assert!(policy("form-action 'self'")
+            .allows_form_action(&same)
+            .is_ok());
+        assert!(policy("form-action 'self'")
+            .allows_form_action(&other)
+            .is_err());
+        assert!(policy("form-action 'none'; form-action *")
+            .allows_form_action(&same)
+            .is_err());
+        assert!(policy("form-action *, form-action 'none'")
+            .allows_form_action(&same)
+            .is_err());
+        assert!(policy("form-action 'nonce-One' 'unsafe-inline'")
+            .allows_form_action(&same)
+            .is_err());
+        let mut set = policy("form-action 'self'");
+        set.add_meta("form-action 'none'", 10);
+        assert!(set.allows_form_action(&same).is_err());
+    }
+
+    #[test]
+    fn restrictive_embedder_headers_keep_classic_scripts_at_exact_origin() {
+        let same = location("https://example.test/a.js");
+        let other = location("https://cdn.test/a.js");
+        for value in [
+            "require-corp",
+            "require-corp; report-to=endpoint",
+            "credentialless",
+        ] {
+            let mut p = policy("script-src https:");
+            p.add_embedder_header(value);
+            assert!(p.allows_external(1, None, &same).is_ok());
+            assert!(p
+                .allows_external(1, None, &other)
+                .unwrap_err()
+                .contains("Embedder"));
+        }
+        let mut p = policy("script-src https:");
+        p.add_embedder_header("unsafe-none");
+        assert!(p.allows_external(1, None, &other).is_ok());
+        p.add_embedder_header("require-corp");
+        p.add_embedder_header("unsafe-none");
+        assert!(p.allows_external(1, None, &other).is_err());
+    }
+
+    #[test]
+    fn linked_styles_use_style_fallback_nonces_and_intersecting_policies() {
+        let same = location("https://example.test/screen.css");
+        let other = location("https://other.test/screen.css");
+        assert!(policy("default-src 'none'; style-src 'self'")
+            .allows_external_style(1, None, &same)
+            .is_ok());
+        assert!(policy("default-src 'none'; script-src *")
+            .allows_external_style(1, None, &same)
+            .is_err());
+        assert!(policy("style-src 'none'; style-src-elem 'self'")
+            .allows_external_style(1, None, &same)
+            .is_ok());
+        assert!(policy("style-src *; style-src-elem 'none'")
+            .allows_external_style(1, None, &same)
+            .is_err());
+        assert!(policy("style-src 'self'")
+            .allows_external_style(1, None, &other)
+            .is_err());
+        assert!(policy("style-src 'nonce-One'; script-src 'nonce-Two'")
+            .allows_external_style(1, Some("One"), &other)
+            .is_ok());
+        assert!(policy("style-src 'nonce-One'; script-src 'nonce-Two'")
+            .allows_external_style(1, Some("Two"), &other)
+            .is_err());
+        assert!(policy("style-src 'self', style-src 'none'")
+            .allows_external_style(1, None, &same)
+            .is_err());
+        assert!(policy("style-src 'none'; style-src *")
+            .allows_external_style(1, None, &same)
+            .is_err());
+        let mut set = policy("style-src 'self'");
+        set.add_meta("style-src 'none'", 10);
+        assert!(set.allows_external_style(9, None, &same).is_ok());
+        assert!(set.allows_external_style(usize::MAX, None, &same).is_err());
     }
 
     #[test]

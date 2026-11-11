@@ -54,6 +54,7 @@ impl App {
                     .map_or(desired, |old| old.min(desired)),
             )
         };
+        self.rebuild_link_colors();
         self.sync_browser_panel();
     }
 

@@ -23,6 +23,13 @@ pub struct LoadOptions {
     pub viewport_width: u32,
     pub viewport_height: u32,
     pub density_milli: u32,
+    /// Previous top-level document, for conservative SameSite cookie checks.
+    pub cookie_origin: Option<crate::url::HttpUrl>,
+    pub cookie_same_site: Option<bool>,
+    /// Script-triggered document loads must retain this origin at every hop.
+    pub script_origin: Option<crate::url::HttpUrl>,
+    /// The initiating document's CSP for a form submission.
+    pub form_policy: Option<Arc<csp::PolicySet>>,
 }
 
 impl Default for LoadOptions {
@@ -34,13 +41,17 @@ impl Default for LoadOptions {
             viewport_width: 1068,
             viewport_height: 660,
             density_milli: 1000,
+            cookie_origin: None,
+            cookie_same_site: None,
+            script_origin: None,
+            form_policy: None,
         }
     }
 }
 
-const MAX_SCRIPTS: usize = 16;
-const MAX_SCRIPT_BYTES: usize = 64 * 1024;
-const MAX_SCRIPT_TOTAL: usize = 256 * 1024;
+pub(crate) const MAX_SCRIPTS: usize = 16;
+pub(crate) const MAX_SCRIPT_BYTES: usize = crate::javascript::MAX_SOURCE_BYTES;
+pub(crate) const MAX_SCRIPT_TOTAL: usize = 2 * 1024 * 1024;
 // Small icons should reach the shared attempt or pixel budget before this cap.
 const MAX_UNIQUE_IMAGES: usize = 64;
 const MAX_DECODED_IMAGE_BYTES: usize = 64 * 1024 * 1024;
@@ -52,9 +63,11 @@ pub struct Script {
 }
 
 pub struct Loaded {
+    pub network: crate::network_trace::Trace,
     pub location: Location,
     /// The final document exchange, after any redirects. Assets never inherit it.
     pub request: http::Request,
+    pub cookie_same_site: bool,
     pub base: Location,
     pub document: Document,
     pub raw: String,
@@ -112,22 +125,27 @@ pub struct ImageUpdate {
     pub skipped: usize,
 }
 pub struct LoadEnd {
+    /// An attachment was delivered without committing a document.
+    pub download: bool,
     pub events: Vec<String>,
     /// Total skipped references in the complete document load.
     pub skipped: usize,
     pub notice: String,
 }
 pub struct Poll {
+    pub download: Option<(u64, http::Response)>,
     pub progress: Option<(u64, String)>,
     pub document: Option<(u64, Loaded)>,
     pub images: Option<(u64, ImageUpdate)>,
     pub completed: Option<Completion>,
 }
 enum Delivery {
+    Download(Box<http::Response>),
     Document(Box<Loaded>),
     Images(ImageUpdate),
 }
 struct Request {
+    network: crate::network_trace::Trace,
     id: u64,
     location: Location,
     cancel: Arc<AtomicBool>,
@@ -136,6 +154,8 @@ struct Request {
     http_request: http::Request,
 }
 struct WorkerState {
+    network: Option<(u64, crate::network_trace::Trace)>,
+    download: Option<(u64, http::Response)>,
     request: Option<Request>,
     active: Option<Arc<AtomicBool>>,
     document: Option<(u64, Loaded)>,
@@ -149,9 +169,20 @@ pub struct Worker {
     shared: Arc<(Mutex<WorkerState>, Condvar)>,
 }
 impl Worker {
+    #[allow(dead_code)] // Retained isolated loader API for independent callers.
     pub fn new(wake: Wake, trust: Arc<trust::Store>) -> Result<Self, String> {
+        Self::with_cookie_session(wake, trust, Arc::new(crate::cookies::Session::default()))
+    }
+
+    pub fn with_cookie_session(
+        wake: Wake,
+        trust: Arc<trust::Store>,
+        cookies: Arc<crate::cookies::Session>,
+    ) -> Result<Self, String> {
         let shared = Arc::new((
             Mutex::new(WorkerState {
+                network: None,
+                download: None,
                 request: None,
                 active: None,
                 document: None,
@@ -200,6 +231,9 @@ impl Worker {
                             return Err("Navigation canceled.".to_owned());
                         }
                         match delivery {
+                            Delivery::Download(response) => {
+                                guard.download = Some((request.id, *response));
+                            }
                             Delivery::Document(loaded) => {
                                 guard.document = Some((request.id, *loaded));
                             }
@@ -228,6 +262,8 @@ impl Worker {
                     &trust,
                     request.mode,
                     request.options.clone(),
+                    request.network.clone(),
+                    cookies.clone(),
                     &mut deliver,
                 );
                 let wake = {
@@ -236,13 +272,16 @@ impl Worker {
                     if guard.stopping {
                         return;
                     }
-                    if request.cancel.load(Ordering::Relaxed) {
-                        continue;
+                    if !request.cancel.load(Ordering::Relaxed) {
+                        guard.completed = Some(Completion {
+                            id: request.id,
+                            result,
+                        });
                     }
-                    guard.completed = Some(Completion {
-                        id: request.id,
-                        result,
-                    });
+                    // Cancellation still finishes measured transport phases.
+                    // Wake once so a visible Network view can show that final
+                    // state after Stop has disabled its periodic activity tick.
+                    // No canceled document/completion is published.
                     guard.wake.clone()
                 };
                 wake();
@@ -298,7 +337,10 @@ impl Worker {
         if let Some(queued) = &state.request {
             queued.cancel.store(true, Ordering::Relaxed);
         }
+        let network = crate::network_trace::Trace::default();
+        state.network = Some((id, network.clone()));
         state.request = Some(Request {
+            network,
             id,
             location,
             cancel: Arc::new(AtomicBool::new(false)),
@@ -307,6 +349,7 @@ impl Worker {
             http_request,
         });
         state.completed = None;
+        state.download = None;
         state.document = None;
         state.images = None;
         state.progress = None;
@@ -319,6 +362,7 @@ impl Worker {
         }
         state.request = None;
         state.completed = None;
+        state.download = None;
         state.document = None;
         state.images = None;
         state.progress = None;
@@ -326,11 +370,17 @@ impl Worker {
     pub fn poll(&self) -> Poll {
         let mut state = self.shared.0.lock().unwrap();
         Poll {
+            download: state.download.take(),
             progress: state.progress.take(),
             document: state.document.take(),
             images: state.images.take(),
             completed: state.completed.take(),
         }
+    }
+    /// The latest requested navigation, including an in-flight or failed load.
+    /// Clones share measurements; a later submit installs a fresh recorder.
+    pub fn network_trace(&self) -> Option<(u64, crate::network_trace::Trace)> {
+        self.shared.0.lock().unwrap().network.clone()
     }
 }
 impl Drop for Worker {
@@ -445,28 +495,35 @@ pub fn load_request_with_options(
     options: LoadOptions,
 ) -> Result<Loaded, String> {
     let mut assembled: Option<Loaded> = None;
-    let end = load_request_progressively(
-        initial,
-        request,
-        cancel,
-        progress,
-        trust,
-        mode,
-        options,
-        &mut |delivery| {
-            match delivery {
-                Delivery::Document(loaded) => assembled = Some(*loaded),
-                Delivery::Images(update) => {
-                    let loaded = assembled.as_mut().expect("document precedes image results");
-                    loaded.images.extend(update.images);
-                    loaded.animations.extend(update.animations);
-                    loaded.events.extend(update.events);
-                    loaded.skipped += update.skipped;
+    let end =
+        load_request_progressively(
+            initial,
+            request,
+            cancel,
+            progress,
+            trust,
+            mode,
+            options,
+            crate::network_trace::Trace::default(),
+            Arc::new(crate::cookies::Session::default()),
+            &mut |delivery| {
+                match delivery {
+                    Delivery::Download(_) => return Err(
+                        "This response is an attachment; a browser download handler is required."
+                            .into(),
+                    ),
+                    Delivery::Document(loaded) => assembled = Some(*loaded),
+                    Delivery::Images(update) => {
+                        let loaded = assembled.as_mut().expect("document precedes image results");
+                        loaded.images.extend(update.images);
+                        loaded.animations.extend(update.animations);
+                        loaded.events.extend(update.events);
+                        loaded.skipped += update.skipped;
+                    }
                 }
-            }
-            Ok(())
-        },
-    )?;
+                Ok(())
+            },
+        )?;
     let mut loaded = assembled.expect("successful load supplies a document");
     loaded.events.extend(end.events);
     loaded.skipped = end.skipped;
@@ -483,6 +540,8 @@ fn load_request_progressively(
     trust: &trust::Store,
     mode: http::FetchMode,
     options: LoadOptions,
+    network: crate::network_trace::Trace,
+    cookies: Arc<crate::cookies::Session>,
     deliver: &mut dyn FnMut(Delivery) -> Result<(), String>,
 ) -> Result<LoadEnd, String> {
     check_cancel(cancel)?;
@@ -491,9 +550,28 @@ fn load_request_progressively(
     }
     let started = Instant::now();
     let resource_filter = |url: &crate::url::HttpUrl| options.blocking.check(url);
-    let pool = http::Pool::new(cancel, trust).with_resource_filter(&resource_filter);
+    let document_filter = |url: &crate::url::HttpUrl| {
+        if let Some(policy) = &options.form_policy {
+            policy.allows_form_action(&Location {
+                url: Some(url.clone()),
+                path: None,
+                root: None,
+                fragment: String::new(),
+            })
+        } else {
+            Ok(())
+        }
+    };
+    let pool = http::Pool::new(cancel, trust)
+        .with_resource_filter(&resource_filter)
+        .with_network_trace(network.clone())
+        .with_cookie_session(cookies, options.cookie_origin.clone())
+        .with_cookie_context(options.cookie_same_site)
+        .with_document_origin(options.script_origin.clone())
+        .with_document_filter(&document_filter);
     let mut location = initial.clone();
     let mut final_request = http::Request::Get;
+    let mut final_cookie_same_site = false;
     let mut events = Vec::new();
     events.push(options.blocking.description());
     if mode == http::FetchMode::FullReload {
@@ -507,9 +585,24 @@ fn load_request_progressively(
     let scripting_blocked =
         (!options.javascript).then(|| "JavaScript disabled by user.".to_owned());
     let mut csp_headers = Vec::new();
+    let mut embedder_headers = Vec::new();
     let raw = if let Some(url) = &initial.url {
         progress(format!("Loading {}", url.display()));
-        let response = pool.fetch_request(url, request, 2 * 1024 * 1024, None, mode)?;
+        let response = pool.fetch_document(url, request, mode)?;
+        final_cookie_same_site = response.cookie_same_site;
+        if response
+            .header("content-disposition")
+            .is_some_and(crate::downloads::is_attachment)
+        {
+            let events = response.events.clone();
+            deliver(Delivery::Download(Box::new(response)))?;
+            return Ok(LoadEnd {
+                download: true,
+                events,
+                skipped: 0,
+                notice: "Download received.".into(),
+            });
+        }
         if response.request_is_post {
             final_request = request.clone();
         }
@@ -528,6 +621,13 @@ fn load_request_progressively(
                 .headers
                 .iter()
                 .filter(|(name, _)| name.eq_ignore_ascii_case("content-security-policy"))
+                .map(|(_, value)| value.clone()),
+        );
+        embedder_headers.extend(
+            response
+                .headers
+                .iter()
+                .filter(|(name, _)| name.eq_ignore_ascii_case("cross-origin-embedder-policy"))
                 .map(|(_, value)| value.clone()),
         );
         if response
@@ -636,11 +736,16 @@ fn load_request_progressively(
     for value in csp_headers {
         csp.add_header(&value);
     }
+    for value in embedder_headers {
+        csp.add_embedder_header(&value);
+    }
     events.push(format!("HTML/text loaded: {}", location.display()));
     let mut loaded = Loaded {
+        network,
         base: location.clone(),
         location,
         request: final_request,
+        cookie_same_site: final_cookie_same_site,
         document,
         raw,
         styles: HashMap::new(),
@@ -742,6 +847,17 @@ fn load_request_progressively(
         .map(|image| (image.node, image.density))
         .collect();
     if !options.images {
+        for image in &image_plan {
+            if let Ok(resolved) = navigation::resolve(&image.target, &loaded.base) {
+                if let Some(url) = resolved.url {
+                    pool.network_trace().blocked(
+                        &url.display(),
+                        "image",
+                        "Images disabled by user.",
+                    );
+                }
+            }
+        }
         stats.skipped += image_plan.len();
         loaded.events.push(format!(
             "Images disabled by user: {} image reference(s) skipped before fetching or decoding.",
@@ -789,8 +905,9 @@ fn load_request_progressively(
         "LOAD TIMING: document/parse {} ms; resources {} ms; total {} ms. {} resource attempts; {} reused references ({} earlier failures). Reuse ends with this document load.",
         stats.document_ready.as_millis(), total.saturating_sub(stats.document_ready).as_millis(), total.as_millis(), stats.attempts, stats.reused, stats.reused_failures
     ));
-    events.push("Classic JavaScript uses a bounded subset after document parsing. No cookies, HTTP credentials, referrer header, frames, CSS imports, speculative requests or telemetry. Automatic HTTP/HTTPS resources are restricted to the document origin.".to_owned());
+    events.push("Classic JavaScript uses a bounded subset after document parsing. Session cookies stay in memory and are exact-host scoped. No HTTP authentication, referrer header, frames, CSS imports, speculative requests or telemetry. Stylesheets, images, fonts and script navigation retain the document origin. Classic scripts may also include HTTPS sources from HTTPS documents, with CSP and request checks at each redirect and no cross-origin credentials.".to_owned());
     Ok(LoadEnd {
+        download: false,
         events,
         skipped: stats.skipped,
         notice,
@@ -908,6 +1025,11 @@ fn load_critical_resources(
         };
         let mut attempted_key = None;
         let mut was_reused = false;
+        let trace_address = reference
+            .and_then(|target| navigation::resolve(target, &loaded.base).ok())
+            .and_then(|location| location.url)
+            .map(|url| url.display());
+        let mut trace_attempted = false;
         let result = (|| -> Result<String, String> {
             if kind == "SCRIPT" {
                 if let Some(reason) = &loaded.scripting_blocked {
@@ -918,7 +1040,7 @@ fn load_critical_resources(
                     return Err("Script count limit reached (16).".to_owned());
                 }
                 if script_bytes >= MAX_SCRIPT_TOTAL {
-                    return Err("Script source budget is full (256 KiB).".to_owned());
+                    return Err("Script source budget is full (2 MiB).".to_owned());
                 }
                 if reference.is_none() {
                     stats.begin_attempt(loaded.location.url.is_some())?;
@@ -962,6 +1084,15 @@ fn load_critical_resources(
                 }
             }
             let resolved = navigation::resolve(target, &loaded.base)?;
+            // Per-element CSP must precede reuse too: a previous nonce does
+            // not authorize another LINK node referencing the same URL.
+            if kind == "CSS" {
+                loaded.csp.allows_external_style(
+                    node,
+                    csp::nonce(&loaded.document, node),
+                    &resolved,
+                )?;
+            }
             if let Some(url) = &resolved.url {
                 pool.check_resource(url)?;
             }
@@ -970,6 +1101,13 @@ fn load_critical_resources(
                 .flatten();
             if let Some(outcome) = key.as_ref().and_then(|key| cache.get(key)).cloned() {
                 was_reused = true;
+                if let Some(address) = &trace_address {
+                    pool.network_trace().reused(
+                        address,
+                        kind,
+                        matches!(outcome, ResourceOutcome::Failed(_)),
+                    );
+                }
                 stats.reused += 1;
                 return match outcome {
                     ResourceOutcome::Css(source, base) => {
@@ -999,7 +1137,9 @@ fn load_critical_resources(
             }
             let (bytes, encoding, resolved_location) = if let Some(url) = &resolved.url {
                 let origin = loaded.location.url.as_ref().ok_or("Local pages do not automatically fetch network resources. Follow a web link explicitly first.")?;
-                if !origin.same_origin(url) {
+                if kind == "SCRIPT" {
+                    http::check_classic_script_origin(origin, url)?;
+                } else if !origin.same_origin(url) {
                     return Err("Automatic resources must have the document's scheme, host and port in this build.".to_owned());
                 }
                 let remaining = stats.remaining_bytes();
@@ -1012,7 +1152,26 @@ fn load_critical_resources(
                 } else {
                     MAX_SCRIPT_BYTES
                 };
-                let response = pool.fetch(url, limit.min(remaining), Some(origin), mode)?;
+                trace_attempted = true;
+                let guard = |target: &crate::url::HttpUrl| {
+                    let target = Location {
+                        url: Some(target.clone()),
+                        path: None,
+                        root: None,
+                        fragment: String::new(),
+                    };
+                    let nonce = csp::nonce(&loaded.document, node);
+                    if kind == "SCRIPT" {
+                        loaded.csp.allows_external(node, nonce, &target)
+                    } else {
+                        loaded.csp.allows_external_style(node, nonce, &target)
+                    }
+                };
+                let response = if kind == "SCRIPT" {
+                    pool.fetch_classic_script(url, limit.min(remaining), origin, mode, &guard)?
+                } else {
+                    pool.fetch_kind_checked(url, limit.min(remaining), origin, mode, kind, &guard)?
+                };
                 stats.network_bytes += response.body.len();
                 let final_location = Location {
                     url: Some(response.url.clone()),
@@ -1095,6 +1254,11 @@ fn load_critical_resources(
                 ))
             }
         })();
+        if !trace_attempted && !was_reused {
+            if let (Some(address), Err(error)) = (&trace_address, &result) {
+                pool.network_trace().blocked(address, kind, error);
+            }
+        }
         if let Some(key) = attempted_key {
             let outcome = match &result {
                 Err(error) => ResourceOutcome::Failed(error.clone()),
@@ -1281,6 +1445,12 @@ fn load_fonts(
                                 continue;
                             }
                         }
+                        let trace_address = navigation::resolve(url, &base)
+                            .ok()
+                            .and_then(|location| location.url)
+                            .map(|url| url.display());
+                        let mut trace_attempted = false;
+                        let mut trace_reused = false;
                         let fetched = (|| -> Result<Arc<font::Font>, String> {
                             let resolved = navigation::resolve(url, &base)?;
                             if let Some(url) = &resolved.url {
@@ -1292,6 +1462,11 @@ fn load_fonts(
                             let key = ResourceKey::new("FONT", &resolved)
                                 .ok_or("Font source has no fetchable address.")?;
                             if let Some(previous) = cache.get(&key) {
+                                trace_reused = true;
+                                if let Some(address) = &trace_address {
+                                    pool.network_trace()
+                                        .reused(address, "font", previous.is_err());
+                                }
                                 reused = true;
                                 stats.reused += 1;
                                 if previous.is_err() {
@@ -1321,8 +1496,14 @@ fn load_fonts(
                                         );
                                     }
                                     progress(format!("Loading font {label}"));
-                                    let response =
-                                        pool.fetch(url, limit.min(remaining), Some(origin), mode)?;
+                                    trace_attempted = true;
+                                    let response = pool.fetch_kind(
+                                        url,
+                                        limit.min(remaining),
+                                        Some(origin),
+                                        mode,
+                                        "font",
+                                    )?;
                                     stats.network_bytes += response.body.len();
                                     let final_location = Location {
                                         url: Some(response.url.clone()),
@@ -1377,6 +1558,11 @@ fn load_fonts(
                             cache.insert(key, attempt.clone());
                             attempt
                         })();
+                        if !trace_attempted && !trace_reused {
+                            if let (Some(address), Err(error)) = (&trace_address, &fetched) {
+                                pool.network_trace().blocked(address, "font", error);
+                            }
+                        }
                         match fetched {
                             Ok(font) => (font, url.chars().take(220).collect::<String>()),
                             Err(error) => {
@@ -1506,6 +1692,11 @@ fn load_images(
         let mut attempted_key = None;
         let mut was_reused = false;
         let mut attempted = false;
+        let trace_address = navigation::resolve(&image.target, base)
+            .ok()
+            .and_then(|location| location.url)
+            .map(|url| url.display());
+        let mut trace_attempted = false;
         let embedded = if crate::image_data::is_data(&image.target) {
             Some(crate::image_data::prepare(&image.target))
         } else {
@@ -1543,6 +1734,13 @@ fn load_images(
             };
             if let Some(outcome) = key.as_ref().and_then(|key| cache.get(key)).cloned() {
                 was_reused = true;
+                if let Some(address) = &trace_address {
+                    pool.network_trace().reused(
+                        address,
+                        "image",
+                        matches!(outcome, ResourceOutcome::Failed(_)),
+                    );
+                }
                 stats.reused += 1;
                 return match outcome {
                     ResourceOutcome::Image(bitmap, animation) => {
@@ -1587,6 +1785,7 @@ fn load_images(
                     return Err("Page resource download budget is full (32 MiB).".to_owned());
                 }
                 progress(format!("Loading IMAGE {label}"));
+                trace_attempted = true;
                 let response = if let Some(response) =
                     key.as_ref().and_then(|key| prefetched.remove(key))
                 {
@@ -1692,6 +1891,11 @@ fn load_images(
                 ),
             };
             cache.insert(key, outcome);
+        }
+        if !trace_attempted && !was_reused {
+            if let (Some(address), Err(error)) = (&trace_address, &result) {
+                pool.network_trace().blocked(address, "image", error);
+            }
         }
         stats.record("IMAGE", &label, was_reused, result, &mut update.events);
         update.skipped += stats.skipped - before_skipped;
@@ -1806,7 +2010,7 @@ fn fetch_image_batch(
     mode: http::FetchMode,
 ) -> Vec<Result<http::Response, String>> {
     if urls.len() == 1 {
-        return vec![pool.fetch(&urls[0], limit, Some(origin), mode)];
+        return vec![pool.fetch_kind(&urls[0], limit, Some(origin), mode, "image")];
     }
     std::thread::scope(|scope| {
         let workers: Vec<_> = urls
@@ -1814,7 +2018,9 @@ fn fetch_image_batch(
             .map(|url| {
                 std::thread::Builder::new()
                     .name("image-fetch".to_owned())
-                    .spawn_scoped(scope, move || pool.fetch(url, limit, Some(origin), mode))
+                    .spawn_scoped(scope, move || {
+                        pool.fetch_kind(url, limit, Some(origin), mode, "image")
+                    })
             })
             .collect();
         // Completion is merged in document order regardless of wire arrival order.
@@ -1877,6 +2083,9 @@ fn check_script(doc: &Document, node: usize) -> Result<(), String> {
         if doc.attr(node, "async").is_some() {
             return Err("Async external scripts are not implemented.".to_owned());
         }
+        if doc.attr(node, "crossorigin").is_some() {
+            return Err("CORS-mode scripts are not implemented; a crossorigin attribute requires CORS validation before execution.".to_owned());
+        }
         if doc
             .attr(node, "integrity")
             .is_some_and(|value| !value.trim().is_empty())
@@ -1893,7 +2102,7 @@ fn script_text(doc: &Document, node: usize) -> Result<String, String> {
         if let NodeKind::Text(text) = &doc.nodes[child].kind {
             check_script_size(text.len(), source.len())?;
             if source.len() + text.len() > MAX_SCRIPT_BYTES {
-                return Err("A script source exceeds the 64 KiB limit.".to_owned());
+                return Err("A script source exceeds the 512 KiB limit.".to_owned());
             }
             source.push_str(text);
         }
@@ -1903,17 +2112,17 @@ fn script_text(doc: &Document, node: usize) -> Result<String, String> {
 
 fn check_script_size(bytes: usize, total: usize) -> Result<(), String> {
     if bytes > MAX_SCRIPT_BYTES {
-        return Err("A script source exceeds the 64 KiB limit.".to_owned());
+        return Err("A script source exceeds the 512 KiB limit.".to_owned());
     }
     if bytes > MAX_SCRIPT_TOTAL.saturating_sub(total) {
-        return Err("Script source budget exceeded (256 KiB).".to_owned());
+        return Err("Script source budget exceeded (2 MiB).".to_owned());
     }
     Ok(())
 }
 
 /// The HTML type attribute uses an essence match, so parameters there reject.
 /// HTTP Content-Type is parsed separately before calling this helper.
-fn javascript_mime(mime: &str) -> bool {
+pub(crate) fn javascript_mime(mime: &str) -> bool {
     matches!(
         mime,
         "application/ecmascript"
@@ -1935,7 +2144,7 @@ fn javascript_mime(mime: &str) -> bool {
     )
 }
 
-fn media_type(content_type: &str) -> String {
+pub(crate) fn media_type(content_type: &str) -> String {
     content_type
         .split(';')
         .next()
@@ -2011,7 +2220,11 @@ fn charset(content_type: &str) -> Option<String> {
             .then(|| value.trim().trim_matches(['\'', '"']).to_ascii_lowercase())
     })
 }
-fn decode_text(bytes: &[u8], content_type: &str, sniff_html: bool) -> Result<String, String> {
+pub(crate) fn decode_text(
+    bytes: &[u8],
+    content_type: &str,
+    sniff_html: bool,
+) -> Result<String, String> {
     if let Some(bytes) = bytes.strip_prefix(&[0xef, 0xbb, 0xbf]) {
         return Ok(String::from_utf8_lossy(bytes).into_owned());
     }
@@ -2402,6 +2615,26 @@ mod tests {
     }
 
     #[test]
+    fn linked_style_csp_precedes_reuse_and_cors_scripts_are_not_fetched() {
+        let folder = Folder::new();
+        folder.file("one.css", "body { color: red; }");
+        folder.file("cors.js", "throw 'unsupported CORS must not execute';");
+        let page = folder.page("<meta http-equiv=Content-Security-Policy content=\"style-src 'nonce-One'\"><link rel=stylesheet nonce=One href=one.css><link rel=stylesheet href=one.css><link rel=stylesheet nonce=One nonce=Two href=one.css><script crossorigin src=cors.js></script>");
+        let loaded = local(&page).unwrap();
+        assert_eq!(loaded.styles.len(), 1);
+        assert!(loaded.scripts.is_empty());
+        assert!(loaded
+            .events
+            .iter()
+            .any(|e| e.contains("blocked this stylesheet")));
+        assert!(loaded.events.iter().any(|e| e.contains("CORS-mode")));
+        assert!(!loaded
+            .events
+            .iter()
+            .any(|e| e.contains("reused stylesheet")));
+    }
+
+    #[test]
     fn script_source_count_and_byte_budgets_are_independent() {
         let folder = Folder::new();
         let page = folder.page(&"<script>1;</script>".repeat(MAX_SCRIPTS + 1));
@@ -2412,15 +2645,16 @@ mod tests {
         let page = folder.page(&format!("<script>{large}x</script><script>1;</script>"));
         let loaded = local(&page).unwrap();
         assert_eq!(loaded.scripts.len(), 1);
-        assert!(loaded.events.iter().any(|e| e.contains("64 KiB")));
-        let page = folder.page(&format!("<script>{large}</script>").repeat(5));
+        assert!(loaded.events.iter().any(|e| e.contains("512 KiB")));
+        folder.file("large.js", &large);
+        let page = folder.page(&"<script src=large.js></script>".repeat(5));
         let loaded = local(&page).unwrap();
         assert_eq!(loaded.scripts.len(), 4);
         assert_eq!(
             loaded.scripts.iter().map(|s| s.source.len()).sum::<usize>(),
             MAX_SCRIPT_TOTAL
         );
-        assert!(loaded.events.iter().any(|e| e.contains("256 KiB")));
+        assert!(loaded.events.iter().any(|e| e.contains("2 MiB")));
     }
 
     struct Site {
@@ -2517,6 +2751,8 @@ mod tests {
                         "/post-style.css" => { mime="text/css"; "p{color:#123456}".into() },
                         "/staged" => "<title>Staged page</title><img src=/held.ppm><link rel=stylesheet href=/post-style.css><script src=/ok.js></script><p>Visible before its image</p>".into(),
                         "/fresh" => "<title>Fresh page</title><p>Replacement</p>".into(),
+                        "/script-nav-redirect" => { status=302; extra="Location: /fresh\r\n".into(); String::new() },
+                        "/script-nav-cross" => { status=302; extra=format!("Location: http://localhost:{port}/fresh\r\n"); String::new() },
                         "/repeat-resources" => format!("<link rel=stylesheet href=/post-style.css><style>p{{color:#abcdef}}</style><link rel=stylesheet href='./post-style.css#again'><p id=result>Repeat</p>{}{}<img src='/post-image.ppm#after-many-references'><script src=/ok.js></script><script src=/ok.js></script>", "<img src=/post-image.ppm>".repeat(40), "<img src=/unsupported.gif>".repeat(60)),
                         "/unsupported.gif" => { mime="image/gif"; "GIF89a-not-an-implemented-format".into() },
                         "/post-image.ppm" | "/held.ppm" => { mime="image/x-portable-pixmap"; "P3\n1 1\n255\n255 0 0\n".into() },
@@ -2710,6 +2946,74 @@ mod tests {
         assert_eq!(text.document.content_type, "text/plain");
         assert!(text.scripts.is_empty() && text.images.is_empty());
         assert!(text.raw.starts_with("<script>"));
+    }
+
+    #[test]
+    fn script_document_redirects_check_origin_and_request_rules_before_fetch() {
+        let site = Site::new();
+        let options = |script: bool, rules: &[&str]| LoadOptions {
+            javascript: false,
+            images: false,
+            script_origin: script.then(|| site.location.url.clone().unwrap()),
+            blocking: Arc::new(crate::blocking::Policy::new(&crate::blocking::Config {
+                enabled: true,
+                builtins: false,
+                rules: rules.iter().map(|rule| (*rule).to_owned()).collect(),
+            })),
+            ..LoadOptions::default()
+        };
+        let load_path = |reference: &str, options| {
+            load_with_options(
+                &navigation::resolve(reference, &site.location).unwrap(),
+                &AtomicBool::new(false),
+                &|_| {},
+                &trust::Store::unconfigured(),
+                http::FetchMode::Normal,
+                options,
+            )
+        };
+        let take_paths = || {
+            std::mem::take(&mut *site.requests.lock().unwrap())
+                .iter()
+                .map(|r| r.split_whitespace().nth(1).unwrap().to_owned())
+                .collect::<Vec<_>>()
+        };
+
+        let loaded = load_path("/script-nav-redirect", options(true, &[])).unwrap();
+        assert_eq!(loaded.document.title, "Fresh page");
+        assert_eq!(take_paths(), ["/script-nav-redirect", "/fresh"]);
+
+        let error = load_path("/script-nav-cross", options(true, &[]))
+            .err()
+            .expect("the cross-origin redirected destination must be blocked");
+        assert!(error.contains("Cross-origin script navigation"), "{error}");
+        assert_eq!(take_paths(), ["/script-nav-cross"]);
+
+        let origin = site.location.url.as_ref().unwrap();
+        let cross = format!("http://localhost:{}/fresh", origin.port);
+        let error = load_path(&cross, options(true, &[]))
+            .err()
+            .expect("the initial destination must also keep the origin");
+        assert!(error.contains("Cross-origin script navigation"), "{error}");
+        assert!(take_paths().is_empty());
+
+        let error = load_path("/fresh", options(true, &["path:/fresh"]))
+            .err()
+            .expect("initial script navigation must honor request rules");
+        assert!(error.contains("Blocked by request rule"), "{error}");
+        assert!(take_paths().is_empty());
+        let error = load_path("/script-nav-redirect", options(true, &["path:/fresh"]))
+            .err()
+            .expect("redirected script navigation must honor request rules");
+        assert!(error.contains("Blocked by request rule"), "{error}");
+        assert_eq!(take_paths(), ["/script-nav-redirect"]);
+
+        // The same endpoint remains reachable through an ordinary user
+        // document navigation, including its cross-origin redirect.
+        let loaded = load_path("/script-nav-cross", options(false, &["path:/fresh"])).unwrap();
+        assert_eq!(loaded.document.title, "Fresh page");
+        assert_eq!(loaded.location.url.unwrap().host, "localhost");
+        assert_eq!(take_paths(), ["/script-nav-cross", "/fresh"]);
     }
 
     #[test]

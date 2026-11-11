@@ -1,17 +1,18 @@
 //! Original TLS 1.3 / TLS 1.2 client over an existing byte stream.
 //!
-//! One ClientHello offers both versions. TLS 1.3 uses X25519 and our existing
+//! One ClientHello offers both versions. TLS 1.3 uses X25519 (or P-256 after
+//! one validated HelloRetryRequest) and our existing
 //! ChaCha20-Poly1305/AES-GCM state; TLS 1.2 prefers ECDHE AES-GCM and also
 //! offers authenticated SHA-256/SHA-384 AES-CBC compatibility suites.
 //! Certificate validation uses our X.509 module and explicit trust anchors.
-//! There is no reconnect fallback, resumption, early data, HelloRetryRequest,
+//! There is no reconnect fallback, resumption, early data,
 //! renegotiation, or client authentication.
 //!
 //! The caller supplies fresh OS-generated entropy and a deadline/cancellation
 //! check. Blocking transports must have short read AND write timeouts so that
 //! the check can run while a peer stalls. This code never opens a socket.
 //!
-//! Protocol reference: <https://www.rfc-editor.org/rfc/rfc9846>
+//! Protocol reference: <https://www.rfc-editor.org/rfc/rfc8446>
 
 use crate::crypto_rsa::{self, Hash};
 use crate::crypto_x25519;
@@ -24,6 +25,8 @@ use std::time::SystemTime;
 
 #[path = "crypto_p256_ecdh.rs"]
 mod p256;
+#[path = "tls_retry.rs"]
+mod retry;
 #[path = "tls12.rs"]
 mod tls12;
 #[path = "tls12_cbc.rs"]
@@ -43,6 +46,7 @@ const MAX_TICKETS: usize = 8;
 const MAX_KEY_UPDATES: usize = 32;
 const MAX_CONTROL_RECORDS: usize = 128;
 const X25519_GROUP: u16 = 0x001d;
+const P256_GROUP: u16 = 0x0017;
 const SIGNATURE_SCHEMES: [u16; 5] = [0x0403, 0x0503, 0x0804, 0x0805, 0x0806];
 const OFFERED_SIGNATURE_SCHEMES: [u16; 8] = [
     0x0403, 0x0503, 0x0804, 0x0805, 0x0806, 0x0401, 0x0501, 0x0601,
@@ -310,13 +314,13 @@ fn client_hello(
     Ok(handshake_message(1, &body))
 }
 
-fn server_hello(message: &[u8]) -> Result<(Suite, [u8; 32]), String> {
+fn server_hello(message: &[u8], expected_group: u16) -> Result<(Suite, Vec<u8>), String> {
     let mut input = Bytes::new(handshake_body(message, 2)?);
     if input.u16()? != 0x0303 {
         return Err("Invalid TLS ServerHello legacy version.".into());
     }
     if input.take(32)? == HELLO_RETRY_RANDOM {
-        return Err("TLS HelloRetryRequest is not supported; the server must accept the offered X25519 share.".into());
+        return Err("A second TLS HelloRetryRequest is not permitted.".into());
     }
     if !input.vector8()?.is_empty() {
         return Err("ServerHello did not echo the empty session ID.".into());
@@ -339,17 +343,19 @@ fn server_hello(message: &[u8]) -> Result<(Suite, [u8; 32]), String> {
             }
             51 => {
                 let mut share = Bytes::new(bytes);
-                if share.u16()? != X25519_GROUP {
-                    return Err("Server did not select X25519.".into());
+                if share.u16()? != expected_group {
+                    return Err(
+                        "ServerHello did not select the offered TLS key share group.".into(),
+                    );
                 }
                 let key = share.vector16()?;
-                if key.len() != 32 {
-                    return Err("Invalid server X25519 key length.".into());
+                match expected_group {
+                    X25519_GROUP if key.len() == 32 => {}
+                    P256_GROUP if key.len() == 65 && key[0] == 4 => {}
+                    _ => return Err("Invalid server TLS key share encoding.".into()),
                 }
                 share.finish()?;
-                let mut fixed = [0; 32];
-                fixed.copy_from_slice(key);
-                peer_key = Some(fixed);
+                peer_key = Some(key.to_vec());
             }
             _ => return Err(format!("Unexpected ServerHello extension {kind}.")),
         }
@@ -359,7 +365,7 @@ fn server_hello(message: &[u8]) -> Result<(Suite, [u8; 32]), String> {
     }
     peer_key
         .map(|key| (suite, key))
-        .ok_or_else(|| "ServerHello has no X25519 key share.".into())
+        .ok_or_else(|| "ServerHello has no TLS key share.".into())
 }
 
 fn encrypted_extensions(message: &[u8], sent_sni: bool) -> Result<(), String> {
@@ -675,7 +681,7 @@ fn selected_version(message: &[u8]) -> Result<u16, String> {
             "The server selected a TLS version below 1.2 or an invalid legacy version.".into(),
         );
     }
-    input.take(32)?;
+    let retry = input.take(32)? == HELLO_RETRY_RANDOM;
     if input.vector8()?.len() > 32 {
         return Err("TLS ServerHello session ID exceeds 32 bytes.".into());
     }
@@ -694,11 +700,18 @@ fn selected_version(message: &[u8]) -> Result<u16, String> {
         Some(_) => {
             Err("ServerHello selected an invalid or unoffered supported_versions value.".into())
         }
+        None if retry => {
+            Err("HelloRetryRequest has no TLS 1.3 supported_versions extension.".into())
+        }
         None => Ok(0x0303),
     }
 }
 
 fn tls12_p256_secret(entropy: &[u8; 32]) -> Result<[u8; 32], String> {
+    p256_secret(entropy, b"OwnBrowser TLS 1.2 P-256 ephemeral key")
+}
+
+fn p256_secret(entropy: &[u8; 32], context: &[u8]) -> Result<[u8; 32], String> {
     // Domain separation avoids exposing one private scalar through two curve
     // systems. Rejection avoids modulo bias in the HMAC-derived candidate.
     const ORDER: [u8; 32] = [
@@ -707,7 +720,7 @@ fn tls12_p256_secret(entropy: &[u8; 32]) -> Result<[u8; 32], String> {
         0x25, 0x51,
     ];
     for counter in 0..16u8 {
-        let mut label = b"OwnBrowser TLS 1.2 P-256 ephemeral key".to_vec();
+        let mut label = context.to_vec();
         label.push(counter);
         let candidate = crypto_hash::hmac_sha256(entropy, &label);
         let mut borrow = 0u16;
@@ -738,7 +751,7 @@ pub struct TlsStream<S, C> {
 
 impl<S: Read + Write, C: Fn() -> Result<(), String>> TlsStream<S, C> {
     /// The caller supplies 64 fresh OS-random bytes: ClientHello random plus
-    /// X25519 private entropy. TLS 1.2 P-256 derives a separate scalar from it.
+    /// X25519 private entropy. TLS 1.2/1.3 P-256 derive separate scalars from it.
     pub fn connect(
         stream: S,
         hostname: &str,
@@ -778,22 +791,18 @@ impl<S: Read + Write, C: Fn() -> Result<(), String>> TlsStream<S, C> {
         )
         .map_err(|error| format!("TLS handshake before ServerHello: {error}"))?;
         let inner = match selected_version(&server)? {
-            0x0304 => {
-                let mut transcript = Transcript::new();
-                transcript.add(&hello)?;
-                ProtocolStream::Tls13(Box::new(Tls13Stream::finish_handshake(
-                    transport,
-                    transcript,
-                    buffer,
-                    records,
-                    dummy_ccs,
-                    server,
-                    private_key,
-                    verified_name,
-                    roots,
-                    now,
-                )?))
-            }
+            0x0304 => ProtocolStream::Tls13(Box::new(Tls13Stream::finish_handshake(
+                transport,
+                hello,
+                buffer,
+                records,
+                dummy_ccs,
+                server,
+                private_key,
+                verified_name,
+                roots,
+                now,
+            )?)),
             _ => {
                 if dummy_ccs != 0 {
                     return Err("TLS 1.2 received ChangeCipherSpec before ServerHello.".into());
@@ -919,11 +928,11 @@ impl<S: Read + Write, C: Fn() -> Result<(), String>> Tls13Stream<S, C> {
     #[allow(clippy::too_many_arguments)]
     fn finish_handshake(
         mut transport: Transport<S, C>,
-        mut transcript: Transcript,
+        hello: Vec<u8>,
         mut buffer: HandshakeBuffer,
         mut records: usize,
         mut dummy_ccs: usize,
-        server: Vec<u8>,
+        mut server: Vec<u8>,
         private_key: [u8; 32],
         hostname: &str,
         roots: &[Vec<u8>],
@@ -931,13 +940,49 @@ impl<S: Read + Write, C: Fn() -> Result<(), String>> Tls13Stream<S, C> {
     ) -> Result<Self, String> {
         let name = dns_name(hostname)?;
         let verified_name = name.unwrap_or(hostname);
-        let (suite, peer_key) = server_hello(&server)?;
+        let mut transcript = Transcript::new();
+        let mut client_key = retry::ClientKey::X25519(private_key);
+        let mut retry_suite = None;
+        if let Some(request) = retry::Request::parse(&server)? {
+            if !buffer.empty() {
+                return Err("HelloRetryRequest must finish at a TLS record boundary.".into());
+            }
+            (transport.check)()?;
+            let (second, key) = request.client_hello(&hello, &private_key)?;
+            (transport.check)()?;
+            transcript = request.transcript(&hello, &server)?;
+            transcript.add(&second)?;
+            retry_suite = Some(request.suite);
+            client_key = key;
+            let mut record = vec![22, 3, 3];
+            append_u16(&mut record, second.len());
+            record.extend_from_slice(&second);
+            transport.write_all(&record)?;
+            transport.flush()?;
+            // Continue this connection under the same deadline and counters.
+            // There is no retry loop or TLS 1.2 branch after this point.
+            server = receive_handshake(
+                &mut transport,
+                &mut buffer,
+                None,
+                &mut records,
+                &mut dummy_ccs,
+            )
+            .map_err(|error| format!("TLS handshake after HelloRetryRequest: {error}"))?;
+        } else {
+            transcript.add(&hello)?;
+        }
+        let (suite, peer_key) = server_hello(&server, client_key.group())?;
+        if retry_suite.is_some_and(|selected| selected != suite) {
+            return Err("ServerHello changed the HelloRetryRequest cipher suite.".into());
+        }
         if !buffer.empty() {
             return Err("ServerHello must finish at a TLS record boundary.".into());
         }
         transcript.add(&server)?;
         (transport.check)()?;
-        let shared = crypto_x25519::shared_secret(&private_key, &peer_key)?;
+        let shared = client_key.shared_secret(&peer_key)?;
+        (transport.check)()?;
         let handshake =
             tls_crypto::handshake_secret(suite, &tls_crypto::early_secret(suite), &shared)?;
         let hello_hash = transcript.digest(suite);
@@ -1039,7 +1084,12 @@ impl<S: Read + Write, C: Fn() -> Result<(), String>> Tls13Stream<S, C> {
             read_closed: false,
             write_closed: false,
             failed: false,
-            certificate_summary: format!("TLS 1.3, X25519, {}; {}", suite.name(), verified.summary),
+            certificate_summary: format!(
+                "TLS 1.3, {}, {}; {}",
+                client_key.name(),
+                suite.name(),
+                verified.summary
+            ),
         })
     }
 
@@ -1368,28 +1418,166 @@ mod tests {
         let extra = normal_server_extensions();
         let hello = hello_with_extensions(&extra, [0x52; 32]);
         assert_eq!(
-            server_hello(&hello).unwrap(),
-            (Suite::ChaCha20Poly1305Sha256, [0x51; 32])
+            server_hello(&hello, X25519_GROUP).unwrap(),
+            (Suite::ChaCha20Poly1305Sha256, vec![0x51; 32])
         );
-        assert!(
-            server_hello(&hello_with_extensions(&extra, HELLO_RETRY_RANDOM))
-                .unwrap_err()
-                .contains("HelloRetryRequest")
-        );
+        assert!(server_hello(
+            &hello_with_extensions(&extra, HELLO_RETRY_RANDOM),
+            X25519_GROUP
+        )
+        .unwrap_err()
+        .contains("HelloRetryRequest"));
         let mut duplicate = extra.clone();
         extension(&mut duplicate, 43, &[3, 4]);
-        assert!(server_hello(&hello_with_extensions(&duplicate, [0; 32])).is_err());
+        assert!(server_hello(&hello_with_extensions(&duplicate, [0; 32]), X25519_GROUP).is_err());
         let mut unsolicited = extra.clone();
         extension(&mut unsolicited, 41, &[0, 0]);
-        assert!(server_hello(&hello_with_extensions(&unsolicited, [0; 32])).is_err());
+        assert!(server_hello(&hello_with_extensions(&unsolicited, [0; 32]), X25519_GROUP).is_err());
         for offset in [4, 5, 38, 39, 41] {
             let mut changed = hello.clone();
             changed[offset] ^= 1;
-            assert!(server_hello(&changed).is_err(), "offset {offset}");
+            assert!(
+                server_hello(&changed, X25519_GROUP).is_err(),
+                "offset {offset}"
+            );
         }
         for length in 0..hello.len() {
-            assert!(server_hello(&hello[..length]).is_err());
+            assert!(server_hello(&hello[..length], X25519_GROUP).is_err());
         }
+    }
+
+    #[test]
+    fn hello_retry_never_repeats_or_changes_negotiated_parameters() {
+        let mut retry_extra = Vec::new();
+        extension(&mut retry_extra, 43, &[3, 4]);
+        extension(&mut retry_extra, 44, &[0, 1, 0x51]);
+        let retry = hello_with_extensions(&retry_extra, HELLO_RETRY_RANDOM);
+        let normal = hello_with_extensions(&normal_server_extensions(), [0x52; 32]);
+        let mut changed_suite = normal.clone();
+        changed_suite[40] = 1;
+        let mut changed_version_extra = Vec::new();
+        extension(&mut changed_version_extra, 43, &[3, 3]);
+        let changed_version = hello_with_extensions(&changed_version_extra, [0x52; 32]);
+        let no_version = hello_with_extensions(&[], [0x52; 32]);
+        let mut changed_group_extra = Vec::new();
+        extension(&mut changed_group_extra, 43, &[3, 4]);
+        extension(&mut changed_group_extra, 51, &[0, 0x17, 0, 1, 4]);
+        let changed_group = hello_with_extensions(&changed_group_extra, [0x52; 32]);
+        for (second, expected) in [
+            (retry.clone(), "second TLS HelloRetryRequest"),
+            (changed_suite, "changed the HelloRetryRequest cipher suite"),
+            (changed_version, "did not select TLS 1.3"),
+            (no_version, "no TLS 1.3"),
+            (changed_group, "offered TLS key share group"),
+        ] {
+            let mut io =
+                MemoryIo::new([plain_record(22, &retry), plain_record(22, &second)].concat());
+            let error = TlsStream::connect(
+                &mut io,
+                "example.test",
+                &[vec![0]],
+                SystemTime::now(),
+                [0x42; 64],
+                permitted,
+            )
+            .err()
+            .expect("retry must fail before authentication");
+            assert!(error.contains(expected), "{error}; expected {expected}");
+            let first_length = usize::from(u16::from_be_bytes([io.written[3], io.written[4]]));
+            let second_start = 5 + first_length;
+            assert_eq!(&io.written[second_start..second_start + 3], &[22, 3, 3]);
+            let second_length = usize::from(u16::from_be_bytes([
+                io.written[second_start + 3],
+                io.written[second_start + 4],
+            ]));
+            assert_eq!(io.written.len(), second_start + 5 + second_length);
+            assert_eq!(io.written[5], 1);
+            assert_eq!(io.written[second_start + 5], 1); // Two ClientHellos, no Finished/HTTP.
+        }
+    }
+
+    #[test]
+    fn hello_retry_preserves_record_ccs_and_cancellation_limits() {
+        let mut extra = Vec::new();
+        extension(&mut extra, 43, &[3, 4]);
+        extension(&mut extra, 44, &[0, 1, 0x52]);
+        let retry = hello_with_extensions(&extra, HELLO_RETRY_RANDOM);
+        let first = client_hello("example.test", &[0x31; 32], &[0x42; 32]).unwrap();
+        for (records, ccs, incoming, expected) in [
+            (
+                MAX_HANDSHAKE_RECORDS,
+                0,
+                Vec::new(),
+                "Too many TLS handshake records",
+            ),
+            (
+                1,
+                MAX_DUMMY_CCS,
+                plain_record(20, &[1]),
+                "excessive TLS compatibility",
+            ),
+        ] {
+            let mut io = MemoryIo::new(incoming);
+            let error = Tls13Stream::finish_handshake(
+                Transport {
+                    stream: &mut io,
+                    check: permitted,
+                },
+                first.clone(),
+                HandshakeBuffer::new(MAX_HANDSHAKE_MESSAGE),
+                records,
+                ccs,
+                retry.clone(),
+                [0x42; 32],
+                "example.test",
+                &[vec![0]],
+                SystemTime::now(),
+            )
+            .err()
+            .expect("counter must not reset for retry");
+            assert!(error.contains(expected), "{error}");
+        }
+        let mut io = MemoryIo::new(Vec::new());
+        let mut buffered = HandshakeBuffer::new(MAX_HANDSHAKE_MESSAGE);
+        buffered.push(&[2]).unwrap();
+        let error = Tls13Stream::finish_handshake(
+            Transport {
+                stream: &mut io,
+                check: permitted,
+            },
+            first.clone(),
+            buffered,
+            1,
+            0,
+            retry.clone(),
+            [0x42; 32],
+            "example.test",
+            &[vec![0]],
+            SystemTime::now(),
+        )
+        .err()
+        .unwrap();
+        assert!(error.contains("record boundary"));
+        assert!(io.written.is_empty());
+        let error = Tls13Stream::finish_handshake(
+            Transport {
+                stream: &mut io,
+                check: || Err("cancelled retry".into()),
+            },
+            first,
+            HandshakeBuffer::new(MAX_HANDSHAKE_MESSAGE),
+            1,
+            0,
+            retry,
+            [0x42; 32],
+            "example.test",
+            &[vec![0]],
+            SystemTime::now(),
+        )
+        .err()
+        .unwrap();
+        assert_eq!(error, "cancelled retry");
+        assert!(io.written.is_empty());
     }
 
     #[test]

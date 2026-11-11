@@ -16,6 +16,7 @@ import hashlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from io import BytesIO
 import json
+import re
 from pathlib import Path
 import subprocess
 import tempfile
@@ -26,7 +27,7 @@ from urllib.parse import quote_from_bytes
 from PIL import Image, ImageChops
 
 ROOT = Path(__file__).resolve().parents[1]
-TOOLBAR, STATUS = 68, 32
+TOOLBAR, STATUS = 102, 32
 MARKER = (243, 17, 167)
 MATTE = (25, 45, 63)
 RED, GREEN, BLUE, PURPLE = (221, 31, 53), (37, 199, 83), (41, 71, 223), (113, 29, 197)
@@ -41,7 +42,7 @@ def encoded(image, format='PNG'):
 def page(content):
     return ('<!doctype html><title>ChezCat image presentation check</title>'
             '<style>body{margin:0;padding:0;background:#fff}'
-            'img{display:block;margin:0;padding:0;border:0;background:#192d3f}'
+            'img{display:block;margin:0;padding:0;border:0;background:#192d3f;image-rendering:crisp-edges}'
             '.marker{height:3px;margin:0;background:#f311a7}</style>'
             '<script src="/must-not-run.js"></script><body>'
             '<div class="marker"></div>' + content).encode()
@@ -109,7 +110,10 @@ def main():
     browser = args.browser.resolve()
     assert browser.is_file(), '--browser must name the built executable'
     version = subprocess.run([str(browser), '--help'], capture_output=True, text=True, check=True).stdout.splitlines()[0]
-    assert '0.29' in version, ('Expected current 0.29 build', version)
+    package_version = re.search(r'^version = "([^"]+)"',
+                                (ROOT / 'Cargo.toml').read_text(), re.MULTILINE).group(1)
+    expected = 'ChezCat ' + '.'.join(package_version.split('.')[:2])
+    assert version == expected, ('Expected current source version', expected, version)
     started = time.monotonic()
     routes, checks, runs = {}, [], []
     assets = {
@@ -169,6 +173,13 @@ def main():
                 'style="display:block;width:40px;height:40px;margin:0;padding:0;border:0;'
                 'object-fit:cover;object-position:right bottom"><div class="marker"></div>')
     routes['/fitting'] = ('text/html', page(fitting))
+    # Geometry/decoder fixtures above explicitly preserve sharp pixels. These
+    # separate cases exercise the default smooth path against Pillow's
+    # independent bilinear enlargement, including the CSS property plumbing.
+    smooth_modes = ('auto', 'smooth', 'high-quality')
+    routes['/smooth'] = ('text/html', page(''.join(
+        f'<img src="/pattern.png" width="160" height="80" style="image-rendering:{mode}"><div class="marker"></div>'
+        for mode in smooth_modes)))
 
     # Both extensionless direct image documents and image elements must route
     # the new formats by Content-Type, without an extra image request.
@@ -264,6 +275,17 @@ def main():
             y += 43
             exact(fitted.crop((0, y, 40, y + 40)), pattern.crop((40, 0, 80, 40)), 'image submit uses object-fit and position')
             checks.append(dict(case='image-submit-object-fit-cover-and-position', maximum_channel_error=0))
+
+            smoothed = render('smooth-image-rendering', '/smooth', ['/pattern.png'], height=650)
+            y = marker_bottom(smoothed)
+            reference = pattern.resize((160, 80), Image.Resampling.BILINEAR)
+            for mode in smooth_modes:
+                actual = smoothed.crop((0, y, 160, y + 80))
+                maximum = max(high for _, high in ImageChops.difference(actual, reference).getextrema())
+                assert maximum <= 2, ('bilinear enlargement', mode, maximum)
+                checks.append(dict(case='smooth-image-rendering', value=mode,
+                                   maximum_channel_error=maximum, oracle='Pillow bilinear'))
+                y += 83
 
             image = render('legacy-embedded', '/legacy', list(legacy), height=800)
             y = marker_bottom(image)

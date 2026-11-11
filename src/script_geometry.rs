@@ -46,6 +46,19 @@ impl Geometry {
         self.remaining = MAX_LAYOUTS_PER_JOB;
     }
 
+    pub fn image_dimensions(&self, node: usize) -> Option<(usize, usize)> {
+        self.images.get(&node).copied()
+    }
+
+    pub fn set_stylesheet(&mut self, node: usize, source: Option<&str>) {
+        if let Some(source) = source {
+            self.styles.insert(node, source.to_owned());
+        } else {
+            self.styles.remove(&node);
+        }
+        self.invalidate();
+    }
+
     pub fn invalidate(&mut self) {
         self.boxes = None;
     }

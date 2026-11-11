@@ -144,7 +144,7 @@ pub fn parse(input: &str) -> Document {
             break;
         }
         let node = document.nodes.len();
-        if tag.name == "script" && tag.duplicate_attributes {
+        if matches!(tag.name.as_str(), "script" | "style" | "link") && tag.duplicate_attributes {
             document.nonce_unsafe_nodes.insert(node);
         }
         document.nodes[parent].children.push(node);
@@ -757,6 +757,24 @@ mod tests {
                 _ => None,
             })
             .collect()
+    }
+
+    #[test]
+    fn duplicate_attributes_keep_script_and_stylesheet_nonce_evidence() {
+        let doc = parse("<link id=l rel=stylesheet nonce=first NONCE=second href=x.css><style id=s nonce=first nonce=second>p{color:red}</style><script id=j nonce=first nonce=second></script><link id=good rel=stylesheet nonce=only href=y.css>");
+        for id in ["l", "s", "j", "good"] {
+            let node = doc
+                .nodes
+                .iter()
+                .enumerate()
+                .find_map(|(node, _)| (doc.attr(node, "id") == Some(id)).then_some(node))
+                .unwrap();
+            assert_eq!(
+                doc.attr(node, "nonce"),
+                Some(if id == "good" { "only" } else { "first" })
+            );
+            assert_eq!(doc.nonce_unsafe_nodes.contains(&node), id != "good");
+        }
     }
 
     #[test]

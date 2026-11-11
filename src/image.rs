@@ -5,6 +5,10 @@
 //! JPEG uses our own bounded Huffman/DCT decoder in jpeg.rs.
 //! GIF, APNG and WebP can return bounded, fully composited animation frames.
 //! BMP/ICO/CUR, static SVG, VP8/VP8L WebP, TIFF, QOI and Netpbm use original modules.
+//! JPEG, PNG/APNG and WebP honor bounded Exif orientation; color management is separate.
+
+#[path = "image_metadata.rs"]
+pub(crate) mod metadata;
 
 #[path = "image_bmp.rs"]
 mod dib;

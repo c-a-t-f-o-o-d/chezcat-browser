@@ -655,7 +655,7 @@ impl Runtime {
         let value = self.copy_value(value)?;
         let primitive = self.primitive_with_hint(value, false, host)?;
         self.work(primitive.bytes())?;
-        Ok(primitive.to_number())
+        primitive.script_number()
     }
     fn binary_index(&mut self, value: Option<&Value>, host: &mut dyn Host) -> Result<usize, Fault> {
         let number = self.binary_number(value.unwrap_or(&Value::Undefined), host)?;
@@ -700,8 +700,10 @@ impl Runtime {
         host: &mut dyn Host,
     ) -> Result<usize, Fault> {
         let length = match source {
-            Value::Object(id) => self.get_property(*id, "length")?,
-            Value::Function(id) => self.get_ordinary_property(Ordinary::Function(*id), "length")?,
+            Value::Object(id) => self.get_property_with_host(*id, "length", host)?,
+            Value::Function(id) => {
+                self.get_ordinary_property_with_host(Ordinary::Function(*id), "length", host)?
+            }
             Value::String(text) => {
                 self.work(text.len())?;
                 return Ok(text.encode_utf16().count());
@@ -726,13 +728,20 @@ impl Runtime {
             number.trunc().min(9007199254740991.0) as usize
         })
     }
-    fn binary_source_item(&mut self, source: &Value, index: usize) -> Result<Value, Fault> {
+    fn binary_source_item(
+        &mut self,
+        source: &Value,
+        index: usize,
+        host: &mut dyn Host,
+    ) -> Result<Value, Fault> {
         self.step()?;
         match source {
-            Value::Object(id) => self.get_property(*id, &index.to_string()),
-            Value::Function(id) => {
-                self.get_ordinary_property(Ordinary::Function(*id), &index.to_string())
-            }
+            Value::Object(id) => self.get_property_with_host(*id, &index.to_string(), host),
+            Value::Function(id) => self.get_ordinary_property_with_host(
+                Ordinary::Function(*id),
+                &index.to_string(),
+                host,
+            ),
             Value::String(text) => {
                 self.work(text.len().saturating_mul(2))?;
                 let unit = text.encode_utf16().nth(index).unwrap();
@@ -807,7 +816,7 @@ impl Runtime {
                 {
                     if let Some(object) = Ordinary::from_value(options) {
                         if !matches!(
-                            self.get_ordinary_property(object, "maxByteLength")?,
+                            self.get_ordinary_property_with_host(object, "maxByteLength", host)?,
                             Value::Undefined
                         ) {
                             return Err(Fault::new("Resizable ArrayBuffers are not implemented."));
@@ -925,7 +934,7 @@ impl Runtime {
                         let value = if let Some(items) = &items {
                             self.copy_value(&items[index])?
                         } else {
-                            self.binary_source_item(first, index)?
+                            self.binary_source_item(first, index, host)?
                         };
                         let number = self.binary_number(&value, host)?;
                         self.typed_write(target, index, number)?;
@@ -992,8 +1001,13 @@ impl Runtime {
             }
         }
     }
-    fn checked_binary_species(&mut self, id: usize, expected: usize) -> Result<(), Fault> {
-        let constructor = self.get_property(id, "constructor")?;
+    fn checked_binary_species(
+        &mut self,
+        id: usize,
+        expected: usize,
+        host: &mut dyn Host,
+    ) -> Result<(), Fault> {
+        let constructor = self.get_property_with_host(id, "constructor", host)?;
         if matches!(constructor, Value::Undefined)
             || matches!(constructor, Value::Function(function) if function == expected)
         {
@@ -1031,7 +1045,7 @@ impl Runtime {
         }
         let start = self.binary_relative(args.first(), length, 0, host)?;
         let end = self.binary_relative(args.get(1), length, length, host)?;
-        self.checked_binary_species(id, self.binary_roots.buffer_constructor.unwrap())?;
+        self.checked_binary_species(id, self.binary_roots.buffer_constructor.unwrap(), host)?;
         let count = end.saturating_sub(start);
         let result = self.new_buffer(count)?;
         self.copy_binary_bytes(result, 0, id, start, count)?;
@@ -1090,6 +1104,7 @@ impl Runtime {
                 self.checked_binary_species(
                     id,
                     self.binary_roots.constructors[view.kind as usize].unwrap(),
+                    host,
                 )?;
                 if method == "subarray" {
                     self.new_typed_view(
@@ -1164,7 +1179,7 @@ impl Runtime {
                     }
                 }
                 for index in 0..count {
-                    let item = self.binary_source_item(source, index)?;
+                    let item = self.binary_source_item(source, index, host)?;
                     let number = self.binary_number(&item, host)?;
                     self.typed_write(view, offset + index, number)?;
                 }
@@ -1320,7 +1335,7 @@ impl Runtime {
                     let value = self.copy_value(&args[0])?;
                     let value = self.primitive_with_hint(value, true, host)?;
                     self.work(value.bytes())?;
-                    value.to_text()
+                    value.script_text()?
                 };
                 let mut result = String::new();
                 for index in 0..length {
@@ -1408,6 +1423,7 @@ impl Runtime {
             self.checked_binary_species(
                 id,
                 self.binary_roots.constructors[view.kind as usize].unwrap(),
+                host,
             )?;
             Some(self.new_typed(view.kind, view.length)?)
         } else {
@@ -1475,6 +1491,7 @@ impl Runtime {
                 self.checked_binary_species(
                     id,
                     self.binary_roots.constructors[view.kind as usize].unwrap(),
+                    host,
                 )?;
                 let result = self.new_typed(view.kind, kept.len())?;
                 let target = self.typed_view(result).unwrap();
@@ -1549,7 +1566,7 @@ impl Runtime {
             let value = if let Some(characters) = &characters {
                 self.copy_value(&characters[index])?
             } else {
-                self.binary_source_item(source, index)?
+                self.binary_source_item(source, index, host)?
             };
             let value = if let Some(mapper) = mapper {
                 let receiver = self.copy_value(args.get(2).unwrap_or(&Value::Undefined))?;
