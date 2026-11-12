@@ -1,0 +1,9 @@
+{
+  "source_sha256": "00cd898b9d756ae524e2c7f9beb6119b19f1551cef70eddd1eea5461259cff83",
+  "ICANN": 6870,
+  "PRIVATE": 2892,
+  "exact": 9586,
+  "wildcard": 168,
+  "exception": 8,
+  "generated_sha256": "c00b9eb579cb0aac571ddc17bafce4d77baaadeae8c9524a1d384e98966135a8"
+}

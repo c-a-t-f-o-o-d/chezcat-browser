@@ -10,7 +10,7 @@ impl Fixture {
     fn new() -> Self {
         static NEXT: AtomicUsize = AtomicUsize::new(0);
         let path = std::env::temp_dir().join(format!(
-            "own-browser-native-ui-{}-{}",
+            "chezcat-native-ui-{}-{}",
             std::process::id(),
             NEXT.fetch_add(1, Ordering::Relaxed)
         ));
@@ -71,7 +71,7 @@ fn focus(app: &App) -> Action {
     app.browser_panel.as_ref().unwrap().focus
 }
 fn shot(app: &App, name: &str) {
-    let Some(folder) = std::env::var_os("OWN_BROWSER_NATIVE_SHOTS") else {
+    let Some(folder) = std::env::var_os("CHEZCAT_NATIVE_SHOTS") else {
         return;
     };
     let folder = PathBuf::from(folder);

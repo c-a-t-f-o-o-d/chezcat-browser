@@ -78,7 +78,7 @@ impl Runtime {
             return self.get_ordinary_property_with_receiver(
                 object,
                 name,
-                Value::Host(handle),
+                &Value::Host(handle),
                 host,
             );
         }
@@ -99,7 +99,7 @@ impl Runtime {
             return self.get_ordinary_property_with_receiver(
                 Ordinary::Object(self.object_prototype.unwrap()),
                 name,
-                Value::Host(handle),
+                &Value::Host(handle),
                 host,
             );
         }

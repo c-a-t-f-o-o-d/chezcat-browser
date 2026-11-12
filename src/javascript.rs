@@ -22,6 +22,8 @@ mod array_ops;
 mod base64;
 #[path = "binary_data.rs"]
 mod binary_data;
+#[path = "binding_length.rs"]
+mod binding_length;
 #[path = "binding_patterns.rs"]
 mod binding_patterns;
 #[path = "bound_functions.rs"]
@@ -3869,7 +3871,7 @@ impl Runtime {
             self.get_ordinary_property_with_receiver(
                 Ordinary::Object(properties),
                 name,
-                Value::Host(handle),
+                &Value::Host(handle),
                 host,
             )
         }
@@ -4405,6 +4407,92 @@ impl Runtime {
             return Err(Fault::new("String limit reached (128 KiB)."));
         }
         Ok(text)
+    }
+
+    // Locate one UTF-16 unit without building a whole-string conversion.
+    // The returned offset is within the scalar (zero or one), not the string.
+    // No receiver borrow escapes this call or crosses a script/host callback.
+    fn string_scalar_at(
+        &mut self,
+        text: &str,
+        target: usize,
+    ) -> Result<Option<(char, usize)>, Fault> {
+        // UTF-16 unit count never exceeds UTF-8 byte count. An obviously
+        // out-of-range lookup needs neither a scan nor a temporary buffer.
+        if target >= text.len() {
+            return Ok(None);
+        }
+        let mut byte_offset = 0;
+        let mut unit_offset = 0;
+        let mut characters = text.chars();
+        while byte_offset < text.len() {
+            // The input is valid UTF-8 and offset is at a scalar boundary.
+            // Charge before decoding, including when the target is beyond
+            // the UTF-16 end but still below the conservative byte bound.
+            let first = text.as_bytes()[byte_offset];
+            let width = if first < 0x80 {
+                1
+            } else if first < 0xe0 {
+                2
+            } else if first < 0xf0 {
+                3
+            } else {
+                4
+            };
+            self.work(width)?;
+            let character = characters.next().expect("remaining UTF-8 scalar");
+            byte_offset += width;
+            let units = character.len_utf16();
+            if target < unit_offset + units {
+                return Ok(Some((character, target - unit_offset)));
+            }
+            unit_offset += units;
+        }
+        Ok(None)
+    }
+
+    fn string_character(
+        &mut self,
+        text: &str,
+        method: &str,
+        args: &[Value],
+    ) -> Result<Value, Fault> {
+        let position = args.first().unwrap_or(&Value::Undefined);
+        position.primitive()?;
+        self.work(position.bytes().saturating_mul(2))?;
+        let position = position.script_number()?;
+        let position = if position.is_nan() {
+            0.0
+        } else {
+            position.trunc()
+        };
+        let missing = match method {
+            "charAt" => Value::String(String::new()),
+            "codePointAt" => Value::Undefined,
+            _ => Value::Number(f64::NAN),
+        };
+        // Keep numeric coercion and the pre-cast infinity/range check on the
+        // method route. Indexed properties already have an integer key.
+        if position < 0.0 || position >= text.len() as f64 {
+            return Ok(missing);
+        }
+        let Some((character, index)) = self.string_scalar_at(text, position as usize)? else {
+            return Ok(missing);
+        };
+        let mut buffer = [0; 2];
+        let units = character.encode_utf16(&mut buffer);
+        if method == "charAt" {
+            // Keep the current explicit lone-surrogate boundary.
+            self.units_string(&units[index..index + 1])
+                .map(Value::String)
+        } else {
+            let code = if method == "codePointAt" && index == 0 {
+                u32::from(character)
+            } else {
+                u32::from(units[index])
+            };
+            Ok(Value::Number(f64::from(code)))
+        }
     }
 
     fn regexp_array(
@@ -6286,6 +6374,15 @@ impl Runtime {
             ExprKind::Assign(_, _, _) | ExprKind::Update(_, _, _) => {
                 self.eval_assignment(program, id, env, this, host)
             }
+            ExprKind::Member(object, property)
+                if matches!(&program.exprs[*object].kind, ExprKind::Name(_))
+                    && matches!(
+                        &program.exprs[*property].kind,
+                        ExprKind::Literal(Value::String(key)) if key == "length"
+                    ) =>
+            {
+                self.eval_binding_length(program, *object, *property, env, this, host)
+            }
             ExprKind::Member(_, _) => {
                 let reference = self.reference(program, id, env, this, host)?;
                 self.read_reference(&reference, host)
@@ -6540,9 +6637,7 @@ impl Runtime {
                             None
                         }
                     } else {
-                        let reference =
-                            Reference::Property(self.copy_value(&object)?, property.clone());
-                        Some(self.read_reference(&reference, host)?)
+                        Some(self.read_property(&object, &property, host)?)
                     };
                     let args = self.eval_argument_list(program, arguments, env, this, host)?;
                     if let Some(function) = own_function {
@@ -6725,14 +6820,22 @@ impl Runtime {
         reference: &Reference,
         host: &mut dyn Host,
     ) -> Result<Value, Fault> {
+        if let Reference::Property(object, property) = reference {
+            return self.read_property(object, property, host);
+        }
         self.step()?;
         match reference {
             Reference::ComputedProperty(object, key) => {
                 Self::require_property_receiver(object)?;
                 let key = self.copy_value(key)?;
                 let key = self.property_key(key, host)?;
-                let object = self.copy_value(object)?;
-                self.read_reference(&key.reference(object), host)
+                match key {
+                    PropertyKey::String(name) => self.read_property(object, &name, host),
+                    PropertyKey::Symbol(key) => {
+                        let object = self.copy_value(object)?;
+                        self.read_reference(&Reference::SymbolProperty(object, key), host)
+                    }
+                }
             }
             Reference::SymbolProperty(object, key) => {
                 self.get_symbol_property(object.clone(), *key, host)
@@ -6743,69 +6846,74 @@ impl Runtime {
                 "ReferenceError",
                 format!("{name} is not defined."),
             )),
-            Reference::Property(Value::Host(object), property) => {
+            Reference::Property(_, _) => unreachable!(),
+        }
+    }
+
+    // The reference/call target already owns the receiver. Borrow it during
+    // lookup; only a selected accessor needs a separately owned receiver.
+    // This retains the step previously charged by a resolved Property read.
+    fn read_property(
+        &mut self,
+        object: &Value,
+        property: &str,
+        host: &mut dyn Host,
+    ) -> Result<Value, Fault> {
+        self.step()?;
+        match object {
+            Value::Host(object) => {
                 if self.is_browser_global(*object) {
                     return self.global_value(property, host);
                 }
                 self.host_read(*object, property, host)
             }
-            Reference::Property(Value::Object(object), property) => {
-                self.get_property_with_host(*object, property, host)
-            }
-            Reference::Property(Value::Function(function), property) => {
+            Value::Object(object) => self.get_property_with_host(*object, property, host),
+            Value::Function(function) => {
                 self.get_ordinary_property_with_host(Ordinary::Function(*function), property, host)
             }
-            Reference::Property(Value::String(text), property) if property == "length" => {
+            Value::String(text) if property == "length" => {
                 self.work(text.len())?;
                 Ok(Value::Number(text.encode_utf16().count() as f64))
             }
-            Reference::Property(Value::String(text), property)
-                if property_index(property).is_some() =>
-            {
-                self.work(text.len().saturating_mul(2))?;
-                let units: Vec<_> = text.encode_utf16().collect();
-                let index = property_index(property).unwrap();
-                if index < units.len() {
+            Value::String(text) if property_index(property).is_some() => {
+                let target = property_index(property).unwrap();
+                if let Some((character, index)) = self.string_scalar_at(text, target)? {
+                    let mut buffer = [0; 2];
+                    let units = character.encode_utf16(&mut buffer);
                     self.units_string(&units[index..index + 1])
                         .map(Value::String)
                 } else {
-                    self.work(text.len())?;
-                    let receiver = Value::String(text.clone());
+                    // An absent own index may have an inherited getter. Use
+                    // the original, already evaluated receiver, not a live
+                    // binding or an empty-string sentinel.
                     self.get_ordinary_property_with_receiver(
                         Ordinary::Object(self.string_prototype.unwrap()),
                         property,
-                        receiver,
+                        object,
                         host,
                     )
                 }
             }
-            Reference::Property(value @ Value::String(_), property) => {
-                let receiver = self.copy_value(value)?;
-                self.get_ordinary_property_with_receiver(
-                    Ordinary::Object(self.string_prototype.unwrap()),
-                    property,
-                    receiver,
-                    host,
-                )
-            }
-            Reference::Property(value @ Value::Number(_), property) => self
-                .get_ordinary_property_with_receiver(
-                    Ordinary::Object(self.number_prototype.unwrap()),
-                    property,
-                    value.clone(),
-                    host,
-                ),
-            Reference::Property(value @ Value::Bool(_), property) => self
-                .get_ordinary_property_with_receiver(
-                    Ordinary::Object(self.boolean_prototype.unwrap()),
-                    property,
-                    value.clone(),
-                    host,
-                ),
-            Reference::Property(Value::Symbol(id), property) => {
-                self.symbol_string_property(*id, property, host)
-            }
-            Reference::Property(_, _) => Ok(Value::Undefined),
+            Value::String(_) => self.get_ordinary_property_with_receiver(
+                Ordinary::Object(self.string_prototype.unwrap()),
+                property,
+                object,
+                host,
+            ),
+            Value::Number(_) => self.get_ordinary_property_with_receiver(
+                Ordinary::Object(self.number_prototype.unwrap()),
+                property,
+                object,
+                host,
+            ),
+            Value::Bool(_) => self.get_ordinary_property_with_receiver(
+                Ordinary::Object(self.boolean_prototype.unwrap()),
+                property,
+                object,
+                host,
+            ),
+            Value::Symbol(id) => self.symbol_string_property(*id, property, host),
+            _ => Ok(Value::Undefined),
         }
     }
 
@@ -7542,44 +7650,19 @@ impl Runtime {
             if matches!(method, "search" | "match" | "replace") {
                 return self.regexp_string_method(&text, method, args, host);
             }
+            if matches!(method, "charAt" | "charCodeAt" | "codePointAt") {
+                return self.string_character(&text, method, args);
+            }
             self.work(text.len().saturating_mul(3))?;
             return match method {
                 "split" => self.split_string(&text, args),
-                "slice" | "substring" | "charAt" | "charCodeAt" | "codePointAt" => {
+                "slice" | "substring" => {
                     let input: Vec<_> = text.encode_utf16().collect();
                     let length = input.len();
                     let start = args.first().unwrap_or(&Value::Undefined);
                     start.primitive()?;
                     self.work(start.bytes().saturating_mul(2))?;
                     let start = start.script_number()?;
-                    if matches!(method, "charAt" | "charCodeAt" | "codePointAt") {
-                        let position = if start.is_nan() { 0.0 } else { start.trunc() };
-                        if position < 0.0 || position >= length as f64 {
-                            return Ok(match method {
-                                "charAt" => Value::String(String::new()),
-                                "codePointAt" => Value::Undefined,
-                                _ => Value::Number(f64::NAN),
-                            });
-                        }
-                        let index = position as usize;
-                        return if method == "charAt" {
-                            Ok(Value::String(self.units_string(&input[index..index + 1])?))
-                        } else {
-                            let first = u32::from(input[index]);
-                            let code = if method == "codePointAt"
-                                && (0xd800..=0xdbff).contains(&first)
-                                && input
-                                    .get(index + 1)
-                                    .is_some_and(|unit| (0xdc00..=0xdfff).contains(unit))
-                            {
-                                0x10000 + ((first - 0xd800) << 10) + u32::from(input[index + 1])
-                                    - 0xdc00
-                            } else {
-                                first
-                            };
-                            Ok(Value::Number(f64::from(code)))
-                        };
-                    }
                     let end = args.get(1).unwrap_or(&Value::Undefined);
                     end.primitive()?;
                     self.work(end.bytes().saturating_mul(2))?;
@@ -8387,6 +8470,148 @@ strictFailure;
     }
 
     #[test]
+    fn binding_identifier_leaf_boundary_on_a_one_mib_stack() {
+        std::thread::Builder::new()
+            .stack_size(1024 * 1024)
+            .spawn(|| {
+                // Parentheses disappear from the AST: this isolates parser
+                // depth from evaluator recursion at the exact 64-frame edge.
+                assert_eq!(
+                    result(include_str!(
+                        "../tools/fixtures/parser-binding-identifier.js"
+                    )),
+                    "7"
+                );
+                // This original indirect-eval fixture creates an uncalled
+                // function containing nested calls/groups. No site code runs.
+                let (mut runtime, mut host) = test_runtime();
+                host.eval_permission = Some(true);
+                assert_eq!(
+                    runtime
+                        .execute(
+                            include_str!("../tools/fixtures/parser-binding-identifier-eval.js"),
+                            &mut host,
+                        )
+                        .unwrap()
+                        .to_text(),
+                    "undefined"
+                );
+                let call_shape = format!(
+                    "var f={}function(value){{return value;}}{};",
+                    "keep(".repeat(MAX_PARSE_DEPTH - 3),
+                    ")".repeat(MAX_PARSE_DEPTH - 3)
+                );
+                assert!(Parser::parse(&call_shape, &mut MAX_REGEXP_WORK.clone()).is_ok());
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    #[test]
+    fn binding_identifier_leaf_keeps_recursive_limits_and_atomic_rejection() {
+        std::thread::Builder::new()
+            .stack_size(1024 * 1024)
+            .spawn(|| {
+                let mut sources = Vec::new();
+                for (groups, parameters) in [
+                    (MAX_PARSE_DEPTH - 2, "value"),
+                    (MAX_PARSE_DEPTH - 3, "[value]"),
+                    (MAX_PARSE_DEPTH - 3, "{value}"),
+                    (MAX_PARSE_DEPTH - 3, "value=7"),
+                ] {
+                    sources.push(format!(
+                        "test.record('early');var f={}function({parameters}){{return 7;}}{};",
+                        "(".repeat(groups),
+                        ")".repeat(groups)
+                    ));
+                }
+                // An assignment reference can recurse through member syntax;
+                // it must not use the identifier-binding leaf path.
+                sources.push(format!(
+                    "test.record('early');var target={{}};{}[target.value]=[7]{};",
+                    "(".repeat(MAX_PARSE_DEPTH - 3),
+                    ")".repeat(MAX_PARSE_DEPTH - 3)
+                ));
+                for source in sources {
+                    let (mut runtime, mut host) = test_runtime();
+                    let error = runtime.execute(&source, &mut host).unwrap_err();
+                    assert!(
+                        error.contains("Parser nesting limit reached (64)"),
+                        "{error}"
+                    );
+                    assert!(host.records.is_empty());
+                    assert!(runtime.programs.is_empty());
+                    runtime.begin_job();
+                    assert_eq!(runtime.execute("2+2;", &mut host).unwrap().to_text(), "4");
+                }
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    #[test]
+    fn binding_identifier_leaf_keeps_active_dynamic_depth() {
+        std::thread::Builder::new()
+            .stack_size(1024 * 1024)
+            .spawn(|| {
+                for active in [0, 1, 4, 16, 32] {
+                    for excess in [false, true] {
+                        let groups = MAX_PARSE_DEPTH - 3 - active + usize::from(excess);
+                        let source = format!(
+                            "var f={}function(value){{return value;}}{};",
+                            "(".repeat(groups),
+                            ")".repeat(groups)
+                        );
+                        let parsed = Parser::parse_context(
+                            &source,
+                            &mut MAX_REGEXP_WORK.clone(),
+                            false,
+                            active,
+                        );
+                        if excess {
+                            let error =
+                                parsed.err().expect("active parser depth must stay bounded");
+                            assert!(error.message.contains("Parser nesting limit reached (64)"));
+                        } else {
+                            assert!(parsed.is_ok(), "active depth {active}");
+                        }
+                    }
+                }
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    #[test]
+    fn binding_identifier_leaf_keeps_parameter_early_errors() {
+        for function in [
+            "function(if){}",
+            "function(eval){'use strict';}",
+            "function(arguments){'use strict';}",
+            "function(value,value){'use strict';}",
+        ] {
+            let source = format!(
+                "test.record('early');var f={}{function}{};",
+                "(".repeat(MAX_PARSE_DEPTH - 3),
+                ")".repeat(MAX_PARSE_DEPTH - 3)
+            );
+            let parsed = Parser::parse(&source, &mut MAX_REGEXP_WORK.clone());
+            let error = parsed.err().expect("invalid parameter must still fail");
+            assert!(matches!(
+                error.exception.as_deref(),
+                Some(Exception::Error("SyntaxError"))
+            ));
+            let (mut runtime, mut host) = test_runtime();
+            assert!(runtime.execute(&source, &mut host).is_err());
+            assert!(host.records.is_empty());
+            assert!(runtime.programs.is_empty());
+        }
+    }
+
+    #[test]
     fn every_deferred_body_is_validated_before_any_script_effects() {
         for source in [
             "test.record('early');function unused(){return 1+;}",
@@ -8794,6 +9019,349 @@ caught;
         runtime.begin_job();
         runtime.bind_browser_global(2).unwrap();
         assert_eq!(runtime.execute("window.temp=4; var fixed=5; (delete window.temp)+':'+(typeof window.temp==='undefined')+':'+(delete window.fixed)+':'+fixed;",&mut host).unwrap().to_text(),"true:true:false:5");
+    }
+
+    #[test]
+    fn string_character_reads_match_original_unicode_reference_fixture() {
+        assert_eq!(
+            result(include_str!("../tools/fixtures/utf16-character-reads.js")),
+            "ok"
+        );
+    }
+
+    #[test]
+    fn string_character_scan_charges_only_visited_scalars_before_decoding() {
+        let mut runtime = Runtime::new();
+        for (method, position, expected, charged) in [
+            ("charCodeAt", 0.0, 65.0, 1),
+            ("charCodeAt", 1.0, 233.0, 3),
+            ("charCodeAt", 2.0, 55357.0, 7),
+            ("charCodeAt", 3.0, 56832.0, 7),
+            ("charCodeAt", 4.0, 90.0, 8),
+            ("codePointAt", 2.0, 128512.0, 7),
+            ("codePointAt", 3.0, 56832.0, 7),
+        ] {
+            runtime.begin_job();
+            let value = runtime
+                .string_character("Aé😀Z", method, &[Value::Number(position)])
+                .unwrap();
+            assert_eq!(value.to_number(), expected, "{method}({position})");
+            assert_eq!(runtime.job_usage().1, charged);
+            assert_eq!(runtime.job_usage().0, 0);
+        }
+        runtime.begin_job();
+        runtime.copy_bytes = 2;
+        let error = runtime
+            .string_character("Aé😀Z", "charCodeAt", &[Value::Number(1.0)])
+            .unwrap_err();
+        assert!(error.exception.is_none());
+        assert!(error.display().contains("String/copy work limit"));
+        assert_eq!(runtime.copy_bytes, 0);
+        runtime.begin_job();
+        assert_eq!(
+            runtime
+                .string_character("A", "charAt", &[])
+                .unwrap()
+                .to_text(),
+            "A"
+        );
+    }
+
+    #[test]
+    fn string_character_ranges_and_surrogate_boundaries_remain_explicit() {
+        let mut runtime = Runtime::new();
+        for position in [-1.0, f64::NEG_INFINITY, f64::INFINITY, f64::MAX, 4.0] {
+            for method in ["charAt", "charCodeAt", "codePointAt"] {
+                runtime.begin_job();
+                let result = runtime
+                    .string_character("😀", method, &[Value::Number(position)])
+                    .unwrap();
+                assert_eq!(runtime.job_usage().1, 0, "{method}({position})");
+                match method {
+                    "charAt" => assert_eq!(result.to_text(), ""),
+                    "codePointAt" => assert!(matches!(result, Value::Undefined)),
+                    _ => assert!(result.to_number().is_nan()),
+                }
+            }
+        }
+        // These positions are below the byte bound but past the UTF-16 end.
+        for position in [2.0, 3.0] {
+            runtime.begin_job();
+            assert_eq!(
+                runtime
+                    .string_character("😀", "charAt", &[Value::Number(position)])
+                    .unwrap()
+                    .to_text(),
+                ""
+            );
+            assert_eq!(runtime.job_usage().1, 4);
+        }
+        for position in [0.0, 1.0] {
+            runtime.begin_job();
+            let error = runtime
+                .string_character("😀", "charAt", &[Value::Number(position)])
+                .unwrap_err();
+            assert!(error.exception.is_none());
+            assert!(error.display().contains("lone UTF-16 surrogate"));
+        }
+        for position in [f64::NAN, -0.0, -0.5] {
+            runtime.begin_job();
+            assert_eq!(
+                runtime
+                    .string_character("abc", "charAt", &[Value::Number(position)])
+                    .unwrap()
+                    .to_text(),
+                "a"
+            );
+        }
+    }
+
+    #[test]
+    fn string_index_original_semantic_fixture() {
+        assert_eq!(
+            result(include_str!("../tools/fixtures/primitive-string-index-reads.js")),
+            "ok"
+        );
+    }
+
+    #[test]
+    fn string_index_scalar_scan_charges_visited_bytes_and_stops_at_target() {
+        let mut runtime = Runtime::new();
+        for (index, expected, bytes) in [
+            (0, Some(65), 1),
+            (1, Some(233), 3),
+            (2, Some(55357), 7),
+            (3, Some(56832), 7),
+            (4, Some(90), 8),
+            (5, None, 8),
+            (7, None, 8),
+            (8, None, 0),
+            (usize::MAX, None, 0),
+        ] {
+            runtime.begin_job();
+            let unit = runtime
+                .string_scalar_at("Aé😀Z", index)
+                .unwrap()
+                .map(|(character, offset)| {
+                    let mut buffer = [0; 2];
+                    character.encode_utf16(&mut buffer)[offset]
+                });
+            assert_eq!(unit, expected, "index {index}");
+            assert_eq!(runtime.job_usage().1, bytes, "index {index}");
+            assert_eq!(runtime.job_usage().0, 0);
+        }
+        runtime.begin_job();
+        assert_eq!(runtime.string_scalar_at("", 0).unwrap(), None);
+        assert_eq!(runtime.job_usage().1, 0);
+    }
+
+    #[test]
+    fn string_index_full_conversion_oracle_preserves_values_steps_and_errors() {
+        // The former implementation is a test-only value/accounting oracle.
+        // It never replaces an execution mode or weakens a production guard.
+        fn original(
+            runtime: &mut Runtime,
+            receiver: &Value,
+            property: &str,
+            host: &mut TestHost,
+        ) -> Result<Value, Fault> {
+            runtime.step()?;
+            let Value::String(text) = receiver else {
+                unreachable!()
+            };
+            runtime.work(text.len().saturating_mul(2))?;
+            let units: Vec<_> = text.encode_utf16().collect();
+            let index = property_index(property).unwrap();
+            if index < units.len() {
+                runtime.units_string(&units[index..index + 1]).map(Value::String)
+            } else {
+                runtime.get_ordinary_property_with_receiver(
+                    Ordinary::Object(runtime.string_prototype.unwrap()),
+                    property,
+                    receiver,
+                    host,
+                )
+            }
+        }
+        for text in ["", "A", "ABCD", "éΩ中", "😀", "Aé😀Z", "\0\u{0800}Z"] {
+            for index in [0, 1, 2, 3, 4, 7, text.len(), text.len() + 1] {
+                let property = index.to_string();
+                let receiver = Value::String(text.into());
+                let mut before = Runtime::new();
+                let mut after = Runtime::new();
+                before.begin_job();
+                after.begin_job();
+                let expected = original(&mut before, &receiver, &property, &mut TestHost::default())
+                    .map(|value| value.to_text())
+                    .map_err(|error| error.display());
+                let actual = after.read_property(&receiver, &property, &mut TestHost::default())
+                    .map(|value| value.to_text())
+                    .map_err(|error| error.display());
+                assert_eq!(actual, expected, "{text:?}[{index}]");
+                assert_eq!(after.job_usage().0, before.job_usage().0);
+                let mut prefix_bytes = 0;
+                if index < text.len() {
+                    let mut units = 0;
+                    for character in text.chars() {
+                        prefix_bytes += character.len_utf8();
+                        units += character.len_utf16();
+                        if units > index {
+                            break;
+                        }
+                    }
+                }
+                assert_eq!(
+                    before.job_usage().1 - after.job_usage().1,
+                    text.len() * 2 - prefix_bytes,
+                    "{text:?}[{index}]"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn string_index_original_probe_counts_and_unchanged_controls() {
+        for (bytes, expected_work) in [(1024, 1077), (8192, 8245)] {
+            let mut runtime = Runtime::new();
+            runtime.define_global("payload", Value::String("A".repeat(bytes))).unwrap();
+            runtime.begin_job();
+            // Exact bytes of the retained index-1024.js/index-8192.js fixture.
+            let source = "payload[0];\n";
+            assert_eq!(
+                runtime.execute(source, &mut TestHost::default()).unwrap().to_text(),
+                "A"
+            );
+            assert_eq!(runtime.job_usage(), (13, expected_work, 0));
+        }
+        for (source, work) in [
+            ("payload;\n", 8238),
+            ("payload.length;\n", 8269),
+            ("payload['length'];\n", 8272),
+            ("payload?.length;\n", 16462),
+            ("payload.charCodeAt(0);\n", 8293),
+        ] {
+            let mut runtime = Runtime::new();
+            runtime.define_global("payload", Value::String("A".repeat(8192))).unwrap();
+            runtime.begin_job();
+            runtime.execute(source, &mut TestHost::default()).unwrap();
+            assert_eq!(runtime.job_usage().1, work, "{source}");
+        }
+    }
+
+    #[test]
+    fn string_index_scan_and_result_charges_precede_success() {
+        let mut runtime = Runtime::new();
+        let receiver = Value::String("Aé😀Z".into());
+        for (property, budget) in [("0", 0), ("0", 1), ("0", 2), ("1", 2), ("1", 4)] {
+            runtime.begin_job();
+            runtime.copy_bytes = budget;
+            let error = runtime
+                .read_property(&receiver, property, &mut TestHost::default())
+                .unwrap_err();
+            assert!(error.exception.is_none());
+            assert!(error.display().contains("String/copy work limit"));
+            assert_eq!(runtime.copy_bytes, 0);
+        }
+        runtime.begin_job();
+        runtime.copy_bytes = 3;
+        assert_eq!(
+            runtime.read_property(&receiver, "0", &mut TestHost::default()).unwrap().to_text(),
+            "A"
+        );
+        assert_eq!(runtime.copy_bytes, 0);
+        // Missing-index fallback still charges its getter receiver copy before
+        // calling user code. Avoid mistaking an empty result for a missing index.
+        runtime.begin_job();
+        runtime.execute(
+            "var getterRuns=0;Object.defineProperty(String.prototype,'99999',{configurable:true,get:function(){getterRuns++;return 7;}});",
+            &mut TestHost::default(),
+        ).unwrap();
+        let large = Value::String("A".repeat(8192));
+        runtime.begin_job();
+        runtime.copy_bytes = 100;
+        let error = runtime.read_property(&large, "99999", &mut TestHost::default()).unwrap_err();
+        assert!(error.display().contains("String/copy work limit"));
+        assert_eq!(runtime.copy_bytes, 0);
+        runtime.begin_job();
+        assert_eq!(runtime.execute("getterRuns;", &mut TestHost::default()).unwrap().to_number(), 0.0);
+        assert_eq!(runtime.read_property(&large, "99999", &mut TestHost::default()).unwrap().to_number(), 7.0);
+        assert_eq!(runtime.execute("getterRuns;", &mut TestHost::default()).unwrap().to_number(), 1.0);
+    }
+
+    #[test]
+    fn string_index_shared_budget_cancels_jobs_and_recovers_on_one_mib_stack() {
+        std::thread::Builder::new()
+            .stack_size(1024 * 1024)
+            .spawn(|| {
+                for microtask in [false, true] {
+                    for iterations in [512, 1536] {
+                        let mut runtime = Runtime::new();
+                        let mut host = TestHost::default();
+                        runtime.define_global("payload", Value::String("A".repeat(8192))).unwrap();
+                        let setup = "var completed=0,total=0,tail=0,sentinel=0;";
+                        let scan = format!("while(completed<{iterations}){{if(payload[completed]!=='A')throw 'index';total++;completed++;}}tail=1;");
+                        let queued = "Promise.resolve().then(function(){sentinel++;});";
+                        let source = if microtask {
+                            format!("{setup}Promise.resolve().then(function(){{{scan}}});{queued}")
+                        } else {
+                            format!("{setup}{queued}{scan}")
+                        };
+                        runtime.begin_job();
+                        let execution = runtime.execute(&source, &mut host).map(|_| ());
+                        let completion = if microtask || execution.is_ok() {
+                            execution.unwrap();
+                            runtime.microtask_checkpoint(&mut host)
+                                .map(|messages| assert!(messages.is_empty()))
+                        } else {
+                            execution
+                        };
+                        if iterations == 512 {
+                            completion.unwrap();
+                            assert!(runtime.job_usage().1 < MAX_COPY_BYTES);
+                        } else {
+                            let error = completion.unwrap_err();
+                            assert!(error.contains("String/copy work limit"), "{error}");
+                            assert_eq!(runtime.job_usage().1, MAX_COPY_BYTES);
+                        }
+                        assert!(!runtime.has_microtasks());
+                        assert_eq!((runtime.eval_depth, runtime.call_depth), (0, 0));
+                        runtime.begin_job();
+                        let completed = runtime.execute("completed;", &mut host).unwrap().to_number();
+                        let total = runtime.execute("total;", &mut host).unwrap().to_number();
+                        let tail = runtime.execute("tail;", &mut host).unwrap().to_number();
+                        let sentinel = runtime.execute("sentinel;", &mut host).unwrap().to_number();
+                        if iterations == 512 {
+                            assert_eq!((completed, total, tail, sentinel), (512.0, 512.0, 1.0, 1.0));
+                        } else {
+                            assert!(completed > 0.0 && completed < 1536.0);
+                            assert!(total == completed || total == completed + 1.0);
+                            assert_eq!((tail, sentinel), (0.0, 0.0));
+                        }
+                        assert_eq!(runtime.execute("21+21;", &mut host).unwrap().to_number(), 42.0);
+                    }
+                }
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    #[test]
+    fn string_index_lone_surrogate_stays_fatal_and_cancels_later_callbacks() {
+        let mut runtime = Runtime::new();
+        let mut host = TestHost::default();
+        runtime.begin_job();
+        runtime.execute(
+            "var caught=0,tail=0;Promise.resolve().then(function(){try{'😀'[0];}catch(e){caught++;}finally{caught+=10;}});Promise.resolve().then(function(){tail++;});",
+            &mut host,
+        ).unwrap();
+        let error = runtime.microtask_checkpoint(&mut host).unwrap_err();
+        assert!(error.contains("lone UTF-16 surrogate"), "{error}");
+        assert!(!runtime.has_microtasks());
+        assert_eq!((runtime.eval_depth, runtime.call_depth), (0, 0));
+        runtime.begin_job();
+        assert_eq!(runtime.execute("caught+tail;", &mut host).unwrap().to_number(), 0.0);
+        assert_eq!(runtime.execute("'😀'.codePointAt(0);", &mut host).unwrap().to_number(), 128512.0);
     }
 
     #[test]

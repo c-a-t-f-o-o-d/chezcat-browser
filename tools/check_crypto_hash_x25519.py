@@ -182,7 +182,7 @@ def main() -> None:
     source = source.replace("CURVE_PATH", json.dumps(str(root / "src/crypto_x25519.rs"), ensure_ascii=False))
     checks = cases(args.cases)
     suffix = ".exe" if os.name == "nt" else ""
-    with tempfile.TemporaryDirectory(prefix="own-browser-crypto-") as directory:
+    with tempfile.TemporaryDirectory(prefix="chezcat-crypto-") as directory:
         temp = Path(directory)
         harness, vectors, probe = temp / "probe.rs", temp / ("vectors" + suffix), temp / ("probe" + suffix)
         harness.write_text(source, encoding="utf-8")

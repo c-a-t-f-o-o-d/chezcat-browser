@@ -10,7 +10,7 @@ impl ScriptFixture {
     fn new() -> Self {
         static NEXT: AtomicUsize = AtomicUsize::new(0);
         let path = std::env::temp_dir().join(format!(
-            "own-browser-app-script-review-{}-{}",
+            "chezcat-app-script-review-{}-{}",
             std::process::id(),
             NEXT.fetch_add(1, Ordering::Relaxed)
         ));

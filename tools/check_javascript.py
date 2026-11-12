@@ -1549,6 +1549,40 @@ NEGATIVE.extend([
 ])
 
 
+# Original reduced fixtures for a nonrecursive binding name at the parser edge.
+# The eval fixture creates an uncalled function; no captured site code is used.
+_BINDING_LEAF_FIXTURES = [
+    ROOT / 'tools/fixtures/parser-binding-identifier.js',
+    ROOT / 'tools/fixtures/parser-binding-identifier-eval.js',
+]
+CASES.extend([
+    ('binding-leaf-group-boundary', _BINDING_LEAF_FIXTURES[0].read_text(encoding='utf-8')),
+    ('binding-leaf-indirect-eval-boundary', _BINDING_LEAF_FIXTURES[1].read_text(encoding='utf-8')),
+    ('binding-leaf-rest-names-boundary',
+     'var f=' + '(' * 61
+     + 'function(value,extra,...rest){return [value,extra,rest.length].join("|");}'
+     + ')' * 61 + ';f(7,8,9);'),
+    ('binding-leaf-array-name-boundary',
+     'var f=' + '(' * 60 + 'function([value]){return value;}' + ')' * 60 + ';f([7]);'),
+])
+_BINDING_LEAF_LIMIT_CASES = [
+    ('binding-leaf-extra-group-limit-atomic', 62, 'value'),
+    ('binding-leaf-array-pattern-limit-atomic', 61, '[value]'),
+    ('binding-leaf-object-pattern-limit-atomic', 61, '{value}'),
+    ('binding-leaf-default-initializer-limit-atomic', 61, 'value=7'),
+]
+NEGATIVE.extend(
+    (name, 'test.record("early");var f=' + '(' * groups
+     + 'function(' + parameters + '){return 7;}' + ')' * groups + ';')
+    for name, groups, parameters in _BINDING_LEAF_LIMIT_CASES
+)
+NEGATIVE.append((
+    'binding-leaf-assignment-reference-limit-atomic',
+    'test.record("early");var target={};' + '(' * 61
+    + '[target.value]=[7]' + ')' * 61 + ';',
+))
+
+
 # These are original Symbol fixtures, including explicit disposal and an
 # ordinary iterator polyfill. They do not execute captured page source or claim
 # support for using declarations, automatic disposal, or native @@iterator.
@@ -2471,6 +2505,22 @@ _FIXTURE_PATHS_041 = [
     ROOT / 'tools/reference/url-041/edge-review-frozen.json',
     ROOT / 'tools/reference/url-041/bounds-corrected.json',
 ]
+_FIXTURE_PATHS_041.extend(_BINDING_LEAF_FIXTURES)
+_PRIMITIVE_RECEIVER_FIXTURE = ROOT / 'tools/fixtures/primitive-receiver-lookup.js'
+_FIXTURE_PATHS_041.append(_PRIMITIVE_RECEIVER_FIXTURE)
+COMPLETION_CASES.append(('primitive-receiver-lookup', _PRIMITIVE_RECEIVER_FIXTURE.read_text(encoding='utf-8')))
+_UTF16_CHARACTER_FIXTURE = ROOT / 'tools/fixtures/utf16-character-reads.js'
+_FIXTURE_PATHS_041.append(_UTF16_CHARACTER_FIXTURE)
+COMPLETION_CASES.append(('utf16-character-reads', _UTF16_CHARACTER_FIXTURE.read_text(encoding='utf-8')))
+# 0.43: retained design acceptance plus original binding/fallback coverage.
+for _name in ['string-work-design', 'binding-length-reads']:
+    _fixture = ROOT / ('tools/fixtures/' + _name + '.js')
+    _FIXTURE_PATHS_041.append(_fixture)
+    COMPLETION_CASES.append((_name, _fixture.read_text(encoding='utf-8')))
+# 0.44: bounded primitive index reads, retaining normal reference semantics.
+_INDEX_READ_FIXTURE = ROOT / 'tools/fixtures/primitive-string-index-reads.js'
+_FIXTURE_PATHS_041.append(_INDEX_READ_FIXTURE)
+COMPLETION_CASES.append(('primitive-string-index-reads', _INDEX_READ_FIXTURE.read_text(encoding='utf-8')))
 _FIXTURE_HASHES_041 = {str(path.relative_to(ROOT)): hashlib.sha256(path.read_bytes()).hexdigest() for path in _FIXTURE_PATHS_041}
 _string_objects_041 = json.loads((_041 / "string-objects-cases.json").read_text(encoding="utf-8"))['cases']
 _object_is_041 = json.loads((_041 / "object-is-original-node.json").read_text(encoding="utf-8"))['cases']
@@ -2503,6 +2553,10 @@ _url_bounds_041 = json.loads((ROOT / 'tools/reference/url-041/bounds-corrected.j
 NEGATIVE.extend((row['name'], row['source']) for row in _url_bounds_041)
 ATOMIC_NEGATIVE_CASES.update(row['name'] for row in _url_bounds_041)
 NEGATIVE_DIAGNOSTICS_041 = {row['name']: row['diagnostic'] for row in _url_bounds_041}
+NEGATIVE_DIAGNOSTICS_041.update(
+    (name, 'Parser nesting limit reached (64)')
+    for name, *_ in NEGATIVE if name.startswith('binding-leaf-')
+)
 NEGATIVE_DIAGNOSTICS_041.update({row['id']: row['error_contains'] for row in _string_objects_041 if row['kind'] == 'boundary'})
 NEGATIVE_DIAGNOSTICS_041.update({row['id']: row['error_fragment'] for row in _operators_041['bounds']})
 _string_bound_041 = json.loads((_041 / 'string-objects-boundary-adjudication.json').read_text(encoding="utf-8"))
@@ -2545,7 +2599,7 @@ def main():
         results = []
         negatives = []
         spec_differences = []
-        with tempfile.TemporaryDirectory(prefix="own-browser-js-check-") as directory:
+        with tempfile.TemporaryDirectory(prefix="chezcat-js-check-") as directory:
             temporary = Path(directory)
             probe_source = temporary / "probe.rs"
             probe = temporary / ("probe.exe" if os.name == "nt" else "probe")

@@ -23,7 +23,7 @@ mod network_tests;
 
 const MAX_BODY_BYTES: usize = 32 * 1024 * 1024;
 pub const MAX_FORM_BYTES: usize = 128 * 1024;
-pub const USER_AGENT: &str = "ChezCat/0.41.2";
+pub const USER_AGENT: &str = "ChezCat/0.45";
 const MAX_HEADER_BYTES: usize = 32 * 1024;
 const MAX_LINE_BYTES: usize = 8 * 1024;
 const MAX_CHUNK_METADATA: usize = 512 * 1024;
@@ -184,7 +184,10 @@ fn fetch_in_pool(
     let mut fragment = None;
     let mut visited = HashSet::new();
     let mut events = Vec::new();
-    let mut same_site_redirects = true;
+    let mut document_cookie_context = crate::cookies::NavigationContext::new(
+        pool.cookie_origin.as_ref(),
+        pool.cookie_context,
+    );
     // Once a classic-script redirect leaves its document origin, credentials
     // remain omitted for the rest of the chain, even when it returns.
     let mut resource_credentials = true;
@@ -250,17 +253,13 @@ fn fetch_in_pool(
             }
             events.push(format!("{} {address}", outgoing.method()));
             let cookie_same_site = if document {
-                pool.cookie_context != Some(false)
-                    && same_site_redirects
-                    && pool.cookie_origin.as_ref().is_some_and(|origin| {
-                        origin.secure == current.secure && origin.host == current.host
-                    })
+                document_cookie_context.is_same_site(&current)
             } else {
                 // Resource requests have their own already-checked document
                 // origin. A top-level reload override must not affect them.
                 resource_credentials
                     && same_origin.or(classic_origin).is_some_and(|origin| {
-                        origin.secure == current.secure && origin.host == current.host
+                        crate::cookies::same_site(origin, &current)
                     })
             };
             if let Some(cookies) = pool.cookies.as_ref().filter(|_| resource_credentials) {
@@ -362,12 +361,10 @@ fn fetch_in_pool(
                             .into(),
                     );
                     }
-                    // Once a redirect leaves the initiating scheme/host chain,
-                    // returning to the original host cannot restore Strict
-                    // cookies for this automatic navigation. Ports do not
-                    // broaden host scope and are not a SameSite distinction.
-                    same_site_redirects &=
-                        current.secure == next.secure && current.host == next.host;
+                    // Once a redirect leaves the schemeful site, returning
+                    // cannot restore Strict cookies. Sibling subdomains inside
+                    // one registrable domain are not a cross-site hop.
+                    document_cookie_context.redirect(&current, &next);
                     current = next;
                     continue;
                 }
@@ -629,7 +626,7 @@ impl<'a> Pool<'a> {
 
     /// Preserve a committed document's context for a user-initiated reload.
     /// A true override never grants same-site status without a matching
-    /// initiator or after a scheme/host-changing redirect.
+    /// initiator or after a schemeful-site-changing redirect.
     pub fn with_cookie_context(mut self, same_site: Option<bool>) -> Self {
         self.cookie_context = same_site;
         self
@@ -2860,6 +2857,25 @@ mod tests {
             200
         );
         assert_eq!(site.requests.lock().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn cookie_site_equivalence_does_not_grant_cross_origin_post_authority() {
+        let source = crate::url::parse("https://www.example.com/form").unwrap().0;
+        let sibling = crate::url::parse("https://consent.example.com/submit").unwrap().0;
+        assert!(crate::cookies::same_site(&source, &sibling));
+        assert!(!source.same_origin(&sibling));
+        let mut post = Request::FormPost {
+            body: b"private=value".to_vec(),
+            origin: Some(source.clone()),
+        };
+        assert!(post.redirect(307, &source, &sibling).is_err());
+        assert!(post.is_post());
+        assert_eq!(post.body(), b"private=value");
+        // A 303 still discards the body; site equivalence does not retain it.
+        post.redirect(303, &source, &sibling).unwrap();
+        assert!(!post.is_post());
+        assert!(post.body().is_empty());
     }
 
     #[test]

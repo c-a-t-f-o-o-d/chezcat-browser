@@ -403,7 +403,7 @@ def main():
     parser.add_argument('--skip-deadline', action='store_true', help='skip the 20-second deadline renewal case')
     args = parser.parse_args()
     results, benchmarks = [], []
-    with tempfile.TemporaryDirectory(prefix='own-browser-persistence-') as temporary:
+    with tempfile.TemporaryDirectory(prefix='chezcat-persistence-') as temporary:
         directory = Path(temporary)
         binary = compile_probe(directory, args.rustc)
         for profile in ['http', 'tls13', 'tls12_gcm', 'tls12_cbc']:

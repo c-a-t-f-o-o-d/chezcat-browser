@@ -503,8 +503,7 @@ impl Runtime {
                         None
                     }
                 } else {
-                    let object = self.copy_value(&receiver)?;
-                    Some(self.read_reference(&Reference::Property(object, name.clone()), host)?)
+                    Some(self.read_property(&receiver, &name, host)?)
                 };
                 Ok(CallTarget {
                     function,

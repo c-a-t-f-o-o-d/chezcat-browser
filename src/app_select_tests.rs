@@ -89,7 +89,7 @@ fn select_mouse_chooses_only_enabled_rows_and_emits_input_then_change() {
         0x526d80
     );
     assert_eq!(canvas.pixels[0], ui::NAVY);
-    if let Ok(directory) = std::env::var("OWN_BROWSER_SELECT_QA") {
+    if let Ok(directory) = std::env::var("CHEZCAT_SELECT_QA") {
         let path = Path::new(&directory);
         std::fs::create_dir_all(path).unwrap();
         let mut output = std::fs::File::create(path.join("select-popup.ppm")).unwrap();

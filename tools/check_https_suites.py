@@ -91,7 +91,7 @@ def main():
         parser.error("Install the OpenSSL command-line program or pass --openssl PATH")
     version = subprocess.check_output([args.openssl, "version"], text=True, timeout=10).strip()
     results = []
-    with tempfile.TemporaryDirectory(prefix="own-browser-suites-") as temporary:
+    with tempfile.TemporaryDirectory(prefix="chezcat-suites-") as temporary:
         directory = Path(temporary)
         identities = {name: split_chain(name, directory) for name in ("rsa", "p256", "p384")}
         for suite in SUITES:

@@ -11,7 +11,7 @@ and --no-javascript against a temporary loopback server.
 Regenerate the included original demonstration asset:
     python tools/check_image_downsampling.py --write-demo
 Run validation against a freshly built executable:
-    python tools/check_image_downsampling.py --browser target/release/own-browser
+    python tools/check_image_downsampling.py --browser target/release/chezcat
 """
 from __future__ import annotations
 

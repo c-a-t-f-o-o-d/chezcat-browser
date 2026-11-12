@@ -319,7 +319,7 @@ impl Runtime {
         self.symbol(symbol)?;
         self.property_name(name)?;
         let prototype = Ordinary::Object(self.symbol_prototype.unwrap());
-        self.get_ordinary_property_with_receiver(prototype, name, Value::Symbol(symbol), host)
+        self.get_ordinary_property_with_receiver(prototype, name, &Value::Symbol(symbol), host)
     }
 
     pub(super) fn assign_symbol_property(

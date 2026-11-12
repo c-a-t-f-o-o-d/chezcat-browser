@@ -501,14 +501,14 @@ impl Runtime {
         name: &str,
         host: &mut dyn Host,
     ) -> Result<Value, Fault> {
-        self.get_ordinary_property_with_receiver(object, name, object.value(), host)
+        self.get_ordinary_property_with_receiver(object, name, &object.value(), host)
     }
 
     pub(super) fn get_ordinary_property_with_receiver(
         &mut self,
         object: Ordinary,
         name: &str,
-        receiver: Value,
+        receiver: &Value,
         host: &mut dyn Host,
     ) -> Result<Value, Fault> {
         self.property_name(name)?;
@@ -520,6 +520,13 @@ impl Runtime {
             .get(name)
             .and_then(|property| property.accessor)
         {
+            // Resolve once before materializing: data properties and absent
+            // getters never need to copy the original primitive receiver.
+            let receiver = if accessor.get.is_some() {
+                self.copy_value(receiver)?
+            } else {
+                Value::Undefined
+            };
             return self.call_accessor(accessor.get, receiver, &[], host);
         }
         if let Some(field) = self.objects[owner]
@@ -527,6 +534,7 @@ impl Runtime {
             .get(name)
             .and_then(|property| property.getter)
         {
+            let receiver = self.copy_value(receiver)?;
             return self.native_getter(field, receiver);
         }
         self.own_property(owner, name)
@@ -2070,6 +2078,178 @@ mod tests {
             runtime.execute(source, &mut NoHost).unwrap().to_text(),
             "ok"
         );
+    }
+
+    #[test]
+    fn primitive_receiver_lookup_preserves_reference_and_accessor_semantics() {
+        succeeds(include_str!(
+            "../tools/fixtures/primitive-receiver-lookup.js"
+        ));
+    }
+
+    #[test]
+    fn primitive_receiver_data_reads_skip_copies_but_charge_returned_values() {
+        let mut runtime = Runtime::new();
+        runtime
+            .execute(
+                "Object.defineProperty(String.prototype,'setterOnly',{set:function(){throw 'setter';}});",
+                &mut NoHost,
+            )
+            .unwrap();
+        let receiver = Value::String("A".repeat(8192));
+        for name in ["charCodeAt", "missing", "setterOnly"] {
+            runtime.begin_job();
+            runtime.copy_bytes = 128;
+            let value = runtime.read_property(&receiver, name, &mut NoHost).unwrap();
+            assert_eq!(matches!(value, Value::Function(_)), name == "charCodeAt");
+            assert!(runtime.copy_bytes > 0);
+        }
+
+        runtime.begin_job();
+        runtime
+            .set_property(
+                runtime.string_prototype.unwrap(),
+                "data".into(),
+                Value::String("B".repeat(8192)),
+            )
+            .unwrap();
+        runtime.copy_bytes = 128;
+        let error = runtime
+            .read_property(&receiver, "data", &mut NoHost)
+            .unwrap_err();
+        assert!(error.exception.is_none());
+        assert!(error.display().contains("String/copy work limit"));
+        assert_eq!(runtime.copy_bytes, 0);
+    }
+
+    #[test]
+    fn primitive_receiver_getter_copy_is_charged_before_effects_and_recovers() {
+        let mut runtime = Runtime::new();
+        runtime
+            .execute(
+                "var getterRuns=0;Object.defineProperty(String.prototype,'read',{get:function(){'use strict';getterRuns++;return 7;}});",
+                &mut NoHost,
+            )
+            .unwrap();
+        let receiver = Value::String("A".repeat(8192));
+        runtime.begin_job();
+        runtime.copy_bytes = 128;
+        let error = runtime
+            .read_property(&receiver, "read", &mut NoHost)
+            .unwrap_err();
+        assert!(error.exception.is_none());
+        assert!(error.display().contains("String/copy work limit"));
+        assert_eq!(runtime.copy_bytes, 0);
+        assert_eq!(runtime.eval_depth, 0);
+        assert_eq!(runtime.call_depth, 0);
+        runtime.begin_job();
+        assert_eq!(
+            runtime
+                .execute("getterRuns;", &mut NoHost)
+                .unwrap()
+                .to_text(),
+            "0"
+        );
+        assert_eq!(
+            runtime
+                .read_property(&receiver, "read", &mut NoHost)
+                .unwrap()
+                .to_text(),
+            "7"
+        );
+        assert_eq!(
+            runtime
+                .execute("getterRuns;", &mut NoHost)
+                .unwrap()
+                .to_text(),
+            "1"
+        );
+    }
+
+    #[test]
+    fn primitive_receiver_reads_remove_only_the_redundant_payload_work() {
+        for (source, copies) in [
+            ("payload;", 1),
+            ("payload.length;", 1),
+            ("typeof payload.charCodeAt;", 1),
+            // Character reads now scan only the requested prefix; at zero,
+            // only the owned binding read scales with the payload length.
+            ("payload.charCodeAt(0);", 1),
+            ("payload?.charCodeAt?.(0);", 1),
+            ("(payload?.charCodeAt)(0);", 1),
+            ("payload[0];", 1),
+            ("payload?.[0];", 1),
+        ] {
+            let mut measurements = Vec::new();
+            for length in [1024, 8192] {
+                let mut runtime = Runtime::new();
+                runtime
+                    .define_global("payload", Value::String("A".repeat(length)))
+                    .unwrap();
+                runtime.begin_job();
+                runtime.execute(source, &mut NoHost).unwrap();
+                measurements.push(runtime.job_usage());
+            }
+            assert_eq!(
+                measurements[1].1 - measurements[0].1,
+                copies * (8192 - 1024),
+                "{source}"
+            );
+            assert_eq!(measurements[1].0, measurements[0].0, "{source}");
+        }
+    }
+
+    #[test]
+    fn primitive_receiver_scans_keep_shared_job_limit_and_one_mib_recovery() {
+        std::thread::Builder::new()
+            .stack_size(1024 * 1024)
+            .spawn(|| {
+                for microtask in [false, true] {
+                    // Retain the old 1536-read input as an improved success;
+                    // a larger witness still exercises the same fatal guard.
+                    for iterations in [768, 1536, 4096] {
+                        let mut runtime = Runtime::new();
+                        runtime.define_global("payload", Value::String("A".repeat(2048))).unwrap();
+                        let scan = format!("for(;completed<{iterations};completed++){{total+=payload.charCodeAt(completed%2048);}}");
+                        let source = if microtask {
+                            format!("var completed=0,total=0,tail=0;Promise.resolve().then(function(){{{scan}}}).then(function(){{tail=1;}});")
+                        } else {
+                            format!("var completed=0,total=0,tail=0;{scan}tail=1;")
+                        };
+                        runtime.begin_job();
+                        let mut result = runtime.execute(&source, &mut NoHost).map(|_| ());
+                        if microtask {
+                            result.unwrap();
+                            result = runtime.microtask_checkpoint(&mut NoHost).map(|messages| assert!(messages.is_empty()));
+                        }
+                        if iterations <= 1536 {
+                            result.unwrap();
+                            assert!(runtime.job_usage().1 < super::super::MAX_COPY_BYTES);
+                        } else {
+                            let error = result.unwrap_err();
+                            assert!(error.contains("String/copy work limit"), "{error}");
+                            assert_eq!(runtime.job_usage().1, super::super::MAX_COPY_BYTES);
+                            assert!(!runtime.has_microtasks());
+                        }
+                        assert_eq!(runtime.eval_depth, 0);
+                        assert_eq!(runtime.call_depth, 0);
+                        runtime.begin_job();
+                        let completed = runtime.execute("completed;", &mut NoHost).unwrap().to_number();
+                        if iterations <= 1536 {
+                            assert_eq!(completed, f64::from(iterations));
+                            assert_eq!(runtime.execute("total;", &mut NoHost).unwrap().to_number(), f64::from(iterations * 65));
+                            assert_eq!(runtime.execute("tail;", &mut NoHost).unwrap().to_text(), "1");
+                        } else {
+                            assert!(completed > 0.0 && completed < 4096.0);
+                            assert_eq!(runtime.execute("tail;", &mut NoHost).unwrap().to_text(), "0");
+                        }
+                        assert_eq!(runtime.execute("6*7;", &mut NoHost).unwrap().to_text(), "42");
+                    }
+                }
+            })
+            .unwrap()
+            .join()
+            .unwrap();
     }
 
     #[test]

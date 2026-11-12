@@ -121,7 +121,7 @@ def main():
         ('backward-assertions-share-work', '(?<=(a+)+b)c', '', 'a' * 24 + 'c', 0, 100, 'LIMIT:'),
         ('compilation-spends-same-budget', '(?=a)a', '', 'a', 0, 4, 'LIMIT:'),
     ]
-    with tempfile.TemporaryDirectory(prefix='own-browser-regexp-') as directory:
+    with tempfile.TemporaryDirectory(prefix='chezcat-regexp-') as directory:
         directory = Path(directory)
         source = directory / 'probe.rs'
         binary = directory / ('probe.exe' if os.name == 'nt' else 'probe')

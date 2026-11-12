@@ -8,7 +8,7 @@ impl Fixture {
     fn new() -> Self {
         static NEXT: AtomicUsize = AtomicUsize::new(0);
         let path = std::env::temp_dir().join(format!(
-            "own-browser-history-ui-{}-{}",
+            "chezcat-history-ui-{}-{}",
             std::process::id(),
             NEXT.fetch_add(1, Ordering::Relaxed)
         ));
@@ -98,7 +98,7 @@ fn record(app: &mut App, when: u64, title: &str, url: &str) -> u64 {
         .unwrap()
 }
 fn shot(app: &App, name: &str) {
-    let Some(path) = std::env::var_os("OWN_BROWSER_HISTORY_SHOTS") else {
+    let Some(path) = std::env::var_os("CHEZCAT_HISTORY_SHOTS") else {
         return;
     };
     let folder = PathBuf::from(path);

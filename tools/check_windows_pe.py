@@ -218,7 +218,10 @@ def package_version():
     text = version.group(1)
     parts = tuple(int(part) for part in text.split(".")) + (0,)
     require(all(part <= 65535 for part in parts), "Version components exceed Windows limits")
-    return text, parts
+    # Cargo requires three components; ChezCat releases are presented as 0.42,
+    # 0.43, etc. Preserve older nonzero patch versions when inspecting history.
+    display = ".".join(str(part) for part in parts[:2]) if parts[2] == 0 else text
+    return display, parts
 
 
 def check(exe, baseline_exe, report):

@@ -3,7 +3,7 @@
 
 Development only: Python 3 ssl/OpenSSL serves TLS; cryptography generates signed
 negative certificate fixtures. Neither is used by the browser. Build the browser
-first and pass --browser target/release/own-browser (or ChezCat.exe).
+first and pass --browser target/release/chezcat (or ChezCat.exe).
 All servers and requests stay on loopback. No CA is installed anywhere.
 """
 
@@ -97,7 +97,7 @@ def make_certificates(directory):
     leaf_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     rogue_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     name = lambda value: x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, value)])
-    root_name = name("Own Browser ephemeral integration CA")
+    root_name = name("ChezCat ephemeral integration CA")
 
     def builder(subject, public_key, issuer, before=start, after=end, ca=False):
         return (x509.CertificateBuilder().subject_name(subject).issuer_name(issuer)
@@ -157,7 +157,7 @@ def main():
     if not browser.is_file():
         parser.error("--browser must name the built browser executable")
     results = []
-    with tempfile.TemporaryDirectory(prefix="own-browser-https-") as temporary:
+    with tempfile.TemporaryDirectory(prefix="chezcat-https-") as temporary:
         directory = Path(temporary)
 
         def run(label, url, trust, success=True, contains=None, extra=()):

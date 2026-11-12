@@ -90,7 +90,7 @@ def main() -> None:
     aead_cases = 0
     poly_cases = 0
 
-    with tempfile.TemporaryDirectory(prefix="own-browser-aead-") as temporary:
+    with tempfile.TemporaryDirectory(prefix="chezcat-aead-") as temporary:
         harness = Path(temporary) / "aead_oracle_driver.rs"
         executable = Path(temporary) / ("aead_oracle_driver.exe" if os.name == "nt" else "aead_oracle_driver")
         harness.write_text(source + "\n" + DRIVER, encoding="utf-8")

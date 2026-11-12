@@ -398,7 +398,7 @@ fn show_message(message: &str, kind: u32) {
 pub fn run(app: App) -> Result<(), String> {
     // Single UI thread. This Box outlives the window and the entire message loop.
     let mut state = Box::new(app);
-    let class_name = wide("OwnBrowserWindow");
+    let class_name = wide("ChezCatWindow");
     let title = wide(&state.title());
     unsafe {
         SetProcessDPIAware();

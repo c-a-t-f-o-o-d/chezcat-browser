@@ -1,4 +1,4 @@
-#![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
+#![cfg_attr(all(target_os = "windows", not(test)), windows_subsystem = "windows")]
 
 // The Windows message pump owns the interactive methods; headless builds don't.
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
@@ -42,6 +42,7 @@ mod paint;
 mod platform;
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 mod profile;
+mod public_suffix;
 mod random;
 mod script_geometry;
 mod scripting;
@@ -227,7 +228,7 @@ fn run() -> Result<(), String> {
                 )
             }
             Some("--help") | Some("-h") => {
-                let help = r#"ChezCat 0.41.2
+                let help = r#"ChezCat 0.45
 
 Open local HTML, UTF-8 text, supported images or a website address. Bare hosts such as google.com default to HTTPS; explicit http:// remains supported.
 Ctrl+O: file picker; Ctrl+L: address; Esc: stop loading.
@@ -262,7 +263,7 @@ Trust: --trust-file roots.pem (replaces trust/roots.pem beside the executable)
 Connection report: --diagnose https://host/path --report connection.txt
 Repeat --diagnose up to eight times, or run tools\demos\Check-Connections.cmd. Diagnostics do not load a profile.
 
-HTTP, the TLS 1.3/1.2 HTTPS subset, gzip/deflate decoding, images, layout, controls and JavaScript use our own code. Page fonts use our TrueType/WOFF1 reader and renderer; try pages/fonts.html. GET and URL-encoded POST forms work; refresh/history asks before resending POST. The bounded JavaScript subset includes typed arrays, DataView, Map/Set, text encoding, animation frames and native keyboard events. Session cookies stay in memory and are restricted to their exact host. Same-origin script navigation and external classic script insertion are supported within work, CSP and request-blocking limits. Fetch, XHR, persistent storage and HTML injection remain unavailable. Try the workshops and pages/browser-tests.html for current limits."#;
+HTTP, the TLS 1.3/1.2 HTTPS subset, gzip/deflate decoding, images, layout, controls and JavaScript use our own code. Page fonts use our TrueType/WOFF1 reader and renderer; try pages/fonts.html. GET and URL-encoded POST forms work; refresh/history asks before resending POST. The bounded JavaScript subset includes typed arrays, DataView, Map/Set, text encoding, animation frames and native keyboard events. Session cookies stay in memory; host-only and validated Domain cookies use bundled public-suffix boundaries. Same-origin script navigation and external classic script insertion are supported within work, CSP and request-blocking limits. Fetch, XHR, persistent storage and HTML injection remain unavailable. Try the workshops and pages/browser-tests.html for current limits."#;
                 #[cfg(target_os = "windows")]
                 platform::show_info(help);
                 #[cfg(not(target_os = "windows"))]

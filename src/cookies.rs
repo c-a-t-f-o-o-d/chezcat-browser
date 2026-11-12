@@ -6,10 +6,9 @@
 //! https://httpwg.org/http-extensions/draft-ietf-httpbis-rfc6265bis.html
 //!
 //! This is an explicit conservative subset: ASCII cookie syntax, no nameless
-//! cookies, no persistence, and exact-host storage even when a matching Domain
-//! attribute is supplied. Domain cookies never reach a parent or child host;
-//! this does not require a public-suffix list. The caller supplies a scheme and
-//! exact-host SameSite context. Unspecified/invalid SameSite means Lax, without
+//! cookies and no persistence. Host-only and Domain cookies have distinct scope.
+//! Bundled ICANN/PRIVATE public-suffix data prevents registry/tenant-wide cookies.
+//! The caller supplies schemeful registrable-domain SameSite context. Unspecified/invalid SameSite means Lax, without
 //! a temporary unsafe-method exception. Only HTTPS is considered secure.
 
 use crate::url::HttpUrl;
@@ -21,7 +20,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 const MAX_SET_BYTES: usize = 4096;
 const MAX_COOKIES: usize = 256;
-const MAX_HOST_COOKIES: usize = 50;
+const MAX_DOMAIN_COOKIES: usize = 50;
 const MAX_STORED_BYTES: usize = 64 * 1024;
 // Leave room for "Cookie: " and CRLF inside an 8 KiB HTTP header line.
 const MAX_OUTPUT_BYTES: usize = 8 * 1024 - 10;
@@ -41,7 +40,8 @@ struct Store {
 }
 
 struct Cookie {
-    host: String,
+    domain: String,
+    host_only: bool,
     path: String,
     name: String,
     value: String,
@@ -61,7 +61,7 @@ enum SameSite {
 
 impl Cookie {
     fn bytes(&self) -> usize {
-        self.host.len() + self.path.len() + self.name.len() + self.value.len() + 4
+        self.domain.len() + self.path.len() + self.name.len() + self.value.len() + 5
     }
 
     fn expired(&self, now: i64) -> bool {
@@ -102,7 +102,7 @@ impl Session {
     }
 
     /// Return a Cookie field value. `same_site` must use the initiating
-    /// document's scheme and exact host; `top_level_safe` is only for safe
+    /// document's scheme and registrable domain; `top_level_safe` is only for safe
     /// top-level navigation, never an arbitrary subresource or POST.
     pub fn request_header(&self, url: &HttpUrl, same_site: bool, top_level_safe: bool) -> String {
         self.get_at(url, false, same_site, top_level_safe, now_seconds())
@@ -128,7 +128,8 @@ impl Session {
         if !url.secure
             && store.cookies.iter().any(|old| {
                 old.secure
-                    && old.host == cookie.host
+                    && (domain_matches(&old.domain, &cookie.domain)
+                        || domain_matches(&cookie.domain, &old.domain))
                     && old.name == cookie.name
                     && path_matches(&cookie.path, &old.path)
             })
@@ -136,7 +137,10 @@ impl Session {
             return Err("An insecure origin cannot replace a Secure cookie.".into());
         }
         let previous = store.cookies.iter().position(|old| {
-            old.host == cookie.host && old.path == cookie.path && old.name == cookie.name
+            old.domain == cookie.domain
+                && old.host_only == cookie.host_only
+                && old.path == cookie.path
+                && old.name == cookie.name
         });
         if !http && previous.is_some_and(|index| store.cookies[index].http_only) {
             return Err("Document scripts cannot replace an HttpOnly cookie.".into());
@@ -153,9 +157,9 @@ impl Session {
                 || store
                     .cookies
                     .iter()
-                    .filter(|old| old.host == cookie.host)
+                    .filter(|old| old.domain == cookie.domain)
                     .count()
-                    >= MAX_HOST_COOKIES)
+                    >= MAX_DOMAIN_COOKIES)
         {
             return Err("Session cookie count limit reached.".into());
         }
@@ -194,7 +198,12 @@ impl Session {
             .cookies
             .iter()
             .filter(|cookie| {
-                cookie.host.eq_ignore_ascii_case(&url.host)
+                (if cookie.host_only {
+                    cookie.domain.eq_ignore_ascii_case(&url.host)
+                } else {
+                    domain_matches(&url.host, &cookie.domain)
+                        && !crate::public_suffix::is_public_suffix(&cookie.domain)
+                })
                     && path_matches(&url.path, &cookie.path)
                     && (!cookie.secure || url.secure)
                     && (!document || !cookie.http_only)
@@ -301,19 +310,35 @@ fn parse_cookie(url: &HttpUrl, text: &str, http: bool, now: i64) -> Result<Cooki
         }
     }
     let host = url.host.to_ascii_lowercase();
-    if let Some(domain) = domain {
-        let domain = domain
-            .strip_prefix('.')
-            .unwrap_or(domain)
-            .to_ascii_lowercase();
-        if !valid_host(&domain)
-            || !(host == domain
-                || host.parse::<IpAddr>().is_err()
-                    && host
-                        .strip_suffix(&domain)
-                        .is_some_and(|prefix| prefix.ends_with('.')))
-        {
+    let mut scope = host.clone();
+    let mut host_only = true;
+    // An empty attribute is ignored. Keep its presence for the stricter
+    // existing __Host- prefix check below (no Domain attribute at all).
+    if let Some(attribute) = domain.filter(|value| !value.is_empty()) {
+        let candidate = attribute.strip_prefix('.').unwrap_or(attribute).to_ascii_lowercase();
+        if !valid_host(&candidate) || !domain_matches(&host, &candidate) {
             return Err("Cookie Domain does not match its originating host.".into());
+        }
+        if host.parse::<IpAddr>().is_ok() {
+            // An exact IP Domain cannot widen scope; retain it as host-only.
+            // domain_matches has already rejected a suffix of an IP literal.
+        } else if crate::public_suffix::is_public_suffix(&candidate) {
+            if candidate != host {
+                return Err("Cookie Domain is a public suffix.".into());
+            }
+            // A public-suffix host may set a cookie for itself, never children.
+        } else {
+            // Do not let a tenant skip its public/private suffix by choosing
+            // a still-higher parent that is not itself a listed suffix.
+            // E.g. a.hosting.example.com cannot escape hosting.example.com
+            // by setting Domain=example.com when that hosting boundary is PSL.
+            let boundary = crate::public_suffix::registrable_domain(&host)
+                .ok_or("Cookie origin has no registrable domain.")?;
+            if !domain_matches(&candidate, boundary) {
+                return Err("Cookie Domain crosses its registrable site boundary.".into());
+            }
+            scope = candidate;
+            host_only = false;
         }
     }
     if secure && !url.secure {
@@ -340,7 +365,8 @@ fn parse_cookie(url: &HttpUrl, text: &str, http: bool, now: i64) -> Result<Cooki
         return Err("Host-prefixed cookies require explicit Path=/ and no Domain.".into());
     }
     Ok(Cookie {
-        host,
+        domain: scope,
+        host_only,
         path: path.to_owned(),
         name: name.to_owned(),
         value: value.to_owned(),
@@ -386,6 +412,66 @@ fn valid_host(host: &str) -> bool {
                         .bytes()
                         .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
             }))
+}
+
+/// Both names use the URL parser's ASCII DNS subset. A dot boundary is
+/// mandatory and numeric IP suffixes never grant cookie authority.
+fn domain_matches(host: &str, domain: &str) -> bool {
+    host.eq_ignore_ascii_case(domain)
+        || host.parse::<IpAddr>().is_err()
+            && host.len() > domain.len()
+            && host.as_bytes().get(host.len() - domain.len() - 1) == Some(&b'.')
+            && host.get(host.len() - domain.len()..)
+                .is_some_and(|suffix| suffix.eq_ignore_ascii_case(domain))
+}
+
+/// Cookie site equality is NOT origin equality: ports do not participate,
+/// but HTTP and HTTPS remain separate. IPs/public-suffix hosts match exactly.
+/// Never use this to loosen CSP, CORS, script or resource credential checks.
+pub(crate) fn same_site(left: &HttpUrl, right: &HttpUrl) -> bool {
+    if left.secure != right.secure || !valid_host(&left.host) || !valid_host(&right.host) {
+        return false;
+    }
+    if left.host.eq_ignore_ascii_case(&right.host) {
+        return true;
+    }
+    if left.host.parse::<IpAddr>().is_ok() || right.host.parse::<IpAddr>().is_ok() {
+        return false;
+    }
+    let left = left.host.to_ascii_lowercase();
+    let right = right.host.to_ascii_lowercase();
+    match (
+        crate::public_suffix::registrable_domain(&left),
+        crate::public_suffix::registrable_domain(&right),
+    ) {
+        (Some(left), Some(right)) => left == right,
+        _ => false,
+    }
+}
+
+/// Context for one top-level redirect chain. A cross-site hop permanently
+/// removes Strict eligibility for that chain, including a return to its source.
+/// The optional false context preserves an earlier cross-site UI reload.
+pub(crate) struct NavigationContext<'a> {
+    origin: Option<&'a HttpUrl>,
+    allowed: bool,
+}
+
+impl<'a> NavigationContext<'a> {
+    pub(crate) fn new(origin: Option<&'a HttpUrl>, reload: Option<bool>) -> Self {
+        Self {
+            origin,
+            allowed: reload != Some(false),
+        }
+    }
+
+    pub(crate) fn is_same_site(&self, target: &HttpUrl) -> bool {
+        self.allowed && self.origin.is_some_and(|origin| same_site(origin, target))
+    }
+
+    pub(crate) fn redirect(&mut self, from: &HttpUrl, to: &HttpUrl) {
+        self.allowed &= same_site(from, to);
+    }
 }
 
 fn default_path(path: &str) -> &str {
@@ -569,7 +655,7 @@ mod tests {
     }
 
     #[test]
-    fn matching_domain_never_broadens_the_exact_host_scope() {
+    fn matching_domain_shares_only_with_its_domain_and_children() {
         let session = Session::default();
         let target = url("https://www.example.test/path");
         session
@@ -587,18 +673,16 @@ mod tests {
             request(&session, &url("https://www.example.test:8443/")),
             "SID=upper; sid=lower"
         );
-        for other in [
-            "https://example.test/",
-            "https://child.www.example.test/",
-            "https://badexample.test/",
-        ] {
+        assert_eq!(request(&session, &url("https://example.test/")), "SID=upper");
+        assert_eq!(request(&session, &url("https://consent.example.test/")), "SID=upper");
+        assert_eq!(request(&session, &url("https://child.www.example.test/")), "SID=upper; sid=lower");
+        for other in ["https://badexample.test/", "https://example.test.attacker.test/"] {
             assert_eq!(request(&session, &url(other)), "");
         }
         for domain in [
             "other.test",
             "badexample.test",
             "example.test.",
-            "",
             "..example.test",
         ] {
             assert!(session
@@ -855,7 +939,7 @@ mod tests {
     fn capacity_rejects_atomically_and_expiry_releases_space() {
         let session = Session::default();
         let target = url("https://example.test/");
-        for index in 0..MAX_HOST_COOKIES {
+        for index in 0..MAX_DOMAIN_COOKIES {
             session
                 .set_at(&target, &format!("c{index}=keep; Max-Age=2"), true, NOW)
                 .unwrap();
@@ -948,3 +1032,7 @@ mod tests {
             .is_empty());
     }
 }
+
+#[cfg(test)]
+#[path = "cookies_domain_tests.rs"]
+mod domain_tests;

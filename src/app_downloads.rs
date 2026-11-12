@@ -1008,7 +1008,8 @@ mod tests {
         let token: String = nonce.iter().map(|byte| format!("{byte:02x}")).collect();
         let root = std::env::temp_dir().join(format!("chezcat-download-ui-{token}"));
         std::fs::create_dir(&root).unwrap();
-        let root = std::fs::canonicalize(root).unwrap();
+        // Keep the user-selected input in ordinary path syntax. On Windows,
+        // canonicalize adds a device prefix that explicit navigation rejects.
         let source = root.join("page.html");
         let original = root.join("payload.bin");
         std::fs::write(
@@ -1017,6 +1018,7 @@ mod tests {
         )
         .unwrap();
         std::fs::write(&original, b"original binary\0bytes").unwrap();
+        let expected_location = navigation::explicit(&source).unwrap();
         {
             let mut app = App::new();
             let mut data = app.profile.data().clone();
@@ -1025,6 +1027,8 @@ mod tests {
             app.profile.save(data).unwrap();
             app.open(&source);
             app.wait_for_load();
+            assert!(!app.failed, "{}", app.status);
+            assert_eq!(app.location, expected_location);
             let run = app.page.runs.iter().find(|run| run.link.is_some()).unwrap();
             let (x, y) = (run.x + 2, run.y + app.content_top() + 2);
             assert!(app.download_at(x, y));
@@ -1034,7 +1038,7 @@ mod tests {
                 assert!(std::time::Instant::now() < deadline);
                 std::thread::sleep(std::time::Duration::from_millis(2));
             }
-            assert_eq!(app.location.path.as_ref(), Some(&source));
+            assert_eq!(app.location, expected_location);
             assert_eq!(app.downloads.entries()[0].status, Status::Complete);
             assert!(app.status.starts_with("Downloaded payload.bin"));
             let saved = app.downloads.entries()[0].path.clone().unwrap();
@@ -1051,6 +1055,7 @@ mod tests {
             app.pointer_up(clear.x + 4, clear.y + 4);
             assert!(app.downloads.entries().is_empty());
             assert!(saved.is_file());
+            assert_eq!(app.location, expected_location);
         }
         std::fs::remove_dir_all(root).unwrap();
     }

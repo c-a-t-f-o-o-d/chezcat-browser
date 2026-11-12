@@ -57,7 +57,7 @@ fn click(app: &mut App, action: ChromeAction) -> PlatformAction {
     app.pointer_up(x, y)
 }
 fn shot(app: &App, name: &str) {
-    let Some(folder) = std::env::var_os("OWN_BROWSER_CHROME_SHOTS") else {
+    let Some(folder) = std::env::var_os("CHEZCAT_CHROME_SHOTS") else {
         return;
     };
     let folder = PathBuf::from(folder);

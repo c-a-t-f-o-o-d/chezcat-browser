@@ -1,7 +1,8 @@
 """Regenerate ChezCat's checked-in Windows icon/version resources.
 
-Requires Python 3 and GNU windres from the Windows build toolchain. Neither is
-needed to run ChezCat; ordinary Cargo builds link the already-generated files.
+The default path uses GNU windres from the Windows build toolchain. --portable
+uses the original Python standard-library writer for this project's bounded RC
+grammar. Neither tool is needed to run ChezCat or build the checked-in resources.
 Run from any folder. --windres accepts an explicit resource-compiler path.
 """
 import argparse
@@ -16,14 +17,18 @@ import tempfile
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--windres', default=None)
+    parser.add_argument('--portable', action='store_true',
+                        help='Use the bounded original standard-library resource writer')
     parser.add_argument('--preprocessor', default=None,
                         help='Optional matching gcc preprocessor executable')
     args = parser.parse_args()
     root = Path(__file__).resolve().parent.parent
     windres = args.windres or shutil.which('x86_64-w64-mingw32-windres') or shutil.which('windres')
-    if not windres:
+    if not windres and not args.portable:
         parser.error('GNU windres was not found; pass --windres with its path.')
-    compiler = shutil.which(windres) or windres
+    if args.portable and (args.windres or args.preprocessor):
+        parser.error('--portable cannot be combined with external compiler options.')
+    compiler = (shutil.which(windres) or windres) if windres else None
     source = root / 'resources/chezcat.rc'
     icon = root / 'assets/chezcat.ico'
     if not source.is_file() or not icon.is_file():
@@ -37,10 +42,16 @@ def main():
         temporary = Path(temporary)
         resource = temporary / 'chezcat.res'
         coff = temporary / 'chezcat-x64.o'
-        subprocess.run(command + ['-J', 'rc', '-O', 'res', '-i', str(source),
-                                 '-o', str(resource)], cwd=root, check=True)
-        subprocess.run([compiler, '-J', 'res', '-O', 'coff', '-F', 'pe-x86-64',
-                        '-i', str(resource), '-o', str(coff)], cwd=root, check=True)
+        if args.portable:
+            from portable_resources import generate
+            resource_bytes, coff_bytes = generate(source.read_text(encoding='utf-8'), icon.read_bytes())
+            resource.write_bytes(resource_bytes)
+            coff.write_bytes(coff_bytes)
+        else:
+            subprocess.run(command + ['-J', 'rc', '-O', 'res', '-i', str(source),
+                                     '-o', str(resource)], cwd=root, check=True)
+            subprocess.run([compiler, '-J', 'res', '-O', 'coff', '-F', 'pe-x86-64',
+                            '-i', str(resource), '-o', str(coff)], cwd=root, check=True)
         for output in [resource, coff]:
             shutil.copyfile(output, root / 'resources' / output.name)
     files = [source, icon, root / 'resources/chezcat.res', root / 'resources/chezcat-x64.o']

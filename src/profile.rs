@@ -706,7 +706,7 @@ mod tests {
         fn new() -> Self {
             static NEXT: AtomicU64 = AtomicU64::new(0);
             let path = std::env::temp_dir().join(format!(
-                "own-browser-profile-{}-{}",
+                "chezcat-profile-{}-{}",
                 std::process::id(),
                 NEXT.fetch_add(1, Ordering::Relaxed)
             ));
@@ -933,7 +933,7 @@ mod tests {
         );
 
         let nonexistent =
-            std::env::temp_dir().join("own-browser-intentionally-absent-bookmark-20.html");
+            std::env::temp_dir().join("chezcat-intentionally-absent-bookmark-20.html");
         let location = navigation::Location {
             path: Some(nonexistent),
             url: None,

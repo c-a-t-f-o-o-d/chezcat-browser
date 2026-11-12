@@ -187,7 +187,7 @@ def main():
     args = parser.parse_args()
     started = time.monotonic()
     cases = tests()
-    with tempfile.TemporaryDirectory(prefix="own-browser-compression-") as temporary:
+    with tempfile.TemporaryDirectory(prefix="chezcat-compression-") as temporary:
         directory = Path(temporary)
         source = directory / "probe.rs"
         source.write_text(PROBE.replace("SOURCE", json.dumps(str(ROOT / "src/compression.rs"))), encoding="utf-8")

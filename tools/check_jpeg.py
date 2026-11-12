@@ -372,7 +372,7 @@ def cases():
     good('extended-16bit-quantization', precision16, 'metadata')
     bad('baseline-16bit-quantization', patch(precision16, next(m[1] for m in markers(precision16) if m[0] == 0xC1) + 1, b'\xc0'))
     good('ignored-app-comment', normal[:2] + segment(0xE3, b'Original ignored data\0\xff')
-         + segment(0xFE, b'Own Browser JPEG fixture') + normal[2:], 'metadata')
+         + segment(0xFE, b'ChezCat JPEG fixture') + normal[2:], 'metadata')
     good('marker-fill', normal[:2] + b'\xff\xff' + normal[2:], 'metadata')
     good('no-jfif', without(normal, 0xE0), 'metadata')
     odd_ids = normal
@@ -527,7 +527,7 @@ def main():
         return
     started = time.monotonic()
     checks = cases()
-    with tempfile.TemporaryDirectory(prefix='own-browser-jpeg-') as temporary:
+    with tempfile.TemporaryDirectory(prefix='chezcat-jpeg-') as temporary:
         directory = args.keep.resolve() if args.keep else Path(temporary)
         directory.mkdir(parents=True, exist_ok=True)
         source = directory / 'jpeg_probe.rs'

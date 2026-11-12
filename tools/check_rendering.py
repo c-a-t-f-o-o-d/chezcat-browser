@@ -79,7 +79,7 @@ def main():
         parser.error('--browser must name the built executable')
     results = []
     runs = 0
-    with tempfile.TemporaryDirectory(prefix='own-browser-rendering-') as temporary:
+    with tempfile.TemporaryDirectory(prefix='chezcat-rendering-') as temporary:
         directory = Path(temporary)
         for protocol in ('http', 'https'):
             server = (FixtureServer(('127.0.0.1', 0), Plain) if protocol == 'http' else

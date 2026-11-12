@@ -30,7 +30,7 @@ FIXTURES = ROOT / "tools" / "https-demo"
 BODY = b"HTTP_CLOSURE_FIXTURE_OK"
 FORM = b"fixture=private-body-value"
 MODULES = [
-    "http", "cookies", "network_trace", "url", "compression", "random", "tls", "trust", "x509", "tls_crypto",
+    "http", "cookies", "public_suffix", "network_trace", "url", "compression", "random", "tls", "trust", "x509", "tls_crypto",
     "crypto_hash", "crypto_sha512", "crypto_aead", "crypto_aes_gcm",
     "crypto_x25519", "crypto_rsa", "crypto_ec",
 ]
@@ -235,7 +235,7 @@ def main() -> None:
         "chunked_partial": False, "no_http_bytes": False, "post_partial": False,
         "redirect_partial": False,
     }
-    with tempfile.TemporaryDirectory(prefix="own-browser-http-closure-") as temporary:
+    with tempfile.TemporaryDirectory(prefix="chezcat-http-closure-") as temporary:
         binary = compile_probe(Path(temporary), args.rustc)
         results = [check_case(binary, profile, case, success)
                    for profile in ("tls12_gcm", "tls12_cbc", "tls13")

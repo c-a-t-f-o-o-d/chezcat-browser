@@ -75,7 +75,7 @@ fn report(app: &App) -> String {
     app.scripting.as_ref().unwrap().report()
 }
 fn shot(app: &App, name: &str, detached: bool) {
-    let Some(folder) = std::env::var_os("OWN_BROWSER_INSPECTOR_SHOTS") else {
+    let Some(folder) = std::env::var_os("CHEZCAT_INSPECTOR_SHOTS") else {
         return;
     };
     let folder = PathBuf::from(folder);

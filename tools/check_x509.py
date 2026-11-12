@@ -512,7 +512,7 @@ def run(rustc):
         add(f"EC {kind} keyEncipherment usage rejected", False,
             cert=issue(leaf_name, keys[kind][2].public_key(), issuer_name, issuer_key, bad_usage), key_type=kind)
 
-    with tempfile.TemporaryDirectory(prefix="own-browser-x509-") as directory:
+    with tempfile.TemporaryDirectory(prefix="chezcat-x509-") as directory:
         folder = Path(directory)
         probe = PROBE
         for token, filename in [("HASH", "crypto_hash.rs"), ("SHA512", "crypto_sha512.rs"),

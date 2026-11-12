@@ -228,7 +228,7 @@ def run(rustc, benchmark):
             add("invalid-aes-key-length", f"seal {encoded(bytes(wrong_length))} {mac_key.hex()} {iv_key.hex()} {bits} 1 0 23 -", "error")
 
     source_hashes = {name: hashlib.sha256((ROOT / "src" / (name + ".rs")).read_bytes()).hexdigest() for name in MODULES}
-    with tempfile.TemporaryDirectory(prefix="own-browser-cbc-check-") as temporary:
+    with tempfile.TemporaryDirectory(prefix="chezcat-cbc-check-") as temporary:
         path = Path(temporary)
         source = path / "probe.rs"
         # JSON string escaping also works for these absolute Rust path literals.

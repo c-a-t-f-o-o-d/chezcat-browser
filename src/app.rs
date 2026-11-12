@@ -4208,7 +4208,7 @@ mod tests {
     impl Fixture {
         fn new() -> Self {
             let p = std::env::temp_dir().join(format!(
-                "own-browser-app-{}-{}",
+                "chezcat-app-{}-{}",
                 std::process::id(),
                 SERIAL.fetch_add(1, Ordering::Relaxed)
             ));

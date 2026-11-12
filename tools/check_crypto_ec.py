@@ -269,7 +269,7 @@ def run(rustc):
         for length in [0, 1, 31, 33, 47, 49, 63, 65, 1024]:
             add("unsupported digest length", "sig", curve_id, [key, bytes(length), signature], False)
 
-    with tempfile.TemporaryDirectory(prefix="own-browser-ec-") as directory:
+    with tempfile.TemporaryDirectory(prefix="chezcat-ec-") as directory:
         folder = Path(directory)
         module = folder / "ec.rs"
         module.write_text((ROOT / "src/crypto_ec.rs").read_text(encoding="utf-8") + HOOKS, encoding="utf-8")

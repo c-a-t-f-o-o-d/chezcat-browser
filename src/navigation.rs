@@ -563,7 +563,7 @@ mod tests {
                 .unwrap()
                 .as_nanos();
             let path = std::env::temp_dir().join(format!(
-                "own-browser-navigation-{}-{stamp}-{}",
+                "chezcat-navigation-{}-{stamp}-{}",
                 std::process::id(),
                 NEXT.fetch_add(1, Ordering::Relaxed)
             ));

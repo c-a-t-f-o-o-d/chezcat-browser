@@ -10,7 +10,7 @@ if errorlevel 1 (
 )
 cargo build --release --offline --locked
 if errorlevel 1 exit /b 1
-copy /y "target\release\own-browser.exe" "ChezCat.exe" >nul
+copy /y "target\release\chezcat.exe" "ChezCat.exe" >nul
 if errorlevel 1 exit /b 1
 echo Built ChezCat.exe
 endlocal

@@ -315,7 +315,7 @@ def main():
     parser.add_argument('--output', type=Path)
     args = parser.parse_args()
     results, benchmarks = [], []
-    with tempfile.TemporaryDirectory(prefix='own-browser-loading-') as temporary:
+    with tempfile.TemporaryDirectory(prefix='chezcat-loading-') as temporary:
         directory = Path(temporary)
         suffix = '.exe' if os.name == 'nt' else ''
         current = directory / ('current' + suffix)

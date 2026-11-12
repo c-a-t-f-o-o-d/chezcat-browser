@@ -145,6 +145,12 @@ impl Parser {
     }
 
     pub(super) fn binding_pattern(&mut self, binding: bool) -> Result<Id, Fault> {
+        // An identifier binding is a leaf, even at the caller's depth limit.
+        // Destructuring patterns and assignment references can recurse and
+        // must still enter the shared parser guard.
+        if binding && !self.is("[") && !self.is("{") {
+            return self.pattern_inner(binding);
+        }
         self.enter()?;
         let result = self.pattern_inner(binding);
         self.depth -= 1;

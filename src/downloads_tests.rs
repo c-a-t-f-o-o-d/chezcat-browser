@@ -249,11 +249,21 @@ fn http_status_and_partial_responses_do_not_become_downloaded_files() {
 fn folder_validation_rejects_relative_parent_and_device_components() {
     assert!(validate_folder(Path::new("relative/Downloads")).is_err());
     let temp = Temp::new();
-    for suffix in ["../outside", "CON", "a:stream", "trailing."] {
-        assert!(
-            validate_folder(&temp.0.join(suffix)).is_err(),
-            "unsafe folder: {suffix}"
-        );
+    assert!(validate_folder(&temp.folder()).is_ok());
+    for suffix in ["../outside", "nested/../outside", "CON", "a:stream", "trailing."] {
+        // PathBuf::join removes '..' from Windows verbatim paths. Append native
+        // text instead so validation receives the unsafe component itself.
+        let mut raw = temp.0.as_os_str().to_os_string();
+        raw.push(std::path::MAIN_SEPARATOR_STR);
+        raw.push(suffix.replace('/', std::path::MAIN_SEPARATOR_STR));
+        let path = PathBuf::from(raw);
+        if suffix.split('/').any(|part| part == "..") {
+            assert!(
+                path.components().any(|part| part == Component::ParentDir),
+                "fixture must retain its parent component: {path:?}"
+            );
+        }
+        assert!(validate_folder(&path).is_err(), "unsafe folder: {suffix}");
     }
     let file = temp.0.join("not-a-directory");
     fs::write(&file, b"keep").unwrap();

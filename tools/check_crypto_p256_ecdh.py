@@ -176,7 +176,7 @@ def run(rustc):
             raise AssertionError('Unexpected valid special malformed point')
 
     commands = '\n'.join(command for _, command, _ in cases) + '\n'
-    with tempfile.TemporaryDirectory(prefix='own-browser-p256-') as directory:
+    with tempfile.TemporaryDirectory(prefix='chezcat-p256-') as directory:
         folder = Path(directory)
         harness = folder / 'reference_harness.rs'
         harness.write_text('mod p256 {\n' + source + '\n' + EXTRA + '\n}\n' + MAIN, encoding='utf-8')

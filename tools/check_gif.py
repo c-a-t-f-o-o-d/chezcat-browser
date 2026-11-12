@@ -384,7 +384,7 @@ def main():
         print(json.dumps({'demo_files':write_demos()},indent=2))
     checks=cases()
     results=[]
-    with tempfile.TemporaryDirectory(prefix='own-browser-gif-') as directory:
+    with tempfile.TemporaryDirectory(prefix='chezcat-gif-') as directory:
         directory=Path(directory)
         source=PROBE
         for name in ('image','jpeg','compression'):

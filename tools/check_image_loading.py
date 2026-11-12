@@ -7,7 +7,7 @@ reuse, disabled images, the resource report, and native animation with JavaScrip
 disabled. Pixel regions are compared with independent Pillow/ImageMagick/FFmpeg
 decodes. These are development checks only, never browser dependencies.
 
-Run: python tools/check_image_loading.py --browser target/release/own-browser
+Run: python tools/check_image_loading.py --browser target/release/chezcat
        --output image-loading-report.json --work-dir image-loading-artifacts
 """
 from __future__ import annotations

@@ -240,7 +240,7 @@ def main():
         parser.error("--browser must name the built browser executable")
     results, controls = [], {}
     oversized = oversized_encoded_document()
-    with tempfile.TemporaryDirectory(prefix="own-browser-content-decoding-") as temporary:
+    with tempfile.TemporaryDirectory(prefix="chezcat-content-decoding-") as temporary:
         directory = Path(temporary)
         for protocol in ("http", "https"):
             if protocol == "https":

@@ -52,7 +52,7 @@ ROOT = Path(__file__).resolve().parents[1]
 MARKER = b"TLS12_FIXTURE_OK"
 FORM = b"payload=" + b"x" * (128 * 1024 - len(b"payload="))
 MODULES = [
-    "http", "cookies", "network_trace", "url", "compression", "random", "tls", "trust", "x509", "tls_crypto",
+    "http", "cookies", "public_suffix", "network_trace", "url", "compression", "random", "tls", "trust", "x509", "tls_crypto",
     "crypto_hash", "crypto_sha512", "crypto_aead", "crypto_aes_gcm",
     "crypto_x25519", "crypto_rsa", "crypto_ec",
 ]
@@ -900,7 +900,7 @@ def main():
     browser = arguments.browser.resolve() if arguments.browser else None
     if browser and not browser.is_file():
         parser.error("--browser must name the built executable")
-    with tempfile.TemporaryDirectory(prefix="own-browser-tls12-") as temporary:
+    with tempfile.TemporaryDirectory(prefix="chezcat-tls12-") as temporary:
         directory = Path(temporary)
         probe = browser if arguments.only == "browser" else compile_probe(directory, arguments.rustc)
         identity = identities(directory)
