@@ -9,8 +9,10 @@
 
 use super::{
     Accessors, Builtin, Fault, Host, NativeGetter, Ordinary, Property, Runtime, Value,
-    MAX_OBJECT_PROPERTIES, MAX_PROPERTIES, MAX_RETAINED_VALUES, MAX_STRING_BYTES,
+    MAX_STRING_BYTES,
 };
+#[cfg(test)]
+use super::{MAX_OBJECT_PROPERTIES, MAX_PROPERTIES, MAX_RETAINED_VALUES};
 
 const MAX_SYMBOLS: usize = 4096;
 
@@ -65,8 +67,8 @@ impl Runtime {
         let retained = self
             .value_bytes
             .saturating_add(bytes * if registered { 2 } else { 1 });
-        if retained > MAX_RETAINED_VALUES {
-            return Err(Fault::new("Retained value limit reached (2 MiB)."));
+        if retained > self.limits.heap.retained_values {
+            return Err(Fault::new(format!("Retained value limit reached ({} bytes).", self.limits.heap.retained_values)));
         }
         self.work(bytes * if registered { 2 } else { 1 })?;
         let id = self.symbols.len();
@@ -440,12 +442,10 @@ impl Runtime {
             };
         }
         if is_new
-            && (object.properties.len() + object.symbol_properties.len() >= MAX_OBJECT_PROPERTIES
-                || self.properties >= MAX_PROPERTIES)
+            && (object.properties.len() + object.symbol_properties.len() >= self.limits.heap.object_properties
+                || self.properties >= self.limits.heap.properties)
         {
-            return Err(Fault::new(
-                "Object property limit reached (4096 per object / 16384 per document).",
-            ));
+            return Err(self.property_limit_fault(object));
         }
         let order = previous.map_or(object.next_order, |property| property.order);
         let enumerable = attributes.map_or_else(
@@ -467,8 +467,8 @@ impl Runtime {
         }
         let retained =
             self.value_bytes - previous.map_or(0, |property| property.value.bytes()) + bytes;
-        if retained > MAX_RETAINED_VALUES {
-            return Err(Fault::new("Retained value limit reached (2 MiB)."));
+        if retained > self.limits.heap.retained_values {
+            return Err(Fault::new(format!("Retained value limit reached ({} bytes).", self.limits.heap.retained_values)));
         }
         self.work(bytes)?;
         self.objects[id].symbol_properties.insert(

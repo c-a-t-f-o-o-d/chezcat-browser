@@ -4,9 +4,9 @@
 //! https://tc39.es/ecma262/multipage/fundamental-objects.html
 //! https://tc39.es/ecma262/multipage/abstract-operations.html#sec-enumerableownproperties
 
-use super::{
-    property_index, Fault, Host, Ordinary, Reference, Runtime, Value, MAX_OBJECT_PROPERTIES,
-};
+use super::{property_index, Fault, Host, Ordinary, Reference, Runtime, Value};
+#[cfg(test)]
+use super::MAX_OBJECT_PROPERTIES;
 
 impl Runtime {
     pub(super) fn object_inspection(
@@ -52,9 +52,9 @@ impl Runtime {
             } else {
                 Vec::new()
             };
-            if keys.len().saturating_add(symbols.len()) > MAX_OBJECT_PROPERTIES {
+            if keys.len().saturating_add(symbols.len()) > self.limits.heap.object_properties {
                 return Err(Fault::new(
-                    "Property enumeration limit reached (4096 keys).",
+                    format!("Property enumeration limit reached ({} keys).", self.limits.heap.object_properties),
                 ));
             }
             let result = self.new_object(None)?;
@@ -128,9 +128,9 @@ impl Runtime {
         {
             // Array length is an implicit own property, created before the
             // stored string properties but ordered after all integer indices.
-            if keys.len() >= MAX_OBJECT_PROPERTIES {
+            if keys.len() >= self.limits.heap.object_properties {
                 return Err(Fault::new(
-                    "Property enumeration limit reached (4096 keys).",
+                    format!("Property enumeration limit reached ({} keys).", self.limits.heap.object_properties),
                 ));
             }
             self.work(6)?;
@@ -145,9 +145,9 @@ impl Runtime {
         let length = text.encode_utf16().count();
         let all = matches!(method, "getOwnPropertyNames" | "getOwnPropertyDescriptors");
         let count = length.saturating_add(usize::from(all));
-        if count > MAX_OBJECT_PROPERTIES {
+        if count > self.limits.heap.object_properties {
             return Err(Fault::new(
-                "Property enumeration limit reached (4096 keys).",
+                format!("Property enumeration limit reached ({} keys).", self.limits.heap.object_properties),
             ));
         }
         if method == "getOwnPropertyNames" {

@@ -3,9 +3,9 @@
 //! length but observes later element changes, with the existing job limits.
 
 use super::{
-    primitive_conversion, property_index, strict_equal, Builtin, Fault, Function, Host, Ordinary,
-    PropertyKey, Runtime, Value, MAX_ARRAY_LENGTH, MAX_CALL_DEPTH, MAX_PARSE_DEPTH,
-    MAX_PROPERTY_BYTES, MAX_STRING_BYTES,
+    primitive_conversion, property_index, strict_equal, Builtin, Fault, Function, Host,
+    Ordinary, PropertyKey, Runtime, Value, MAX_CALL_DEPTH, MAX_PARSE_DEPTH, MAX_PROPERTY_BYTES,
+    MAX_STRING_BYTES,
 };
 use std::cmp::Ordering;
 
@@ -251,8 +251,8 @@ impl Runtime {
                     }
                 }
             }
-            if output == MAX_ARRAY_LENGTH {
-                return Err(Fault::new("Array flatten length limit reached (8192)."));
+            if output == self.limits.heap.array_length {
+                return Err(Fault::new(format!("Array flatten length limit reached ({}).", self.limits.heap.array_length)));
             }
             self.create_data_property(
                 &target,
@@ -274,8 +274,8 @@ impl Runtime {
             return Ok(length);
         }
         let length = self.binary_source_length(&Value::Object(id), host)?;
-        if length > MAX_ARRAY_LENGTH {
-            return Err(Fault::new("Array-like length limit reached (8192)."));
+        if length > self.limits.heap.array_length {
+            return Err(Fault::new(format!("Array-like length limit reached ({}).", self.limits.heap.array_length)));
         }
         Ok(length)
     }
@@ -403,8 +403,8 @@ impl Runtime {
                 Ok(first)
             }
             "unshift" => {
-                if length.saturating_add(args.len()) > MAX_ARRAY_LENGTH {
-                    return Err(Fault::new("Array length limit reached (8192)."));
+                if length.saturating_add(args.len()) > self.limits.heap.array_length {
+                    return Err(Fault::new(format!("Array length limit reached ({}).", self.limits.heap.array_length)));
                 }
                 if !args.is_empty() {
                     for index in (0..length).rev() {
@@ -562,8 +562,8 @@ impl Runtime {
                 for source in std::iter::once(&Value::Object(id)).chain(args) {
                     if let Value::Object(source) = source {
                         if let Some(length) = self.object(*source)?.length {
-                            if at + length > MAX_ARRAY_LENGTH {
-                                return Err(Fault::new("Array length limit reached (8192)."));
+                            if at + length > self.limits.heap.array_length {
+                                return Err(Fault::new(format!("Array length limit reached ({}).", self.limits.heap.array_length)));
                             }
                             for index in 0..length {
                                 if self.array_has_index(*source, index)? {
@@ -575,8 +575,8 @@ impl Runtime {
                             continue;
                         }
                     }
-                    if at == MAX_ARRAY_LENGTH {
-                        return Err(Fault::new("Array length limit reached (8192)."));
+                    if at == self.limits.heap.array_length {
+                        return Err(Fault::new(format!("Array length limit reached ({}).", self.limits.heap.array_length)));
                     }
                     let value = self.copy_value(source)?;
                     self.set_property(result, at.to_string(), value)?;
@@ -646,8 +646,8 @@ impl Runtime {
         let items = args.get(2..).unwrap_or(&[]);
         let added = items.len();
         let new_length = length - deleted + added;
-        if new_length > MAX_ARRAY_LENGTH {
-            return Err(Fault::new("Array length limit reached (8192)."));
+        if new_length > self.limits.heap.array_length {
+            return Err(Fault::new(format!("Array length limit reached ({}).", self.limits.heap.array_length)));
         }
         if copy {
             let result = self.new_object(Some(new_length))?;

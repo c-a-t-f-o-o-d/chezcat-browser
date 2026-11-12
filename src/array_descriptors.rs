@@ -4,9 +4,7 @@
 //! https://tc39.es/ecma262/#sec-array-exotic-objects-defineownproperty-p-desc
 //! https://tc39.es/ecma262/#sec-arraysetlength
 
-use super::{
-    int32, property_index, Fault, Host, Runtime, Value, MAX_ARRAY_LENGTH, MAX_PROPERTY_BYTES,
-};
+use super::{int32, property_index, Fault, Host, Runtime, Value, MAX_PROPERTY_BYTES};
 
 impl Runtime {
     pub(super) fn array_length_value(
@@ -44,8 +42,8 @@ impl Runtime {
         {
             return Ok(false);
         }
-        if length > MAX_ARRAY_LENGTH {
-            return Err(Fault::new("Array length limit reached (8192)."));
+        if length > self.limits.heap.array_length {
+            return Err(Fault::new(format!("Array length limit reached ({}).", self.limits.heap.array_length)));
         }
         if length < old_length {
             // At most the existing per-object property cap is snapshotted.

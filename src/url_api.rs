@@ -6,7 +6,7 @@
 
 use super::{
     Accessors, Builtin, Declaration, Fault, Host, Ordinary, Reference, Runtime, Value,
-    MAX_CALL_DEPTH, MAX_RETAINED_VALUES,
+    MAX_CALL_DEPTH,
 };
 use std::net::Ipv6Addr;
 
@@ -848,8 +848,8 @@ impl Runtime {
     fn url_reserve(&mut self, old: usize, new: usize) -> Result<usize, Fault> {
         self.work(new)?;
         let total = self.value_bytes.saturating_sub(old).saturating_add(new);
-        if total > MAX_RETAINED_VALUES {
-            return Err(Fault::new("Retained value limit reached (2 MiB)."));
+        if total > self.limits.heap.retained_values {
+            return Err(Fault::new(format!("Retained value limit reached ({} bytes).", self.limits.heap.retained_values)));
         }
         Ok(total)
     }

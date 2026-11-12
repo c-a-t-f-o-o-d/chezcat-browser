@@ -6,7 +6,8 @@
 
 use super::{
     ExprId, ExprKind, Fault, Host, Ordinary, Parser, Program, PropertyKey, Reference, Runtime,
-    TokenKind, Value, MAX_ARRAY_LENGTH, MAX_EVAL_DEPTH, MAX_OBJECT_PROPERTIES, MAX_PROPERTY_BYTES,
+    TokenKind, Value, MAX_ARRAY_LENGTH, MAX_EVAL_DEPTH, MAX_OBJECT_PROPERTIES,
+    MAX_PROPERTY_BYTES,
 };
 use std::collections::HashSet;
 use std::rc::Rc;
@@ -483,8 +484,8 @@ impl Runtime {
                 let array = self.new_object(Some(0))?;
                 let mut index = 0usize;
                 while let Some(value) = self.iterator_next(&mut iterator, host)? {
-                    if index == MAX_ARRAY_LENGTH {
-                        return Err(Fault::new("Array length limit reached (8192)."));
+                    if index == self.limits.heap.array_length {
+                        return Err(Fault::new(format!("Array length limit reached ({}).", self.limits.heap.array_length)));
                     }
                     self.store_property(array, index.to_string(), value, Some((true, true, true)))?;
                     index += 1;
@@ -597,9 +598,9 @@ impl Runtime {
         if let Value::String(text) = value {
             self.work(text.len().saturating_mul(2))?;
             let units = text.encode_utf16().collect::<Vec<_>>();
-            if units.len() > MAX_OBJECT_PROPERTIES {
+            if units.len() > self.limits.heap.object_properties {
                 return Err(Fault::new(
-                    "Property enumeration limit reached (4096 keys).",
+                    format!("Property enumeration limit reached ({} keys).", self.limits.heap.object_properties),
                 ));
             }
             for (index, unit) in units.iter().enumerate() {
@@ -614,9 +615,9 @@ impl Runtime {
             let source = self.ordinary_id(ordinary)?;
             let keys = self.own_string_keys(source, false)?;
             let symbols = self.own_symbol_keys(source, false)?;
-            if keys.len().saturating_add(symbols.len()) > MAX_OBJECT_PROPERTIES {
+            if keys.len().saturating_add(symbols.len()) > self.limits.heap.object_properties {
                 return Err(Fault::new(
-                    "Property enumeration limit reached (4096 keys).",
+                    format!("Property enumeration limit reached ({} keys).", self.limits.heap.object_properties),
                 ));
             }
             for key in keys {

@@ -5,7 +5,7 @@
 
 use super::{
     number_text, property_index, strict_equal, Fault, Host, Ordinary, PropertyKey, Reference,
-    Runtime, Value, MAX_OBJECT_PROPERTIES, MAX_PARSE_DEPTH, MAX_RETAINED_VALUES, MAX_STRING_BYTES,
+    Runtime, Value, MAX_PARSE_DEPTH, MAX_STRING_BYTES,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -59,8 +59,8 @@ impl Reader<'_> {
             .snapshot_bytes
             .saturating_sub(old)
             .saturating_add(bytes);
-        if retained > MAX_RETAINED_VALUES {
-            return Err(Fault::new("JSON reviver snapshot limit reached (2 MiB)."));
+        if retained > runtime.limits.heap.retained_values {
+            return Err(Fault::new(format!("JSON reviver snapshot limit reached ({} bytes).", runtime.limits.heap.retained_values)));
         }
         runtime.work(bytes)?;
         let value = runtime.copy_value(value)?;
@@ -733,16 +733,16 @@ impl Runtime {
                 self.property_name(&key)?;
                 self.work(key.len())?;
                 if !seen.contains(&key) {
-                    if keys.len() == MAX_OBJECT_PROPERTIES {
-                        return Err(Fault::new("JSON property list limit reached (4096)."));
+                    if keys.len() == self.limits.heap.object_properties {
+                        return Err(Fault::new(format!("JSON property list limit reached ({}).", self.limits.heap.object_properties)));
                     }
                     let added = key.len() * 2
                         + 2 * std::mem::size_of::<String>()
                         + 3 * std::mem::size_of::<usize>();
                     bytes = bytes.saturating_add(added);
-                    if bytes > MAX_RETAINED_VALUES {
+                    if bytes > self.limits.heap.retained_values {
                         return Err(Fault::new(
-                            "JSON property list snapshot limit reached (2 MiB).",
+                            format!("JSON property list snapshot limit reached ({} bytes).", self.limits.heap.retained_values),
                         ));
                     }
                     self.work(added)?;

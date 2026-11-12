@@ -6,7 +6,7 @@ implementation. The browser's original X.509, RSA and ECDSA code validates the c
 There is no operating-system trust-store lookup, authority discovery, download,
 automatic root update, or certificate-error bypass.
 
-The default file contains these seven self-signed authorities:
+The default file contains these eight self-signed authorities:
 
 | Certificate | Public key | DER SHA-256 | Expires (UTC) |
 | --- | ---: | --- | --- |
@@ -17,6 +17,7 @@ The default file contains these seven self-signed authorities:
 | GTS Root R1 | RSA 4096 | `d947432abde7b7fa90fc2e6b59101b1280e0e1c7e4e40fa3c6887fff57a7f4cf` | 2036-06-22 00:00:00 |
 | GTS Root R3 | ECDSA P-384 | `34d8a73ee208d9bcdb0d956520934b4e40e69482596e8b6f73c8426b010a6f48` | 2036-06-22 00:00:00 |
 | GTS Root R4 | ECDSA P-384 | `349dfa4058c5e263123b398ae795573c4e1313c83fe68f93556cd5e8031b3c7d` | 2036-06-22 00:00:00 |
+| DigiCert Global Root G3 | ECDSA P-384 | `31ad6648f8104138c738f39ea4320133393e3a18cc02296ef97c2ac9ef6731d0` | 2038-01-15 12:00:00 |
 
 Expiry means the certificate's `notAfter`, not a browser root program's trust-retirement date.
 The GTS entries are the self-signed **with digitalSignature** variants; other
@@ -82,3 +83,19 @@ valid for the older RSA fixtures. None of these test roots is included in
 
 Revocation, OCSP/CRL fetching and certificate transparency are not implemented.
 No revocation or CT status is implied by the status bar's certificate result.
+
+## 0.51 explicit addition
+
+The G3 DER fingerprint was checked against DigiCert's published root list on
+2026-11-12. Its subject-name DER SHA-256 exactly matches the last issuer-name
+hash in the user's failing www.bing.com path. The first seven certificates are
+unchanged. See `digicert-global-root-g3-provenance.json` for fingerprints and the
+source of these certificate data. OpenSSL independently verified its self-signature.
+
+This is an explicit addition to the bundled trust policy, not automatic trust
+of certificates sent by a server. It can validate only a correctly signed path
+satisfying the existing hostname, time, constraints and algorithm checks. The
+reported peer DER files were not supplied, so the full Bing path still needs a
+fresh capture. Certificate validation, revocation/CT limitations and custom
+`--trust-file` replacement semantics remain unchanged. Restart the browser to
+load the updated bundle; the activity report should list eight roots.

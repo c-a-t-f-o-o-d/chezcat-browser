@@ -5,7 +5,7 @@
 
 use super::{
     Builtin, Declaration, Fault, Host, NativeGetter, Ordinary, Runtime, Value, MAX_CALL_DEPTH,
-    MAX_RETAINED_VALUES, MAX_STRING_BYTES,
+    MAX_STRING_BYTES,
 };
 use std::collections::{BTreeMap, HashMap};
 
@@ -315,8 +315,8 @@ impl Runtime {
         if key.bytes() > MAX_STRING_BYTES || value.bytes() > MAX_STRING_BYTES {
             return Err(Fault::new("String limit reached (128 KiB)."));
         }
-        if retained > MAX_RETAINED_VALUES {
-            return Err(Fault::new("Retained value limit reached (2 MiB)."));
+        if retained > self.limits.heap.retained_values {
+            return Err(Fault::new(format!("Retained value limit reached ({} bytes).", self.limits.heap.retained_values)));
         }
         if let Some(order) = existing {
             self.objects[id]
@@ -430,8 +430,8 @@ impl Runtime {
         if text.len() > MAX_STRING_BYTES {
             return Err(Fault::new("String limit reached (128 KiB)."));
         }
-        if self.value_bytes.saturating_add(text.len()) > MAX_RETAINED_VALUES {
-            return Err(Fault::new("Retained value limit reached (2 MiB)."));
+        if self.value_bytes.saturating_add(text.len()) > self.limits.heap.retained_values {
+            return Err(Fault::new(format!("Retained value limit reached ({} bytes).", self.limits.heap.retained_values)));
         }
         self.work(text.len())?;
         let id = self.new_object(None)?;

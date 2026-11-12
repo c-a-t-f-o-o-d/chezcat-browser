@@ -227,10 +227,68 @@ pub fn verify_server(
             }
         }
     }
-    Err(match failure {
+    let reason = match failure {
         Some(error) => format!("No supplied trusted root validates this chain: {error}"),
         None => "The server chain does not reach a supplied trusted root.".to_owned(),
-    })
+    };
+    Err(format!("{reason}\n{}", untrusted_path_summary(&chain, &roots)))
+}
+
+// This metadata identifies the failing peer path; it never supplies trust.
+// Subject/issuer display names are not used in validation, which still compares
+// their exact DER and verifies signatures against the explicitly supplied roots.
+fn untrusted_path_summary(chain: &[Certificate<'_>], roots: &[Certificate<'_>]) -> String {
+    use std::fmt::Write;
+    let mut report = String::from("Untrusted peer path (diagnostic metadata only; not a trust decision):\n");
+    if let Some(last) = chain.last() {
+        let _ = writeln!(report, "Last issuer CN: {}; issuer-name SHA-256: {}",
+            diagnostic_common_name(last.issuer), fingerprint(&sha256(last.issuer)));
+    }
+    let _ = writeln!(report, "Presented certificates: {}; configured roots: {}. No certificates fetched or trusted automatically.",
+        chain.len(), roots.len());
+    for (index, certificate) in chain.iter().take(MAX_CHAIN).enumerate() {
+        let subject_matches = roots.iter().filter(|root| certificate.issuer == root.subject).count();
+        let key_matches = roots.iter().filter(|root| issuer_matches(certificate, root)).count();
+        let _ = writeln!(report, "Peer {} SHA-256: {}; subject CN: {}; issuer CN: {}; root subject matches: {}; root subject/key-id matches: {}.",
+            index + 1, fingerprint(&certificate.fingerprint), diagnostic_common_name(certificate.subject),
+            diagnostic_common_name(certificate.issuer), subject_matches, key_matches);
+    }
+    report
+}
+
+fn diagnostic_common_name(der: &[u8]) -> String {
+    let name = (|| -> Result<Option<&str>, String> {
+        let mut rdns = Reader::new(single(der, 0x30)?.value);
+        for _ in 0..64 {
+            if rdns.peek().is_none() { break; }
+            let mut rdn = Reader::new(rdns.expect(0x31)?.value);
+            for _ in 0..16 {
+                if rdn.peek().is_none() { break; }
+                let mut attribute = Reader::new(rdn.expect(0x30)?.value);
+                let oid = attribute.expect(0x06)?;
+                let value = attribute.next()?;
+                attribute.finish()?;
+                if oid.value == [0x55, 0x04, 0x03] && matches!(value.tag, 0x0c | 0x13 | 0x16) {
+                    return Ok(std::str::from_utf8(value.value).ok());
+                }
+            }
+        }
+        Ok(None)
+    })().ok().flatten();
+    let Some(name) = name else { return "<not displayed>".into(); };
+    let mut result = String::new();
+    for c in name.chars().take(121) {
+        // Printable escaped ASCII prevents certificate text from injecting
+        // diagnostic lines or bidi/control characters. Output is bounded even
+        // for a maximum-sized certificate name.
+        let escaped = c.escape_default().to_string();
+        if result.len() + escaped.len() > 120 {
+            result.push_str("...");
+            break;
+        }
+        result.push_str(&escaped);
+    }
+    result
 }
 
 fn intermediate_count(certificates: &[Certificate<'_>]) -> usize {
@@ -1472,6 +1530,7 @@ mod tests {
             ("D9:47:43:2A:BD:E7:B7:FA:90:FC:2E:6B:59:10:1B:12:80:E0:E1:C7:E4:E4:0F:A3:C6:88:7F:FF:57:A7:F4:CF", 512, "RSA"),
             ("34:D8:A7:3E:E2:08:D9:BC:DB:0D:95:65:20:93:4B:4E:40:E6:94:82:59:6E:8B:6F:73:C8:42:6B:01:0A:6F:48", 97, "ECDSA P-384"),
             ("34:9D:FA:40:58:C5:E2:63:12:3B:39:8A:E7:95:57:3C:4E:13:13:C8:3F:E6:8F:93:55:6C:D5:E8:03:1B:3C:7D", 97, "ECDSA P-384"),
+            ("31:AD:66:48:F8:10:41:38:C7:38:F3:9E:A4:32:01:33:39:3E:3A:18:CC:02:29:6E:F9:7C:2A:C9:EF:67:31:D0", 97, "ECDSA P-384"),
         ];
         assert_eq!(roots.len(), expected.len());
         for (der, (expected_fingerprint, key_bytes, key_kind)) in roots.iter().zip(expected) {
@@ -1493,6 +1552,20 @@ mod tests {
                 expected_fingerprint
             );
         }
+    }
+
+    #[test]
+    fn bundled_g3_identity_matches_the_published_root_and_reported_issuer() {
+        // This verifies bundled root DATA, not the absent Bing peer DER chain.
+        let roots = parse_pem_certificates(include_bytes!("../trust/roots.pem")).unwrap();
+        let root = parse_certificate(roots.last().unwrap()).unwrap();
+        assert_eq!(fingerprint(&root.fingerprint),
+            "31:AD:66:48:F8:10:41:38:C7:38:F3:9E:A4:32:01:33:39:3E:3A:18:CC:02:29:6E:F9:7C:2A:C9:EF:67:31:D0");
+        assert_eq!(fingerprint(&sha256(root.subject)),
+            "54:43:1F:47:9F:E2:A4:E5:63:6A:92:AC:DB:E1:E7:F6:00:28:AC:4A:1A:22:44:ED:31:BD:17:C4:94:B6:EE:3C");
+        assert_eq!(root.subject, root.issuer);
+        assert_eq!(root.key.description(), "ECDSA P-384");
+        assert_eq!(root.algorithm, Signature::Ecdsa(Hash::Sha384));
     }
 
     #[test]
@@ -1536,6 +1609,39 @@ mod tests {
             // must return a result without panicking for every byte position.
             let _ = parse_certificate(&malformed);
         }
+    }
+
+    #[test]
+    fn untrusted_path_reports_peer_identity_without_accepting_it() {
+        let chain = parse_pem_certificates(include_bytes!("../tools/https-demo/server-chain.pem")).unwrap();
+        let roots = parse_pem_certificates(include_bytes!("../trust/roots.pem")).unwrap();
+        let now = UNIX_EPOCH + std::time::Duration::from_secs(1_794_182_400);
+        let error = verify_server(&chain, &roots, "localhost", now).unwrap_err();
+        assert!(error.contains("does not reach a supplied trusted root"), "{error}");
+        assert!(error.contains("Untrusted peer path"));
+        assert!(error.contains(&fingerprint(&sha256(&chain[0]))));
+        assert!(error.contains("Last issuer CN:"));
+        assert!(error.contains("root subject/key-id matches: 0"));
+        assert!(error.len() < 4096);
+        let trusted = parse_pem_certificates(include_bytes!("../tools/https-demo/ca.pem")).unwrap();
+        assert!(!verify_server(&chain, &trusted, "localhost", now).unwrap().summary.contains("Untrusted peer"));
+    }
+
+    #[test]
+    fn certificate_diagnostic_names_are_escaped_bounded_and_non_authoritative() {
+        let mut attribute = encode(0x06, &[0x55, 0x04, 0x03]);
+        attribute.extend(encode(0x0c, "issuer\nforged\r\t\u{202e}name".as_bytes()));
+        let der = encode(0x30, &encode(0x31, &encode(0x30, &attribute)));
+        let displayed = diagnostic_common_name(&der);
+        assert!(displayed.contains("\\n"));
+        assert!(!displayed.chars().any(|c| matches!(c, '\n' | '\r' | '\t' | '\u{202e}')));
+        assert!(displayed.is_ascii());
+        let mut long = encode(0x06, &[0x55, 0x04, 0x03]);
+        long.extend(encode(0x0c, "é".repeat(1000).as_bytes()));
+        let der = encode(0x30, &encode(0x31, &encode(0x30, &long)));
+        assert!(diagnostic_common_name(&der).len() <= 123);
+        assert_eq!(diagnostic_common_name(&[]), "<not displayed>");
+        assert_eq!(diagnostic_common_name(&encode(0x30, &[])), "<not displayed>");
     }
 
     fn encode(tag: u8, value: &[u8]) -> Vec<u8> {

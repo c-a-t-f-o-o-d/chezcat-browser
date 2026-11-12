@@ -6,7 +6,6 @@
 
 use super::{
     Builtin, Declaration, Fault, NativeGetter, Ordinary, Program, Runtime, StmtKind, Value,
-    MAX_RETAINED_VALUES,
 };
 use std::collections::{BTreeMap, HashSet};
 
@@ -76,8 +75,8 @@ impl Runtime {
             }
         }
         let bytes = values.iter().map(Value::bytes).sum::<usize>();
-        if self.value_bytes.saturating_add(bytes) > MAX_RETAINED_VALUES {
-            return Err(Fault::new("Retained value limit reached (2 MiB)."));
+        if self.value_bytes.saturating_add(bytes) > self.limits.heap.retained_values {
+            return Err(Fault::new(format!("Retained value limit reached ({} bytes).", self.limits.heap.retained_values)));
         }
         self.work(bytes)?;
         let mut mapped = BTreeMap::new();
@@ -159,6 +158,9 @@ impl Runtime {
             self.arguments_iterator_method(),
             Some((false, true, true)),
         )?;
+        if !pending.mapped.is_empty() {
+            self.capture_environment(environment);
+        }
         self.objects[id].arguments = Some(Data {
             environment,
             mapped: pending.mapped,

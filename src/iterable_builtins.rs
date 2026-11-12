@@ -5,8 +5,7 @@
 //! https://tc39.es/ecma262/#sec-object.fromentries
 
 use super::{
-    Builtin, Fault, Function, Host, PropertyKey, Reference, Runtime, Value, MAX_ARRAY_LENGTH,
-    MAX_CALL_DEPTH,
+    Builtin, Fault, Function, Host, PropertyKey, Reference, Runtime, Value, MAX_CALL_DEPTH,
 };
 
 #[derive(Clone, Copy)]
@@ -183,8 +182,8 @@ impl Runtime {
                     self.array_from_length(&target, index, host)?;
                     return Ok(target);
                 };
-                if index >= MAX_ARRAY_LENGTH {
-                    return Err(Fault::new("Array.from length limit reached (8192)."));
+                if index >= self.limits.heap.array_length {
+                    return Err(Fault::new(format!("Array.from length limit reached ({}).", self.limits.heap.array_length)));
                 }
                 let mapped = self.array_from_map(mapper, receiver, value, index, host);
                 let defined = mapped.and_then(|value| {
@@ -217,8 +216,8 @@ impl Runtime {
             }
         };
         let length = self.binary_source_length(&source, host)?;
-        if length > MAX_ARRAY_LENGTH {
-            return Err(Fault::new("Array.from length limit reached (8192)."));
+        if length > self.limits.heap.array_length {
+            return Err(Fault::new(format!("Array.from length limit reached ({}).", self.limits.heap.array_length)));
         }
         let target = self.array_from_target(&constructor, Some(length), host)?;
         let source = self.ordinary_required(&source)?;

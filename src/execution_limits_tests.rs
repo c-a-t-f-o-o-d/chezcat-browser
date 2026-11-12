@@ -177,13 +177,14 @@ fn browser_budget_microtasks_share_the_enlarged_allowance_and_still_cancel() {
 }
 
 #[test]
-fn browser_budget_does_not_raise_native_or_allocation_limits() {
+fn browser_budget_preserves_native_and_single_string_limits() {
     assert_eq!(MAX_PARSE_DEPTH, 64);
     assert_eq!(MAX_EVAL_DEPTH, 128);
     assert_eq!(MAX_CALL_DEPTH, 32);
     assert_eq!(MAX_EVALUATION_FRAMES, 4096);
     assert_eq!(MAX_STRING_BYTES, 128 * 1024);
-    assert_eq!(MAX_RETAINED_VALUES, 2 * 1024 * 1024);
+    assert_eq!(limits::REGRESSION_HEAP.retained_values, 2 * 1024 * 1024);
+    assert_eq!(limits::BROWSER.heap, limits::BROWSER_HEAP);
     assert!(limits::BROWSER.startup_copy >= 2 * limits::BROWSER.copy_bytes);
     assert!(limits::BROWSER.startup_steps >= limits::BROWSER.steps);
     assert!(limits::BROWSER.startup_regexp >= limits::BROWSER.regexp_work);

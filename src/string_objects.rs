@@ -78,9 +78,9 @@ impl Runtime {
             .value_bytes
             .saturating_add(value.len())
             .saturating_add("length".len())
-            > super::MAX_RETAINED_VALUES
+            > self.limits.heap.retained_values
         {
-            return Err(Fault::new("Retained value limit reached (2 MiB)."));
+            return Err(Fault::new(format!("Retained value limit reached ({} bytes).", self.limits.heap.retained_values)));
         }
         self.work_as(value.len(), WorkKind::LengthScan)?;
         let length = value.encode_utf16().count();
@@ -104,9 +104,9 @@ impl Runtime {
             .value_bytes
             .saturating_add(value.len())
             .saturating_add("length".len())
-            > super::MAX_RETAINED_VALUES
+            > self.limits.heap.retained_values
         {
-            return Err(Fault::new("Retained value limit reached (2 MiB)."));
+            return Err(Fault::new(format!("Retained value limit reached ({} bytes).", self.limits.heap.retained_values)));
         }
         let id = self.new_object(None)?;
         self.initialize_string_object(id, value)?;

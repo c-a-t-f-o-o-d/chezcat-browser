@@ -121,6 +121,7 @@ enum Transition<'p> {
     Invoke(Call<'p>),
     Spread(Call<'p>, Value),
     Read(Reference, ReadEnd),
+    Immediate(ExprId),
 }
 
 fn value(completion: Completion) -> Value {
@@ -165,15 +166,18 @@ impl Runtime {
         &mut self, program: &Rc<Program>, id: ExprId, env: usize,
         this: &Value, host: &mut dyn Host,
     ) -> Result<Value, Fault> {
-        // A leaf has no suspended children. Keep its shared logical slot, but
-        // do not allocate a continuation vector for every literal/name read.
+        // Compound helpers already own their traversal state. Do not retain
+        // this driver's large Frame/Transition temporaries while they invoke
+        // iterator getters or other callbacks. Children still reenter eval
+        // through its native guard and share the heap-frame quota.
         if matches!(&program.exprs[id].kind, ExprKind::Literal(_) | ExprKind::Name(_)
-            | ExprKind::This | ExprKind::Function(_) | ExprKind::RegExp(_)) {
+            | ExprKind::This | ExprKind::Function(_) | ExprKind::RegExp(_)
+            | ExprKind::Array(_) | ExprKind::Object(_) | ExprKind::TemplateLiteral(..)) {
             if self.evaluation_frames >= MAX_EVALUATION_FRAMES {
                 return Err(Fault::new("Pending evaluation limit reached (4096)."));
             }
             self.evaluation_frames += 1;
-            let result = self.eval_inner(program, id, env, this, host);
+            let result = self.eval_heap_immediate(program, id, env, this, host);
             self.evaluation_frames -= 1;
             return result;
         }
@@ -186,6 +190,32 @@ impl Runtime {
         self.evaluation_frame_slots = baseline.1;
         self.evaluation_argument_slots = baseline.2;
         result
+    }
+
+    // Keep this dispatch independent from the recursive test oracle. That
+    // oracle handles every expression kind and retains unnecessary temporary
+    // state during callback reentry in unoptimized Windows builds.
+    #[inline(never)]
+    fn eval_heap_immediate(
+        &mut self, program: &Rc<Program>, id: ExprId, env: usize,
+        this: &Value, host: &mut dyn Host,
+    ) -> Result<Value, Fault> {
+        match &program.exprs[id].kind {
+            ExprKind::Literal(value) => self.copy_value(value),
+            ExprKind::Name(name) => match self.lookup(env, name)? {
+                Some(scope) => self.read_binding(scope, name, host),
+                None if self.global_exists(name, host)? => self.global_value(name, host),
+                None => Err(Fault::exception("ReferenceError", format!("{name} is not defined."))),
+            },
+            ExprKind::This => self.copy_value(this),
+            ExprKind::Function(template) => self.make_function(program, *template, env, this),
+            ExprKind::RegExp(expression) => self.regexp_object(expression.clone()),
+            ExprKind::Array(elements) => self.eval_array_literal(program, elements, env, this, host),
+            ExprKind::Object(properties) => self.eval_object_literal(program, properties, env, this, host),
+            ExprKind::TemplateLiteral(head, spans) => self.eval_template(program, head, spans, env, this, host),
+            ExprKind::Pattern(_) => Err(Fault::new("A destructuring target is not an expression.")),
+            _ => unreachable!("continuation expression routed to an immediate helper"),
+        }
     }
 
     fn push_evaluation<'p>(
@@ -248,6 +278,8 @@ impl Runtime {
                         call, &mut scratch, env, this, host).map_err(located)?,
                     Transition::Spread(call, result) => self.finish_heap_spread(
                         call, result, &mut scratch, env, this, host).map_err(located)?,
+                    Transition::Immediate(id) => done(
+                        self.eval_heap_immediate(program, id, env, this, host).map_err(located)?),
                     Transition::Read(reference, end) => match end {
                         ReadEnd::Value => done(self.read_reference(&reference, host).map_err(located)?),
                         ReadEnd::Reference => Transition::Done(Completion::Reference(reference)),
@@ -285,7 +317,8 @@ impl Runtime {
                     self.evaluation_frames -= 1;
                     completed = Some(result);
                 }
-                Transition::Invoke(_) | Transition::Spread(..) | Transition::Read(..) => unreachable!(),
+                Transition::Invoke(_) | Transition::Spread(..) | Transition::Read(..)
+                    | Transition::Immediate(_) => unreachable!(),
             }
         }
         debug_assert!(scratch.arguments.is_empty());
@@ -373,9 +406,9 @@ impl Runtime {
                 Transition::Child(Request::Operand(*base),
                     State::ChainNext { steps, next: 0, end: ChainEnd::Value })
             }
-            // Collection/template helpers keep native guards and reenter the
-            // same globally bounded driver for their expression children.
-            _ => return self.eval_inner(program, id, env, this, host).map(done),
+            // Return before entering a helper that can call page code. In
+            // particular array-spread iteration must not suspend this builder.
+            _ => Transition::Immediate(id),
         };
         Ok(next)
     }

@@ -8,8 +8,8 @@
 //! Proxies remain an explicit limitation.
 
 use super::{
-    strict_equal, Accessors, Builtin, Fault, Function, Host, Ordinary, PropertyKey, Runtime, Value,
-    MAX_CALL_DEPTH, MAX_FUNCTIONS, MAX_OBJECT_PROPERTIES,
+    strict_equal, Accessors, Builtin, Fault, Function, Host, Ordinary, PropertyKey, Runtime,
+    Value, MAX_CALL_DEPTH, MAX_FUNCTIONS,
 };
 use std::collections::HashSet;
 
@@ -689,8 +689,8 @@ impl Runtime {
             let id = self.ordinary_id(object)?;
             for key in self.enumerable_keys(id)? {
                 if seen.insert(key.clone()) {
-                    if keys.len() >= MAX_OBJECT_PROPERTIES {
-                        return Err(Fault::new("for-in enumeration limit reached (4096 keys)."));
+                    if keys.len() >= self.limits.heap.object_properties {
+                        return Err(Fault::new(format!("for-in enumeration limit reached ({} keys).", self.limits.heap.object_properties)));
                     }
                     keys.push(key);
                 }
@@ -1590,9 +1590,9 @@ impl Runtime {
                     } else {
                         Vec::new()
                     };
-                    if keys.len().saturating_add(symbols.len()) > MAX_OBJECT_PROPERTIES {
+                    if keys.len().saturating_add(symbols.len()) > self.limits.heap.object_properties {
                         return Err(Fault::new(
-                            "Property enumeration limit reached (4096 keys).",
+                            format!("Property enumeration limit reached ({} keys).", self.limits.heap.object_properties),
                         ));
                     }
                     for key in keys {
@@ -1685,9 +1685,9 @@ impl Runtime {
             .map(PropertyKey::String)
             .collect();
         let symbols = self.own_symbol_keys(id, false)?;
-        if keys.len().saturating_add(symbols.len()) > MAX_OBJECT_PROPERTIES {
+        if keys.len().saturating_add(symbols.len()) > self.limits.heap.object_properties {
             return Err(Fault::new(
-                "Property enumeration limit reached (4096 keys).",
+                format!("Property enumeration limit reached ({} keys).", self.limits.heap.object_properties),
             ));
         }
         keys.extend(symbols.into_iter().map(PropertyKey::Symbol));
@@ -1717,8 +1717,8 @@ impl Runtime {
             let descriptor = self.property_descriptor(descriptor, host)?;
             snapshot_bytes =
                 snapshot_bytes.saturating_add(descriptor.value.as_ref().map_or(0, Value::bytes));
-            if snapshot_bytes > super::MAX_RETAINED_VALUES {
-                return Err(Fault::new("Descriptor snapshot limit reached (2 MiB)."));
+            if snapshot_bytes > self.limits.heap.retained_values {
+                return Err(Fault::new(format!("Descriptor snapshot limit reached ({} bytes).", self.limits.heap.retained_values)));
             }
             entries.push((key, descriptor));
         }

@@ -4,7 +4,9 @@
 //! Global matching finishes before the first callback. Custom Symbol.replace/
 //! RegExp execution protocols remain outside the existing subset.
 
-use super::{regexp, Fault, Host, Runtime, Value, MAX_ARRAY_LENGTH, MAX_RETAINED_VALUES};
+use super::{regexp, Fault, Host, Runtime, Value};
+#[cfg(test)]
+use super::MAX_ARRAY_LENGTH;
 
 impl Runtime {
     pub(super) fn string_replace_all(
@@ -100,13 +102,13 @@ impl Runtime {
                 else {
                     break;
                 };
-                if matches.len() >= MAX_ARRAY_LENGTH {
-                    return Err(Fault::new("Replacement match limit reached (8192)."));
+                if matches.len() >= self.limits.heap.array_length {
+                    return Err(Fault::new(format!("Replacement match limit reached ({}).", self.limits.heap.array_length)));
                 }
                 let bytes = found.retained_bytes();
                 snapshot_bytes = snapshot_bytes.saturating_add(bytes);
-                if snapshot_bytes > MAX_RETAINED_VALUES {
-                    return Err(Fault::new("Replacement snapshot limit reached (2 MiB)."));
+                if snapshot_bytes > self.limits.heap.retained_values {
+                    return Err(Fault::new(format!("Replacement snapshot limit reached ({} bytes).", self.limits.heap.retained_values)));
                 }
                 // Range snapshots retain no duplicate source strings and also
                 // spend the shared job allowance, including across recursion.

@@ -5,8 +5,8 @@
 //! https://html.spec.whatwg.org/multipage/webappapis.html#perform-a-microtask-checkpoint
 
 use super::{
-    Accessors, Builtin, Declaration, Exception, Fault, Function, Host, Ordinary, Runtime, Value,
-    MAX_CALL_DEPTH, MAX_FUNCTIONS, MAX_RETAINED_VALUES, MAX_STRING_BYTES,
+    Accessors, Builtin, Declaration, Exception, Fault, Function, Host, Ordinary, Runtime,
+    Value, MAX_CALL_DEPTH, MAX_FUNCTIONS, MAX_STRING_BYTES,
 };
 use std::collections::VecDeque;
 
@@ -190,8 +190,8 @@ pub(super) struct Arena {
 
 impl Runtime {
     fn promise_retain(&mut self, bytes: usize) -> Result<(), Fault> {
-        if self.value_bytes.saturating_add(bytes) > MAX_RETAINED_VALUES {
-            return Err(Fault::new("Retained value limit reached (2 MiB)."));
+        if self.value_bytes.saturating_add(bytes) > self.limits.heap.retained_values {
+            return Err(Fault::new(format!("Retained value limit reached ({} bytes).", self.limits.heap.retained_values)));
         }
         self.work(bytes)?;
         self.value_bytes += bytes;

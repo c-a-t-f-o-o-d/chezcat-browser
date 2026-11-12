@@ -43,6 +43,9 @@ mod expression_evaluator_tests;
 #[cfg(test)]
 #[path = "expression_parser_tests.rs"]
 mod expression_parser_tests;
+#[cfg(test)]
+#[path = "environment_lifetime_tests.rs"]
+mod environment_lifetime_tests;
 #[path = "function_constructor.rs"]
 mod function_constructor;
 #[path = "host_objects.rs"]
@@ -99,6 +102,9 @@ pub mod limits;
 #[cfg(test)]
 #[path = "execution_limits_tests.rs"]
 mod execution_limits_tests;
+#[cfg(test)]
+#[path = "heap_limits_tests.rs"]
+mod heap_limits_tests;
 
 // Source/parse storage is separate from execution, strings and host work.
 // A bounded 512 KiB bundle can contain ordinary bootstrap code without giving
@@ -135,13 +141,16 @@ const MAX_RETAINED_AST: usize = 262_144;
 const MAX_FUNCTIONS: usize = 1024;
 const MAX_ENVIRONMENTS: usize = 4096;
 const MAX_BINDINGS: usize = 4096;
-const MAX_RETAINED_VALUES: usize = 2 * 1024 * 1024;
-const MAX_OBJECTS: usize = 4096;
-const MAX_PROPERTIES: usize = 16_384;
-const MAX_OBJECT_PROPERTIES: usize = 4096;
-// Logical holes do not allocate values. Stored entries still share the 4096
-// per-object property cap and the document's memory/work/output budgets.
-const MAX_ARRAY_LENGTH: usize = 8192;
+#[cfg(test)]
+const MAX_RETAINED_VALUES: usize = limits::REGRESSION_HEAP.retained_values;
+#[cfg(test)]
+const MAX_OBJECTS: usize = limits::REGRESSION_HEAP.objects;
+#[cfg(test)]
+const MAX_PROPERTIES: usize = limits::REGRESSION_HEAP.properties;
+// Source literal/pattern bounds remain separate from dynamic heap capacity.
+// Historical regression-profile tests use these same small boundary witnesses.
+const MAX_OBJECT_PROPERTIES: usize = limits::REGRESSION_HEAP.object_properties;
+const MAX_ARRAY_LENGTH: usize = limits::REGRESSION_HEAP.array_length;
 const MAX_PROPERTY_BYTES: usize = 256;
 
 #[derive(Clone, Debug)]
@@ -2732,6 +2741,9 @@ struct Binding {
 }
 
 struct Environment {
+    // A closure or mapped arguments object can outlive the current activation.
+    // Pin its ancestor chain before publishing the retaining handle.
+    captured: bool,
     arguments: Option<arguments::Pending>,
     parent: Option<usize>,
     function_scope: bool,
@@ -3005,6 +3017,7 @@ impl Runtime {
     pub fn with_limits(limits: limits::Limits) -> Self {
         let mut runtime = Self {
             environments: vec![Some(Environment {
+                captured: true,
                 arguments: None,
                 parent: None,
                 function_scope: true,
@@ -3376,19 +3389,23 @@ impl Runtime {
             // var/function bindings; sloppy eval targets the caller's variable
             // environment (or the global environment for an indirect call).
             let lexical = self.new_environment(outer, program.strict)?;
-            let variable = if program.strict {
-                lexical
-            } else {
-                self.var_environment(outer)?
-            };
-            if !program.strict {
-                self.check_eval_declarations(&program, outer, variable)?;
-            }
-            self.prepare_scopes(&program, &program.body, lexical, variable, true, host)?;
-            match self.statements(&program, &program.body, lexical, &this, host)? {
-                Control::Normal(value) => Ok(value.unwrap_or(Value::Undefined)),
-                _ => Err(Fault::new("Unexpected control completion in eval.")),
-            }
+            let result = (|| {
+                let variable = if program.strict {
+                    lexical
+                } else {
+                    self.var_environment(outer)?
+                };
+                if !program.strict {
+                    self.check_eval_declarations(&program, outer, variable)?;
+                }
+                self.prepare_scopes(&program, &program.body, lexical, variable, true, host)?;
+                match self.statements(&program, &program.body, lexical, &this, host)? {
+                    Control::Normal(value) => Ok(value.unwrap_or(Value::Undefined)),
+                    _ => Err(Fault::new("Unexpected control completion in eval.")),
+                }
+            })();
+            self.release_environment(lexical);
+            result
         })();
         self.call_depth -= 1;
         self.strict = previous_strict;
@@ -3613,6 +3630,7 @@ impl Runtime {
     fn new_environment(&mut self, parent: usize, function_scope: bool) -> Result<usize, Fault> {
         self.step()?;
         let env = Some(Environment {
+            captured: false,
             arguments: None,
             parent: Some(parent),
             function_scope,
@@ -3627,7 +3645,7 @@ impl Runtime {
             self.environments.push(env);
             Ok(id)
         } else {
-            Err(Fault::new("Environment limit reached (4096)."))
+            Err(self.environment_limit_fault("Environment", MAX_ENVIRONMENTS))
         }
     }
     fn put_binding(
@@ -3653,7 +3671,7 @@ impl Runtime {
             return Err(Fault::new("String limit reached (128 KiB)."));
         }
         if old.is_none() && self.bindings == MAX_BINDINGS {
-            return Err(Fault::new("Binding limit reached (4096)."));
+            return Err(self.environment_limit_fault("Binding", MAX_BINDINGS));
         }
         let pending_bytes = if name == "arguments" {
             self.environment(env)
@@ -3663,8 +3681,8 @@ impl Runtime {
         } else {
             0
         };
-        if self.value_bytes - old_bytes - pending_bytes + new_bytes > MAX_RETAINED_VALUES {
-            return Err(Fault::new("Retained value limit reached (2 MiB)."));
+        if self.value_bytes - old_bytes - pending_bytes + new_bytes > self.limits.heap.retained_values {
+            return Err(Fault::new(format!("Retained value limit reached ({} bytes).", self.limits.heap.retained_values)));
         }
         let new = old.is_none();
         self.work(new_bytes.saturating_add(name.len()))?;
@@ -3896,8 +3914,8 @@ impl Runtime {
             environment
         };
         let lexical_this = if program.templates[template].arrow {
-            if self.value_bytes.saturating_add(this.bytes()) > MAX_RETAINED_VALUES {
-                return Err(Fault::new("Retained value limit reached (2 MiB)."));
+            if self.value_bytes.saturating_add(this.bytes()) > self.limits.heap.retained_values {
+                return Err(Fault::new(format!("Retained value limit reached ({} bytes).", self.limits.heap.retained_values)));
             }
             let value = self.copy_value(this)?;
             self.value_bytes += value.bytes();
@@ -3905,6 +3923,7 @@ impl Runtime {
         } else {
             None
         };
+        self.capture_environment(environment);
         self.functions.push(Function::Script {
             program: program.clone(),
             template,
@@ -4106,6 +4125,49 @@ impl Runtime {
         }
         Ok(())
     }
+    fn environment_limit_fault(&self, kind: &str, limit: usize) -> Fault {
+        let occupied = self.environments.iter().flatten().count();
+        let pinned = self.environments.iter().flatten().filter(|env| env.captured).count();
+        Fault::new(format!(
+            "{kind} limit reached ({limit}). Scope arena: occupied={occupied}; pinned={pinned}; reusable={}; bindings={}. Counts only; no binding names or values.",
+            self.free_environments.len(), self.bindings,
+        ))
+    }
+
+    fn capture_environment(&mut self, mut id: usize) {
+        loop {
+            let environment = self.environment_mut(id);
+            if environment.captured {
+                break;
+            }
+            environment.captured = true;
+            match environment.parent {
+                Some(parent) => id = parent,
+                None => break,
+            }
+        }
+    }
+
+    fn discard_environment(&mut self, id: usize) {
+        if let Some(environment) = self.environments[id].take() {
+            self.bindings -= environment.bindings.len();
+            self.value_bytes -= environment.arguments.as_ref().map_or(0, arguments::Pending::bytes);
+            self.value_bytes -= environment.bindings.values()
+                .filter_map(|binding| binding.value.as_ref())
+                .map(Value::bytes).sum::<usize>();
+            self.free_environments.push(id);
+        }
+    }
+
+    // Called only when the lexical activation has completed. Returned closures
+    // and mapped arguments have already pinned every environment they need.
+    // Cleanup invokes no page code, refunds no job work and also runs on errors.
+    fn release_environment(&mut self, id: usize) {
+        if id != 0 && self.environments[id].as_ref().is_some_and(|env| !env.captured) {
+            self.discard_environment(id);
+        }
+    }
+
     fn collect_environments(&mut self) {
         let mut live = vec![false; self.environments.len()];
         let mut roots = vec![0];
@@ -4134,21 +4196,10 @@ impl Runtime {
             }
         }
         for (id, used) in live.into_iter().enumerate() {
-            if !used {
-                if let Some(environment) = self.environments[id].take() {
-                    self.bindings -= environment.bindings.len();
-                    self.value_bytes -= environment
-                        .arguments
-                        .as_ref()
-                        .map_or(0, arguments::Pending::bytes);
-                    self.value_bytes -= environment
-                        .bindings
-                        .values()
-                        .filter_map(|binding| binding.value.as_ref())
-                        .map(Value::bytes)
-                        .sum::<usize>();
-                    self.free_environments.push(id);
-                }
+            if used {
+                self.environment_mut(id).captured = true;
+            } else {
+                self.discard_environment(id);
             }
         }
     }
@@ -4453,8 +4504,8 @@ impl Runtime {
         self.set_property_throw(id, "lastIndex".into(), Value::Number(0.0))?;
         let mut matches = Vec::new();
         while let Some(found) = self.regexp_run(id, &input)? {
-            if matches.len() == MAX_ARRAY_LENGTH {
-                return Err(Fault::new("Array length limit reached (8192)."));
+            if matches.len() == self.limits.heap.array_length {
+                return Err(Fault::new(format!("Array length limit reached ({}).", self.limits.heap.array_length)));
             }
             matches.push(Value::String(
                 self.units_string(&input[found.start()..found.end()])?,
@@ -4574,8 +4625,8 @@ impl Runtime {
         limit: usize,
     ) -> Result<bool, Fault> {
         self.step()?;
-        if pieces.len() >= MAX_ARRAY_LENGTH {
-            return Err(Fault::new("Array length limit reached (8192)."));
+        if pieces.len() >= self.limits.heap.array_length {
+            return Err(Fault::new(format!("Array length limit reached ({}).", self.limits.heap.array_length)));
         }
         pieces.push(value);
         Ok(pieces.len() >= limit)
@@ -4717,15 +4768,26 @@ impl Runtime {
             .ok_or_else(|| Fault::new("Invalid object handle."))
     }
 
+    fn property_limit_fault(&self, object: &Object) -> Fault {
+        Fault::new(format!(
+            "Object property limit reached ({} per object / {} per document). \
+             Target properties: {} string, {} symbol; document properties={}, objects={}; \
+             retained-value bytes={}/{} (payload accounting, not total process memory).",
+            self.limits.heap.object_properties, self.limits.heap.properties,
+            object.properties.len(), object.symbol_properties.len(), self.properties,
+            self.objects.len(), self.value_bytes, self.limits.heap.retained_values,
+        ))
+    }
+
     fn new_object(&mut self, length: Option<usize>) -> Result<usize, Fault> {
         self.step()?;
-        if self.objects.len() >= MAX_OBJECTS {
+        if self.objects.len() >= self.limits.heap.objects {
             return Err(Fault::new(
-                "Object identity limit reached (4096 per document).",
+                format!("Object identity limit reached ({} per document).", self.limits.heap.objects),
             ));
         }
-        if length.is_some_and(|length| length > MAX_ARRAY_LENGTH) {
-            return Err(Fault::new("Array length limit reached (8192)."));
+        if length.is_some_and(|length| length > self.limits.heap.array_length) {
+            return Err(Fault::new(format!("Array length limit reached ({}).", self.limits.heap.array_length)));
         }
         let id = self.objects.len();
         self.objects.push(Object {
@@ -5087,18 +5149,16 @@ impl Runtime {
                 Ok(())
             };
         }
-        if array_index.is_some_and(|index| index >= MAX_ARRAY_LENGTH) {
-            return Err(Fault::new("Array length limit reached (8192)."));
+        if array_index.is_some_and(|index| index >= self.limits.heap.array_length) {
+            return Err(Fault::new(format!("Array length limit reached ({}).", self.limits.heap.array_length)));
         }
         let old_bytes = previous.map_or(0, |property| property.value.bytes());
         let is_new = previous.is_none();
         if is_new
-            && (object.properties.len() + object.symbol_properties.len() >= MAX_OBJECT_PROPERTIES
-                || self.properties >= MAX_PROPERTIES)
+            && (object.properties.len() + object.symbol_properties.len() >= self.limits.heap.object_properties
+                || self.properties >= self.limits.heap.properties)
         {
-            return Err(Fault::new(
-                "Object property limit reached (4096 per object / 16384 per document).",
-            ));
+            return Err(self.property_limit_fault(object));
         }
         let order = previous.map_or(object.next_order, |property| property.order);
         let enumerable = attributes.map_or_else(
@@ -5120,8 +5180,8 @@ impl Runtime {
         }
         let retained =
             self.value_bytes - old_bytes + new_bytes + if is_new { name.len() } else { 0 };
-        if retained > MAX_RETAINED_VALUES {
-            return Err(Fault::new("Retained value limit reached (2 MiB)."));
+        if retained > self.limits.heap.retained_values {
+            return Err(Fault::new(format!("Retained value limit reached ({} bytes).", self.limits.heap.retained_values)));
         }
         self.work(new_bytes)?;
         if let Some((environment, binding)) = self.mapped_argument(id, &name) {
@@ -5142,8 +5202,8 @@ impl Runtime {
         }
         let retained =
             self.value_bytes - old_bytes + new_bytes + if is_new { name.len() } else { 0 };
-        if retained > MAX_RETAINED_VALUES {
-            return Err(Fault::new("Retained value limit reached (2 MiB)."));
+        if retained > self.limits.heap.retained_values {
+            return Err(Fault::new(format!("Retained value limit reached ({} bytes).", self.limits.heap.retained_values)));
         }
         let object = &mut self.objects[id];
         object.properties.insert(
@@ -5203,9 +5263,9 @@ impl Runtime {
             || self.string_object_length(id).unwrap_or(0),
             |view| view.length,
         );
-        if indexed_length.saturating_add(object.properties.len()) > MAX_OBJECT_PROPERTIES {
+        if indexed_length.saturating_add(object.properties.len()) > self.limits.heap.object_properties {
             return Err(Fault::new(
-                "Property enumeration limit reached (4096 keys).",
+                format!("Property enumeration limit reached ({} keys).", self.limits.heap.object_properties),
             ));
         }
         self.work(
@@ -5254,8 +5314,8 @@ impl Runtime {
             Value::String(text) => {
                 self.work(text.len())?;
                 let length = text.encode_utf16().count();
-                if length > MAX_OBJECT_PROPERTIES {
-                    return Err(Fault::new("for-in enumeration limit reached (4096 keys)."));
+                if length > self.limits.heap.object_properties {
+                    return Err(Fault::new(format!("for-in enumeration limit reached ({} keys).", self.limits.heap.object_properties)));
                 }
                 self.work(length.saturating_mul(8))?;
                 Ok((0..length).map(|index| index.to_string()).collect())
@@ -5397,8 +5457,8 @@ impl Runtime {
         };
         match method {
             "push" => {
-                if length.saturating_add(args.len()) > MAX_ARRAY_LENGTH {
-                    return Err(Fault::new("Array length limit reached (8192)."));
+                if length.saturating_add(args.len()) > self.limits.heap.array_length {
+                    return Err(Fault::new(format!("Array length limit reached ({}).", self.limits.heap.array_length)));
                 }
                 for (index, value) in args.iter().enumerate() {
                     let value = self.copy_value(value)?;
@@ -5593,8 +5653,12 @@ impl Runtime {
             ))),
             StmtKind::Block(body) => {
                 let scope = self.new_environment(env, false)?;
-                self.prepare(program, body, scope, false, host)?;
-                self.statements(program, body, scope, this, host)
+                let result = match self.prepare(program, body, scope, false, host) {
+                    Ok(()) => self.statements(program, body, scope, this, host),
+                    Err(error) => Err(error),
+                };
+                self.release_environment(scope);
+                result
             }
             StmtKind::Declare(_, _) => self.declaration_statement(program, id, env, this, host),
             StmtKind::If(_, _, _) => self.if_statement(program, id, env, this, host),
@@ -5742,27 +5806,31 @@ impl Runtime {
         // one shared lexical block, including TDZ bindings in unselected cases.
         let value = self.eval(program, *discriminant, env, this, host)?;
         let scope = self.new_environment(env, false)?;
-        self.prepare(program, body, scope, false, host)?;
-        let (mut start, mut default) = (None, None);
-        for (test, offset) in cases {
-            self.step()?;
-            if let Some(test) = test {
-                let candidate = self.eval(program, *test, scope, this, host)?;
-                self.work(value.bytes().saturating_add(candidate.bytes()))?;
-                if strict_equal(&value, &candidate) {
-                    start = Some(*offset);
-                    break;
+        let result = (|| {
+            self.prepare(program, body, scope, false, host)?;
+            let (mut start, mut default) = (None, None);
+            for (test, offset) in cases {
+                self.step()?;
+                if let Some(test) = test {
+                    let candidate = self.eval(program, *test, scope, this, host)?;
+                    self.work(value.bytes().saturating_add(candidate.bytes()))?;
+                    if strict_equal(&value, &candidate) {
+                        start = Some(*offset);
+                        break;
+                    }
+                } else {
+                    default = Some(*offset);
                 }
-            } else {
-                default = Some(*offset);
             }
-        }
-        if let Some(start) = start.or(default) {
-            self.statements(program, &body[start..], scope, this, host)
-                .map(|control| control.update_empty(Some(Value::Undefined)))
-        } else {
-            Ok(Control::Normal(Some(Value::Undefined)))
-        }
+            if let Some(start) = start.or(default) {
+                self.statements(program, &body[start..], scope, this, host)
+                    .map(|control| control.update_empty(Some(Value::Undefined)))
+            } else {
+                Ok(Control::Normal(Some(Value::Undefined)))
+            }
+        })();
+        self.release_environment(scope);
+        result
     }
 
     fn while_statement(
@@ -5815,69 +5883,73 @@ impl Runtime {
         match &program.stmts[id].kind {
             StmtKind::For(initial, condition, advance, body) => {
                 let mut loop_env = self.new_environment(env, false)?;
-                let mut per_iteration = Vec::new();
-                if let Some(initial) = initial {
-                    if let StmtKind::Declare(
-                        kind @ (Declaration::Let | Declaration::Const),
-                        declarations,
-                    ) = &program.stmts[*initial].kind
-                    {
-                        for (pattern, _) in declarations {
-                            for name in
-                                program.pattern_names_with_work(*pattern, |n| self.work(n))?
-                            {
-                                self.put_binding(loop_env, name.clone(), None, *kind, false)?;
-                                if *kind == Declaration::Let {
-                                    per_iteration.push(name);
+                let result = (|| {
+                    let mut per_iteration = Vec::new();
+                    if let Some(initial) = initial {
+                        if let StmtKind::Declare(
+                            kind @ (Declaration::Let | Declaration::Const),
+                            declarations,
+                        ) = &program.stmts[*initial].kind
+                        {
+                            for (pattern, _) in declarations {
+                                for name in
+                                    program.pattern_names_with_work(*pattern, |n| self.work(n))?
+                                {
+                                    self.put_binding(loop_env, name.clone(), None, *kind, false)?;
+                                    if *kind == Declaration::Let {
+                                        per_iteration.push(name);
+                                    }
                                 }
                             }
                         }
+                        self.statement(program, *initial, loop_env, this, host)?;
                     }
-                    self.statement(program, *initial, loop_env, this, host)?;
-                }
-                // A for-let initializer and each loop body have distinct lexical
-                // environments, so closures retain the value for that iteration.
-                if !per_iteration.is_empty() {
-                    loop_env = self.iteration_environment(loop_env, env, &per_iteration)?;
-                }
-                let mut last = Some(Value::Undefined);
-                loop {
-                    self.step()?;
-                    if let Some(condition) = condition {
-                        if !self
-                            .eval(program, *condition, loop_env, this, host)?
-                            .truthy()
-                        {
-                            break;
-                        }
-                    }
-                    match self.statement(program, *body, loop_env, this, host)? {
-                        Control::Normal(value) => {
-                            if value.is_some() {
-                                last = value;
-                            }
-                        }
-                        Control::Continue(target, value) if target == id => {
-                            if value.is_some() {
-                                last = value;
-                            }
-                        }
-                        Control::Break(target, value) if target == id => {
-                            if value.is_some() {
-                                last = value;
-                            }
-                            break;
-                        }
-                        abrupt => return Ok(abrupt.update_empty(last)),
-                    }
+                    // A for-let initializer and each loop body have distinct lexical
+                    // environments, so closures retain the value for that iteration.
                     if !per_iteration.is_empty() {
                         loop_env = self.iteration_environment(loop_env, env, &per_iteration)?;
                     }
-                    if let Some(advance) = advance {
-                        self.eval(program, *advance, loop_env, this, host)?;
+                    let mut last = Some(Value::Undefined);
+                    loop {
+                        self.step()?;
+                        if let Some(condition) = condition {
+                            if !self
+                                .eval(program, *condition, loop_env, this, host)?
+                                .truthy()
+                            {
+                                break;
+                            }
+                        }
+                        match self.statement(program, *body, loop_env, this, host)? {
+                            Control::Normal(value) => {
+                                if value.is_some() {
+                                    last = value;
+                                }
+                            }
+                            Control::Continue(target, value) if target == id => {
+                                if value.is_some() {
+                                    last = value;
+                                }
+                            }
+                            Control::Break(target, value) if target == id => {
+                                if value.is_some() {
+                                    last = value;
+                                }
+                                break;
+                            }
+                            abrupt => return Ok(abrupt.update_empty(last)),
+                        }
+                        if !per_iteration.is_empty() {
+                            loop_env = self.iteration_environment(loop_env, env, &per_iteration)?;
+                        }
+                        if let Some(advance) = advance {
+                            self.eval(program, *advance, loop_env, this, host)?;
+                        }
                     }
-                }
-                Ok(Control::Normal(last))
+                    Ok(Control::Normal(last))
+                })();
+                self.release_environment(loop_env);
+                result
             }
             _ => unreachable!(),
         }
@@ -5904,23 +5976,33 @@ impl Runtime {
         };
         // The lexical name is uninitialized while evaluating the right side,
         // but each body iteration gets a separate initialized binding.
-        let right_env = if let Some((kind, pattern)) = lexical {
-            let scope = self.new_environment(env, false)?;
-            for name in program.pattern_names_with_work(*pattern, |n| self.work(n))? {
-                self.put_binding(scope, name, None, kind, false)?;
-            }
-            scope
-        } else {
-            env
-        };
-        let source = self.eval(program, *source, right_env, this, host)?;
+        let mut right_scope = None;
+        let source = (|| {
+            let right_env = if let Some((kind, pattern)) = lexical {
+                let scope = self.new_environment(env, false)?;
+                right_scope = Some(scope);
+                for name in program.pattern_names_with_work(*pattern, |n| self.work(n))? {
+                    self.put_binding(scope, name, None, kind, false)?;
+                }
+                scope
+            } else {
+                env
+            };
+            self.eval(program, *source, right_env, this, host)
+        })();
+        if let Some(scope) = right_scope {
+            self.release_environment(scope);
+        }
+        let source = source?;
         let mut iterator = self.loop_iterator(source, of, host)?;
         let mut last = Some(Value::Undefined);
         while let Some(key) = self.loop_next(&mut iterator, host)? {
             self.step()?;
+            let mut iteration_scope = None;
             let completion = (|| {
                 let body_env = if let Some((kind, pattern)) = lexical {
                     let scope = self.new_environment(env, false)?;
+                    iteration_scope = Some(scope);
                     for name in program.pattern_names_with_work(*pattern, |n| self.work(n))? {
                         self.put_binding(scope, name, None, kind, false)?;
                     }
@@ -5971,6 +6053,9 @@ impl Runtime {
                 };
                 self.statement(program, *body, body_env, this, host)
             })();
+            if let Some(scope) = iteration_scope {
+                self.release_environment(scope);
+            }
             match completion {
                 Ok(Control::Normal(value)) => {
                     if value.is_some() {
@@ -6113,8 +6198,8 @@ impl Runtime {
                 Exception::Value(value) => value,
                 Exception::Error(kind) => self.error_object(kind, Some(error.message.clone()))?,
             };
+            let catch_env = self.new_environment(env, false)?;
             completion = (|| {
-                let catch_env = self.new_environment(env, false)?;
                 if let Some(pattern) = binding {
                     for name in program.pattern_names_with_work(*pattern, |n| self.work(n))? {
                         self.put_binding(catch_env, name, None, Declaration::Let, false)?;
@@ -6134,6 +6219,7 @@ impl Runtime {
                 }
                 self.statement(program, *catch_body, catch_env, this, host)
             })();
+            self.release_environment(catch_env);
         }
         if completion
             .as_ref()
@@ -6157,11 +6243,19 @@ impl Runtime {
         names: &[String],
     ) -> Result<usize, Fault> {
         let new = self.new_environment(parent, false)?;
-        for name in names {
-            let value = self.binding_value(old, name)?;
-            self.put_binding(new, name.clone(), Some(value), Declaration::Let, false)?;
+        let result = (|| {
+            for name in names {
+                let value = self.binding_value(old, name)?;
+                self.put_binding(new, name.clone(), Some(value), Declaration::Let, false)?;
+            }
+            Ok(new)
+        })();
+        if result.is_ok() {
+            self.release_environment(old);
+        } else {
+            self.release_environment(new);
         }
-        Ok(new)
+        result
     }
 
     fn eval(
@@ -6189,9 +6283,9 @@ impl Runtime {
         result.map_err(|error| error.at(&program.source, program.exprs[id].at))
     }
 
-    // Keep heavier expression/statement arms in separate helpers. Otherwise
-    // a deep member chain reserves call/loop scratch space at every AST level
-    // in debug builds and can exhaust the native stack before our guard runs.
+    // Retain the old recursive expression implementation only as a shallow
+    // test oracle. Production compound expressions use small direct helpers.
+    #[cfg(test)]
     fn eval_inner(
         &mut self,
         program: &Rc<Program>,
@@ -6261,6 +6355,7 @@ impl Runtime {
         .map_err(|error| error.at(&program.source, program.exprs[id].at))
     }
 
+    #[cfg(test)]
     fn eval_collection(
         &mut self,
         program: &Rc<Program>,
@@ -6271,22 +6366,7 @@ impl Runtime {
     ) -> Result<Value, Fault> {
         match &program.exprs[id].kind {
             ExprKind::Object(properties) => {
-                let object = self.new_object(None)?;
-                for member in properties {
-                    match member {
-                        object_literals::Member::Property { key, value, kind } => {
-                            let key = self.eval(program, *key, env, this, host)?;
-                            let key = self.property_key(key, host)?;
-                            let value = self.eval(program, *value, env, this, host)?;
-                            self.define_literal_member(object, key, value, *kind)?;
-                        }
-                        object_literals::Member::Spread(expression) => {
-                            let source = self.eval(program, *expression, env, this, host)?;
-                            self.copy_data_properties(object, &source, &HashSet::new(), host)?;
-                        }
-                    }
-                }
-                Ok(Value::Object(object))
+                self.eval_object_literal(program, properties, env, this, host)
             }
             ExprKind::Array(elements) => {
                 self.eval_array_literal(program, elements, env, this, host)
@@ -6295,6 +6375,34 @@ impl Runtime {
         }
     }
 
+    #[inline(never)]
+    fn eval_object_literal(
+        &mut self,
+        program: &Rc<Program>,
+        properties: &[object_literals::Member],
+        env: usize,
+        this: &Value,
+        host: &mut dyn Host,
+    ) -> Result<Value, Fault> {
+        let object = self.new_object(None)?;
+        for member in properties {
+            match member {
+                object_literals::Member::Property { key, value, kind } => {
+                    let key = self.eval(program, *key, env, this, host)?;
+                    let key = self.property_key(key, host)?;
+                    let value = self.eval(program, *value, env, this, host)?;
+                    self.define_literal_member(object, key, value, *kind)?;
+                }
+                object_literals::Member::Spread(expression) => {
+                    let source = self.eval(program, *expression, env, this, host)?;
+                    self.copy_data_properties(object, &source, &HashSet::new(), host)?;
+                }
+            }
+        }
+        Ok(Value::Object(object))
+    }
+
+    #[cfg(test)]
     fn eval_unary(
         &mut self,
         program: &Rc<Program>,
@@ -6358,6 +6466,7 @@ impl Runtime {
         }
     }
 
+    #[cfg(test)]
     fn eval_binary(
         &mut self,
         program: &Rc<Program>,
@@ -6390,6 +6499,7 @@ impl Runtime {
         }
     }
 
+    #[cfg(test)]
     fn eval_assignment(
         &mut self,
         program: &Rc<Program>,
@@ -6460,6 +6570,7 @@ impl Runtime {
     // Dispatch without retaining member-resolution scratch in every plain
     // nested call. Argument evaluation can recurse up to MAX_EVAL_DEPTH even
     // when no JavaScript function body has been entered yet.
+    #[cfg(test)]
     fn eval_call(
         &mut self,
         program: &Rc<Program>,
@@ -6483,6 +6594,7 @@ impl Runtime {
     }
 
     #[inline(never)]
+    #[cfg(test)]
     fn eval_value_call(
         &mut self,
         program: &Rc<Program>,
@@ -6511,6 +6623,7 @@ impl Runtime {
     // arguments, then retain only the resolved values. In particular a getter
     // or argument may replace the original method or its receiver binding.
     #[inline(never)]
+    #[cfg(test)]
     fn eval_member_call(
         &mut self,
         program: &Rc<Program>,
@@ -6528,6 +6641,7 @@ impl Runtime {
     }
 
     #[inline(never)]
+    #[cfg(test)]
     fn prepare_member_call(
         &mut self,
         program: &Rc<Program>,
@@ -6607,6 +6721,7 @@ impl Runtime {
         }
     }
 
+    #[cfg(test)]
     fn eval_construct(
         &mut self,
         program: &Rc<Program>,
@@ -7147,9 +7262,9 @@ impl Runtime {
             let Value::Number(length) = host.get(object, "length").map_err(Fault::new)? else {
                 return Err(Fault::new("Invalid native collection length."));
             };
-            if length < 0.0 || length.fract() != 0.0 || length > MAX_OBJECT_PROPERTIES as f64 {
+            if length < 0.0 || length.fract() != 0.0 || length > self.limits.heap.object_properties as f64 {
                 return Err(Fault::new(
-                    "Native collection iteration limit reached (4096 entries).",
+                    format!("Native collection iteration limit reached ({} entries).", self.limits.heap.object_properties),
                 ));
             }
             let this_arg = args.get(1).cloned().unwrap_or(Value::Undefined);
@@ -7963,8 +8078,8 @@ impl Runtime {
                     if !length.is_finite() || *length < 0.0 || length.fract() != 0.0 {
                         return Err(Fault::exception("RangeError", "Invalid array length."));
                     }
-                    if *length > MAX_ARRAY_LENGTH as f64 {
-                        return Err(Fault::new("Array length limit reached (8192)."));
+                    if *length > self.limits.heap.array_length as f64 {
+                        return Err(Fault::new(format!("Array length limit reached ({}).", self.limits.heap.array_length)));
                     }
                     self.new_object(Some(*length as usize)).map(Value::Object)
                 } else {
@@ -11013,8 +11128,10 @@ caught;
     fn recursion_infinite_loops_and_flat_ast_chains_are_bounded() {
         // Retain the old 4000-group witness as an intentional acceptance case.
         assert_eq!(result(&format!("{}1{}", "(".repeat(4000), ")".repeat(4000))), "1");
+        // Include the base-name frame: 4095 members plus the base exactly fit.
+        // The original 4096-member witness remains a negative case below.
         let (mut accepted, mut recorder) = test_runtime();
-        assert!(matches!(accepted.execute(&format!("test{};", ".child".repeat(MAX_EVALUATION_FRAMES)), &mut recorder).unwrap(), Value::Host(1)));
+        assert!(matches!(accepted.execute(&format!("test{};", ".child".repeat(MAX_EVALUATION_FRAMES - 1)), &mut recorder).unwrap(), Value::Host(1)));
         for source in [
             "while(true);".to_string(),
             "function forever(){forever();} forever();".into(),

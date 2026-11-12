@@ -322,3 +322,32 @@ fn heap_evaluation_recursive_calls_keep_finite_success_and_guard_on_one_mib() {
         clean(&runtime);
     });
 }
+
+#[test]
+fn heap_evaluation_compound_helpers_match_recursive_semantics_and_charges() {
+    for source in [
+        "var log='';var item={get value(){log+='v';return 3;}};var a=[item.value,...[4,5]];var o={value:a[0],...{other:a[2]}};log+':'+o.value+':'+o.other;",
+        "var input={};input[Symbol.iterator]=function(){var n=0;return {next:function(){return {done:n===2,value:n++};}};};var out=[...input];out.join(':');",
+        "var o={get value(){probe.record('getter');return 7;}};`value:${o.value}`;",
+        "var key={toString:function(){probe.record('key');return 'x';}};({[key]:(probe.record('value'),2)}).x;",
+        "var input={};Object.defineProperty(input,Symbol.iterator,{get:function(){throw 'original';}});[...input];",
+    ] {
+        assert_eq!(observation(source, false), observation(source, true), "{source}");
+    }
+}
+
+#[test]
+fn heap_evaluation_finite_recursive_array_iterators_fit_one_mib() {
+    small_stack(|| {
+        for source in [
+            "var depth=0,input={};Object.defineProperty(input,Symbol.iterator,{get:function(){if(depth++<12)[...input];depth--;return function(){return [].values();};}});[...input];depth;",
+            "var depth=0,input={};input[Symbol.iterator]=function(){var used=false;return {next:function(){if(used)return {done:true};used=true;if(depth<12){depth++;[...input];depth--;}return {done:false,value:1};}};};[...input];depth;",
+        ] {
+            let (mut runtime, mut host) = realm();
+            assert_eq!(runtime.execute(source, &mut host).unwrap().to_text(), "0");
+            clean(&runtime);
+            runtime.begin_job();
+            assert_eq!(runtime.execute("1+2;", &mut host).unwrap().to_text(), "3");
+        }
+    });
+}

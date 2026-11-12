@@ -4,11 +4,12 @@
 //! https://tc39.es/ecma262/#sec-array-initializer-runtime-semantics-arrayaccumulation
 //! https://tc39.es/ecma262/#sec-argument-lists-runtime-semantics-argumentlistevaluation
 
-use super::{
-    iterator_protocol, Argument, Fault, Host, Program, Runtime, Value, MAX_ARGUMENTS,
-    MAX_ARRAY_LENGTH,
-};
+use super::{iterator_protocol, Argument, Fault, Host, Program, Runtime, Value};
+#[cfg(test)]
+use super::MAX_ARRAY_LENGTH;
 use std::rc::Rc;
+#[cfg(test)]
+use super::MAX_ARGUMENTS;
 
 impl Runtime {
     pub(super) fn spread_iterator(
@@ -22,6 +23,7 @@ impl Runtime {
         self.iterator_from_method(value, method, host)
     }
 
+    #[cfg(test)]
     pub(super) fn eval_argument_list(
         &mut self,
         program: &Rc<Program>,
@@ -48,6 +50,7 @@ impl Runtime {
     // Ordinary nested arguments must not retain iterator/expansion scratch.
     // This helper is entered only after the spread operand has been evaluated.
     #[inline(never)]
+    #[cfg(test)]
     fn append_spread_arguments(
         &mut self,
         values: &mut Vec<Value>,
@@ -79,21 +82,21 @@ impl Runtime {
         for element in elements {
             self.step()?;
             let Some(element) = element else {
-                if index == MAX_ARRAY_LENGTH {
-                    return Err(Fault::new("Array length limit reached (8192)."));
+                if index == self.limits.heap.array_length {
+                    return Err(Fault::new(format!("Array length limit reached ({}).", self.limits.heap.array_length)));
                 }
                 index += 1;
                 continue;
             };
-            if !element.spread && index == MAX_ARRAY_LENGTH {
-                return Err(Fault::new("Array length limit reached (8192)."));
+            if !element.spread && index == self.limits.heap.array_length {
+                return Err(Fault::new(format!("Array length limit reached ({}).", self.limits.heap.array_length)));
             }
             let value = self.eval(program, element.expression, env, this, host)?;
             if element.spread {
                 let mut iterator = self.spread_iterator(value, host)?;
                 while let Some(value) = self.iterator_next(&mut iterator, host)? {
-                    if index == MAX_ARRAY_LENGTH {
-                        return Err(Fault::new("Array length limit reached (8192)."));
+                    if index == self.limits.heap.array_length {
+                        return Err(Fault::new(format!("Array length limit reached ({}).", self.limits.heap.array_length)));
                     }
                     // This fresh array is not exposed until evaluation ends.
                     // Define own data properties, bypassing inherited setters.
@@ -349,11 +352,12 @@ var dense=[...Array(4096)];if(dense.length!==4096||!Object.hasOwn(dense,4095))th
 
     #[test]
     fn spread_recursive_iterator_callbacks_are_bounded_on_small_native_stack() {
-        std::thread::Builder::new().stack_size(1024 * 1024).spawn(|| {
-            for code in [
+        std::thread::Builder::new().name("spread-recursive-iterator".into()).stack_size(1024 * 1024).spawn(|| {
+            for (case, code) in [
                 "var input={};Object.defineProperty(input,Symbol.iterator,{get:function(){return [...input];}});try{[...input];}catch(e){caught=true;}finally{finalized=true;}",
                 "var input={};input[Symbol.iterator]=function(){return{next(){return {done:false,value:[...input]};}};};try{[...input];}catch(e){caught=true;}finally{finalized=true;}",
-            ] {
+            ].into_iter().enumerate() {
+                eprintln!("spread recursion case {case}: starting");
                 let mut runtime=Runtime::for_test();
                 runtime.execute("var caught=false,finalized=false;", &mut NoHost).unwrap();
                 let error=runtime.execute(code,&mut NoHost).unwrap_err();

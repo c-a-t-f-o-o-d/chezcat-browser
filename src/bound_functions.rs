@@ -5,8 +5,10 @@
 
 use super::{
     Fault, Function, Host, Ordinary, Runtime, Value, MAX_ARGUMENTS, MAX_FUNCTIONS,
-    MAX_RETAINED_VALUES, MAX_STRING_BYTES,
+    MAX_STRING_BYTES,
 };
+#[cfg(test)]
+use super::MAX_RETAINED_VALUES;
 
 pub(super) struct Bound {
     pub(super) target: usize,
@@ -39,8 +41,8 @@ impl Runtime {
             .saturating_mul(arguments.len() + 1)
             .saturating_add(receiver.bytes())
             .saturating_add(arguments.iter().map(Value::bytes).sum::<usize>());
-        if self.value_bytes.saturating_add(retained) > MAX_RETAINED_VALUES {
-            return Err(Fault::new("Retained value limit reached (2 MiB)."));
+        if self.value_bytes.saturating_add(retained) > self.limits.heap.retained_values {
+            return Err(Fault::new(format!("Retained value limit reached ({} bytes).", self.limits.heap.retained_values)));
         }
         if receiver.bytes() > MAX_STRING_BYTES
             || arguments
@@ -82,8 +84,8 @@ impl Runtime {
         if self.functions.len() >= MAX_FUNCTIONS {
             return Err(Fault::new("Function limit reached (1024)."));
         }
-        if self.value_bytes.saturating_add(retained) > MAX_RETAINED_VALUES {
-            return Err(Fault::new("Retained value limit reached (2 MiB)."));
+        if self.value_bytes.saturating_add(retained) > self.limits.heap.retained_values {
+            return Err(Fault::new(format!("Retained value limit reached ({} bytes).", self.limits.heap.retained_values)));
         }
         let index = self.functions.len();
         self.functions.push(Function::Bound(Bound {

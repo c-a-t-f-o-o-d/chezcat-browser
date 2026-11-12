@@ -5,12 +5,13 @@
 //! https://tc39.es/ecma262/#sec-binary-logical-operators
 
 use super::{
-    Argument, ExprId, ExprKind, Fault, Host, Ordinary, Parser, Program, Reference, Runtime,
-    TokenKind, Value, MAX_EVAL_DEPTH,
+    Argument, ExprId, ExprKind, Fault, Host, Ordinary, Parser, Reference, Runtime,
+    TokenKind, Value,
 };
+#[cfg(test)]
 use std::rc::Rc;
 #[cfg(test)]
-use super::MAX_EXPRESSION_FRAMES;
+use super::{Program, MAX_EVAL_DEPTH, MAX_EXPRESSION_FRAMES};
 
 #[derive(Clone)]
 pub(super) enum Step {
@@ -306,6 +307,7 @@ impl Runtime {
         }
     }
 
+    #[cfg(test)]
     fn chain_operand(
         &mut self,
         program: &Rc<Program>,
@@ -325,6 +327,7 @@ impl Runtime {
         }
     }
 
+    #[cfg(test)]
     fn chain_reference(
         &mut self,
         program: &Rc<Program>,
@@ -462,6 +465,7 @@ impl Runtime {
         }
     }
 
+    #[cfg(test)]
     pub(super) fn eval_optional_chain(
         &mut self,
         program: &Rc<Program>,
@@ -474,6 +478,7 @@ impl Runtime {
         self.chain_value(completion, host)
     }
 
+    #[cfg(test)]
     pub(super) fn call_parenthesized_chain(
         &mut self,
         program: &Rc<Program>,
@@ -489,6 +494,7 @@ impl Runtime {
         self.invoke_chain_call(target, &args, host)
     }
 
+    #[cfg(test)]
     pub(super) fn delete_optional_chain(
         &mut self,
         program: &Rc<Program>,

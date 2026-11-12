@@ -80,12 +80,23 @@ impl Runtime {
         this: &Value,
         host: &mut dyn Host,
     ) -> Result<Value, Fault> {
-        let body = self.prepare_script_call(program, template, callee, parent, args, this, host)?;
-        match self.statements(program, &program.templates[template].body, body, this, host)? {
-            Control::Return(value) => Ok(value),
-            Control::Normal(_) => Ok(Value::Undefined),
-            _ => Err(Fault::new("Unexpected loop control outside a loop.")),
+        let mut scopes = [None; 4];
+        let prepared = self.prepare_script_call(
+            program, template, callee, parent, args, this, host, &mut scopes,
+        );
+        let result = match prepared {
+            Ok(body) => match self.statements(program, &program.templates[template].body, body, this, host) {
+                Ok(Control::Return(value)) => Ok(value),
+                Ok(Control::Normal(_)) => Ok(Value::Undefined),
+                Ok(_) => Err(Fault::new("Unexpected loop control outside a loop.")),
+                Err(error) => Err(error),
+            },
+            Err(error) => Err(error),
+        };
+        for scope in scopes.into_iter().rev().flatten() {
+            self.release_environment(scope);
         }
+        result
     }
 
     #[inline(never)]
@@ -99,14 +110,18 @@ impl Runtime {
         args: &[Value],
         this: &Value,
         host: &mut dyn Host,
+        scopes: &mut [Option<usize>; 4],
     ) -> Result<usize, Fault> {
         let function = &program.templates[template];
         let has_expressions = function.has_parameter_expressions(program);
         let call_scope = self.new_environment(parent, true)?;
+        scopes[0] = Some(call_scope);
         // Sloppy default eval may introduce vars, but cannot replace formal
         // bindings. Keeping these records distinct also preserves its closures.
         let parameters = if has_expressions && !function.strict {
-            self.new_environment(call_scope, false)?
+            let scope = self.new_environment(call_scope, false)?;
+            scopes[1] = Some(scope);
+            scope
         } else {
             call_scope
         };
@@ -149,6 +164,7 @@ impl Runtime {
         }
         let variables = if has_expressions {
             let scope = self.new_environment(parameters, true)?;
+            scopes[2] = Some(scope);
             for name in collect_var_names_with_work(program, &function.body, |n| self.work(n))? {
                 self.step()?;
                 if self.environment(scope).bindings.contains_key(&name) {
@@ -171,7 +187,9 @@ impl Runtime {
             parameters
         };
         let body = if has_expressions && !function.strict {
-            self.new_environment(variables, false)?
+            let scope = self.new_environment(variables, false)?;
+            scopes[3] = Some(scope);
+            scope
         } else {
             variables
         };

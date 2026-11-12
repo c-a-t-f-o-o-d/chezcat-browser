@@ -109,6 +109,7 @@ fn main() {
     let mut source = String::new();
     io::stdin().read_to_string(&mut source).unwrap();
     let mut runtime = Runtime::with_limits(javascript::limits::Limits {
+        heap: javascript::limits::REGRESSION_HEAP,
         steps: 250_000, copy_bytes: 8 * 1024 * 1024,
         regexp_work: 2_000_000, job_seconds: 1,
         ..javascript::limits::BROWSER
@@ -2641,6 +2642,7 @@ NEGATIVE.extend((name, source) for name, source, _ in _CONTINUATION_LIMITS_047)
 NEGATIVE_DIAGNOSTICS_041.update((name, message) for name, _, message in _CONTINUATION_LIMITS_047)
 
 COMPLETION_CASES.append(('heap-expression-evaluation', (ROOT / 'tools/fixtures/heap-expression-evaluation.js').read_text(encoding='utf-8')))
+COMPLETION_CASES.append(('environment-lifetimes', (ROOT / 'tools/fixtures/environment-lifetimes.js').read_text(encoding='utf-8')))
 
 # 0.48 moves expression evaluation onto a shared heap stack. Preserve inputs
 # that formerly spent native depth as positive references, then test the actual

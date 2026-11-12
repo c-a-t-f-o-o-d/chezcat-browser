@@ -1,7 +1,7 @@
 //! Bounded ordinary expandos on explicitly selected native objects and live
 //! named-property reflection. Host handles never acquire arbitrary capability.
 
-use super::{Fault, Function, Host, Ordinary, Runtime, Value, MAX_OBJECT_PROPERTIES};
+use super::{Fault, Function, Host, Ordinary, Runtime, Value};
 
 impl Runtime {
     pub fn bind_host_object(
@@ -163,9 +163,9 @@ impl Runtime {
         } else {
             host.own_keys(handle).map_err(Fault::new)?
         };
-        if keys.len() > MAX_OBJECT_PROPERTIES {
+        if keys.len() > self.limits.heap.object_properties {
             return Err(Fault::new(
-                "Property enumeration limit reached (4096 keys).",
+                format!("Property enumeration limit reached ({} keys).", self.limits.heap.object_properties),
             ));
         }
         for key in &keys {

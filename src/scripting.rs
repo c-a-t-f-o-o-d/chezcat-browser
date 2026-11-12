@@ -1442,12 +1442,10 @@ impl Page {
         let attribution = self.runtime.string_work_failure_report();
         // Reserve the fixed snapshot inside the existing log byte allowance.
         // Rendering never mutates the stored log, counters, or error count.
-        let log_budget = attribution.as_ref().map_or(MAX_LOG_BYTES, |snapshot| {
-            MAX_LOG_BYTES
-                .saturating_sub(text.len())
-                .saturating_sub(snapshot.len())
-                .saturating_sub(1024) // Fixed report trailers and omission count.
-        });
+        let log_budget = MAX_LOG_BYTES
+            .saturating_sub(text.len())
+            .saturating_sub(attribution.as_ref().map_or(0, String::len))
+            .saturating_sub(1536); // Fixed trailers, heap profile and omission count.
         let mut rendered_log_bytes = 0;
         let mut snapshot_omissions = 0usize;
         for line in &self.state.logs {
@@ -1465,6 +1463,12 @@ impl Page {
         }
         text.push_str(&format!("Animation frames: {} pending callback(s), {} executed. Whole-millisecond monotonic timestamps; 16 ms minimum frame interval.\n", self.state.animation_frames.len(), self.state.animation_callbacks));
         text.push_str(&format!("Classic scripts have independent execution jobs ({} steps / {} seconds / {} MiB string-copy work). Aggregate startup: {} steps / {} seconds / {} MiB string-copy work. Native-stack and allocation guards are separate.\nDynamic image requests declined: {}. Detached Image nodes reflect attributes; no request or load event was fabricated.\nBeacon requests declined: {}. sendBeacon returns false; no data was queued or transmitted.\n", self.state.limits.steps, self.state.limits.job_seconds, self.state.limits.copy_bytes / (1024 * 1024), self.state.limits.startup_steps, self.state.limits.startup_seconds, self.state.limits.startup_copy / (1024 * 1024), self.state.declined_images, self.state.declined_beacons));
+        let heap = self.state.limits.heap;
+        text.push_str(&format!(
+            "Script heap caps: {} properties per object / {} per document; {} object identities; array length {}; {} MiB retained-value payload accounting (not process memory). No up-front reservation.\n",
+            heap.object_properties, heap.properties, heap.objects, heap.array_length,
+            heap.retained_values / (1024 * 1024),
+        ));
         let omitted = self.state.omitted.saturating_add(snapshot_omissions);
         if omitted > 0 {
             text.push_str(&format!(
@@ -5279,5 +5283,7 @@ mod browser_budget_tests {
         let report = page.report();
         assert!(report.contains("5000000 steps / 10 seconds / 256 MiB"));
         assert!(report.contains("20000000 steps / 30 seconds / 1024 MiB"));
+        assert!(report.contains("262144 properties per object / 1048576 per document"));
+        assert!(report.contains("65536 object identities; array length 1048576; 64 MiB"));
     }
 }

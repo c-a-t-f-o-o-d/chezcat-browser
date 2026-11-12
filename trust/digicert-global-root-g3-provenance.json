@@ -1,0 +1,22 @@
+{
+  "name": "DigiCert Global Root G3",
+  "der_sha256": "31ad6648f8104138c738f39ea4320133393e3a18cc02296ef97c2ac9ef6731d0",
+  "pem_sha256": "1914cd2d4cde263315f9e32c7683fc0e1b921919ad12b256d49bf782011c03cc",
+  "subject_der_sha256": "54431f479fe2a4e5636a92acdbe1e7f60028ac4a1a2244ed31bd17c494b6ee3c",
+  "subject_der_hash_matches_user_reported_last_issuer": true,
+  "serial": "055556bcf25ea43535c3a40fd5ab4572",
+  "not_before": "2013-08-01T12:00:00+00:00",
+  "not_after": "2038-01-15T12:00:00+00:00",
+  "key": "ECDSA P-384",
+  "signature": "ECDSA SHA-384",
+  "data_source": "Development system /etc/ssl/certs/DigiCert_Global_Root_G3.pem (certificate DATA only; browser does not use OS trust)",
+  "publisher_fingerprint_verified_on": "2026-11-12",
+  "publisher_reference": "https://knowledge.digicert.com/general-information/digicert-trusted-root-authority-certificates",
+  "publisher_der_url": "https://cacerts.digicert.com/DigiCertGlobalRootG3.crt",
+  "microsoft_reference": "https://learn.microsoft.com/en-us/azure/security/fundamentals/azure-certificate-authority-details",
+  "previous_bundle_sha256": "2a24ed0679ee42f3efc2c8931645b4db87c97c8725a17c9b3e7da8772df99693",
+  "new_bundle_sha256": "102685ac3458de282da759edc9f95d5c416e02b46978ac4970f32e2a82986c6a",
+  "old_roots_preserved_byte_for_byte": true,
+  "authority_change": "One explicit additional trust anchor; validation code unchanged. Not a leaf or unverified peer root.",
+  "boundary": "Public metadata and root self-signature verified locally; supplied peer hashes are not peer DER. No new Bing handshake or peer-chain validation performed here."
+}

@@ -60,6 +60,7 @@ impl Host for Recorder {
 fn main() {
     let mut source = String::new(); io::stdin().read_to_string(&mut source).unwrap();
     let mut runtime = Runtime::with_limits(javascript::limits::Limits {
+        heap: javascript::limits::REGRESSION_HEAP,
         steps: 250_000, copy_bytes: 8 * 1024 * 1024,
         regexp_work: 2_000_000, job_seconds: 1,
         ..javascript::limits::BROWSER
