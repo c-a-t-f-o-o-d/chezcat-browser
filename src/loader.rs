@@ -905,7 +905,7 @@ fn load_request_progressively(
         "LOAD TIMING: document/parse {} ms; resources {} ms; total {} ms. {} resource attempts; {} reused references ({} earlier failures). Reuse ends with this document load.",
         stats.document_ready.as_millis(), total.saturating_sub(stats.document_ready).as_millis(), total.as_millis(), stats.attempts, stats.reused, stats.reused_failures
     ));
-    events.push("Classic JavaScript uses a bounded subset after document parsing. Session cookies stay in memory and are exact-host scoped. No HTTP authentication, referrer header, frames, CSS imports, speculative requests or telemetry. Stylesheets, images, fonts and script navigation retain the document origin. Classic scripts may also include HTTPS sources from HTTPS documents, with CSP and request checks at each redirect and no cross-origin credentials.".to_owned());
+    events.push("Classic JavaScript uses a bounded subset after document parsing. Session cookies stay in memory with host-only/Domain scope and bundled public-suffix boundaries. No HTTP authentication, referrer header, frames, CSS imports, speculative requests or telemetry. Stylesheets, images, fonts and script navigation retain the document origin. Classic scripts may also include HTTPS sources from HTTPS documents, with CSP and request checks at each redirect and no cross-origin credentials.".to_owned());
     Ok(LoadEnd {
         download: false,
         events,

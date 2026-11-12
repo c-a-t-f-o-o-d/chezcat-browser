@@ -11,6 +11,7 @@
 use std::collections::{BTreeMap, HashSet};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
+use work_attribution::Kind as WorkKind;
 
 #[path = "arguments.rs"]
 mod arguments;
@@ -81,6 +82,8 @@ mod template_literals;
 mod text_encoding;
 #[path = "url_api.rs"]
 mod url_api;
+#[path = "work_attribution.rs"]
+mod work_attribution;
 
 // Source/parse storage is separate from execution, strings and host work.
 // A bounded 512 KiB bundle can contain ordinary bootstrap code without giving
@@ -3156,6 +3159,7 @@ pub struct Runtime {
     job_deadline: Instant,
     job_allowance: (usize, usize, usize),
     copy_bytes: usize,
+    work_attribution: work_attribution::Tracker,
     eval_depth: usize,
     call_depth: usize,
     strict: bool,
@@ -3222,6 +3226,7 @@ impl Runtime {
             job_deadline: Instant::now() + MAX_JOB_TIME,
             job_allowance: (MAX_STEPS, MAX_COPY_BYTES, MAX_REGEXP_WORK),
             copy_bytes: MAX_COPY_BYTES,
+            work_attribution: work_attribution::Tracker::new(MAX_COPY_BYTES),
             eval_depth: 0,
             call_depth: 0,
             strict: false,
@@ -3413,6 +3418,7 @@ impl Runtime {
     }
 
     pub fn begin_job(&mut self) {
+        self.work_attribution.begin_job(MAX_COPY_BYTES);
         self.steps = MAX_STEPS;
         self.job_deadline = Instant::now() + MAX_JOB_TIME;
         self.copy_bytes = MAX_COPY_BYTES;
@@ -3422,7 +3428,9 @@ impl Runtime {
 
     pub fn constrain_job(&mut self, steps: usize, copies: usize, regexp: usize, deadline: Instant) {
         self.steps = self.steps.min(steps);
+        let previous_copies = self.copy_bytes;
         self.copy_bytes = self.copy_bytes.min(copies);
+        self.work_attribution.constrain(previous_copies, self.copy_bytes);
         self.regexp_work = self.regexp_work.min(regexp);
         self.job_deadline = self.job_deadline.min(deadline);
         self.job_allowance = (self.steps, self.copy_bytes, self.regexp_work);
@@ -3434,6 +3442,12 @@ impl Runtime {
             self.job_allowance.1 - self.copy_bytes,
             self.job_allowance.2 - self.regexp_work,
         )
+    }
+
+    /// Latest failed job only. Formatting reads fixed numeric state; it never
+    /// invokes page code, charges the job, or resets/consumes the snapshot.
+    pub fn string_work_failure_report(&self) -> Option<String> {
+        self.work_attribution.failure_report()
     }
 
     pub fn define_global(&mut self, name: &str, value: Value) -> Result<(), String> {
@@ -3731,24 +3745,31 @@ impl Runtime {
         Ok(())
     }
     fn work(&mut self, bytes: usize) -> Result<(), Fault> {
+        self.work_as(bytes, WorkKind::Other)
+    }
+
+    fn work_as(&mut self, bytes: usize, kind: WorkKind) -> Result<(), Fault> {
         if bytes > self.copy_bytes {
+            let remaining = self.copy_bytes;
             self.copy_bytes = 0;
+            self.work_attribution.reject(kind, bytes, remaining, self.job_allowance.1);
             return Err(Fault::new(
                 "String/copy work limit reached (8 MiB per job).",
             ));
         }
         self.copy_bytes -= bytes;
+        self.work_attribution.accept(kind, bytes);
         Ok(())
     }
     fn checked_value(&mut self, value: Value) -> Result<Value, Fault> {
         if value.bytes() > MAX_STRING_BYTES {
             return Err(Fault::new("String limit reached (128 KiB)."));
         }
-        self.work(value.bytes())?;
+        self.work_as(value.bytes(), WorkKind::ConversionOutput)?;
         Ok(value)
     }
     fn copy_value(&mut self, value: &Value) -> Result<Value, Fault> {
-        self.work(value.bytes())?;
+        self.work_as(value.bytes(), WorkKind::ValueCopy)?;
         Ok(value.clone())
     }
     fn new_environment(&mut self, parent: usize, function_scope: bool) -> Result<usize, Fault> {
@@ -3955,7 +3976,7 @@ impl Runtime {
             )
         })?;
         let bytes = value.bytes();
-        self.work(bytes)?;
+        self.work_as(bytes, WorkKind::BindingCopy)?;
         Ok(self.environment(env).bindings[name]
             .value
             .as_ref()
@@ -4397,7 +4418,7 @@ impl Runtime {
     }
 
     fn units_string(&mut self, input: &[u16]) -> Result<String, Fault> {
-        self.work(input.len().saturating_mul(2))?;
+        self.work_as(input.len().saturating_mul(2), WorkKind::ConversionOutput)?;
         let text = String::from_utf16(input).map_err(|_| {
             Fault::new(
                 "A regexp/string result containing a lone UTF-16 surrogate is not implemented.",
@@ -4439,7 +4460,7 @@ impl Runtime {
             } else {
                 4
             };
-            self.work(width)?;
+            self.work_as(width, WorkKind::CharacterScan)?;
             let character = characters.next().expect("remaining UTF-8 scalar");
             byte_offset += width;
             let units = character.len_utf16();
@@ -4459,7 +4480,7 @@ impl Runtime {
     ) -> Result<Value, Fault> {
         let position = args.first().unwrap_or(&Value::Undefined);
         position.primitive()?;
-        self.work(position.bytes().saturating_mul(2))?;
+        self.work_as(position.bytes().saturating_mul(2), WorkKind::ConversionOutput)?;
         let position = position.script_number()?;
         let position = if position.is_nan() {
             0.0
@@ -4982,7 +5003,7 @@ impl Runtime {
             .properties
             .get(name)
             .map_or(0, |property| property.value.bytes());
-        self.work(bytes)?;
+        self.work_as(bytes, WorkKind::ValueCopy)?;
         Ok(self
             .object(id)?
             .properties
@@ -5065,7 +5086,7 @@ impl Runtime {
             self.symbol(id)?;
             return Ok(PropertyKey::Symbol(id));
         }
-        self.work(primitive.bytes())?;
+        self.work_as(primitive.bytes(), WorkKind::ConversionOutput)?;
         let key = if let Value::String(text) = primitive {
             text
         } else {
@@ -5509,7 +5530,7 @@ impl Runtime {
         if output.len().saturating_add(text.len()) > MAX_STRING_BYTES {
             return Err(Fault::new("String limit reached (128 KiB)."));
         }
-        self.work(text.len())?;
+        self.work_as(text.len(), WorkKind::ConversionOutput)?;
         output.push_str(text);
         Ok(())
     }
@@ -6872,7 +6893,7 @@ impl Runtime {
                 self.get_ordinary_property_with_host(Ordinary::Function(*function), property, host)
             }
             Value::String(text) if property == "length" => {
-                self.work(text.len())?;
+                self.work_as(text.len(), WorkKind::LengthScan)?;
                 Ok(Value::Number(text.encode_utf16().count() as f64))
             }
             Value::String(text) if property_index(property).is_some() => {

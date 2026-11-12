@@ -2521,6 +2521,9 @@ for _name in ['string-work-design', 'binding-length-reads']:
 _INDEX_READ_FIXTURE = ROOT / 'tools/fixtures/primitive-string-index-reads.js'
 _FIXTURE_PATHS_041.append(_INDEX_READ_FIXTURE)
 COMPLETION_CASES.append(('primitive-string-index-reads', _INDEX_READ_FIXTURE.read_text(encoding='utf-8')))
+_ATTRIBUTION_FIXTURE = ROOT / 'tools/fixtures/string-work-attribution.js'
+COMPLETION_CASES.append(('string-work-attribution', _ATTRIBUTION_FIXTURE.read_text(encoding='utf-8')))
+
 _FIXTURE_HASHES_041 = {str(path.relative_to(ROOT)): hashlib.sha256(path.read_bytes()).hexdigest() for path in _FIXTURE_PATHS_041}
 _string_objects_041 = json.loads((_041 / "string-objects-cases.json").read_text(encoding="utf-8"))['cases']
 _object_is_041 = json.loads((_041 / "object-is-original-node.json").read_text(encoding="utf-8"))['cases']

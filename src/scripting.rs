@@ -1432,16 +1432,37 @@ impl Page {
             return "JavaScript did not run for this document (disabled or blocked by document policy).\n".into();
         }
         let mut text = format!("ChezCat JavaScript subset\n{} script(s), {} active listener(s), {} error(s).\n{} pending timer(s), {} timer callback(s) executed.\nClassic scripts run after parsing. Events come from supported controls/forms and completed dynamic scripts/stylesheets.\nFunction timers use the document queue. Bounded eval follows the document CSP.\nLocation inspection reflects the displayed document; same-origin assign/replace/reload and href/search/hash writes queue navigation.\nSession cookies are memory-only with host-only/Domain scope and bundled public-suffix boundaries; document.cookie excludes HttpOnly entries.\nDynamic external classic scripts use CSP, MIME, request-blocking and bounded source checks; cross-origin HTTPS scripts omit credentials. Dynamic LINK stylesheets retain exact-origin checks. HTML injection, modules, persistent storage, fetch and XHR are not implemented.\n\n", self.state.executed, self.state.listeners.len(), self.state.errors, self.state.timers.len(), self.state.timer_callbacks);
+        let attribution = self.runtime.string_work_failure_report();
+        // Reserve the fixed snapshot inside the existing log byte allowance.
+        // Rendering never mutates the stored log, counters, or error count.
+        let log_budget = attribution.as_ref().map_or(MAX_LOG_BYTES, |snapshot| {
+            MAX_LOG_BYTES
+                .saturating_sub(text.len())
+                .saturating_sub(snapshot.len())
+                .saturating_sub(1024) // Fixed report trailers and omission count.
+        });
+        let mut rendered_log_bytes = 0;
+        let mut snapshot_omissions = 0usize;
         for line in &self.state.logs {
+            let bytes = line.len().saturating_add(1);
+            if bytes > log_budget.saturating_sub(rendered_log_bytes) {
+                snapshot_omissions = snapshot_omissions.saturating_add(1);
+                continue;
+            }
             text.push_str(line);
             text.push('\n');
+            rendered_log_bytes += bytes;
+        }
+        if let Some(attribution) = attribution {
+            text.push_str(&attribution);
         }
         text.push_str(&format!("Animation frames: {} pending callback(s), {} executed. Whole-millisecond monotonic timestamps; 16 ms minimum frame interval.\n", self.state.animation_frames.len(), self.state.animation_callbacks));
         text.push_str(&format!("Classic scripts have independent execution jobs (250000 steps / 1 second), with aggregate startup work/time limits.\nDynamic image requests declined: {}. Detached Image nodes reflect attributes; no request or load event was fabricated.\nBeacon requests declined: {}. sendBeacon returns false; no data was queued or transmitted.\n", self.state.declined_images, self.state.declined_beacons));
-        if self.state.omitted > 0 {
+        let omitted = self.state.omitted.saturating_add(snapshot_omissions);
+        if omitted > 0 {
             text.push_str(&format!(
                 "{} further log entries omitted by the report limit.\n",
-                self.state.omitted
+                omitted
             ));
         }
         text

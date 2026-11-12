@@ -7,7 +7,7 @@
 //! https://tc39.es/ecma262/#sec-string-exotic-objects
 //! https://tc39.es/ecma262/#sec-string-constructor
 
-use super::{primitive_wrappers::Data, Fault, Host, Ordinary, Runtime, Value};
+use super::{primitive_wrappers::Data, Fault, Host, Ordinary, Runtime, Value, WorkKind};
 
 impl Runtime {
     pub(super) fn string_object_length(&self, id: usize) -> Option<usize> {
@@ -30,7 +30,7 @@ impl Runtime {
             return Err(Fault::new("Invalid String object index."));
         }
         let bytes = value.len();
-        self.work(bytes)?;
+        self.work_as(bytes, WorkKind::CharacterScan)?;
         let Some(Data::String { value, .. }) = self.objects[id].primitive.as_ref() else {
             unreachable!()
         };
@@ -82,7 +82,7 @@ impl Runtime {
         {
             return Err(Fault::new("Retained value limit reached (2 MiB)."));
         }
-        self.work(value.len())?;
+        self.work_as(value.len(), WorkKind::LengthScan)?;
         let length = value.encode_utf16().count();
         self.store_property(
             id,
@@ -123,7 +123,7 @@ impl Runtime {
             let value = self.copy_value(value)?;
             // Only String() as a function has the Symbol description exception.
             let primitive = self.primitive_with_hint(value, true, host)?;
-            self.work(primitive.bytes())?;
+            self.work_as(primitive.bytes(), WorkKind::ConversionOutput)?;
             primitive.script_text()?
         } else {
             String::new()

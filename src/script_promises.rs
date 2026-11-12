@@ -295,4 +295,58 @@ if(called!==0)throw 'synchronous native then call';
         assert_eq!(outcome.errors, 0, "{}", page.report());
         assert_eq!(doc.title, "native thenable passed");
     }
+
+    #[test]
+    fn string_work_snapshot_survives_checkpoint_recovery_and_full_logs() {
+        let (mut doc, mut forms, mut page, outcome) = make_page("<p></p>", &[]);
+        assert_eq!(outcome.errors, 0);
+        page.runtime.define_global(
+            "payload", Value::String("PRIVATE_ATTRIBUTE_MARKER".repeat(256)),
+        ).unwrap();
+        page.runtime.execute(
+            "var tail=0,sentinel=0;function burn(){var i=0;while(i<64){payload.length;i++;}tail=1;}",
+            &mut Bridge { doc: &mut doc, forms: &mut forms, state: &mut page.state },
+        ).unwrap();
+        page.begin_job();
+        page.runtime.constrain_job(
+            250_000, 16384, 2_000_000, Instant::now() + Duration::from_secs(1),
+        );
+        page.runtime.execute(
+            "Promise.resolve().then(burn);Promise.resolve().then(function(){sentinel=1;});",
+            &mut Bridge { doc: &mut doc, forms: &mut forms, state: &mut page.state },
+        ).unwrap();
+        page.microtask_checkpoint(&mut doc, &mut forms);
+        assert_eq!(page.error_count(), 1);
+        assert!(!page.runtime.has_microtasks());
+        let snapshot = page.runtime.string_work_failure_report().unwrap();
+        assert!(snapshot.len() <= 2048);
+        assert!(!snapshot.contains("PRIVATE_ATTRIBUTE_MARKER"));
+        assert!(!snapshot.contains("Promise.resolve"));
+        assert!(snapshot.contains("effective=16384;"));
+        let report = page.report();
+        assert!(report.contains("Microtask checkpoint: JavaScript error"), "{report}");
+        assert_eq!(report.matches("String/copy work attribution:").count(), 1);
+        let outcome = page.console_eval(&mut doc, &mut forms, "tail+sentinel;");
+        assert_eq!(outcome.errors, 0);
+        assert_eq!(page.runtime.string_work_failure_report().as_deref(), Some(snapshot.as_str()));
+        let usage = page.runtime.job_usage();
+        for _ in 0..MAX_LOG_LINES + 1 {
+            page.state.log(&"full-log witness".repeat(200));
+        }
+        for _ in 0..2 {
+            let report = page.report();
+            assert!(report.contains(&snapshot));
+            assert!(report.len() <= MAX_LOG_BYTES + 1024);
+            assert_eq!(report.matches("String/copy work attribution:").count(), 1);
+            assert_eq!(page.runtime.job_usage(), usage);
+        }
+        page.clear_console();
+        assert_eq!(page.runtime.string_work_failure_report().as_deref(), Some(snapshot.as_str()));
+        assert_eq!(page.error_count(), 1);
+        assert_eq!(page.runtime.job_usage(), usage);
+        // A replacement document, unlike a fresh job, owns a new runtime.
+        page.start(&mut doc, &mut forms, &[]);
+        assert!(page.runtime.string_work_failure_report().is_none());
+    }
+
 }

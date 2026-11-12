@@ -4,7 +4,7 @@
 
 use super::{
     ExprId, ExprKind, Fault, Host, Program, PropertyKey, Reference, Runtime, Value,
-    MAX_EVAL_DEPTH,
+    WorkKind, MAX_EVAL_DEPTH,
 };
 use std::rc::Rc;
 
@@ -82,7 +82,7 @@ impl Runtime {
                 let key = self.property_key(property, host)?;
                 debug_assert!(matches!(key, PropertyKey::String(key) if key == "length"));
                 self.step()?; // property read
-                self.work(bytes)?;
+                self.work_as(bytes, WorkKind::LengthScan)?;
 
                 // Literal evaluation/key conversion above cannot call out or
                 // mutate/reclaim this environment. No map borrow crosses them.
