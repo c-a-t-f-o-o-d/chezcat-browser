@@ -27,7 +27,7 @@ pub fn write_report(path: &Path, targets: &[String], trust: &trust::Store) -> Re
         .duration_since(UNIX_EPOCH)
         .map_err(|error| error.to_string())?
         .as_secs();
-    writeln!(report, "ChezCat 0.47 connection report\nUTC time: {timestamp} seconds since 1970-01-01\nExecutable: {}\nTrust file: {}\n\nEach check is an ordinary document GET using our HTTP/TLS code.\nNo page scripts, subresources or form submissions run.\nA received HTTP page does not mean a fingerprint or port test passed.\n", std::env::current_exe().map_err(|error| error.to_string())?.display(), trust.description())
+    writeln!(report, "ChezCat 0.49 connection report\nUTC time: {timestamp} seconds since 1970-01-01\nExecutable: {}\nTrust file: {}\n\nEach check is an ordinary document GET using our HTTP/TLS code.\nNo page scripts, subresources or form submissions run.\nA received HTTP page does not mean a fingerprint or port test passed.\n", std::env::current_exe().map_err(|error| error.to_string())?.display(), trust.description())
         .map_err(|error| error.to_string())?;
     for target in targets {
         writeln!(report, "URL: {}", target.display()).map_err(|error| error.to_string())?;

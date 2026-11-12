@@ -95,7 +95,7 @@ mod tests {
         let mut doc = crate::html::parse(html);
         doc.scripting_enabled = true;
         let mut forms = Forms::new(&doc);
-        let mut page = Page::new();
+        let mut page = Page::for_test();
         let location = crate::navigation::address(
             "https://example.test/home",
             &crate::navigation::Location::home(),
@@ -176,7 +176,7 @@ mod tests {
         );
         doc.scripting_enabled = true;
         let mut forms = Forms::new(&doc);
-        let mut page = Page::new();
+        let mut page = Page::for_test();
         page.set_location(&crate::navigation::Location::home());
         page.start(
             &mut doc,

@@ -365,6 +365,7 @@ impl Runtime {
         }
     }
 
+    #[cfg(test)]
     pub(super) fn json_parse(&mut self, args: &[Value]) -> Result<Value, Fault> {
         // Host-free parsing is retained for the original internal allocation
         // assertions. The public builtin below performs observable conversion
@@ -900,7 +901,7 @@ mod tests {
 
     fn callback_succeeds(source: &str) {
         assert_eq!(
-            Runtime::new()
+            Runtime::for_test()
                 .execute(source, &mut NoHost)
                 .unwrap()
                 .to_text(),
@@ -1041,7 +1042,7 @@ if(!caught||saved.keep!==9)throw 'source conversion publication';
             "try{JSON.parse('{\"a\":1,\"b\":{}}',function(k,v){if(k==='a')this.b=this;return v;});}catch(e){caught=true;}finally{finished=true;}",
             "var a={toJSON(){return JSON.stringify(this);}};try{JSON.stringify(a);}catch(e){caught=true;}finally{finished=true;}",
         ] {
-            let mut runtime=Runtime::new();
+            let mut runtime=Runtime::for_test();
             runtime.execute("var caught=false,finished=false;",&mut NoHost).unwrap();
             let error=runtime.execute(source,&mut NoHost).unwrap_err();
             assert!(error.contains("limit"),"{error}");
@@ -1053,7 +1054,7 @@ if(!caught||saved.keep!==9)throw 'source conversion publication';
 
     #[test]
     fn stringify_omits_symbol_values_and_uses_null_for_array_entries() {
-        let result = Runtime::new()
+        let result = Runtime::for_test()
             .execute(
                 r#"var symbol=Symbol("value");
                 [JSON.stringify(symbol)===undefined,
@@ -1071,7 +1072,7 @@ if(!caught||saved.keep!==9)throw 'source conversion publication';
 
     #[test]
     fn stringify_ignores_symbol_keys_without_reading_their_values() {
-        let result = Runtime::new()
+        let result = Runtime::for_test()
             .execute(
                 r#"var symbol=Symbol("hidden");
                 var object={"Symbol(hidden)":5,visible:7};
@@ -1086,7 +1087,7 @@ if(!caught||saved.keep!==9)throw 'source conversion publication';
 
     #[test]
     fn parse_symbol_source_throws_a_catchable_type_error() {
-        let result = Runtime::new()
+        let result = Runtime::for_test()
             .execute(
                 r#"var result="missing";
                 try {JSON.parse(Symbol("source"));}
@@ -1100,7 +1101,7 @@ if(!caught||saved.keep!==9)throw 'source conversion publication';
 
     #[test]
     fn stringify_unboxes_numeric_and_boolean_wrappers_but_keeps_symbol_objects() {
-        let result = Runtime::new().execute(r#"
+        let result = Runtime::for_test().execute(r#"
 var n=new Number(7),b=new Boolean(false),s=Object(Symbol('field'));
 n.self=n;b.self=b;s.field=3;
 if(JSON.stringify(n)!=='7'||JSON.stringify(b)!=='false'||JSON.stringify(s)!=='{"field":3}')throw 'wrapper values';
@@ -1119,7 +1120,7 @@ if(!caught)throw 'symbol wrapper cycle';
 
     #[test]
     fn stringify_wrapper_conversion_observes_hooks_and_preserves_exception_order() {
-        let result = Runtime::new().execute(r#"
+        let result = Runtime::for_test().execute(r#"
 var n=Object(3),b=Object(false),s=Object(Symbol('field')),log='';
 Object.defineProperty(n,'toJSON',{get:function(){log+='j';return 0;},configurable:true});
 n[Symbol.toPrimitive]=function(hint){if(this!==n)throw 'receiver';log+=hint;return '9';};
@@ -1139,7 +1140,7 @@ if(caught!==2)throw 'exception identity';
 
     #[test]
     fn stringify_boxed_numeric_indentation_converts_before_omitted_root() {
-        let result = Runtime::new()
+        let result = Runtime::for_test()
             .execute(
                 r#"
 var gap=Object(2),log='',value={a:1};

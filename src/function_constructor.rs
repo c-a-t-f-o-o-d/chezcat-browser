@@ -203,7 +203,7 @@ mod tests {
     }
 
     fn realm() -> Runtime {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_test();
         for name in ["window", "self", "globalThis"] {
             runtime.define_global(name, Value::Host(2)).unwrap();
         }
@@ -486,7 +486,14 @@ if(caught!==7||effects!==0)throw 'fragment injection or execution';
     #[test]
     fn dynamic_function_recursion_parse_and_body_work_share_fatal_job_limits() {
         std::thread::Builder::new().stack_size(1024*1024).spawn(|| {
-            let deep=format!("try{{Function({:?})();}}catch(e){{caught=true;}}finally{{finished=true;}}",format!("return {}0{};","(".repeat(180),")".repeat(180)));
+            let grouped=format!("try{{Function({:?})();}}catch(e){{caught=true;}}finally{{finished=true;}}",format!("return {}0{};","(".repeat(180),")".repeat(180)));
+            let mut accepted = realm();
+            let mut host = TestHost::default();
+            accepted.execute("var caught=false,finished=false;", &mut host).unwrap();
+            assert_eq!(accepted.execute(&grouped, &mut host).unwrap().to_text(), "0");
+            assert_eq!(accepted.execute("!caught&&finished;", &mut host).unwrap().to_text(), "true");
+            let count = super::super::MAX_EXPRESSION_FRAMES + 1;
+            let deep=format!("try{{Function({:?})();}}catch(e){{caught=true;}}finally{{finished=true;}}",format!("return {}0{};","(".repeat(count),")".repeat(count)));
             for source in [
                 "var o={toString:function(){return Function(o);}};try{Function(o);}catch(e){caught=true;}finally{finished=true;}".to_owned(),
                 "try{Function('while(true){}')();}catch(e){caught=true;}finally{finished=true;}".to_owned(),

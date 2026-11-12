@@ -136,7 +136,7 @@ mod tests {
         }
     }
     fn run(source: &str) -> String {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_test();
         runtime
             .execute(source, &mut TestHost::default())
             .unwrap()
@@ -293,7 +293,7 @@ if(item(2)**item(3)**item(2)!==512||log!=='e2e3e2v3v2v2')throw 'coercion order';
             "2***3",
             "2**=3",
         ] {
-            let mut runtime = Runtime::new();
+            let mut runtime = Runtime::for_test();
             let mut host = TestHost::default();
             runtime.define_global("test", Value::Host(1)).unwrap();
             let source = format!("test.record('early');function unused(){{{expression};}}");
@@ -330,7 +330,7 @@ if(item(2)**item(3)**item(2)!==512||log!=='e2e3e2v3v2v2')throw 'coercion order';
                     format!("{}1", "x||=".repeat(MAX_EXPRESSION_FRAMES + 1)),
                     format!("{}({}1)", "1**".repeat(2048), "x??=".repeat(2049)),
                 ] {
-                    let mut runtime = Runtime::new();
+                    let mut runtime = Runtime::for_test();
                     let mut host = TestHost::default();
                     runtime.define_global("test", Value::Host(1)).unwrap();
                     let source = format!(
@@ -355,11 +355,17 @@ if(item(2)**item(3)**item(2)!==512||log!=='e2e3e2v3v2v2')throw 'coercion order';
     #[test]
     fn operator_depth_and_native_write_failures_remain_fatal() {
         std::thread::Builder::new().stack_size(1024 * 1024).spawn(|| {
+            let mut accepted = Runtime::for_test();
+            let mut recorder = TestHost::default();
+            accepted.define_global("test", Value::Host(1)).unwrap();
+            let old = format!("try{{{}1;}}catch(e){{test.record('caught');}}finally{{test.record('finally');}}", "1**".repeat(256));
+            assert_eq!(accepted.execute(&old, &mut recorder).unwrap().to_text(), "1");
+            assert_eq!(recorder.records, ["finally"]);
             for source in [
-                format!("try{{{}1;}}catch(e){{test.record('caught');}}finally{{test.record('finally');}}", "1**".repeat(256)),
+                format!("try{{{}1;}}catch(e){{test.record('caught');}}finally{{test.record('finally');}}", "1**".repeat(super::super::MAX_EVALUATION_FRAMES)),
                 "try{test.value||=1;}catch(e){test.record('caught');}finally{test.record('finally');}".into(),
             ] {
-                let mut runtime = Runtime::new();
+                let mut runtime = Runtime::for_test();
                 let mut host = TestHost::default();
                 runtime.define_global("test", Value::Host(1)).unwrap();
                 let error = runtime.execute(&source, &mut host).unwrap_err();
@@ -375,7 +381,7 @@ if(item(2)**item(3)**item(2)!==512||log!=='e2e3e2v3v2v2')throw 'coercion order';
 
     #[test]
     fn logical_assignment_step_exhaustion_is_fatal_and_next_job_recovers() {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_test();
         let mut host = TestHost::default();
         runtime.define_global("test", Value::Host(1)).unwrap();
         runtime.steps = 300;

@@ -901,7 +901,7 @@ mod tests {
 
     fn join_succeeds(source: &str) {
         assert_eq!(
-            Runtime::new()
+            Runtime::for_test()
                 .execute(source, &mut NoHost)
                 .unwrap()
                 .to_text(),
@@ -969,7 +969,7 @@ if([custom].join()!=='override')throw 'toString override';
 
     #[test]
     fn actual_array_join_cycles_reentrancy_and_throw_cleanup_keep_native_depth() {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_test();
         assert_eq!(runtime.execute(r#"
 var a=[];a[0]={toString:function(){return a.join(':');}};a[1]=2;
 if(a.join('|')!=='|2'||a.join('|')!=='|2')throw 'reentrant cycle';
@@ -993,7 +993,7 @@ broken[0]=1;if(broken.join('|')!=='1|second'||later!==1)throw 'cycle guard clean
                 "var a=[];for(var i=0;i<40;i++)a=[a];try{a.join();}catch(e){caught=true;}finally{finalized=true;}",
                 "var o={toString:function(){return [o].join();}};try{[o].join();}catch(e){caught=true;}finally{finalized=true;}",
             ] {
-                let mut runtime=Runtime::new();
+                let mut runtime=Runtime::for_test();
                 runtime.execute("var caught=false,finalized=false;",&mut NoHost).unwrap();
                 let error=runtime.execute(source,&mut NoHost).unwrap_err();
                 assert!(error.contains("limit"),"{error}");
@@ -1026,7 +1026,7 @@ broken[0]=1;if(broken.join('|')!=='1|second'||later!==1)throw 'cycle guard clean
                 Err("Unexpected native call".into())
             }
         }
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_test();
         let mut host = Native { reads: 0 };
         runtime.define_global("native", Value::Host(17)).unwrap();
         let error=runtime.execute("var caught=false,finalized=false;try{[native].join();}catch(e){caught=true;}finally{finalized=true;}",&mut host).unwrap_err();
@@ -1048,7 +1048,7 @@ broken[0]=1;if(broken.join('|')!=='1|second'||later!==1)throw 'cycle guard clean
 
     fn flatten_succeeds(source: &str) {
         assert_eq!(
-            Runtime::new()
+            Runtime::for_test()
                 .execute(source, &mut NoHost)
                 .unwrap()
                 .to_text(),
@@ -1128,7 +1128,7 @@ var failed=false;try{a.flat();}catch(e){failed=e.name==='TypeError';}if(!failed)
             "var a=[];a[0]=a;try{a.flat(Infinity);}catch(e){caught=true;}finally{finished=true;}",
             "var a=Array(2050).fill(1);try{[a,a].flat();}catch(e){caught=true;}finally{finished=true;}",
         ] {
-            let mut runtime=Runtime::new();
+            let mut runtime=Runtime::for_test();
             runtime.execute("var caught=false,finished=false;",&mut NoHost).unwrap();
             let error=runtime.execute(source,&mut NoHost).unwrap_err();
             assert!(error.contains("limit"),"{error}");
@@ -1155,7 +1155,7 @@ var failed=false;try{a.flat();}catch(e){failed=e.name==='TypeError';}if(!failed)
     #[test]
     fn default_comparison_finishes_left_string_conversion_before_right_callback() {
         for object_left in [false, true] {
-            let mut runtime = Runtime::new();
+            let mut runtime = Runtime::for_test();
             let mut host = NoHost;
             runtime
                 .execute(

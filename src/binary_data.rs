@@ -1689,7 +1689,7 @@ mod tests {
 
     #[test]
     fn binary_allocations_have_per_buffer_and_document_caps() {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_test();
         let before = runtime.objects.len();
         assert!(runtime
             .new_buffer(MAX_BUFFER_BYTES + 1)
@@ -1715,7 +1715,7 @@ mod tests {
 
     #[test]
     fn checked_views_and_copies_preserve_buffer_boundaries() {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_test();
         let source = runtime.new_buffer(16).unwrap();
         let target = runtime.new_buffer(16).unwrap();
         runtime

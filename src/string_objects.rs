@@ -151,7 +151,7 @@ mod tests {
 
     fn succeeds(source: &str) {
         assert_eq!(
-            Runtime::new()
+            Runtime::for_test()
                 .execute(source, &mut NoHost)
                 .unwrap()
                 .to_text(),
@@ -260,7 +260,7 @@ if(log!=='string:3')throw 'primitive inherited setter';
 
     #[test]
     fn string_payload_accounting_is_exact_and_indices_are_not_allocated() {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_test();
         let before = runtime.value_bytes;
         let properties = runtime.properties;
         let Value::Object(id) = runtime.box_string("x".repeat(65536)).unwrap() else {
@@ -303,12 +303,12 @@ if(log!=='string:3')throw 'primitive inherited setter';
             "try{new String('😀')[0];}catch(e){throw 'caught';}finally{throw 'finally';}",
             "let b=new String('x');try{for(var i=0;i<5000;i++)new String('x');}catch(e){throw 'caught';}finally{throw 'finally';}",
         ] {
-            let error=Runtime::new().execute(source,&mut NoHost).unwrap_err();
+            let error=Runtime::for_test().execute(source,&mut NoHost).unwrap_err();
             let diagnostic=error.lines().next().unwrap();
             assert!(!diagnostic.contains("caught")&&!diagnostic.contains("finally"), "{error}");
             assert!(error.contains("lone UTF-16")||error.contains("Object identity limit"), "{error}");
         }
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_test();
         let boxed = runtime.box_string("work".into()).unwrap();
         runtime.copy_bytes = 0;
         assert!(runtime
@@ -320,7 +320,7 @@ if(log!=='string:3')throw 'primitive inherited setter';
 
     #[test]
     fn string_payload_retention_remains_bounded_across_fresh_jobs() {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_test();
         let mut failures = 0;
         for _ in 0..40 {
             runtime.begin_job();

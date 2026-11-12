@@ -13,7 +13,7 @@ fn page(markup: &str, scripts: &[&str]) -> (Document, Forms, Page, Outcome) {
             label: format!("compat script {node}"),
         })
         .collect();
-    let mut page = Page::new();
+    let mut page = Page::for_test();
     page.set_location(
         &crate::navigation::address(
             "https://www.google.com/search?q=test",
@@ -866,7 +866,7 @@ fn dynamic_function_callbacks_keep_document_string_compilation_policy() {
         let mut doc = crate::html::parse("<p id=out></p>");
         doc.scripting_enabled = true;
         let mut forms = Forms::new(&doc);
-        let mut page = Page::new();
+        let mut page = Page::for_test();
         let location = crate::navigation::address(
             "http://127.0.0.1:1/function-policy",
             &crate::navigation::Location::home(),

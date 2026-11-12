@@ -250,7 +250,7 @@ mod tests {
     }
     fn succeeds(source: &str) {
         assert_eq!(
-            Runtime::new()
+            Runtime::for_test()
                 .execute(source, &mut NoHost)
                 .unwrap()
                 .to_text(),
@@ -385,7 +385,7 @@ var custom={};custom[Symbol.iterator]=function(){return [3,4].values();};if(new 
     #[test]
     fn iterator_protocol_native_steps_preserve_object_budget_and_fatal_exit() {
         succeeds("var count=0;for(var x of Array(6000))count++;if(count!==6000)throw count;'ok';");
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_test();
         let error=runtime.execute(r#"
 var closed=false,caught=false,finalized=false,result={done:false,value:1};
 var it={next(){return result;},return(){closed=true;return {};}};it[Symbol.iterator]=function(){return this;};
@@ -409,7 +409,7 @@ try{for(var x of it){}}catch(e){caught=true;}finally{finalized=true;}
 
     #[test]
     fn iterator_protocol_rejects_native_handles_before_property_callbacks() {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_test();
         runtime.define_global("native", Value::Host(7)).unwrap();
         let error=runtime.execute("var reads=0;Object.defineProperty(Object.prototype,Symbol.iterator,{get:function(){reads++;return function(){};}});for(var x of native){};",&mut NoHost).unwrap_err();
         assert!(error.contains("Host-object iteration"), "{error}");
@@ -427,7 +427,7 @@ try{for(var x of it){}}catch(e){caught=true;}finally{finalized=true;}
                 "var obj={};Object.defineProperty(obj,Symbol.iterator,{get:function(){for(var x of obj){}return undefined;}});try{for(var x of obj){}}catch(e){caught=true;}finally{finalized=true;}",
                 "var obj={toString:String.prototype[Symbol.iterator]};try{String.prototype[Symbol.iterator].call(obj);}catch(e){caught=true;}finally{finalized=true;}",
             ] {
-                let mut runtime=Runtime::new();
+                let mut runtime=Runtime::for_test();
                 let source=format!("var caught=false,finalized=false;{code}");
                 let error=runtime.execute(&source,&mut NoHost).unwrap_err();
                 assert!(error.contains("limit"),"{error}");
@@ -441,7 +441,7 @@ try{for(var x of it){}}catch(e){caught=true;}finally{finalized=true;}
 
     #[test]
     fn iterator_protocol_fatal_return_exhaustion_overrides_body_throw() {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_test();
         let error=runtime.execute(r#"
 var closed=false,caught=false,finalized=false,marker={};
 var it={next(){return {done:false,value:1};},return(){closed=true;while(true){};}};it[Symbol.iterator]=function(){return this;};

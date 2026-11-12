@@ -108,7 +108,11 @@ impl Host for Recorder {
 fn main() {
     let mut source = String::new();
     io::stdin().read_to_string(&mut source).unwrap();
-    let mut runtime = Runtime::new();
+    let mut runtime = Runtime::with_limits(javascript::limits::Limits {
+        steps: 250_000, copy_bytes: 8 * 1024 * 1024,
+        regexp_work: 2_000_000, job_seconds: 1,
+        ..javascript::limits::BROWSER
+    });
     runtime.define_global("test", Value::Host(1)).unwrap();
     let mut host = Recorder::default();
     let args: Vec<_> = std::env::args().skip(1).collect();
@@ -147,6 +151,7 @@ fn main() {
 '''
 
 NODE_DRIVER = r'''
+(function () {
 const fs = require('fs');
 const source = fs.readFileSync(0, 'utf8');
 const records = [];
@@ -185,11 +190,15 @@ try {
         browserWindow = vm.runInContext('window', context);
         for (const job of source.split('\n//---NEXT SCRIPT---\n')) completion = vm.runInContext(job, context);
     } else {
-        completion = eval(source);
+        // The driver lives in this private function. Indirect eval runs the
+        // fixture in Node's normal global realm, with its actual host builtins,
+        // without exposing driver-local source/records/test lexical bindings.
+        completion = (0, eval)(source);
         if (process.argv.includes('--invoke')) completion = test.savedCallback.call(test,5);
     }
 } catch (e) { ok = false; error = e.name + ': ' + e.message; }
 console.log(JSON.stringify({ok, records, error, value: ok ? repr(completion) : null}));
+})();
 '''
 
 CASES = [
@@ -2525,7 +2534,8 @@ _ATTRIBUTION_FIXTURE = ROOT / 'tools/fixtures/string-work-attribution.js'
 COMPLETION_CASES.append(('string-work-attribution', _ATTRIBUTION_FIXTURE.read_text(encoding='utf-8')))
 
 # 0.47: grouping/reference semantics and atomic expression syntax failures.
-for _name in ['parser-continuation-semantics', 'parser-continuation-errors']:
+for _name in ['parser-continuation-semantics', 'parser-continuation-errors',
+              'call-evaluation-stack']:
     _fixture = ROOT / ('tools/fixtures/' + _name + '.js')
     _FIXTURE_PATHS_041.append(_fixture)
     COMPLETION_CASES.append((_name, _fixture.read_text(encoding='utf-8')))
@@ -2629,6 +2639,36 @@ for _name, _count, _parameters in _BINDING_LEAF_LIMIT_CASES:
     ))
 NEGATIVE.extend((name, source) for name, source, _ in _CONTINUATION_LIMITS_047)
 NEGATIVE_DIAGNOSTICS_041.update((name, message) for name, _, message in _CONTINUATION_LIMITS_047)
+
+COMPLETION_CASES.append(('heap-expression-evaluation', (ROOT / 'tools/fixtures/heap-expression-evaluation.js').read_text(encoding='utf-8')))
+
+# 0.48 moves expression evaluation onto a shared heap stack. Preserve inputs
+# that formerly spent native depth as positive references, then test the actual
+# continuation quota and genuine native/dynamic recursion separately.
+_EVALUATION_ACCEPTED_048 = {
+    'operator-supplement-power-evaluation-depth',
+    'continuation-eval-keeps-active-native-depth-atomic',
+    'continuation-execution-keeps-evaluator-depth-atomic',
+}
+_migrated_048 = [case for case in NEGATIVE if case[0] in _EVALUATION_ACCEPTED_048]
+assert len(_migrated_048) == len(_EVALUATION_ACCEPTED_048)
+CASES.extend((name.removesuffix('-atomic') + '-heap-accepted', source)
+             for name, source in _migrated_048)
+NEGATIVE = [case for case in NEGATIVE if case[0] not in _EVALUATION_ACCEPTED_048]
+for _name in _EVALUATION_ACCEPTED_048:
+    ATOMIC_NEGATIVE_CASES.discard(_name)
+    NEGATIVE_DIAGNOSTICS_041.pop(_name, None)
+_EVALUATION_LIMITS_048 = [
+    ('evaluation-shared-heap-limit-atomic',
+     _KEEP_FUNCTION + 'try{' + nested_keep_calls('7', 4096)
+     + ';}catch(error){test.record("caught");}finally{test.record("finally");}',
+     'Pending evaluation limit reached (4096)'),
+    ('evaluation-native-reentry-retains-guard-atomic',
+     "var code='eval(code)';try{eval(code);}catch(error){test.record('caught');}finally{test.record('finally');}",
+     'limit'),
+]
+NEGATIVE.extend((name, source) for name, source, _ in _EVALUATION_LIMITS_048)
+NEGATIVE_DIAGNOSTICS_041.update((name, message) for name, _, message in _EVALUATION_LIMITS_048)
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)

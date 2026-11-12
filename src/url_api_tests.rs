@@ -14,7 +14,7 @@ impl Host for NoHost {
 }
 fn succeeds(source: &str) {
     assert_eq!(
-        Runtime::new()
+        Runtime::for_test()
             .execute(source, &mut NoHost)
             .unwrap()
             .to_text(),
@@ -22,7 +22,7 @@ fn succeeds(source: &str) {
     );
 }
 fn error(source: &str, fragment: &str) {
-    let e = Runtime::new().execute(source, &mut NoHost).unwrap_err();
+    let e = Runtime::for_test().execute(source, &mut NoHost).unwrap_err();
     assert!(e.contains(fragment), "{e}");
 }
 
@@ -189,7 +189,7 @@ try{Object.getOwnPropertyDescriptor(URL.prototype,'href').get.call({});throw 'mi
 }
 #[test]
 fn urls_and_queries_charge_all_retained_strings_and_pair_metadata() {
-    let mut runtime = Runtime::new();
+    let mut runtime = Runtime::for_test();
     let initial = runtime.value_bytes;
     let Value::Object(id) = runtime
         .url_construct(
@@ -241,7 +241,7 @@ fn urls_and_queries_charge_all_retained_strings_and_pair_metadata() {
 }
 #[test]
 fn query_failed_attached_mutations_leave_both_slots_unchanged() {
-    let mut runtime = Runtime::new();
+    let mut runtime = Runtime::for_test();
     let Value::Object(url) = runtime
         .url_construct(
             Kind::Url,
@@ -280,7 +280,7 @@ fn urls_lengths_and_query_entries_have_independent_limits() {
         .unwrap()
         .display()
         .contains("entry limit"));
-    let mut runtime = Runtime::new();
+    let mut runtime = Runtime::for_test();
     let count = runtime.objects.len();
     runtime.value_bytes = MAX_RETAINED_VALUES - 1;
     assert!(runtime
@@ -297,7 +297,7 @@ fn urls_lengths_and_query_entries_have_independent_limits() {
 }
 #[test]
 fn query_limits_remain_fatal_and_do_not_run_catch_blocks() {
-    let mut runtime = Runtime::new();
+    let mut runtime = Runtime::for_test();
     runtime.execute("var caught=false;", &mut NoHost).unwrap();
     let source = format!(
         "try{{new URLSearchParams('{}');}}catch(e){{caught=true;}}",

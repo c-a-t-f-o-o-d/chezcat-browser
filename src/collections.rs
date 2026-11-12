@@ -747,7 +747,7 @@ mod tests {
     }
     #[test]
     fn collection_entry_and_retained_string_budgets_release_on_delete_and_clear() {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_test();
         let id = new_map(&mut runtime);
         let baseline = runtime.value_bytes;
         runtime
@@ -783,7 +783,7 @@ mod tests {
     }
     #[test]
     fn live_entry_caps_do_not_accumulate_deleted_slots() {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_test();
         let id = new_map(&mut runtime);
         for index in 0..MAX_ENTRIES * 2 {
             if index % 256 == 0 {
@@ -829,7 +829,7 @@ mod tests {
     }
     #[test]
     fn all_collections_share_one_document_entry_cap() {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_test();
         for _ in 0..MAX_DOCUMENT_ENTRIES / MAX_ENTRIES {
             runtime.begin_job();
             let id = new_map(&mut runtime);
@@ -851,7 +851,7 @@ mod tests {
 
     #[test]
     fn map_symbol_keys_preserve_identity_updates_and_reinsertion_order() {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_test();
         let id = new_map(&mut runtime);
         let first = Value::Symbol(0);
         let second = Value::Symbol(1);
@@ -892,7 +892,7 @@ mod tests {
 
     #[test]
     fn set_symbol_keys_are_distinct_from_other_key_types() {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_test();
         let id = runtime.new_object(None).unwrap();
         runtime.objects[id].collection = Some(Data::new(Kind::Set));
         for key in [

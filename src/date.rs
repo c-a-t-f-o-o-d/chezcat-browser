@@ -818,7 +818,7 @@ mod tests {
     }
     fn succeeds(source: &str) {
         assert_eq!(
-            Runtime::new()
+            Runtime::for_test()
                 .execute(source, &mut NoHost)
                 .unwrap()
                 .to_text(),
@@ -924,7 +924,7 @@ if(new Date(NaN).toUTCString()!=='Invalid Date'||new Date(NaN).toString()!=='Inv
     #[test]
     fn dates_clock_is_explicit_default_deny_and_fatal() {
         for source in ["Date.now();", "new Date();"] {
-            let mut runtime = Runtime::new();
+            let mut runtime = Runtime::for_test();
             runtime
                 .execute("var caught=false,finished=false;", &mut NoHost)
                 .unwrap();
@@ -971,7 +971,7 @@ if(new Date(NaN).toUTCString()!=='Invalid Date'||new Date(NaN).toString()!=='Inv
             now: 1_700_000_000_123.0,
             reads: 0,
         };
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_test();
         assert_eq!(
             runtime
                 .execute("Date.now();", &mut clock)
@@ -1011,7 +1011,7 @@ if(new Date(NaN).toUTCString()!=='Invalid Date'||new Date(NaN).toString()!=='Inv
             "String(new Date(0));",
             "new Date(0).setHours(12);",
         ] {
-            let error = Runtime::new().execute(source, &mut NoHost).unwrap_err();
+            let error = Runtime::for_test().execute(source, &mut NoHost).unwrap_err();
             assert!(error.contains("local-time"), "{source}: {error}");
         }
     }
@@ -1019,7 +1019,7 @@ if(new Date(NaN).toUTCString()!=='Invalid Date'||new Date(NaN).toString()!=='Inv
     #[test]
     fn dates_parser_and_allocations_share_bounds() {
         assert!(parse(&"x".repeat(MAX_DATE_TEXT + 1)).unwrap().is_nan());
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_test();
         runtime.execute("var caught=false;", &mut NoHost).unwrap();
         let error = runtime
             .execute(

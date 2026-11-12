@@ -11,7 +11,7 @@ use super::{
 use std::rc::Rc;
 
 impl Runtime {
-    fn spread_iterator(
+    pub(super) fn spread_iterator(
         &mut self,
         value: Value,
         host: &mut dyn Host,
@@ -37,20 +37,33 @@ impl Runtime {
             }
             let value = self.eval(program, argument.expression, env, this, host)?;
             if argument.spread {
-                let mut iterator = self.spread_iterator(value, host)?;
-                while let Some(value) = self.iterator_next(&mut iterator, host)? {
-                    // Read terminal done at the boundary: an empty later spread
-                    // does not add an argument. A yielded excess value is fatal.
-                    if values.len() == MAX_ARGUMENTS {
-                        return Err(Fault::new("Call argument limit reached (256)."));
-                    }
-                    values.push(value);
-                }
+                self.append_spread_arguments(&mut values, value, host)?;
             } else {
                 values.push(value);
             }
         }
         Ok(values)
+    }
+
+    // Ordinary nested arguments must not retain iterator/expansion scratch.
+    // This helper is entered only after the spread operand has been evaluated.
+    #[inline(never)]
+    fn append_spread_arguments(
+        &mut self,
+        values: &mut Vec<Value>,
+        value: Value,
+        host: &mut dyn Host,
+    ) -> Result<(), Fault> {
+        let mut iterator = self.spread_iterator(value, host)?;
+        while let Some(value) = self.iterator_next(&mut iterator, host)? {
+            // Read terminal done at the boundary: an empty later spread
+            // does not add an argument. A yielded excess value is fatal.
+            if values.len() == MAX_ARGUMENTS {
+                return Err(Fault::new("Call argument limit reached (256)."));
+            }
+            values.push(value);
+        }
+        Ok(())
     }
 
     pub(super) fn eval_array_literal(
@@ -125,7 +138,7 @@ mod tests {
 
     fn succeeds(source: &str) {
         assert_eq!(
-            Runtime::new()
+            Runtime::for_test()
                 .execute(source, &mut NoHost)
                 .unwrap()
                 .to_text(),
@@ -286,7 +299,7 @@ var dense=[...Array(4096)];if(dense.length!==4096||!Object.hasOwn(dense,4095))th
             "var a=[{holes}...[1,2],...[]];if(a.length!==8192||a[8190]!==1||a[8191]!==2||Object.hasOwn(a,0))throw 'logical array boundary';'ok';"
         ));
         let excess = format!("var caught=false,finalized=false;try{{[{holes}...[1,2,3]];}}catch(e){{caught=true;}}finally{{finalized=true;}}");
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_test();
         let error = runtime.execute(&excess, &mut NoHost).unwrap_err();
         assert!(error.contains("Array length limit"), "{error}");
         runtime.begin_job();
@@ -303,7 +316,7 @@ var dense=[...Array(4096)];if(dense.length!==4096||!Object.hasOwn(dense,4095))th
             "try{[...Array(4097)];}catch(e){caught=true;}finally{finalized=true;}",
             "var flow={},item={done:false,value:1};flow[Symbol.iterator]=function(){return{next(){return item;},return(){closed=true;return {};}};};try{(function(){called=true;})(...flow);}catch(e){caught=true;}finally{finalized=true;}",
         ] {
-            let mut runtime = Runtime::new();
+            let mut runtime = Runtime::for_test();
             runtime.execute("var caught=false,finalized=false,called=false,closed=false;", &mut NoHost).unwrap();
             let error = runtime.execute(code, &mut NoHost).unwrap_err();
             assert!(error.contains("limit"), "{error}");
@@ -321,7 +334,7 @@ var dense=[...Array(4096)];if(dense.length!==4096||!Object.hasOwn(dense,4095))th
             "(function(){})(...native);",
             "new (function(){})(...native);",
         ] {
-            let mut runtime = Runtime::new();
+            let mut runtime = Runtime::for_test();
             runtime.define_global("native", Value::Host(7)).unwrap();
             runtime.execute("var reads=0;Object.defineProperty(Object.prototype,Symbol.iterator,{get:function(){reads++;return function(){};}});", &mut NoHost).unwrap();
             let error = runtime.execute(code, &mut NoHost).unwrap_err();
@@ -341,7 +354,7 @@ var dense=[...Array(4096)];if(dense.length!==4096||!Object.hasOwn(dense,4095))th
                 "var input={};Object.defineProperty(input,Symbol.iterator,{get:function(){return [...input];}});try{[...input];}catch(e){caught=true;}finally{finalized=true;}",
                 "var input={};input[Symbol.iterator]=function(){return{next(){return {done:false,value:[...input]};}};};try{[...input];}catch(e){caught=true;}finally{finalized=true;}",
             ] {
-                let mut runtime=Runtime::new();
+                let mut runtime=Runtime::for_test();
                 runtime.execute("var caught=false,finalized=false;", &mut NoHost).unwrap();
                 let error=runtime.execute(code,&mut NoHost).unwrap_err();
                 assert!(error.contains("limit"), "{error}");

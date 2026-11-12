@@ -35,6 +35,11 @@ mod collections;
 mod date;
 #[path = "expression_parser.rs"]
 mod expression_parser;
+#[path = "expression_evaluator.rs"]
+mod expression_evaluator;
+#[cfg(test)]
+#[path = "expression_evaluator_tests.rs"]
+mod expression_evaluator_tests;
 #[cfg(test)]
 #[path = "expression_parser_tests.rs"]
 mod expression_parser_tests;
@@ -89,13 +94,19 @@ mod text_encoding;
 mod url_api;
 #[path = "work_attribution.rs"]
 mod work_attribution;
+#[path = "execution_limits.rs"]
+pub mod limits;
+#[cfg(test)]
+#[path = "execution_limits_tests.rs"]
+mod execution_limits_tests;
 
 // Source/parse storage is separate from execution, strings and host work.
 // A bounded 512 KiB bundle can contain ordinary bootstrap code without giving
 // its loops, recursive calls or callbacks a larger execution allowance.
 pub const MAX_SOURCE_BYTES: usize = 512 * 1024;
 pub const MAX_STRING_BYTES: usize = 128 * 1024;
-const MAX_REGEXP_WORK: usize = 2_000_000;
+#[cfg(test)]
+const MAX_REGEXP_WORK: usize = limits::REGRESSION.regexp_work;
 const MAX_RETAINED_REGEXP: usize = 2 * 1024 * 1024;
 const MAX_TOKENS: usize = 131_072;
 const MAX_AST: usize = 131_072;
@@ -106,12 +117,18 @@ const MAX_EXPRESSION_FRAMES: usize = 4096;
 // Flat else-if dispatchers do not consume native parser/evaluator frames.
 // Pending branches across nested statements still share a finite allowance.
 const MAX_IF_BRANCHES: usize = 4096;
+// Native reentry (statements, callbacks and compound helpers), not the
+// expression continuation stack. Never raise this to enlarge heap capacity.
 const MAX_EVAL_DEPTH: usize = 128;
+const MAX_EVALUATION_FRAMES: usize = 4096;
+const MAX_EVALUATION_FRAME_SLOTS: usize = 2 * MAX_EVALUATION_FRAMES;
+const MAX_EVALUATION_ARGUMENT_SLOTS: usize = 4 * MAX_EVALUATION_FRAMES;
 const MAX_CALL_DEPTH: usize = 32;
 const MAX_ARGUMENTS: usize = 256;
-const MAX_STEPS: usize = 250_000;
-const MAX_JOB_TIME: Duration = Duration::from_secs(1);
-const MAX_COPY_BYTES: usize = 8 * 1024 * 1024;
+#[cfg(test)]
+const MAX_STEPS: usize = limits::REGRESSION.steps;
+#[cfg(test)]
+const MAX_COPY_BYTES: usize = limits::REGRESSION.copy_bytes;
 const MAX_PROGRAMS: usize = 128;
 const MAX_RETAINED_SOURCE: usize = 2 * 1024 * 1024;
 const MAX_RETAINED_AST: usize = 262_144;
@@ -2953,11 +2970,17 @@ pub struct Runtime {
     bindings: usize,
     value_bytes: usize,
     steps: usize,
+    limits: limits::Limits,
     job_deadline: Instant,
     job_allowance: (usize, usize, usize),
     copy_bytes: usize,
     work_attribution: work_attribution::Tracker,
     eval_depth: usize,
+    evaluation_frames: usize,
+    evaluation_frame_slots: usize,
+    evaluation_argument_slots: usize,
+    #[cfg(test)]
+    recursive_evaluation_oracle: bool,
     call_depth: usize,
     strict: bool,
 }
@@ -2970,6 +2993,16 @@ impl Default for Runtime {
 
 impl Runtime {
     pub fn new() -> Self {
+        Self::with_limits(limits::BROWSER)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn for_test() -> Self {
+        Self::with_limits(limits::REGRESSION)
+    }
+
+    /// Host configuration only. Dynamic scripts inherit this runtime's profile.
+    pub fn with_limits(limits: limits::Limits) -> Self {
         let mut runtime = Self {
             environments: vec![Some(Environment {
                 arguments: None,
@@ -3016,15 +3049,21 @@ impl Runtime {
             retained_source: 0,
             retained_ast: 0,
             retained_regexp: 0,
-            regexp_work: MAX_REGEXP_WORK,
+            regexp_work: limits.regexp_work,
             bindings: 0,
             value_bytes: 0,
-            steps: MAX_STEPS,
-            job_deadline: Instant::now() + MAX_JOB_TIME,
-            job_allowance: (MAX_STEPS, MAX_COPY_BYTES, MAX_REGEXP_WORK),
-            copy_bytes: MAX_COPY_BYTES,
-            work_attribution: work_attribution::Tracker::new(MAX_COPY_BYTES),
+            limits,
+            steps: limits.steps,
+            job_deadline: Instant::now() + Duration::from_secs(limits.job_seconds),
+            job_allowance: (limits.steps, limits.copy_bytes, limits.regexp_work),
+            copy_bytes: limits.copy_bytes,
+            work_attribution: work_attribution::Tracker::new(limits.copy_bytes),
             eval_depth: 0,
+            evaluation_frames: 0,
+            evaluation_frame_slots: 0,
+            evaluation_argument_slots: 0,
+            #[cfg(test)]
+            recursive_evaluation_oracle: false,
             call_depth: 0,
             strict: false,
         };
@@ -3215,12 +3254,12 @@ impl Runtime {
     }
 
     pub fn begin_job(&mut self) {
-        self.work_attribution.begin_job(MAX_COPY_BYTES);
-        self.steps = MAX_STEPS;
-        self.job_deadline = Instant::now() + MAX_JOB_TIME;
-        self.copy_bytes = MAX_COPY_BYTES;
-        self.regexp_work = MAX_REGEXP_WORK;
-        self.job_allowance = (MAX_STEPS, MAX_COPY_BYTES, MAX_REGEXP_WORK);
+        self.work_attribution.begin_job(self.limits.copy_bytes);
+        self.steps = self.limits.steps;
+        self.job_deadline = Instant::now() + Duration::from_secs(self.limits.job_seconds);
+        self.copy_bytes = self.limits.copy_bytes;
+        self.regexp_work = self.limits.regexp_work;
+        self.job_allowance = (self.limits.steps, self.limits.copy_bytes, self.limits.regexp_work);
     }
 
     pub fn constrain_job(&mut self, steps: usize, copies: usize, regexp: usize, deadline: Instant) {
@@ -3530,13 +3569,14 @@ impl Runtime {
     }
     fn step(&mut self) -> Result<(), Fault> {
         if self.steps == 0 {
-            return Err(Fault::new("Execution step limit reached (250000 per job)."));
+            return Err(Fault::new(format!("Execution step limit reached ({} per job).", self.limits.steps)));
         }
         if self.steps & 255 == 0 && Instant::now() >= self.job_deadline {
             self.steps = 0;
-            return Err(Fault::new(
-                "Execution time limit reached (1 second per job).",
-            ));
+            return Err(Fault::new(format!(
+                "Execution time limit reached ({} second{} per job).",
+                self.limits.job_seconds, if self.limits.job_seconds == 1 { "" } else { "s" },
+            )));
         }
         self.steps -= 1;
         Ok(())
@@ -3550,9 +3590,10 @@ impl Runtime {
             let remaining = self.copy_bytes;
             self.copy_bytes = 0;
             self.work_attribution.reject(kind, bytes, remaining, self.job_allowance.1);
-            return Err(Fault::new(
-                "String/copy work limit reached (8 MiB per job).",
-            ));
+            return Err(Fault::new(format!(
+                "String/copy work limit reached ({} MiB per job).",
+                self.limits.copy_bytes / (1024 * 1024),
+            )));
         }
         self.copy_bytes -= bytes;
         self.work_attribution.accept(kind, bytes);
@@ -6136,7 +6177,14 @@ impl Runtime {
             return Err(Fault::new("Evaluation nesting limit reached (128)."));
         }
         self.eval_depth += 1;
-        let result = self.eval_inner(program, id, env, this, host);
+        #[cfg(test)]
+        let result = if self.recursive_evaluation_oracle {
+            self.eval_inner(program, id, env, this, host)
+        } else {
+            self.eval_heap(program, id, env, this, host)
+        };
+        #[cfg(not(test))]
+        let result = self.eval_heap(program, id, env, this, host);
         self.eval_depth -= 1;
         result.map_err(|error| error.at(&program.source, program.exprs[id].at))
     }
@@ -6409,6 +6457,9 @@ impl Runtime {
         }
     }
 
+    // Dispatch without retaining member-resolution scratch in every plain
+    // nested call. Argument evaluation can recurse up to MAX_EVAL_DEPTH even
+    // when no JavaScript function body has been entered yet.
     fn eval_call(
         &mut self,
         program: &Rc<Program>,
@@ -6417,69 +6468,142 @@ impl Runtime {
         this: &Value,
         host: &mut dyn Host,
     ) -> Result<Value, Fault> {
-        match &program.exprs[id].kind {
-            ExprKind::Call(callee, arguments) => {
-                if matches!(program.exprs[*callee].kind, ExprKind::OptionalChain(_, _)) {
-                    return self
-                        .call_parenthesized_chain(program, *callee, arguments, env, this, host);
-                }
-                if let ExprKind::Member(object, property) = &program.exprs[*callee].kind {
-                    let object = self.eval(program, *object, env, this, host)?;
-                    let property = self.eval(program, *property, env, this, host)?;
-                    Self::require_property_receiver(&object)?;
-                    let property = self.property_key(property, host)?;
-                    let PropertyKey::String(property) = property else {
-                        let PropertyKey::Symbol(key) = property else {
-                            unreachable!()
-                        };
-                        let receiver = self.copy_value(&object)?;
-                        let function = self.get_symbol_property(receiver, key, host)?;
-                        let args = self.eval_argument_list(program, arguments, env, this, host)?;
-                        return self.call_value(function, &args, object, host);
-                    };
-                    // Resolve an own or inherited method before arguments run.
-                    // An argument may replace that property on the receiver.
-                    let own_function = if let Some(ordinary) = Ordinary::from_value(&object) {
-                        Some(self.get_ordinary_property_with_host(ordinary, &property, host)?)
-                    } else if let Value::Host(handle) = &object {
-                        if self.host_ordinary(*handle, &property, host).is_some()
-                            || host.ordinary_prototype(*handle)
-                            || host.resolve_member_before_call(*handle)
-                        {
-                            Some(self.host_read(*handle, &property, host)?)
-                        } else if self.is_browser_global(*handle)
-                            && !host.owns_global_property(&property)
-                        {
-                            Some(self.global_value(&property, host)?)
-                        } else {
-                            None
-                        }
+        let ExprKind::Call(callee, arguments) = &program.exprs[id].kind else {
+            unreachable!()
+        };
+        match &program.exprs[*callee].kind {
+            ExprKind::OptionalChain(_, _) => {
+                self.call_parenthesized_chain(program, *callee, arguments, env, this, host)
+            }
+            ExprKind::Member(object, property) => {
+                self.eval_member_call(program, *object, *property, arguments, env, this, host)
+            }
+            _ => self.eval_value_call(program, *callee, arguments, env, this, host),
+        }
+    }
+
+    #[inline(never)]
+    fn eval_value_call(
+        &mut self,
+        program: &Rc<Program>,
+        callee: ExprId,
+        arguments: &[Argument],
+        env: usize,
+        this: &Value,
+        host: &mut dyn Host,
+    ) -> Result<Value, Fault> {
+        let function = self.eval(program, callee, env, this, host)?;
+        let args = self.eval_argument_list(program, arguments, env, this, host)?;
+        if matches!(&program.exprs[callee].kind, ExprKind::Name(name) if name == "eval")
+            && self.is_eval(&function)
+        {
+            self.string_eval(
+                args.first().unwrap_or(&Value::Undefined),
+                Some((env, this)),
+                host,
+            )
+        } else {
+            self.call_value(function, &args, Value::Undefined, host)
+        }
+    }
+
+    // Resolve the receiver/key/callee completely before descending into the
+    // arguments, then retain only the resolved values. In particular a getter
+    // or argument may replace the original method or its receiver binding.
+    #[inline(never)]
+    fn eval_member_call(
+        &mut self,
+        program: &Rc<Program>,
+        object: ExprId,
+        property: ExprId,
+        arguments: &[Argument],
+        env: usize,
+        this: &Value,
+        host: &mut dyn Host,
+    ) -> Result<Value, Fault> {
+        let (object, property, function) =
+            self.prepare_member_call(program, object, property, env, this, host)?;
+        let args = self.eval_argument_list(program, arguments, env, this, host)?;
+        self.invoke_member_call(object, property, function, &args, host)
+    }
+
+    #[inline(never)]
+    fn prepare_member_call(
+        &mut self,
+        program: &Rc<Program>,
+        object: ExprId,
+        property: ExprId,
+        env: usize,
+        this: &Value,
+        host: &mut dyn Host,
+    ) -> Result<(Value, PropertyKey, Option<Value>), Fault> {
+        let object = self.eval(program, object, env, this, host)?;
+        let property = self.eval(program, property, env, this, host)?;
+        self.resolve_member_call(object, property, host)
+    }
+
+    // Shared by the recursive reference path and the heap expression driver.
+    // Both have already evaluated the receiver and key, in that order.
+    #[inline(never)]
+    fn resolve_member_call(
+        &mut self,
+        object: Value,
+        property: Value,
+        host: &mut dyn Host,
+    ) -> Result<(Value, PropertyKey, Option<Value>), Fault> {
+        Self::require_property_receiver(&object)?;
+        let property = self.property_key(property, host)?;
+        let function = match &property {
+            PropertyKey::Symbol(key) => {
+                let receiver = self.copy_value(&object)?;
+                Some(self.get_symbol_property(receiver, *key, host)?)
+            }
+            PropertyKey::String(property) => {
+                if let Some(ordinary) = Ordinary::from_value(&object) {
+                    Some(self.get_ordinary_property_with_host(ordinary, property, host)?)
+                } else if let Value::Host(handle) = &object {
+                    if self.host_ordinary(*handle, property, host).is_some()
+                        || host.ordinary_prototype(*handle)
+                        || host.resolve_member_before_call(*handle)
+                    {
+                        Some(self.host_read(*handle, property, host)?)
+                    } else if self.is_browser_global(*handle)
+                        && !host.owns_global_property(property)
+                    {
+                        Some(self.global_value(property, host)?)
                     } else {
-                        Some(self.read_property(&object, &property, host)?)
-                    };
-                    let args = self.eval_argument_list(program, arguments, env, this, host)?;
-                    if let Some(function) = own_function {
-                        self.call_named_value(function, &args, object, &property, host)
-                    } else {
-                        self.call_member(object, &property, &args, host)
+                        None
                     }
                 } else {
-                    let function = self.eval(program, *callee, env, this, host)?;
-                    let args = self.eval_argument_list(program, arguments, env, this, host)?;
-                    if matches!(&program.exprs[*callee].kind, ExprKind::Name(name) if name == "eval")
-                        && self.is_eval(&function)
-                    {
-                        self.string_eval(
-                            args.first().unwrap_or(&Value::Undefined),
-                            Some((env, this)),
-                            host,
-                        )
-                    } else {
-                        self.call_value(function, &args, Value::Undefined, host)
-                    }
+                    Some(self.read_property(&object, property, host)?)
                 }
             }
-            _ => unreachable!(),
+        };
+        Ok((object, property, function))
+    }
+
+    // Invocation scratch is needed only after the argument expressions have
+    // completed; do not reserve it in every suspended argument-evaluation frame.
+    #[inline(never)]
+    fn invoke_member_call(
+        &mut self,
+        object: Value,
+        property: PropertyKey,
+        function: Option<Value>,
+        args: &[Value],
+        host: &mut dyn Host,
+    ) -> Result<Value, Fault> {
+        match (property, function) {
+            (PropertyKey::String(property), Some(function)) => {
+                self.call_named_value(function, args, object, &property, host)
+            }
+            (PropertyKey::String(property), None) => {
+                self.call_member(object, &property, args, host)
+            }
+            (PropertyKey::Symbol(_), Some(function)) => {
+                self.call_value(function, args, object, host)
+            }
+            (PropertyKey::Symbol(_), None) => unreachable!(),
         }
     }
 
@@ -7229,6 +7353,16 @@ impl Runtime {
                 ),
             ));
         };
+        if matches!(self.functions.get(index), Some(Function::Script { .. })) {
+            return self.call_script_value(index, args, this, host);
+        }
+        self.call_non_script_value(index, args, this, host)
+    }
+
+    #[inline(never)]
+    fn call_non_script_value(
+        &mut self, index: usize, args: &[Value], this: Value, host: &mut dyn Host,
+    ) -> Result<Value, Fault> {
         match self.functions.get(index) {
             Some(Function::Bound(_)) => {
                 let (target, arguments, receiver) = self.bound_arguments(index, args, true)?;
@@ -7328,9 +7462,15 @@ impl Runtime {
                 self.call_depth -= 1;
                 return self.checked_value(result?);
             }
-            Some(Function::Script { .. }) => {}
+            Some(Function::Script { .. }) => unreachable!("script dispatch handled separately"),
             None => return Err(Fault::new("Invalid function handle.")),
         }
+    }
+
+    #[inline(never)]
+    fn call_script_value(
+        &mut self, index: usize, args: &[Value], this: Value, host: &mut dyn Host,
+    ) -> Result<Value, Fault> {
         if self.call_depth >= MAX_CALL_DEPTH {
             return Err(Fault::new("Function call limit reached (32)."));
         }
@@ -8024,7 +8164,7 @@ mod tests {
     }
 
     fn test_runtime() -> (Runtime, TestHost) {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_test();
         runtime.define_global("test", Value::Host(1)).unwrap();
         runtime.define_global("window", Value::Host(2)).unwrap();
         (runtime, TestHost::default())
@@ -8804,7 +8944,7 @@ true;
                 Ok(Value::String("https://example.test/".into()))
             }
         }
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_test();
         runtime.define_global("native", Value::Host(1)).unwrap();
         runtime.define_global("opaque", Value::Host(2)).unwrap();
         let mut host = NativeText::default();
@@ -8836,7 +8976,7 @@ true;
                 Ok(self.0)
             }
         }
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_test();
         assert_eq!(
             runtime
                 .execute("var next=Math.random;next();", &mut Entropy(0.125))
@@ -8892,7 +9032,7 @@ caught;
 
     #[test]
     fn string_character_scan_charges_only_visited_scalars_before_decoding() {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_test();
         for (method, position, expected, charged) in [
             ("charCodeAt", 0.0, 65.0, 1),
             ("charCodeAt", 1.0, 233.0, 3),
@@ -8930,7 +9070,7 @@ caught;
 
     #[test]
     fn string_character_ranges_and_surrogate_boundaries_remain_explicit() {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_test();
         for position in [-1.0, f64::NEG_INFINITY, f64::INFINITY, f64::MAX, 4.0] {
             for method in ["charAt", "charCodeAt", "codePointAt"] {
                 runtime.begin_job();
@@ -8987,7 +9127,7 @@ caught;
 
     #[test]
     fn string_index_scalar_scan_charges_visited_bytes_and_stops_at_target() {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_test();
         for (index, expected, bytes) in [
             (0, Some(65), 1),
             (1, Some(233), 3),
@@ -9048,8 +9188,8 @@ caught;
             for index in [0, 1, 2, 3, 4, 7, text.len(), text.len() + 1] {
                 let property = index.to_string();
                 let receiver = Value::String(text.into());
-                let mut before = Runtime::new();
-                let mut after = Runtime::new();
+                let mut before = Runtime::for_test();
+                let mut after = Runtime::for_test();
                 before.begin_job();
                 after.begin_job();
                 let expected = original(&mut before, &receiver, &property, &mut TestHost::default())
@@ -9083,7 +9223,7 @@ caught;
     #[test]
     fn string_index_original_probe_counts_and_unchanged_controls() {
         for (bytes, expected_work) in [(1024, 1077), (8192, 8245)] {
-            let mut runtime = Runtime::new();
+            let mut runtime = Runtime::for_test();
             runtime.define_global("payload", Value::String("A".repeat(bytes))).unwrap();
             runtime.begin_job();
             // Exact bytes of the retained index-1024.js/index-8192.js fixture.
@@ -9101,7 +9241,7 @@ caught;
             ("payload?.length;\n", 16462),
             ("payload.charCodeAt(0);\n", 8293),
         ] {
-            let mut runtime = Runtime::new();
+            let mut runtime = Runtime::for_test();
             runtime.define_global("payload", Value::String("A".repeat(8192))).unwrap();
             runtime.begin_job();
             runtime.execute(source, &mut TestHost::default()).unwrap();
@@ -9111,7 +9251,7 @@ caught;
 
     #[test]
     fn string_index_scan_and_result_charges_precede_success() {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_test();
         let receiver = Value::String("Aé😀Z".into());
         for (property, budget) in [("0", 0), ("0", 1), ("0", 2), ("1", 2), ("1", 4)] {
             runtime.begin_job();
@@ -9156,7 +9296,7 @@ caught;
             .spawn(|| {
                 for microtask in [false, true] {
                     for iterations in [512, 1536] {
-                        let mut runtime = Runtime::new();
+                        let mut runtime = Runtime::for_test();
                         let mut host = TestHost::default();
                         runtime.define_global("payload", Value::String("A".repeat(8192))).unwrap();
                         let setup = "var completed=0,total=0,tail=0,sentinel=0;";
@@ -9209,7 +9349,7 @@ caught;
 
     #[test]
     fn string_index_lone_surrogate_stays_fatal_and_cancels_later_callbacks() {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_test();
         let mut host = TestHost::default();
         runtime.begin_job();
         runtime.execute(
@@ -9740,12 +9880,18 @@ caught;
         std::thread::Builder::new()
             .stack_size(1024 * 1024)
             .spawn(|| {
+                // Preserve the formerly rejected input as an exact success case.
+                let grouped = format!("var n=0;var code='if(n++<16)eval(code);else eval(deep);';var deep='{}1{}';try{{eval(code);}}catch(e){{test.record('caught');}}finally{{test.record('finally');}}", "(".repeat(1000), ")".repeat(1000));
+                let (mut accepted, mut recorder) = test_runtime();
+                recorder.eval_permission = Some(true);
+                assert_eq!(accepted.execute(&grouped, &mut recorder).unwrap().to_text(), "1");
+                assert_eq!(recorder.records, ["finally"]);
                 for source in [
                     format!("{}Array;", "new ".repeat(1000)),
                     format!("{};{}", "do{".repeat(100), "}while(false);".repeat(100)),
                     format!("{};", "for(var x of [1])".repeat(100)),
                     "var code='eval(code)';eval(code);".into(),
-                    format!("var n=0;var code='if(n++<16)eval(code);else eval(deep);';var deep='{}1{}';try{{eval(code);}}catch(e){{test.record('caught');}}finally{{test.record('finally');}}", "(".repeat(1000), ")".repeat(1000)),
+                    format!("var n=0;var code='if(n++<16)eval(code);else eval(deep);';var deep='{}1{}';try{{eval(code);}}catch(e){{test.record('caught');}}finally{{test.record('finally');}}", "(".repeat(MAX_EXPRESSION_FRAMES + 1), ")".repeat(MAX_EXPRESSION_FRAMES + 1)),
                 ] {
                     let (mut runtime, mut host) = test_runtime();
                     host.eval_permission = Some(true);
@@ -9798,7 +9944,7 @@ caught;
                     assert_eq!(runtime.call_depth, 0);
                     assert_eq!(runtime.eval_depth, 0);
                 }
-                let mut runtime = Runtime::new();
+                let mut runtime = Runtime::for_test();
                 runtime.register_program(&nodes, false).unwrap();
                 runtime.register_program(&nodes, false).unwrap();
                 assert_eq!(runtime.retained_ast, MAX_RETAINED_AST);
@@ -9854,7 +10000,7 @@ caught;
                 Ok(Value::Undefined)
             }
         }
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_test();
         let mut host = GuardHost::default();
         runtime.define_global("native", Value::Host(1)).unwrap();
         runtime.define_global("window", Value::Host(2)).unwrap();
@@ -9920,7 +10066,7 @@ caught;
                 Err("No host calls expected.".into())
             }
         }
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_test();
         let mut host = PresenceHost::default();
         runtime.define_global("window", Value::Host(2)).unwrap();
         runtime.define_global("opaque", Value::Host(1)).unwrap();
@@ -10867,12 +11013,14 @@ caught;
     fn recursion_infinite_loops_and_flat_ast_chains_are_bounded() {
         // Retain the old 4000-group witness as an intentional acceptance case.
         assert_eq!(result(&format!("{}1{}", "(".repeat(4000), ")".repeat(4000))), "1");
+        let (mut accepted, mut recorder) = test_runtime();
+        assert!(matches!(accepted.execute(&format!("test{};", ".child".repeat(MAX_EVALUATION_FRAMES)), &mut recorder).unwrap(), Value::Host(1)));
         for source in [
             "while(true);".to_string(),
             "function forever(){forever();} forever();".into(),
             format!("{}1{}", "(".repeat(MAX_EXPRESSION_FRAMES + 1), ")".repeat(MAX_EXPRESSION_FRAMES + 1)),
             format!("1{};", "+1".repeat(12_000)),
-            format!("test{};", ".child".repeat(1000)),
+            format!("test{};", ".child".repeat(MAX_EVALUATION_FRAMES)),
             format!("{}true;", "!".repeat(4000)),
         ] {
             let (mut runtime, mut host) = test_runtime();
@@ -10893,8 +11041,10 @@ caught;
             .spawn(|| {
                 recursion_infinite_loops_and_flat_ast_chains_are_bounded();
                 resource_and_capability_failures_cannot_be_caught_or_suppressed();
+                let (mut accepted, mut recorder) = test_runtime();
+                assert!(matches!(accepted.execute(&format!("function f(){{return f;}}f{};", "()".repeat(1000)), &mut recorder).unwrap(), Value::Function(_)));
                 for source in [
-                    format!("function f(){{return f;}}f{};", "()".repeat(1000)),
+                    format!("function f(){{return f;}}f{};", "()".repeat(MAX_EVALUATION_FRAMES)),
                     format!("{};", vec!["1"; 12_000].join(",")),
                     format!("{}1;{}", "try{".repeat(100), "}finally{}".repeat(100)),
                     "let f=()=>f();f();".into(),

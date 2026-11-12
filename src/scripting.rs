@@ -63,8 +63,6 @@ const DATASET_BASE: u32 = 1_500_000;
 const EVENT_BASE: u32 = 2_000_000;
 const MAX_LISTENERS: usize = 64;
 const MAX_EVENT_TYPE_BYTES: usize = 256;
-const MAX_HOST_WORK: usize = 100_000;
-const MAX_COPY_WORK: usize = 8 * 1024 * 1024;
 const MAX_STRING: usize = 32 * 1024;
 const MAX_EXTRA_NODES: usize = 256;
 const MAX_EXTRA_BYTES: usize = 1024 * 1024;
@@ -78,11 +76,6 @@ const MAX_TIMER_BYTES: usize = 256 * 1024;
 const MAX_TIMER_CALLBACKS: usize = 4096;
 const MAX_ANIMATION_FRAMES: usize = 64;
 const FRAME_INTERVAL: Duration = Duration::from_millis(16);
-const MAX_STARTUP_STEPS: usize = 1_000_000;
-const MAX_STARTUP_COPY: usize = 64 * 1024 * 1024;
-const MAX_STARTUP_REGEXP: usize = 8_000_000;
-const MAX_STARTUP_HOST_WORK: usize = 500_000;
-const MAX_STARTUP_TIME: Duration = Duration::from_secs(2);
 pub const MAX_CONSOLE_SOURCE: usize = 8192;
 
 /// Values supplied by the native input path, never by document code.
@@ -302,6 +295,7 @@ struct State {
     event: Option<Event>,
     tree: Tree,
     dirty: bool,
+    limits: crate::javascript::limits::Limits,
     host_work: usize,
     copy_work: usize,
     node_limit: usize,
@@ -354,8 +348,9 @@ impl State {
             event: None,
             tree: Tree::default(),
             dirty: true,
-            host_work: MAX_HOST_WORK,
-            copy_work: MAX_COPY_WORK,
+            limits: crate::javascript::limits::BROWSER,
+            host_work: crate::javascript::limits::BROWSER.host_work,
+            copy_work: crate::javascript::limits::BROWSER.copy_bytes,
             node_limit: 0,
             retained: 0,
             retained_limit: MAX_EXTRA_BYTES,
@@ -380,7 +375,7 @@ impl State {
     fn work(&mut self, count: usize) -> Result<(), String> {
         if count > self.host_work {
             self.host_work = 0;
-            return Err("DOM work limit reached (100000 node/host operations per job).".into());
+            return Err(format!("DOM work limit reached ({} node/host operations per job).", self.limits.host_work));
         }
         self.host_work -= count;
         Ok(())
@@ -389,7 +384,7 @@ impl State {
     fn copies(&mut self, bytes: usize) -> Result<(), String> {
         if bytes > self.copy_work {
             self.copy_work = 0;
-            return Err("DOM string work limit reached (8 MiB per job).".into());
+            return Err(format!("DOM string work limit reached ({} MiB per job).", self.limits.copy_bytes / (1024 * 1024)));
         }
         self.copy_work -= bytes;
         Ok(())
@@ -612,7 +607,16 @@ impl Default for Page {
 
 impl Page {
     pub fn new() -> Self {
-        let mut runtime = Runtime::new();
+        Self::with_limits(crate::javascript::limits::BROWSER)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn for_test() -> Self {
+        Self::with_limits(crate::javascript::limits::REGRESSION)
+    }
+
+    fn with_limits(limits: crate::javascript::limits::Limits) -> Self {
+        let mut runtime = Runtime::with_limits(limits);
         for (name, handle) in [
             ("window", WINDOW),
             ("self", WINDOW),
@@ -632,6 +636,9 @@ impl Page {
             .bind_browser_global(WINDOW)
             .expect("fixed browser global");
         let mut state = State::new();
+        state.limits = limits;
+        state.host_work = limits.host_work;
+        state.copy_work = limits.copy_bytes;
         for name in [
             "setTimeout",
             "clearTimeout",
@@ -735,8 +742,8 @@ impl Page {
     /// this once for that entire action, never once per listener or dispatch.
     pub fn begin_job(&mut self) {
         self.runtime.begin_job();
-        self.state.host_work = MAX_HOST_WORK;
-        self.state.copy_work = MAX_COPY_WORK;
+        self.state.host_work = self.state.limits.host_work;
+        self.state.copy_work = self.state.limits.copy_bytes;
         self.state.timer_nesting = 0;
         if let Some(geometry) = &mut self.state.geometry {
             geometry.begin_job();
@@ -1090,11 +1097,11 @@ impl Page {
         let mut startup_regexp = 0usize;
         let mut startup_host = 0usize;
         for source in sources {
-            if startup_steps >= MAX_STARTUP_STEPS
-                || startup_copy >= MAX_STARTUP_COPY
-                || startup_regexp >= MAX_STARTUP_REGEXP
-                || startup_host >= MAX_STARTUP_HOST_WORK
-                || started.elapsed() >= MAX_STARTUP_TIME
+            if startup_steps >= self.state.limits.startup_steps
+                || startup_copy >= self.state.limits.startup_copy
+                || startup_regexp >= self.state.limits.startup_regexp
+                || startup_host >= self.state.limits.startup_host_work
+                || started.elapsed() >= Duration::from_secs(self.state.limits.startup_seconds)
             {
                 self.state.error("JavaScript startup", "Aggregate startup work/time limit reached; remaining classic scripts were skipped.");
                 break;
@@ -1103,17 +1110,17 @@ impl Page {
             // exception or exhausted allowance must not poison the next one.
             // Retained AST/object/binding caps still cover the entire realm.
             self.begin_job();
-            let remaining_copy = MAX_STARTUP_COPY - startup_copy;
-            let runtime_copy = (remaining_copy / 2).min(MAX_COPY_WORK);
-            self.state.copy_work = (remaining_copy - runtime_copy).min(MAX_COPY_WORK);
-            self.state.host_work = (MAX_STARTUP_HOST_WORK - startup_host).min(MAX_HOST_WORK);
+            let remaining_copy = self.state.limits.startup_copy - startup_copy;
+            let runtime_copy = (remaining_copy / 2).min(self.state.limits.copy_bytes);
+            self.state.copy_work = (remaining_copy - runtime_copy).min(self.state.limits.copy_bytes);
+            self.state.host_work = (self.state.limits.startup_host_work - startup_host).min(self.state.limits.host_work);
             let host_copy = self.state.copy_work;
             let host_work = self.state.host_work;
             self.runtime.constrain_job(
-                MAX_STARTUP_STEPS - startup_steps,
+                self.state.limits.startup_steps - startup_steps,
                 runtime_copy,
-                MAX_STARTUP_REGEXP - startup_regexp,
-                started + MAX_STARTUP_TIME,
+                self.state.limits.startup_regexp - startup_regexp,
+                started + Duration::from_secs(self.state.limits.startup_seconds),
             );
             self.state.executed += 1;
             if let Err(error) = self.runtime.execute(
@@ -1457,7 +1464,7 @@ impl Page {
             text.push_str(&attribution);
         }
         text.push_str(&format!("Animation frames: {} pending callback(s), {} executed. Whole-millisecond monotonic timestamps; 16 ms minimum frame interval.\n", self.state.animation_frames.len(), self.state.animation_callbacks));
-        text.push_str(&format!("Classic scripts have independent execution jobs (250000 steps / 1 second), with aggregate startup work/time limits.\nDynamic image requests declined: {}. Detached Image nodes reflect attributes; no request or load event was fabricated.\nBeacon requests declined: {}. sendBeacon returns false; no data was queued or transmitted.\n", self.state.declined_images, self.state.declined_beacons));
+        text.push_str(&format!("Classic scripts have independent execution jobs ({} steps / {} seconds / {} MiB string-copy work). Aggregate startup: {} steps / {} seconds / {} MiB string-copy work. Native-stack and allocation guards are separate.\nDynamic image requests declined: {}. Detached Image nodes reflect attributes; no request or load event was fabricated.\nBeacon requests declined: {}. sendBeacon returns false; no data was queued or transmitted.\n", self.state.limits.steps, self.state.limits.job_seconds, self.state.limits.copy_bytes / (1024 * 1024), self.state.limits.startup_steps, self.state.limits.startup_seconds, self.state.limits.startup_copy / (1024 * 1024), self.state.declined_images, self.state.declined_beacons));
         let omitted = self.state.omitted.saturating_add(snapshot_omissions);
         if omitted > 0 {
             text.push_str(&format!(
@@ -3249,7 +3256,7 @@ impl Host for Bridge<'_> {
                         );
                     }
                     if value.len() > self.state.copy_work {
-                        return Err("DOM string work limit reached (8 MiB per job).".into());
+                        return Err(format!("DOM string work limit reached ({} MiB per job).", self.state.limits.copy_bytes / (1024 * 1024)));
                     }
                 }
                 self.forms.script_set_value(node, &value)?;
@@ -3817,7 +3824,7 @@ mod tests {
                 label: format!("test script {node}"),
             })
             .collect();
-        let mut page = Page::new();
+        let mut page = Page::for_test();
         if let Some(location) = location {
             page.set_location(location);
         }
@@ -4174,7 +4181,7 @@ document.onkeyup=function(e){if(e.key!=='A' || e.type!=='keyup')throw Error('rel
         let mut doc = html::parse("<body><p id=out>unchanged</p></body>");
         doc.scripting_enabled = true;
         let mut forms = Forms::new(&doc);
-        let mut page = Page::new();
+        let mut page = Page::for_test();
         let mut policy = crate::csp::PolicySet::default();
         policy.add_header("script-src 'self'");
         page.start_with_policy(&mut doc, &mut forms, &[], &policy);
@@ -4858,7 +4865,7 @@ document.getElementById('button').addEventListener('click',function(){attempt('c
             let button = id(&doc, "button");
             let out = id(&doc, "out");
             let mut forms = Forms::new(&doc);
-            let mut page = Page::new();
+            let mut page = Page::for_test();
             let scripts = [Script {
                 node: 10,
                 label: "eval CSP fixture".into(),
@@ -4907,7 +4914,7 @@ document.getElementById('button').addEventListener('click',function(){attempt('c
         let mut doc = html::parse("<html><body><p id='result'>Initial</p></body></html>");
         doc.scripting_enabled = true;
         let mut forms = Forms::new(&doc);
-        let mut page = Page::new();
+        let mut page = Page::for_test();
         let scripts = [Script { node: 0, label: "deferred fixture".into(), source: r#"
 var order='script';
 document.addEventListener('DOMContentLoaded', function(){order+='-dom';document.title=document.readyState;});
@@ -5140,7 +5147,7 @@ window.addEventListener('load',()=>{order+='-load';});"#],
         assert_eq!(text(&doc, id(&doc, "out")), "true");
         let mut doc = html::parse("<body onload=\"document.title='ran'\"><button id=b onclick=\"document.title='ran'\">Go</button></body>");
         let mut forms = Forms::new(&doc);
-        let mut page = Page::new();
+        let mut page = Page::for_test();
         let result = page.start(
             &mut doc,
             &mut forms,
@@ -5240,5 +5247,37 @@ window.addEventListener('load',()=>{order+='-load';});"#],
         }
         assert!(page.report().len() <= MAX_LOG_BYTES + 1024);
         assert!(page.state.omitted > 0);
+    }
+}
+
+
+#[cfg(test)]
+mod browser_budget_tests {
+    use super::*;
+
+    #[test]
+    fn production_page_uses_enlarged_limits_for_startup_and_later_jobs() {
+        let mut page = Page::new();
+        assert_eq!(page.state.limits, crate::javascript::limits::BROWSER);
+        let mut doc = crate::html::parse("<title>pending</title>");
+        doc.scripting_enabled = true;
+        let mut forms = Forms::new(&doc);
+        let script = Script {
+            node: 0,
+            source: format!(
+                "let payload={:?};Promise.resolve().then(function(){{let n=0;for(let i=0;i<1024;i++)n+=payload.length;document.title=String(n);}});",
+                "x".repeat(16 * 1024),
+            ),
+            label: "original enlarged-budget fixture".into(),
+        };
+        let result = page.start(&mut doc, &mut forms, &[script]);
+        assert_eq!(result.errors, 0, "{}", page.report());
+        assert_eq!(doc.title, "16777216");
+        page.begin_job();
+        assert_eq!(page.state.host_work, 2_000_000);
+        assert_eq!(page.state.copy_work, 256 * 1024 * 1024);
+        let report = page.report();
+        assert!(report.contains("5000000 steps / 10 seconds / 256 MiB"));
+        assert!(report.contains("20000000 steps / 30 seconds / 1024 MiB"));
     }
 }

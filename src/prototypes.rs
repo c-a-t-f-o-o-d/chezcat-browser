@@ -2073,7 +2073,7 @@ mod tests {
     }
 
     fn succeeds(source: &str) {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_test();
         assert_eq!(
             runtime.execute(source, &mut NoHost).unwrap().to_text(),
             "ok"
@@ -2089,7 +2089,7 @@ mod tests {
 
     #[test]
     fn primitive_receiver_data_reads_skip_copies_but_charge_returned_values() {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_test();
         runtime
             .execute(
                 "Object.defineProperty(String.prototype,'setterOnly',{set:function(){throw 'setter';}});",
@@ -2124,7 +2124,7 @@ mod tests {
 
     #[test]
     fn primitive_receiver_getter_copy_is_charged_before_effects_and_recovers() {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_test();
         runtime
             .execute(
                 "var getterRuns=0;Object.defineProperty(String.prototype,'read',{get:function(){'use strict';getterRuns++;return 7;}});",
@@ -2182,7 +2182,7 @@ mod tests {
         ] {
             let mut measurements = Vec::new();
             for length in [1024, 8192] {
-                let mut runtime = Runtime::new();
+                let mut runtime = Runtime::for_test();
                 runtime
                     .define_global("payload", Value::String("A".repeat(length)))
                     .unwrap();
@@ -2208,7 +2208,7 @@ mod tests {
                     // Retain the old 1536-read input as an improved success;
                     // a larger witness still exercises the same fatal guard.
                     for iterations in [768, 1536, 4096] {
-                        let mut runtime = Runtime::new();
+                        let mut runtime = Runtime::for_test();
                         runtime.define_global("payload", Value::String("A".repeat(2048))).unwrap();
                         let scan = format!("for(;completed<{iterations};completed++){{total+=payload.charCodeAt(completed%2048);}}");
                         let source = if microtask {
@@ -2254,7 +2254,7 @@ mod tests {
 
     #[test]
     fn object_has_own_checks_own_keys_without_reading_values() {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_test();
         runtime.bind_host_object(11, &[]).unwrap();
         runtime.define_global("native", Value::Host(11)).unwrap();
         assert_eq!(
@@ -2385,11 +2385,11 @@ mod tests {
             "String.fromCharCode(0xD800,65);",
             "String.fromCharCode(0xDC00,0xD800);",
         ] {
-            let mut runtime = Runtime::new();
+            let mut runtime = Runtime::for_test();
             let error = runtime.execute(source, &mut NoHost).unwrap_err();
             assert!(error.contains("lone UTF-16 surrogate"), "{source}: {error}");
         }
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_test();
         let error = runtime
             .execute(
                 "let calls=0,done=false;try{String.fromCharCode(0xD800,{valueOf:function(){calls++;return 65;}});}catch(e){calls+=10;}done=true;",
@@ -2410,7 +2410,7 @@ mod tests {
     #[test]
     fn string_from_char_code_retains_call_and_work_limits() {
         let arguments = vec!["65"; super::super::MAX_ARGUMENTS].join(",");
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_test();
         let result = runtime
             .execute(&format!("String.fromCharCode({arguments});"), &mut NoHost)
             .unwrap();
@@ -2434,7 +2434,7 @@ mod tests {
             "{error}"
         );
 
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_test();
         let constructor = runtime.binding_value(0, "String").unwrap();
         let function = runtime
             .get_ordinary_property_with_host(
@@ -2614,7 +2614,7 @@ mod tests {
 
     #[test]
     fn accessor_raw_reads_fail_without_invoking_script() {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_test();
         let Value::Object(object) = runtime.execute(
             "var reads=0;var object={};Object.defineProperty(object,'x',{get:function(){reads++;return 9;}});object;",
             &mut NoHost,
@@ -2640,7 +2640,7 @@ mod tests {
 
     #[test]
     fn accessor_registered_host_expandos_keep_the_native_receiver_and_reserved_names() {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_test();
         runtime.bind_host_object(11, &[]).unwrap();
         runtime.define_global("native", Value::Host(11)).unwrap();
         assert_eq!(
@@ -2816,7 +2816,7 @@ mod tests {
 
     #[test]
     fn symbol_descriptors_use_registered_host_backing_without_native_calls() {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_test();
         runtime.bind_host_object(11, &[]).unwrap();
         runtime.define_global("native", Value::Host(11)).unwrap();
         runtime.define_global("opaque", Value::Host(12)).unwrap();

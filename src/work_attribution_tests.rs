@@ -26,7 +26,7 @@ fn constrain(runtime: &mut Runtime, copies: usize) {
 
 #[test]
 fn attribution_partitions_success_and_keeps_rejected_work_separate() {
-    let mut runtime = Runtime::new();
+    let mut runtime = Runtime::for_test();
     runtime.begin_job();
     constrain(&mut runtime, 64);
     for (kind, bytes) in Kind::ALL.into_iter().zip([3, 5, 7, 11, 13, 17]) {
@@ -59,7 +59,7 @@ fn attribution_partitions_success_and_keeps_rejected_work_separate() {
 
 #[test]
 fn attribution_constraint_rebasing_does_not_reset_successful_counters() {
-    let mut runtime = Runtime::new();
+    let mut runtime = Runtime::for_test();
     runtime.begin_job();
     constrain(&mut runtime, 100);
     runtime.work_as(20, Kind::ValueCopy).unwrap();
@@ -83,7 +83,7 @@ fn attribution_constraint_rebasing_does_not_reset_successful_counters() {
 
 #[test]
 fn attribution_exact_allowance_zero_charges_and_overflow_requests() {
-    let mut runtime = Runtime::new();
+    let mut runtime = Runtime::for_test();
     runtime.begin_job();
     constrain(&mut runtime, 8);
     runtime.work_as(8, Kind::BindingCopy).unwrap();
@@ -100,7 +100,7 @@ fn attribution_exact_allowance_zero_charges_and_overflow_requests() {
 
 #[test]
 fn attribution_preserves_snapshot_and_reporting_does_not_charge() {
-    let mut runtime = Runtime::new();
+    let mut runtime = Runtime::for_test();
     runtime.begin_job();
     runtime.work_as(MAX_COPY_BYTES + 1, Kind::Other).unwrap_err();
     let snapshot = runtime.work_attribution.last_failure;
@@ -156,7 +156,7 @@ fn attribution_keeps_original_probe_totals_and_disjoint_scan_categories() {
         ("payload.charCodeAt(0);\n", 8293, 8192, 0, 1),
         ("payload[0];\n", 8245, 8192, 0, 1),
     ] {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_test();
         runtime.define_global("payload", Value::String("A".repeat(8192))).unwrap();
         runtime.begin_job();
         runtime.execute(source, &mut NoHost).unwrap();
@@ -173,7 +173,7 @@ fn attribution_keeps_original_probe_totals_and_disjoint_scan_categories() {
 #[test]
 fn attribution_high_character_reads_and_conversion_use_existing_charges() {
     for source in ["payload.charCodeAt(8191);", "payload[8191];"] {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_test();
         runtime.define_global("payload", Value::String("A".repeat(8192))).unwrap();
         runtime.begin_job();
         runtime.execute(source, &mut NoHost).unwrap();
@@ -182,7 +182,7 @@ fn attribution_high_character_reads_and_conversion_use_existing_charges() {
         assert_eq!(job.categories[Kind::CharacterScan as usize], Counter { bytes: 8192, calls: 8192 });
         assert_eq!(job.totals().0.bytes, runtime.job_usage().1);
     }
-    let mut runtime = Runtime::new();
+    let mut runtime = Runtime::for_test();
     runtime.define_global("payload", Value::String("private-payload".into())).unwrap();
     runtime.begin_job();
     assert_eq!(runtime.execute("String(payload);", &mut NoHost).unwrap().to_text(), "private-payload");
@@ -193,7 +193,7 @@ fn attribution_high_character_reads_and_conversion_use_existing_charges() {
 
 #[test]
 fn attribution_records_scan_rejection_before_any_scan_success() {
-    let mut runtime = Runtime::new();
+    let mut runtime = Runtime::for_test();
     runtime.begin_job();
     constrain(&mut runtime, 2);
     runtime.string_scalar_at("\u{1f600}", 0).unwrap_err();
@@ -207,7 +207,7 @@ fn attribution_records_scan_rejection_before_any_scan_success() {
 
 #[test]
 fn attribution_original_order_getters_and_unicode_fixture() {
-    assert_eq!(Runtime::new().execute(
+    assert_eq!(Runtime::for_test().execute(
         include_str!("../tools/fixtures/string-work-attribution.js"), &mut NoHost,
     ).unwrap().to_text(), "ok");
 }
@@ -216,7 +216,7 @@ fn attribution_original_order_getters_and_unicode_fixture() {
 fn attribution_shared_microtask_failure_cancels_and_recovers_on_one_mib_stack() {
     std::thread::Builder::new().stack_size(1024 * 1024).spawn(|| {
         for microtask in [false, true] {
-            let mut runtime = Runtime::new();
+            let mut runtime = Runtime::for_test();
             runtime.define_global("payload", Value::String("PRIVATE_WORK_PAYLOAD".repeat(256))).unwrap();
             runtime.execute("var tail=0,sentinel=0;function burn(){var i=0;while(i<64){payload.length;i++;}tail=1;}", &mut NoHost).unwrap();
             runtime.begin_job();

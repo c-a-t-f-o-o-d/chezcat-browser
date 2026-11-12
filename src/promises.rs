@@ -1257,6 +1257,7 @@ impl Runtime {
         self.promises.reactions = 0;
     }
 
+    #[cfg(test)]
     pub fn has_microtasks(&self) -> bool {
         !self.promises.jobs.is_empty()
             || self.objects.iter().any(|object| {
@@ -1293,7 +1294,7 @@ mod tests {
     }
 
     fn completed(source: &str, check: &str) {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_test();
         runtime.execute(source, &mut NoHost).unwrap();
         assert!(runtime
             .microtask_checkpoint(&mut NoHost)
@@ -1309,7 +1310,7 @@ mod tests {
 
     #[test]
     fn promise_constructor_and_resolution_have_real_identity_and_deferred_reactions() {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_test();
         runtime.execute(r#"
 var log='',saved;
 var p=new Promise(function(resolve,reject){log+='executor;';saved=resolve;resolve(3);reject(8);throw 9;});
@@ -1442,7 +1443,7 @@ if(!(Promise.resolve.call(C,2) instanceof C))throw 'undefined capability values'
 
     #[test]
     fn promise_queue_order_nested_jobs_and_unhandled_reporting_are_bounded() {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_test();
         runtime.execute(r#"
 var log='';
 queueMicrotask(function(){log+='a';queueMicrotask(function(){log+='d';});throw 'oops';});
@@ -1468,7 +1469,7 @@ Promise.reject('unhandled');var handled=Promise.reject('handled');queueMicrotask
 
     #[test]
     fn promise_cancellation_removes_queued_and_pending_reactions() {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_test();
         runtime.execute("var log='',resolve;var p=new Promise(function(r){resolve=r;});p.then(function(){log+='old';});queueMicrotask(function(){log+='queued';});",&mut NoHost).unwrap();
         runtime.cancel_microtasks();
         runtime.begin_job();
@@ -1493,7 +1494,7 @@ Promise.reject('unhandled');var handled=Promise.reject('handled');queueMicrotask
 
     #[test]
     fn promise_fatal_faults_cancel_callbacks_without_becoming_rejections() {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_test();
         runtime.execute("var caught=false,finalized=false,called=false;Promise.resolve(1).then(function(){try{while(true){}}catch(e){caught=true;}finally{finalized=true;}}).catch(function(){caught=true;});queueMicrotask(function(){called=true;});",&mut NoHost).unwrap();
         assert!(runtime
             .microtask_checkpoint(&mut NoHost)
@@ -1524,7 +1525,7 @@ Promise.reject('unhandled');var handled=Promise.reject('handled');queueMicrotask
             "var called=false;function f(){called=true;}try{for(var i=0;i<1025;i++)queueMicrotask(f);}catch(e){called=true;}finally{called=true;}",
             "var called=false;function f(){queueMicrotask(f);}queueMicrotask(f);"
         ] {
-            let mut runtime=Runtime::new();
+            let mut runtime=Runtime::for_test();
             let error=match runtime.execute(source,&mut NoHost) { Err(error)=>error,Ok(_)=>runtime.microtask_checkpoint(&mut NoHost).unwrap_err() };
             assert!(error.contains("limit"),"{error}");
             assert!(!runtime.has_microtasks());
@@ -1535,7 +1536,7 @@ Promise.reject('unhandled');var handled=Promise.reject('handled');queueMicrotask
 
     #[test]
     fn promise_host_assimilation_gate_runs_before_native_lookup() {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_test();
         runtime.define_global("opaque", Value::Host(7)).unwrap();
         let error=runtime.execute("var called=false;try{Promise.resolve(opaque);}catch(e){called=true;}finally{called=true;}",&mut NoHost).unwrap_err();
         assert!(
@@ -1551,7 +1552,7 @@ Promise.reject('unhandled');var handled=Promise.reject('handled');queueMicrotask
 
     #[test]
     fn promise_retained_strings_are_accounted_and_reaction_storage_is_released() {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_test();
         let before = runtime.value_bytes;
         runtime
             .execute(
@@ -1686,7 +1687,7 @@ if(order!=='callbackerror')throw 'invalid constructor order';
             "var called=false;try{Promise.try(function(){while(true){}}).catch(function(){called=true;});}catch(e){called=true;}finally{called=true;}",
             "var called=false;function C(executor){executor(function(){called=true;},function(){called=true;});}C.resolve=function(value){return {then:function(){}};};try{Promise.all.call(C,Array(4097));}catch(e){called=true;}finally{called=true;}"
         ] {
-            let mut runtime=Runtime::new();runtime.define_global("opaque",Value::Host(4)).unwrap();
+            let mut runtime=Runtime::for_test();runtime.define_global("opaque",Value::Host(4)).unwrap();
             let error=runtime.execute(source,&mut NoHost).unwrap_err();
             assert!(error.contains("limit")||error.contains("Host-object iteration"),"{error}");
             runtime.begin_job();assert_eq!(runtime.execute("!called;",&mut NoHost).unwrap().to_text(),"true");

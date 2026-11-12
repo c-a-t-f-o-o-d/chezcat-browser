@@ -679,7 +679,7 @@ mod tests {
     }
     fn succeeds(source: &str) {
         assert_eq!(
-            Runtime::new()
+            Runtime::for_test()
                 .execute(source, &mut NoHost::default())
                 .unwrap()
                 .to_text(),
@@ -842,7 +842,7 @@ let [a=2,b=a+1]=[];if(a!==2||b!==3)throw 'left to right';'ok';
             "let {a,...b={}}={};",
             "let [a,...b=[]]=[];",
         ] {
-            let mut runtime = Runtime::new();
+            let mut runtime = Runtime::for_test();
             let mut host = NoHost::default();
             runtime.execute("var effect=false;", &mut host).unwrap();
             let source = format!("effect=true;{tail}");
@@ -869,7 +869,7 @@ let [a=2,b=a+1]=[];if(a!==2||b!==3)throw 'left to right';'ok';
 
     #[test]
     fn patterns_infinite_rest_preserves_fatal_bounds_without_cleanup() {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_test();
         let mut host = NoHost::default();
         runtime.execute("var caught=false,finalized=false,closed=false;var result={value:1,done:false},iterable={};iterable[Symbol.iterator]=function(){return {next(){return result;},return(){closed=true;return {};}};};", &mut host).unwrap();
         runtime.begin_job();
@@ -896,7 +896,7 @@ let [a=2,b=a+1]=[];if(a!==2||b!==3)throw 'left to right';'ok';
 
     #[test]
     fn patterns_native_reads_keep_host_boundary_and_rest_is_explicitly_unsupported() {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_test();
         let mut host = NoHost::default();
         runtime.define_global("native", Value::Host(7)).unwrap();
         assert_eq!(
@@ -930,7 +930,7 @@ let [a=2,b=a+1]=[];if(a!==2||b!==3)throw 'left to right';'ok';
 
     #[test]
     fn patterns_share_ast_retention_and_parser_nesting_limits() {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_test();
         let program = runtime
             .register_program("let [{a:b=3},...rest]=[];", false)
             .unwrap();
@@ -944,7 +944,7 @@ let [a=2,b=a+1]=[];if(a!==2||b!==3)throw 'left to right';'ok';
         );
         assert_eq!(runtime.retained_ast, program.node_count());
         let source = format!("var effect=1;let {}a{}=[];", "[".repeat(80), "]".repeat(80));
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_test();
         let mut host = NoHost::default();
         let error = runtime.execute(&source, &mut host).unwrap_err();
         assert!(error.contains("nesting limit"), "{error}");

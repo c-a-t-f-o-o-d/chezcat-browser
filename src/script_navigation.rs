@@ -182,7 +182,7 @@ mod tests {
         let mut doc = crate::html::parse("<html><head></head><body></body></html>");
         doc.scripting_enabled = true;
         let mut forms = Forms::new(&doc);
-        let mut page = Page::new();
+        let mut page = Page::for_test();
         page.set_location(
             &crate::navigation::address(
                 "https://www.example.test/find?q=old#start",

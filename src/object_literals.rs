@@ -147,7 +147,7 @@ mod tests {
     }
 
     fn run(source: &str) {
-        Runtime::new().execute(source, &mut NoHost).unwrap();
+        Runtime::for_test().execute(source, &mut NoHost).unwrap();
     }
 
     #[test]
@@ -263,7 +263,7 @@ mod tests {
             "(function(){'use strict';return {set x(eval){}};})();",
             "({set x(v){let v;}});",
         ] {
-            let mut runtime = Runtime::new();
+            let mut runtime = Runtime::for_test();
             runtime.execute("var untouched=0;", &mut NoHost).unwrap();
             assert!(
                 runtime
@@ -349,7 +349,7 @@ if(log!=='a'||copy!==undefined)throw 'spread abrupt completion';
     #[test]
     fn literal_spread_invalid_syntax_is_atomic() {
         for source in ["var o={...};", "var o={...a:1};", "var o={...a,...};"] {
-            let mut runtime = Runtime::new();
+            let mut runtime = Runtime::for_test();
             runtime.execute("var effect=false;", &mut NoHost).unwrap();
             assert!(runtime
                 .execute(&format!("effect=true;{source}"), &mut NoHost)
@@ -364,7 +364,7 @@ if(log!=='a'||copy!==undefined)throw 'spread abrupt completion';
 
     #[test]
     fn literal_spread_native_and_property_limits_remain_fatal() {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_test();
         runtime.define_global("native", Value::Host(7)).unwrap();
         runtime
             .execute("var caught=false,finalized=false,later=false;", &mut NoHost)
@@ -379,7 +379,7 @@ if(log!=='a'||copy!==undefined)throw 'spread abrupt completion';
                 .to_text(),
             "true"
         );
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_test();
         runtime
             .define_global(
                 "textSource",
@@ -407,7 +407,7 @@ if(log!=='a'||copy!==undefined)throw 'spread abrupt completion';
 
     #[test]
     fn literal_accessor_allocations_and_execution_remain_bounded() {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_test();
         let error = runtime
             .execute(
                 "for(var i=0;i<1100;i++){var o={get x(){return i;}};}",
@@ -415,12 +415,12 @@ if(log!=='a'||copy!==undefined)throw 'spread abrupt completion';
             )
             .unwrap_err();
         assert!(error.contains("Function limit"), "{error}");
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_test();
         let error = runtime
             .execute("var o={get x(){return this.x;}};o.x;", &mut NoHost)
             .unwrap_err();
         assert!(error.contains("call limit"), "{error}");
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_test();
         let symbol = runtime
             .symbol_builtin(
                 super::super::symbols::Op::Constructor,

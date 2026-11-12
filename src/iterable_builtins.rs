@@ -276,7 +276,7 @@ mod tests {
 
     fn succeeds(source: &str) {
         assert_eq!(
-            Runtime::new()
+            Runtime::for_test()
                 .execute(source, &mut NoHost)
                 .unwrap()
                 .to_text(),
@@ -434,7 +434,7 @@ if(count!==3)throw 'object requirements';
     #[test]
     fn iterable_builtins_keep_shared_limits_and_native_capability_gates() {
         for operation in ["Array.from", "Object.fromEntries"] {
-            let mut runtime = Runtime::new();
+            let mut runtime = Runtime::for_test();
             let source = format!(
                 "var caught=false,finalized=false,closed=0;\
                  var pair=['repeat',1],step={{done:false,value:{}}};\
@@ -458,7 +458,7 @@ if(count!==3)throw 'object requirements';
                 "false:false:0"
             );
         }
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_test();
         let error = runtime
             .execute(
                 "var entered=0;function C(){entered++;}Array.from.call(C,{length:8193});",
@@ -488,7 +488,7 @@ if(count!==3)throw 'object requirements';
             }
         }
         for operation in [Op::ArrayFrom, Op::ObjectFromEntries] {
-            let mut runtime = Runtime::new();
+            let mut runtime = Runtime::for_test();
             let mut host = GuardedHost(0);
             let error = runtime
                 .iterable_builtin(operation, &[Value::Host(77)], Value::Undefined, &mut host)
@@ -498,14 +498,14 @@ if(count!==3)throw 'object requirements';
             assert_eq!(runtime.call_depth, 0);
         }
         for source in ["Object.fromEntries([['__proto__',1]]);"] {
-            assert!(Runtime::new().execute(source, &mut NoHost).is_err());
+            assert!(Runtime::for_test().execute(source, &mut NoHost).is_err());
         }
     }
 
     #[test]
     fn string_arraylike_fallback_retains_the_original_supported_program() {
         // Exact earlier rejection input, now enabled by String boxing.
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_test();
         let Value::Object(array) = runtime
             .execute(
                 "String.prototype[Symbol.iterator]=undefined;Array.from('x');",

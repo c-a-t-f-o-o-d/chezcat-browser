@@ -7,7 +7,17 @@ struct Recorder {
     eval_allowed: bool,
 }
 impl Host for Recorder {
-    fn allow_eval(&mut self) -> Result<bool, String> { Ok(self.eval_allowed) }
+    // Only the explicit record call is available. Reject unexpected property
+    // access so a parser regression cannot gain an unobserved host capability.
+    fn get(&mut self, _object: u32, _property: &str) -> Result<Value, String> {
+        Err("Property reads are not available in the continuation-test host.".into())
+    }
+    fn set(&mut self, _object: u32, _property: &str, _value: Value) -> Result<(), String> {
+        Err("Property writes are not available in the continuation-test host.".into())
+    }
+    fn allow_eval(&mut self) -> Result<bool, String> {
+        Ok(self.eval_allowed)
+    }
     fn has(&mut self, object: u32, name: &str) -> Result<bool, String> {
         Ok(object == 1 && name == "record")
     }
@@ -21,7 +31,7 @@ impl Host for Recorder {
     }
 }
 fn runtime() -> (Runtime, Recorder) {
-    let mut runtime = Runtime::new();
+    let mut runtime = Runtime::for_test();
     runtime.define_global("probe", Value::Host(1)).unwrap();
     (runtime, Recorder { eval_allowed: true, ..Recorder::default() })
 }
@@ -29,7 +39,19 @@ fn parse(source: &str) -> Result<Program, Fault> {
     Parser::parse(source, &mut MAX_REGEXP_WORK.clone())
 }
 fn small_stack(action: impl FnOnce() + Send + 'static) {
-    std::thread::Builder::new().stack_size(1024 * 1024).spawn(action).unwrap().join().unwrap();
+    // Preserve the harness name in a fatal native diagnostic, without changing
+    // the deliberately small stack or turning an abort into a passing test.
+    let name = std::thread::current()
+        .name()
+        .unwrap_or("continuation-test")
+        .to_owned();
+    std::thread::Builder::new()
+        .name(name)
+        .stack_size(1024 * 1024)
+        .spawn(action)
+        .unwrap()
+        .join()
+        .unwrap();
 }
 fn execute_ok(source: &str) {
     let (mut runtime, mut host) = runtime();
@@ -168,16 +190,16 @@ fn continuation_eval_policy_denial_still_precedes_compilation() {
 }
 
 #[test]
-fn continuation_deep_executable_ast_keeps_evaluator_guard_and_recovery() {
+fn continuation_deep_executable_ast_uses_heap_and_keeps_recovery() {
     small_stack(|| {
         let source = format!(
             "function keep(x){{return x;}}try{{{}1{};}}catch(e){{probe.record('caught');}}finally{{probe.record('finally');}}",
             "keep(".repeat(256), ")".repeat(256)
         );
         let (mut runtime, mut host) = runtime();
-        let error = runtime.execute(&source, &mut host).unwrap_err();
-        assert!(error.contains("Evaluation nesting limit reached (128)"), "{error}");
-        assert!(host.records.is_empty());
+        assert_eq!(runtime.execute(&source, &mut host).unwrap().to_text(), "1");
+        assert_eq!(host.records, ["finally"]);
+        assert_eq!(runtime.evaluation_frames, 0);
         assert_eq!(runtime.eval_depth, 0);
         assert_eq!(runtime.call_depth, 0);
         runtime.begin_job();
@@ -295,4 +317,60 @@ fn ast_signature(program: &Program, root: ExprId) -> String {
         values.push(text);
     }
     values[root].clone()
+}
+
+#[test]
+fn continuation_call_variants_execute_deeply_on_small_stack_and_recover() {
+    small_stack(|| {
+        let setup = concat!(
+            "function keep(x){return x;}var holder={method:keep};",
+            "var key=Symbol('method');holder[key]=keep;"
+        );
+        for opening in [
+            "keep(",
+            "holder.method(",
+            "holder['method'](",
+            "holder[key](",
+            "keep?.(",
+            "holder.method?.(",
+            "(holder?.method)(",
+        ] {
+            let (mut runtime, mut host) = runtime();
+            let shallow = format!("{setup}{}7{};", opening.repeat(24), ")".repeat(24));
+            assert_eq!(runtime.execute(&shallow, &mut host).unwrap().to_text(), "7");
+            assert_eq!((runtime.eval_depth, runtime.call_depth), (0, 0));
+            runtime.begin_job();
+            let deep = format!(
+                "try{{{}1{};}}catch(e){{probe.record('caught');}}finally{{probe.record('finally');}}",
+                opening.repeat(256), ")".repeat(256)
+            );
+            assert_eq!(runtime.execute(&deep, &mut host).unwrap().to_text(), "1", "{opening}");
+            assert_eq!(host.records, ["finally"], "{opening}");
+            assert_eq!(runtime.evaluation_frames, 0);
+            assert_eq!((runtime.eval_depth, runtime.call_depth), (0, 0), "{opening}");
+            runtime.begin_job();
+            assert_eq!(runtime.execute("2+2;", &mut host).unwrap().to_text(), "4");
+        }
+    });
+}
+
+#[test]
+fn continuation_call_frame_repair_preserves_reference_and_spread_semantics() {
+    small_stack(|| {
+        execute_ok(include_str!("../tools/fixtures/call-evaluation-stack.js"));
+        let setup = "function wrap(value){return [value];}";
+        let (mut runtime, mut host) = runtime();
+        let shallow = format!(
+            "{setup}({}[7]{})[0];", "wrap(...".repeat(24), ")".repeat(24)
+        );
+        assert_eq!(runtime.execute(&shallow, &mut host).unwrap().to_text(), "7");
+        runtime.begin_job();
+        let deep = format!("{}[7]{};", "wrap(...".repeat(256), ")".repeat(256));
+        let Value::Object(object) = runtime.execute(&deep, &mut host).unwrap() else { panic!("expected wrapped array") };
+        assert_eq!(runtime.get_property(object, "0").unwrap().to_text(), "7");
+        assert_eq!(runtime.evaluation_frames, 0);
+        assert_eq!((runtime.eval_depth, runtime.call_depth), (0, 0));
+        runtime.begin_job();
+        assert_eq!(runtime.execute("2+2;", &mut host).unwrap().to_text(), "4");
+    });
 }

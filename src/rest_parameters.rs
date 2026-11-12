@@ -22,7 +22,7 @@ impl Host for NoHost {
 
 fn succeeds(source: &str) {
     assert_eq!(
-        Runtime::new()
+        Runtime::for_test()
             .execute(source, &mut NoHost)
             .unwrap()
             .to_text(),
@@ -157,7 +157,7 @@ fn rest_parameters_reject_invalid_lists_before_any_execution() {
         "function f(...tail){let tail;}",
         "function outer(){function invalid(...tail){'use strict';}}",
     ] {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_test();
         runtime.execute("var ran=false;", &mut NoHost).unwrap();
         let source = format!("ran=true;{tail}");
         let mut parse_work = 0;
@@ -185,7 +185,7 @@ fn rest_parameters_reject_invalid_lists_before_any_execution() {
 #[test]
 fn rest_parameters_original_array_pattern_program_is_now_supported() {
     // Exact 0.39 rejection program preserved as a positive 0.40 regression.
-    let mut runtime = Runtime::new();
+    let mut runtime = Runtime::for_test();
     runtime
         .execute("function f(...[tail]){}", &mut NoHost)
         .unwrap();
@@ -198,7 +198,7 @@ fn rest_parameters_original_array_pattern_program_is_now_supported() {
 
 #[test]
 fn rest_parameters_keep_argument_and_object_arena_limits() {
-    let mut runtime = Runtime::new();
+    let mut runtime = Runtime::for_test();
     runtime
         .execute(
             "function rest(...tail){return tail;}var caught=false,finalized=false;",
@@ -227,7 +227,7 @@ fn rest_parameters_keep_argument_and_object_arena_limits() {
             .to_text(),
         "true"
     );
-    let mut runtime = Runtime::new();
+    let mut runtime = Runtime::for_test();
     runtime
         .execute(
             "var caught=false,finalized=false;function rest(...tail){return tail;}",

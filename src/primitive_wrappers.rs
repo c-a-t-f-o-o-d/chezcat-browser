@@ -211,7 +211,7 @@ mod tests {
 
     fn succeeds(source: &str) {
         assert_eq!(
-            Runtime::new()
+            Runtime::for_test()
                 .execute(source, &mut NoHost)
                 .unwrap()
                 .to_text(),
@@ -351,7 +351,7 @@ if(Number.prototype.toString.call(Object(NaN),16)!=='NaN'||Number.prototype.toSt
 
     #[test]
     fn wrapper_objects_keep_existing_arena_and_string_limit_boundaries() {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_test();
         for source in [
             "new String('x');",
             "Object('x');",

@@ -544,7 +544,7 @@ mod tests {
 
     #[test]
     fn string_and_symbol_properties_share_object_limit_and_retained_storage() {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_test();
         let object = runtime.new_object(None).unwrap();
         let key = fresh(&mut runtime);
         for index in 0..MAX_OBJECT_PROPERTIES - 1 {
@@ -586,7 +586,7 @@ mod tests {
 
     #[test]
     fn symbol_properties_cannot_bypass_document_property_limit() {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_test();
         let keys: Vec<_> = (0..(MAX_OBJECT_PROPERTIES - 1)
             .min(MAX_SYMBOLS - runtime.symbols.len()))
             .map(|_| fresh(&mut runtime))
@@ -626,7 +626,7 @@ mod tests {
 
     #[test]
     fn symbol_descriptions_and_registry_share_retained_value_budget() {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_test();
         let initial = runtime.value_bytes;
         runtime.new_symbol(Some("plain".into()), false).unwrap();
         runtime.new_symbol(Some("registered".into()), true).unwrap();
@@ -650,7 +650,7 @@ mod tests {
 
     #[test]
     fn symbol_identity_limit_persists_across_jobs_and_cannot_be_caught() {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_test();
         runtime
             .execute(
                 "var saved=Symbol.for('saved'); var caught=false,finalized=false;",
@@ -668,7 +668,7 @@ mod tests {
             .unwrap_err();
         assert!(error.contains("Symbol identity limit reached"));
         assert_eq!(runtime.execute("!caught&&!finalized&&saved===Symbol.for('saved')&&saved.description==='saved';", &mut NoHost).unwrap().to_text(), "true");
-        let mut next_document = Runtime::new();
+        let mut next_document = Runtime::for_test();
         assert_eq!(
             next_document
                 .execute("typeof Symbol()", &mut NoHost)

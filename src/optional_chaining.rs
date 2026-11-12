@@ -55,7 +55,7 @@ mod tests {
     }
     fn succeeds(source: &str) {
         assert_eq!(
-            Runtime::new()
+            Runtime::for_test()
                 .execute(source, &mut NoHost::default())
                 .unwrap()
                 .to_text(),
@@ -191,7 +191,7 @@ if(count!==10)throw 'early errors';'ok';
 
     #[test]
     fn optional_native_calls_preserve_registered_receivers_and_denied_capabilities() {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_test();
         runtime.define_global("native", Value::Host(1)).unwrap();
         runtime.define_global("opaque", Value::Host(2)).unwrap();
         let mut host = NoHost::default();
@@ -210,7 +210,7 @@ if(count!==10)throw 'early errors';'ok';
     #[test]
     fn optional_chain_steps_are_bounded_counted_and_do_not_reset_execution() {
         let source = format!("null{}", "?.x".repeat(MAX_EXPRESSION_FRAMES));
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_test();
         assert!(matches!(
             runtime.execute(&source, &mut NoHost::default()).unwrap(),
             Value::Undefined
@@ -223,7 +223,7 @@ if(count!==10)throw 'early errors';'ok';
             "var ran=true;null{}",
             "?.x".repeat(MAX_EXPRESSION_FRAMES + 1)
         );
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_test();
         let error = runtime
             .execute(&source, &mut NoHost::default())
             .unwrap_err();
@@ -235,7 +235,7 @@ if(count!==10)throw 'early errors';'ok';
                 .to_text(),
             "undefined"
         );
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_test();
         let error = runtime.execute("var continued=false,o={f(){while(true){}}};try{o?.f();}catch(e){continued=true;}finally{continued=true;}", &mut NoHost::default()).unwrap_err();
         assert!(error.contains("limit"), "{error}");
         runtime.begin_job();
@@ -285,21 +285,21 @@ impl Parser {
     }
 }
 
-enum Completion {
+pub(super) enum Completion {
     Value(Value),
     Reference(Reference),
 }
 
 // A missing value here is only the existing legacy native-member call route.
 // An optional call must read its callee before it can decide to skip a call.
-struct CallTarget {
-    function: Option<Value>,
-    receiver: Value,
-    name: Option<String>,
+pub(super) struct CallTarget {
+    pub(super) function: Option<Value>,
+    pub(super) receiver: Value,
+    pub(super) name: Option<String>,
 }
 
 impl Runtime {
-    fn chain_value(&mut self, completion: Completion, host: &mut dyn Host) -> Result<Value, Fault> {
+    pub(super) fn chain_value(&mut self, completion: Completion, host: &mut dyn Host) -> Result<Value, Fault> {
         match completion {
             Completion::Value(value) => Ok(value),
             Completion::Reference(reference) => self.read_reference(&reference, host),
@@ -377,7 +377,7 @@ impl Runtime {
         result.map_err(|error: Fault| error.at(&program.source, program.exprs[id].at))
     }
 
-    fn prepare_chain_call(
+    pub(super) fn prepare_chain_call(
         &mut self,
         current: Completion,
         optional: bool,
@@ -446,7 +446,7 @@ impl Runtime {
         }
     }
 
-    fn invoke_chain_call(
+    pub(super) fn invoke_chain_call(
         &mut self,
         target: CallTarget,
         args: &[Value],

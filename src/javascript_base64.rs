@@ -140,7 +140,7 @@ mod tests {
     }
 
     fn convert(encode: bool, text: &str) -> Result<Value, Fault> {
-        Runtime::new().base64_builtin(encode, &[Value::String(text.into())], &mut NoHost)
+        Runtime::for_test().base64_builtin(encode, &[Value::String(text.into())], &mut NoHost)
     }
 
     #[test]
@@ -211,7 +211,7 @@ mod tests {
 
     #[test]
     fn base64_required_argument_and_string_coercion_order() {
-        let answer = Runtime::new().execute(r#"
+        let answer = Runtime::for_test().execute(r#"
 var seen='', errors=[];
 var value={toString:function(){seen+='s';return '\xff';},valueOf:function(){seen+='v';return 'wrong';}};
 var encoded=btoa(value,{toString:function(){seen+='x';return 'ignored';}});
@@ -244,7 +244,7 @@ try{atob(undefined);}catch(e){errors.push(e.name);}
         let fault = convert(false, &"/".repeat(MAX_STRING_BYTES)).unwrap_err();
         assert!(fault.exception.is_none());
         assert!(fault.message.contains("String limit"));
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_test();
         runtime.copy_bytes = 0;
         let fault = runtime
             .base64_builtin(false, &[Value::String("Qw".into())], &mut NoHost)

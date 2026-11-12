@@ -42,7 +42,7 @@ mod tests {
                 label: format!("promise fixture {node}"),
             })
             .collect();
-        let mut page = Page::new();
+        let mut page = Page::for_test();
         let location = crate::navigation::address(
             "http://127.0.0.1:1/promise-fixture",
             &crate::navigation::Location::home(),
@@ -240,7 +240,7 @@ document.head.appendChild(child);
         let mut doc = crate::html::parse("<p></p>");
         doc.scripting_enabled = true;
         let mut forms = Forms::new(&doc);
-        let mut page = Page::new();
+        let mut page = Page::for_test();
         let mut policy = crate::csp::PolicySet::default();
         policy.add_header("script-src 'nonce-original-fixture'");
         // As with the loader, these sources have already been selected for

@@ -31,7 +31,7 @@ mod tests {
 
     fn succeeds(source: &str) {
         assert_eq!(
-            Runtime::new()
+            Runtime::for_test()
                 .execute(source, &mut NoHost)
                 .unwrap()
                 .to_text(),
@@ -113,7 +113,7 @@ Symbol.toPrimitive=Symbol('replacement');if(Symbol.toPrimitive!==key||delete Sym
 "#,
         );
         assert_eq!(
-            Runtime::new()
+            Runtime::for_test()
                 .execute("typeof Symbol.iterator;", &mut NoHost)
                 .unwrap()
                 .to_text(),
@@ -146,7 +146,7 @@ if(caught!==5)throw 'array-like validation';
 
     #[test]
     fn conversion_protocol_apply_converted_length_keeps_argument_bound() {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_test();
         runtime
             .execute(
                 "var converted=0,indexReads=0,called=false,caught=false,finalized=false;",
@@ -240,7 +240,7 @@ if(caught!==3)throw 'strict primitive assignments';
                 Err("No native calls.".into())
             }
         }
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_test();
         runtime.define_global("native", Value::Host(1)).unwrap();
         runtime.define_global("opaque", Value::Host(2)).unwrap();
         runtime.bind_host_object(1, &[]).unwrap();
@@ -284,7 +284,7 @@ if(caught!==3)throw 'strict primitive assignments';
                 "var o={};o[Symbol.toPrimitive]=function(){return +o;};try{+o;}catch(e){caught=true;}finally{finalized=true;}",
                 "var o={};Object.defineProperty(o,Symbol.toPrimitive,{get:function(){return +o;}});try{+o;}catch(e){caught=true;}finally{finalized=true;}",
             ] {
-                let mut runtime = Runtime::new();
+                let mut runtime = Runtime::for_test();
                 runtime.execute("var caught=false,finalized=false;", &mut NoHost).unwrap();
                 let error = runtime.execute(source, &mut NoHost).unwrap_err();
                 assert!(error.contains("limit"), "{error}");
@@ -302,7 +302,7 @@ if(caught!==3)throw 'strict primitive assignments';
         // verbatim. Native join now recognizes this active array through the
         // Symbol.toPrimitive callback; the two genuine recursion programs above
         // remain fatal. Node returns normally and executes the finally block.
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_test();
         runtime
             .execute("var caught=false,finalized=false;", &mut NoHost)
             .unwrap();

@@ -255,7 +255,7 @@ mod tests {
 
     fn succeeds(source: &str) {
         assert_eq!(
-            Runtime::new()
+            Runtime::for_test()
                 .execute(source, &mut NoHost)
                 .unwrap()
                 .to_text(),
@@ -314,7 +314,7 @@ if(!caught||order!=='')throw 'nonglobal order';
         // Native RegExp configuration still uses the pre-existing virtual
         // properties. Keep the unsupported descriptor boundary explicit;
         // replaceAll does not claim custom RegExp accessors or protocols.
-        let error = Runtime::new().execute(r#"
+        let error = Runtime::for_test().execute(r#"
 var order='',receiver={toString(){order+='receiver';return 'aaa';}},replacement={toString(){order+='replacement';return 'x';}};
 var marker={},reg=/a/g;Object.defineProperty(reg,'flags',{get:function(){throw marker;}});
 try{String.prototype.replaceAll.call(receiver,reg,replacement);}catch(e){if(e!==marker)throw e;}
@@ -328,7 +328,7 @@ if(order!=='')throw 'flags read before receiver';
 
     #[test]
     fn replace_all_match_budget_is_fatal_before_callbacks() {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_test();
         runtime.execute("var caught=false,finished=false,called=false,text='a';for(var i=0;i<14;i++)text+=text;",&mut NoHost).unwrap();
         let error=runtime.execute("try{text.replaceAll('a',function(){called=true;return '';});}catch(e){caught=true;}finally{finished=true;}",&mut NoHost).unwrap_err();
         assert!(error.contains("limit"), "{error}");
@@ -445,7 +445,7 @@ if(order!=='')throw 'flags read before receiver';
 
     #[test]
     fn callable_replace_snapshot_and_callback_work_remain_bounded() {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_test();
         let source = format!(
             "var callbacks=0;var text='{}';text.replace(/a/g,function(){{callbacks++;return '';}});",
             "a".repeat(MAX_ARRAY_LENGTH + 1)
@@ -461,7 +461,7 @@ if(order!=='')throw 'flags read before receiver';
             "0"
         );
 
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_test();
         let source = format!(
             "var callbacks=0;var text='{}';text.replace(/(a){}/g,function(){{callbacks++;return '';}});",
             "a".repeat(5000),
@@ -478,7 +478,7 @@ if(order!=='')throw 'flags read before receiver';
             "0"
         );
 
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_test();
         runtime
             .define_global(
                 "wide",
@@ -498,7 +498,7 @@ if(order!=='')throw 'flags read before receiver';
             "1"
         );
 
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_test();
         let error = runtime
             .execute("'a'.replace('a',function(){while(true);});", &mut NoHost)
             .unwrap_err();
@@ -506,7 +506,7 @@ if(order!=='')throw 'flags read before receiver';
             error.contains("Execution step limit") || error.contains("Execution time limit"),
             "{error}"
         );
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_test();
         let error = runtime
             .execute(
                 "function again(){return 'a'.replace(/a/g,again);}again();",

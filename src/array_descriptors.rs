@@ -113,7 +113,7 @@ mod tests {
 
     fn succeeds(source: &str) {
         assert_eq!(
-            Runtime::new()
+            Runtime::for_test()
                 .execute(source, &mut NoHost)
                 .unwrap()
                 .to_text(),
@@ -287,7 +287,7 @@ if(b.length!==2||b['4294967295']!==4||b['-0']!==5)throw 'non-index names';
 
     #[test]
     fn array_descriptors_enforce_existing_limits_without_length_or_property_growth() {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_test();
         runtime.execute("var capped=[1,2];", &mut NoHost).unwrap();
         for source in [
             "Object.defineProperty(capped,'length',{value:8193,writable:false});",

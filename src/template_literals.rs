@@ -209,7 +209,7 @@ mod tests {
         }
     }
     fn succeeds(source: &str) {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_test();
         let window = runtime.new_object(None).unwrap();
         runtime
             .define_global("window", Value::Object(window))
@@ -337,7 +337,7 @@ if(caught!==11)throw 'syntax exceptions';'ok';
             r"`\uD800${1}\uDC00`;",
         ] {
             let source = format!("var ran=true;{text}");
-            let mut runtime = Runtime::new();
+            let mut runtime = Runtime::for_test();
             let error = runtime
                 .execute(&source, &mut NoHost::default())
                 .unwrap_err();
@@ -359,7 +359,7 @@ if(caught!==11)throw 'syntax exceptions';'ok';
     fn template_substitution_nesting_string_and_work_limits_remain_fatal() {
         let accepted = format!("`{}`", "${1}".repeat(MAX_EXPRESSION_FRAMES));
         assert_eq!(
-            Runtime::new()
+            Runtime::for_test()
                 .execute(&accepted, &mut NoHost::default())
                 .unwrap()
                 .to_text()
@@ -371,12 +371,12 @@ if(caught!==11)throw 'syntax exceptions';'ok';
             format!("{}1{}", "`${".repeat(65), "}`".repeat(65)),
             format!("`{}`", "x".repeat(MAX_STRING_BYTES + 1)),
         ] {
-            let error = Runtime::new()
+            let error = Runtime::for_test()
                 .execute(&source, &mut NoHost::default())
                 .unwrap_err();
             assert!(error.contains("limit"), "{error}");
         }
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_test();
         runtime
             .define_global("x", Value::String("x".repeat(MAX_STRING_BYTES)))
             .unwrap();
@@ -390,7 +390,7 @@ if(caught!==11)throw 'syntax exceptions';'ok';
                 .to_text(),
             "false"
         );
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_test();
         runtime
             .define_global("x", Value::String("x".repeat(8192)))
             .unwrap();
@@ -411,7 +411,7 @@ if(caught!==11)throw 'syntax exceptions';'ok';
 
     #[test]
     fn template_native_conversion_keeps_the_host_capability_gate() {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_test();
         runtime.define_global("opaque", Value::Host(9)).unwrap();
         let mut host = NoHost::default();
         let error = runtime.execute("var continued=false;try{`${opaque}`;}catch(e){continued=true;}finally{continued=true;}", &mut host).unwrap_err();

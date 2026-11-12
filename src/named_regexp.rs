@@ -46,7 +46,7 @@ mod tests {
 
     fn succeeds(source: &str) {
         assert_eq!(
-            Runtime::new()
+            Runtime::for_test()
                 .execute(source, &mut NoHost)
                 .unwrap()
                 .to_text(),
@@ -123,7 +123,7 @@ if(called||a.groups.entry!=='a'||b!=='b')throw 'inherited setter';'ok';
             "(?<猫>a)",
             "(?<__proto__>a)",
         ] {
-            let mut runtime = Runtime::new();
+            let mut runtime = Runtime::for_test();
             runtime.execute("var effect=false;", &mut NoHost).unwrap();
             runtime
                 .execute(&format!("effect=true;/{pattern}/;"), &mut NoHost)
@@ -138,7 +138,7 @@ if(called||a.groups.entry!=='a'||b!=='b')throw 'inherited setter';'ok';
 
     #[test]
     fn named_reference_limits_remain_fatal_and_reset_for_next_job() {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_test();
         runtime
             .execute(
                 "var caught=false,finalized=false,r=/(?<x>a+)\\k<x>/;",

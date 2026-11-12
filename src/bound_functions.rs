@@ -171,7 +171,7 @@ mod tests {
     }
 
     fn run(source: &str) -> Value {
-        Runtime::new().execute(source, &mut NoHost).unwrap()
+        Runtime::for_test().execute(source, &mut NoHost).unwrap()
     }
 
     #[test]
@@ -259,7 +259,7 @@ mod tests {
                 Ok(false)
             }
         }
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_test();
         let method = runtime.host_function(7, "checked").unwrap();
         let Value::Function(id) = method else {
             unreachable!()
@@ -290,7 +290,7 @@ mod tests {
 
     #[test]
     fn bind_chains_share_argument_retention_and_execution_bounds() {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_test();
         runtime.execute("function target(){return arguments.length;} var bound=target; for(var i=0;i<400;i++)bound=bound.bind(null); if(bound(1,2)!==2)throw 'chain';",&mut NoHost).unwrap();
         runtime.begin_job();
         let target = runtime.execute("target;", &mut NoHost).unwrap();

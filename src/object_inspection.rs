@@ -226,7 +226,7 @@ mod tests {
     }
 
     fn result(source: &str) -> String {
-        Runtime::new()
+        Runtime::for_test()
             .execute(source, &mut NoHost)
             .unwrap()
             .to_text()
@@ -343,7 +343,7 @@ delete Object.prototype['0'];delete Object.prototype.value;
 
     #[test]
     fn inspection_host_expandos_remain_scoped_and_use_original_receivers() {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_test();
         runtime.bind_host_object(17, &[]).unwrap();
         runtime.define_global("node", Value::Host(17)).unwrap();
         let value = runtime
@@ -379,7 +379,7 @@ d[s].value,typeof d.answer.get].join('|');
 
     #[test]
     fn inspection_keeps_enumeration_copy_step_and_utf16_bounds() {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_test();
         let source = Value::String("x".repeat(MAX_OBJECT_PROPERTIES));
         let fault = runtime
             .object_inspection("getOwnPropertyNames", &source, &mut NoHost)

@@ -171,7 +171,7 @@ mod tests {
             include_str!("../tools/fixtures/binding-length-reads.js"),
         ] {
             assert_eq!(
-                Runtime::new().execute(source, &mut NoHost).unwrap().to_text(),
+                Runtime::for_test().execute(source, &mut NoHost).unwrap().to_text(),
                 "ok"
             );
         }
@@ -189,7 +189,7 @@ mod tests {
             for text in ["", "abcd", "éAB", "éé", "😀", "A😀ΩZ"] {
                 let mut observations = Vec::new();
                 for original in [true, false] {
-                    let mut runtime = Runtime::new();
+                    let mut runtime = Runtime::for_test();
                     runtime.define_global("payload", Value::String(text.into())).unwrap();
                     runtime.begin_job();
                     let value = member(&mut runtime, &program, id, original, &mut NoHost).unwrap();
@@ -213,7 +213,7 @@ mod tests {
             ("payload;\n", 8238),
             ("payload.charCodeAt(0);\n", 8293),
         ] {
-            let mut runtime = Runtime::new();
+            let mut runtime = Runtime::for_test();
             runtime.define_global("payload", Value::String("A".repeat(8192))).unwrap();
             runtime.begin_job();
             runtime.execute(source, &mut NoHost).unwrap();
@@ -226,7 +226,7 @@ mod tests {
         for source in ["payload[key];", "payload['len'+'gth'];", "payload?.length;"] {
             let mut usage = Vec::new();
             for size in [1024, 8192] {
-                let mut runtime = Runtime::new();
+                let mut runtime = Runtime::for_test();
                 runtime.define_global("payload", Value::String("A".repeat(size))).unwrap();
                 runtime.define_global("key", Value::String("length".into())).unwrap();
                 runtime.begin_job();
@@ -244,7 +244,7 @@ mod tests {
             let (program, id) = expression("\n payload.length;");
             let mut observations = Vec::new();
             for original in [true, false] {
-                let mut runtime = Runtime::new();
+                let mut runtime = Runtime::for_test();
                 match kind {
                     "missing" => (),
                     "tdz" => runtime
@@ -313,7 +313,7 @@ mod tests {
         ] {
             let mut observations = Vec::new();
             for original in [true, false] {
-                let mut runtime = Runtime::new();
+                let mut runtime = Runtime::for_test();
                 runtime.bind_browser_global(7).unwrap();
                 if binding {
                     runtime.define_global("payload", Value::String("A".repeat(8192))).unwrap();
@@ -339,7 +339,7 @@ mod tests {
         let (program, id) = expression("payload.length;");
         let mut observations = Vec::new();
         for original in [true, false] {
-            let mut runtime = Runtime::new();
+            let mut runtime = Runtime::for_test();
             runtime.bind_browser_global(7).unwrap();
             runtime
                 .put_binding(
@@ -372,7 +372,7 @@ mod tests {
             for steps in [0, 1, 2, 3, 4, 5, 6, 7, 8, 64] {
                 let mut observations = Vec::new();
                 for original in [true, false] {
-                    let mut runtime = Runtime::new();
+                    let mut runtime = Runtime::for_test();
                     runtime.define_global("payload", Value::String("é😀".into())).unwrap();
                     runtime.begin_job();
                     runtime.eval_depth = seed;
@@ -394,7 +394,7 @@ mod tests {
         // literal/key copies and conversion cost four lots of 6 bytes.
         let fixed = 7 + 4 * "length".len();
         for enough in [false, true] {
-            let mut runtime = Runtime::new();
+            let mut runtime = Runtime::for_test();
             runtime.define_global("payload", Value::String("A".repeat(8192))).unwrap();
             runtime.begin_job();
             runtime.copy_bytes = fixed + 8192 - usize::from(!enough);
@@ -422,7 +422,7 @@ mod tests {
                     // Preserve the 512-read witness as a real improvement;
                     // 1536 reads must still fail under the same 8 MiB budget.
                     for iterations in [512, 1536] {
-                        let mut runtime = Runtime::new();
+                        let mut runtime = Runtime::for_test();
                         runtime.define_global("payload", Value::String("A".repeat(8192))).unwrap();
                         let setup = "var completed=0,total=0,tail=0,sentinel=0;";
                         let scan = format!(

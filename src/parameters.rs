@@ -80,6 +80,26 @@ impl Runtime {
         this: &Value,
         host: &mut dyn Host,
     ) -> Result<Value, Fault> {
+        let body = self.prepare_script_call(program, template, callee, parent, args, this, host)?;
+        match self.statements(program, &program.templates[template].body, body, this, host)? {
+            Control::Return(value) => Ok(value),
+            Control::Normal(_) => Ok(Value::Undefined),
+            _ => Err(Fault::new("Unexpected loop control outside a loop.")),
+        }
+    }
+
+    #[inline(never)]
+    #[allow(clippy::too_many_arguments)]
+    fn prepare_script_call(
+        &mut self,
+        program: &Rc<Program>,
+        template: usize,
+        callee: usize,
+        parent: usize,
+        args: &[Value],
+        this: &Value,
+        host: &mut dyn Host,
+    ) -> Result<usize, Fault> {
         let function = &program.templates[template];
         let has_expressions = function.has_parameter_expressions(program);
         let call_scope = self.new_environment(parent, true)?;
@@ -156,11 +176,7 @@ impl Runtime {
             variables
         };
         self.prepare_scopes(program, &function.body, body, variables, true, host)?;
-        match self.statements(program, &function.body, body, this, host)? {
-            Control::Return(value) => Ok(value),
-            Control::Normal(_) => Ok(Value::Undefined),
-            _ => Err(Fault::new("Unexpected loop control outside a loop.")),
-        }
+        Ok(body)
     }
 }
 
@@ -184,7 +200,7 @@ mod tests {
     }
     fn succeeds(source: &str) {
         assert_eq!(
-            Runtime::new()
+            Runtime::for_test()
                 .execute(source, &mut NoHost)
                 .unwrap()
                 .to_text(),
@@ -278,7 +294,7 @@ if(nested.call({x:3},4)()!==7)throw 'lexical arrow';'ok';
             "var effect=1;var o={set x(a=1,){}};",
             "var effect=1;function f(a=1){let a;}",
         ] {
-            let mut runtime = Runtime::new();
+            let mut runtime = Runtime::for_test();
             let error = runtime.execute(source, &mut NoHost).unwrap_err();
             assert!(
                 error.contains("SyntaxError")
@@ -299,7 +315,7 @@ if(nested.call({x:3},4)()!==7)throw 'lexical arrow';'ok';
 
     #[test]
     fn default_parameters_callback_limits_remain_fatal() {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_test();
         runtime
             .execute("var caught=false,finalized=false;", &mut NoHost)
             .unwrap();
