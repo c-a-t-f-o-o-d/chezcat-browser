@@ -33,6 +33,11 @@ mod bound_functions;
 mod collections;
 #[path = "date.rs"]
 mod date;
+#[path = "expression_parser.rs"]
+mod expression_parser;
+#[cfg(test)]
+#[path = "expression_parser_tests.rs"]
+mod expression_parser_tests;
 #[path = "function_constructor.rs"]
 mod function_constructor;
 #[path = "host_objects.rs"]
@@ -95,8 +100,8 @@ const MAX_RETAINED_REGEXP: usize = 2 * 1024 * 1024;
 const MAX_TOKENS: usize = 131_072;
 const MAX_AST: usize = 131_072;
 const MAX_PARSE_DEPTH: usize = 64;
-// Right-associative dispatch/assignment chains use heap frames rather than the
-// native call stack. This shared cap also counts chains inside grouped syntax.
+// Expressions suspend groups/calls/keys/operators in one shared heap quota.
+// Genuinely recursive compound syntax retains the independent native depth guard.
 const MAX_EXPRESSION_FRAMES: usize = 4096;
 // Flat else-if dispatchers do not consume native parser/evaluator frames.
 // Pending branches across nested statements still share a finite allowance.
@@ -1380,11 +1385,12 @@ struct DeferredBody {
 struct Parser {
     program: Program,
     tokens: Vec<Token>,
-    body_ends: Vec<usize>,
+    delimiter_ends: Vec<usize>,
     deferred_bodies: Vec<DeferredBody>,
     current: usize,
     depth: usize,
     expression_frames: usize,
+    argument_entries: usize,
     if_branches: usize,
     strict: bool,
     loops: Vec<StmtId>,
@@ -1405,23 +1411,32 @@ impl Parser {
         active_depth: usize,
     ) -> Result<Program, Fault> {
         let tokens = tokenize(source, regexp_budget)?;
-        // Index braces once. Deferring nested bodies must not rescan enclosing
-        // token ranges quadratically or copy their source/tokens into each job.
-        // Both arrays are bounded by the existing token limit and die with the
-        // parser; strings, comments and regular expressions are single tokens.
-        let mut body_ends = vec![usize::MAX; tokens.len()];
+        // Index braces and parentheses once. Deferred bodies and arrow lookahead
+        // reuse this token-sized map instead of rescanning nested token ranges.
+        // Separate delimiter stacks preserve the existing lookahead semantics;
+        // parsing, not this index, diagnoses mixed/malformed delimiters.
+        let mut delimiter_ends = vec![usize::MAX; tokens.len()];
         let mut braces = Vec::new();
+        let mut parentheses = Vec::new();
         for (index, token) in tokens.iter().enumerate() {
             match token.kind {
+                TokenKind::Punct("(") => parentheses.push(index),
+                TokenKind::Punct(")") => {
+                    if let Some(start) = parentheses.pop() {
+                        delimiter_ends[start] = index;
+                    }
+                }
                 TokenKind::Punct("{") => braces.push(index),
                 TokenKind::Punct("}") => {
                     if let Some(start) = braces.pop() {
-                        body_ends[start] = index;
+                        delimiter_ends[start] = index;
                     }
                 }
                 _ => {}
             }
         }
+        drop(braces);
+        drop(parentheses);
         let mut parser = Self {
             program: Program {
                 source: source.into(),
@@ -1434,13 +1449,14 @@ impl Parser {
                 chain_steps: 0,
             },
             tokens,
-            body_ends,
+            delimiter_ends,
             deferred_bodies: Vec::new(),
             current: 0,
             // Dynamic compilation runs on the caller's native stack. Account
             // for live evaluator frames instead of granting a fresh parse stack.
             depth: active_depth,
             expression_frames: 0,
+            argument_entries: 0,
             if_branches: 0,
             strict,
             loops: Vec::new(),
@@ -1467,7 +1483,7 @@ impl Parser {
         }
         let start = self.current;
         self.need("{")?;
-        let end = self.body_ends[start];
+        let end = self.delimiter_ends[start];
         if end == usize::MAX {
             return Err(self.error("Unterminated function body."));
         }
@@ -1487,6 +1503,9 @@ impl Parser {
     }
 
     fn parse_deferred_bodies(&mut self, active_depth: usize) -> Result<(), Fault> {
+        if self.expression_frames != 0 || self.if_branches != 0 {
+            return Err(self.unsupported("Undrained parser continuations after program body."));
+        }
         while let Some(body) = self.deferred_bodies.pop() {
             self.current = body.start;
             // The outer expression's parser stack has unwound, but eval's live
@@ -1501,8 +1520,9 @@ impl Parser {
             self.loops.clear();
             self.breakables.clear();
             self.labels.clear();
-            self.expression_frames = 0;
-            self.if_branches = 0;
+            if self.expression_frames != 0 || self.if_branches != 0 {
+                return Err(self.unsupported("Undrained parser continuations before deferred body."));
+            }
             let (statements, strict, own_strict) = self.function_body()?;
             if self.current != body.end + 1 {
                 return Err(self.error("Function body exceeded its token range."));
@@ -1528,6 +1548,10 @@ impl Parser {
             let template = &mut self.program.templates[body.template];
             template.strict = strict;
             template.body = statements;
+            self.depth -= 1;
+            if self.expression_frames != 0 || self.if_branches != 0 {
+                return Err(self.unsupported("Undrained parser continuations after deferred body."));
+            }
         }
         Ok(())
     }
@@ -2001,7 +2025,7 @@ impl Parser {
     }
     fn assignment_expression(&mut self) -> Result<ExprId, Fault> {
         self.enter()?;
-        let result = self.assignment();
+        let result = self.continuation_assignment();
         self.depth -= 1;
         result
     }
@@ -2010,80 +2034,6 @@ impl Parser {
             self.program.exprs[expression].kind,
             ExprKind::Name(_) | ExprKind::Member(_, _)
         )
-    }
-    fn assignment(&mut self) -> Result<ExprId, Fault> {
-        enum Pending {
-            Yes(ExprId, usize, bool),
-            No(ExprId, ExprId, usize),
-            Assign(&'static str, ExprId, usize),
-        }
-        // A minified state dispatcher can have hundreds of `a ? b : c ? d :`
-        // arms without nested grouping. Both branches and assignment RHSs are
-        // processed explicitly, preserving right associativity and the grammar's
-        // +In true arm while keeping actual grouping/function nesting at 64.
-        let mut pending = Vec::new();
-        'next: loop {
-            let at = self.at();
-            let arrow = self.arrow_ahead();
-            let mut value = if arrow {
-                self.arrow()?
-            } else if self.pattern_ahead() {
-                let pattern = self.binding_pattern(false)?;
-                self.expr(ExprKind::Pattern(pattern), at)?
-            } else {
-                self.binary(1)?
-            };
-            if !arrow {
-                let next = if self.eat("?") {
-                    let previous_in = std::mem::replace(&mut self.allow_in, true);
-                    Some(Pending::Yes(value, at, previous_in))
-                } else if let TokenKind::Punct(
-                    op @ ("=" | "+=" | "-=" | "*=" | "**=" | "&&=" | "||=" | "??=" | "/=" | "%="
-                    | "&=" | "|=" | "^=" | "<<=" | ">>=" | ">>>="),
-                ) = self.token().kind
-                {
-                    if !self.assignable(value)
-                        && !(op == "="
-                            && matches!(self.program.exprs[value].kind, ExprKind::Pattern(_)))
-                    {
-                        return Err(self.error("Invalid assignment target."));
-                    }
-                    if let ExprKind::Name(name) = &self.program.exprs[value].kind {
-                        self.strict_binding(name, self.strict)?;
-                    }
-                    self.current += 1;
-                    Some(Pending::Assign(op, value, at))
-                } else {
-                    None
-                };
-                if let Some(frame) = next {
-                    if self.expression_frames == MAX_EXPRESSION_FRAMES {
-                        return Err(self.unsupported("Pending expression limit reached (4096)."));
-                    }
-                    self.expression_frames += 1;
-                    pending.push(frame);
-                    continue;
-                }
-            }
-            while let Some(frame) = pending.pop() {
-                match frame {
-                    Pending::Yes(condition, at, previous_in) => {
-                        self.need(":")?;
-                        self.allow_in = previous_in;
-                        pending.push(Pending::No(condition, value, at));
-                        continue 'next;
-                    }
-                    Pending::No(condition, yes, at) => {
-                        value = self.expr(ExprKind::Conditional(condition, yes, value), at)?;
-                    }
-                    Pending::Assign(op, left, at) => {
-                        value = self.expr(ExprKind::Assign(op, left, value), at)?;
-                    }
-                }
-                self.expression_frames -= 1;
-            }
-            return Ok(value);
-        }
     }
     fn arrow_ahead(&self) -> bool {
         let tokens = &self.tokens;
@@ -2096,26 +2046,10 @@ impl Parser {
         if !punct(tokens.get(at), "(") {
             return false;
         }
-        // Defaults may contain nested calls, function expressions or arrows.
-        // Tokens already isolate strings/regexps; balance the outer parentheses
-        // without parsing an expression twice or treating default effects as code.
-        let mut depth = 1usize;
-        at += 1;
-        while let Some(token) = tokens.get(at) {
-            match token.kind {
-                TokenKind::Punct("(") => depth += 1,
-                TokenKind::Punct(")") => {
-                    depth -= 1;
-                    if depth == 0 {
-                        return punct(tokens.get(at + 1), "=>");
-                    }
-                }
-                TokenKind::End => return false,
-                _ => {}
-            }
-            at += 1;
-        }
-        false
+        // Parenthesis matching was indexed once with the tokens. Looking through
+        // every nested group here would make the new heap path quadratic.
+        at = self.delimiter_ends[at];
+        at != usize::MAX && punct(tokens.get(at + 1), "=>")
     }
 
     fn arrow(&mut self) -> Result<ExprId, Fault> {
@@ -2188,89 +2122,6 @@ impl Parser {
         self.expr(ExprKind::Function(template), at)
     }
 
-    fn binary(&mut self, minimum: u8) -> Result<ExprId, Fault> {
-        let at = self.at();
-        let mut left = self.exponentiation()?;
-        loop {
-            let op = match &self.token().kind {
-                TokenKind::Punct(op) => *op,
-                TokenKind::Word(word) if word == "in" && self.allow_in => "in",
-                TokenKind::Word(word) if word == "instanceof" => "instanceof",
-                _ => break,
-            };
-            let precedence = match op {
-                "||" | "??" => 1,
-                "&&" => 2,
-                "|" => 3,
-                "^" => 4,
-                "&" => 5,
-                "==" | "!=" | "===" | "!==" => 6,
-                "<" | ">" | "<=" | ">=" | "in" | "instanceof" => 7,
-                "<<" | ">>" | ">>>" => 8,
-                "+" | "-" => 9,
-                "*" | "/" | "%" => 10,
-                _ => 0,
-            };
-            if precedence < minimum {
-                break;
-            }
-            self.current += 1;
-            let right = self.binary(precedence + 1)?;
-            self.check_coalescing(op, left, right)?;
-            left = self.expr(ExprKind::Binary(op, left, right), at)?;
-        }
-        Ok(left)
-    }
-    fn unary(&mut self) -> Result<ExprId, Fault> {
-        let at = self.at();
-        let op = match &self.token().kind {
-            TokenKind::Punct(op @ ("!" | "~" | "+" | "-" | "++" | "--")) => Some(*op),
-            TokenKind::Word(word) if word == "typeof" => Some("typeof"),
-            TokenKind::Word(word) if word == "void" => Some("void"),
-            TokenKind::Word(word) if word == "delete" => Some("delete"),
-            _ => None,
-        };
-        if let Some(op) = op {
-            self.current += 1;
-            self.enter()?;
-            let argument = self.unary()?;
-            self.depth -= 1;
-            if op == "delete"
-                && self.strict
-                && matches!(self.program.exprs[argument].kind, ExprKind::Name(_))
-            {
-                return Err(
-                    self.error("Deleting an unqualified identifier is forbidden in strict code.")
-                );
-            }
-            if matches!(op, "++" | "--") {
-                if !self.assignable(argument) {
-                    return Err(self.error("Invalid update target."));
-                }
-                if let ExprKind::Name(name) = &self.program.exprs[argument].kind {
-                    self.strict_binding(name, self.strict)?;
-                }
-                return self.expr(ExprKind::Update(argument, op == "++", true), at);
-            }
-            return self.expr(ExprKind::Unary(op, argument), at);
-        }
-        let expression = self.member_expression()?;
-        let mut expression = self.postfix_chain(expression, at)?;
-        if !self.token().newline && (self.is("++") || self.is("--")) {
-            if !self.assignable(expression) {
-                return Err(self.error("Invalid update target."));
-            }
-            if let ExprKind::Name(name) = &self.program.exprs[expression].kind {
-                self.strict_binding(name, self.strict)?;
-            }
-            let increment = self.eat("++");
-            if !increment {
-                self.need("--")?;
-            }
-            expression = self.expr(ExprKind::Update(expression, increment, false), at)?;
-        }
-        Ok(expression)
-    }
     fn arguments(&mut self) -> Result<Vec<Argument>, Fault> {
         self.need("(")?;
         let mut args = Vec::new();
@@ -2280,10 +2131,8 @@ impl Parser {
                     return Err(self.unsupported("Call argument limit reached (256)."));
                 }
                 let spread = self.eat("...");
-                args.push(Argument {
-                    expression: self.assignment_with_in()?,
-                    spread,
-                });
+                let expression = self.assignment_with_in()?;
+                self.append_argument(&mut args, Argument { expression, spread })?;
                 if !self.eat(",") || self.is(")") {
                     break;
                 }
@@ -2291,51 +2140,6 @@ impl Parser {
         }
         self.need(")")?;
         Ok(args)
-    }
-    fn member_expression(&mut self) -> Result<ExprId, Fault> {
-        let at = self.at();
-        let mut expression = if self.eat("new") {
-            self.enter()?;
-            let constructor = self.member_expression()?;
-            if self.is("?.") {
-                return Err(self.error("An optional chain cannot be the constructor in new."));
-            }
-            let args = if self.is("(") {
-                self.arguments()?
-            } else {
-                Vec::new()
-            };
-            self.depth -= 1;
-            self.expr(ExprKind::Construct(constructor, args), at)?
-        } else {
-            self.primary()?
-        };
-        loop {
-            if self.eat(".") {
-                let TokenKind::Word(name) = &self.token().kind else {
-                    return Err(self.error("Expected a property name."));
-                };
-                let property =
-                    self.expr(ExprKind::Literal(Value::String(name.clone())), self.at())?;
-                self.current += 1;
-                expression = self.expr(ExprKind::Member(expression, property), at)?;
-            } else if self.eat("[") {
-                let property = self.expression_with_in()?;
-                self.need("]")?;
-                expression = self.expr(ExprKind::Member(expression, property), at)?;
-            } else if matches!(
-                self.token().kind,
-                TokenKind::Template(
-                    _,
-                    template_literals::Part::NoSubstitution | template_literals::Part::Head
-                )
-            ) {
-                return Err(self.unsupported("Tagged template literals are not implemented."));
-            } else {
-                break;
-            }
-        }
-        Ok(expression)
     }
     fn primary(&mut self) -> Result<ExprId, Fault> {
         let at = self.at();
@@ -2380,13 +2184,6 @@ impl Parser {
             }
             TokenKind::Punct("{") => self.object_literal()?,
             TokenKind::Punct("[") => self.array_literal()?,
-            TokenKind::Punct("(") => {
-                self.current += 1;
-                let expression = self.expression_with_in()?;
-                self.need(")")?;
-                self.program.exprs[expression].parenthesized = true;
-                return Ok(expression);
-            }
             _ => {
                 return Err(self.error(
                     "Expected an expression. This JavaScript subset does not support this syntax.",
@@ -8458,6 +8255,14 @@ strictFailure;
                 let (mut runtime, mut host) = test_runtime();
                 runtime.execute(&source, &mut host).unwrap();
                 assert_eq!(host.records, ["parsed"]);
+                let formerly_rejected = format!(
+                    "function unused(){{return {}0{};}}test.record('heap parsed');",
+                    "keep(".repeat(MAX_PARSE_DEPTH + 1),
+                    ")".repeat(MAX_PARSE_DEPTH + 1)
+                );
+                runtime.begin_job();
+                runtime.execute(&formerly_rejected, &mut host).unwrap();
+                assert_eq!(host.records.last().unwrap(), "heap parsed");
                 for (source, message) in [
                     (
                         format!(
@@ -8470,10 +8275,10 @@ strictFailure;
                     (
                         format!(
                             "test.record('early');function unused(){{return {}0{};}}",
-                            "keep(".repeat(MAX_PARSE_DEPTH + 1),
-                            ")".repeat(MAX_PARSE_DEPTH + 1)
+                            "keep(".repeat(MAX_EXPRESSION_FRAMES + 1),
+                            ")".repeat(MAX_EXPRESSION_FRAMES + 1)
                         ),
-                        "Parser nesting limit reached (64)",
+                        "Pending expression limit reached (4096)",
                     ),
                 ] {
                     let (mut runtime, mut host) = test_runtime();
@@ -8495,8 +8300,8 @@ strictFailure;
         std::thread::Builder::new()
             .stack_size(1024 * 1024)
             .spawn(|| {
-                // Parentheses disappear from the AST: this isolates parser
-                // depth from evaluator recursion at the exact 64-frame edge.
+                // Retain the original pre-continuation boundary fixtures.
+                // Parentheses still disappear from the evaluator AST.
                 assert_eq!(
                     result(include_str!(
                         "../tools/fixtures/parser-binding-identifier.js"
@@ -8541,18 +8346,34 @@ strictFailure;
                     (MAX_PARSE_DEPTH - 3, "{value}"),
                     (MAX_PARSE_DEPTH - 3, "value=7"),
                 ] {
-                    sources.push(format!(
+                    let heap_source = format!(
                         "test.record('early');var f={}function({parameters}){{return 7;}}{};",
                         "(".repeat(groups),
                         ")".repeat(groups)
+                    );
+                    let (mut runtime, mut host) = test_runtime();
+                    runtime.execute(&heap_source, &mut host).unwrap();
+                    assert_eq!(host.records, ["early"]);
+                    sources.push(format!(
+                        "test.record('early');var f={}function({parameters}){{return 7;}}{};",
+                        "[".repeat(groups),
+                        "]".repeat(groups)
                     ));
                 }
                 // An assignment reference can recurse through member syntax;
                 // it must not use the identifier-binding leaf path.
-                sources.push(format!(
+                let old_reference = format!(
                     "test.record('early');var target={{}};{}[target.value]=[7]{};",
                     "(".repeat(MAX_PARSE_DEPTH - 3),
                     ")".repeat(MAX_PARSE_DEPTH - 3)
+                );
+                let (mut runtime, mut host) = test_runtime();
+                runtime.execute(&old_reference, &mut host).unwrap();
+                assert_eq!(host.records, ["early"]);
+                sources.push(format!(
+                    "test.record('early');var target={{}};{}[target.value]=[7]{};",
+                    "[".repeat(MAX_PARSE_DEPTH - 3),
+                    "]".repeat(MAX_PARSE_DEPTH - 3)
                 ));
                 for source in sources {
                     let (mut runtime, mut host) = test_runtime();
@@ -8590,6 +8411,15 @@ strictFailure;
                             &mut MAX_REGEXP_WORK.clone(),
                             false,
                             active,
+                        );
+                        assert!(parsed.is_ok(), "heap groups with active depth {active}");
+                        let native = format!(
+                            "var f={}function(value){{return value;}}{};",
+                            "[".repeat(groups),
+                            "]".repeat(groups)
+                        );
+                        let parsed = Parser::parse_context(
+                            &native, &mut MAX_REGEXP_WORK.clone(), false, active,
                         );
                         if excess {
                             let error =
@@ -8683,13 +8513,23 @@ strictFailure;
             "(".repeat(60),
             ")".repeat(60)
         );
-        // This body fits a standalone job but must not get a fresh stack
-        // allowance when compiled by eval inside another live execution job.
+        // This original grouped body now needs heap frames rather than native
+        // recursion, including when eval compiles it on an active stack.
         Parser::parse(&nested, &mut MAX_REGEXP_WORK.clone()).unwrap();
         runtime
             .define_global("nested", Value::String(nested))
             .unwrap();
         host.records.clear();
+        runtime.begin_job();
+        runtime.execute("eval(nested);", &mut host).unwrap();
+        assert!(host.records.is_empty());
+        // Native array-literal reentry still shares eval's live stack budget.
+        let native = format!(
+            "function inactive(){{return {}1{};}}",
+            "[".repeat(60), "]".repeat(60)
+        );
+        Parser::parse(&native, &mut MAX_REGEXP_WORK.clone()).unwrap();
+        runtime.define_global("nested", Value::String(native)).unwrap();
         runtime.begin_job();
         let error = runtime
             .execute(
@@ -11025,10 +10865,12 @@ caught;
 
     #[test]
     fn recursion_infinite_loops_and_flat_ast_chains_are_bounded() {
+        // Retain the old 4000-group witness as an intentional acceptance case.
+        assert_eq!(result(&format!("{}1{}", "(".repeat(4000), ")".repeat(4000))), "1");
         for source in [
             "while(true);".to_string(),
             "function forever(){forever();} forever();".into(),
-            format!("{}1{}", "(".repeat(4000), ")".repeat(4000)),
+            format!("{}1{}", "(".repeat(MAX_EXPRESSION_FRAMES + 1), ")".repeat(MAX_EXPRESSION_FRAMES + 1)),
             format!("1{};", "+1".repeat(12_000)),
             format!("test{};", ".child".repeat(1000)),
             format!("{}true;", "!".repeat(4000)),

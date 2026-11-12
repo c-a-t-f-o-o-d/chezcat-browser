@@ -6,9 +6,11 @@
 
 use super::{
     Argument, ExprId, ExprKind, Fault, Host, Ordinary, Parser, Program, Reference, Runtime,
-    TokenKind, Value, MAX_EVAL_DEPTH, MAX_EXPRESSION_FRAMES,
+    TokenKind, Value, MAX_EVAL_DEPTH,
 };
 use std::rc::Rc;
+#[cfg(test)]
+use super::MAX_EXPRESSION_FRAMES;
 
 #[derive(Clone)]
 pub(super) enum Step {
@@ -248,7 +250,7 @@ if(count!==10)throw 'early errors';'ok';
 }
 
 impl Parser {
-    fn chain_property(&mut self) -> Result<ExprId, Fault> {
+    pub(super) fn chain_property(&mut self) -> Result<ExprId, Fault> {
         let TokenKind::Word(name) = &self.token().kind else {
             return Err(self.error("Expected a property name after the optional-chain operator."));
         };
@@ -256,93 +258,6 @@ impl Parser {
         let at = self.at();
         self.current += 1;
         self.expr(ExprKind::Literal(Value::String(name)), at)
-    }
-
-    pub(super) fn postfix_chain(
-        &mut self,
-        mut expression: ExprId,
-        at: usize,
-    ) -> Result<ExprId, Fault> {
-        let mut chain = None;
-        let mut steps = Vec::new();
-        loop {
-            let step = if self.eat("?.") {
-                if chain.is_none() {
-                    chain = Some(expression);
-                }
-                if self.is("(") {
-                    Step::Call {
-                        args: self.arguments()?,
-                        optional: true,
-                    }
-                } else if self.eat("[") {
-                    let key = self.expression_with_in()?;
-                    self.need("]")?;
-                    Step::Member {
-                        key,
-                        optional: true,
-                    }
-                } else {
-                    Step::Member {
-                        key: self.chain_property()?,
-                        optional: true,
-                    }
-                }
-            } else if self.eat(".") {
-                Step::Member {
-                    key: self.chain_property()?,
-                    optional: false,
-                }
-            } else if self.eat("[") {
-                let key = self.expression_with_in()?;
-                self.need("]")?;
-                Step::Member {
-                    key,
-                    optional: false,
-                }
-            } else if self.is("(") {
-                Step::Call {
-                    args: self.arguments()?,
-                    optional: false,
-                }
-            } else if matches!(
-                self.token().kind,
-                TokenKind::Template(
-                    _,
-                    super::template_literals::Part::NoSubstitution
-                        | super::template_literals::Part::Head
-                )
-            ) {
-                return Err(if chain.is_some() {
-                    self.error("An optional chain cannot be a tagged template.")
-                } else {
-                    self.unsupported("Tagged template literals are not implemented.")
-                });
-            } else {
-                break;
-            };
-            if chain.is_some() {
-                if steps.len() >= MAX_EXPRESSION_FRAMES {
-                    return Err(self.unsupported("Optional-chain step limit reached (4096)."));
-                }
-                self.check_nodes()?;
-                self.program.chain_steps += 1;
-                steps.push(step);
-            } else {
-                expression = self.expr(
-                    match step {
-                        Step::Member { key, .. } => ExprKind::Member(expression, key),
-                        Step::Call { args, .. } => ExprKind::Call(expression, args),
-                    },
-                    at,
-                )?;
-            }
-        }
-        if let Some(base) = chain {
-            self.expr(ExprKind::OptionalChain(base, steps), at)
-        } else {
-            Ok(expression)
-        }
     }
 
     pub(super) fn check_coalescing(

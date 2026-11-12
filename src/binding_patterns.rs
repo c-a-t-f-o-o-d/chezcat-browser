@@ -282,8 +282,7 @@ impl Parser {
             self.strict_binding(&name, self.strict)?;
             self.add_pattern(Kind::Name(name), false, at)
         } else {
-            let expression = self.member_expression()?;
-            let expression = self.postfix_chain(expression, at)?;
+            let expression = self.left_hand_side_expression()?;
             if !self.assignable(expression) {
                 return Err(self.error("Invalid destructuring assignment reference."));
             }

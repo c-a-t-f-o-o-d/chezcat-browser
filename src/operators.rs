@@ -7,37 +7,11 @@
 //! https://tc39.es/ecma262/#sec-getvalue
 
 use super::{
-    ExprId, ExprKind, Fault, Host, Ordinary, Parser, Program, Reference, Runtime, Value,
-    MAX_EXPRESSION_FRAMES,
+    ExprId, ExprKind, Fault, Host, Ordinary, Program, Reference, Runtime, Value,
 };
 
-impl Parser {
-    pub(super) fn exponentiation(&mut self) -> Result<ExprId, Fault> {
-        let mut value = self.unary()?;
-        let mut pending = Vec::new();
-        while self.is("**") {
-            let expression = &self.program.exprs[value];
-            if matches!(expression.kind, ExprKind::Unary(_, _)) && !expression.parenthesized {
-                return Err(self.error("A unary expression before ** must be parenthesized."));
-            }
-            if self.expression_frames == MAX_EXPRESSION_FRAMES {
-                return Err(self.unsupported("Pending expression limit reached (4096)."));
-            }
-            self.expression_frames += 1;
-            pending.push(value);
-            self.current += 1;
-            value = self.unary()?;
-        }
-        // A long, flat power chain never recurses on the native parser stack.
-        // Its right-hand AST remains subject to the ordinary evaluation bound.
-        while let Some(base) = pending.pop() {
-            let at = self.program.exprs[base].at;
-            value = self.expr(ExprKind::Binary("**", base, value), at)?;
-            self.expression_frames -= 1;
-        }
-        Ok(value)
-    }
-}
+#[cfg(test)]
+use super::{Parser, MAX_EXPRESSION_FRAMES};
 
 impl Runtime {
     pub(super) fn resolved_operator_reference(

@@ -2524,6 +2524,12 @@ COMPLETION_CASES.append(('primitive-string-index-reads', _INDEX_READ_FIXTURE.rea
 _ATTRIBUTION_FIXTURE = ROOT / 'tools/fixtures/string-work-attribution.js'
 COMPLETION_CASES.append(('string-work-attribution', _ATTRIBUTION_FIXTURE.read_text(encoding='utf-8')))
 
+# 0.47: grouping/reference semantics and atomic expression syntax failures.
+for _name in ['parser-continuation-semantics', 'parser-continuation-errors']:
+    _fixture = ROOT / ('tools/fixtures/' + _name + '.js')
+    _FIXTURE_PATHS_041.append(_fixture)
+    COMPLETION_CASES.append((_name, _fixture.read_text(encoding='utf-8')))
+
 _FIXTURE_HASHES_041 = {str(path.relative_to(ROOT)): hashlib.sha256(path.read_bytes()).hexdigest() for path in _FIXTURE_PATHS_041}
 _string_objects_041 = json.loads((_041 / "string-objects-cases.json").read_text(encoding="utf-8"))['cases']
 _object_is_041 = json.loads((_041 / "object-is-original-node.json").read_text(encoding="utf-8"))['cases']
@@ -2566,6 +2572,63 @@ _string_bound_041 = json.loads((_041 / 'string-objects-boundary-adjudication.jso
 NEGATIVE_DIAGNOSTICS_041[_string_bound_041['id']] = _string_bound_041['accepted_error_contains']
 for _row in json.loads((_041 / 'operator-supplement-bound-adjudication.json').read_text(encoding="utf-8"))['cases']:
     NEGATIVE_DIAGNOSTICS_041[_row['id']] = _row['adjudicated_error_fragment']
+
+
+# 0.47 removes native recursion only for continuation-managed syntax. Retain
+# every original input that was rejected solely for that recursion as a Node
+# comparison, and retain the negative protection at its actual bounded boundary.
+_CONTINUATION_ACCEPTED_047 = {
+    'else-if-nested-condition-depth-atomic',
+    'deferred-function-call-depth-within-body-stays-bounded-atomic',
+    'deferred-function-top-level-call-depth-stays-bounded-atomic',
+    'deferred-function-eval-preserves-active-depth-seed-atomic',
+    'binding-leaf-extra-group-limit-atomic',
+    'binding-leaf-array-pattern-limit-atomic',
+    'binding-leaf-object-pattern-limit-atomic',
+    'binding-leaf-default-initializer-limit-atomic',
+    'binding-leaf-assignment-reference-limit-atomic',
+}
+_migrated_047 = [case for case in NEGATIVE if case[0] in _CONTINUATION_ACCEPTED_047]
+assert len(_migrated_047) == len(_CONTINUATION_ACCEPTED_047)
+CASES.extend((name.removesuffix('-atomic') + '-now-accepted', source)
+             for name, source in _migrated_047)
+NEGATIVE = [case for case in NEGATIVE if case[0] not in _CONTINUATION_ACCEPTED_047]
+for _name in _CONTINUATION_ACCEPTED_047:
+    ATOMIC_NEGATIVE_CASES.discard(_name)
+    NEGATIVE_DIAGNOSTICS_041.pop(_name, None)
+
+_CONTINUATION_LIMITS_047 = [
+    ('continuation-group-shared-limit-atomic',
+     'test.record("early");' + '(' * 4097 + '1' + ')' * 4097 + ';',
+     'Pending expression limit reached (4096)'),
+    ('continuation-call-shared-limit-atomic',
+     'test.record("early");function unused(){return '
+     + nested_keep_calls('7', 4097) + ';}',
+     'Pending expression limit reached (4096)'),
+    ('continuation-computed-key-shared-limit-atomic',
+     'test.record("early");function unused(){return '
+     + 'holder[' * 4097 + '0' + ']' * 4097 + ';}',
+     'Pending expression limit reached (4096)'),
+    ('continuation-eval-keeps-active-native-depth-atomic',
+     _KEEP_FUNCTION + 'try{'
+     + nested_keep_calls('eval(' + json.dumps('function unused(){return '
+                                             + '[' * 30 + '7' + ']' * 30 + ';}1;') + ')', 40)
+     + ';}catch(error){test.record("caught");}finally{test.record("finally");}',
+     'Parser nesting limit reached (64)'),
+    ('continuation-execution-keeps-evaluator-depth-atomic',
+     _KEEP_FUNCTION + 'try{' + nested_keep_calls('7', 256)
+     + ';}catch(error){test.record("caught");}finally{test.record("finally");}',
+     'Evaluation nesting limit reached (128)'),
+]
+for _name, _count, _parameters in _BINDING_LEAF_LIMIT_CASES:
+    _CONTINUATION_LIMITS_047.append((
+        _name.replace('binding-leaf-', 'continuation-native-binding-'),
+        'test.record("early");var f=' + '[' * _count
+        + 'function(' + _parameters + '){return 7;}' + ']' * _count + ';',
+        'Parser nesting limit reached (64)',
+    ))
+NEGATIVE.extend((name, source) for name, source, _ in _CONTINUATION_LIMITS_047)
+NEGATIVE_DIAGNOSTICS_041.update((name, message) for name, _, message in _CONTINUATION_LIMITS_047)
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
