@@ -2217,7 +2217,8 @@ impl Host for Bridge<'_> {
                 _ => &[],
             };
         }
-        if (object == DOCUMENT || node_index(object).is_some()) && method == "getElementsByTagName"
+        if (object == DOCUMENT || node_index(object).is_some()) && method=="getElementsByTagName"
+            || (object==DOCUMENT || self.attr_element_receiver(object)) && method=="getElementsByClassName"
         {
             return &[(0, true)];
         }
@@ -2257,6 +2258,7 @@ impl Host for Bridge<'_> {
     }
 
     fn method_length(&self, object:u32, method:&str) -> Option<usize> {
+        if method=="getElementsByClassName" && (object==DOCUMENT || self.attr_element_receiver(object)) { return Some(1); }
         if self.class_list_receiver(object) {
             return match method {"contains"|"item"=>Some(1),"remove"|"toString"=>Some(0),_=>None};
         }
@@ -2293,7 +2295,7 @@ impl Host for Bridge<'_> {
         if self.attr_element_receiver(object) && matches!(method, "getAttributeNode" | "removeAttributeNode") { return 1; }
         if collection_handle_index(object).is_some() && matches!(method, "item" | "namedItem")
             || (object == DOCUMENT || node_index(object).is_some())
-                && method == "getElementsByTagName"
+                && matches!(method,"getElementsByTagName"|"getElementsByClassName")
         {
             return 1;
         }
@@ -2336,6 +2338,9 @@ impl Host for Bridge<'_> {
         method: &str,
         args: &[Value],
     ) -> Result<(), (&'static str, String)> {
+        if method=="getElementsByClassName" && !(object==DOCUMENT || self.attr_element_receiver(object)) {
+            return Err(("TypeError","getElementsByClassName requires a Document or Element.".into()));
+        }
         self.validate_created_event_call(object, method, args)?;
         // These existing methods still convert primitive arguments inside the
         // bridge. Reject Symbol before that boundary so the error is catchable
@@ -2499,6 +2504,8 @@ impl Host for Bridge<'_> {
     }
 
     fn method(&self, object: u32, property: &str) -> Option<&'static str> {
+        if property=="getElementsByClassName" && (object==DOCUMENT || self.attr_element_receiver(object))
+            && !self.form_named_control(object,property) { return Some("getElementsByClassName"); }
         if script_class_list::element(object).is_some() {
             return self.class_list_receiver(object).then(||script_class_list::method(property)).flatten();
         }
@@ -2549,6 +2556,10 @@ impl Host for Bridge<'_> {
     }
 
     fn accepts_receiver(&self, object: u32, method: &str, receiver: u32) -> bool {
+        if method=="getElementsByClassName" {
+            return if object==DOCUMENT {receiver==DOCUMENT}
+                else {self.attr_element_receiver(object) && self.attr_element_receiver(receiver)};
+        }
         if script_class_list::element(object).is_some() { return self.class_list_receiver(object) && self.class_list_receiver(receiver); }
         if method == "initMouseEvent" { return self.mouse_receiver(object) && self.mouse_receiver(receiver); }
         if matches!(method, "initEvent" | "preventDefault" | "stopPropagation" | "stopImmediatePropagation") {
@@ -2659,7 +2670,7 @@ impl Host for Bridge<'_> {
         if object == NAVIGATOR {
             return Ok(None);
         }
-        Err("Own-property inspection is not implemented for this host object.".into())
+        Err(unsupported_own_property(object,property))
     }
 
     fn delete(&mut self, object: u32, property: &str) -> Result<bool, String> {
@@ -2806,6 +2817,7 @@ impl Host for Bridge<'_> {
 
     fn has(&mut self, object: u32, property: &str) -> Result<bool, String> {
         self.state.work(1)?;
+        if property=="getElementsByClassName" && (object==DOCUMENT || self.attr_element_receiver(object)) { return Ok(true); }
         if script_class_list::element(object).is_some() {
             if matches!(property,"length"|"value") || script_class_list::method(property).is_some() { self.class_list_get(object,"length")?; return Ok(true); }
             return if collection_index(property).is_some() { self.class_list_get(object,property).map(|value|!matches!(value,Value::Undefined)) } else { Ok(false) };
@@ -2984,6 +2996,12 @@ impl Host for Bridge<'_> {
             return Ok(has);
         }
         let node = self.node(object)?;
+        if self.doc.nodes[node].namespace==crate::html::Namespace::Html && tag(self.doc,node)!="form"
+            && matches!(property,"prototype"|"setCapture"|"releaseCapture") {
+            // These Elements are instances, not constructors. Legacy mouse
+            // capture extensions are absent; no capture operation is advertised.
+            return Ok(false);
+        }
         if tag(self.doc, node) == "img"
             && matches!(
                 property,
@@ -3227,6 +3245,10 @@ impl Host for Bridge<'_> {
             return Ok(value);
         }
         let node = self.node(object)?;
+        if self.doc.nodes[node].namespace==crate::html::Namespace::Html && tag(self.doc,node)!="form"
+            && matches!(property,"prototype"|"setCapture"|"releaseCapture") {
+            return Ok(Value::Undefined);
+        }
         if let Some(value) = self.image_get(node, property)? {
             return Ok(value);
         }
@@ -3549,6 +3571,9 @@ impl Host for Bridge<'_> {
         if object == DOCUMENT && method == "createEvent" {
             return if self.event_factory_enabled() { self.create_event(args) }
                 else { Err(unsupported_event_interface(args.first())) };
+        }
+        if method=="getElementsByClassName" && (object==DOCUMENT || self.attr_element_receiver(object)) {
+            return self.create_class_collection(object,args.first().ok_or("getElementsByClassName requires one argument.")?);
         }
         if let Some(result) = self.created_event_call(object, method, args) { return result; }
         if method == "initEvent" && self.state.event.as_ref().is_some_and(|event| event.handle == object) {
@@ -3878,6 +3903,12 @@ fn inert_attribute_name(name: &str) -> bool {
                 || byte.is_ascii_digit()
                 || matches!(byte, b'-' | b'_' | b':' | b'.')
         })
+}
+
+#[cold]
+#[inline(never)]
+fn unsupported_own_property(object:u32, property:&str) -> String {
+    format!("Own-property inspection is not implemented for this host object. Native handle={object}; property={property:?}.")
 }
 fn collection_index(property: &str) -> Option<usize> {
     if property.is_empty() || property.len() > 1 && property.starts_with('0') {

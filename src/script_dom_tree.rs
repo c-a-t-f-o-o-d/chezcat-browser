@@ -192,6 +192,13 @@ impl Bridge<'_> {
             self.state.dom.connected[node], self.state.dom.created.contains(&node), self.state.geometry.is_some())
     }
 
+    #[cold]
+    #[inline(never)]
+    fn unavailable_scroll(&self, node:usize, property:&str) -> String {
+        format!("Element property {property:?} requires measured scrolling-area geometry. Receiver node={node}; tag={}; connected={}; created={}; geometry-attached={}. No extent was fabricated.",
+            tag(self.doc,node),self.state.dom.connected[node],self.state.dom.created.contains(&node),self.state.geometry.is_some())
+    }
+
     pub(super) fn namespace_receiver(&self, object: u32) -> bool {
         object == DOCUMENT
             || self.attr_receiver(object)
@@ -285,7 +292,7 @@ impl Bridge<'_> {
     }
 
     pub(super) fn dom_readonly(&self, object: u32, property: &str) -> bool {
-        if matches!(property, "offsetLeft" | "offsetTop") {
+        if matches!(property, "offsetLeft" | "offsetTop" | "scrollWidth" | "scrollHeight") {
             return node_index(object).is_some_and(|node| self.dom_accessible(node)
                 && self.doc.nodes[node].namespace == crate::html::Namespace::Html
                 && matches!(self.doc.nodes[node].kind, NodeKind::Element { .. }));
@@ -371,7 +378,7 @@ impl Bridge<'_> {
         let node = self.dom_node(node_handle(node))?;
         if property == "classList" { return Ok(Some(matches!(self.doc.nodes[node].kind,NodeKind::Element {..}))); }
         if node_constant(property).is_some() { return Ok(Some(true)); }
-        if matches!(property, "tabIndex" | "offsetLeft" | "offsetTop") && matches!(self.doc.nodes[node].kind, NodeKind::Element { .. }) {
+        if matches!(property, "tabIndex" | "offsetLeft" | "offsetTop" | "scrollWidth" | "scrollHeight") && matches!(self.doc.nodes[node].kind, NodeKind::Element { .. }) {
             if self.doc.nodes[node].namespace != crate::html::Namespace::Html {
                 return Err("tabIndex for unsupported foreign parser contexts is unavailable.".into());
             }
@@ -428,6 +435,16 @@ impl Bridge<'_> {
             return Ok(None);
         }
         let node = self.dom_node(object)?;
+        if matches!(property,"scrollWidth"|"scrollHeight") {
+            if !matches!(self.doc.nodes[node].kind,NodeKind::Element {..})
+                || self.doc.nodes[node].namespace != crate::html::Namespace::Html {
+                return Err("Scroll dimensions require a known HTML Element.".into());
+            }
+            // A detached Element has no associated CSS layout box. Connected
+            // extents require renderer measurements, never a client-size alias.
+            if !self.state.dom.connected[node] { return Ok(Some(Value::Number(0.0))); }
+            return Err(self.unavailable_scroll(node,property));
+        }
         if property == "classList" {
             if !matches!(self.doc.nodes[node].kind,NodeKind::Element {..}) { return Ok(Some(Value::Undefined)); }
             if self.doc.nodes[node].namespace != crate::html::Namespace::Html { return Err("Class token list requires known namespace provenance.".into()); }

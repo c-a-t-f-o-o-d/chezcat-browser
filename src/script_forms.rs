@@ -11,19 +11,24 @@ impl Bridge<'_> {
     }
 
     pub(super) fn form_submit_method(&self, object: u32) -> Option<&'static str> {
-        let form = node_index(object).filter(|_| self.form_receiver(object))?;
+        if !self.form_receiver(object) { return None; }
         // Native form named properties override prototype methods. A field
         // named or identified as "submit" must remain that actual field.
-        if self.forms.controls.iter().any(|(&node, control)| {
-            control.owner == Some(form)
-                && control.kind != Kind::Image
-                && (self.doc.attr(node, "id") == Some("submit")
-                    || self.doc.attr(node, "name") == Some("submit"))
-        }) {
+        if self.form_named_control(object,"submit") {
             None
         } else {
             Some("submit")
         }
+    }
+
+    pub(super) fn form_named_control(&self, object:u32, name:&str) -> bool {
+        let Some(form) = node_index(object).filter(|_|self.form_receiver(object)) else {return false;};
+        self.forms.controls.iter().any(|(&node, control)| {
+            control.owner == Some(form)
+                && control.kind != Kind::Image
+                && (self.doc.attr(node, "id") == Some(name)
+                    || self.doc.attr(node, "name") == Some(name))
+        })
     }
 
     pub(super) fn submit_form(&mut self, object: u32) -> Result<Value, String> {

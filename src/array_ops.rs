@@ -19,6 +19,36 @@ struct FlattenFrame {
 }
 
 impl Runtime {
+    /// A native collection is not an Array: ArraySpeciesCreate returns a fresh
+    /// ordinary Array without reading constructor/species. Length is captured
+    /// once; coercion and indexed reads continue to observe the live source.
+    pub(super) fn array_slice_host(&mut self, handle:u32, args:&[Value], host:&mut dyn Host) -> Result<Value,Fault> {
+        self.reject_foreign_window(&Value::Host(handle),host)?;
+        // Host/prototype getters may enter Script while the result is partial.
+        let marker = self.inhibit_transient_collection();
+        let result = (|| {
+            let length_value = self.host_read(handle,"length",host)?;
+            let number = self.binary_number(&length_value,host)?;
+            let number = if number.is_nan() || number<=0.0 {0.0} else {number.floor().min(9_007_199_254_740_991.0)};
+            if number > usize::MAX as f64 { return Err(Fault::new("Native slice length exceeds the index representation.")); }
+            let length = number as usize;
+            let start = self.binary_relative(args.first(),length,0,host)?;
+            let end = self.binary_relative(args.get(1),length,length,host)?;
+            let output = Value::Object(self.new_object(Some(end.saturating_sub(start)))?);
+            for index in start..end {
+                self.step()?;
+                let name = index.to_string();
+                if matches!(self.has_property_value(Value::String(name.clone()),Value::Host(handle),host)?,Value::Bool(true)) {
+                    let value = self.host_read(handle,&name,host)?;
+                    self.create_data_property(&output,PropertyKey::String((index-start).to_string()),value,host)?;
+                }
+            }
+            Ok(output)
+        })();
+        self.restore_transient_marker(marker);
+        result
+    }
+
     /// Join uses the length captured before separator conversion. Active array
     /// identities span custom conversion callbacks as well as native nesting;
     /// cleanup on every completion lets later independent joins visit again.
@@ -920,6 +950,69 @@ impl Runtime {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct SliceHost {
+        length:Value,
+        fail_has:bool,
+        fail_get:bool,
+        log:Vec<String>,
+    }
+    impl Default for SliceHost {
+        fn default()->Self {Self {length:Value::Number(3.0),fail_has:false,fail_get:false,log:Vec::new()}}
+    }
+    impl Host for SliceHost {
+        fn get(&mut self,_:u32,name:&str)->Result<Value,String> {
+            self.log.push(match name {"length"=>"L".into(),"start"=>"S".into(),"end"=>"E".into(),_=>format!("G{name}")});
+            match name {
+                "length"=>Ok(self.length.clone()),"start"=>Ok(Value::Number(0.0)),"end"=>Ok(Value::Number(3.0)),
+                "0"=>Ok(Value::Undefined),"2" if !self.fail_get=>Ok(Value::String("third".into())),
+                _=>Err("Host indexed read denied".into()),
+            }
+        }
+        fn has(&mut self,_:u32,name:&str)->Result<bool,String> {
+            self.log.push(format!("H{name}"));
+            if name=="1" && self.fail_has {Err("Host indexed presence denied".into())} else {Ok(matches!(name,"0"|"2"))}
+        }
+        fn set(&mut self,_:u32,_:&str,_:Value)->Result<(),String> {Err("No host write".into())}
+        fn call(&mut self,_:u32,_:&str,_:&[Value])->Result<Value,String> {Err("No host call".into())}
+    }
+
+    #[test]
+    fn host_array_slice_observes_order_holes_and_own_creation_without_species() {
+        let mut runtime=Runtime::for_test();
+        runtime.define_global("native",Value::Host(1234)).unwrap();
+        let mut host=SliceHost::default();
+        let value=runtime.execute(r#"
+Object.defineProperty(Array.prototype,'0',{get:function(){throw 'inherited read';},set:function(){throw 'inherited setter';},configurable:true});
+var result=Array.prototype.slice.call(native,{valueOf:function(){return native.start;}},{valueOf:function(){return native.end;}});
+if(result.length!==3||!Object.prototype.hasOwnProperty.call(result,'0')||result[0]!==undefined||1 in result||result[2]!=='third'||Object.getPrototypeOf(result)!==Array.prototype)throw 'shape';
+var desc=Object.getOwnPropertyDescriptor(result,'0');if(!desc.writable||!desc.enumerable||!desc.configurable)throw 'own data flags';delete Array.prototype[0];'ok';
+"#,&mut host).unwrap();
+        assert_eq!(value.to_text(),"ok");
+        assert_eq!(host.log,["L","S","E","H0","G0","H1","H2","G2"]);
+    }
+
+    #[test]
+    fn host_array_slice_keeps_host_denials_array_capacity_and_recovery() {
+        for fail_get in [false,true] {
+            let mut runtime=Runtime::for_test();
+            runtime.define_global("native",Value::Host(1234)).unwrap();
+            let mut host=SliceHost {fail_has:!fail_get,fail_get,..SliceHost::default()};
+            let error=runtime.execute("Array.prototype.slice.call(native);",&mut host).unwrap_err();
+            assert!(error.contains("Host indexed"),"{error}");
+            runtime.begin_job();host.fail_has=false;host.fail_get=false;
+            assert_eq!(runtime.execute("Array.prototype.slice.call(native).length;",&mut host).unwrap().to_number(),3.0);
+        }
+        let mut runtime=Runtime::for_test();
+        runtime.define_global("native",Value::Host(1234)).unwrap();
+        let mut host=SliceHost {length:Value::Number(1_000_000_000.0),..SliceHost::default()};
+        let error=runtime.execute("Array.prototype.slice.call(native);",&mut host).unwrap_err();
+        assert!(error.contains("limit"),"{error}");
+        assert_eq!(host.log,["L"]);
+        runtime.begin_job();host.log.clear();host.length=Value::Number(f64::INFINITY);
+        assert_eq!(runtime.execute("Array.prototype.slice.call(native,Infinity).length;",&mut host).unwrap().to_number(),0.0);
+        assert_eq!(host.log,["L"]);
+    }
 
     fn join_succeeds(source: &str) {
         assert_eq!(

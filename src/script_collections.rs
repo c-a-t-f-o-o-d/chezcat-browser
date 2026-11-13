@@ -1,5 +1,5 @@
-//! Live, bounded getElementsByTagName collections. Each handle retains a root
-//! and tag filter, never a snapshot of node references. Queries share DOM work
+//! Live, bounded tag/class collections. Each handle retains a root
+//! and filter, never a snapshot of node references. Queries share DOM work
 //! limits and preserve the document's inert-subtree policy.
 //! https://dom.spec.whatwg.org/#concept-getelementsbytagname
 use super::*;
@@ -9,7 +9,21 @@ const MAX_COLLECTIONS: usize = 128;
 
 pub(super) struct TagCollection {
     root: usize,
-    name: String,
+    filter: Filter,
+}
+
+#[derive(Clone)]
+enum Filter {
+    Tag(String),
+    Classes(Vec<String>),
+}
+impl Filter {
+    fn bytes(&self) -> usize {
+        match self {
+            Self::Tag(name) => name.len(),
+            Self::Classes(names) => names.iter().map(String::len).sum(),
+        }
+    }
 }
 
 pub(super) fn collection_handle_index(handle: u32) -> Option<usize> {
@@ -30,15 +44,47 @@ impl Bridge<'_> {
         } else {
             self.node(object)?
         };
+        self.store_live_collection(root, Filter::Tag(name))
+    }
+
+    pub(super) fn create_class_collection(
+        &mut self,
+        object: u32,
+        value: &Value,
+    ) -> Result<Value, String> {
+        let root = if object == DOCUMENT {
+            0
+        } else {
+            self.node(object)?
+        };
+        let text = self.text(value)?;
+        self.state.work(text.len())?;
+        self.state.copies(text.len())?;
+        let mut seen = std::collections::BTreeSet::new();
+        let names = text
+            .split(class_whitespace)
+            .filter(|token| !token.is_empty())
+            .filter(|token| seen.insert(*token))
+            .map(str::to_owned)
+            .collect();
+        self.store_live_collection(root, Filter::Classes(names))
+    }
+
+    fn store_live_collection(&mut self, root: usize, filter: Filter) -> Result<Value, String> {
         if self.state.dom.collections.len() >= MAX_COLLECTIONS {
             return Err("DOM live tag-collection limit reached (128 per document).".into());
         }
-        self.state.replace_bytes(0, name.len())?;
+        self.state
+            .dom
+            .collections
+            .try_reserve(1)
+            .map_err(|_| "DOM live collection storage reservation failed.")?;
+        self.state.replace_bytes(0, filter.bytes())?;
         let handle = COLLECTION_BASE + self.state.dom.collections.len() as u32;
         self.state
             .dom
             .collections
-            .push(TagCollection { root, name });
+            .push(TagCollection { root, filter });
         Ok(Value::Host(handle))
     }
 
@@ -51,19 +97,47 @@ impl Bridge<'_> {
             .get(index)
             .ok_or("Invalid HTMLCollection handle.")?;
         let root = collection.root;
-        let bytes = collection.name.len();
+        let bytes = collection.filter.bytes();
         self.state.copies(bytes)?;
-        let name = self.state.dom.collections[index].name.clone();
+        let filter = self.state.dom.collections[index].filter.clone();
+        if matches!(&filter,Filter::Classes(names) if names.is_empty()) {
+            return Ok(Vec::new());
+        }
         let candidates = self.query_candidates(root)?;
-        if name == "*" {
+        if matches!(&filter,Filter::Tag(name) if name=="*") {
             return Ok(candidates);
         }
         let mut found = Vec::new();
         for node in candidates {
             self.state.work(1)?;
-            let candidate = tag(self.doc, node);
-            self.state.copies(candidate.len())?;
-            if candidate == name {
+            let matches = match &filter {
+                Filter::Tag(name) => {
+                    let candidate = tag(self.doc, node);
+                    self.state.copies(candidate.len())?;
+                    candidate == name
+                }
+                Filter::Classes(names) => {
+                    let NodeKind::Element { attrs, .. } = &self.doc.nodes[node].kind else {
+                        unreachable!()
+                    };
+                    self.state.work(attrs.len())?;
+                    self.state
+                        .copies(attrs.iter().map(|(name, _)| name.len()).sum())?;
+                    let class = self.doc.attr(node, "class").unwrap_or("");
+                    let scans = class
+                        .len()
+                        .checked_mul(names.len())
+                        .ok_or("Class collection scan accounting overflow.")?;
+                    self.state.work(scans)?;
+                    self.state.copies(scans)?;
+                    // ChezCat reports its actual standards mode (CSS1Compat).
+                    // Every requested token must match, with exact case.
+                    names
+                        .iter()
+                        .all(|name| class.split(class_whitespace).any(|token| token == name))
+                }
+            };
+            if matches {
                 found.push(node);
             }
         }
@@ -171,4 +245,8 @@ impl Bridge<'_> {
         }
         Ok(None)
     }
+}
+
+fn class_whitespace(c: char) -> bool {
+    matches!(c, ' ' | '\t' | '\n' | '\r' | '\u{c}')
 }

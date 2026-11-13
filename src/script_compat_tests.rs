@@ -1,6 +1,133 @@
 use super::*;
 
 #[test]
+fn host_array_slice_captures_length_but_reads_live_indices_and_keeps_dom_identity() {
+    let (doc,_,page,outcome)=page("<main><p id=a class=probe></p><p id=b class=probe></p><p id=c class=probe></p></main>",&[r#"
+var live=document.getElementsByClassName('probe'),a=document.getElementById('a'),b=document.getElementById('b'),c=document.getElementById('c');
+var snapshot=Array.prototype.slice.call(live);if(!Array.isArray(snapshot)||Object.getPrototypeOf(snapshot)!==Array.prototype||snapshot.length!==3||snapshot[0]!==a||snapshot[2]!==c)throw 'ordinary snapshot/identity';
+var log='',shorter=Array.prototype.slice.call(live,{valueOf:function(){log+='s';a.className='gone';return 0;}},{valueOf:function(){log+='e';return undefined;}});
+if(log!=='se'||shorter.length!==0)throw 'explicit end NaN';
+a.className='probe';var holes=Array.prototype.slice.call(live,{valueOf:function(){a.className='gone';return 0;}});
+if(holes.length!==3||holes[0]!==b||holes[1]!==c||2 in holes||Object.prototype.hasOwnProperty.call(holes,'2'))throw 'captured length/live holes';
+if(snapshot.length!==3||snapshot[0]!==a||snapshot[1]!==b)throw 'snapshot stays static';
+var tail=Array.prototype.slice.call(live,-1,undefined);if(tail.length!==1||tail[0]!==c)throw 'negative/defaultend';
+if(Array.prototype.slice.call(live,Infinity).length||Array.prototype.slice.call(live,-Infinity,1)[0]!==b)throw 'infinite bounds';
+var marker={},same=false;try{Array.prototype.slice.call(live,{valueOf:function(){throw marker;}});}catch(e){same=e===marker;}if(!same)throw 'throw identity';
+var caught=false;try{Array.prototype.slice.call(live,Symbol());}catch(e){caught=e.name==='TypeError';}if(!caught)throw 'Symbol';document.title='host-slice-ok';
+"#]);
+    assert_eq!(outcome.errors,0,"{}",page.report());
+    assert_eq!(doc.title,"host-slice-ok");
+}
+
+#[test]
+fn detached_scroll_dimensions_are_exact_and_connected_measurements_remain_explicit() {
+    let (mut doc,mut forms,mut page,outcome)=page("<main><p id=p>rendered</p></main>",&[r#"
+var e=document.createElement('div');e.style.width='123px';e.style.height='45px';
+if(e.scrollWidth!==0||e.scrollHeight!==0||!('scrollWidth' in e))throw 'detached no box';
+e.scrollWidth=9;if(e.scrollWidth!==0)throw 'readonly';document.title='detached-scroll-ok';
+"#]);
+    assert_eq!(outcome.errors,0,"{}",page.report());
+    assert_eq!(doc.title,"detached-scroll-ok");
+    let node=(0..doc.nodes.len()).find(|&n|doc.attr(n,"id")==Some("p")).unwrap();
+    let mut bridge=Bridge {doc:&mut doc,forms:&mut forms,state:&mut page.state};
+    let error=bridge.get(node_handle(node),"scrollWidth").unwrap_err();
+    assert!(error.contains("measured scrolling-area")&&error.contains("connected=true"),"{error}");
+}
+
+#[test]
+fn class_name_collection_method_preserves_form_named_control_precedence() {
+    let (doc,_,page,outcome)=page("<form id=f><input id=field name=getElementsByClassName class=probe></form>",&[r#"
+var f=document.getElementById('f'),field=document.getElementById('field');
+if(f.getElementsByClassName!==field||!('getElementsByClassName' in f))throw 'named precedence';
+var method=document.createElement('div').getElementsByClassName;
+if(method.call(f,'probe')[0]!==field)throw 'borrow genuine Element method';
+var caught=false;try{f.getElementsByClassName('probe');}catch(e){caught=e.name==='TypeError';}if(!caught)throw 'named field is not callable';document.title='class-collection-form-ok';
+"#]);
+    assert_eq!(outcome.errors,0,"{}",page.report());
+    assert_eq!(doc.title,"class-collection-form-ok");
+}
+
+#[test]
+fn class_name_collections_match_all_ascii_tokens_in_live_descendant_order() {
+    let (doc,_,page,outcome)=page("<main><section id=s class='a b'><p id=p class='a b'></p><div><b id=b class='b a'></b></div><i id=c class='a B'></i></section><p id=outside class='a b'></p></main>",&[r#"
+var s=document.getElementById('s'),p=document.getElementById('p'),b=document.getElementById('b'),c=document.getElementById('c');
+var all=document.getElementsByClassName(' a\t b a\n'),inside=s.getElementsByClassName('b a');
+if(document.compatMode!=='CSS1Compat'||all.length!==4||all[0]!==s||all[1]!==p||all[2]!==b||all[3]!==document.getElementById('outside'))throw 'standards order';
+if(inside.length!==2||inside[0]!==p||inside[1]!==b||inside.namedItem('b')!==b||inside.item(2)!==null)throw 'scope/root exclusion';
+if(document.getElementsByClassName('').length||document.getElementsByClassName(' \t\n\r\f ').length)throw 'empty tokens';
+if(s.getElementsByClassName('B').length!==1||s.getElementsByClassName('B')[0]!==c)throw 'case';
+var unicode=document.createElement('span');unicode.className='a\u00a0b';s.appendChild(unicode);
+if(s.getElementsByClassName('a\u00a0b')[0]!==unicode||inside.length!==2)throw 'ASCII whitespace only';
+unicode.className='a\u000bb';if(s.getElementsByClassName('a\u000bb')[0]!==unicode)throw 'vertical tab is token content';
+p.className='changed';if(inside.length!==1||inside[0]!==b)throw 'live class mutation';
+c.className='a b';if(inside.length!==2||inside[1]!==c)throw 'live case change';
+var fresh=document.createElement('em');fresh.className='b a';s.insertBefore(fresh,b.parentNode);if(inside[0]!==fresh||inside.length!==3)throw 'live insertion/order';
+s.removeChild(fresh);if(inside.length!==2||all.length!==4)throw 'live removal';
+var detached=s.getElementsByClassName('a b');s.parentNode.removeChild(s);if(detached.length!==2||all.length!==1)throw 'detached retained scope';
+if(Object.keys(detached).join(',')!=='0,1')throw 'indexed enumeration';document.title='class-collection-ok';
+"#]);
+    assert_eq!(outcome.errors,0,"{}",page.report());
+    assert_eq!(doc.title,"class-collection-ok");
+}
+
+#[test]
+fn class_name_collection_conversion_metadata_and_interface_brands_are_real() {
+    let (doc,_,page,outcome)=page("<p id=p class='null undefined a'></p><div id=d class=a></div>",&[r#"
+var p=document.getElementById('p'),d=document.getElementById('d'),docMethod=document.getElementsByClassName,elementMethod=p.getElementsByClassName;
+if(docMethod.length!==1||elementMethod.length!==1||docMethod!==document.getElementsByClassName)throw 'metadata';
+if(docMethod.call(document,null)[0]!==p||docMethod.call(document,undefined)[0]!==p)throw 'DOMString';
+var called=0,classes={toString:function(){called++;p.className='new';return 'new';}};if(docMethod.call(document,classes)[0]!==p||called!==1)throw 'conversion/current DOM';
+var bad=0,arg={toString:function(){bad++;return 'a';}},caught=0;
+try{docMethod.call(document);}catch(e){if(e.name==='TypeError')caught++;}
+try{docMethod.call(document,Symbol());}catch(e){if(e.name==='TypeError')caught++;}
+for(var receiver of [{},window,p,p.style,document.createTextNode('x')])try{docMethod.call(receiver,arg);}catch(e){if(e.name==='TypeError')caught++;}
+for(var receiver of [{},window,document,p.style,document.createTextNode('x')])try{elementMethod.call(receiver,arg);}catch(e){if(e.name==='TypeError')caught++;}
+if(caught!==12||bad)throw 'brand/arity before conversion';
+if(elementMethod.call(d,'a').length!==0)throw 'borrow excludes root';
+var marker={},same=false;try{docMethod.call(document,{toString:function(){throw marker;}});}catch(e){same=e===marker;}if(!same)throw 'throw identity';
+document.title='class-collection-conversion-ok';
+"#]);
+    assert_eq!(outcome.errors,0,"{}",page.report());
+    assert_eq!(doc.title,"class-collection-conversion-ok");
+}
+
+#[test]
+fn class_name_collection_accounting_failures_keep_existing_storage_and_dom() {
+    let (mut doc,mut forms,mut page,_) = page("<p class='a b'></p>",&[]);
+    page.begin_job();
+    let mut bridge=Bridge {doc:&mut doc,forms:&mut forms,state:&mut page.state};
+    let before=bridge.state.retained;
+    bridge.state.retained_limit=before;
+    assert!(bridge.create_class_collection(DOCUMENT,&Value::String("a b".into())).is_err());
+    assert_eq!(bridge.state.retained,before);
+    assert!(bridge.state.dom.collections.is_empty());
+    bridge.state.retained_limit=before+100;
+    bridge.state.copy_work=0;
+    assert!(bridge.create_class_collection(DOCUMENT,&Value::String("a".into())).is_err());
+    assert!(bridge.state.dom.collections.is_empty());
+    bridge.state.copy_work=bridge.state.limits.copy_bytes;
+    let list=bridge.create_class_collection(DOCUMENT,&Value::String("a".into())).unwrap();
+    let Value::Host(list)=list else {unreachable!()};
+    bridge.state.host_work=0;
+    assert!(bridge.get(list,"length").is_err());
+    assert_eq!(bridge.state.dom.collections.len(),1);
+    assert!(bridge.doc.nodes.iter().any(|node|matches!(&node.kind,NodeKind::Element {attrs,..} if attrs.iter().any(|(name,value)|name=="class"&&value=="a b"))));
+}
+
+#[test]
+fn real_element_instances_have_no_constructor_prototype_or_legacy_capture_methods() {
+    let (doc,_,page,outcome)=page("<html><body><div id=d></div><form id=f><input id=fp name=prototype><input id=fc name=setCapture></form></body></html>",&[r#"
+var d=document.getElementById('d');
+for(var name of ['prototype','setCapture','releaseCapture'])if(d[name]!==undefined||name in d)throw 'instance absence';
+if(document.releaseCapture!==undefined)throw 'Document capture absence';
+var f=document.getElementById('f');if(f.prototype!==document.getElementById('fp')||f.setCapture!==document.getElementById('fc'))throw 'form named properties';
+document.title='element-absence-ok';
+"#]);
+    assert_eq!(outcome.errors,0,"{}",page.report());
+    assert_eq!(doc.title,"element-absence-ok");
+}
+
+#[test]
 fn class_list_is_live_ordered_case_sensitive_and_mutates_the_actual_attribute() {
     let (doc,_,page,outcome) = page("<p id=p class=' a  b a A&#9;c '></p>", &[r#"
 var p=document.getElementById('p'),l=p.classList,a=p.getAttributeNode('class');

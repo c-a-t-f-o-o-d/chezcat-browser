@@ -2006,6 +2006,9 @@ impl Runtime {
                 }
             }
             Builtin::ArrayMethod(method) => {
+                if method=="slice" {
+                    if let Value::Host(handle) = this { return self.array_slice_host(handle,args,host); }
+                }
                 if matches!(method, "flat" | "flatMap") {
                     return self.array_flat(this, method == "flatMap", args, host);
                 }
