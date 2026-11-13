@@ -26,6 +26,8 @@ fn scope_candidate_comparison_tags_only_successful_direct_anonymous_expression_s
 #[test]
 fn scope_candidate_comparison_preserves_production_marks_and_reports_dead_binding_cycles() {
     let mut runtime = Runtime::new();
+    // Preserve the exact mark-only checkpoint's object-only production baseline.
+    runtime.function_arena.disable_scope_collection = true;
     runtime.execute("function create(){var n=17;var f=function(){return n;};return f;}var kept=create();0;", &mut NoHost).unwrap();
     assert_eq!(runtime.scope_assigned_closures.len(), 1);
     let id = *runtime.scope_assigned_closures.iter().next().unwrap();

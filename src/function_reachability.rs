@@ -10,6 +10,10 @@ mod array_seed_tests;
 #[path = "scope_candidate_tests.rs"]
 mod scope_candidate_tests;
 
+#[cfg(test)]
+#[path = "scope_collection_tests.rs"]
+mod scope_collection_tests;
+
 #[derive(Clone, Copy, Debug)]
 pub(super) enum Edge { Object(usize), Function(usize), Environment(usize) }
 
@@ -87,6 +91,18 @@ impl Graph {
 }
 
 impl Runtime {
+    pub(super) fn scope_retirement_enabled(&self) -> bool {
+        #[cfg(test)]
+        { !self.function_arena.disable_scope_collection }
+        #[cfg(not(test))]
+        { true }
+    }
+
+    pub(super) fn function_is_retirement_candidate(&self, id: usize) -> bool {
+        self.object_assigned_closures.contains(&id)
+            || self.scope_retirement_enabled() && self.scope_assigned_closures.contains(&id)
+    }
+
     fn active_roots_are_audited(&self) -> bool {
         let state = &self.transient_roots;
         #[cfg(test)]
@@ -113,7 +129,9 @@ impl Runtime {
     fn collect_function_candidates(&mut self, allocation_demand: bool) -> Result<(), Fault> {
         #[cfg(test)]
         if self.function_arena.disable_collection { return Ok(()); }
-        if self.object_assigned_closures.is_empty() || self.function_arena.occupied < MAX_FUNCTIONS * 3 / 4
+        let include_scope = self.scope_retirement_enabled();
+        if self.object_assigned_closures.is_empty() && (!include_scope || self.scope_assigned_closures.is_empty())
+            || self.function_arena.occupied < MAX_FUNCTIONS * 3 / 4
             || self.function_arena.allocations < self.function_arena.next_collection_at
                 && !(allocation_demand && self.function_arena.occupied == MAX_FUNCTIONS)
             || !self.active_roots_are_audited() {
@@ -122,7 +140,7 @@ impl Runtime {
         let mut meter = Meter { remaining: Some(self.steps), deadline: self.job_deadline };
         // Production MUST include permanent API/Host export pins. The test-only
         // pin-disabled audit below exists to prove transient edges independently.
-        let traced = self.trace_root_graph_metered(&[], true, true, true, &mut meter);
+        let traced = self.trace_root_graph_candidate_policy(&[], true, true, true, false, include_scope, &mut meter);
         self.steps = meter.remaining.unwrap();
         let graph = traced.map_err(Fault::new)?;
         let prepared = (|| {
@@ -131,16 +149,18 @@ impl Runtime {
           meter.charge((self.functions.len() + self.environments.len()) * 2).map_err(Fault::new)?;
           let mut functions = 0usize;
           let mut environments = 0usize;
+          let mut scope_functions = 0usize;
           let mut bindings = 0usize;
           let mut bytes = 0usize;
           for (id, function) in self.functions.iter().enumerate() {
             if matches!(function, Function::Vacant) { continue; }
             if !graph.functions[id] {
                 let Function::Script { lexical_this, .. } = function else { return Err(Fault::new("Unmarked non-Script function in retirement transaction.")); };
-                if !self.object_assigned_closures.contains(&id) || self.exported_function_roots.contains(&id) {
+                if !self.function_is_retirement_candidate(id) || self.exported_function_roots.contains(&id) {
                     return Err(Fault::new("Unmarked function outside retirement candidate class."));
                 }
                 functions += 1;
+                scope_functions += usize::from(self.scope_assigned_closures.contains(&id));
                 bytes = bytes.checked_add(lexical_this.as_ref().map_or(0, Value::bytes))
                     .and_then(|bytes| bytes.checked_add(self.function_initial_names[id].as_ref().map_or(0, String::len)))
                     .ok_or_else(|| Fault::new("Invalid function retirement accounting."))?;
@@ -162,10 +182,10 @@ impl Runtime {
             }
           }
           if bindings > self.bindings || bytes > self.value_bytes { return Err(Fault::new("Retirement refunds exceed retained payload accounting.")); }
-          Ok((functions, environments))
+          Ok((functions, environments, scope_functions))
         })();
         self.steps = meter.remaining.unwrap();
-        let (functions, environments) = prepared?;
+        let (functions, environments, scope_functions) = prepared?;
         self.reserve_function_retirements(functions)?;
         self.free_environments.try_reserve(environments).map_err(|_| Fault::new("Unable to reserve bounded free-environment storage."))?;
         if Instant::now() >= self.job_deadline {
@@ -182,13 +202,15 @@ impl Runtime {
         if allocation_demand { self.function_arena.demand_collections = self.function_arena.demand_collections.saturating_add(1); }
         self.function_arena.retired = self.function_arena.retired.saturating_add(functions);
         self.function_arena.environments_retired = self.function_arena.environments_retired.saturating_add(environments);
+        self.function_arena.scope_retired = self.function_arena.scope_retired.saturating_add(scope_functions);
         self.function_arena.next_collection_at = self.function_arena.allocations.saturating_add(32);
         Ok(())
     }
 
     #[cfg(test)]
     pub(super) fn retire_proven_inactive_candidate(&mut self, id: usize) -> Result<(), Fault> {
-        let graph = self.mark_root_graph(&[], true, true).map_err(Fault::new)?;
+        let graph = if self.scope_retirement_enabled() { self.mark_scope_candidate_comparison(true) }
+            else { self.mark_root_graph(&[], true, true) }.map_err(Fault::new)?;
         if graph.functions.get(id).copied() != Some(false) { return Err(Fault::new("Candidate remains reachable.")); }
         self.retire_unreachable_script(id)
     }
@@ -202,8 +224,8 @@ impl Runtime {
             if Rc::ptr_eq(program, actual) && template == actual_template).then_some(*id)
     }
 
-    // Mark-only provenance, not production retirement eligibility. Only the
-    // syntactic expression's freshly created anonymous identity may be tagged.
+    // Only the syntactic expression's freshly created anonymous identity may be
+    // tagged. All root/audit/inhibitor gates still apply to actual retirement.
     pub(super) fn fresh_anonymous_scope_closure(&self, program: &Rc<Program>, expression: ExprId, value: &Value) -> Option<usize> {
         let ExprKind::Function(template) = &program.exprs[expression].kind else { return None; };
         if program.templates[*template].name.is_some() { return None; }
@@ -241,7 +263,8 @@ impl Runtime {
                         let scope_only = self.scope_assigned_closures.iter().filter(|&&id| !graph.functions[id]).count();
                         let total = self.object_assigned_closures.union(&self.scope_assigned_closures)
                             .filter(|&&id| !graph.functions[id]).count();
-                        format!("Scope-binding mark-only comparison (inactive; permanent API pins retained): tagged={}; eligible unmarked={total}; scope unmarked={scope_only}. Production scope retirement remains disabled.", self.scope_assigned_closures.len())
+                        let policy = if self.scope_retirement_enabled() { "enabled at audited entries" } else { "disabled" };
+                        format!("Scope-binding mark-only comparison (inactive; permanent API pins retained): tagged={}; eligible unmarked={total}; scope unmarked={scope_only}. Production scope retirement remains {policy}; scope functions retired={}.", self.scope_assigned_closures.len(), self.function_arena.scope_retired)
                     }
                     Err(message) => format!("Scope-binding mark-only comparison unavailable: {message}"),
                 };

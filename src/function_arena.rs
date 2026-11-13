@@ -10,9 +10,12 @@ pub(super) struct Arena {
     pub(super) demand_collections: usize,
     pub(super) retired: usize,
     pub(super) environments_retired: usize,
+    pub(super) scope_retired: usize,
     pub(super) next_collection_at: usize,
     #[cfg(test)]
     pub(super) disable_collection: bool,
+    #[cfg(test)]
+    pub(super) disable_scope_collection: bool,
     free: Vec<usize>,
 }
 
@@ -72,7 +75,7 @@ impl Runtime {
     #[cfg(test)]
     pub(super) fn retire_unreachable_script(&mut self, id: usize) -> Result<(), Fault> {
         if !matches!(self.functions.get(id), Some(Function::Script { .. }))
-            || !self.object_assigned_closures.contains(&id) || self.exported_function_roots.contains(&id) {
+            || !self.function_is_retirement_candidate(id) || self.exported_function_roots.contains(&id) {
             return Err(Fault::new("Function is outside the unexported closure candidate class."));
         }
         // Tests supply a completed inactive graph proving unreachability.
