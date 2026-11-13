@@ -81,6 +81,8 @@ mod environment_lifetime_tests;
 mod function_constructor;
 #[path = "host_objects.rs"]
 mod host_objects;
+#[path = "runtime_diagnostics.rs"]
+mod runtime_diagnostics;
 #[path = "global_operations.rs"]
 mod global_operations;
 #[path = "iterable_builtins.rs"]
@@ -3188,6 +3190,7 @@ pub struct Runtime {
     window_realms: BTreeMap<u32, Option<usize>>,
     native_constructor_prototypes:BTreeMap<(u32,&'static str),usize>,
     native_expando_owners:BTreeMap<u32,u32>,
+    diagnostics: runtime_diagnostics::Data,
     failed_window_realms: HashSet<u32>,
     deferred_intrinsics: u8,
     failed_intrinsics: u8,
@@ -3321,6 +3324,7 @@ impl Runtime {
             window_realms: BTreeMap::new(),
             native_constructor_prototypes:BTreeMap::new(),
             native_expando_owners:BTreeMap::new(),
+            diagnostics: runtime_diagnostics::Data::default(),
             failed_window_realms: HashSet::new(),
             deferred_intrinsics: if defer_families { 7 } else { 0 },
             failed_intrinsics: 0,
@@ -3607,7 +3611,7 @@ impl Runtime {
         }
         if let Ok(value) = &result { self.pin_exported_value(value); }
         self.collect_environments();
-        result.map_err(Fault::display)
+        result.map_err(|error| self.display_fault(error))
     }
 
     fn is_eval(&self, value: &Value) -> bool {
@@ -3775,7 +3779,7 @@ impl Runtime {
         }
         if let Ok(value) = &result { self.pin_exported_value(value); }
         self.collect_environments();
-        result.map_err(Fault::display)
+        result.map_err(|error| self.display_fault(error))
     }
 
     pub fn invoke(
@@ -3797,7 +3801,7 @@ impl Runtime {
         }
         if let Ok(value) = &result { self.pin_exported_value(value); }
         self.collect_environments();
-        result.map_err(Fault::display)
+        result.map_err(|error| self.display_fault(error))
     }
 
     fn register_program(&mut self, source: &str, handler: bool) -> Result<Rc<Program>, Fault> {
@@ -6773,6 +6777,7 @@ impl Runtime {
     #[inline(never)]
     fn catch_statement(&mut self, program: &Rc<Program>, binding: Option<binding_patterns::Id>,
         body: StmtId, error: &mut Fault, env: usize, this: &Value, host: &mut dyn Host) -> Result<Control, Fault> {
+        self.record_caught_error(error, "catch");
         let exception = error.exception.take().expect("catchable exception");
         let value = match *exception {
             Exception::Value(value) => value,

@@ -195,6 +195,8 @@ pub(super) struct Arena {
     jobs: VecDeque<(Option<usize>, Job)>,
     draining: bool,
     allocation_trace: AllocationTrace,
+    jobs_started: [usize; 3],
+    jobs_succeeded: [usize; 3],
 }
 
 impl Capability {
@@ -419,6 +421,7 @@ impl Runtime {
     }
 
     fn promise_exception(&mut self, fault: Fault) -> Result<Value, Fault> {
+        self.record_caught_error(&fault, "Promise");
         match fault.exception {
             Some(exception) => match *exception {
                 Exception::Value(value) => Ok(value),
@@ -1334,10 +1337,14 @@ impl Runtime {
                 let first = self.function_arena.script_created;
                 self.promises.allocation_trace.active = Some((kind, first));
                 self.promises.allocation_trace.started[kind] += 1;
+                self.promises.jobs_started[kind] = self.promises.jobs_started[kind].saturating_add(1);
                 let result = self.run_promise_job(realm, job, host);
                 self.promises.allocation_trace.active = None;
                 self.promises.allocation_trace.scripts[kind] += self.function_arena.script_created.saturating_sub(first);
-                if result.is_ok() { self.promises.allocation_trace.succeeded[kind] += 1; }
+                if result.is_ok() {
+                    self.promises.allocation_trace.succeeded[kind] += 1;
+                    self.promises.jobs_succeeded[kind] = self.promises.jobs_succeeded[kind].saturating_add(1);
+                }
                 if let Err(error) = result {
                     if error.exception.is_none() {
                         return Err(error);
@@ -1391,6 +1398,39 @@ impl Runtime {
         self.promises.reactions = 0;
     }
 
+    /// Read-only snapshot; handled rejections here are not reported as errors.
+    pub(crate) fn promise_state_report(&self) -> String {
+        let (mut pending, mut fulfilled, mut rejected, mut handled, mut reported, mut reactions) = (0usize,0usize,0usize,0usize,0usize,0usize);
+        let mut samples = String::new();
+        let (mut pending_samples, mut rejected_samples) = (0,0);
+        for (id, object) in self.objects.iter().enumerate() {
+            let Some(data) = &object.promise else { continue; };
+            reactions += data.reactions.len();
+            match &data.state {
+                State::Pending => {
+                    pending += 1;
+                    if pending_samples < 4 {
+                        pending_samples += 1;
+                        samples.push_str(&format!("Promise snapshot object={id} pending; reactions={}.\n",data.reactions.len()));
+                    }
+                }
+                State::Fulfilled(_) => fulfilled += 1,
+                State::Rejected(reason) => {
+                    rejected += 1;
+                    handled += usize::from(data.handled);
+                    reported += usize::from(data.reported);
+                    if rejected_samples < 4 {
+                        rejected_samples += 1;
+                        samples.push_str(&format!("Promise snapshot object={id} rejected; handled={}; reported={}; reason={}.\n",data.handled,data.reported,self.diagnostic_value(reason)));
+                    }
+                }
+            }
+        }
+        let mut queued = [0usize;3];
+        for (_, job) in &self.promises.jobs { queued[job.allocation_kind()] += 1; }
+        format!("Promise snapshot: pending={pending}; fulfilled={fulfilled}; rejected={rejected} (handled={handled}, reported={reported}); pending reactions={reactions}; queued callback/reaction/thenable={queued:?}; lifetime jobs started={:?}, succeeded={:?}. Snapshot does not run jobs or change rejection reporting.\n{samples}",self.promises.jobs_started,self.promises.jobs_succeeded)
+    }
+
     #[cfg(test)]
     pub fn has_microtasks(&self) -> bool {
         !self.promises.jobs.is_empty()
@@ -1413,6 +1453,50 @@ fn bounded_diagnostic(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bounded_runtime_diagnostics_do_not_run_getters_or_mutate_promise_state() {
+        let mut runtime=Runtime::for_test();
+        runtime.execute(r#"
+var getterHits=0,jobHits=0,error=Error('original');
+Object.defineProperty(error,'message',{get:function(){getterHits++;throw 'getter ran';}});
+var held=new Promise(function(){});held.then(function(){});
+Promise.reject(error).catch(function(){return 7;});
+Promise.resolve(4).then(function(){return 5;});queueMicrotask(function(){jobHits++;});
+"#,&mut NoHost).unwrap();
+        let before=(runtime.job_usage(),runtime.objects.len(),runtime.functions.len(),runtime.value_bytes,runtime.promises.jobs.len());
+        let first=runtime.promise_state_report();
+        assert_eq!(first,runtime.promise_state_report());
+        assert!(first.contains("pending=4; fulfilled=1; rejected=1"),"{first}");
+        assert!(first.contains("queued callback/reaction/thenable=[1, 2, 0]"),"{first}");
+        assert!(first.contains("handled=true; reported=false; reason=Error."),"{first}");
+        assert_eq!(before,(runtime.job_usage(),runtime.objects.len(),runtime.functions.len(),runtime.value_bytes,runtime.promises.jobs.len()));
+        assert!(runtime.microtask_checkpoint(&mut NoHost).unwrap().is_empty());
+        let after=runtime.promise_state_report();
+        assert!(after.contains("pending=2; fulfilled=3; rejected=1"),"{after}");
+        assert!(after.contains("lifetime jobs started=[1, 2, 0], succeeded=[1, 2, 0]"),"{after}");
+        assert_eq!(runtime.execute("getterHits===0&&jobHits===1;",&mut NoHost).unwrap().to_text(),"true");
+    }
+
+    #[test]
+    fn bounded_runtime_diagnostics_show_native_errors_without_conversion_and_cap_samples() {
+        let mut runtime=Runtime::for_test();
+        let error=runtime.execute("var hits=0,e=Error('marker\\nline');e.toString=function(){hits++;throw 'conversion';};throw e;",&mut NoHost).unwrap_err();
+        assert!(error.contains("Uncaught exception: Error: marker\\nline"),"{error}");
+        runtime.begin_job();
+        runtime.execute("for(var i=0;i<10;i++){try{throw Error('handled '+i);}catch(e){}}",&mut NoHost).unwrap();
+        let caught=runtime.caught_error_report();
+        assert_eq!(caught.matches("Caught native Error sample").count(),8);
+        assert!(caught.contains("omitted: 2"),"{caught}");
+        assert_eq!(caught,runtime.caught_error_report());
+        runtime.execute("Object.defineProperty(e,'message',{value:{toString:function(){hits++;throw 'conversion';}}});",&mut NoHost).unwrap();
+        let error=runtime.execute("throw e;",&mut NoHost).unwrap_err();
+        assert!(error.ends_with("throw e;"),"{error}");
+        assert!(error.contains("Uncaught exception: Error"),"{error}");
+        assert_eq!(runtime.execute("hits;",&mut NoHost).unwrap().to_number(),0.0);
+        let huge=runtime.error_object("Error",Some("\u{10ffff}".repeat(20000))).unwrap();
+        assert!(runtime.diagnostic_value(&huge).len()<=2055);
+    }
 
     #[test]
     fn reused_promise_closure_slot_dispatches_its_new_value_and_drops_old_candidate_tag() {

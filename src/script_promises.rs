@@ -29,6 +29,23 @@ impl Page {
 mod tests {
     use super::*;
 
+    #[test]
+    fn bounded_runtime_diagnostic_report_reserves_space_with_full_logs_and_unicode_errors() {
+        let (mut doc,mut forms,mut page,outcome)=make_page("<p></p>",&[]);
+        assert_eq!(outcome.errors,0);
+        page.runtime.define_global("diagnosticMessage",Value::String("\u{10ffff}".repeat(1000))).unwrap();
+        let outcome=page.console_eval(&mut doc,&mut forms,"for(var i=0;i<12;i++){try{throw Error(diagnosticMessage);}catch(e){}}for(var j=0;j<6;j++)Promise.reject(Error(diagnosticMessage)).catch(function(){});");
+        assert_eq!(outcome.errors,0,"{}",page.report());
+        for _ in 0..MAX_LOG_LINES { page.state.log(&"x".repeat(MAX_LOG_LINE)); }
+        let errors=page.error_count();
+        let report=page.report();
+        assert!(report.len()<=MAX_LOG_BYTES+1024,"{} bytes",report.len());
+        assert!(report.contains("Further caught native Error samples omitted: 4"));
+        assert!(report.contains("rejected=6 (handled=6, reported=0)"));
+        assert_eq!(report,page.report());
+        assert_eq!(page.error_count(),errors);
+    }
+
     fn make_page(markup: &str, sources: &[&str]) -> (Document, Forms, Page, Outcome) {
         let mut doc = crate::html::parse(markup);
         doc.scripting_enabled = true;
