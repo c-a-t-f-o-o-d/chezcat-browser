@@ -71,8 +71,8 @@ impl Runtime {
         id: usize,
         value: String,
     ) -> Result<(), Fault> {
-        if value.len() > super::MAX_STRING_BYTES {
-            return Err(Fault::new("String limit reached (128 KiB)."));
+        if value.len() > self.limits.capacity.string_bytes {
+            return Err(Fault::new(format!("String limit reached ({} KiB).", self.limits.capacity.string_bytes / 1024)));
         }
         if self
             .value_bytes
@@ -97,8 +97,8 @@ impl Runtime {
 
     pub(super) fn box_string(&mut self, value: String) -> Result<Value, Fault> {
         // Validate before allocating an object; no partial object is exposed.
-        if value.len() > super::MAX_STRING_BYTES {
-            return Err(Fault::new("String limit reached (128 KiB)."));
+        if value.len() > self.limits.capacity.string_bytes {
+            return Err(Fault::new(format!("String limit reached ({} KiB).", self.limits.capacity.string_bytes / 1024)));
         }
         if self
             .value_bytes

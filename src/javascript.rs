@@ -136,18 +136,24 @@ pub mod limits;
 #[path = "execution_limits_tests.rs"]
 mod execution_limits_tests;
 #[cfg(test)]
+#[path = "browser_capacity_tests.rs"]
+mod browser_capacity_tests;
+#[cfg(test)]
 #[path = "heap_limits_tests.rs"]
 mod heap_limits_tests;
 
 // Source/parse storage is separate from execution, strings and host work.
-// A bounded 512 KiB bundle can contain ordinary bootstrap code without giving
-// its loops, recursive calls or callbacks a larger execution allowance.
+// Historical aliases below are only for explicit regression-profile fixtures.
+// Normal source/parse/storage paths use the selected capacity profile.
+#[cfg(test)]
 pub const MAX_SOURCE_BYTES: usize = 512 * 1024;
+#[cfg(test)]
 pub const MAX_STRING_BYTES: usize = 128 * 1024;
 #[cfg(test)]
 const MAX_REGEXP_WORK: usize = limits::REGRESSION.regexp_work;
-const MAX_RETAINED_REGEXP: usize = 2 * 1024 * 1024;
+#[cfg(test)]
 const MAX_TOKENS: usize = 131_072;
+#[cfg(test)]
 const MAX_AST: usize = 131_072;
 const MAX_PARSE_DEPTH: usize = 64;
 // Expressions suspend groups/calls/keys/operators in one shared heap quota.
@@ -163,17 +169,22 @@ const MAX_EVALUATION_FRAMES: usize = 4096;
 const MAX_EVALUATION_FRAME_SLOTS: usize = 2 * MAX_EVALUATION_FRAMES;
 const MAX_EVALUATION_ARGUMENT_SLOTS: usize = 4 * MAX_EVALUATION_FRAMES;
 const MAX_CALL_DEPTH: usize = 32;
+#[cfg(test)]
 const MAX_ARGUMENTS: usize = 256;
 #[cfg(test)]
 const MAX_STEPS: usize = limits::REGRESSION.steps;
 #[cfg(test)]
 const MAX_COPY_BYTES: usize = limits::REGRESSION.copy_bytes;
+#[cfg(test)]
 const MAX_PROGRAMS: usize = 128;
+#[cfg(test)]
 const MAX_RETAINED_SOURCE: usize = 2 * 1024 * 1024;
+#[cfg(test)]
 const MAX_RETAINED_AST: usize = 262_144;
+#[cfg(test)]
 const MAX_FUNCTIONS: usize = 1024;
+#[cfg(test)]
 const MAX_ENVIRONMENTS: usize = 4096;
-const MAX_BINDINGS: usize = 4096;
 #[cfg(test)]
 const MAX_RETAINED_VALUES: usize = limits::REGRESSION_HEAP.retained_values;
 #[cfg(test)]
@@ -182,8 +193,11 @@ const MAX_OBJECTS: usize = limits::REGRESSION_HEAP.objects;
 const MAX_PROPERTIES: usize = limits::REGRESSION_HEAP.properties;
 // Source literal/pattern bounds remain separate from dynamic heap capacity.
 // Historical regression-profile tests use these same small boundary witnesses.
+#[cfg(test)]
 const MAX_OBJECT_PROPERTIES: usize = limits::REGRESSION_HEAP.object_properties;
+#[cfg(test)]
 const MAX_ARRAY_LENGTH: usize = limits::REGRESSION_HEAP.array_length;
+#[cfg(test)]
 const MAX_PROPERTY_BYTES: usize = 256;
 
 #[derive(Clone, Debug)]
@@ -1065,9 +1079,14 @@ fn regexp_literal(
     )
 }
 
+#[cfg(test)]
 fn tokenize(source: &str, regexp_budget: &mut usize) -> Result<Vec<Token>, Fault> {
-    if source.len() > MAX_SOURCE_BYTES {
-        return Err(Fault::new("Script source limit reached (512 KiB)."));
+    tokenize_with_capacity(source, regexp_budget, limits::REGRESSION_CAPACITIES)
+}
+
+fn tokenize_with_capacity(source: &str, regexp_budget: &mut usize, capacity: limits::Capacities) -> Result<Vec<Token>, Fault> {
+    if source.len() > capacity.source_bytes {
+        return Err(Fault::new(format!("Script source limit reached ({} KiB).", capacity.source_bytes / 1024)));
     }
     let bytes = source.as_bytes();
     let (mut at, mut newline) = (0, false);
@@ -1105,9 +1124,9 @@ fn tokenize(source: &str, regexp_budget: &mut usize) -> Result<Vec<Token>, Fault
             at = end;
             continue;
         }
-        if tokens.len() >= MAX_TOKENS {
+        if tokens.len() >= capacity.tokens {
             return Err(
-                Fault::new(format!("Script token limit reached ({MAX_TOKENS}).")).at(source, at),
+                Fault::new(format!("Script token limit reached ({}).", capacity.tokens)).at(source, at),
             );
         }
         if newline && goal.jump_end {
@@ -1121,7 +1140,7 @@ fn tokenize(source: &str, regexp_budget: &mut usize) -> Result<Vec<Token>, Fault
             use template_literals::Part;
             let initial = ch == '`';
             at += 1;
-            let (text, tail) = template_literals::chunk(source, &mut at, start)?;
+            let (text, tail) = template_literals::chunk(source, &mut at, start, capacity.string_bytes)?;
             let part = match (initial, tail) {
                 (true, true) => Part::NoSubstitution,
                 (true, false) => {
@@ -1149,8 +1168,8 @@ fn tokenize(source: &str, regexp_budget: &mut usize) -> Result<Vec<Token>, Fault
         } else if ch == '/' && !goal.end_expression {
             let expression = regexp_literal(source, &mut at, regexp_budget)?;
             regexp_bytes = regexp_bytes.saturating_add(expression.retained_bytes);
-            if regexp_bytes > MAX_RETAINED_REGEXP {
-                return Err(Fault::new("Retained regexp limit reached (2 MiB).").at(source, start));
+            if regexp_bytes > capacity.retained_regexp {
+                return Err(Fault::new(format!("Retained regexp limit reached ({} MiB).", capacity.retained_regexp / (1024 * 1024))).at(source, start));
             }
             TokenKind::RegExp(expression)
         } else if identifier_start(ch) {
@@ -1277,8 +1296,8 @@ fn tokenize(source: &str, regexp_budget: &mut usize) -> Result<Vec<Token>, Fault
                         other => value.push(other),
                     }
                 }
-                if value.len() > MAX_STRING_BYTES {
-                    return Err(Fault::new("String limit reached (128 KiB).").at(source, start));
+                if value.len() > capacity.string_bytes {
+                    return Err(Fault::new(format!("String limit reached ({} KiB).", capacity.string_bytes / 1024)).at(source, start));
                 }
             }
             if !closed {
@@ -1476,6 +1495,8 @@ struct DeferredBody {
 }
 
 struct Parser {
+    capacity: limits::Capacities,
+    heap: limits::HeapLimits,
     program: Program,
     tokens: Vec<Token>,
     delimiter_ends: Vec<usize>,
@@ -1494,16 +1515,25 @@ struct Parser {
 }
 
 impl Parser {
+    #[cfg(test)]
     fn parse(source: &str, regexp_budget: &mut usize) -> Result<Program, Fault> {
         Self::parse_context(source, regexp_budget, false, 0)
     }
+    #[cfg(test)]
     fn parse_context(
         source: &str,
         regexp_budget: &mut usize,
         strict: bool,
         active_depth: usize,
     ) -> Result<Program, Fault> {
-        let tokens = tokenize(source, regexp_budget)?;
+        Self::parse_context_with_capacity(source, regexp_budget, strict, active_depth,
+            limits::REGRESSION_CAPACITIES, limits::REGRESSION_HEAP)
+    }
+
+    fn parse_context_with_capacity(source: &str, regexp_budget: &mut usize,
+        strict: bool, active_depth: usize, capacity: limits::Capacities,
+        heap: limits::HeapLimits) -> Result<Program, Fault> {
+        let tokens = tokenize_with_capacity(source, regexp_budget, capacity)?;
         // Index braces and parentheses once. Deferred bodies and arrow lookahead
         // reuse this token-sized map instead of rescanning nested token ranges.
         // Separate delimiter stacks preserve the existing lookahead semantics;
@@ -1531,6 +1561,8 @@ impl Parser {
         drop(braces);
         drop(parentheses);
         let mut parser = Self {
+            capacity,
+            heap,
             program: Program {
                 source: source.into(),
                 strict,
@@ -1719,8 +1751,8 @@ impl Parser {
         Ok(id)
     }
     fn check_nodes(&self) -> Result<(), Fault> {
-        if self.program.node_count() >= MAX_AST {
-            Err(self.unsupported(format!("AST node limit reached ({MAX_AST}).")))
+        if self.program.node_count() >= self.capacity.ast_nodes {
+            Err(self.unsupported(format!("AST node limit reached ({max_ast}).", max_ast=self.capacity.ast_nodes)))
         } else {
             Ok(())
         }
@@ -2031,8 +2063,8 @@ impl Parser {
         let mut trailing = false;
         if !self.is(")") {
             loop {
-                if params.len() == MAX_ARGUMENTS {
-                    return Err(self.unsupported("Function parameter limit reached (256)."));
+                if params.len() == self.capacity.arguments {
+                    return Err(self.unsupported(format!("Function parameter limit reached ({}).", self.capacity.arguments)));
                 }
                 rest = self.eat("...");
                 let pattern = self.binding_pattern(true)?;
@@ -2230,8 +2262,8 @@ impl Parser {
         let mut args = Vec::new();
         if !self.is(")") {
             loop {
-                if args.len() == MAX_ARGUMENTS {
-                    return Err(self.unsupported("Call argument limit reached (256)."));
+                if args.len() == self.capacity.arguments {
+                    return Err(self.unsupported(format!("Call argument limit reached ({}).", self.capacity.arguments)));
                 }
                 let spread = self.eat("...");
                 let expression = self.assignment_with_in()?;
@@ -2300,8 +2332,8 @@ impl Parser {
         self.current += 1;
         let mut properties = Vec::new();
         while !self.is("}") {
-            if properties.len() == MAX_OBJECT_PROPERTIES {
-                return Err(self.unsupported("Object property limit reached (4096)."));
+            if properties.len() == self.heap.object_properties {
+                return Err(self.unsupported(format!("Object property limit reached ({}).", self.heap.object_properties)));
             }
             if self.eat("...") {
                 properties.push(Member::Spread(self.assignment_with_in()?));
@@ -2361,7 +2393,7 @@ impl Parser {
                         self.unsupported("Object prototype configuration is not implemented.")
                     );
                 }
-                if name.len() > MAX_PROPERTY_BYTES {
+                if name.len() > self.capacity.property_bytes {
                     return Err(self.unsupported("Property-name limit reached (256 bytes)."));
                 }
                 self.current += 1;
@@ -2419,8 +2451,8 @@ impl Parser {
         self.current += 1;
         let mut elements = Vec::new();
         while !self.is("]") {
-            if elements.len() == MAX_ARRAY_LENGTH {
-                return Err(self.unsupported("Array length limit reached (8192)."));
+            if elements.len() == self.heap.array_length {
+                return Err(self.unsupported(format!("Array length limit reached ({}).", self.heap.array_length)));
             }
             if self.eat(",") {
                 elements.push(None);
@@ -3131,6 +3163,18 @@ impl Default for Runtime {
 }
 
 impl Runtime {
+    #[cold]
+    #[inline(never)]
+    fn argument_limit_fault(&self) -> Fault {
+        Fault::new(format!("Call argument limit reached ({}).", self.limits.capacity.arguments))
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn string_limit_fault(&self) -> Fault {
+        Fault::new(format!("String limit reached ({} KiB).", self.limits.capacity.string_bytes / 1024))
+    }
+
     pub fn new() -> Self {
         Self::with_limits(limits::BROWSER)
     }
@@ -3138,6 +3182,11 @@ impl Runtime {
     #[cfg(test)]
     pub(crate) fn for_test() -> Self {
         Self::with_limits(limits::REGRESSION)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn for_capacity_test() -> Self {
+        Self::with_limits(limits::CAPACITY_REGRESSION)
     }
 
     /// Host configuration only. Dynamic scripts inherit this runtime's profile.
@@ -3410,7 +3459,7 @@ impl Runtime {
     }
 
     fn allocate_host_function(&mut self, object: u32, method: &'static str) -> Result<function_arena::Allocation, String> {
-        if self.function_arena.occupied >= MAX_FUNCTIONS {
+        if self.function_arena.occupied >= self.limits.capacity.functions {
             return Err(self.function_limit_fault("host").display());
         }
         let allocation = self.insert_function_slot(Function::Host {
@@ -3658,8 +3707,8 @@ impl Runtime {
     /// statements while the host is only registering callbacks.
     pub fn compile_handler(&mut self, source: &str) -> Result<Value, String> {
         let result = (|| {
-            if source.len() > MAX_SOURCE_BYTES {
-                return Err(Fault::new("Script source limit reached (512 KiB)."));
+            if source.len() > self.limits.capacity.source_bytes {
+                return Err(Fault::new(format!("Script source limit reached ({} KiB).", self.limits.capacity.source_bytes / 1024)));
             }
             let wrapped = format!("(function(event) {{\n{source}\n}})");
             let program = self.register_program(&wrapped, true)?;
@@ -3715,17 +3764,14 @@ impl Runtime {
     ) -> Result<Rc<Program>, Fault> {
         self.step()?;
         self.prepare_program_capacity(source.len(), 0, true)?;
-        if self.programs.len() >= MAX_PROGRAMS
-            || self.retained_source.saturating_add(source.len()) > MAX_RETAINED_SOURCE
+        if self.programs.len() >= self.limits.capacity.programs
+            || self.retained_source.saturating_add(source.len()) > self.limits.capacity.retained_source
         {
             return Err(self.program_limit_fault(source, None, if handler { "handler" } else { "ordinary" }, Some(strict), false));
         }
         self.work_as(source.len(), WorkKind::ProgramCompilation)?;
-        let program = Rc::new(if strict || self.eval_depth != 0 {
-            Parser::parse_context(source, &mut self.regexp_work, strict, self.eval_depth)
-        } else {
-            Parser::parse(source, &mut self.regexp_work)
-        }.map_err(|mut fault| {
+        let program = Rc::new(Parser::parse_context_with_capacity(source, &mut self.regexp_work,
+            strict, self.eval_depth, self.limits.capacity, self.limits.heap).map_err(|mut fault| {
             if fault.message.contains("Parser nesting limit") && self.eval_depth != 0 {
                 fault.message.push_str(&format!(" Active native entries={}; calls={}; heap expression frames={}.",
                     self.eval_depth, self.call_depth, self.evaluation_frames));
@@ -3760,8 +3806,8 @@ impl Runtime {
 
     fn retain_parsed_program(&mut self, program: Rc<Program>) -> Result<Rc<Program>, Fault> {
         self.prepare_program_capacity(program.source.len(), program.node_count(), true)?;
-        if self.programs.len() >= MAX_PROGRAMS
-            || self.retained_source.saturating_add(program.source.len()) > MAX_RETAINED_SOURCE
+        if self.programs.len() >= self.limits.capacity.programs
+            || self.retained_source.saturating_add(program.source.len()) > self.limits.capacity.retained_source
         {
             return Err(self.program_limit_fault(&program.source, Some(program.node_count()), "parsed-retention", None, false));
         }
@@ -3774,7 +3820,7 @@ impl Runtime {
             })
             .sum::<usize>();
         let nodes = program.node_count();
-        if self.retained_ast.saturating_add(nodes) > MAX_RETAINED_AST {
+        if self.retained_ast.saturating_add(nodes) > self.limits.capacity.retained_ast {
             return Err(self.program_limit_fault(&program.source, Some(nodes), "parsed-retention", None, true));
         }
         self.retain_regexp(regexp_bytes)?;
@@ -3827,8 +3873,8 @@ impl Runtime {
         Ok(())
     }
     fn checked_value(&mut self, value: Value) -> Result<Value, Fault> {
-        if value.bytes() > MAX_STRING_BYTES {
-            return Err(Fault::new("String limit reached (128 KiB)."));
+        if value.bytes() > self.limits.capacity.string_bytes {
+            return Err(Fault::new(format!("String limit reached ({} KiB).", self.limits.capacity.string_bytes / 1024)));
         }
         self.work_as(value.bytes(), WorkKind::ConversionOutput)?;
         Ok(value)
@@ -3850,12 +3896,12 @@ impl Runtime {
         if let Some(id) = self.free_environments.pop() {
             self.environments[id] = env;
             Ok(id)
-        } else if self.environments.len() < MAX_ENVIRONMENTS {
+        } else if self.environments.len() < self.limits.capacity.environments {
             let id = self.environments.len();
             self.environments.push(env);
             Ok(id)
         } else {
-            Err(self.environment_limit_fault("Environment", MAX_ENVIRONMENTS))
+            Err(self.environment_limit_fault("Environment", self.limits.capacity.environments))
         }
     }
     fn put_binding(
@@ -3866,8 +3912,8 @@ impl Runtime {
         kind: Declaration,
         replace: bool,
     ) -> Result<(), Fault> {
-        if name.len() > 256 {
-            return Err(Fault::new("Identifier length limit reached (256 bytes)."));
+        if name.len() > self.limits.capacity.property_bytes {
+            return Err(Fault::new(format!("Identifier length limit reached ({} bytes).", self.limits.capacity.property_bytes)));
         }
         let old = self.environment(env).bindings.get(&name);
         if old.is_some() && !replace {
@@ -3877,11 +3923,11 @@ impl Runtime {
             .and_then(|binding| binding.value.as_ref())
             .map_or(0, Value::bytes);
         let new_bytes = value.as_ref().map_or(0, Value::bytes);
-        if new_bytes > MAX_STRING_BYTES {
-            return Err(Fault::new("String limit reached (128 KiB)."));
+        if new_bytes > self.limits.capacity.string_bytes {
+            return Err(Fault::new(format!("String limit reached ({} KiB).", self.limits.capacity.string_bytes / 1024)));
         }
-        if old.is_none() && self.bindings == MAX_BINDINGS {
-            return Err(self.environment_limit_fault("Binding", MAX_BINDINGS));
+        if old.is_none() && self.bindings == self.limits.capacity.bindings {
+            return Err(self.environment_limit_fault("Binding", self.limits.capacity.bindings));
         }
         let pending_bytes = if name == "arguments" {
             self.environment(env)
@@ -4134,7 +4180,7 @@ impl Runtime {
         &mut self, program: &Rc<Program>, template: usize, environment: usize, this: &Value,
     ) -> Result<Value, Fault> {
         self.step()?;
-        if self.function_arena.occupied == MAX_FUNCTIONS {
+        if self.function_arena.occupied == self.limits.capacity.functions {
             return Err(self.function_limit_fault("script"));
         }
         let index = self.next_function_slot()?;
@@ -4522,7 +4568,7 @@ impl Runtime {
 impl Runtime {
     fn retain_regexp(&mut self, bytes: usize) -> Result<(), Fault> {
         let total = self.retained_regexp.saturating_add(bytes);
-        if total > MAX_RETAINED_REGEXP {
+        if total > self.limits.capacity.retained_regexp {
             return Err(Fault::new("Retained regexp limit reached (2 MiB)."));
         }
         self.retained_regexp = total;
@@ -4624,8 +4670,8 @@ impl Runtime {
                 "A regexp/string result containing a lone UTF-16 surrogate is not implemented.",
             )
         })?;
-        if text.len() > MAX_STRING_BYTES {
-            return Err(Fault::new("String limit reached (128 KiB)."));
+        if text.len() > self.limits.capacity.string_bytes {
+            return Err(Fault::new(format!("String limit reached ({} KiB).", self.limits.capacity.string_bytes / 1024)));
         }
         Ok(text)
     }
@@ -5226,7 +5272,7 @@ impl Runtime {
     }
 
     fn property_name(&mut self, name: &str) -> Result<(), Fault> {
-        if name.len() > MAX_PROPERTY_BYTES {
+        if name.len() > self.limits.capacity.property_bytes {
             return Err(Fault::new("Property-name limit reached (256 bytes)."));
         }
         if name == "__proto__" {
@@ -5489,8 +5535,8 @@ impl Runtime {
             .checked_add(usize::from(is_new))
             .ok_or_else(|| Fault::new("Object property order limit reached."))?;
         let new_bytes = value.bytes();
-        if new_bytes > MAX_STRING_BYTES {
-            return Err(Fault::new("String limit reached (128 KiB)."));
+        if new_bytes > self.limits.capacity.string_bytes {
+            return Err(Fault::new(format!("String limit reached ({} KiB).", self.limits.capacity.string_bytes / 1024)));
         }
         let retained =
             self.value_bytes - old_bytes + new_bytes + if is_new { name.len() } else { 0 };
@@ -5586,7 +5632,7 @@ impl Runtime {
             object
                 .properties
                 .len()
-                .saturating_mul(MAX_PROPERTY_BYTES * 2)
+                .saturating_mul(self.limits.capacity.property_bytes * 2)
                 .saturating_add(indexed_length.saturating_mul(16)),
             WorkKind::PropertyEnumeration,
         )?;
@@ -5743,8 +5789,8 @@ impl Runtime {
         let length = if numeric.is_nan() || numeric <= 0.0 {
             0
         } else {
-            if numeric.trunc() > MAX_ARGUMENTS as f64 {
-                return Err(Fault::new("Call argument limit reached (256)."));
+            if numeric.trunc() > self.limits.capacity.arguments as f64 {
+                return Err(Fault::new(format!("Call argument limit reached ({}).", self.limits.capacity.arguments)));
             }
             numeric.trunc() as usize
         };
@@ -5756,8 +5802,8 @@ impl Runtime {
     }
 
     fn append_string(&mut self, output: &mut String, text: &str) -> Result<(), Fault> {
-        if output.len().saturating_add(text.len()) > MAX_STRING_BYTES {
-            return Err(Fault::new("String limit reached (128 KiB)."));
+        if output.len().saturating_add(text.len()) > self.limits.capacity.string_bytes {
+            return Err(Fault::new(format!("String limit reached ({} KiB).", self.limits.capacity.string_bytes / 1024)));
         }
         self.work_as(text.len(), WorkKind::ConversionOutput)?;
         output.push_str(text);
@@ -7846,8 +7892,8 @@ impl Runtime {
             if let Some(value @ (Value::Object(_) | Value::Host(_) | Value::Function(_))) =
                 args.get(index)
             {
-                if names.len() > MAX_ARGUMENTS {
-                    return Err(Fault::new("Native dictionary field limit reached (256)."));
+                if names.len() > self.limits.capacity.arguments {
+                    return Err(Fault::new(format!("Native dictionary field limit reached ({}).", self.limits.capacity.arguments)));
                 }
                 let mut values = Vec::with_capacity(names.len());
                 for &name in names {
@@ -7926,8 +7972,8 @@ impl Runtime {
             )?;
             let mut text = left.script_text()?;
             let right = right.script_text()?;
-            if text.len().saturating_add(right.len()) > MAX_STRING_BYTES {
-                return Err(Fault::new("String limit reached (128 KiB)."));
+            if text.len().saturating_add(right.len()) > self.limits.capacity.string_bytes {
+                return Err(Fault::new(format!("String limit reached ({} KiB).", self.limits.capacity.string_bytes / 1024)));
             }
             text.push_str(&right);
             return self.checked_value(Value::String(text));
@@ -8036,16 +8082,16 @@ impl Runtime {
         host: &mut dyn Host,
     ) -> Result<Value, Fault> {
         self.step()?;
-        if args.len() > MAX_ARGUMENTS {
-            return Err(Fault::new("Call argument limit reached (256)."));
+        if args.len() > self.limits.capacity.arguments {
+            return Err(self.argument_limit_fault());
         }
         for value in args {
-            if value.bytes() > MAX_STRING_BYTES {
-                return Err(Fault::new("String limit reached (128 KiB)."));
+            if value.bytes() > self.limits.capacity.string_bytes {
+                return Err(self.string_limit_fault());
             }
         }
-        if this.bytes() > MAX_STRING_BYTES {
-            return Err(Fault::new("String limit reached (128 KiB)."));
+        if this.bytes() > self.limits.capacity.string_bytes {
+            return Err(self.string_limit_fault());
         }
         let Value::Function(index) = function else {
             return Err(Fault::exception(

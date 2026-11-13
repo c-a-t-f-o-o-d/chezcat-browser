@@ -2,10 +2,11 @@
 //! holes; writes use Set/Delete with Throw=true. Callback traversal captures
 //! length but observes later element changes, with the existing job limits.
 
+#[cfg(test)]
+use super::MAX_PROPERTY_BYTES;
 use super::{
     primitive_conversion, property_index, strict_equal, Builtin, Fault, Function, Host,
-    Ordinary, PropertyKey, Runtime, Value, MAX_CALL_DEPTH, MAX_PARSE_DEPTH, MAX_PROPERTY_BYTES,
-    MAX_STRING_BYTES,
+    Ordinary, PropertyKey, Runtime, Value, MAX_CALL_DEPTH, MAX_PARSE_DEPTH,
 };
 use std::cmp::Ordering;
 
@@ -70,7 +71,7 @@ impl Runtime {
                     self.objects[object]
                         .properties
                         .len()
-                        .saturating_mul(MAX_PROPERTY_BYTES),
+                        .saturating_mul(self.limits.capacity.property_bytes),
                     super::WorkKind::ArrayJoinPreflight,
                 )?;
                 if self.objects[object]
@@ -85,8 +86,8 @@ impl Runtime {
             }
             if !has_indices {
                 let bytes = length.saturating_sub(1).saturating_mul(separator.len());
-                if bytes > MAX_STRING_BYTES {
-                    return Err(Fault::new("String limit reached (128 KiB)."));
+                if bytes > self.limits.capacity.string_bytes {
+                    return Err(Fault::new(format!("String limit reached ({} KiB).", self.limits.capacity.string_bytes / 1024)));
                 }
                 self.work(bytes)?;
                 return Ok(separator.repeat(length.saturating_sub(1)));
@@ -955,7 +956,7 @@ if(caught!==2)throw 'catchable conversion';
         std::thread::Builder::new().stack_size(1024 * 1024).spawn(|| {
             let mut observations = Vec::new();
             for legacy in [true, false] {
-                let mut runtime = Runtime::with_limits(super::super::limits::BROWSER);
+                let mut runtime = Runtime::for_capacity_test();
                 runtime.legacy_array_join_preflight = legacy;
                 let values: Vec<_> = (0..32).map(|i| Value::Number(i as f64)).collect();
                 let Value::Object(array) = runtime.array_from_values(&values).unwrap() else { unreachable!() };

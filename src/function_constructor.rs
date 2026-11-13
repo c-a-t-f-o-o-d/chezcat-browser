@@ -4,10 +4,11 @@
 //! compilation and later calls share existing budgets and the host's eval policy.
 //! https://tc39.es/ecma262/#sec-createdynamicfunction
 
+#[cfg(test)]
+use super::{MAX_PROGRAMS, MAX_RETAINED_AST, MAX_RETAINED_SOURCE, MAX_STRING_BYTES};
 use super::{
-    ExprKind, Fault, Host, Parser, Program, Runtime, StmtKind, Value, MAX_ARGUMENTS,
-    MAX_CALL_DEPTH, MAX_PROGRAMS, MAX_RETAINED_AST, MAX_RETAINED_SOURCE, MAX_SOURCE_BYTES,
-    MAX_STRING_BYTES,
+    ExprKind, Fault, Host, Parser, Program, Runtime, StmtKind, Value,
+    MAX_CALL_DEPTH,
 };
 use std::rc::Rc;
 
@@ -21,8 +22,8 @@ impl Runtime {
         if self.call_depth >= MAX_CALL_DEPTH {
             return Err(Fault::new("Function call limit reached (32)."));
         }
-        if args.len() > MAX_ARGUMENTS {
-            return Err(Fault::new("Call argument limit reached (256)."));
+        if args.len() > self.limits.capacity.arguments {
+            return Err(Fault::new(format!("Call argument limit reached ({}).", self.limits.capacity.arguments)));
         }
         self.call_depth += 1;
         let result = (|| {
@@ -48,8 +49,8 @@ impl Runtime {
                 ));
             }
             self.prepare_program_capacity(source.len(), 0, true)?;
-            if self.programs.len() >= MAX_PROGRAMS
-                || self.retained_source.saturating_add(source.len()) > MAX_RETAINED_SOURCE
+            if self.programs.len() >= self.limits.capacity.programs
+                || self.retained_source.saturating_add(source.len()) > self.limits.capacity.retained_source
             {
                 return Err(self.program_limit_fault(&source, None, "dynamic-constructor", Some(false), false));
             }
@@ -95,8 +96,8 @@ impl Runtime {
         value: &Value,
         host: &mut dyn Host,
     ) -> Result<String, Fault> {
-        if value.bytes() > MAX_STRING_BYTES {
-            return Err(Fault::new("String limit reached (128 KiB)."));
+        if value.bytes() > self.limits.capacity.string_bytes {
+            return Err(Fault::new(format!("String limit reached ({} KiB).", self.limits.capacity.string_bytes / 1024)));
         }
         let value = self.copy_value(value)?;
         let primitive = self.primitive_with_hint(value, true, host)?;
@@ -104,9 +105,9 @@ impl Runtime {
     }
 
     fn function_source_append(&mut self, output: &mut String, text: &str) -> Result<(), Fault> {
-        if output.len().saturating_add(text.len()) > MAX_SOURCE_BYTES {
+        if output.len().saturating_add(text.len()) > self.limits.capacity.source_bytes {
             return Err(Fault::new(
-                "Dynamic Function source limit reached (512 KiB).",
+                format!("Dynamic Function source limit reached ({} KiB).", self.limits.capacity.source_bytes / 1024),
             ));
         }
         self.work_as(text.len(), super::WorkKind::ProgramCompilation)?;
@@ -127,10 +128,11 @@ impl Runtime {
         self.work_as(source.len(), super::WorkKind::ProgramCompilation)?;
         // Dynamic functions do not inherit caller strictness. Active evaluator
         // depth still counts because parsing happens on the same native stack.
-        let program = Parser::parse_context(source, &mut self.regexp_work, false, self.eval_depth)?;
+        let program = Parser::parse_context_with_capacity(source, &mut self.regexp_work,
+            false, self.eval_depth, self.limits.capacity, self.limits.heap)?;
         let nodes = program.node_count();
         self.prepare_program_capacity(0, nodes, false)?;
-        if self.retained_ast.saturating_add(nodes) > MAX_RETAINED_AST {
+        if self.retained_ast.saturating_add(nodes) > self.limits.capacity.retained_ast {
             return Err(self.program_limit_fault(source, Some(nodes), "dynamic-validation", Some(false), true));
         }
         self.work_as(nodes.saturating_mul(std::mem::size_of::<usize>()), super::WorkKind::ProgramCompilation)?;

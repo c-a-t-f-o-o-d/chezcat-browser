@@ -4,8 +4,7 @@
 //! https://tc39.es/ecma262/#sec-bound-function-exotic-objects
 
 use super::{
-    Fault, Function, Host, Ordinary, Runtime, Value, MAX_ARGUMENTS, MAX_FUNCTIONS,
-    MAX_STRING_BYTES,
+    Fault, Function, Host, Ordinary, Runtime, Value,
 };
 #[cfg(test)]
 use super::MAX_RETAINED_VALUES;
@@ -38,13 +37,13 @@ impl Runtime {
         if !self.function_is_occupied(target) {
             return Err(Fault::new("Invalid function handle."));
         }
-        if self.function_arena.occupied >= MAX_FUNCTIONS {
+        if self.function_arena.occupied >= self.limits.capacity.functions {
             return Err(self.function_limit_fault("bound"));
         }
         let receiver = args.first().unwrap_or(&Value::Undefined);
         let arguments = args.get(1..).unwrap_or(&[]);
-        if arguments.len() > MAX_ARGUMENTS {
-            return Err(Fault::new("Call argument limit reached (256)."));
+        if arguments.len() > self.limits.capacity.arguments {
+            return Err(Fault::new(format!("Call argument limit reached ({}).", self.limits.capacity.arguments)));
         }
         // Charge both captured strings and the argument slots themselves. Bound
         // arguments cannot become an unaccounted arena of primitive values.
@@ -55,12 +54,12 @@ impl Runtime {
         if self.value_bytes.saturating_add(retained) > self.limits.heap.retained_values {
             return Err(Fault::new(format!("Retained value limit reached ({} bytes).", self.limits.heap.retained_values)));
         }
-        if receiver.bytes() > MAX_STRING_BYTES
+        if receiver.bytes() > self.limits.capacity.string_bytes
             || arguments
                 .iter()
-                .any(|value| value.bytes() > MAX_STRING_BYTES)
+                .any(|value| value.bytes() > self.limits.capacity.string_bytes)
         {
-            return Err(Fault::new("String limit reached (128 KiB)."));
+            return Err(Fault::new(format!("String limit reached ({} KiB).", self.limits.capacity.string_bytes / 1024)));
         }
         self.work(retained)?;
         let receiver = receiver.clone();
@@ -92,7 +91,7 @@ impl Runtime {
             self.append_string(&mut bound_name, &name)?;
         }
         // User callbacks above may allocate functions or retain values.
-        if self.function_arena.occupied >= MAX_FUNCTIONS {
+        if self.function_arena.occupied >= self.limits.capacity.functions {
             return Err(self.function_limit_fault("bound"));
         }
         if self.value_bytes.saturating_add(retained) > self.limits.heap.retained_values {
@@ -123,8 +122,8 @@ impl Runtime {
         args: &[Value],
         bind_receiver: bool,
     ) -> Result<(usize, Vec<Value>, Value), Fault> {
-        if args.len() > MAX_ARGUMENTS {
-            return Err(Fault::new("Call argument limit reached (256)."));
+        if args.len() > self.limits.capacity.arguments {
+            return Err(Fault::new(format!("Call argument limit reached ({}).", self.limits.capacity.arguments)));
         }
         self.work_as(std::mem::size_of_val(args), super::WorkKind::ArgumentCapture)?;
         let mut arguments = Vec::with_capacity(args.len());
@@ -138,8 +137,8 @@ impl Runtime {
                 break;
             };
             let total = bound.arguments.len().saturating_add(arguments.len());
-            if total > MAX_ARGUMENTS {
-                return Err(Fault::new("Call argument limit reached (256)."));
+            if total > self.limits.capacity.arguments {
+                return Err(Fault::new(format!("Call argument limit reached ({}).", self.limits.capacity.arguments)));
             }
             let work = std::mem::size_of::<Value>()
                 .saturating_mul(total)

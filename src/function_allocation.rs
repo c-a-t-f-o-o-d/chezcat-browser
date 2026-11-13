@@ -8,7 +8,7 @@ impl Runtime {
         let mut kinds = [0usize; 5];
         let mut main = [0usize; 5];
         let mut templates = BTreeMap::new();
-        for (index, function) in self.functions.iter().enumerate().take(MAX_FUNCTIONS) {
+        for (index, function) in self.functions.iter().enumerate().take(self.limits.capacity.functions) {
             let kind = match function {
                 Function::Vacant => continue,
                 Function::Native(_) => 0,
@@ -20,7 +20,7 @@ impl Runtime {
             kinds[kind] += 1;
             if self.function_realms.get(index).is_some_and(Option::is_none) { main[kind] += 1; }
             if let Function::Script { program, template, .. } = function {
-                let program_id = self.programs.iter().position(|candidate| Rc::ptr_eq(candidate, program)).unwrap_or(MAX_PROGRAMS);
+                let program_id = self.programs.iter().position(|candidate| Rc::ptr_eq(candidate, program)).unwrap_or(self.limits.capacity.programs);
                 *templates.entry((program_id, *template)).or_insert(0usize) += 1;
             }
         }
@@ -35,13 +35,13 @@ impl Runtime {
             let kind = if syntax.dynamic_source { "dynamic" }
                 else if syntax.arrow { "arrow" }
                 else if !syntax.constructible { "method/accessor" }
-                else if program.stmts.iter().take(MAX_AST).any(|statement| matches!(&statement.kind, StmtKind::Function(_, id) if *id == template)) { "declaration" }
+                else if program.stmts.iter().take(self.limits.capacity.ast_nodes).any(|statement| matches!(&statement.kind, StmtKind::Function(_, id) if *id == template)) { "declaration" }
                 else if syntax.name.is_some() { "named-expression" }
                 else { "anonymous-expression" };
             Some((kind, syntax.source_start, syntax.source_end.saturating_sub(syntax.source_start)))
         }).collect();
-        Fault::new(format!("Function limit reached (1024). Requested={requested}; active-realm={:?}; native/script/host/bound/promise={kinds:?}; main-realm={main:?}; detached-realms={}; top-script-program/template/count={repeated:?}; top-script-kind/offset/bytes={shapes:?}; {}; {}.",
-            self.active_realm, self.intrinsic_realms.len(), self.inhibition_diagnostic(), self.microtask_allocation_diagnostic()))
+        Fault::new(format!("Function limit reached ({}). Requested={requested}; active-realm={:?}; native/script/host/bound/promise={kinds:?}; main-realm={main:?}; detached-realms={}; top-script-program/template/count={repeated:?}; top-script-kind/offset/bytes={shapes:?}; {}; {}.",
+            self.limits.capacity.functions, self.active_realm, self.intrinsic_realms.len(), self.inhibition_diagnostic(), self.microtask_allocation_diagnostic()))
     }
 }
 
@@ -50,7 +50,7 @@ mod tests {
     use super::*;
     #[test]
     fn exhausted_function_guard_attributes_kinds_and_realms_without_allocating_a_callable() {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_capacity_test();
         let realm = runtime.allocate_intrinsic_realm().unwrap();
         runtime.with_intrinsic_realm(Some(realm), |runtime| {
             while runtime.functions.len() < MAX_FUNCTIONS { runtime.native_function(Builtin::IsNaN, "fixture")?; }
@@ -84,7 +84,7 @@ function replace(value){
     return cell;
 }
 "#;
-        let mut runtime = Runtime::with_limits(limits::BROWSER);
+        let mut runtime = Runtime::for_capacity_test();
         // Preserve the original cumulative failure as the collection-disabled
         // baseline. The enabled workload has independent semantic tests.
         runtime.function_arena.disable_collection = true;
@@ -114,7 +114,7 @@ function replace(value){
             fn set(&mut self, _: u32, _: &str, _: Value) -> Result<(), String> { panic!("unexpected set") }
             fn call(&mut self, _: u32, _: &str, _: &[Value]) -> Result<Value, String> { panic!("unexpected call") }
         }
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_capacity_test();
         let baseline = runtime.functions.len();
         runtime.execute("function factory(){function h(){return 1;}function h(){return 2;}return h;}var a=factory(),b=factory();if(a===b||a()!==2||b()!==2)throw 'identity';", &mut NoHost).unwrap();
         assert_eq!(runtime.functions.len(), baseline + 3);
@@ -122,7 +122,7 @@ function replace(value){
         runtime.execute("var c=factory();if(c===a||c===b||c()!==2)throw 'later invocation';", &mut NoHost).unwrap();
         assert_eq!(runtime.functions.len(), before + 1);
 
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_capacity_test();
         let baseline = runtime.functions.len();
         runtime.execute("function alpha(){return 1;}function beta(){return 2;}function alpha(){return 3;}if(alpha()!==3||beta()!==2)throw 'last body';", &mut NoHost).unwrap();
         assert_eq!(runtime.functions.len(), baseline + 2);
@@ -143,7 +143,7 @@ function replace(value){
             fn set(&mut self, object: u32, name: &str, value: Value) -> Result<(), String> { assert_eq!(object, 77); self.0.push((name.into(), value)); Ok(()) }
             fn call(&mut self, _: u32, _: &str, _: &[Value]) -> Result<Value, String> { panic!("unexpected call") }
         }
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_capacity_test();
         runtime.bind_browser_global(77).unwrap();
         let mut host = Record(Vec::new());
         runtime.execute("function alpha(){return 1;}function beta(){return 2;}function alpha(){return 3;}", &mut host).unwrap();
@@ -153,7 +153,7 @@ function replace(value){
             assert_eq!(runtime.invoke(callback, &[], Value::Undefined, &mut host).unwrap().to_number(), expected);
         }
         for source in ["function alpha(){var broken=;}function alpha(){return 3;}", "{function alpha(){}function alpha(){}}", "let blocked;function blocked(){}function blocked(){}"] {
-            let mut runtime = Runtime::new();
+            let mut runtime = Runtime::for_capacity_test();
             runtime.bind_browser_global(77).unwrap();
             let functions = runtime.functions.len();
             let mut host = Record(Vec::new());
@@ -171,7 +171,7 @@ function replace(value){
             fn set(&mut self, _: u32, _: &str, _: Value) -> Result<(), String> { panic!("unexpected set") }
             fn call(&mut self, _: u32, _: &str, _: &[Value]) -> Result<Value, String> { panic!("unexpected call") }
         }
-        let mut runtime = Runtime::with_limits(limits::BROWSER);
+        let mut runtime = Runtime::for_capacity_test();
         let baseline = runtime.functions.len();
         runtime.execute("function factory(){function h(){return 1;}function h(){return 2;}return h;}var kept=[];for(var i=0;i<600;i++)kept[i]=factory();if(kept[0]===kept[599]||kept[0]()!==2||kept[599]()!==2)throw 'fresh identity or last body';", &mut NoHost).unwrap();
         assert_eq!(runtime.functions.len(), baseline + 601);
@@ -189,7 +189,7 @@ function replace(value){
         }
         let source = "var kept=[];for(var i=0;i<900;i++)kept[i]=function(){return 1;};if(kept[0]===kept[899]||kept[0]()!==1||kept[899]()!==1)throw 'identity';kept.length;";
         for deferred in [false, true] {
-            let mut runtime = Runtime::with_intrinsic_startup(limits::BROWSER, deferred);
+            let mut runtime = Runtime::with_intrinsic_startup(limits::CAPACITY_REGRESSION, deferred);
             let baseline = runtime.functions.len();
             let result = runtime.execute(source, &mut NoHost);
             let scripts = runtime.functions.iter().filter(|function| matches!(function, Function::Script { .. })).count();

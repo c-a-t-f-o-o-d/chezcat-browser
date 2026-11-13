@@ -6,7 +6,7 @@
 
 use super::{
     optional_chaining::Step, template_literals::Part, Argument, ExprId, ExprKind, Fault, Parser,
-    TokenKind, MAX_ARGUMENTS, MAX_AST, MAX_EXPRESSION_FRAMES,
+    TokenKind, MAX_EXPRESSION_FRAMES,
 };
 
 const POWER: u8 = 13;
@@ -153,16 +153,16 @@ impl Parser {
         args: &mut Vec<Argument>,
         argument: Argument,
     ) -> Result<(), Fault> {
-        if args.len() >= MAX_ARGUMENTS {
-            return Err(self.unsupported("Call argument limit reached (256)."));
+        if args.len() >= self.capacity.arguments {
+            return Err(self.unsupported(format!("Call argument limit reached ({}).", self.capacity.arguments)));
         }
         // Each call argument has a distinct parsed expression root. Counting all
         // entries, including those already in the AST, bounds aggregate buffers
         // across suspended calls and guarded parser reentry, not only one call.
-        if self.argument_entries >= MAX_AST {
+        if self.argument_entries >= self.capacity.ast_nodes {
             return Err(self.unsupported("Call argument storage limit reached (131072)."));
         }
-        reserve_one(args, MAX_ARGUMENTS)?;
+        reserve_one(args, self.capacity.arguments)?;
         args.push(argument);
         self.argument_entries += 1;
         Ok(())
@@ -470,8 +470,8 @@ impl Parser {
             Frame::Call(parent, mut owner, mut args, optional, spread) => {
                 self.append_argument(&mut args, Argument { expression: value, spread })?;
                 if self.eat(",") && !self.is(")") {
-                    if args.len() == MAX_ARGUMENTS {
-                        return Err(self.unsupported("Call argument limit reached (256)."));
+                    if args.len() == self.capacity.arguments {
+                        return Err(self.unsupported(format!("Call argument limit reached ({}).", self.capacity.arguments)));
                     }
                     let spread = self.eat("...");
                     self.push_expression_frame(pending, Frame::Call(parent, owner, args, optional, spread))?;

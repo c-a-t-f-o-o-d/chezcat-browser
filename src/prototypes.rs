@@ -9,7 +9,7 @@
 
 use super::{
     strict_equal, Accessors, Builtin, Fault, Function, Host, Ordinary, PropertyKey, Runtime,
-    Value, MAX_CALL_DEPTH, MAX_FUNCTIONS,
+    Value, MAX_CALL_DEPTH,
 };
 use std::collections::HashSet;
 
@@ -48,7 +48,7 @@ impl Runtime {
     }
 
     pub(super) fn native_function(&mut self, builtin: Builtin, name: &str) -> Result<Value, Fault> {
-        if self.function_arena.occupied >= MAX_FUNCTIONS {
+        if self.function_arena.occupied >= self.limits.capacity.functions {
             let requested = match builtin {
                 Builtin::ArrayMethod(_) => "native-array-method",
                 Builtin::StringMethod(_) => "native-string-method",
@@ -747,7 +747,7 @@ impl Runtime {
                 self.objects[id]
                     .properties
                     .len()
-                    .saturating_mul(super::MAX_PROPERTY_BYTES),
+                    .saturating_mul(self.limits.capacity.property_bytes),
                 super::WorkKind::PropertyEnumeration,
             )?;
             seen.extend(self.objects[id].properties.keys().cloned());

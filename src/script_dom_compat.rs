@@ -83,7 +83,7 @@ impl Bridge<'_> {
             _ => None,
         };
         if let Some(value) = value {
-            if value.len() > MAX_STRING {
+            if value.len() > self.state.limits.host.string_bytes {
                 return Err("Dataset value exceeds 32 KiB.".into());
             }
             self.state.copies(value.len())?;

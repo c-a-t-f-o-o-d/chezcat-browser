@@ -47,7 +47,7 @@ impl Bridge<'_> {
         match name {
             "name" | "localName" | "nodeName" => {
                 let len = attr.name.len();
-                if len > MAX_STRING { return Err("Attr name exceeds 32 KiB.".into()); }
+                if len > self.state.limits.host.string_bytes { return Err("Attr name exceeds 32 KiB.".into()); }
                 self.state.copies(len)?;
                 Ok(Value::String(self.state.attributes[id].name.clone()))
             }
@@ -64,7 +64,7 @@ impl Bridge<'_> {
                     let NodeKind::Element { attrs, .. } = &self.doc.nodes[owner].kind else { unreachable!() };
                     attrs[slot].1.len()
                 } else { self.state.attributes[id].value.len() };
-                if len > MAX_STRING { return Err("Attr value exceeds 32 KiB.".into()); }
+                if len > self.state.limits.host.string_bytes { return Err("Attr value exceeds 32 KiB.".into()); }
                 self.state.copies(len)?;
                 let value = if let Some((owner, slot)) = location {
                     let NodeKind::Element { attrs, .. } = &self.doc.nodes[owner].kind else { unreachable!() };

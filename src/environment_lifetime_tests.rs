@@ -34,7 +34,7 @@ fn environment_lifetime_long_single_job_reuses_uncaptured_blocks_and_calls() {
         "var n=0;for(var i=0;i<6000;i++){try{let v=i;throw 1;}catch(e){n+=e;}}n;",
     ] {
         // The actual browser profile, not a special enlarged fixture profile.
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_capacity_test();
         assert_eq!(runtime.execute(source, &mut NoHost).unwrap().to_text(), "6000", "{source}");
         assert!(runtime.environments.len() < 16, "unbounded arena growth: {}", runtime.environments.len());
         assert_accounting(&runtime);
@@ -44,7 +44,7 @@ fn environment_lifetime_long_single_job_reuses_uncaptured_blocks_and_calls() {
 
 #[test]
 fn environment_lifetime_original_closures_arguments_and_eval_fixture() {
-    let mut runtime = Runtime::new();
+    let mut runtime = Runtime::for_capacity_test();
     assert_eq!(runtime.execute(include_str!("../tools/fixtures/environment-lifetimes.js"), &mut NoHost).unwrap().to_text(), "ok");
     assert!(runtime.environments.len() < 40);
     assert_accounting(&runtime);
@@ -54,7 +54,7 @@ fn environment_lifetime_original_closures_arguments_and_eval_fixture() {
 
 #[test]
 fn environment_lifetime_parameter_failures_release_partial_setup() {
-    let mut runtime = Runtime::new();
+    let mut runtime = Runtime::for_capacity_test();
     let source = "function bad(){throw 1;}function f(a=2,b=bad()){return a+b;}var n=0;for(var i=0;i<5000;i++){try{f();}catch(e){n+=e;}}n;";
     assert_eq!(runtime.execute(source, &mut NoHost).unwrap().to_text(), "5000");
     assert!(runtime.environments.len() < 16);
@@ -63,7 +63,7 @@ fn environment_lifetime_parameter_failures_release_partial_setup() {
 
 #[test]
 fn environment_lifetime_mapped_arguments_pin_ancestors_until_detached() {
-    let mut runtime = Runtime::new();
+    let mut runtime = Runtime::for_capacity_test();
     runtime.execute("var setter;function save(a){setter=function(v){a=v;};return arguments;}var args=save(5);", &mut NoHost).unwrap();
     runtime.begin_job();
     runtime.execute("for(var i=0;i<6000;i++){let unused=i;}setter(17);", &mut NoHost).unwrap();
@@ -78,7 +78,7 @@ fn environment_lifetime_mapped_arguments_pin_ancestors_until_detached() {
 
 #[test]
 fn environment_lifetime_capture_chain_and_capacity_remain_bounded() {
-    let mut runtime = Runtime::new();
+    let mut runtime = Runtime::for_capacity_test();
     let mut parent = 0;
     for _ in 1..MAX_ENVIRONMENTS {
         parent = runtime.new_environment(parent, false).unwrap();
@@ -115,7 +115,7 @@ fn environment_lifetime_fatal_exit_releases_bindings_without_refunding_work() {
 
 #[test]
 fn environment_lifetime_loop_abrupt_completions_preserve_captured_bindings() {
-    let mut runtime = Runtime::new();
+    let mut runtime = Runtime::for_capacity_test();
     let source = "var saved=[],n=0;outer:for(let i=0;i<5;i++){try{switch(i){case 0:let v=10;saved.push(function(){return v;});continue outer;case 1:break;default:let w=i;saved.push(function(){return w;});if(i===3)break outer;}}finally{n++;}}if(n!==4||saved[0]()!==10||saved[1]()!==2||saved[2]()!==3)throw 'completion';'ok';";
     assert_eq!(runtime.execute(source, &mut NoHost).unwrap().to_text(), "ok");
     assert_accounting(&runtime);

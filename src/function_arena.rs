@@ -1,5 +1,5 @@
 //! Stable function IDs with explicit occupancy and pre-reserved retirement.
-use super::{Fault, Function, Runtime, MAX_FUNCTIONS};
+use super::{Fault, Function, Runtime};
 
 #[derive(Default)]
 pub(super) struct Arena {
@@ -30,28 +30,29 @@ impl Runtime {
     pub(super) fn next_function_slot(&self) -> Result<usize, Fault> {
         if let Some(&id) = self.function_arena.free.last() {
             if matches!(self.functions.get(id), Some(Function::Vacant)) { return Ok(id); }
-        } else if self.functions.len() < MAX_FUNCTIONS { return Ok(self.functions.len()); }
+        } else if self.functions.len() < self.limits.capacity.functions { return Ok(self.functions.len()); }
         Err(Fault::new("Invalid bounded function-slot reservation."))
     }
 
     pub(super) fn insert_function_slot(&mut self, function: Function) -> Result<Allocation, Fault> {
         if matches!(function, Function::Vacant) { return Err(Fault::new("Cannot allocate a vacant function.")); }
-        if self.function_arena.occupied >= MAX_FUNCTIONS { return Err(self.function_limit_fault("function-slot")); }
+        if self.function_arena.occupied >= self.limits.capacity.functions { return Err(self.function_limit_fault("function-slot")); }
         let id = self.next_function_slot()?;
         let appended = id == self.functions.len();
         let realm = match &function { Function::Bound(bound) => self.function_realms[bound.target], _ => self.active_realm };
         if id == self.functions.len() {
-            fn reserve<T>(values: &mut Vec<T>) -> Result<(), Fault> {
+            fn reserve<T>(values: &mut Vec<T>, limit: usize) -> Result<(), Fault> {
                 if values.len() == values.capacity() {
-                    let count = values.capacity().max(8).min(MAX_FUNCTIONS - values.len());
+                    let count = values.capacity().max(8).min(limit - values.len());
                     values.try_reserve_exact(count).map_err(|_| Fault::new("Unable to allocate bounded function-slot storage."))?;
                 }
                 Ok(())
             }
-            reserve(&mut self.functions)?;
-            reserve(&mut self.function_properties)?;
-            reserve(&mut self.function_realms)?;
-            reserve(&mut self.function_initial_names)?;
+            let limit = self.limits.capacity.functions;
+            reserve(&mut self.functions, limit)?;
+            reserve(&mut self.function_properties, limit)?;
+            reserve(&mut self.function_realms, limit)?;
+            reserve(&mut self.function_initial_names, limit)?;
             self.functions.push(function);
             self.function_properties.push(usize::MAX);
             self.function_realms.push(realm);
@@ -135,7 +136,7 @@ mod tests {
         assert!(runtime.functions.len() <= MAX_FUNCTIONS);
     }
     fn vacant(higher: bool) -> (Runtime, usize, Option<usize>) {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_capacity_test();
         runtime.execute("let blocked;var holder={};holder.fn=function gone(){return 3;};holder.fn=null;0;", &mut Native).unwrap();
         let id = *runtime.object_assigned_closures.iter().next().unwrap();
         let higher = if higher {
@@ -207,7 +208,7 @@ mod tests {
     fn first_backing_failure_preserves_append_middle_and_trailing_topology_and_legacy_payload_charge() {
         for shape in 0..3 {
             let (mut runtime, expected) = match shape {
-                0 => { let runtime = Runtime::new(); let id = runtime.functions.len(); (runtime, id) },
+                0 => { let runtime = Runtime::for_capacity_test(); let id = runtime.functions.len(); (runtime, id) },
                 1 => { let (runtime, id, _) = vacant(true); (runtime, id) },
                 _ => { let (runtime, id, _) = vacant(false); (runtime, id) },
             };
@@ -230,7 +231,7 @@ mod tests {
     }
     #[test]
     fn first_backing_failure_keeps_legacy_bound_capture_charge() {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_capacity_test();
         let target = runtime.function_prototype.unwrap();
         let before = (runtime.functions.len(), runtime.function_arena.occupied, runtime.value_bytes);
         runtime.limits.heap.objects = runtime.objects.len();
@@ -241,7 +242,7 @@ mod tests {
     }
     #[test]
     fn later_property_failure_retains_occupied_script_and_commits_one_monotonic_creation() {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_capacity_test();
         let program = runtime.register_program("(()=>0);", false).unwrap();
         let StmtKind::Expr(expression) = program.stmts[program.body[0]].kind else { unreachable!() };
         let ExprKind::Function(template) = program.exprs[expression].kind else { unreachable!() };
@@ -255,7 +256,7 @@ mod tests {
     }
     #[test]
     fn proven_retirement_refunds_only_the_captured_arrow_string_without_resetting_work_or_time() {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_capacity_test();
         runtime.execute("var holder={};function factory(){'use strict';holder.fn=()=>this;}factory.call('é𐀀');holder.fn=null;0;", &mut Native).unwrap();
         let id = *runtime.object_assigned_closures.iter().next().unwrap();
         let before = (runtime.value_bytes, runtime.job_usage(), runtime.job_deadline, runtime.function_arena.script_created, runtime.objects.len(), runtime.bindings);
@@ -266,7 +267,7 @@ mod tests {
     }
     #[test]
     fn occupied_cap_and_script_creation_counter_remain_correct_after_reusing_high_water_slots() {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_capacity_test();
         runtime.execute("var holder={};holder.fn=function gone(){};holder.fn=null;0;", &mut Native).unwrap();
         let id = *runtime.object_assigned_closures.iter().next().unwrap();
         while runtime.function_arena.occupied < MAX_FUNCTIONS { runtime.native_function(Builtin::IsNaN, "fixture").unwrap(); }
@@ -282,7 +283,7 @@ mod tests {
         assert_eq!((runtime.objects.len(), runtime.job_usage(), runtime.job_deadline), before);
         aligned(&runtime);
 
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_capacity_test();
         let before = runtime.function_arena.script_created;
         let mut high_water = None;
         for _ in 0..8 {

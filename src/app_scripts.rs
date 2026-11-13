@@ -27,9 +27,22 @@ struct Completion {
 struct Shared {
     queue: VecDeque<Job>,
     completed: VecDeque<Completion>,
+    completed_bytes: usize,
     active: Option<Arc<AtomicBool>>,
     stopping: bool,
     wake: loader::Wake,
+}
+
+impl Shared {
+    fn complete(&mut self, mut completion: Completion, limit: usize) {
+        let bytes = completion.result.as_ref().map_or(0, |script| script.source.len());
+        if bytes > limit.saturating_sub(self.completed_bytes) {
+            completion.result = Err(format!("Dynamic script completion source budget reached ({limit} bytes)."));
+        } else {
+            self.completed_bytes += bytes;
+        }
+        self.completed.push_back(completion);
+    }
 }
 
 pub(super) struct Worker {
@@ -46,6 +59,7 @@ impl Worker {
             Mutex::new(Shared {
                 queue: VecDeque::new(),
                 completed: VecDeque::new(),
+                completed_bytes: 0,
                 active: None,
                 stopping: false,
                 wake,
@@ -77,12 +91,12 @@ impl Worker {
                         return;
                     }
                     if !job.cancel.load(Ordering::Relaxed) {
-                        guard.completed.push_back(Completion {
+                        guard.complete(Completion {
                             epoch: job.epoch,
                             request: job.request,
                             result,
                             events,
-                        });
+                        }, crate::javascript::limits::BROWSER_CAPACITIES.retained_source);
                     }
                     guard.wake.clone()
                 };
@@ -110,6 +124,9 @@ impl Worker {
         let (result, wake) = {
             let mut state = self.state.0.lock().unwrap();
             let result = state.completed.pop_front();
+            if let Some(completion) = &result {
+                state.completed_bytes -= completion.result.as_ref().map_or(0, |script| script.source.len());
+            }
             let wake = (!state.completed.is_empty()).then(|| state.wake.clone());
             (result, wake)
         };
@@ -126,6 +143,7 @@ impl Worker {
         }
         state.queue.clear();
         state.completed.clear();
+        state.completed_bytes = 0;
     }
 }
 
@@ -134,6 +152,43 @@ impl Drop for Worker {
         self.cancel();
         self.state.0.lock().unwrap().stopping = true;
         self.state.1.notify_one();
+    }
+}
+
+#[cfg(test)]
+mod completion_tests {
+    use super::*;
+
+    fn completion(source: &str) -> Completion {
+        Completion { epoch: 1, request: DynamicScript {
+            node: 1, target: Location::home(), origin: Location::home(), nonce: None,
+            policy: crate::csp::PolicySet::default(), same_origin_only: false, error: None,
+        }, result: Ok(loader::Script { node: 1, source: source.into(), label: "bounded completion".into() }), events: Vec::new() }
+    }
+
+    #[test]
+    fn completed_script_payload_is_bounded_before_ui_poll_and_released_on_poll_or_cancel() {
+        let worker = Worker { state: Arc::new((Mutex::new(Shared {
+            queue: VecDeque::new(), completed: VecDeque::new(), completed_bytes: 0,
+            active: None, stopping: false, wake: Arc::new(|| {}),
+        }), Condvar::new())) };
+        {
+            let mut state = worker.state.0.lock().unwrap();
+            state.complete(completion("abc"), 8);
+            state.complete(completion("12345"), 8);
+            state.complete(completion("overflow"), 8);
+            assert_eq!(state.completed_bytes, 8);
+            assert_eq!(state.completed.len(), 3);
+            assert!(matches!(&state.completed[2].result, Err(error) if error.contains("source budget")));
+        }
+        assert_eq!(worker.poll().unwrap().result.unwrap().source, "abc");
+        assert_eq!(worker.state.0.lock().unwrap().completed_bytes, 5);
+        worker.state.0.lock().unwrap().complete(completion("xyz"), 8);
+        assert_eq!(worker.state.0.lock().unwrap().completed_bytes, 8);
+        worker.cancel();
+        let state = worker.state.0.lock().unwrap();
+        assert!(state.completed.is_empty());
+        assert_eq!(state.completed_bytes, 0);
     }
 }
 
@@ -198,7 +253,7 @@ fn fetch(
     }
     let source = loader::decode_text(&response.body, &content_type, false)?;
     if source.len() > loader::MAX_SCRIPT_BYTES {
-        return Err("Decoded dynamic script source exceeds 512 KiB.".into());
+        return Err(format!("Decoded dynamic script source exceeds {} KiB.", crate::loader::MAX_SCRIPT_BYTES / 1024));
     }
     events.push(format!(
         "DYNAMIC SCRIPT node {}: loaded {} bytes from {}",

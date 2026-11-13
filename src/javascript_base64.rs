@@ -2,7 +2,9 @@
 //! References: https://html.spec.whatwg.org/multipage/webappapis.html#atob
 //! and https://infra.spec.whatwg.org/#forgiving-base64-decode.
 
-use super::{Fault, Host, Runtime, Value, MAX_STRING_BYTES};
+use super::{Fault, Host, Runtime, Value};
+#[cfg(test)]
+use super::MAX_STRING_BYTES;
 
 const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
@@ -25,8 +27,8 @@ impl Runtime {
         })?;
         let value = self.copy_value(value)?;
         let value = self.primitive_with_hint(value, true, host)?;
-        if value.bytes() > MAX_STRING_BYTES {
-            return Err(Fault::new("String limit reached (128 KiB)."));
+        if value.bytes() > self.limits.capacity.string_bytes {
+            return Err(Fault::new(format!("String limit reached ({} KiB).", self.limits.capacity.string_bytes / 1024)));
         }
         self.work(value.bytes())?;
         let text = value.script_text()?;
@@ -49,8 +51,8 @@ impl Runtime {
             bytes.push(character as u8);
         }
         let length = bytes.len().div_ceil(3) * 4;
-        if length > MAX_STRING_BYTES {
-            return Err(Fault::new("String limit reached (128 KiB)."));
+        if length > self.limits.capacity.string_bytes {
+            return Err(Fault::new(format!("String limit reached ({} KiB).", self.limits.capacity.string_bytes / 1024)));
         }
         self.work(length)?;
         let mut output = String::with_capacity(length);

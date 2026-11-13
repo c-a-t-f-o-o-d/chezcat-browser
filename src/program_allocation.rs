@@ -115,7 +115,7 @@ mod retirement_tests {
         std::thread::Builder::new()
             .stack_size(1024 * 1024)
             .spawn(|| {
-                let mut runtime = Runtime::with_limits(limits::BROWSER);
+                let mut runtime = Runtime::for_capacity_test();
                 let mut saved = Vec::new();
                 for i in 0..2 {
                     let prefix = format!("var kept=(function(){{return {i};}});");
@@ -273,7 +273,7 @@ mod retirement_tests {
 
     #[test]
     fn program_retirement_rechecks_parsed_and_dynamic_validation_guards() {
-        let mut runtime = Runtime::with_limits(limits::BROWSER);
+        let mut runtime = Runtime::for_capacity_test();
         let dense = "0\n".repeat(MAX_AST / 2);
         runtime.register_program(&dense, false).unwrap();
         runtime.register_program(&dense, false).unwrap();
@@ -302,7 +302,7 @@ mod retirement_tests {
 
     #[test]
     fn program_retirement_source_pressure_spends_work_without_refunding_or_resetting() {
-        let mut runtime = Runtime::with_limits(limits::BROWSER);
+        let mut runtime = Runtime::for_capacity_test();
         let source = format!("/*{}*/", "x".repeat(MAX_SOURCE_BYTES - 4));
         for _ in 0..MAX_RETAINED_SOURCE / MAX_SOURCE_BYTES {
             runtime.register_program(&source, false).unwrap();
@@ -394,9 +394,9 @@ impl Runtime {
         if self.program_allocation.disabled {
             return Ok(());
         }
-        if !(needs_slot && self.programs.len() >= MAX_PROGRAMS
-            || self.retained_source.saturating_add(source_bytes) > MAX_RETAINED_SOURCE
-            || self.retained_ast.saturating_add(nodes) > MAX_RETAINED_AST)
+        if !(needs_slot && self.programs.len() >= self.limits.capacity.programs
+            || self.retained_source.saturating_add(source_bytes) > self.limits.capacity.retained_source
+            || self.retained_ast.saturating_add(nodes) > self.limits.capacity.retained_ast)
         {
             return Ok(());
         }
@@ -465,7 +465,7 @@ impl Runtime {
         let mut registry_only = 0usize;
         let mut requested_matches = 0usize;
         let mut dynamic = 0usize;
-        for (index, program) in self.programs.iter().enumerate().take(MAX_PROGRAMS) {
+        for (index, program) in self.programs.iter().enumerate().take(self.limits.capacity.programs) {
             let group = groups.entry(program.source.as_str()).or_insert((index, 0));
             group.1 += 1;
             if program.source == source {
@@ -492,14 +492,14 @@ impl Runtime {
             right.1.cmp(&left.1).then_with(|| left.0.cmp(&right.0))
         });
         repeated.truncate(3);
-        let count_cap = self.programs.len() >= MAX_PROGRAMS;
-        let source_cap = self.retained_source.saturating_add(source.len()) > MAX_RETAINED_SOURCE;
+        let count_cap = self.programs.len() >= self.limits.capacity.programs;
+        let source_cap = self.retained_source.saturating_add(source.len()) > self.limits.capacity.retained_source;
         let ast_cap =
-            nodes.is_some_and(|nodes| self.retained_ast.saturating_add(nodes) > MAX_RETAINED_AST);
+            nodes.is_some_and(|nodes| self.retained_ast.saturating_add(nodes) > self.limits.capacity.retained_ast);
         let prefix = if ast {
-            "Retained AST limit reached (262144 nodes)."
+            format!("Retained AST limit reached ({} nodes).", self.limits.capacity.retained_ast)
         } else {
-            "Retained script limit reached (128 scripts / 2 MiB source)."
+            format!("Retained script limit reached ({} scripts / {} MiB source).", self.limits.capacity.programs, self.limits.capacity.retained_source / (1024 * 1024))
         };
         Fault::new(format!("{prefix} Count/source/AST-cap={count_cap}/{source_cap}/{ast_cap}; programs={}; source-bytes={}; AST-nodes={}; regexp-accounting-bytes={}; requested-kind={kind}; requested-input-strict={input_strict:?}; requested-bytes={}; requested-nodes={nodes:?}; active-native={}; exact-source-groups={unique}; requested-exact-source-occurrences={requested_matches}; registry-only={registry_only}; dynamic-template-programs={dynamic}; top-duplicate-first-index/count/bytes={repeated:?}. Exact source equality is attribution, not proof of a reusable compilation context.",
             self.programs.len(), self.retained_source, self.retained_ast, self.retained_regexp, source.len(), self.eval_depth))
@@ -509,7 +509,7 @@ impl Runtime {
 #[test]
 fn retained_program_attribution_is_numeric_and_preserves_existing_guards_and_work() {
     let source = "var PrivateSourcePayload = 1;";
-    let mut runtime = Runtime::new();
+    let mut runtime = Runtime::for_capacity_test();
     // Preserve the exact pre-retirement cumulative guard witness.
     runtime.program_allocation.disabled = true;
     for _ in 0..MAX_PROGRAMS {
@@ -564,7 +564,7 @@ fn retained_program_attribution_is_numeric_and_preserves_existing_guards_and_wor
         )
     );
     for ast in [false, true] {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_capacity_test();
         if ast {
             runtime.retained_ast = MAX_RETAINED_AST;
         } else {

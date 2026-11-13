@@ -7,9 +7,10 @@
 //! unsupported well-known protocols are not advertised. Number/Boolean/Symbol boxing uses explicit
 //! primitive slots; Symbol.prototype itself has no boxed Symbol value.
 
+#[cfg(test)]
+use super::MAX_STRING_BYTES;
 use super::{
     Accessors, Builtin, Fault, Host, NativeGetter, Ordinary, Property, Runtime, Value,
-    MAX_STRING_BYTES,
 };
 #[cfg(test)]
 use super::{MAX_OBJECT_PROPERTIES, MAX_PROPERTIES, MAX_RETAINED_VALUES};
@@ -60,8 +61,8 @@ impl Runtime {
             ));
         }
         let bytes = description.as_ref().map_or(0, String::len);
-        if bytes > MAX_STRING_BYTES {
-            return Err(Fault::new("String limit reached (128 KiB)."));
+        if bytes > self.limits.capacity.string_bytes {
+            return Err(Fault::new(format!("String limit reached ({} KiB).", self.limits.capacity.string_bytes / 1024)));
         }
         // A registry entry owns a second copy of its description as a key.
         let retained = self
@@ -182,8 +183,8 @@ impl Runtime {
 
     pub(super) fn symbol_text(&mut self, id: usize) -> Result<Value, Fault> {
         let bytes = self.symbol(id)?.description.as_ref().map_or(0, String::len);
-        if bytes.saturating_add(8) > MAX_STRING_BYTES {
-            return Err(Fault::new("String limit reached (128 KiB)."));
+        if bytes.saturating_add(8) > self.limits.capacity.string_bytes {
+            return Err(Fault::new(format!("String limit reached ({} KiB).", self.limits.capacity.string_bytes / 1024)));
         }
         self.work(bytes + 8)?;
         Ok(Value::String(format!(
@@ -472,8 +473,8 @@ impl Runtime {
             .checked_add(usize::from(is_new))
             .ok_or_else(|| Fault::new("Object property order limit reached."))?;
         let bytes = value.bytes();
-        if bytes > MAX_STRING_BYTES {
-            return Err(Fault::new("String limit reached (128 KiB)."));
+        if bytes > self.limits.capacity.string_bytes {
+            return Err(Fault::new(format!("String limit reached ({} KiB).", self.limits.capacity.string_bytes / 1024)));
         }
         let retained =
             self.value_bytes - previous.map_or(0, |property| property.value.bytes()) + bytes;

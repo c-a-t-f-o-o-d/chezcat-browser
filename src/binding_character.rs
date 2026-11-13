@@ -2,7 +2,7 @@
 //! All other member calls retain their owned receiver/callee snapshots.
 
 use super::{Argument, Builtin, ExprId, ExprKind, Fault, Function, Host, Program,
-    Runtime, Value, WorkKind, MAX_CALL_DEPTH, MAX_EVALUATION_FRAMES, MAX_STRING_BYTES};
+    Runtime, Value, WorkKind, MAX_CALL_DEPTH, MAX_EVALUATION_FRAMES};
 use std::rc::Rc;
 
 impl Runtime {
@@ -73,7 +73,7 @@ impl Runtime {
                 self.binding_value(scope, index_name)
             })().map_err(|error| error.at(&program.source, program.exprs[argument].at))?;
             self.step()?; // call_value
-            if bytes > MAX_STRING_BYTES { return Err(Fault::new("String limit reached (128 KiB).")); }
+            if bytes > self.limits.capacity.string_bytes { return Err(Fault::new(format!("String limit reached ({} KiB).", self.limits.capacity.string_bytes / 1024))); }
             if self.call_depth >= MAX_CALL_DEPTH { return Err(Fault::new("Function call limit reached (32).")); }
             self.call_depth += 1;
             let result = (|| {

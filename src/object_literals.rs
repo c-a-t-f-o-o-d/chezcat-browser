@@ -6,7 +6,9 @@
 //! https://tc39.es/ecma262/multipage/ecmascript-language-functions-and-classes.html#sec-runtime-semantics-methoddefinitionevaluation
 //! https://tc39.es/ecma262/multipage/ordinary-and-exotic-objects-behaviours.html#sec-setfunctionname
 
-use super::{Accessors, ExprId, Fault, Ordinary, PropertyKey, Runtime, Value, MAX_STRING_BYTES};
+use super::{Accessors, ExprId, Fault, Ordinary, PropertyKey, Runtime, Value};
+#[cfg(test)]
+use super::MAX_STRING_BYTES;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum Kind {
@@ -102,8 +104,8 @@ impl Runtime {
             PropertyKey::Symbol(symbol) => match self.symbol_description(Value::Symbol(*symbol))? {
                 Value::Undefined => String::new(),
                 Value::String(description) => {
-                    if description.len().saturating_add(prefix.len() + 2) > MAX_STRING_BYTES {
-                        return Err(Fault::new("String limit reached (128 KiB)."));
+                    if description.len().saturating_add(prefix.len() + 2) > self.limits.capacity.string_bytes {
+                        return Err(Fault::new(format!("String limit reached ({} KiB).", self.limits.capacity.string_bytes / 1024)));
                     }
                     self.work(description.len() + 2)?;
                     format!("[{description}]")
@@ -111,8 +113,8 @@ impl Runtime {
                 _ => unreachable!(),
             },
         };
-        if prefix.len().saturating_add(key_name.len()) > MAX_STRING_BYTES {
-            return Err(Fault::new("String limit reached (128 KiB)."));
+        if prefix.len().saturating_add(key_name.len()) > self.limits.capacity.string_bytes {
+            return Err(Fault::new(format!("String limit reached ({} KiB).", self.limits.capacity.string_bytes / 1024)));
         }
         self.work(prefix.len() + key_name.len())?;
         let properties = self.ordinary_id(Ordinary::Function(function))?;

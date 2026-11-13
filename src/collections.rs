@@ -3,9 +3,10 @@
 //! deletion/reinsertion observable to active iterators without tombstone growth.
 //! Collection entries share the runtime's retained-string and execution budgets.
 
+#[cfg(test)]
+use super::MAX_STRING_BYTES;
 use super::{
     Builtin, Declaration, Fault, Host, NativeGetter, Ordinary, Runtime, Value, MAX_CALL_DEPTH,
-    MAX_STRING_BYTES,
 };
 use std::collections::{BTreeMap, HashMap};
 
@@ -331,8 +332,8 @@ impl Runtime {
             0
         };
         let retained = self.value_bytes - old_bytes + key_bytes + value.bytes();
-        if key.bytes() > MAX_STRING_BYTES || value.bytes() > MAX_STRING_BYTES {
-            return Err(Fault::new("String limit reached (128 KiB)."));
+        if key.bytes() > self.limits.capacity.string_bytes || value.bytes() > self.limits.capacity.string_bytes {
+            return Err(Fault::new(format!("String limit reached ({} KiB).", self.limits.capacity.string_bytes / 1024)));
         }
         if retained > self.limits.heap.retained_values {
             return Err(Fault::new(format!("Retained value limit reached ({} bytes).", self.limits.heap.retained_values)));
@@ -446,8 +447,8 @@ impl Runtime {
     }
 
     pub(super) fn new_string_iterator(&mut self, text: String) -> Result<usize, Fault> {
-        if text.len() > MAX_STRING_BYTES {
-            return Err(Fault::new("String limit reached (128 KiB)."));
+        if text.len() > self.limits.capacity.string_bytes {
+            return Err(Fault::new(format!("String limit reached ({} KiB).", self.limits.capacity.string_bytes / 1024)));
         }
         if self.value_bytes.saturating_add(text.len()) > self.limits.heap.retained_values {
             return Err(Fault::new(format!("Retained value limit reached ({} bytes).", self.limits.heap.retained_values)));

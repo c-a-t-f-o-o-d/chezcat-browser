@@ -14,14 +14,14 @@ const PRESSURE: &str = "function checkpoint(){return undefined;}function pressur
 // Preserve these Script-entry ownership proofs independently of the newer
 // Function-literal safepoint. Demand tests exercise the default production path.
 fn entry_runtime() -> Runtime {
-    let mut runtime = Runtime::new();
+    let mut runtime = Runtime::for_capacity_test();
     runtime.transient_roots.disable_function_literal_collection = true;
     runtime
 }
 
 #[test]
 fn original_two_thousand_replaced_cells_collect_without_changing_state_order_or_live_identity() {
-    let mut runtime = Runtime::with_limits(limits::BROWSER);
+    let mut runtime = Runtime::for_capacity_test();
     runtime.execute(r#"
 var order='',slots=[],first,previous,count=0;
 var model=Object.create(Object.prototype,{payload:{get:function(){order+='g';return this.read();}}});

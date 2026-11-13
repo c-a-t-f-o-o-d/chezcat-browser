@@ -2,13 +2,17 @@
 use super::*;
 
 fn page(sources: &[&str]) -> (Document, Forms, Page, Outcome) {
+    page_with_policy(sources, crate::javascript::limits::BROWSER)
+}
+
+fn page_with_policy(sources: &[&str], limits: crate::javascript::limits::Limits) -> (Document, Forms, Page, Outcome) {
     let mut doc = crate::html::parse("<html><head><title>waiting</title></head><body><p id=out>Waiting</p></body></html>");
     doc.scripting_enabled = true;
     let mut forms = Forms::new(&doc);
     let scripts: Vec<_> = sources.iter().enumerate().map(|(node, source)| Script {
         node, label: format!("original timer-global fixture {node}"), source: (*source).into(),
     }).collect();
-    let mut page = Page::new();
+    let mut page = Page::with_limits(limits);
     let outcome = page.start(&mut doc, &mut forms, &scripts);
     (doc, forms, page, outcome)
 }
@@ -224,11 +228,11 @@ fn timer_wrapping_does_not_make_unrelated_native_properties_replaceable() {
 
 #[test]
 fn timer_wrappers_cannot_bypass_scheduler_limits_or_enable_string_timers() {
-    let (_,_,page,start)=page(&[r#"
+    let (_,_,page,start)=page_with_policy(&[r#"
 var original=setTimeout;
 setTimeout=function(){return original.apply(window,arguments);};
 for(var n=0;n<65;n++)setTimeout(function(){},60000);
-"#]);
+"#], crate::javascript::limits::CAPACITY_REGRESSION);
     assert_eq!(start.errors,1,"{}",page.report());
     assert!(page.report().contains("Timer limit reached (64"));
     assert_eq!(page.state.timers.len(),64);

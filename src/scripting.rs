@@ -67,18 +67,23 @@ const NODE_BASE: u32 = 1024;
 const STYLE_BASE: u32 = 1_000_000;
 const DATASET_BASE: u32 = 1_500_000;
 const EVENT_BASE: u32 = 2_000_000;
+#[cfg(test)]
 const MAX_LISTENERS: usize = 64;
+#[cfg(test)]
 const MAX_EVENT_TYPE_BYTES: usize = 256;
+#[cfg(test)]
 const MAX_STRING: usize = 32 * 1024;
+#[cfg(test)]
 const MAX_EXTRA_NODES: usize = 256;
+#[cfg(test)]
 const MAX_EXTRA_BYTES: usize = 1024 * 1024;
 const MAX_LOG_LINES: usize = 128;
 const MAX_LOG_BYTES: usize = 32 * 1024;
 const MAX_LOG_LINE: usize = 2048;
 const MAX_HANDLER_BYTES: usize = 8192;
+#[cfg(test)]
 const MAX_TIMERS: usize = 64;
-const MAX_TIMER_ARGUMENTS: usize = 30;
-const MAX_TIMER_BYTES: usize = 256 * 1024;
+#[cfg(test)]
 const MAX_TIMER_CALLBACKS: usize = 4096;
 const MAX_ANIMATION_FRAMES: usize = 64;
 const FRAME_INTERVAL: Duration = Duration::from_millis(16);
@@ -371,7 +376,7 @@ impl State {
             copy_work: crate::javascript::limits::BROWSER.copy_bytes,
             node_limit: 0,
             retained: 0,
-            retained_limit: MAX_EXTRA_BYTES,
+            retained_limit: crate::javascript::limits::BROWSER.host.retained_bytes,
             changed: false,
             errors: 0,
             logs: Vec::new(),
@@ -414,17 +419,17 @@ impl State {
                 "setTimeout requires a function; string/eval timers are not supported.".into(),
             );
         };
-        if self.timers.len() >= MAX_TIMERS {
+        if self.timers.len() >= self.limits.host.timers {
             return Err("Timer limit reached (64 pending callbacks per document).".into());
         }
-        if self.timer_callbacks >= MAX_TIMER_CALLBACKS {
+        if self.timer_callbacks >= self.limits.host.timer_callbacks {
             return Err(
                 "Timer callback limit reached (4096 per document). Reload starts a new allowance."
                     .into(),
             );
         }
         let extra = arguments.get(2..).unwrap_or(&[]);
-        if extra.len() > MAX_TIMER_ARGUMENTS {
+        if extra.len() > self.limits.host.timer_arguments {
             return Err("Timer argument limit reached (30).".into());
         }
         let bytes = extra
@@ -436,7 +441,7 @@ impl State {
                 })
             })
             .ok_or("Timer argument size overflow.")?;
-        if bytes > MAX_TIMER_BYTES.saturating_sub(self.timer_bytes) {
+        if bytes > self.limits.host.timer_bytes.saturating_sub(self.timer_bytes) {
             return Err("Timer argument memory limit reached (256 KiB per document).".into());
         }
         self.copies(bytes)?;
@@ -593,7 +598,7 @@ impl State {
         }) {
             return Ok(());
         }
-        if self.listeners.len() >= MAX_LISTENERS {
+        if self.listeners.len() >= self.limits.host.listeners {
             return Err("Event listener limit reached (64 per document).".into());
         }
         self.next_listener = self
@@ -630,7 +635,7 @@ impl Page {
 
     #[cfg(test)]
     pub(crate) fn for_test() -> Self {
-        Self::with_limits(crate::javascript::limits::REGRESSION)
+        Self::with_limits(crate::javascript::limits::CAPACITY_REGRESSION)
     }
 
     fn with_limits(limits: crate::javascript::limits::Limits) -> Self {
@@ -657,6 +662,7 @@ impl Page {
         state.limits = limits;
         state.host_work = limits.host_work;
         state.copy_work = limits.copy_bytes;
+        state.retained_limit = limits.host.retained_bytes;
         for name in [
             "setTimeout",
             "clearTimeout",
@@ -824,7 +830,7 @@ impl Page {
             .enumerate()
             .filter(|(_, timer)| timer.due <= now)
             .min_by_key(|(_, timer)| (timer.due, timer.id))?;
-        if self.state.timer_callbacks >= MAX_TIMER_CALLBACKS {
+        if self.state.timer_callbacks >= self.state.limits.host.timer_callbacks {
             self.state.timers.clear();
             self.state.timer_bytes = 0;
             self.state.error(
@@ -1023,7 +1029,8 @@ impl Page {
         let cookies = self.state.cookies.clone();
         let resource_base = self.state.dynamic.base.take();
         let stylesheet_bytes = self.state.stylesheets.source_bytes;
-        *self = Self::new();
+        let limits = self.state.limits;
+        *self = Self::with_limits(limits);
         self.state.geometry = geometry;
         self.state.location = location;
         self.state.cookies = cookies;
@@ -1039,7 +1046,7 @@ impl Page {
             return Outcome::default();
         }
         self.state.ready = "interactive";
-        self.state.node_limit = doc.nodes.len().saturating_add(MAX_EXTRA_NODES);
+        self.state.node_limit = doc.nodes.len().saturating_add(self.state.limits.host.extra_nodes);
         if let Err(error) = self.state.work(doc.nodes.len()) {
             self.state.error("JavaScript startup", &error);
             return Outcome {
@@ -1048,7 +1055,7 @@ impl Page {
             };
         }
         self.state.retained = document_bytes(doc);
-        self.state.retained_limit = self.state.retained.saturating_add(MAX_EXTRA_BYTES);
+        self.state.retained_limit = self.state.retained.saturating_add(self.state.limits.host.retained_bytes);
         if let Err(error) = self.state.rebuild(doc) {
             self.state.error("JavaScript startup", &error);
             return Outcome {
@@ -1095,7 +1102,7 @@ impl Page {
                     self.state.error(&label, &error);
                     continue;
                 }
-                if self.state.listeners.len() >= MAX_LISTENERS {
+                if self.state.listeners.len() >= self.state.limits.host.listeners {
                     self.state
                         .error(&label, "Event listener limit reached (64 per document).");
                     break 'handlers;
@@ -1572,8 +1579,8 @@ impl Bridge<'_> {
         if name.is_empty() {
             return Ok(None);
         }
-        if name.len() > MAX_STRING {
-            return Err("Image collection name exceeds 32 KiB.".into());
+        if name.len() > self.state.limits.host.string_bytes {
+            return Err(format!("Image collection name exceeds {} KiB.", self.state.limits.host.string_bytes / 1024).into());
         }
         self.state.copies(name.len())?;
         self.state.rebuild(self.doc)?;
@@ -1653,16 +1660,16 @@ impl Bridge<'_> {
             return Err("DOM values must be primitive strings, numbers, booleans or null.".into());
         }
         let text = value.to_text();
-        if text.len() > MAX_STRING {
-            return Err("DOM string limit reached (32 KiB).".into());
+        if text.len() > self.state.limits.host.string_bytes {
+            return Err(format!("DOM string limit reached ({} KiB).", self.state.limits.host.string_bytes / 1024).into());
         }
         self.state.copies(text.len())?;
         Ok(text)
     }
 
     fn string(&mut self, text: &str) -> Result<Value, String> {
-        if text.len() > MAX_STRING {
-            return Err("DOM result exceeds 32 KiB.".into());
+        if text.len() > self.state.limits.host.string_bytes {
+            return Err(format!("DOM result exceeds {} KiB.", self.state.limits.host.string_bytes / 1024).into());
         }
         self.state.copies(text.len())?;
         Ok(Value::String(text.into()))
@@ -1685,8 +1692,8 @@ impl Bridge<'_> {
         let value = location.property(property).ok_or_else(|| {
             format!("Location property {property:?} is not supported by this subset.")
         })?;
-        if value.len() > MAX_STRING {
-            return Err("Location result exceeds 32 KiB.".into());
+        if value.len() > self.state.limits.host.string_bytes {
+            return Err(format!("Location result exceeds {} KiB.", self.state.limits.host.string_bytes / 1024).into());
         }
         let size = value.len();
         self.state.copies(size)?;
@@ -1835,8 +1842,8 @@ impl Bridge<'_> {
                 continue;
             }
             if let NodeKind::Text(text) = &self.doc.nodes[node].kind {
-                if result.len().saturating_add(text.len()) > MAX_STRING {
-                    return Err("textContent result exceeds 32 KiB.".into());
+                if result.len().saturating_add(text.len()) > self.state.limits.host.string_bytes {
+                    return Err(format!("textContent result exceeds {} KiB.", self.state.limits.host.string_bytes / 1024).into());
                 }
                 self.state.copies(text.len())?;
                 result.push_str(text);
@@ -1924,7 +1931,7 @@ impl Bridge<'_> {
     fn listener_target(&mut self, handle: u32, event: &str) -> Result<(), String> {
         // Event types are case-sensitive DOM strings, including custom and
         // empty names. Registering one does not create a native event source.
-        if event.len() > MAX_EVENT_TYPE_BYTES {
+        if event.len() > self.state.limits.host.event_type_bytes {
             return Err("Event type exceeds the 256-byte limit.".into());
         }
         if !matches!(handle, DOCUMENT | WINDOW) {
@@ -2063,8 +2070,8 @@ impl Bridge<'_> {
 
     fn get_style(&mut self, node: usize, name: &str) -> Result<Value, String> {
         let style = self.doc.attr(node, "style").unwrap_or("");
-        if style.len() > MAX_STRING {
-            return Err("Inline style exceeds 32 KiB.".into());
+        if style.len() > self.state.limits.host.string_bytes {
+            return Err(format!("Inline style exceeds {} KiB.", self.state.limits.host.string_bytes / 1024).into());
         }
         self.state.copies(style.len())?;
         let value = style
@@ -2085,13 +2092,13 @@ impl Bridge<'_> {
         value: &str,
         priority: &str,
     ) -> Result<(), String> {
-        validate_css_value(value, matches!(name, "font" | "font-family"))?;
+        validate_css_value(value, matches!(name, "font" | "font-family"), self.state.limits.host.string_bytes)?;
         if !priority.is_empty() && !priority.eq_ignore_ascii_case("important") {
             return Err("CSS priority must be empty or important.".into());
         }
         let existing = self.doc.attr(node, "style").unwrap_or("");
-        if existing.len() > MAX_STRING {
-            return Err("Inline style exceeds 32 KiB.".into());
+        if existing.len() > self.state.limits.host.string_bytes {
+            return Err(format!("Inline style exceeds {} KiB.", self.state.limits.host.string_bytes / 1024).into());
         }
         self.state.copies(existing.len())?;
         let mut style = String::new();
@@ -2114,8 +2121,8 @@ impl Bridge<'_> {
             }
             style.push(';');
         }
-        if style.len() > MAX_STRING {
-            return Err("Inline style exceeds 32 KiB.".into());
+        if style.len() > self.state.limits.host.string_bytes {
+            return Err(format!("Inline style exceeds {} KiB.", self.state.limits.host.string_bytes / 1024).into());
         }
         self.attribute(node, "style", Some(style))
     }
@@ -3102,8 +3109,8 @@ impl Host for Bridge<'_> {
                     self.string(&content_type)
                 }
                 "title" => {
-                    if self.doc.title.len() > MAX_STRING {
-                        return Err("Document title exceeds 32 KiB.".into());
+                    if self.doc.title.len() > self.state.limits.host.string_bytes {
+                        return Err(format!("Document title exceeds {} KiB.", self.state.limits.host.string_bytes / 1024).into());
                     }
                     let title = self.doc.title.clone();
                     self.string(&title)
@@ -3172,8 +3179,8 @@ impl Host for Bridge<'_> {
                     property
                 };
                 let value = self.doc.attr(node, name).unwrap_or("");
-                if value.len() > MAX_STRING {
-                    return Err("Attribute value exceeds 32 KiB.".into());
+                if value.len() > self.state.limits.host.string_bytes {
+                    return Err(format!("Attribute value exceeds {} KiB.", self.state.limits.host.string_bytes / 1024).into());
                 }
                 let value = value.to_owned();
                 self.string(&value)
@@ -3665,8 +3672,8 @@ impl Host for Bridge<'_> {
                 if method == "hasAttribute" {
                     return Ok(Value::Bool(value.is_some()));
                 }
-                if value.is_some_and(|value| value.len() > MAX_STRING) {
-                    return Err("Attribute value exceeds 32 KiB.".into());
+                if value.is_some_and(|value| value.len() > self.state.limits.host.string_bytes) {
+                    return Err(format!("Attribute value exceeds {} KiB.", self.state.limits.host.string_bytes / 1024).into());
                 }
                 let value = value.map(str::to_owned);
                 return value.map_or(Ok(Value::Null), |value| self.string(&value));
@@ -3702,7 +3709,7 @@ impl Host for Bridge<'_> {
                         return Ok(Value::Undefined);
                     }
                     if name == "style" {
-                        validate_style(&value)?;
+                        validate_style(&value, self.state.limits.host.string_bytes)?;
                     }
                     self.attribute(node, &name, Some(value))?;
                 }
@@ -3931,8 +3938,8 @@ fn css_name(name: &str) -> Result<String, String> {
     }
     Ok(css)
 }
-fn validate_css_value(value: &str, allow_font_quotes: bool) -> Result<(), String> {
-    if value.len() > MAX_STRING
+fn validate_css_value(value: &str, allow_font_quotes: bool, string_limit: usize) -> Result<(), String> {
+    if value.len() > string_limit
         || value.chars().any(|ch| {
             ch.is_control() && !ch.is_ascii_whitespace()
                 || matches!(ch, ';' | '{' | '}' | '\\' | '@' | '!')
@@ -3964,7 +3971,7 @@ fn validate_css_value(value: &str, allow_font_quotes: bool) -> Result<(), String
     }
     Ok(())
 }
-fn validate_style(style: &str) -> Result<(), String> {
+fn validate_style(style: &str, string_limit: usize) -> Result<(), String> {
     for item in style.split(';').filter(|item| !item.trim().is_empty()) {
         let (name, value) = item
             .split_once(':')
@@ -3973,6 +3980,7 @@ fn validate_style(style: &str) -> Result<(), String> {
         validate_css_value(
             value.trim(),
             matches!(name.as_str(), "font" | "font-family"),
+            string_limit,
         )?;
     }
     Ok(())
@@ -5440,6 +5448,31 @@ mod browser_budget_tests {
     use super::*;
 
     #[test]
+    fn browser_host_strings_cross_old_limit_and_explicit_profiles_survive_start() {
+        for small in [false, true] {
+            let mut page = if small { Page::for_test() } else { Page::new() };
+            let selected = page.state.limits;
+            let mut doc = crate::html::parse("<title>pending</title><body></body>");
+            doc.scripting_enabled = true;
+            let mut forms = Forms::new(&doc);
+            let payload = "x".repeat(70 * 1024);
+            let script = Script { node: 0,
+                source: format!("var payload='{payload}';document.title=payload;var node=document.createElement('div');node.setAttribute('data-large',payload);document.body.appendChild(node);"),
+                label: "host conversion beyond old32KiB".into() };
+            let result = page.start(&mut doc, &mut forms, &[script]);
+            assert_eq!(page.state.limits, selected);
+            if small {
+                assert!(result.errors > 0);
+                assert_eq!(doc.title, "pending");
+            } else {
+                assert_eq!(result.errors, 0, "{}", page.report());
+                assert_eq!(doc.title, payload);
+                assert!(doc.nodes.iter().enumerate().any(|(id, _)| doc.attr(id, "data-large") == Some(payload.as_str())));
+            }
+        }
+    }
+
+    #[test]
     fn production_page_uses_enlarged_limits_for_startup_and_later_jobs() {
         let mut page = Page::new();
         assert_eq!(page.state.limits, crate::javascript::limits::BROWSER);
@@ -5458,13 +5491,13 @@ mod browser_budget_tests {
         assert_eq!(result.errors, 0, "{}", page.report());
         assert_eq!(doc.title, "16777216");
         page.begin_job();
-        assert_eq!(page.state.host_work, 2_000_000);
-        assert_eq!(page.state.copy_work, 256 * 1024 * 1024);
+        assert_eq!(page.state.host_work, 64_000_000);
+        assert_eq!(page.state.copy_work, 16 * 1024 * 1024 * 1024);
         let report = page.report();
-        assert!(report.contains("50000000 steps / 10 seconds / 256 MiB"));
-        assert!(report.contains("200000000 steps / 30 seconds / 1024 MiB"));
-        assert!(report.contains("262144 properties per object / 1048576 per document"));
-        assert!(report.contains("65536 object identities; array length 1048576; 64 MiB"));
+        assert!(report.contains("1000000000 steps / 30 seconds / 16384 MiB"));
+        assert!(report.contains("4000000000 steps / 120 seconds / 65536 MiB"));
+        assert!(report.contains("1048576 properties per object / 16777216 per document"));
+        assert!(report.contains("1048576 object identities; array length 16777216; 512 MiB"));
     }
 }
 

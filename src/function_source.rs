@@ -38,7 +38,7 @@ impl Runtime {
     }
 
     fn function_source_output_work(&mut self, bytes: usize) -> Result<(), Fault> {
-        if bytes > MAX_STRING_BYTES { return Err(Fault::new("String limit reached (128 KiB).")); }
+        if bytes > self.limits.capacity.string_bytes { return Err(Fault::new(format!("String limit reached ({} KiB).", self.limits.capacity.string_bytes / 1024))); }
         self.work_as(bytes, WorkKind::ConversionOutput)
     }
 }
@@ -77,7 +77,7 @@ mod tests {
             ("(()=> /a+/gi).toString();", "()=> /a+/gi"),
             ("(()=> `a${1}z`).toString();", "()=> `a${1}z`"),
         ] {
-            let mut runtime = Runtime::new();
+            let mut runtime = Runtime::for_capacity_test();
             let result = runtime.execute(source, &mut NoHost::default()).unwrap();
             assert_eq!(result.to_text(), expected, "{source}");
         }
@@ -85,7 +85,7 @@ mod tests {
 
     #[test]
     fn dynamic_function_source_uses_anonymous_without_a_private_name_binding() {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_capacity_test();
         let mut host = NoHost::default();
         assert_eq!(runtime.execute("Function().toString();", &mut host).unwrap().to_text(), "function anonymous(\n) {\n\n}");
         assert_eq!(runtime.execute("Function('x /*p*/','y','return x+y;').toString();", &mut host).unwrap().to_text(), "function anonymous(x /*p*/,y\n) {\nreturn x+y;\n}");
@@ -94,7 +94,7 @@ mod tests {
 
     #[test]
     fn public_name_changes_and_getters_do_not_affect_source_or_run_code() {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_capacity_test();
         let source = r#"
 var count=0,f=function /*original*/ real(){return 1;},n=Array,b=f.bind(null);
 for(var target of [f,n,b]){Object.defineProperty(target,'name',{get:function(){count++;throw 'name getter';},configurable:true});}
@@ -109,7 +109,7 @@ if(errors!==1)throw 'callable receiver';'ok';
 
     #[test]
     fn reading_existing_source_does_not_ask_for_string_compilation_permission() {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_capacity_test();
         let mut host = NoHost { deny: true, ..NoHost::default() };
         assert_eq!(runtime.execute("function f(){return 7;}f.toString();", &mut host).unwrap().to_text(), "function f(){return 7;}");
         assert_eq!(host.compilation_checks, 0);
@@ -120,7 +120,7 @@ if(errors!==1)throw 'callable receiver';'ok';
     #[test]
     fn source_output_limits_charge_before_copy_and_do_not_grow_callable_or_program_arenas() {
         for extra in [0usize, 1] {
-            let mut runtime = Runtime::new();
+            let mut runtime = Runtime::for_capacity_test();
             let prefix = "function f(){/*";
             let suffix = "*/}";
             let text = format!("{prefix}{}{suffix}", "x".repeat(MAX_STRING_BYTES + extra - prefix.len() - suffix.len()));
@@ -153,7 +153,7 @@ if(errors!==1)throw 'callable receiver';'ok';
 
     #[test]
     fn implicit_conversion_uses_source_then_observes_public_conversion_overrides() {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_capacity_test();
         let source = r#"
 var f=function /*source*/ demo(){return 1;},text='function /*source*/ demo(){return 1;}';
 if(String(f)!==text||(''+f)!==text||`${f}`!==text)throw 'implicit source';
@@ -169,7 +169,7 @@ if(String(f)!=='symbol-string'||(''+f)!=='symbol-default'||Function.prototype.to
     #[test]
     fn dynamic_anonymous_name_is_included_in_the_output_size_bound() {
         for extra in [0usize, 1] {
-            let mut runtime = Runtime::new();
+            let mut runtime = Runtime::for_capacity_test();
             let fixed = "function anonymous(\n) {\n/**/\n}".len();
             let body = format!("/*{}*/", "x".repeat(MAX_STRING_BYTES + extra - fixed));
             let Value::Function(function) = runtime.function_constructor(&[Value::String(body)], &mut NoHost::default()).unwrap() else { panic!("dynamic function") };
@@ -189,7 +189,7 @@ if(String(f)!=='symbol-string'||(''+f)!=='symbol-default'||Function.prototype.to
     #[test]
     fn late_initial_name_failures_leave_parallel_function_arenas_aligned() {
         for budget in 0..64 {
-            let mut runtime = Runtime::new();
+            let mut runtime = Runtime::for_capacity_test();
             runtime.begin_job();
             runtime.copy_bytes = budget;
             let result = runtime.native_function(Builtin::IsNaN, "originalName");

@@ -6,14 +6,10 @@
 
 use super::{
     Accessors, Builtin, Declaration, Exception, Fault, Function, Host, Ordinary, Runtime,
-    Value, MAX_CALL_DEPTH, MAX_FUNCTIONS, MAX_STRING_BYTES,
+    Value, MAX_CALL_DEPTH,
 };
 use std::collections::VecDeque;
 
-const MAX_PROMISES: usize = 1024;
-const MAX_REACTIONS: usize = 1024;
-const MAX_MICROTASKS: usize = 1024;
-const MAX_CHECKPOINT_JOBS: usize = 4096;
 const MAX_DIAGNOSTICS: usize = 32;
 
 #[derive(Clone, Copy)]
@@ -377,7 +373,7 @@ impl Runtime {
 
     fn promise_function(&mut self, closure: Closure) -> Result<Value, Fault> {
         self.step()?;
-        if self.function_arena.occupied >= MAX_FUNCTIONS {
+        if self.function_arena.occupied >= self.limits.capacity.functions {
             return Err(self.function_limit_fault("promise-closure"));
         }
         let length = closure.arity();
@@ -388,8 +384,8 @@ impl Runtime {
     }
 
     fn new_promise(&mut self) -> Result<usize, Fault> {
-        if self.promises.count >= MAX_PROMISES {
-            return Err(Fault::new("Promise identity limit reached (1024)."));
+        if self.promises.count >= self.limits.capacity.promises {
+            return Err(Fault::new(format!("Promise identity limit reached ({}).", self.limits.capacity.promises)));
         }
         self.promise_retain(std::mem::size_of::<Data>())?;
         let object = self.new_object(None)?;
@@ -405,8 +401,8 @@ impl Runtime {
     }
 
     fn resolving_pair(&mut self, promise: usize) -> Result<(Value, Value), Fault> {
-        if self.promises.pairs.len() >= MAX_FUNCTIONS {
-            return Err(Fault::new("Promise resolving-pair limit reached (1024)."));
+        if self.promises.pairs.len() >= self.limits.capacity.functions {
+            return Err(Fault::new(format!("Promise resolving-pair limit reached ({}).", self.limits.capacity.promises)));
         }
         self.promise_retain(std::mem::size_of::<ResolvingPair>())?;
         let pair = self.promises.pairs.len();
@@ -487,8 +483,8 @@ impl Runtime {
                 reject,
             });
         }
-        if self.promises.capabilities.len() >= MAX_FUNCTIONS {
-            return Err(Fault::new("Promise capability limit reached (1024)."));
+        if self.promises.capabilities.len() >= self.limits.capacity.functions {
+            return Err(Fault::new(format!("Promise capability limit reached ({}).", self.limits.capacity.promises)));
         }
         self.promise_retain(std::mem::size_of::<CapabilitySlot>())?;
         let slot = self.promises.capabilities.len();
@@ -516,8 +512,8 @@ impl Runtime {
 
     fn promise_enqueue(&mut self, job: Job) -> Result<(), Fault> {
         self.step()?;
-        if self.promises.jobs.len() >= MAX_MICROTASKS {
-            return Err(Fault::new("Microtask queue limit reached (1024)."));
+        if self.promises.jobs.len() >= self.limits.capacity.promises {
+            return Err(Fault::new(format!("Microtask queue limit reached ({}).", self.limits.capacity.promises)));
         }
         self.promise_retain(job.retained_bytes().saturating_add(std::mem::size_of::<Option<usize>>()))?;
         let callback = match &job {
@@ -538,8 +534,8 @@ impl Runtime {
         ) {
             return Ok(());
         }
-        if value.bytes() > MAX_STRING_BYTES {
-            return Err(Fault::new("String limit reached (128 KiB)."));
+        if value.bytes() > self.limits.capacity.string_bytes {
+            return Err(Fault::new(format!("String limit reached ({} KiB).", self.limits.capacity.string_bytes / 1024)));
         }
         self.promise_retain(value.bytes())?;
         let data = self.objects[promise].promise.as_mut().unwrap();
@@ -694,8 +690,8 @@ impl Runtime {
         });
         match &self.objects[promise].promise.as_ref().unwrap().state {
             State::Pending => {
-                if self.promises.reactions >= MAX_REACTIONS {
-                    return Err(Fault::new("Promise reaction limit reached (1024)."));
+                if self.promises.reactions >= self.limits.capacity.promises {
+                    return Err(Fault::new(format!("Promise reaction limit reached ({}).", self.limits.capacity.promises)));
                 }
                 self.promise_retain(std::mem::size_of::<Reaction>())?;
                 self.objects[promise]
@@ -909,8 +905,8 @@ impl Runtime {
         let group = if matches!(op, Op::Race) {
             None
         } else {
-            if self.promises.groups.len() >= MAX_PROMISES {
-                return Err(Fault::new("Promise combinator state limit reached (1024)."));
+            if self.promises.groups.len() >= self.limits.capacity.promises {
+                return Err(Fault::new(format!("Promise combinator state limit reached ({}).", self.limits.capacity.promises)));
             }
             self.promise_retain(std::mem::size_of::<Group>())?;
             let values = self.new_object(Some(0))?;
@@ -943,9 +939,9 @@ impl Runtime {
             }
             let next = self.call_value(resolve.clone(), &[value], constructor.clone(), host)?;
             let (fulfill, reject) = if let Some(group) = group {
-                if self.promises.elements.len() >= MAX_REACTIONS {
+                if self.promises.elements.len() >= self.limits.capacity.promises {
                     return Err(Fault::new(
-                        "Promise combinator element limit reached (1024).",
+                        format!("Promise combinator element limit reached ({}).", self.limits.capacity.promises),
                     ));
                 }
                 self.promise_retain(std::mem::size_of::<Element>())?;
@@ -1328,7 +1324,7 @@ impl Runtime {
             let mut executed = 0;
             while let Some((realm, job)) = self.promises.jobs.pop_front() {
                 self.value_bytes -= job.retained_bytes() + std::mem::size_of::<Option<usize>>();
-                if executed == MAX_CHECKPOINT_JOBS {
+                if executed == self.limits.capacity.promise_jobs {
                     return Err(Fault::new(
                         "Microtask checkpoint limit reached (4096 jobs).",
                     ));
@@ -1420,7 +1416,7 @@ mod tests {
 
     #[test]
     fn reused_promise_closure_slot_dispatches_its_new_value_and_drops_old_candidate_tag() {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_capacity_test();
         runtime.execute("var holder={};holder.fn=function gone(){};holder.fn=null;0;", &mut NoHost).unwrap();
         let id = *runtime.object_assigned_closures.iter().next().unwrap();
         runtime.retire_proven_inactive_candidate(id).unwrap();
@@ -1435,7 +1431,7 @@ mod tests {
     #[test]
     fn first_promise_closure_backing_failure_keeps_legacy_capture_charge_for_append_and_reuse() {
         for reused in [false, true] {
-            let mut runtime = Runtime::new();
+            let mut runtime = Runtime::for_capacity_test();
             if reused {
                 runtime.execute("var holder={};holder.fn=function gone(){};holder.fn=null;0;", &mut NoHost).unwrap();
                 let id = *runtime.object_assigned_closures.iter().next().unwrap();
@@ -1456,7 +1452,7 @@ mod tests {
 
     #[test]
     fn reachability_report_rejects_popped_or_draining_jobs_before_traversal() {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_capacity_test();
         runtime.promises.draining = true;
         assert!(runtime.persistent_allocation_report().contains("unavailable"));
         runtime.promises.draining = false;
@@ -1468,7 +1464,7 @@ mod tests {
 
     #[test]
     fn microtask_allocation_trace_distinguishes_jobs_and_resets_without_changing_work() {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_capacity_test();
         runtime.execute("var a,b,c;queueMicrotask(function(){a=function(){};});Promise.resolve(1).then(function(){b=function(){};});Promise.resolve({then:function(resolve){c=function(){};resolve(1);}});", &mut NoHost).unwrap();
         runtime.microtask_checkpoint(&mut NoHost).unwrap();
         let trace = &runtime.promises.allocation_trace;
@@ -1492,7 +1488,7 @@ mod tests {
             (1, "reaction", "Promise.resolve(1).then(function(){for(var i=0;i<1100;i++)(function(){})();});"),
             (2, "thenable", "Promise.resolve({then:function(){for(var i=0;i<1100;i++)(function(){})();}});"),
         ] {
-            let mut runtime = Runtime::new();
+            let mut runtime = Runtime::for_capacity_test();
             runtime.execute(source, &mut NoHost).unwrap();
             let error = runtime.microtask_checkpoint(&mut NoHost).unwrap_err();
             assert!(error.contains("Function limit reached (1024)") && error.contains(&format!("microtasks-active=Some(\"{name}\")")), "{error}");

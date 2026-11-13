@@ -316,7 +316,7 @@ mod tests {
 
     #[test]
     fn foreign_constructors_callbacks_closures_and_bound_targets_keep_their_realms() {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_capacity_test();
         expose_test_realm(&mut runtime);
         runtime.execute(r#"
 if(ChildFunction('return realmSecret;')()!==17||realmSecret!==91)throw 'global isolation';
@@ -344,7 +344,7 @@ if(ChildFunction('return Symbol.iterator;')()!==Symbol.iterator||ChildFunction('
 
     #[test]
     fn foreign_errors_and_direct_indirect_eval_preserve_identity_and_scope() {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_capacity_test();
         expose_test_realm(&mut runtime);
         assert_eq!(runtime.execute(r#"
 var errors=0;
@@ -365,7 +365,7 @@ if(typeof childOnly!=='undefined'||ChildFunction('return childOnly;')()!==27)thr
 
     #[test]
     fn borrowed_source_stringification_keeps_foreign_source_and_ignores_names() {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_capacity_test();
         expose_test_realm(&mut runtime);
         assert_eq!(runtime.execute(r#"
 var f=ChildFunction('x','return x;'),read=Function.prototype.toString;
@@ -383,7 +383,7 @@ if(read.call(nested)!=='function /*child*/ named(){return 17;}')throw 'mutable s
 
     #[test]
     fn regexp_call_identity_observes_constructor_and_creation_realm() {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_capacity_test();
         expose_test_realm(&mut runtime);
         assert_eq!(runtime.execute(r#"
 var original=/x/g, NativeRegExp=RegExp, copied=ChildRegExp(original);
@@ -402,7 +402,7 @@ var same=/y/;if(NativeRegExp(same)!==same)throw 'intrinsic identity';
 
     #[test]
     fn foreign_jobs_and_compilation_gate_keep_context_and_shared_queue() {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_capacity_test();
         expose_test_realm(&mut runtime);
         runtime.execute("var observed=0;ChildPromise.resolve(1).then(ChildFunction('return [realmSecret,Array];')).then(function(v){if(v[0]!==17||v[1]!==ChildArray||Array===ChildArray)throw 'job realm';observed=42;});", &mut NoHost).unwrap();
         runtime.execute("ChildEval('var realmJobOK=false;');Promise.resolve({then:ChildFunction('resolve','reject','realmJobOK=Object.getPrototypeOf(resolve)===Function.prototype;resolve(1);')});", &mut NoHost).unwrap();
@@ -424,7 +424,7 @@ var same=/y/;if(NativeRegExp(same)!==same)throw 'intrinsic identity';
     #[test]
     fn foreign_call_guard_and_recovery_fit_one_mib_without_resetting_job() {
         std::thread::Builder::new().stack_size(1024 * 1024).spawn(|| {
-            let mut runtime = Runtime::new();
+            let mut runtime = Runtime::for_capacity_test();
             expose_test_realm(&mut runtime);
             runtime.execute("var child=ChildFunction('n','callback','if(n>0)return callback(n-1);return 42;');function parent(n){return child(n,parent);}", &mut NoHost).unwrap();
             runtime.begin_job();
@@ -444,7 +444,7 @@ var same=/y/;if(NativeRegExp(same)!==same)throw 'intrinsic identity';
 
     #[test]
     fn child_global_declarations_keep_operation_preflight_and_eval_deletion() {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_capacity_test();
         let realm = expose_test_realm(&mut runtime);
         runtime.with_intrinsic_realm(Some(realm), |runtime| {
             runtime.define_global_operation("setTimeout", 77, "setTimeout", 1).map_err(Fault::new)?;
@@ -463,7 +463,7 @@ var same=/y/;if(NativeRegExp(same)!==same)throw 'intrinsic identity';
 
     #[test]
     fn detached_intrinsics_are_real_distinct_and_do_not_inherit_parent_mutation() {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_capacity_test();
         let parent_object = runtime.object_prototype.unwrap();
         let parent_array = runtime.array_prototype.unwrap();
         let parent_constructor = constructor(&runtime, 0, "Array");
@@ -496,7 +496,7 @@ var same=/y/;if(NativeRegExp(same)!==same)throw 'intrinsic identity';
 
     #[test]
     fn realm_bootstrap_reuses_agent_symbols_and_preserves_parent_jobs() {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_capacity_test();
         let ids = (runtime.symbol_dispose, runtime.symbol_to_primitive, runtime.symbol_iterator, runtime.symbol_species);
         let symbols = runtime.symbols.len();
         let promise_roots = (runtime.promises.prototype, runtime.promises.constructor);
@@ -514,7 +514,7 @@ var same=/y/;if(NativeRegExp(same)!==same)throw 'intrinsic identity';
     #[test]
     fn failed_realm_bootstrap_restores_parent_without_refunding_work_or_time() {
         for extra_objects in [0, 4, 32] {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_capacity_test();
         let object = runtime.object_prototype;
         let constructor = constructor(&runtime, 0, "Array");
         let deadline = runtime.job_deadline;
@@ -535,7 +535,7 @@ var same=/y/;if(NativeRegExp(same)!==same)throw 'intrinsic identity';
     #[test]
     fn repeated_realm_bootstrap_is_bounded_on_one_mib_stack() {
         std::thread::Builder::new().stack_size(1024 * 1024).spawn(|| {
-            let mut runtime = Runtime::new();
+            let mut runtime = Runtime::for_capacity_test();
             let parent = constructor(&runtime, 0, "Array");
             let deadline = runtime.job_deadline;
             let mut successes = 0;
@@ -561,14 +561,14 @@ var same=/y/;if(NativeRegExp(same)!==same)throw 'intrinsic identity';
     #[test]
     fn deferred_main_families_preserve_declarations_replacements_and_siblings() {
         for (name, sibling) in [("URL", "URLSearchParams"), ("Uint8Array", "ArrayBuffer"), ("TextEncoder", "TextDecoder")] {
-            let mut runtime = Runtime::new();
+            let mut runtime = Runtime::for_capacity_test();
             let source = format!("function {name}(){{return 17;}}if({name}()!==17||typeof {sibling}!=='function')throw 'declaration override';");
             runtime.execute(&source, &mut NoHost).unwrap();
-            let mut runtime = Runtime::new();
+            let mut runtime = Runtime::for_capacity_test();
             runtime.define_global(name, Value::Number(17.0)).unwrap();
             runtime.execute(&format!("if({name}!==17||typeof {sibling}!=='function')throw 'host override';"), &mut NoHost).unwrap();
             runtime.execute(&format!("{name}=23;if({name}!==23||delete {name})throw 'host replacement';"), &mut NoHost).unwrap();
-            let mut runtime = Runtime::new();
+            let mut runtime = Runtime::for_capacity_test();
             runtime.bind_browser_global(77).unwrap();
             runtime.define_global("window", Value::Host(77)).unwrap();
             runtime.execute(&format!("window.{name}=23;if({name}!==23||!delete window.{name}||typeof {name}!=='undefined'||typeof {sibling}!=='function')throw 'no resurrection';"), &mut NoHost).unwrap();
@@ -585,14 +585,14 @@ var same=/y/;if(NativeRegExp(same)!==same)throw 'intrinsic identity';
                 assert_eq!((object, method), (1, "record")); self.0 += 1; Ok(Value::Number(17.0))
             }
         }
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_capacity_test();
         let value = runtime.define_host_function("URL", 1, "record").unwrap();
         assert!(matches!(value, Value::Function(id) if matches!(runtime.functions[id], Function::Host { object: 1, method: "record", .. })));
         let mut host = Record(0);
         runtime.execute("if(URL()!==17||typeof URLSearchParams!=='function')throw 'registered identity';", &mut host).unwrap();
         assert_eq!(host.0, 1);
 
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_capacity_test();
         while runtime.functions.len() < MAX_FUNCTIONS - 2 { runtime.native_function(Builtin::IsNaN, "fixture").unwrap(); }
         let error = runtime.define_host_function("URL", 1, "record").unwrap_err();
         assert!(error.contains("Function limit"), "{error}");
@@ -604,7 +604,7 @@ var same=/y/;if(NativeRegExp(same)!==same)throw 'intrinsic identity';
         assert!(runtime.define_host_function("URL", 1, "record").unwrap_err().contains("earlier bounded initialization failure"));
         assert_eq!((runtime.functions.len(), runtime.objects.len(), runtime.bindings, runtime.job_usage()), before);
 
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_capacity_test();
         runtime.bind_browser_global(77).unwrap();
         assert!(runtime.define_global_operation("URL", 77, "record", 1).unwrap_err().contains("conflicts"));
         assert!(!runtime.functions.iter().any(|function| matches!(function, Function::Host { .. })));
@@ -613,7 +613,7 @@ var same=/y/;if(NativeRegExp(same)!==same)throw 'intrinsic identity';
 
     #[test]
     fn deferred_main_window_descriptors_convert_before_activation_and_reselect_after_callbacks() {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_capacity_test();
         runtime.bind_browser_global(77).unwrap();
         runtime.define_global("window", Value::Host(77)).unwrap();
         runtime.execute("var define=Object.defineProperty,marker=0,sentinel={};var descriptor={get value(){marker=1;throw sentinel;}};", &mut NoHost).unwrap();
@@ -621,7 +621,7 @@ var same=/y/;if(NativeRegExp(same)!==same)throw 'intrinsic identity';
         runtime.execute("try{define(window,'URL',descriptor);throw 'missing';}catch(e){if(e!==sentinel||marker!==1)throw 'conversion order';}", &mut NoHost).unwrap();
         assert_eq!(runtime.deferred_intrinsics, 7);
 
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_capacity_test();
         runtime.bind_browser_global(77).unwrap();
         runtime.define_global("window", Value::Host(77)).unwrap();
         runtime.execute("var define=Object.defineProperty;var old=URL;define(window,'URL',{get value(){delete window.URL;return 17;},writable:true,configurable:true});if(URL!==17||typeof URLSearchParams!=='function'||Object.getOwnPropertyDescriptor(window,'URL').value!==17)throw 'reselect';delete window.URL;if(Object.getOwnPropertyDescriptor(window,'URL')!==undefined||typeof URL!=='undefined')throw 'resurrection';", &mut NoHost).unwrap();
@@ -629,7 +629,7 @@ var same=/y/;if(NativeRegExp(same)!==same)throw 'intrinsic identity';
 
     #[test]
     fn deferred_main_direct_binary_calls_initialize_the_receiving_realm() {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_capacity_test();
         runtime.execute("if(!Number.isFinite(1))throw 'number';", &mut NoHost).unwrap();
         assert_eq!(runtime.deferred_intrinsics, 7);
         let realm = runtime.allocate_realm_with_deferred_families(true).unwrap();
@@ -642,7 +642,7 @@ var same=/y/;if(NativeRegExp(same)!==same)throw 'intrinsic identity';
         runtime.define_global("view", view).unwrap();
         runtime.execute("if(Object.getPrototypeOf(view)!==DataView.prototype||view.byteLength!==4)throw 'view realm';", &mut NoHost).unwrap();
 
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_capacity_test();
         let realm = runtime.allocate_realm_with_deferred_families(true).unwrap();
         let foreign = runtime.with_intrinsic_realm(Some(realm), |runtime| {
             let value = runtime.construct_binary(binary_data::Constructor::Buffer, &[Value::Number(4.0)], &mut NoHost)?;
@@ -660,7 +660,7 @@ var same=/y/;if(NativeRegExp(same)!==same)throw 'intrinsic identity';
     #[test]
     fn deferred_main_direct_text_construction_has_real_prototypes_and_binary_output() {
         for encoder in [true, false] {
-            let mut runtime = Runtime::new();
+            let mut runtime = Runtime::for_capacity_test();
             let codec = runtime.construct_text_encoding(encoder, &[], &mut NoHost).unwrap();
             assert_eq!(runtime.deferred_intrinsics, 2);
             assert_eq!(runtime.call_depth, 0);
@@ -676,7 +676,7 @@ var same=/y/;if(NativeRegExp(same)!==same)throw 'intrinsic identity';
 
     #[test]
     fn failed_deferred_family_stays_bounded_and_restores_parent() {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_capacity_test();
         let realm = runtime.allocate_realm_with_deferred_families(true).unwrap();
         while runtime.functions.len() < MAX_FUNCTIONS - 2 {
             runtime.native_function(Builtin::IsNaN, "guardFixture").unwrap();

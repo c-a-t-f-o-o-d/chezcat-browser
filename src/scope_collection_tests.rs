@@ -12,13 +12,13 @@ impl Host for NoHost {
 const SETUP: &str = "function checkpoint(){}function pressure(){var trash;for(var p=0;p<750;p++)trash=function(){return p;};}function make(n){var f=function(){return n;};return f;}";
 
 fn entry_runtime() -> Runtime {
-    let mut runtime = Runtime::new();
+    let mut runtime = Runtime::for_capacity_test();
     runtime.transient_roots.disable_function_literal_collection = true;
     runtime
 }
 
 fn fixture(free: usize, extra: &str) -> Runtime {
-    let mut runtime = Runtime::new();
+    let mut runtime = Runtime::for_capacity_test();
     runtime.execute(&format!("var keep=function(){{return 71;}},dead=function(){{return 73;}},tmp;function take(a,b){{return a();}}function tick(){{return 1;}}{extra}0;"), &mut NoHost).unwrap();
     assert!(runtime.object_assigned_closures.is_empty());
     while runtime.function_arena.occupied < MAX_FUNCTIONS - free { runtime.native_function(Builtin::IsNaN, "fixture").unwrap(); }
@@ -28,7 +28,7 @@ fn fixture(free: usize, extra: &str) -> Runtime {
 
 #[test]
 fn scope_collection_original_two_thousand_factories_preserve_state_identity_and_source() {
-    let mut runtime = Runtime::with_limits(limits::BROWSER);
+    let mut runtime = Runtime::for_capacity_test();
     runtime.execute(r#"
 function make(n){var f=function(delta){n+=delta;return n;};return f;}
 var first,previous,current;for(var i=0;i<2000;i++){

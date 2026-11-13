@@ -232,6 +232,8 @@ fn continuation_grouped_errors_keep_inner_source_position() {
 fn scratch_parser(source: &str, enclosing: usize) -> Parser {
     let tokens = tokenize(source, &mut MAX_REGEXP_WORK.clone()).unwrap();
     Parser {
+        capacity: limits::REGRESSION_CAPACITIES,
+        heap: limits::REGRESSION_HEAP,
         program: Program {
             source: source.into(), strict: false, exprs: Vec::new(), stmts: Vec::new(),
             templates: Vec::new(), patterns: Vec::new(), body: Vec::new(), chain_steps: 0,

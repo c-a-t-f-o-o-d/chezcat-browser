@@ -5,7 +5,7 @@
 
 use super::{
     number_text, property_index, strict_equal, Fault, Host, Ordinary, PropertyKey, Reference,
-    Runtime, Value, MAX_PARSE_DEPTH, MAX_STRING_BYTES,
+    Runtime, Value, MAX_PARSE_DEPTH,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -382,7 +382,7 @@ impl Runtime {
         source: &str,
         capture: bool,
     ) -> Result<(Value, Snapshots), Fault> {
-        if source.len() > MAX_STRING_BYTES {
+        if source.len() > self.limits.capacity.string_bytes {
             return Err(Fault::new("JSON source limit reached (128 KiB)."));
         }
         self.work(source.len())?;

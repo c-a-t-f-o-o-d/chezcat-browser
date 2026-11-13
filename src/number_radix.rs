@@ -1,7 +1,7 @@
 //! Original bounded binary64 -> positional radix formatter.
 //! Exact rounding intervals; no decimal parsing, float remainder or engine helper.
 //! https://tc39.es/ecma262/2025/multipage/ecmascript-data-types-and-values.html#sec-numeric-types-number-tostring
-use super::{Fault, Runtime, Value, WorkKind, MAX_STRING_BYTES};
+use super::{Fault, Runtime, Value, WorkKind};
 use std::cmp::Ordering;
 
 const LIMBS: usize = 36; // 1152 bits; intermediates are below 36 * 2^1076.
@@ -249,7 +249,7 @@ impl Runtime {
             count + 1
         };
         let length = unsigned + usize::from(value.is_sign_negative());
-        if length > MAX_TEXT || length > MAX_STRING_BYTES {
+        if length > MAX_TEXT || length > self.limits.capacity.string_bytes {
             return Err(bound());
         }
         // Charge output exactly once, before allocation. Arithmetic scratch

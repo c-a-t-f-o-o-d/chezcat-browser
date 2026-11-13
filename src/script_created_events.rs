@@ -2,6 +2,7 @@
 //! trusted dispatch slot and provide no synthetic dispatch or activation path.
 use super::*;
 
+#[cfg(test)]
 const MAX_CREATED_EVENTS: usize = 256;
 
 #[derive(Default)]
@@ -365,7 +366,7 @@ impl Bridge<'_> {
                 self.mouse_interface_argument(args.get(3), true)?;
                 self.mouse_interface_argument(args.get(14), false)?;
             }
-            if matches!(args.first(), Some(Value::String(name)) if name.len() > MAX_EVENT_TYPE_BYTES) {
+            if matches!(args.first(), Some(Value::String(name)) if name.len() > self.state.limits.host.event_type_bytes) {
                 return Err(("QuotaExceededError", "Event type exceeds 256 UTF-8 bytes.".into()));
             }
         }
@@ -375,7 +376,7 @@ impl Bridge<'_> {
     pub(super) fn create_event(&mut self, args: &[Value]) -> Result<Value, String> {
         if let Some(Value::String(name)) = args.first() { self.state.copies(name.len())?; }
         let mouse = interface(args.first()).ok_or_else(|| unsupported_event_interface(args.first()))?;
-        if self.state.created_events.len() >= MAX_CREATED_EVENTS { return Err("Constructed Event limit reached (256 per document).".into()); }
+        if self.state.created_events.len() >= self.state.limits.host.created_events { return Err("Constructed Event limit reached (256 per document).".into()); }
         let next = self.state.next_event.checked_add(1).ok_or("Event identity space exhausted.")?;
         self.state.created_events.try_reserve(1).map_err(|_| "Constructed Event storage reservation failed.")?;
         let handle = self.state.next_event;

@@ -18,7 +18,7 @@ fn compared(runtime: &Runtime, exports: bool) -> Graph {
 
 #[test]
 fn sparse_symbol_accessor_and_prototype_array_edges_survive_mark_and_collection() {
-    let mut runtime = Runtime::new();
+    let mut runtime = Runtime::for_capacity_test();
     runtime.execute(FACTORY, &mut NoHost).unwrap();
     runtime.execute("var holder=[],key=Symbol('slot');Object.defineProperty(holder,'1000',{value:candidate(11)});Object.defineProperty(holder,'read',{get:candidate(13)});holder[key]=candidate(17);var proto={fn:candidate(19)};Object.setPrototypeOf(holder,proto);proto=null;0;", &mut NoHost).unwrap();
     let ids: Vec<_> = runtime.object_assigned_closures.iter().copied().collect();
@@ -36,7 +36,7 @@ fn sparse_symbol_accessor_and_prototype_array_edges_survive_mark_and_collection(
 
 #[test]
 fn array_api_pin_remains_a_root_after_all_script_names_disappear() {
-    let mut runtime = Runtime::new();
+    let mut runtime = Runtime::for_capacity_test();
     runtime.execute(FACTORY, &mut NoHost).unwrap();
     let exported = runtime.execute("var held=array(83);held;", &mut NoHost).unwrap();
     let id = *runtime.object_assigned_closures.iter().next().unwrap();
@@ -61,7 +61,7 @@ fn array_edges_in_iterators_promises_bound_values_and_pending_arguments_remain_s
         ("var holder=new Map();holder.set(array(91),17);", "holder.keys().next().value[0]();"),
         ("var holder=Promise.all([array(91)]);", "var result=0;holder.then(function(a){result=a[0][0]();});0;"),
     ] {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_capacity_test();
         runtime.execute(FACTORY, &mut NoHost).unwrap();
         runtime.execute(&format!("{setup}0;"), &mut NoHost).unwrap();
         let id = *runtime.object_assigned_closures.iter().next().unwrap();
@@ -97,7 +97,7 @@ fn active_array_argument_roots_are_proven_without_array_seeds_or_api_pins() {
         assert!(!without.functions[candidate]);
         CHECKED.fetch_add(1, Ordering::Relaxed);
     }
-    let mut runtime = Runtime::new();
+    let mut runtime = Runtime::for_capacity_test();
     runtime.transient_roots.script_input_observer = Some(observe);
     runtime.execute(FACTORY, &mut NoHost).unwrap();
     assert_eq!(runtime.execute("function observe(a){return a[0]();}observe(array(91));", &mut NoHost).unwrap().to_number(), 91.0);
@@ -107,7 +107,7 @@ fn active_array_argument_roots_are_proven_without_array_seeds_or_api_pins() {
 
 #[test]
 fn original_discarded_array_cell_cycles_reclaim_functions_without_losing_live_state() {
-    let mut runtime = Runtime::new();
+    let mut runtime = Runtime::for_capacity_test();
     let deadline = runtime.job_deadline;
     runtime.execute("function build(n){var state=n,c={},a=[c];c.write=function(v){state=v;};c.read=function(){return state;};c.back=a;return a;}var first,previous;for(var i=0;i<2000;i++){var current=build(i);if(i===0)first=current;if(previous&&(previous===current||previous[0].write===current[0].write||previous[0].read===current[0].read))throw 'identity';current[0].write(i*2);if(current[0].read()!==i*2)throw 'state';previous=current;}if(first[0].read()!==0||current[0].read()!==3998||first[0].back!==first||current[0].back!==current)throw 'live cycles';0;", &mut NoHost).unwrap();
     assert!(runtime.function_arena.retired > 3000);
@@ -120,7 +120,7 @@ fn original_discarded_array_cell_cycles_reclaim_functions_without_losing_live_st
 }
 
 fn full_array_fixture(free: usize, extra: &str) -> Runtime {
-    let mut runtime = Runtime::new();
+    let mut runtime = Runtime::for_capacity_test();
     runtime.execute(FACTORY, &mut NoHost).unwrap();
     runtime.execute(&format!("var dead={{}};dead.fn=function(){{return 0;}};{extra}0;"), &mut NoHost).unwrap();
     while runtime.function_arena.occupied < MAX_FUNCTIONS - free { runtime.native_function(Builtin::IsNaN, "fixture").unwrap(); }
@@ -150,7 +150,7 @@ fn pending_return_and_throw_arrays_survive_collection_in_finally() {
         "function returning(){try{return array(71);}finally{pressure();}}if(returning()[0]()!==71)throw 'pending return';0;",
         "try{try{throw array(73);}finally{pressure();}}catch(e){if(e[0]()!==73)throw 'pending throw';}0;",
     ] {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_capacity_test();
         runtime.execute(FACTORY, &mut NoHost).unwrap();
         runtime.execute("function pressure(){var trash={};for(var i=0;i<750;i++)trash.fn=function(){return i;};}0;", &mut NoHost).unwrap();
         runtime.execute(source, &mut NoHost).unwrap();

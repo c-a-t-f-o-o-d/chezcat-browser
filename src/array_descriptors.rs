@@ -4,7 +4,7 @@
 //! https://tc39.es/ecma262/#sec-array-exotic-objects-defineownproperty-p-desc
 //! https://tc39.es/ecma262/#sec-arraysetlength
 
-use super::{int32, property_index, Fault, Host, Runtime, Value, MAX_PROPERTY_BYTES};
+use super::{int32, property_index, Fault, Host, Runtime, Value};
 
 impl Runtime {
     pub(super) fn array_length_value(
@@ -50,7 +50,7 @@ impl Runtime {
             // Deletion invokes no user callbacks in this object model. Keep
             // the old length until completion so a work-limit interruption
             // cannot leave a stored index beyond the array's logical length.
-            self.work_as(object.properties.len().saturating_mul(MAX_PROPERTY_BYTES), super::WorkKind::PropertyEnumeration)?;
+            self.work_as(object.properties.len().saturating_mul(self.limits.capacity.property_bytes), super::WorkKind::PropertyEnumeration)?;
             let mut keys = self.objects[id]
                 .properties
                 .iter()

@@ -21,11 +21,11 @@ fn heap_profile_defaults_and_resets_are_explicit() {
     assert_eq!(runtime.limits.heap, limits::BROWSER_HEAP);
     assert_eq!(Runtime::default().limits.heap, limits::BROWSER_HEAP);
     assert_eq!(Runtime::for_test().limits.heap, limits::REGRESSION_HEAP);
-    assert_eq!(limits::BROWSER_HEAP.object_properties, 262_144);
-    assert_eq!(limits::BROWSER_HEAP.properties, 1_048_576);
-    assert_eq!(limits::BROWSER_HEAP.objects, 65_536);
-    assert_eq!(limits::BROWSER_HEAP.array_length, 1_048_576);
-    assert_eq!(limits::BROWSER_HEAP.retained_values, 64 * 1024 * 1024);
+    assert_eq!(limits::BROWSER_HEAP.object_properties, 1_048_576);
+    assert_eq!(limits::BROWSER_HEAP.properties, 16_777_216);
+    assert_eq!(limits::BROWSER_HEAP.objects, 1_048_576);
+    assert_eq!(limits::BROWSER_HEAP.array_length, 16_777_216);
+    assert_eq!(limits::BROWSER_HEAP.retained_values, 512 * 1024 * 1024);
     let counts = (runtime.objects.len(), runtime.properties, runtime.value_bytes);
     assert!(counts.0 < 4096 && counts.1 < 4096 && counts.2 < 2 * 1024 * 1024);
     runtime.constrain_job(1, 1, 1, Instant::now() + Duration::from_secs(1));
@@ -80,7 +80,7 @@ fn heap_string_and_symbol_properties_share_atomic_capacity_and_redaction() {
     let before = (runtime.properties, runtime.value_bytes, runtime.objects[id].next_order);
     let error = runtime.set_property(id, "rejected-private-name".into(), Value::Number(4.0)).unwrap_err();
     assert!(error.exception.is_none());
-    assert!(error.message.contains("3 per object / 1048576 per document"));
+    assert!(error.message.contains("3 per object / 16777216 per document"));
     assert!(error.message.contains("Target properties: 2 string, 1 symbol"));
     for secret in ["private-name", "private-value", "private-description"] {
         assert!(!error.message.contains(secret));
@@ -124,7 +124,7 @@ fn heap_sparse_maximum_does_not_allocate_holes_and_overflow_is_atomic() {
     runtime.set_property(id, (cap - 1).to_string(), Value::Number(7.0)).unwrap();
     assert_eq!(runtime.objects[id].properties.len(), 1);
     let retained = runtime.value_bytes;
-    assert!(runtime.set_property(id, cap.to_string(), Value::Number(8.0)).unwrap_err().message.contains("1048576"));
+    assert!(runtime.set_property(id, cap.to_string(), Value::Number(8.0)).unwrap_err().message.contains(&cap.to_string()));
     assert_eq!(runtime.objects[id].length, Some(cap));
     assert_eq!(runtime.value_bytes, retained);
     assert!(runtime.apply_array_length(id, Some(cap + 1), None, true).is_err());

@@ -465,6 +465,7 @@ impl App {
     }
     fn load_options(&self) -> loader::LoadOptions {
         loader::LoadOptions {
+            script_capacity: crate::javascript::limits::BROWSER_CAPACITIES,
             javascript: self.scripts_enabled,
             images: self.images_enabled,
             blocking: std::sync::Arc::new(crate::blocking::Policy::new(

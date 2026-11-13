@@ -9,7 +9,7 @@ impl Host for NoHost {
 }
 
 fn fixture(free: usize, extra: &str) -> Runtime {
-    let mut runtime = Runtime::new();
+    let mut runtime = Runtime::for_capacity_test();
     runtime.execute(&format!("var box={{}},tmp;box.keep=function(){{return 71;}};box.dead=function(){{return 73;}};function take(a,b){{return a();}}function tick(){{return 1;}}{extra}0;"), &mut NoHost).unwrap();
     while runtime.function_arena.occupied < MAX_FUNCTIONS - free { runtime.native_function(Builtin::IsNaN, "fixture").unwrap(); }
     runtime.function_arena.next_collection_at = runtime.function_arena.allocations + 10_000;

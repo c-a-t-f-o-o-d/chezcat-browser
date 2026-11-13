@@ -2,7 +2,6 @@
 //! placeholder is exposed through JavaScript Value, descriptors or reflection.
 use super::*;
 
-const MAX_DEFERRED_NATIVE_METHODS: usize = MAX_FUNCTIONS;
 
 #[derive(Clone, Copy)]
 enum State { Pending, Ready(usize), Failed }
@@ -16,7 +15,7 @@ pub(super) struct NativeMethod {
 
 impl Runtime {
     pub(super) fn deferred_native_method(&mut self, owner: usize, name: &str, builtin: Builtin) -> Result<(), Fault> {
-        if self.deferred_native_methods.len() >= MAX_DEFERRED_NATIVE_METHODS {
+        if self.deferred_native_methods.len() >= self.limits.capacity.functions {
             return Err(Fault::new("Deferred native method metadata limit reached (1024)."));
         }
         let bytes = std::mem::size_of::<NativeMethod>().saturating_add(name.len());
@@ -76,7 +75,7 @@ mod tests {
 
     #[test]
     fn first_method_observation_creates_one_stable_data_value() {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_capacity_test();
         println!("Demand-driven baseline: {} callable identities; {} bounded native method records.", runtime.functions.len(), runtime.deferred_native_methods.len());
         runtime.execute("var inspect=Object.getOwnPropertyDescriptor;var p=Array.prototype;", &mut NoHost).unwrap();
         let functions = runtime.functions.len();
@@ -86,7 +85,7 @@ mod tests {
 
     #[test]
     fn names_presence_freeze_and_flag_updates_do_not_create_callables() {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_capacity_test();
         runtime.execute("var names=Object.getOwnPropertyNames,freeze=Object.freeze,inspect=Object.getOwnPropertyDescriptor,define=Object.defineProperty;var p=Array.prototype;", &mut NoHost).unwrap();
         let functions = runtime.functions.len();
         runtime.execute("if(!('map' in p)||names(p).indexOf('map')<0)throw 'method presence';define(p,'map',{writable:false});freeze(p);", &mut NoHost).unwrap();
@@ -99,7 +98,7 @@ mod tests {
 
     #[test]
     fn replacement_and_deletion_before_observation_do_not_resurrect_methods() {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_capacity_test();
         runtime.execute("var inspect=Object.getOwnPropertyDescriptor,define=Object.defineProperty;var p=Array.prototype;", &mut NoHost).unwrap();
         let functions = runtime.functions.len();
         runtime.execute("p.flat=17;if(p.flat!==17)throw 'replacement';delete p.flat;if(p.flat!==undefined||inspect(p,'flat')!==undefined)throw 'resurrection';define(p,'map',{get:undefined,configurable:true});if(p.map!==undefined)throw 'accessor replacement';", &mut NoHost).unwrap();
@@ -109,14 +108,14 @@ mod tests {
     #[test]
     fn aliases_preserve_identity_and_first_read_under_one_mib_is_bounded() {
         std::thread::Builder::new().stack_size(1024 * 1024).spawn(|| {
-            let mut runtime = Runtime::new();
+            let mut runtime = Runtime::for_capacity_test();
             runtime.execute("if(Array.prototype.values!==Array.prototype[Symbol.iterator]||Set.prototype.keys!==Set.prototype.values||Date.prototype.toGMTString!==Date.prototype.toUTCString)throw 'native alias';function nested(n){if(n>0)return nested(n-1);return String.prototype.trim;}var a=nested(8);if(a!==String.prototype.trim||a.call(' x ')!=='x')throw 'late method';", &mut NoHost).unwrap();
         }).unwrap().join().unwrap();
     }
 
     #[test]
     fn failed_method_realization_never_exposes_a_placeholder_or_retries_allocation() {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_capacity_test();
         while runtime.functions.len() < MAX_FUNCTIONS { runtime.native_function(Builtin::IsNaN, "fixture").unwrap(); }
         let before = (runtime.functions.len(), runtime.objects.len(), runtime.value_bytes, runtime.job_deadline);
         let error = runtime.execute("Array.prototype.map;", &mut NoHost).unwrap_err();
@@ -136,7 +135,7 @@ mod tests {
 
     #[test]
     fn frozen_method_rejects_an_unrelated_value_without_needing_a_callable_slot() {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_capacity_test();
         runtime.execute("var freeze=Object.freeze,define=Object.defineProperty;freeze(Array.prototype);", &mut NoHost).unwrap();
         while runtime.functions.len() < MAX_FUNCTIONS { runtime.native_function(Builtin::IsNaN, "fixture").unwrap(); }
         let functions = runtime.functions.len();
@@ -146,7 +145,7 @@ mod tests {
 
     #[test]
     fn observing_all_pending_methods_once_matches_the_eager_surface_without_repeated_allocations() {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_capacity_test();
         let before = runtime.functions.len();
         let pending: Vec<_> = runtime.objects.iter().enumerate().flat_map(|(owner, object)| {
             object.properties.iter().filter_map(move |(name, property)| matches!(property.value, StoredValue::DeferredNative(_)).then(|| (owner, name.clone())))
@@ -167,7 +166,7 @@ mod tests {
 
     #[test]
     fn original_sparse_method_workload_allocates_only_observed_identities() {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_capacity_test();
         let owner = runtime.new_object(None).unwrap();
         let before = runtime.functions.len();
         let retained = runtime.value_bytes;

@@ -7,8 +7,7 @@
 
 use super::optional_chaining::{CallTarget, Completion, Step};
 use super::{
-    Argument, ExprId, ExprKind, Fault, Host, Program, PropertyKey, Reference, Runtime, Value,
-    MAX_ARGUMENTS, MAX_EVALUATION_ARGUMENT_SLOTS, MAX_EVALUATION_FRAMES,
+    Argument, ExprId, ExprKind, Fault, Host, Program, PropertyKey, Reference, Runtime, Value, MAX_EVALUATION_FRAMES,
     MAX_EVALUATION_FRAME_SLOTS,
 };
 use std::rc::Rc;
@@ -28,7 +27,7 @@ mod root_tests {
 
     #[test]
     fn suspended_heap_snapshot_contains_receivers_operands_references_and_outer_arguments() {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_capacity_test();
         let objects: Vec<_> = (0..12).map(|_| runtime.new_object(None).unwrap()).collect();
         let functions: Vec<_> = (0..4).map(|_| {
             let Value::Function(id) = runtime.native_function(super::super::Builtin::IsNaN, "rootFixture").unwrap() else { unreachable!() }; id
@@ -74,7 +73,7 @@ mod root_tests {
             ("Function('return 1;');", Some("Content Security Policy")),
             ("for(var i=0;i<1100;i++)(function(){})();", Some("Function limit reached (1024)")),
         ] {
-            let mut runtime = Runtime::new();
+            let mut runtime = Runtime::for_capacity_test();
             let result = runtime.execute(source, &mut NoHost);
             if let Some(expected) = expected_error { assert!(result.unwrap_err().contains(expected), "{source}"); } else { result.unwrap(); }
             assert!(runtime.transient_registration_is_empty(), "{source}");
@@ -788,8 +787,9 @@ impl Runtime {
     }
 
     fn push_heap_argument(&mut self, scratch: &mut Scratch<'_>, value: Value) -> Result<(), Fault> {
+        let limit = self.argument_scratch_limit()?;
         reserve(&mut scratch.arguments, &mut self.evaluation_argument_slots,
-                MAX_EVALUATION_ARGUMENT_SLOTS)?;
+                limit)?;
         scratch.arguments.push(value);
         Ok(())
     }
@@ -800,8 +800,8 @@ impl Runtime {
     ) -> Result<(), Fault> {
         let mut iterator = self.spread_iterator(value, host)?;
         while let Some(value) = self.iterator_next(&mut iterator, host)? {
-            if scratch.arguments.len() - start == MAX_ARGUMENTS {
-                return Err(Fault::new("Call argument limit reached (256)."));
+            if scratch.arguments.len() - start == self.limits.capacity.arguments {
+                return Err(Fault::new(format!("Call argument limit reached ({}).", self.limits.capacity.arguments)));
             }
             self.push_heap_argument(scratch, value)?;
         }
@@ -814,8 +814,8 @@ impl Runtime {
         _this: &Value, _host: &mut dyn Host,
     ) -> Result<Transition<'p>, Fault> {
         if let Some(argument) = call.arguments.get(call.index) {
-            if !argument.spread && scratch.arguments.len() - call.start == MAX_ARGUMENTS {
-                return Err(Fault::new("Call argument limit reached (256)."));
+            if !argument.spread && scratch.arguments.len() - call.start == self.limits.capacity.arguments {
+                return Err(Fault::new(format!("Call argument limit reached ({}).", self.limits.capacity.arguments)));
             }
             return Ok(Transition::Child(Request::Value(argument.expression), State::Argument(call)));
         }

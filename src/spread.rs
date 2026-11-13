@@ -8,8 +8,6 @@ use super::{iterator_protocol, Argument, Fault, Host, Program, Runtime, Value};
 #[cfg(test)]
 use super::MAX_ARRAY_LENGTH;
 use std::rc::Rc;
-#[cfg(test)]
-use super::MAX_ARGUMENTS;
 
 impl Runtime {
     pub(super) fn spread_iterator(
@@ -32,10 +30,10 @@ impl Runtime {
         this: &Value,
         host: &mut dyn Host,
     ) -> Result<Vec<Value>, Fault> {
-        let mut values = Vec::with_capacity(arguments.len().min(MAX_ARGUMENTS));
+        let mut values = Vec::with_capacity(arguments.len().min(self.limits.capacity.arguments));
         for argument in arguments {
-            if !argument.spread && values.len() == MAX_ARGUMENTS {
-                return Err(Fault::new("Call argument limit reached (256)."));
+            if !argument.spread && values.len() == self.limits.capacity.arguments {
+                return Err(Fault::new(format!("Call argument limit reached ({}).", self.limits.capacity.arguments)));
             }
             let value = self.eval(program, argument.expression, env, this, host)?;
             if argument.spread {
@@ -61,8 +59,8 @@ impl Runtime {
         while let Some(value) = self.iterator_next(&mut iterator, host)? {
             // Read terminal done at the boundary: an empty later spread
             // does not add an argument. A yielded excess value is fatal.
-            if values.len() == MAX_ARGUMENTS {
-                return Err(Fault::new("Call argument limit reached (256)."));
+            if values.len() == self.limits.capacity.arguments {
+                return Err(Fault::new(format!("Call argument limit reached ({}).", self.limits.capacity.arguments)));
             }
             values.push(value);
         }

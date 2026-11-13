@@ -2,9 +2,11 @@
 //! https://tc39.es/ecma262/#sec-template-literal-lexical-components
 //! https://tc39.es/ecma262/#sec-template-literals-runtime-semantics-evaluation
 
+#[cfg(test)]
+use super::MAX_STRING_BYTES;
 use super::{
     primitive_conversion::Hint, ExprId, ExprKind, Fault, Host, Parser, Program, Runtime, TokenKind,
-    Value, MAX_EXPRESSION_FRAMES, MAX_STRING_BYTES,
+    Value, MAX_EXPRESSION_FRAMES,
 };
 use std::rc::Rc;
 
@@ -19,7 +21,7 @@ pub(super) enum Part {
 // Cooked text is represented in the runtime's existing UTF-8 string model.
 // Pair adjacent escaped UTF-16 units within a chunk; lone units remain an
 // explicit capability boundary, including at an interpolation boundary.
-fn push_cooked(text: &mut String, high: &mut Option<u32>, value: u32) -> Result<(), Fault> {
+fn push_cooked(text: &mut String, high: &mut Option<u32>, value: u32, string_limit: usize) -> Result<(), Fault> {
     let scalar = if let Some(first) = high.take() {
         if !(0xdc00..=0xdfff).contains(&value) {
             return Err(Fault::new(
@@ -35,8 +37,8 @@ fn push_cooked(text: &mut String, high: &mut Option<u32>, value: u32) -> Result<
     };
     let ch = char::from_u32(scalar)
         .ok_or_else(|| Fault::new("Lone UTF-16 surrogate escapes are not supported."))?;
-    if text.len().saturating_add(ch.len_utf8()) > MAX_STRING_BYTES {
-        return Err(Fault::new("String limit reached (128 KiB)."));
+    if text.len().saturating_add(ch.len_utf8()) > string_limit {
+        return Err(Fault::new(format!("String limit reached ({} KiB).", string_limit / 1024)));
     }
     text.push(ch);
     Ok(())
@@ -71,7 +73,7 @@ fn braced_unicode(source: &str, at: &mut usize) -> Result<u32, Fault> {
 
 /// Scan exactly one chunk, after the opening backtick or closing substitution
 /// brace. The boolean says whether a backtick (rather than ${) ended it.
-pub(super) fn chunk(source: &str, at: &mut usize, start: usize) -> Result<(String, bool), Fault> {
+pub(super) fn chunk(source: &str, at: &mut usize, start: usize, string_limit: usize) -> Result<(String, bool), Fault> {
     let bytes = source.as_bytes();
     let mut text = String::new();
     let mut high = None;
@@ -127,7 +129,7 @@ pub(super) fn chunk(source: &str, at: &mut usize, start: usize) -> Result<(Strin
         } else {
             ch as u32
         };
-        push_cooked(&mut text, &mut high, value).map_err(|error| error.at(source, position))?;
+        push_cooked(&mut text, &mut high, value, string_limit).map_err(|error| error.at(source, position))?;
     }
     Err(Fault::exception("SyntaxError", "Unterminated template literal.").at(source, start))
 }

@@ -6,8 +6,7 @@
 
 use super::{
     ExprId, ExprKind, Fault, Host, Ordinary, Parser, Program, PropertyKey, Reference, Runtime,
-    TokenKind, Value, MAX_ARRAY_LENGTH, MAX_EVAL_DEPTH, MAX_OBJECT_PROPERTIES,
-    MAX_PROPERTY_BYTES,
+    TokenKind, Value, MAX_EVAL_DEPTH,
 };
 use std::collections::HashSet;
 use std::rc::Rc;
@@ -175,7 +174,7 @@ impl Parser {
             let mut rest = None;
             let mut expressions = false;
             while !self.is("]") {
-                if elements.len() == MAX_ARRAY_LENGTH {
+                if elements.len() == self.heap.array_length {
                     return Err(self.unsupported("Array pattern limit reached (8192 elements)."));
                 }
                 if self.eat(",") {
@@ -207,7 +206,7 @@ impl Parser {
             let mut rest = None;
             let mut expressions = false;
             while !self.is("}") {
-                if properties.len() == MAX_OBJECT_PROPERTIES {
+                if properties.len() == self.heap.object_properties {
                     return Err(self.unsupported("Object pattern limit reached (4096 properties)."));
                 }
                 if self.eat("...") {
@@ -240,7 +239,7 @@ impl Parser {
                         TokenKind::Number(n) => (super::number_text(n), None),
                         _ => return Err(self.error("Expected an object pattern property name.")),
                     };
-                    if name.len() > MAX_PROPERTY_BYTES {
+                    if name.len() > self.capacity.property_bytes {
                         return Err(self.unsupported("Property-name limit reached (256 bytes)."));
                     }
                     self.current += 1;

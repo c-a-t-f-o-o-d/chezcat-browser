@@ -16,6 +16,8 @@ pub type Wake = Arc<dyn Fn() + Send + Sync>;
 /// User-controlled capabilities captured once for each document load.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LoadOptions {
+    /// Host-selected script policy; page content cannot change it.
+    pub script_capacity: crate::javascript::limits::Capacities,
     pub javascript: bool,
     pub images: bool,
     pub blocking: Arc<crate::blocking::Policy>,
@@ -35,6 +37,7 @@ pub struct LoadOptions {
 impl Default for LoadOptions {
     fn default() -> Self {
         Self {
+            script_capacity: crate::javascript::limits::BROWSER_CAPACITIES,
             javascript: true,
             images: true,
             blocking: Arc::new(crate::blocking::Policy::default()),
@@ -49,11 +52,10 @@ impl Default for LoadOptions {
     }
 }
 
-pub(crate) const MAX_SCRIPTS: usize = 128;
+pub(crate) const MAX_SCRIPTS: usize = crate::javascript::limits::BROWSER_CAPACITIES.programs;
 pub(crate) const MAX_STYLESHEETS: usize = 256;
-const MAX_RESOURCE_ATTEMPTS: usize = 512;
-pub(crate) const MAX_SCRIPT_BYTES: usize = crate::javascript::MAX_SOURCE_BYTES;
-pub(crate) const MAX_SCRIPT_TOTAL: usize = 2 * 1024 * 1024;
+const MAX_RESOURCE_ATTEMPTS: usize = 8192;
+pub(crate) const MAX_SCRIPT_BYTES: usize = crate::javascript::limits::BROWSER_CAPACITIES.source_bytes;
 // Decoded-image counts stay independent from CSS/script request capacities.
 const MAX_UNIQUE_IMAGES: usize = 64;
 const MAX_DECODED_IMAGE_BYTES: usize = 64 * 1024 * 1024;
@@ -867,7 +869,7 @@ fn load_request_progressively(
         ));
         image_plan.clear();
     }
-    load_critical_resources(&mut loaded, &mut stats, cancel, progress, &pool, mode)?;
+    load_critical_resources(&mut loaded, &mut stats, cancel, progress, &pool, mode, options.script_capacity)?;
     check_cancel(cancel)?;
     loaded.events.push(format!(
         "DISPLAY READY: {} ms after document request; CSS, fonts and classic script sources ready; images load afterward.",
@@ -952,7 +954,7 @@ impl LoadStats {
         Ok(())
     }
     fn remaining_bytes(&self) -> usize {
-        (32 * 1024 * 1024usize).saturating_sub(self.network_bytes)
+        (256 * 1024 * 1024usize).saturating_sub(self.network_bytes)
     }
     fn record(
         &mut self,
@@ -986,6 +988,7 @@ fn load_critical_resources(
     progress: &dyn Fn(String),
     pool: &http::Pool<'_>,
     mode: http::FetchMode,
+    capacity: crate::javascript::limits::Capacities,
 ) -> Result<(), String> {
     let inert = inert_nodes(&loaded.document, loaded.scripting_blocked.is_none());
     let script_inert = inert_nodes(&loaded.document, true);
@@ -1038,19 +1041,19 @@ fn load_critical_resources(
                     return Err(reason.clone());
                 }
                 check_script(&loaded.document, node)?;
-                if loaded.scripts.len() >= MAX_SCRIPTS {
-                    return Err(format!("Script count limit reached ({MAX_SCRIPTS})."));
+                if loaded.scripts.len() >= capacity.programs {
+                    return Err(format!("Script count limit reached ({}).", capacity.programs));
                 }
-                if script_bytes >= MAX_SCRIPT_TOTAL {
-                    return Err("Script source budget is full (2 MiB).".to_owned());
+                if script_bytes >= capacity.retained_source {
+                    return Err(format!("Script source budget is full ({} MiB).", capacity.retained_source / (1024 * 1024)));
                 }
                 if reference.is_none() {
                     stats.begin_attempt(loaded.location.url.is_some())?;
-                    let source = script_text(&loaded.document, node)?;
+                    let source = script_text(&loaded.document, node, capacity)?;
                     loaded
                         .csp
                         .allows_inline(node, csp::nonce(&loaded.document, node), &source)?;
-                    check_script_size(source.len(), script_bytes)?;
+                    check_script_size(source.len(), script_bytes, capacity)?;
                     script_bytes += source.len();
                     loaded.scripts.push(Script {
                         node,
@@ -1155,13 +1158,13 @@ fn load_critical_resources(
                 }
                 let remaining = stats.remaining_bytes();
                 if remaining == 0 {
-                    return Err("Page resource download budget is full (32 MiB).".to_owned());
+                    return Err("Page resource download budget is full (256 MiB).".to_owned());
                 }
                 progress(format!("Loading {kind} {label}"));
                 let limit = if kind == "CSS" {
                     128 * 1024
                 } else {
-                    MAX_SCRIPT_BYTES
+                    capacity.source_bytes
                 };
                 trace_attempted = true;
                 let guard = |target: &crate::url::HttpUrl| {
@@ -1233,7 +1236,7 @@ fn load_critical_resources(
                 let limit = if kind == "CSS" {
                     128 * 1024
                 } else {
-                    MAX_SCRIPT_BYTES
+                    capacity.source_bytes
                 };
                 (
                     navigation::read_limited(path, limit)?,
@@ -1253,7 +1256,7 @@ fn load_critical_resources(
                 style_bases.insert(node, resolved_location);
                 Ok(format!("loaded {resolved_name}"))
             } else {
-                check_script_size(source.len(), script_bytes)?;
+                check_script_size(source.len(), script_bytes, capacity)?;
                 script_bytes += source.len();
                 loaded.scripts.push(Script {
                     node,
@@ -1502,7 +1505,7 @@ fn load_fonts(
                                     let remaining = stats.remaining_bytes();
                                     if remaining == 0 {
                                         return Err(
-                                            "Page resource download budget is full (32 MiB)."
+                                            "Page resource download budget is full (256 MiB)."
                                                 .into(),
                                         );
                                     }
@@ -1793,7 +1796,7 @@ fn load_images(
                 }
                 let remaining = stats.remaining_bytes();
                 if remaining == 0 && !has_prefetched {
-                    return Err("Page resource download budget is full (32 MiB).".to_owned());
+                    return Err("Page resource download budget is full (256 MiB).".to_owned());
                 }
                 progress(format!("Loading IMAGE {label}"));
                 trace_attempted = true;
@@ -2104,13 +2107,13 @@ fn check_script(doc: &Document, node: usize) -> Result<(), String> {
     Ok(())
 }
 
-fn script_text(doc: &Document, node: usize) -> Result<String, String> {
+fn script_text(doc: &Document, node: usize, capacity: crate::javascript::limits::Capacities) -> Result<String, String> {
     let mut source = String::new();
     for &child in &doc.nodes[node].children {
         if let NodeKind::Text(text) = &doc.nodes[child].kind {
-            check_script_size(text.len(), source.len())?;
-            if source.len() + text.len() > MAX_SCRIPT_BYTES {
-                return Err("A script source exceeds the 512 KiB limit.".to_owned());
+            check_script_size(text.len(), source.len(), capacity)?;
+            if text.len() > capacity.source_bytes.saturating_sub(source.len()) {
+                return Err(format!("A script source exceeds the {} KiB limit.", capacity.source_bytes / 1024));
             }
             source.push_str(text);
         }
@@ -2118,12 +2121,12 @@ fn script_text(doc: &Document, node: usize) -> Result<String, String> {
     Ok(source)
 }
 
-fn check_script_size(bytes: usize, total: usize) -> Result<(), String> {
-    if bytes > MAX_SCRIPT_BYTES {
-        return Err("A script source exceeds the 512 KiB limit.".to_owned());
+fn check_script_size(bytes: usize, total: usize, capacity: crate::javascript::limits::Capacities) -> Result<(), String> {
+    if bytes > capacity.source_bytes {
+        return Err(format!("A script source exceeds the {} KiB limit.", capacity.source_bytes / 1024));
     }
-    if bytes > MAX_SCRIPT_TOTAL.saturating_sub(total) {
-        return Err("Script source budget exceeded (2 MiB).".to_owned());
+    if bytes > capacity.retained_source.saturating_sub(total) {
+        return Err(format!("Script source budget exceeded ({} MiB).", capacity.retained_source / (1024 * 1024)));
     }
     Ok(())
 }
@@ -2643,13 +2646,29 @@ mod tests {
     }
 
     #[test]
+    fn browser_script_loading_crosses_old_count_and_source_limits() {
+        let folder = Folder::new();
+        let source = format!("/*{}*/42;", "x".repeat(513 * 1024));
+        folder.file("large.js", &source);
+        let page = folder.page(&format!("<script src=large.js></script>{}", "<script>1;</script>".repeat(140)));
+        let loaded = local(&page).unwrap();
+        assert_eq!(loaded.scripts.len(), 141);
+        assert_eq!(loaded.scripts[0].source, source);
+        assert_eq!(loaded.skipped, 0, "{:?}", loaded.events);
+    }
+
+    #[test]
     fn script_source_count_and_byte_budgets_are_independent() {
         let folder = Folder::new();
-        let page = folder.page(&"<script>1;</script>".repeat(MAX_SCRIPTS + 1));
+        let capacity = crate::javascript::limits::REGRESSION_CAPACITIES;
+        let local = |location: &Location| local_with_options(location, LoadOptions {
+            script_capacity: capacity, ..LoadOptions::default()
+        });
+        let page = folder.page(&"<script>1;</script>".repeat(capacity.programs + 1));
         let loaded = local(&page).unwrap();
-        assert_eq!(loaded.scripts.len(), MAX_SCRIPTS);
+        assert_eq!(loaded.scripts.len(), capacity.programs);
         assert_eq!(loaded.skipped, 1);
-        let large = "x".repeat(MAX_SCRIPT_BYTES);
+        let large = "x".repeat(capacity.source_bytes);
         let page = folder.page(&format!("<script>{large}x</script><script>1;</script>"));
         let loaded = local(&page).unwrap();
         assert_eq!(loaded.scripts.len(), 1);
@@ -2660,7 +2679,7 @@ mod tests {
         assert_eq!(loaded.scripts.len(), 4);
         assert_eq!(
             loaded.scripts.iter().map(|s| s.source.len()).sum::<usize>(),
-            MAX_SCRIPT_TOTAL
+            capacity.retained_source
         );
         assert!(loaded.events.iter().any(|e| e.contains("2 MiB")));
     }
@@ -3638,13 +3657,13 @@ mod tests {
     fn resource_attempts_have_a_finite_shared_boundary() {
         let mut stats = LoadStats::new(Instant::now());
         for _ in 0..MAX_RESOURCE_ATTEMPTS { stats.begin_attempt(false).unwrap(); }
-        assert!(stats.begin_attempt(false).unwrap_err().contains("512"));
+        assert!(stats.begin_attempt(false).unwrap_err().contains(&MAX_RESOURCE_ATTEMPTS.to_string()));
         assert_eq!(stats.attempts, MAX_RESOURCE_ATTEMPTS);
         // Time and bytes are independent; higher counts do not disable either.
         stats.attempts = 0;
         stats.started = Instant::now() - Duration::from_secs(46);
         assert!(stats.begin_attempt(true).unwrap_err().contains("45 seconds"));
-        stats.network_bytes = 32 * 1024 * 1024;
+        stats.network_bytes = 256 * 1024 * 1024;
         assert_eq!(stats.remaining_bytes(), 0);
     }
 

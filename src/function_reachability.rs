@@ -131,9 +131,9 @@ impl Runtime {
         if self.function_arena.disable_collection { return Ok(()); }
         let include_scope = self.scope_retirement_enabled();
         if self.object_assigned_closures.is_empty() && (!include_scope || self.scope_assigned_closures.is_empty())
-            || self.function_arena.occupied < MAX_FUNCTIONS * 3 / 4
+            || self.function_arena.occupied < self.limits.capacity.functions * 3 / 4
             || self.function_arena.allocations < self.function_arena.next_collection_at
-                && !(allocation_demand && self.function_arena.occupied == MAX_FUNCTIONS)
+                && !(allocation_demand && self.function_arena.occupied == self.limits.capacity.functions)
             || !self.active_roots_are_audited() {
             return Ok(());
         }

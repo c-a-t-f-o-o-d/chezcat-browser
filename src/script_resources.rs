@@ -5,11 +5,6 @@
 use super::*;
 use std::collections::VecDeque;
 
-use crate::loader::{
-    MAX_SCRIPTS as MAX_PAGE_SCRIPTS, MAX_SCRIPT_BYTES as MAX_SOURCE_BYTES,
-    MAX_SCRIPT_TOTAL as MAX_PAGE_SCRIPT_BYTES,
-};
-
 #[derive(Clone, Debug)]
 pub struct DynamicScript {
     pub node: usize,
@@ -65,13 +60,13 @@ impl Page {
         self.state.dynamic.in_flight = self.state.dynamic.in_flight.saturating_sub(1);
         let event = match result {
             Ok(script) => {
-                if script.source.len() > MAX_SOURCE_BYTES
+                if script.source.len() > self.state.limits.capacity.source_bytes
                     || script.source.len()
-                        > MAX_PAGE_SCRIPT_BYTES.saturating_sub(self.state.dynamic.source_bytes)
+                        > self.state.limits.capacity.retained_source.saturating_sub(self.state.dynamic.source_bytes)
                 {
                     self.state.error(
                         "Dynamic script",
-                        "Script source exceeds the 512 KiB per-script or 2 MiB document budget.",
+                        &format!("Script source exceeds the {} KiB per-script or {} MiB document budget.", self.state.limits.capacity.source_bytes / 1024, self.state.limits.capacity.retained_source / (1024 * 1024)),
                     );
                     "error"
                 } else {
@@ -142,10 +137,10 @@ impl Bridge<'_> {
             return Ok(()); // An empty script can acquire src/text later.
         }
         self.state.dynamic.started.insert(node);
-        if self.state.dynamic.script_count >= MAX_PAGE_SCRIPTS {
+        if self.state.dynamic.script_count >= self.state.limits.capacity.programs {
             self.state.error(
                 "Dynamic script",
-                &format!("Document script attempt limit reached ({MAX_PAGE_SCRIPTS} including parser-loaded scripts)."),
+                &format!("Document script attempt limit reached ({} including parser-loaded scripts).", self.state.limits.capacity.programs),
             );
             return Ok(());
         }

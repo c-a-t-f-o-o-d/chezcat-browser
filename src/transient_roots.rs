@@ -1,8 +1,11 @@
 //! ID-only registrations for suspended interpreter state and audited call entries.
-use super::{Control, Exception, Fault, Runtime, Value, MAX_ARGUMENTS, MAX_CALL_DEPTH, MAX_EVAL_DEPTH,
+#[cfg(test)]
+use super::MAX_ARGUMENTS;
+use super::{Control, Exception, Fault, Runtime, Value, MAX_CALL_DEPTH, MAX_EVAL_DEPTH,
     MAX_EVALUATION_ARGUMENT_SLOTS, MAX_EVALUATION_FRAME_SLOTS};
 use super::function_reachability::Edge;
 
+#[cfg(test)]
 const MAX_ROOT_REFERENCES: usize = 4 * MAX_EVALUATION_FRAME_SLOTS
     + MAX_EVALUATION_ARGUMENT_SLOTS + MAX_CALL_DEPTH * (MAX_ARGUMENTS + 4)
     + 4 * MAX_EVAL_DEPTH;
@@ -52,6 +55,21 @@ pub(super) struct Marker {
 pub(super) struct RootMarker(usize);
 
 impl Runtime {
+    pub(super) fn argument_scratch_limit(&self) -> Result<usize, Fault> {
+        self.limits.capacity.arguments.checked_mul(MAX_CALL_DEPTH + 1)
+            .map(|limit| limit.max(MAX_EVALUATION_ARGUMENT_SLOTS))
+            .ok_or_else(|| Fault::new("Argument scratch policy arithmetic overflow."))
+    }
+
+    fn root_reference_limit(&self) -> Result<usize, Fault> {
+        let arguments = self.limits.capacity.arguments.checked_add(4)
+            .and_then(|n| n.checked_mul(MAX_CALL_DEPTH))
+            .ok_or_else(|| Fault::new("Transient root policy arithmetic overflow."))?;
+        self.argument_scratch_limit()?.checked_add(arguments)
+            .and_then(|n| n.checked_add(4 * MAX_EVALUATION_FRAME_SLOTS + 4 * MAX_EVAL_DEPTH))
+            .ok_or_else(|| Fault::new("Transient root policy arithmetic overflow."))
+    }
+
     pub(super) fn inhibition_diagnostic(&self) -> String {
         let native = self.transient_roots.outer_native.and_then(|id| {
             if !matches!(self.functions.get(id), Some(super::Function::Native(_))) { return None; }
@@ -161,7 +179,7 @@ impl Runtime {
         let result = (|| {
             self.push_transient_value(function)?;
             self.push_transient_value(this)?;
-            if args.len() <= MAX_ARGUMENTS {
+            if args.len() <= self.limits.capacity.arguments {
                 for value in args { self.push_transient_value(value)?; }
             } else {
                 // Preserve the original dispatch's argument-limit validation.
@@ -176,10 +194,11 @@ impl Runtime {
     }
 
     pub(super) fn push_transient_root(&mut self, edge: Edge) -> Result<(), Fault> {
+        let limit = self.root_reference_limit()?;
         let roots = &mut self.transient_roots.roots;
-        if roots.len() >= MAX_ROOT_REFERENCES { return Err(Fault::new("Transient root-reference limit reached.")); }
+        if roots.len() >= limit { return Err(Fault::new("Transient root-reference limit reached.")); }
         if roots.len() == roots.capacity() {
-            let additional = roots.capacity().max(8).min(MAX_ROOT_REFERENCES - roots.len());
+            let additional = roots.capacity().max(8).min(limit - roots.len());
             roots.try_reserve_exact(additional).map_err(|_| Fault::new("Unable to allocate bounded transient-root scratch."))?;
         }
         roots.push(edge);
@@ -253,7 +272,7 @@ mod tests {
 
     #[test]
     fn completion_roots_cover_all_control_and_throw_variants_and_restore_after_failure() {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_capacity_test();
         for completion in [
             Ok(Control::Normal(Some(Value::Object(1)))), Ok(Control::Return(Value::Object(1))),
             Ok(Control::Break(0, Some(Value::Object(1)))), Ok(Control::Continue(0, Some(Value::Object(1)))),
@@ -288,7 +307,7 @@ mod tests {
 
     #[test]
     fn statement_and_loop_completions_replace_roots_and_finally_preserves_values() {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_capacity_test();
         let source = r#"
 function item(n){return {read:function(){return n;}};}function cleanup(){return 0;}
 var fromList=eval('item(1);var ignored=cleanup();');if(fromList.read()!==1)throw 'list';
@@ -317,7 +336,7 @@ var choice=item(5);switch(choice){case (cleanup(),choice):if(choice.read()!==5)t
 
     #[test]
     fn eval_registers_inputs_while_host_dictionary_and_legacy_apply_remain_inhibited() {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_capacity_test();
         let value = runtime.string_eval(&Value::String("function f(){return 7;}f();".into()), None, &mut EvalHost).unwrap();
         assert_eq!(value.to_number(), 7.0);
         assert!(runtime.transient_roots.script_entries > 0);
@@ -354,7 +373,7 @@ var choice=item(5);switch(choice){case (cleanup(),choice):if(choice.read()!==5)t
                 _ => {}
             }
         }
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_capacity_test();
         runtime.transient_roots.script_input_observer = Some(observe);
         assert_eq!(runtime.execute(r#"
 function target(fn,obj){if(fn()!==17||obj.n!==23||this.tag!==41)throw 'forwarded values';return 7;}
@@ -387,7 +406,7 @@ if(eval("'use strict';target.call(receiver,function(){return 17;},{n:23});")!==7
 
     #[test]
     fn call_input_roots_include_callee_receiver_and_all_arguments_with_bounded_validation() {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_capacity_test();
         let receiver = Value::Object(runtime.new_object(None).unwrap());
         let argument = Value::Object(runtime.new_object(None).unwrap());
         let function = Value::Function(0);
@@ -417,7 +436,7 @@ if(eval("'use strict';target.call(receiver,function(){return 17;},{n:23});")!==7
             fn set(&mut self, _: u32, _: &str, _: Value) -> Result<(), String> { panic!("unexpected set") }
             fn call(&mut self, _: u32, _: &str, _: &[Value]) -> Result<Value, String> { panic!("unexpected call") }
         }
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_capacity_test();
         runtime.execute("function factory(a=17,read=()=>a){var a=23;return read;}var saved=factory();if(saved()!==17)throw 'parameter capture';function receiver(){return ()=>this.valueOf();}var held=receiver.call(7);if(held()!==7)throw 'boxed receiver';function Box(x=31){this.x=x;}if(new Box().x!==31)throw 'constructor';var named=function self(n){return n?self(n-1):41;};if(named(3)!==41)throw 'private environment';0;", &mut NoHost).unwrap();
         assert!(runtime.transient_registration_is_empty());
         assert!(runtime.transient_roots.call_scopes > 0);
@@ -437,7 +456,7 @@ if(eval("'use strict';target.call(receiver,function(){return 17;},{n:23});")!==7
 
     #[test]
     fn transient_root_bound_and_nested_markers_restore_without_refunding_work() {
-        let mut runtime = Runtime::new();
+        let mut runtime = Runtime::for_capacity_test();
         let before = (runtime.job_usage(), runtime.job_deadline, runtime.value_bytes);
         let outer = runtime.transient_marker();
         runtime.push_transient_root(Edge::Environment(0)).unwrap();

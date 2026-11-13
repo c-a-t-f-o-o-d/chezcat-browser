@@ -103,7 +103,7 @@ impl State {
                 }
                 if let Some(id) = doc
                     .attr(node, "id")
-                    .filter(|id| !id.is_empty() && id.len() <= MAX_STRING)
+                    .filter(|id| !id.is_empty() && id.len() <= self.limits.host.string_bytes)
                 {
                     self.copies(id.len())?;
                     tree.ids.entry(id.to_owned()).or_insert(node);
@@ -457,7 +457,7 @@ impl Bridge<'_> {
         if let NodeKind::Text(value) = &self.doc.nodes[node].kind {
             return Ok(Some(match property {
                 "data" | "nodeValue" | "textContent" => {
-                    if value.len() > MAX_STRING {
+                    if value.len() > self.state.limits.host.string_bytes {
                         return Err("DOM result exceeds 32 KiB.".into());
                     }
                     self.state.copies(value.len())?;
@@ -759,7 +759,7 @@ impl Bridge<'_> {
         for &child in &self.doc.nodes[node].children {
             self.state.work(1)?;
             if let NodeKind::Text(value) = &self.doc.nodes[child].kind {
-                if text.len().saturating_add(value.len()) > MAX_STRING {
+                if text.len().saturating_add(value.len()) > self.state.limits.host.string_bytes {
                     return Err("Script text exceeds 32 KiB.".into());
                 }
                 self.state.copies(value.len())?;
