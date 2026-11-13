@@ -7168,10 +7168,17 @@ impl Runtime {
         self.construct_value(constructor, &args, host)
     }
 
-    #[inline(always)]
+    // Keep constructor-only scratch out of ordinary call dispatch on the
+    // unchanged one-MiB unoptimized native-stack regressions.
+    #[inline(never)]
     fn construct_value(&mut self, constructor: Value, args: &[Value], host: &mut dyn Host) -> Result<Value, Fault> {
         let marker = self.publish_call_inputs(&constructor, &Value::Undefined, args)?;
-        self.inhibit_transient_collection_for("constructor");
+        if !matches!(&constructor, Value::Function(id) if matches!(self.functions.get(*id), Some(Function::Script { .. } | Function::Bound(_)))) {
+            if self.transient_roots.inhibited == 0 {
+                self.transient_roots.outer_native = match constructor { Value::Function(id) => Some(id), _ => None };
+            }
+            self.inhibit_transient_collection_for("constructor");
+        }
         let result = self.construct_value_routed(constructor, args, host);
         self.restore_transient_marker(marker);
         result
@@ -7247,20 +7254,7 @@ impl Runtime {
             Some(Function::Script {
                 program, template, ..
             }) if program.templates[*template].constructible => {
-                let prototype = self.get_ordinary_property_with_host(
-                    Ordinary::Function(index),
-                    "prototype",
-                    host,
-                )?;
-                if matches!(prototype, Value::Host(_)) {
-                    return Err(Fault::new(
-                        "Native host object prototypes are not implemented.",
-                    ));
-                }
-                let object = self.new_object(None)?;
-                if let Some(prototype) = Ordinary::from_value(&prototype) {
-                    self.objects[object].prototype = Some(prototype);
-                }
+                let object = self.script_constructor_receiver(index, host)?;
                 let result =
                     self.call_value(Value::Function(index), args, Value::Object(object), host)?;
                 Ok(
@@ -7293,6 +7287,25 @@ impl Runtime {
             )),
             None => Err(Fault::new("Invalid function handle.")),
         }
+    }
+
+    fn script_constructor_receiver(&mut self, constructor: usize, host: &mut dyn Host) -> Result<usize, Fault> {
+        // The prototype snapshot/new receiver are unpublished until linked.
+        // Restore before call_value immediately publishes the complete receiver.
+        let marker = self.inhibit_transient_collection_for("constructor-setup");
+        let result = (|| {
+            let prototype = self.get_ordinary_property_with_host(Ordinary::Function(constructor), "prototype", host)?;
+            if matches!(prototype, Value::Host(_)) {
+                return Err(Fault::new("Native host object prototypes are not implemented."));
+            }
+            let object = self.new_object(None)?;
+            if let Some(prototype) = Ordinary::from_value(&prototype) {
+                self.objects[object].prototype = Some(prototype);
+            }
+            Ok(object)
+        })();
+        self.restore_transient_marker(marker);
+        result
     }
 
     fn reference(

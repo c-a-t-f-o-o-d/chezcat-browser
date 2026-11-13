@@ -200,6 +200,66 @@ impl Runtime {
 }
 
 #[test]
+fn audited_script_constructor_bodies_keep_receiver_prototype_arguments_and_result_handoffs() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static BODIES: AtomicUsize = AtomicUsize::new(0);
+    static NATIVE_EXECUTORS: AtomicUsize = AtomicUsize::new(0);
+    struct NoHost;
+    impl Host for NoHost {
+        fn get(&mut self, _: u32, _: &str) -> Result<Value, String> { panic!("unexpected get") }
+        fn set(&mut self, _: u32, _: &str, _: Value) -> Result<(), String> { panic!("unexpected set") }
+        fn call(&mut self, _: u32, _: &str, _: &[Value]) -> Result<Value, String> { panic!("unexpected call") }
+    }
+    fn observe(runtime: &Runtime, function: usize, args: &[Value], this: &Value) {
+        let StoredValue::Value(Value::String(name)) = &runtime.objects[runtime.function_properties[function]].properties["name"].value else { panic!("fixture data name") };
+        if name == "nativeExecutor" {
+            assert!(runtime.transient_roots.inhibited > 0);
+            assert!(runtime.mark_audited_active_roots(false).is_err());
+            NATIVE_EXECUTORS.fetch_add(1, Ordering::Relaxed);
+        }
+        if !matches!(name.as_str(), "Item" | "Returns" | "Thrower") { return; }
+        assert_eq!(runtime.transient_roots.inhibited, 0);
+        let graph = runtime.mark_audited_active_roots(false).unwrap();
+        let Value::Object(receiver) = this else { panic!("constructed receiver") };
+        assert!(graph.objects[*receiver]);
+        assert!(graph.functions[function]);
+        if let Some(prototype) = runtime.objects[*receiver].prototype {
+            assert!(match prototype { Ordinary::Object(id) => graph.objects[id], Ordinary::Function(id) => graph.functions[id] });
+        }
+        for value in args {
+            match value { Value::Object(id) => assert!(graph.objects[*id]), Value::Function(id) => assert!(graph.functions[*id]), _ => {} }
+        }
+        BODIES.fetch_add(1, Ordering::Relaxed);
+    }
+    let mut runtime = Runtime::new();
+    runtime.transient_roots.script_input_observer = Some(observe);
+    runtime.execute(r#"
+var seen;
+function Item(fn,arg){seen=this;this.fn=fn;this.arg=arg;Item.prototype={later:1};return 17;}
+Item.prototype={original:1};
+var bound=Item.bind({wrong:1},function(){return 19;},{value:23}),chained=bound.bind({wrong:2});
+var first=new chained();
+if(first!==seen||first.original!==1||first.fn()!==19||first.arg.value!==23||first.wrong!==undefined)throw 'bound construction';
+var second=new Item(function(){return 29;},{value:31});
+if(second===first||second!==seen||second.later!==1||second.original!==undefined||first.original!==1)throw 'prototype snapshot';
+function Returns(){this.discarded=true;return {override:37};}
+if(new Returns().override!==37)throw 'object return';
+function Thrower(){throw {reason:41};}
+try{new Thrower();throw 'accepted throw';}catch(e){if(e.reason!==41)throw e;}
+new Promise(function nativeExecutor(resolve){resolve(43);});
+"#, &mut NoHost).unwrap();
+    assert_eq!(BODIES.load(Ordering::Relaxed), 4);
+    assert_eq!(NATIVE_EXECUTORS.load(Ordering::Relaxed), 1);
+    assert!(runtime.transient_registration_is_empty());
+    runtime.define_global("native", Value::Host(7)).unwrap();
+    let error = runtime.execute("var ran=false;function Broken(){ran=true;}Broken.prototype=native;new Broken();", &mut NoHost).unwrap_err();
+    assert!(error.contains("Native host object prototypes are not implemented"));
+    assert!(runtime.transient_registration_is_empty());
+    runtime.begin_job();
+    assert!(matches!(runtime.execute("ran;", &mut NoHost).unwrap(), Value::Bool(false)));
+}
+
+#[test]
 fn active_mark_audit_covers_forwarders_completions_and_popped_jobs_without_export_pins() {
     use std::sync::atomic::{AtomicUsize, Ordering};
     static AUDITS: AtomicUsize = AtomicUsize::new(0);
