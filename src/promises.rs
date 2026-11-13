@@ -176,8 +176,8 @@ impl Job {
 
 #[derive(Default)]
 pub(super) struct Arena {
-    prototype: Option<usize>,
-    constructor: Option<usize>,
+    pub(super) prototype: Option<usize>,
+    pub(super) constructor: Option<usize>,
     count: usize,
     reactions: usize,
     pairs: Vec<ResolvingPair>,

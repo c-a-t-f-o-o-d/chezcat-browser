@@ -643,7 +643,7 @@ impl Runtime {
                 "The object is not extensible.",
             ));
         }
-        if Some(id) == self.object_prototype {
+        if self.immutable_object_prototype(id) {
             return Err(Fault::exception(
                 "TypeError",
                 "Object.prototype has an immutable prototype.",

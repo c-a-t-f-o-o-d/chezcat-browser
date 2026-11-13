@@ -100,15 +100,21 @@ impl Runtime {
         let owner = self.ordinary_id(Ordinary::from_value(&constructor).unwrap())?;
         self.prototype_method(owner, "for", Builtin::Symbol(Op::For))?;
         self.prototype_method(owner, "keyFor", Builtin::Symbol(Op::KeyFor))?;
-        let dispose = self.new_symbol(Some("Symbol.dispose".into()), false)?;
+        let dispose = if let Some(key) = self.symbol_dispose { Value::Symbol(key) } else {
+            let value = self.new_symbol(Some("Symbol.dispose".into()), false)?;
+            let Value::Symbol(key) = value else { unreachable!() };
+            self.symbol_dispose = Some(key);
+            value
+        };
         self.store_property(
             owner,
             "dispose".into(),
             dispose,
             Some((false, false, false)),
         )?;
-        let Value::Symbol(key) = self.new_symbol(Some("Symbol.toPrimitive".into()), false)? else {
-            unreachable!()
+        let key = if let Some(key) = self.symbol_to_primitive { key } else {
+            let Value::Symbol(key) = self.new_symbol(Some("Symbol.toPrimitive".into()), false)? else { unreachable!() };
+            key
         };
         self.symbol_to_primitive = Some(key);
         self.store_property(
@@ -120,8 +126,9 @@ impl Runtime {
         let method =
             self.native_function(Builtin::Symbol(Op::ToPrimitive), "[Symbol.toPrimitive]")?;
         self.store_symbol_property(prototype, key, method, Some((false, false, true)))?;
-        let Value::Symbol(key) = self.new_symbol(Some("Symbol.iterator".into()), false)? else {
-            unreachable!()
+        let key = if let Some(key) = self.symbol_iterator { key } else {
+            let Value::Symbol(key) = self.new_symbol(Some("Symbol.iterator".into()), false)? else { unreachable!() };
+            key
         };
         self.symbol_iterator = Some(key);
         self.store_property(
@@ -130,8 +137,9 @@ impl Runtime {
             Value::Symbol(key),
             Some((false, false, false)),
         )?;
-        let Value::Symbol(key) = self.new_symbol(Some("Symbol.species".into()), false)? else {
-            unreachable!()
+        let key = if let Some(key) = self.symbol_species { key } else {
+            let Value::Symbol(key) = self.new_symbol(Some("Symbol.species".into()), false)? else { unreachable!() };
+            key
         };
         self.symbol_species = Some(key);
         self.store_property(

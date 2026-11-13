@@ -474,7 +474,18 @@ impl Bridge<'_> {
                 || name == "script" && !self.dom_script(node)
                 || name == "link" && !self.dom_stylesheet(node)
             {
-                return Err(format!("DOM tree mutation of controls, loaded resources or structural roots is not implemented. Blocked node={node}; tag={:?}; connected={}; created={}.",
+                let frame = if name == "iframe" {
+                    let source = match self.doc.attr(node, "src").map(str::trim) {
+                        None => "absent",
+                        Some("") => "empty",
+                        Some("about:blank") => "blank",
+                        Some(_) => "other",
+                    };
+                    format!(" Frame source={source}; srcdoc={}; sandbox={}; hidden={}; inline-style={}.",
+                        self.doc.attr(node, "srcdoc").is_some(), self.doc.attr(node, "sandbox").is_some(),
+                        self.doc.attr(node, "hidden").is_some(), self.doc.attr(node, "style").is_some())
+                } else { String::new() };
+                return Err(format!("DOM tree mutation of controls, loaded resources or structural roots is not implemented. Blocked node={node}; tag={:?}; connected={}; created={}.{frame}",
                     prefix(name, 64), self.state.dom.connected.get(node).copied().unwrap_or(false), self.state.dom.created.contains(&node)));
             }
             if let Some(id) = self.doc.attr(node, "id").filter(|id| !id.is_empty()) {

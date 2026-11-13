@@ -27,6 +27,8 @@ mod binary_data;
 mod binding_length;
 #[path = "binding_character.rs"]
 mod binding_character;
+#[path = "intrinsic_realms.rs"]
+mod intrinsic_realms;
 #[cfg(test)]
 #[path = "statement_expression_tests.rs"]
 mod statement_expression_tests;
@@ -2961,6 +2963,7 @@ pub struct Runtime {
     symbols: Vec<symbols::Data>,
     symbol_registry: BTreeMap<String, usize>,
     symbol_prototype: Option<usize>,
+    symbol_dispose: Option<usize>,
     symbol_to_primitive: Option<usize>,
     symbol_iterator: Option<usize>,
     symbol_species: Option<usize>,
@@ -3010,6 +3013,7 @@ pub struct Runtime {
     recursive_evaluation_oracle: bool,
     call_depth: usize,
     strict: bool,
+    intrinsic_realms: Vec<intrinsic_realms::IntrinsicRealm>,
 }
 
 impl Default for Runtime {
@@ -3047,6 +3051,7 @@ impl Runtime {
             symbols: Vec::new(),
             symbol_registry: BTreeMap::new(),
             symbol_prototype: None,
+            symbol_dispose: None,
             symbol_to_primitive: None,
             symbol_iterator: None,
             symbol_species: None,
@@ -3095,8 +3100,14 @@ impl Runtime {
             recursive_evaluation_oracle: false,
             call_depth: 0,
             strict: false,
+            intrinsic_realms: Vec::new(),
         };
-        runtime.initialize_prototype_roots().unwrap();
+        runtime.initialize_realm_intrinsics().expect("initial intrinsic capacity");
+        runtime
+    }
+
+    fn initialize_realm_intrinsics(&mut self) -> Result<(), Fault> {
+        self.initialize_prototype_roots()?;
         for (name, builtin) in [
             ("eval", Builtin::Eval),
             ("EvalError", Builtin::Error("EvalError")),
@@ -3124,52 +3135,49 @@ impl Runtime {
             ("isNaN", Builtin::IsNaN),
             ("Function", Builtin::Function),
         ] {
-            let value = runtime.native_function(builtin, name).unwrap();
-            runtime
-                .put_binding(0, name.into(), Some(value), Declaration::Var, false)
-                .unwrap();
+            let value = self.native_function(builtin, name)?;
+            self
+                .put_binding(0, name.into(), Some(value), Declaration::Var, false)?;
         }
-        runtime.initialize_intrinsic_prototypes().unwrap();
-        runtime.initialize_symbols().unwrap();
-        runtime.initialize_binary().unwrap();
-        runtime.initialize_collections().unwrap();
-        runtime.initialize_iterable_builtins().unwrap();
-        runtime.initialize_promises().unwrap();
-        runtime.initialize_date().unwrap();
-        runtime.initialize_url_api().unwrap();
-        runtime.initialize_text_encoding().unwrap();
+        self.initialize_intrinsic_prototypes()?;
+        self.initialize_symbols()?;
+        self.initialize_binary()?;
+        self.initialize_collections()?;
+        self.initialize_iterable_builtins()?;
+        self.initialize_promises()?;
+        self.initialize_date()?;
+        self.initialize_url_api()?;
+        self.initialize_text_encoding()?;
         for (name, value) in [
             ("undefined", Value::Undefined),
             ("NaN", Value::Number(f64::NAN)),
             ("Infinity", Value::Number(f64::INFINITY)),
         ] {
-            runtime
-                .put_binding(0, name.into(), Some(value), Declaration::Const, false)
-                .unwrap();
+            self
+                .put_binding(0, name.into(), Some(value), Declaration::Const, false)?;
         }
-        let json = runtime.new_object(None).unwrap();
+        let json = self.new_object(None)?;
         for (name, builtin) in [
             ("parse", Builtin::JsonParse),
             ("stringify", Builtin::JsonStringify),
         ] {
-            let value = runtime.native_function(builtin, name).unwrap();
-            runtime.set_property(json, name.into(), value).unwrap();
-            runtime.objects[json]
+            let value = self.native_function(builtin, name)?;
+            self.set_property(json, name.into(), value)?;
+            self.objects[json]
                 .properties
                 .get_mut(name)
                 .unwrap()
                 .enumerable = false;
         }
-        runtime
+        self
             .put_binding(
                 0,
                 "JSON".into(),
                 Some(Value::Object(json)),
                 Declaration::Var,
                 false,
-            )
-            .unwrap();
-        let math = runtime.new_object(None).unwrap();
+            )?;
+        let math = self.new_object(None)?;
         for (name, number) in [
             ("E", std::f64::consts::E),
             ("LN2", std::f64::consts::LN_2),
@@ -3180,10 +3188,9 @@ impl Runtime {
             ("SQRT1_2", std::f64::consts::FRAC_1_SQRT_2),
             ("SQRT2", std::f64::consts::SQRT_2),
         ] {
-            runtime
-                .set_property(math, name.into(), Value::Number(number))
-                .unwrap();
-            let property = runtime.objects[math].properties.get_mut(name).unwrap();
+            self
+                .set_property(math, name.into(), Value::Number(number))?;
+            let property = self.objects[math].properties.get_mut(name).unwrap();
             property.enumerable = false;
             property.writable = false;
             property.configurable = false;
@@ -3194,24 +3201,23 @@ impl Runtime {
             "log1p", "log2", "log10", "max", "min", "pow", "random", "round", "sign", "sin",
             "sinh", "sqrt", "tan", "tanh", "trunc",
         ] {
-            let value = runtime.native_function(Builtin::Math(name), name).unwrap();
-            runtime.set_property(math, name.into(), value).unwrap();
-            runtime.objects[math]
+            let value = self.native_function(Builtin::Math(name), name)?;
+            self.set_property(math, name.into(), value)?;
+            self.objects[math]
                 .properties
                 .get_mut(name)
                 .unwrap()
                 .enumerable = false;
         }
-        runtime
+        self
             .put_binding(
                 0,
                 "Math".into(),
                 Some(Value::Object(math)),
                 Declaration::Var,
                 false,
-            )
-            .unwrap();
-        runtime.global_attributes = runtime
+            )?;
+        self.global_attributes = self
             .environment(0)
             .bindings
             .iter()
@@ -3220,7 +3226,7 @@ impl Runtime {
                 (name.clone(), (false, mutable, mutable))
             })
             .collect();
-        runtime
+        Ok(())
     }
 
     /// Bind the browser's existing opaque Window handle to this runtime's
@@ -4233,6 +4239,7 @@ impl Runtime {
     fn collect_environments(&mut self) {
         let mut live = vec![false; self.environments.len()];
         let mut roots = vec![0];
+        roots.extend(self.intrinsic_realms.iter().map(|realm| realm.global_environment));
         for function in &self.functions {
             if let Function::Script { environment, .. } = function {
                 roots.push(*environment);
