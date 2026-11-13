@@ -3097,6 +3097,8 @@ pub struct Runtime {
     evaluation_argument_slots: usize,
     #[cfg(test)]
     recursive_evaluation_oracle: bool,
+    #[cfg(test)]
+    legacy_array_join_preflight: bool,
     call_depth: usize,
     strict: bool,
     intrinsic_realms: Vec<intrinsic_realms::IntrinsicRealm>,
@@ -3206,6 +3208,8 @@ impl Runtime {
             evaluation_argument_slots: 0,
             #[cfg(test)]
             recursive_evaluation_oracle: false,
+            #[cfg(test)]
+            legacy_array_join_preflight: false,
             call_depth: 0,
             strict: false,
             intrinsic_realms: Vec::new(),

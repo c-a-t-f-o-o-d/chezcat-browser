@@ -39,6 +39,16 @@ impl Runtime {
         }
         self.active_array_joins.push(id);
         let result = (|| {
+            #[cfg(test)]
+            let zero_shortcut = !self.legacy_array_join_preflight;
+            #[cfg(not(test))]
+            let zero_shortcut = true;
+            // Separator conversion has already completed. With captured zero
+            // length there is no index to inspect, including on prototypes.
+            if zero_shortcut && length == 0 {
+                self.work(0)?;
+                return Ok(String::new());
+            }
             // Preserve the original hole-only fast path. Prototype indices
             // count too, since even a hole can expose an inherited getter.
             let mut parent = Some(Ordinary::Object(id));
@@ -46,6 +56,16 @@ impl Runtime {
             while let Some(object) = parent {
                 self.step()?;
                 let object = self.ordinary_id(object)?;
+                // A first stored key "0" proves the old scan's first match.
+                // No value/getter is read; captured zero length stays on the
+                // original path. Prepay the bounded key/node inspection.
+                if zero_shortcut && length > 0 && self.objects[object].properties
+                    .first_key_value().is_some_and(|(key, _)| key == "0")
+                {
+                    self.work_as(std::mem::size_of::<usize>() + 1, super::WorkKind::ArrayJoinPreflight)?;
+                    has_indices = true;
+                    break;
+                }
                 self.work_as(
                     self.objects[object]
                         .properties
@@ -928,6 +948,104 @@ if(caught!==2)throw 'catchable conversion';
 'ok';
 "#,
         );
+    }
+
+    #[test]
+    fn zero_index_join_original_dense_reducer_preserves_output_and_reduces_preflight() {
+        std::thread::Builder::new().stack_size(1024 * 1024).spawn(|| {
+            let mut observations = Vec::new();
+            for legacy in [true, false] {
+                let mut runtime = Runtime::with_limits(super::super::limits::BROWSER);
+                runtime.legacy_array_join_preflight = legacy;
+                let values: Vec<_> = (0..32).map(|i| Value::Number(i as f64)).collect();
+                let Value::Object(array) = runtime.array_from_values(&values).unwrap() else { unreachable!() };
+                runtime.begin_job();
+                let before = (runtime.steps, runtime.copy_bytes, runtime.job_deadline);
+                let expected = (0..32).map(|i| i.to_string()).collect::<String>();
+                for _ in 0..1000 { assert_eq!(runtime.array_join(array, 32, "", &mut NoHost).unwrap(), expected); }
+                assert!(runtime.active_array_joins.is_empty());
+                assert_eq!(runtime.job_deadline, before.2);
+                observations.push((before.0 - runtime.steps, before.1 - runtime.copy_bytes));
+            }
+            assert_eq!(observations[0].0, observations[1].0);
+            assert_eq!(observations[0].1 - observations[1].1, (32 * MAX_PROPERTY_BYTES - 9) * 1000);
+            println!("Original32element/1000join reducer: legacy={:?}; zero-key={:?}; saved={}bytes; steps/deadline unchanged.", observations[0], observations[1], observations[0].1 - observations[1].1);
+        }).unwrap().join().unwrap();
+    }
+
+    #[test]
+    fn zero_index_join_keeps_live_getters_prototypes_captured_length_and_fallback_keys() {
+        join_succeeds(r#"
+var log='',a=[1,2,3];Object.defineProperty(a,'0',{get:function(){log+='g';delete a[1];a[2]=9;return {toString:function(){log+='c';return 'first';}};}});
+if(a.join('|')!=='first||9'||log!=='gc')throw 'live getter/conversion';
+var parent=Object.create(Array.prototype),reads=0;Object.defineProperty(parent,'0',{get:function(){reads++;return 7;}});
+var holes=Array(2);Object.setPrototypeOf(holes,parent);if(holes.join('|')!=='7|'||reads!==1)throw 'inherited zero';
+var empty=[],touched=0,separator={toString:function(){Object.defineProperty(empty,'0',{get:function(){touched++;return 9;}});return '|';}};
+if(empty.join(separator)!==''||touched!==0)throw 'captured zero length';
+for(var key of ['', '00', '0.0']){var fallback=[1,2];fallback[key]=3;if(fallback.join('|')!=='1|2')throw 'fallback key';}
+var shrinking=[1,2];if(shrinking.join({toString:function(){shrinking.length=1;return '|';}})!=='1|')throw 'captured length';
+'ok';
+"#);
+        for source in ["var a=[];a['']=3;a[0]=1;a[1]=2;", "var a=Array(2);a['00']=3;"] {
+            let mut observed = Vec::new();
+            for legacy in [true, false] {
+                let mut runtime = Runtime::for_test();
+                runtime.legacy_array_join_preflight = legacy;
+                runtime.execute(source, &mut NoHost).unwrap();
+                runtime.begin_job();
+                let value = runtime.execute("a.join('|');", &mut NoHost).unwrap().to_text();
+                observed.push((value, runtime.job_usage()));
+            }
+            assert_eq!(observed[0], observed[1], "{source}");
+        }
+    }
+
+    #[test]
+    fn zero_index_join_preflight_failures_clear_cycle_state_and_preserve_arenas() {
+        for failure in ["copy", "steps", "deadline"] {
+            let mut runtime = Runtime::for_test();
+            let Value::Object(array) = runtime.array_from_values(&[Value::Number(1.0)]).unwrap() else { unreachable!() };
+            runtime.begin_job();
+            match failure {
+                "copy" => runtime.copy_bytes = 8,
+                "steps" => runtime.steps = 1,
+                _ => { runtime.steps = 256; runtime.job_deadline = std::time::Instant::now() - std::time::Duration::from_secs(1); }
+            }
+            let before = (runtime.functions.len(), runtime.objects.len(), runtime.environments.len(), runtime.value_bytes, runtime.bindings, runtime.job_deadline);
+            let error = runtime.array_join(array, 1, "", &mut NoHost).unwrap_err();
+            assert!(error.exception.is_none() && error.message.contains("limit"), "{error:?}");
+            assert!(runtime.active_array_joins.is_empty());
+            assert_eq!((runtime.functions.len(), runtime.objects.len(), runtime.environments.len(), runtime.value_bytes, runtime.bindings, runtime.job_deadline), before);
+            if failure == "copy" { assert!(runtime.string_work_failure_report().unwrap().contains("category=array-join-preflight; requested=9; remaining-before=8")); }
+            runtime.begin_job();
+            assert_eq!(runtime.array_join(array, 1, "", &mut NoHost).unwrap(), "1");
+        }
+    }
+
+    #[test]
+    fn zero_length_join_eliminates_prototype_walk_after_separator_conversion() {
+        let mut observations = Vec::new();
+        for legacy in [true, false] {
+            let mut runtime = Runtime::with_limits(super::super::limits::BROWSER);
+            runtime.legacy_array_join_preflight = legacy;
+            let Value::Object(array) = runtime.array_from_values(&[]).unwrap() else { unreachable!() };
+            runtime.begin_job();
+            let before = (runtime.steps, runtime.copy_bytes, runtime.job_deadline);
+            for _ in 0..1000 { assert_eq!(runtime.array_join(array, 0, "", &mut NoHost).unwrap(), ""); }
+            observations.push((before.0 - runtime.steps, before.1 - runtime.copy_bytes));
+            assert_eq!(runtime.job_deadline, before.2);
+            assert!(runtime.active_array_joins.is_empty());
+        }
+        assert!(observations[1].0 < observations[0].0);
+        assert_eq!(observations[1].1, 0);
+        println!("Original1000emptyjoin reducer: legacy={:?}; capturedzero={:?}.", observations[0], observations[1]);
+        join_succeeds(r#"
+var log='',a=[],parent=Object.create(Array.prototype);Object.defineProperty(parent,'0',{get:function(){throw 'unread';}});Object.setPrototypeOf(a,parent);
+var separator={toString:function(){log+='s';return '|';}};
+if(a.join(separator)!==''||log!=='s')throw 'separator order';
+var marker={};try{a.join({toString:function(){throw marker;}});throw 'missing';}catch(e){if(e!==marker)throw e;}
+'ok';
+"#);
     }
 
     #[test]

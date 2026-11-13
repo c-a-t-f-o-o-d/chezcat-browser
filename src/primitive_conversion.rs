@@ -278,6 +278,18 @@ if(caught!==3)throw 'strict primitive assignments';
     }
 
     #[test]
+    fn conversion_denial_attributes_only_numeric_handle_and_fixed_hint_without_reads() {
+        let mut runtime = Runtime::for_test();
+        for hint in [Hint::Default, Hint::Number, Hint::String] {
+            let before = (runtime.functions.len(), runtime.objects.len(), runtime.environments.len(), runtime.copy_bytes, runtime.steps, runtime.job_deadline);
+            let fault = runtime.primitive_with_preference(Value::Host(1234), hint, &mut NoHost).unwrap_err();
+            assert!(fault.exception.is_none());
+            assert!(fault.message.contains(&format!("Native handle=1234; hint={}", hint.text())), "{}", fault.message);
+            assert_eq!((runtime.functions.len(), runtime.objects.len(), runtime.environments.len(), runtime.copy_bytes, runtime.steps, runtime.job_deadline), (before.0, before.1, before.2, before.3, before.4 - 1, before.5));
+        }
+    }
+
+    #[test]
     fn conversion_protocol_recursion_and_native_array_hook_cycles_are_bounded() {
         std::thread::Builder::new().stack_size(1024 * 1024).spawn(|| {
             for source in [
@@ -328,6 +340,18 @@ impl Hint {
     }
 }
 
+// Keep formatting scratch out of successful recursive conversion activations.
+#[cold]
+#[inline(never)]
+fn native_conversion_denied(object: u32, hint: Hint) -> Fault {
+    let message = if matches!(hint, Hint::String) {
+        "Native host object property-key conversion is not implemented."
+    } else {
+        "Implicit native host object conversion is not implemented."
+    };
+    Fault::new(format!("{message} Native handle={object}; hint={}. No conversion permission or hook read was granted.", hint.text()))
+}
+
 impl Runtime {
     pub(super) fn primitive_with_preference(
         &mut self,
@@ -338,11 +362,7 @@ impl Runtime {
         self.step()?;
         if let Value::Host(object) = value {
             if !host.primitive_conversion(object) {
-                return Err(Fault::new(if matches!(hint, Hint::String) {
-                    "Native host object property-key conversion is not implemented."
-                } else {
-                    "Implicit native host object conversion is not implemented."
-                }));
+                return Err(native_conversion_denied(object, hint));
             }
         } else if Ordinary::from_value(&value).is_none() {
             return Ok(value);
