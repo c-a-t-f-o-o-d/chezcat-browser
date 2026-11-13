@@ -122,7 +122,7 @@ impl Bridge<'_> {
                     };
                     self.state.work(attrs.len())?;
                     self.state
-                        .copies(attrs.iter().map(|(name, _)| name.len()).sum())?;
+                        .copies(attrs.iter().map(|attr| attr.name.bytes()).sum())?;
                     let class = self.doc.attr(node, "class").unwrap_or("");
                     let scans = class
                         .len()

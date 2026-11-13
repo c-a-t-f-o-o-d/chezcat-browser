@@ -2241,7 +2241,8 @@ fn build_snapshot(app: &App) -> Snapshot {
                 match &item.kind {
                     html::NodeKind::Element { tag, attrs, .. } => {
                         let _ = write!(text, "<{tag}");
-                        for (key, value) in attrs.iter().take(8) {
+                        for attr in attrs.iter().take(8) {
+                            let (key, value) = (&attr.name.qualified, &attr.value);
                             let _ =
                                 write!(text, " {}=\"{}\"", truncate(key, 50), truncate(value, 100));
                             if text.len() > 300 {
@@ -2435,7 +2436,8 @@ fn selected_details(app: &App) -> Vec<String> {
             if attrs.is_empty() {
                 lines.push("  (none)".into());
             }
-            for (key, value) in attrs.iter().take(128) {
+            for attr in attrs.iter().take(128) {
+                let (key, value) = (&attr.name.qualified, &attr.value);
                 lines.push(format!(
                     "  {} = {}",
                     truncate(key, 128),

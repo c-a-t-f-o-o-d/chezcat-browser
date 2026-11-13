@@ -139,11 +139,11 @@ impl Bridge<'_> {
                 (Some(this), Some(other)) => {
                     let owner = self.state.attributes[this].owner.ok_or("Missing attached Attr owner.")?;
                     let NodeKind::Element { attrs, .. } = &self.doc.nodes[owner].kind else { return Err("Invalid Attr owner.".into()); };
-                    self.state.work(attrs.iter().fold(attrs.len(), |work, (name, _)| work.saturating_add(name.len().saturating_mul(2))))?;
+                    self.state.work(attrs.iter().fold(attrs.len(), |work, attr| work.saturating_add(attr.name.bytes().saturating_mul(2))))?;
                     let this_name = &self.state.attributes[this].name;
                     let other_name = &self.state.attributes[other].name;
-                    let this_order = attrs.iter().position(|(name, _)| name == this_name).ok_or("Attached Attr is missing from its owner.")?;
-                    let other_order = attrs.iter().position(|(name, _)| name == other_name).ok_or("Attached Attr is missing from its owner.")?;
+                    let this_order = attrs.iter().position(|attr| attr.name.same_expanded_name(this_name)).ok_or("Attached Attr is missing from its owner.")?;
+                    let other_order = attrs.iter().position(|attr| attr.name.same_expanded_name(other_name)).ok_or("Attached Attr is missing from its owner.")?;
                     if this_order < other_order { 36.0 } else { 34.0 }
                 }
                 (Some(_), None) => 10.0,

@@ -1913,9 +1913,9 @@ impl<'a> MatchContext<'a> {
         let NodeKind::Element { attrs, .. } = &self.doc.nodes.get(node)?.kind else {
             return None;
         };
-        for (key, value) in attrs {
-            if self.equal(key, name, true, budget) {
-                return Some(value);
+        for attr in attrs {
+            if attr.name.namespace.is_none() && self.equal(&attr.name.qualified, name, false, budget) {
+                return Some(&attr.value);
             }
             if *budget == 0 {
                 return None;

@@ -52,7 +52,7 @@ impl Bridge<'_> {
         };
         self.state.work(attrs.len())?;
         self.state
-            .copies(attrs.iter().map(|(name, _)| name.len()).sum())?;
+            .copies(attrs.iter().map(|attr| attr.name.bytes()).sum())?;
         let raw = self.doc.attr(node, "class").unwrap_or("");
         if raw.len() > self.state.limits.host.string_bytes {
             return Err("Class attribute exceeds the host string bound.".into());

@@ -1411,7 +1411,7 @@ mod tests {
         let mut forms = Forms::new(&doc);
         assert!(!forms.controls[&node_id(&doc, "off")].focusable());
         if let NodeKind::Element { attrs, .. } = &mut doc.nodes[group].kind {
-            attrs.push(("disabled".into(), "".into()));
+            attrs.push(crate::html::Attribute::unqualified("disabled".into(), "".into()));
         }
         forms.refresh_disabled(&doc);
         assert!(forms.controls[&node].select.as_ref().unwrap().options[0].disabled);

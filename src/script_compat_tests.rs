@@ -498,7 +498,7 @@ fn class_name_collection_accounting_failures_keep_existing_storage_and_dom() {
     bridge.state.host_work=0;
     assert!(bridge.get(list,"length").is_err());
     assert_eq!(bridge.state.dom.collections.len(),1);
-    assert!(bridge.doc.nodes.iter().any(|node|matches!(&node.kind,NodeKind::Element {attrs,..} if attrs.iter().any(|(name,value)|name=="class"&&value=="a b"))));
+    assert!(bridge.doc.nodes.iter().any(|node|matches!(&node.kind,NodeKind::Element {attrs,..} if attrs.iter().any(|attr|attr.name.html_is("class")&&attr.value=="a b"))));
 }
 
 #[test]
@@ -861,6 +861,137 @@ fn attr_namespace_foreign_context_and_failed_new_record_keep_existing_boundaries
     bridge.state.retained_limit = before;
     assert!(bridge.call(node_handle(p), "getAttributeNodeNS", &[Value::Null, Value::String("title".into())]).is_err());
     assert!(bridge.state.attributes.is_empty());
+    assert_eq!(bridge.state.retained, before);
+}
+
+#[test]
+fn set_attribute_ns_preserves_expanded_identity_qname_order_and_detached_metadata() {
+    let (doc, _, page, outcome) = page("<p id=p p:x=raw></p>", &[r#"
+var p=document.getElementById('p'),raw=p.getAttributeNode('p:x');
+p.setAttributeNS('urn:a','p:x','one');p.setAttributeNS('urn:b','p:x','two');
+var a=p.getAttributeNodeNS('urn:a','x'),b=p.getAttributeNodeNS('urn:b','x');
+if(a===raw||a===b||a.name!=='p:x'||a.localName!=='x'||a.prefix!=='p'||a.namespaceURI!=='urn:a'||a.ownerElement!==p)throw 'real namespace records';
+if(p.getAttribute('p:x')!=='raw'||p.getAttributeNS(null,'p:x')!=='raw'||p.getAttributeNS('urn:a','x')!=='one'||p.getAttributeNS('urn:a','X')!==null)throw 'distinct lookup';
+if(a.compareDocumentPosition(b)!==36||b.compareDocumentPosition(a)!==34)throw 'same QName order';
+p.setAttributeNS('urn:a','q:x','new');
+if(p.getAttributeNodeNS('urn:a','x')!==a||a.name!=='p:x'||a.prefix!=='p'||a.value!=='new'||a.compareDocumentPosition(b)!==36)throw 'replace value only';
+p.setAttribute('p:x','plain-update');if(raw.value!=='plain-update'||a.value!=='new')throw 'QName first match';
+a.value='exact-a';if(a.value!=='exact-a'||raw.value!=='plain-update'||b.value!=='two')throw 'Attr exact setter';
+p.removeAttribute('p:x');if(raw.ownerElement!==null||raw.value!=='plain-update'||p.getAttributeNode('p:x')!==a)throw 'raw detach first';
+if(p.removeAttributeNode(b)!==b||b.ownerElement!==null||b.value!=='two'||b.namespaceURI!=='urn:b'||b.prefix!=='p'||a.ownerElement!==p)throw 'remove exact node';
+p.removeAttributeNS('urn:a','x');if(a.ownerElement!==null||a.value!=='exact-a'||a.name!=='p:x'||a.localName!=='x'||a.namespaceURI!=='urn:a')throw 'NS detach metadata';
+a.value='detached';p.setAttributeNS('urn:a','z:x','fresh');var fresh=p.getAttributeNodeNS('urn:a','x');
+if(fresh===a||fresh.name!=='z:x'||fresh.value!=='fresh'||a.value!=='detached'||p.getAttributeNS(null,'p:x')!==null)throw 'readd new identity';
+document.title='set-namespace-identity-ok';
+"#]);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    assert_eq!(doc.title, "set-namespace-identity-ok");
+}
+
+#[test]
+fn set_attribute_ns_validates_after_conversions_and_preserves_abrupt_identity() {
+    let (doc, _, page, outcome) = page("<p id=p title=old></p>", &[r#"
+var p=document.getElementById('p'),log='',marker={},set=p.setAttributeNS;
+if(set.length!==3||set!==p.setAttributeNS||typeof set!=='function')throw 'native method';
+var ns={toString:function(){log+='N';return 'urn:a';}},name={toString:function(){log+='Q';return 'a:key';}},value={toString:function(){log+='V';return 'live';}};
+if(set.call(p,ns,name,value)!==undefined||log!=='NQV'||p.getAttributeNS('urn:a','key')!=='live')throw 'ordered conversions';
+log='';var rejected=0;try{p.setAttributeNS(ns,name);}catch(e){if(e.name==='TypeError')rejected++;}
+for(var bad of [{},window,document,p.style,p.dataset,document.createTextNode('x')]){try{set.call(bad,ns,name,value);}catch(e){if(e.name==='TypeError')rejected++;}}
+if(log!==''||rejected!==7)throw 'arity/receiver before conversion';
+for(var args of [[Symbol(),name,value],['urn:a',Symbol(),value],['urn:a','a:key',Symbol()]]){try{set.apply(p,args);}catch(e){if(e.name==='TypeError')rejected++;}}
+if(log!==''||rejected!==10)throw 'Symbol ordered failure';
+for(var index of [0,1,2]){var args=['urn:a','a:key','next'];args[index]={toString:function(){throw marker;}};var caught=false;try{set.apply(p,args);}catch(e){caught=e===marker;}if(!caught||p.getAttributeNS('urn:a','key')!=='live')throw 'throw identity/atomicity';}
+log='';try{p.setAttributeNS(ns,{toString:function(){log+='Q';return 'bad name';}},value);}catch(e){if(e.name==='InvalidCharacterError')rejected++;}
+if(log!=='NQV'||rejected!==11)throw 'all conversions before validation';
+var old=p.getAttributeNodeNS('urn:a','key');
+p.setAttributeNS('urn:a','incoming:key',{toString:function(){p.removeAttributeNS('urn:a','key');p.setAttributeNS('urn:a','during:key','middle');return 'after';}});
+var fresh=p.getAttributeNodeNS('urn:a','key');if(fresh===old||old.ownerElement!==null||old.value!=='live'||fresh.name!=='during:key'||fresh.value!=='after')throw 'reentrant current target';
+var order='';Promise.resolve().then(function(){try{p.setAttributeNS(null,'p:title','bad');}catch(e){order=e.name;}});Promise.resolve().then(function(){if(order!=='NamespaceError'||p.getAttribute('title')!=='old')throw 'catchable namespace error';document.title='set-namespace-conversions-ok';});
+"#]);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    assert_eq!(doc.title, "set-namespace-conversions-ok");
+}
+
+#[test]
+fn set_attribute_ns_xml_combinations_case_and_null_namespace_are_distinct() {
+    let (doc, _, page, outcome) = page("<p id=p></p>", &[r#"
+var p=document.getElementById('p'),xml='http://www.w3.org/XML/1998/namespace',xmlns='http://www.w3.org/2000/xmlns/';
+for(var row of [[null,'p:x','NamespaceError'],['','p:x','NamespaceError'],['urn:a','xml:x','NamespaceError'],[null,'xmlns','NamespaceError'],['urn:a','xmlns:x','NamespaceError'],[xmlns,'x','NamespaceError'],[xmlns,'p:x','NamespaceError'],['urn:a','bad name','InvalidCharacterError'],['urn:a',':x','InvalidCharacterError'],['urn:a','x:','InvalidCharacterError'],['urn:a','p:x/y','InvalidCharacterError'],['urn:a','x=bad','InvalidCharacterError']]){
+ var observed='';try{p.setAttributeNS(row[0],row[1],'no');}catch(e){observed=e.name;}if(observed!==row[2])throw row[1]+':'+observed;
+}
+p.setAttributeNS(xml,'xml:lang','en');p.setAttributeNS(xml,'other:free','yes');p.setAttributeNS(xmlns,'xmlns','urn:default');p.setAttributeNS(xmlns,'xmlns:p','urn:p');
+if(p.getAttributeNS(xml,'lang')!=='en'||p.getAttributeNS(xml,'free')!=='yes'||p.getAttributeNodeNS(xmlns,'xmlns').prefix!==null||p.getAttributeNS(xmlns,'p')!=='urn:p')throw 'valid XML combinations';
+if(p.namespaceURI!=='http://www.w3.org/1999/xhtml'||!p.isDefaultNamespace('http://www.w3.org/1999/xhtml'))throw 'no invented parser namespace';
+p.setAttributeNS(null,'title','one');var title=p.getAttributeNode('title');p.setAttributeNS(undefined,'title','two');p.setAttributeNS('','title','three');
+if(title.value!=='three'||p.getAttributeNodeNS(null,'title')!==title||title.prefix!==null||title.namespaceURI!==null)throw 'null normalization';
+p.setAttributeNS(null,'TITLE','upper');var upper=p.getAttributeNodeNS(null,'TITLE');
+if(upper.name!=='TITLE'||upper.localName!=='TITLE'||p.getAttribute('TITLE')!=='three'||p.getAttributeNS(null,'TITLE')!=='upper')throw 'case preserved';
+p.removeAttributeNS(null,'TITLE');if(upper.ownerElement!==null||upper.value!=='upper'||title.ownerElement!==p||p.getAttribute('title')!=='three')throw 'exact case removal';
+p.setAttributeNS('urn:case','p:Key','case');if(p.getAttributeNS('urn:case','key')!==null||p.getAttributeNS('URN:case','Key')!==null||p.getAttributeNS('urn:case','Key')!=='case')throw 'case-sensitive expanded name';
+p.setAttributeNS('urn:a','1prefix:x:y','colons');p.setAttributeNS('urn:a','1local','digit');
+if(p.getAttributeNS('urn:a','x:y')!=='colons'||p.getAttributeNodeNS('urn:a','x:y').prefix!=='1prefix'||p.getAttributeNS('urn:a','1local')!=='digit')throw 'current DOM name validation';
+document.title='set-namespace-validation-ok';
+"#]);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    assert_eq!(doc.title, "set-namespace-validation-ok");
+}
+
+#[test]
+fn set_attribute_ns_metadata_cannot_acquire_html_resource_form_or_csp_effects() {
+    let (doc, forms, mut page, outcome) = page("<html><body><img id=picture><input id=control value=original><p id=p>Text</p></body></html>", &[r#"
+var p=document.createElement('div');p.setAttributeNS('urn:a','id','meta');p.setAttribute('id','updated');
+if(p.id!==''||p.getAttribute('id')!=='updated')throw 'raw QName not HTML id';p.id='real';if(p.getAttributeNS(null,'id')!=='real'||p.getAttributeNS('urn:a','id')!=='updated')throw 'IDL exact null namespace';
+p.setAttributeNS(null,'ID','UPPER');if(p.id!=='real')throw 'uppercase not reflected';
+p.setAttributeNS('urn:a','class','meta');p.className='real';if(p.className!=='real'||p.getAttributeNS('urn:a','class')!=='meta')throw 'class reflection';
+p.setAttributeNS('urn:a','data-mode','meta');if(p.dataset.mode!==undefined||Object.keys(p.dataset).length!==0)throw 'dataset excludes namespaces';p.dataset.mode='real';if(p.getAttributeNS('urn:a','data-mode')!=='meta'||p.dataset.mode!=='real')throw 'dataset null write';
+var img=document.getElementById('picture');img.setAttributeNS('urn:a','src','/never-one');img.setAttribute('src','/never-two');var source=img.getAttributeNodeNS('urn:a','src');source.value='/never-three';
+if(img.src!==''||!img.complete||img.currentSrc!==''||img.getAttribute('src')!=='/never-three')throw 'image metadata';img.removeAttributeNode(source);if(source.value!=='/never-three'||source.ownerElement!==null)throw 'resource metadata detach';
+var link=document.createElement('link');link.setAttributeNS('urn:a','href','/never-sheet');link.setAttribute('href','/still-never');link.rel='stylesheet';document.body.appendChild(link);if(link.href!=='')throw 'link metadata';
+var script=document.createElement('script');script.setAttributeNS('urn:a','src','/never-script');script.setAttribute('src','/still-never-script');script.setAttributeNS('urn:a','nonce','meta');document.body.appendChild(script);if(script.src!=='')throw 'script metadata';
+var control=document.getElementById('control');control.setAttributeNS('urn:a','value','metadata');control.setAttributeNS('urn:a','disabled','');if(control.value!=='original'||control.disabled)throw 'form metadata';
+document.getElementById('p').setAttributeNS('urn:a','style','display:none; background:url(/never-style)');
+document.title='set-namespace-policy-ok';
+"#]);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    assert_eq!(doc.title, "set-namespace-policy-ok");
+    assert!(page.take_dynamic_scripts().is_empty());
+    assert!(page.take_dynamic_stylesheets().is_empty());
+    assert_eq!(page.state.declined_images, 0);
+    let p = (0..doc.nodes.len()).find(|&n| doc.attr(n, "id") == Some("p")).unwrap();
+    assert_eq!(doc.attr(p, "style"), None);
+    let control = (0..doc.nodes.len()).find(|&n| doc.attr(n, "id") == Some("control")).unwrap();
+    assert!(!forms.controls[&control].disabled);
+    let script = doc.nodes.iter().position(|n| matches!(&n.kind, NodeKind::Element { tag, .. } if tag=="script")).unwrap();
+    assert_eq!(crate::csp::nonce(&doc, script), None);
+}
+
+#[test]
+fn set_attribute_ns_budget_failures_preserve_records_identity_and_detached_values() {
+    let (mut doc, mut forms, mut page, outcome) = page("<p id=p></p>", &["var p=document.getElementById('p');p.setAttributeNS('urn:a','p:title','old');var retained=p.getAttributeNodeNS('urn:a','title');"]);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    let node = (0..doc.nodes.len()).find(|&n| doc.attr(n, "id") == Some("p")).unwrap();
+    page.begin_job();
+    let mut bridge = Bridge { doc: &mut doc, forms: &mut forms, state: &mut page.state };
+    let args = [Value::String("urn:a".into()), Value::String("q:title".into()), Value::String("longer".into())];
+    let before = bridge.state.retained;
+    bridge.state.retained_limit = before;
+    assert!(bridge.call(node_handle(node), "setAttributeNS", &args).is_err());
+    assert_eq!(bridge.state.retained, before);
+    let NodeKind::Element { attrs, .. } = &bridge.doc.nodes[node].kind else { unreachable!() };
+    assert_eq!(attrs.len(), 2); assert_eq!(attrs[1].name.qualified, "p:title"); assert_eq!(attrs[1].value, "old");
+    let Value::Host(handle) = bridge.call(node_handle(node), "getAttributeNodeNS", &[Value::String("urn:a".into()), Value::String("title".into())]).unwrap() else { panic!("missing retained Attr") };
+    assert!(matches!(bridge.get(handle, "value").unwrap(), Value::String(value) if value=="old"));
+    bridge.state.retained_limit = before + 100;
+    bridge.state.copy_work = 0;
+    assert!(bridge.call(node_handle(node), "setAttributeNS", &args).is_err());
+    assert_eq!(bridge.state.retained, before);
+    bridge.state.copy_work = bridge.state.limits.copy_bytes;
+    bridge.state.host_work = 0;
+    assert!(bridge.call(node_handle(node), "removeAttributeNS", &args[..2]).is_err());
+    assert_eq!(bridge.state.attributes[0].owner, Some(node));
+    bridge.state.host_work = bridge.state.limits.host_work;
+    bridge.doc.nodes[node].namespace = crate::html::Namespace::UnknownForeign;
+    assert!(bridge.call(node_handle(node), "setAttributeNS", &args).unwrap_err().contains("foreign"));
     assert_eq!(bridge.state.retained, before);
 }
 

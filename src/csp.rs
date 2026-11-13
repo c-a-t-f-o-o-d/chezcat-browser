@@ -623,7 +623,7 @@ pub fn nonce(doc: &Document, node: usize) -> Option<&str> {
     };
     if attrs
         .iter()
-        .any(|(name, value)| forbidden(name) || forbidden(value))
+        .any(|attr| forbidden(&attr.name.qualified) || forbidden(&attr.value))
     {
         return None;
     }

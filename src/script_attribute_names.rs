@@ -1,16 +1,27 @@
-//! XML Name validation shared by attribute operations. No namespace is inferred.
-//! https://www.w3.org/TR/xml/#NT-Name
-pub(super) fn name_start(c: char) -> bool {
-    matches!(c, ':' | '_' | 'A'..='Z' | 'a'..='z' | '\u{c0}'..='\u{d6}'
-        | '\u{d8}'..='\u{f6}' | '\u{f8}'..='\u{2ff}' | '\u{370}'..='\u{37d}'
-        | '\u{37f}'..='\u{1fff}' | '\u{200c}'..='\u{200d}' | '\u{2070}'..='\u{218f}'
-        | '\u{2c00}'..='\u{2fef}' | '\u{3001}'..='\u{d7ff}' | '\u{f900}'..='\u{fdcf}'
-        | '\u{fdf0}'..='\u{fffd}' | '\u{10000}'..='\u{effff}')
+//! DOM attribute name validation. Namespace strings confer no network authority.
+//! https://dom.spec.whatwg.org/#validate-and-extract
+pub(super) fn valid_attribute_name(name: &str) -> bool {
+    !name.is_empty() && !name.chars().any(|c| matches!(c, '\0' | '\t' | '\n' | '\u{c}' | '\r' | ' ' | '/' | '=' | '>'))
 }
-pub(super) fn name_char(c: char) -> bool {
-    name_start(c) || matches!(c,'-' | '.' | '0'..='9' | '\u{b7}' | '\u{300}'..='\u{36f}' | '\u{203f}'..='\u{2040}')
-}
-pub(super) fn valid_name(name: &str) -> bool {
-    let mut chars=name.chars();
-    chars.next().is_some_and(name_start) && chars.all(name_char)
+
+pub(super) fn validate_namespace(namespace: Option<&str>, qualified: &str)
+    -> Result<(), (&'static str, String)> {
+    // All Web IDL conversions precede this validation. The current DOM rules
+    // split at the first colon; local names can themselves contain colons.
+    let (prefix, local) = qualified.split_once(':').map_or((None, qualified), |(p, l)| (Some(p), l));
+    let valid_prefix = |name: &str| !name.is_empty()
+        && !name.chars().any(|c| matches!(c, '\0' | '\t' | '\n' | '\u{c}' | '\r' | ' ' | '/' | '>'));
+    if !valid_attribute_name(local) || prefix.is_some_and(|p| !valid_prefix(p)) {
+        return Err(("InvalidCharacterError", "Invalid attribute local name or namespace prefix.".into()));
+    }
+    const XML: &str = "http://www.w3.org/XML/1998/namespace";
+    const XMLNS: &str = "http://www.w3.org/2000/xmlns/";
+    let declaration = qualified == "xmlns" || prefix == Some("xmlns");
+    if prefix.is_some() && namespace.is_none()
+        || prefix == Some("xml") && namespace != Some(XML)
+        || declaration && namespace != Some(XMLNS)
+        || namespace == Some(XMLNS) && !declaration {
+        return Err(("NamespaceError", "Attribute prefix and namespace are inconsistent.".into()));
+    }
+    Ok(())
 }

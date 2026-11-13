@@ -162,7 +162,7 @@ impl Bridge<'_> {
             return Err("tabIndex for unsupported foreign parser contexts is unavailable.".into());
         }
         self.state.work(attrs.len())?;
-        self.state.copies(attrs.iter().map(|(name, value)| name.len() + if name == "tabindex" { value.len() } else { 0 }).sum())?;
+        self.state.copies(attrs.iter().map(|attr| attr.name.bytes() + if attr.name.html_is("tabindex") { attr.value.len() } else { 0 }).sum())?;
         if let Some(value) = self.doc.attr(node, "tabindex").and_then(forms::parse_tab_index) { return Ok(value); }
         if matches!(tag(self.doc, node), "a" | "area" | "button" | "frame" | "iframe" | "input" | "object" | "select" | "textarea") { return Ok(0); }
         if tag(self.doc, node) == "summary" {
@@ -267,7 +267,7 @@ impl Bridge<'_> {
         tag(self.doc, node) == "link" && self.state.dom.created.contains(&node)
     }
 
-    fn dom_script(&self, node: usize) -> bool {
+    pub(super) fn dom_script(&self, node: usize) -> bool {
         tag(self.doc, node) == "script" && self.state.dom.created.contains(&node)
     }
 
@@ -285,6 +285,7 @@ impl Bridge<'_> {
             "hasAttributes" if self.attr_element_receiver(object) => Some("hasAttributes"),
             "getAttributeNodeNS" if self.attr_element_receiver(object) => Some("getAttributeNodeNS"),
             "getAttributeNS" if self.attr_element_receiver(object) => Some("getAttributeNS"),
+            "setAttributeNS" if self.attr_element_receiver(object) => Some("setAttributeNS"),
             "removeAttributeNS" if self.attr_element_receiver(object) => Some("removeAttributeNS"),
             "removeAttributeNode" if self.attr_element_receiver(object) => Some("removeAttributeNode"),
             "appendChild" => Some("appendChild"),
@@ -335,9 +336,15 @@ impl Bridge<'_> {
     ) -> Result<(), (&'static str, String)> {
         if method=="setAttribute" && node_index(object).is_some() {
             if let Some(Value::String(name))=args.first() {
-                if !super::script_attribute_names::valid_name(name) {
-                    return Err(("InvalidCharacterError","Attribute name is not an XML Name.".into()));
+                if !super::script_attribute_names::valid_attribute_name(name) {
+                    return Err(("InvalidCharacterError","Invalid attribute local name.".into()));
                 }
+            }
+        }
+        if method == "setAttributeNS" && self.attr_element_receiver(object) {
+            if let (Some(namespace), Some(Value::String(name))) = (args.first(), args.get(1)) {
+                let ns = match namespace { Value::String(text) if !text.is_empty() => Some(text.as_str()), _ => None };
+                super::script_attribute_names::validate_namespace(ns, name)?;
             }
         }
         if method == "compareDocumentPosition" {
@@ -1003,6 +1010,7 @@ impl Bridge<'_> {
                 "getAttributeNode" => return self.get_attribute_node(object, args).map(Some),
                 "getAttributeNodeNS" => return self.get_attribute_node_ns(object, args).map(Some),
                 "getAttributeNS" => return self.get_attribute_ns(object, args).map(Some),
+                "setAttributeNS" => return self.set_attribute_ns(object, args).map(Some),
                 "removeAttributeNS" => return self.remove_attribute_ns(object, args).map(Some),
                 "removeAttributeNode" => return self.remove_attribute_node(object, args).map(Some),
                 _ => (),
@@ -1044,42 +1052,6 @@ impl Bridge<'_> {
                 self.state.dom.pending_focus = Some(node);
             }
             return Ok(Some(Value::Undefined));
-        }
-        if matches!(method, "setAttribute" | "removeAttribute") {
-            let node = self.node(object)?;
-            if self.stylesheet_attribute_call(node, method, args)? {
-                return Ok(Some(Value::Undefined));
-            }
-            if self.dom_script(node) {
-                let name = self
-                    .text(args.first().ok_or("Attribute name is required.")?)?
-                    .to_ascii_lowercase();
-                if matches!(
-                    name.as_str(),
-                    "src"
-                        | "type"
-                        | "charset"
-                        | "nonce"
-                        | "integrity"
-                        | "crossorigin"
-                        | "referrerpolicy"
-                        | "fetchpriority"
-                        | "async"
-                        | "defer"
-                        | "nomodule"
-                ) {
-                    let value = if method == "removeAttribute" {
-                        None
-                    } else {
-                        Some(self.text(args.get(1).ok_or("Attribute value is required.")?)?)
-                    };
-                    self.attribute(node, &name, value)?;
-                    if name == "src" && self.state.dom.connected[node] {
-                        self.queue_dynamic_script(node)?;
-                    }
-                    return Ok(Some(Value::Undefined));
-                }
-            }
         }
         Ok(None)
     }

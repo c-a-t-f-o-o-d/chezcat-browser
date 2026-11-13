@@ -1728,15 +1728,22 @@ impl Bridge<'_> {
     }
 
     fn attribute(&mut self, node: usize, name: &str, value: Option<String>) -> Result<(), String> {
-        self.frame_attribute_guard(node, name)?;
+        self.state.copies(name.len())?;
+        self.attribute_named(node, crate::html::AttributeName::unqualified(name.into()), value)
+    }
+
+    fn attribute_named(&mut self, node: usize, name: crate::html::AttributeName, value: Option<String>) -> Result<(), String> {
+        if name.namespace.is_none() { self.frame_attribute_guard(node, &name.qualified)?; }
         let NodeKind::Element { attrs, .. } = &self.doc.nodes[node].kind else {
             return Err("Not an element.".into());
         };
         self.state.work(attrs.len())?;
-        if attrs.len() >= 4096 && value.is_some() && !attrs.iter().any(|(key, _)| key == name) {
+        self.state.copies(attrs.iter().map(|attr| attr.name.bytes()).sum())?;
+        let slot = attrs.iter().position(|attr| attr.name.same_expanded_name(&name));
+        if attrs.len() >= 4096 && value.is_some() && slot.is_none() {
             return Err("Element attribute limit reached (4096).".into());
         }
-        if name == "id" && self.doc.attr(node, "id") != value.as_deref() {
+        if name.html_is("id") && self.doc.attr(node, "id") != value.as_deref() {
             self.state.work(self.forms.controls.len())?;
             self.state.copies(
                 self.forms
@@ -1757,45 +1764,45 @@ impl Bridge<'_> {
                 );
             }
         }
-        if name == "disabled" {
+        if name.html_is("disabled") {
             self.charge_disabled_refresh(node, value.is_some())?;
         }
-        let factor = if name == "id" { 2 } else { 1 };
-        let old = self
-            .doc
-            .attr(node, name)
-            .map_or(0, |value| value.len() * factor + name.len());
-        let new = value
-            .as_ref()
-            .map_or(0, |value| value.len() * factor + name.len());
+        let NodeKind::Element { attrs, .. } = &mut self.doc.nodes[node].kind else { unreachable!() };
+        if slot.is_none() && value.is_some() { attrs.try_reserve(1).map_err(|_| "Attribute storage reservation failed.")?; }
+        let factor = if name.html_is("id") { 2 } else { 1 };
+        let old = slot.map_or(0, |slot| attrs[slot].name.bytes() + attrs[slot].value.len() * factor);
+        // Existing expanded names retain the original QName/prefix and order.
+        let new = value.as_ref().map_or(0, |value| value.len() * factor + slot.map_or_else(|| name.bytes(), |slot| attrs[slot].name.bytes()));
         let detached_attr = if value.is_none() {
             self.state.work(self.state.attributes.len())?;
-            self.state.copies(self.state.attributes.iter().filter(|attr| attr.owner == Some(node)).map(|attr| attr.name.len()).sum())?;
-            self.state.attributes.iter().position(|attr| attr.owner == Some(node) && attr.name == name)
+            self.state.copies(self.state.attributes.iter().filter(|attr| attr.owner == Some(node)).map(|attr| attr.name.bytes()).sum())?;
+            self.state.attributes.iter().position(|attr| attr.owner == Some(node) && attr.name.same_expanded_name(&name))
         } else { None };
-        let retained_value = if detached_attr.is_some() { self.doc.attr(node, name).map_or(0, str::len) } else { 0 };
+        let retained_value = if detached_attr.is_some() { slot.map_or(0, |slot| attrs[slot].value.len()) } else { 0 };
+        if name.html_is("id") { self.state.copies(value.as_ref().map_or(0, String::len))?; }
         self.state.replace_bytes(old, new + retained_value)?;
         let NodeKind::Element { attrs, id, .. } = &mut self.doc.nodes[node].kind else {
             return Err("Not an element.".into());
         };
-        if name == "id" {
+        if name.html_is("id") {
             *id = value.clone();
             self.state.dirty = true;
         }
-        if let Some(index) = attrs.iter().position(|(key, _)| key == name) {
+        let disabled = name.html_is("disabled");
+        if let Some(index) = slot {
             if let Some(value) = value {
-                attrs[index].1 = value;
+                attrs[index].value = value;
             } else {
-                let (_, removed) = attrs.remove(index);
+                let removed = attrs.remove(index).value;
                 if let Some(attr) = detached_attr {
                     self.state.attributes[attr].owner = None;
                     self.state.attributes[attr].value = removed;
                 }
             }
         } else if let Some(value) = value {
-            attrs.push((name.into(), value));
+            attrs.push(crate::html::Attribute { name, value });
         }
-        if name == "disabled" {
+        if disabled {
             self.forms.refresh_disabled(self.doc);
         }
         if self.state.tree.active.get(node).copied().unwrap_or(false) {
@@ -2247,6 +2254,7 @@ impl Host for Bridge<'_> {
         if self.ui_receiver(object) && method=="initUIEvent" {return &[(0,true),(4,false)];}
         if method == "isDefaultNamespace" && self.namespace_receiver(object) { return &[(0, true)]; }
         if self.attr_element_receiver(object) && method == "getAttributeNode" { return &[(0, true)]; }
+        if self.attr_element_receiver(object) && method == "setAttributeNS" { return &[(0, true), (1, true), (2, true)]; }
         if self.attr_element_receiver(object) && matches!(method,"getAttributeNS" | "getAttributeNodeNS" | "removeAttributeNS") { return &[(0, true), (1, true)]; }
         if collection_handle_index(object).is_some() {
             return match method {
@@ -2297,6 +2305,7 @@ impl Host for Bridge<'_> {
     }
 
     fn method_length(&self, object:u32, method:&str) -> Option<usize> {
+        if self.attr_element_receiver(object) && method == "setAttributeNS" { return Some(3); }
         if self.event_receiver(object) && method=="initEvent"
             || self.ui_receiver(object) && method=="initUIEvent"
             || self.mouse_receiver(object) && method=="initMouseEvent" {return Some(1);}
@@ -2310,7 +2319,7 @@ impl Host for Bridge<'_> {
 
     fn nullable_string_argument(&self, object: u32, method: &str, index: usize) -> bool {
         method == "isDefaultNamespace" && index == 0 && self.namespace_receiver(object)
-            || matches!(method,"getAttributeNS" | "getAttributeNodeNS" | "removeAttributeNS") && index == 0 && self.attr_element_receiver(object)
+            || matches!(method,"getAttributeNS" | "getAttributeNodeNS" | "removeAttributeNS" | "setAttributeNS") && index == 0 && self.attr_element_receiver(object)
     }
 
     fn validate_argument_prefix(&self, object: u32, method: &str, next_index: usize, args: &[Value])
@@ -2328,6 +2337,7 @@ impl Host for Bridge<'_> {
     }
 
     fn required_arguments(&self, object: u32, method: &str) -> usize {
+        if self.attr_element_receiver(object) && method == "setAttributeNS" { return 3; }
         if self.class_list_receiver(object) && matches!(method,"item"|"contains") { return 1; }
         if self.attr_element_receiver(object) && matches!(method,"getAttributeNS" | "getAttributeNodeNS" | "removeAttributeNS") { return 2; }
         if object == DOCUMENT && method == "getElementsByName" { return 1; }
@@ -2622,7 +2632,7 @@ impl Host for Bridge<'_> {
             // event does not revoke borrowing; the actual receiver must be live.
             return (EVENT_BASE..self.state.next_event).contains(&object) && self.event_receiver(receiver);
         }
-        if matches!(method, "getAttributeNS" | "getAttributeNode" | "getAttributeNodeNS" | "removeAttributeNS" | "removeAttributeNode" | "hasAttributes") {
+        if matches!(method, "getAttributeNS" | "getAttributeNode" | "getAttributeNodeNS" | "removeAttributeNS" | "setAttributeNS" | "removeAttributeNode" | "hasAttributes") {
             return self.attr_element_receiver(object) && self.attr_element_receiver(receiver);
         }
         if matches!(method, "isDefaultNamespace" | "compareDocumentPosition") {
@@ -2691,10 +2701,11 @@ impl Host for Bridge<'_> {
             }
             self.state.work(attrs.len())?;
             self.state
-                .copies(attrs.iter().map(|(key, _)| key.len()).sum())?;
+                .copies(attrs.iter().map(|attr| attr.name.bytes()).sum())?;
             return Ok(attrs
                 .iter()
-                .filter_map(|(key, _)| dataset_key(key))
+                .filter(|attr| attr.name.namespace.is_none())
+                .filter_map(|attr| dataset_key(&attr.name.qualified))
                 .collect());
         }
         Err("Enumerating this native host object is not implemented.".into())
@@ -3890,76 +3901,26 @@ impl Host for Bridge<'_> {
             ));
         }
         let node = self.node(object)?;
-        if matches!(
-            method,
-            "getAttribute" | "hasAttribute" | "setAttribute" | "removeAttribute"
-        ) {
+        if matches!(method, "getAttribute" | "hasAttribute" | "setAttribute" | "removeAttribute") {
             let count = if method == "setAttribute" { 2 } else { 1 };
-            if args.len() < count {
-                return Err("Wrong number of attribute arguments.".into());
-            }
-            let name = self.text(&args[0])?.to_ascii_lowercase();
+            if args.len() < count { return Err("Wrong number of attribute arguments.".into()); }
+            let text = self.text(&args[0])?;
+            self.state.copies(text.len())?;
+            let qualified = text.to_ascii_lowercase();
+            let slot = self.raw_attribute_slot(node, &qualified)?;
             if matches!(method, "getAttribute" | "hasAttribute") {
-                if let NodeKind::Element { attrs, .. } = &self.doc.nodes[node].kind {
-                    self.state.work(attrs.len())?;
-                    self.state
-                        .copies(attrs.iter().map(|(key, _)| key.len()).sum())?;
-                }
-                let value = self.doc.attr(node, &name);
-                if method == "hasAttribute" {
-                    return Ok(Value::Bool(value.is_some()));
-                }
-                if value.is_some_and(|value| value.len() > self.state.limits.host.string_bytes) {
-                    return Err(format!("Attribute value exceeds {} KiB.", self.state.limits.host.string_bytes / 1024).into());
-                }
-                let value = value.map(str::to_owned);
-                return value.map_or(Ok(Value::Null), |value| self.string(&value));
+                if method == "hasAttribute" { return Ok(Value::Bool(slot.is_some())); }
+                let Some(slot) = slot else { return Ok(Value::Null); };
+                let NodeKind::Element { attrs, .. } = &self.doc.nodes[node].kind else { unreachable!() };
+                let value = &attrs[slot].value;
+                if value.len() > self.state.limits.host.string_bytes { return Err("Attribute value exceeds the host string bound.".into()); }
+                self.state.copies(value.len())?;
+                return Ok(Value::String(value.to_owned()));
             }
-            let image_attribute = tag(self.doc, node) == "img"
-                && matches!(name.as_str(), "src" | "alt" | "width" | "height")
-                || self.html_spacing_property(node, &name)
-                || name == "border" && self.html_border_property(node)
-                || name == "ismap" && self.html_image_map_property(node)
-                || name == "srcdoc" && self.iframe_srcdoc_property(node);
-            if !matches!(
-                name.as_str(),
-                "id" | "class"
-                    | "style"
-                    | "title"
-                    | "hidden"
-                    | "disabled"
-                    | "role"
-                    | "lang"
-                    | "dir"
-            ) && !inert_attribute_name(&name)
-                && !image_attribute
-                // In a known HTML namespace, raw colon attributes are opaque
-                // unqualified metadata (including parsed xmlns:*). Removing
-                // them does not change the node's immutable namespace.
-                && !(method == "removeAttribute" && name.contains(':')
-                    && self.doc.nodes[node].namespace == crate::html::Namespace::Html)
-            {
-                return Err("Supported attributes are id, class, style, title, hidden, disabled, role, lang, dir, data-* and aria-*; use .value/.checked for live controls.".into());
-            }
-            match method {
-                "removeAttribute" => {
-                    if name == "src" && !self.state.detached_images.contains(&node) {
-                        return Err("Changing a connected image source is not implemented.".into());
-                    }
-                    self.attribute(node, &name, None)?;
-                }
-                _ => {
-                    let value = self.text(&args[1])?;
-                    if name == "src" && image_attribute {
-                        self.image_set(node, "src", &Value::String(value))?;
-                        return Ok(Value::Undefined);
-                    }
-                    if name == "style" {
-                        validate_style(&value, self.state.limits.host.string_bytes)?;
-                    }
-                    self.attribute(node, &name, Some(value))?;
-                }
-            }
+            let name = if let Some(slot) = slot { self.copy_attribute_name(node, slot)? }
+                else { crate::html::AttributeName::unqualified(qualified) };
+            let value = if method == "setAttribute" { Some(self.text(&args[1])?) } else { None };
+            self.public_attribute(node, name, value)?;
             return Ok(Value::Undefined);
         }
         Err(format!("DOM method {method:?} is not supported."))
@@ -4099,7 +4060,7 @@ fn node_bytes(node: &Node) -> usize {
         NodeKind::Text(text) => text.len(),
         NodeKind::Element { id, attrs, .. } => {
             id.as_ref().map_or(0, String::len)
-                + attrs.iter().map(|(_, value)| value.len()).sum::<usize>()
+                + attrs.iter().map(crate::html::Attribute::bytes).sum::<usize>()
         }
     }
 }

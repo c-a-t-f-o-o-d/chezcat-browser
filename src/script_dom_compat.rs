@@ -136,8 +136,8 @@ impl Bridge<'_> {
         let value = match &self.doc.nodes[node].kind {
             NodeKind::Element { attrs, .. } => attrs
                 .iter()
-                .find(|(key, _)| *key == attribute)
-                .map(|(_, value)| value),
+                .find(|attr| attr.name.html_is(&attribute))
+                .map(|attr| &attr.value),
             _ => None,
         };
         if let Some(value) = value {
@@ -162,12 +162,12 @@ impl Bridge<'_> {
                 // Web IDL unsigned long wraps after truncation; it is not a
                 // pointer size or a raster allocation request.
                 let dimension = timer_integer(value)? as u32;
-                attrs.push(((*name).into(), dimension.to_string()));
+                attrs.push(crate::html::Attribute::unqualified((*name).into(), dimension.to_string()));
             }
         }
         let bytes = 3 + attrs
             .iter()
-            .map(|(name, value): &(String, String)| name.len() + value.len())
+            .map(crate::html::Attribute::bytes)
             .sum::<usize>();
         self.state.replace_bytes(0, bytes)?;
         let node = self.doc.nodes.len();

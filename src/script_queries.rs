@@ -37,7 +37,7 @@ impl Bridge<'_> {
             if self.doc.nodes[node].namespace != crate::html::Namespace::Html { continue; }
             let NodeKind::Element {attrs,..} = &self.doc.nodes[node].kind else { unreachable!() };
             self.state.work(attrs.len())?;
-            self.state.copies(attrs.iter().map(|(key,_)|key.len()).sum())?;
+            self.state.copies(attrs.iter().map(|attr|attr.name.bytes()).sum())?;
             let value = self.doc.attr(node,"name");
             self.state.copies(value.map_or(0,str::len))?;
             if value == Some(name.as_str()) { found.push(node); }

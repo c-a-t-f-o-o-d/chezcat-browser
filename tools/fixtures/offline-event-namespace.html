@@ -4,6 +4,12 @@
 var fixtureNode=document.getElementById('event-namespace-state');
 fixtureNode.setAttribute('data-sample','value');
 if(fixtureNode.getAttributeNS(null,'data-sample')!=='value'||fixtureNode.getAttributeNS('urn:fixture','data-sample')!==null)throw Error('namespace read');
+fixtureNode.setAttributeNS('urn:fixture','a:sample','first');
+var fixtureAttr=fixtureNode.getAttributeNodeNS('urn:fixture','sample');
+fixtureNode.setAttributeNS('urn:fixture','b:sample','second');
+if(fixtureAttr!==fixtureNode.getAttributeNodeNS('urn:fixture','sample')||fixtureAttr.name!=='a:sample'||fixtureAttr.value!=='second'||fixtureAttr.namespaceURI!=='urn:fixture')throw Error('namespace mutation identity');
+fixtureNode.removeAttributeNS('urn:fixture','sample');
+if(fixtureAttr.ownerElement!==null||fixtureAttr.value!=='second')throw Error('namespace detachment');
 var fixtureEvent=document.createEvent('UIEvents');
 fixtureEvent.initUIEvent('fixture',true,true,window,4294967297);
 if(fixtureEvent.view!==window||fixtureEvent.detail!==1||fixtureEvent.isTrusted)throw Error('UI initializer');

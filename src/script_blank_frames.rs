@@ -202,7 +202,7 @@ impl Bridge<'_> {
         if !self.iframe_srcdoc_property(node) {return Ok(Value::Undefined);}
         let NodeKind::Element {attrs,..}=&self.doc.nodes[node].kind else {unreachable!()};
         self.state.work(attrs.len())?;
-        self.state.copies(attrs.iter().map(|(name,_)|name.len()).sum())?;
+        self.state.copies(attrs.iter().map(|attr|attr.name.bytes()).sum())?;
         let text=self.doc.attr(node,"srcdoc").unwrap_or("");
         if text.len()>self.state.limits.host.string_bytes {return Err("srcdoc exceeds the host string bound.".into());}
         self.state.copies(text.len())?;

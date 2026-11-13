@@ -198,20 +198,17 @@ impl Bridge<'_> {
         Ok(true)
     }
 
-    pub(super) fn stylesheet_attribute_call(
+    pub(super) fn stylesheet_attribute_change(
         &mut self,
         node: usize,
-        method: &str,
-        args: &[Value],
+        name: &str,
+        value: Option<&str>,
     ) -> Result<bool, String> {
         if !self.dom_stylesheet(node) {
             return Ok(false);
         }
-        let name = self
-            .text(args.first().ok_or("Attribute name is required.")?)?
-            .to_ascii_lowercase();
         if !matches!(
-            name.as_str(),
+            name,
             "href"
                 | "rel"
                 | "type"
@@ -226,12 +223,8 @@ impl Bridge<'_> {
         ) {
             return Ok(false);
         }
-        let value = if method == "removeAttribute" {
-            None
-        } else {
-            Some(self.text(args.get(1).ok_or("Attribute value is required.")?)?)
-        };
-        self.attribute(node, &name, value)?;
+        self.state.copies(value.map_or(0, str::len))?;
+        self.attribute(node, name, value.map(str::to_owned))?;
         self.queue_dynamic_stylesheet(node)?;
         Ok(true)
     }

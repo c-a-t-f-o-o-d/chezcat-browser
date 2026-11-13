@@ -32,11 +32,16 @@ pub struct Document {
 
 impl Document {
     pub fn attr(&self, node: usize, name: &str) -> Option<&str> {
+        // HTML consumers accept a case-insensitive query, but only the exact
+        // lower-case null-namespace attribute drives native HTML behavior.
+        let name = if name.bytes().any(|c| c.is_ascii_uppercase()) {
+            Cow::Owned(name.to_ascii_lowercase())
+        } else { Cow::Borrowed(name) };
         match &self.nodes.get(node)?.kind {
             NodeKind::Element { attrs, .. } => attrs
                 .iter()
-                .find(|(key, _)| key.eq_ignore_ascii_case(name))
-                .map(|(_, value)| value.as_str()),
+                .find(|attr| attr.name.html_is(name.as_ref()))
+                .map(|attr| attr.value.as_str()),
             NodeKind::Text(_) => None,
         }
     }
@@ -58,12 +63,56 @@ pub enum Namespace {
 }
 
 #[derive(Debug)]
+pub struct AttributeName {
+    pub qualified: String,
+    pub namespace: Option<AttributeNamespace>,
+}
+
+#[derive(Debug)]
+pub struct AttributeNamespace {
+    pub uri: String,
+    pub prefix: Option<String>,
+    pub local: String,
+}
+
+impl AttributeName {
+    pub fn unqualified(qualified: String) -> Self { Self { qualified, namespace: None } }
+    pub fn namespace_uri(&self) -> Option<&str> { self.namespace.as_ref().map(|ns| ns.uri.as_str()) }
+    pub fn prefix(&self) -> Option<&str> { self.namespace.as_ref().and_then(|ns| ns.prefix.as_deref()) }
+    pub fn local(&self) -> &str { self.namespace.as_ref().map_or(&self.qualified, |ns| &ns.local) }
+    pub fn html_is(&self, name: &str) -> bool { self.namespace.is_none() && self.qualified == name }
+    pub fn matches(&self, namespace: Option<&str>, local: &str) -> bool {
+        self.namespace_uri() == namespace && self.local() == local
+    }
+    pub fn same_expanded_name(&self, other: &Self) -> bool { self.matches(other.namespace_uri(), other.local()) }
+    pub fn bytes(&self) -> usize {
+        self.qualified.len() + self.namespace.as_ref().map_or(0, |ns| ns.uri.len() + ns.local.len() + ns.prefix.as_ref().map_or(0, String::len))
+    }
+    // Callers charge bytes before cloning retained native metadata.
+    pub fn copy(&self) -> Self {
+        Self { qualified: self.qualified.clone(), namespace: self.namespace.as_ref().map(|ns|
+            AttributeNamespace { uri: ns.uri.clone(), prefix: ns.prefix.clone(), local: ns.local.clone() }) }
+    }
+}
+
+#[derive(Debug)]
+pub struct Attribute {
+    pub name: AttributeName,
+    pub value: String,
+}
+
+impl Attribute {
+    pub fn unqualified(name: String, value: String) -> Self { Self { name: AttributeName::unqualified(name), value } }
+    pub fn bytes(&self) -> usize { self.name.bytes() + self.value.len() }
+}
+
+#[derive(Debug)]
 pub enum NodeKind {
     Element {
         tag: String,
         id: Option<String>,
         href: Option<String>,
-        attrs: Vec<(String, String)>,
+        attrs: Vec<Attribute>,
     },
     Text(String),
 }
@@ -179,7 +228,7 @@ pub fn parse(input: &str) -> Document {
                 tag: tag.name.clone(),
                 id: tag.id,
                 href: tag.href,
-                attrs: tag.attrs,
+                attrs: tag.attrs.into_iter().map(|(name, value)| Attribute::unqualified(name, value)).collect(),
             },
             children: Vec::new(),
         });
