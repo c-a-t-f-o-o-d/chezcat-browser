@@ -5,7 +5,9 @@ use super::{Fault, Function, Runtime, MAX_FUNCTIONS};
 pub(super) struct Arena {
     pub(super) occupied: usize,
     pub(super) script_created: usize,
+    pub(super) allocations: usize,
     pub(super) collections: usize,
+    pub(super) demand_collections: usize,
     pub(super) retired: usize,
     pub(super) environments_retired: usize,
     pub(super) next_collection_at: usize,
@@ -59,6 +61,7 @@ impl Runtime {
             self.function_initial_names[id] = None;
         }
         self.function_arena.occupied += 1;
+        self.function_arena.allocations = self.function_arena.allocations.saturating_add(1);
         Ok(Allocation { id, appended })
     }
 

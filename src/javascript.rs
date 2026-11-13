@@ -38,6 +38,9 @@ mod function_reachability;
 #[cfg(test)]
 #[path = "function_collection_tests.rs"]
 mod function_collection_tests;
+#[cfg(test)]
+#[path = "function_demand_tests.rs"]
+mod function_demand_tests;
 #[path = "selected_if_statement.rs"]
 mod selected_if_statement;
 #[path = "transient_roots.rs"]

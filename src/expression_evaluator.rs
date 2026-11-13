@@ -293,12 +293,15 @@ impl Runtime {
         &mut self, program: &Rc<Program>, id: ExprId, env: usize,
         this: &Value, host: &mut dyn Host,
     ) -> Result<Value, Fault> {
+        if let ExprKind::Function(template) = program.exprs[id].kind {
+            return self.eval_heap_function_literal(program, template, env, this);
+        }
         // Compound helpers already own their traversal state. Do not retain
         // this driver's large Frame/Transition temporaries while they invoke
         // iterator getters or other callbacks. Children still reenter eval
         // through its native guard and share the heap-frame quota.
         if matches!(&program.exprs[id].kind, ExprKind::Literal(_) | ExprKind::Name(_)
-            | ExprKind::This | ExprKind::Function(_) | ExprKind::RegExp(_)
+            | ExprKind::This | ExprKind::RegExp(_)
             | ExprKind::Array(_) | ExprKind::Object(_) | ExprKind::TemplateLiteral(..)) {
             if self.evaluation_frames >= MAX_EVALUATION_FRAMES {
                 return Err(Fault::new("Pending evaluation limit reached (4096)."));
@@ -318,6 +321,30 @@ impl Runtime {
         self.evaluation_frames = baseline.0;
         self.evaluation_frame_slots = baseline.1;
         self.evaluation_argument_slots = baseline.2;
+        result
+    }
+
+    #[inline(never)]
+    fn eval_heap_function_literal(&mut self, program: &Rc<Program>, template: usize,
+        env: usize, this: &Value) -> Result<Value, Fault> {
+        if self.evaluation_frames >= MAX_EVALUATION_FRAMES {
+            return Err(Fault::new("Pending evaluation limit reached (4096)."));
+        }
+        self.evaluation_frames += 1;
+        // A standalone literal has no suspended heap state of its own.
+        // Publish its actual one frame without introducing driver storage.
+        // Keep this scratch out of every other expression's native activation.
+        let scratch = Scratch { frames: Vec::new(), arguments: Vec::new() };
+        let result = match self.publish_heap_roots(&scratch, env, this, None, None, None) {
+            Ok(marker) => {
+                let result = self.collect_before_function_literal()
+                    .and_then(|()| self.make_function(program, template, env, this));
+                self.restore_transient_marker(marker);
+                result
+            }
+            Err(error) => Err(error),
+        };
+        self.evaluation_frames -= 1;
         result
     }
 
@@ -419,9 +446,7 @@ impl Runtime {
                         result.map_err(located)?
                     }
                     Transition::Immediate(id) => {
-                        let marker = self.inhibit_transient_collection_for("immediate-expression");
-                        let result = self.eval_heap_immediate(program, id, env, this, host);
-                        self.restore_transient_marker(marker);
+                        let result = self.finish_heap_immediate(program, id, &scratch, env, this, completed.as_ref(), host);
                         done(result.map_err(located)?)
                     }
                     Transition::Read(reference, end) => {
@@ -472,6 +497,27 @@ impl Runtime {
         }
         debug_assert!(scratch.arguments.is_empty());
         Ok(value(completed.expect("root expression completion")))
+    }
+
+    #[inline(never)]
+    fn finish_heap_immediate(&mut self, program: &Rc<Program>, id: ExprId,
+        scratch: &Scratch<'_>, env: usize, this: &Value, completed: Option<&Completion>,
+        host: &mut dyn Host) -> Result<Value, Fault> {
+        // Keep all terminal-only scratch out of every recursive Invoke. Only
+        // Function literals publish a complete snapshot and become safepoints;
+        // compound/native helpers retain their existing blanket inhibitor.
+        if let ExprKind::Function(template) = program.exprs[id].kind {
+            let marker = self.publish_heap_roots(scratch, env, this, None, None, completed)?;
+            let result = self.collect_before_function_literal()
+                .and_then(|()| self.make_function(program, template, env, this));
+            self.restore_transient_marker(marker);
+            result
+        } else {
+            let marker = self.inhibit_transient_collection_for("immediate-expression");
+            let result = self.eval_heap_immediate(program, id, env, this, host);
+            self.restore_transient_marker(marker);
+            result
+        }
     }
 
     #[inline(never)]

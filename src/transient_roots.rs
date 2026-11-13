@@ -15,6 +15,8 @@ pub(super) struct State {
     pub(super) disable_empty_loop_fast_path: bool,
     #[cfg(test)]
     pub(super) disable_if_statement_tail: bool,
+    #[cfg(test)]
+    pub(super) disable_function_literal_collection: bool,
     pub(super) roots: Vec<Edge>,
     pub(super) evaluation_frames: usize,
     pub(super) frame_slots: usize,

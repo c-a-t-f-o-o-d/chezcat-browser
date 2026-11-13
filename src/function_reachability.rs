@@ -91,10 +91,23 @@ impl Runtime {
 
     #[inline(never)]
     pub(super) fn collect_function_candidates_at_entry(&mut self) -> Result<(), Fault> {
+        self.collect_function_candidates(false)
+    }
+
+    #[inline(never)]
+    pub(super) fn collect_before_function_literal(&mut self) -> Result<(), Fault> {
+        #[cfg(test)]
+        if self.transient_roots.disable_function_literal_collection { return Ok(()); }
+        self.collect_function_candidates(true)
+    }
+
+    #[inline(never)]
+    fn collect_function_candidates(&mut self, allocation_demand: bool) -> Result<(), Fault> {
         #[cfg(test)]
         if self.function_arena.disable_collection { return Ok(()); }
         if self.object_assigned_closures.is_empty() || self.function_arena.occupied < MAX_FUNCTIONS * 3 / 4
-            || self.function_arena.script_created < self.function_arena.next_collection_at && self.function_arena.occupied < MAX_FUNCTIONS - 16
+            || self.function_arena.allocations < self.function_arena.next_collection_at
+                && !(allocation_demand && self.function_arena.occupied == MAX_FUNCTIONS)
             || !self.active_roots_are_audited() {
             return Ok(());
         }
@@ -158,9 +171,10 @@ impl Runtime {
             if !graph.environments[id] { self.discard_environment(id); }
         }
         self.function_arena.collections = self.function_arena.collections.saturating_add(1);
+        if allocation_demand { self.function_arena.demand_collections = self.function_arena.demand_collections.saturating_add(1); }
         self.function_arena.retired = self.function_arena.retired.saturating_add(functions);
         self.function_arena.environments_retired = self.function_arena.environments_retired.saturating_add(environments);
-        self.function_arena.next_collection_at = self.function_arena.script_created.saturating_add(32);
+        self.function_arena.next_collection_at = self.function_arena.allocations.saturating_add(32);
         Ok(())
     }
 
@@ -204,9 +218,10 @@ impl Runtime {
                 let candidates = self.object_assigned_closures.len();
                 let unmarked = self.object_assigned_closures.iter().filter(|&&id| !graph.functions[id]).count();
                 let history = if self.function_arena.collections == 0 { "No collection or slot reuse has occurred." } else { "Candidate function slots may be reused." };
-                format!("Callable reachability (inactive stack; conservative native/Promise/API roots): Script allocated={allocated}; reachable={reachable}; exported function/object pins={}/{}. Object-assigned closure candidates={candidates}; unmarked with all other functions/exotic objects rooted={unmarked}. Conservative Script-entry collection: passes={}; functions retired={}; environments retired={}; occupied/high-water={}/{}; Script creations={}. {history} Objects remain append-only.\nEvaluator root snapshots: {}; call-root scopes={}; completion-root scopes={}; peak ID references={}; active registrations=0. Script entries={}; uninhibited={}.\n",
+                format!("Callable reachability (inactive stack; conservative native/Promise/API roots): Script allocated={allocated}; reachable={reachable}; exported function/object pins={}/{}. Object-assigned closure candidates={candidates}; unmarked with all other functions/exotic objects rooted={unmarked}. Conservative Script-entry collection: passes={}; functions retired={}; environments retired={}; occupied/high-water={}/{}; Script creations={}; slot allocations={}; Function-literal passes={}. {history} Objects remain append-only.\nEvaluator root snapshots: {}; call-root scopes={}; completion-root scopes={}; peak ID references={}; active registrations=0. Script entries={}; uninhibited={}.\n",
                     self.exported_function_roots.len(), self.exported_object_roots.len(), self.function_arena.collections, self.function_arena.retired,
                     self.function_arena.environments_retired, self.function_arena.occupied, self.functions.len(), self.function_arena.script_created,
+                    self.function_arena.allocations, self.function_arena.demand_collections,
                     self.transient_roots.snapshots, self.transient_roots.call_scopes, self.transient_roots.completion_scopes, self.transient_roots.peak, self.transient_roots.script_entries, self.transient_roots.uninhibited_script_entries)
             }
             Err(message) => format!("Callable reachability unavailable: {message}\n"),

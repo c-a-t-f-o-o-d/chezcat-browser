@@ -11,6 +11,14 @@ impl Host for NoHost {
 
 const PRESSURE: &str = "function checkpoint(){return undefined;}function pressure(){var trash={};for(var p=0;p<750;p++)trash.fn=function(){return p;};}function make(n){var box={};box.fn=function(){return n;};return box.fn;}";
 
+// Preserve these Script-entry ownership proofs independently of the newer
+// Function-literal safepoint. Demand tests exercise the default production path.
+fn entry_runtime() -> Runtime {
+    let mut runtime = Runtime::new();
+    runtime.transient_roots.disable_function_literal_collection = true;
+    runtime
+}
+
 #[test]
 fn original_two_thousand_replaced_cells_collect_without_changing_state_order_or_live_identity() {
     let mut runtime = Runtime::with_limits(limits::BROWSER);
@@ -49,7 +57,7 @@ fn collection_keeps_unexported_pending_returns_throws_and_saved_eval_completions
         "var result=eval('for(var i=0;i<1;(pressure(),checkpoint())){i++;make(75);}');if(result()!==75)throw 'for completion';0;",
     ] {
         for disabled in [true, false] {
-            let mut runtime = Runtime::new();
+            let mut runtime = entry_runtime();
             runtime.function_arena.disable_collection = disabled;
             runtime.execute(PRESSURE, &mut NoHost).unwrap();
             runtime.execute(source, &mut NoHost).unwrap();
@@ -62,7 +70,7 @@ fn collection_keeps_unexported_pending_returns_throws_and_saved_eval_completions
 
 #[test]
 fn collection_honors_exported_function_and_object_pins_after_script_names_disappear() {
-    let mut runtime = Runtime::new();
+    let mut runtime = entry_runtime();
     runtime.execute(PRESSURE, &mut NoHost).unwrap();
     let function = runtime.execute("make(81);", &mut NoHost).unwrap();
     let object = runtime.execute("var box={};box.fn=function(){return 83;};box;", &mut NoHost).unwrap();
@@ -75,7 +83,7 @@ fn collection_honors_exported_function_and_object_pins_after_script_names_disapp
 }
 
 fn ready() -> Runtime {
-    let mut runtime = Runtime::new();
+    let mut runtime = entry_runtime();
     runtime.execute(PRESSURE, &mut NoHost).unwrap();
     runtime.execute("pressure('retained payload');0;", &mut NoHost).unwrap();
     assert_eq!(runtime.function_arena.collections, 0);
@@ -126,7 +134,7 @@ fn primitive_only_collection_storage_still_spends_finite_traversal_work() {
 
 #[test]
 fn near_cap_entry_retries_after_candidate_references_clear_without_more_script_creation() {
-    let mut runtime = Runtime::new();
+    let mut runtime = entry_runtime();
     runtime.execute("var kept=[];for(var i=0;i<750;i++)kept[i]=function(){return i;};function checkpoint(){}checkpoint();0;", &mut NoHost).unwrap();
     assert_eq!((runtime.function_arena.collections, runtime.function_arena.retired), (1, 0));
     let created = runtime.function_arena.script_created;
@@ -156,7 +164,7 @@ fn collection_refuses_unaudited_entries_and_preserves_live_occupied_cap() {
     runtime.collect_function_candidates_at_entry().unwrap();
     assert!(runtime.function_arena.retired >= 749);
 
-    let mut runtime = Runtime::new();
+    let mut runtime = entry_runtime();
     let error = runtime.execute("var kept=[];for(var i=0;i<1200;i++){kept[i]=function(){return i;};if(i%32===0)kept[i]();}0;", &mut NoHost).unwrap_err();
     assert!(error.contains("Function limit reached (1024)"), "{error}");
     assert_eq!(runtime.function_arena.occupied, MAX_FUNCTIONS);
@@ -169,7 +177,7 @@ fn collection_inside_popped_callback_and_thenable_jobs_keeps_private_values_and_
         "var seen=0,box={};box.fn=function(){var saved=make(91);pressure();checkpoint();if(saved()!==91)throw 'private callback';seen=91;};queueMicrotask(box.fn);box=null;0;",
         "var seen=0,box={};box.then=function(resolve){var saved=make(93);pressure();checkpoint();if(saved()!==93)throw 'private thenable';resolve(saved);};Promise.resolve(box).then(function(value){seen=value();});box=null;0;",
     ] {
-        let mut runtime = Runtime::new();
+        let mut runtime = entry_runtime();
         runtime.execute(PRESSURE, &mut NoHost).unwrap();
         runtime.execute(source, &mut NoHost).unwrap();
         assert!(runtime.microtask_checkpoint(&mut NoHost).unwrap().is_empty());
