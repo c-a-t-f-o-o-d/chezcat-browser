@@ -223,6 +223,34 @@ impl Bridge<'_> {
 
     pub(super) fn is_frame_handle(&self, handle: u32) -> bool { frame_handle(handle).is_some() }
 
+    pub(super) fn frame_default_namespace(&mut self, handle: u32) -> Option<Result<Option<&'static str>, String>> {
+        let (index, offset) = frame_handle(handle)?;
+        Some((|| {
+            self.frame_window_access(Some(WINDOW), window(index))?;
+            if !matches!(offset, 1 | 4..=6) { return Err("Invalid blank child Node receiver.".into()); }
+            let frame = self.state.blank_frames.get(index).ok_or("Unknown blank-frame handle.")?;
+            let node = if offset == 1 { 0 } else { (offset - 3) as usize };
+            // Blank documents are immutable and only expose Document/Elements.
+            // Their existing metadata validation remains mandatory.
+            let item = frame.document.nodes.get(node).ok_or("Invalid blank-document node.")?;
+            let mut work = 0;
+            let mut namespace = if node == 0 { None } else { Some(item.namespace) };
+            if node == 0 {
+                for &child in &frame.document.nodes[0].children {
+                    work += 1;
+                    let item = frame.document.nodes.get(child).ok_or("Invalid child namespace node.")?;
+                    if matches!(item.kind, NodeKind::Element { .. }) { namespace = Some(item.namespace); break; }
+                }
+            }
+            self.state.work(work + 1)?;
+            match namespace {
+                None => Ok(None),
+                Some(crate::html::Namespace::Html) => Ok(Some("http://www.w3.org/1999/xhtml")),
+                Some(_) => Err("Blank child namespace context is unsupported.".into()),
+            }
+        })())
+    }
+
     pub(super) fn frame_node_constant_readonly(&self, handle: u32) -> bool {
         let Some((index, offset)) = frame_handle(handle) else { return false; };
         if !matches!(offset, 1 | 4..=6) { return false; }
@@ -253,6 +281,34 @@ mod tests {
     }
 
     const CREATE: &str = "var f=document.createElement('iframe');f.hidden=true;document.body.appendChild(f);var w=f.contentWindow;";
+
+    #[test]
+    fn default_namespace_blank_nodes_borrow_and_keep_origin_and_handle_boundaries() {
+        let source = format!("{CREATE}{}", r#"
+var saved=w.document,method=saved.isDefaultNamespace,uri='http://www.w3.org/1999/xhtml';
+for(var n of [saved,saved.documentElement,saved.head,saved.body]){
+if(!('isDefaultNamespace' in n)||!n.isDefaultNamespace(uri)||n.isDefaultNamespace(null)||!document.isDefaultNamespace.call(n,uri))throw 'child namespace';}
+if(!method.call(document,uri)||!method.call(document.createTextNode('x'),null))throw 'borrowed child method';
+var bad=false,calls=0;try{method.call(w,{toString:function(){calls++;return uri;}});}catch(e){bad=e.name==='TypeError';}
+if(!bad||calls!==0)throw 'Window brand';document.title='child-namespace-ok';
+"#);
+        let (mut doc, mut forms, mut page, outcome) = start(&source, &crate::csp::PolicySet::default());
+        assert_eq!(outcome.errors, 0, "{}", page.report());
+        assert_eq!(doc.title, "child-namespace-ok");
+        {
+            let mut bridge = Bridge { doc: &mut doc, forms: &mut forms, state: &mut page.state };
+            for handle in [window(0), window(0)+3, window(0)+7, window(MAX_BLANK_FRAMES-1)+1] {
+                assert!(bridge.method(handle, "isDefaultNamespace").is_none());
+                assert!(bridge.call(handle, "isDefaultNamespace", &[Value::Null]).is_err());
+            }
+        }
+        let location = crate::navigation::Location { url: Some(crate::url::parse("https://other.test/").unwrap().0), path: None, fragment: String::new(), root: None };
+        page.set_location(&location);
+        for source in ["saved.isDefaultNamespace(null);", "'isDefaultNamespace' in saved;", "method.call(saved,null);"] {
+            let result = page.console_eval(&mut doc, &mut forms, source);
+            assert_eq!(result.errors, 1, "{source}: {}", page.report());
+        }
+    }
 
     #[test]
     fn real_blank_frame_identity_topology_inheritance_and_foreign_calls() {

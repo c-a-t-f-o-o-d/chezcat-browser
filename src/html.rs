@@ -46,6 +46,15 @@ impl Document {
 pub struct Node {
     pub kind: NodeKind,
     pub children: Vec<usize>,
+    /// Persistent provenance; foreign-content tree building is unsupported.
+    pub namespace: Namespace,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Namespace {
+    None,
+    Html,
+    UnknownForeign,
 }
 
 #[derive(Debug)]
@@ -81,11 +90,15 @@ pub fn parse(input: &str) -> Document {
                 attrs: Vec::new(),
             },
             children: Vec::new(),
+            namespace: Namespace::None,
         }],
     };
     let mut stack = vec![0];
     let mut position = 0;
     let mut title_seen = false;
+    // If unsupported foreign recovery escapes through an unrelated ancestor,
+    // later elements cannot safely be classified from this subset's stack.
+    let mut uncertain_foreign_recovery = false;
 
     while position < input.len() {
         let parent = *stack.last().unwrap();
@@ -130,14 +143,23 @@ pub fn parse(input: &str) -> Document {
                     NodeKind::Element { tag: name, .. } if name == &tag.name)
             }) {
                 if index > 0 {
+                    if document.nodes[*stack.last().unwrap()].namespace == Namespace::UnknownForeign
+                        && document.nodes[stack[index]].namespace != Namespace::UnknownForeign
+                    {
+                        uncertain_foreign_recovery = true;
+                    }
                     stack.truncate(index);
                 }
             }
             continue;
         }
 
+        let was_foreign = document.nodes[*stack.last().unwrap()].namespace == Namespace::UnknownForeign;
         close_implied(&mut stack, &document, &tag.name);
         let parent = *stack.last().unwrap();
+        if was_foreign && document.nodes[parent].namespace != Namespace::UnknownForeign {
+            uncertain_foreign_recovery = true;
+        }
         let raw = matches!(tag.name.as_str(), "script" | "style" | "title" | "textarea");
         let void = is_void(&tag.name);
         if document.nodes.len() == MAX_NODES || (!raw && !void && stack.len() == MAX_DEPTH) {
@@ -149,6 +171,10 @@ pub fn parse(input: &str) -> Document {
         }
         document.nodes[parent].children.push(node);
         document.nodes.push(Node {
+            namespace: if uncertain_foreign_recovery
+                || matches!(tag.name.as_str(), "svg" | "math")
+                || document.nodes[parent].namespace == Namespace::UnknownForeign
+            { Namespace::UnknownForeign } else { Namespace::Html },
             kind: NodeKind::Element {
                 tag: tag.name.clone(),
                 id: tag.id,
@@ -219,6 +245,7 @@ fn append_text_value(document: &mut Document, parent: usize, text: String) -> bo
     document.nodes.push(Node {
         kind: NodeKind::Text(text),
         children: Vec::new(),
+        namespace: Namespace::None,
     });
     true
 }
@@ -747,6 +774,26 @@ fn named_character(name: &str) -> Option<(char, bool)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn default_namespace_parser_provenance_is_conservative_across_foreign_recovery() {
+        for markup in [
+            "<html><svg><g id=x></html><p id=after>unknown</p>",
+            "<p><svg><g id=x><div id=after>implied escape</div>",
+        ] {
+            let doc = parse(markup);
+            for id in ["x", "after"] {
+                let node = (0..doc.nodes.len()).find(|&n| doc.attr(n, "id") == Some(id)).unwrap();
+                assert_eq!(doc.nodes[node].namespace, Namespace::UnknownForeign, "{markup}");
+            }
+        }
+        let doc = parse("<div id=html xmlns='urn:other'></div><math><mi id=m>x</mi></math><p id=after>known</p>");
+        for (id, namespace) in [("html", Namespace::Html), ("m", Namespace::UnknownForeign), ("after", Namespace::Html)] {
+            let node = (0..doc.nodes.len()).find(|&n| doc.attr(n, "id") == Some(id)).unwrap();
+            assert_eq!(doc.nodes[node].namespace, namespace);
+        }
+        assert!(doc.nodes.iter().filter(|n| matches!(n.kind, NodeKind::Text(_))).all(|n| n.namespace == Namespace::None));
+    }
 
     fn text(document: &Document) -> String {
         document

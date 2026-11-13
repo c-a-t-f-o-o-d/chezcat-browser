@@ -1,5 +1,90 @@
 use super::*;
 
+#[test]
+fn default_namespace_tracks_real_html_nodes_and_physical_text_parents() {
+    let (doc, _, page, outcome) = page("<html><body><div id=p xmlns='urn:other'>text</div><b id=empty xmlns=''></b></body></html>", &[r#"
+var uri='http://www.w3.org/1999/xhtml',p=document.getElementById('p'),t=document.createTextNode('x');
+var e=document.createElement('svg'),image=new Image(),nodes=[document,p,p.firstChild,e,image];
+for(var n of nodes){if(!('isDefaultNamespace' in n)||!n.isDefaultNamespace(uri)||n.isDefaultNamespace(null)||n.isDefaultNamespace(undefined)||n.isDefaultNamespace('')||n.isDefaultNamespace('urn:other'))throw 'HTML namespace';}
+if(!t.isDefaultNamespace(null)||!t.isDefaultNamespace(undefined)||!t.isDefaultNamespace('')||t.isDefaultNamespace(uri))throw 'unparented text';
+e.appendChild(t);if(!t.isDefaultNamespace(uri)||t.isDefaultNamespace(null))throw 'detached parent';
+e.removeChild(t);if(!t.isDefaultNamespace(null)||t.isDefaultNamespace(uri))throw 'removed text';
+if(!document.getElementById('empty').isDefaultNamespace(uri))throw 'xmlns attribute';
+var check=p.isDefaultNamespace;
+if(!check.call(document,uri)||!check.call(t,null)||!document.isDefaultNamespace.call(p,uri))throw 'Node borrowing';
+document.title='namespace-topology-ok';
+"#]);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    assert_eq!(doc.title, "namespace-topology-ok");
+}
+
+#[test]
+fn default_namespace_nullable_conversion_and_receiver_failures_preserve_effect_order() {
+    let (doc, _, page, outcome) = page("<p id=p>coercion</p>", &[r#"
+var p=document.getElementById('p'),t=document.createTextNode('x'),calls='',marker={};
+var uri={toString:function(){calls+='s';return 'http://www.w3.org/1999/xhtml';},valueOf:function(){throw 'wrong hint';}};
+if(!p.isDefaultNamespace(uri)||calls!=='s')throw 'once/string hint';
+if(t.isDefaultNamespace({toString:function(){return null;}})||t.isDefaultNamespace({toString:function(){return undefined;}}))throw 'post-coercion nullability';
+if(t.isDefaultNamespace('null')||t.isDefaultNamespace('undefined'))throw 'literal nullability';
+try{p.isDefaultNamespace({toString:function(){throw marker;}});throw 'missing throw';}catch(e){if(e!==marker)throw e;}
+var failures=0;try{p.isDefaultNamespace();}catch(e){if(e.name==='TypeError')failures++;}
+for(var v of [Symbol('x'),Object(Symbol('y'))]){try{p.isDefaultNamespace(v);}catch(e){if(e.name==='TypeError')failures++;}}
+var arg={toString:function(){calls+='BAD';return '';}};
+for(var bad of [{},window,p.style,p.dataset,document.querySelectorAll('p')]){try{p.isDefaultNamespace.call(bad,arg);}catch(e){if(e.name==='TypeError')failures++;}}
+if(failures!==8||calls!=='s')throw 'brand/arity/Symbol';
+if(document.createTextNode(null).data!=='null')throw 'ordinary string conversion changed';
+document.title='namespace-coercion-ok';
+"#]);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    assert_eq!(doc.title, "namespace-coercion-ok");
+}
+
+#[test]
+fn default_namespace_foreign_provenance_survives_moves_and_rejects_unknown_context() {
+    let (mut doc, mut forms, mut page, outcome) = page("<html><body><div id=out></div><svg><g id=foreign><i id=inside>f</i></g></svg><p id=html>h</p></body></html>", &[r#"
+var g=document.getElementById('foreign'),i=document.getElementById('inside'),out=document.getElementById('out'),uri='http://www.w3.org/1999/xhtml';
+"#]);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    let foreign = (0..doc.nodes.len()).find(|&n| doc.attr(n, "id") == Some("foreign")).unwrap();
+    let inside = (0..doc.nodes.len()).find(|&n| doc.attr(n, "id") == Some("inside")).unwrap();
+    let text = doc.nodes[inside].children[0];
+    for action in ["", "out.appendChild(g);", "out.removeChild(g);"] {
+        if !action.is_empty() {
+            let outcome = page.console_eval(&mut doc, &mut forms, action);
+            assert_eq!(outcome.errors, 0, "{}", page.report());
+        }
+        let mut bridge = Bridge { doc: &mut doc, forms: &mut forms, state: &mut page.state };
+        for node in [foreign, inside, text] {
+            let error = bridge.call(node_handle(node), "isDefaultNamespace", &[Value::Null]).unwrap_err();
+            assert!(error.contains("unsupported foreign parser context"), "{error}");
+        }
+    }
+    let outcome = page.console_eval(&mut doc, &mut forms, "if(!document.getElementById('html').isDefaultNamespace(uri))throw 'ordinary HTML after foreign';var created=document.createElement('svg');g.appendChild(created);if(!created.isDefaultNamespace(uri))throw 'creation provenance';document.title='namespace-provenance-ok';");
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    assert_eq!(doc.title, "namespace-provenance-ok");
+}
+
+#[test]
+fn default_namespace_uses_actual_document_root_and_retains_invalid_handle_and_work_bounds() {
+    for (markup, expected) in [("", true), ("text", true), ("<object>inert</object>", false)] {
+        let source = format!("if(document.isDefaultNamespace(null)!=={expected})throw 'document root';");
+        let (_, _, page, outcome) = page(markup, &[&source]);
+        assert_eq!(outcome.errors, 0, "{}", page.report());
+    }
+    let (mut doc, mut forms, mut page, outcome) = page("<p>ok</p><template><i id=inert>x</i></template>", &[]);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    let inert = (0..doc.nodes.len()).find(|&n| doc.attr(n, "id") == Some("inert")).unwrap();
+    let invalid = [node_handle(0), node_handle(doc.nodes.len() + 99), node_handle(inert), WINDOW, STYLE_BASE];
+    let mut bridge = Bridge { doc: &mut doc, forms: &mut forms, state: &mut page.state };
+    for handle in invalid {
+        assert!(bridge.method(handle, "isDefaultNamespace").is_none());
+        assert!(!bridge.accepts_receiver(DOCUMENT, "isDefaultNamespace", handle));
+        assert!(bridge.call(handle, "isDefaultNamespace", &[Value::Null]).is_err());
+    }
+    bridge.state.host_work = 0;
+    assert!(bridge.call(DOCUMENT, "isDefaultNamespace", &[Value::Null]).is_err());
+}
+
 fn page(markup: &str, scripts: &[&str]) -> (Document, Forms, Page, Outcome) {
     let mut doc = crate::html::parse(markup);
     doc.scripting_enabled = true;

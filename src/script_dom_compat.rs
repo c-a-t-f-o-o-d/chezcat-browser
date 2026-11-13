@@ -114,6 +114,7 @@ impl Bridge<'_> {
         self.state.replace_bytes(0, bytes)?;
         let node = self.doc.nodes.len();
         self.doc.nodes.push(Node {
+            namespace: crate::html::Namespace::Html,
             kind: NodeKind::Element {
                 tag: "img".into(),
                 id: None,

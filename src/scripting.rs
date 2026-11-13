@@ -1878,6 +1878,7 @@ impl Bridge<'_> {
                 self.doc.nodes.push(Node {
                     kind: NodeKind::Text(text),
                     children: Vec::new(),
+                    namespace: crate::html::Namespace::None,
                 });
                 self.doc.nodes[node].children.push(child);
                 if self.state.detached_nodes.contains(&node) {
@@ -2156,6 +2157,7 @@ impl Host for Bridge<'_> {
     }
 
     fn argument_conversions(&self, object: u32, method: &str) -> &'static [(usize, bool)] {
+        if method == "isDefaultNamespace" && self.namespace_receiver(object) { return &[(0, true)]; }
         if collection_handle_index(object).is_some() {
             return match method {
                 "item" => &[(0, false)],
@@ -2198,7 +2200,12 @@ impl Host for Bridge<'_> {
         &[]
     }
 
+    fn nullable_string_argument(&self, object: u32, method: &str, index: usize) -> bool {
+        method == "isDefaultNamespace" && index == 0 && self.namespace_receiver(object)
+    }
+
     fn required_arguments(&self, object: u32, method: &str) -> usize {
+        if method == "isDefaultNamespace" && self.namespace_receiver(object) { return 1; }
         if collection_handle_index(object).is_some() && matches!(method, "item" | "namedItem")
             || (object == DOCUMENT || node_index(object).is_some())
                 && method == "getElementsByTagName"
@@ -2447,6 +2454,9 @@ impl Host for Bridge<'_> {
     }
 
     fn accepts_receiver(&self, object: u32, method: &str, receiver: u32) -> bool {
+        if method == "isDefaultNamespace" {
+            return self.namespace_receiver(object) && self.namespace_receiver(receiver);
+        }
         if method == "submit" {
             return self.form_receiver(object) && self.form_receiver(receiver);
         }
@@ -2650,6 +2660,7 @@ impl Host for Bridge<'_> {
     fn has(&mut self, object: u32, property: &str) -> Result<bool, String> {
         self.state.work(1)?;
         if self.is_frame_handle(object) {
+            if property == "isDefaultNamespace" && self.namespace_receiver(object) { return Ok(true); }
             return self.frame_get(object, property).unwrap().map(|_| true);
         }
         if property == "submit" && self.form_submit_method(object).is_some() {
@@ -2783,6 +2794,7 @@ impl Host for Bridge<'_> {
         }
         if object == DOCUMENT {
             if dom_tree::node_constant(property).is_some() { return Ok(true); }
+            if property == "isDefaultNamespace" { return Ok(true); }
             if matches!(property, "location" | "URL" | "documentURI") {
                 return Ok(self.state.location.is_some());
             }
@@ -3334,6 +3346,10 @@ impl Host for Bridge<'_> {
     }
 
     fn call(&mut self, object: u32, method: &str, args: &[Value]) -> Result<Value, String> {
+        if method == "isDefaultNamespace" {
+            self.state.work(1)?;
+            return self.is_default_namespace(object, args);
+        }
         if self.is_frame_handle(object) { return Err("Blank child native methods are not implemented.".into()); }
         self.state.work(1)?;
         if object == DOCUMENT && method == "createEvent" {

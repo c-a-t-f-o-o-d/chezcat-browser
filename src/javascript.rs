@@ -381,6 +381,11 @@ pub trait Host {
     fn argument_conversions(&self, _object: u32, _method: &str) -> &'static [(usize, bool)] {
         &[]
     }
+    /// Preserve original nullish inputs for an explicitly nullable DOMString.
+    /// A null returned by object coercion still undergoes ordinary ToString.
+    fn nullable_string_argument(&self, _object: u32, _method: &str, _index: usize) -> bool {
+        false
+    }
     fn required_arguments(&self, _object: u32, _method: &str) -> usize {
         0
     }
@@ -7780,6 +7785,12 @@ impl Runtime {
             }
             for &(index, string_hint) in conversions {
                 if let Some(value) = converted.get(index).cloned() {
+                    if string_hint && host.nullable_string_argument(object, method, index)
+                        && matches!(value, Value::Null | Value::Undefined)
+                    {
+                        converted[index] = Value::Null;
+                        continue;
+                    }
                     let primitive = self.primitive_with_hint(value, string_hint, host)?;
                     self.work(primitive.bytes())?;
                     converted[index] = self.checked_value(if string_hint {
@@ -8829,6 +8840,34 @@ fn loose_equal(left: &Value, right: &Value) -> Result<bool, Fault> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn default_namespace_nullable_host_conversion_only_preserves_original_nullish_values() {
+        struct Strings;
+        impl Host for Strings {
+            fn get(&mut self, _: u32, _: &str) -> Result<Value, String> { Ok(Value::Undefined) }
+            fn set(&mut self, _: u32, _: &str, _: Value) -> Result<(), String> { unreachable!() }
+            fn method(&self, _: u32, name: &str) -> Option<&'static str> {
+                match name { "nullable" => Some("nullable"), "plain" => Some("plain"), _ => None }
+            }
+            fn argument_conversions(&self, _: u32, _: &str) -> &'static [(usize, bool)] { &[(0, true)] }
+            fn nullable_string_argument(&self, _: u32, method: &str, index: usize) -> bool { method == "nullable" && index == 0 }
+            fn required_arguments(&self, _: u32, _: &str) -> usize { 1 }
+            fn call(&mut self, _: u32, _: &str, args: &[Value]) -> Result<Value, String> { Ok(args[0].clone()) }
+        }
+        let mut runtime = Runtime::for_test();
+        runtime.define_global("strings", Value::Host(1)).unwrap();
+        runtime.execute(r#"
+if(strings.nullable(null)!==null||strings.nullable(undefined)!==null||strings.nullable('')!=='')throw 'nullable';
+if(strings.plain(null)!=='null'||strings.plain(undefined)!=='undefined')throw 'default hook';
+var count=0,v={toString:function(){count++;return null;}};
+if(strings.nullable(v)!=='null'||count!==1)throw 'object result';
+var marker={},caught=false;try{strings.nullable({toString:function(){throw marker;}});}catch(e){caught=e===marker;}if(!caught)throw 'throw identity';
+var errors=0;try{strings.nullable();}catch(e){if(e.name==='TypeError')errors++;}
+try{strings.nullable(Symbol());}catch(e){if(e.name==='TypeError')errors++;}
+if(errors!==2||strings.nullable(null)!==null)throw 'failure cleanup';
+"#, &mut Strings).unwrap();
+    }
 
     #[derive(Default)]
     struct TestHost {

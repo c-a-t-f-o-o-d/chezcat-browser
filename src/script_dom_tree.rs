@@ -147,6 +147,30 @@ impl Page {
 }
 
 impl Bridge<'_> {
+    pub(super) fn namespace_receiver(&self, object: u32) -> bool {
+        object == DOCUMENT
+            || node_index(object).is_some_and(|node| self.dom_accessible(node))
+            || self.frame_node_constant_readonly(object)
+    }
+
+    pub(super) fn is_default_namespace(&mut self, object: u32, args: &[Value]) -> Result<Value, String> {
+        let query = match args.first() {
+            Some(Value::Null | Value::Undefined) => None,
+            Some(Value::String(text)) => if text.is_empty() { None } else { Some(text.as_str()) },
+            _ => return Err("isDefaultNamespace requires a converted nullable string.".into()),
+        };
+        if let Some(result) = self.frame_default_namespace(object) {
+            return result.map(|namespace| Value::Bool(query == namespace));
+        }
+        let node = if object == DOCUMENT {
+            self.state.rebuild(self.doc)?;
+            0
+        } else { self.dom_node(object)? };
+        let parent = self.state.tree.parents.get(node).copied().flatten();
+        default_namespace(self.doc, node, parent, self.state)
+            .map(|namespace| Value::Bool(query == namespace))
+    }
+
     fn dom_accessible(&self, node: usize) -> bool {
         node != 0
             && node < self.doc.nodes.len()
@@ -172,6 +196,9 @@ impl Bridge<'_> {
     }
 
     pub(super) fn dom_method(&self, object: u32, property: &str) -> Option<&'static str> {
+        if property == "isDefaultNamespace" && self.namespace_receiver(object) {
+            return Some("isDefaultNamespace");
+        }
         let node = node_index(object).filter(|&node| node < self.doc.nodes.len())?;
         match property {
             "appendChild" => Some("appendChild"),
@@ -412,6 +439,9 @@ impl Bridge<'_> {
             self.state.dom.force_async.insert(node);
         }
         self.doc.nodes.push(Node {
+            namespace: if matches!(kind, NodeKind::Element { .. }) {
+                crate::html::Namespace::Html
+            } else { crate::html::Namespace::None },
             kind,
             children: Vec::new(),
         });
@@ -896,6 +926,38 @@ impl Bridge<'_> {
             }
         }
         Ok(found.map_or(Value::Undefined, |node| Value::Host(node_handle(node))))
+    }
+}
+
+// https://dom.spec.whatwg.org/#locate-a-namespace (null prefix only).
+// HTML elements have a null prefix and an immutable HTML namespace, regardless
+// of raw xmlns attributes. Unknown parser contexts must fail explicitly.
+pub(super) fn default_namespace(
+    doc: &Document, node: usize, parent: Option<usize>, state: &mut State,
+) -> Result<Option<&'static str>, String> {
+    state.work(1)?;
+    let item = doc.nodes.get(node).ok_or("Invalid namespace node.")?;
+    let element = if node == 0 {
+        let mut found = None;
+        for &child in &item.children {
+            state.work(1)?;
+            let item = doc.nodes.get(child).ok_or("Invalid document namespace child.")?;
+            if matches!(item.kind, NodeKind::Element { .. }) { found = Some(item); break; }
+        }
+        found
+    } else if matches!(item.kind, NodeKind::Element { .. }) { Some(item) }
+    else if let Some(parent) = parent.filter(|&parent| parent != 0) {
+        state.work(1)?;
+        let item = doc.nodes.get(parent).ok_or("Invalid namespace parent.")?;
+        if !matches!(item.kind, NodeKind::Element { .. }) {
+            return Err("Namespace parent is not an Element.".into());
+        }
+        Some(item)
+    } else { None };
+    match element.map(|item| item.namespace) {
+        None => Ok(None),
+        Some(crate::html::Namespace::Html) => Ok(Some("http://www.w3.org/1999/xhtml")),
+        Some(_) => Err("Namespace lookup for unsupported foreign parser context is unavailable.".into()),
     }
 }
 
