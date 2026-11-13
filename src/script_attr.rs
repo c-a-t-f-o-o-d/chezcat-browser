@@ -21,7 +21,7 @@ fn property(name: &str) -> bool {
         "name" | "localName" | "nodeName" | "namespaceURI" | "prefix" | "value"
         | "nodeValue" | "textContent" | "ownerElement" | "ownerDocument" | "specified"
         | "nodeType" | "parentNode" | "parentElement" | "firstChild" | "lastChild"
-        | "nextSibling" | "previousSibling" | "isConnected" | "isDefaultNamespace")
+        | "nextSibling" | "previousSibling" | "isConnected" | "isDefaultNamespace" | "compareDocumentPosition")
 }
 
 impl Bridge<'_> {
@@ -31,7 +31,7 @@ impl Bridge<'_> {
 
     pub(super) fn attr_readonly(&self, handle: u32, name: &str) -> bool {
         self.attr_receiver(handle) && property(name)
-            && !matches!(name, "value" | "nodeValue" | "textContent" | "isDefaultNamespace")
+            && !matches!(name, "value" | "nodeValue" | "textContent" | "isDefaultNamespace" | "compareDocumentPosition")
     }
 
     pub(super) fn attr_has(&self, handle: u32, name: &str) -> Result<bool, String> {

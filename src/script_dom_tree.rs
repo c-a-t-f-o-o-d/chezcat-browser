@@ -221,15 +221,31 @@ impl Bridge<'_> {
     }
 
     fn dom_accessible(&self, node: usize) -> bool {
-        node != 0
-            && node < self.doc.nodes.len()
-            && (self.state.tree.active.get(node).copied().unwrap_or(false)
+        if node == 0 || node >= self.doc.nodes.len() { return false; }
+        if self.state.tree.active.get(node).copied().unwrap_or(false)
                 || self.state.detached_nodes.contains(&node)
                 || self.state.detached_images.contains(&node)
-                || self.state.dom.created.contains(&node))
+                || self.state.dom.created.contains(&node) { return true; }
+        if !self.state.dirty || self.state.dom.connected.get(node) != Some(&true) { return false; }
+        // Mutation commits current parents/connection state before rebuilding
+        // lookup caches. A reinserted parsed subtree remains a genuine Node in
+        // that interval; prove its actual non-inert ancestry without changing
+        // state or accepting an arbitrary in-range handle.
+        let mut current = node;
+        for _ in 0..self.doc.nodes.len() {
+            if current == 0 { return true; }
+            let name = tag(self.doc, current);
+            if name == "script" && current != node
+                || name != "script" && inert_dom_tag(name, self.doc.scripting_enabled) { return false; }
+            let Some(parent) = self.state.tree.parents.get(current).copied().flatten() else { return false; };
+            let Some(parent_node) = self.doc.nodes.get(parent) else { return false; };
+            if !parent_node.children.contains(&current) { return false; }
+            current = parent;
+        }
+        false
     }
 
-    fn dom_node(&mut self, handle: u32) -> Result<usize, String> {
+    pub(super) fn dom_node(&mut self, handle: u32) -> Result<usize, String> {
         self.state.rebuild(self.doc)?;
         node_index(handle)
             .filter(|&node| self.dom_accessible(node))
@@ -245,8 +261,12 @@ impl Bridge<'_> {
     }
 
     pub(super) fn dom_method(&self, object: u32, property: &str) -> Option<&'static str> {
-        if property == "isDefaultNamespace" && self.namespace_receiver(object) {
-            return Some("isDefaultNamespace");
+        if self.namespace_receiver(object) {
+            match property {
+                "isDefaultNamespace" => return Some("isDefaultNamespace"),
+                "compareDocumentPosition" => return Some("compareDocumentPosition"),
+                _ => {}
+            }
         }
         let node = node_index(object).filter(|&node| node < self.doc.nodes.len())?;
         match property {
@@ -295,6 +315,11 @@ impl Bridge<'_> {
         method: &str,
         args: &[Value],
     ) -> Result<(), (&'static str, String)> {
+        if method == "compareDocumentPosition" {
+            if !matches!(args.first(), Some(Value::Host(other)) if self.namespace_receiver(*other)) {
+                return Err(("TypeError", "compareDocumentPosition requires a Node argument.".into()));
+            }
+        }
         if method == "removeAttributeNode" && node_index(object).is_some() {
             return self.validate_attr_removal(object, args);
         }
@@ -363,6 +388,12 @@ impl Bridge<'_> {
             }
             return Ok(Some(self.html_spacing_property(node, property)));
         }
+        if property == "border" {
+            if self.doc.nodes[node].namespace == crate::html::Namespace::UnknownForeign {
+                return Err("Border lookup requires a known namespace context.".into());
+            }
+            return Ok(Some(self.html_border_property(node)));
+        }
         if common_node_property(property) || self.dom_method(object, property).is_some() {
             return Ok(Some(true));
         }
@@ -392,6 +423,7 @@ impl Bridge<'_> {
         if matches!(property, "vspace" | "hspace") {
             return self.html_spacing_get(node, property).map(Some);
         }
+        if property == "border" { return self.html_border_get(node).map(Some); }
         if let Some(number) = node_constant(property) {
             return Ok(Some(Value::Number(f64::from(number))));
         }

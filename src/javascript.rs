@@ -410,6 +410,8 @@ pub trait Host {
     }
     /// Node nullable string setters normalize original nullish inputs to empty.
     fn nullish_string_setter(&self, _object: u32, _property: &str) -> bool { false }
+    /// LegacyNullToEmptyString preserves normal undefined/object conversion.
+    fn null_string_setter(&self, _object: u32, _property: &str) -> bool { false }
     /// Pure interface checks interleaved with scalar conversion in table order.
     fn validate_argument_prefix(&self, _object: u32, _method: &str, _next_index: usize, _args: &[Value])
         -> Result<(), (&'static str, String)> { Ok(()) }
@@ -3484,7 +3486,8 @@ impl Runtime {
             receiver_required: false,
             constructible: false,
         }).map_err(Fault::display)?;
-        self.initialize_function_properties(allocation, method, 0, false)
+        let length = usize::from(method == "compareDocumentPosition");
+        self.initialize_function_properties(allocation, method, length, false)
             .map_err(Fault::display)?;
         Ok(allocation)
     }

@@ -52,6 +52,24 @@ pub(super) fn dataset_attribute(name: &str) -> String {
 }
 
 impl Bridge<'_> {
+    pub(super) fn html_border_property(&self, node: usize) -> bool {
+        self.doc.nodes.get(node).is_some_and(|item| item.namespace == crate::html::Namespace::Html)
+            && matches!(tag(self.doc, node), "img" | "object" | "table")
+    }
+
+    pub(super) fn html_border_get(&mut self, node: usize) -> Result<Value, String> {
+        if self.doc.nodes[node].namespace == crate::html::Namespace::UnknownForeign {
+            return Err("Border lookup requires a known namespace context.".into());
+        }
+        if !self.html_border_property(node) { return Ok(Value::Undefined); }
+        let NodeKind::Element { attrs, .. } = &self.doc.nodes[node].kind else { unreachable!() };
+        self.state.work(attrs.len())?;
+        let value = self.doc.attr(node, "border").unwrap_or("");
+        if value.len() > self.state.limits.host.string_bytes { return Err("Border value exceeds the DOM string limit.".into()); }
+        self.state.copies(value.len())?;
+        Ok(Value::String(value.to_owned()))
+    }
+
     pub(super) fn html_spacing_property(&self, node: usize, name: &str) -> bool {
         matches!(name, "vspace" | "hspace")
             && self.doc.nodes.get(node).is_some_and(|item| item.namespace == crate::html::Namespace::Html)

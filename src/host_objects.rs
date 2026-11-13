@@ -140,7 +140,8 @@ impl Runtime {
             };
         }
         let value = if host.string_setter(handle, &name) {
-            let value = if host.nullish_string_setter(handle, &name) && matches!(value, Value::Null | Value::Undefined) {
+            let value = if host.nullish_string_setter(handle, &name) && matches!(value, Value::Null | Value::Undefined)
+                || host.null_string_setter(handle, &name) && matches!(value, Value::Null) {
                 Value::String(String::new())
             } else { value };
             let primitive = self.primitive_with_hint(value, true, host)?;

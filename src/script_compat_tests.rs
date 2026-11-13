@@ -1,6 +1,46 @@
 use super::*;
 
 #[test]
+fn html_border_reflects_real_strings_and_legacy_null_only_on_its_brands() {
+    let (doc, _, page, outcome) = page("<img id=i border=' 05px '><table id=t border=' 05px '></table><p id=p>ordinary</p>", &[r#"
+if(document.getElementById('i').border!==' 05px '||document.getElementById('t').border!==' 05px ')throw 'raw reflection';
+for(var tag of ['img','object','table']){
+ var e=document.createElement(tag);if(e.border!==''||!('border' in e)||e.hasAttribute('border'))throw 'empty default';
+ e.border=null;if(e.getAttribute('border')!==(tag==='table'?'null':''))throw 'original null';
+ var attr=e.getAttributeNode('border');e.border=undefined;if(e.border!=='undefined'||attr.value!=='undefined')throw 'undefined';
+ e.border={toString:function(){return null;}};if(e.border!=='null')throw 'object-produced null';
+ e.setAttribute('border',null);if(e.border!=='null')throw 'raw setter conversion';
+ var log='';e.border={toString:function(){log+='s';return 'raw';},valueOf:function(){log+='v';return 1;}};if(log!=='s'||e.border!=='raw'||attr.value!=='raw'||e.getAttributeNode('border')!==attr)throw 'coercion/identity';
+ var caught=false;try{e.border=Symbol();}catch(x){caught=x.name==='TypeError';}if(!caught||e.border!=='raw')throw 'Symbol atomic';
+ var marker={},caught=false;try{e.border={toString:function(){throw marker;}};}catch(x){caught=x===marker;}if(!caught||e.border!=='raw')throw 'throw atomic';
+ e.removeAttribute('border');if(e.border!==''||attr.ownerElement!==null||attr.value!=='raw')throw 'detach';
+}
+for(var e of [document.createElement('input'),document.createElement('embed'),document.createElement('iframe'),document.createElement('div'),document.createTextNode('text')]){if('border' in e||e.border!==undefined)throw 'wrong brand';}
+if('border' in document)throw 'Document brand';document.title='border-ok';
+"#]);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    assert_eq!(doc.title, "border-ok");
+}
+
+#[test]
+fn html_border_budget_and_unknown_namespace_failures_preserve_existing_attributes() {
+    let (mut doc, mut forms, mut page, outcome) = page("<p>ordinary</p>", &["var image=document.createElement('img');image.border='old';"]);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    let node = doc.nodes.iter().position(|node| matches!(&node.kind, NodeKind::Element { tag, .. } if tag == "img")).unwrap();
+    page.begin_job();
+    page.state.retained_limit = page.state.retained;
+    let mut bridge = Bridge { doc: &mut doc, forms: &mut forms, state: &mut page.state };
+    assert!(bridge.set(node_handle(node), "border", Value::String("longer".into())).is_err());
+    assert_eq!(bridge.doc.attr(node, "border"), Some("old"));
+    bridge.state.copy_work = 0;
+    assert!(bridge.get(node_handle(node), "border").is_err());
+    assert_eq!(bridge.doc.attr(node, "border"), Some("old"));
+    bridge.state.copy_work = bridge.state.limits.copy_bytes;
+    bridge.doc.nodes[node].namespace = crate::html::Namespace::UnknownForeign;
+    assert!(bridge.get(node_handle(node), "border").unwrap_err().contains("namespace"));
+}
+
+#[test]
 fn html_spacing_reflects_unsigned_attributes_on_real_brands_and_keeps_attr_identity() {
     let (doc, _, page, outcome) = page("<p id=p>ordinary</p>", &[r#"
 for(var tag of ['img','input','object','embed','marquee']){

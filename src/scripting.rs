@@ -29,6 +29,8 @@ mod dom_collections;
 use dom_collections::collection_handle_index;
 #[path = "script_dom_tree.rs"]
 mod dom_tree;
+#[path = "script_position.rs"]
+mod script_position;
 use dom_tree::DomState;
 #[path = "script_attr.rs"]
 mod script_attr;
@@ -2179,6 +2181,7 @@ impl Host for Bridge<'_> {
             || (DATASET_BASE..EVENT_BASE).contains(&object)
             || node_index(object).is_some_and(|node| tag(self.doc, node) == "img")
                 && matches!(property, "src" | "alt")
+            || property == "border" && node_index(object).is_some_and(|node| self.html_border_property(node))
     }
 
     fn number_setter(&self, object: u32, property: &str) -> bool {
@@ -2253,13 +2256,18 @@ impl Host for Bridge<'_> {
         self.attr_receiver(object) && matches!(property, "nodeValue" | "textContent")
     }
 
+    fn null_string_setter(&self, object: u32, property: &str) -> bool {
+        property == "border" && node_index(object).is_some_and(|node|
+            self.html_border_property(node) && matches!(tag(self.doc, node), "img" | "object"))
+    }
+
     fn required_arguments(&self, object: u32, method: &str) -> usize {
         if self.attr_element_receiver(object) && method == "getAttributeNodeNS" { return 2; }
         if object == DOCUMENT && method == "createEvent" && self.event_factory_enabled()
             || self.event_receiver(object) && method == "initEvent"
             || self.mouse_receiver(object) && method == "initMouseEvent"
         { return 1; }
-        if method == "isDefaultNamespace" && self.namespace_receiver(object) { return 1; }
+        if matches!(method, "isDefaultNamespace" | "compareDocumentPosition") && self.namespace_receiver(object) { return 1; }
         if self.attr_element_receiver(object) && matches!(method, "getAttributeNode" | "removeAttributeNode") { return 1; }
         if collection_handle_index(object).is_some() && matches!(method, "item" | "namedItem")
             || (object == DOCUMENT || node_index(object).is_some())
@@ -2524,7 +2532,7 @@ impl Host for Bridge<'_> {
         if matches!(method, "getAttributeNode" | "getAttributeNodeNS" | "removeAttributeNode") {
             return self.attr_element_receiver(object) && self.attr_element_receiver(receiver);
         }
-        if method == "isDefaultNamespace" {
+        if matches!(method, "isDefaultNamespace" | "compareDocumentPosition") {
             return self.namespace_receiver(object) && self.namespace_receiver(receiver);
         }
         if method == "submit" {
@@ -2748,7 +2756,7 @@ impl Host for Bridge<'_> {
         if let Some(result) = self.created_event_has(object, property) { return result; }
         if script_attr::index(object).is_some() { return self.attr_has(object, property); }
         if self.is_frame_handle(object) {
-            if property == "isDefaultNamespace" && self.namespace_receiver(object) { return Ok(true); }
+            if matches!(property, "isDefaultNamespace" | "compareDocumentPosition") && self.namespace_receiver(object) { return Ok(true); }
             return self.frame_get(object, property).unwrap().map(|_| true);
         }
         if property == "submit" && self.form_submit_method(object).is_some() {
@@ -2885,7 +2893,7 @@ impl Host for Bridge<'_> {
         if object == DOCUMENT {
             if dom_tree::node_constant(property).is_some() { return Ok(true); }
             if property == "createEvent" && self.event_factory_enabled() { return Ok(true); }
-            if property == "isDefaultNamespace" { return Ok(true); }
+            if matches!(property, "isDefaultNamespace" | "compareDocumentPosition") { return Ok(true); }
             if matches!(property, "location" | "URL" | "documentURI") {
                 return Ok(self.state.location.is_some());
             }
@@ -3322,6 +3330,10 @@ impl Host for Bridge<'_> {
             return Ok(());
         }
         let node = self.node(object)?;
+        if property == "border" && self.html_border_property(node) {
+            let value = self.text(&value)?;
+            return self.attribute(node, "border", Some(value));
+        }
         if self.html_spacing_property(node, property) {
             return self.html_spacing_set(node, property, &value);
         }
@@ -3450,6 +3462,10 @@ impl Host for Bridge<'_> {
     }
 
     fn call(&mut self, object: u32, method: &str, args: &[Value]) -> Result<Value, String> {
+        if method == "compareDocumentPosition" {
+            self.state.work(1)?;
+            return self.compare_document_position(object, args);
+        }
         if method == "isDefaultNamespace" {
             self.state.work(1)?;
             return self.is_default_namespace(object, args);
@@ -3705,7 +3721,8 @@ impl Host for Bridge<'_> {
             }
             let image_attribute = tag(self.doc, node) == "img"
                 && matches!(name.as_str(), "src" | "alt" | "width" | "height")
-                || self.html_spacing_property(node, &name);
+                || self.html_spacing_property(node, &name)
+                || name == "border" && self.html_border_property(node);
             if !matches!(
                 name.as_str(),
                 "id" | "class"

@@ -27,6 +27,34 @@ fn document_node(index: usize, node: usize) -> u32 {
 }
 
 impl Bridge<'_> {
+    pub(super) fn frame_position_path(&mut self, handle: u32) -> Option<Result<super::script_position::PositionPath, String>> {
+        let (index, offset) = frame_handle(handle)?;
+        Some((|| {
+            self.frame_window_access(Some(WINDOW), window(index))?;
+            if !matches!(offset, 1 | 4..=6) { return Err("Invalid blank Node position handle.".into()); }
+            let frame = self.state.blank_frames.get(index).ok_or("Unknown blank Node context.")?;
+            let mut node = if offset == 1 { 0 } else { (offset - 3) as usize };
+            if node >= frame.document.nodes.len() { return Err("Invalid blank Node position index.".into()); }
+            let mut work = 1usize;
+            let mut steps = Vec::new();
+            for _ in 0..frame.document.nodes.len() {
+                work = work.saturating_add(frame.document.nodes.len()).saturating_add(frame.document.nodes.iter().map(|node| node.children.len()).sum::<usize>());
+                let parent = frame.document.nodes.iter().position(|parent| parent.children.contains(&node));
+                let Some(parent) = parent else {
+                    if node != 0 { return Err("Disconnected blank Node metadata is unsupported.".into()); }
+                    steps.reverse();
+                    self.state.work(work)?;
+                    return Ok(super::script_position::PositionPath { root: window(index)+1, steps, attribute: None });
+                };
+                let ordinal = frame.document.nodes[parent].children.iter().position(|&child| child == node).unwrap();
+                steps.try_reserve(1).map_err(|_| "Unable to allocate blank Node position path.")?;
+                steps.push(ordinal);
+                node = parent;
+            }
+            Err("Cyclic blank Node position metadata.".into())
+        })())
+    }
+
     pub(super) fn frame_context(&self, handle: u32) -> Option<crate::javascript::WindowContext> {
         let (index, offset) = frame_handle(handle)?;
         (offset == 0 && index < self.state.blank_frames.len()).then(|| crate::javascript::WindowContext {
@@ -282,6 +310,32 @@ mod tests {
     }
 
     const CREATE: &str = "var f=document.createElement('iframe');f.hidden=true;document.body.appendChild(f);var w=f.contentWindow;";
+
+    #[test]
+    fn node_position_blank_documents_have_real_ancestry_and_disconnected_roots() {
+        let source = format!("{CREATE}{}", r#"
+var d=w.document,html=d.documentElement,head=d.head,body=d.body;
+if(d.compareDocumentPosition(html)!==20||html.compareDocumentPosition(d)!==10||head.compareDocumentPosition(body)!==4||body.compareDocumentPosition(head)!==2)throw 'blank physical tree';
+if(d.compareDocumentPosition(d)!==0||document.compareDocumentPosition.call(d,body)!==20)throw 'identity/borrowing';
+var position=document.compareDocumentPosition(d),reverse=d.compareDocumentPosition(document);
+if((position!==35&&position!==37)||(position^reverse)!==6||document.compareDocumentPosition(body)!==position)throw 'separate documents';
+var second=document.createElement('iframe');second.hidden=true;document.body.appendChild(second);
+var secondBody=second.contentDocument.body,a=body.compareDocumentPosition(secondBody),b=secondBody.compareDocumentPosition(body);
+if((a!==35&&a!==37)||(a^b)!==6||body.compareDocumentPosition(secondBody)!==a)throw 'separate child contexts';
+var saved=d.compareDocumentPosition;document.title='child-position-ok';
+"#);
+        let (mut doc, mut forms, mut page, outcome) = start(&source, &crate::csp::PolicySet::default());
+        assert_eq!(outcome.errors, 0, "{}", page.report());
+        assert_eq!(doc.title, "child-position-ok");
+        let mut bridge = Bridge { doc: &mut doc, forms: &mut forms, state: &mut page.state };
+        for handle in [window(0)+3, window(0)+7, window(MAX_BLANK_FRAMES-1)+6] {
+            assert!(bridge.method(handle, "compareDocumentPosition").is_none());
+            assert!(bridge.call(handle, "compareDocumentPosition", &[Value::Host(DOCUMENT)]).is_err());
+        }
+        page.set_location(&crate::navigation::Location { url: Some(crate::url::parse("https://other.test/").unwrap().0), path: None, fragment: String::new(), root: None });
+        let outcome = page.console_eval(&mut doc, &mut forms, "saved.call(d,body);");
+        assert_eq!(outcome.errors, 1, "{}", page.report());
+    }
 
     #[test]
     fn active_child_window_keys_use_real_realm_names_flags_order_and_prototypes() {
