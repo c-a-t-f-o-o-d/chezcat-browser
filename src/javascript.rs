@@ -3496,15 +3496,17 @@ impl Runtime {
         direct: Option<(usize, &Value)>,
         host: &mut dyn Host,
     ) -> Result<Value, Fault> {
-        // Direct eval bypasses call_value. Its parser/scoping helpers still own
-        // Rust-only locals, so nested script execution remains inhibited.
-        let marker = self.inhibit_transient_collection();
-        let result = self.string_eval_unpublished(value, direct, host);
-        self.restore_transient_marker(marker);
+        // Direct eval bypasses call_value. Source parsing invokes no script;
+        // publish its incoming IDs and retain the new lexical scope below.
+        let undefined = Value::Undefined;
+        let (environment, this) = direct.unwrap_or((self.global_environment, &undefined));
+        let marker = self.publish_statement_inputs(environment, this, Some(value))?;
+        let result = self.string_eval_registered(value, direct, host);
+        self.restore_root_marker(marker);
         result
     }
 
-    fn string_eval_unpublished(
+    fn string_eval_registered(
         &mut self,
         value: &Value,
         direct: Option<(usize, &Value)>,
@@ -3525,6 +3527,7 @@ impl Runtime {
         }
         let previous_strict = self.strict;
         self.call_depth += 1;
+        self.transient_roots.owned_call_depth += 1;
         let result = (|| {
             let program =
                 self.register_program_context(source, false, direct.is_some() && self.strict)?;
@@ -3539,25 +3542,33 @@ impl Runtime {
             // var/function bindings; sloppy eval targets the caller's variable
             // environment (or the global environment for an indirect call).
             let lexical = self.new_environment(outer, program.strict)?;
-            let result = (|| {
-                let variable = if program.strict {
-                    lexical
-                } else {
-                    self.var_environment(outer)?
-                };
-                if !program.strict {
-                    self.check_eval_declarations(&program, outer, variable)?;
+            let result = match self.publish_statement_inputs(lexical, &this, None) {
+                Err(error) => Err(error),
+                Ok(marker) => {
+                    let result = (|| {
+                        let variable = if program.strict {
+                            lexical
+                        } else {
+                            self.var_environment(outer)?
+                        };
+                        if !program.strict {
+                            self.check_eval_declarations(&program, outer, variable)?;
+                        }
+                        self.prepare_scopes(&program, &program.body, lexical, variable, true, host)?;
+                        match self.statements(&program, &program.body, lexical, &this, host)? {
+                            Control::Normal(value) => Ok(value.unwrap_or(Value::Undefined)),
+                            _ => Err(Fault::new("Unexpected control completion in eval.")),
+                        }
+                    })();
+                    self.restore_root_marker(marker);
+                    result
                 }
-                self.prepare_scopes(&program, &program.body, lexical, variable, true, host)?;
-                match self.statements(&program, &program.body, lexical, &this, host)? {
-                    Control::Normal(value) => Ok(value.unwrap_or(Value::Undefined)),
-                    _ => Err(Fault::new("Unexpected control completion in eval.")),
-                }
-            })();
+            };
             self.release_environment(lexical);
             result
         })();
         self.call_depth -= 1;
+        self.transient_roots.owned_call_depth -= 1;
         self.strict = previous_strict;
         result
     }
@@ -3680,6 +3691,7 @@ impl Runtime {
             if fault.message.contains("Parser nesting limit") && self.eval_depth != 0 {
                 fault.message.push_str(&format!(" Active native entries={}; calls={}; heap expression frames={}.",
                     self.eval_depth, self.call_depth, self.evaluation_frames));
+                fault.message.push_str(&format!(" {}.", self.inhibition_diagnostic()));
             }
             fault
         })?);
@@ -5112,8 +5124,10 @@ impl Runtime {
             return Err(Fault::new("Accessor call limit reached (32)."));
         }
         self.call_depth += 1;
+        self.transient_roots.owned_call_depth += 1;
         let result = self.call_value(Value::Function(callback), args, receiver, host);
         self.call_depth -= 1;
+        self.transient_roots.owned_call_depth -= 1;
         result
     }
 
@@ -5661,6 +5675,16 @@ impl Runtime {
     }
 
     fn apply_arguments(&mut self, value: &Value, host: &mut dyn Host) -> Result<Vec<Value>, Fault> {
+        // Earlier indexed getters may have produced fresh Values that only this
+        // partial list owns. Inhibit construction, then hand the complete list
+        // directly to call_value's input registration.
+        let marker = self.inhibit_transient_collection();
+        let result = self.apply_arguments_unpublished(value, host);
+        self.restore_transient_marker(marker);
+        result
+    }
+
+    fn apply_arguments_unpublished(&mut self, value: &Value, host: &mut dyn Host) -> Result<Vec<Value>, Fault> {
         if matches!(value, Value::Null | Value::Undefined) {
             return Ok(Vec::new());
         }
@@ -5898,6 +5922,7 @@ impl Runtime {
         }
         let marker = self.publish_statement_inputs(env, this, None)?;
         self.eval_depth += 1;
+        self.transient_roots.owned_eval_depth += 1;
         // Expression/return statements have no pending statement work while
         // their expression runs. Enter the heap evaluator from this activation,
         // rather than retaining statement_inner plus a second eval wrapper.
@@ -5929,6 +5954,7 @@ impl Runtime {
                     other => other,
                 });
         self.eval_depth -= 1;
+        self.transient_roots.owned_eval_depth -= 1;
         self.restore_root_marker(marker);
         result.map_err(|error| error.at(&program.source, program.stmts[id].at))
     }
@@ -6153,6 +6179,11 @@ impl Runtime {
             StmtKind::DoWhile(body, condition) => (condition, body, true),
             _ => unreachable!(),
         };
+        let empty_true = matches!(program.exprs[*condition].kind, ExprKind::Literal(Value::Bool(true)))
+            && matches!(program.stmts[*body].kind, StmtKind::Empty);
+        #[cfg(test)]
+        let empty_true = empty_true && !self.transient_roots.disable_empty_loop_fast_path;
+        if empty_true { return self.empty_true_loop(program, *condition, first); }
         let mut last = Some(Value::Undefined);
         loop {
             if !first {
@@ -6186,6 +6217,28 @@ impl Runtime {
             }
         }
         Ok(Control::Normal(last))
+    }
+
+    #[inline(never)]
+    fn empty_true_loop(&mut self, program: &Program, condition: ExprId,
+        first_body: bool) -> Result<Control, Fault> {
+        // No callback or live arena Value is produced by these two AST nodes.
+        // Retain one step per condition/body, the condition's zero-byte copy
+        // call, both native guards and the original source position of faults.
+        let mut condition_phase = !first_body;
+        loop {
+            self.step()?;
+            if self.eval_depth >= MAX_EVAL_DEPTH {
+                return Err(Fault::new("Evaluation nesting limit reached (128)."));
+            }
+            if condition_phase {
+                if self.evaluation_frames >= MAX_EVALUATION_FRAMES {
+                    return Err(Fault::new("Pending evaluation limit reached (4096).").at(&program.source, program.exprs[condition].at));
+                }
+                self.work_as(0, WorkKind::ValueCopy)?;
+            }
+            condition_phase = !condition_phase;
+        }
     }
 
     fn for_statement(
@@ -6637,7 +6690,9 @@ impl Runtime {
         if self.eval_depth >= MAX_EVAL_DEPTH {
             return Err(Fault::new("Evaluation nesting limit reached (128)."));
         }
+        let marker = self.publish_statement_inputs(env, this, None)?;
         self.eval_depth += 1;
+        self.transient_roots.owned_eval_depth += 1;
         #[cfg(test)]
         let result = if self.recursive_evaluation_oracle {
             self.eval_inner(program, id, env, this, host)
@@ -6647,6 +6702,8 @@ impl Runtime {
         #[cfg(not(test))]
         let result = self.eval_heap(program, id, env, this, host);
         self.eval_depth -= 1;
+        self.transient_roots.owned_eval_depth -= 1;
+        self.restore_root_marker(marker);
         result.map_err(|error| error.at(&program.source, program.exprs[id].at))
     }
 
@@ -7114,7 +7171,7 @@ impl Runtime {
     #[inline(always)]
     fn construct_value(&mut self, constructor: Value, args: &[Value], host: &mut dyn Host) -> Result<Value, Fault> {
         let marker = self.publish_call_inputs(&constructor, &Value::Undefined, args)?;
-        self.transient_roots.inhibited += 1;
+        self.inhibit_transient_collection_for("constructor");
         let result = self.construct_value_routed(constructor, args, host);
         self.restore_transient_marker(marker);
         result
@@ -7877,9 +7934,16 @@ impl Runtime {
     #[inline(always)]
     fn call_value(&mut self, function: Value, args: &[Value], this: Value, host: &mut dyn Host) -> Result<Value, Fault> {
         let marker = self.publish_call_inputs(&function, &this, args)?;
-        // Native, Promise and bound helpers may own additional Rust-only locals.
-        if !matches!(&function, Value::Function(id) if matches!(self.functions.get(*id), Some(Function::Script { .. }))) {
-            self.transient_roots.inhibited += 1;
+        // Only audited forwarding helpers can run without a blanket inhibitor.
+        // Their inputs stay registered until the nested call has returned;
+        // apply list construction has its own guard for partial getter results.
+        if !matches!(&function, Value::Function(id) if matches!(self.functions.get(*id),
+            Some(Function::Script { .. } | Function::Bound(_)
+                | Function::Native(Builtin::FunctionMethod("call" | "apply") | Builtin::Eval)))) {
+            if self.transient_roots.inhibited == 0 {
+                self.transient_roots.outer_native = match function { Value::Function(id) => Some(id), _ => None };
+            }
+            self.inhibit_transient_collection_for("native-call");
         }
         let result = self.call_value_routed(function, args, this, host);
         self.restore_transient_marker(marker);
@@ -8072,17 +8136,21 @@ impl Runtime {
         let rooted = self.push_transient_value(&this)
             .and_then(|()| self.push_transient_root(function_reachability::Edge::Environment(parent)));
         if let Err(error) = rooted { self.restore_transient_marker(marker); return Err(error); }
+        #[cfg(test)]
+        if let Some(observe) = self.transient_roots.script_input_observer { observe(self, index, args, &this); }
         self.transient_roots.script_entries = self.transient_roots.script_entries.saturating_add(1);
         if self.transient_roots.inhibited == 0 {
             self.transient_roots.uninhibited_script_entries = self.transient_roots.uninhibited_script_entries.saturating_add(1);
         }
         self.call_depth += 1;
         let previous_strict = self.strict;
+        self.transient_roots.owned_call_depth += 1;
         self.strict = program.templates[template].strict;
         let result = (|| {
             self.script_parameters_and_body(&program, template, index, parent, args, &this, host)
         })();
         self.call_depth -= 1;
+        self.transient_roots.owned_call_depth -= 1;
         self.strict = previous_strict;
         self.restore_transient_marker(marker);
         result

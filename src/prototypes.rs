@@ -1958,8 +1958,11 @@ impl Runtime {
             return Err(Fault::new("Function call limit reached (32)."));
         }
         self.call_depth += 1;
+        let audited = matches!(builtin, Builtin::FunctionMethod("call" | "apply"));
+        if audited { self.transient_roots.owned_call_depth += 1; }
         let result = self.prototype_builtin_inner(builtin, args, this, host);
         self.call_depth -= 1;
+        if audited { self.transient_roots.owned_call_depth -= 1; }
         result
     }
 

@@ -304,7 +304,7 @@ impl Runtime {
                 return Err(Fault::new("Pending evaluation limit reached (4096)."));
             }
             self.evaluation_frames += 1;
-            let marker = self.inhibit_transient_collection();
+            let marker = self.inhibit_transient_collection_for("immediate-expression");
             let result = self.eval_heap_immediate(program, id, env, this, host);
             self.restore_transient_marker(marker);
             self.evaluation_frames -= 1;
@@ -391,7 +391,7 @@ impl Runtime {
                 Some(position) => error.at(&program.source, position),
                 None => error,
             };
-            let inhibited = self.inhibit_transient_collection();
+            let inhibited = self.inhibit_transient_collection_for("evaluator-dispatch");
             let transition = match frame.state {
                 State::Begin(mode) => self.begin_heap_expression(
                     program, frame.id, mode, env, this, host),
@@ -413,13 +413,13 @@ impl Runtime {
                         result.map_err(located)?
                     }
                     Transition::Spread(call, result) => {
-                        let marker = self.inhibit_transient_collection();
+                        let marker = self.inhibit_transient_collection_for("spread-arguments");
                         let result = self.finish_heap_spread(call, result, &mut scratch, env, this, host);
                         self.restore_transient_marker(marker);
                         result.map_err(located)?
                     }
                     Transition::Immediate(id) => {
-                        let marker = self.inhibit_transient_collection();
+                        let marker = self.inhibit_transient_collection_for("immediate-expression");
                         let result = self.eval_heap_immediate(program, id, env, this, host);
                         self.restore_transient_marker(marker);
                         done(result.map_err(located)?)

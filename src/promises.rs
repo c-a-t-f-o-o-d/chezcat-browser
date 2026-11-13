@@ -235,6 +235,12 @@ impl Arena {
         !self.draining && self.allocation_trace.active.is_none()
     }
 
+    #[cfg(test)]
+    pub(super) fn reachability_job_is_registered(&self, registrations: usize) -> bool {
+        if self.draining { registrations == 1 && self.allocation_trace.active.is_some() }
+        else { registrations == 0 && self.allocation_trace.active.is_none() }
+    }
+
     pub(super) fn reachability_edges(&self, add: &mut impl FnMut(super::function_reachability::Edge)) {
         use super::function_reachability::Edge;
         if let Some(id) = self.prototype { add(Edge::Object(id)); }
@@ -1250,7 +1256,10 @@ impl Runtime {
                     self.push_transient_value(value)?;
                 }
             }
-            self.with_intrinsic_realm(realm, |runtime| runtime.run_promise_job_registered(job, host))
+            self.transient_roots.active_job_registrations += 1;
+            let result = self.with_intrinsic_realm(realm, |runtime| runtime.run_promise_job_registered(job, host));
+            self.transient_roots.active_job_registrations -= 1;
+            result
         })();
         self.restore_transient_marker(marker);
         result

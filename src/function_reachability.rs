@@ -105,7 +105,26 @@ impl Runtime {
             || !self.transient_registration_is_empty() {
             return Err("Mark-only snapshot requires inactive JavaScript; transient roots are not covered.");
         }
+        self.trace_root_graph(exported, include_registered_exports, conservative_candidates, false)
+    }
+
+    #[cfg(test)]
+    fn mark_audited_active_roots(&self, conservative_candidates: bool) -> Result<Graph, &'static str> {
+        let state = &self.transient_roots;
+        if self.recursive_evaluation_oracle || state.inhibited != 0
+            || self.call_depth != state.owned_call_depth || self.eval_depth != state.owned_eval_depth
+            || self.evaluation_frames != state.evaluation_frames || self.evaluation_frame_slots != state.frame_slots
+            || self.evaluation_argument_slots != state.argument_slots || !self.active_array_joins.is_empty()
+            || !self.promises.reachability_job_is_registered(state.active_job_registrations) {
+            return Err("Active mark-only audit requires complete registered guard ownership and uninhibited helpers.");
+        }
+        self.trace_root_graph(&[], false, conservative_candidates, true)
+    }
+
+    fn trace_root_graph(&self, exported: &[Value], include_registered_exports: bool,
+        conservative_candidates: bool, transient: bool) -> Result<Graph, &'static str> {
         let mut graph = Graph::new(self)?;
+        if transient { for &edge in &self.transient_roots.roots { graph.add(edge); } }
         graph.add(Edge::Environment(0));
         graph.add(Edge::Environment(self.global_environment));
         for realm in &self.intrinsic_realms { graph.add(Edge::Environment(realm.global_environment)); }
@@ -178,6 +197,116 @@ impl Runtime {
         }
         if graph.invalid { Err("A retained root has no valid arena entry; snapshot rejected.") } else { Ok(graph) }
     }
+}
+
+#[test]
+fn active_mark_audit_covers_forwarders_completions_and_popped_jobs_without_export_pins() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static AUDITS: AtomicUsize = AtomicUsize::new(0);
+    static JOBS: AtomicUsize = AtomicUsize::new(0);
+    static COMPLETIONS: AtomicUsize = AtomicUsize::new(0);
+    struct EvalHost;
+    impl Host for EvalHost {
+        fn allow_eval(&mut self) -> Result<bool, String> { Ok(true) }
+        fn get(&mut self, _: u32, _: &str) -> Result<Value, String> { panic!("unexpected get") }
+        fn set(&mut self, _: u32, _: &str, _: Value) -> Result<(), String> { panic!("unexpected set") }
+        fn call(&mut self, _: u32, _: &str, _: &[Value]) -> Result<Value, String> { panic!("unexpected call") }
+    }
+    fn observe(runtime: &Runtime, function: usize, args: &[Value], this: &Value) {
+        if runtime.transient_roots.inhibited != 0 {
+            assert!(runtime.mark_audited_active_roots(false).is_err());
+            return;
+        }
+        let before = (runtime.functions.len(), runtime.objects.len(), runtime.bindings, runtime.value_bytes, runtime.job_usage());
+        let graph = runtime.mark_audited_active_roots(false).unwrap();
+        assert!(graph.functions[function]);
+        for value in args.iter().chain(std::iter::once(this)) {
+            match value {
+                Value::Object(id) => assert!(graph.objects[*id]),
+                Value::Function(id) => assert!(graph.functions[*id]),
+                _ => {}
+            }
+        }
+        // Declarations have no private named-expression binding. Inspect the
+        // fixture's unchanged own data name without invoking a public getter.
+        let name = |id: usize| match &runtime.objects[runtime.function_properties[id]].properties["name"].value {
+            StoredValue::Value(Value::String(name)) => Some(name.as_str()), _ => None,
+        };
+        if name(function) == Some("checkpoint") {
+            let phase = runtime.environment(runtime.global_environment).bindings["phase"].value.as_ref().unwrap().to_number() as usize;
+            let expected = ["hiddenReturn", "hiddenThrow", "hiddenLoop", "hiddenList", "hiddenSwitch", "hiddenFor"][phase - 1];
+            let id = (0..runtime.functions.len()).rfind(|&id| name(id) == Some(expected)).unwrap();
+            assert!(graph.functions[id], "lost pending {expected}");
+            COMPLETIONS.fetch_or(1 << (phase - 1), Ordering::Relaxed);
+            let discarded = (0..runtime.functions.len()).find(|&id| name(id) == Some("discarded")).unwrap();
+            assert!(!graph.functions[discarded], "dead constructor/capture cycle became a root");
+        }
+        for (label, bit) in [("callback", 1), ("reaction", 2), ("thenableMethod", 4)] {
+            if name(function) == Some(label) { JOBS.fetch_or(bit, Ordering::Relaxed); }
+        }
+        AUDITS.fetch_add(1, Ordering::Relaxed);
+        assert_eq!((runtime.functions.len(), runtime.objects.len(), runtime.bindings, runtime.value_bytes, runtime.job_usage()), before);
+    }
+    let mut runtime = Runtime::new();
+    runtime.execute("(function discarded(){});0;", &mut EvalHost).unwrap();
+    runtime.transient_roots.script_input_observer = Some(observe);
+    runtime.execute(r#"
+function checkpoint(){return undefined;}var phase=1;
+function returning(){try{return function hiddenReturn(){return 71;};}finally{checkpoint();}}
+if(returning()()!==71)throw 'return';
+phase=2;try{try{throw function hiddenThrow(){return 72;};}finally{checkpoint();}}catch(e){if(e()!==72)throw 'throw';}
+phase=3;eval('var n=0;while(n++<2){if(n===1)(function hiddenLoop(){});else{checkpoint();break;}}');
+phase=4;eval('(function hiddenList(){});var ignored=checkpoint();');
+phase=5;switch((function hiddenSwitch(){})){case checkpoint():throw 'matched';default:break;}
+phase=6;for(var i=0;i<2;checkpoint()){i++;(function hiddenFor(){});}
+function f(v){return v;}f.call(null,{});f.apply(null,[{}]);f.bind(null,{})();
+var getter={get value(){return f({});}};getter.value;
+eval('f({});');(0,eval)('f({});');
+var scoped=eval("'use strict';var retained=79;(function heldEval(){return retained;});");
+if(scoped()!==79)throw 'eval scope';
+function nestedEval(){return eval('f({});');}nestedEval();
+function throwingEval(){try{eval('throw 17;');}catch(e){return e;}}
+if(throwingEval()!==17)throw 'eval recovery';
+var privateBound=(function receiverFactory(){var privateReceiver={value:83};function readPrivate(){return this.value;}return readPrivate.bind(privateReceiver).bind({value:0});})();
+if(privateBound()!==83)throw 'private bound receiver';
+queueMicrotask(function callback(){f({});});Promise.resolve(1).then(function reaction(){f({});});
+Promise.resolve({then:function thenableMethod(resolve){f({});resolve(2);}});
+[1].map(function guarded(){f({});});
+"#, &mut EvalHost).unwrap();
+    assert!(runtime.microtask_checkpoint(&mut EvalHost).unwrap().is_empty());
+    assert_eq!(JOBS.load(Ordering::Relaxed), 7);
+    assert_eq!(COMPLETIONS.load(Ordering::Relaxed), 63);
+    assert!(AUDITS.load(Ordering::Relaxed) > 25);
+    assert!(runtime.transient_registration_is_empty());
+}
+
+#[test]
+fn active_mark_audit_rejects_unowned_guards_inhibitors_and_invalid_transient_handles() {
+    let mut runtime = Runtime::new();
+    assert!(runtime.mark_audited_active_roots(true).is_ok());
+    runtime.call_depth = 1;
+    assert!(runtime.mark_audited_active_roots(true).is_err());
+    runtime.call_depth = 0;
+    runtime.eval_depth = 1;
+    assert!(runtime.mark_audited_active_roots(true).is_err());
+    runtime.eval_depth = 0;
+    runtime.evaluation_frames = 1;
+    assert!(runtime.mark_audited_active_roots(true).is_err());
+    runtime.evaluation_frames = 0;
+    let marker = runtime.inhibit_transient_collection();
+    assert!(runtime.mark_audited_active_roots(true).is_err());
+    runtime.restore_transient_marker(marker);
+    runtime.transient_roots.active_job_registrations = 1;
+    assert!(runtime.mark_audited_active_roots(true).is_err());
+    runtime.transient_roots.active_job_registrations = 0;
+    runtime.recursive_evaluation_oracle = true;
+    assert!(runtime.mark_audited_active_roots(true).is_err());
+    runtime.recursive_evaluation_oracle = false;
+    let marker = runtime.root_marker();
+    runtime.push_transient_root(Edge::Function(usize::MAX)).unwrap();
+    assert!(runtime.mark_audited_active_roots(true).is_err());
+    runtime.restore_root_marker(marker);
+    assert!(runtime.transient_registration_is_empty());
 }
 
 #[test]

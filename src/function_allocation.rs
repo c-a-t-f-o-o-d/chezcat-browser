@@ -1,5 +1,6 @@
 //! Bounded allocation attribution for the existing cumulative function guard.
-//! Counts only; no source, function names, URLs or host/device data is collected.
+//! Counts and internal helper/native intrinsic names only; no source, Script
+//! names, URLs or host/device data is collected.
 use super::*;
 
 impl Runtime {
@@ -38,8 +39,8 @@ impl Runtime {
                 else { "anonymous-expression" };
             Some((kind, syntax.source_start, syntax.source_end.saturating_sub(syntax.source_start)))
         }).collect();
-        Fault::new(format!("Function limit reached (1024). Requested={requested}; active-realm={:?}; native/script/host/bound/promise={kinds:?}; main-realm={main:?}; detached-realms={}; top-script-program/template/count={repeated:?}; top-script-kind/offset/bytes={shapes:?}; {}.",
-            self.active_realm, self.intrinsic_realms.len(), self.microtask_allocation_diagnostic()))
+        Fault::new(format!("Function limit reached (1024). Requested={requested}; active-realm={:?}; native/script/host/bound/promise={kinds:?}; main-realm={main:?}; detached-realms={}; top-script-program/template/count={repeated:?}; top-script-kind/offset/bytes={shapes:?}; {}; {}.",
+            self.active_realm, self.intrinsic_realms.len(), self.inhibition_diagnostic(), self.microtask_allocation_diagnostic()))
     }
 }
 
