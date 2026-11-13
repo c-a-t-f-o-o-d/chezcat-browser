@@ -2,6 +2,10 @@
 //! Objects remain append-only; only proven dead candidate functions/environments retire.
 use super::*;
 
+#[cfg(test)]
+#[path = "function_array_tests.rs"]
+mod array_seed_tests;
+
 #[derive(Clone, Copy, Debug)]
 pub(super) enum Edge { Object(usize), Function(usize), Environment(usize) }
 
@@ -218,18 +222,14 @@ impl Runtime {
                 let candidates = self.object_assigned_closures.len();
                 let unmarked = self.object_assigned_closures.iter().filter(|&&id| !graph.functions[id]).count();
                 drop(graph);
-                // Diagnostic comparison only. Production collection retains
-                // every existing array seed until the separate audit completes.
+                // Ordinary arrays retain managed values through their traced
+                // properties/prototype and explicit persistent/transient roots.
+                // Never re-seed discarded arrays: their unreachable slots may
+                // now contain retired IDs, like unreachable plain objects.
                 let arrays = self.objects.iter().filter(|object| object.length.is_some() && Self::plain_array_storage(object)).count();
-                let comparison = self.trace_root_graph_array_policy(&[], true, true, false, false,
-                    &mut Meter { remaining: None, deadline: self.job_deadline });
-                let array_comparison = match comparison {
-                    Ok(graph) => format!("Ordinary-array seed comparison (mark-only): arrays={arrays}; candidates unmarked without these seeds={}. Collector policy unchanged.",
-                        self.object_assigned_closures.iter().filter(|&&id| !graph.functions[id]).count()),
-                    Err(message) => format!("Ordinary-array seed comparison unavailable: {message}"),
-                };
+                let array_comparison = format!("Ordinary arrays follow traced references: arrays={arrays}; other exotic seed roots retained. Array/object slots remain append-only.");
                 let history = if self.function_arena.collections == 0 { "No collection or slot reuse has occurred." } else { "Candidate function slots may be reused." };
-                format!("Callable reachability (inactive stack; conservative native/Promise/API roots): Script allocated={allocated}; reachable={reachable}; exported function/object pins={}/{}. Object-assigned closure candidates={candidates}; unmarked with all other functions/exotic objects rooted={unmarked}. Conservative Script-entry collection: passes={}; functions retired={}; environments retired={}; occupied/high-water={}/{}; Script creations={}; slot allocations={}; Function-literal passes={}. {history} Objects remain append-only.\n{array_comparison}\nEvaluator root snapshots: {}; call-root scopes={}; completion-root scopes={}; peak ID references={}; active registrations=0. Script entries={}; uninhibited={}.\n",
+                format!("Callable reachability (inactive stack; conservative native/Promise/API roots): Script allocated={allocated}; reachable={reachable}; exported function/object pins={}/{}. Object-assigned closure candidates={candidates}; unmarked with other functions/non-array exotic objects rooted={unmarked}. Conservative Script-entry collection: passes={}; functions retired={}; environments retired={}; occupied/high-water={}/{}; Script creations={}; slot allocations={}; Function-literal passes={}. {history} Objects remain append-only.\n{array_comparison}\nEvaluator root snapshots: {}; call-root scopes={}; completion-root scopes={}; peak ID references={}; active registrations=0. Script entries={}; uninhibited={}.\n",
                     self.exported_function_roots.len(), self.exported_object_roots.len(), self.function_arena.collections, self.function_arena.retired,
                     self.function_arena.environments_retired, self.function_arena.occupied, self.functions.len(), self.function_arena.script_created,
                     self.function_arena.allocations, self.function_arena.demand_collections,
@@ -269,7 +269,7 @@ impl Runtime {
 
     fn trace_root_graph_metered(&self, exported: &[Value], include_registered_exports: bool,
         conservative_candidates: bool, transient: bool, meter: &mut Meter) -> Result<Graph, &'static str> {
-        self.trace_root_graph_array_policy(exported, include_registered_exports, conservative_candidates, transient, true, meter)
+        self.trace_root_graph_array_policy(exported, include_registered_exports, conservative_candidates, transient, false, meter)
     }
 
     fn plain_array_storage(object: &Object) -> bool {
@@ -407,13 +407,16 @@ fn array_seed_comparison_distinguishes_discarded_cycles_without_mutation_or_call
     runtime.execute("function build(n){var state=n,c={},a=[c];c.write=function(v){state=v;};c.read=function(){return state;};c.back=a;return a;}var kept=build(71);build(72);0;", &mut NoHost).unwrap();
     let before = (runtime.function_arena.occupied, runtime.objects.len(), runtime.bindings, runtime.value_bytes,
         runtime.job_usage(), runtime.job_deadline, runtime.function_arena.collections);
-    let current = runtime.mark_root_graph(&[], true, true).unwrap();
+    // Retain the original pre-collection root-policy comparison explicitly.
+    let current = runtime.trace_root_graph_array_policy(&[], true, true, false, true,
+        &mut Meter { remaining: None, deadline: runtime.job_deadline }).unwrap();
     assert_eq!(runtime.object_assigned_closures.iter().filter(|&&id| current.functions[id]).count(), 4);
     let compared = runtime.trace_root_graph_array_policy(&[], true, true, false, false,
         &mut Meter { remaining: None, deadline: runtime.job_deadline }).unwrap();
     assert_eq!(runtime.object_assigned_closures.iter().filter(|&&id| compared.functions[id]).count(), 2);
     let report = runtime.persistent_allocation_report();
-    assert!(report.contains("candidates unmarked without these seeds=2. Collector policy unchanged"), "{report}");
+    assert!(report.contains("unmarked with other functions/non-array exotic objects rooted=2"), "{report}");
+    assert!(report.contains("Ordinary arrays follow traced references"), "{report}");
     assert_eq!((runtime.function_arena.occupied, runtime.objects.len(), runtime.bindings, runtime.value_bytes,
         runtime.job_usage(), runtime.job_deadline, runtime.function_arena.collections), before);
     assert_eq!(runtime.execute("kept[0].write(83);kept[0].read();", &mut NoHost).unwrap().to_number(), 83.0);
