@@ -629,6 +629,8 @@ impl Site {
             while !ending.load(Ordering::Relaxed) {
                 match listener.accept() {
                     Ok((mut stream, _)) => {
+                        // Accepted Winsock sockets inherit the polling listener mode.
+                        stream.set_nonblocking(false).unwrap();
                         let recorded = recorded.clone();
                         let ready = ready.clone();
                         clients.push(std::thread::spawn(move || {
@@ -703,7 +705,13 @@ impl Drop for Site {
     fn drop(&mut self) {
         self.release.store(true, Ordering::Relaxed);
         self.stop.store(true, Ordering::Relaxed);
-        self.thread.take().unwrap().join().unwrap();
+        if let Some(thread) = self.thread.take() {
+            if let Err(failure) = thread.join() {
+                if !std::thread::panicking() {
+                    std::panic::resume_unwind(failure);
+                }
+            }
+        }
     }
 }
 

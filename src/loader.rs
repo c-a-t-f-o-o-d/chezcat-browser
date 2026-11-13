@@ -2693,6 +2693,8 @@ mod tests {
                         }
                         Err(error) => panic!("{error}"),
                     };
+                    // Accepted Winsock sockets inherit the polling listener mode.
+                    stream.set_nonblocking(false).unwrap();
                     stream
                         .set_read_timeout(Some(Duration::from_secs(2)))
                         .unwrap();
@@ -2703,6 +2705,10 @@ mod tests {
                             break;
                         }
                         request.push(byte[0]);
+                    }
+                    // A cancelled connection has no routable HTTP request.
+                    if !request.ends_with(b"\r\n\r\n") {
+                        continue;
                     }
                     let mut text = String::from_utf8(request).unwrap();
                     let path = text.split_whitespace().nth(1).unwrap_or("/").to_owned();
@@ -2804,8 +2810,32 @@ mod tests {
     impl Drop for Site {
         fn drop(&mut self) {
             self.stop.store(true, Ordering::Relaxed);
-            self.thread.take().unwrap().join().unwrap();
+            if let Some(thread) = self.thread.take() {
+            if let Err(failure) = thread.join() {
+                if !std::thread::panicking() {
+                    std::panic::resume_unwind(failure);
+                }
+            }
         }
+        }
+    }
+
+    #[test]
+    fn loader_fixture_waits_for_fragmented_requests_and_ignores_cancelled_connections() {
+        let site = Site::new();
+        let url = site.location.url.as_ref().expect("loopback fixture URL");
+        let address = format!("{}:{}", url.host, url.port);
+        drop(std::net::TcpStream::connect(&address).unwrap());
+        let mut client = std::net::TcpStream::connect(&address).unwrap();
+        client.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+        client.write_all(b"GET /fre").unwrap();
+        std::thread::sleep(Duration::from_millis(30));
+        client.write_all(b"sh HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n").unwrap();
+        let mut response = String::new();
+        client.read_to_string(&mut response).unwrap();
+        assert!(response.starts_with("HTTP/1.1 200 Test\r\n"), "{response}");
+        assert!(response.contains("Fresh page"), "{response}");
+        assert_eq!(site.requests.lock().unwrap().len(), 1);
     }
 
     #[test]

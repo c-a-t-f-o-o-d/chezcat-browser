@@ -23,7 +23,7 @@ mod network_tests;
 
 const MAX_BODY_BYTES: usize = 32 * 1024 * 1024;
 pub const MAX_FORM_BYTES: usize = 128 * 1024;
-pub const USER_AGENT: &str = "ChezCat/0.53";
+pub const USER_AGENT: &str = "ChezCat/0.54";
 const MAX_HEADER_BYTES: usize = 32 * 1024;
 const MAX_LINE_BYTES: usize = 8 * 1024;
 const MAX_CHUNK_METADATA: usize = 512 * 1024;
@@ -2737,6 +2737,8 @@ mod tests {
                 while !stopping.load(Ordering::Relaxed) {
                     match listener.accept() {
                         Ok((mut stream, _)) => {
+                            // Accepted Winsock sockets inherit the polling listener mode.
+                            stream.set_nonblocking(false).unwrap();
                             stream
                                 .set_read_timeout(Some(Duration::from_secs(2)))
                                 .unwrap();
@@ -2837,7 +2839,13 @@ mod tests {
     impl Drop for PostSite {
         fn drop(&mut self) {
             self.stop.store(true, Ordering::Relaxed);
-            self.thread.take().unwrap().join().unwrap();
+            if let Some(thread) = self.thread.take() {
+            if let Err(failure) = thread.join() {
+                if !std::thread::panicking() {
+                    std::panic::resume_unwind(failure);
+                }
+            }
+        }
         }
     }
 

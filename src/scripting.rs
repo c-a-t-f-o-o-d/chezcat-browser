@@ -5293,8 +5293,8 @@ mod browser_budget_tests {
         assert_eq!(page.state.host_work, 2_000_000);
         assert_eq!(page.state.copy_work, 256 * 1024 * 1024);
         let report = page.report();
-        assert!(report.contains("5000000 steps / 10 seconds / 256 MiB"));
-        assert!(report.contains("20000000 steps / 30 seconds / 1024 MiB"));
+        assert!(report.contains("50000000 steps / 10 seconds / 256 MiB"));
+        assert!(report.contains("200000000 steps / 30 seconds / 1024 MiB"));
         assert!(report.contains("262144 properties per object / 1048576 per document"));
         assert!(report.contains("65536 object identities; array length 1048576; 64 MiB"));
     }

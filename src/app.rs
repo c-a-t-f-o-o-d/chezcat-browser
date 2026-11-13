@@ -4251,6 +4251,8 @@ mod tests {
                 while !ending.load(Ordering::Relaxed) {
                     match listener.accept() {
                         Ok((mut stream, _)) => {
+                            // Accepted Winsock sockets inherit the polling listener mode.
+                            stream.set_nonblocking(false).unwrap();
                             let seen = seen.clone();
                             let seen_headers = seen_headers.clone();
                             clients.push(std::thread::spawn(move || {

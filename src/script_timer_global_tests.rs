@@ -150,7 +150,7 @@ if(reads||writes||setTimeout()!==9||d.value!==setTimeout||!d.writable||!d.enumer
     );
     assert_eq!(doc.title, "waiting");
     assert_eq!(execute(&mut page, &mut doc, &mut forms, r#"
-typeof fresh==='undefined'&&!Object.hasOwn(window,'fresh')&&
+typeof fresh==='undefined'&&!('fresh' in window)&&
 setTimeout()===9&&reads===0&&writes===0;
 "#).unwrap().to_text(), "true");
     // A global indirect eval uses the same declaration preflight, but exposes
@@ -161,7 +161,7 @@ try {
     (0,eval)('function setTimeout(){}document.title="must not run";');
 } catch(e) { declarationError=e.name; }
 declarationError==='TypeError'&&typeof fresh==='undefined'&&
-!Object.hasOwn(window,'fresh')&&setTimeout()===9&&reads===0&&writes===0;
+!('fresh' in window)&&setTimeout()===9&&reads===0&&writes===0;
 "#).unwrap().to_text(), "true");
     assert_eq!(doc.title, "waiting");
 }
