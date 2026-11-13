@@ -31,7 +31,6 @@ mod binding_character;
 mod intrinsic_realms;
 #[path = "function_allocation.rs"]
 mod function_allocation;
-#[cfg(test)]
 #[path = "function_reachability.rs"]
 mod function_reachability;
 #[path = "deferred_native_methods.rs"]
@@ -3051,6 +3050,8 @@ pub struct Runtime {
     browser_global: Option<(u32, usize)>,
     host_objects: BTreeMap<u32, usize>,
     host_method_values: BTreeMap<(u32, &'static str), Value>,
+    exported_function_roots: std::collections::BTreeSet<usize>,
+    exported_object_roots: std::collections::BTreeSet<usize>,
     global_attributes: BTreeMap<String, (bool, bool, bool)>,
     host_globals: HashSet<String>,
     // Names explicitly exposed as ordinary properties by the embedding host.
@@ -3155,6 +3156,8 @@ impl Runtime {
             browser_global: None,
             host_objects: BTreeMap::new(),
             host_method_values: BTreeMap::new(),
+            exported_function_roots: std::collections::BTreeSet::new(),
+            exported_object_roots: std::collections::BTreeSet::new(),
             global_attributes: BTreeMap::new(),
             host_globals: HashSet::new(),
             operation_globals: HashSet::new(),
@@ -3347,6 +3350,7 @@ impl Runtime {
         self.ensure_global_intrinsics(name).map_err(Fault::display)?;
         let value = self.host_function(object, method)?;
         if let Err(error) = self.define_global(name, value.clone()) {
+            if let Value::Function(id) = value { self.exported_function_roots.remove(&id); }
             self.functions.pop();
             self.function_properties.pop();
             self.function_realms.pop();
@@ -3371,6 +3375,7 @@ impl Runtime {
         });
         self.initialize_function_properties(method, 0, false)
             .map_err(Fault::display)?;
+        self.pin_exported_value(&value);
         Ok(value)
     }
 
@@ -3430,6 +3435,7 @@ impl Runtime {
             return Err(Fault::new("Invalid global identifier.").display());
         }
         self.ensure_global_intrinsics(name).map_err(Fault::display)?;
+        self.pin_exported_value(&value);
         self.put_binding(self.global_environment, name.into(), Some(value), Declaration::Var, true)
             .map_err(Fault::display)?;
         self.host_globals.insert(name.into());
@@ -3459,6 +3465,7 @@ impl Runtime {
             self.cancel_microtasks();
         }
         self.collect_environments();
+        if let Ok(value) = &result { self.pin_exported_value(value); }
         result.map_err(Fault::display)
     }
 
@@ -3601,6 +3608,7 @@ impl Runtime {
             self.cancel_microtasks();
         }
         self.collect_environments();
+        if let Ok(value) = &result { self.pin_exported_value(value); }
         result.map_err(Fault::display)
     }
 
@@ -3611,6 +3619,9 @@ impl Runtime {
         this: Value,
         host: &mut dyn Host,
     ) -> Result<Value, String> {
+        self.pin_exported_value(&function);
+        self.pin_exported_value(&this);
+        for value in args { self.pin_exported_value(value); }
         let result = self.call_value(function, args, this, host);
         if result
             .as_ref()
@@ -3619,6 +3630,7 @@ impl Runtime {
             self.cancel_microtasks();
         }
         self.collect_environments();
+        if let Ok(value) = &result { self.pin_exported_value(value); }
         result.map_err(Fault::display)
     }
 
@@ -4302,6 +4314,7 @@ impl Runtime {
                     }
                     if variable_environment == self.global_environment && self.host_owns_global(name, host) {
                         if let Some((handle, _)) = self.browser_global {
+                            self.pin_exported_value(&function);
                             host.set(handle, name, self.copy_value(&function)?)
                                 .map_err(Fault::new)?;
                         }
@@ -7510,6 +7523,7 @@ impl Runtime {
             }
             &converted
         };
+        for value in args { self.pin_exported_value(value); }
         host.validate_call(object, method, args)
             .map_err(|(kind, message)| Fault::exception(kind, message))?;
         if host.indexed_for_each(object, method) {
@@ -7557,6 +7571,7 @@ impl Runtime {
                 fields = Some(values);
             }
         }
+        if let Some(fields) = &fields { for (_, value) in fields { self.pin_exported_value(value); } }
         host.call_with_dictionary(object, method, args, fields.as_deref())
             .map_err(Fault::new)
     }

@@ -66,7 +66,6 @@ pub(super) struct ParkedRoots {
 }
 
 impl Runtime {
-    #[cfg(test)]
     pub(super) fn reachability_intrinsic_edges(&self, add: &mut impl FnMut(super::function_reachability::Edge)) {
         use super::function_reachability::Edge;
         macro_rules! emit {

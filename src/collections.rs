@@ -49,7 +49,6 @@ pub(super) struct Data {
     sequence: usize,
 }
 impl Data {
-    #[cfg(test)]
     pub(super) fn reachability_edges(&self, add: &mut impl FnMut(super::function_reachability::Edge)) {
         use super::function_reachability::Edge;
         for entry in self.ordered.values() { Edge::value(&entry.key, add); Edge::value(&entry.value, add); }
@@ -88,7 +87,6 @@ pub(super) struct IteratorData {
     text: Option<String>,
 }
 impl IteratorData {
-    #[cfg(test)]
     pub(super) fn reachability_edges(&self, add: &mut impl FnMut(super::function_reachability::Edge)) {
         if let Some(id) = self.source { add(super::function_reachability::Edge::Object(id)); }
     }
@@ -113,7 +111,6 @@ pub(super) struct Roots {
     array_values: Option<usize>,
 }
 
-#[cfg(test)]
 impl Roots {
     pub(super) fn reachability_edges(&self, add: &mut impl FnMut(super::function_reachability::Edge)) {
         use super::function_reachability::Edge;

@@ -201,14 +201,12 @@ pub(super) struct Arena {
     allocation_trace: AllocationTrace,
 }
 
-#[cfg(test)]
 impl Capability {
     fn reachability_edges(&self, add: &mut impl FnMut(super::function_reachability::Edge)) {
         for value in [&self.promise, &self.resolve, &self.reject] { super::function_reachability::Edge::value(value, add); }
     }
 }
 
-#[cfg(test)]
 impl Data {
     pub(super) fn reachability_edges(&self, add: &mut impl FnMut(super::function_reachability::Edge)) {
         use super::function_reachability::Edge;
@@ -220,7 +218,6 @@ impl Data {
     }
 }
 
-#[cfg(test)]
 impl Closure {
     pub(super) fn reachability_edges(&self, add: &mut impl FnMut(super::function_reachability::Edge)) {
         use super::function_reachability::Edge;
@@ -233,8 +230,11 @@ impl Closure {
     }
 }
 
-#[cfg(test)]
 impl Arena {
+    pub(super) fn reachability_is_inactive(&self) -> bool {
+        !self.draining && self.allocation_trace.active.is_none()
+    }
+
     pub(super) fn reachability_edges(&self, add: &mut impl FnMut(super::function_reachability::Edge)) {
         use super::function_reachability::Edge;
         if let Some(id) = self.prototype { add(Edge::Object(id)); }
@@ -1379,6 +1379,18 @@ fn bounded_diagnostic(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reachability_report_rejects_popped_or_draining_jobs_before_traversal() {
+        let mut runtime = Runtime::new();
+        runtime.promises.draining = true;
+        assert!(runtime.persistent_allocation_report().contains("unavailable"));
+        runtime.promises.draining = false;
+        runtime.promises.allocation_trace.active = Some((0, 0));
+        assert!(runtime.persistent_allocation_report().contains("unavailable"));
+        runtime.promises.allocation_trace.active = None;
+        assert!(runtime.persistent_allocation_report().contains("No collection or slot reuse"));
+    }
 
     #[test]
     fn microtask_allocation_trace_distinguishes_jobs_and_resets_without_changing_work() {

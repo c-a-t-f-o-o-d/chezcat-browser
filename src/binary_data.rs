@@ -85,7 +85,6 @@ pub(super) enum Data {
     View(View),
 }
 impl Data {
-    #[cfg(test)]
     pub(super) fn reachability_edges(&self, add: &mut impl FnMut(super::function_reachability::Edge)) {
         use super::function_reachability::Edge;
         match self { Self::Typed(view) => add(Edge::Object(view.buffer)), Self::View(view) => add(Edge::Object(view.buffer)), Self::Buffer(_) => {} }
@@ -109,7 +108,6 @@ pub(super) struct Roots {
     constructors: [Option<usize>; 10],
 }
 
-#[cfg(test)]
 impl Roots {
     pub(super) fn reachability_edges(&self, add: &mut impl FnMut(super::function_reachability::Edge)) {
         use super::function_reachability::Edge;

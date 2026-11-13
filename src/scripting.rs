@@ -1457,11 +1457,13 @@ impl Page {
         }
         let mut text = format!("ChezCat JavaScript subset\n{} script(s), {} active listener(s), {} error(s).\n{} pending timer(s), {} timer callback(s) executed.\nClassic scripts run after parsing. Events come from supported controls/forms and completed dynamic scripts/stylesheets.\nFunction timers use the document queue. Bounded eval follows the document CSP.\nLocation inspection reflects the displayed document; same-origin assign/replace/reload and href/search/hash writes queue navigation.\nSession cookies are memory-only with host-only/Domain scope and bundled public-suffix boundaries; document.cookie excludes HttpOnly entries.\nDynamic external classic scripts use CSP, MIME, request-blocking and bounded source checks; cross-origin HTTPS scripts omit credentials. Crossorigin-marked scripts require same-origin at every hop. Dynamic LINK stylesheets retain exact-origin checks. HTML injection, modules, persistent storage, fetch and XHR are not implemented.\n\n", self.state.executed, self.state.listeners.len(), self.state.errors, self.state.timers.len(), self.state.timer_callbacks);
         let attribution = self.runtime.string_work_failure_report();
+        let reachability = self.runtime.persistent_allocation_report();
         // Reserve the fixed snapshot inside the existing log byte allowance.
         // Rendering never mutates the stored log, counters, or error count.
         let log_budget = MAX_LOG_BYTES
             .saturating_sub(text.len())
             .saturating_sub(attribution.as_ref().map_or(0, String::len))
+            .saturating_sub(reachability.len())
             .saturating_sub(1536); // Fixed trailers, heap profile and omission count.
         let mut rendered_log_bytes = 0;
         let mut snapshot_omissions = 0usize;
@@ -1478,6 +1480,7 @@ impl Page {
         if let Some(attribution) = attribution {
             text.push_str(&attribution);
         }
+        text.push_str(&reachability);
         text.push_str(&format!("Animation frames: {} pending callback(s), {} executed. Whole-millisecond monotonic timestamps; 16 ms minimum frame interval.\n", self.state.animation_frames.len(), self.state.animation_callbacks));
         text.push_str(&format!("Classic scripts have independent execution jobs ({} steps / {} seconds / {} MiB string-copy work). Aggregate startup: {} steps / {} seconds / {} MiB string-copy work. Native-stack and allocation guards are separate.\nDynamic image requests declined: {}. Detached Image nodes reflect attributes; no request or load event was fabricated.\nBeacon requests declined: {}. sendBeacon returns false; no data was queued or transmitted.\n", self.state.limits.steps, self.state.limits.job_seconds, self.state.limits.copy_bytes / (1024 * 1024), self.state.limits.startup_steps, self.state.limits.startup_seconds, self.state.limits.startup_copy / (1024 * 1024), self.state.declined_images, self.state.declined_beacons));
         let heap = self.state.limits.heap;

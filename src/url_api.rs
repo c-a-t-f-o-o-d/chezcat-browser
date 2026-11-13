@@ -139,7 +139,6 @@ pub(super) enum Data {
     },
 }
 impl Data {
-    #[cfg(test)]
     pub(super) fn reachability_edges(&self, add: &mut impl FnMut(super::function_reachability::Edge)) {
         use super::function_reachability::Edge;
         match self {
@@ -170,7 +169,6 @@ pub(super) struct Roots {
     iterator: Option<usize>,
 }
 
-#[cfg(test)]
 impl Roots {
     pub(super) fn reachability_edges(&self, add: &mut impl FnMut(super::function_reachability::Edge)) {
         for id in [self.url, self.params, self.iterator].into_iter().flatten() { add(super::function_reachability::Edge::Object(id)); }

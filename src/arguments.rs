@@ -17,7 +17,6 @@ pub(super) struct Pending {
 }
 
 impl Pending {
-    #[cfg(test)]
     pub(super) fn reachability_edges(&self, add: &mut impl FnMut(super::function_reachability::Edge)) {
         use super::function_reachability::Edge;
         add(Edge::Function(self.function));
