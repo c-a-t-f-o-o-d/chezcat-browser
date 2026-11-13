@@ -2782,6 +2782,7 @@ impl Host for Bridge<'_> {
             ));
         }
         if object == DOCUMENT {
+            if dom_tree::node_constant(property).is_some() { return Ok(true); }
             if matches!(property, "location" | "URL" | "documentURI") {
                 return Ok(self.state.location.is_some());
             }
@@ -3009,6 +3010,9 @@ impl Host for Bridge<'_> {
             };
         }
         if object == DOCUMENT {
+            if let Some(number) = dom_tree::node_constant(property) {
+                return Ok(Value::Number(f64::from(number)));
+            }
             return match property {
                 "location" => self.location_handle(),
                 "cookie" => self.document_cookie(),
@@ -3332,6 +3336,9 @@ impl Host for Bridge<'_> {
     fn call(&mut self, object: u32, method: &str, args: &[Value]) -> Result<Value, String> {
         if self.is_frame_handle(object) { return Err("Blank child native methods are not implemented.".into()); }
         self.state.work(1)?;
+        if object == DOCUMENT && method == "createEvent" {
+            return Err(unsupported_event_interface(args.first()));
+        }
         if method == "submit" {
             return self.submit_form(object);
         }
@@ -3613,6 +3620,30 @@ impl Host for Bridge<'_> {
 
 fn node_handle(node: usize) -> u32 {
     NODE_BASE + node as u32
+}
+
+// Diagnostics only: no event object, permission, coercion or dispatch is added.
+#[cold]
+#[inline(never)]
+fn unsupported_event_interface(value: Option<&Value>) -> String {
+    let (class, bytes) = match value {
+        Some(Value::String(name)) => {
+            let class = [
+                ("Event", "base-event"), ("Events", "base-event"),
+                ("HTMLEvents", "base-event"), ("SVGEvents", "base-event"),
+                ("UIEvent", "ui-event"), ("UIEvents", "ui-event"),
+                ("MouseEvent", "mouse-event"), ("MouseEvents", "mouse-event"),
+                ("KeyboardEvent", "keyboard-event"), ("KeyboardEvents", "keyboard-event"),
+                ("CustomEvent", "custom-event"), ("TouchEvent", "touch-event"),
+                ("PointerEvent", "pointer-event"), ("MutationEvent", "mutation-event"),
+                ("MutationEvents", "mutation-event"),
+            ].into_iter().find_map(|(known, class)| name.eq_ignore_ascii_case(known).then_some(class)).unwrap_or("other");
+            (class, Some(name.len()))
+        }
+        Some(_) => ("non-string", None),
+        None => ("missing", None),
+    };
+    format!("Document method \"createEvent\" is not supported in this subset. Requested interface class={class}; UTF-8 bytes={bytes:?}. Diagnostic only; no event was created.")
 }
 fn inert_attribute_name(name: &str) -> bool {
     (name.starts_with("data-") || name.starts_with("aria-") && name.len() > 5)

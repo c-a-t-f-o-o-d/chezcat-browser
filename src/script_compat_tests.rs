@@ -164,6 +164,74 @@ fn empty_host_property_reads_keep_handle_validation_and_dom_work_bounds() {
 }
 
 #[test]
+fn node_constants_are_readonly_on_real_document_element_text_and_detached_nodes() {
+    let (doc, _, page, outcome) = page("<p id=p>Text</p>", &[r#"
+var p=document.getElementById('p'),text=document.createTextNode('x'),detached=document.createElement('i');
+var nodes=[document,p,text,detached],pairs=[
+['ELEMENT_NODE',1],['ATTRIBUTE_NODE',2],['TEXT_NODE',3],['CDATA_SECTION_NODE',4],
+['ENTITY_REFERENCE_NODE',5],['ENTITY_NODE',6],['PROCESSING_INSTRUCTION_NODE',7],
+['COMMENT_NODE',8],['DOCUMENT_NODE',9],['DOCUMENT_TYPE_NODE',10],
+['DOCUMENT_FRAGMENT_NODE',11],['NOTATION_NODE',12],['DOCUMENT_POSITION_DISCONNECTED',1],
+['DOCUMENT_POSITION_PRECEDING',2],['DOCUMENT_POSITION_FOLLOWING',4],
+['DOCUMENT_POSITION_CONTAINS',8],['DOCUMENT_POSITION_CONTAINED_BY',16],
+['DOCUMENT_POSITION_IMPLEMENTATION_SPECIFIC',32]];
+var effects=0,coercions=0,rhs={valueOf:function(){coercions++;return 0;},toString:function(){coercions++;return '0';}};
+function strictSet(node,key){'use strict';node[key]=0;}
+for(var node of nodes){for(var pair of pairs){var key=pair[0],value=pair[1];
+if(!(key in node)||node[key]!==value)throw 'constant value/presence';
+var result=(node[key]=(effects++,rhs));if(result!==rhs||node[key]!==value)throw 'readonly value';
+var caught=false;try{strictSet(node,key);}catch(e){caught=e.name==='TypeError';}if(!caught)throw 'strict readonly';}}
+if(effects!==72||coercions!==0||p.nodeType!==p.ELEMENT_NODE||text.nodeType!==text.TEXT_NODE)throw 'conversion/type';
+if('DOCUMENT_TYPE_NODE' in window||'DOCUMENT_TYPE_NODE' in p.style||'DOCUMENT_TYPE_NODE' in document.querySelectorAll('p'))throw 'wrong receiver';
+p.id='changed';p.textContent='changed';text.data='new';if(p.id!=='changed'||p.textContent!=='changed'||text.data!=='new')throw 'ordinary writes';
+document.title='node-constants-ok';
+"#]);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    assert_eq!(doc.title, "node-constants-ok");
+}
+
+#[test]
+fn node_constants_reject_root_out_of_bounds_and_inert_node_handles() {
+    let (mut doc, mut forms, mut page, outcome) = page("<p>Visible</p><template><p id=inert>Hidden</p></template>", &[]);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    let inert = (0..doc.nodes.len()).find(|&n| doc.attr(n, "id") == Some("inert")).unwrap();
+    let invalid = [node_handle(0), node_handle(doc.nodes.len() + 99), node_handle(inert)];
+    let mut bridge = Bridge { doc: &mut doc, forms: &mut forms, state: &mut page.state };
+    for handle in invalid {
+        assert!(bridge.get(handle, "DOCUMENT_TYPE_NODE").is_err());
+        assert!(bridge.has(handle, "DOCUMENT_TYPE_NODE").is_err());
+        assert!(!bridge.readonly_property(handle, "DOCUMENT_TYPE_NODE"));
+        assert!(bridge.set(handle, "DOCUMENT_TYPE_NODE", Value::Number(0.0)).is_err());
+    }
+}
+
+#[test]
+fn event_interface_diagnostic_is_bounded_and_does_not_echo_payload_or_claim_support() {
+    for (input, class) in [("eVeNt", "base-event"), ("MouseEvents", "mouse-event"), ("KeyboardEvent", "keyboard-event"), ("PRIVATE_INTERFACE_PAYLOAD", "other")] {
+        let report = unsupported_event_interface(Some(&Value::String(input.into())));
+        assert!(report.contains(&format!("class={class}; UTF-8 bytes=Some({})", input.len())), "{report}");
+        assert!(report.contains("not supported") && report.contains("no event was created"));
+        assert!(!report.contains("PRIVATE_INTERFACE_PAYLOAD"));
+        assert!(report.len() < 256);
+    }
+    assert!(unsupported_event_interface(None).contains("class=missing"));
+    assert!(unsupported_event_interface(Some(&Value::Number(1.0))).contains("class=non-string"));
+}
+
+#[test]
+fn event_interface_diagnostic_invokes_no_coercion_or_event_lifecycle() {
+    let (mut doc, mut forms, mut page, outcome) = page("<p>Events</p>", &["var conversions=0,request={toString:function(){conversions++;return 'Event';}};"]);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    let before = (page.state.next_event, page.state.event.is_some(), page.state.listeners.len());
+    let outcome = page.console_eval(&mut doc, &mut forms, "document.createEvent(request);");
+    assert_eq!(outcome.errors, 1, "{}", page.report());
+    assert!(page.report().contains("Requested interface class=non-string"));
+    assert_eq!((page.state.next_event, page.state.event.is_some(), page.state.listeners.len()), before);
+    let outcome = page.console_eval(&mut doc, &mut forms, "if(conversions!==0||'createEvent' in document||'dispatchEvent' in document||'dispatchEvent' in window)throw 'false capability';");
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+}
+
+#[test]
 fn dataset_validates_keys_and_keeps_native_attribute_readonly() {
     let (doc, _, page, outcome) = page(
         "<p id=p></p>",

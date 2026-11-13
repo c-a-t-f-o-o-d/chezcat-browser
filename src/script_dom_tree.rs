@@ -185,6 +185,11 @@ impl Bridge<'_> {
     }
 
     pub(super) fn dom_readonly(&self, object: u32, property: &str) -> bool {
+        if node_constant(property).is_some() {
+            return object == DOCUMENT
+                || node_index(object).is_some_and(|node| self.dom_accessible(node))
+                || self.frame_node_constant_readonly(object);
+        }
         node_index(object).is_some() && common_node_property(property)
     }
 
@@ -251,6 +256,7 @@ impl Bridge<'_> {
             return Ok(None);
         };
         let node = self.dom_node(node_handle(node))?;
+        if node_constant(property).is_some() { return Ok(Some(true)); }
         if self.frame_content(node, property).is_some() { return Ok(Some(true)); }
         if self.dom_stylesheet(node)
             && (script_stylesheets::link_attribute(property).is_some()
@@ -284,6 +290,9 @@ impl Bridge<'_> {
             return Ok(None);
         }
         let node = self.dom_node(object)?;
+        if let Some(number) = node_constant(property) {
+            return Ok(Some(Value::Number(f64::from(number))));
+        }
         let text = matches!(self.doc.nodes[node].kind, NodeKind::Text(_));
         if let Some(value) = self.frame_content(node, property) { return Ok(Some(value)); }
         if common_node_property(property) {
@@ -888,4 +897,29 @@ impl Bridge<'_> {
         }
         Ok(found.map_or(Value::Undefined, |node| Value::Host(node_handle(node))))
     }
+}
+
+// Inherited Node constants describe the interface, not implemented node factories.
+pub(super) fn node_constant(property: &str) -> Option<u16> {
+    Some(match property {
+        "ELEMENT_NODE" => 1,
+        "ATTRIBUTE_NODE" => 2,
+        "TEXT_NODE" => 3,
+        "CDATA_SECTION_NODE" => 4,
+        "ENTITY_REFERENCE_NODE" => 5,
+        "ENTITY_NODE" => 6,
+        "PROCESSING_INSTRUCTION_NODE" => 7,
+        "COMMENT_NODE" => 8,
+        "DOCUMENT_NODE" => 9,
+        "DOCUMENT_TYPE_NODE" => 10,
+        "DOCUMENT_FRAGMENT_NODE" => 11,
+        "NOTATION_NODE" => 12,
+        "DOCUMENT_POSITION_DISCONNECTED" => 1,
+        "DOCUMENT_POSITION_PRECEDING" => 2,
+        "DOCUMENT_POSITION_FOLLOWING" => 4,
+        "DOCUMENT_POSITION_CONTAINS" => 8,
+        "DOCUMENT_POSITION_CONTAINED_BY" => 16,
+        "DOCUMENT_POSITION_IMPLEMENTATION_SPECIFIC" => 32,
+        _ => return None,
+    })
 }

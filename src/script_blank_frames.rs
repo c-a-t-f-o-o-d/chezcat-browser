@@ -180,6 +180,8 @@ impl Bridge<'_> {
                     let native = |node| Value::Host(document_node(index, node));
                     let element = |name: &str| frame.document.nodes.iter().position(|node| matches!(&node.kind, NodeKind::Element { tag, .. } if tag == name)).map_or(Value::Null, native);
                     match property {
+                        name if super::dom_tree::node_constant(name).is_some() =>
+                            Value::Number(f64::from(super::dom_tree::node_constant(name).unwrap())),
                         "defaultView" if node == 0 => {
                             if !frame.connected { return Err("Retained child Document browsing-context teardown is not implemented.".into()); }
                             Value::Host(window(index))
@@ -220,6 +222,15 @@ impl Bridge<'_> {
     }
 
     pub(super) fn is_frame_handle(&self, handle: u32) -> bool { frame_handle(handle).is_some() }
+
+    pub(super) fn frame_node_constant_readonly(&self, handle: u32) -> bool {
+        let Some((index, offset)) = frame_handle(handle) else { return false; };
+        if !matches!(offset, 1 | 4..=6) { return false; }
+        let Some(frame) = self.state.blank_frames.get(index) else { return false; };
+        let node = if offset == 1 { 0 } else { (offset - 3) as usize };
+        frame.document.nodes.get(node).is_some()
+            && self.frame_window_access(Some(WINDOW), window(index)).is_ok()
+    }
 }
 
 #[cfg(test)]
@@ -267,6 +278,40 @@ document.title='blank-frame-ok';
         assert_eq!(page.state.blank_frames[0].document.nodes.len(), 4);
         assert!(page.state.dynamic.pending.is_empty());
         assert_eq!(page.state.declined_images, 0);
+    }
+
+    #[test]
+    fn node_constants_on_real_child_nodes_keep_readonly_and_origin_checks() {
+        let source = format!("{CREATE}{}", r#"
+var nodes=[w.document,w.document.documentElement,w.document.head,w.document.body],effects=0;
+for(var node of nodes){if(!('DOCUMENT_TYPE_NODE' in node)||node.DOCUMENT_TYPE_NODE!==10||node.DOCUMENT_POSITION_FOLLOWING!==4)throw 'child constants';
+node.DOCUMENT_TYPE_NODE=(effects++,0);if(node.DOCUMENT_TYPE_NODE!==10)throw 'readonly';
+var caught=false;try{(function(){'use strict';node.DOCUMENT_TYPE_NODE=0;})();}catch(e){caught=e.name==='TypeError';}if(!caught)throw 'strict readonly';}
+if(effects!==4||w.document.nodeType!==w.document.DOCUMENT_NODE||w.document.body.nodeType!==w.document.body.ELEMENT_NODE)throw 'child type';
+var saved=w.document;document.title='child-node-constants-ok';
+"#);
+        let (mut doc, mut forms, mut page, outcome) = start(&source, &crate::csp::PolicySet::default());
+        assert_eq!(outcome.errors, 0, "{}", page.report());
+        assert_eq!(doc.title, "child-node-constants-ok");
+        let location = crate::navigation::Location { url: Some(crate::url::parse("https://other.test/").unwrap().0), path: None, fragment: String::new(), root: None };
+        page.set_location(&location);
+        for operation in ["saved.DOCUMENT_TYPE_NODE;", "'DOCUMENT_TYPE_NODE' in saved;", "saved.DOCUMENT_TYPE_NODE=0;"] {
+            let outcome = page.console_eval(&mut doc, &mut forms, operation);
+            assert_eq!(outcome.errors, 1, "{operation}: {}", page.report());
+        }
+    }
+
+    #[test]
+    fn node_constants_reject_missing_child_and_reserved_frame_offsets() {
+        let (mut doc, mut forms, mut page, outcome) = start(CREATE, &crate::csp::PolicySet::default());
+        assert_eq!(outcome.errors, 0, "{}", page.report());
+        let mut bridge = Bridge { doc: &mut doc, forms: &mut forms, state: &mut page.state };
+        for handle in [window(0) + 3, window(0) + 7, window(MAX_BLANK_FRAMES - 1) + 1] {
+            assert!(bridge.get(handle, "DOCUMENT_TYPE_NODE").is_err());
+            assert!(bridge.has(handle, "DOCUMENT_TYPE_NODE").is_err());
+            assert!(!bridge.readonly_property(handle, "DOCUMENT_TYPE_NODE"));
+            assert!(bridge.set(handle, "DOCUMENT_TYPE_NODE", Value::Number(0.0)).is_err());
+        }
     }
 
     #[test]
