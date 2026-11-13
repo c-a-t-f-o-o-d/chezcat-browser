@@ -29,6 +29,10 @@ mod binding_length;
 mod binding_character;
 #[path = "intrinsic_realms.rs"]
 mod intrinsic_realms;
+#[path = "function_allocation.rs"]
+mod function_allocation;
+#[path = "deferred_native_methods.rs"]
+mod deferred_native_methods;
 #[cfg(test)]
 #[path = "statement_expression_tests.rs"]
 mod statement_expression_tests;
@@ -2864,8 +2868,26 @@ struct Accessors {
     set: Option<usize>,
 }
 
+#[derive(Clone)]
+enum StoredValue {
+    Value(Value),
+    DeferredNative(usize),
+}
+
+impl StoredValue {
+    fn bytes(&self) -> usize {
+        match self { Self::Value(value) => value.bytes(), Self::DeferredNative(_) => 0 }
+    }
+    fn as_value(&self) -> Result<&Value, Fault> {
+        match self {
+            Self::Value(value) => Ok(value),
+            Self::DeferredNative(_) => Err(Fault::new("Deferred native data value requires materialization.")),
+        }
+    }
+}
+
 struct Property {
-    value: Value,
+    value: StoredValue,
     /// Read-only native getters retain their built-in receiver checks.
     getter: Option<NativeGetter>,
     /// Script callbacks use the existing callable arena, not recursive ownership.
@@ -3042,6 +3064,7 @@ pub struct Runtime {
     deferred_intrinsics: u8,
     failed_intrinsics: u8,
     array_to_string_intrinsic: Option<usize>,
+    deferred_native_methods: Vec<deferred_native_methods::NativeMethod>,
 }
 
 impl Default for Runtime {
@@ -3139,6 +3162,7 @@ impl Runtime {
             deferred_intrinsics: 0,
             failed_intrinsics: 0,
             array_to_string_intrinsic: None,
+            deferred_native_methods: Vec::new(),
         };
         runtime.initialize_realm_intrinsics().expect("initial intrinsic capacity");
         runtime
@@ -3307,7 +3331,7 @@ impl Runtime {
     /// The host can expose the returned value on one specific native object.
     pub fn host_function(&mut self, object: u32, method: &'static str) -> Result<Value, String> {
         if self.functions.len() >= MAX_FUNCTIONS {
-            return Err(Fault::new("Function limit reached (1024).").display());
+            return Err(self.function_limit_fault("host").display());
         }
         let value = Value::Function(self.functions.len());
         self.functions.push(Function::Host {
@@ -3990,7 +4014,7 @@ impl Runtime {
     ) -> Result<Value, Fault> {
         self.step()?;
         if self.functions.len() == MAX_FUNCTIONS {
-            return Err(Fault::new("Function limit reached (1024)."));
+            return Err(self.function_limit_fault("script"));
         }
         let index = self.functions.len();
         // A named expression's private name lives outside its parameter/body
@@ -4989,6 +5013,7 @@ impl Runtime {
     }
 
     fn own_property(&mut self, id: usize, name: &str) -> Result<Value, Fault> {
+        self.materialize_native_property(id, name)?;
         if let Some(index) = self.string_object_index(id, name) {
             return self.string_object_index_value(id, index);
         }
@@ -5039,7 +5064,7 @@ impl Runtime {
             .object(id)?
             .properties
             .get(name)
-            .map_or(Value::Undefined, |property| property.value.clone()))
+            .map_or(Ok(Value::Undefined), |property| property.value.as_value().cloned())?)
     }
 
     fn property_name(&mut self, name: &str) -> Result<(), Fault> {
@@ -5340,7 +5365,7 @@ impl Runtime {
         object.properties.insert(
             name,
             Property {
-                value,
+                value: StoredValue::Value(value),
                 getter: None,
                 accessor,
                 order,

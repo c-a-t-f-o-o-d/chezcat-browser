@@ -28,7 +28,7 @@ impl Runtime {
             return Err(Fault::new("Invalid function handle."));
         }
         if self.functions.len() >= MAX_FUNCTIONS {
-            return Err(Fault::new("Function limit reached (1024)."));
+            return Err(self.function_limit_fault("bound"));
         }
         let receiver = args.first().unwrap_or(&Value::Undefined);
         let arguments = args.get(1..).unwrap_or(&[]);
@@ -82,7 +82,7 @@ impl Runtime {
         }
         // User callbacks above may allocate functions or retain values.
         if self.functions.len() >= MAX_FUNCTIONS {
-            return Err(Fault::new("Function limit reached (1024)."));
+            return Err(self.function_limit_fault("bound"));
         }
         if self.value_bytes.saturating_add(retained) > self.limits.heap.retained_values {
             return Err(Fault::new(format!("Retained value limit reached ({} bytes).", self.limits.heap.retained_values)));

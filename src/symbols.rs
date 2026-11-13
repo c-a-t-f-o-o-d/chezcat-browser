@@ -314,12 +314,12 @@ impl Runtime {
             return self.call_accessor(accessor.get, receiver, &[], host);
         }
         if let Some(getter) = property.getter {
-            let function = property.value.clone();
+            let function = property.value.as_value()?.clone();
             return self.native_getter_in_realm(&function, getter, receiver);
         }
         let bytes = property.value.bytes();
         self.work(bytes)?;
-        Ok(self.objects[owner].symbol_properties[&key].value.clone())
+        Ok(self.objects[owner].symbol_properties[&key].value.as_value()?.clone())
     }
 
     pub(super) fn symbol_string_property(
@@ -484,7 +484,7 @@ impl Runtime {
         self.objects[id].symbol_properties.insert(
             key,
             Property {
-                value,
+                value: super::StoredValue::Value(value),
                 getter: None,
                 accessor,
                 order,

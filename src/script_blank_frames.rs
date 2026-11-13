@@ -440,9 +440,15 @@ document.title='deferred-ok';
             let source = format!("{CREATE}var child=w.Function('n','parent','if(n>0)return parent(n-1);return new Uint8Array([42])[0];');function parent(n){{return child(n,parent);}}if(parent(3)!==42)throw 'nested deferred allocation';");
             let (mut doc, mut forms, mut page, result) = start(&source, &crate::csp::PolicySet::default());
             assert_eq!(result.errors, 0, "{}", page.report());
-            // Exhaust a later family through the original aggregate function
-            // cap, then verify no context/job reset or parent corruption.
+            // Keep the previous capacity witness as a successful case: unused
+            // method deferral leaves room for its real second child URL.
             let result = page.console_eval(&mut doc, &mut forms, "document.body.removeChild(f);document.body.appendChild(f);var other=f.contentWindow;other.Function('return new URL(\"https://example.test/\");')();");
+            assert_eq!(result.errors, 0, "{}", page.report());
+            let result = page.console_eval(&mut doc, &mut forms, "if(other.Function('return new URL(\"https://example.test/\").href;')()!=='https://example.test/')throw 'second child URL';");
+            assert_eq!(result.errors, 0, "{}", page.report());
+            // An intentional fresh-identity workload still exhausts the same
+            // aggregate 1,024-function cap. No callable memoization or cap raise.
+            let result = page.console_eval(&mut doc, &mut forms, "for(var i=0;i<1100;i++){(function(){return 1;})();}");
             assert_eq!(result.errors, 1, "{}", page.report());
             assert!(page.report().contains("limit"), "{}", page.report());
             let result = page.console_eval(&mut doc, &mut forms, "if(6*7!==42||parent(1)!==42)throw 'caller recovery';");

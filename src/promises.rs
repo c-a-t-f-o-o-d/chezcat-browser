@@ -284,7 +284,7 @@ impl Runtime {
     fn promise_function(&mut self, closure: Closure) -> Result<Value, Fault> {
         self.step()?;
         if self.functions.len() >= MAX_FUNCTIONS {
-            return Err(Fault::new("Function limit reached (1024)."));
+            return Err(self.function_limit_fault("promise-closure"));
         }
         let length = closure.arity();
         self.promise_retain(closure.retained_bytes())?;

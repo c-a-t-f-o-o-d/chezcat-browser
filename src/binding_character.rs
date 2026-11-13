@@ -43,7 +43,7 @@ impl Runtime {
         let prototype = self.string_prototype?;
         let property = self.objects.get(prototype)?.properties.get(method)?;
         if property.getter.is_some() || property.accessor.is_some() { return None; }
-        let Value::Function(function) = property.value else { return None };
+        let super::StoredValue::Value(Value::Function(function)) = property.value else { return None };
         if self.function_realms[function] != self.active_realm { return None; }
         if !matches!(self.functions.get(function), Some(Function::Native(Builtin::StringMethod("charCodeAt")))) {
             return None;
@@ -212,6 +212,15 @@ mod tests {
 
     #[test]
     fn binding_character_steps_match_original_member_route_at_every_boundary() {
+        check_character_step_matrix(false);
+    }
+
+    #[test]
+    fn warmed_binding_character_steps_match_original_member_route_at_every_boundary() {
+        check_character_step_matrix(true);
+    }
+
+    fn check_character_step_matrix(warm: bool) {
         use super::super::{Fault, Parser, StmtKind, MAX_REGEXP_WORK};
         use std::rc::Rc;
         let program = Rc::new(Parser::parse("payload.charCodeAt(index);", &mut MAX_REGEXP_WORK.clone()).unwrap());
@@ -224,6 +233,7 @@ mod tests {
                 let mut runtime = Runtime::for_test();
                 runtime.define_global("payload", Value::String("Aé😀Z".into())).unwrap();
                 runtime.define_global("index", Value::Number(3.0)).unwrap();
+                if warm { runtime.get_property(runtime.string_prototype.unwrap(), "charCodeAt").unwrap(); }
                 runtime.begin_job();
                 runtime.steps = budget;
                 let result = if original {

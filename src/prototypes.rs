@@ -49,7 +49,19 @@ impl Runtime {
 
     pub(super) fn native_function(&mut self, builtin: Builtin, name: &str) -> Result<Value, Fault> {
         if self.functions.len() >= MAX_FUNCTIONS {
-            return Err(Fault::new("Function limit reached (1024)."));
+            let requested = match builtin {
+                Builtin::ArrayMethod(_) => "native-array-method",
+                Builtin::StringMethod(_) => "native-string-method",
+                Builtin::ObjectStatic(_) | Builtin::ObjectMethod(_) => "native-object-method",
+                Builtin::Binary(_) => "native-binary",
+                Builtin::Collection(_) => "native-collection",
+                Builtin::Promise(_) => "native-promise",
+                Builtin::Date(_) => "native-date",
+                Builtin::Url(_) => "native-url",
+                Builtin::TextEncoding(_) => "native-text-encoding",
+                _ => "native-core",
+            };
+            return Err(self.function_limit_fault(requested));
         }
         let length = match builtin {
             Builtin::Binary(operation) => operation.arity(),
@@ -158,8 +170,14 @@ impl Runtime {
         name: &str,
         builtin: Builtin,
     ) -> Result<(), Fault> {
-        let value = self.native_function(builtin, name)?;
-        self.store_property(owner, name.into(), value, Some((false, true, true)))
+        // Keep the scan, dispatch and sparse-array primitives ready for their
+        // existing allocation-free operation paths and exact work accounting.
+        if matches!(builtin, Builtin::StringMethod("charCodeAt")
+            | Builtin::FunctionMethod("call") | Builtin::ArrayMethod("join")) {
+            let value = self.native_function(builtin, name)?;
+            return self.store_property(owner, name.into(), value, Some((false, true, true)));
+        }
+        self.deferred_native_method(owner, name, builtin)
     }
 
     pub(super) fn native_accessor(
@@ -491,7 +509,7 @@ impl Runtime {
                     .get(name)
                     .and_then(|property| property.getter)
                 {
-                    let function = self.objects[owner].properties[name].value.clone();
+                    let function = self.objects[owner].properties[name].value.as_value()?.clone();
                     self.native_getter_in_realm(&function, field, value.value())
                 } else {
                     self.own_property(owner, name)
@@ -541,7 +559,7 @@ impl Runtime {
             .and_then(|property| property.getter)
         {
             let receiver = self.copy_value(receiver)?;
-            let function = self.objects[owner].properties[name].value.clone();
+            let function = self.objects[owner].properties[name].value.as_value()?.clone();
             return self.native_getter_in_realm(&function, field, receiver);
         }
         self.own_property(owner, name)
@@ -761,7 +779,7 @@ impl Runtime {
             .get(name)
             .and_then(|property| property.getter)
         {
-            let getter = self.copy_value(&self.objects[id].properties[name].value.clone())?;
+            let getter = self.copy_value(&self.objects[id].properties[name].value.as_value()?.clone())?;
             let enumerable = self.objects[id].properties[name].enumerable;
             let configurable = self.objects[id].properties[name].configurable;
             let descriptor = self.new_object(None)?;
@@ -836,7 +854,7 @@ impl Runtime {
             property.getter,
         );
         self.work(property.value.bytes())?;
-        let value = self.objects[id].symbol_properties[&key].value.clone();
+        let value = self.objects[id].symbol_properties[&key].value.as_value()?.clone();
         let descriptor = self.new_object(None)?;
         if getter.is_some() {
             self.set_property(descriptor, "get".into(), value)?;
@@ -1001,18 +1019,22 @@ impl Runtime {
                     .map_or(0, |property| property.value.bytes())
                     .saturating_add(descriptor.value.as_ref().map_or(0, Value::bytes));
                 self.work(bytes)?;
-                if descriptor.writable == Some(true)
-                    || descriptor.value.as_ref().is_some_and(|value| {
-                        !same_value(
-                            &self.stored_descriptor_property(id, &key).unwrap().value,
-                            value,
-                        )
-                    })
-                {
+                if descriptor.writable == Some(true) {
                     return Err(Fault::exception(
                         "TypeError",
                         "Cannot redefine a nonconfigurable property.",
                     ));
+                }
+                if let Some(value) = descriptor.value.as_ref() {
+                    if !matches!(value, Value::Function(_))
+                        && matches!(self.stored_descriptor_property(id, &key).unwrap().value, super::StoredValue::DeferredNative(_)) {
+                        return Err(Fault::exception("TypeError", "Cannot redefine a nonconfigurable property."));
+                    }
+                    if let PropertyKey::String(name) = &key { self.materialize_native_property(id, name)?; }
+                    let previous = self.stored_descriptor_property(id, &key).unwrap().value.as_value()?;
+                    if !same_value(previous, value) {
+                        return Err(Fault::exception("TypeError", "Cannot redefine a nonconfigurable property."));
+                    }
                 }
             }
         }
@@ -1040,6 +1062,18 @@ impl Runtime {
             let writable = descriptor
                 .writable
                 .unwrap_or(old_accessor.is_none() && old.1);
+            if descriptor.value.is_none() && old_accessor.is_none()
+                && self.stored_descriptor_property(id, &key).is_some_and(|property| matches!(property.value, super::StoredValue::DeferredNative(_))) {
+                self.step()?;
+                let property = match &key {
+                    PropertyKey::String(name) => self.objects[id].properties.get_mut(name).unwrap(),
+                    PropertyKey::Symbol(key) => self.objects[id].symbol_properties.get_mut(key).unwrap(),
+                };
+                property.enumerable = enumerable;
+                property.writable = writable;
+                property.configurable = configurable;
+                return Ok(());
+            }
             let value = if let Some(value) = descriptor.value {
                 value
             } else if old_attrs.is_some() && old_accessor.is_none() {
@@ -1050,7 +1084,7 @@ impl Runtime {
                     PropertyKey::Symbol(symbol) => {
                         let bytes = self.objects[id].symbol_properties[symbol].value.bytes();
                         self.work(bytes)?;
-                        self.objects[id].symbol_properties[symbol].value.clone()
+                        self.objects[id].symbol_properties[symbol].value.as_value()?.clone()
                     }
                 }
             } else {
@@ -1169,7 +1203,7 @@ impl Runtime {
         if let Some(property) = self.objects[id].properties.get(&name) {
             if matches!(property.getter, Some(super::NativeGetter::ArgumentsCallee)) {
                 let callback = match property.value {
-                    Value::Function(callback) => Some(callback),
+                    super::StoredValue::Value(Value::Function(callback)) => Some(callback),
                     _ => None,
                 };
                 return if descriptor.is_data()
@@ -2062,6 +2096,28 @@ fn same_value(left: &Value, right: &Value) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn deferred_descriptor_flag_commit_checks_the_remaining_step_budget() {
+        let mut runtime = Runtime::new();
+        let owner = runtime.array_prototype.unwrap();
+        let functions = runtime.functions.len();
+        runtime.begin_job();
+        runtime.steps = 0;
+        let descriptor = PropertyDescriptor { value: None, enumerable: None, writable: Some(false), configurable: None, get: None, set: None };
+        let error = runtime.define_stored_property(owner, PropertyKey::String("map".into()), descriptor).unwrap_err();
+        assert!(error.message.contains("limit"), "{}", error.message);
+        assert!(runtime.objects[owner].properties["map"].writable);
+        assert!(matches!(runtime.objects[owner].properties["map"].value, super::super::StoredValue::DeferredNative(_)));
+        assert_eq!(runtime.functions.len(), functions);
+        runtime.begin_job();
+        runtime.steps = 1;
+        let descriptor = PropertyDescriptor { value: None, enumerable: None, writable: Some(false), configurable: None, get: None, set: None };
+        runtime.define_stored_property(owner, PropertyKey::String("map".into()), descriptor).unwrap();
+        assert!(!runtime.objects[owner].properties["map"].writable);
+        assert_eq!(runtime.steps, 0);
+        assert_eq!(runtime.functions.len(), functions);
+    }
 
     struct NoHost;
 
