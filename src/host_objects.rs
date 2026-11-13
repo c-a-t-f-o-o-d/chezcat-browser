@@ -93,6 +93,10 @@ impl Runtime {
                 return self.copy_value(&value);
             }
             let value = self.host_method(handle, method).map_err(Fault::new)?;
+            if let Some(length) = host.method_length(handle,method) {
+                let Value::Function(id) = value else { unreachable!() };
+                self.store_property(self.function_properties[id],"length".into(),Value::Number(length as f64),Some((false,false,true)))?;
+            }
             self.host_method_values
                 .insert((handle, method), value.clone());
             return Ok(value);

@@ -412,6 +412,10 @@ pub trait Host {
     fn argument_conversions(&self, _object: u32, _method: &str) -> &'static [(usize, bool)] {
         &[]
     }
+    /// Explicit WebIDL variadic DOMString conversion, in argument order before
+    /// method validation. It shares the caller's argument/copy/work budgets.
+    fn variadic_string_arguments(&self, _object: u32, _method: &str) -> bool { false }
+    fn method_length(&self, _object: u32, _method: &str) -> Option<usize> { None }
     /// Preserve original nullish inputs for an explicitly nullable DOMString.
     /// A null returned by object coercion still undergoes ordinary ToString.
     fn nullable_string_argument(&self, _object: u32, _method: &str, _index: usize) -> bool {
@@ -7878,15 +7882,17 @@ impl Runtime {
             ));
         }
         let conversions = host.argument_conversions(object, method);
+        let variadic = host.variadic_string_arguments(object, method);
         let mut converted;
-        let args = if conversions.is_empty() {
+        let args = if conversions.is_empty() && !variadic {
             args
         } else {
             converted = Vec::with_capacity(args.len());
             for value in args {
                 converted.push(self.copy_value(value)?);
             }
-            for &(index, string_hint) in conversions {
+            for (index, string_hint) in conversions.iter().copied()
+                .chain((0..if variadic {args.len()} else {0}).map(|index|(index,true))) {
                 if let Some(value) = converted.get(index).cloned() {
                     host.validate_argument_prefix(object, method, index, &converted)
                         .map_err(|(kind, message)| Fault::exception(kind, message))?;

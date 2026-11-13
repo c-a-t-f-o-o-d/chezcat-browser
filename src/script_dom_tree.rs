@@ -272,6 +272,7 @@ impl Bridge<'_> {
         match property {
             "getAttributeNode" if self.attr_element_receiver(object) => Some("getAttributeNode"),
             "getAttributeNodeNS" if self.attr_element_receiver(object) => Some("getAttributeNodeNS"),
+            "removeAttributeNS" if self.attr_element_receiver(object) => Some("removeAttributeNS"),
             "removeAttributeNode" if self.attr_element_receiver(object) => Some("removeAttributeNode"),
             "appendChild" => Some("appendChild"),
             "insertBefore" => Some("insertBefore"),
@@ -368,6 +369,7 @@ impl Bridge<'_> {
             return Ok(None);
         };
         let node = self.dom_node(node_handle(node))?;
+        if property == "classList" { return Ok(Some(matches!(self.doc.nodes[node].kind,NodeKind::Element {..}))); }
         if node_constant(property).is_some() { return Ok(Some(true)); }
         if matches!(property, "tabIndex" | "offsetLeft" | "offsetTop") && matches!(self.doc.nodes[node].kind, NodeKind::Element { .. }) {
             if self.doc.nodes[node].namespace != crate::html::Namespace::Html {
@@ -426,6 +428,11 @@ impl Bridge<'_> {
             return Ok(None);
         }
         let node = self.dom_node(object)?;
+        if property == "classList" {
+            if !matches!(self.doc.nodes[node].kind,NodeKind::Element {..}) { return Ok(Some(Value::Undefined)); }
+            if self.doc.nodes[node].namespace != crate::html::Namespace::Html { return Err("Class token list requires known namespace provenance.".into()); }
+            return Ok(Some(Value::Host(script_class_list::handle(object))));
+        }
         if matches!(property, "vspace" | "hspace") {
             return self.html_spacing_get(node, property).map(Some);
         }
@@ -922,6 +929,7 @@ impl Bridge<'_> {
             match method {
                 "getAttributeNode" => return self.get_attribute_node(object, args).map(Some),
                 "getAttributeNodeNS" => return self.get_attribute_node_ns(object, args).map(Some),
+                "removeAttributeNS" => return self.remove_attribute_ns(object, args).map(Some),
                 "removeAttributeNode" => return self.remove_attribute_node(object, args).map(Some),
                 _ => (),
             }

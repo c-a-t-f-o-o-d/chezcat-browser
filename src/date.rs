@@ -136,7 +136,7 @@ fn make_date(day: f64, time: f64) -> f64 {
 }
 
 fn parts(value: f64) -> Parts {
-    debug_assert!(value.is_finite() && value.abs() <= MAX_TIME && value == value.trunc());
+    debug_assert!(value.is_finite() && value.abs() <= 9_007_199_254_740_991.0 && value == value.trunc());
     let day = (value / DAY_MS).floor() as i64;
     // Clipped timestamps occupy fewer than 550,000 calendar years. A fixed
     // 21-step search avoids walking across centuries or input-controlled years.
@@ -333,6 +333,10 @@ fn parse_iso(source: &str) -> Option<Parsed> {
 }
 
 fn parse_utc_string(source: &str) -> Option<f64> {
+    parse_utc_calendar(source,true)
+}
+
+fn parse_utc_calendar(source:&str, clip_result:bool) -> Option<f64> {
     let mut words = source.split(' ');
     let weekday = words.next()?;
     let day = words.next()?;
@@ -386,14 +390,15 @@ fn parse_utc_string(source: &str) -> Option<f64> {
     {
         return None;
     }
-    let value = clip(make_date(
+    let value = make_date(
         make_day(year as f64, month as f64, day as f64),
         make_time(hour as f64, minute as f64, second as f64, 0.0),
-    ));
-    if !value.is_finite() || parts(value).weekday != weekday {
+    );
+    if !value.is_finite() || value.abs()>9_007_199_254_740_991.0 || parts(value).weekday != weekday {
         return None;
     }
-    Some(value)
+    let value = if clip_result {clip(value)} else {value};
+    value.is_finite().then_some(value)
 }
 
 fn parse(source: &str) -> Result<f64, Fault> {
@@ -403,8 +408,28 @@ fn parse(source: &str) -> Result<f64, Fault> {
     match parse_iso(source) {
         Some(Parsed::Time(time)) => Ok(time),
         Some(Parsed::Local) => Err(local_time_fault()),
-        None => Ok(parse_utc_string(source).unwrap_or(f64::NAN)),
+        None => Ok(parse_utc_string(source).or_else(||parse_local_string(source)).unwrap_or(f64::NAN)),
     }
+}
+
+// Parse the exact local representation emitted below, including its numeric
+// offset. It has no dependency on the current host zone or current DST state.
+fn parse_local_string(source:&str) -> Option<f64> {
+    let mut words = source.split(' ');
+    let weekday = words.next()?;
+    let month = words.next()?;
+    let day = words.next()?;
+    let year = words.next()?;
+    let time = words.next()?;
+    let zone = words.next()?;
+    if words.next().is_some() || zone.len()!=8 || !zone.starts_with("GMT") { return None; }
+    let sign = match zone.as_bytes()[3] {b'+'=>1.0,b'-'=>-1.0,_=>return None};
+    let mut offset = Reader {input:&zone.as_bytes()[4..],at:0};
+    let hours = offset.digits(2)?;
+    let minutes = offset.digits(2)?;
+    if hours>23 || minutes>59 { return None; }
+    let wall = parse_utc_calendar(&format!("{weekday}, {day} {month} {year} {time} GMT"),false)?;
+    Some(clip(wall-sign*(hours*60+minutes) as f64*60_000.0))
 }
 
 impl Runtime {
@@ -575,7 +600,10 @@ impl Runtime {
         let result = (|| {
             self.work(64)?;
             match op {
-                Op::Constructor => Err(local_time_fault()),
+                Op::Constructor => {
+                    let now = self.date_clock(host)?;
+                    self.date_local_string(now,"toString",host)
+                }
                 Op::Now => self.date_clock(host).map(Value::Number),
                 Op::Parse => {
                     let input = self.copy_value(args.first().unwrap_or(&Value::Undefined))?;
@@ -645,7 +673,10 @@ impl Runtime {
                             {
                                 return self.checked_value(Value::String("Invalid Date".into()));
                             }
-                            Err(local_time_fault())
+                            if matches!(name,"toString"|"toDateString"|"toTimeString") {
+                                return self.date_local_string(time,name,host);
+                            }
+                            Err(Fault::new(format!("Date local-time operation {name} is not implemented.")))
                         }
                         _ => unreachable!(),
                     }
@@ -662,6 +693,23 @@ impl Runtime {
             return Err(Fault::new("Host timezone did not return exact finite calendar milliseconds."));
         }
         Ok(local)
+    }
+
+    fn date_local_string(&mut self, time:f64, name:&str, host:&mut dyn Host) -> Result<Value,Fault> {
+        if time.is_nan() { return self.checked_value(Value::String("Invalid Date".into())); }
+        let local = self.date_local_time(time,host)?;
+        let p = parts(local);
+        let year = if p.year<0 {format!("-{:04}",-p.year)} else {format!("{:04}",p.year)};
+        let date = format!("{} {} {:02} {year}",WEEK_NAMES[p.weekday],MONTH_NAMES[p.month],p.day);
+        if name=="toDateString" { return self.checked_value(Value::String(date)); }
+        let offset = local-time;
+        let minutes = ((offset.abs()/60_000.0).floor() as i64)%60;
+        let hours = ((offset.abs()/3_600_000.0).floor() as i64)%24;
+        // The standard permits an empty implementation-defined zone name.
+        // The numeric offset always describes this instant, including DST.
+        let clock = format!("{:02}:{:02}:{:02} GMT{}{:02}{:02}",p.hour,p.minute,p.second,
+            if offset>=0.0 {'+'} else {'-'},hours,minutes);
+        self.checked_value(Value::String(if name=="toTimeString" {clock} else {format!("{date} {clock}")}))
     }
 
     fn date_set_local_seconds(&mut self, object: usize, time: f64, args: &[Value], host: &mut dyn Host) -> Result<f64, Fault> {
@@ -968,7 +1016,7 @@ if(new Date(NaN).toUTCString()!=='Invalid Date'||new Date(NaN).toString()!=='Inv
 
     #[test]
     fn dates_clock_is_explicit_default_deny_and_fatal() {
-        for source in ["Date.now();", "new Date();"] {
+        for source in ["Date.now();", "new Date();", "Date();"] {
             let mut runtime = Runtime::for_test();
             runtime
                 .execute("var caught=false,finished=false;", &mut NoHost)
@@ -1049,7 +1097,6 @@ if(new Date(NaN).toUTCString()!=='Invalid Date'||new Date(NaN).toString()!=='Inv
     #[test]
     fn dates_local_time_capabilities_never_silently_substitute_utc() {
         for source in [
-            "Date();",
             "new Date(2024,0);",
             "Date.parse('2024-01-01T12:00');",
             "new Date(0).getFullYear();",
@@ -1074,6 +1121,7 @@ if(new Date(NaN).toUTCString()!=='Invalid Date'||new Date(NaN).toString()!=='Inv
         writes: usize,
     }
     impl Host for LocalHost {
+        fn date_now(&mut self) -> Result<f64,String> { Ok(0.0) }
         fn get(&mut self, _: u32, _: &str) -> Result<Value, String> { Err("No read".into()) }
         fn set(&mut self, _: u32, _: &str, _: Value) -> Result<(), String> { Err("No write".into()) }
         fn call(&mut self, _: u32, _: &str, _: &[Value]) -> Result<Value, String> { Err("No call".into()) }
@@ -1178,6 +1226,41 @@ if(d.setSeconds(90)!==Date.parse('2024-03-10T08:00:30Z'))throw 'spring pre-gap o
         runtime.begin_job();
         assert_eq!(runtime.execute("var n=new Date(NaN);isNaN(n.getSeconds())&&isNaN(n.setSeconds(1));", &mut host).unwrap().to_text(),"true");
         assert_eq!((host.reads,host.writes),(reads,writes));
+    }
+
+    #[test]
+    fn dates_local_string_formats_real_offset_calendar_and_parse_roundtrip() {
+        let mut host = LocalHost {offset:19_800_000.0,..LocalHost::default()};
+        local_succeeds(r#"
+var d=new Date('2024-01-01T20:31:02.999Z');
+if(d.toString()!=='Tue Jan 02 2024 02:01:02 GMT+0530'||d.toDateString()!=='Tue Jan 02 2024'||d.toTimeString()!=='02:01:02 GMT+0530'||String(d)!==d.toString())throw 'format';
+var called=0,arg={valueOf:function(){called++;throw 'must ignore';},toString:function(){called++;throw 'must ignore';}};
+if(Date(arg,Symbol())!=='Thu Jan 01 1970 05:30:00 GMT+0530'||called)throw 'call Date ignores args';
+for(var stamp of [0,-1000,Date.parse('0000-01-01T00:00Z'),Date.parse('-000001-01-01T00:00Z'),8640000000000000,-8640000000000000]){
+ var v=new Date(stamp);if(Date.parse(v.toString())!==stamp||new Date(v.toString()).getTime()!==stamp)throw 'roundtrip';
+}
+var bad=new Date(NaN);if(bad.toString()!=='Invalid Date'||bad.toDateString()!=='Invalid Date'||bad.toTimeString()!=='Invalid Date')throw 'invalid';
+var n=0;for(var method of ['toString','toDateString','toTimeString'])try{Date.prototype[method].call({});}catch(e){if(e.name==='TypeError')n++;}if(n!==3)throw 'brands';
+'ok';
+"#,&mut host);
+        let reads = host.reads;
+        local_succeeds("var n=new Date(NaN);n.toString();n.toDateString();n.toTimeString();'ok';",&mut host);
+        assert_eq!(host.reads,reads);
+    }
+
+    #[test]
+    fn dates_local_strings_distinguish_dst_folds_and_reject_malformed_offsets() {
+        let mut host = LocalHost {central:true,..LocalHost::default()};
+        local_succeeds(r#"
+var a=new Date('2024-11-03T06:30:00Z'),b=new Date('2024-11-03T07:30:00Z');
+if(a.toString()!=='Sun Nov 03 2024 01:30:00 GMT-0500'||b.toString()!=='Sun Nov 03 2024 01:30:00 GMT-0600')throw 'fold strings';
+if(Date.parse(a.toString())!==a.getTime()||Date.parse(b.toString())!==b.getTime())throw 'fold roundtrip';
+for(var text of ['Thu Jan 01 1970 00:00:00 GMT+2400','Thu Jan 01 1970 00:00:00 GMT+0060','Thu Jan 01 1970 00:00:00 GMT?0000','Fri Jan 01 1970 00:00:00 GMT+0000','Thu Jan 32 1970 00:00:00 GMT+0000'])if(!isNaN(Date.parse(text)))throw 'malformed';'ok';
+"#,&mut host);
+        let mut nepal = LocalHost {offset:20_700_000.0,..LocalHost::default()};
+        local_succeeds("if(new Date(0).toTimeString()!=='05:45:00 GMT+0545')throw 'quarter hour';'ok';",&mut nepal);
+        let mut west = LocalHost {offset:-21_600_000.0,..LocalHost::default()};
+        local_succeeds("var d=new Date(-8640000000000000);if(Date.parse(d.toString())!==d.getTime())throw 'lower boundary offset';'ok';",&mut west);
     }
 
     #[test]

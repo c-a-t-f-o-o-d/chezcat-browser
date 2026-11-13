@@ -152,6 +152,26 @@ impl Bridge<'_> {
         self.lookup_attribute_node(node, name)
     }
 
+    pub(super) fn remove_attribute_ns(&mut self, object: u32, args: &[Value]) -> Result<Value, String> {
+        let node = self.attr_element_node(object)?;
+        let namespace = match args.first() {
+            Some(Value::Null | Value::Undefined) => None,
+            Some(Value::String(text)) => if text.is_empty() { None } else { Some(text.as_str()) },
+            _ => return Err("removeAttributeNS requires a converted nullable namespace.".into()),
+        };
+        let name = self.text(args.get(1).ok_or("removeAttributeNS requires two arguments.")?)?;
+        // Exact local-name matching: unlike removeAttribute this never folds
+        // ASCII case, interprets colons, or creates an Attr identity on a miss.
+        // The supported HTML model has only unqualified attributes.
+        if namespace.is_some() { return Ok(Value::Undefined); }
+        let NodeKind::Element { attrs, .. } = &self.doc.nodes[node].kind else { unreachable!() };
+        self.state.work(attrs.len())?;
+        self.state.copies(attrs.iter().map(|(key, _)|key.len()).sum())?;
+        if !attrs.iter().any(|(key,_)|key == &name) { return Ok(Value::Undefined); }
+        // Reuse every existing mutation/security check and Attr detachment path.
+        self.call(object,"removeAttribute",&[Value::String(name)])
+    }
+
     pub(super) fn validate_attr_removal(&self, object: u32, args: &[Value]) -> Result<(), (&'static str, String)> {
         let Some(Value::Host(handle)) = args.first() else { return Err(("TypeError", "removeAttributeNode requires an Attr.".into())); };
         let Some(attr) = index(*handle).and_then(|id| self.state.attributes.get(id)) else {

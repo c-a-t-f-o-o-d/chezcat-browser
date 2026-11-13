@@ -297,7 +297,7 @@ impl Bridge<'_> {
     }
 
     fn created_event_index(&self, handle: u32) -> Option<usize> {
-        (handle >= EVENT_BASE).then(|| self.state.created_events.iter().position(|event| event.handle == handle)).flatten()
+        (EVENT_BASE..script_class_list::BASE).contains(&handle).then(|| self.state.created_events.iter().position(|event| event.handle == handle)).flatten()
     }
 
     pub(super) fn constructed_event_receiver(&self, handle: u32) -> bool {
@@ -432,7 +432,7 @@ impl Bridge<'_> {
         if let Some(Value::String(name)) = args.first() { self.state.copies(name.len())?; }
         let mouse = interface(args.first()).ok_or_else(|| unsupported_event_interface(args.first()))?;
         if self.state.created_events.len() >= self.state.limits.host.created_events { return Err("Constructed Event limit reached (256 per document).".into()); }
-        let next = self.state.next_event.checked_add(1).ok_or("Event identity space exhausted.")?;
+        let next = self.state.next_event.checked_add(1).filter(|next|*next <= script_class_list::BASE).ok_or("Event identity space exhausted.")?;
         self.state.created_events.try_reserve(1).map_err(|_| "Constructed Event storage reservation failed.")?;
         let handle = self.state.next_event;
         let event = CreatedEvent { handle, name: String::new(), bubbles: false, cancelable: false,

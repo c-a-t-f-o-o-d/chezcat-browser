@@ -36,6 +36,8 @@ mod script_timezone;
 use dom_tree::DomState;
 #[path = "script_attr.rs"]
 mod script_attr;
+#[path = "script_class_list.rs"]
+mod script_class_list;
 #[path = "script_created_events.rs"]
 mod script_created_events;
 #[path = "script_navigation.rs"]
@@ -1330,7 +1332,7 @@ impl Page {
                 return false;
             }
         };
-        let Some(next) = self.state.next_event.checked_add(1) else {
+        let Some(next) = self.state.next_event.checked_add(1).filter(|next|*next <= script_class_list::BASE) else {
             self.state.error(event, "Event identity limit reached.");
             return false;
         };
@@ -2154,7 +2156,7 @@ impl Host for Bridge<'_> {
         } else { self.owns_global_property(property) }
     }
     fn primitive_conversion(&self, object: u32) -> bool {
-        object == LOCATION
+        object == LOCATION || self.class_list_receiver(object)
     }
 
     fn owns_property(&self, object: u32, property: &str) -> bool {
@@ -2164,6 +2166,7 @@ impl Host for Bridge<'_> {
     fn readonly_property(&self, object: u32, property: &str) -> bool {
         self.created_event_readonly(object, property) || self.attr_readonly(object, property) || self.dom_readonly(object, property)
             || collection_handle_index(object).is_some()
+            || self.class_list_receiver(object) && (property == "length" || collection_index(property).is_some())
             || node_list_index(object).is_some()
                 && (property == "length" || collection_index(property).is_some())
             || object == NAVIGATOR && navigator_readonly(property)
@@ -2176,7 +2179,9 @@ impl Host for Bridge<'_> {
     }
 
     fn string_setter(&self, object: u32, property: &str) -> bool {
-        self.attr_receiver(object) && matches!(property, "value" | "nodeValue" | "textContent")
+        self.class_list_receiver(object) && property == "value"
+            || self.class_list_element_receiver(object) && property == "classList"
+            || self.attr_receiver(object) && matches!(property, "value" | "nodeValue" | "textContent")
             || self.dom_string_setter(object, property)
             || Self::location_string_setter(object, property)
             || object == DOCUMENT && property == "cookie"
@@ -2193,6 +2198,9 @@ impl Host for Bridge<'_> {
     }
 
     fn argument_conversions(&self, object: u32, method: &str) -> &'static [(usize, bool)] {
+        if self.class_list_receiver(object) {
+            return match method { "item"=>&[(0,false)], "contains"=>&[(0,true)], _=>&[] };
+        }
         if object == DOCUMENT && method == "createEvent" && self.event_factory_enabled()
             || self.event_receiver(object) && method == "initEvent"
         { return &[(0, true)]; }
@@ -2201,7 +2209,7 @@ impl Host for Bridge<'_> {
         }
         if method == "isDefaultNamespace" && self.namespace_receiver(object) { return &[(0, true)]; }
         if self.attr_element_receiver(object) && method == "getAttributeNode" { return &[(0, true)]; }
-        if self.attr_element_receiver(object) && method == "getAttributeNodeNS" { return &[(0, true), (1, true)]; }
+        if self.attr_element_receiver(object) && matches!(method,"getAttributeNodeNS" | "removeAttributeNS") { return &[(0, true), (1, true)]; }
         if collection_handle_index(object).is_some() {
             return match method {
                 "item" => &[(0, false)],
@@ -2244,9 +2252,20 @@ impl Host for Bridge<'_> {
         &[]
     }
 
+    fn variadic_string_arguments(&self, object:u32, method:&str) -> bool {
+        self.class_list_receiver(object) && method == "remove"
+    }
+
+    fn method_length(&self, object:u32, method:&str) -> Option<usize> {
+        if self.class_list_receiver(object) {
+            return match method {"contains"|"item"=>Some(1),"remove"|"toString"=>Some(0),_=>None};
+        }
+        (self.attr_element_receiver(object) && matches!(method,"getAttributeNodeNS"|"removeAttributeNS")).then_some(2)
+    }
+
     fn nullable_string_argument(&self, object: u32, method: &str, index: usize) -> bool {
         method == "isDefaultNamespace" && index == 0 && self.namespace_receiver(object)
-            || method == "getAttributeNodeNS" && index == 0 && self.attr_element_receiver(object)
+            || matches!(method,"getAttributeNodeNS" | "removeAttributeNS") && index == 0 && self.attr_element_receiver(object)
     }
 
     fn validate_argument_prefix(&self, object: u32, method: &str, next_index: usize, args: &[Value])
@@ -2264,7 +2283,8 @@ impl Host for Bridge<'_> {
     }
 
     fn required_arguments(&self, object: u32, method: &str) -> usize {
-        if self.attr_element_receiver(object) && method == "getAttributeNodeNS" { return 2; }
+        if self.class_list_receiver(object) && matches!(method,"item"|"contains") { return 1; }
+        if self.attr_element_receiver(object) && matches!(method,"getAttributeNodeNS" | "removeAttributeNS") { return 2; }
         if object == DOCUMENT && method == "createEvent" && self.event_factory_enabled()
             || self.event_receiver(object) && method == "initEvent"
             || self.mouse_receiver(object) && method == "initMouseEvent"
@@ -2353,6 +2373,7 @@ impl Host for Bridge<'_> {
                 format!("{method} cannot convert a Symbol argument to its required type."),
             ));
         }
+        if script_class_list::element(object).is_some() { return self.class_list_validate(object,method,args); }
         self.dom_validate_call(object, method, args)?;
         if (object == DOCUMENT || node_index(object).is_some())
             && matches!(
@@ -2456,7 +2477,7 @@ impl Host for Bridge<'_> {
     }
 
     fn ordinary_prototype(&self, object: u32) -> bool {
-        node_list_index(object).is_some()
+        self.class_list_receiver(object) || node_list_index(object).is_some()
             || collection_handle_index(object).is_some()
             || (DATASET_BASE..EVENT_BASE).contains(&object)
     }
@@ -2466,6 +2487,7 @@ impl Host for Bridge<'_> {
         // Authorize this protocol explicitly for this realm's Window, Document
         // and real DOM nodes; other native capabilities keep the default deny.
         matches!(object, WINDOW | DOCUMENT)
+            || self.class_list_receiver(object)
             || self.attr_receiver(object)
             || self.constructed_event_receiver(object)
             || node_index(object).is_some_and(|node| self.doc.nodes.get(node).is_some())
@@ -2477,6 +2499,9 @@ impl Host for Bridge<'_> {
     }
 
     fn method(&self, object: u32, property: &str) -> Option<&'static str> {
+        if script_class_list::element(object).is_some() {
+            return self.class_list_receiver(object).then(||script_class_list::method(property)).flatten();
+        }
         if object == DOCUMENT && property == "createEvent" && self.event_factory_enabled() { return Some("createEvent"); }
         if let Some(method) = self.created_event_method(object, property) { return Some(method); }
         if property == "submit" {
@@ -2524,6 +2549,7 @@ impl Host for Bridge<'_> {
     }
 
     fn accepts_receiver(&self, object: u32, method: &str, receiver: u32) -> bool {
+        if script_class_list::element(object).is_some() { return self.class_list_receiver(object) && self.class_list_receiver(receiver); }
         if method == "initMouseEvent" { return self.mouse_receiver(object) && self.mouse_receiver(receiver); }
         if matches!(method, "initEvent" | "preventDefault" | "stopPropagation" | "stopImmediatePropagation") {
             // First-class methods are created only from genuine Event handles.
@@ -2531,7 +2557,7 @@ impl Host for Bridge<'_> {
             // event does not revoke borrowing; the actual receiver must be live.
             return (EVENT_BASE..self.state.next_event).contains(&object) && self.event_receiver(receiver);
         }
-        if matches!(method, "getAttributeNode" | "getAttributeNodeNS" | "removeAttributeNode") {
+        if matches!(method, "getAttributeNode" | "getAttributeNodeNS" | "removeAttributeNS" | "removeAttributeNode") {
             return self.attr_element_receiver(object) && self.attr_element_receiver(receiver);
         }
         if matches!(method, "isDefaultNamespace" | "compareDocumentPosition") {
@@ -2577,6 +2603,7 @@ impl Host for Bridge<'_> {
     }
 
     fn own_keys(&mut self, object: u32) -> Result<Vec<String>, String> {
+        if script_class_list::element(object).is_some() { return self.class_list_keys(object); }
         if self.is_frame_handle(object) { return Err(format!("Blank child native property enumeration is not implemented (handle {object}).")); }
         self.state.work(1)?;
         if collection_handle_index(object).is_some() {
@@ -2605,6 +2632,10 @@ impl Host for Bridge<'_> {
     }
 
     fn own_data(&mut self, object: u32, property: &str) -> Result<Option<Value>, String> {
+        if script_class_list::element(object).is_some() {
+            if collection_index(property).is_none() { self.class_list_get(object,"length")?; return Ok(None); }
+            return self.class_list_get(object,property).map(|value|(!matches!(value,Value::Undefined)).then_some(value));
+        }
         if self.is_frame_handle(object) { return Err("Blank child native descriptors are not implemented.".into()); }
         self.state.work(1)?;
         if collection_handle_index(object).is_some() {
@@ -2632,6 +2663,10 @@ impl Host for Bridge<'_> {
     }
 
     fn delete(&mut self, object: u32, property: &str) -> Result<bool, String> {
+        if script_class_list::element(object).is_some() {
+            return if collection_index(property).is_some() { self.class_list_get(object,property).map(|value|matches!(value,Value::Undefined)) }
+                else { self.class_list_get(object,"length")?; Ok(true) };
+        }
         if self.is_frame_handle(object) { return Err("Blank child native property deletion is not implemented.".into()); }
         self.state.work(1)?;
         if collection_handle_index(object).is_some() {
@@ -2771,6 +2806,10 @@ impl Host for Bridge<'_> {
 
     fn has(&mut self, object: u32, property: &str) -> Result<bool, String> {
         self.state.work(1)?;
+        if script_class_list::element(object).is_some() {
+            if matches!(property,"length"|"value") || script_class_list::method(property).is_some() { self.class_list_get(object,"length")?; return Ok(true); }
+            return if collection_index(property).is_some() { self.class_list_get(object,property).map(|value|!matches!(value,Value::Undefined)) } else { Ok(false) };
+        }
         if let Some(result) = self.created_event_has(object, property) { return result; }
         if script_attr::index(object).is_some() { return self.attr_has(object, property); }
         if self.is_frame_handle(object) {
@@ -2833,7 +2872,7 @@ impl Host for Bridge<'_> {
                     .map(|value| !matches!(value, Value::Undefined))
             };
         }
-        if object >= EVENT_BASE {
+        if (EVENT_BASE..script_class_list::BASE).contains(&object) {
             if !self
                 .state
                 .event
@@ -3013,6 +3052,7 @@ impl Host for Bridge<'_> {
 
     fn get(&mut self, object: u32, property: &str) -> Result<Value, String> {
         self.state.work(1)?;
+        if script_class_list::element(object).is_some() { return self.class_list_get(object,property); }
         if let Some(result) = self.created_event_get(object, property) { return result; }
         if script_attr::index(object).is_some() { return self.attr_get(object, property); }
         if let Some(value) = self.frame_get(object, property) { return value; }
@@ -3078,7 +3118,7 @@ impl Host for Bridge<'_> {
             }
             return self.location_property(property);
         }
-        if object >= EVENT_BASE {
+        if (EVENT_BASE..script_class_list::BASE).contains(&object) {
             let event = self
                 .state
                 .event
@@ -3273,6 +3313,10 @@ impl Host for Bridge<'_> {
     }
 
     fn set(&mut self, object: u32, property: &str, value: Value) -> Result<(), String> {
+        if script_class_list::element(object).is_some() {
+            self.state.work(1)?;
+            return self.class_list_set(object,property,value);
+        }
         if script_attr::index(object).is_some() {
             self.state.work(1)?;
             return self.attr_set(object, property, value);
@@ -3282,7 +3326,7 @@ impl Host for Bridge<'_> {
         if collection_handle_index(object).is_some() {
             return Err("Native HTMLCollection properties are read-only in this subset.".into());
         }
-        if object >= EVENT_BASE && property == "cancelBubble" {
+        if (EVENT_BASE..script_class_list::BASE).contains(&object) && property == "cancelBubble" {
             return self.set_cancel_bubble(object, &value);
         }
         if Self::location_string_setter(object, property) {
@@ -3313,7 +3357,7 @@ impl Host for Bridge<'_> {
         if matches!(object, NAVIGATOR | PLUGINS | MIME_TYPES) {
             return Err("Navigator and plugin information are read-only in this subset.".into());
         }
-        if object >= EVENT_BASE {
+        if (EVENT_BASE..script_class_list::BASE).contains(&object) {
             return Err("Event properties are read-only; use preventDefault().".into());
         }
         if object >= STYLE_BASE {
@@ -3348,6 +3392,11 @@ impl Host for Bridge<'_> {
             return Ok(());
         }
         let node = self.node(object)?;
+        if property == "classList" {
+            if self.doc.nodes[node].namespace != crate::html::Namespace::Html { return Err("Class token list requires known namespace provenance.".into()); }
+            let value = self.text(&value)?;
+            return self.attribute(node,"class",Some(value));
+        }
         if property == "isMap" && self.html_image_map_property(node) {
             return self.attribute(node, "ismap", value.truthy().then(String::new));
         }
@@ -3483,6 +3532,10 @@ impl Host for Bridge<'_> {
     }
 
     fn call(&mut self, object: u32, method: &str, args: &[Value]) -> Result<Value, String> {
+        if script_class_list::element(object).is_some() {
+            self.state.work(1)?;
+            return self.class_list_call(object,method,args);
+        }
         if method == "compareDocumentPosition" {
             self.state.work(1)?;
             return self.compare_document_position(object, args);
@@ -3619,7 +3672,7 @@ impl Host for Bridge<'_> {
             )?;
             return self.selector_query(object, method, &selector);
         }
-        if object >= EVENT_BASE {
+        if (EVENT_BASE..script_class_list::BASE).contains(&object) {
             if !args.is_empty() {
                 return Err("Event methods take no arguments in this subset.".into());
             }
@@ -3757,6 +3810,11 @@ impl Host for Bridge<'_> {
                     | "dir"
             ) && !inert_attribute_name(&name)
                 && !image_attribute
+                // In a known HTML namespace, raw colon attributes are opaque
+                // unqualified metadata (including parsed xmlns:*). Removing
+                // them does not change the node's immutable namespace.
+                && !(method == "removeAttribute" && name.contains(':')
+                    && self.doc.nodes[node].namespace == crate::html::Namespace::Html)
             {
                 return Err("Supported attributes are id, class, style, title, hidden, disabled, role, lang, dir, data-* and aria-*; use .value/.checked for live controls.".into());
             }

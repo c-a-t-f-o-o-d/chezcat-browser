@@ -1,6 +1,144 @@
 use super::*;
 
 #[test]
+fn class_list_is_live_ordered_case_sensitive_and_mutates_the_actual_attribute() {
+    let (doc,_,page,outcome) = page("<p id=p class=' a  b a A&#9;c '></p>", &[r#"
+var p=document.getElementById('p'),l=p.classList,a=p.getAttributeNode('class');
+if(l!==p.classList||l.length!==4||l[0]!=='a'||l[3]!=='c'||l[4]!==undefined||l.item(4294967296)!=='a'||l.item(-1)!==null)throw 'live identity/index';
+if(l.remove.length!==0||l.contains.length!==1||l.item.length!==1||l.remove!==l.remove)throw 'method metadata';
+if(!l.contains('A')||l.contains('missing')||l.contains('')||l.contains('a b'))throw 'contains';
+if(Object.keys(l).join(',')!=='0,1,2,3'||Object.prototype.hasOwnProperty.call(l,'length'))throw 'own indices';
+if(!l.hasOwnProperty('0')||!l.propertyIsEnumerable('0')||l.hasOwnProperty('value'))throw 'ordinary inherited methods';
+Object.prototype.customClassProbe=17;if(l.customClassProbe!==17)throw 'ordinary inherited property';delete Object.prototype.customClassProbe;
+if(l.remove('a','c')!==undefined||p.className!=='b A'||a.value!=='b A'||p.getAttributeNode('class')!==a)throw 'real removal/Attr';
+p.setAttribute('class','  x x Y  ');if(l.length!==2||l[1]!=='Y'||String(l)!=='  x x Y  ')throw 'raw edit';
+l.remove();if(l.value!=='x Y')throw 'zero argument normalize';
+l.value=' \u00a0 \u000b z';if(l.length!==3||!l.contains('\u00a0')||!l.contains('\u000b'))throw 'ASCII only';
+p.classList={toString:function(){return 'forwarded';}};if(l.value!=='forwarded'||a.value!=='forwarded')throw 'PutForwards';
+var fresh=document.createElement('div'),f=fresh.classList;f.remove('missing');if(fresh.hasAttribute('class'))throw 'absent stays absent';
+fresh.className='x';f.remove('x');if(f.value!==''||!fresh.hasAttribute('class'))throw 'empty stays present';
+if('classList' in document.createTextNode('text')||'classList' in document)throw 'brand';
+Promise.resolve(l).then(function(v){if(v!==l)throw 'Promise identity';document.title='class-list-ok';});
+"#]);
+    assert_eq!(outcome.errors,0,"{}",page.report());
+    assert_eq!(doc.title,"class-list-ok");
+}
+
+#[test]
+fn class_list_removal_converts_all_arguments_before_validation_and_observes_callbacks() {
+    let (doc,_,page,outcome) = page("<p id=p class='old'></p><b id=b class='b c'></b>", &[r#"
+var p=document.getElementById('p'),l=p.classList,log='',caught=false;
+try{l.remove('',{toString:function(){log+='b';p.className='after';return 'x';}});}catch(e){caught=e.name==='SyntaxError';}
+if(!caught||log!=='b'||p.className!=='after')throw 'all conversions before validation';
+caught=false;try{l.remove('',Symbol());}catch(e){caught=e.name==='TypeError';}if(!caught||p.className!=='after')throw 'conversion precedence';
+caught=false;try{l.remove(' ', '');}catch(e){caught=e.name==='InvalidCharacterError';}if(!caught)throw 'validation order';
+log='';l.remove({toString:function(){log+='a';p.className='a b c';return 'a';}},{toString:function(){log+='b';return 'b';}});
+if(log!=='ab'||p.className!=='c')throw 'current post-conversion class';
+var marker={};caught=false;try{l.remove({toString:function(){p.className='side effect';throw marker;}});}catch(e){caught=e===marker;}if(!caught||p.className!=='side effect')throw 'exception identity';
+var n=0;for(var bad of [{},window,document,p,p.style,document.createTextNode('t')]){caught=false;try{l.remove.call(bad,{toString:function(){n++;return 'x';}});}catch(e){caught=e.name==='TypeError';}if(!caught)throw 'wrong receiver';}
+if(n)throw 'brand before conversion';var b=document.getElementById('b');l.remove.call(b.classList,'b');if(b.className!=='c'||p.className!=='side effect')throw 'borrow';
+document.title='class-list-conversion-ok';
+"#]);
+    assert_eq!(outcome.errors,0,"{}",page.report());
+    assert_eq!(doc.title,"class-list-conversion-ok");
+}
+
+#[test]
+fn class_list_copy_work_and_invalid_namespace_failures_preserve_attribute() {
+    let (mut doc,mut forms,mut page,outcome) = page("<p id=p class='a b'></p>",&[]);
+    assert_eq!(outcome.errors,0,"{}",page.report());
+    let node = (0..doc.nodes.len()).find(|&n|doc.attr(n,"id")==Some("p")).unwrap();
+    let handle = script_class_list::handle(node_handle(node));
+    page.begin_job();
+    let mut bridge = Bridge {doc:&mut doc,forms:&mut forms,state:&mut page.state};
+    bridge.state.copy_work = 0;
+    assert!(bridge.call(handle,"remove",&[Value::String("a".into())]).is_err());
+    assert_eq!(bridge.doc.attr(node,"class"),Some("a b"));
+    bridge.state.copy_work = bridge.state.limits.copy_bytes;
+    bridge.state.host_work = 0;
+    assert!(bridge.call(handle,"remove",&[Value::String("a".into())]).is_err());
+    assert_eq!(bridge.doc.attr(node,"class"),Some("a b"));
+    bridge.state.host_work = bridge.state.limits.host_work;
+    bridge.doc.nodes[node].namespace = crate::html::Namespace::UnknownForeign;
+    assert!(bridge.get(handle,"value").unwrap_err().contains("namespace"));
+    assert!(!bridge.accepts_receiver(handle,"remove",node_handle(node)));
+    assert_eq!(bridge.doc.attr(node,"class"),Some("a b"));
+    assert!(!bridge.class_list_receiver(handle));
+}
+
+#[test]
+fn class_list_put_forwards_conversion_is_limited_to_real_html_elements() {
+    let (mut doc,mut forms,mut page,outcome) = page("<p id=p></p><svg><g id=f></g></svg>",&[]);
+    assert_eq!(outcome.errors,0,"{}",page.report());
+    let html = (0..doc.nodes.len()).find(|&n|doc.attr(n,"id")==Some("p")).unwrap();
+    let foreign = (0..doc.nodes.len()).find(|&n|doc.attr(n,"id")==Some("f")).unwrap();
+    let mut bridge = Bridge {doc:&mut doc,forms:&mut forms,state:&mut page.state};
+    assert!(bridge.string_setter(node_handle(html),"classList"));
+    assert!(!bridge.string_setter(node_handle(foreign),"classList"));
+    assert!(!bridge.string_setter(DOCUMENT,"classList"));
+    let text = bridge.call(DOCUMENT,"createTextNode",&[Value::String("text".into())]).unwrap();
+    let Value::Host(text) = text else {unreachable!()};
+    assert!(!bridge.string_setter(text,"classList"));
+    assert!(!bridge.class_list_receiver(script_class_list::handle(text)));
+}
+
+#[test]
+fn class_list_handle_band_never_collides_with_last_event_identity() {
+    let (mut doc,mut forms,mut page,_) = page("<p id=p></p>",&[]);
+    page.state.next_event = script_class_list::BASE-1;
+    let mut bridge = Bridge {doc:&mut doc,forms:&mut forms,state:&mut page.state};
+    let last = bridge.create_event(&[Value::String("Event".into())]).unwrap();
+    assert!(matches!(last,Value::Host(handle) if handle==script_class_list::BASE-1));
+    assert_eq!(bridge.state.next_event,script_class_list::BASE);
+    assert!(bridge.create_event(&[Value::String("Event".into())]).is_err());
+    assert_eq!(bridge.state.created_events.len(),1);
+    assert_eq!(bridge.state.next_event,script_class_list::BASE);
+    assert!(!page.dispatch_to(&mut doc,&mut forms,WINDOW,"load",false,false));
+    assert_eq!(page.state.next_event,script_class_list::BASE);
+    assert!(page.state.event.is_none());
+}
+
+#[test]
+fn remove_attribute_ns_matches_exact_local_names_and_preserves_detached_attr_values() {
+    let (doc,_,page,outcome) = page("<p id=p title=old x:y=colon xmlns:x=raw></p>", &[r#"
+var p=document.getElementById('p'),a=p.getAttributeNode('title'),c=p.getAttributeNode('x:y');
+if(p.removeAttributeNS.length!==2||p.removeAttributeNS!==p.removeAttributeNS)throw 'metadata';
+p.removeAttributeNS(null,'TITLE');p.removeAttributeNS('urn:x','title');if(a.ownerElement!==p||a.value!=='old')throw 'exact namespace/name';
+if(p.removeAttributeNS('', 'title')!==undefined||a.ownerElement!==null||a.value!=='old'||p.hasAttribute('title'))throw 'remove/Attr';
+p.removeAttributeNS(undefined,'y');if(c.ownerElement!==p)throw 'raw colon';
+p.removeAttributeNS(null,'x:y');if(c.ownerElement!==null||c.value!=='colon')throw 'raw colon removal';
+p.removeAttributeNS('http://www.w3.org/2000/xmlns/','x');if(!p.hasAttribute('xmlns:x'))throw 'raw xmlns';
+p.removeAttributeNS(null,'xmlns:x');if(p.hasAttribute('xmlns:x'))throw 'unqualified xmlns';
+p.removeAttributeNS(null,'bad name');p.removeAttributeNS(null,'');document.title='remove-ns-ok';
+"#]);
+    assert_eq!(outcome.errors,0,"{}",page.report());
+    assert_eq!(doc.title,"remove-ns-ok");
+}
+
+#[test]
+fn remove_attribute_ns_conversion_order_and_brands_keep_existing_mutation_policy() {
+    let (doc,_,script_page,outcome) = page("<p id=p title=old></p>", &[r#"
+var p=document.getElementById('p'),log='',name={toString:function(){log+='L';p.setAttribute('title','current');return 'title';}};
+var ns={toString:function(){log+='N';return '';}};p.removeAttributeNS(ns,name);if(log!=='NL'||p.hasAttribute('title'))throw 'conversion order/reentrant';
+p.setAttribute('title','keep');log='';p.removeAttributeNS({toString:function(){log+='N';return null;}},name);if(log!=='NL'||p.getAttribute('title')!=='current')throw 'object null becomes string';
+var calls=0,arg={toString:function(){calls++;return '';}};var caught=0;
+try{p.removeAttributeNS(arg);}catch(e){if(e.name==='TypeError')caught++;}
+for(var bad of [{},window,document,p.style,document.createTextNode('x')])try{p.removeAttributeNS.call(bad,arg,arg);}catch(e){if(e.name==='TypeError')caught++;}
+if(calls||caught!==6)throw 'brand/arity before coercion';
+var marker={},same=false;try{p.removeAttributeNS(null,{toString:function(){throw marker;}});}catch(e){same=e===marker;}if(!same||p.getAttribute('title')!=='current')throw 'exception identity';
+document.title='remove-ns-conversion-ok';
+"#]);
+    assert_eq!(outcome.errors,0,"{}",script_page.report());
+    assert_eq!(doc.title,"remove-ns-conversion-ok");
+    let (mut doc,mut forms,mut page,_) = page("<img id=i src='https://example.test/a.png'>",&[]);
+    let node = (0..doc.nodes.len()).find(|&n|doc.attr(n,"id")==Some("i")).unwrap();
+    let mut bridge = Bridge {doc:&mut doc,forms:&mut forms,state:&mut page.state};
+    let error = bridge.remove_attribute_ns(node_handle(node),&[Value::Null,Value::String("src".into())]).unwrap_err();
+    assert!(error.contains("connected image"),"{error}");
+    assert_eq!(bridge.doc.attr(node,"src"),Some("https://example.test/a.png"));
+}
+
+#[test]
 fn html_image_is_map_reflects_boolean_presence_without_coercion_and_keeps_attr_identity() {
     let (doc, _, page, outcome) = page("<img id=i ismap='false'>", &[r#"
 var i=document.getElementById('i');if(i.isMap!==true||!('isMap' in i))throw 'presence';
