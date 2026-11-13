@@ -10,6 +10,63 @@ impl Host for NoHost {
 }
 
 #[test]
+fn original_selected_if_branch_native_pressure_on_one_mib_stack() {
+    std::thread::Builder::new().stack_size(1024 * 1024).spawn(|| {
+        for braced in [false, true] {
+            for depth in [16, 17, 18, 20] {
+              for disabled in [true, false] {
+                let mut runtime = Runtime::new();
+                runtime.transient_roots.disable_if_statement_tail = disabled;
+                let code = format!("{}42;{}", "if(true){".repeat(5), "}".repeat(5));
+                runtime.define_global("code", Value::String(code)).unwrap();
+                let branch = if braced { "{return descend(n-1);}" } else { "return descend(n-1);" };
+                let source = format!("function descend(n){{if(n>0){branch}return eval(code);}}descend({depth});");
+                let result = runtime.execute(&source, &mut NoHost);
+                if disabled && braced && depth >= 17 {
+                    let error = result.unwrap_err();
+                    assert!(error.contains("Parser nesting limit reached (64)"), "{error}");
+                    println!("Original selected-if baseline: braced={braced}; calls={depth}; {error}");
+                } else {
+                    assert_eq!(result.unwrap().to_number(), 42.0);
+                }
+                assert_eq!((runtime.eval_depth, runtime.call_depth, runtime.evaluation_frames), (0, 0, 0));
+                runtime.begin_job();
+                assert_eq!(runtime.execute("6*7;", &mut NoHost).unwrap().to_number(), 42.0);
+              }
+            }
+        }
+    }).unwrap().join().unwrap();
+}
+
+#[test]
+fn selected_if_tail_matches_original_completions_labels_steps_and_fault_locations() {
+    for source in [
+        "var n=0;outer:if(true)inner:if(true){n=7;break outer;n=99;}if(n!==7)throw 'label';n;",
+        "var n=0;outer:if(false)n=99;else inner:if(true){n=11;break outer;}n;",
+        "var n=0;while(n<4){if(++n===2)continue;if(n===3)break;}n;",
+        "var x=eval('17;if(false)99;');if(x!==undefined)throw 'empty';x;",
+        "var x=eval('17;if(true);');if(x!==undefined)throw 'selected empty';x;",
+        "function f(){try{if(true)if(false)return 0;else return 23;}finally{if(true);}}f();",
+        "var answer=0;try{if(true)if(false);else throw 29;}catch(e){answer=e;}finally{if(false)answer=99;}answer;",
+        "if(false);else\nif(true)\n missingName();",
+    ] {
+        for allowance in (0..=120).chain(std::iter::once(10_000)) {
+            let mut results = Vec::new();
+            for disabled in [true, false] {
+                let mut runtime = Runtime::new();
+                runtime.transient_roots.disable_if_statement_tail = disabled;
+                runtime.steps = allowance;
+                let result = runtime.execute(source, &mut NoHost).map(|value| value.to_text());
+                results.push((result, runtime.steps));
+                assert_eq!((runtime.eval_depth, runtime.call_depth, runtime.evaluation_frames), (0, 0, 0));
+                assert!(runtime.transient_registration_is_empty());
+            }
+            assert_eq!(results[0], results[1], "allowance={allowance}; source={source}");
+        }
+    }
+}
+
+#[test]
 fn statement_expression_original_shallow_dynamic_parse_fits_one_mib() {
     std::thread::Builder::new().stack_size(1024 * 1024).spawn(|| {
         let mut runtime = Runtime::new();
@@ -23,6 +80,31 @@ fn statement_expression_original_shallow_dynamic_parse_fits_one_mib() {
         runtime.begin_job();
         assert_eq!(runtime.execute("descend(1);", &mut NoHost).unwrap().to_number(), 42.0);
     }).unwrap().join().unwrap();
+}
+
+#[test]
+fn selected_if_pending_metadata_has_an_exact_finite_copy_allowance() {
+    for (source, slots) in [("if(true)7;", 1), ("if(false);else if(true)7;", 2)] {
+        let charge = slots * std::mem::size_of::<StmtId>();
+        for allowance in [0, charge - 1, charge] {
+            let mut runtime = Runtime::new();
+            let program = runtime.register_program(source, false).unwrap();
+            runtime.copy_bytes = allowance;
+            let deadline = runtime.job_deadline;
+            let result = runtime.statements(&program, &program.body, 0, &Value::Undefined, &mut NoHost);
+            if allowance < charge {
+                assert!(result.err().unwrap().message.contains("String/copy work limit reached"));
+                assert_eq!(runtime.copy_bytes, 0);
+            } else {
+                let Control::Normal(Some(value)) = result.unwrap() else { panic!("normal completion"); };
+                assert_eq!(value.to_number(), 7.0);
+                assert_eq!(runtime.copy_bytes, 0);
+            }
+            assert_eq!(runtime.job_deadline, deadline);
+            assert!(runtime.transient_registration_is_empty());
+            assert_eq!((runtime.eval_depth, runtime.call_depth), (0, 0));
+        }
+    }
 }
 
 #[test]

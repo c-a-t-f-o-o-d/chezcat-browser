@@ -38,6 +38,8 @@ mod function_reachability;
 #[cfg(test)]
 #[path = "function_collection_tests.rs"]
 mod function_collection_tests;
+#[path = "selected_if_statement.rs"]
+mod selected_if_statement;
 #[path = "transient_roots.rs"]
 mod transient_roots;
 #[path = "deferred_native_methods.rs"]
@@ -5947,7 +5949,13 @@ impl Runtime {
             StmtKind::Return(Some(expression)) => Some((expression, true)),
             _ => None,
         };
-        let result = if let Some((expression, returning)) = expression {
+        #[cfg(test)]
+        let tail = !self.transient_roots.disable_if_statement_tail;
+        #[cfg(not(test))]
+        let tail = true;
+        let result = if tail && matches!(program.stmts[id].kind, StmtKind::If(_, _, _)) {
+            self.selected_if_statement(program, id, env, this, host)
+        } else if let Some((expression, returning)) = expression {
             self.step().and_then(|_| {
                 #[cfg(test)]
                 let value = if self.recursive_evaluation_oracle {

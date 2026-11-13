@@ -13,6 +13,8 @@ pub(super) struct State {
     pub(super) script_input_observer: Option<fn(&Runtime, usize, &[Value], &Value)>,
     #[cfg(test)]
     pub(super) disable_empty_loop_fast_path: bool,
+    #[cfg(test)]
+    pub(super) disable_if_statement_tail: bool,
     pub(super) roots: Vec<Edge>,
     pub(super) evaluation_frames: usize,
     pub(super) frame_slots: usize,
