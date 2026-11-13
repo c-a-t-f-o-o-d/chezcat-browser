@@ -150,6 +150,7 @@ impl Runtime {
     }
 
     pub(super) fn reject_foreign_window(&self, value: &Value, host: &dyn Host) -> Result<(), Fault> {
+        if let Value::Host(handle) = value { self.validate_native_access(*handle, host)?; }
         if matches!(value, Value::Host(handle) if self.foreign_window(*handle, host)) {
             return Err(Fault::new("This foreign Window operation is not implemented; only named property reads are supported."));
         }

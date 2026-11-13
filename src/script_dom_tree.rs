@@ -299,6 +299,7 @@ impl Bridge<'_> {
     }
 
     pub(super) fn dom_readonly(&self, object: u32, property: &str) -> bool {
+        if property == "attributes" { return self.class_list_element_receiver(object); }
         if matches!(property,"localName"|"prefix"|"namespaceURI") {
             return self.attr_element_receiver(object) && node_index(object).is_some_and(|node|
                 self.doc.nodes[node].namespace==crate::html::Namespace::Html);
@@ -409,6 +410,11 @@ impl Bridge<'_> {
             return Ok(None);
         };
         let node = self.dom_node(node_handle(node))?;
+        if property == "attributes" {
+            if !matches!(self.doc.nodes[node].kind, NodeKind::Element { .. }) { return Ok(Some(false)); }
+            if self.doc.nodes[node].namespace != crate::html::Namespace::Html { return Err("Attribute map requires known namespace provenance.".into()); }
+            return Ok(Some(true));
+        }
         if matches!(property,"localName"|"prefix"|"namespaceURI") {
             if matches!(self.doc.nodes[node].kind,NodeKind::Element {..}) && self.doc.nodes[node].namespace!=crate::html::Namespace::Html {
                 return Err("Element naming requires known namespace provenance.".into());
@@ -478,6 +484,11 @@ impl Bridge<'_> {
             return Ok(None);
         }
         let node = self.dom_node(object)?;
+        if property == "attributes" {
+            if !matches!(self.doc.nodes[node].kind, NodeKind::Element { .. }) { return Ok(Some(Value::Undefined)); }
+            if self.doc.nodes[node].namespace != crate::html::Namespace::Html { return Err("Attribute map requires known namespace provenance.".into()); }
+            return Ok(Some(Value::Host(script_named_map::handle(object))));
+        }
         if matches!(property,"localName"|"prefix"|"namespaceURI") {
             if !matches!(self.doc.nodes[node].kind,NodeKind::Element {..}) {return Ok(Some(Value::Undefined));}
             if self.doc.nodes[node].namespace!=crate::html::Namespace::Html {return Err("Element naming requires known namespace provenance.".into());}

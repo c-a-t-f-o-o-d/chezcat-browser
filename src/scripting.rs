@@ -40,6 +40,8 @@ mod script_attr;
 mod script_attribute_names;
 #[path = "script_class_list.rs"]
 mod script_class_list;
+#[path = "script_named_map.rs"]
+mod script_named_map;
 #[path = "script_normalize.rs"]
 mod script_normalize;
 #[path = "script_element_properties.rs"]
@@ -2164,7 +2166,7 @@ impl Host for Bridge<'_> {
                 && self.doc.nodes[node].namespace==crate::html::Namespace::Html)
             .map(|_|(IMAGE_FACTORY,"Image"));
         let known=node.is_some() || matches!(object,DOCUMENT|CONSOLE|NAVIGATOR|PLUGINS|MIME_TYPES|DOCUMENT_IMAGES|LOCATION|PERFORMANCE)
-            || self.attr_receiver(object) || self.event_receiver(object) || self.class_list_receiver(object)
+            || self.attr_receiver(object) || self.event_receiver(object) || self.class_list_receiver(object) || self.named_map_receiver(object)
             || node_list_index(object).is_some_and(|index|index<self.state.node_lists.len())
             || collection_handle_index(object).is_some_and(|index|index<self.state.dom.collections.len())
             || (STYLE_BASE..EVENT_BASE).contains(&object) && self.attr_element_receiver(node_handle(((object-STYLE_BASE)%500_000) as usize));
@@ -2203,13 +2205,17 @@ impl Host for Bridge<'_> {
     }
 
     fn ordinary_lookup_tail(&self, object:u32) -> bool {
-        self.attr_receiver(object) || self.constructed_event_receiver(object)
+        self.attr_receiver(object) || self.constructed_event_receiver(object) || self.named_map_receiver(object)
+    }
+    fn native_access_owner(&self, object: u32) -> Option<u32> {
+        self.named_map_receiver(object).then_some(WINDOW)
     }
 
     fn readonly_property(&self, object: u32, property: &str) -> bool {
         self.created_event_readonly(object, property) || self.attr_readonly(object, property) || self.dom_readonly(object, property)
             || collection_handle_index(object).is_some()
             || self.class_list_receiver(object) && (property == "length" || collection_index(property).is_some())
+            || self.named_map_receiver(object) && (property == "length" || collection_index(property).is_some())
             || node_list_index(object).is_some()
                 && (property == "length" || collection_index(property).is_some())
             || object == NAVIGATOR && navigator_readonly(property)
@@ -2242,6 +2248,9 @@ impl Host for Bridge<'_> {
     }
 
     fn argument_conversions(&self, object: u32, method: &str) -> &'static [(usize, bool)] {
+        if self.named_map_receiver(object) {
+            return match method { "item" => &[(0, false)], "getNamedItem" => &[(0, true)], "getNamedItemNS" => &[(0, true), (1, true)], _ => &[] };
+        }
         if self.class_list_receiver(object) {
             return match method { "item"=>&[(0,false)], "contains"=>&[(0,true)], _=>&[] };
         }
@@ -2305,6 +2314,7 @@ impl Host for Bridge<'_> {
     }
 
     fn method_length(&self, object:u32, method:&str) -> Option<usize> {
+        if self.named_map_receiver(object) { return match method { "item" | "getNamedItem" => Some(1), "getNamedItemNS" => Some(2), _ => None }; }
         if self.attr_element_receiver(object) && method == "setAttributeNS" { return Some(3); }
         if self.event_receiver(object) && method=="initEvent"
             || self.ui_receiver(object) && method=="initUIEvent"
@@ -2318,6 +2328,7 @@ impl Host for Bridge<'_> {
     }
 
     fn nullable_string_argument(&self, object: u32, method: &str, index: usize) -> bool {
+        if self.named_map_receiver(object) { return method == "getNamedItemNS" && index == 0; }
         method == "isDefaultNamespace" && index == 0 && self.namespace_receiver(object)
             || matches!(method,"getAttributeNS" | "getAttributeNodeNS" | "removeAttributeNS" | "setAttributeNS") && index == 0 && self.attr_element_receiver(object)
     }
@@ -2337,6 +2348,7 @@ impl Host for Bridge<'_> {
     }
 
     fn required_arguments(&self, object: u32, method: &str) -> usize {
+        if self.named_map_receiver(object) { return match method { "item" | "getNamedItem" => 1, "getNamedItemNS" => 2, _ => 0 }; }
         if self.attr_element_receiver(object) && method == "setAttributeNS" { return 3; }
         if self.class_list_receiver(object) && matches!(method,"item"|"contains") { return 1; }
         if self.attr_element_receiver(object) && matches!(method,"getAttributeNS" | "getAttributeNodeNS" | "removeAttributeNS") { return 2; }
@@ -2533,7 +2545,7 @@ impl Host for Bridge<'_> {
     }
 
     fn resolve_member_before_call(&self, object: u32) -> bool {
-        if self.attr_receiver(object) || self.constructed_event_receiver(object) { return true; }
+        if self.attr_receiver(object) || self.constructed_event_receiver(object) || self.named_map_receiver(object) { return true; }
         self.form_receiver(object)
     }
 
@@ -2560,6 +2572,7 @@ impl Host for Bridge<'_> {
     }
 
     fn method(&self, object: u32, property: &str) -> Option<&'static str> {
+        if script_named_map::element(object).is_some() { return self.named_map_receiver(object).then(|| script_named_map::method(property)).flatten(); }
         if object == DOCUMENT && property == "getElementsByName" { return Some("getElementsByName"); }
         if property=="normalize" && !self.is_frame_handle(object) && self.namespace_receiver(object) {return Some("normalize");}
         if property=="getElementsByClassName" && (object==DOCUMENT || self.attr_element_receiver(object))
@@ -2614,6 +2627,7 @@ impl Host for Bridge<'_> {
     }
 
     fn accepts_receiver(&self, object: u32, method: &str, receiver: u32) -> bool {
+        if script_named_map::element(object).is_some() { return self.named_map_receiver(object) && self.named_map_receiver(receiver); }
         if method == "getElementsByName" { return object == DOCUMENT && receiver == DOCUMENT; }
         if method=="normalize" {return !self.is_frame_handle(object) && !self.is_frame_handle(receiver)
             && self.namespace_receiver(object) && self.namespace_receiver(receiver);}
@@ -2678,6 +2692,10 @@ impl Host for Bridge<'_> {
     }
 
     fn own_keys(&mut self, object: u32) -> Result<Vec<String>, String> {
+        if script_named_map::element(object).is_some() {
+            self.named_map_get(object, "length")?;
+            return Err("NamedNodeMap complete indexed/named enumeration is not implemented; use length and item.".into());
+        }
         if self.element_expando_receiver(object) {
             self.state.work(1)?;
             return Ok(Vec::new());
@@ -2719,6 +2737,7 @@ impl Host for Bridge<'_> {
     }
 
     fn own_data(&mut self, object: u32, property: &str) -> Result<Option<Value>, String> {
+        if script_named_map::element(object).is_some() { return self.named_map_own_data(object, property); }
         if self.attr_receiver(object) { self.state.work(1)?; return Ok(None); }
         if self.event_receiver(object) {
             self.state.work(1)?;
@@ -2763,6 +2782,10 @@ impl Host for Bridge<'_> {
     }
 
     fn delete(&mut self, object: u32, property: &str) -> Result<bool, String> {
+        if script_named_map::element(object).is_some() {
+            return if collection_index(property).is_some() { self.named_map_has(object, property).map(|present| !present) }
+                else { self.named_map_own_data(object, property)?; Ok(true) };
+        }
         if script_class_list::element(object).is_some() {
             return if collection_index(property).is_some() { self.class_list_get(object,property).map(|value|matches!(value,Value::Undefined)) }
                 else { self.class_list_get(object,"length")?; Ok(true) };
@@ -2906,6 +2929,7 @@ impl Host for Bridge<'_> {
 
     fn has(&mut self, object: u32, property: &str) -> Result<bool, String> {
         self.state.work(1)?;
+        if script_named_map::element(object).is_some() { return self.named_map_has(object, property); }
         if property=="normalize" && !self.is_frame_handle(object) && self.namespace_receiver(object) {return Ok(true);}
         if property=="getElementsByClassName" && (object==DOCUMENT || self.attr_element_receiver(object)) { return Ok(true); }
         if script_class_list::element(object).is_some() {
@@ -3163,6 +3187,7 @@ impl Host for Bridge<'_> {
 
     fn get(&mut self, object: u32, property: &str) -> Result<Value, String> {
         self.state.work(1)?;
+        if script_named_map::element(object).is_some() { return self.named_map_get(object, property); }
         if script_class_list::element(object).is_some() { return self.class_list_get(object,property); }
         if let Some(result) = self.created_event_get(object, property) { return result; }
         if script_attr::index(object).is_some() { return self.attr_get(object, property); }
@@ -3434,6 +3459,7 @@ impl Host for Bridge<'_> {
     }
 
     fn set(&mut self, object: u32, property: &str, value: Value) -> Result<(), String> {
+        if script_named_map::element(object).is_some() { self.named_map_get(object, "length")?; return Err("NamedNodeMap property writes are not implemented.".into()); }
         if script_class_list::element(object).is_some() {
             self.state.work(1)?;
             return self.class_list_set(object,property,value);
@@ -3658,6 +3684,7 @@ impl Host for Bridge<'_> {
     }
 
     fn call(&mut self, object: u32, method: &str, args: &[Value]) -> Result<Value, String> {
+        if script_named_map::element(object).is_some() { return self.named_map_call(object, method, args); }
         if method=="normalize" {self.state.work(1)?;return self.normalize_node(object);}
         if script_class_list::element(object).is_some() {
             self.state.work(1)?;

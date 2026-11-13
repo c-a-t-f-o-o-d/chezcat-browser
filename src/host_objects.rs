@@ -4,14 +4,26 @@
 use super::{Fault, Function, Host, Ordinary, Runtime, Value};
 
 impl Runtime {
+    pub(super) fn validate_native_access(&self, handle: u32, host: &dyn Host) -> Result<(), Fault> {
+        if let Some(owner) = host.native_access_owner(handle) {
+            let caller = self.native_access_caller.unwrap_or_else(|| self.browser_global.map(|(window, _)| window));
+            if caller != Some(owner) { host.validate_window_access(caller, owner).map_err(Fault::new)?; }
+        }
+        Ok(())
+    }
     pub(super) fn host_lookup_tail(&mut self,handle:u32,name:&str,host:&dyn Host)->Result<Option<Ordinary>,Fault> {
         if !host.ordinary_lookup_tail(handle) || host.owns_property(handle,name) { return Ok(None); }
+        self.host_inherited_read_tail(handle, host)
+    }
+    pub(super) fn host_inherited_read_tail(&mut self,handle:u32,host:&dyn Host)->Result<Option<Ordinary>,Fault> {
+        if !host.ordinary_lookup_tail(handle) { return Ok(None); }
         let ancestry=host.instance_ancestry(handle).ok_or_else(||Fault::new("Native lookup prototype provenance is unavailable."))?;
         let caller=self.browser_global.map(|(window,_)|window);
         if caller!=Some(ancestry.window) { host.validate_window_access(caller,ancestry.window).map_err(Fault::new)?; }
         self.native_ancestry_anchor(ancestry).map(Some)
     }
     pub(super) fn ensure_native_expando(&mut self,handle:u32,host:&dyn Host,create:bool)->Result<(),Fault> {
+        self.validate_native_access(handle, host)?;
         let Some(owner)=host.expando_owner(handle) else {
             if self.native_expando_owners.contains_key(&handle) {return Err(Fault::new("Native expando receiver is no longer accessible."));}
             return Ok(());
@@ -140,11 +152,13 @@ impl Runtime {
         }
         let value = host.get(handle, name).map_err(Fault::new)?;
         if matches!(value, Value::Undefined)
-            && host.ordinary_prototype(handle)
+            && (host.ordinary_prototype(handle) || host.ordinary_lookup_tail(handle))
             && !host.has(handle, name).map_err(Fault::new)?
         {
+            let prototype = self.host_inherited_read_tail(handle, host)?
+                .unwrap_or(Ordinary::Object(self.object_prototype.unwrap()));
             return self.get_ordinary_property_with_receiver(
-                Ordinary::Object(self.object_prototype.unwrap()),
+                prototype,
                 name,
                 &Value::Host(handle),
                 host,

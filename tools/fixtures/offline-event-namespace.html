@@ -10,6 +10,8 @@ fixtureNode.setAttributeNS('urn:fixture','b:sample','second');
 if(fixtureAttr!==fixtureNode.getAttributeNodeNS('urn:fixture','sample')||fixtureAttr.name!=='a:sample'||fixtureAttr.value!=='second'||fixtureAttr.namespaceURI!=='urn:fixture')throw Error('namespace mutation identity');
 fixtureNode.removeAttributeNS('urn:fixture','sample');
 if(fixtureAttr.ownerElement!==null||fixtureAttr.value!=='second')throw Error('namespace detachment');
+var fixtureMap=fixtureNode.attributes;
+if(fixtureMap!==fixtureNode.attributes||fixtureMap.getNamedItem('data-sample')!==fixtureNode.getAttributeNode('data-sample')||fixtureMap.item(0)!==fixtureMap[0])throw Error('live attribute map');
 var fixtureEvent=document.createEvent('UIEvents');
 fixtureEvent.initUIEvent('fixture',true,true,window,4294967297);
 if(fixtureEvent.view!==window||fixtureEvent.detail!==1||fixtureEvent.isTrusted)throw Error('UI initializer');

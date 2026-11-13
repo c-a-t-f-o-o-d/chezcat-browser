@@ -326,6 +326,8 @@ pub trait Host {
     /// Explicit read/presence fallback to a proven native owner's Object tail.
     /// This does not grant expando, mutation or descriptor authority.
     fn ordinary_lookup_tail(&self, _object:u32) -> bool { false }
+    /// Owner validation without granting an ordinary expando or definition store.
+    fn native_access_owner(&self, _object: u32) -> Option<u32> { None }
     /// Real ordinary expando storage for an explicitly proven native family.
     fn expando_owner(&self, _object:u32) -> Option<u32> { None }
     fn instance_ancestry(&self, _object:u32) -> Option<NativeAncestry> { None }
@@ -3195,6 +3197,9 @@ pub struct Runtime {
     window_realms: BTreeMap<u32, Option<usize>>,
     native_constructor_prototypes:BTreeMap<(u32,&'static str),usize>,
     native_expando_owners:BTreeMap<u32,u32>,
+    // Preserve the invoking Script realm through native call/apply/bind
+    // forwarding. A real Script callee starts its own authority context.
+    native_access_caller: Option<Option<u32>>,
     diagnostics: runtime_diagnostics::Data,
     failed_window_realms: HashSet<u32>,
     deferred_intrinsics: u8,
@@ -3329,6 +3334,7 @@ impl Runtime {
             window_realms: BTreeMap::new(),
             native_constructor_prototypes:BTreeMap::new(),
             native_expando_owners:BTreeMap::new(),
+            native_access_caller: None,
             diagnostics: runtime_diagnostics::Data::default(),
             failed_window_realms: HashSet::new(),
             deferred_intrinsics: if defer_families { 7 } else { 0 },
@@ -5825,14 +5831,13 @@ impl Runtime {
                         host.has(handle, &name).map_err(Fault::new)?
                     }
                 } else {
-                    host.has(handle, &name).map_err(Fault::new)?
-                        || host.ordinary_prototype(handle)
-                            && self
-                                .property_owner(
-                                    Ordinary::Object(self.object_prototype.unwrap()),
-                                    &name,
-                                )?
-                                .is_some()
+                    if host.has(handle, &name).map_err(Fault::new)? { true }
+                    else if let Some(tail) = self.host_inherited_read_tail(handle, host)? {
+                        self.property_owner(tail, &name)?.is_some()
+                    } else {
+                        host.ordinary_prototype(handle)
+                            && self.property_owner(Ordinary::Object(self.object_prototype.unwrap()), &name)?.is_some()
+                    }
                 }
             }
             _ => unreachable!(),
@@ -7912,6 +7917,7 @@ impl Runtime {
         args: &[Value],
         host: &mut dyn Host,
     ) -> Result<Value, Fault> {
+        self.validate_native_access(object, host)?;
         let required = host.required_arguments(object, method);
         if args.len() < required {
             return Err(Fault::exception(
@@ -8167,9 +8173,35 @@ impl Runtime {
     }
 
     fn call_value_routed(&mut self, function: Value, args: &[Value], this: Value, host: &mut dyn Host) -> Result<Value, Fault> {
+        if self.changes_native_access_caller(&function) {
+            return self.call_with_native_access_caller(function, args, this, host);
+        }
         let realm = match &function { Value::Function(id) => self.function_realms.get(*id).copied().unwrap_or(self.active_realm), _ => self.active_realm };
         if realm == self.active_realm { return self.call_value_in_realm(function, args, this, host); }
         self.with_intrinsic_realm(realm, |runtime| runtime.call_value_in_realm(function, args, this, host))
+    }
+
+    #[inline(never)]
+    fn changes_native_access_caller(&self, function: &Value) -> bool {
+        if matches!(function, Value::Function(id) if matches!(self.functions.get(*id), Some(Function::Script { .. }))) {
+            self.native_access_caller.is_some()
+        } else { self.native_access_caller.is_none() }
+    }
+
+    // Saving a Result across restoration makes a materially larger debug frame.
+    // Keep that frame off ordinary recursive Script calls on small test stacks.
+    #[inline(never)]
+    fn call_with_native_access_caller(&mut self, function: Value, args: &[Value], this: Value,
+        host: &mut dyn Host) -> Result<Value, Fault> {
+        let realm = match &function { Value::Function(id) => self.function_realms.get(*id).copied().unwrap_or(self.active_realm), _ => self.active_realm };
+        let previous = self.native_access_caller;
+        self.native_access_caller = if matches!(&function, Value::Function(id) if matches!(self.functions.get(*id), Some(Function::Script { .. }))) {
+            None
+        } else { Some(self.browser_global.map(|(window, _)| window)) };
+        let result = if realm == self.active_realm { self.call_value_in_realm(function, args, this, host) }
+            else { self.with_intrinsic_realm(realm, |runtime| runtime.call_value_in_realm(function, args, this, host)) };
+        self.native_access_caller = previous;
+        result
     }
 
     fn call_value_in_realm(

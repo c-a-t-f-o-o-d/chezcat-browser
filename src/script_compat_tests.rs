@@ -996,6 +996,130 @@ fn set_attribute_ns_budget_failures_preserve_records_identity_and_detached_value
 }
 
 #[test]
+fn named_map_is_same_object_live_ordered_and_returns_stable_namespace_attrs() {
+    let (doc, _, page, outcome) = page("<html><body><p id=p title=old></p><p id=q></p></body></html>", &[r#"
+var p=document.getElementById('p'),q=document.getElementById('q'),map=p.attributes;
+if(map!==p.attributes||map===q.attributes||map.length!==2||map[0].name!=='id'||map[1].name!=='title')throw 'same object/order';
+var title=map.item(1);if(title!==p.getAttributeNode('TITLE')||map.getNamedItem('TITLE')!==title||map.getNamedItemNS(null,'title')!==title||map.getNamedItemNS(null,'TITLE')!==null)throw 'shared identities/names';
+p.setAttributeNS('urn:a','p:key','one');p.setAttributeNS('urn:b','p:key','two');
+var a=map[2],b=map.item(3);if(map.length!==4||map.getNamedItem('p:key')!==a||map.getNamedItemNS('urn:b','key')!==b)throw 'namespace/order';
+p.setAttributeNS('urn:a','q:key','new');if(map[2]!==a||a.name!=='p:key'||a.value!=='new'||map.length!==4)throw 'replace';
+p.removeAttribute('title');if(map.length!==3||map[1]!==a||title.ownerElement!==null||title.value!=='old')throw 'live removal';
+p.setAttribute('title','fresh');if(map[3]===title||map[3].name!=='title'||map[3].value!=='fresh')throw 'append after remove';
+if(map[99]!==undefined||map.item(99)!==null||map.getNamedItem('absent')!==null||map.getNamedItemNS('urn:missing','key')!==null||'99' in map)throw 'missing distinction';
+var get=map.getNamedItem;if(get!==map.getNamedItem||get.call(q.attributes,'id')!==q.getAttributeNode('id'))throw 'borrowed current receiver';
+document.body.removeChild(p);if(map!==p.attributes||map.length!==4||map[1]!==a||a.ownerElement!==p)throw 'detached owner map';
+document.title='named-map-live-ok';
+"#]);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    assert_eq!(doc.title, "named-map-live-ok");
+}
+
+#[test]
+fn named_map_conversion_order_reentrancy_and_brands_use_the_existing_native_path() {
+    let (doc, _, page, outcome) = page("<p id=p title=old></p>", &[r#"
+var p=document.getElementById('p'),map=p.attributes,log='',marker={};
+if(map.item.length!==1||map.getNamedItem.length!==1||map.getNamedItemNS.length!==2)throw 'lengths';
+var ns={toString:function(){log+='N';return '';}};var local={toString:function(){log+='L';return 'title';}};
+if(map.getNamedItemNS(ns,local)!==p.getAttributeNode('title')||log!=='NL')throw 'ordered DOMString';
+var calls=0,index={valueOf:function(){calls++;return 4294967297;},toString:function(){throw 'wrong hint';}};
+if(map.item(index)!==map[1]||calls!==1||map.item(NaN)!==map[0]||map.item(Infinity)!==map[0]||map.item(-1)!==null)throw 'unsigned long';
+var rejected=0;log='';try{map.getNamedItemNS(ns);}catch(e){if(e.name==='TypeError')rejected++;}
+try{map.item();}catch(e){if(e.name==='TypeError')rejected++;}try{map.getNamedItem();}catch(e){if(e.name==='TypeError')rejected++;}
+for(var bad of [{},window,document,p,p.style,p.dataset,document.createTextNode('x')]){try{map.getNamedItemNS.call(bad,ns,local);}catch(e){if(e.name==='TypeError')rejected++;}}
+if(log!==''||rejected!==10)throw 'brand/arity before conversion';
+try{map.getNamedItem(Symbol());}catch(e){if(e.name==='TypeError')rejected++;}try{map.item(Symbol());}catch(e){if(e.name==='TypeError')rejected++;}
+var caught=false;try{map.getNamedItem({toString:function(){throw marker;}});}catch(e){caught=e===marker;}if(!caught||rejected!==12)throw 'abrupt completion';
+var old=map[1],fresh=map.getNamedItem({toString:function(){p.removeAttribute('title');p.setAttribute('title','after');return 'TITLE';}});
+if(fresh===old||fresh!==map[1]||fresh.value!=='after'||old.ownerElement!==null||old.value!=='old')throw 'lookup after conversion';
+document.title='named-map-conversion-ok';
+"#]);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    assert_eq!(doc.title, "named-map-conversion-ok");
+}
+
+#[test]
+fn named_map_index_descriptors_readonly_fields_and_missing_properties_are_honest() {
+    let (doc, _, page, outcome) = page("<p id=p title=old></p>", &[r#"
+var p=document.getElementById('p'),map=p.attributes,calls=0,rhs={toString:function(){calls++;return 'bad';}};
+map.length=rhs;map[0]=rhs;p.attributes=rhs;if(calls!==0||map.length!==2||map[0].value!=='p'||p.attributes!==map)throw 'readonly no conversion';
+var rejected=0;try{(function(){'use strict';map.length=3;})();}catch(e){if(e.name==='TypeError')rejected++;}
+try{(function(){'use strict';p.attributes={};})();}catch(e){if(e.name==='TypeError')rejected++;}if(rejected!==2)throw 'strict readonly';
+var d=Object.getOwnPropertyDescriptor(map,'0');if(d.value!==map[0]||d.writable||!d.enumerable||!d.configurable||!Object.hasOwn(map,'0'))throw 'index descriptor';
+if(Object.hasOwn(map,'length')||Object.getOwnPropertyDescriptor(map,'item')!==undefined||Object.getOwnPropertyDescriptor(map,'99')!==undefined)throw 'inherited/missing descriptors';
+if(delete map[0]||!delete map[99]||map.length!==2||map[0].value!=='p')throw 'indexed deletion';
+if(map.offlineAbsent!==undefined||'offlineAbsent' in map||typeof map.toString!=='function'||!('toString' in map))throw 'absence/prototype';
+Object.defineProperty(Object.prototype,'mapProbe',{configurable:true,get:function(){if(this!==map)throw 'wrong inherited receiver';return 42;}});
+if(map.mapProbe!==42||!('mapProbe' in map)||Object.hasOwn(map,'mapProbe'))throw 'read-only owner prototype tail';delete Object.prototype.mapProbe;
+document.title='named-map-descriptors-ok';
+"#]);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    assert_eq!(doc.title, "named-map-descriptors-ok");
+}
+
+#[test]
+fn named_map_laziness_quota_rollback_and_unsupported_surfaces_preserve_real_entries() {
+    let (mut doc, mut forms, mut page, outcome) = page("<p id=p title=old></p>", &[]);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    let node = (0..doc.nodes.len()).find(|&n| doc.attr(n, "id") == Some("p")).unwrap();
+    let object = node_handle(node);
+    let mut bridge = Bridge { doc: &mut doc, forms: &mut forms, state: &mut page.state };
+    let Value::Host(map) = bridge.get(object, "attributes").unwrap() else { panic!("missing map") };
+    let before = bridge.state.retained;
+    for _ in 0..4 { assert!(bridge.has(map, "0").unwrap()); assert!(matches!(bridge.get(map, "length").unwrap(), Value::Number(2.0))); }
+    assert!(bridge.state.attributes.is_empty()); assert_eq!(bridge.state.retained, before);
+    bridge.state.retained_limit = before;
+    assert!(bridge.get(map, "0").is_err()); assert!(bridge.state.attributes.is_empty()); assert_eq!(bridge.state.retained, before);
+    bridge.state.retained_limit = before + 100;
+    bridge.state.copy_work = 0;
+    assert!(bridge.get(map, "1").is_err()); assert!(bridge.state.attributes.is_empty());
+    bridge.state.copy_work = bridge.state.limits.copy_bytes;
+    let value = bridge.get(map, "1").unwrap();
+    assert!(matches!(value, Value::Host(handle) if script_attr::index(handle)==Some(0)));
+    assert_eq!(bridge.state.attributes.len(), 1);
+    assert!(bridge.own_keys(map).unwrap_err().contains("enumeration"));
+    assert!(bridge.get(map, "title").unwrap_err().contains("named-property"));
+    for name in ["setNamedItem", "setNamedItemNS", "removeNamedItem", "removeNamedItemNS"] {
+        assert!(bridge.method(map, name).is_none()); assert!(bridge.get(map, name).unwrap_err().contains("not implemented"));
+    }
+    bridge.doc.nodes[node].namespace = crate::html::Namespace::UnknownForeign;
+    assert!(!bridge.named_map_receiver(map)); assert!(bridge.get(object, "attributes").is_err()); assert!(bridge.get(map, "0").is_err());
+    assert!(!bridge.accepts_receiver(map, "item", map));
+    let invalid = script_named_map::handle(node_handle(bridge.doc.nodes.len() + 1));
+    assert!(!bridge.named_map_receiver(invalid)); assert!(bridge.get(invalid, "length").is_err());
+}
+
+#[test]
+fn named_map_unsupported_descriptor_definition_never_claims_or_publishes_mutation() {
+    let (mut doc, mut forms, mut page, outcome) = page("<p id=p title=old></p>", &["var p=document.getElementById('p'),map=p.attributes;"]);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    let outcome = page.console_eval(&mut doc, &mut forms, "Object.defineProperty(map,'0',{value:17,writable:true,enumerable:true,configurable:true});document.title='fabricated success';");
+    assert_eq!(outcome.errors, 1);
+    assert!(page.report().contains("Native host object prototypes and descriptors are not implemented"));
+    assert_ne!(doc.title, "fabricated success");
+    let outcome = page.console_eval(&mut doc, &mut forms, "if(map[0].value!=='p'||map.length!==2||map!==p.attributes)throw 'failed definition changed map';document.title='map-definition-refused';");
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    assert_eq!(doc.title, "map-definition-refused");
+}
+
+#[test]
+fn named_map_normal_browser_materializes_more_than_historical_attr_capacity() {
+    let mut markup = String::from("<p");
+    for i in 0..600 { markup.push_str(&format!(" data-{i}='{i}'")); }
+    markup.push_str(">Text</p>");
+    let mut doc = crate::html::parse(&markup);
+    doc.scripting_enabled = true;
+    let mut forms = Forms::new(&doc);
+    let mut page = Page::new();
+    let source = "var p=document.querySelector('p'),m=p.attributes;for(var i=0;i<600;i++){var a=m.item(i);if(a!==m[i]||a.value!==String(i)||a.ownerElement!==p)throw 'live index capacity';}if(m.length!==600||m[600]!==undefined||m.item(600)!==null)throw 'length';document.title='named-map-capacity-ok';";
+    let outcome = page.start(&mut doc, &mut forms, &[Script { node: 0, label: "original generous map fixture".into(), source: source.into() }]);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    assert_eq!(doc.title, "named-map-capacity-ok");
+    assert_eq!(page.state.attributes.len(), 600);
+    assert_eq!(page.state.limits.host.attribute_identities, 65_536);
+}
+
+#[test]
 fn tab_index_getter_uses_tag_defaults_and_physical_summary_parent() {
     let (doc, _, page, outcome) = page("<html><body><input id=hidden type=hidden><input id=disabled disabled><a id=a>No href</a><div id=d></div><details><i>lead</i><summary id=first>First</summary><summary id=second>Second</summary></details><summary id=outside>Outside</summary></body></html>", &[r#"
 for(var id of ['hidden','disabled','a']){if(document.getElementById(id).tabIndex!==0)throw 'default historical zero';}
@@ -1190,7 +1314,7 @@ fn attr_detach_retains_exact_value_bytes_and_budget_failures_publish_no_partial_
     assert_eq!(bridge.state.attributes[script_attr::index(attr).unwrap()].value, "original");
     bridge.set(attr, "value", Value::String("longer-value".into())).unwrap();
     assert_eq!(bridge.state.retained, before - "title".len() - "original".len() + "longer-value".len());
-    for invalid in [768 + 1, NODE_BASE - 1] {
+    for invalid in [768 + 1, NODE_BASE - 1, script_attr::ATTR_BASE + 1, script_attr::ATTR_BASE + 65_535] {
         assert!(bridge.get(invalid, "value").is_err());
         assert!(bridge.has(invalid, "value").is_err());
         assert!(!bridge.readonly_property(invalid, "name"));

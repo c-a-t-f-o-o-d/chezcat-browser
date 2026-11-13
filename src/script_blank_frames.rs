@@ -349,6 +349,34 @@ mod tests {
     const CREATE: &str = "var f=document.createElement('iframe');f.hidden=true;document.body.appendChild(f);var w=f.contentWindow;";
 
     #[test]
+    fn named_map_native_fields_and_saved_forwarders_validate_original_script_owner() {
+        let source = format!("{CREATE}{}", r#"
+var p=document.createElement('div');p.id='probe';var map=p.attributes,attr=p.getAttributeNode('id');
+var read=w.Function('m','return m.length;'),indexRead=w.Function('m','return m[0].value;'),present=w.Function('m','return "0" in m;');
+var own=w.Function('m','return Object.getOwnPropertyDescriptor(m,"0").value;');
+var converted=0,arg={toString:function(){converted++;return 'id';}},use=w.Function('m','arg','return m.getNamedItem(arg);');
+var saved=map.item,bound=saved.bind(map,0),forward=w.Function('f','m','return f.call(m,0);'),boundRead=w.Function('f','return f();');
+var applyRead=w.Function('f','m','return Function.prototype.call.apply(f,[m,0]);');
+if(read(map)!==1||indexRead(map)!=='probe'||!present(map)||own(map)!==attr||use(map,arg)!==attr||converted!==1||forward(saved,map)!==attr||boundRead(bound)!==attr||applyRead(saved,map)!==attr)throw 'same-origin native Map';
+document.title='named-map-owner-ok';
+"#);
+        let (mut doc, mut forms, mut page, outcome) = start(&source, &crate::csp::PolicySet::default());
+        assert_eq!(outcome.errors, 0, "{}", page.report());
+        assert_eq!(doc.title, "named-map-owner-ok");
+        let before = page.state.attributes.len();
+        page.set_location(&crate::navigation::Location {url:Some(crate::url::parse("https://other.test/").unwrap().0),path:None,fragment:String::new(),root:None});
+        for source in ["read(map);", "indexRead(map);", "present(map);", "own(map);", "use(map,arg);", "forward(saved,map);", "boundRead(bound);", "applyRead(saved,map);"] {
+            let outcome = page.console_eval(&mut doc, &mut forms, source);
+            assert_eq!(outcome.errors, 1, "{source}: {}", page.report());
+            assert!(page.report().contains("same-origin"), "{source}: {}", page.report());
+            assert_eq!(page.state.attributes.len(), before);
+        }
+        let outcome = page.console_eval(&mut doc, &mut forms, "if(converted!==1||map.length!==1||map[0]!==attr||attr.value!=='probe')throw 'denied read changed state';document.title='named-map-owner-restored';");
+        assert_eq!(outcome.errors, 0, "{}", page.report());
+        assert_eq!(doc.title, "named-map-owner-restored");
+    }
+
+    #[test]
     fn native_element_expandos_validate_owner_across_child_callee_realms() {
         let source=format!("{CREATE}{}",r#"
 var p=document.createElement('div');p.customProbe=11;

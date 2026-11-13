@@ -3,8 +3,8 @@
 use super::*;
 use crate::html::{AttributeName, AttributeNamespace};
 
-const ATTR_BASE: u32 = 768;
-const MAX_ATTRS: usize = 256;
+pub(super) const ATTR_BASE: u32 = 0x8200_0000;
+const MAX_ATTRS: usize = 65_536;
 
 pub(super) struct Attr {
     pub(super) owner: Option<usize>,
@@ -14,7 +14,7 @@ pub(super) struct Attr {
 }
 
 pub(super) fn index(handle: u32) -> Option<usize> {
-    (ATTR_BASE..NODE_BASE).contains(&handle).then(|| (handle - ATTR_BASE) as usize)
+    (ATTR_BASE..ATTR_BASE + MAX_ATTRS as u32).contains(&handle).then(|| (handle - ATTR_BASE) as usize)
 }
 
 fn property(name: &str) -> bool {
@@ -142,7 +142,7 @@ impl Bridge<'_> {
         Ok(())
     }
 
-    fn attr_element_node(&mut self, object: u32) -> Result<usize, String> {
+    pub(super) fn attr_element_node(&mut self, object: u32) -> Result<usize, String> {
         let node = self.node(object)?;
         if self.doc.nodes[node].namespace != crate::html::Namespace::Html {
             return Err("Attr namespace provenance for foreign parser contexts is unavailable.".into());
@@ -150,7 +150,7 @@ impl Bridge<'_> {
         Ok(node)
     }
 
-    fn lookup_attribute_node_at(&mut self, node: usize, slot: Option<usize>) -> Result<Value, String> {
+    pub(super) fn lookup_attribute_node_at(&mut self, node: usize, slot: Option<usize>) -> Result<Value, String> {
         let Some(slot) = slot else { return Ok(Value::Null); };
         let NodeKind::Element { attrs, .. } = &self.doc.nodes[node].kind else { unreachable!() };
         let name = &attrs[slot].name;
@@ -159,7 +159,8 @@ impl Bridge<'_> {
         if let Some(id) = self.state.attributes.iter().position(|attr| attr.owner == Some(node) && attr.name.same_expanded_name(name)) {
             return Ok(Value::Host(ATTR_BASE + id as u32));
         }
-        if self.state.attributes.len() >= MAX_ATTRS { return Err("Attr identity limit reached (256 per document).".into()); }
+        let limit = self.state.limits.host.attribute_identities.min(MAX_ATTRS);
+        if self.state.attributes.len() >= limit { return Err(format!("Attr identity limit reached ({limit} per document).")); }
         self.state.attributes.try_reserve(1).map_err(|_| "Attr storage reservation failed.")?;
         self.state.copies(name.bytes())?;
         self.state.replace_bytes(0, name.bytes())?;
