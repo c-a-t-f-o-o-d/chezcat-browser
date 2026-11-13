@@ -96,7 +96,7 @@ impl Runtime {
             Builtin::Symbol(Op::Description),
             NativeGetter::SymbolDescription,
         )?;
-        let constructor = self.binding_value(0, "Symbol")?;
+        let constructor = self.binding_value(self.global_environment, "Symbol")?;
         let owner = self.ordinary_id(Ordinary::from_value(&constructor).unwrap())?;
         self.prototype_method(owner, "for", Builtin::Symbol(Op::For))?;
         self.prototype_method(owner, "keyFor", Builtin::Symbol(Op::KeyFor))?;
@@ -313,7 +313,8 @@ impl Runtime {
             return self.call_accessor(accessor.get, receiver, &[], host);
         }
         if let Some(getter) = property.getter {
-            return self.native_getter(getter, receiver);
+            let function = property.value.clone();
+            return self.native_getter_in_realm(&function, getter, receiver);
         }
         let bytes = property.value.bytes();
         self.work(bytes)?;

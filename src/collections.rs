@@ -132,7 +132,7 @@ impl Runtime {
             let constructor =
                 self.native_function(Builtin::Collection(Op::Constructor(kind)), kind.name())?;
             self.put_binding(
-                0,
+                self.global_environment,
                 kind.name().into(),
                 Some(constructor),
                 Declaration::Var,

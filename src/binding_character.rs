@@ -14,7 +14,7 @@ impl Runtime {
             let current = self.environment(env);
             if current.bindings.contains_key(name) {
                 if name == "arguments" && current.arguments.is_some()
-                    || env == 0 && self.browser_global.is_some() && self.global_binding(name) {
+                    || env == self.global_environment && self.browser_global.is_some() && self.global_binding(name) {
                     return None;
                 }
                 return Some(env);
@@ -44,6 +44,7 @@ impl Runtime {
         let property = self.objects.get(prototype)?.properties.get(method)?;
         if property.getter.is_some() || property.accessor.is_some() { return None; }
         let Value::Function(function) = property.value else { return None };
+        if self.function_realms[function] != self.active_realm { return None; }
         if !matches!(self.functions.get(function), Some(Function::Native(Builtin::StringMethod("charCodeAt")))) {
             return None;
         }

@@ -2958,6 +2958,7 @@ pub struct Runtime {
     functions: Vec<Function>,
     /// Ordinary own properties and [[Prototype]] of each callable identity.
     function_properties: Vec<usize>,
+    function_realms: Vec<Option<usize>>,
     programs: Vec<Rc<Program>>,
     objects: Vec<Object>,
     symbols: Vec<symbols::Data>,
@@ -2978,6 +2979,7 @@ pub struct Runtime {
     array_prototype: Option<usize>,
     active_array_joins: Vec<usize>,
     regexp_prototype: Option<usize>,
+    regexp_constructor: Option<usize>,
     date_prototype: Option<usize>,
     url_roots: url_api::Roots,
     string_prototype: Option<usize>,
@@ -3014,6 +3016,9 @@ pub struct Runtime {
     call_depth: usize,
     strict: bool,
     intrinsic_realms: Vec<intrinsic_realms::IntrinsicRealm>,
+    global_environment: usize,
+    active_realm: Option<usize>,
+    parked_main_roots: Option<intrinsic_realms::ParkedRoots>,
 }
 
 impl Default for Runtime {
@@ -3046,6 +3051,7 @@ impl Runtime {
             free_environments: Vec::new(),
             functions: Vec::new(),
             function_properties: Vec::new(),
+            function_realms: Vec::new(),
             programs: Vec::new(),
             objects: Vec::new(),
             symbols: Vec::new(),
@@ -3066,6 +3072,7 @@ impl Runtime {
             array_prototype: None,
             active_array_joins: Vec::new(),
             regexp_prototype: None,
+            regexp_constructor: None,
             date_prototype: None,
             url_roots: url_api::Roots::default(),
             string_prototype: None,
@@ -3101,6 +3108,9 @@ impl Runtime {
             call_depth: 0,
             strict: false,
             intrinsic_realms: Vec::new(),
+            global_environment: 0,
+            active_realm: None,
+            parked_main_roots: None,
         };
         runtime.initialize_realm_intrinsics().expect("initial intrinsic capacity");
         runtime
@@ -3136,8 +3146,11 @@ impl Runtime {
             ("Function", Builtin::Function),
         ] {
             let value = self.native_function(builtin, name)?;
+            if name == "RegExp" {
+                if let Value::Function(id) = &value { self.regexp_constructor = Some(*id); }
+            }
             self
-                .put_binding(0, name.into(), Some(value), Declaration::Var, false)?;
+                .put_binding(self.global_environment, name.into(), Some(value), Declaration::Var, false)?;
         }
         self.initialize_intrinsic_prototypes()?;
         self.initialize_symbols()?;
@@ -3154,7 +3167,7 @@ impl Runtime {
             ("Infinity", Value::Number(f64::INFINITY)),
         ] {
             self
-                .put_binding(0, name.into(), Some(value), Declaration::Const, false)?;
+                .put_binding(self.global_environment, name.into(), Some(value), Declaration::Const, false)?;
         }
         let json = self.new_object(None)?;
         for (name, builtin) in [
@@ -3171,7 +3184,7 @@ impl Runtime {
         }
         self
             .put_binding(
-                0,
+                self.global_environment,
                 "JSON".into(),
                 Some(Value::Object(json)),
                 Declaration::Var,
@@ -3211,14 +3224,14 @@ impl Runtime {
         }
         self
             .put_binding(
-                0,
+                self.global_environment,
                 "Math".into(),
                 Some(Value::Object(math)),
                 Declaration::Var,
                 false,
             )?;
         self.global_attributes = self
-            .environment(0)
+            .environment(self.global_environment)
             .bindings
             .iter()
             .map(|(name, binding)| {
@@ -3252,6 +3265,7 @@ impl Runtime {
         if let Err(error) = self.define_global(name, value.clone()) {
             self.functions.pop();
             self.function_properties.pop();
+            self.function_realms.pop();
             return Err(error);
         }
         Ok(value)
@@ -3330,7 +3344,7 @@ impl Runtime {
         {
             return Err(Fault::new("Invalid global identifier.").display());
         }
-        self.put_binding(0, name.into(), Some(value), Declaration::Var, true)
+        self.put_binding(self.global_environment, name.into(), Some(value), Declaration::Var, true)
             .map_err(Fault::display)?;
         self.host_globals.insert(name.into());
         self.global_attributes.remove(name);
@@ -3342,9 +3356,9 @@ impl Runtime {
         let result = (|| {
             let program = self.register_program(source, false)?;
             self.strict = program.strict;
-            self.prepare(&program, &program.body, 0, true, host)?;
+            self.prepare(&program, &program.body, self.global_environment, true, host)?;
             let this = self.global_this()?;
-            match self.statements(&program, &program.body, 0, &this, host)? {
+            match self.statements(&program, &program.body, self.global_environment, &this, host)? {
                 Control::Normal(value) => Ok(value.unwrap_or(Value::Undefined)),
                 _ => Err(Fault::new(
                     "Unexpected control completion outside a function or loop.",
@@ -3363,13 +3377,14 @@ impl Runtime {
     }
 
     fn is_eval(&self, value: &Value) -> bool {
-        matches!(value, Value::Function(id) if matches!(self.functions.get(*id), Some(Function::Native(Builtin::Eval))))
+        matches!(value, Value::Function(id) if matches!(self.functions.get(*id), Some(Function::Native(Builtin::Eval)))
+            && self.function_realms.get(*id).copied().flatten() == self.active_realm)
     }
 
     fn global_this(&mut self) -> Result<Value, Fault> {
         if let Some((handle, _)) = self.browser_global {
             Ok(Value::Host(handle))
-        } else if let Some(environment) = self.lookup(0, "window")? {
+        } else if let Some(environment) = self.lookup(self.global_environment, "window")? {
             self.binding_value(environment, "window")
         } else {
             Ok(Value::Undefined)
@@ -3401,7 +3416,7 @@ impl Runtime {
             let program =
                 self.register_program_context(source, false, direct.is_some() && self.strict)?;
             self.strict = program.strict;
-            let outer = direct.map_or(0, |(environment, _)| environment);
+            let outer = direct.map_or(self.global_environment, |(environment, _)| environment);
             let this = if let Some((_, this)) = direct {
                 self.copy_value(this)?
             } else {
@@ -3491,7 +3506,7 @@ impl Runtime {
             let ExprKind::Function(template) = program.exprs[expression].kind else {
                 unreachable!()
             };
-            self.make_function(&program, template, 0, &Value::Undefined)
+            self.make_function(&program, template, self.global_environment, &Value::Undefined)
         })();
         if result
             .as_ref()
@@ -3741,7 +3756,7 @@ impl Runtime {
         }
     }
     fn global_binding(&self, name: &str) -> bool {
-        self.environment(0)
+        self.environment(self.global_environment)
             .bindings
             .get(name)
             .is_some_and(|binding| {
@@ -3778,7 +3793,7 @@ impl Runtime {
             let value = host.get(handle, name).map_err(Fault::new)?;
             self.checked_value(value)
         } else if self.global_binding(name) {
-            self.binding_value(0, name)
+            self.binding_value(self.global_environment, name)
         } else {
             self.get_ordinary_property_with_receiver(
                 Ordinary::Object(properties),
@@ -3797,7 +3812,7 @@ impl Runtime {
             // conversions and validation as member assignments on other hosts.
             self.host_write(handle, name, value, host)
         } else if self.global_binding(&name) {
-            self.store_binding(0, &name, value, false)
+            self.store_binding(self.global_environment, &name, value, false)
         } else {
             self.assign_ordinary_property_with_receiver(
                 Ordinary::Object(properties),
@@ -3815,7 +3830,7 @@ impl Runtime {
         name: &str,
         host: &mut dyn Host,
     ) -> Result<Value, Fault> {
-        if env == 0
+        if env == self.global_environment
             && self.browser_global.is_some()
             && self.global_binding(name)
             && host.owns_global_property(name)
@@ -3834,12 +3849,12 @@ impl Runtime {
         initialize: bool,
         host: &mut dyn Host,
     ) -> Result<(), Fault> {
-        if env == 0
+        if env == self.global_environment
             && self.is_operation_global(name)
-            && !self.environment(0).bindings.contains_key(name)
+            && !self.environment(self.global_environment).bindings.contains_key(name)
         {
             self.set_global(name.into(), value, host)
-        } else if env == 0
+        } else if env == self.global_environment
             && self.browser_global.is_some()
             && self.global_binding(name)
             && host.owns_global_property(name)
@@ -3897,7 +3912,7 @@ impl Runtime {
             ));
         }
         if !initialize
-            && env == 0
+            && env == self.global_environment
             && self
                 .global_attributes
                 .get(name)
@@ -4017,7 +4032,7 @@ impl Runtime {
                 StmtKind::Declare(Declaration::Let | Declaration::Const, names) => {
                     for (pattern, _) in names {
                         for name in program.pattern_names_with_work(*pattern, |n| self.work(n))? {
-                            if environment == 0 {
+                            if environment == self.global_environment {
                                 self.check_operation_lexical(&name)?;
                             }
                             if self.environment(environment).bindings.contains_key(&name) {
@@ -4056,7 +4071,7 @@ impl Runtime {
                 )));
             }
         }
-        if variable_environment == 0 {
+        if variable_environment == self.global_environment {
             if let Some((_, properties)) = self.browser_global {
                 // Global bindings and Window expandos have separate storage in
                 // this subset. Migrating an accessor would invoke its getter
@@ -4088,7 +4103,7 @@ impl Runtime {
                 }
             }
         }
-        if variable_environment == 0 {
+        if variable_environment == self.global_environment {
             for name in &variable_names {
                 self.check_operation_declaration(name, false)?;
             }
@@ -4100,7 +4115,7 @@ impl Runtime {
         }
         for name in variable_names {
             self.step()?;
-            if variable_environment == 0 && self.is_operation_global(&name) {
+            if variable_environment == self.global_environment && self.is_operation_global(&name) {
                 self.declare_operation_var(&name, environment != variable_environment)?;
                 continue;
             }
@@ -4109,7 +4124,7 @@ impl Runtime {
                 .bindings
                 .contains_key(&name)
             {
-                let value = if variable_environment == 0 {
+                let value = if variable_environment == self.global_environment {
                     if let Some((_, properties)) = self.browser_global {
                         if self.object(properties)?.properties.contains_key(&name) {
                             let value = self.get_property_with_host(properties, &name, host)?;
@@ -4124,6 +4139,12 @@ impl Runtime {
                 } else {
                     Value::Undefined
                 };
+                // A new sloppy-eval global is configurable. Keep the descriptor
+                // in this realm, charging its retained name copy before effects.
+                let eval_global = variable_environment == self.global_environment
+                    && environment != variable_environment
+                    && self.browser_global.is_some_and(|(_, properties)| !self.objects[properties].properties.contains_key(&name));
+                let descriptor_name = if eval_global { self.work(name.len())?; Some(name.clone()) } else { None };
                 self.put_binding(
                     variable_environment,
                     name,
@@ -4131,6 +4152,7 @@ impl Runtime {
                     Declaration::Var,
                     false,
                 )?;
+                if let Some(name) = descriptor_name { self.global_attributes.insert(name, (true, true, true)); }
             }
         }
         for &statement in body {
@@ -4155,7 +4177,7 @@ impl Runtime {
                             Some((false, false, true)),
                         )?;
                     }
-                    if variable_environment == 0 && self.is_operation_global(name) {
+                    if variable_environment == self.global_environment && self.is_operation_global(name) {
                         self.declare_operation_function(
                             name,
                             function,
@@ -4163,7 +4185,7 @@ impl Runtime {
                         )?;
                         continue;
                     }
-                    if variable_environment == 0 && host.owns_global_property(name) {
+                    if variable_environment == self.global_environment && host.owns_global_property(name) {
                         if let Some((handle, _)) = self.browser_global {
                             host.set(handle, name, self.copy_value(&function)?)
                                 .map_err(Fault::new)?;
@@ -4182,7 +4204,7 @@ impl Runtime {
                     )?;
                     // A hoisted global function supersedes an earlier Window
                     // expando. Keep one owner for its value and retained bytes.
-                    if variable_environment == 0 {
+                    if variable_environment == self.global_environment {
                         if let Some((_, properties)) = self.browser_global {
                             self.remove_property(properties, name)?;
                         }
@@ -4316,9 +4338,6 @@ impl Runtime {
             Value::Object(id) => self.object(*id)?.regexp.clone(),
             _ => None,
         };
-        if existing.is_some() && matches!(flags, Value::Undefined) {
-            return self.copy_value(pattern);
-        }
         let pattern = if let Some(existing) = &existing {
             existing.source.clone()
         } else if matches!(pattern, Value::Undefined) {
@@ -6838,7 +6857,18 @@ impl Runtime {
         self.construct_value(constructor, &args, host)
     }
 
-    fn construct_value(
+    #[inline(always)]
+    fn construct_value(&mut self, constructor: Value, args: &[Value], host: &mut dyn Host) -> Result<Value, Fault> {
+        let realm = match &constructor { Value::Function(id) => self.function_realms.get(*id).copied().unwrap_or(self.active_realm), _ => self.active_realm };
+        if realm == self.active_realm { return self.construct_value_in_realm(constructor, args, host); }
+        if !self.from_constructor(&constructor)? {
+            self.step()?;
+            return Err(Fault::exception("TypeError", "The value is not a constructor."));
+        }
+        self.with_intrinsic_realm(realm, |runtime| runtime.construct_value_in_realm(constructor, args, host))
+    }
+
+    fn construct_value_in_realm(
         &mut self,
         constructor: Value,
         args: &[Value],
@@ -7145,8 +7175,8 @@ impl Runtime {
                 }
             }
             Reference::Missing(_) => true,
-            Reference::Binding(0, name)
-                if self.browser_global.is_some() && self.global_attributes.contains_key(&name) =>
+            Reference::Binding(environment, name)
+                if environment == self.global_environment && self.browser_global.is_some() && self.global_attributes.contains_key(&name) =>
             {
                 self.delete_global(&name, host)?
             }
@@ -7232,7 +7262,7 @@ impl Runtime {
             {
                 return Ok(false);
             }
-            let binding = self.environment_mut(0).bindings.remove(name).unwrap();
+            let binding = self.environment_mut(self.global_environment).bindings.remove(name).unwrap();
             self.bindings -= 1;
             self.value_bytes -= binding.value.as_ref().map_or(0, Value::bytes);
             self.global_attributes.remove(name);
@@ -7547,7 +7577,14 @@ impl Runtime {
         }
     }
 
-    fn call_value(
+    #[inline(always)]
+    fn call_value(&mut self, function: Value, args: &[Value], this: Value, host: &mut dyn Host) -> Result<Value, Fault> {
+        let realm = match &function { Value::Function(id) => self.function_realms.get(*id).copied().unwrap_or(self.active_realm), _ => self.active_realm };
+        if realm == self.active_realm { return self.call_value_in_realm(function, args, this, host); }
+        self.with_intrinsic_realm(realm, |runtime| runtime.call_value_in_realm(function, args, this, host))
+    }
+
+    fn call_value_in_realm(
         &mut self,
         function: Value,
         args: &[Value],
@@ -8151,7 +8188,19 @@ impl Runtime {
             Builtin::Eval => Err(Fault::new("Intrinsic eval needs an execution context.")),
             Builtin::JsonParse => self.json_parse_builtin(args, host),
             Builtin::JsonStringify => self.json_stringify(args, host),
-            Builtin::RegExp => self.regexp_factory(args),
+            Builtin::RegExp => {
+                if matches!(args.get(1), None | Some(Value::Undefined)) {
+                    if let Some(Value::Object(id)) = args.first() {
+                        if self.object(*id)?.regexp.is_some() {
+                            let constructor = self.get_property_with_host(*id, "constructor", host)?;
+                            if matches!(constructor, Value::Function(id) if Some(id) == self.regexp_constructor) {
+                                return self.copy_value(&args[0]);
+                            }
+                        }
+                    }
+                }
+                self.regexp_factory(args)
+            }
             Builtin::EncodeUri(component) => {
                 let value = self.copy_value(value)?;
                 let value = self.primitive_with_hint(value, true, host)?;

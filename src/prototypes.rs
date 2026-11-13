@@ -114,6 +114,11 @@ impl Runtime {
             }
         };
         self.function_properties.push(properties);
+        let realm = match &self.functions[index] {
+            Function::Bound(bound) => self.function_realms[bound.target],
+            _ => self.active_realm,
+        };
+        self.function_realms.push(realm);
         if let Some(prototype) = self.function_prototype {
             self.objects[properties].prototype = Some(Ordinary::Function(prototype));
         }
@@ -192,7 +197,7 @@ impl Runtime {
         name: &str,
         prototype: Value,
     ) -> Result<(), Fault> {
-        let constructor = self.binding_value(0, name)?;
+        let constructor = self.binding_value(self.global_environment, name)?;
         let id = self.ordinary_id(Ordinary::from_value(&constructor).unwrap())?;
         self.store_property(
             id,
@@ -227,7 +232,7 @@ impl Runtime {
         for name in ["call", "apply", "bind", "toString"] {
             self.prototype_method(function_properties, name, Builtin::FunctionMethod(name))?;
         }
-        let Value::Function(object_constructor) = self.binding_value(0, "Object")? else {
+        let Value::Function(object_constructor) = self.binding_value(self.global_environment, "Object")? else {
             unreachable!()
         };
         let object_constructor = self.ordinary_id(Ordinary::Function(object_constructor))?;
@@ -297,7 +302,7 @@ impl Runtime {
         ] {
             self.prototype_method(array, name, Builtin::ArrayMethod(name))?;
         }
-        let Value::Function(array_constructor) = self.binding_value(0, "Array")? else {
+        let Value::Function(array_constructor) = self.binding_value(self.global_environment, "Array")? else {
             unreachable!()
         };
         let array_constructor = self.ordinary_id(Ordinary::Function(array_constructor))?;
@@ -348,7 +353,7 @@ impl Runtime {
         self.string_prototype = Some(string);
         self.initialize_string_object(string, String::new())?;
         self.constructor_prototype("String", Value::Object(string))?;
-        let Value::Function(string_constructor) = self.binding_value(0, "String")? else {
+        let Value::Function(string_constructor) = self.binding_value(self.global_environment, "String")? else {
             unreachable!()
         };
         let string_constructor = self.ordinary_id(Ordinary::Function(string_constructor))?;
@@ -486,7 +491,8 @@ impl Runtime {
                     .get(name)
                     .and_then(|property| property.getter)
                 {
-                    self.native_getter(field, value.value())
+                    let function = self.objects[owner].properties[name].value.clone();
+                    self.native_getter_in_realm(&function, field, value.value())
                 } else {
                     self.own_property(owner, name)
                 }
@@ -535,7 +541,8 @@ impl Runtime {
             .and_then(|property| property.getter)
         {
             let receiver = self.copy_value(receiver)?;
-            return self.native_getter(field, receiver);
+            let function = self.objects[owner].properties[name].value.clone();
+            return self.native_getter_in_realm(&function, field, receiver);
         }
         self.own_property(owner, name)
     }
@@ -1194,7 +1201,7 @@ impl Runtime {
         if let DescriptorTarget::Ordinary(object) = target {
             return self.own_descriptor(object, name);
         }
-        let value = self.binding_value(0, name)?;
+        let value = self.binding_value(self.global_environment, name)?;
         let attrs = self
             .global_attributes
             .get(name)
@@ -1238,7 +1245,7 @@ impl Runtime {
             descriptor.writable.unwrap_or(old.1),
             descriptor.configurable.unwrap_or(old.2),
         );
-        let previous = self.binding_value(0, &name)?;
+        let previous = self.binding_value(self.global_environment, &name)?;
         let value = descriptor.value.unwrap_or_else(|| previous.clone());
         if !old.2
             && (attrs.2
@@ -1250,8 +1257,8 @@ impl Runtime {
                 "Cannot redefine a nonconfigurable global property.",
             ));
         }
-        let kind = self.environment(0).bindings[&name].kind;
-        self.put_binding(0, name.clone(), Some(value), kind, true)?;
+        let kind = self.environment(self.global_environment).bindings[&name].kind;
+        self.put_binding(self.global_environment, name.clone(), Some(value), kind, true)?;
         self.global_attributes.insert(name, attrs);
         Ok(())
     }

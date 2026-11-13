@@ -26,7 +26,7 @@ impl Runtime {
             ("Array", "from", Op::ArrayFrom),
             ("Object", "fromEntries", Op::ObjectFromEntries),
         ] {
-            let constructor = self.binding_value(0, constructor)?;
+            let constructor = self.binding_value(self.global_environment, constructor)?;
             let owner = self.ordinary_id(self.ordinary_required(&constructor)?)?;
             self.prototype_method(owner, name, Builtin::Iterable(operation))?;
         }

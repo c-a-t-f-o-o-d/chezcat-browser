@@ -1,8 +1,8 @@
 //! Bounded allocation of independent intrinsic roots and detached global scopes.
 //!
-//! This is a prerequisite for real frames, not an exposed iframe API. Child
-//! function execution/Window routing must be implemented before publishing these
-//! roots to page code. All allocation/work/deadline accounting stays shared.
+//! Private realm execution is a prerequisite for real frames, not an iframe API.
+//! Window/Document routing must be implemented before publishing a frame. All
+//! allocation/work/deadline accounting stays shared.
 use super::*;
 
 const MAX_INTRINSIC_REALMS: usize = 8;
@@ -31,6 +31,7 @@ roots! {
     function_prototype: Option<usize>,
     array_prototype: Option<usize>,
     regexp_prototype: Option<usize>,
+    regexp_constructor: Option<usize>,
     date_prototype: Option<usize>,
     url_roots: url_api::Roots,
     string_prototype: Option<usize>,
@@ -52,9 +53,15 @@ pub(super) struct IntrinsicRealm {
     function_range: std::ops::Range<usize>,
 }
 
+pub(super) struct ParkedRoots {
+    roots: Roots,
+    promise_roots: (Option<usize>, Option<usize>),
+}
+
 impl Runtime {
     pub(super) fn immutable_object_prototype(&self, id: usize) -> bool {
         self.object_prototype == Some(id)
+            || self.parked_main_roots.as_ref().is_some_and(|main| main.roots.object_prototype == Some(id))
             || self.intrinsic_realms.iter().any(|realm| realm.roots.object_prototype == Some(id))
     }
 
@@ -64,39 +71,86 @@ impl Runtime {
             return Err(Fault::new("Intrinsic realm limit reached (8 detached realms)."));
         }
         self.step()?;
-        // Reserve the global environment first. Bootstrap cannot run page/host
-        // code, create script closures or allocate lexical environments. Slot 0
-        // is borrowed only during this synchronous intrinsic bootstrap, then
-        // its exact original Environment is restored before any return.
-        let global_environment = self.new_environment(0, true)?;
-        let mut empty = self.environments[global_environment].take().unwrap();
-        empty.parent = None;
-        empty.captured = true;
-        let parent_environment = self.environments[0].replace(empty);
-        let parent_roots = Roots::take(self);
-        let parent_promises = (self.promises.prototype.take(), self.promises.constructor.take());
+        let global_environment = self.new_environment(self.global_environment, true)?;
+        self.environment_mut(global_environment).parent = None;
+        self.environment_mut(global_environment).captured = true;
         let start = self.functions.len();
-        let result = self.initialize_realm_intrinsics();
-        let roots = Roots::take(self);
-        let promise_roots = (self.promises.prototype.take(), self.promises.constructor.take());
-        let child_environment = std::mem::replace(&mut self.environments[0], parent_environment);
-        self.environments[global_environment] = child_environment;
-        parent_roots.restore(self);
-        self.promises.prototype = parent_promises.0;
-        self.promises.constructor = parent_promises.1;
+        let id = self.intrinsic_realms.len();
+        let previous = self.active_realm;
+        self.intrinsic_realms.push(IntrinsicRealm {
+            global_environment, roots: Roots::default(), promise_roots: (None, None),
+            function_range: start..start,
+        });
+        let result = self.with_intrinsic_realm(Some(id), |runtime| runtime.initialize_realm_intrinsics());
         if let Err(error) = result {
             // Failed work is not refunded. Unreachable partial arena objects
             // remain bounded by the original aggregate caps; no roots/handles
             // are published. Drop the unexposed global's binding storage.
             self.discard_environment(global_environment);
+            self.intrinsic_realms.pop();
+            for realm in &mut self.function_realms[start..] { *realm = previous; }
             return Err(error);
         }
-        let id = self.intrinsic_realms.len();
-        self.intrinsic_realms.push(IntrinsicRealm {
-            global_environment, roots, promise_roots,
-            function_range: start..self.functions.len(),
-        });
+        self.intrinsic_realms[id].function_range = start..self.functions.len();
         Ok(id)
+    }
+
+    fn switch_intrinsic_realm(&mut self, target: Option<usize>) -> Result<(), Fault> {
+        if target == self.active_realm { return Ok(()); }
+        if target.is_some_and(|id| id >= self.intrinsic_realms.len()) {
+            return Err(Fault::new("Invalid intrinsic realm handle."));
+        }
+        let parked = ParkedRoots { roots: Roots::take(self),
+            promise_roots: (self.promises.prototype.take(), self.promises.constructor.take()) };
+        if let Some(id) = self.active_realm {
+            self.intrinsic_realms[id].roots = parked.roots;
+            self.intrinsic_realms[id].promise_roots = parked.promise_roots;
+        } else {
+            self.parked_main_roots = Some(parked);
+        }
+        let incoming = if let Some(id) = target {
+            self.global_environment = self.intrinsic_realms[id].global_environment;
+            ParkedRoots { roots: std::mem::take(&mut self.intrinsic_realms[id].roots),
+                promise_roots: std::mem::replace(&mut self.intrinsic_realms[id].promise_roots, (None, None)) }
+        } else {
+            self.global_environment = 0;
+            self.parked_main_roots.take().expect("parked main realm")
+        };
+        incoming.roots.restore(self);
+        self.promises.prototype = incoming.promise_roots.0;
+        self.promises.constructor = incoming.promise_roots.1;
+        self.active_realm = target;
+        Ok(())
+    }
+
+    #[inline(never)]
+    pub(super) fn with_intrinsic_realm<T>(
+        &mut self, realm: Option<usize>, action: impl FnOnce(&mut Runtime) -> Result<T, Fault>,
+    ) -> Result<T, Fault> {
+        if realm == self.active_realm { return action(self); }
+        let previous = self.active_realm;
+        self.switch_intrinsic_realm(realm)?;
+        let mut result = action(self);
+        // Materialize only a lazy native Error that crosses a realm boundary,
+        // while its originating prototypes are active. Explicit thrown values
+        // keep identity; same-realm faults keep the original lazy accounting.
+        if let Err(error) = &mut result {
+            if let Some(Exception::Error(kind)) = error.exception.as_deref() {
+                match self.error_object(kind, Some(error.message.clone())) {
+                    Ok(value) => error.exception = Some(Box::new(Exception::Value(value))),
+                    Err(fatal) => result = Err(fatal),
+                }
+            }
+        }
+        self.switch_intrinsic_realm(previous).expect("restore known caller realm");
+        result
+    }
+
+    #[inline(always)]
+    pub(super) fn native_getter_in_realm(&mut self, function: &Value, field: NativeGetter, receiver: Value) -> Result<Value, Fault> {
+        let realm = match function { Value::Function(id) => self.function_realms[*id], _ => self.active_realm };
+        if realm == self.active_realm { return self.native_getter(field, receiver); }
+        self.with_intrinsic_realm(realm, |runtime| runtime.native_getter(field, receiver))
     }
 }
 
@@ -106,6 +160,7 @@ mod tests {
 
     struct NoHost;
     impl Host for NoHost {
+        fn allow_eval(&mut self) -> Result<bool, String> { Ok(true) }
         fn get(&mut self, _: u32, _: &str) -> Result<Value, String> { Err("unexpected host get".into()) }
         fn set(&mut self, _: u32, _: &str, _: Value) -> Result<(), String> { Err("unexpected host set".into()) }
         fn call(&mut self, _: u32, _: &str, _: &[Value]) -> Result<Value, String> { Err("unexpected host call".into()) }
@@ -114,6 +169,152 @@ mod tests {
     fn constructor(runtime: &Runtime, global: usize, name: &str) -> usize {
         let Some(Value::Function(index)) = runtime.environment(global).bindings[name].value else { panic!("constructor") };
         index
+    }
+
+    fn expose_test_realm(runtime: &mut Runtime) -> usize {
+        runtime.execute("var realmSecret=91;", &mut NoHost).unwrap();
+        let realm = runtime.allocate_intrinsic_realm().unwrap();
+        let values = runtime.with_intrinsic_realm(Some(realm), |runtime| {
+            runtime.bind_browser_global(77).map_err(Fault::new)?;
+            runtime.execute("var realmSecret=17;", &mut NoHost).map_err(Fault::new)?;
+            ["Array", "Function", "String", "TypeError", "EvalError", "eval", "Promise", "Uint8Array", "RegExp"]
+                .iter().map(|name| runtime.binding_value(runtime.global_environment, name).map(|value| (*name, value)))
+                .collect::<Result<Vec<_>, _>>()
+        }).unwrap();
+        for (name, value) in values {
+            let name = if name == "eval" { "ChildEval".into() } else { format!("Child{name}") };
+            runtime.define_global(&name, value).unwrap();
+        }
+        runtime.define_global("ChildWindow", Value::Host(77)).unwrap();
+        realm
+    }
+
+    #[test]
+    fn foreign_constructors_callbacks_closures_and_bound_targets_keep_their_realms() {
+        let mut runtime = Runtime::new();
+        expose_test_realm(&mut runtime);
+        runtime.execute(r#"
+if(ChildFunction('return realmSecret;')()!==17||realmSecret!==91)throw 'global isolation';
+if(ChildFunction('return this;')()!==ChildWindow)throw 'child global this';
+if(Object.getPrototypeOf(ChildArray(1,2))!==ChildArray.prototype)throw 'call allocation';
+if(Object.getPrototypeOf(new ChildArray(1,2))!==ChildArray.prototype)throw 'construct allocation';
+if(Object.getPrototypeOf(Uint8Array.of.call(ChildUint8Array,1))!==ChildUint8Array.prototype||Object.getPrototypeOf(ChildUint8Array.from.call(Uint8Array,[1]))!==Uint8Array.prototype)throw 'typed constructor receiver';
+var mapped=ChildArray.prototype.map.call([1],function(){return [Array,[]];});
+if(Object.getPrototypeOf(mapped)!==ChildArray.prototype||mapped[0][0]!==Array||Object.getPrototypeOf(mapped[0][1])!==Array.prototype)throw 'callback realm';
+if(Object.getPrototypeOf([])!==Array.prototype)throw 'caller restore';
+var closure=ChildFunction('return function(){return [realmSecret,Array];};')();
+if(closure()[0]!==17||closure()[1]!==ChildArray)throw 'closure realm';
+var bound=Function.prototype.bind.call(ChildArray,null,1).bind(null,2);
+if(Object.getPrototypeOf(new bound())!==ChildArray.prototype)throw 'bound target realm';
+if(ChildFunction('return Symbol.iterator;')()!==Symbol.iterator||ChildFunction('return Symbol.dispose;')()!==Symbol.dispose||ChildFunction('return Symbol.for("realm-key");')()!==Symbol.for('realm-key'))throw 'shared symbols';
+'ok';
+"#, &mut NoHost).unwrap();
+        assert_eq!(runtime.active_realm, None);
+        assert_eq!(runtime.global_environment, 0);
+        assert_eq!(runtime.function_realms.len(), runtime.functions.len());
+        runtime.collect_environments();
+        assert_eq!(runtime.execute("closure()[0];", &mut NoHost).unwrap().to_number(), 17.0);
+    }
+
+    #[test]
+    fn foreign_errors_and_direct_indirect_eval_preserve_identity_and_scope() {
+        let mut runtime = Runtime::new();
+        expose_test_realm(&mut runtime);
+        assert_eq!(runtime.execute(r#"
+var errors=0;
+try{ChildString.prototype.charCodeAt.call(null,0);}catch(e){if(Object.getPrototypeOf(e)===ChildTypeError.prototype)errors++;}
+try{ChildFunction('return null.x;')();}catch(e){if(Object.getPrototypeOf(e)===ChildTypeError.prototype)errors++;}
+try{new ChildArray.prototype.map();throw 'missing nonconstructor';}catch(e){if(Object.getPrototypeOf(e)!==TypeError.prototype)throw 'nonconstructor caller realm';}
+var marker={},thrower=ChildFunction('value','throw value;');
+try{thrower(marker);}catch(e){if(e===marker)errors++;}
+if(errors!==3)throw 'error realm';
+function probe(eval){let privateLocal=5;return eval('typeof privateLocal;');}
+if(probe(ChildEval)!=='undefined'||probe(eval)!=='number')throw 'eval identity';
+ChildEval('var childOnly=27;');
+if(typeof childOnly!=='undefined'||ChildFunction('return childOnly;')()!==27)throw 'indirect global';
+'ok';
+"#, &mut NoHost).unwrap().to_text(), "ok");
+        assert_eq!((runtime.active_realm, runtime.global_environment), (None, 0));
+    }
+
+    #[test]
+    fn regexp_call_identity_observes_constructor_and_creation_realm() {
+        let mut runtime = Runtime::new();
+        expose_test_realm(&mut runtime);
+        assert_eq!(runtime.execute(r#"
+var original=/x/g, NativeRegExp=RegExp, copied=ChildRegExp(original);
+if(copied===original||Object.getPrototypeOf(copied)!==ChildRegExp.prototype||copied.source!=='x'||copied.flags!=='g')throw 'foreign regexp';
+if(NativeRegExp(original)!==original||ChildRegExp(copied)!==copied)throw 'native identity';
+var reads=0;Object.defineProperty(original,'constructor',{get:function(){reads++;return ChildRegExp;},configurable:true});
+if(ChildRegExp(original)!==original||reads!==1)throw 'constructor getter';
+if(new ChildRegExp(original)===original||reads!==1)throw 'construct must clone without getter';
+var marker={};Object.defineProperty(original,'constructor',{get:function(){throw marker;}});
+try{ChildRegExp(original);throw 'missing getter exception';}catch(e){if(e!==marker)throw 'getter exception identity';}
+RegExp=function(){throw 'mutable global';};
+var same=/y/;if(NativeRegExp(same)!==same)throw 'intrinsic identity';
+'ok';
+"#, &mut NoHost).unwrap().to_text(), "ok");
+    }
+
+    #[test]
+    fn foreign_jobs_and_compilation_gate_keep_context_and_shared_queue() {
+        let mut runtime = Runtime::new();
+        expose_test_realm(&mut runtime);
+        runtime.execute("var observed=0;ChildPromise.resolve(1).then(ChildFunction('return [realmSecret,Array];')).then(function(v){if(v[0]!==17||v[1]!==ChildArray||Array===ChildArray)throw 'job realm';observed=42;});", &mut NoHost).unwrap();
+        runtime.execute("ChildEval('var realmJobOK=false;');Promise.resolve({then:ChildFunction('resolve','reject','realmJobOK=Object.getPrototypeOf(resolve)===Function.prototype;resolve(1);')});", &mut NoHost).unwrap();
+        assert!(runtime.has_microtasks());
+        assert!(runtime.microtask_checkpoint(&mut NoHost).unwrap().is_empty());
+        assert_eq!(runtime.binding_value(0, "observed").unwrap().to_number(), 42.0);
+        assert_eq!(runtime.execute("ChildFunction('return realmJobOK;')();", &mut NoHost).unwrap().to_text(), "true");
+        struct Deny;
+        impl Host for Deny {
+            fn allow_eval(&mut self) -> Result<bool, String> { Ok(false) }
+            fn get(&mut self, _: u32, _: &str) -> Result<Value, String> { Err("unexpected host get".into()) }
+            fn set(&mut self, _: u32, _: &str, _: Value) -> Result<(), String> { Err("unexpected host set".into()) }
+            fn call(&mut self, _: u32, _: &str, _: &[Value]) -> Result<Value, String> { Err("unexpected host call".into()) }
+        }
+        assert_eq!(runtime.execute("var blocked=0;try{ChildFunction('return 1;');}catch(e){if(Object.getPrototypeOf(e)===ChildEvalError.prototype)blocked++;}try{ChildEval('1;');}catch(e){if(Object.getPrototypeOf(e)===ChildEvalError.prototype)blocked++;}blocked;", &mut Deny).unwrap().to_number(), 2.0);
+        assert_eq!((runtime.active_realm, runtime.global_environment), (None, 0));
+    }
+
+    #[test]
+    fn foreign_call_guard_and_recovery_fit_one_mib_without_resetting_job() {
+        std::thread::Builder::new().stack_size(1024 * 1024).spawn(|| {
+            let mut runtime = Runtime::new();
+            expose_test_realm(&mut runtime);
+            runtime.execute("var child=ChildFunction('n','callback','if(n>0)return callback(n-1);return 42;');function parent(n){return child(n,parent);}", &mut NoHost).unwrap();
+            runtime.begin_job();
+            let deadline = runtime.job_deadline;
+            assert_eq!(runtime.execute("parent(8);", &mut NoHost).unwrap().to_number(), 42.0);
+            assert_eq!(runtime.job_deadline, deadline);
+            runtime.begin_job();
+            let error = runtime.execute("parent(80);", &mut NoHost).unwrap_err();
+            assert!(error.contains("limit"), "{error}");
+            assert_eq!((runtime.active_realm, runtime.global_environment), (None, 0));
+            assert_eq!((runtime.call_depth, runtime.eval_depth), (0, 0));
+            assert!(runtime.parked_main_roots.is_none());
+            runtime.begin_job();
+            assert_eq!(runtime.execute("parent(1);", &mut NoHost).unwrap().to_number(), 42.0);
+        }).unwrap().join().unwrap();
+    }
+
+    #[test]
+    fn child_global_declarations_keep_operation_preflight_and_eval_deletion() {
+        let mut runtime = Runtime::new();
+        let realm = expose_test_realm(&mut runtime);
+        runtime.with_intrinsic_realm(Some(realm), |runtime| {
+            runtime.define_global_operation("setTimeout", 77, "setTimeout", 1).map_err(Fault::new)?;
+            runtime.execute("Object.defineProperty(this,'setTimeout',{configurable:false});", &mut NoHost).map_err(Fault::new)?;
+            let program = runtime.register_program("let setTimeout=1;", false)?;
+            let error = runtime.prepare(&program, &program.body, runtime.global_environment, true, &mut NoHost).err().expect("restricted child global");
+            assert!(matches!(error.exception.as_deref(), Some(Exception::Error("SyntaxError"))));
+            assert!(error.message.contains("Lexical binding conflicts with global property"));
+            assert_eq!(runtime.execute("var setTimeout=8;setTimeout;", &mut NoHost).unwrap().to_number(), 8.0);
+            assert!(!runtime.environment(runtime.global_environment).bindings.contains_key("setTimeout"));
+            Ok(())
+        }).unwrap();
+        assert_eq!(runtime.execute("ChildEval('var removable=5;');if(ChildEval('delete removable;')!==true||ChildEval('typeof removable;')!=='undefined')throw 'deletion';typeof removable;", &mut NoHost).unwrap().to_text(), "undefined");
+        assert_eq!((runtime.active_realm, runtime.global_environment), (None, 0));
     }
 
     #[test]

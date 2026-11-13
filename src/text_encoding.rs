@@ -190,7 +190,7 @@ impl Runtime {
             }
             let constructor =
                 self.native_function(Builtin::TextEncoding(Op::Constructor(encoder)), name)?;
-            self.put_binding(0, name.into(), Some(constructor), Declaration::Var, false)?;
+            self.put_binding(self.global_environment, name.into(), Some(constructor), Declaration::Var, false)?;
             self.constructor_prototype(name, Value::Object(prototype))?;
             let fields: &[(&str, Field)] = if encoder {
                 &[("encoding", Field::EncoderEncoding)]

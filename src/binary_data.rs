@@ -272,7 +272,7 @@ impl Runtime {
         let Value::Function(function) = value else {
             unreachable!()
         };
-        self.put_binding(0, name.into(), Some(value), Declaration::Var, false)?;
+        self.put_binding(self.global_environment, name.into(), Some(value), Declaration::Var, false)?;
         self.constructor_prototype(name, Value::Object(prototype))?;
         Ok(function)
     }
@@ -421,7 +421,7 @@ impl Runtime {
         ] {
             self.binary_method_property(view, name, Op::ViewMethod(name))?;
         }
-        let number = self.binding_value(0, "Number")?;
+        let number = self.binding_value(self.global_environment, "Number")?;
         let properties = self.ordinary_id(Ordinary::from_value(&number).unwrap())?;
         for (name, value) in [
             ("EPSILON", f64::EPSILON),
@@ -444,7 +444,7 @@ impl Runtime {
             self.binary_method_property(properties, name, Op::NumberMethod(name))?;
         }
         for (name, global) in [("parseInt", "parseInt"), ("parseFloat", "parseFloat")] {
-            let value = self.binding_value(0, global)?;
+            let value = self.binding_value(self.global_environment, global)?;
             self.store_property(properties, name.into(), value, Some((false, true, true)))?;
         }
         Ok(())
@@ -1544,7 +1544,8 @@ impl Runtime {
         };
         let kind = *kind;
         if method == "of" {
-            let result = self.new_typed(kind, args.len())?;
+            let realm = self.function_realms[function];
+            let result = self.with_intrinsic_realm(realm, |runtime| runtime.new_typed(kind, args.len()))?;
             let view = self.typed_view(result).unwrap();
             for (index, value) in args.iter().enumerate() {
                 let number = self.binary_number(value, host)?;
@@ -1570,7 +1571,8 @@ impl Runtime {
         } else {
             self.binary_source_length(source, host)?
         };
-        let result = self.new_typed(kind, count)?;
+        let realm = self.function_realms[function];
+        let result = self.with_intrinsic_realm(realm, |runtime| runtime.new_typed(kind, count))?;
         let view = self.typed_view(result).unwrap();
         for index in 0..count {
             let value = if let Some(characters) = &characters {

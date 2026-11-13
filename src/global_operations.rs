@@ -20,7 +20,7 @@ impl Runtime {
         };
         if object != handle
             || self.operation_globals.contains(name)
-            || self.environment(0).bindings.contains_key(name)
+            || self.environment(self.global_environment).bindings.contains_key(name)
             || self.objects[properties].properties.contains_key(name)
         {
             return Err("Operation global conflicts with an existing binding or receiver.".into());

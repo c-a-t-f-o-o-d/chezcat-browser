@@ -44,7 +44,7 @@ impl Runtime {
                 Some(scope) => {
                     // Do not probe host ownership here: read_binding performs
                     // the original host queries exactly once on fallback.
-                    let global_route = scope == 0
+                    let global_route = scope == self.global_environment
                         && self.browser_global.is_some()
                         && self.global_binding(name);
                     let current = self.environment(scope);

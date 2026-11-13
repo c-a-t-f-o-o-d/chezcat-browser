@@ -698,7 +698,7 @@ impl Runtime {
                 Kind::Params => self.url_roots.params = Some(prototype),
             }
             let constructor = self.native_function(Builtin::Url(Op::Constructor(kind)), name)?;
-            self.put_binding(0, name.into(), Some(constructor), Declaration::Var, false)?;
+            self.put_binding(self.global_environment, name.into(), Some(constructor), Declaration::Var, false)?;
             self.constructor_prototype(name, Value::Object(prototype))?;
         }
         let url = self.url_roots.url.unwrap();
@@ -730,7 +730,7 @@ impl Runtime {
         for name in ["toString", "toJSON"] {
             self.url_method(url, name, Op::UrlString)?;
         }
-        let constructor = self.binding_value(0, "URL")?;
+        let constructor = self.binding_value(self.global_environment, "URL")?;
         let ctor = self.ordinary_id(Ordinary::from_value(&constructor).unwrap())?;
         for (name, parse) in [("canParse", false), ("parse", true)] {
             self.url_method(ctor, name, Op::Static(parse))?;

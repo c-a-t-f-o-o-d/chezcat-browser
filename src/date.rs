@@ -414,7 +414,7 @@ impl Runtime {
         let Value::Function(index) = constructor else {
             unreachable!()
         };
-        self.put_binding(0, "Date".into(), Some(constructor), Declaration::Var, false)?;
+        self.put_binding(self.global_environment, "Date".into(), Some(constructor), Declaration::Var, false)?;
         let prototype = self.new_object(None)?;
         // Date.prototype is an ordinary object without a [[DateValue]] slot.
         self.date_prototype = Some(prototype);

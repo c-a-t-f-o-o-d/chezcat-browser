@@ -74,7 +74,7 @@ impl Runtime {
             let program = self.parse_function_source(&source)?;
             let template = Self::function_source_template(&program, false, false)?;
             let program = self.retain_parsed_program(Rc::new(program))?;
-            let function = self.make_function(&program, template, 0, &Value::Undefined)?;
+            let function = self.make_function(&program, template, self.global_environment, &Value::Undefined)?;
             let properties = self.ordinary_id(self.ordinary_required(&function)?)?;
             // The name is metadata only. An unnamed parsed template creates no
             // private lexical `anonymous` binding and captures the global realm.

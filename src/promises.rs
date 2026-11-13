@@ -184,7 +184,7 @@ pub(super) struct Arena {
     capabilities: Vec<CapabilitySlot>,
     groups: Vec<Group>,
     elements: Vec<Element>,
-    jobs: VecDeque<Job>,
+    jobs: VecDeque<(Option<usize>, Job)>,
     draining: bool,
 }
 
@@ -205,7 +205,7 @@ impl Runtime {
         };
         self.promises.constructor = Some(index);
         self.put_binding(
-            0,
+            self.global_environment,
             "Promise".into(),
             Some(constructor),
             Declaration::Var,
@@ -253,7 +253,7 @@ impl Runtime {
             get: Some(getter),
             set: None,
         });
-        let array = self.binding_value(0, "Array")?;
+        let array = self.binding_value(self.global_environment, "Array")?;
         let array = self.ordinary_id(self.ordinary_required(&array)?)?;
         let array_getter =
             self.native_function(Builtin::Promise(Op::Species), "get [Symbol.species]")?;
@@ -273,7 +273,7 @@ impl Runtime {
         let callback =
             self.native_function(Builtin::Promise(Op::QueueMicrotask), "queueMicrotask")?;
         self.put_binding(
-            0,
+            self.global_environment,
             "queueMicrotask".into(),
             Some(callback),
             Declaration::Var,
@@ -426,8 +426,14 @@ impl Runtime {
         if self.promises.jobs.len() >= MAX_MICROTASKS {
             return Err(Fault::new("Microtask queue limit reached (1024)."));
         }
-        self.promise_retain(job.retained_bytes())?;
-        self.promises.jobs.push_back(job);
+        self.promise_retain(job.retained_bytes().saturating_add(std::mem::size_of::<Option<usize>>()))?;
+        let callback = match &job {
+            Job::Thenable { then: Value::Function(id), .. } => Some(*id),
+            Job::Reaction { handler: Some(id), .. } | Job::Callback(id) => Some(*id),
+            _ => None,
+        };
+        let realm = callback.map_or(self.active_realm, |id| self.function_realms[id]);
+        self.promises.jobs.push_back((realm, job));
         Ok(())
     }
 
@@ -675,10 +681,10 @@ impl Runtime {
         let constructor =
             self.native_function(Builtin::Promise(Op::AggregateError), "AggregateError")?;
         let constructor_object = self.ordinary_id(self.ordinary_required(&constructor)?)?;
-        let error = self.binding_value(0, "Error")?;
+        let error = self.binding_value(self.global_environment, "Error")?;
         self.objects[constructor_object].prototype = Ordinary::from_value(&error);
         self.put_binding(
-            0,
+            self.global_environment,
             "AggregateError".into(),
             Some(constructor),
             Declaration::Var,
@@ -1196,15 +1202,15 @@ impl Runtime {
         let mut diagnostics = Vec::new();
         let result = (|| {
             let mut executed = 0;
-            while let Some(job) = self.promises.jobs.pop_front() {
-                self.value_bytes -= job.retained_bytes();
+            while let Some((realm, job)) = self.promises.jobs.pop_front() {
+                self.value_bytes -= job.retained_bytes() + std::mem::size_of::<Option<usize>>();
                 if executed == MAX_CHECKPOINT_JOBS {
                     return Err(Fault::new(
                         "Microtask checkpoint limit reached (4096 jobs).",
                     ));
                 }
                 executed += 1;
-                if let Err(error) = self.run_promise_job(job, host) {
+                if let Err(error) = self.with_intrinsic_realm(realm, |runtime| runtime.run_promise_job(job, host)) {
                     if error.exception.is_none() {
                         return Err(error);
                     }
@@ -1244,8 +1250,8 @@ impl Runtime {
     /// Cancel existing queued callbacks and pending observers. Promise states
     /// remain ordinary document-owned values, but removed reactions never resume.
     pub fn cancel_microtasks(&mut self) {
-        for job in std::mem::take(&mut self.promises.jobs) {
-            self.value_bytes -= job.retained_bytes();
+        for (_, job) in std::mem::take(&mut self.promises.jobs) {
+            self.value_bytes -= job.retained_bytes() + std::mem::size_of::<Option<usize>>();
         }
         for object in &mut self.objects {
             if let Some(data) = &mut object.promise {
