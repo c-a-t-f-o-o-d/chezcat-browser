@@ -3602,7 +3602,7 @@ impl Runtime {
         outer: usize,
         variable: usize,
     ) -> Result<(), Fault> {
-        self.work(program.source.len())?;
+        self.work_as(program.source.len(), WorkKind::ProgramCompilation)?;
         let mut names = collect_var_names(program, &program.body);
         for &statement in &program.body {
             if let StmtKind::Function(name, _) = &program.stmts[statement].kind {
@@ -3704,7 +3704,7 @@ impl Runtime {
         {
             return Err(self.program_limit_fault(source, None, if handler { "handler" } else { "ordinary" }, Some(strict), false));
         }
-        self.work(source.len())?;
+        self.work_as(source.len(), WorkKind::ProgramCompilation)?;
         let program = Rc::new(if strict || self.eval_depth != 0 {
             Parser::parse_context(source, &mut self.regexp_work, strict, self.eval_depth)
         } else {
@@ -3879,7 +3879,7 @@ impl Runtime {
             return Err(Fault::new(format!("Retained value limit reached ({} bytes).", self.limits.heap.retained_values)));
         }
         let new = old.is_none();
-        self.work(new_bytes.saturating_add(name.len()))?;
+        self.work_as(new_bytes.saturating_add(name.len()), WorkKind::BindingStore)?;
         if name == "arguments" {
             if let Some(pending) = self.environment_mut(env).arguments.take() {
                 self.value_bytes -= pending.bytes();
@@ -3895,7 +3895,7 @@ impl Runtime {
     fn lookup(&mut self, mut env: usize, name: &str) -> Result<Option<usize>, Fault> {
         loop {
             self.step()?;
-            self.work(name.len())?;
+            self.work_as(name.len(), WorkKind::LookupName)?;
             if env == self.global_environment { self.ensure_global_intrinsics(name)?; }
             let current = self.environment(env);
             if current.bindings.contains_key(name) {
@@ -4204,11 +4204,11 @@ impl Runtime {
         function_scope: bool,
         host: &mut dyn Host,
     ) -> Result<(), Fault> {
-        self.work(std::mem::size_of_val(body))?;
+        self.work_as(std::mem::size_of_val(body), WorkKind::ScopeNames)?;
         // Check the complete scope before creating bindings or running a host
         // call. This also catches cross-script let/var collisions at global scope.
         let variable_names = if function_scope {
-            collect_var_names_with_work(program, body, |bytes| self.work(bytes))?
+            collect_var_names_with_work(program, body, |bytes| self.work_as(bytes, WorkKind::ScopeNames))?
         } else {
             Vec::new()
         };
@@ -4219,14 +4219,14 @@ impl Runtime {
             self.step()?;
             if function_scope {
                 if let StmtKind::Function(name, _) = &program.stmts[statement].kind {
-                    self.work(name.len().saturating_add(std::mem::size_of::<(&str, StmtId)>()))?;
+                    self.work_as(name.len().saturating_add(std::mem::size_of::<(&str, StmtId)>()), WorkKind::ScopeNames)?;
                     final_functions.insert(name.as_str(), statement);
                 }
             }
             match &program.stmts[statement].kind {
                 StmtKind::Declare(Declaration::Let | Declaration::Const, names) => {
                     for (pattern, _) in names {
-                        for name in program.pattern_names_with_work(*pattern, |n| self.work(n))? {
+                        for name in program.pattern_names_with_work(*pattern, |n| self.work_as(n, WorkKind::PatternPreparation))? {
                             if environment == self.global_environment {
                                 self.ensure_global_intrinsics(&name)?;
                                 self.check_operation_lexical(&name)?;
@@ -4361,7 +4361,7 @@ impl Runtime {
             match &program.stmts[statement].kind {
                 StmtKind::Declare(kind @ (Declaration::Let | Declaration::Const), names) => {
                     for (pattern, _) in names {
-                        for name in program.pattern_names_with_work(*pattern, |n| self.work(n))? {
+                        for name in program.pattern_names_with_work(*pattern, |n| self.work_as(n, WorkKind::PatternPreparation))? {
                             self.put_binding(environment, name, None, *kind, false)?;
                         }
                     }
@@ -4735,7 +4735,7 @@ impl Runtime {
         }
         let value = args.first().unwrap_or(&Value::Undefined);
         value.primitive()?;
-        self.work(value.bytes().saturating_mul(3))?;
+        self.work_as(value.bytes().saturating_mul(3), WorkKind::StringMethodInput)?;
         let text = value.script_text()?;
         let input: Vec<_> = text.encode_utf16().collect();
         let found = self.regexp_run(id, &input)?;
@@ -4756,7 +4756,7 @@ impl Runtime {
         args: &[Value],
         host: &mut dyn Host,
     ) -> Result<Value, Fault> {
-        self.work(text.len().saturating_mul(3))?;
+        self.work_as(text.len().saturating_mul(3), WorkKind::StringMethodInput)?;
         let pattern = args.first().unwrap_or(&Value::Undefined);
         let regex_id = match pattern {
             Value::Object(id) if self.object(*id)?.regexp.is_some() => Some(*id),
@@ -5216,7 +5216,7 @@ impl Runtime {
         if name == "__proto__" {
             return Err(Fault::new("Object prototype access is not implemented."));
         }
-        self.work(name.len())
+        self.work_as(name.len(), WorkKind::PropertyName)
     }
 
     /// Number/string adapters for the supported conversion APIs. Addition and
@@ -5481,7 +5481,7 @@ impl Runtime {
         if retained > self.limits.heap.retained_values {
             return Err(Fault::new(format!("Retained value limit reached ({} bytes).", self.limits.heap.retained_values)));
         }
-        self.work(new_bytes)?;
+        self.work_as(new_bytes, WorkKind::PropertyStore)?;
         if let Some((environment, binding)) = self.mapped_argument(id, &name) {
             if accessor.is_none() {
                 let parameter = self.copy_value(&value)?;
@@ -5566,12 +5566,13 @@ impl Runtime {
                 format!("Property enumeration limit reached ({} keys).", self.limits.heap.object_properties),
             ));
         }
-        self.work(
+        self.work_as(
             object
                 .properties
                 .len()
                 .saturating_mul(MAX_PROPERTY_BYTES * 2)
                 .saturating_add(indexed_length.saturating_mul(16)),
+            WorkKind::PropertyEnumeration,
         )?;
         let mut keys: Vec<_> = self.objects[id]
             .properties
@@ -6068,7 +6069,7 @@ impl Runtime {
                         // The parser's shared branch cap also bounds this path.
                         // Each visited if keeps its execution and copy charges;
                         // only native-stack growth is removed.
-                        self.work(std::mem::size_of::<StmtId>())
+                        self.work_as(std::mem::size_of::<StmtId>(), WorkKind::ConditionalTarget)
                             .map_err(|error| error.at(&program.source, at))?;
                         ancestors.push(current);
                         current = *next;
@@ -6291,7 +6292,7 @@ impl Runtime {
                         {
                             for (pattern, _) in declarations {
                                 for name in
-                                    program.pattern_names_with_work(*pattern, |n| self.work(n))?
+                                    program.pattern_names_with_work(*pattern, |n| self.work_as(n, WorkKind::PatternPreparation))?
                                 {
                                     self.put_binding(loop_env, name.clone(), None, *kind, false)?;
                                     if *kind == Declaration::Let {
@@ -6401,7 +6402,7 @@ impl Runtime {
             let right_env = if let Some((kind, pattern)) = lexical {
                 let scope = self.new_environment(env, false)?;
                 right_scope = Some(scope);
-                for name in program.pattern_names_with_work(*pattern, |n| self.work(n))? {
+                for name in program.pattern_names_with_work(*pattern, |n| self.work_as(n, WorkKind::PatternPreparation))? {
                     self.put_binding(scope, name, None, kind, false)?;
                 }
                 scope
@@ -6423,7 +6424,7 @@ impl Runtime {
                 let body_env = if let Some((kind, pattern)) = lexical {
                     let scope = self.new_environment(env, false)?;
                     iteration_scope = Some(scope);
-                    for name in program.pattern_names_with_work(*pattern, |n| self.work(n))? {
+                    for name in program.pattern_names_with_work(*pattern, |n| self.work_as(n, WorkKind::PatternPreparation))? {
                         self.put_binding(scope, name, None, kind, false)?;
                     }
                     self.initialize_pattern(
@@ -6646,7 +6647,7 @@ impl Runtime {
             self.push_transient_value(&value)?;
             self.push_transient_root(function_reachability::Edge::Environment(catch_env))?;
             if let Some(pattern) = binding {
-                for name in program.pattern_names_with_work(pattern, |n| self.work(n))? {
+                for name in program.pattern_names_with_work(pattern, |n| self.work_as(n, WorkKind::PatternPreparation))? {
                     self.put_binding(catch_env, name, None, Declaration::Let, false)?;
                 }
                 if let binding_patterns::Kind::Name(name) = &program.patterns[pattern].kind {
@@ -7843,7 +7844,7 @@ impl Runtime {
         self.step()?;
         // Equality and coercion also inspect strings; they share the same work
         // allowance as concatenation, searches, and value copying.
-        self.work(left.bytes().saturating_add(right.bytes()))?;
+        self.work_as(left.bytes().saturating_add(right.bytes()), WorkKind::BinaryInspection)?;
         if matches!(op, "===" | "!==") {
             return Ok(Value::Bool(strict_equal(&left, &right) == (op == "===")));
         }
@@ -7867,7 +7868,7 @@ impl Runtime {
             } else {
                 right
             };
-            self.work(left.bytes().saturating_add(right.bytes()))?;
+            self.work_as(left.bytes().saturating_add(right.bytes()), WorkKind::BinaryInspection)?;
             return Ok(Value::Bool(loose_equal(&left, &right)? == (op == "==")));
         }
         // Both operands have already been evaluated. Addition and comparisons
@@ -7889,10 +7890,11 @@ impl Runtime {
         left.primitive()?;
         right.primitive()?;
         if op == "+" && (matches!(left, Value::String(_)) || matches!(right, Value::String(_))) {
-            self.work(
+            self.work_as(
                 left.bytes()
                     .saturating_add(right.bytes())
                     .saturating_add(64),
+                WorkKind::ConcatenationScratch,
             )?;
             let mut text = left.script_text()?;
             let right = right.script_text()?;
@@ -7904,7 +7906,7 @@ impl Runtime {
         }
         if matches!(op, "<" | ">" | "<=" | ">=") {
             let order = if let (Value::String(left), Value::String(right)) = (&left, &right) {
-                self.work(left.len().saturating_add(right.len()))?;
+                self.work_as(left.len().saturating_add(right.len()), WorkKind::BinaryInspection)?;
                 Some(left.encode_utf16().cmp(right.encode_utf16()))
             } else {
                 left.script_number()?.partial_cmp(&right.script_number()?)
@@ -7917,7 +7919,7 @@ impl Runtime {
             });
             return Ok(Value::Bool(value));
         }
-        self.work(left.bytes().saturating_add(right.bytes()))?;
+        self.work_as(left.bytes().saturating_add(right.bytes()), WorkKind::BinaryInspection)?;
         let a = match numeric_left {
             Some(number) => number,
             None => left.script_number()?,
@@ -8313,7 +8315,7 @@ impl Runtime {
             if matches!(method, "charAt" | "charCodeAt" | "codePointAt") {
                 return self.string_character(&text, method, args);
             }
-            self.work(text.len().saturating_mul(3))?;
+            self.work_as(text.len().saturating_mul(3), WorkKind::StringMethodInput)?;
             return match method {
                 "split" => self.split_string(&text, args),
                 "slice" | "substring" => {
@@ -8597,7 +8599,7 @@ impl Runtime {
         host: &mut dyn Host,
     ) -> Result<Value, Fault> {
         let value = args.first().unwrap_or(&Value::Undefined);
-        self.work(value.bytes().saturating_mul(2))?;
+        self.work_as(value.bytes().saturating_mul(2), WorkKind::NativeInput)?;
         match builtin {
             Builtin::ThrowTypeError => Err(Fault::exception(
                 "TypeError",

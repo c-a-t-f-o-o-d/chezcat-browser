@@ -5,8 +5,8 @@
 
 use std::fmt::Write;
 
-const CATEGORY_COUNT: usize = 6;
-const MAX_REPORT_BYTES: usize = 2048;
+const CATEGORY_COUNT: usize = 22;
+const MAX_REPORT_BYTES: usize = 4096;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[repr(usize)]
@@ -17,6 +17,22 @@ pub(super) enum Kind {
     CharacterScan,
     ConversionOutput,
     Other,
+    BindingStore,
+    LookupName,
+    PropertyName,
+    PropertyStore,
+    BinaryInspection,
+    ConcatenationScratch,
+    ScopeNames,
+    ConditionalTarget,
+    PropertyEnumeration,
+    StringMethodInput,
+    NativeInput,
+    NumberScratch,
+    ArgumentCapture,
+    ProgramCompilation,
+    PatternPreparation,
+    ArrayJoinPreflight,
 }
 
 impl Kind {
@@ -27,6 +43,22 @@ impl Kind {
         Self::CharacterScan,
         Self::ConversionOutput,
         Self::Other,
+        Self::BindingStore,
+        Self::LookupName,
+        Self::PropertyName,
+        Self::PropertyStore,
+        Self::BinaryInspection,
+        Self::ConcatenationScratch,
+        Self::ScopeNames,
+        Self::ConditionalTarget,
+        Self::PropertyEnumeration,
+        Self::StringMethodInput,
+        Self::NativeInput,
+        Self::NumberScratch,
+        Self::ArgumentCapture,
+        Self::ProgramCompilation,
+        Self::PatternPreparation,
+        Self::ArrayJoinPreflight,
     ];
 
     fn label(self) -> &'static str {
@@ -37,6 +69,22 @@ impl Kind {
             Self::CharacterScan => "character-index-scan",
             Self::ConversionOutput => "conversion-output",
             Self::Other => "other",
+            Self::BindingStore => "binding-store",
+            Self::LookupName => "lookup-name",
+            Self::PropertyName => "property-name",
+            Self::PropertyStore => "property-store",
+            Self::BinaryInspection => "binary-inspection",
+            Self::ConcatenationScratch => "concatenation-preflight",
+            Self::ScopeNames => "scope-name-preparation",
+            Self::ConditionalTarget => "conditional-target-copy",
+            Self::PropertyEnumeration => "property-enumeration",
+            Self::StringMethodInput => "string-method-input",
+            Self::NativeInput => "native-input-preflight",
+            Self::NumberScratch => "number-radix-scratch",
+            Self::ArgumentCapture => "argument-capture",
+            Self::ProgramCompilation => "program-compilation",
+            Self::PatternPreparation => "pattern-name-preparation",
+            Self::ArrayJoinPreflight => "array-join-preflight",
         }
     }
 }

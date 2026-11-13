@@ -34,7 +34,7 @@ impl Runtime {
             }
         }
         let text = self.replacement_string_value(receiver, host)?;
-        self.work(text.len().saturating_mul(3))?;
+        self.work_as(text.len().saturating_mul(3), super::WorkKind::StringMethodInput)?;
         self.string_replace_mode(
             &text,
             pattern,

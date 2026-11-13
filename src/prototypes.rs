@@ -743,11 +743,12 @@ impl Runtime {
                 }
             }
             // A nonenumerable own property also shadows an inherited name.
-            self.work(
+            self.work_as(
                 self.objects[id]
                     .properties
                     .len()
                     .saturating_mul(super::MAX_PROPERTY_BYTES),
+                super::WorkKind::PropertyEnumeration,
             )?;
             seen.extend(self.objects[id].properties.keys().cloned());
             if self.objects[id].length.is_some() {

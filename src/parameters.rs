@@ -133,7 +133,7 @@ impl Runtime {
         };
         for parameter in &function.params {
             self.step()?;
-            for name in program.pattern_names_with_work(parameter.pattern, |n| self.work(n))? {
+            for name in program.pattern_names_with_work(parameter.pattern, |n| self.work_as(n, super::WorkKind::PatternPreparation))? {
                 if !self.environment(parameters).bindings.contains_key(&name) {
                     self.put_binding(parameters, name, None, Declaration::Var, false)?;
                 }
@@ -172,7 +172,7 @@ impl Runtime {
             let scope = self.new_environment(parameters, true)?;
             scopes[2] = Some(scope);
             self.push_transient_root(super::function_reachability::Edge::Environment(scope))?;
-            for name in collect_var_names_with_work(program, &function.body, |n| self.work(n))? {
+            for name in collect_var_names_with_work(program, &function.body, |n| self.work_as(n, super::WorkKind::PatternPreparation))? {
                 self.step()?;
                 if self.environment(scope).bindings.contains_key(&name) {
                     continue;

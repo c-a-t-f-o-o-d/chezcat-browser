@@ -21,7 +21,7 @@ fn bound() -> Fault {
 impl Natural {
     fn shifted(value: u64, shift: usize, runtime: &mut Runtime) -> Result<Self, Fault> {
         runtime.step()?;
-        runtime.work(std::mem::size_of::<Self>())?;
+        runtime.work_as(std::mem::size_of::<Self>(), WorkKind::NumberScratch)?;
         let mut out = Self {
             words: [0; LIMBS],
             len: 0,
@@ -43,7 +43,7 @@ impl Natural {
 
     fn copy(&self, runtime: &mut Runtime) -> Result<Self, Fault> {
         runtime.step()?;
-        runtime.work(std::mem::size_of::<Self>())?;
+        runtime.work_as(std::mem::size_of::<Self>(), WorkKind::NumberScratch)?;
         Ok(Self {
             words: self.words,
             len: self.len,
@@ -169,7 +169,7 @@ impl Runtime {
             }
         }
 
-        self.work(MAX_DIGITS)?;
+        self.work_as(MAX_DIGITS, WorkKind::NumberScratch)?;
         let mut digits = [0u8; MAX_DIGITS];
         let mut count = 0usize;
         let mut coefficient_parity = 0u32;

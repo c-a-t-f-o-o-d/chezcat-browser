@@ -50,7 +50,7 @@ impl Runtime {
             // Deletion invokes no user callbacks in this object model. Keep
             // the old length until completion so a work-limit interruption
             // cannot leave a stored index beyond the array's logical length.
-            self.work(object.properties.len().saturating_mul(MAX_PROPERTY_BYTES))?;
+            self.work_as(object.properties.len().saturating_mul(MAX_PROPERTY_BYTES), super::WorkKind::PropertyEnumeration)?;
             let mut keys = self.objects[id]
                 .properties
                 .iter()

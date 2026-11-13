@@ -46,11 +46,12 @@ impl Runtime {
             while let Some(object) = parent {
                 self.step()?;
                 let object = self.ordinary_id(object)?;
-                self.work(
+                self.work_as(
                     self.objects[object]
                         .properties
                         .len()
                         .saturating_mul(MAX_PROPERTY_BYTES),
+                    super::WorkKind::ArrayJoinPreflight,
                 )?;
                 if self.objects[object]
                     .properties

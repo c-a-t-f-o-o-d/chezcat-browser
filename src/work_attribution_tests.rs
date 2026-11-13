@@ -58,6 +58,45 @@ fn attribution_partitions_success_and_keeps_rejected_work_separate() {
 }
 
 #[test]
+fn attribution_other_subcategories_preserve_charge_values_order_and_fatal_boundaries() {
+    let kinds = [Kind::BindingStore, Kind::LookupName, Kind::PropertyName,
+        Kind::PropertyStore, Kind::BinaryInspection, Kind::ConcatenationScratch,
+        Kind::ScopeNames, Kind::ConditionalTarget, Kind::PropertyEnumeration,
+        Kind::StringMethodInput, Kind::NativeInput, Kind::NumberScratch,
+        Kind::ArgumentCapture, Kind::ProgramCompilation, Kind::PatternPreparation,
+        Kind::ArrayJoinPreflight];
+    for rejected_at in 0..kinds.len() {
+        let mut runtime = Runtime::for_test();
+        runtime.begin_job();
+        constrain(&mut runtime, rejected_at * 3 + 2);
+        let before = (runtime.steps, runtime.job_deadline);
+        for (index, kind) in kinds.into_iter().enumerate() {
+            let result = runtime.work_as(3, kind);
+            if index == rejected_at {
+                let error = result.unwrap_err();
+                assert!(error.exception.is_none() && error.message.contains("String/copy work limit"));
+                break;
+            }
+            result.unwrap();
+        }
+        assert_eq!((runtime.steps, runtime.job_deadline), before);
+        let snapshot = runtime.work_attribution.last_failure.unwrap();
+        assert_eq!(snapshot.job.totals().0, Counter { bytes: rejected_at * 3, calls: rejected_at });
+        assert_eq!(snapshot.job.last_rejected, Some(Rejected { kind: kinds[rejected_at], requested: 3, remaining_before: 2 }));
+        assert_eq!(snapshot.job.categories[Kind::Other as usize], Counter::default());
+    }
+    // Original code exercises every tagged route, with no captured program.
+    let mut runtime = Runtime::for_test();
+    runtime.begin_job();
+    assert_eq!(runtime.execute("var box={text:'a'};function grow(flag){var captured=arguments[1],local=box.text;if(flag)local=local+'b';box.text=local;return local;}grow(true,'capture').slice(0);Object.keys(box);String('a');(12345).toString(36);[1,2].join('');box.text;", &mut NoHost).unwrap().to_text(), "ab");
+    let job = &runtime.work_attribution.current;
+    for kind in kinds {
+        assert!(job.categories[kind as usize].bytes > 0, "{kind:?}");
+    }
+    assert_eq!(job.totals().0.bytes, runtime.job_usage().1);
+}
+
+#[test]
 fn attribution_constraint_rebasing_does_not_reset_successful_counters() {
     let mut runtime = Runtime::for_test();
     runtime.begin_job();

@@ -109,7 +109,7 @@ impl Runtime {
                 "Dynamic Function source limit reached (512 KiB).",
             ));
         }
-        self.work(text.len())?;
+        self.work_as(text.len(), super::WorkKind::ProgramCompilation)?;
         output.push_str(text);
         Ok(())
     }
@@ -124,7 +124,7 @@ impl Runtime {
 
     fn parse_function_source(&mut self, source: &str) -> Result<Program, Fault> {
         self.step()?;
-        self.work(source.len())?;
+        self.work_as(source.len(), super::WorkKind::ProgramCompilation)?;
         // Dynamic functions do not inherit caller strictness. Active evaluator
         // depth still counts because parsing happens on the same native stack.
         let program = Parser::parse_context(source, &mut self.regexp_work, false, self.eval_depth)?;
@@ -133,7 +133,7 @@ impl Runtime {
         if self.retained_ast.saturating_add(nodes) > MAX_RETAINED_AST {
             return Err(self.program_limit_fault(source, Some(nodes), "dynamic-validation", Some(false), true));
         }
-        self.work(nodes.saturating_mul(std::mem::size_of::<usize>()))?;
+        self.work_as(nodes.saturating_mul(std::mem::size_of::<usize>()), super::WorkKind::ProgramCompilation)?;
         Ok(program)
     }
 

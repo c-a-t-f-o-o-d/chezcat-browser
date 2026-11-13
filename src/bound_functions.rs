@@ -126,7 +126,7 @@ impl Runtime {
         if args.len() > MAX_ARGUMENTS {
             return Err(Fault::new("Call argument limit reached (256)."));
         }
-        self.work(std::mem::size_of_val(args))?;
+        self.work_as(std::mem::size_of_val(args), super::WorkKind::ArgumentCapture)?;
         let mut arguments = Vec::with_capacity(args.len());
         for value in args {
             arguments.push(self.copy_value(value)?);
@@ -149,7 +149,7 @@ impl Runtime {
                 } else {
                     0
                 });
-            self.work(work)?;
+            self.work_as(work, super::WorkKind::ArgumentCapture)?;
             let Function::Bound(bound) = &self.functions[index] else {
                 unreachable!()
             };

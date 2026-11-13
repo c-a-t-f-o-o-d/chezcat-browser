@@ -516,7 +516,7 @@ impl Runtime {
         enumerable_only: bool,
     ) -> Result<Vec<usize>, Fault> {
         let count = self.object(id)?.symbol_properties.len();
-        self.work(count.saturating_mul(std::mem::size_of::<(usize, usize)>()))?;
+        self.work_as(count.saturating_mul(std::mem::size_of::<(usize, usize)>()), super::WorkKind::PropertyEnumeration)?;
         let mut keys = self.objects[id]
             .symbol_properties
             .iter()

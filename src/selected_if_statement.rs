@@ -38,7 +38,7 @@ impl Runtime {
                     }
                     // Unlike a retained native child frame, this ID is a
                     // real heap copy and pays the finite copy allowance.
-                    self.work(std::mem::size_of::<StmtId>())
+                    self.work_as(std::mem::size_of::<StmtId>(), WorkKind::ConditionalTarget)
                         .map_err(|error| error.at(&program.source, at))?;
                     if if_parents.len() == if_parents.capacity() {
                         let count = if_parents

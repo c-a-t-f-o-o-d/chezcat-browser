@@ -52,7 +52,7 @@ impl Runtime {
         }
         for p in &function.params {
             if program
-                .pattern_names_with_work(p.pattern, |n| self.work(n))?
+                .pattern_names_with_work(p.pattern, |n| self.work_as(n, super::WorkKind::PatternPreparation))?
                 .iter()
                 .any(|name| name == "arguments")
             {
@@ -71,7 +71,7 @@ impl Runtime {
                     let mut found = false;
                     for (pattern, _) in names {
                         found |= program
-                            .pattern_names_with_work(*pattern, |n| self.work(n))?
+                            .pattern_names_with_work(*pattern, |n| self.work_as(n, super::WorkKind::PatternPreparation))?
                             .iter()
                             .any(|name| name == "arguments");
                     }
@@ -86,7 +86,7 @@ impl Runtime {
         if self.value_bytes.saturating_add(bytes) > self.limits.heap.retained_values {
             return Err(Fault::new(format!("Retained value limit reached ({} bytes).", self.limits.heap.retained_values)));
         }
-        self.work(bytes)?;
+        self.work_as(bytes, super::WorkKind::ArgumentCapture)?;
         let mut mapped = BTreeMap::new();
         if !function.strict && !function.non_simple(program) {
             let mut seen = HashSet::new();
@@ -97,7 +97,7 @@ impl Runtime {
                 let name = program
                     .pattern_name(parameter.pattern)
                     .expect("simple parameter name");
-                self.work(name.len())?;
+                self.work_as(name.len(), super::WorkKind::PatternPreparation)?;
                 if seen.insert(name) && index < values.len() {
                     mapped.insert(index.to_string(), name.to_owned());
                 }
