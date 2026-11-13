@@ -327,6 +327,15 @@ pub trait Host {
     fn date_now(&mut self) -> Result<f64, String> {
         Err("Date clock access is not available in this host.".into())
     }
+    /// Integral local calendar milliseconds for an integral UTC timestamp.
+    fn date_to_local(&mut self, _utc: f64) -> Result<f64, String> {
+        Err("Date local-time operations are not implemented in this host.".into())
+    }
+    /// Inverse local calendar mapping: earlier overlap occurrence, pre-gap bias.
+    /// NaN may represent a result proven outside the TimeClip range.
+    fn date_to_utc(&mut self, _local: f64) -> Result<f64, String> {
+        Err("Date local-time operations are not implemented in this host.".into())
+    }
     /// Opt a current-realm native receiver into Promise then-property lookup.
     /// Unregistered/opaque handles remain denied; this grants no new methods.
     fn promise_resolution_receiver(&self, _object: u32) -> bool {

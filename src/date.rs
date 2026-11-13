@@ -1,7 +1,6 @@
-//! Original bounded UTC Date operations over an unforgeable scalar object slot.
-//! The language runtime does not consult the OS clock or timezone. Current time
-//! requires an explicit host capability; local-time operations remain explicit
-//! unsupported capabilities rather than silently substituting UTC.
+//! Original bounded Date operations over an unforgeable scalar object slot.
+//! The runtime does not consult the OS clock/timezone. Current time and supported
+//! local-time operations require explicit host capabilities; no UTC substitution.
 //! https://tc39.es/ecma262/multipage/numbers-and-dates.html#sec-date-objects
 
 use super::{
@@ -626,6 +625,21 @@ impl Runtime {
                             if time.is_nan() && name.starts_with("get") {
                                 return Ok(Value::Number(f64::NAN));
                             }
+                            if matches!(name, "getSeconds" | "getMilliseconds" | "getMinutes" | "getHours" | "getTimezoneOffset") {
+                                let local = self.date_local_time(time, host)?;
+                                let value = match name {
+                                    "getSeconds" => (local.rem_euclid(60_000.0) / 1000.0).floor(),
+                                    "getMilliseconds" => local.rem_euclid(1000.0),
+                                    "getMinutes" => (local.rem_euclid(3_600_000.0) / 60_000.0).floor(),
+                                    "getHours" => (local.rem_euclid(DAY_MS) / 3_600_000.0).floor(),
+                                    "getTimezoneOffset" => (time-local) / 60_000.0,
+                                    _ => unreachable!(),
+                                };
+                                return Ok(Value::Number(if value == 0.0 { 0.0 } else { value }));
+                            }
+                            if name == "setSeconds" {
+                                return self.date_set_local_seconds(object, time, args, host).map(Value::Number);
+                            }
                             if time.is_nan()
                                 && matches!(name, "toString" | "toDateString" | "toTimeString")
                             {
@@ -640,6 +654,37 @@ impl Runtime {
         })();
         self.call_depth -= 1;
         result
+    }
+
+    fn date_local_time(&mut self, time: f64, host: &mut dyn Host) -> Result<f64, Fault> {
+        let local = host.date_to_local(time).map_err(Fault::new)?;
+        if !local.is_finite() || local.fract() != 0.0 || local.abs() > 9_007_199_254_740_991.0 {
+            return Err(Fault::new("Host timezone did not return exact finite calendar milliseconds."));
+        }
+        Ok(local)
+    }
+
+    fn date_set_local_seconds(&mut self, object: usize, time: f64, args: &[Value], host: &mut dyn Host) -> Result<f64, Fault> {
+        // Snapshot the old slot before conversions, preserving callback effects
+        // on invalid dates and on later host conversion failures.
+        let second = self.binary_number(args.first().unwrap_or(&Value::Undefined), host)?;
+        let millisecond = args.get(1).map(|value| self.binary_number(value, host)).transpose()?;
+        if time.is_nan() { return Ok(f64::NAN); }
+        let local = self.date_local_time(time, host)?;
+        let within = local.rem_euclid(DAY_MS);
+        let result = make_date((local/DAY_MS).floor(), make_time(
+            (within/3_600_000.0).floor(), (within.rem_euclid(3_600_000.0)/60_000.0).floor(),
+            second, millisecond.unwrap_or(local.rem_euclid(1000.0))));
+        let utc = if result.is_nan() { f64::NAN } else {
+            let utc = host.date_to_utc(result).map_err(Fault::new)?;
+            if utc.is_infinite() || utc.is_finite() && utc.fract() != 0.0 {
+                return Err(Fault::new("Host timezone did not return integral UTC milliseconds."));
+            }
+            utc
+        };
+        let value = clip(utc);
+        self.objects[object].date = Some(value);
+        Ok(value)
     }
 
     fn date_utc(&mut self, args: &[Value], host: &mut dyn Host) -> Result<f64, Fault> {
@@ -1008,12 +1053,131 @@ if(new Date(NaN).toUTCString()!=='Invalid Date'||new Date(NaN).toString()!=='Inv
             "new Date(2024,0);",
             "Date.parse('2024-01-01T12:00');",
             "new Date(0).getFullYear();",
+            "new Date(0).getSeconds();",
+            "new Date(0).setSeconds(12);",
             "String(new Date(0));",
             "new Date(0).setHours(12);",
         ] {
             let error = Runtime::for_test().execute(source, &mut NoHost).unwrap_err();
             assert!(error.contains("local-time"), "{source}: {error}");
         }
+    }
+
+    #[derive(Default)]
+    struct LocalHost {
+        offset: f64,
+        central: bool,
+        fail_inverse: bool,
+        bad_local: Option<f64>,
+        bad_utc: Option<f64>,
+        reads: usize,
+        writes: usize,
+    }
+    impl Host for LocalHost {
+        fn get(&mut self, _: u32, _: &str) -> Result<Value, String> { Err("No read".into()) }
+        fn set(&mut self, _: u32, _: &str, _: Value) -> Result<(), String> { Err("No write".into()) }
+        fn call(&mut self, _: u32, _: &str, _: &[Value]) -> Result<Value, String> { Err("No call".into()) }
+        fn date_to_local(&mut self, utc: f64) -> Result<f64, String> {
+            self.reads += 1;
+            let offset = if self.central {
+                if utc >= parse("2024-03-10T08:00Z").unwrap() && utc < parse("2024-11-03T07:00Z").unwrap() { -5.0*3_600_000.0 } else { -6.0*3_600_000.0 }
+            } else { self.offset };
+            Ok(self.bad_local.unwrap_or(utc + offset))
+        }
+        fn date_to_utc(&mut self, local: f64) -> Result<f64, String> {
+            self.writes += 1;
+            if self.fail_inverse { return Err("Timezone inverse unavailable".into()); }
+            // Explicit 2024 Central wall-time fixture: spring gap uses the old
+            // offset; the autumn repeated hour uses its earlier occurrence.
+            let offset = if self.central {
+                if local >= parse("2024-03-10T03:00Z").unwrap() && local < parse("2024-11-03T02:00Z").unwrap() { -5.0*3_600_000.0 } else { -6.0*3_600_000.0 }
+            } else { self.offset };
+            Ok(self.bad_utc.unwrap_or(local - offset))
+        }
+    }
+    fn local_succeeds(source: &str, host: &mut LocalHost) {
+        assert_eq!(Runtime::for_test().execute(source, host).unwrap().to_text(), "ok");
+    }
+
+    #[test]
+    fn dates_local_seconds_reflect_offset_rollover_truncation_and_positive_zero() {
+        let mut host = LocalHost { offset: 19_800_000.0, ..LocalHost::default() };
+        local_succeeds(r#"
+var d=new Date('2024-01-01T00:00:58.007Z');
+if(d.getHours()!==5||d.getMinutes()!==30||d.getSeconds()!==58||d.getMilliseconds()!==7||d.getTimezoneOffset()!==-330)throw 'local components';
+if(d.setSeconds(61.9,123.9)!==Date.parse('2024-01-01T00:01:01.123Z'))throw 'truncate/rollover';
+if(d.setSeconds(-1)!==Date.parse('2024-01-01T00:00:59.123Z'))throw 'negative rollover';
+for(var arg of [NaN,Infinity,1e100]){d.setTime(0);if(!isNaN(d.setSeconds(arg))||!isNaN(d.getTime()))throw 'invalid seconds';}
+d.setTime(0);if(!isNaN(d.setSeconds(1,undefined)))throw 'explicit undefined ms';
+d.setTime(0);if(!isNaN(d.setSeconds()))throw 'missing seconds';'ok';
+"#, &mut host);
+        let mut zero = LocalHost::default();
+        local_succeeds(r#"
+var d=new Date(-86400000);
+for(var method of ['getSeconds','getMilliseconds','getMinutes','getHours','getTimezoneOffset'])if(!Object.is(d[method](),0))throw 'negative zero';'ok';
+"#, &mut zero);
+    }
+
+    #[test]
+    fn dates_local_seconds_preserve_snapshot_callback_order_and_exception_identity() {
+        let mut host = LocalHost { offset: 19_800_000.0, ..LocalHost::default() };
+        local_succeeds(r#"
+var d=new Date('2000-01-02T03:04:05.006Z'),log='';
+d.setSeconds({valueOf:function(){log+='s';d.setTime(0);return 8;}},{valueOf:function(){log+='m';return 9;}});
+if(log!=='sm'||d.toISOString()!=='2000-01-02T03:04:08.009Z')throw 'snapshot/order';
+d.setTime(NaN);log='';var result=d.setSeconds({valueOf:function(){log+='s';d.setTime(17);return 1;}},{valueOf:function(){log+='m';d.setTime(23);return 2;}});
+if(!isNaN(result)||d.getTime()!==23||log!=='sm')throw 'invalid callback';
+var reads=0,caught=false;try{Date.prototype.setSeconds.call({}, {valueOf:function(){reads++;return 0;}});}catch(e){caught=e.name==='TypeError';}if(!caught||reads)throw 'brand';
+d.setTime(42);caught=false;try{d.setSeconds(Symbol());}catch(e){caught=e.name==='TypeError';}if(!caught||d.getTime()!==42)throw 'Symbol';
+var marker={};caught=false;try{d.setSeconds(1,{valueOf:function(){d.setTime(77);throw marker;}});}catch(e){caught=e===marker;}if(!caught||d.getTime()!==77)throw 'throw identity';
+Object.freeze(d);if(d.setSeconds(2)!==2077||d.getTime()!==2077)throw 'frozen slot';'ok';
+"#, &mut host);
+        assert_eq!((host.reads,host.writes),(2,2));
+    }
+
+    #[test]
+    fn dates_local_seconds_use_calendar_inverse_across_dst_fold_and_gap() {
+        let mut host = LocalHost { central:true, ..LocalHost::default() };
+        local_succeeds(r#"
+var d=new Date('2024-11-03T07:30:00.007Z');
+if(d.setSeconds(d.getSeconds())!==Date.parse('2024-11-03T06:30:00.007Z'))throw 'fold earlier';
+d.setTime(Date.parse('2024-11-03T06:58:30Z'));
+if(d.setSeconds(330)!==Date.parse('2024-11-03T08:03:30Z'))throw 'fall calendar rollover';
+d.setTime(Date.parse('2024-03-10T07:59:30Z'));
+if(d.setSeconds(90)!==Date.parse('2024-03-10T08:00:30Z'))throw 'spring pre-gap offset';'ok';
+"#, &mut host);
+    }
+
+    #[test]
+    fn dates_local_timezone_failure_is_fatal_preserves_mutations_and_recovers() {
+        let mut host = LocalHost { fail_inverse:true, ..LocalHost::default() };
+        let mut runtime = Runtime::for_test();
+        runtime.execute("var d=new Date(42),caught=false;", &mut host).unwrap();
+        let error = runtime.execute("try{d.setSeconds({valueOf:function(){d.setTime(17);return 1;}});}catch(e){caught=true;}", &mut host).unwrap_err();
+        assert!(error.contains("inverse unavailable"), "{error}");
+        runtime.begin_job();
+        assert_eq!(runtime.execute("!caught&&d.getTime()===17;", &mut host).unwrap().to_text(),"true");
+        host.fail_inverse = false;
+        runtime.begin_job();
+        assert_eq!(runtime.execute("d.setSeconds(2);", &mut host).unwrap().to_number(),2017.0);
+        for value in [f64::NAN,f64::INFINITY,0.5,9_007_199_254_740_992.0] {
+            host.bad_local = Some(value);
+            runtime.begin_job();
+            assert!(runtime.execute("d.getSeconds();", &mut host).unwrap_err().contains("calendar milliseconds"));
+        }
+        host.bad_local = None;
+        for value in [f64::INFINITY,0.5] {
+            host.bad_utc = Some(value);
+            runtime.begin_job();
+            assert!(runtime.execute("d.setSeconds(3);", &mut host).unwrap_err().contains("UTC milliseconds"));
+        }
+        runtime.begin_job();
+        assert_eq!(runtime.execute("d.getTime();", &mut host).unwrap().to_number(),2017.0);
+        let reads = host.reads;
+        let writes = host.writes;
+        runtime.begin_job();
+        assert_eq!(runtime.execute("var n=new Date(NaN);isNaN(n.getSeconds())&&isNaN(n.setSeconds(1));", &mut host).unwrap().to_text(),"true");
+        assert_eq!((host.reads,host.writes),(reads,writes));
     }
 
     #[test]

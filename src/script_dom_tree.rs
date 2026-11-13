@@ -394,6 +394,12 @@ impl Bridge<'_> {
             }
             return Ok(Some(self.html_border_property(node)));
         }
+        if property == "isMap" {
+            if self.doc.nodes[node].namespace == crate::html::Namespace::UnknownForeign {
+                return Err("Image-map reflection requires a known namespace context.".into());
+            }
+            return Ok(Some(self.html_image_map_property(node)));
+        }
         if common_node_property(property) || self.dom_method(object, property).is_some() {
             return Ok(Some(true));
         }
@@ -424,6 +430,7 @@ impl Bridge<'_> {
             return self.html_spacing_get(node, property).map(Some);
         }
         if property == "border" { return self.html_border_get(node).map(Some); }
+        if property == "isMap" { return self.html_image_map_get(node).map(Some); }
         if let Some(number) = node_constant(property) {
             return Ok(Some(Value::Number(f64::from(number))));
         }

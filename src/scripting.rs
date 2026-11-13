@@ -31,6 +31,8 @@ use dom_collections::collection_handle_index;
 mod dom_tree;
 #[path = "script_position.rs"]
 mod script_position;
+#[path = "script_timezone.rs"]
+mod script_timezone;
 use dom_tree::DomState;
 #[path = "script_attr.rs"]
 mod script_attr;
@@ -2701,6 +2703,22 @@ impl Host for Bridge<'_> {
         )
     }
 
+    fn date_to_local(&mut self, utc: f64) -> Result<f64, String> {
+        self.state.work(256)?;
+        if !self.state.enabled || !self.doc.scripting_enabled {
+            return Err("Date timezone access is unavailable while scripting is disabled.".into());
+        }
+        script_timezone::to_local(utc)
+    }
+
+    fn date_to_utc(&mut self, local: f64) -> Result<f64, String> {
+        self.state.work(256)?;
+        if !self.state.enabled || !self.doc.scripting_enabled {
+            return Err("Date timezone access is unavailable while scripting is disabled.".into());
+        }
+        script_timezone::to_utc(local)
+    }
+
     fn random(&mut self) -> Result<f64, String> {
         self.state.work(1)?;
         let mut bytes = [0u8; 8];
@@ -3330,6 +3348,9 @@ impl Host for Bridge<'_> {
             return Ok(());
         }
         let node = self.node(object)?;
+        if property == "isMap" && self.html_image_map_property(node) {
+            return self.attribute(node, "ismap", value.truthy().then(String::new));
+        }
         if property == "border" && self.html_border_property(node) {
             let value = self.text(&value)?;
             return self.attribute(node, "border", Some(value));
@@ -3722,7 +3743,8 @@ impl Host for Bridge<'_> {
             let image_attribute = tag(self.doc, node) == "img"
                 && matches!(name.as_str(), "src" | "alt" | "width" | "height")
                 || self.html_spacing_property(node, &name)
-                || name == "border" && self.html_border_property(node);
+                || name == "border" && self.html_border_property(node)
+                || name == "ismap" && self.html_image_map_property(node);
             if !matches!(
                 name.as_str(),
                 "id" | "class"

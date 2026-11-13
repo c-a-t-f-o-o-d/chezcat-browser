@@ -1,6 +1,51 @@
 use super::*;
 
 #[test]
+fn html_image_is_map_reflects_boolean_presence_without_coercion_and_keeps_attr_identity() {
+    let (doc, _, page, outcome) = page("<img id=i ismap='false'>", &[r#"
+var i=document.getElementById('i');if(i.isMap!==true||!('isMap' in i))throw 'presence';
+var a=i.getAttributeNode('ismap');i.isMap=true;if(i.getAttribute('ismap')!==''||a.value!==''||i.getAttributeNode('ismap')!==a)throw 'canonical/identity';
+var calls=0;i.isMap={toString:function(){calls++;throw 'string';},valueOf:function(){calls++;throw 'number';}};
+if(calls||!i.isMap)throw 'no conversion hooks';i.isMap=Symbol();if(!i.isMap)throw 'truthy Symbol';
+for(var v of [false,0,-0,NaN,'',null,undefined]){i.isMap=true;i.isMap=v;if(i.isMap!==false||i.hasAttribute('ismap'))throw 'falsy removal';}
+if(a.ownerElement!==null||a.value!=='')throw 'detached attr';
+for(var e of [document.createElement('img'),new Image()]){
+ if(e.isMap!==false||e.hasAttribute('ismap'))throw 'created default';
+ e.isMap='false';if(!e.isMap||e.getAttribute('ismap')!=='')throw 'truthy string';
+ e.removeAttribute('ismap');if(e.isMap)throw 'raw remove';
+ e.setAttribute('ismap','anything');if(!e.isMap)throw 'raw set';
+}
+for(var e of [document.createElement('input'),document.createElement('embed'),document.createElement('iframe'),document.createElement('div'),document.createTextNode('text')])if('isMap' in e||e.isMap!==undefined)throw 'wrong brand';
+if('isMap' in document)throw 'Document brand';document.title='image-map-ok';
+"#]);
+    assert_eq!(outcome.errors,0,"{}",page.report());
+    assert_eq!(doc.title,"image-map-ok");
+}
+
+#[test]
+fn html_image_is_map_failures_leave_real_attribute_unchanged() {
+    let (mut doc, mut forms, mut page, outcome) = page("<img id=i ismap=old>", &[]);
+    assert_eq!(outcome.errors,0,"{}",page.report());
+    let node = (0..doc.nodes.len()).find(|&n|doc.attr(n,"id")==Some("i")).unwrap();
+    page.begin_job();
+    let mut bridge = Bridge { doc:&mut doc, forms:&mut forms, state:&mut page.state };
+    bridge.state.host_work = 0;
+    assert!(bridge.set(node_handle(node),"isMap",Value::Bool(false)).is_err());
+    assert_eq!(bridge.doc.attr(node,"ismap"),Some("old"));
+    bridge.state.host_work = bridge.state.limits.host_work;
+    bridge.state.copy_work = 0;
+    assert!(bridge.set(node_handle(node),"isMap",Value::Bool(true)).is_err());
+    assert_eq!(bridge.doc.attr(node,"ismap"),Some("old"));
+    bridge.state.copy_work = bridge.state.limits.copy_bytes;
+    bridge.set(node_handle(node),"isMap",Value::Bool(false)).unwrap();
+    bridge.state.retained_limit = bridge.state.retained;
+    assert!(bridge.set(node_handle(node),"isMap",Value::Bool(true)).is_err());
+    assert_eq!(bridge.doc.attr(node,"ismap"),None);
+    bridge.doc.nodes[node].namespace = crate::html::Namespace::UnknownForeign;
+    assert!(bridge.get(node_handle(node),"isMap").unwrap_err().contains("namespace"));
+}
+
+#[test]
 fn html_border_reflects_real_strings_and_legacy_null_only_on_its_brands() {
     let (doc, _, page, outcome) = page("<img id=i border=' 05px '><table id=t border=' 05px '></table><p id=p>ordinary</p>", &[r#"
 if(document.getElementById('i').border!==' 05px '||document.getElementById('t').border!==' 05px ')throw 'raw reflection';
