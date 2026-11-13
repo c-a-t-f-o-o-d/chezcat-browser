@@ -2184,6 +2184,7 @@ impl Host for Bridge<'_> {
     fn number_setter(&self, object: u32, property: &str) -> bool {
         node_index(object).is_some_and(|node| tag(self.doc, node) == "img")
             && matches!(property, "width" | "height")
+            || node_index(object).is_some_and(|node| self.html_spacing_property(node, property))
     }
 
     fn argument_conversions(&self, object: u32, method: &str) -> &'static [(usize, bool)] {
@@ -2566,7 +2567,7 @@ impl Host for Bridge<'_> {
     }
 
     fn own_keys(&mut self, object: u32) -> Result<Vec<String>, String> {
-        if self.is_frame_handle(object) { return Err("Blank child native property enumeration is not implemented.".into()); }
+        if self.is_frame_handle(object) { return Err(format!("Blank child native property enumeration is not implemented (handle {object}).")); }
         self.state.work(1)?;
         if collection_handle_index(object).is_some() {
             return self.tag_collection_keys(object);
@@ -2811,6 +2812,7 @@ impl Host for Bridge<'_> {
                         | "bubbles"
                         | "eventPhase"
                         | "defaultPrevented"
+                        | "cancelBubble"
                         | "preventDefault"
                         | "stopPropagation"
                         | "stopImmediatePropagation"
@@ -3049,6 +3051,7 @@ impl Host for Bridge<'_> {
                 "bubbles" => Value::Bool(event.bubbles),
                 "eventPhase" => Value::Number(f64::from(event.phase)),
                 "defaultPrevented" => Value::Bool(event.prevented),
+                "cancelBubble" => Value::Bool(event.stopped),
                 "timeStamp" => Value::Number(event.timestamp),
                 "isTrusted" => Value::Bool(true),
                 name if event.keyboard.is_some() && keyboard_property(name) => {
@@ -3237,6 +3240,9 @@ impl Host for Bridge<'_> {
         if collection_handle_index(object).is_some() {
             return Err("Native HTMLCollection properties are read-only in this subset.".into());
         }
+        if object >= EVENT_BASE && property == "cancelBubble" {
+            return self.set_cancel_bubble(object, &value);
+        }
         if Self::location_string_setter(object, property) {
             return self.set_location_value(object, property, &value);
         }
@@ -3300,6 +3306,9 @@ impl Host for Bridge<'_> {
             return Ok(());
         }
         let node = self.node(object)?;
+        if self.html_spacing_property(node, property) {
+            return self.html_spacing_set(node, property, &value);
+        }
         if self.image_set(node, property, &value)? {
             return Ok(());
         }
@@ -3679,7 +3688,8 @@ impl Host for Bridge<'_> {
                 return value.map_or(Ok(Value::Null), |value| self.string(&value));
             }
             let image_attribute = tag(self.doc, node) == "img"
-                && matches!(name.as_str(), "src" | "alt" | "width" | "height");
+                && matches!(name.as_str(), "src" | "alt" | "width" | "height")
+                || self.html_spacing_property(node, &name);
             if !matches!(
                 name.as_str(),
                 "id" | "class"

@@ -52,6 +52,31 @@ pub(super) fn dataset_attribute(name: &str) -> String {
 }
 
 impl Bridge<'_> {
+    pub(super) fn html_spacing_property(&self, node: usize, name: &str) -> bool {
+        matches!(name, "vspace" | "hspace")
+            && self.doc.nodes.get(node).is_some_and(|item| item.namespace == crate::html::Namespace::Html)
+            && matches!(tag(self.doc, node), "img" | "input" | "object" | "embed" | "marquee")
+    }
+
+    pub(super) fn html_spacing_get(&mut self, node: usize, name: &str) -> Result<Value, String> {
+        if self.doc.nodes[node].namespace == crate::html::Namespace::UnknownForeign {
+            return Err("Spacing lookup requires a known namespace context.".into());
+        }
+        if !self.html_spacing_property(node, name) { return Ok(Value::Undefined); }
+        if let NodeKind::Element { attrs, .. } = &self.doc.nodes[node].kind {
+            self.state.work(attrs.len())?;
+        }
+        let value = self.doc.attr(node, name).unwrap_or("");
+        self.state.work(value.len().saturating_add(1))?;
+        Ok(Value::Number(f64::from(crate::forms::parse_tab_index(value).filter(|n| *n >= 0).unwrap_or(0))))
+    }
+
+    pub(super) fn html_spacing_set(&mut self, node: usize, name: &str, value: &Value) -> Result<(), String> {
+        let value = timer_integer(value)? as u32;
+        let value = if value > i32::MAX as u32 { 0 } else { value };
+        self.attribute(node, name, Some(value.to_string()))
+    }
+
     pub(super) fn dataset_node(&mut self, handle: u32) -> Result<usize, String> {
         if !(DATASET_BASE..EVENT_BASE).contains(&handle) {
             return Err("Invalid dataset handle.".into());

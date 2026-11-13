@@ -247,7 +247,7 @@ impl Parser {
                     self.at += 1;
                     Some((0, Some(1)))
                 }
-                Some(123) => Some(self.counted()?),
+                Some(123) if self.has_counted(self.at) => Some(self.counted()?),
                 _ => None,
             };
             if let Some((min, max)) = min_max {
@@ -282,6 +282,22 @@ impl Parser {
             _ => self.push(Node::Sequence(parts)),
         }
     }
+    // Annex B treats an opening brace as a literal unless the whole braced
+    // quantifier is present. Recognize syntax before applying numeric bounds;
+    // incomplete huge decimal strings are literals, not oversized repetitions.
+    fn has_counted(&self, mut at: usize) -> bool {
+        if self.units.get(at) != Some(&123) { return false; }
+        at += 1;
+        let start = at;
+        while matches!(self.units.get(at), Some(48..=57)) { at += 1; }
+        if at == start { return false; }
+        if self.units.get(at) == Some(&44) {
+            at += 1;
+            while matches!(self.units.get(at), Some(48..=57)) { at += 1; }
+        }
+        self.units.get(at) == Some(&125)
+    }
+
     fn decimal(&mut self) -> Result<usize, Error> {
         let start = self.at;
         let mut number = 0usize;
@@ -422,11 +438,13 @@ impl Parser {
                     })),
                 }
             }
-            // In the supported non-Unicode grammar, standalone closing braces
-            // and brackets are literal ExtendedPatternCharacters (Annex B.1.2).
-            // Counted repetitions and character classes consume their own
-            // closing delimiters before this atom path is reached.
-            42 | 43 | 63 | 123 => Err(Error::Syntax(
+            // Complete braced quantifiers without a preceding atom are invalid.
+            // Other braces/brackets are literal ExtendedPatternCharacters in
+            // the supported non-Unicode grammar (Annex B).
+            123 if self.has_counted(self.at - 1) => Err(Error::Syntax(
+                "Unexpected regular-expression quantifier or delimiter.",
+            )),
+            42 | 43 | 63 => Err(Error::Syntax(
                 "Unexpected regular-expression quantifier or delimiter.",
             )),
             _ => self.character(unit),
@@ -1559,6 +1577,34 @@ mod tests {
         let plain = Regex::compile("(a)", "", &mut budget).unwrap();
         let named = Regex::compile("(?<entry>a)", "", &mut budget).unwrap();
         assert!(named.retained_bytes > plain.retained_bytes);
+    }
+
+    #[test]
+    fn legacy_opening_braces_distinguish_literals_and_complete_quantifiers() {
+        for pattern in ["{", "}", "{}", "{1", "{1,", "{,1}", "a{1", "a{1,", "a{1,2", "a{1,x}", "a{1001"] {
+            let mut budget = 100_000;
+            let regex = Regex::compile(pattern, "", &mut budget).unwrap();
+            let input: Vec<_> = pattern.encode_utf16().collect();
+            assert!(regex.find(&input, 0, false, &mut budget).unwrap().is_some(), "{pattern}");
+        }
+        for (pattern, text) in [(r"\{", "{"), ("[{]", "{"), ("^({)(})$", "{}"), ("^{{2}$", "{{")] {
+            let mut budget = 100_000;
+            let regex = Regex::compile(pattern, "", &mut budget).unwrap();
+            assert!(regex.find(&text.encode_utf16().collect::<Vec<_>>(), 0, false, &mut budget).unwrap().is_some(), "{pattern}");
+        }
+        for pattern in ["{1}", "{1,}", "{1,2}", "a{2,1}", "a{1}*", "a{1}{2}", "*{", "("] {
+            assert!(matches!(Regex::compile(pattern, "", &mut 100_000), Err(Error::Syntax(_))), "{pattern}");
+        }
+        assert!(matches!(Regex::compile("a{1001}", "", &mut 100_000), Err(Error::Limit(_))));
+        assert!(matches!(Regex::compile("{", "", &mut 0), Err(Error::Limit(_))));
+        for flags in ["u", "v"] {
+            assert!(matches!(Regex::compile("{", flags, &mut 100_000), Err(Error::Unsupported(_))));
+        }
+        for (pattern, end) in [("a{2,3}", 3), ("a{2,3}?", 2)] {
+            let mut budget = 100_000;
+            let regex = Regex::compile(pattern, "", &mut budget).unwrap();
+            assert_eq!(regex.find(&[97,97,97,97], 0, false, &mut budget).unwrap().unwrap().end(), end);
+        }
     }
 
     #[test]

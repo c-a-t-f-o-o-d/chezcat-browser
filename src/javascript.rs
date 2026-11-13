@@ -11000,6 +11000,18 @@ caught;
     }
 
     #[test]
+    fn legacy_opening_brace_literals_and_regexp_constructor_preserve_state_and_errors() {
+        assert_eq!(result(r#"
+var regex=/{/g,first=regex.exec('x{y{'),position=regex.lastIndex,second=regex.exec('x{y{');
+if(first.index!==1||second.index!==3||position!==2||regex.lastIndex!==4||regex.source!=='{')throw 'global state';
+if('x{y{'.replace(/{/g,'!')!=='x!y!'||!new RegExp('a{1001').test('a{1001')||!/^{{2}$/.test('{{'))throw 'literal braces';
+var errors=0;for(var pattern of ['{1}','{1,}','{1,2}','a{2,1}','a{1}*','a{1}{2}']){
+try{new RegExp(pattern);}catch(e){if(e.name==='SyntaxError')errors++;}}
+if(errors!==6)throw 'quantifier syntax';'brace-ok';
+"#), "brace-ok");
+    }
+
+    #[test]
     fn regexp_compilation_matching_and_calls_share_one_job_budget() {
         let (mut runtime, mut host) = test_runtime();
         runtime.regexp_work = 2000;

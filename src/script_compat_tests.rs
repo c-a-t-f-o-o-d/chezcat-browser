@@ -1,6 +1,46 @@
 use super::*;
 
 #[test]
+fn html_spacing_reflects_unsigned_attributes_on_real_brands_and_keeps_attr_identity() {
+    let (doc, _, page, outcome) = page("<p id=p>ordinary</p>", &[r#"
+for(var tag of ['img','input','object','embed','marquee']){
+ var e=document.createElement(tag);if(e.vspace!==0||e.hspace!==0||!('vspace' in e)||e.hasAttribute('vspace'))throw 'default/brand';
+ e.setAttribute('vspace',' +12px');var a=e.getAttributeNode('vspace');if(e.vspace!==12||a.value!==' +12px')throw 'attribute parser';
+ for(var pair of [[1.9,'1'],[-1,'0'],[-4294967295,'1'],[4294967303,'7'],[NaN,'0'],[Infinity,'0']]){
+  e.vspace=pair[0];if(e.getAttribute('vspace')!==pair[1]||a.value!==pair[1]||e.getAttributeNode('vspace')!==a)throw 'unsigned reflection';
+ }
+ e.vspace=2147483647;if(e.vspace!==2147483647)throw 'max';
+ for(var text of ['-1','2147483648','garbage']){e.setAttribute('vspace',text);if(e.vspace!==0)throw 'invalid attribute';}
+ e.vspace='12px';if(e.getAttribute('vspace')!=='0')throw 'number conversion';
+ var calls=0;e.hspace={valueOf:function(){calls++;return 17;}};if(calls!==1||e.hspace!==17||e.getAttribute('hspace')!=='17')throw 'ordered numeric conversion';
+ var caught=false;try{e.hspace=Symbol();}catch(x){caught=x.name==='TypeError';}if(!caught||e.hspace!==17)throw 'Symbol atomic';
+ e.removeAttribute('vspace');if(e.vspace!==0||a.ownerElement!==null||a.value!=='0')throw 'removal';
+}
+for(var e of [document.createElement('div'),document.createElement('iframe'),document.createTextNode('text')]){
+ if('vspace' in e||e.vspace!==undefined)throw 'wrong brand';
+}
+if('vspace' in document)throw 'Document brand';document.title='spacing-ok';
+"#]);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    assert_eq!(doc.title, "spacing-ok");
+}
+
+#[test]
+fn html_spacing_work_and_retention_failures_do_not_mutate_the_attribute() {
+    let (mut doc, mut forms, mut page, outcome) = page("<p>ordinary</p>", &["var image=document.createElement('img');image.vspace=7;"]);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    let node = doc.nodes.iter().position(|node| matches!(&node.kind, NodeKind::Element { tag, .. } if tag == "img")).unwrap();
+    page.begin_job();
+    page.state.retained_limit = page.state.retained;
+    let mut bridge = Bridge { doc: &mut doc, forms: &mut forms, state: &mut page.state };
+    assert!(bridge.set(node_handle(node), "vspace", Value::Number(1000.0)).is_err());
+    assert_eq!(bridge.doc.attr(node, "vspace"), Some("7"));
+    bridge.state.host_work = 0;
+    assert!(bridge.get(node_handle(node), "vspace").is_err());
+    assert_eq!(bridge.doc.attr(node, "vspace"), Some("7"));
+}
+
+#[test]
 fn attr_namespace_lookup_keeps_exact_local_names_raw_colons_and_stable_identity() {
     let (doc, _, page, outcome) = page("<p id=p TITLE=old x:y=colon xmlns='urn:raw' xmlns:x='urn:x' null=n undefined=u></p>", &[r#"
 var p=document.getElementById('p'),a=p.getAttributeNode('TITLE');

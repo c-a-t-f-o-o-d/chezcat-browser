@@ -37,6 +37,48 @@ mod tests {
     }
 
     #[test]
+    fn cancel_bubble_uses_persistent_stop_state_without_conversion_or_default_cancellation() {
+        let (doc, _, page, outcome) = start(r#"
+var e=document.createEvent('Event');e.initEvent('test',true,true);
+if(e.cancelBubble||!('cancelBubble' in e))throw 'default';
+var calls=0,obj={valueOf:function(){calls++;throw 'conversion';},toString:function(){calls++;throw 'conversion';}};
+if((e.cancelBubble=obj)!==obj||!e.cancelBubble||calls||e.defaultPrevented)throw 'truthy state';
+e.cancelBubble=false;if(!e.cancelBubble)throw 'false must not clear';
+e.initEvent('reset',true,true);if(e.cancelBubble)throw 'reinit';
+e.cancelBubble=Symbol();if(!e.cancelBubble)throw 'symbol truthy';
+var caught=0;try{e.initEvent(Symbol());}catch(x){if(x.name==='TypeError')caught++;}
+if(caught!==1||!e.cancelBubble||e.type!=='reset')throw 'failed init atomic';
+e.initEvent('reset');e.stopPropagation();if(!e.cancelBubble)throw 'method alias';
+e.initEvent('reset');e.stopImmediatePropagation();e.cancelBubble=0;if(!e.cancelBubble)throw 'immediate alias';
+e.initEvent('reset');if(e.cancelBubble||e.defaultPrevented)throw 'final reset';
+document.title='cancel-bubble-ok';
+"#);
+        assert_eq!(outcome.errors, 0, "{}", page.report());
+        assert_eq!(doc.title, "cancel-bubble-ok");
+    }
+
+    #[test]
+    fn cancel_bubble_on_real_dispatch_keeps_same_phase_and_expires_without_reviving() {
+        let (mut doc, mut forms, mut page, outcome) = start(r#"
+var b=document.getElementById('b'),saved,order='';
+b.addEventListener('click',function(e){saved=e;order+='a';if(e.cancelBubble)throw 'fresh native';e.cancelBubble={valueOf:function(){throw 'conversion';}};e.cancelBubble=false;if(!e.cancelBubble||e.defaultPrevented)throw 'native stop';});
+b.addEventListener('click',function(e){order+='b';if(!e.cancelBubble)throw 'same phase';});
+document.addEventListener('click',function(){order+='bad';});
+"#);
+        assert_eq!(outcome.errors, 0, "{}", page.report());
+        let button = doc.nodes.iter().enumerate().find(|(id, _)| doc.attr(*id, "id") == Some("b")).unwrap().0;
+        let outcome = page.dispatch(&mut doc, &mut forms, button, "click", true);
+        assert_eq!(outcome.errors, 0, "{}", page.report());
+        assert!(!outcome.prevented);
+        let outcome = page.console_eval(&mut doc, &mut forms, "if(order!=='ab')throw 'order';var e=document.createEvent('Event');e.cancelBubble=true;if(!e.cancelBubble)throw 'created isolation';document.title='native-stop-ok';");
+        assert_eq!(outcome.errors, 0, "{}", page.report());
+        assert_eq!(doc.title, "native-stop-ok");
+        let outcome = page.console_eval(&mut doc, &mut forms, "saved.cancelBubble=true;");
+        assert_eq!(outcome.errors, 1, "{}", page.report());
+        assert!(page.report().contains("expired"));
+    }
+
+    #[test]
     fn constructed_event_factory_has_real_defaults_aliases_brands_and_no_dispatch() {
         let (doc, _, page, outcome) = start(r#"
 var aliases=['Event','eVeNtS','HTMLEvents','SVGEvents','MouseEvent','mOuSeEvEnTs'],events=[];
@@ -239,7 +281,7 @@ fn constant(name: &str) -> Option<u8> {
 
 fn base_property(name: &str) -> bool {
     constant(name).is_some() || matches!(name, "type" | "target" | "currentTarget" | "bubbles" | "cancelable"
-        | "defaultPrevented" | "eventPhase" | "timeStamp" | "isTrusted" | "composed")
+        | "defaultPrevented" | "eventPhase" | "timeStamp" | "isTrusted" | "composed" | "cancelBubble")
 }
 
 fn mouse_property(name: &str) -> bool {
@@ -283,7 +325,7 @@ impl Bridge<'_> {
     }
 
     pub(super) fn created_event_readonly(&self, object: u32, name: &str) -> bool {
-        self.created_event_index(object).is_some_and(|id| base_property(name)
+        name != "cancelBubble" && self.created_event_index(object).is_some_and(|id| base_property(name)
             || self.state.created_events[id].mouse.is_some() && mouse_property(name))
     }
 
@@ -311,6 +353,7 @@ impl Bridge<'_> {
                 "bubbles" => Value::Bool(event.bubbles),
                 "cancelable" => Value::Bool(event.cancelable),
                 "defaultPrevented" => Value::Bool(event.prevented),
+                "cancelBubble" => Value::Bool(event.stopped),
                 "eventPhase" => Value::Number(0.0),
                 "timeStamp" => Value::Number(event.timestamp),
                 "isTrusted" | "composed" => Value::Bool(false),
@@ -332,6 +375,18 @@ impl Bridge<'_> {
                 _ => return Err(format!("Constructed Event property {name:?} is not implemented.")),
             })
         })())
+    }
+
+    pub(super) fn set_cancel_bubble(&mut self, object: u32, value: &Value) -> Result<(), String> {
+        self.state.work(self.state.created_events.len().max(1))?;
+        if let Some(id) = self.created_event_index(object) {
+            if value.truthy() { self.state.created_events[id].stopped = true; }
+        } else {
+            let event = self.state.event.as_mut().filter(|event| event.handle == object)
+                .ok_or("Event handle has expired.")?;
+            if value.truthy() { event.stopped = true; }
+        }
+        Ok(())
     }
 
     fn mouse_interface_argument(&self, value: Option<&Value>, window_only: bool) -> Result<Option<u32>, (&'static str, String)> {

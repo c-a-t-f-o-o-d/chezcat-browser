@@ -357,6 +357,12 @@ impl Bridge<'_> {
         {
             return Ok(Some(true));
         }
+        if matches!(property, "vspace" | "hspace") {
+            if self.doc.nodes[node].namespace == crate::html::Namespace::UnknownForeign {
+                return Err("Spacing lookup requires a known namespace context.".into());
+            }
+            return Ok(Some(self.html_spacing_property(node, property)));
+        }
         if common_node_property(property) || self.dom_method(object, property).is_some() {
             return Ok(Some(true));
         }
@@ -383,6 +389,9 @@ impl Bridge<'_> {
             return Ok(None);
         }
         let node = self.dom_node(object)?;
+        if matches!(property, "vspace" | "hspace") {
+            return self.html_spacing_get(node, property).map(Some);
+        }
         if let Some(number) = node_constant(property) {
             return Ok(Some(Value::Number(f64::from(number))));
         }
