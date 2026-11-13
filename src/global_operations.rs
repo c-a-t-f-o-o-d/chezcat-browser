@@ -18,6 +18,7 @@ impl Runtime {
         let Some((handle, properties)) = self.browser_global else {
             return Err("A browser global is required for an operation property.".into());
         };
+        self.ensure_global_intrinsics(name).map_err(Fault::display)?;
         if object != handle
             || self.operation_globals.contains(name)
             || self.environment(self.global_environment).bindings.contains_key(name)

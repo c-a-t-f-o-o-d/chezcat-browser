@@ -190,6 +190,9 @@ try{Object.getOwnPropertyDescriptor(URL.prototype,'href').get.call({});throw 'mi
 #[test]
 fn urls_and_queries_charge_all_retained_strings_and_pair_metadata() {
     let mut runtime = Runtime::for_test();
+    // Observe the API before measuring instance storage; public construction
+    // likewise resolves its constructor before allocating the instance.
+    runtime.binding_value(runtime.global_environment, "URL").unwrap();
     let initial = runtime.value_bytes;
     let Value::Object(id) = runtime
         .url_construct(
@@ -281,6 +284,7 @@ fn urls_lengths_and_query_entries_have_independent_limits() {
         .display()
         .contains("entry limit"));
     let mut runtime = Runtime::for_test();
+    runtime.binding_value(runtime.global_environment, "URL").unwrap();
     let count = runtime.objects.len();
     runtime.value_bytes = runtime.limits.heap.retained_values - 1;
     assert!(runtime

@@ -1578,13 +1578,27 @@ impl Runtime {
                         }
                     }
                 }
-                let object = self.descriptor_target(first, &key, host)?;
+                // A supported own-Window definition converts its descriptor
+                // before selecting the current binding. Conversion may throw,
+                // delete that binding or create it. Keep native/foreign receiver
+                // rejection ahead of callbacks, without bootstrapping an unused
+                // intrinsic family before the descriptor has been converted.
+                let defer_target = method == "defineProperty"
+                    && matches!(first, Value::Host(handle) if self.is_browser_global(*handle)
+                        && !self.host_owns_global(&key, host) && !self.host_globals.contains(&key));
+                let object = if defer_target {
+                    self.reject_foreign_window(first, host)?;
+                    None
+                } else {
+                    Some(self.descriptor_target(first, &key, host)?)
+                };
                 if method == "getOwnPropertyDescriptor" {
-                    return self.target_descriptor(object, &key);
+                    return self.target_descriptor(object.unwrap(), &key);
                 }
                 let descriptor =
                     self.ordinary_required(args.get(2).unwrap_or(&Value::Undefined))?;
                 let descriptor = self.property_descriptor(descriptor, host)?;
+                let object = match object { Some(object) => object, None => self.descriptor_target(first, &key, host)? };
                 self.define_target_property(object, key, descriptor, host)?;
                 self.copy_value(first)
             }

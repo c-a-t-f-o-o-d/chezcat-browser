@@ -3104,6 +3104,10 @@ impl Runtime {
 
     /// Host configuration only. Dynamic scripts inherit this runtime's profile.
     pub fn with_limits(limits: limits::Limits) -> Self {
+        Self::with_intrinsic_startup(limits, true)
+    }
+
+    fn with_intrinsic_startup(limits: limits::Limits, defer_families: bool) -> Self {
         let mut runtime = Self {
             environments: vec![Some(Environment {
                 captured: true,
@@ -3179,7 +3183,7 @@ impl Runtime {
             parked_main_roots: None,
             window_realms: BTreeMap::new(),
             failed_window_realms: HashSet::new(),
-            deferred_intrinsics: 0,
+            deferred_intrinsics: if defer_families { 7 } else { 0 },
             failed_intrinsics: 0,
             array_to_string_intrinsic: None,
             deferred_native_methods: Vec::new(),
@@ -3337,6 +3341,7 @@ impl Runtime {
         object: u32,
         method: &'static str,
     ) -> Result<Value, String> {
+        self.ensure_global_intrinsics(name).map_err(Fault::display)?;
         let value = self.host_function(object, method)?;
         if let Err(error) = self.define_global(name, value.clone()) {
             self.functions.pop();
@@ -3421,6 +3426,7 @@ impl Runtime {
         {
             return Err(Fault::new("Invalid global identifier.").display());
         }
+        self.ensure_global_intrinsics(name).map_err(Fault::display)?;
         self.put_binding(self.global_environment, name.into(), Some(value), Declaration::Var, true)
             .map_err(Fault::display)?;
         self.host_globals.insert(name.into());
@@ -3958,6 +3964,7 @@ impl Runtime {
         Ok(env)
     }
     fn binding_value(&mut self, env: usize, name: &str) -> Result<Value, Fault> {
+        if env == self.global_environment { self.ensure_global_intrinsics(name)?; }
         if name == "arguments" && self.environment(env).arguments.is_some() {
             self.materialize_arguments(env)?;
         }
@@ -4159,6 +4166,9 @@ impl Runtime {
         }
         if variable_environment == self.global_environment {
             for name in &variable_names { self.ensure_global_intrinsics(name)?; }
+            for &statement in body {
+                if let StmtKind::Function(name, _) = &program.stmts[statement].kind { self.ensure_global_intrinsics(name)?; }
+            }
             if let Some((_, properties)) = self.browser_global {
                 // Global bindings and Window expandos have separate storage in
                 // this subset. Migrating an accessor would invoke its getter

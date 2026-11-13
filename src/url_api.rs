@@ -854,6 +854,7 @@ impl Runtime {
         Ok(total)
     }
     fn new_url_value(&mut self, value: Url) -> Result<Value, Fault> {
+        self.ensure_global_intrinsics("URL")?;
         self.work(value.bytes().saturating_mul(4))?;
         let pairs = parse_pairs(value.query.as_deref().unwrap_or(""))?;
         let bytes = value.bytes() + pair_storage(&pairs);
@@ -871,6 +872,7 @@ impl Runtime {
         Ok(Value::Object(object))
     }
     fn new_params_value(&mut self, pairs: Vec<Pair>) -> Result<Value, Fault> {
+        self.ensure_global_intrinsics("URLSearchParams")?;
         check_pairs(&pairs)?;
         let retained = self.url_reserve(0, pair_storage(&pairs))?;
         let object = self.new_object(None)?;

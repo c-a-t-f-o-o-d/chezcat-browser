@@ -527,6 +527,122 @@ var same=/y/;if(NativeRegExp(same)!==same)throw 'intrinsic identity';
     }
 
     #[test]
+    fn deferred_main_families_preserve_declarations_replacements_and_siblings() {
+        for (name, sibling) in [("URL", "URLSearchParams"), ("Uint8Array", "ArrayBuffer"), ("TextEncoder", "TextDecoder")] {
+            let mut runtime = Runtime::new();
+            let source = format!("function {name}(){{return 17;}}if({name}()!==17||typeof {sibling}!=='function')throw 'declaration override';");
+            runtime.execute(&source, &mut NoHost).unwrap();
+            let mut runtime = Runtime::new();
+            runtime.define_global(name, Value::Number(17.0)).unwrap();
+            runtime.execute(&format!("if({name}!==17||typeof {sibling}!=='function')throw 'host override';"), &mut NoHost).unwrap();
+            runtime.execute(&format!("{name}=23;if({name}!==23||delete {name})throw 'host replacement';"), &mut NoHost).unwrap();
+            let mut runtime = Runtime::new();
+            runtime.bind_browser_global(77).unwrap();
+            runtime.define_global("window", Value::Host(77)).unwrap();
+            runtime.execute(&format!("window.{name}=23;if({name}!==23||!delete window.{name}||typeof {name}!=='undefined'||typeof {sibling}!=='function')throw 'no resurrection';"), &mut NoHost).unwrap();
+        }
+    }
+
+    #[test]
+    fn deferred_main_host_registration_allocates_after_family_and_fails_before_capability() {
+        struct Record(usize);
+        impl Host for Record {
+            fn get(&mut self, _: u32, _: &str) -> Result<Value, String> { panic!("unexpected get") }
+            fn set(&mut self, _: u32, _: &str, _: Value) -> Result<(), String> { panic!("unexpected set") }
+            fn call(&mut self, object: u32, method: &str, _: &[Value]) -> Result<Value, String> {
+                assert_eq!((object, method), (1, "record")); self.0 += 1; Ok(Value::Number(17.0))
+            }
+        }
+        let mut runtime = Runtime::new();
+        let value = runtime.define_host_function("URL", 1, "record").unwrap();
+        assert!(matches!(value, Value::Function(id) if matches!(runtime.functions[id], Function::Host { object: 1, method: "record", .. })));
+        let mut host = Record(0);
+        runtime.execute("if(URL()!==17||typeof URLSearchParams!=='function')throw 'registered identity';", &mut host).unwrap();
+        assert_eq!(host.0, 1);
+
+        let mut runtime = Runtime::new();
+        while runtime.functions.len() < MAX_FUNCTIONS - 2 { runtime.native_function(Builtin::IsNaN, "fixture").unwrap(); }
+        let error = runtime.define_host_function("URL", 1, "record").unwrap_err();
+        assert!(error.contains("Function limit"), "{error}");
+        assert!(!runtime.functions.iter().any(|function| matches!(function, Function::Host { .. })));
+        assert_eq!(runtime.functions.len(), runtime.function_properties.len());
+        assert_eq!(runtime.functions.len(), runtime.function_realms.len());
+        assert_eq!(runtime.functions.len(), runtime.function_initial_names.len());
+        let before = (runtime.functions.len(), runtime.objects.len(), runtime.bindings, runtime.job_usage());
+        assert!(runtime.define_host_function("URL", 1, "record").unwrap_err().contains("earlier bounded initialization failure"));
+        assert_eq!((runtime.functions.len(), runtime.objects.len(), runtime.bindings, runtime.job_usage()), before);
+
+        let mut runtime = Runtime::new();
+        runtime.bind_browser_global(77).unwrap();
+        assert!(runtime.define_global_operation("URL", 77, "record", 1).unwrap_err().contains("conflicts"));
+        assert!(!runtime.functions.iter().any(|function| matches!(function, Function::Host { .. })));
+        runtime.execute("if(typeof URL!=='function'||typeof URLSearchParams!=='function')throw 'collision';", &mut NoHost).unwrap();
+    }
+
+    #[test]
+    fn deferred_main_window_descriptors_convert_before_activation_and_reselect_after_callbacks() {
+        let mut runtime = Runtime::new();
+        runtime.bind_browser_global(77).unwrap();
+        runtime.define_global("window", Value::Host(77)).unwrap();
+        runtime.execute("var define=Object.defineProperty,marker=0,sentinel={};var descriptor={get value(){marker=1;throw sentinel;}};", &mut NoHost).unwrap();
+        while runtime.functions.len() < MAX_FUNCTIONS { runtime.native_function(Builtin::IsNaN, "fixture").unwrap(); }
+        runtime.execute("try{define(window,'URL',descriptor);throw 'missing';}catch(e){if(e!==sentinel||marker!==1)throw 'conversion order';}", &mut NoHost).unwrap();
+        assert_eq!(runtime.deferred_intrinsics, 7);
+
+        let mut runtime = Runtime::new();
+        runtime.bind_browser_global(77).unwrap();
+        runtime.define_global("window", Value::Host(77)).unwrap();
+        runtime.execute("var define=Object.defineProperty;var old=URL;define(window,'URL',{get value(){delete window.URL;return 17;},writable:true,configurable:true});if(URL!==17||typeof URLSearchParams!=='function'||Object.getOwnPropertyDescriptor(window,'URL').value!==17)throw 'reselect';delete window.URL;if(Object.getOwnPropertyDescriptor(window,'URL')!==undefined||typeof URL!=='undefined')throw 'resurrection';", &mut NoHost).unwrap();
+    }
+
+    #[test]
+    fn deferred_main_direct_binary_calls_initialize_the_receiving_realm() {
+        let mut runtime = Runtime::new();
+        runtime.execute("if(!Number.isFinite(1))throw 'number';", &mut NoHost).unwrap();
+        assert_eq!(runtime.deferred_intrinsics, 7);
+        let realm = runtime.allocate_realm_with_deferred_families(true).unwrap();
+        let foreign = runtime.with_intrinsic_realm(Some(realm), |runtime| {
+            runtime.construct_binary(binary_data::Constructor::Buffer, &[Value::Number(4.0)], &mut NoHost)
+        }).unwrap();
+        assert_eq!(runtime.deferred_intrinsics, 7);
+        let view = runtime.construct_binary(binary_data::Constructor::View, &[foreign.clone()], &mut NoHost).unwrap();
+        assert_eq!(runtime.deferred_intrinsics, 6);
+        runtime.define_global("view", view).unwrap();
+        runtime.execute("if(Object.getPrototypeOf(view)!==DataView.prototype||view.byteLength!==4)throw 'view realm';", &mut NoHost).unwrap();
+
+        let mut runtime = Runtime::new();
+        let realm = runtime.allocate_realm_with_deferred_families(true).unwrap();
+        let foreign = runtime.with_intrinsic_realm(Some(realm), |runtime| {
+            let value = runtime.construct_binary(binary_data::Constructor::Buffer, &[Value::Number(4.0)], &mut NoHost)?;
+            let Value::Object(id) = value else { unreachable!() };
+            // Select the ordinary default-species path; custom foreign species
+            // remain explicitly unsupported by the existing binary subset.
+            runtime.set_property(id, "constructor".into(), Value::Undefined)?;
+            Ok(value)
+        }).unwrap();
+        let copied = runtime.binary_builtin(binary_data::Op::BufferMethod("slice"), &[], foreign, &mut NoHost).unwrap();
+        runtime.define_global("copied", copied).unwrap();
+        runtime.execute("if(Object.getPrototypeOf(copied)!==ArrayBuffer.prototype||copied.byteLength!==4)throw 'copy realm';", &mut NoHost).unwrap();
+    }
+
+    #[test]
+    fn deferred_main_direct_text_construction_has_real_prototypes_and_binary_output() {
+        for encoder in [true, false] {
+            let mut runtime = Runtime::new();
+            let codec = runtime.construct_text_encoding(encoder, &[], &mut NoHost).unwrap();
+            assert_eq!(runtime.deferred_intrinsics, 2);
+            assert_eq!(runtime.call_depth, 0);
+            runtime.define_global("codec", codec).unwrap();
+            let source = if encoder {
+                "if(Object.getPrototypeOf(codec)!==TextEncoder.prototype)throw 'encoder prototype';var bytes=codec.encode('A');if(Object.getPrototypeOf(bytes)!==Uint8Array.prototype||bytes[0]!==65)throw 'binary prototype';"
+            } else {
+                "if(Object.getPrototypeOf(codec)!==TextDecoder.prototype||codec.decode(new Uint8Array([65]))!=='A')throw 'decoder prototype';"
+            };
+            runtime.execute(source, &mut NoHost).unwrap();
+        }
+    }
+
+    #[test]
     fn failed_deferred_family_stays_bounded_and_restores_parent() {
         let mut runtime = Runtime::new();
         let realm = runtime.allocate_realm_with_deferred_families(true).unwrap();

@@ -303,6 +303,7 @@ impl Runtime {
         }
         self.call_depth += 1;
         let result = (|| {
+            self.ensure_global_intrinsics("TextEncoder")?;
             let data = if encoder {
                 Data::Encoder
             } else {

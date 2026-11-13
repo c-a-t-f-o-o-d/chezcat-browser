@@ -574,6 +574,7 @@ impl Runtime {
         if self.retained_binary.saturating_add(length) > MAX_RETAINED_BYTES {
             return Err(Fault::new("Retained binary data limit reached (16 MiB)."));
         }
+        self.ensure_global_intrinsics("ArrayBuffer")?;
         self.work(length)?;
         let id = self.new_object(None)?;
         let mut bytes = Vec::new();
@@ -605,6 +606,7 @@ impl Runtime {
                 "Typed-array view exceeds or misaligns its ArrayBuffer.",
             ));
         }
+        self.ensure_global_intrinsics("Uint8Array")?;
         let id = self.new_object(None)?;
         self.objects[id].binary = Some(Data::Typed(TypedView {
             buffer,
@@ -817,6 +819,7 @@ impl Runtime {
         args: &[Value],
         host: &mut dyn Host,
     ) -> Result<Value, Fault> {
+        self.ensure_global_intrinsics("ArrayBuffer")?;
         match constructor {
             Constructor::AbstractTyped => Err(Fault::exception(
                 "TypeError",
@@ -983,6 +986,9 @@ impl Runtime {
         this: Value,
         host: &mut dyn Host,
     ) -> Result<Value, Fault> {
+        if !matches!(operation, Op::NumberMethod(_)) {
+            self.ensure_global_intrinsics("ArrayBuffer")?;
+        }
         match operation {
             Op::Constructor(_) => Err(Fault::exception(
                 "TypeError",
