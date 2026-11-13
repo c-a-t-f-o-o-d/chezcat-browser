@@ -111,6 +111,59 @@ document.title='dataset passed';
 }
 
 #[test]
+fn empty_element_and_style_reads_are_absent_and_keep_dataset_routing() {
+    let (doc, _, page, outcome) = page(
+        "<p id=p style='color:blue' data-='dataset-empty'>Text</p>",
+        &[r#"
+var p=document.getElementById('p'),s=p.style,n=0,key={toString(){n++;return '';}};
+if(p[key]!==undefined||s[key]!==undefined||n!==2)throw 'empty read/key conversion';
+if('' in p||'' in s)throw 'empty presence';
+if(p.dataset['']!=='dataset-empty'||p.getAttribute('data-')!=='dataset-empty')throw 'dataset routing';
+var marker={},caught=false;try{p[{toString(){throw marker;}}];}catch(e){caught=e===marker;}
+if(!caught)throw 'thrown key identity';
+if(p.getAttribute('style')!=='color:blue'||p.textContent!=='Text')throw 'native mutation';
+document.title='empty-read-ok';
+"#],
+    );
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    assert_eq!(doc.title, "empty-read-ok");
+    let node = (0..doc.nodes.len()).find(|&n| doc.attr(n, "id") == Some("p")).unwrap();
+    assert_eq!(doc.attr(node, "style"), Some("color:blue"));
+    assert_eq!(doc.attr(node, "data-"), Some("dataset-empty"));
+    assert!(page.state.timers.is_empty());
+}
+
+#[test]
+fn empty_element_and_style_writes_remain_rejected_without_partial_effects() {
+    for source in ["p['']=1;", "p.style['']='red';"] {
+        let (doc, _, page, outcome) = page(
+            "<p id=p style='color:blue'>Text</p>",
+            &["var p=document.getElementById('p');", source,
+              "if(p['']!==undefined||p.style['']!==undefined||p.textContent!=='Text'||p.getAttribute('style')!=='color:blue')throw 'partial effect';document.title='empty-write-rejected';"],
+        );
+        assert_eq!(outcome.errors, 1, "{}", page.report());
+        assert_eq!(doc.title, "empty-write-rejected");
+        assert!(page.report().contains("not writable") || page.report().contains("not supported"));
+    }
+}
+
+#[test]
+fn empty_host_property_reads_keep_handle_validation_and_dom_work_bounds() {
+    let (mut doc, mut forms, mut page, outcome) = page("<p id=p>Text</p>", &[]);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    let missing = doc.nodes.len() + 99;
+    let node = (0..doc.nodes.len()).find(|&n| doc.attr(n, "id") == Some("p")).unwrap();
+    let mut bridge = Bridge { doc: &mut doc, forms: &mut forms, state: &mut page.state };
+    for handle in [node_handle(missing), STYLE_BASE + missing as u32] {
+        assert!(bridge.get(handle, "").is_err());
+    }
+    bridge.state.host_work = 1;
+    assert!(matches!(bridge.get(STYLE_BASE + node as u32, "").unwrap(), Value::Undefined));
+    assert_eq!(bridge.state.host_work, 0);
+    assert!(bridge.get(STYLE_BASE + node as u32, "").unwrap_err().contains("DOM work limit"));
+}
+
+#[test]
 fn dataset_validates_keys_and_keeps_native_attribute_readonly() {
     let (doc, _, page, outcome) = page(
         "<p id=p></p>",

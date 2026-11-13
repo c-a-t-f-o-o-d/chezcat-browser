@@ -2985,6 +2985,9 @@ impl Host for Bridge<'_> {
         }
         if object >= STYLE_BASE {
             let node = self.style_node(object)?;
+            // An empty direct key is an absent ordinary property, not a CSS
+            // declaration name. Validate the handle before reporting absence.
+            if property.is_empty() { return Ok(Value::Undefined); }
             return self.get_style(node, &css_name(property)?);
         }
         if let Some(value) = self.handler(object, property)? {
@@ -3128,7 +3131,7 @@ impl Host for Bridge<'_> {
             // Ordinary DOM nodes have no built-in then method. Recognizing
             // this absence permits the explicitly authorized Promise protocol;
             // form named properties above retain their normal lookup behavior.
-            "then" => Ok(Value::Undefined),
+            "then" | "" => Ok(Value::Undefined),
             _ => Err(format!("Element property {property:?} is not supported.")),
         }
     }
