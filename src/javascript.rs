@@ -4118,8 +4118,17 @@ impl Runtime {
         } else {
             Vec::new()
         };
+        // Collect last direct declarations during the existing charged preflight.
+        // This is temporary borrowed-name metadata, with no binding/host effects.
+        let mut final_functions = BTreeMap::new();
         for &statement in body {
             self.step()?;
+            if function_scope {
+                if let StmtKind::Function(name, _) = &program.stmts[statement].kind {
+                    self.work(name.len().saturating_add(std::mem::size_of::<(&str, StmtId)>()))?;
+                    final_functions.insert(name.as_str(), statement);
+                }
+            }
             match &program.stmts[statement].kind {
                 StmtKind::Declare(Declaration::Let | Declaration::Const, names) => {
                     for (pattern, _) in names {
@@ -4264,6 +4273,11 @@ impl Runtime {
                     }
                 }
                 StmtKind::Function(name, template) => {
+                    // All declarations were checked before any instantiation.
+                    // Keep surviving source order and fresh per-entry identity.
+                    if function_scope && final_functions.get(name.as_str()) != Some(&statement) {
+                        continue;
+                    }
                     let function =
                         self.make_function(program, *template, environment, &Value::Undefined)?;
                     if let Value::Function(index) = &function {

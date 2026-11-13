@@ -50,6 +50,80 @@ mod tests {
     }
 
     #[test]
+    fn duplicate_direct_hoists_allocate_only_fresh_survivors() {
+        struct NoHost;
+        impl Host for NoHost {
+            fn allow_eval(&mut self) -> Result<bool, String> { Ok(true) }
+            fn get(&mut self, _: u32, _: &str) -> Result<Value, String> { panic!("unexpected get") }
+            fn set(&mut self, _: u32, _: &str, _: Value) -> Result<(), String> { panic!("unexpected set") }
+            fn call(&mut self, _: u32, _: &str, _: &[Value]) -> Result<Value, String> { panic!("unexpected call") }
+        }
+        let mut runtime = Runtime::new();
+        let baseline = runtime.functions.len();
+        runtime.execute("function factory(){function h(){return 1;}function h(){return 2;}return h;}var a=factory(),b=factory();if(a===b||a()!==2||b()!==2)throw 'identity';", &mut NoHost).unwrap();
+        assert_eq!(runtime.functions.len(), baseline + 3);
+        let before = runtime.functions.len();
+        runtime.execute("var c=factory();if(c===a||c===b||c()!==2)throw 'later invocation';", &mut NoHost).unwrap();
+        assert_eq!(runtime.functions.len(), before + 1);
+
+        let mut runtime = Runtime::new();
+        let baseline = runtime.functions.len();
+        runtime.execute("function alpha(){return 1;}function beta(){return 2;}function alpha(){return 3;}if(alpha()!==3||beta()!==2)throw 'last body';", &mut NoHost).unwrap();
+        assert_eq!(runtime.functions.len(), baseline + 2);
+        let before = runtime.functions.len();
+        runtime.execute("var first=eval('function e(){return 1;}function e(){return 2;}e;');var second=eval('function e(){return 1;}function e(){return 2;}e;');if(first===second||first()!==2||second()!==2)throw 'eval identity';", &mut NoHost).unwrap();
+        assert_eq!(runtime.functions.len(), before + 2);
+        assert_eq!(runtime.functions.len(), runtime.function_realms.len());
+        assert_eq!(runtime.functions.len(), runtime.function_properties.len());
+        assert_eq!(runtime.functions.len(), runtime.function_initial_names.len());
+    }
+
+    #[test]
+    fn duplicate_direct_hoists_keep_surviving_host_order_and_complete_syntax_preflight() {
+        struct Record(Vec<(String, Value)>);
+        impl Host for Record {
+            fn owns_window_property(&self, object: Option<u32>, name: &str) -> bool { object == Some(77) && matches!(name, "alpha" | "beta") }
+            fn get(&mut self, _: u32, _: &str) -> Result<Value, String> { panic!("unexpected get") }
+            fn set(&mut self, object: u32, name: &str, value: Value) -> Result<(), String> { assert_eq!(object, 77); self.0.push((name.into(), value)); Ok(()) }
+            fn call(&mut self, _: u32, _: &str, _: &[Value]) -> Result<Value, String> { panic!("unexpected call") }
+        }
+        let mut runtime = Runtime::new();
+        runtime.bind_browser_global(77).unwrap();
+        let mut host = Record(Vec::new());
+        runtime.execute("function alpha(){return 1;}function beta(){return 2;}function alpha(){return 3;}", &mut host).unwrap();
+        assert_eq!(host.0.iter().map(|(name, _)| name.as_str()).collect::<Vec<_>>(), ["beta", "alpha"]);
+        for (position, expected) in [(0, 2.0), (1, 3.0)] {
+            let callback = host.0[position].1.clone();
+            assert_eq!(runtime.invoke(callback, &[], Value::Undefined, &mut host).unwrap().to_number(), expected);
+        }
+        for source in ["function alpha(){var broken=;}function alpha(){return 3;}", "{function alpha(){}function alpha(){}}", "let blocked;function blocked(){}function blocked(){}"] {
+            let mut runtime = Runtime::new();
+            runtime.bind_browser_global(77).unwrap();
+            let functions = runtime.functions.len();
+            let mut host = Record(Vec::new());
+            assert!(runtime.execute(source, &mut host).is_err(), "{source}");
+            assert!(host.0.is_empty());
+            assert_eq!(runtime.functions.len(), functions);
+        }
+    }
+
+    #[test]
+    fn duplicate_direct_hoists_original_six_hundred_factory_workload_stays_bounded() {
+        struct NoHost;
+        impl Host for NoHost {
+            fn get(&mut self, _: u32, _: &str) -> Result<Value, String> { panic!("unexpected get") }
+            fn set(&mut self, _: u32, _: &str, _: Value) -> Result<(), String> { panic!("unexpected set") }
+            fn call(&mut self, _: u32, _: &str, _: &[Value]) -> Result<Value, String> { panic!("unexpected call") }
+        }
+        let mut runtime = Runtime::with_limits(limits::BROWSER);
+        let baseline = runtime.functions.len();
+        runtime.execute("function factory(){function h(){return 1;}function h(){return 2;}return h;}var kept=[];for(var i=0;i<600;i++)kept[i]=factory();if(kept[0]===kept[599]||kept[0]()!==2||kept[599]()!==2)throw 'fresh identity or last body';", &mut NoHost).unwrap();
+        assert_eq!(runtime.functions.len(), baseline + 601);
+        println!("Original duplicate declaration workload: bootstrap={baseline}; fresh survivors=601; total={}; unchanged-cap={MAX_FUNCTIONS}.", runtime.functions.len());
+        assert!(runtime.execute("for(var j=0;j<1100;j++)(function(){})();", &mut NoHost).unwrap_err().contains("Function limit reached (1024)"));
+    }
+
+    #[test]
     fn original_retained_closure_workload_measures_unused_main_family_cost() {
         struct NoHost;
         impl Host for NoHost {
