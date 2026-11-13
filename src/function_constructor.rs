@@ -47,6 +47,7 @@ impl Runtime {
                     "Content Security Policy blocks dynamic Function compilation.",
                 ));
             }
+            self.prepare_program_capacity(source.len(), 0, true)?;
             if self.programs.len() >= MAX_PROGRAMS
                 || self.retained_source.saturating_add(source.len()) > MAX_RETAINED_SOURCE
             {
@@ -128,6 +129,7 @@ impl Runtime {
         // depth still counts because parsing happens on the same native stack.
         let program = Parser::parse_context(source, &mut self.regexp_work, false, self.eval_depth)?;
         let nodes = program.node_count();
+        self.prepare_program_capacity(0, nodes, false)?;
         if self.retained_ast.saturating_add(nodes) > MAX_RETAINED_AST {
             return Err(self.program_limit_fault(source, Some(nodes), "dynamic-validation", Some(false), true));
         }

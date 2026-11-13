@@ -3081,6 +3081,7 @@ pub struct Runtime {
     retained_source: usize,
     retained_ast: usize,
     retained_regexp: usize,
+    program_allocation: program_allocation::State,
     regexp_work: usize,
     bindings: usize,
     value_bytes: usize,
@@ -3189,6 +3190,7 @@ impl Runtime {
             retained_source: 0,
             retained_ast: 0,
             retained_regexp: 0,
+            program_allocation: program_allocation::State::default(),
             regexp_work: limits.regexp_work,
             bindings: 0,
             value_bytes: 0,
@@ -3696,6 +3698,7 @@ impl Runtime {
         strict: bool,
     ) -> Result<Rc<Program>, Fault> {
         self.step()?;
+        self.prepare_program_capacity(source.len(), 0, true)?;
         if self.programs.len() >= MAX_PROGRAMS
             || self.retained_source.saturating_add(source.len()) > MAX_RETAINED_SOURCE
         {
@@ -3740,6 +3743,7 @@ impl Runtime {
     }
 
     fn retain_parsed_program(&mut self, program: Rc<Program>) -> Result<Rc<Program>, Fault> {
+        self.prepare_program_capacity(program.source.len(), program.node_count(), true)?;
         if self.programs.len() >= MAX_PROGRAMS
             || self.retained_source.saturating_add(program.source.len()) > MAX_RETAINED_SOURCE
         {
@@ -10530,6 +10534,8 @@ caught;
         ] {
             let (mut runtime, mut host) = test_runtime();
             host.eval_permission = Some(true);
+            // Original cumulative-program fatal guard remains an exact control.
+            runtime.program_allocation.disabled = expected == "Retained script limit";
             let error = runtime.execute(&source, &mut host).unwrap_err();
             assert!(error.contains(expected), "{source}: {error}");
             assert!(host.records.is_empty(), "{source}");
@@ -10655,6 +10661,7 @@ caught;
                     assert_eq!(runtime.eval_depth, 0);
                 }
                 let mut runtime = Runtime::for_test();
+                runtime.program_allocation.disabled = true;
                 runtime.register_program(&nodes, false).unwrap();
                 runtime.register_program(&nodes, false).unwrap();
                 assert_eq!(runtime.retained_ast, MAX_RETAINED_AST);
@@ -11812,6 +11819,7 @@ caught;
     #[test]
     fn retained_bundle_source_limit_rejects_before_executing() {
         let (mut runtime, mut host) = test_runtime();
+        runtime.program_allocation.disabled = true;
         let source = format!("/*{}*/", "x".repeat(MAX_SOURCE_BYTES - 4));
         for _ in 0..MAX_RETAINED_SOURCE / MAX_SOURCE_BYTES {
             runtime.begin_job();
@@ -11890,6 +11898,7 @@ caught;
     #[test]
     fn retained_program_and_function_counts_are_bounded() {
         let (mut runtime, mut host) = test_runtime();
+        runtime.program_allocation.disabled = true;
         for _ in 0..MAX_PROGRAMS {
             runtime.begin_job();
             runtime.execute("1;", &mut host).unwrap();
