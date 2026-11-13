@@ -47,6 +47,21 @@ fn attr<'a>(app: &'a App, id: &str, name: &str) -> Option<&'a str> {
 }
 
 #[test]
+fn tab_index_html_prefix_values_drive_actual_app_keyboard_order() {
+    let (_fixture, mut app) = Fixture::new("<body><input id=third tabindex=' +3tail'><input id=first tabindex='1e3'><input id=skip tabindex=' -1tail'><input id=zero tabindex=invalid><input id=disabled disabled tabindex=0><script>document.title=document.getElementById('third').tabIndex+','+document.getElementById('first').tabIndex+','+document.getElementById('skip').tabIndex+','+document.getElementById('zero').tabIndex;</script></body>");
+    assert_eq!(app.document.title, "3,1,-1,0");
+    app.focus = Focus::Page;
+    for id in ["first", "third", "zero"] {
+        app.key_event(input(true, "Tab", "Tab", 0x09));
+        assert!(app.focus == Focus::Control(node(&app, id)), "{id}");
+    }
+    let mut previous = input(true, "Tab", "Tab", 0x09);
+    previous.shift = true;
+    app.key_event(previous);
+    assert!(app.focus == Focus::Control(node(&app, "third")));
+}
+
+#[test]
 fn prevented_page_arrows_change_live_dom_without_scrolling_and_still_receive_keyup() {
     let (_fixture, mut app) = Fixture::new("<body><div id=box style='position:relative;left:0px;width:20px;height:20px;background:red'></div><div style='height:1800px'></div><script>var x=0; document.addEventListener('keydown',function(e){ if(e.key === 'ArrowRight'){e.preventDefault(); x+=10; document.getElementById('box').style.left=x+'px';} if(e.key === 'ArrowDown'){e.preventDefault(); document.getElementById('box').setAttribute('data-down','yes');}}); document.addEventListener('keyup',function(e){document.getElementById('box').setAttribute('data-up', e.key);});</script></body>");
     let (_, canceled) = app.key_event(input(true, "ArrowRight", "ArrowRight", 0x27));

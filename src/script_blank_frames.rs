@@ -197,6 +197,7 @@ impl Bridge<'_> {
                         "title" if node == 0 => Value::String(frame.document.title.clone()),
                         "nodeName" => Value::String(if node == 0 { "#document".into() } else { tag(&frame.document, node).to_ascii_uppercase() }),
                         "tagName" if node != 0 => Value::String(tag(&frame.document, node).to_ascii_uppercase()),
+                        "tabIndex" if node != 0 => Value::Number(-1.0),
                         "nodeType" => Value::Number(if node == 0 { 9.0 } else { 1.0 }),
                         "ownerDocument" => if node == 0 { Value::Null } else { native(0) },
                         "parentNode" => parent.map_or(Value::Null, native),
@@ -281,6 +282,21 @@ mod tests {
     }
 
     const CREATE: &str = "var f=document.createElement('iframe');f.hidden=true;document.body.appendChild(f);var w=f.contentWindow;";
+
+    #[test]
+    fn tab_index_child_getter_keeps_actual_node_and_origin_validation() {
+        let source = format!("{CREATE}for(var n of [w.document.documentElement,w.document.head,w.document.body]){{if(!('tabIndex' in n)||n.tabIndex!==-1)throw 'child tabIndex';}}var saved=w.document.body;");
+        let (mut doc, mut forms, mut page, outcome) = start(&source, &crate::csp::PolicySet::default());
+        assert_eq!(outcome.errors, 0, "{}", page.report());
+        let mut bridge = Bridge { doc: &mut doc, forms: &mut forms, state: &mut page.state };
+        for handle in [window(0)+3, window(0)+7, window(MAX_BLANK_FRAMES-1)+6] {
+            assert!(bridge.get(handle, "tabIndex").is_err());
+        }
+        let location = crate::navigation::Location { url: Some(crate::url::parse("https://other.test/").unwrap().0), path: None, fragment: String::new(), root: None };
+        page.set_location(&location);
+        let outcome = page.console_eval(&mut doc, &mut forms, "saved.tabIndex;");
+        assert_eq!(outcome.errors, 1, "{}", page.report());
+    }
 
     #[test]
     fn default_namespace_blank_nodes_borrow_and_keep_origin_and_handle_boundaries() {

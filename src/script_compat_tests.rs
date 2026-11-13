@@ -1,6 +1,84 @@
 use super::*;
 
 #[test]
+fn tab_index_getter_uses_tag_defaults_and_physical_summary_parent() {
+    let (doc, _, page, outcome) = page("<html><body><input id=hidden type=hidden><input id=disabled disabled><a id=a>No href</a><div id=d></div><details><i>lead</i><summary id=first>First</summary><summary id=second>Second</summary></details><summary id=outside>Outside</summary></body></html>", &[r#"
+for(var id of ['hidden','disabled','a']){if(document.getElementById(id).tabIndex!==0)throw 'default historical zero';}
+for(var id of ['d','second','outside']){if(document.getElementById(id).tabIndex!==-1)throw 'default minus one';}
+if(document.getElementById('first').tabIndex!==0||'tabIndex' in document||'tabIndex' in document.createTextNode('x'))throw 'interface/default';
+for(var name of ['a','area','button','frame','iframe','input','object','select','textarea']){var n=document.createElement(name);if(!('tabIndex' in n)||n.tabIndex!==0)throw 'detached tag default';}
+var details=document.createElement('details'),first=document.createElement('summary'),second=document.createElement('summary');
+details.appendChild(first);details.appendChild(second);if(first.tabIndex!==0||second.tabIndex!==-1)throw 'detached summary order';details.removeChild(first);if(first.tabIndex!==-1||second.tabIndex!==0)throw 'summary mutation';
+document.title='tab-index-defaults-ok';
+"#]);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    assert_eq!(doc.title, "tab-index-defaults-ok");
+}
+
+#[test]
+fn tab_index_getter_and_native_control_order_share_the_authored_integer_parser() {
+    for (text, expected) in [(" +12junk", Some(12)), ("1e3", Some(1)), ("0x10", Some(0)),
+        ("-0", Some(0)), ("2147483647", Some(i32::MAX)), ("-2147483648", Some(i32::MIN)),
+        ("2147483648", None), ("-2147483649", None), ("+", None), ("\u{a0}2", None), ("\x0b2", None)] {
+        let markup = format!("<input id=c tabindex='{text}'><div id=d tabindex='{text}'></div>");
+        let source = format!("if(document.getElementById('c').tabIndex!=={}||document.getElementById('d').tabIndex!=={})throw 'integer prefix';", expected.unwrap_or(0), expected.unwrap_or(-1));
+        let (doc, forms, page, outcome) = page(&markup, &[&source]);
+        assert_eq!(outcome.errors, 0, "{text:?}: {}", page.report());
+        let control = (0..doc.nodes.len()).find(|&n| doc.attr(n, "id") == Some("c")).unwrap();
+        assert_eq!(forms.controls[&control].tab_index, expected.unwrap_or(0));
+    }
+}
+
+#[test]
+fn tab_index_summary_context_keeps_foreign_provenance_after_moves() {
+    let (mut doc, mut forms, mut page, outcome) = page("<html><body><svg><details id=fd></details><summary id=fs></summary></svg></body></html>", &[r#"
+var foreign=document.getElementById('fd'),s=document.createElement('summary');s.id='known-parent';foreign.appendChild(s);
+var d=document.createElement('details'),bad=document.getElementById('fs'),x=document.createElement('summary');x.id='known-sibling';d.appendChild(bad);d.appendChild(x);
+"#]);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    let nodes: Vec<_> = ["known-parent", "known-sibling"].iter().map(|id| (0..doc.nodes.len()).find(|&n| doc.attr(n, "id") == Some(*id)).unwrap()).collect();
+    {
+        let mut bridge = Bridge { doc: &mut doc, forms: &mut forms, state: &mut page.state };
+        for node in nodes {
+            assert!(bridge.get(node_handle(node), "tabIndex").unwrap_err().contains("unknown"));
+        }
+    }
+    let outcome = page.console_eval(&mut doc, &mut forms, "d.removeChild(bad);if(x.tabIndex!==0)throw 'known summary after removal';");
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+}
+
+#[test]
+fn tab_index_and_zero_offset_reads_keep_invalid_foreign_write_and_work_boundaries() {
+    let (mut doc, mut forms, mut page, outcome) = page("<html><body><span id=connected>Text</span><svg><g id=foreign></g></svg><template><i id=inert></i></template></body></html>", &[r#"
+var detached=document.createElement('input');if(detached.offsetLeft!==0||detached.offsetTop!==0||document.body.offsetLeft!==0||document.body.offsetTop!==0)throw 'defined zero offsets';
+var effects=0,rhs={valueOf:function(){effects++;return 2;},toString:function(){effects++;return '2';}};
+if((detached.offsetLeft=rhs)!==rhs||detached.offsetLeft!==0||effects!==0)throw 'readonly offset';
+var caught=false;try{(function(){'use strict';detached.offsetTop=7;})();}catch(e){caught=e.name==='TypeError';}if(!caught||detached.offsetTop!==0)throw 'strict offset';
+"#]);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    let find = |id: &str| (0..doc.nodes.len()).find(|&n| doc.attr(n, "id") == Some(id)).unwrap();
+    let connected = find("connected"); let foreign = find("foreign"); let inert = find("inert");
+    let invalid = [node_handle(0), node_handle(doc.nodes.len()+99), node_handle(inert), node_handle(foreign)];
+    let mut bridge = Bridge { doc: &mut doc, forms: &mut forms, state: &mut page.state };
+    for handle in invalid {
+        for property in ["tabIndex", "offsetLeft", "offsetTop"] {
+            assert!(bridge.get(handle, property).is_err());
+            assert!(bridge.has(handle, property).is_err());
+            assert!(!bridge.readonly_property(handle, property));
+        }
+    }
+    let diagnostic = bridge.get(node_handle(connected), "offsetLeft").unwrap_err();
+    assert!(diagnostic.contains("class=span; connected=true; created=false; geometry-attached=false"), "{diagnostic}");
+    assert!(diagnostic.len() < 300);
+    assert!(bridge.set(node_handle(connected), "tabIndex", Value::Number(3.0)).is_err());
+    assert_eq!(bridge.doc.attr(connected, "tabindex"), None);
+    bridge.state.copy_work = 0;
+    assert!(bridge.get(node_handle(connected), "tabIndex").is_err());
+    bridge.state.host_work = 0;
+    assert!(bridge.get(node_handle(connected), "offsetTop").is_err());
+}
+
+#[test]
 fn attr_identity_ownership_detach_and_live_values_follow_existing_mutations() {
     let (doc, _, page, outcome) = page("<div id=p title=old data-x=one style='color:red'></div><div id=q></div>", &[r#"
 var p=document.getElementById('p'),q=document.getElementById('q'),a=p.getAttributeNode('TITLE'),x=p.getAttributeNode('data-x'),s=p.getAttributeNode('style');

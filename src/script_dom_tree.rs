@@ -152,6 +152,46 @@ impl Bridge<'_> {
             && matches!(self.doc.nodes[node].kind, NodeKind::Element { .. }))
     }
 
+    fn html_tab_index(&mut self, node: usize) -> Result<i32, String> {
+        let NodeKind::Element { attrs, .. } = &self.doc.nodes[node].kind else { return Err("tabIndex requires an HTML Element.".into()); };
+        if self.doc.nodes[node].namespace != crate::html::Namespace::Html {
+            return Err("tabIndex for unsupported foreign parser contexts is unavailable.".into());
+        }
+        self.state.work(attrs.len())?;
+        self.state.copies(attrs.iter().map(|(name, value)| name.len() + if name == "tabindex" { value.len() } else { 0 }).sum())?;
+        if let Some(value) = self.doc.attr(node, "tabindex").and_then(forms::parse_tab_index) { return Ok(value); }
+        if matches!(tag(self.doc, node), "a" | "area" | "button" | "frame" | "iframe" | "input" | "object" | "select" | "textarea") { return Ok(0); }
+        if tag(self.doc, node) == "summary" {
+            if let Some(parent) = self.state.tree.parents[node].filter(|&parent| tag(self.doc, parent) == "details") {
+                if self.doc.nodes[parent].namespace != crate::html::Namespace::Html {
+                    return Err("tabIndex summary default has an unknown parent namespace.".into());
+                }
+                for &child in &self.doc.nodes[parent].children {
+                    self.state.work(1)?;
+                    if tag(self.doc, child) == "summary" {
+                        if self.doc.nodes[child].namespace != crate::html::Namespace::Html {
+                            return Err("tabIndex summary default has an unknown sibling namespace.".into());
+                        }
+                        return Ok(if child == node { 0 } else { -1 });
+                    }
+                }
+            }
+        }
+        Ok(-1)
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn unavailable_offset(&self, node: usize, property: &str) -> String {
+        let class = match tag(self.doc, node) {
+            "html" => "html", "head" => "head", "div" => "div", "span" => "span",
+            "input" => "input", "textarea" => "textarea", "button" => "button", "a" => "anchor",
+            _ => "other",
+        };
+        format!("Element property {property:?} requires measured offset geometry. Receiver node={node}; class={class}; connected={}; created={}; geometry-attached={}. No coordinate was fabricated.",
+            self.state.dom.connected[node], self.state.dom.created.contains(&node), self.state.geometry.is_some())
+    }
+
     pub(super) fn namespace_receiver(&self, object: u32) -> bool {
         object == DOCUMENT
             || self.attr_receiver(object)
@@ -223,6 +263,11 @@ impl Bridge<'_> {
     }
 
     pub(super) fn dom_readonly(&self, object: u32, property: &str) -> bool {
+        if matches!(property, "offsetLeft" | "offsetTop") {
+            return node_index(object).is_some_and(|node| self.dom_accessible(node)
+                && self.doc.nodes[node].namespace == crate::html::Namespace::Html
+                && matches!(self.doc.nodes[node].kind, NodeKind::Element { .. }));
+        }
         if node_constant(property).is_some() {
             return object == DOCUMENT
                 || node_index(object).is_some_and(|node| self.dom_accessible(node))
@@ -298,6 +343,12 @@ impl Bridge<'_> {
         };
         let node = self.dom_node(node_handle(node))?;
         if node_constant(property).is_some() { return Ok(Some(true)); }
+        if matches!(property, "tabIndex" | "offsetLeft" | "offsetTop") && matches!(self.doc.nodes[node].kind, NodeKind::Element { .. }) {
+            if self.doc.nodes[node].namespace != crate::html::Namespace::Html {
+                return Err("tabIndex for unsupported foreign parser contexts is unavailable.".into());
+            }
+            return Ok(Some(true));
+        }
         if self.frame_content(node, property).is_some() { return Ok(Some(true)); }
         if self.dom_stylesheet(node)
             && (script_stylesheets::link_attribute(property).is_some()
@@ -333,6 +384,16 @@ impl Bridge<'_> {
         let node = self.dom_node(object)?;
         if let Some(number) = node_constant(property) {
             return Ok(Some(Value::Number(f64::from(number))));
+        }
+        if property == "tabIndex" { return self.html_tab_index(node).map(|value| Some(Value::Number(f64::from(value)))); }
+        if matches!(property, "offsetLeft" | "offsetTop") {
+            if !matches!(self.doc.nodes[node].kind, NodeKind::Element { .. })
+                || self.doc.nodes[node].namespace != crate::html::Namespace::Html
+            { return Err("Offset lookup requires a known HTML Element.".into()); }
+            if tag(self.doc, node) == "body" || !self.state.dom.connected[node] {
+                return Ok(Some(Value::Number(0.0)));
+            }
+            return Err(self.unavailable_offset(node, property));
         }
         let text = matches!(self.doc.nodes[node].kind, NodeKind::Text(_));
         if let Some(value) = self.frame_content(node, property) { return Ok(Some(value)); }

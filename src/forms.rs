@@ -91,6 +91,26 @@ fn tag(doc: &Document, node: usize) -> &str {
     }
 }
 
+/// HTML integer-prefix parsing restricted to the signed WebIDL long range.
+/// Attribute GET parsing does not wrap out-of-range values like an IDL setter.
+pub(crate) fn parse_tab_index(input: &str) -> Option<i32> {
+    let bytes = input.as_bytes();
+    let mut position = 0;
+    while bytes.get(position).is_some_and(|byte| matches!(byte, b'\t' | b'\n' | b'\x0c' | b'\r' | b' ')) { position += 1; }
+    let negative = bytes.get(position) == Some(&b'-');
+    if matches!(bytes.get(position), Some(b'+' | b'-')) { position += 1; }
+    let first = position;
+    let limit = if negative { 2_147_483_648u64 } else { 2_147_483_647u64 };
+    let mut number = 0u64;
+    while let Some(byte) = bytes.get(position).filter(|byte| byte.is_ascii_digit()) {
+        number = number * 10 + u64::from(byte - b'0');
+        if number > limit { return None; }
+        position += 1;
+    }
+    if position == first { return None; }
+    Some(if negative { -(number as i64) } else { number as i64 } as i32)
+}
+
 pub fn caption(doc: &Document, node: usize, kind: Kind) -> String {
     if kind == Kind::Select {
         return select_state(doc, node)
@@ -660,7 +680,7 @@ impl Forms {
                     .min(MAX_VALUE_UNITS),
                 tab_index: doc
                     .attr(node, "tabindex")
-                    .and_then(|s| s.parse().ok())
+                    .and_then(parse_tab_index)
                     .unwrap_or(0),
                 select,
                 initial,
@@ -1237,6 +1257,19 @@ fn encode_into(text: &str, output: &mut String, limit: usize) -> Result<(), Stri
 mod tests {
     use super::*;
     use crate::html;
+
+    #[test]
+    fn tab_index_html_integer_prefix_parser_preserves_signed_range_and_ascii_rules() {
+        for (text, expected) in [(" +12junk", Some(12)), ("\t\n\x0c\r -7tail", Some(-7)),
+            ("1e3", Some(1)), ("0x10", Some(0)), ("-0", Some(0)),
+            ("2147483647", Some(i32::MAX)), ("-2147483648", Some(i32::MIN)),
+            ("2147483648", None), ("-2147483649", None), ("", None), ("+", None),
+            ("-", None), ("+ 1", None), ("\u{a0}2", None), ("\x0b2", None)] {
+            assert_eq!(parse_tab_index(text), expected, "{text:?}");
+        }
+        assert_eq!(parse_tab_index(&("0".repeat(20_000) + "12rest")), Some(12));
+        assert_eq!(parse_tab_index(&"9".repeat(20_000)), None);
+    }
     fn location(url: &str) -> Location {
         navigation::address(url, &Location::home()).unwrap()
     }
