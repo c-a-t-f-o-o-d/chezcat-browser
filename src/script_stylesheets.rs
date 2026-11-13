@@ -6,7 +6,7 @@ use std::collections::VecDeque;
 
 pub(super) const MAX_SHEET_BYTES: usize = 128 * 1024;
 const MAX_STYLESHEET_BYTES: usize = 1024 * 1024;
-const MAX_STYLESHEET_REQUESTS: usize = 16;
+const MAX_STYLESHEET_REQUESTS: usize = crate::loader::MAX_STYLESHEETS;
 
 #[derive(Clone, Debug)]
 pub struct DynamicStylesheet {
@@ -299,7 +299,7 @@ impl Bridge<'_> {
         if self.state.stylesheets.attempts >= MAX_STYLESHEET_REQUESTS {
             self.state.error(
                 "Dynamic stylesheet",
-                "Dynamic stylesheet request limit reached (16 per document).",
+                &format!("Dynamic stylesheet request limit reached ({MAX_STYLESHEET_REQUESTS} per document)."),
             );
             return Ok(());
         }

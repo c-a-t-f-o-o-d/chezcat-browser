@@ -125,19 +125,27 @@ fn browser_budget_step_and_clock_guards_remain_independent() {
 
 #[test]
 fn browser_budget_runs_original_length_work_beyond_eight_mib() {
-    let source = "var total=0;for(var i=0;i<1024;i++)total+=payload.length;total;";
-    for profile in [limits::REGRESSION, limits::BROWSER] {
-        let mut runtime = Runtime::with_limits(profile);
-        let mut host = Recorder::default();
-        runtime.define_global("payload", Value::String("x".repeat(16 * 1024))).unwrap();
-        runtime.begin_job();
-        let result = runtime.execute(source, &mut host);
-        if profile == limits::REGRESSION {
-            assert!(result.unwrap_err().contains("String/copy work limit"));
+    // Preserve the original literal-key workload as an optimized success.
+    // The dynamic-key control still demonstrates the larger actual budget.
+    for cached in [true, false] {
+        let source = if cached {
+            "var total=0;for(var i=0;i<1024;i++)total+=payload.length;total;"
         } else {
-            assert_eq!(result.unwrap().to_text(), "16777216");
-            assert!(runtime.job_usage().1 > limits::REGRESSION.copy_bytes);
-            assert!(runtime.job_usage().1 < limits::BROWSER.copy_bytes);
+            "var total=0,key='length';for(var i=0;i<1024;i++)total+=payload[key];total;"
+        };
+        for profile in [limits::REGRESSION, limits::BROWSER] {
+            let mut runtime = Runtime::with_limits(profile);
+            let mut host = Recorder::default();
+            runtime.define_global("payload", Value::String("x".repeat(16 * 1024))).unwrap();
+            runtime.begin_job();
+            let result = runtime.execute(source, &mut host);
+            if profile == limits::REGRESSION && !cached {
+                assert!(result.unwrap_err().contains("String/copy work limit"));
+            } else {
+                assert_eq!(result.unwrap().to_text(), "16777216");
+                assert_eq!(runtime.job_usage().1 < limits::REGRESSION.copy_bytes, cached);
+                assert!(runtime.job_usage().1 < limits::BROWSER.copy_bytes);
+            }
         }
     }
 }
@@ -157,7 +165,9 @@ fn browser_budget_microtasks_share_the_enlarged_allowance_and_still_cancel() {
     let before = runtime.job_usage().1;
     runtime.microtask_checkpoint(&mut host).unwrap();
     assert_eq!(host.records, vec!["16777216".to_owned()]);
-    assert!(runtime.job_usage().1 > limits::REGRESSION.copy_bytes + before);
+    assert!(runtime.job_usage().1 > before);
+    assert!(runtime.job_usage().1 < limits::REGRESSION.copy_bytes);
+    // The original loop remains; it now reuses the successful first scan.
     assert!(runtime.copy_bytes < limits::BROWSER.copy_bytes);
     runtime.begin_job();
     host.records.clear();

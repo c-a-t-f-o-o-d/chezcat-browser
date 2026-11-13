@@ -94,8 +94,8 @@ impl Worker {
 
     fn submit(&self, job: Job) -> Result<(), String> {
         let mut state = self.state.0.lock().unwrap();
-        if state.stopping || state.queue.len() + state.completed.len() >= 16 {
-            return Err("Dynamic script worker queue limit reached (16).".into());
+        if state.stopping || state.queue.len() + state.completed.len() >= loader::MAX_SCRIPTS {
+            return Err(format!("Dynamic script worker queue limit reached ({}).", loader::MAX_SCRIPTS));
         }
         state.queue.push_back(job);
         self.state.1.notify_one();
@@ -158,7 +158,7 @@ fn fetch(
         .url
         .as_ref()
         .ok_or("Dynamic script has no HTTP document origin.")?;
-    crate::http::check_classic_script_origin(origin, url)?;
+    crate::http::check_classic_script_mode(origin, url, job.request.same_origin_only)?;
     let filter = |target: &crate::url::HttpUrl| {
         job.blocking.check(target)?;
         // Apply CSP to every redirected destination before any DNS or request,
@@ -182,6 +182,7 @@ fn fetch(
         loader::MAX_SCRIPT_BYTES,
         origin,
         crate::http::FetchMode::Normal,
+        job.request.same_origin_only,
         &filter,
     )?;
     let content_type = response.header("content-type").unwrap_or("").to_owned();

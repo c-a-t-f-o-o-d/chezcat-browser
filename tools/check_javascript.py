@@ -2643,6 +2643,7 @@ NEGATIVE_DIAGNOSTICS_041.update((name, message) for name, _, message in _CONTINU
 
 COMPLETION_CASES.append(('heap-expression-evaluation', (ROOT / 'tools/fixtures/heap-expression-evaluation.js').read_text(encoding='utf-8')))
 COMPLETION_CASES.append(('environment-lifetimes', (ROOT / 'tools/fixtures/environment-lifetimes.js').read_text(encoding='utf-8')))
+COMPLETION_CASES.append(('binding-length-memo', (ROOT / 'tools/fixtures/binding-length-memo.js').read_text(encoding='utf-8')))
 
 # 0.48 moves expression evaluation onto a shared heap stack. Preserve inputs
 # that formerly spent native depth as positive references, then test the actual

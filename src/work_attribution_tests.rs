@@ -218,7 +218,7 @@ fn attribution_shared_microtask_failure_cancels_and_recovers_on_one_mib_stack() 
         for microtask in [false, true] {
             let mut runtime = Runtime::for_test();
             runtime.define_global("payload", Value::String("PRIVATE_WORK_PAYLOAD".repeat(256))).unwrap();
-            runtime.execute("var tail=0,sentinel=0;function burn(){var i=0;while(i<64){payload.length;i++;}tail=1;}", &mut NoHost).unwrap();
+            runtime.execute("var tail=0,sentinel=0,key='length';function burn(){var i=0;while(i<64){payload[key];i++;}tail=1;}", &mut NoHost).unwrap();
             runtime.begin_job();
             constrain(&mut runtime, 16384);
             let job_number = runtime.work_attribution.current.number;

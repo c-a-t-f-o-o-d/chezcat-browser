@@ -49,10 +49,12 @@ impl Default for LoadOptions {
     }
 }
 
-pub(crate) const MAX_SCRIPTS: usize = 16;
+pub(crate) const MAX_SCRIPTS: usize = 128;
+pub(crate) const MAX_STYLESHEETS: usize = 256;
+const MAX_RESOURCE_ATTEMPTS: usize = 512;
 pub(crate) const MAX_SCRIPT_BYTES: usize = crate::javascript::MAX_SOURCE_BYTES;
 pub(crate) const MAX_SCRIPT_TOTAL: usize = 2 * 1024 * 1024;
-// Small icons should reach the shared attempt or pixel budget before this cap.
+// Decoded-image counts stay independent from CSS/script request capacities.
 const MAX_UNIQUE_IMAGES: usize = 64;
 const MAX_DECODED_IMAGE_BYTES: usize = 64 * 1024 * 1024;
 
@@ -889,9 +891,9 @@ fn load_request_progressively(
     )?;
     check_cancel(cancel)?;
     let mut events = Vec::new();
-    if stats.attempts >= 48 {
+    if stats.attempts >= MAX_RESOURCE_ATTEMPTS {
         events.push(
-            "Resource attempt limit reached (48). Additional references were skipped.".to_owned(),
+            format!("Resource attempt limit reached ({MAX_RESOURCE_ATTEMPTS}). Additional references were skipped."),
         );
     }
     if stats.omitted_messages > 0 {
@@ -905,7 +907,7 @@ fn load_request_progressively(
         "LOAD TIMING: document/parse {} ms; resources {} ms; total {} ms. {} resource attempts; {} reused references ({} earlier failures). Reuse ends with this document load.",
         stats.document_ready.as_millis(), total.saturating_sub(stats.document_ready).as_millis(), total.as_millis(), stats.attempts, stats.reused, stats.reused_failures
     ));
-    events.push("Classic JavaScript uses a bounded subset after document parsing. Session cookies stay in memory with host-only/Domain scope and bundled public-suffix boundaries. No HTTP authentication, referrer header, frames, CSS imports, speculative requests or telemetry. Stylesheets, images, fonts and script navigation retain the document origin. Classic scripts may also include HTTPS sources from HTTPS documents, with CSP and request checks at each redirect and no cross-origin credentials.".to_owned());
+    events.push("Classic JavaScript uses a bounded subset after document parsing. Session cookies stay in memory with host-only/Domain scope and bundled public-suffix boundaries. No HTTP authentication, referrer header, frames, CSS imports, speculative requests or telemetry. Stylesheets, images, fonts and script navigation retain the document origin. Classic scripts without crossorigin may also include HTTPS sources from HTTPS documents, with CSP and request checks at each redirect and no cross-origin credentials. Crossorigin-marked scripts currently require the document origin at every hop.".to_owned());
     Ok(LoadEnd {
         download: false,
         events,
@@ -940,8 +942,8 @@ impl LoadStats {
         }
     }
     fn begin_attempt(&mut self, network: bool) -> Result<(), String> {
-        if self.attempts >= 48 {
-            return Err("Resource attempt limit reached (48).".to_owned());
+        if self.attempts >= MAX_RESOURCE_ATTEMPTS {
+            return Err(format!("Resource attempt limit reached ({MAX_RESOURCE_ATTEMPTS})."));
         }
         if network && self.started.elapsed() > Duration::from_secs(45) {
             return Err("Page resource time budget reached (45 seconds).".to_owned());
@@ -1037,7 +1039,7 @@ fn load_critical_resources(
                 }
                 check_script(&loaded.document, node)?;
                 if loaded.scripts.len() >= MAX_SCRIPTS {
-                    return Err("Script count limit reached (16).".to_owned());
+                    return Err(format!("Script count limit reached ({MAX_SCRIPTS})."));
                 }
                 if script_bytes >= MAX_SCRIPT_TOTAL {
                     return Err("Script source budget is full (2 MiB).".to_owned());
@@ -1062,8 +1064,8 @@ fn load_critical_resources(
                 return Err("Empty resource reference.".to_owned());
             }
             if kind == "CSS" {
-                if loaded.styles.len() >= 16 {
-                    return Err("Stylesheet count limit reached (16).".to_owned());
+                if loaded.styles.len() >= MAX_STYLESHEETS {
+                    return Err(format!("Stylesheet count limit reached ({MAX_STYLESHEETS})."));
                 }
                 let media = loaded.document.attr(node, "media").unwrap_or("").trim();
                 if !media.is_empty()
@@ -1084,6 +1086,15 @@ fn load_critical_resources(
                 }
             }
             let resolved = navigation::resolve(target, &loaded.base)?;
+            let same_origin_only = kind == "SCRIPT"
+                && loaded.document.attr(node, "crossorigin").is_some();
+            if same_origin_only {
+                let origin = loaded.location.url.as_ref()
+                    .ok_or("CORS-mode scripts require an HTTP(S) document origin.")?;
+                let target = resolved.url.as_ref()
+                    .ok_or("CORS-mode scripts require an HTTP(S) resource URL.")?;
+                http::check_classic_script_mode(origin, target, true)?;
+            }
             // Per-element CSP must precede reuse too: a previous nonce does
             // not authorize another LINK node referencing the same URL.
             if kind == "CSS" {
@@ -1168,7 +1179,7 @@ fn load_critical_resources(
                     }
                 };
                 let response = if kind == "SCRIPT" {
-                    pool.fetch_classic_script(url, limit.min(remaining), origin, mode, &guard)?
+                    pool.fetch_classic_script(url, limit.min(remaining), origin, mode, same_origin_only, &guard)?
                 } else {
                     pool.fetch_kind_checked(url, limit.min(remaining), origin, mode, kind, &guard)?
                 };
@@ -2083,9 +2094,6 @@ fn check_script(doc: &Document, node: usize) -> Result<(), String> {
         if doc.attr(node, "async").is_some() {
             return Err("Async external scripts are not implemented.".to_owned());
         }
-        if doc.attr(node, "crossorigin").is_some() {
-            return Err("CORS-mode scripts are not implemented; a crossorigin attribute requires CORS validation before execution.".to_owned());
-        }
         if doc
             .attr(node, "integrity")
             .is_some_and(|value| !value.trim().is_empty())
@@ -2443,7 +2451,7 @@ mod tests {
     }
 
     #[test]
-    fn small_local_icons_reach_the_shared_attempt_limit() {
+    fn small_local_icons_no_longer_hit_the_old_attempt_limit() {
         let folder = Folder::new();
         let mut source = String::new();
         for index in 0..50 {
@@ -2452,20 +2460,20 @@ mod tests {
             source.push_str(&format!("<img src={name}>"));
         }
         let loaded = local(&folder.page(&source)).unwrap();
-        assert_eq!(loaded.images.len(), 48);
-        assert_eq!(loaded.skipped, 2);
+        assert_eq!(loaded.images.len(), 50);
+        assert_eq!(loaded.skipped, 0);
         assert_eq!(
             loaded
                 .images
                 .values()
                 .map(|bitmap| bitmap.pixels.len() * 4)
                 .sum::<usize>(),
-            192
+            200
         );
-        assert!(loaded
+        assert!(!loaded
             .events
             .iter()
-            .any(|event| event.contains("Resource attempt limit reached (48)")));
+            .any(|event| event.contains("Resource attempt limit reached")));
         assert!(!loaded
             .events
             .iter()
@@ -2731,6 +2739,8 @@ mod tests {
                         "/font-blocked" => { extra="Content-Security-Policy: default-src 'self'; font-src 'none'\r\n".into(); "<link rel=stylesheet href=/font-redirect.css><p style='font-family:Page'>AV</p>".into() },
                         "/font-redirect.css" => { status=302; extra="Location: /assets/font.css\r\n".into(); String::new() },
                         "/assets/font.css" => { mime="text/css"; format!("@font-face{{font-family:Page;src:url(page-font.ttf) format(truetype)}}@font-face{{font-family:Other;src:url(http://localhost:{port}/must-not-fetch.ttf)}}") },
+                        "/cors-page" => format!("<script crossorigin=anonymous src=/ok.js></script><script crossorigin=use-credentials src=/redirect.js></script><script crossorigin=invalid src=/ok.js></script><script crossorigin src=/bad.js></script><script crossorigin src='http://localhost:{port}/unfetched.js'></script><script crossorigin src=/foreign-redirect.js></script><script crossorigin integrity=declared src=/unfetched.js></script><script type=text/rms src=/unfetched.js></script>"),
+                        "/cors-blocked" => { extra="Content-Security-Policy: script-src 'none'\r\n".into(); "<script crossorigin src=/ok.js></script>".into() },
                         "/page" => format!("<script>var a=1;</script><script src=/ok.js></script><script src=/redirect.js></script><script src=/bad.js></script><script src=/no-type.js></script><script src='http://localhost:{port}/foreign.js'></script><script src=/foreign-redirect.js></script><script integrity=declared src=/unfetched.js></script><script async src=/async.js></script><script type=module src=/module.js></script>"),
                         "/ok.js" | "/last.js" => { mime = "text/javascript;charset=UTF-8"; "var external=2;".to_owned() },
                         "/redirect.js" => { status=302; extra="Location: /last.js\r\n".into(); String::new() },
@@ -3575,4 +3585,57 @@ mod tests {
             "a\u{fffd}"
         );
     }
+
+    #[test]
+    fn stylesheet_fragments_beyond_sixteen_keep_sources_and_cap() {
+        let folder = Folder::new();
+        let mut markup = String::new();
+        for i in 0..MAX_STYLESHEETS + 1 {
+            let name = format!("fragment-{i}.css");
+            folder.file(&name, &format!("p{{color:#{:06x}}}", i));
+            markup.push_str(&format!("<link rel=stylesheet href={name}>"));
+        }
+        markup.push_str("<p>fragments</p>");
+        let loaded = local(&folder.page(&markup)).unwrap();
+        assert_eq!(loaded.styles.len(), MAX_STYLESHEETS);
+        assert_eq!(loaded.skipped, 1);
+        // The bounded event report may omit late repeated resource messages.
+        assert!(loaded.styles.values().any(|s| s.contains("#0000ff")));
+        assert!(!loaded.styles.values().any(|s| s.contains("#000100")));
+    }
+
+    #[test]
+    fn resource_attempts_have_a_finite_shared_boundary() {
+        let mut stats = LoadStats::new(Instant::now());
+        for _ in 0..MAX_RESOURCE_ATTEMPTS { stats.begin_attempt(false).unwrap(); }
+        assert!(stats.begin_attempt(false).unwrap_err().contains("512"));
+        assert_eq!(stats.attempts, MAX_RESOURCE_ATTEMPTS);
+        // Time and bytes are independent; higher counts do not disable either.
+        stats.attempts = 0;
+        stats.started = Instant::now() - Duration::from_secs(46);
+        assert!(stats.begin_attempt(true).unwrap_err().contains("45 seconds"));
+        stats.network_bytes = 32 * 1024 * 1024;
+        assert_eq!(stats.remaining_bytes(), 0);
+    }
+
+    #[test]
+    fn same_origin_crossorigin_scripts_load_but_do_not_cross_redirect_origins() {
+        let site = Site::new();
+        let loaded = site.load("/cors-page", http::FetchMode::Normal, true);
+        assert_eq!(loaded.scripts.len(), 3);
+        assert!(loaded.scripts.iter().all(|s| s.source == "var external=2;"));
+        let paths: Vec<_> = site.requests.lock().unwrap().iter()
+            .map(|r| r.split_whitespace().nth(1).unwrap().to_owned()).collect();
+        assert_eq!(paths, ["/cors-page", "/ok.js", "/redirect.js", "/last.js",
+            "/ok.js", "/bad.js", "/foreign-redirect.js"]);
+        assert!(loaded.events.iter().any(|e| e.contains("CORS-mode")));
+        assert!(loaded.events.iter().any(|e| e.contains("Content-Type")));
+        assert!(loaded.events.iter().any(|e| e.contains("Subresource Integrity")));
+        assert!(!paths.iter().any(|p| p == "/unfetched.js"));
+        site.requests.lock().unwrap().clear();
+        let blocked = site.load("/cors-blocked", http::FetchMode::Normal, true);
+        assert!(blocked.scripts.is_empty());
+        assert_eq!(site.requests.lock().unwrap().len(), 1);
+    }
+
 }

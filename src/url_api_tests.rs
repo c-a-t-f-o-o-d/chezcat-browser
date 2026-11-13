@@ -282,7 +282,7 @@ fn urls_lengths_and_query_entries_have_independent_limits() {
         .contains("entry limit"));
     let mut runtime = Runtime::for_test();
     let count = runtime.objects.len();
-    runtime.value_bytes = MAX_RETAINED_VALUES - 1;
+    runtime.value_bytes = runtime.limits.heap.retained_values - 1;
     assert!(runtime
         .url_construct(
             Kind::Url,

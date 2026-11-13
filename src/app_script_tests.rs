@@ -594,3 +594,32 @@ fn unsupported_startup_script_preserves_the_page_and_valid_handlers() {
     assert_eq!(text(&app, "out"), "working");
     assert!(!app.failed);
 }
+
+#[test]
+fn wrapped_timer_capabilities_survive_fragments_not_document_replacement_or_disable() {
+    let fixture = ScriptFixture::new();
+    let markup = r#"<title>Waiting</title><p id=anchor>Anchor</p><script>
+var nativeTimer=setTimeout;
+window.setTimeout=function(){return nativeTimer.apply(window,arguments);};
+setTimeout(function(){document.title='wrapped callback';},0);
+</script>"#;
+    let mut app = fixture.open(markup);
+    app.follow("#anchor");
+    assert!(app.poll_script_timer());
+    assert_eq!(app.document.title, "wrapped callback");
+    let source = fixture.write("wrapped-timers.html", markup);
+    app.open(&source);
+    let replacement = fixture.write("wrapped-replacement.html", r#"<title>Replacement</title><script>
+if(typeof nativeTimer!=='undefined')throw Error('previous realm leaked');
+if(Object.getOwnPropertyDescriptor(window,'setTimeout').value!==setTimeout)throw Error('timer slot');
+setTimeout(function(){document.title='replacement callback';},0);
+</script>"#);
+    app.open(&replacement);
+    assert!(app.poll_script_timer());
+    assert_eq!(app.document.title, "replacement callback");
+    assert!(!app.poll_script_timer());
+    app.open(&source);
+    app.set_javascript_enabled(false);
+    assert!(app.next_script_timer().is_none());
+    assert!(!app.poll_script_timer());
+}

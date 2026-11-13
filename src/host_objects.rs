@@ -181,6 +181,14 @@ impl Runtime {
         enumerable: bool,
         host: &mut dyn Host,
     ) -> Result<bool, Fault> {
+        if self.is_browser_global(handle) && self.is_operation_global(name) {
+            let (_, id) = self.browser_global.unwrap();
+            return if enumerable {
+                self.own_enumerable(id, name)
+            } else {
+                self.owns_property(id, name)
+            };
+        }
         if let Some(object) = self.host_ordinary(handle, name, host) {
             let id = self.ordinary_id(object)?;
             return if enumerable {

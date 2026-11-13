@@ -23,7 +23,7 @@ mod network_tests;
 
 const MAX_BODY_BYTES: usize = 32 * 1024 * 1024;
 pub const MAX_FORM_BYTES: usize = 128 * 1024;
-pub const USER_AGENT: &str = "ChezCat/0.51";
+pub const USER_AGENT: &str = "ChezCat/0.53";
 const MAX_HEADER_BYTES: usize = 32 * 1024;
 const MAX_LINE_BYTES: usize = 8 * 1024;
 const MAX_CHUNK_METADATA: usize = 512 * 1024;
@@ -407,6 +407,21 @@ fn fetch_in_pool(
 /// Deliberately narrower than general no-CORS fetching: only secure pages
 /// may include another secure origin. No scheme downgrade or local-file path
 /// can enter this API, and callers still enforce CSP and JavaScript MIME.
+/// A crossorigin attribute changes fetch mode, not the origin itself. Until
+/// cross-origin response validation is implemented, accept only paths that
+/// remain same-origin. Anonymous and use-credentials are equivalent on such a
+/// path; the existing cookie/CSP/TLS policies still apply.
+pub(crate) fn check_classic_script_mode(
+    origin: &HttpUrl,
+    target: &HttpUrl,
+    same_origin_only: bool,
+) -> Result<(), String> {
+    if same_origin_only && !origin.same_origin(target) {
+        return Err("Cross-origin CORS-mode scripts are not implemented; only same-origin scripts are supported.".into());
+    }
+    check_classic_script_origin(origin, target)
+}
+
 pub(crate) fn check_classic_script_origin(
     origin: &HttpUrl,
     target: &HttpUrl,
@@ -752,20 +767,23 @@ impl<'a> Pool<'a> {
     /// HTTPS document. This does not grant fetch/XHR or other resource access.
     /// Third-party sends and Set-Cookie are omitted permanently after origin
     /// exit. TLS, request blocking and the supplied CSP check remain mandatory.
+    /// CORS-mode includes set same_origin_only, checked on every redirect hop.
     pub fn fetch_classic_script(
         &self,
         url: &HttpUrl,
         limit: usize,
         origin: &HttpUrl,
         mode: FetchMode,
+        same_origin_only: bool,
         guard: &ResourceFilter<'_>,
     ) -> Result<Response, String> {
+        check_classic_script_mode(origin, url, same_origin_only)?;
         fetch_in_pool(
             self,
             url,
             &Request::Get,
             limit,
-            None,
+            same_origin_only.then_some(origin),
             mode,
             true,
             "SCRIPT",
@@ -3255,4 +3273,17 @@ mod tests {
         .contains("HTTPS"));
         assert!(site.take().is_empty());
     }
+
+    #[test]
+    fn crossorigin_classic_mode_does_not_confuse_same_site_with_same_origin() {
+        let url = |s: &str| crate::url::parse(s).unwrap().0;
+        let origin = url("https://www.example.test/");
+        assert!(check_classic_script_mode(&origin, &url("https://www.example.test/a.js"), true).is_ok());
+        for target in ["https://cdn.example.test/a.js", "https://www.example.test:444/a.js",
+                       "http://www.example.test/a.js", "https://other.test/a.js"] {
+            assert!(check_classic_script_mode(&origin, &url(target), true).is_err());
+        }
+        assert!(check_classic_script_mode(&origin, &url("https://cdn.example.test/a.js"), false).is_ok());
+    }
+
 }
