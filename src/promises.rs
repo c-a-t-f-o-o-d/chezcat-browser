@@ -157,6 +157,10 @@ enum Job {
 }
 
 impl Job {
+    fn allocation_kind(&self) -> usize {
+        match self { Self::Callback(_) => 0, Self::Reaction { .. } => 1, Self::Thenable { .. } => 2 }
+    }
+
     fn retained_bytes(&self) -> usize {
         std::mem::size_of::<Self>()
             + match self {
@@ -175,6 +179,14 @@ impl Job {
 }
 
 #[derive(Default)]
+struct AllocationTrace {
+    active: Option<(usize, usize)>,
+    started: [usize; 3],
+    succeeded: [usize; 3],
+    scripts: [usize; 3],
+}
+
+#[derive(Default)]
 pub(super) struct Arena {
     pub(super) prototype: Option<usize>,
     pub(super) constructor: Option<usize>,
@@ -186,9 +198,22 @@ pub(super) struct Arena {
     elements: Vec<Element>,
     jobs: VecDeque<(Option<usize>, Job)>,
     draining: bool,
+    allocation_trace: AllocationTrace,
 }
 
 impl Runtime {
+    pub(super) fn microtask_allocation_diagnostic(&self) -> String {
+        let trace = &self.promises.allocation_trace;
+        let mut scripts = trace.scripts;
+        if let Some((kind, first)) = trace.active {
+            scripts[kind] = scripts[kind].saturating_add(self.functions.iter().skip(first).take(MAX_FUNCTIONS)
+                .filter(|function| matches!(function, Function::Script { .. })).count());
+        }
+        let active = trace.active.map(|(kind, _)| ["callback", "reaction", "thenable"][kind]);
+        format!("microtasks-active={active:?}; callback/reaction/thenable-started={:?}; succeeded={:?}; script-created={scripts:?}; queued={}; resolving-pairs={}; promises={}",
+            trace.started, trace.succeeded, self.promises.jobs.len(), self.promises.pairs.len(), self.promises.count)
+    }
+
     fn promise_retain(&mut self, bytes: usize) -> Result<(), Fault> {
         if self.value_bytes.saturating_add(bytes) > self.limits.heap.retained_values {
             return Err(Fault::new(format!("Retained value limit reached ({} bytes).", self.limits.heap.retained_values)));
@@ -1199,6 +1224,7 @@ impl Runtime {
             return Ok(Vec::new());
         }
         self.promises.draining = true;
+        self.promises.allocation_trace = AllocationTrace::default();
         let mut diagnostics = Vec::new();
         let result = (|| {
             let mut executed = 0;
@@ -1210,7 +1236,16 @@ impl Runtime {
                     ));
                 }
                 executed += 1;
-                if let Err(error) = self.with_intrinsic_realm(realm, |runtime| runtime.run_promise_job(job, host)) {
+                let kind = job.allocation_kind();
+                let first = self.functions.len();
+                self.promises.allocation_trace.active = Some((kind, first));
+                self.promises.allocation_trace.started[kind] += 1;
+                let result = self.with_intrinsic_realm(realm, |runtime| runtime.run_promise_job(job, host));
+                self.promises.allocation_trace.active = None;
+                self.promises.allocation_trace.scripts[kind] += self.functions.iter().skip(first).take(MAX_FUNCTIONS)
+                    .filter(|function| matches!(function, Function::Script { .. })).count();
+                if result.is_ok() { self.promises.allocation_trace.succeeded[kind] += 1; }
+                if let Err(error) = result {
                     if error.exception.is_none() {
                         return Err(error);
                     }
@@ -1285,6 +1320,48 @@ fn bounded_diagnostic(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn microtask_allocation_trace_distinguishes_jobs_and_resets_without_changing_work() {
+        let mut runtime = Runtime::new();
+        runtime.execute("var a,b,c;queueMicrotask(function(){a=function(){};});Promise.resolve(1).then(function(){b=function(){};});Promise.resolve({then:function(resolve){c=function(){};resolve(1);}});", &mut NoHost).unwrap();
+        runtime.microtask_checkpoint(&mut NoHost).unwrap();
+        let trace = &runtime.promises.allocation_trace;
+        assert_eq!(trace.active, None);
+        assert_eq!(trace.started, [1, 1, 1]);
+        assert_eq!(trace.succeeded, [1, 1, 1]);
+        assert_eq!(trace.scripts, [1, 1, 1]);
+        let before = (runtime.functions.len(), runtime.objects.len(), runtime.job_usage());
+        let report = runtime.microtask_allocation_diagnostic();
+        assert!(report.contains("script-created=[1, 1, 1]") && report.contains("resolving-pairs="), "{report}");
+        assert_eq!((runtime.functions.len(), runtime.objects.len(), runtime.job_usage()), before);
+        runtime.microtask_checkpoint(&mut NoHost).unwrap();
+        assert_eq!(runtime.promises.allocation_trace.started, [0; 3]);
+        assert_eq!(runtime.promises.allocation_trace.scripts, [0; 3]);
+    }
+
+    #[test]
+    fn microtask_allocation_trace_identifies_active_fatal_job_and_restores_context() {
+        for (kind, name, source) in [
+            (0, "callback", "queueMicrotask(function(){for(var i=0;i<1100;i++)(function(){})();});"),
+            (1, "reaction", "Promise.resolve(1).then(function(){for(var i=0;i<1100;i++)(function(){})();});"),
+            (2, "thenable", "Promise.resolve({then:function(){for(var i=0;i<1100;i++)(function(){})();}});"),
+        ] {
+            let mut runtime = Runtime::new();
+            runtime.execute(source, &mut NoHost).unwrap();
+            let error = runtime.microtask_checkpoint(&mut NoHost).unwrap_err();
+            assert!(error.contains("Function limit reached (1024)") && error.contains(&format!("microtasks-active=Some(\"{name}\")")), "{error}");
+            let trace = &runtime.promises.allocation_trace;
+            assert_eq!(trace.active, None);
+            assert_eq!(trace.started.iter().sum::<usize>(), 1);
+            assert_eq!(trace.started[kind], 1);
+            assert_eq!(trace.succeeded, [0; 3]);
+            assert!(trace.scripts[kind] > 0);
+            assert!(runtime.promises.jobs.is_empty());
+            assert!(!runtime.promises.draining);
+            assert_eq!((runtime.active_realm, runtime.call_depth, runtime.eval_depth), (None, 0, 0));
+        }
+    }
 
     struct NoHost;
     impl Host for NoHost {

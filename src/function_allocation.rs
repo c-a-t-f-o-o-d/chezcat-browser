@@ -25,8 +25,21 @@ impl Runtime {
         let mut repeated: Vec<_> = templates.into_iter().map(|((program, template), count)| (program, template, count)).collect();
         repeated.sort_unstable_by(|left, right| right.2.cmp(&left.2).then_with(|| left.0.cmp(&right.0)).then_with(|| left.1.cmp(&right.1)));
         repeated.truncate(3);
-        Fault::new(format!("Function limit reached (1024). Requested={requested}; active-realm={:?}; native/script/host/bound/promise={kinds:?}; main-realm={main:?}; detached-realms={}; top-script-program/template/count={repeated:?}.",
-            self.active_realm, self.intrinsic_realms.len()))
+        // Classify only three retained templates, using AST metadata. No source
+        // text, public names or URLs are read or emitted by this diagnostic.
+        let shapes: Vec<_> = repeated.iter().filter_map(|&(program, template, _)| {
+            let program = self.programs.get(program)?;
+            let syntax = program.templates.get(template)?;
+            let kind = if syntax.dynamic_source { "dynamic" }
+                else if syntax.arrow { "arrow" }
+                else if !syntax.constructible { "method/accessor" }
+                else if program.stmts.iter().take(MAX_AST).any(|statement| matches!(&statement.kind, StmtKind::Function(_, id) if *id == template)) { "declaration" }
+                else if syntax.name.is_some() { "named-expression" }
+                else { "anonymous-expression" };
+            Some((kind, syntax.source_start, syntax.source_end.saturating_sub(syntax.source_start)))
+        }).collect();
+        Fault::new(format!("Function limit reached (1024). Requested={requested}; active-realm={:?}; native/script/host/bound/promise={kinds:?}; main-realm={main:?}; detached-realms={}; top-script-program/template/count={repeated:?}; top-script-kind/offset/bytes={shapes:?}; {}.",
+            self.active_realm, self.intrinsic_realms.len(), self.microtask_allocation_diagnostic()))
     }
 }
 
@@ -145,6 +158,7 @@ mod tests {
             } else {
                 let error = result.unwrap_err();
                 assert!(error.contains("Function limit reached (1024)"), "{error}");
+                assert!(error.contains("anonymous-expression"), "{error}");
                 assert_eq!(runtime.functions.len(), MAX_FUNCTIONS);
             }
             println!("Original retained closures: deferred={deferred}; bootstrap={baseline}; scripts={scripts}; final-callables={}; callable-cap={MAX_FUNCTIONS}.", runtime.functions.len());
