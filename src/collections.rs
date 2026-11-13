@@ -49,6 +49,8 @@ pub(super) struct Data {
     sequence: usize,
 }
 impl Data {
+    pub(super) fn reachability_cost(&self) -> usize { self.ordered.len() * 2 }
+
     pub(super) fn reachability_edges(&self, add: &mut impl FnMut(super::function_reachability::Edge)) {
         use super::function_reachability::Edge;
         for entry in self.ordered.values() { Edge::value(&entry.key, add); Edge::value(&entry.value, add); }

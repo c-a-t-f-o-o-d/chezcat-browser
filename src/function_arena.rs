@@ -1,10 +1,16 @@
-//! Stable function IDs with explicit occupancy. Automatic reclamation is disabled.
+//! Stable function IDs with explicit occupancy and pre-reserved retirement.
 use super::{Fault, Function, Runtime, MAX_FUNCTIONS};
 
 #[derive(Default)]
 pub(super) struct Arena {
     pub(super) occupied: usize,
     pub(super) script_created: usize,
+    pub(super) collections: usize,
+    pub(super) retired: usize,
+    pub(super) environments_retired: usize,
+    pub(super) next_collection_at: usize,
+    #[cfg(test)]
+    pub(super) disable_collection: bool,
     free: Vec<usize>,
 }
 
@@ -66,9 +72,12 @@ impl Runtime {
             || !self.object_assigned_closures.contains(&id) || self.exported_function_roots.contains(&id) {
             return Err(Fault::new("Function is outside the unexported closure candidate class."));
         }
-        // Tests supply a completed graph proving unreachability. A future
-        // collector must reserve transaction scratch before retiring any slot.
+        // Tests supply a completed inactive graph proving unreachability.
         self.vacate_function_slot(id, false, true)
+    }
+
+    pub(super) fn reserve_function_retirements(&mut self, count: usize) -> Result<(), Fault> {
+        self.function_arena.free.try_reserve(count).map_err(|_| Fault::new("Unable to reserve bounded free-function storage."))
     }
 
     fn vacate_function_slot(&mut self, id: usize, appended_rollback: bool, refund_script: bool) -> Result<(), Fault> {
@@ -76,9 +85,14 @@ impl Runtime {
             return Err(Fault::new("Cannot retire an invalid or exported function slot."));
         }
         let truncate = appended_rollback && id + 1 == self.functions.len();
-        if !truncate {
-            self.function_arena.free.try_reserve(1).map_err(|_| Fault::new("Unable to reserve bounded free-function storage."))?;
-        }
+        if !truncate { self.reserve_function_retirements(1)?; }
+        self.vacate_function_slot_prepared(id, truncate, refund_script);
+        Ok(())
+    }
+
+    // Caller has validated the complete transaction, refunds and export pins,
+    // and reserved every free ID. This commit path cannot allocate or fail.
+    pub(super) fn vacate_function_slot_prepared(&mut self, id: usize, truncate: bool, refund_script: bool) {
         if refund_script {
             if let Function::Script { lexical_this: Some(value), .. } = &self.functions[id] { self.value_bytes -= value.bytes(); }
         }
@@ -91,7 +105,6 @@ impl Runtime {
         if truncate {
             self.functions.pop(); self.function_properties.pop(); self.function_realms.pop(); self.function_initial_names.pop();
         } else { self.function_arena.free.push(id); }
-        Ok(())
     }
 }
 

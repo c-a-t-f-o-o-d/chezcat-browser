@@ -208,6 +208,8 @@ impl Capability {
 }
 
 impl Data {
+    pub(super) fn reachability_cost(&self) -> usize { 1 + self.reactions.len() * 5 }
+
     pub(super) fn reachability_edges(&self, add: &mut impl FnMut(super::function_reachability::Edge)) {
         use super::function_reachability::Edge;
         match &self.state { State::Fulfilled(value) | State::Rejected(value) => Edge::value(value, add), State::Pending => {} }
@@ -231,11 +233,14 @@ impl Closure {
 }
 
 impl Arena {
+    pub(super) fn reachability_cost(&self) -> usize {
+        2 + self.pairs.len() + self.capabilities.len() * 2 + self.groups.len() * 4 + self.jobs.len() * 5
+    }
+
     pub(super) fn reachability_is_inactive(&self) -> bool {
         !self.draining && self.allocation_trace.active.is_none()
     }
 
-    #[cfg(test)]
     pub(super) fn reachability_job_is_registered(&self, registrations: usize) -> bool {
         if self.draining { registrations == 1 && self.allocation_trace.active.is_some() }
         else { registrations == 0 && self.allocation_trace.active.is_none() }

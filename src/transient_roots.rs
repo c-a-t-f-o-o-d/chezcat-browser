@@ -1,4 +1,4 @@
-//! ID-only registrations for suspended interpreter state. No collection occurs.
+//! ID-only registrations for suspended interpreter state and audited call entries.
 use super::{Control, Exception, Fault, Runtime, Value, MAX_ARGUMENTS, MAX_CALL_DEPTH, MAX_EVAL_DEPTH,
     MAX_EVALUATION_ARGUMENT_SLOTS, MAX_EVALUATION_FRAME_SLOTS};
 use super::function_reachability::Edge;

@@ -1,4 +1,4 @@
-//! Bounded allocation attribution for the existing cumulative function guard.
+//! Bounded allocation attribution for the occupied function-slot guard.
 //! Counts and internal helper/native intrinsic names only; no source, Script
 //! names, URLs or host/device data is collected.
 use super::*;
@@ -85,6 +85,9 @@ function replace(value){
 }
 "#;
         let mut runtime = Runtime::with_limits(limits::BROWSER);
+        // Preserve the original cumulative failure as the collection-disabled
+        // baseline. The enabled workload has independent semantic tests.
+        runtime.function_arena.disable_collection = true;
         runtime.execute(setup, &mut NoHost).unwrap();
         let initial = runtime.functions.len();
         runtime.execute("Promise.resolve().then(function(){for(var i=0;i<64;i++){var current=replace(i);if(i===0)first=current;if(previous&&(previous===current||previous.write===current.write||previous.read===current.read))throw 'identity';order='';current.write(i*2);if(current.payload!==i*2+1||order!=='wgr')throw 'receiver/state/order';previous=current;}if(first===slots[0]||first.payload!==1||slots[0].payload!==127)throw 'retained state';});", &mut NoHost).unwrap();

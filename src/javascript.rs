@@ -35,6 +35,9 @@ mod function_allocation;
 mod function_arena;
 #[path = "function_reachability.rs"]
 mod function_reachability;
+#[cfg(test)]
+#[path = "function_collection_tests.rs"]
+mod function_collection_tests;
 #[path = "transient_roots.rs"]
 mod transient_roots;
 #[path = "deferred_native_methods.rs"]
@@ -8166,6 +8169,7 @@ impl Runtime {
         if self.transient_roots.inhibited == 0 {
             self.transient_roots.uninhibited_script_entries = self.transient_roots.uninhibited_script_entries.saturating_add(1);
         }
+        if let Err(error) = self.collect_function_candidates_at_entry() { self.restore_transient_marker(marker); return Err(error); }
         self.call_depth += 1;
         let previous_strict = self.strict;
         self.transient_roots.owned_call_depth += 1;

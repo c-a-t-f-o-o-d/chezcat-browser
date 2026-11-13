@@ -17,6 +17,8 @@ pub(super) struct Pending {
 }
 
 impl Pending {
+    pub(super) fn reachability_cost(&self) -> usize { self.values.len() + 1 }
+
     pub(super) fn reachability_edges(&self, add: &mut impl FnMut(super::function_reachability::Edge)) {
         use super::function_reachability::Edge;
         add(Edge::Function(self.function));

@@ -1,5 +1,5 @@
-//! Mark-only diagnostics for persistent roots at an inactive-JavaScript boundary.
-//! No sweeping, slot reuse or production collection is enabled.
+//! Checked persistent/transient roots and conservative Script-entry reclamation.
+//! Objects remain append-only; only proven dead candidate functions/environments retire.
 use super::*;
 
 #[derive(Clone, Copy, Debug)]
@@ -27,6 +27,24 @@ struct Graph {
     environments: Vec<bool>,
     pending: Vec<Edge>,
     invalid: bool,
+}
+
+// Charge ID/slot traversal to the existing step/deadline allowance, without
+// copying script payloads or spending/resetting the string-copy allowance.
+struct Meter { remaining: Option<usize>, deadline: Instant }
+impl Meter {
+    fn charge(&mut self, count: usize) -> Result<(), &'static str> {
+        let Some(remaining) = &mut self.remaining else { return Ok(()); };
+        for _ in 0..count {
+            if *remaining == 0 { return Err("Execution step limit reached during reachability."); }
+            if *remaining & 255 == 0 && Instant::now() >= self.deadline {
+                *remaining = 0;
+                return Err("Execution time limit reached during reachability.");
+            }
+            *remaining -= 1;
+        }
+        Ok(())
+    }
 }
 
 impl Graph {
@@ -61,6 +79,91 @@ impl Graph {
 }
 
 impl Runtime {
+    fn active_roots_are_audited(&self) -> bool {
+        let state = &self.transient_roots;
+        #[cfg(test)]
+        if self.recursive_evaluation_oracle { return false; }
+        state.inhibited == 0 && self.call_depth == state.owned_call_depth && self.eval_depth == state.owned_eval_depth
+            && self.evaluation_frames == state.evaluation_frames && self.evaluation_frame_slots == state.frame_slots
+            && self.evaluation_argument_slots == state.argument_slots && self.active_array_joins.is_empty()
+            && self.promises.reachability_job_is_registered(state.active_job_registrations)
+    }
+
+    #[inline(never)]
+    pub(super) fn collect_function_candidates_at_entry(&mut self) -> Result<(), Fault> {
+        #[cfg(test)]
+        if self.function_arena.disable_collection { return Ok(()); }
+        if self.object_assigned_closures.is_empty() || self.function_arena.occupied < MAX_FUNCTIONS * 3 / 4
+            || self.function_arena.script_created < self.function_arena.next_collection_at && self.function_arena.occupied < MAX_FUNCTIONS - 16
+            || !self.active_roots_are_audited() {
+            return Ok(());
+        }
+        let mut meter = Meter { remaining: Some(self.steps), deadline: self.job_deadline };
+        // Production MUST include permanent API/Host export pins. The test-only
+        // pin-disabled audit below exists to prove transient edges independently.
+        let traced = self.trace_root_graph_metered(&[], true, true, true, &mut meter);
+        self.steps = meter.remaining.unwrap();
+        let graph = traced.map_err(Fault::new)?;
+        let prepared = (|| {
+          // Prepay each preflight/commit scan before inspecting its contents.
+          // Failure paths retain this spent work, even if a later reserve fails.
+          meter.charge((self.functions.len() + self.environments.len()) * 2).map_err(Fault::new)?;
+          let mut functions = 0usize;
+          let mut environments = 0usize;
+          let mut bindings = 0usize;
+          let mut bytes = 0usize;
+          for (id, function) in self.functions.iter().enumerate() {
+            if matches!(function, Function::Vacant) { continue; }
+            if !graph.functions[id] {
+                let Function::Script { lexical_this, .. } = function else { return Err(Fault::new("Unmarked non-Script function in retirement transaction.")); };
+                if !self.object_assigned_closures.contains(&id) || self.exported_function_roots.contains(&id) {
+                    return Err(Fault::new("Unmarked function outside retirement candidate class."));
+                }
+                functions += 1;
+                bytes = bytes.checked_add(lexical_this.as_ref().map_or(0, Value::bytes))
+                    .and_then(|bytes| bytes.checked_add(self.function_initial_names[id].as_ref().map_or(0, String::len)))
+                    .ok_or_else(|| Fault::new("Invalid function retirement accounting."))?;
+            } else if let Function::Script { environment, .. } = function {
+                if graph.environments.get(*environment).copied() != Some(true) {
+                    return Err(Fault::new("Retained function has an unmarked capture environment."));
+                }
+            }
+          }
+          for (id, environment) in self.environments.iter().enumerate() {
+            if graph.environments[id] { continue; }
+            if let Some(environment) = environment {
+                meter.charge((environment.bindings.len() + environment.arguments.as_ref().map_or(0, arguments::Pending::reachability_cost)) * 2).map_err(Fault::new)?;
+                environments += 1;
+                bindings = bindings.checked_add(environment.bindings.len()).ok_or_else(|| Fault::new("Invalid environment retirement accounting."))?;
+                let retained = environment.bindings.values().filter_map(|binding| binding.value.as_ref()).map(Value::bytes)
+                    .chain(environment.arguments.as_ref().map(arguments::Pending::bytes));
+                for retained in retained { bytes = bytes.checked_add(retained).ok_or_else(|| Fault::new("Invalid environment retirement accounting."))?; }
+            }
+          }
+          if bindings > self.bindings || bytes > self.value_bytes { return Err(Fault::new("Retirement refunds exceed retained payload accounting.")); }
+          Ok((functions, environments))
+        })();
+        self.steps = meter.remaining.unwrap();
+        let (functions, environments) = prepared?;
+        self.reserve_function_retirements(functions)?;
+        self.free_environments.try_reserve(environments).map_err(|_| Fault::new("Unable to reserve bounded free-environment storage."))?;
+        if Instant::now() >= self.job_deadline {
+            self.steps = 0;
+            return Err(Fault::new("Execution time limit reached during reachability."));
+        }
+        for id in 0..self.functions.len() {
+            if self.function_is_occupied(id) && !graph.functions[id] { self.vacate_function_slot_prepared(id, false, true); }
+        }
+        for id in 0..self.environments.len() {
+            if !graph.environments[id] { self.discard_environment(id); }
+        }
+        self.function_arena.collections = self.function_arena.collections.saturating_add(1);
+        self.function_arena.retired = self.function_arena.retired.saturating_add(functions);
+        self.function_arena.environments_retired = self.function_arena.environments_retired.saturating_add(environments);
+        self.function_arena.next_collection_at = self.function_arena.script_created.saturating_add(32);
+        Ok(())
+    }
+
     #[cfg(test)]
     pub(super) fn retire_proven_inactive_candidate(&mut self, id: usize) -> Result<(), Fault> {
         let graph = self.mark_root_graph(&[], true, true).map_err(Fault::new)?;
@@ -100,8 +203,11 @@ impl Runtime {
                 };
                 let candidates = self.object_assigned_closures.len();
                 let unmarked = self.object_assigned_closures.iter().filter(|&&id| !graph.functions[id]).count();
-                format!("Callable reachability (inactive stack; conservative native/Promise/API roots): Script allocated={allocated}; reachable={reachable}; exported function/object pins={}/{}. Object-assigned closure candidates={candidates}; unmarked with all other functions/exotic objects rooted={unmarked}. No collection or slot reuse.\nEvaluator root snapshots: {}; call-root scopes={}; completion-root scopes={}; peak ID references={}; active registrations=0. Script entries={}; uninhibited={}. Active collection coverage remains under audit.\n",
-                    self.exported_function_roots.len(), self.exported_object_roots.len(), self.transient_roots.snapshots, self.transient_roots.call_scopes, self.transient_roots.completion_scopes, self.transient_roots.peak, self.transient_roots.script_entries, self.transient_roots.uninhibited_script_entries)
+                let history = if self.function_arena.collections == 0 { "No collection or slot reuse has occurred." } else { "Candidate function slots may be reused." };
+                format!("Callable reachability (inactive stack; conservative native/Promise/API roots): Script allocated={allocated}; reachable={reachable}; exported function/object pins={}/{}. Object-assigned closure candidates={candidates}; unmarked with all other functions/exotic objects rooted={unmarked}. Conservative Script-entry collection: passes={}; functions retired={}; environments retired={}; occupied/high-water={}/{}; Script creations={}. {history} Objects remain append-only.\nEvaluator root snapshots: {}; call-root scopes={}; completion-root scopes={}; peak ID references={}; active registrations=0. Script entries={}; uninhibited={}.\n",
+                    self.exported_function_roots.len(), self.exported_object_roots.len(), self.function_arena.collections, self.function_arena.retired,
+                    self.function_arena.environments_retired, self.function_arena.occupied, self.functions.len(), self.function_arena.script_created,
+                    self.transient_roots.snapshots, self.transient_roots.call_scopes, self.transient_roots.completion_scopes, self.transient_roots.peak, self.transient_roots.script_entries, self.transient_roots.uninhibited_script_entries)
             }
             Err(message) => format!("Callable reachability unavailable: {message}\n"),
         }
@@ -123,12 +229,7 @@ impl Runtime {
 
     #[cfg(test)]
     fn mark_audited_active_roots(&self, conservative_candidates: bool) -> Result<Graph, &'static str> {
-        let state = &self.transient_roots;
-        if self.recursive_evaluation_oracle || state.inhibited != 0
-            || self.call_depth != state.owned_call_depth || self.eval_depth != state.owned_eval_depth
-            || self.evaluation_frames != state.evaluation_frames || self.evaluation_frame_slots != state.frame_slots
-            || self.evaluation_argument_slots != state.argument_slots || !self.active_array_joins.is_empty()
-            || !self.promises.reachability_job_is_registered(state.active_job_registrations) {
+        if !self.active_roots_are_audited() {
             return Err("Active mark-only audit requires complete registered guard ownership and uninhibited helpers.");
         }
         self.trace_root_graph(&[], false, conservative_candidates, true)
@@ -136,12 +237,26 @@ impl Runtime {
 
     fn trace_root_graph(&self, exported: &[Value], include_registered_exports: bool,
         conservative_candidates: bool, transient: bool) -> Result<Graph, &'static str> {
+        self.trace_root_graph_metered(exported, include_registered_exports, conservative_candidates, transient,
+            &mut Meter { remaining: None, deadline: self.job_deadline })
+    }
+
+    fn trace_root_graph_metered(&self, exported: &[Value], include_registered_exports: bool,
+        conservative_candidates: bool, transient: bool, meter: &mut Meter) -> Result<Graph, &'static str> {
+        meter.charge(self.objects.len() + self.functions.len() * 4 + self.environments.len())?;
         let mut graph = Graph::new(self)?;
+        // Fixed-size intrinsic families include current and parked main blocks,
+        // even when no child realm exists. Error-family maps have bounded keys.
+        meter.charge(self.transient_roots.roots.len() + 2
+            + (1 + usize::from(self.parked_main_roots.is_some()) + self.intrinsic_realms.len()) * 256
+            + self.host_objects.len() + self.host_method_values.len() + exported.len()
+            + self.exported_function_roots.len() + self.exported_object_roots.len())?;
         if transient { for &edge in &self.transient_roots.roots { graph.add(edge); } }
         graph.add(Edge::Environment(0));
         graph.add(Edge::Environment(self.global_environment));
         for realm in &self.intrinsic_realms { graph.add(Edge::Environment(realm.global_environment)); }
         for (id, function) in self.functions.iter().enumerate() {
+            meter.charge(1)?;
             if !matches!(function, Function::Vacant) && (!matches!(function, Function::Script { .. }) || conservative_candidates && !self.object_assigned_closures.contains(&id)) {
                 graph.add(Edge::Function(id));
             }
@@ -155,18 +270,22 @@ impl Runtime {
         // Conservatively preserve all Promise metadata and pending rejection
         // reporting. This is intentionally broader than eventual precise roots.
         for (id, object) in self.objects.iter().enumerate() {
+            meter.charge(1)?;
             let plain = object.length.is_none() && object.date.is_none() && object.url.is_none() && object.primitive.is_none()
                 && object.promise.is_none() && object.arguments.is_none() && object.binary.is_none() && object.collection.is_none()
                 && object.iterator.is_none() && object.text.is_none() && object.regexp.is_none() && object.error_name.is_none();
             if object.promise.is_some() || conservative_candidates && !plain { graph.add(Edge::Object(id)); }
         }
+        meter.charge(self.promises.reachability_cost())?;
         self.promises.reachability_edges(&mut |edge| graph.add(edge));
         self.reachability_intrinsic_edges(&mut |edge| graph.add(edge));
         while let Some(edge) = graph.pending.pop() {
+            meter.charge(1)?;
             let mut add = |edge| graph.add(edge);
             match edge {
                 Edge::Environment(id) => {
                     let Some(environment) = self.environments[id].as_ref() else { add(Edge::Environment(usize::MAX)); continue; };
+                    meter.charge(2 + environment.bindings.len() * 2 + environment.arguments.as_ref().map_or(0, arguments::Pending::reachability_cost))?;
                     if let Some(parent) = environment.parent { add(Edge::Environment(parent)); }
                     for binding in environment.bindings.values() {
                         if let Some(value) = &binding.value { Edge::value(value, &mut add); }
@@ -174,6 +293,7 @@ impl Runtime {
                     if let Some(pending) = &environment.arguments { pending.reachability_edges(&mut add); }
                 }
                 Edge::Function(id) => {
+                    meter.charge(16 + match &self.functions[id] { Function::Bound(bound) => bound.reachability_cost(), _ => 0 })?;
                     let Some(&properties) = self.function_properties.get(id) else { add(Edge::Object(usize::MAX)); continue; };
                     add(Edge::Object(properties));
                     match &self.functions[id] {
@@ -188,6 +308,9 @@ impl Runtime {
                 }
                 Edge::Object(id) => {
                     let object = &self.objects[id];
+                    meter.charge(32 + (object.properties.len() + object.symbol_properties.len()) * 4
+                        + object.collection.as_ref().map_or(0, collections::Data::reachability_cost)
+                        + object.promise.as_ref().map_or(0, promises::Data::reachability_cost))?;
                     if let Some(prototype) = object.prototype {
                         add(match prototype { Ordinary::Object(id) => Edge::Object(id), Ordinary::Function(id) => Edge::Function(id) });
                     }
