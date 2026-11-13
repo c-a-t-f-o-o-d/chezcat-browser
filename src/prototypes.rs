@@ -117,6 +117,20 @@ impl Runtime {
         length: usize,
         constructible: bool,
     ) -> Result<(), Fault> {
+        // Every factory enters here, including deferred native materialization.
+        // Parallel function metadata is incomplete until initialization finishes.
+        let marker = self.inhibit_transient_collection();
+        let result = self.initialize_function_properties_unpublished(name, length, constructible);
+        self.restore_transient_marker(marker);
+        result
+    }
+
+    fn initialize_function_properties_unpublished(
+        &mut self,
+        name: &str,
+        length: usize,
+        constructible: bool,
+    ) -> Result<(), Fault> {
         let index = self.functions.len() - 1;
         let properties = match self.new_object(None) {
             Ok(properties) => properties,

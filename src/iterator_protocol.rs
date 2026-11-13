@@ -49,6 +49,18 @@ impl Runtime {
         method: Value,
         host: &mut dyn Host,
     ) -> Result<Record, Fault> {
+        let marker = self.inhibit_transient_collection();
+        let result = self.iterator_from_method_unpublished(source, method, host);
+        self.restore_transient_marker(marker);
+        result
+    }
+
+    fn iterator_from_method_unpublished(
+        &mut self,
+        source: Value,
+        method: Value,
+        host: &mut dyn Host,
+    ) -> Result<Record, Fault> {
         if matches!(source, Value::Host(_)) {
             return Err(Fault::new("Host-object iteration is not implemented."));
         }
@@ -90,6 +102,20 @@ impl Runtime {
     }
 
     fn iterator_advance(
+        &mut self,
+        record: &mut Record,
+        read_value: bool,
+        host: &mut dyn Host,
+    ) -> Result<Option<Value>, Fault> {
+        // Includes the optimized native-next path, which bypasses call_value,
+        // and custom result objects retained across done/value getters.
+        let marker = self.inhibit_transient_collection();
+        let result = self.iterator_advance_unpublished(record, read_value, host);
+        self.restore_transient_marker(marker);
+        result
+    }
+
+    fn iterator_advance_unpublished(
         &mut self,
         record: &mut Record,
         read_value: bool,
@@ -151,6 +177,20 @@ impl Runtime {
     }
 
     pub(super) fn iterator_close<T>(
+        &mut self,
+        record: &mut Record,
+        completion: Result<T, Fault>,
+        host: &mut dyn Host,
+    ) -> Result<T, Fault> {
+        // The generic completion can own an unpublished Value as well as the
+        // iterator record. Preserve it across live return lookup and callbacks.
+        let marker = self.inhibit_transient_collection();
+        let result = self.iterator_close_unpublished(record, completion, host);
+        self.restore_transient_marker(marker);
+        result
+    }
+
+    fn iterator_close_unpublished<T>(
         &mut self,
         record: &mut Record,
         completion: Result<T, Fault>,

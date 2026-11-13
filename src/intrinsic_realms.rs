@@ -253,6 +253,7 @@ impl Runtime {
         let previous = self.active_realm;
         self.switch_intrinsic_realm(realm)?;
         let mut result = action(self);
+        let marker = self.inhibit_transient_collection();
         // Materialize only a lazy native Error that crosses a realm boundary,
         // while its originating prototypes are active. Explicit thrown values
         // keep identity; same-realm faults keep the original lazy accounting.
@@ -265,14 +266,18 @@ impl Runtime {
             }
         }
         self.switch_intrinsic_realm(previous).expect("restore known caller realm");
+        self.restore_transient_marker(marker);
         result
     }
 
     #[inline(always)]
     pub(super) fn native_getter_in_realm(&mut self, function: &Value, field: NativeGetter, receiver: Value) -> Result<Value, Fault> {
+        let marker = self.inhibit_transient_collection();
         let realm = match function { Value::Function(id) => self.function_realms[*id], _ => self.active_realm };
-        if realm == self.active_realm { return self.native_getter(field, receiver); }
-        self.with_intrinsic_realm(realm, |runtime| runtime.native_getter(field, receiver))
+        let result = if realm == self.active_realm { self.native_getter(field, receiver) }
+            else { self.with_intrinsic_realm(realm, |runtime| runtime.native_getter(field, receiver)) };
+        self.restore_transient_marker(marker);
+        result
     }
 }
 

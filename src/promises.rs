@@ -1229,7 +1229,34 @@ impl Runtime {
         result
     }
 
-    fn run_promise_job(&mut self, job: Job, host: &mut dyn Host) -> Result<(), Fault> {
+    fn run_promise_job(&mut self, realm: Option<usize>, job: Job, host: &mut dyn Host) -> Result<(), Fault> {
+        // The queue no longer owns this job. Publish its fields before any
+        // handler runs; permanent Promise roots alone do not cover these Values.
+        let marker = self.transient_marker();
+        let result = (|| {
+            use super::function_reachability::Edge;
+            match &job {
+                Job::Callback(function) => self.push_transient_root(Edge::Function(*function))?,
+                Job::Thenable { promise, receiver, then } => {
+                    self.push_transient_root(Edge::Object(*promise))?;
+                    self.push_transient_value(receiver)?;
+                    self.push_transient_value(then)?;
+                }
+                Job::Reaction { capability, handler, value, .. } => {
+                    self.push_transient_value(&capability.promise)?;
+                    self.push_transient_value(&capability.resolve)?;
+                    self.push_transient_value(&capability.reject)?;
+                    if let Some(function) = handler { self.push_transient_root(Edge::Function(*function))?; }
+                    self.push_transient_value(value)?;
+                }
+            }
+            self.with_intrinsic_realm(realm, |runtime| runtime.run_promise_job_registered(job, host))
+        })();
+        self.restore_transient_marker(marker);
+        result
+    }
+
+    fn run_promise_job_registered(&mut self, job: Job, host: &mut dyn Host) -> Result<(), Fault> {
         self.step()?;
         match job {
             Job::Callback(function) => {
@@ -1299,7 +1326,7 @@ impl Runtime {
                 let first = self.functions.len();
                 self.promises.allocation_trace.active = Some((kind, first));
                 self.promises.allocation_trace.started[kind] += 1;
-                let result = self.with_intrinsic_realm(realm, |runtime| runtime.run_promise_job(job, host));
+                let result = self.run_promise_job(realm, job, host);
                 self.promises.allocation_trace.active = None;
                 self.promises.allocation_trace.scripts[kind] += self.functions.iter().skip(first).take(MAX_FUNCTIONS)
                     .filter(|function| matches!(function, Function::Script { .. })).count();

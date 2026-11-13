@@ -9,9 +9,11 @@ impl Runtime {
         handle: u32,
         methods: &[(&str, Value)],
     ) -> Result<(), String> {
+        for (_, value) in methods { self.pin_exported_value(value); }
         if self.host_objects.contains_key(&handle) {
             return Err("Native object already has an expando store.".into());
         }
+        let marker = self.inhibit_transient_collection();
         let result = (|| {
             let prototype = self.new_object(None)?;
             for (name, value) in methods {
@@ -22,6 +24,7 @@ impl Runtime {
             self.host_objects.insert(handle, object);
             Ok(())
         })();
+        self.restore_transient_marker(marker);
         result.map_err(Fault::display)
     }
 

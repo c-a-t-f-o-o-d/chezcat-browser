@@ -46,7 +46,17 @@ def write_json(path, value):
     temporary = path.with_suffix(path.suffix + ".tmp")
     temporary.write_text(json.dumps(value, indent=2, ensure_ascii=False) + "\n",
                          encoding="utf-8")
-    temporary.replace(path)
+    # Windows readers can briefly deny replacement of a just-written manifest.
+    # Preserve atomic publication and the prior manifest; never swallow a
+    # persistent permission error or report a test pass when publication failed.
+    for attempt in range(7):
+        try:
+            temporary.replace(path)
+            break
+        except PermissionError:
+            if attempt == 6:
+                raise
+            time.sleep(0.01 * (2 ** attempt))
 
 
 def source_identity(root):

@@ -357,6 +357,23 @@ impl Runtime {
         this: &Value,
         host: &mut dyn Host,
     ) -> Result<(), Fault> {
+        let marker = self.inhibit_transient_collection();
+        let result = self.initialize_pattern_unpublished(program, pattern, value, mode, environment, this, host);
+        self.restore_transient_marker(marker);
+        result
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn initialize_pattern_unpublished(
+        &mut self,
+        program: &Rc<Program>,
+        pattern: Id,
+        value: Value,
+        mode: Mode,
+        environment: usize,
+        this: &Value,
+        host: &mut dyn Host,
+    ) -> Result<(), Fault> {
         self.step()?;
         if self.eval_depth >= MAX_EVAL_DEPTH {
             return Err(Fault::new("Evaluation nesting limit reached (128)."));

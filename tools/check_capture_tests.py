@@ -49,6 +49,40 @@ print('test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered ou
 
 
 class CaptureTests(unittest.TestCase):
+    def test_manifest_publication_retries_temporary_permission_error(self):
+        with tempfile.TemporaryDirectory(prefix="chezcat-manifest-retry-") as temporary:
+            path = Path(temporary) / "manifest.json"
+            path.write_text('{"previous": true}\n', encoding="utf-8")
+            original = Path.replace
+            attempts = 0
+
+            def briefly_locked(source, destination):
+                nonlocal attempts
+                attempts += 1
+                if attempts <= 2:
+                    raise PermissionError("controlled temporary sharing denial")
+                return original(source, destination)
+
+            with patch.object(Path, "replace", briefly_locked), patch.object(runner.time, "sleep") as sleep:
+                runner.write_json(path, {"published": True})
+            self.assertEqual(attempts, 3)
+            self.assertEqual(sleep.call_count, 2)
+            self.assertEqual(json.loads(path.read_text(encoding="utf-8")), {"published": True})
+            self.assertFalse(path.with_suffix(".json.tmp").exists())
+
+    def test_manifest_publication_keeps_previous_on_persistent_permission_error(self):
+        with tempfile.TemporaryDirectory(prefix="chezcat-manifest-denied-") as temporary:
+            path = Path(temporary) / "manifest.json"
+            previous = b'{"previous": true}\n'
+            path.write_bytes(previous)
+            with patch.object(Path, "replace", side_effect=PermissionError("controlled persistent denial")) as replace, patch.object(runner.time, "sleep") as sleep:
+                with self.assertRaises(PermissionError):
+                    runner.write_json(path, {"published": True})
+            self.assertEqual(replace.call_count, 7)
+            self.assertEqual(sleep.call_count, 6)
+            self.assertEqual(path.read_bytes(), previous)
+            self.assertTrue(path.with_suffix(".json.tmp").exists())
+
     def test_source_identity_hashes_embedded_suffix_data(self):
         with tempfile.TemporaryDirectory(prefix="chezcat-cookie-inputs-") as temporary:
             root = Path(temporary)

@@ -81,9 +81,12 @@ impl Runtime {
         host: &mut dyn Host,
     ) -> Result<Value, Fault> {
         let mut scopes = [None; 4];
+        let marker = self.transient_marker();
+        let inhibited = self.inhibit_transient_collection();
         let prepared = self.prepare_script_call(
             program, template, callee, parent, args, this, host, &mut scopes,
         );
+        self.finish_transient_inhibition(inhibited);
         let result = match prepared {
             Ok(body) => match self.statements(program, &program.templates[template].body, body, this, host) {
                 Ok(Control::Return(value)) => Ok(value),
@@ -93,6 +96,7 @@ impl Runtime {
             },
             Err(error) => Err(error),
         };
+        self.restore_transient_marker(marker);
         for scope in scopes.into_iter().rev().flatten() {
             self.release_environment(scope);
         }
@@ -116,11 +120,13 @@ impl Runtime {
         let has_expressions = function.has_parameter_expressions(program);
         let call_scope = self.new_environment(parent, true)?;
         scopes[0] = Some(call_scope);
+        self.push_transient_root(super::function_reachability::Edge::Environment(call_scope))?;
         // Sloppy default eval may introduce vars, but cannot replace formal
         // bindings. Keeping these records distinct also preserves its closures.
         let parameters = if has_expressions && !function.strict {
             let scope = self.new_environment(call_scope, false)?;
             scopes[1] = Some(scope);
+            self.push_transient_root(super::function_reachability::Edge::Environment(scope))?;
             scope
         } else {
             call_scope
@@ -165,6 +171,7 @@ impl Runtime {
         let variables = if has_expressions {
             let scope = self.new_environment(parameters, true)?;
             scopes[2] = Some(scope);
+            self.push_transient_root(super::function_reachability::Edge::Environment(scope))?;
             for name in collect_var_names_with_work(program, &function.body, |n| self.work(n))? {
                 self.step()?;
                 if self.environment(scope).bindings.contains_key(&name) {
@@ -189,6 +196,7 @@ impl Runtime {
         let body = if has_expressions && !function.strict {
             let scope = self.new_environment(variables, false)?;
             scopes[3] = Some(scope);
+            self.push_transient_root(super::function_reachability::Edge::Environment(scope))?;
             scope
         } else {
             variables

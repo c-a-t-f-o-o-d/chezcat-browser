@@ -87,8 +87,8 @@ impl Runtime {
                 };
                 let candidates = self.object_assigned_closures.len();
                 let unmarked = self.object_assigned_closures.iter().filter(|&&id| !graph.functions[id]).count();
-                format!("Callable reachability (inactive stack; conservative native/Promise/API roots): Script allocated={allocated}; reachable={reachable}; exported function/object pins={}/{}. Object-assigned closure candidates={candidates}; unmarked with all other functions/exotic objects rooted={unmarked}. No collection or slot reuse.\nEvaluator root snapshots: {}; peak ID references={}; active registrations=0. Other transient coverage remains incomplete.\n",
-                    self.exported_function_roots.len(), self.exported_object_roots.len(), self.transient_roots.snapshots, self.transient_roots.peak)
+                format!("Callable reachability (inactive stack; conservative native/Promise/API roots): Script allocated={allocated}; reachable={reachable}; exported function/object pins={}/{}. Object-assigned closure candidates={candidates}; unmarked with all other functions/exotic objects rooted={unmarked}. No collection or slot reuse.\nEvaluator root snapshots: {}; call-root scopes={}; completion-root scopes={}; peak ID references={}; active registrations=0. Script entries={}; uninhibited={}. Active collection coverage remains under audit.\n",
+                    self.exported_function_roots.len(), self.exported_object_roots.len(), self.transient_roots.snapshots, self.transient_roots.call_scopes, self.transient_roots.completion_scopes, self.transient_roots.peak, self.transient_roots.script_entries, self.transient_roots.uninhibited_script_entries)
             }
             Err(message) => format!("Callable reachability unavailable: {message}\n"),
         }

@@ -3470,8 +3470,8 @@ impl Runtime {
         {
             self.cancel_microtasks();
         }
-        self.collect_environments();
         if let Ok(value) = &result { self.pin_exported_value(value); }
+        self.collect_environments();
         result.map_err(Fault::display)
     }
 
@@ -3491,6 +3491,20 @@ impl Runtime {
     }
 
     fn string_eval(
+        &mut self,
+        value: &Value,
+        direct: Option<(usize, &Value)>,
+        host: &mut dyn Host,
+    ) -> Result<Value, Fault> {
+        // Direct eval bypasses call_value. Its parser/scoping helpers still own
+        // Rust-only locals, so nested script execution remains inhibited.
+        let marker = self.inhibit_transient_collection();
+        let result = self.string_eval_unpublished(value, direct, host);
+        self.restore_transient_marker(marker);
+        result
+    }
+
+    fn string_eval_unpublished(
         &mut self,
         value: &Value,
         direct: Option<(usize, &Value)>,
@@ -3613,8 +3627,8 @@ impl Runtime {
         {
             self.cancel_microtasks();
         }
-        self.collect_environments();
         if let Ok(value) = &result { self.pin_exported_value(value); }
+        self.collect_environments();
         result.map_err(Fault::display)
     }
 
@@ -3635,8 +3649,8 @@ impl Runtime {
         {
             self.cancel_microtasks();
         }
-        self.collect_environments();
         if let Ok(value) = &result { self.pin_exported_value(value); }
+        self.collect_environments();
         result.map_err(Fault::display)
     }
 
@@ -4061,6 +4075,15 @@ impl Runtime {
         environment: usize,
         this: &Value,
     ) -> Result<Value, Fault> {
+        let marker = self.inhibit_transient_collection();
+        let result = self.make_function_unpublished(program, template, environment, this);
+        self.restore_transient_marker(marker);
+        result
+    }
+
+    fn make_function_unpublished(
+        &mut self, program: &Rc<Program>, template: usize, environment: usize, this: &Value,
+    ) -> Result<Value, Fault> {
         self.step()?;
         if self.functions.len() == MAX_FUNCTIONS {
             return Err(self.function_limit_fault("script"));
@@ -4123,6 +4146,21 @@ impl Runtime {
         )
     }
     fn prepare_scopes(
+        &mut self,
+        program: &Rc<Program>,
+        body: &[StmtId],
+        environment: usize,
+        variable_environment: usize,
+        function_scope: bool,
+        host: &mut dyn Host,
+    ) -> Result<(), Fault> {
+        let marker = self.inhibit_transient_collection();
+        let result = self.prepare_scopes_unpublished(program, body, environment, variable_environment, function_scope, host);
+        self.restore_transient_marker(marker);
+        result
+    }
+
+    fn prepare_scopes_unpublished(
         &mut self,
         program: &Rc<Program>,
         body: &[StmtId],
@@ -5831,7 +5869,10 @@ impl Runtime {
     ) -> Result<Control, Fault> {
         let mut last = None;
         for &statement in body {
-            match self.statement(program, statement, env, this, host)? {
+            let marker = self.publish_statement_inputs(env, this, last.as_ref())?;
+            let completion = self.statement(program, statement, env, this, host);
+            self.restore_root_marker(marker);
+            match completion? {
                 Control::Normal(value) => {
                     if value.is_some() {
                         last = value;
@@ -5855,6 +5896,7 @@ impl Runtime {
         if self.eval_depth >= MAX_EVAL_DEPTH {
             return Err(Fault::new("Evaluation nesting limit reached (128)."));
         }
+        let marker = self.publish_statement_inputs(env, this, None)?;
         self.eval_depth += 1;
         // Expression/return statements have no pending statement work while
         // their expression runs. Enter the heap evaluator from this activation,
@@ -5887,6 +5929,7 @@ impl Runtime {
                     other => other,
                 });
         self.eval_depth -= 1;
+        self.restore_root_marker(marker);
         result.map_err(|error| error.at(&program.source, program.stmts[id].at))
     }
 
@@ -5906,8 +5949,15 @@ impl Runtime {
             ))),
             StmtKind::Block(body) => {
                 let scope = self.new_environment(env, false)?;
-                let result = match self.prepare(program, body, scope, false, host) {
-                    Ok(()) => self.statements(program, body, scope, this, host),
+                let result = match self.publish_statement_inputs(scope, this, None) {
+                    Ok(marker) => {
+                        let result = match self.prepare(program, body, scope, false, host) {
+                            Ok(()) => self.statements(program, body, scope, this, host),
+                            Err(error) => Err(error),
+                        };
+                        self.restore_root_marker(marker);
+                        result
+                    }
                     Err(error) => Err(error),
                 };
                 self.release_environment(scope);
@@ -6059,7 +6109,10 @@ impl Runtime {
         // one shared lexical block, including TDZ bindings in unselected cases.
         let value = self.eval(program, *discriminant, env, this, host)?;
         let scope = self.new_environment(env, false)?;
+        let marker = self.transient_marker();
         let result = (|| {
+            self.push_transient_value(&value)?;
+            self.push_transient_root(function_reachability::Edge::Environment(scope))?;
             self.prepare(program, body, scope, false, host)?;
             let (mut start, mut default) = (None, None);
             for (test, offset) in cases {
@@ -6082,6 +6135,7 @@ impl Runtime {
                 Ok(Control::Normal(Some(Value::Undefined)))
             }
         })();
+        self.restore_transient_marker(marker);
         self.release_environment(scope);
         result
     }
@@ -6100,9 +6154,18 @@ impl Runtime {
             _ => unreachable!(),
         };
         let mut last = Some(Value::Undefined);
-        while first || self.eval(program, *condition, env, this, host)?.truthy() {
+        loop {
+            if !first {
+                let marker = self.publish_statement_inputs(env, this, last.as_ref())?;
+                let condition = self.eval(program, *condition, env, this, host);
+                self.restore_root_marker(marker);
+                if !condition?.truthy() { break; }
+            }
             first = false;
-            match self.statement(program, *body, env, this, host)? {
+            let marker = self.publish_statement_inputs(env, this, last.as_ref())?;
+            let completion = self.statement(program, *body, env, this, host);
+            self.restore_root_marker(marker);
+            match completion? {
                 Control::Normal(value) => {
                     if value.is_some() {
                         last = value;
@@ -6166,14 +6229,17 @@ impl Runtime {
                     loop {
                         self.step()?;
                         if let Some(condition) = condition {
-                            if !self
-                                .eval(program, *condition, loop_env, this, host)?
-                                .truthy()
-                            {
+                            let marker = self.publish_statement_inputs(loop_env, this, last.as_ref())?;
+                            let value = self.eval(program, *condition, loop_env, this, host);
+                            self.restore_root_marker(marker);
+                            if !value?.truthy() {
                                 break;
                             }
                         }
-                        match self.statement(program, *body, loop_env, this, host)? {
+                        let marker = self.publish_statement_inputs(loop_env, this, last.as_ref())?;
+                        let completion = self.statement(program, *body, loop_env, this, host);
+                        self.restore_root_marker(marker);
+                        match completion? {
                             Control::Normal(value) => {
                                 if value.is_some() {
                                     last = value;
@@ -6196,7 +6262,10 @@ impl Runtime {
                             loop_env = self.iteration_environment(loop_env, env, &per_iteration)?;
                         }
                         if let Some(advance) = advance {
-                            self.eval(program, *advance, loop_env, this, host)?;
+                            let marker = self.publish_statement_inputs(loop_env, this, last.as_ref())?;
+                            let value = self.eval(program, *advance, loop_env, this, host);
+                            self.restore_root_marker(marker);
+                            value?;
                         }
                     }
                     Ok(Control::Normal(last))
@@ -6209,6 +6278,22 @@ impl Runtime {
     }
 
     fn for_each_statement(
+        &mut self,
+        program: &Rc<Program>,
+        id: StmtId,
+        env: usize,
+        this: &Value,
+        host: &mut dyn Host,
+    ) -> Result<Control, Fault> {
+        // Iterator records, LHS snapshots and close completions are still held
+        // in Rust locals. Keep the complete loop inhibited until all are ported.
+        let marker = self.inhibit_transient_collection();
+        let result = self.for_each_statement_unpublished(program, id, env, this, host);
+        self.restore_transient_marker(marker);
+        result
+    }
+
+    fn for_each_statement_unpublished(
         &mut self,
         program: &Rc<Program>,
         id: StmtId,
@@ -6446,33 +6531,7 @@ impl Runtime {
             return completion;
         }
         if let (Err(error), Some((binding, catch_body))) = (&mut completion, catch) {
-            let exception = error.exception.take().expect("catchable exception");
-            let value = match *exception {
-                Exception::Value(value) => value,
-                Exception::Error(kind) => self.error_object(kind, Some(error.message.clone()))?,
-            };
-            let catch_env = self.new_environment(env, false)?;
-            completion = (|| {
-                if let Some(pattern) = binding {
-                    for name in program.pattern_names_with_work(*pattern, |n| self.work(n))? {
-                        self.put_binding(catch_env, name, None, Declaration::Let, false)?;
-                    }
-                    if let binding_patterns::Kind::Name(name) = &program.patterns[*pattern].kind {
-                        self.environment_mut(catch_env).catch_parameter = Some(name.clone());
-                    }
-                    self.initialize_pattern(
-                        program,
-                        *pattern,
-                        value,
-                        binding_patterns::Mode::Initialize(catch_env),
-                        catch_env,
-                        this,
-                        host,
-                    )?;
-                }
-                self.statement(program, *catch_body, catch_env, this, host)
-            })();
-            self.release_environment(catch_env);
+            completion = self.catch_statement(program, *binding, *catch_body, error, env, this, host);
         }
         if completion
             .as_ref()
@@ -6481,7 +6540,7 @@ impl Runtime {
             return completion;
         }
         if let Some(finally) = finally {
-            match self.statement(program, *finally, env, this, host) {
+            match self.finally_statement(program, *finally, &completion, env, this, host) {
                 Ok(Control::Normal(_)) => {}
                 replacement => completion = replacement,
             }
@@ -6489,7 +6548,62 @@ impl Runtime {
         completion.map(|control| control.update_empty(Some(Value::Undefined)))
     }
 
+    // Catch/finally-only scratch must not enlarge every recursively entered try
+    // body. Existing one-MiB stack guards exercise this separation.
+    #[inline(never)]
+    fn catch_statement(&mut self, program: &Rc<Program>, binding: Option<binding_patterns::Id>,
+        body: StmtId, error: &mut Fault, env: usize, this: &Value, host: &mut dyn Host) -> Result<Control, Fault> {
+        let exception = error.exception.take().expect("catchable exception");
+        let value = match *exception {
+            Exception::Value(value) => value,
+            Exception::Error(kind) => self.error_object(kind, Some(error.message.clone()))?,
+        };
+        let catch_env = self.new_environment(env, false)?;
+        let marker = self.transient_marker();
+        let result = (|| {
+            self.push_transient_value(&value)?;
+            self.push_transient_root(function_reachability::Edge::Environment(catch_env))?;
+            if let Some(pattern) = binding {
+                for name in program.pattern_names_with_work(pattern, |n| self.work(n))? {
+                    self.put_binding(catch_env, name, None, Declaration::Let, false)?;
+                }
+                if let binding_patterns::Kind::Name(name) = &program.patterns[pattern].kind {
+                    self.environment_mut(catch_env).catch_parameter = Some(name.clone());
+                }
+                self.initialize_pattern(program, pattern, value, binding_patterns::Mode::Initialize(catch_env), catch_env, this, host)?;
+            }
+            self.statement(program, body, catch_env, this, host)
+        })();
+        self.restore_transient_marker(marker);
+        self.release_environment(catch_env);
+        result
+    }
+
+    #[inline(never)]
+    fn finally_statement(&mut self, program: &Rc<Program>, body: StmtId,
+        completion: &Result<Control, Fault>, env: usize, this: &Value, host: &mut dyn Host) -> Result<Control, Fault> {
+        let marker = self.transient_marker();
+        let result = self.push_completion_roots(completion)
+            .and_then(|()| self.statement(program, body, env, this, host));
+        self.restore_transient_marker(marker);
+        result
+    }
+
     fn iteration_environment(
+        &mut self,
+        old: usize,
+        parent: usize,
+        names: &[String],
+    ) -> Result<usize, Fault> {
+        // The old/new scope ownership transfer is atomic with respect to any
+        // future collection; no root may reference the released old scope.
+        let marker = self.inhibit_transient_collection();
+        let result = self.iteration_environment_unpublished(old, parent, names);
+        self.restore_transient_marker(marker);
+        result
+    }
+
+    fn iteration_environment_unpublished(
         &mut self,
         old: usize,
         parent: usize,
@@ -6999,6 +7113,14 @@ impl Runtime {
 
     #[inline(always)]
     fn construct_value(&mut self, constructor: Value, args: &[Value], host: &mut dyn Host) -> Result<Value, Fault> {
+        let marker = self.publish_call_inputs(&constructor, &Value::Undefined, args)?;
+        self.transient_roots.inhibited += 1;
+        let result = self.construct_value_routed(constructor, args, host);
+        self.restore_transient_marker(marker);
+        result
+    }
+
+    fn construct_value_routed(&mut self, constructor: Value, args: &[Value], host: &mut dyn Host) -> Result<Value, Fault> {
         let realm = match &constructor { Value::Function(id) => self.function_realms.get(*id).copied().unwrap_or(self.active_realm), _ => self.active_realm };
         if realm == self.active_realm { return self.construct_value_in_realm(constructor, args, host); }
         if !self.from_constructor(&constructor)? {
@@ -7117,6 +7239,21 @@ impl Runtime {
     }
 
     fn reference(
+        &mut self,
+        program: &Rc<Program>,
+        id: ExprId,
+        env: usize,
+        this: &Value,
+        host: &mut dyn Host,
+    ) -> Result<Reference, Fault> {
+        // Pattern/loop LHS evaluation keeps the base while computing its key.
+        let marker = self.inhibit_transient_collection();
+        let result = self.reference_unpublished(program, id, env, this, host);
+        self.restore_transient_marker(marker);
+        result
+    }
+
+    fn reference_unpublished(
         &mut self,
         program: &Rc<Program>,
         expression: ExprId,
@@ -7500,6 +7637,21 @@ impl Runtime {
         args: &[Value],
         host: &mut dyn Host,
     ) -> Result<Value, Fault> {
+        // Dictionary conversion retains earlier getter results while invoking
+        // later getters. Direct Host member calls do not enter call_value.
+        let marker = self.inhibit_transient_collection();
+        let result = self.call_host_unpublished(object, method, args, host);
+        self.restore_transient_marker(marker);
+        result
+    }
+
+    fn call_host_unpublished(
+        &mut self,
+        object: u32,
+        method: &str,
+        args: &[Value],
+        host: &mut dyn Host,
+    ) -> Result<Value, Fault> {
         let required = host.required_arguments(object, method);
         if args.len() < required {
             return Err(Fault::exception(
@@ -7724,6 +7876,17 @@ impl Runtime {
 
     #[inline(always)]
     fn call_value(&mut self, function: Value, args: &[Value], this: Value, host: &mut dyn Host) -> Result<Value, Fault> {
+        let marker = self.publish_call_inputs(&function, &this, args)?;
+        // Native, Promise and bound helpers may own additional Rust-only locals.
+        if !matches!(&function, Value::Function(id) if matches!(self.functions.get(*id), Some(Function::Script { .. }))) {
+            self.transient_roots.inhibited += 1;
+        }
+        let result = self.call_value_routed(function, args, this, host);
+        self.restore_transient_marker(marker);
+        result
+    }
+
+    fn call_value_routed(&mut self, function: Value, args: &[Value], this: Value, host: &mut dyn Host) -> Result<Value, Fault> {
         let realm = match &function { Value::Function(id) => self.function_realms.get(*id).copied().unwrap_or(self.active_realm), _ => self.active_realm };
         if realm == self.active_realm { return self.call_value_in_realm(function, args, this, host); }
         self.with_intrinsic_realm(realm, |runtime| runtime.call_value_in_realm(function, args, this, host))
@@ -7905,6 +8068,14 @@ impl Runtime {
         } else {
             this
         };
+        let marker = self.transient_marker();
+        let rooted = self.push_transient_value(&this)
+            .and_then(|()| self.push_transient_root(function_reachability::Edge::Environment(parent)));
+        if let Err(error) = rooted { self.restore_transient_marker(marker); return Err(error); }
+        self.transient_roots.script_entries = self.transient_roots.script_entries.saturating_add(1);
+        if self.transient_roots.inhibited == 0 {
+            self.transient_roots.uninhibited_script_entries = self.transient_roots.uninhibited_script_entries.saturating_add(1);
+        }
         self.call_depth += 1;
         let previous_strict = self.strict;
         self.strict = program.templates[template].strict;
@@ -7913,10 +8084,26 @@ impl Runtime {
         })();
         self.call_depth -= 1;
         self.strict = previous_strict;
+        self.restore_transient_marker(marker);
         result
     }
 
     fn call_member(
+        &mut self,
+        object: Value,
+        method: &str,
+        args: &[Value],
+        host: &mut dyn Host,
+    ) -> Result<Value, Fault> {
+        // Legacy direct member dispatch includes apply's array-like getters and
+        // native helpers whose temporary values are not individually published.
+        let marker = self.inhibit_transient_collection();
+        let result = self.call_member_unpublished(object, method, args, host);
+        self.restore_transient_marker(marker);
+        result
+    }
+
+    fn call_member_unpublished(
         &mut self,
         object: Value,
         method: &str,
@@ -10690,6 +10877,7 @@ caught;
             "try{let o={};o.__proto__;}catch(e){test.record('caught');}finally{test.record('finally');}",
             "function f(){try{Array(8193);}finally{return 1;}}test.record(f());",
         ] {
+            eprintln!("fatal capability witness: {source}");
             let (mut runtime, mut host) = test_runtime();
             assert!(runtime.execute(source, &mut host).is_err(), "{source}");
             assert!(host.records.is_empty(), "A fatal interpreter failure was suppressed: {source}");
@@ -11457,11 +11645,14 @@ caught;
         std::thread::Builder::new()
             .stack_size(1024 * 1024)
             .spawn(|| {
+                eprintln!("hostile nesting: recursion/flat-chain guards");
                 recursion_infinite_loops_and_flat_ast_chains_are_bounded();
+                eprintln!("hostile nesting: fatal capability guards");
                 resource_and_capability_failures_cannot_be_caught_or_suppressed();
+                eprintln!("hostile nesting: accepted flat calls");
                 let (mut accepted, mut recorder) = test_runtime();
                 assert!(matches!(accepted.execute(&format!("function f(){{return f;}}f{};", "()".repeat(1000)), &mut recorder).unwrap(), Value::Function(_)));
-                for source in [
+                for (case, source) in [
                     format!("function f(){{return f;}}f{};", "()".repeat(MAX_EVALUATION_FRAMES)),
                     format!("{};", vec!["1"; 12_000].join(",")),
                     format!("{}1;{}", "try{".repeat(100), "}finally{}".repeat(100)),
@@ -11475,7 +11666,8 @@ caught;
                     ),
                     format!("{}1;", "for(let key in {a:1})".repeat(100)),
                     format!("{}1;", "while(true)".repeat(100)),
-                ] {
+                ].into_iter().enumerate() {
+                    eprintln!("hostile nesting: case {case}");
                     let (mut runtime, mut host) = test_runtime();
                     let error = runtime.execute(&source, &mut host).unwrap_err();
                     assert!(error.contains("limit"), "{error}");

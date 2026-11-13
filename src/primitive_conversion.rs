@@ -365,6 +365,7 @@ impl Runtime {
         if self.call_depth >= MAX_CALL_DEPTH {
             return Err(Fault::new("Object conversion call limit reached (32)."));
         }
+        let marker = self.inhibit_transient_collection();
         self.call_depth += 1;
         let result = (|| {
             let Some(key) = self.symbol_to_primitive else {
@@ -394,6 +395,7 @@ impl Runtime {
             self.checked_value(primitive).map(Some)
         })();
         self.call_depth -= 1;
+        self.restore_transient_marker(marker);
         result
     }
 
@@ -408,9 +410,11 @@ impl Runtime {
         if self.call_depth >= MAX_CALL_DEPTH {
             return Err(Fault::new("Object conversion call limit reached (32)."));
         }
+        let marker = self.inhibit_transient_collection();
         self.call_depth += 1;
         let result = self.primitive_methods(value, string_hint, host);
         self.call_depth -= 1;
+        self.restore_transient_marker(marker);
         result
     }
 }
