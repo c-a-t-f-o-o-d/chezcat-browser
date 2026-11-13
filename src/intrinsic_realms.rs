@@ -6,6 +6,10 @@
 use super::*;
 
 const MAX_INTRINSIC_REALMS: usize = 8;
+const BINARY_GLOBALS: &[&str] = &["ArrayBuffer", "DataView", "Int8Array", "Uint8Array", "Uint8ClampedArray",
+    "Int16Array", "Uint16Array", "Int32Array", "Uint32Array", "Float16Array", "Float32Array", "Float64Array"];
+const URL_GLOBALS: &[&str] = &["URL", "URLSearchParams"];
+const TEXT_GLOBALS: &[&str] = &["TextEncoder", "TextDecoder"];
 
 macro_rules! roots {
     ($($field:ident: $kind:ty),* $(,)?) => {
@@ -43,6 +47,9 @@ roots! {
     host_globals: HashSet<String>,
     operation_globals: HashSet<&'static str>,
     arguments_thrower: Option<usize>,
+    array_to_string_intrinsic: Option<usize>,
+    deferred_intrinsics: u8,
+    failed_intrinsics: u8,
 }
 
 #[allow(dead_code)] // Not exposed until callee-realm/Window routing is complete.
@@ -59,6 +66,85 @@ pub(super) struct ParkedRoots {
 }
 
 impl Runtime {
+    pub(super) fn ensure_global_intrinsics(&mut self, name: &str) -> Result<(), Fault> {
+        if self.deferred_intrinsics == 0 && self.failed_intrinsics == 0 { return Ok(()); }
+        let (bit, names) = if BINARY_GLOBALS.contains(&name) { (1, BINARY_GLOBALS) }
+            else if URL_GLOBALS.contains(&name) { (2, URL_GLOBALS) }
+            else if TEXT_GLOBALS.contains(&name) { (4, TEXT_GLOBALS) }
+            else { return Ok(()); };
+        if self.failed_intrinsics & bit != 0 {
+            return Err(Fault::new("Deferred intrinsic family is unavailable after an earlier bounded initialization failure."));
+        }
+        if self.deferred_intrinsics & bit == 0 { return Ok(()); }
+        self.step()?;
+        self.deferred_intrinsics &= !bit;
+        let result = (|| {
+            match bit {
+                1 => self.initialize_binary()?,
+                2 => self.initialize_url_api()?,
+                4 => { self.ensure_global_intrinsics("Uint8Array")?; self.initialize_text_encoding()?; }
+                _ => unreachable!(),
+            }
+            for &name in names {
+                self.work(name.len())?;
+                self.global_attributes.insert(name.into(), (false, true, true));
+            }
+            Ok(())
+        })();
+        if result.is_err() { self.failed_intrinsics |= bit; }
+        result
+    }
+
+    pub(super) fn foreign_window(&self, handle: u32, host: &dyn Host) -> bool {
+        !self.is_browser_global(handle)
+            && (self.window_realms.contains_key(&handle) || host.window_context(handle).is_some())
+    }
+
+    pub(super) fn reject_foreign_window(&self, value: &Value, host: &dyn Host) -> Result<(), Fault> {
+        if matches!(value, Value::Host(handle) if self.foreign_window(*handle, host)) {
+            return Err(Fault::new("This foreign Window operation is not implemented; only named property reads are supported."));
+        }
+        Ok(())
+    }
+
+    pub(super) fn read_foreign_window(&mut self, handle: u32, name: &str, host: &mut dyn Host) -> Result<Value, Fault> {
+        host.validate_window_access(self.browser_global.map(|(handle, _)| handle), handle).map_err(Fault::new)?;
+        // Native identity/document/location reads do not require allocating the
+        // child's ES intrinsics. The host already owns a real child context.
+        if host.owns_window_property(Some(handle), name) {
+            let value = host.get(handle, name).map_err(Fault::new)?;
+            return self.checked_value(value);
+        }
+        let realm = if let Some(realm) = self.window_realms.get(&handle).copied() {
+            realm
+        } else {
+            if self.failed_window_realms.contains(&handle) {
+                return Err(Fault::new("Child Window intrinsics are unavailable after an earlier bounded initialization failure."));
+            }
+            let context = host.window_context(handle).ok_or_else(|| Fault::new("Unknown child Window context."))?;
+            let realm = match self.allocate_realm_with_deferred_families(true) {
+                Ok(realm) => realm,
+                Err(error) => { self.failed_window_realms.insert(handle); return Err(error); }
+            };
+            let result = self.with_intrinsic_realm(Some(realm), |runtime| {
+                for (name, value) in [("window", handle), ("self", handle), ("globalThis", handle),
+                    ("document", context.document), ("location", context.location)] {
+                    runtime.define_global(name, Value::Host(value)).map_err(Fault::new)?;
+                }
+                runtime.bind_browser_global(handle).map_err(Fault::new)
+            });
+            if let Err(error) = result {
+                // The real host context remains. No partial realm is published;
+                // failed allocation remains charged under aggregate arena caps.
+                self.window_realms.remove(&handle);
+                self.failed_window_realms.insert(handle);
+                return Err(error);
+            }
+            Some(realm)
+        };
+        self.with_intrinsic_realm(realm, |runtime| runtime.global_value(name, host))
+    }
+
     pub(super) fn immutable_object_prototype(&self, id: usize) -> bool {
         self.object_prototype == Some(id)
             || self.parked_main_roots.as_ref().is_some_and(|main| main.roots.object_prototype == Some(id))
@@ -67,6 +153,10 @@ impl Runtime {
 
     #[allow(dead_code)]
     pub(super) fn allocate_intrinsic_realm(&mut self) -> Result<usize, Fault> {
+        self.allocate_realm_with_deferred_families(false)
+    }
+
+    fn allocate_realm_with_deferred_families(&mut self, deferred: bool) -> Result<usize, Fault> {
         if self.intrinsic_realms.len() >= MAX_INTRINSIC_REALMS {
             return Err(Fault::new("Intrinsic realm limit reached (8 detached realms)."));
         }
@@ -81,7 +171,10 @@ impl Runtime {
             global_environment, roots: Roots::default(), promise_roots: (None, None),
             function_range: start..start,
         });
-        let result = self.with_intrinsic_realm(Some(id), |runtime| runtime.initialize_realm_intrinsics());
+        let result = self.with_intrinsic_realm(Some(id), |runtime| {
+            runtime.deferred_intrinsics = if deferred { 7 } else { 0 };
+            runtime.initialize_realm_intrinsics()
+        });
         if let Err(error) = result {
             // Failed work is not refunded. Unreachable partial arena objects
             // remain bounded by the original aggregate caps; no roots/handles
@@ -412,5 +505,26 @@ var same=/y/;if(NativeRegExp(same)!==same)throw 'intrinsic identity';
                 assert!(runtime.environments[realm.global_environment].is_some());
             }
         }).unwrap().join().unwrap();
+    }
+
+    #[test]
+    fn failed_deferred_family_stays_bounded_and_restores_parent() {
+        let mut runtime = Runtime::new();
+        let realm = runtime.allocate_realm_with_deferred_families(true).unwrap();
+        while runtime.functions.len() < MAX_FUNCTIONS - 2 {
+            runtime.native_function(Builtin::IsNaN, "guardFixture").unwrap();
+        }
+        let deadline = runtime.job_deadline;
+        let error = runtime.with_intrinsic_realm(Some(realm), |runtime| runtime.ensure_global_intrinsics("URL")).unwrap_err();
+        assert!(error.message.contains("Function limit"), "{}", error.message);
+        assert_eq!(runtime.job_deadline, deadline);
+        let retained = (runtime.functions.len(), runtime.objects.len(), runtime.bindings);
+        runtime.begin_job();
+        let retry = runtime.with_intrinsic_realm(Some(realm), |runtime| runtime.ensure_global_intrinsics("URLSearchParams")).unwrap_err();
+        assert!(retry.message.contains("earlier bounded initialization failure"), "{}", retry.message);
+        assert_eq!((runtime.functions.len(), runtime.objects.len(), runtime.bindings), retained);
+        assert_eq!((runtime.active_realm, runtime.global_environment), (None, 0));
+        assert!(runtime.parked_main_roots.is_none());
+        assert_eq!(runtime.execute("6*7;", &mut NoHost).unwrap().to_number(), 42.0);
     }
 }

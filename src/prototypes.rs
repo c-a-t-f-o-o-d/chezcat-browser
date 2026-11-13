@@ -879,8 +879,9 @@ impl Runtime {
         target: &Value,
         key: usize,
         descriptor: PropertyDescriptor,
+        host: &mut dyn Host,
     ) -> Result<(), Fault> {
-        let object = self.symbol_backing(target)?.ok_or_else(|| {
+        let object = self.symbol_backing(target, host)?.ok_or_else(|| {
             Fault::new("Symbol properties of this native object are not implemented.")
         })?;
         let id = self.ordinary_id(object)?;
@@ -1093,7 +1094,7 @@ impl Runtime {
             }
             PropertyKey::Symbol(key) => {
                 self.ordinary_required(target)?;
-                self.define_symbol_data_property(target, key, descriptor)
+                self.define_symbol_data_property(target, key, descriptor, host)
             }
         }
     }
@@ -1339,17 +1340,19 @@ impl Runtime {
     }
 
     fn descriptor_target(
-        &self,
+        &mut self,
         value: &Value,
         name: &str,
         host: &dyn Host,
     ) -> Result<DescriptorTarget, Fault> {
+        self.reject_foreign_window(value, host)?;
         if let Value::Host(handle) = value {
+            if self.is_browser_global(*handle) { self.ensure_global_intrinsics(name)?; }
             if let Some(object) = self.host_ordinary(*handle, name, host) {
                 return Ok(DescriptorTarget::Ordinary(object));
             }
             if self.is_browser_global(*handle) {
-                if host.owns_global_property(name) || self.host_globals.contains(name) {
+                if self.host_owns_global(name, host) || self.host_globals.contains(name) {
                     return Err(Fault::new("Descriptors of native or declared global properties cannot be changed by this subset."));
                 }
                 if self.global_binding(name) {
@@ -1406,7 +1409,7 @@ impl Runtime {
             }
             "getOwnPropertySymbols" => {
                 Self::require_property_receiver(first)?;
-                let keys = if let Some(object) = self.symbol_backing(first)? {
+                let keys = if let Some(object) = self.symbol_backing(first, host)? {
                     let id = self.ordinary_id(object)?;
                     self.own_symbol_keys(id, false)?
                 } else {
@@ -1488,7 +1491,7 @@ impl Runtime {
                 let key = match key {
                     PropertyKey::Symbol(key) => {
                         if method == "getOwnPropertyDescriptor" {
-                            return if let Some(object) = self.symbol_backing(first)? {
+                            return if let Some(object) = self.symbol_backing(first, host)? {
                                 self.own_symbol_descriptor(object, key)
                             } else {
                                 Ok(Value::Undefined)
@@ -1497,7 +1500,7 @@ impl Runtime {
                         let descriptor =
                             self.ordinary_required(args.get(2).unwrap_or(&Value::Undefined))?;
                         let descriptor = self.property_descriptor(descriptor, host)?;
-                        self.define_symbol_data_property(first, key, descriptor)?;
+                        self.define_symbol_data_property(first, key, descriptor, host)?;
                         return self.copy_value(first);
                     }
                     PropertyKey::String(key) => key,
@@ -1591,7 +1594,7 @@ impl Runtime {
                     // Snapshot symbol keys before the first write too. A host
                     // setter can mutate a source; newly added keys are not part
                     // of this source's copy operation.
-                    let symbols = if let Some(object) = self.symbol_backing(source)? {
+                    let symbols = if let Some(object) = self.symbol_backing(source, host)? {
                         let id = self.ordinary_id(object)?;
                         self.own_symbol_keys(id, false)?
                     } else {
@@ -1630,7 +1633,7 @@ impl Runtime {
                         result?;
                     }
                     for key in symbols {
-                        let Some(object) = self.symbol_backing(source)? else {
+                        let Some(object) = self.symbol_backing(source, host)? else {
                             continue;
                         };
                         let id = self.ordinary_id(object)?;
@@ -1661,6 +1664,7 @@ impl Runtime {
         descriptors: &Value,
         host: &mut dyn Host,
     ) -> Result<(), Fault> {
+        self.reject_foreign_window(target, host)?;
         // Reject an invalid target even when the descriptor list is empty.
         if !matches!(target, Value::Host(handle) if self.is_browser_global(*handle) || self.host_objects.contains_key(handle))
         {
@@ -1736,7 +1740,7 @@ impl Runtime {
                     self.define_target_property(target, key, descriptor, host)?;
                 }
                 PropertyKey::Symbol(key) => {
-                    self.define_symbol_data_property(target, key, descriptor)?;
+                    self.define_symbol_data_property(target, key, descriptor, host)?;
                 }
             }
         }
@@ -1837,7 +1841,7 @@ impl Runtime {
         Self::require_property_receiver(&this)?;
         let key = match key {
             PropertyKey::Symbol(key) => {
-                let owned = if let Some(object) = self.symbol_backing(&this)? {
+                let owned = if let Some(object) = self.symbol_backing(&this, host)? {
                     let id = self.ordinary_id(object)?;
                     self.objects[id]
                         .symbol_properties

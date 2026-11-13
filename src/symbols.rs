@@ -248,7 +248,8 @@ impl Runtime {
 
     /// Only already registered native expando stores can hold symbol keys.
     /// No key is converted to a native property name or passed to Host::set.
-    pub(super) fn symbol_backing(&self, value: &Value) -> Result<Option<Ordinary>, Fault> {
+    pub(super) fn symbol_backing(&self, value: &Value, host: &dyn Host) -> Result<Option<Ordinary>, Fault> {
+        self.reject_foreign_window(value, host)?;
         if let Some(ordinary) = Ordinary::from_value(value) {
             self.ordinary_id(ordinary)?;
             return Ok(Some(ordinary));
@@ -292,7 +293,7 @@ impl Runtime {
     ) -> Result<Value, Fault> {
         Self::require_property_receiver(&receiver)?;
         self.symbol(key)?;
-        let object = match self.symbol_backing(&receiver)? {
+        let object = match self.symbol_backing(&receiver, host)? {
             Some(object) => Some(object),
             None => match receiver {
                 Value::Symbol(_) => self.symbol_prototype.map(Ordinary::Object),
@@ -341,7 +342,7 @@ impl Runtime {
         host: &mut dyn Host,
     ) -> Result<(), Fault> {
         Self::require_property_receiver(&receiver)?;
-        let backing = self.symbol_backing(&receiver)?;
+        let backing = self.symbol_backing(&receiver, host)?;
         let object = match backing {
             Some(object) => object,
             None => match receiver {

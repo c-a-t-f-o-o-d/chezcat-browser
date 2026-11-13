@@ -265,7 +265,22 @@ impl Value {
     }
 }
 
+#[derive(Clone, Copy)]
+pub struct WindowContext {
+    pub document: u32,
+    pub location: u32,
+}
+
 pub trait Host {
+    /// Only a genuine, already-created child context may expose these handles.
+    /// The default grants no Window capability to an arbitrary native handle.
+    fn window_context(&self, _window: u32) -> Option<WindowContext> { None }
+    fn validate_window_access(&self, _caller: Option<u32>, _target: u32) -> Result<(), String> {
+        Err("Foreign Window access is not authorized by this host.".into())
+    }
+    fn allow_eval_for_window(&mut self, _window: Option<u32>) -> Result<bool, String> {
+        self.allow_eval()
+    }
     /// Explicit wall-clock capability for Date.now and zero-argument construction.
     /// Return a finite integral UTC Unix timestamp in milliseconds. No implicit
     /// OS clock read or local timezone access is granted by the language runtime.
@@ -384,6 +399,9 @@ pub trait Host {
     /// is unavailable. They must never become ordinary script expandos.
     fn owns_global_property(&self, _property: &str) -> bool {
         false
+    }
+    fn owns_window_property(&self, _window: Option<u32>, property: &str) -> bool {
+        self.owns_global_property(property)
     }
     /// Property-existence checks are explicit host capabilities. A getter's
     /// undefined value cannot distinguish an absent property from a present one.
@@ -3019,6 +3037,11 @@ pub struct Runtime {
     global_environment: usize,
     active_realm: Option<usize>,
     parked_main_roots: Option<intrinsic_realms::ParkedRoots>,
+    window_realms: BTreeMap<u32, Option<usize>>,
+    failed_window_realms: HashSet<u32>,
+    deferred_intrinsics: u8,
+    failed_intrinsics: u8,
+    array_to_string_intrinsic: Option<usize>,
 }
 
 impl Default for Runtime {
@@ -3111,6 +3134,11 @@ impl Runtime {
             global_environment: 0,
             active_realm: None,
             parked_main_roots: None,
+            window_realms: BTreeMap::new(),
+            failed_window_realms: HashSet::new(),
+            deferred_intrinsics: 0,
+            failed_intrinsics: 0,
+            array_to_string_intrinsic: None,
         };
         runtime.initialize_realm_intrinsics().expect("initial intrinsic capacity");
         runtime
@@ -3153,14 +3181,17 @@ impl Runtime {
                 .put_binding(self.global_environment, name.into(), Some(value), Declaration::Var, false)?;
         }
         self.initialize_intrinsic_prototypes()?;
+        let Value::Function(to_string) = self.get_property(self.array_prototype.unwrap(), "toString")? else { unreachable!() };
+        self.array_to_string_intrinsic = Some(to_string);
         self.initialize_symbols()?;
-        self.initialize_binary()?;
+        self.initialize_number_statics()?;
+        if self.deferred_intrinsics & 1 == 0 { self.initialize_binary()?; }
         self.initialize_collections()?;
         self.initialize_iterable_builtins()?;
         self.initialize_promises()?;
         self.initialize_date()?;
-        self.initialize_url_api()?;
-        self.initialize_text_encoding()?;
+        if self.deferred_intrinsics & 2 == 0 { self.initialize_url_api()?; }
+        if self.deferred_intrinsics & 4 == 0 { self.initialize_text_encoding()?; }
         for (name, value) in [
             ("undefined", Value::Undefined),
             ("NaN", Value::Number(f64::NAN)),
@@ -3250,6 +3281,7 @@ impl Runtime {
         }
         let properties = self.new_object(None).map_err(Fault::display)?;
         self.browser_global = Some((handle, properties));
+        self.window_realms.insert(handle, self.active_realm);
         Ok(())
     }
 
@@ -3401,7 +3433,7 @@ impl Runtime {
         let Value::String(source) = value else {
             return self.copy_value(value);
         };
-        if !host.allow_eval().map_err(Fault::new)? {
+        if !host.allow_eval_for_window(self.browser_global.map(|(handle, _)| handle)).map_err(Fault::new)? {
             return Err(Fault::exception(
                 "EvalError",
                 "Content Security Policy blocks string evaluation.",
@@ -3745,6 +3777,7 @@ impl Runtime {
         loop {
             self.step()?;
             self.work(name.len())?;
+            if env == self.global_environment { self.ensure_global_intrinsics(name)?; }
             let current = self.environment(env);
             if current.bindings.contains_key(name) {
                 return Ok(Some(env));
@@ -3769,12 +3802,17 @@ impl Runtime {
             .is_some_and(|(global, _)| handle == global)
     }
 
+    fn host_owns_global(&self, name: &str, host: &dyn Host) -> bool {
+        host.owns_window_property(self.browser_global.map(|(handle, _)| handle), name)
+    }
+
     fn global_exists(&mut self, name: &str, host: &dyn Host) -> Result<bool, Fault> {
         self.step()?;
+        self.ensure_global_intrinsics(name)?;
         let Some((_, properties)) = self.browser_global else {
             return Ok(false);
         };
-        if host.owns_global_property(name)
+        if self.host_owns_global(name, host)
             || self.global_binding(name)
             || self.object(properties)?.properties.contains_key(name)
         {
@@ -3787,9 +3825,10 @@ impl Runtime {
     }
 
     fn global_value(&mut self, name: &str, host: &mut dyn Host) -> Result<Value, Fault> {
+        self.ensure_global_intrinsics(name)?;
         let (handle, properties) = self.browser_global.expect("bound browser global");
         self.property_name(name)?;
-        if host.owns_global_property(name) {
+        if self.host_owns_global(name, host) {
             let value = host.get(handle, name).map_err(Fault::new)?;
             self.checked_value(value)
         } else if self.global_binding(name) {
@@ -3805,9 +3844,10 @@ impl Runtime {
     }
 
     fn set_global(&mut self, name: String, value: Value, host: &mut dyn Host) -> Result<(), Fault> {
+        self.ensure_global_intrinsics(&name)?;
         let (handle, properties) = self.browser_global.expect("bound browser global");
         self.property_name(&name)?;
-        if host.owns_global_property(&name) {
+        if self.host_owns_global(&name, host) {
             // Native globals such as Window.location need the same checked
             // conversions and validation as member assignments on other hosts.
             self.host_write(handle, name, value, host)
@@ -3833,7 +3873,7 @@ impl Runtime {
         if env == self.global_environment
             && self.browser_global.is_some()
             && self.global_binding(name)
-            && host.owns_global_property(name)
+            && self.host_owns_global(name, host)
         {
             self.global_value(name, host)
         } else {
@@ -3857,7 +3897,7 @@ impl Runtime {
         } else if env == self.global_environment
             && self.browser_global.is_some()
             && self.global_binding(name)
-            && host.owns_global_property(name)
+            && self.host_owns_global(name, host)
         {
             self.set_global(name.into(), value, host)
         } else {
@@ -4033,6 +4073,7 @@ impl Runtime {
                     for (pattern, _) in names {
                         for name in program.pattern_names_with_work(*pattern, |n| self.work(n))? {
                             if environment == self.global_environment {
+                                self.ensure_global_intrinsics(&name)?;
                                 self.check_operation_lexical(&name)?;
                             }
                             if self.environment(environment).bindings.contains_key(&name) {
@@ -4072,6 +4113,7 @@ impl Runtime {
             }
         }
         if variable_environment == self.global_environment {
+            for name in &variable_names { self.ensure_global_intrinsics(name)?; }
             if let Some((_, properties)) = self.browser_global {
                 // Global bindings and Window expandos have separate storage in
                 // this subset. Migrating an accessor would invoke its getter
@@ -4085,6 +4127,7 @@ impl Runtime {
                         });
                 for name in variable_names.iter().chain(function_names) {
                     self.step()?;
+                    self.ensure_global_intrinsics(name)?;
                     if self.is_operation_global(name) {
                         continue;
                     }
@@ -4185,7 +4228,7 @@ impl Runtime {
                         )?;
                         continue;
                     }
-                    if variable_environment == self.global_environment && host.owns_global_property(name) {
+                    if variable_environment == self.global_environment && self.host_owns_global(name, host) {
                         if let Some((handle, _)) = self.browser_global {
                             host.set(handle, name, self.copy_value(&function)?)
                                 .map_err(Fault::new)?;
@@ -5436,12 +5479,16 @@ impl Runtime {
             ));
         }
         let name = self.property_key(key, host)?;
+        self.reject_foreign_window(&object, host)?;
+        if let (Value::Host(handle), PropertyKey::String(name)) = (&object, &name) {
+            if self.is_browser_global(*handle) { self.ensure_global_intrinsics(name)?; }
+        }
         let PropertyKey::String(name) = name else {
             let PropertyKey::Symbol(key) = name else {
                 unreachable!()
             };
             return Ok(Value::Bool(
-                if let Some(backing) = self.symbol_backing(&object)? {
+                if let Some(backing) = self.symbol_backing(&object, host)? {
                     self.symbol_property_owner(backing, key)?.is_some()
                 } else {
                     false
@@ -5456,7 +5503,7 @@ impl Runtime {
             Value::Host(handle) => {
                 if let Some(object) = self.host_ordinary(handle, &name, host) {
                     self.property_owner(object, &name)?.is_some()
-                } else if self.is_browser_global(handle) && !host.owns_global_property(&name) {
+                } else if self.is_browser_global(handle) && !self.host_owns_global(&name, host) {
                     let (_, properties) = self.browser_global.unwrap();
                     if self.global_binding(&name)
                         || self.object(properties)?.properties.contains_key(&name)
@@ -6793,13 +6840,14 @@ impl Runtime {
                 if let Some(ordinary) = Ordinary::from_value(&object) {
                     Some(self.get_ordinary_property_with_host(ordinary, property, host)?)
                 } else if let Value::Host(handle) = &object {
-                    if self.host_ordinary(*handle, property, host).is_some()
+                    if self.foreign_window(*handle, host)
+                        || self.host_ordinary(*handle, property, host).is_some()
                         || host.ordinary_prototype(*handle)
                         || host.resolve_member_before_call(*handle)
                     {
                         Some(self.host_read(*handle, property, host)?)
                     } else if self.is_browser_global(*handle)
-                        && !host.owns_global_property(property)
+                        && !self.host_owns_global(property, host)
                     {
                         Some(self.global_value(property, host)?)
                     } else {
@@ -7023,6 +7071,7 @@ impl Runtime {
                 }
             }
             Reference::SymbolProperty(object, key) => {
+                self.reject_foreign_window(&object, host)?;
                 self.get_symbol_property(object.clone(), *key, host)
             }
             Reference::Binding(env, name) => self.read_binding(*env, name, host),
@@ -7158,7 +7207,7 @@ impl Runtime {
             Reference::ComputedProperty(_, _) => unreachable!(),
             Reference::SymbolProperty(object, key) => {
                 Self::require_property_receiver(&object)?;
-                if let Some(backing) = self.symbol_backing(&object)? {
+                if let Some(backing) = self.symbol_backing(&object, host)? {
                     let id = self.ordinary_id(backing)?;
                     if self.objects[id]
                         .symbol_properties
@@ -7186,6 +7235,7 @@ impl Runtime {
                 self.delete_global(&name, host)?
             }
             Reference::Property(Value::Host(handle), name) => {
+                self.reject_foreign_window(&Value::Host(handle), host)?;
                 if let Some(object) = self.host_ordinary(handle, &name, host) {
                     return self.delete_reference(Reference::Property(object.value(), name), host);
                 }
@@ -7250,8 +7300,9 @@ impl Runtime {
     }
 
     fn delete_global(&mut self, name: &str, host: &dyn Host) -> Result<bool, Fault> {
+        self.ensure_global_intrinsics(name)?;
         self.property_name(name)?;
-        if host.owns_global_property(name) || self.host_globals.contains(name) {
+        if self.host_owns_global(name, host) || self.host_globals.contains(name) {
             return Ok(false);
         }
         if self.global_binding(name) {

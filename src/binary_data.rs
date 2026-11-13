@@ -364,7 +364,7 @@ impl Runtime {
             values,
             Some((false, true, true)),
         )?;
-        let to_string = self.get_property(self.array_prototype.unwrap(), "toString")?;
+        let to_string = Value::Function(self.array_to_string_intrinsic.expect("canonical Array toString"));
         self.store_property(
             typed,
             "toString".into(),
@@ -421,6 +421,10 @@ impl Runtime {
         ] {
             self.binary_method_property(view, name, Op::ViewMethod(name))?;
         }
+        Ok(())
+    }
+
+    pub(super) fn initialize_number_statics(&mut self) -> Result<(), Fault> {
         let number = self.binding_value(self.global_environment, "Number")?;
         let properties = self.ordinary_id(Ordinary::from_value(&number).unwrap())?;
         for (name, value) in [

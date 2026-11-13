@@ -251,6 +251,7 @@ impl Bridge<'_> {
             return Ok(None);
         };
         let node = self.dom_node(node_handle(node))?;
+        if self.frame_content(node, property).is_some() { return Ok(Some(true)); }
         if self.dom_stylesheet(node)
             && (script_stylesheets::link_attribute(property).is_some()
                 || matches!(property, "onload" | "onerror"))
@@ -284,6 +285,7 @@ impl Bridge<'_> {
         }
         let node = self.dom_node(object)?;
         let text = matches!(self.doc.nodes[node].kind, NodeKind::Text(_));
+        if let Some(value) = self.frame_content(node, property) { return Ok(Some(value)); }
         if common_node_property(property) {
             return Ok(Some(match property {
                 "nodeType" => Value::Number(if text { 3.0 } else { 1.0 }),
@@ -388,7 +390,7 @@ impl Bridge<'_> {
 
     fn create_dom_node(&mut self, kind: NodeKind) -> Result<Value, String> {
         self.state.rebuild(self.doc)?;
-        if self.doc.nodes.len() >= self.state.node_limit {
+        if self.doc.nodes.len().saturating_add(self.state.blank_frame_nodes) >= self.state.node_limit {
             return Err("DOM appended-node limit reached (256 per document).".into());
         }
         let bytes = match &kind {
@@ -463,7 +465,6 @@ impl Bridge<'_> {
                         | "img"
                         | "style"
                         | "title"
-                        | "iframe"
                         | "object"
                         | "embed"
                         | "base"
@@ -488,6 +489,7 @@ impl Bridge<'_> {
                 return Err(format!("DOM tree mutation of controls, loaded resources or structural roots is not implemented. Blocked node={node}; tag={:?}; connected={}; created={}.{frame}",
                     prefix(name, 64), self.state.dom.connected.get(node).copied().unwrap_or(false), self.state.dom.created.contains(&node)));
             }
+            if name == "iframe" { self.validate_blank_frame(node)?; }
             if let Some(id) = self.doc.attr(node, "id").filter(|id| !id.is_empty()) {
                 self.state.work(self.forms.controls.len())?;
                 self.state.copies(
@@ -583,12 +585,13 @@ impl Bridge<'_> {
                 .saturating_add(descendants.len()),
         )?;
         let was_connected = self.state.dom.connected[child];
+        let connected = method != "removeChild" && self.state.dom.connected[parent];
+        let frames = self.prepare_blank_frames(&descendants, connected, parent)?;
         if let Some(old_parent) = old_parent {
             self.doc.nodes[old_parent]
                 .children
                 .retain(|&node| node != child);
         }
-        let connected = method != "removeChild" && self.state.dom.connected[parent];
         if method != "removeChild" {
             let position = reference
                 .and_then(|reference| {
@@ -613,6 +616,7 @@ impl Bridge<'_> {
                 self.state.detached_nodes.insert(node);
             }
         }
+        self.commit_blank_frames(&descendants, frames);
         self.state.dirty = true;
         if was_connected || connected {
             self.state.layout_changed();

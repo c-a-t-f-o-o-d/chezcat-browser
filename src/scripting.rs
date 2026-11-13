@@ -39,6 +39,8 @@ mod script_forms;
 mod script_resources;
 pub use script_resources::DynamicScript;
 use script_resources::DynamicState;
+#[path = "script_blank_frames.rs"]
+mod script_blank_frames;
 #[path = "script_stylesheets.rs"]
 mod script_stylesheets;
 pub use script_stylesheets::DynamicStylesheet;
@@ -261,6 +263,8 @@ impl LocationView {
 }
 
 struct State {
+    blank_frames: Vec<script_blank_frames::BlankFrame>,
+    blank_frame_nodes: usize,
     geometry: Option<crate::script_geometry::Geometry>,
     location: Option<LocationView>,
     navigation: Option<Navigation>,
@@ -314,6 +318,8 @@ struct State {
 impl State {
     fn new() -> Self {
         Self {
+            blank_frames: Vec::new(),
+            blank_frame_nodes: 0,
             geometry: None,
             location: None,
             navigation: None,
@@ -1682,6 +1688,7 @@ impl Bridge<'_> {
     }
 
     fn attribute(&mut self, node: usize, name: &str, value: Option<String>) -> Result<(), String> {
+        self.frame_attribute_guard(node, name)?;
         let NodeKind::Element { attrs, .. } = &self.doc.nodes[node].kind else {
             return Err("Not an element.".into());
         };
@@ -1841,7 +1848,7 @@ impl Bridge<'_> {
         } else {
             None
         };
-        if reuse.is_none() && !text.is_empty() && self.doc.nodes.len() >= self.state.node_limit {
+        if reuse.is_none() && !text.is_empty() && self.doc.nodes.len().saturating_add(self.state.blank_frame_nodes) >= self.state.node_limit {
             return Err("DOM appended-node limit reached (256 per document).".into());
         }
         let mut captions = Vec::new();
@@ -2089,6 +2096,26 @@ impl Bridge<'_> {
 }
 
 impl Host for Bridge<'_> {
+    fn window_context(&self, window: u32) -> Option<crate::javascript::WindowContext> {
+        self.frame_context(window)
+    }
+
+    fn validate_window_access(&self, caller: Option<u32>, target: u32) -> Result<(), String> {
+        self.frame_window_access(caller, target)
+    }
+
+    fn allow_eval_for_window(&mut self, window: Option<u32>) -> Result<bool, String> {
+        self.state.work(1)?;
+        if !self.state.enabled { return Err("String compilation is unavailable while scripting is disabled.".into()); }
+        if let Some(result) = window.and_then(|handle| self.frame_eval(handle)) { return result; }
+        self.allow_eval()
+    }
+
+    fn owns_window_property(&self, window: Option<u32>, property: &str) -> bool {
+        if let Some(window) = window.filter(|&window| self.frame_context(window).is_some()) {
+            self.frame_native_property(window, property)
+        } else { self.owns_global_property(property) }
+    }
     fn primitive_conversion(&self, object: u32) -> bool {
         object == LOCATION
     }
@@ -2457,6 +2484,7 @@ impl Host for Bridge<'_> {
     }
 
     fn own_keys(&mut self, object: u32) -> Result<Vec<String>, String> {
+        if self.is_frame_handle(object) { return Err("Blank child native property enumeration is not implemented.".into()); }
         self.state.work(1)?;
         if collection_handle_index(object).is_some() {
             return self.tag_collection_keys(object);
@@ -2484,6 +2512,7 @@ impl Host for Bridge<'_> {
     }
 
     fn own_data(&mut self, object: u32, property: &str) -> Result<Option<Value>, String> {
+        if self.is_frame_handle(object) { return Err("Blank child native descriptors are not implemented.".into()); }
         self.state.work(1)?;
         if collection_handle_index(object).is_some() {
             return self.tag_collection_own_data(object, property);
@@ -2510,6 +2539,7 @@ impl Host for Bridge<'_> {
     }
 
     fn delete(&mut self, object: u32, property: &str) -> Result<bool, String> {
+        if self.is_frame_handle(object) { return Err("Blank child native property deletion is not implemented.".into()); }
         self.state.work(1)?;
         if collection_handle_index(object).is_some() {
             return if matches!(property, "length" | "item" | "namedItem") {
@@ -2616,6 +2646,9 @@ impl Host for Bridge<'_> {
 
     fn has(&mut self, object: u32, property: &str) -> Result<bool, String> {
         self.state.work(1)?;
+        if self.is_frame_handle(object) {
+            return self.frame_get(object, property).unwrap().map(|_| true);
+        }
         if property == "submit" && self.form_submit_method(object).is_some() {
             return Ok(true);
         }
@@ -2847,6 +2880,7 @@ impl Host for Bridge<'_> {
 
     fn get(&mut self, object: u32, property: &str) -> Result<Value, String> {
         self.state.work(1)?;
+        if let Some(value) = self.frame_get(object, property) { return value; }
         if collection_handle_index(object).is_some() {
             return self.tag_collection_get(object, property);
         }
@@ -3097,6 +3131,7 @@ impl Host for Bridge<'_> {
     }
 
     fn set(&mut self, object: u32, property: &str, value: Value) -> Result<(), String> {
+        if self.is_frame_handle(object) { return Err("Blank child native writes and navigation are not implemented.".into()); }
         self.state.work(1)?;
         if collection_handle_index(object).is_some() {
             return Err("Native HTMLCollection properties are read-only in this subset.".into());
@@ -3289,6 +3324,7 @@ impl Host for Bridge<'_> {
     }
 
     fn call(&mut self, object: u32, method: &str, args: &[Value]) -> Result<Value, String> {
+        if self.is_frame_handle(object) { return Err("Blank child native methods are not implemented.".into()); }
         self.state.work(1)?;
         if method == "submit" {
             return self.submit_form(object);

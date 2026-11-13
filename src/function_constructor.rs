@@ -41,7 +41,7 @@ impl Runtime {
             let source = self.function_source_wrapper(&parameters, &body)?;
             // CreateDynamicFunction converts every argument before asking the
             // host to permit string compilation. No fragment is parsed first.
-            if !host.allow_eval().map_err(Fault::new)? {
+            if !host.allow_eval_for_window(self.browser_global.map(|(handle, _)| handle)).map_err(Fault::new)? {
                 return Err(Fault::exception(
                     "EvalError",
                     "Content Security Policy blocks dynamic Function compilation.",

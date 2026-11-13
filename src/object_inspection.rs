@@ -46,7 +46,7 @@ impl Runtime {
         if method == "getOwnPropertyDescriptors" {
             // Snapshot symbols before any descriptor retrieval, and preserve
             // their identities rather than converting them to string keys.
-            let symbols = if let Some(object) = self.symbol_backing(value)? {
+            let symbols = if let Some(object) = self.symbol_backing(value, host)? {
                 let id = self.ordinary_id(object)?;
                 self.own_symbol_keys(id, false)?
             } else {

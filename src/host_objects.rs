@@ -74,6 +74,9 @@ impl Runtime {
         name: &str,
         host: &mut dyn Host,
     ) -> Result<Value, Fault> {
+        if self.foreign_window(handle, host) {
+            return self.read_foreign_window(handle, name, host);
+        }
         if let Some(object) = self.host_ordinary(handle, name, host) {
             return self.get_ordinary_property_with_receiver(
                 object,
@@ -113,6 +116,7 @@ impl Runtime {
         value: Value,
         host: &mut dyn Host,
     ) -> Result<(), Fault> {
+        self.reject_foreign_window(&Value::Host(handle), host)?;
         if let Some(object) = self.host_ordinary(handle, &name, host) {
             return self.assign_ordinary_property_with_receiver(
                 object,
@@ -154,6 +158,7 @@ impl Runtime {
         inherited: bool,
         host: &mut dyn Host,
     ) -> Result<Vec<String>, Fault> {
+        self.reject_foreign_window(&Value::Host(handle), host)?;
         let keys = if let Some(&id) = self.host_objects.get(&handle) {
             if inherited {
                 self.inherited_keys(Ordinary::Object(id))?
@@ -181,6 +186,7 @@ impl Runtime {
         enumerable: bool,
         host: &mut dyn Host,
     ) -> Result<bool, Fault> {
+        self.reject_foreign_window(&Value::Host(handle), host)?;
         if self.is_browser_global(handle) && self.is_operation_global(name) {
             let (_, id) = self.browser_global.unwrap();
             return if enumerable {
@@ -206,6 +212,7 @@ impl Runtime {
         name: &str,
         host: &mut dyn Host,
     ) -> Result<Value, Fault> {
+        self.reject_foreign_window(&Value::Host(handle), host)?;
         if let Some(object) = self.host_ordinary(handle, name, host) {
             return self.own_descriptor(object, name);
         }

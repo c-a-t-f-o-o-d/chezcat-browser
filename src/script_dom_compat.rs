@@ -95,7 +95,7 @@ impl Bridge<'_> {
 
     pub(super) fn create_image(&mut self, args: &[Value]) -> Result<Value, String> {
         self.state.rebuild(self.doc)?;
-        if self.doc.nodes.len() >= self.state.node_limit {
+        if self.doc.nodes.len().saturating_add(self.state.blank_frame_nodes) >= self.state.node_limit {
             return Err("DOM appended-node limit reached (256 per document).".into());
         }
         let mut attrs = Vec::new();

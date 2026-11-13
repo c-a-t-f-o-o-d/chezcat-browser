@@ -99,6 +99,24 @@ impl Digests {
 }
 
 impl PolicySet {
+    /// Work/storage represented by an independent policy snapshot. Child
+    /// contexts charge this before cloning rather than sharing mutable policy.
+    pub(crate) fn clone_work_bytes(&self) -> usize {
+        let mut bytes = std::mem::size_of::<Self>() + self.origin.as_ref().map_or(0, |origin| origin.display().len());
+        bytes += self.diagnostics.iter().map(|line| std::mem::size_of::<String>() + line.len()).sum::<usize>();
+        for policy in &self.policies {
+            bytes += std::mem::size_of::<Policy>();
+            for sources in [&policy.default, &policy.scripts, &policy.elements, &policy.attributes,
+                &policy.styles, &policy.style_elements, &policy.fonts, &policy.base, &policy.forms].into_iter().flatten() {
+                bytes += sources.iter().map(|source| std::mem::size_of::<Source>() + match source {
+                    Source::Origin { host, .. } => host.len(),
+                    Source::Nonce(text) | Source::Hash(_, text) => text.len(),
+                    _ => 0,
+                }).sum::<usize>();
+            }
+        }
+        bytes
+    }
     pub fn new(origin: &Location) -> Self {
         Self {
             origin: Some(origin.clone()),
@@ -267,6 +285,11 @@ impl PolicySet {
                 }
             }
         }
+        Ok(())
+    }
+
+    pub(crate) fn allows_initial_blank_frame(&self) -> Result<(), String> {
+        for policy in self.active(usize::MAX)? { policy.allow_sandbox()?; }
         Ok(())
     }
 

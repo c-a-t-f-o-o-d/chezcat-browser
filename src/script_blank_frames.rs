@@ -1,0 +1,485 @@
+//! Real, bounded initial blank contexts. No child navigation, DOM writes or
+//! painting is claimed. Only authored-hidden, created, src-absent frames enter.
+//! https://html.spec.whatwg.org/multipage/iframe-embed-object.html
+use super::*;
+
+const FRAME_BASE: u32 = 512;
+const FRAME_STRIDE: u32 = 16;
+const MAX_BLANK_FRAMES: usize = 8;
+
+pub(super) struct BlankFrame {
+    owner: usize,
+    connected: bool,
+    document: Document,
+    origin: crate::navigation::Location,
+    serialized_origin: String,
+    base: crate::navigation::Location,
+    policy: crate::csp::PolicySet,
+}
+
+fn window(index: usize) -> u32 { FRAME_BASE + index as u32 * FRAME_STRIDE }
+fn frame_handle(handle: u32) -> Option<(usize, u32)> {
+    (FRAME_BASE..FRAME_BASE + MAX_BLANK_FRAMES as u32 * FRAME_STRIDE).contains(&handle)
+        .then(|| (((handle - FRAME_BASE) / FRAME_STRIDE) as usize, (handle - FRAME_BASE) % FRAME_STRIDE))
+}
+fn document_node(index: usize, node: usize) -> u32 {
+    if node == 0 { window(index) + 1 } else { window(index) + 3 + node as u32 }
+}
+
+impl Bridge<'_> {
+    pub(super) fn frame_context(&self, handle: u32) -> Option<crate::javascript::WindowContext> {
+        let (index, offset) = frame_handle(handle)?;
+        (offset == 0 && index < self.state.blank_frames.len()).then(|| crate::javascript::WindowContext {
+            document: window(index) + 1, location: window(index) + 2,
+        })
+    }
+
+    pub(super) fn frame_window_access(&self, caller: Option<u32>, target: u32) -> Result<(), String> {
+        let origin = |handle| {
+            if handle == WINDOW { self.state.location.as_ref().map(|view| &view.source) }
+            else { frame_handle(handle).filter(|(_, offset)| *offset == 0)
+                .and_then(|(index, _)| self.state.blank_frames.get(index)).map(|frame| &frame.origin) }
+        };
+        let caller = caller.and_then(origin).and_then(|location| location.url.as_ref());
+        let target = origin(target).and_then(|location| location.url.as_ref());
+        if matches!((caller, target), (Some(a), Some(b)) if a.same_origin(b)) { Ok(()) }
+        else { Err("Foreign Window access requires a verified same-origin web context.".into()) }
+    }
+
+    pub(super) fn frame_eval(&self, handle: u32) -> Option<Result<bool, String>> {
+        let (index, offset) = frame_handle(handle)?;
+        Some(if offset != 0 { Err("String compilation requires a Window context.".into()) }
+        else { self.state.blank_frames.get(index).ok_or_else(|| "Unknown blank Window.".into())
+            .map(|frame| frame.policy.allows_eval().is_ok()) })
+    }
+
+    pub(super) fn frame_native_property(&self, handle: u32, name: &str) -> bool {
+        self.frame_context(handle).is_some() && (self.owns_global_property(name)
+            || matches!(name, "parent" | "top" | "frameElement" | "closed" | "length" | "origin"
+                | "setTimeout" | "clearTimeout" | "fetch" | "XMLHttpRequest" | "frames"))
+    }
+
+    pub(super) fn frame_content(&self, node: usize, property: &str) -> Option<Value> {
+        if tag(self.doc, node) != "iframe" || !matches!(property, "contentWindow" | "contentDocument") { return None; }
+        Some(self.state.blank_frames.iter().enumerate().rev()
+            .find(|(_, frame)| frame.owner == node && frame.connected)
+            .filter(|(_, frame)| property != "contentDocument" || matches!((self.state.location.as_ref().and_then(|view| view.source.url.as_ref()), frame.origin.url.as_ref()), (Some(a),Some(b)) if a.same_origin(b)))
+            .map_or(Value::Null, |(index, _)| Value::Host(window(index) + u32::from(property == "contentDocument"))))
+    }
+
+    pub(super) fn validate_blank_frame(&mut self, node: usize) -> Result<(), String> {
+        if !self.state.dom.created.contains(&node) || !self.doc.nodes[node].children.is_empty()
+            || self.doc.attr(node, "src").is_some() || self.doc.attr(node, "srcdoc").is_some()
+            || self.doc.attr(node, "sandbox").is_some()
+        { return Err("Only created, src-absent initial blank iframes without srcdoc, sandbox or children are implemented.".into()); }
+        if self.doc.attr(node, "hidden").is_none()
+            && !matches!(self.get_style(node, "display")?, Value::String(display) if display.eq_ignore_ascii_case("none"))
+        { return Err("Blank iframe painting is unavailable; an authored hidden attribute or inline display:none is required.".into()); }
+        Ok(())
+    }
+
+    pub(super) fn prepare_blank_frames(&mut self, nodes: &[usize], connected: bool, parent: usize) -> Result<Vec<BlankFrame>, String> {
+        let owners: Vec<_> = nodes.iter().copied().filter(|&node| tag(self.doc, node) == "iframe").collect();
+        if !connected || owners.is_empty() { return Ok(Vec::new()); }
+        self.state.dynamic.policy.allows_initial_blank_frame()?;
+        if owners.len() != 1 || nodes.len() != 1 {
+            return Err("Only direct insertion of one initial blank iframe is implemented.".into());
+        }
+        if self.state.blank_frames.len().saturating_add(owners.len()) > MAX_BLANK_FRAMES {
+            return Err("Blank frame context limit reached (8 retained contexts).".into());
+        }
+        if self.doc.nodes.len().saturating_add(self.state.blank_frame_nodes).saturating_add(owners.len() * 4) > self.state.node_limit {
+            return Err("DOM appended-node limit reached (256 shared with child documents).".into());
+        }
+        let origin = self.state.location.as_ref().map(|view| &view.source)
+            .filter(|location| location.url.is_some()).ok_or("Blank frames currently require a committed web origin; local-file contexts remain unavailable.")?;
+        let base = self.state.dynamic.base.as_ref().unwrap_or(origin);
+        let bytes = owners.len().saturating_mul(self.state.dynamic.policy.clone_work_bytes()
+            .saturating_add(origin.display().len().saturating_add(base.display().len()).saturating_mul(4))
+            .saturating_add(std::mem::size_of::<BlankFrame>() + 4 * std::mem::size_of::<Node>() + 64));
+        // No parent link, current-frame mapping or context identity changes
+        // before every validation and aggregate quota check has succeeded.
+        for &owner in &owners {
+            if self.state.listeners.iter().any(|listener| listener.event == "load" && listener.target == node_handle(owner)) {
+                return Err("Synchronous blank-frame load listener dispatch is not implemented.".into());
+            }
+            let mut ancestor = Some(parent);
+            while let Some(node) = ancestor {
+                self.state.work(1)?;
+                if self.state.listeners.iter().any(|listener| listener.event == "load"
+                    && listener.target == node_handle(node)
+                    && listener.options.capture)
+                { return Err("Synchronous blank-frame load listener dispatch is not implemented.".into()); }
+                ancestor = self.state.tree.parents[node];
+            }
+        }
+        if self.state.listeners.iter().any(|listener| listener.event == "load" && listener.options.capture
+            && matches!(listener.target, WINDOW | DOCUMENT)) {
+            return Err("Synchronous blank-frame load capture dispatch is not implemented.".into());
+        }
+        self.state.work(owners.len() * 4)?;
+        self.state.replace_bytes(0, bytes)?;
+        let origin = self.state.location.as_ref().unwrap().source.clone();
+        let base = self.state.dynamic.base.clone().unwrap_or_else(|| origin.clone());
+        let url = origin.url.as_ref().unwrap();
+        let serialized_origin = format!("{}://{}", if url.secure { "https" } else { "http" }, url.host_header());
+        Ok(owners.into_iter().map(|owner| {
+            let mut document = crate::html::parse("<html><head></head><body></body></html>");
+            document.scripting_enabled = self.doc.scripting_enabled;
+            BlankFrame { owner, connected: true, document, origin: origin.clone(), serialized_origin: serialized_origin.clone(), base: base.clone(),
+                policy: self.state.dynamic.policy.clone() }
+        }).collect())
+    }
+
+    pub(super) fn commit_blank_frames(&mut self, descendants: &[usize], frames: Vec<BlankFrame>) {
+        for frame in &mut self.state.blank_frames {
+            if descendants.contains(&frame.owner) { frame.connected = false; }
+        }
+        self.state.blank_frame_nodes += frames.iter().map(|frame| frame.document.nodes.len()).sum::<usize>();
+        self.state.blank_frames.extend(frames);
+        // With no observable load listeners, the initial blank load has no
+        // callbacks. Never fabricate a resource request or a deferred load.
+    }
+
+    pub(super) fn frame_attribute_guard(&self, node: usize, name: &str) -> Result<(), String> {
+        if tag(self.doc, node) == "iframe" && self.state.dom.connected.get(node) == Some(&true) {
+            return Err(format!("Changing connected blank-frame attribute {name:?} is not implemented."));
+        }
+        Ok(())
+    }
+
+    pub(super) fn frame_get(&mut self, handle: u32, property: &str) -> Option<Result<Value, String>> {
+        let (index, offset) = frame_handle(handle)?;
+        let result = (|| {
+            self.frame_window_access(Some(WINDOW), window(index))?;
+            let frame = self.state.blank_frames.get(index).ok_or("Unknown blank-frame handle.")?;
+            let value = match offset {
+                0 => match property {
+                    "window" | "self" | "globalThis" => Value::Host(handle),
+                    "document" => Value::Host(window(index) + 1),
+                    "location" => Value::Host(window(index) + 2),
+                    "parent" | "top" => Value::Host(WINDOW),
+                    "frameElement" => if frame.connected { Value::Host(node_handle(frame.owner)) } else { Value::Null },
+                    "closed" => Value::Bool(!frame.connected),
+                    "length" => Value::Number(0.0),
+                    "origin" => Value::String(frame.serialized_origin.clone()),
+                    _ => return Err(format!("Blank child Window property {property:?} is not implemented.")),
+                },
+                2 => match property {
+                    "href" => Value::String("about:blank".into()),
+                    "protocol" => Value::String("about:".into()),
+                    "pathname" => Value::String("blank".into()),
+                    "origin" => Value::String("null".into()),
+                    "host" | "hostname" | "port" | "search" | "hash" => Value::String(String::new()),
+                    _ => return Err(format!("Blank child Location property {property:?} is not implemented.")),
+                },
+                1 | 4..=6 => {
+                    let node = if offset == 1 { 0 } else { (offset - 3) as usize };
+                    let item = frame.document.nodes.get(node).ok_or("Invalid blank-document node.")?;
+                    let parent = frame.document.nodes.iter().position(|item| item.children.contains(&node));
+                    let native = |node| Value::Host(document_node(index, node));
+                    let element = |name: &str| frame.document.nodes.iter().position(|node| matches!(&node.kind, NodeKind::Element { tag, .. } if tag == name)).map_or(Value::Null, native);
+                    match property {
+                        "defaultView" if node == 0 => {
+                            if !frame.connected { return Err("Retained child Document browsing-context teardown is not implemented.".into()); }
+                            Value::Host(window(index))
+                        },
+                        "URL" | "documentURI" if node == 0 => Value::String("about:blank".into()),
+                        "baseURI" => Value::String(frame.base.display()),
+                        "location" if node == 0 => Value::Host(window(index) + 2),
+                        "body" if node == 0 => element("body"),
+                        "head" if node == 0 => element("head"),
+                        "documentElement" if node == 0 => element("html"),
+                        "readyState" if node == 0 => Value::String("complete".into()),
+                        "contentType" if node == 0 => Value::String(frame.document.content_type.clone()),
+                        "title" if node == 0 => Value::String(frame.document.title.clone()),
+                        "nodeName" => Value::String(if node == 0 { "#document".into() } else { tag(&frame.document, node).to_ascii_uppercase() }),
+                        "tagName" if node != 0 => Value::String(tag(&frame.document, node).to_ascii_uppercase()),
+                        "nodeType" => Value::Number(if node == 0 { 9.0 } else { 1.0 }),
+                        "ownerDocument" => if node == 0 { Value::Null } else { native(0) },
+                        "parentNode" => parent.map_or(Value::Null, native),
+                        "parentElement" => parent.filter(|&node| node != 0).map_or(Value::Null, native),
+                        "firstChild" => item.children.first().copied().map_or(Value::Null, native),
+                        "lastChild" => item.children.last().copied().map_or(Value::Null, native),
+                        "nextSibling" | "previousSibling" => parent.and_then(|parent| {
+                            let siblings = &frame.document.nodes[parent].children;
+                            let at = siblings.iter().position(|&sibling| sibling == node)?;
+                            if property == "nextSibling" { siblings.get(at + 1) } else { at.checked_sub(1).and_then(|at| siblings.get(at)) }
+                        }).copied().map_or(Value::Null, native),
+                        "isConnected" => Value::Bool(true),
+                        "textContent" => if node == 0 { Value::Null } else { Value::String(String::new()) },
+                        _ => return Err(format!("Read-only blank child Document/node property {property:?} is not implemented.")),
+                    }
+                },
+                _ => return Err("Invalid blank-frame handle.".into()),
+            };
+            self.state.copies(if let Value::String(text) = &value { text.len() } else { 0 })?;
+            Ok(value)
+        })();
+        Some(result)
+    }
+
+    pub(super) fn is_frame_handle(&self, handle: u32) -> bool { frame_handle(handle).is_some() }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn start(source: &str, policy: &crate::csp::PolicySet) -> (Document, Forms, Page, Outcome) {
+        let mut doc = crate::html::parse("<html><head></head><body><p>Original frame fixture</p></body></html>");
+        doc.scripting_enabled = true;
+        let mut forms = Forms::new(&doc);
+        let mut page = Page::for_test();
+        let origin = crate::navigation::Location { url: Some(crate::url::parse("https://example.test/parent/page").unwrap().0),
+            path: None, fragment: String::new(), root: None };
+        let base = crate::navigation::Location { url: Some(crate::url::parse("https://example.test/assets/").unwrap().0),
+            ..origin.clone() };
+        page.set_location(&origin);
+        page.set_resource_base(&base);
+        let result = page.start_with_policy(&mut doc, &mut forms, &[Script { node: 0, label: "Original blank-frame fixture".into(), source: source.into() }], policy);
+        (doc, forms, page, result)
+    }
+
+    const CREATE: &str = "var f=document.createElement('iframe');f.hidden=true;document.body.appendChild(f);var w=f.contentWindow;";
+
+    #[test]
+    fn real_blank_frame_identity_topology_inheritance_and_foreign_calls() {
+        let source = format!("{CREATE}{}", r#"
+var d=f.contentDocument;
+if(w===window||d===document||w.document!==d||d.defaultView!==w||w.window!==w||w.self!==w||w.globalThis!==w)throw 'context identity';
+if(w.parent!==window||w.top!==window||w.frameElement!==f||w.closed||w.length!==0)throw 'context links';
+if(d.URL!=='about:blank'||d.documentURI!=='about:blank'||w.location.href!=='about:blank'||d.baseURI!=='https://example.test/assets/'||w.origin!=='https://example.test')throw 'inherited metadata';
+if(d.nodeType!==9||d.nodeName!=='#document'||d.parentNode!==null||d.ownerDocument!==null)throw 'document root';
+if(d.documentElement.tagName!=='HTML'||d.documentElement.parentNode!==d||d.documentElement.firstChild!==d.head||d.documentElement.lastChild!==d.body||d.head.nextSibling!==d.body||d.body.previousSibling!==d.head||d.body.ownerDocument!==d||d.body.firstChild!==null||d.body.textContent!=='')throw 'actual child tree';
+if(w.Array===Array||w.Array.prototype===Array.prototype||Object.getPrototypeOf(w.Array(1))!==w.Array.prototype||Object.getPrototypeOf(w?.Array(1))!==w.Array.prototype)throw 'child intrinsics';
+if(w.Function('return this;')()!==w||w.Function('return parent.Array;')()!==Array)throw 'child function globals';
+Array.prototype.parentMutation=7;if(w.Array.prototype.parentMutation!==undefined)throw 'prototype alias';
+w.eval('var childOnly=23;');if(w.childOnly!==23||typeof childOnly!=='undefined')throw 'global alias';
+if(w.Function('return Symbol.iterator;')()!==Symbol.iterator)throw 'shared symbol';
+document.title='blank-frame-ok';
+"#);
+        let (doc, _, page, result) = start(&source, &crate::csp::PolicySet::default());
+        assert_eq!(result.errors, 0, "{}", page.report());
+        assert_eq!(doc.title, "blank-frame-ok");
+        assert_eq!(page.state.blank_frames.len(), 1);
+        assert_eq!(page.state.blank_frame_nodes, 4);
+        assert_eq!(page.state.blank_frames[0].document.nodes.len(), 4);
+        assert!(page.state.dynamic.pending.is_empty());
+        assert_eq!(page.state.declined_images, 0);
+    }
+
+    #[test]
+    fn blank_frame_csp_is_an_independent_inherited_snapshot() {
+        let mut policy = crate::csp::PolicySet::default();
+        policy.add_header("script-src 'unsafe-inline'");
+        let source = format!("{CREATE}var blocked=0;try{{w.Function('return 1;');}}catch(e){{if(Object.getPrototypeOf(e)===w.EvalError.prototype)blocked++;}}try{{w.eval('1;');}}catch(e){{if(Object.getPrototypeOf(e)===w.EvalError.prototype)blocked++;}}if(blocked!==2)throw 'inherited CSP';");
+        let (mut doc, mut forms, mut page, result) = start(&source, &policy);
+        assert_eq!(result.errors, 0, "{}", page.report());
+        assert_eq!(page.state.blank_frames[0].policy, policy);
+        page.state.dynamic.policy = crate::csp::PolicySet::default();
+        page.state.eval_allowed = true;
+        let result = page.console_eval(&mut doc, &mut forms, "try{w.Function('return 1;');throw 'missing denial';}catch(e){if(Object.getPrototypeOf(e)!==w.EvalError.prototype)throw e;}");
+        assert_eq!(result.errors, 0, "{}", page.report());
+    }
+
+    #[test]
+    fn blank_frame_removal_and_reinsertion_keep_old_identity_without_aliasing() {
+        let source = format!("{CREATE}{}", r#"
+var old=w,oldDoc=f.contentDocument,oldArray=w.Array;
+document.body.removeChild(f);
+if(f.contentWindow!==null||f.contentDocument!==null||!old.closed||old.frameElement!==null)throw 'removal';
+document.body.appendChild(f);
+var fresh=f.contentWindow;
+if(fresh===old||f.contentDocument===oldDoc||fresh.Array===oldArray||fresh.closed||!old.closed)throw 'reinsert identity';
+if(old.Function('return Array;')()!==oldArray||fresh.Function('return Array;')()!==fresh.Array)throw 'retained realm';
+document.title='lifecycle-ok';
+"#);
+        let (doc, _, page, result) = start(&source, &crate::csp::PolicySet::default());
+        assert_eq!(result.errors, 0, "{}", page.report());
+        assert_eq!(doc.title, "lifecycle-ok");
+        assert_eq!(page.state.blank_frames.len(), 2);
+        assert!(!page.state.blank_frames[0].connected && page.state.blank_frames[1].connected);
+    }
+
+    #[test]
+    fn first_use_foreign_window_observations_reject_without_parent_effects() {
+        for operation in ["w[Symbol('x')]", "Symbol('x') in w", "delete w[Symbol('x')]",
+            "Object.getOwnPropertySymbols(w)", "Object.getOwnPropertyDescriptor(w,Symbol('x'))",
+            "Object.getOwnPropertyDescriptor(w,'Array')", "Object.defineProperty(w,'x',{value:1})",
+            "Object.defineProperties(w,{})", "Object.keys(w)", "Object.hasOwn(w,'Array')",
+            "Object.prototype.hasOwnProperty.call(w,Symbol('x'))", "Object.prototype.propertyIsEnumerable.call(w,'Array')",
+            "w.parentOnly=7", "delete w.Array", "'Array' in w", "w.location.href='https://other.test/'",
+            "f.contentDocument.body.textContent='changed'", "f.hidden=false", "f.style.display='block'"] {
+            let (mut doc, mut forms, mut page, result) = start(&format!("var parentOnly=3;{CREATE}"), &crate::csp::PolicySet::default());
+            assert_eq!(result.errors, 0, "{}", page.report());
+            let result = page.console_eval(&mut doc, &mut forms, operation);
+            assert_eq!(result.errors, 1, "unexpected success for {operation}: {}", page.report());
+            let result = page.console_eval(&mut doc, &mut forms, "if(parentOnly!==3||f.parentNode!==document.body||f.contentDocument.body.firstChild!==null)throw 'partial effect';");
+            assert_eq!(result.errors, 0, "{operation}: {}", page.report());
+        }
+    }
+
+    #[test]
+    fn blank_window_member_resolution_and_optional_calls_keep_order() {
+        let source = format!("{CREATE}{}", r#"
+var effects=0;
+if(w.missing?.(++effects)!==undefined||effects!==0)throw 'optional skip';
+try{w?.missing(++effects);}catch(e){if(Object.getPrototypeOf(e)!==TypeError.prototype)throw e;}
+if(effects!==1)throw 'argument before callability';
+document.title='call-order-ok';
+"#);
+        let (doc, _, page, result) = start(&source, &crate::csp::PolicySet::default());
+        assert_eq!(result.errors, 0, "{}", page.report());
+        assert_eq!(doc.title, "call-order-ok");
+        let (mut doc, mut forms, mut page, result) = start(CREATE, &crate::csp::PolicySet::default());
+        assert_eq!(result.errors, 0, "{}", page.report());
+        let result = page.console_eval(&mut doc, &mut forms, "var effects=0;w.fetch(++effects);");
+        assert_eq!(result.errors, 1, "{}", page.report());
+        let result = page.console_eval(&mut doc, &mut forms, "if(effects!==0)throw 'lookup must precede arguments';");
+        assert_eq!(result.errors, 0, "{}", page.report());
+    }
+
+    #[test]
+    fn blank_frame_creation_quota_failure_is_atomic_and_contexts_are_bounded() {
+        let (mut doc, mut forms, mut page, result) = start("var f=document.createElement('iframe');f.hidden=true;", &crate::csp::PolicySet::default());
+        assert_eq!(result.errors, 0, "{}", page.report());
+        page.state.retained_limit = page.state.retained;
+        let result = page.console_eval(&mut doc, &mut forms, "document.body.appendChild(f);");
+        assert_eq!(result.errors, 1, "{}", page.report());
+        assert!(page.state.blank_frames.is_empty());
+        assert_eq!(page.state.blank_frame_nodes, 0);
+        let result = page.console_eval(&mut doc, &mut forms, "if(f.parentNode!==null||f.contentWindow!==null)throw 'partial insertion';");
+        assert_eq!(result.errors, 0, "{}", page.report());
+
+        let source = "var count=0;for(var i=0;i<9;i++){var f=document.createElement('iframe');f.hidden=true;document.body.appendChild(f);count++;document.body.removeChild(f);}";
+        let (mut doc, mut forms, mut page, result) = start(source, &crate::csp::PolicySet::default());
+        assert_eq!(result.errors, 1, "{}", page.report());
+        assert!(page.report().contains("8 retained contexts"));
+        assert_eq!(page.state.blank_frames.len(), MAX_BLANK_FRAMES);
+        assert_eq!(page.state.blank_frame_nodes, 32);
+        let result = page.console_eval(&mut doc, &mut forms, "if(count!==8||f.parentNode!==null||f.contentWindow!==null)throw 'bounded atomic insertion';");
+        assert_eq!(result.errors, 0, "{}", page.report());
+    }
+
+    #[test]
+    fn visible_frames_and_observable_loads_reject_before_connection() {
+        for source in [
+            "var f=document.createElement('iframe');document.body.appendChild(f);",
+            "var f=document.createElement('iframe');f.hidden=true;f.addEventListener('load',function(){document.title='false load';});document.body.appendChild(f);",
+            "var f=document.createElement('iframe');f.hidden=true;document.body.addEventListener('load',function(){document.title='false load';},true);document.body.appendChild(f);",
+        ] {
+            let (mut doc, mut forms, mut page, result) = start(source, &crate::csp::PolicySet::default());
+            assert_eq!(result.errors, 1, "{}", page.report());
+            assert!(page.state.blank_frames.is_empty());
+            assert_ne!(doc.title, "false load");
+            let result = page.console_eval(&mut doc, &mut forms, "if(f.parentNode!==null||f.contentWindow!==null)throw 'partial insertion';");
+            assert_eq!(result.errors, 0, "{}", page.report());
+        }
+    }
+
+    #[test]
+    fn frame_collection_and_nodelist_handles_are_disjoint() {
+        let source = format!("var tags=document.getElementsByTagName('p'),list=document.querySelectorAll('p');{CREATE}{}", r#"
+if(tags.length!==1||list.length!==1||tags[0]!==list[0]||tags[0].tagName!=='P')throw 'collection collision';
+if(w===tags||w===list||w.document===tags||f.contentDocument.body.tagName!=='BODY')throw 'frame collision';
+document.title='disjoint-ok';
+"#);
+        let (doc, _, page, result) = start(&source, &crate::csp::PolicySet::default());
+        assert_eq!(result.errors, 0, "{}", page.report());
+        assert_eq!(doc.title, "disjoint-ok");
+    }
+
+    #[test]
+    fn shared_child_node_reservation_blocks_image_and_text_growth() {
+        for operation in ["new Image();", "target.textContent='new text';"] {
+            let (mut doc, mut forms, mut page, result) = start(&format!("{CREATE}var target=document.createElement('span');document.body.appendChild(target);"), &crate::csp::PolicySet::default());
+            assert_eq!(result.errors, 0, "{}", page.report());
+            let nodes = doc.nodes.len();
+            let frames = page.state.blank_frame_nodes;
+            page.state.node_limit = nodes + frames;
+            let result = page.console_eval(&mut doc, &mut forms, operation);
+            assert_eq!(result.errors, 1, "{operation}: {}", page.report());
+            assert!(page.report().contains("appended-node limit"), "{}", page.report());
+            assert_eq!(doc.nodes.len(), nodes);
+            assert_eq!(page.state.blank_frame_nodes, frames);
+            assert_eq!(page.state.blank_frames.len(), 1);
+        }
+    }
+
+    #[test]
+    fn trusted_location_change_does_not_expose_retained_child_documents() {
+        let (mut doc, mut forms, mut page, result) = start(&format!("{CREATE}var saved=f.contentDocument;"), &crate::csp::PolicySet::default());
+        assert_eq!(result.errors, 0, "{}", page.report());
+        let location = crate::navigation::Location { url: Some(crate::url::parse("https://other.test/").unwrap().0),
+            path: None, fragment: String::new(), root: None };
+        page.set_location(&location);
+        let result = page.console_eval(&mut doc, &mut forms, "if(f.contentDocument!==null)throw 'foreign document';");
+        assert_eq!(result.errors, 0, "{}", page.report());
+        for operation in ["saved.body", "w.Array", "w.location.href"] {
+            let result = page.console_eval(&mut doc, &mut forms, operation);
+            assert_eq!(result.errors, 1, "{operation}: {}", page.report());
+        }
+    }
+
+    #[test]
+    fn deferred_families_keep_canonical_methods_and_global_mutation_semantics() {
+        let source = format!("{CREATE}{}", r#"
+var check=w.Function("var canonical=Array.prototype.toString;Object.defineProperty(Array.prototype,'toString',{get:function(){throw 'late getter';},configurable:true});if(Uint8Array.prototype.toString!==canonical)throw 'canonical method';if((0).constructor.EPSILON!==2.220446049250313e-16||(0).constructor.isInteger(2)!==true)throw 'eager Number aliases';if(Object.getOwnPropertyDescriptor(this,'URL').value!==URL)throw 'lazy descriptor';delete this.URL;if(typeof URL!=='undefined')throw 'deleted intrinsic resurrected';var TextEncoder=17;if(TextEncoder!==17)throw 'global override';return new Uint8Array([3])[0];");
+if(check()!==3)throw 'deferred families';
+document.title='deferred-ok';
+"#);
+        let (doc, _, page, result) = start(&source, &crate::csp::PolicySet::default());
+        assert_eq!(result.errors, 0, "{}", page.report());
+        assert_eq!(doc.title, "deferred-ok");
+    }
+
+    #[test]
+    fn first_deferred_access_in_nested_foreign_calls_is_bounded_on_one_mib() {
+        std::thread::Builder::new().stack_size(1024 * 1024).spawn(|| {
+            let source = format!("{CREATE}var child=w.Function('n','parent','if(n>0)return parent(n-1);return new Uint8Array([42])[0];');function parent(n){{return child(n,parent);}}if(parent(3)!==42)throw 'nested deferred allocation';");
+            let (mut doc, mut forms, mut page, result) = start(&source, &crate::csp::PolicySet::default());
+            assert_eq!(result.errors, 0, "{}", page.report());
+            // Exhaust a later family through the original aggregate function
+            // cap, then verify no context/job reset or parent corruption.
+            let result = page.console_eval(&mut doc, &mut forms, "document.body.removeChild(f);document.body.appendChild(f);var other=f.contentWindow;other.Function('return new URL(\"https://example.test/\");')();");
+            assert_eq!(result.errors, 1, "{}", page.report());
+            assert!(page.report().contains("limit"), "{}", page.report());
+            let result = page.console_eval(&mut doc, &mut forms, "if(6*7!==42||parent(1)!==42)throw 'caller recovery';");
+            assert_eq!(result.errors, 0, "{}", page.report());
+        }).unwrap().join().unwrap();
+    }
+
+    #[test]
+    fn deferred_constructor_global_function_overrides_preserve_sibling_intrinsics() {
+        for (name, sibling) in [("URL", "URLSearchParams"), ("Uint8Array", "DataView"), ("TextEncoder", "TextDecoder")] {
+            let source = format!("{CREATE}var original={name};w.eval('function {name}(){{return 17;}}');if(w.{name}()!==17||typeof w.{sibling}!=='function'||{name}!==original)throw 'global function override';document.title='override-ok';");
+            let (doc, _, page, result) = start(&source, &crate::csp::PolicySet::default());
+            assert_eq!(result.errors, 0, "{name}: {}", page.report());
+            assert_eq!(doc.title, "override-ok");
+        }
+    }
+
+    #[test]
+    fn inherited_sandbox_and_policy_limit_reject_before_frame_publication() {
+        for header in ["sandbox allow-scripts allow-same-origin", &"x".repeat(65 * 1024)] {
+            let mut policy = crate::csp::PolicySet::default();
+            policy.add_header(header);
+            let (mut doc, mut forms, mut page, result) = start(CREATE, &policy);
+            assert_eq!(result.errors, 1, "{}", page.report());
+            assert!(page.state.blank_frames.is_empty());
+            let result = page.runtime.execute("if(f.parentNode!==null||f.contentWindow!==null)throw 'partial policy insertion';", &mut Bridge { doc: &mut doc, forms: &mut forms, state: &mut page.state });
+            assert!(result.is_ok(), "{result:?}");
+        }
+    }
+
+    #[test]
+    fn retained_document_does_not_claim_completed_browsing_context_teardown() {
+        let source = format!("{CREATE}var oldDoc=f.contentDocument;document.body.removeChild(f);");
+        let (mut doc, mut forms, mut page, result) = start(&source, &crate::csp::PolicySet::default());
+        assert_eq!(result.errors, 0, "{}", page.report());
+        let result = page.console_eval(&mut doc, &mut forms, "oldDoc.defaultView;");
+        assert_eq!(result.errors, 1, "{}", page.report());
+        assert!(page.report().contains("browsing-context teardown is not implemented"));
+    }
+}
