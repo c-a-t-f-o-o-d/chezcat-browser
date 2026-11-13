@@ -1,6 +1,93 @@
 use super::*;
 
 #[test]
+fn name_namespace_attribute_values_are_exact_live_and_do_not_allocate_attr_identities() {
+    let (mut doc,mut forms,mut page,outcome)=page("<div id=p title=old x:y=colon xmlns:x=raw null=n undefined=u></div>",&[r#"
+var p=document.getElementById('p'),get=p.getAttributeNS;
+if(get.length!==2||get!==p.getAttributeNS||get.call(p,null,'title')!=='old')throw 'metadata/receiver';
+if(p.getAttributeNS('', 'title')!=='old'||p.getAttributeNS(undefined,'title')!=='old'||p.getAttributeNS(null,'TITLE')!==null)throw 'nullable/exact name';
+if(p.getAttributeNS('http://www.w3.org/1999/xhtml','title')!==null||p.getAttributeNS(null,'missing')!==null||p.getAttributeNS(null,'bad name')!==null)throw 'namespace/miss';
+if(p.getAttributeNS(null,'x:y')!=='colon'||p.getAttributeNS(null,'y')!==null||p.getAttributeNS('urn:x','y')!==null)throw 'raw colon';
+if(p.getAttributeNS(null,'xmlns:x')!=='raw'||p.getAttributeNS('http://www.w3.org/2000/xmlns/','x')!==null)throw 'raw xmlns';
+if(p.getAttributeNS(null,null)!=='n'||p.getAttributeNS(null,undefined)!=='u')throw 'local DOMString';
+p.setAttribute('title','new');if(get.call(p,null,'title')!=='new')throw 'live value';document.title='namespace-values-ok';
+"#]);
+    assert_eq!(outcome.errors,0,"{}",page.report());
+    assert_eq!(doc.title,"namespace-values-ok");
+    assert!(page.state.attributes.is_empty());
+    let node=(0..doc.nodes.len()).find(|&n|doc.attr(n,"id")==Some("p")).unwrap();
+    doc.nodes[node].namespace=crate::html::Namespace::UnknownForeign;
+    let mut bridge=Bridge{doc:&mut doc,forms:&mut forms,state:&mut page.state};
+    assert!(bridge.call(node_handle(node),"getAttributeNS",&[Value::Null,Value::String("title".into())]).unwrap_err().contains("foreign"));
+    bridge.doc.nodes[node].namespace=crate::html::Namespace::Html;
+    let retained=bridge.state.retained;
+    bridge.state.host_work=0;
+    assert!(bridge.call(node_handle(node),"getAttributeNS",&[Value::Null,Value::String("title".into())]).is_err());
+    bridge.state.host_work=bridge.state.limits.host_work;
+    bridge.state.limits.host.string_bytes=1;
+    assert!(bridge.call(node_handle(node),"getAttributeNS",&[Value::Null,Value::String("title".into())]).is_err());
+    assert!(bridge.state.attributes.is_empty());
+    assert_eq!(bridge.state.retained,retained);
+    assert_eq!(bridge.doc.attr(node,"title"),Some("new"));
+}
+
+#[test]
+fn name_namespace_attribute_value_conversion_is_ordered_nullable_and_reentrant() {
+    let (_,_,page,outcome)=page("<div id=p title=old></div>",&[r#"
+var p=document.getElementById('p'),log='',marker={};
+var ns={toString:function(){log+='N';return '';}};
+var name={toString:function(){log+='L';p.setAttribute('title','current');return 'title';}};
+if(p.getAttributeNS(ns,name)!=='current'||log!=='NL')throw 'ordered live conversion';
+log='';if(p.getAttributeNS({toString:function(){log+='N';return null;}},name)!==null||log!=='NL')throw 'object null string';
+log='';var count=0;try{p.getAttributeNS(ns);}catch(e){if(e.name==='TypeError')count++;}
+try{p.getAttributeNS(Symbol(),name);}catch(e){if(e.name==='TypeError')count++;}
+if(log!=='')throw 'arity/namespace before name';
+try{p.getAttributeNS('urn:x',Symbol());}catch(e){if(e.name==='TypeError')count++;}
+var same=false;try{p.getAttributeNS(null,{toString:function(){throw marker;}});}catch(e){same=e===marker;}if(!same)throw 'throw identity';
+for(var bad of [{},window,document,p.style,p.dataset,document.createTextNode('x')])try{p.getAttributeNS.call(bad,ns,name);}catch(e){if(e.name==='TypeError')count++;}
+if(count!==9||log!==''||p.getAttribute('title')!=='current')throw 'brand/coercion';
+"#]);
+    assert_eq!(outcome.errors,0,"{}",page.report());
+}
+
+#[test]
+fn name_namespace_live_name_nodelists_keep_tree_order_methods_and_static_snapshots() {
+    let (_,_,page,outcome)=page("<div id=root><span id=a name=probe></span><span id=b name=probe></span><span name=Probe></span><span name=''></span><span></span><i id=probe></i></div><div id=outside><span id=c name=probe></span></div><svg name=probe></svg>",&[r#"
+var get=document.getElementsByName,root=document.getElementById('root'),outside=document.getElementById('outside');
+var a=document.getElementById('a'),b=document.getElementById('b'),c=document.getElementById('c');
+var list=get.call(document,'probe'),snapshot=document.querySelectorAll('span[name=probe]');
+if(get.length!==1||get!==document.getElementsByName||list.length!==3||list[0]!==a||list[1]!==b||list[2]!==c)throw 'initial order';
+if(list.item(1)!==b||list.item(99)!==null||list[99]!==undefined||list.namedItem!==undefined||list.a!==undefined||'namedItem' in list)throw 'NodeList surface';
+if(document.getElementsByName('').length!==1||document.getElementsByName('Probe').length!==1||document.getElementsByName('PROBE').length!==0)throw 'exact name';
+if(Object.keys(list).join(',')!=='0,1,2'||Object.getOwnPropertyNames(list).join(',')!=='0,1,2')throw 'indices';
+outside.appendChild(b);if(list[1]!==c||list[2]!==b||snapshot[1]!==b||snapshot.length!==3)throw 'move/live versus snapshot';
+root.removeChild(a);if(list.length!==2||list[0]!==c||list[1]!==b||snapshot[0]!==a)throw 'remove';
+var hits=0,context={};list.forEach(function(node,index,owner){if(this!==context||owner!==list||index!==0||node!==c)throw 'callback';hits++;outside.removeChild(c);outside.removeChild(b);},context);
+if(hits!==1||list.length!==0||Object.keys(list).length!==0)throw 'removed live indices must skip';
+root.appendChild(a);if(list.length!==1||list[0]!==a||Array.prototype.slice.call(list)[0]!==a)throw 'reinsert/arraylike';
+"#]);
+    assert_eq!(outcome.errors,0,"{}",page.report());
+}
+
+#[test]
+fn name_namespace_name_list_conversion_brand_and_retention_failures_are_atomic() {
+    let (mut doc,mut forms,mut page,outcome)=page("<span name=null></span><span name=undefined></span>",&[r#"
+if(document.getElementsByName(null).length!==1||document.getElementsByName(undefined).length!==1)throw 'DOMString';
+var converted=0,arg={toString:function(){converted++;return 'null';}},get=document.getElementsByName,count=0;
+for(var bad of [{},window,document.body,document.createTextNode('x')])try{get.call(bad,arg);}catch(e){if(e.name==='TypeError')count++;}
+try{get();}catch(e){if(e.name==='TypeError')count++;}try{get(Symbol());}catch(e){if(e.name==='TypeError')count++;}
+if(count!==6||converted!==0||document.getElementsByName(arg).length!==1||converted!==1)throw 'brand/arity/conversion';
+"#]);
+    assert_eq!(outcome.errors,0,"{}",page.report());
+    assert_eq!(page.state.node_list_references,0);
+    let before=(page.state.node_lists.len(),page.state.retained);
+    page.state.retained_limit=page.state.retained;
+    let mut bridge=Bridge{doc:&mut doc,forms:&mut forms,state:&mut page.state};
+    assert!(bridge.call(DOCUMENT,"getElementsByName",&[Value::String("unretained".into())]).is_err());
+    assert_eq!(before,(bridge.state.node_lists.len(),bridge.state.retained));
+}
+
+#[test]
 fn native_element_expandos_are_real_ordinary_properties_with_native_accessor_receivers() {
     let (doc,_,page,outcome)=page("<div id=p></div><form id=f><input id=field name=customProbe></form>",&[r#"
 var p=document.getElementById('p');if(p.customProbe!==undefined||'customProbe' in p||Object.hasOwn(p,'customProbe'))throw 'real absent key';

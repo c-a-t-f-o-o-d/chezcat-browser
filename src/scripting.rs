@@ -297,7 +297,7 @@ struct State {
     native_methods: Vec<(u32, &'static str, Value)>,
     detached_images: HashSet<usize>,
     detached_nodes: HashSet<usize>,
-    node_lists: Vec<Vec<usize>>,
+    node_lists: Vec<queries::NodeList>,
     node_list_references: usize,
     attributes: Vec<script_attr::Attr>,
     declined_images: usize,
@@ -2238,7 +2238,7 @@ impl Host for Bridge<'_> {
         }
         if method == "isDefaultNamespace" && self.namespace_receiver(object) { return &[(0, true)]; }
         if self.attr_element_receiver(object) && method == "getAttributeNode" { return &[(0, true)]; }
-        if self.attr_element_receiver(object) && matches!(method,"getAttributeNodeNS" | "removeAttributeNS") { return &[(0, true), (1, true)]; }
+        if self.attr_element_receiver(object) && matches!(method,"getAttributeNS" | "getAttributeNodeNS" | "removeAttributeNS") { return &[(0, true), (1, true)]; }
         if collection_handle_index(object).is_some() {
             return match method {
                 "item" => &[(0, false)],
@@ -2248,6 +2248,7 @@ impl Host for Bridge<'_> {
         }
         if (object == DOCUMENT || node_index(object).is_some()) && method=="getElementsByTagName"
             || (object==DOCUMENT || self.attr_element_receiver(object)) && method=="getElementsByClassName"
+            || object == DOCUMENT && method == "getElementsByName"
         {
             return &[(0, true)];
         }
@@ -2287,16 +2288,17 @@ impl Host for Bridge<'_> {
     }
 
     fn method_length(&self, object:u32, method:&str) -> Option<usize> {
+        if object == DOCUMENT && method == "getElementsByName" { return Some(1); }
         if method=="getElementsByClassName" && (object==DOCUMENT || self.attr_element_receiver(object)) { return Some(1); }
         if self.class_list_receiver(object) {
             return match method {"contains"|"item"=>Some(1),"add"|"remove"|"toString"=>Some(0),_=>None};
         }
-        (self.attr_element_receiver(object) && matches!(method,"getAttributeNodeNS"|"removeAttributeNS")).then_some(2)
+        (self.attr_element_receiver(object) && matches!(method,"getAttributeNS"|"getAttributeNodeNS"|"removeAttributeNS")).then_some(2)
     }
 
     fn nullable_string_argument(&self, object: u32, method: &str, index: usize) -> bool {
         method == "isDefaultNamespace" && index == 0 && self.namespace_receiver(object)
-            || matches!(method,"getAttributeNodeNS" | "removeAttributeNS") && index == 0 && self.attr_element_receiver(object)
+            || matches!(method,"getAttributeNS" | "getAttributeNodeNS" | "removeAttributeNS") && index == 0 && self.attr_element_receiver(object)
     }
 
     fn validate_argument_prefix(&self, object: u32, method: &str, next_index: usize, args: &[Value])
@@ -2315,7 +2317,8 @@ impl Host for Bridge<'_> {
 
     fn required_arguments(&self, object: u32, method: &str) -> usize {
         if self.class_list_receiver(object) && matches!(method,"item"|"contains") { return 1; }
-        if self.attr_element_receiver(object) && matches!(method,"getAttributeNodeNS" | "removeAttributeNS") { return 2; }
+        if self.attr_element_receiver(object) && matches!(method,"getAttributeNS" | "getAttributeNodeNS" | "removeAttributeNS") { return 2; }
+        if object == DOCUMENT && method == "getElementsByName" { return 1; }
         if object == DOCUMENT && method == "createEvent" && self.event_factory_enabled()
             || self.event_receiver(object) && method == "initEvent"
             || self.mouse_receiver(object) && method == "initMouseEvent"
@@ -2533,6 +2536,7 @@ impl Host for Bridge<'_> {
     }
 
     fn method(&self, object: u32, property: &str) -> Option<&'static str> {
+        if object == DOCUMENT && property == "getElementsByName" { return Some("getElementsByName"); }
         if property=="normalize" && !self.is_frame_handle(object) && self.namespace_receiver(object) {return Some("normalize");}
         if property=="getElementsByClassName" && (object==DOCUMENT || self.attr_element_receiver(object))
             && !self.form_named_control(object,property) { return Some("getElementsByClassName"); }
@@ -2586,6 +2590,7 @@ impl Host for Bridge<'_> {
     }
 
     fn accepts_receiver(&self, object: u32, method: &str, receiver: u32) -> bool {
+        if method == "getElementsByName" { return object == DOCUMENT && receiver == DOCUMENT; }
         if method=="normalize" {return !self.is_frame_handle(object) && !self.is_frame_handle(receiver)
             && self.namespace_receiver(object) && self.namespace_receiver(receiver);}
         if method=="getElementsByClassName" {
@@ -2600,7 +2605,7 @@ impl Host for Bridge<'_> {
             // event does not revoke borrowing; the actual receiver must be live.
             return (EVENT_BASE..self.state.next_event).contains(&object) && self.event_receiver(receiver);
         }
-        if matches!(method, "getAttributeNode" | "getAttributeNodeNS" | "removeAttributeNS" | "removeAttributeNode" | "hasAttributes") {
+        if matches!(method, "getAttributeNS" | "getAttributeNode" | "getAttributeNodeNS" | "removeAttributeNS" | "removeAttributeNode" | "hasAttributes") {
             return self.attr_element_receiver(object) && self.attr_element_receiver(receiver);
         }
         if matches!(method, "isDefaultNamespace" | "compareDocumentPosition") {
@@ -3035,6 +3040,7 @@ impl Host for Bridge<'_> {
                     | "compatMode"
                     | "prerendering"
                     | "getElementById"
+                    | "getElementsByName"
                     | "getElementsByTagName"
                     | "querySelector"
                     | "querySelectorAll"
@@ -3633,6 +3639,9 @@ impl Host for Bridge<'_> {
         if object == DOCUMENT && method == "createEvent" {
             return if self.event_factory_enabled() { self.create_event(args) }
                 else { Err(unsupported_event_interface(args.first())) };
+        }
+        if object == DOCUMENT && method == "getElementsByName" {
+            return self.create_name_list(args.first().ok_or("getElementsByName requires one argument.")?);
         }
         if method=="getElementsByClassName" && (object==DOCUMENT || self.attr_element_receiver(object)) {
             return self.create_class_collection(object,args.first().ok_or("getElementsByClassName requires one argument.")?);

@@ -137,6 +137,24 @@ impl Bridge<'_> {
         self.lookup_attribute_node(node, text.to_ascii_lowercase())
     }
 
+    pub(super) fn get_attribute_ns(&mut self, object: u32, args: &[Value]) -> Result<Value, String> {
+        let node = self.attr_element_node(object)?;
+        let namespace = match args.first() {
+            Some(Value::Null | Value::Undefined) => None,
+            Some(Value::String(text)) => if text.is_empty() { None } else { Some(text.as_str()) },
+            _ => return Err("getAttributeNS requires a converted nullable namespace.".into()),
+        };
+        let name = self.text(args.get(1).ok_or("getAttributeNS requires two arguments.")?)?;
+        if namespace.is_some() { return Ok(Value::Null); }
+        let NodeKind::Element { attrs, .. } = &self.doc.nodes[node].kind else { unreachable!() };
+        self.state.work(attrs.len())?;
+        self.state.copies(attrs.iter().map(|(key, _)| key.len()).sum())?;
+        let Some((_,value)) = attrs.iter().find(|(key,_)| key == &name) else { return Ok(Value::Null); };
+        if value.len() > self.state.limits.host.string_bytes { return Err("Attribute value exceeds the host string bound.".into()); }
+        self.state.copies(value.len())?;
+        Ok(Value::String(value.to_owned()))
+    }
+
     pub(super) fn get_attribute_node_ns(&mut self, object: u32, args: &[Value]) -> Result<Value, String> {
         let node = self.attr_element_node(object)?;
         let namespace = match args.first() {

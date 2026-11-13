@@ -7968,7 +7968,9 @@ impl Runtime {
             let this_arg = args.get(1).cloned().unwrap_or(Value::Undefined);
             for index in 0..length as usize {
                 self.step()?;
-                let value = self.host_read(object, &index.to_string(), host)?;
+                let key = index.to_string();
+                if !host.has(object,&key).map_err(Fault::new)? { continue; }
+                let value = self.host_read(object, &key, host)?;
                 self.call_value(
                     callback.clone(),
                     &[value, Value::Number(index as f64), Value::Host(object)],

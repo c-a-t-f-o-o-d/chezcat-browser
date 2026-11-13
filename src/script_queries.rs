@@ -1,7 +1,12 @@
-//! Bounded selector queries and static NodeList snapshots. Querying never
+//! Bounded selector snapshots and live name-filtered NodeLists. Querying never
 //! constructs markup, runs scripts, changes resources or leaves this document.
 //! Semantics: https://dom.spec.whatwg.org/#dom-parentnode-queryselectorall
 use super::*;
+
+pub(super) enum NodeList {
+    Snapshot(Vec<usize>),
+    Name(String),
+}
 
 pub(super) fn node_list_index(handle: u32) -> Option<usize> {
     (NODE_LIST_BASE..NODE_LIST_BASE + MAX_NODE_LISTS as u32)
@@ -10,12 +15,50 @@ pub(super) fn node_list_index(handle: u32) -> Option<usize> {
 }
 
 impl Bridge<'_> {
+    pub(super) fn create_name_list(&mut self, value: &Value) -> Result<Value,String> {
+        let name = self.text(value)?;
+        if self.state.node_lists.len() >= MAX_NODE_LISTS { return Err("DOM NodeList identity limit reached (128 per document).".into()); }
+        self.state.node_lists.try_reserve(1).map_err(|_|"DOM NodeList storage reservation failed.")?;
+        self.state.replace_bytes(0,name.len())?;
+        let handle = NODE_LIST_BASE + self.state.node_lists.len() as u32;
+        self.state.node_lists.push(NodeList::Name(name));
+        Ok(Value::Host(handle))
+    }
+
+    fn name_list_nodes(&mut self, index: usize) -> Result<Vec<usize>,String> {
+        let NodeList::Name(name) = &self.state.node_lists[index] else { unreachable!() };
+        self.state.copies(name.len())?;
+        let NodeList::Name(name) = &self.state.node_lists[index] else { unreachable!() };
+        let name = name.clone();
+        let candidates = self.query_candidates(0)?;
+        let mut found = Vec::new();
+        for node in candidates {
+            self.state.work(1)?;
+            if self.doc.nodes[node].namespace != crate::html::Namespace::Html { continue; }
+            let NodeKind::Element {attrs,..} = &self.doc.nodes[node].kind else { unreachable!() };
+            self.state.work(attrs.len())?;
+            self.state.copies(attrs.iter().map(|(key,_)|key.len()).sum())?;
+            let value = self.doc.attr(node,"name");
+            self.state.copies(value.map_or(0,str::len))?;
+            if value == Some(name.as_str()) { found.push(node); }
+        }
+        Ok(found)
+    }
+
     pub(super) fn node_list_get(&mut self, handle: u32, property: &str) -> Result<Value, String> {
+        let index = node_list_index(handle).ok_or("Invalid NodeList handle.")?;
         let list = self
             .state
             .node_lists
-            .get(node_list_index(handle).ok_or("Invalid NodeList handle.")?)
+            .get(index)
             .ok_or("Invalid NodeList handle.")?;
+        if matches!(list,NodeList::Name(_)) {
+            if property != "length" && collection_index(property).is_none() { return Ok(Value::Undefined); }
+            let nodes = self.name_list_nodes(index)?;
+            return if property == "length" { Ok(Value::Number(nodes.len() as f64)) }
+                else { Ok(collection_index(property).and_then(|index|nodes.get(index)).map_or(Value::Undefined,|&node|Value::Host(node_handle(node)))) };
+        }
+        let NodeList::Snapshot(list) = list else { unreachable!() };
         if property == "length" {
             return Ok(Value::Number(list.len() as f64));
         }
@@ -25,12 +68,8 @@ impl Bridge<'_> {
     }
 
     pub(super) fn node_list_keys(&mut self, handle: u32) -> Result<Vec<String>, String> {
-        let length = self
-            .state
-            .node_lists
-            .get(node_list_index(handle).ok_or("Invalid NodeList handle.")?)
-            .ok_or("Invalid NodeList handle.")?
-            .len();
+        let Value::Number(length) = self.node_list_get(handle,"length")? else { unreachable!() };
+        let length = length as usize;
         self.state.work(length)?;
         self.state.copies(length.saturating_mul(4))?;
         Ok((0..length).map(|index| index.to_string()).collect())
@@ -119,7 +158,7 @@ impl Bridge<'_> {
             self.state.work(nodes.len())?;
             self.state.node_list_references = references;
             let handle = NODE_LIST_BASE + self.state.node_lists.len() as u32;
-            self.state.node_lists.push(nodes);
+            self.state.node_lists.push(NodeList::Snapshot(nodes));
             Ok(Value::Host(handle))
         } else {
             let found = crate::css::query_first(

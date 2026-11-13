@@ -280,6 +280,7 @@ impl Bridge<'_> {
             "getAttributeNode" if self.attr_element_receiver(object) => Some("getAttributeNode"),
             "hasAttributes" if self.attr_element_receiver(object) => Some("hasAttributes"),
             "getAttributeNodeNS" if self.attr_element_receiver(object) => Some("getAttributeNodeNS"),
+            "getAttributeNS" if self.attr_element_receiver(object) => Some("getAttributeNS"),
             "removeAttributeNS" if self.attr_element_receiver(object) => Some("removeAttributeNS"),
             "removeAttributeNode" if self.attr_element_receiver(object) => Some("removeAttributeNode"),
             "appendChild" => Some("appendChild"),
@@ -981,6 +982,7 @@ impl Bridge<'_> {
                 }
                 "getAttributeNode" => return self.get_attribute_node(object, args).map(Some),
                 "getAttributeNodeNS" => return self.get_attribute_node_ns(object, args).map(Some),
+                "getAttributeNS" => return self.get_attribute_ns(object, args).map(Some),
                 "removeAttributeNS" => return self.remove_attribute_ns(object, args).map(Some),
                 "removeAttributeNode" => return self.remove_attribute_node(object, args).map(Some),
                 _ => (),
