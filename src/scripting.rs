@@ -38,6 +38,8 @@ use dom_tree::DomState;
 mod script_attr;
 #[path = "script_class_list.rs"]
 mod script_class_list;
+#[path = "script_normalize.rs"]
+mod script_normalize;
 #[path = "script_created_events.rs"]
 mod script_created_events;
 #[path = "script_navigation.rs"]
@@ -2270,13 +2272,13 @@ impl Host for Bridge<'_> {
     }
 
     fn variadic_string_arguments(&self, object:u32, method:&str) -> bool {
-        self.class_list_receiver(object) && method == "remove"
+        self.class_list_receiver(object) && matches!(method,"add"|"remove")
     }
 
     fn method_length(&self, object:u32, method:&str) -> Option<usize> {
         if method=="getElementsByClassName" && (object==DOCUMENT || self.attr_element_receiver(object)) { return Some(1); }
         if self.class_list_receiver(object) {
-            return match method {"contains"|"item"=>Some(1),"remove"|"toString"=>Some(0),_=>None};
+            return match method {"contains"|"item"=>Some(1),"add"|"remove"|"toString"=>Some(0),_=>None};
         }
         (self.attr_element_receiver(object) && matches!(method,"getAttributeNodeNS"|"removeAttributeNS")).then_some(2)
     }
@@ -2520,6 +2522,7 @@ impl Host for Bridge<'_> {
     }
 
     fn method(&self, object: u32, property: &str) -> Option<&'static str> {
+        if property=="normalize" && !self.is_frame_handle(object) && self.namespace_receiver(object) {return Some("normalize");}
         if property=="getElementsByClassName" && (object==DOCUMENT || self.attr_element_receiver(object))
             && !self.form_named_control(object,property) { return Some("getElementsByClassName"); }
         if script_class_list::element(object).is_some() {
@@ -2572,6 +2575,8 @@ impl Host for Bridge<'_> {
     }
 
     fn accepts_receiver(&self, object: u32, method: &str, receiver: u32) -> bool {
+        if method=="normalize" {return !self.is_frame_handle(object) && !self.is_frame_handle(receiver)
+            && self.namespace_receiver(object) && self.namespace_receiver(receiver);}
         if method=="getElementsByClassName" {
             return if object==DOCUMENT {receiver==DOCUMENT}
                 else {self.attr_element_receiver(object) && self.attr_element_receiver(receiver)};
@@ -2630,6 +2635,10 @@ impl Host for Bridge<'_> {
     }
 
     fn own_keys(&mut self, object: u32) -> Result<Vec<String>, String> {
+        if self.class_list_element_receiver(object) && node_index(object).is_some_and(|node|tag(self.doc,node)=="iframe") {
+            self.state.work(1)?;
+            return Ok(Vec::new());
+        }
         if script_class_list::element(object).is_some() { return self.class_list_keys(object); }
         if self.is_frame_handle(object) { return Err(format!("Blank child native property enumeration is not implemented (handle {object}).")); }
         self.state.work(1)?;
@@ -2658,7 +2667,21 @@ impl Host for Bridge<'_> {
         Err("Enumerating this native host object is not implemented.".into())
     }
 
+    fn inherited_keys(&mut self,object:u32) -> Result<Vec<String>,String> {
+        if self.class_list_element_receiver(object) && node_index(object).is_some_and(|node|tag(self.doc,node)=="iframe") {
+            return Err("Inherited iframe property enumeration is not implemented.".into());
+        }
+        self.own_keys(object)
+    }
+
     fn own_data(&mut self, object: u32, property: &str) -> Result<Option<Value>, String> {
+        if self.class_list_element_receiver(object) && node_index(object).is_some_and(|node|tag(self.doc,node)=="iframe") {
+            // This real Element has no expando store or indexed/named own
+            // properties. IDL accessors such as srcdoc live on its prototype;
+            // inspection must neither call them nor grant mutation authority.
+            self.state.work(1)?;
+            return Ok(None);
+        }
         if script_class_list::element(object).is_some() {
             if collection_index(property).is_none() { self.class_list_get(object,"length")?; return Ok(None); }
             return self.class_list_get(object,property).map(|value|(!matches!(value,Value::Undefined)).then_some(value));
@@ -2833,6 +2856,7 @@ impl Host for Bridge<'_> {
 
     fn has(&mut self, object: u32, property: &str) -> Result<bool, String> {
         self.state.work(1)?;
+        if property=="normalize" && !self.is_frame_handle(object) && self.namespace_receiver(object) {return Ok(true);}
         if property=="getElementsByClassName" && (object==DOCUMENT || self.attr_element_receiver(object)) { return Ok(true); }
         if script_class_list::element(object).is_some() {
             if matches!(property,"length"|"value") || script_class_list::method(property).is_some() { self.class_list_get(object,"length")?; return Ok(true); }
@@ -3574,6 +3598,7 @@ impl Host for Bridge<'_> {
     }
 
     fn call(&mut self, object: u32, method: &str, args: &[Value]) -> Result<Value, String> {
+        if method=="normalize" {self.state.work(1)?;return self.normalize_node(object);}
         if script_class_list::element(object).is_some() {
             self.state.work(1)?;
             return self.class_list_call(object,method,args);

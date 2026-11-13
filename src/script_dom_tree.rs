@@ -604,7 +604,7 @@ impl Bridge<'_> {
 
     // No mutation may invalidate a loaded resource, native form value, form
     // ownership, button caption or disabled fieldset's first-legend relation.
-    fn mutation_ancestors(&mut self, node: usize) -> Result<(), String> {
+    pub(super) fn mutation_ancestors(&mut self, node: usize) -> Result<(), String> {
         let mut current = Some(node);
         while let Some(index) = current {
             self.state.work(1)?;

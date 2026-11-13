@@ -1,6 +1,105 @@
 use super::*;
 
 #[test]
+fn node_normalize_merges_real_text_runs_preserving_first_nonempty_and_detached_data() {
+    let (doc,_,page,outcome)=page("<main id=root></main>",&[r#"
+var root=document.getElementById('root'),p=document.createElement('div');root.appendChild(p);
+var empty=document.createTextNode(''),a=document.createTextNode('a'),middle=document.createTextNode(''),b=document.createTextNode('b'),end=document.createTextNode('');
+for(var n of [empty,a,middle,b,end])p.appendChild(n);
+var separator=document.createElement('span'),x=document.createTextNode('x'),y=document.createTextNode('y');separator.appendChild(x);separator.appendChild(y);p.appendChild(separator);
+var z=document.createTextNode('z');p.appendChild(z);
+empty.normalize();a.normalize();if(p.firstChild!==empty||a.data!=='a'||b.parentNode!==p)throw 'Text receiver excludes itself';
+var called=0;if(p.normalize({toString:function(){called++;throw 'ignored';}})!==undefined||called||p.normalize.length!==0||p.normalize!==p.normalize)throw 'metadata/ignored args';
+if(p.firstChild!==a||a.data!=='ab'||a.nextSibling!==separator||separator.nextSibling!==z||x.data!=='xy'||separator.firstChild!==x||x.nextSibling!==null)throw 'nested runs/identity';
+for(var n of [empty,middle,b,end,y])if(n.parentNode!==null||n.isConnected)throw 'detached';if(b.data!=='b'||y.data!=='y'||!a.isConnected)throw 'saved data/connection';
+var attr=root.getAttributeNode('id');attr.normalize();p.normalize();if(a.data!=='ab'||p.firstChild!==a)throw 'idempotent/Attr';
+root.appendChild(b);if(b.parentNode!==root||b.data!=='b')throw 'removed identity reusable';
+var rejected=0;for(var bad of [{},window,p.style,p.classList])try{p.normalize.call(bad);}catch(e){if(e.name==='TypeError')rejected++;}if(rejected!==4)throw 'genuine Node brand';
+document.normalize();document.title='normalize-ok';
+"#]);
+    assert_eq!(outcome.errors,0,"{}",page.report());
+    assert_eq!(doc.title,"normalize-ok");
+}
+
+#[test]
+fn node_normalize_quota_and_late_resource_guard_failures_leave_all_text_unchanged() {
+    let (mut doc,mut forms,mut page,outcome)=page("<title id=t>x</title><div id=p></div>",&[r#"
+var p=document.getElementById('p');p.appendChild(document.createTextNode('left'));p.appendChild(document.createTextNode('right'));
+"#]);
+    assert_eq!(outcome.errors,0,"{}",page.report());
+    let p=(0..doc.nodes.len()).find(|&n|doc.attr(n,"id")==Some("p")).unwrap();
+    let t=(0..doc.nodes.len()).find(|&n|doc.attr(n,"id")==Some("t")).unwrap();
+    let original=doc.nodes[p].children.clone();
+    let original_retained=page.state.retained;
+    page.begin_job();
+    let mut bridge=Bridge {doc:&mut doc,forms:&mut forms,state:&mut page.state};
+    for failure in 0..3 {
+        bridge.state.retained_limit=if failure==0 {original_retained} else {bridge.state.limits.host.retained_bytes};
+        bridge.state.copy_work=if failure==1 {0} else {bridge.state.limits.copy_bytes};
+        bridge.state.host_work=if failure==2 {0} else {bridge.state.limits.host_work};
+        assert!(bridge.normalize_node(node_handle(p)).is_err());
+        assert_eq!(bridge.doc.nodes[p].children,original);
+        assert!(matches!(&bridge.doc.nodes[original[0]].kind,NodeKind::Text(text) if text=="left"));
+        assert_eq!(bridge.state.retained,original_retained);
+    }
+    bridge.state.copy_work=bridge.state.limits.copy_bytes;
+    bridge.state.host_work=bridge.state.limits.host_work;
+    let Value::Host(empty)=bridge.call(DOCUMENT,"createTextNode",&[Value::String(String::new())]).unwrap() else {unreachable!()};
+    let empty=node_index(empty).unwrap();
+    bridge.doc.nodes[t].children.push(empty);
+    bridge.state.detached_nodes.remove(&empty);
+    bridge.state.dirty=true;
+    let error=bridge.normalize_node(DOCUMENT).unwrap_err();
+    assert!(error.contains("native control contents or inert resource"),"{error}");
+    assert_eq!(bridge.doc.nodes[p].children,original);
+    assert_eq!(bridge.doc.nodes[t].children.len(),2);
+    bridge.doc.nodes[t].children.pop();bridge.state.detached_nodes.insert(empty);bridge.state.dirty=true;
+    bridge.normalize_node(node_handle(p)).unwrap();
+    assert_eq!(bridge.doc.nodes[p].children,[original[0]]);
+    assert!(matches!(&bridge.doc.nodes[original[0]].kind,NodeKind::Text(text) if text=="leftright"));
+    assert!(matches!(&bridge.doc.nodes[original[1]].kind,NodeKind::Text(text) if text=="right"));
+}
+
+#[test]
+fn class_list_add_uses_ordered_boolean_free_domstring_tokens_and_atomic_validation() {
+    let (doc,_,page,outcome)=page("<div id=p class=' a a B '></div>",&[r#"
+var p=document.getElementById('p'),l=p.classList,a=p.getAttributeNode('class');
+if(l.add.length!==0||l.add('b','a','b')!==undefined||l.value!=='a B b'||a.value!=='a B b'||p.getAttributeNode('class')!==a)throw 'ordered set/Attr';
+p.className=' x  x ';l.add();if(l.value!=='x')throw 'zero argument normalize';
+var log='',caught=false;try{l.add('',{toString:function(){log+='b';p.className='side effect';return 'q';}});}catch(e){caught=e.name==='SyntaxError';}if(!caught||log!=='b'||l.value!=='side effect')throw 'all conversions before validation';
+caught=false;try{l.add('',Symbol());}catch(e){caught=e.name==='TypeError';}if(!caught||l.value!=='side effect')throw 'Symbol before validation';
+caught=false;try{l.add('bad token','');}catch(e){caught=e.name==='InvalidCharacterError';}if(!caught)throw 'validation order';
+l.add({toString:function(){p.className='q';return 'r';}},'q');if(l.value!=='q r')throw 'current post-conversion class';
+var empty=document.createElement('div');empty.classList.add();if(empty.hasAttribute('class'))throw 'absent empty set';
+document.title='class-add-ok';
+"#]);
+    assert_eq!(outcome.errors,0,"{}",page.report());
+    assert_eq!(doc.title,"class-add-ok");
+}
+
+#[test]
+fn iframe_own_inspection_reports_real_absence_without_accessor_or_mutation_authority() {
+    let (mut doc,mut forms,mut page,outcome)=page("<iframe id=old srcdoc='authored'></iframe>",&[r#"
+var f=document.createElement('iframe');f.id='f';
+for(var key of ['id','srcdoc','contentWindow','normalize','hasAttributes'])if(Object.hasOwn(f,key)||Object.getOwnPropertyDescriptor(f,key)!==undefined)throw 'inherited IDL';
+if(Object.keys(f).length||Object.getOwnPropertyNames(f).length||f.getAttribute('srcdoc')!==null||f.getAttribute('id')!=='f')throw 'actual own keys/attribute';document.title='iframe-own-ok';
+"#]);
+    assert_eq!(outcome.errors,0,"{}",page.report());
+    assert_eq!(doc.title,"iframe-own-ok");
+    let node=(0..doc.nodes.len()).find(|&n|doc.attr(n,"id")==Some("f")).unwrap();
+    let inert=(0..doc.nodes.len()).find(|&n|doc.attr(n,"id")==Some("old")).unwrap();
+    let mut bridge=Bridge {doc:&mut doc,forms:&mut forms,state:&mut page.state};
+    assert!(bridge.set(node_handle(node),"srcdoc",Value::String("changed".into())).is_err());
+    assert!(bridge.call(node_handle(node),"setAttribute",&[Value::String("srcdoc".into()),Value::String("changed".into())]).is_err());
+    assert!(bridge.inherited_keys(node_handle(node)).is_err());
+    assert!(bridge.own_data(node_handle(inert),"srcdoc").is_err());
+    assert!(bridge.own_keys(node_handle(inert)).is_err());
+    assert!(bridge.state.blank_frames.is_empty());
+    assert_eq!(bridge.doc.attr(node,"srcdoc"),None);
+    assert_eq!(bridge.doc.attr(inert,"srcdoc"),Some("authored"));
+}
+
+#[test]
 fn element_has_attributes_reports_actual_presence_and_borrows_only_element_receivers() {
     let (doc,_,page,outcome)=page("<p id=p data-x=''></p>",&[r#"
 var p=document.getElementById('p'),f=p.hasAttributes,e=document.createElement('div');

@@ -372,6 +372,7 @@ pub trait Host {
     fn own_keys(&mut self, _object: u32) -> Result<Vec<String>, String> {
         Err("Enumerating this native host object is not implemented.".into())
     }
+    fn inherited_keys(&mut self, object:u32) -> Result<Vec<String>,String> { self.own_keys(object) }
 
     /// Implemented native Window own names and their enumerable attributes.
     /// ES bindings and ordinary expandos are supplied by the active realm.

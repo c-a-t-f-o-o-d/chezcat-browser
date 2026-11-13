@@ -20,6 +20,7 @@ fn whitespace(c: char) -> bool {
 }
 pub(super) fn method(name: &str) -> Option<&'static str> {
     match name {
+        "add" => Some("add"),
         "remove" => Some("remove"),
         "contains" => Some("contains"),
         "item" => Some("item"),
@@ -86,7 +87,7 @@ impl Bridge<'_> {
                 "DOMTokenList requires a real Element token list.".into(),
             ));
         }
-        if method == "remove" {
+        if matches!(method, "add" | "remove") {
             for value in args {
                 let Value::String(token) = value else {
                     return Err((
@@ -123,10 +124,9 @@ impl Bridge<'_> {
             };
         }
         match property {
-            "add" | "toggle" | "replace" | "supports" | "entries" | "keys" | "values"
-            | "forEach" => Err(format!(
-                "DOMTokenList operation {property:?} is not implemented."
-            )),
+            "toggle" | "replace" | "supports" | "entries" | "keys" | "values" | "forEach" => Err(
+                format!("DOMTokenList operation {property:?} is not implemented."),
+            ),
             // Ordinary absent properties can inherit from Object.prototype.
             // Missing standard token operations above remain explicit failures.
             _ => Ok(Value::Undefined),
@@ -159,6 +159,21 @@ impl Bridge<'_> {
         }
         let mut tokens = self.class_tokens(node)?;
         match method {
+            "add" => {
+                for value in args {
+                    let Value::String(token) = value else {
+                        unreachable!()
+                    };
+                    self.state.work(tokens.len())?;
+                    self.state.copies(tokens.iter().map(String::len).sum())?;
+                    if !tokens.contains(token) {
+                        self.state.copies(token.len())?;
+                        tokens.push(token.clone());
+                    }
+                }
+                self.update_class_tokens(node, &tokens)?;
+                Ok(Value::Undefined)
+            }
             "remove" => {
                 let removed: BTreeSet<&str> = args
                     .iter()
@@ -168,12 +183,7 @@ impl Bridge<'_> {
                     })
                     .collect();
                 tokens.retain(|token| !removed.contains(token.as_str()));
-                if !tokens.is_empty() || self.doc.attr(node, "class").is_some() {
-                    let length = tokens.iter().map(String::len).sum::<usize>()
-                        + tokens.len().saturating_sub(1);
-                    self.state.copies(length)?;
-                    self.attribute(node, "class", Some(tokens.join(" ")))?;
-                }
+                self.update_class_tokens(node, &tokens)?;
                 Ok(Value::Undefined)
             }
             "contains" => {
@@ -195,6 +205,22 @@ impl Bridge<'_> {
                 "DOMTokenList method {method:?} is not implemented."
             )),
         }
+    }
+    fn update_class_tokens(&mut self, node: usize, tokens: &[String]) -> Result<(), String> {
+        if tokens.is_empty() && self.doc.attr(node, "class").is_none() {
+            return Ok(());
+        }
+        let length = tokens
+            .iter()
+            .try_fold(tokens.len().saturating_sub(1), |n, token| {
+                n.checked_add(token.len())
+            })
+            .ok_or("Class token serialization size overflow.")?;
+        if length > self.state.limits.host.string_bytes {
+            return Err("Class token serialization exceeds the host string bound.".into());
+        }
+        self.state.copies(length)?;
+        self.attribute(node, "class", Some(tokens.join(" ")))
     }
     pub(super) fn class_list_keys(&mut self, object: u32) -> Result<Vec<String>, String> {
         let node = self.class_list_node(object)?;

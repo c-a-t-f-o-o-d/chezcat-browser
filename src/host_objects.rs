@@ -180,7 +180,7 @@ impl Runtime {
                 self.enumerable_keys(id)?
             }
         } else {
-            host.own_keys(handle).map_err(Fault::new)?
+            if inherited {host.inherited_keys(handle)} else {host.own_keys(handle)}.map_err(Fault::new)?
         };
         if keys.len() > self.limits.heap.object_properties {
             return Err(Fault::new(
