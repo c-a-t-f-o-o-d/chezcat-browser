@@ -249,13 +249,14 @@ impl Runtime {
 
     /// Only already registered native expando stores can hold symbol keys.
     /// No key is converted to a native property name or passed to Host::set.
-    pub(super) fn symbol_backing(&self, value: &Value, host: &dyn Host) -> Result<Option<Ordinary>, Fault> {
+    pub(super) fn symbol_backing(&mut self, value: &Value, host: &dyn Host) -> Result<Option<Ordinary>, Fault> {
         self.reject_foreign_window(value, host)?;
         if let Some(ordinary) = Ordinary::from_value(value) {
             self.ordinary_id(ordinary)?;
             return Ok(Some(ordinary));
         }
         if let Value::Host(handle) = value {
+            self.ensure_native_expando(*handle,host,true)?;
             if let Some((global, properties)) = self.browser_global {
                 if global == *handle {
                     return Ok(Some(Ordinary::Object(properties)));

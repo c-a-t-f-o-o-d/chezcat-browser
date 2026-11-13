@@ -319,6 +319,8 @@ pub struct NativeAncestry {
 }
 
 pub trait Host {
+    /// Real ordinary expando storage for an explicitly proven native family.
+    fn expando_owner(&self, _object:u32) -> Option<u32> { None }
     fn instance_ancestry(&self, _object:u32) -> Option<NativeAncestry> { None }
     /// Only a genuine, already-created child context may expose these handles.
     /// The default grants no Window capability to an arbitrary native handle.
@@ -3185,6 +3187,7 @@ pub struct Runtime {
     parked_main_roots: Option<intrinsic_realms::ParkedRoots>,
     window_realms: BTreeMap<u32, Option<usize>>,
     native_constructor_prototypes:BTreeMap<(u32,&'static str),usize>,
+    native_expando_owners:BTreeMap<u32,u32>,
     failed_window_realms: HashSet<u32>,
     deferred_intrinsics: u8,
     failed_intrinsics: u8,
@@ -3317,6 +3320,7 @@ impl Runtime {
             parked_main_roots: None,
             window_realms: BTreeMap::new(),
             native_constructor_prototypes:BTreeMap::new(),
+            native_expando_owners:BTreeMap::new(),
             failed_window_realms: HashSet::new(),
             deferred_intrinsics: if defer_families { 7 } else { 0 },
             failed_intrinsics: 0,
@@ -5796,7 +5800,7 @@ impl Runtime {
                 .property_owner(Ordinary::Function(id), &name)?
                 .is_some(),
             Value::Host(handle) => {
-                if let Some(object) = self.host_ordinary(handle, &name, host) {
+                if let Some(object) = self.host_ordinary(handle, &name, host)? {
                     self.property_owner(object, &name)?.is_some()
                 } else if self.is_browser_global(handle) && !self.host_owns_global(&name, host) {
                     let (_, properties) = self.browser_global.unwrap();
@@ -6707,7 +6711,7 @@ impl Runtime {
                     } else if let Value::Host(handle) = source {
                         if self.is_browser_global(*handle) {
                             if !self.window_enumerable(&name, host)? { continue; }
-                        } else if let Some(object) = self.host_ordinary(*handle, &name, host) {
+                        } else if let Some(object) = self.host_ordinary(*handle, &name, host)? {
                             let Some(owner) = self.property_owner(object, &name)? else {
                                 continue;
                             };
@@ -7267,7 +7271,7 @@ impl Runtime {
                     Some(self.get_ordinary_property_with_host(ordinary, property, host)?)
                 } else if let Value::Host(handle) = &object {
                     if self.foreign_window(*handle, host)
-                        || self.host_ordinary(*handle, property, host).is_some()
+                        || self.host_ordinary(*handle, property, host)?.is_some()
                         || host.ordinary_prototype(*handle)
                         || host.resolve_member_before_call(*handle)
                     {
@@ -7698,7 +7702,7 @@ impl Runtime {
             }
             Reference::Property(Value::Host(handle), name) => {
                 self.reject_foreign_window(&Value::Host(handle), host)?;
-                if let Some(object) = self.host_ordinary(handle, &name, host) {
+                if let Some(object) = self.host_ordinary(handle, &name, host)? {
                     return self.delete_reference(Reference::Property(object.value(), name), host);
                 }
                 host.delete(handle, &name).map_err(Fault::new)?

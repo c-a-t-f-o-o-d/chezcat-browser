@@ -25,6 +25,7 @@ impl Runtime {
             let id = self.ordinary_id(object)?;
             self.inspection_string_keys(id)?
         } else if let Value::Host(handle) = value {
+            self.ensure_native_expando(*handle,host,false)?;
             if self.is_browser_global(*handle) {
                 self.window_keys(false, false, host)?
             } else if let Some(&id) = self.host_objects.get(handle) {

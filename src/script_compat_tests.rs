@@ -1,6 +1,78 @@
 use super::*;
 
 #[test]
+fn native_element_expandos_are_real_ordinary_properties_with_native_accessor_receivers() {
+    let (doc,_,page,outcome)=page("<div id=p></div><form id=f><input id=field name=customProbe></form>",&[r#"
+var p=document.getElementById('p');if(p.customProbe!==undefined||'customProbe' in p||Object.hasOwn(p,'customProbe'))throw 'real absent key';
+p.one=1;p.only=2;p.ariana=3;p.onCustomProbe=4;p.srcdoc={ordinary:true};
+if(p.one!==1||p.only!==2||p.ariana!==3||p.onCustomProbe!==4||p.srcdoc.ordinary!==true||p.getAttribute('srcdoc')!==null)throw 'arbitrary keys/tag-specific native metadata';
+delete p.one;delete p.only;delete p.ariana;delete p.onCustomProbe;delete p.srcdoc;
+p.customProbe=17;if(p.customProbe!==17||!('customProbe' in p)||!Object.hasOwn(p,'customProbe'))throw 'stored key';
+Object.defineProperty(p,'hiddenProbe',{value:9,writable:true,configurable:true});
+var seen=null;Object.defineProperty(p,'accessorProbe',{get:function(){seen=this;return this.customProbe+1;},set:function(v){seen=this;this.customProbe=v;},enumerable:true,configurable:true});
+if(p.accessorProbe!==18||seen!==p)throw 'getter receiver';p.accessorProbe=30;if(p.customProbe!==30||seen!==p)throw 'setter receiver';
+var d=Object.getOwnPropertyDescriptor(p,'accessorProbe');if(typeof d.get!=='function'||!d.enumerable||!d.configurable)throw 'descriptor';
+if(Object.keys(p).join(',')!=='customProbe,accessorProbe'||Object.getOwnPropertyNames(p).join(',')!=='customProbe,hiddenProbe,accessorProbe')throw 'own keys/flags';
+var key=Symbol('own');p[key]=p;var symbols=Object.getOwnPropertySymbols(p);if(symbols.length!==1||symbols[0]!==key||p[key]!==p)throw 'symbols';
+var copy=Object.assign({},p);if(copy.customProbe!==30||copy.accessorProbe!==31||copy[key]!==p||Object.hasOwn(copy,'hiddenProbe'))throw 'copy real own values';
+if(!delete p.customProbe||Object.hasOwn(p,'customProbe')||p.customProbe!==undefined)throw 'deletion';
+Object.defineProperties(p,{methodProbe:{value:function(){return this===p;},enumerable:true}});if(!p.methodProbe()||p.methodProbe?.()!==true)throw 'ordinary method this';
+if(p.id!=='p'||p.localName!=='div'||Object.hasOwn(p,'id')||document.getElementById('f').customProbe!==document.getElementById('field'))throw 'native namespace/named boundary';
+document.title='element-expando-ok';
+"#]);
+    assert_eq!(outcome.errors,0,"{}",page.report());
+    assert_eq!(doc.title,"element-expando-ok");
+}
+
+#[test]
+fn native_element_expandos_first_descriptor_symbol_and_inspection_paths_agree() {
+    let (doc,_,page,outcome)=page("<div id=a></div><span id=b></span><p id=c></p><img id=i>",&[r#"
+var a=document.getElementById('a'),b=document.getElementById('b'),c=document.getElementById('c');
+Object.defineProperty(a,'firstProbe',{value:1,enumerable:true,configurable:true});
+var key=Symbol('first');Object.defineProperty(b,key,{value:2,enumerable:true,configurable:true});
+if(Object.keys(c).length||Object.getOwnPropertyNames(c).length||Object.getOwnPropertySymbols(c).length)throw 'empty own inspection';
+Object.defineProperties(c,{});Object.assign(c,{assignedProbe:3});
+if(a.firstProbe!==1||Object.getOwnPropertyDescriptor(a,'firstProbe').value!==1||b[key]!==2||c.assignedProbe!==3)throw 'first operation paths';
+var i=document.getElementById('i');Image.prototype.imageProbe=7;if(i.imageProbe!==7||Object.hasOwn(i,'imageProbe'))throw 'canonical prototype inheritance';delete Image.prototype.imageProbe;
+document.title='element-expando-first-ok';
+"#]);
+    assert_eq!(outcome.errors,0,"{}",page.report());
+    assert_eq!(doc.title,"element-expando-first-ok");
+}
+
+#[test]
+fn native_element_expandos_preserve_unsupported_native_and_enumeration_boundaries() {
+    let (mut doc,mut forms,mut page,outcome)=page("<div id=p></div><iframe id=inert srcdoc=x></iframe>",&["var p=document.getElementById('p');p.customProbe=1;"]);
+    assert_eq!(outcome.errors,0,"{}",page.report());
+    for operation in ["p.getBoundingClientRect;","Object.defineProperty(p,'innerHTML',{value:'x'});","Object.defineProperty(document.createElement('input'),'files',{value:[]});","Object.defineProperty(document.createElement('blockquote'),'cite',{value:'https://example.test/'});","Object.defineProperty(document.createElement('meta'),'content',{value:'x'});","Object.defineProperty(document.createElement('link'),'as',{value:'script'});","Object.setPrototypeOf(p,Array.prototype);","for(var key in p){};"] {
+        let outcome=page.console_eval(&mut doc,&mut forms,operation);
+        assert_eq!(outcome.errors,1,"{operation}: {}",page.report());
+    }
+    let outcome=page.console_eval(&mut doc,&mut forms,"if(p.id!=='p'||p.customProbe!==1)throw 'recovery';");
+    assert_eq!(outcome.errors,0,"{}",page.report());
+    let inert=(0..doc.nodes.len()).find(|&node|doc.attr(node,"id")==Some("inert")).unwrap();
+    let bridge=Bridge {doc:&mut doc,forms:&mut forms,state:&mut page.state};
+    assert!(bridge.expando_owner(node_handle(inert)).is_none());
+}
+
+#[test]
+fn html_element_names_have_real_namespace_and_null_prefix_independent_of_raw_xmlns() {
+    let (mut doc,mut forms,mut page,outcome)=page("<DIV id=p xmlns='urn:raw'></DIV>",&[r#"
+var p=document.getElementById('p');if(p.localName!=='div'||p.tagName!=='DIV'||p.prefix!==null||p.namespaceURI!=='http://www.w3.org/1999/xhtml')throw 'parsed names';
+var colon=document.createElement('X:Y');if(colon.localName!=='x:y'||colon.prefix!==null||colon.namespaceURI!==p.namespaceURI)throw 'raw HTML colon';
+var attr=p.getAttributeNode('id');if(attr.localName!=='id'||attr.namespaceURI!==null||attr.prefix!==null)throw 'attribute distinct namespace';
+p.localName='changed';p.prefix='x';p.namespaceURI='urn:other';if(p.localName!=='div'||p.prefix!==null||p.namespaceURI!=='http://www.w3.org/1999/xhtml')throw 'readonly';
+var t=document.createTextNode('x');if('localName' in t||t.localName!==undefined||t.prefix!==undefined||document.localName!==undefined)throw 'Element brand';document.title='element-names-ok';
+"#]);
+    assert_eq!(outcome.errors,0,"{}",page.report());
+    assert_eq!(doc.title,"element-names-ok");
+    let node=(0..doc.nodes.len()).find(|&n|doc.attr(n,"id")==Some("p")).unwrap();
+    doc.nodes[node].namespace=crate::html::Namespace::UnknownForeign;
+    let mut bridge=Bridge {doc:&mut doc,forms:&mut forms,state:&mut page.state};
+    assert!(bridge.get(node_handle(node),"localName").unwrap_err().contains("namespace"));
+}
+
+#[test]
 fn detached_never_published_srcdoc_reflects_domstring_and_real_attr_identity() {
     let (doc,_,page,outcome)=page("<p>ordinary</p>",&[r#"
 var f=document.createElement('iframe');if(f.srcdoc!==''||!('srcdoc' in f)||f.hasAttribute('srcdoc')||f.contentWindow!==null)throw 'default';
@@ -1077,8 +1149,16 @@ document.title='empty-read-ok';
 }
 
 #[test]
-fn empty_element_and_style_writes_remain_rejected_without_partial_effects() {
-    for source in ["p['']=1;", "p.style['']='red';"] {
+fn empty_element_expandos_round_trip_and_style_writes_remain_rejected() {
+    let (doc, _, expando_page, outcome) = page(
+        "<p id=p style='color:blue'>Text</p>",
+        &[r#"var p=document.getElementById('p');p['']=1;
+if(p['']!==1||!('' in p)||Object.keys(p)[0]!==''||p.textContent!=='Text'||p.getAttribute('style')!=='color:blue')throw 'empty expando';
+if(!delete p['']||'' in p||p['']!==undefined)throw 'empty deletion';document.title='empty-expando-ok';"#],
+    );
+    assert_eq!(outcome.errors,0,"{}",expando_page.report());
+    assert_eq!(doc.title,"empty-expando-ok");
+    for source in ["p.style['']='red';"] {
         let (doc, _, page, outcome) = page(
             "<p id=p style='color:blue'>Text</p>",
             &["var p=document.getElementById('p');", source,

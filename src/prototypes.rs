@@ -1405,7 +1405,7 @@ impl Runtime {
         self.reject_foreign_window(value, host)?;
         if let Value::Host(handle) = value {
             if self.is_browser_global(*handle) { self.ensure_global_intrinsics(name)?; }
-            if let Some(object) = self.host_ordinary(*handle, name, host) {
+            if let Some(object) = self.host_ordinary(*handle, name, host)? {
                 return Ok(DescriptorTarget::Ordinary(object));
             }
             if self.is_browser_global(*handle) {
@@ -1652,6 +1652,7 @@ impl Runtime {
                         continue;
                     }
                     let keys = if let Value::Host(handle) = source {
+                        self.ensure_native_expando(*handle,host,false)?;
                         if self.is_browser_global(*handle) {
                             self.window_keys(false, false, host)?
                         } else if let Some(&id) = self.host_objects.get(handle) {
@@ -1738,6 +1739,7 @@ impl Runtime {
         host: &mut dyn Host,
     ) -> Result<(), Fault> {
         self.reject_foreign_window(target, host)?;
+        if let Value::Host(handle)=target {self.ensure_native_expando(*handle,host,true)?;}
         // Reject an invalid target even when the descriptor list is empty.
         if !matches!(target, Value::Host(handle) if self.is_browser_global(*handle) || self.host_objects.contains_key(handle))
         {

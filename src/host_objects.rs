@@ -4,6 +4,30 @@
 use super::{Fault, Function, Host, Ordinary, Runtime, Value};
 
 impl Runtime {
+    pub(super) fn ensure_native_expando(&mut self,handle:u32,host:&dyn Host,create:bool)->Result<(),Fault> {
+        let Some(owner)=host.expando_owner(handle) else {
+            if self.native_expando_owners.contains_key(&handle) {return Err(Fault::new("Native expando receiver is no longer accessible."));}
+            return Ok(());
+        };
+        self.reject_foreign_window(&Value::Host(handle),host)?;
+        let caller=self.browser_global.map(|(window,_)|window);
+        if caller!=Some(owner) {host.validate_window_access(caller,owner).map_err(Fault::new)?;}
+        if let Some(&previous)=self.native_expando_owners.get(&handle) {
+            if previous!=owner {return Err(Fault::new("Native expando owner realm changed."));}
+            return Ok(());
+        }
+        if !create {return Ok(());}
+        if self.host_objects.contains_key(&handle) {return Err(Fault::new("Native expando store conflicts with an existing host binding."));}
+        let ancestry=host.instance_ancestry(handle).ok_or_else(||Fault::new("Native expando prototype provenance is unavailable."))?;
+        if ancestry.window!=owner {return Err(Fault::new("Native expando prototype owner mismatch."));}
+        let prototype=self.native_ancestry_anchor(ancestry)?;
+        let id=self.new_object(None)?;
+        self.objects[id].prototype=Some(prototype);
+        self.host_objects.insert(handle,id);
+        self.native_expando_owners.insert(handle,owner);
+        Ok(())
+    }
+
     pub fn bind_host_object(
         &mut self,
         handle: u32,
@@ -61,15 +85,17 @@ impl Runtime {
     }
 
     pub(super) fn host_ordinary(
-        &self,
+        &mut self,
         handle: u32,
         name: &str,
         host: &dyn Host,
-    ) -> Option<Ordinary> {
-        (!host.owns_property(handle, name))
+    ) -> Result<Option<Ordinary>,Fault> {
+        let native=host.owns_property(handle,name);
+        self.ensure_native_expando(handle,host,!native)?;
+        Ok((!native)
             .then(|| self.host_objects.get(&handle).copied())
             .flatten()
-            .map(Ordinary::Object)
+            .map(Ordinary::Object))
     }
 
     pub(super) fn host_read(
@@ -81,7 +107,7 @@ impl Runtime {
         if self.foreign_window(handle, host) {
             return self.read_foreign_window(handle, name, host);
         }
-        if let Some(object) = self.host_ordinary(handle, name, host) {
+        if let Some(object) = self.host_ordinary(handle, name, host)? {
             return self.get_ordinary_property_with_receiver(
                 object,
                 name,
@@ -125,7 +151,7 @@ impl Runtime {
         host: &mut dyn Host,
     ) -> Result<(), Fault> {
         self.reject_foreign_window(&Value::Host(handle), host)?;
-        if let Some(object) = self.host_ordinary(handle, &name, host) {
+        if let Some(object) = self.host_ordinary(handle, &name, host)? {
             return self.assign_ordinary_property_with_receiver(
                 object,
                 name,
@@ -173,6 +199,10 @@ impl Runtime {
     ) -> Result<Vec<String>, Fault> {
         self.reject_foreign_window(&Value::Host(handle), host)?;
         if self.is_browser_global(handle) { return self.window_keys(inherited, true, host); }
+        self.ensure_native_expando(handle,host,false)?;
+        if inherited && host.expando_owner(handle).is_some() {
+            return Err(Fault::new("Inherited native Element enumeration is not implemented."));
+        }
         let keys = if let Some(&id) = self.host_objects.get(&handle) {
             if inherited {
                 self.inherited_keys(Ordinary::Object(id))?
@@ -205,7 +235,7 @@ impl Runtime {
             let own = self.window_own_enumerable(name, host)?;
             return Ok(own.is_some_and(|is_enumerable| !enumerable || is_enumerable));
         }
-        if let Some(object) = self.host_ordinary(handle, name, host) {
+        if let Some(object) = self.host_ordinary(handle, name, host)? {
             let id = self.ordinary_id(object)?;
             return if enumerable {
                 self.own_enumerable(id, name)
@@ -223,7 +253,7 @@ impl Runtime {
         host: &mut dyn Host,
     ) -> Result<Value, Fault> {
         self.reject_foreign_window(&Value::Host(handle), host)?;
-        if let Some(object) = self.host_ordinary(handle, name, host) {
+        if let Some(object) = self.host_ordinary(handle, name, host)? {
             return self.own_descriptor(object, name);
         }
         let Some(value) = host.own_data(handle, name).map_err(Fault::new)? else {
@@ -242,5 +272,55 @@ impl Runtime {
             self.set_property(id, key.into(), value)?;
         }
         Ok(Value::Object(id))
+    }
+}
+
+#[cfg(test)]
+mod expando_tests {
+    use super::*;
+    struct Native { enabled:bool, reads:usize }
+    impl Host for Native {
+        fn expando_owner(&self,object:u32)->Option<u32> {(self.enabled&&object==42).then_some(77)}
+        fn instance_ancestry(&self,object:u32)->Option<super::super::NativeAncestry> {
+            self.expando_owner(object).map(|window|super::super::NativeAncestry {window,constructor:None})
+        }
+        fn owns_property(&self,_:u32,name:&str)->bool {name=="nativeField"}
+        fn own_keys(&mut self,_:u32)->Result<Vec<String>,String> {Ok(Vec::new())}
+        fn own_data(&mut self,_:u32,_:&str)->Result<Option<Value>,String> {Ok(None)}
+        fn get(&mut self,_:u32,name:&str)->Result<Value,String> {self.reads+=1;if name=="nativeField" {Ok(Value::Number(7.0))} else {Err("Unknown native read".into())}}
+        fn set(&mut self,_:u32,_:&str,_:Value)->Result<(),String> {Err("No native write".into())}
+        fn call(&mut self,_:u32,_:&str,_:&[Value])->Result<Value,String> {Err("No native call".into())}
+    }
+    #[test]
+    fn native_expando_allocation_failure_is_atomic_and_recovery_preserves_native_paths() {
+        let mut runtime=Runtime::for_test();runtime.bind_browser_global(77).unwrap();
+        runtime.define_global("element",Value::Host(42)).unwrap();
+        let mut host=Native {enabled:true,reads:0};
+        let old_limit=runtime.limits.heap.objects;
+        runtime.limits.heap.objects=runtime.objects.len();
+        let error=runtime.execute("element.customProbe=1;",&mut host).unwrap_err();
+        assert!(error.contains("limit"),"{error}");
+        assert!(!runtime.host_objects.contains_key(&42));
+        assert!(!runtime.native_expando_owners.contains_key(&42));
+        assert_eq!(host.reads,0);
+        runtime.limits.heap.objects=old_limit;runtime.begin_job();
+        assert_eq!(runtime.execute("if(element.customProbe!==undefined)throw 'failed write leaked';element.customProbe=2;element.customProbe+element.nativeField;",&mut host).unwrap().to_number(),9.0);
+        assert_eq!(host.reads,1);
+    }
+    #[test]
+    fn cached_native_expando_reads_and_inspection_revalidate_capability() {
+        let mut runtime=Runtime::for_test();runtime.bind_browser_global(77).unwrap();
+        runtime.define_global("element",Value::Host(42)).unwrap();
+        let mut host=Native {enabled:true,reads:0};
+        runtime.execute("element.customProbe=17;element[Symbol('own')]=23;",&mut host).unwrap();
+        host.enabled=false;
+        for source in ["element.customProbe;","Object.keys(element);","Object.getOwnPropertyNames(element);","Object.getOwnPropertySymbols(element);","Object.assign({},element);"] {
+            runtime.begin_job();
+            let error=runtime.execute(source,&mut host).unwrap_err();
+            assert!(error.contains("no longer accessible"),"{source}: {error}");
+        }
+        assert_eq!(host.reads,0);
+        host.enabled=true;runtime.begin_job();
+        assert_eq!(runtime.execute("element.customProbe;",&mut host).unwrap().to_number(),17.0);
     }
 }

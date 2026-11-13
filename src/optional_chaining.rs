@@ -409,7 +409,7 @@ impl Runtime {
                     Some(self.get_ordinary_property_with_host(ordinary, &name, host)?)
                 } else if let Value::Host(handle) = receiver {
                     if self.foreign_window(handle, host)
-                        || self.host_ordinary(handle, &name, host).is_some()
+                        || self.host_ordinary(handle, &name, host)?.is_some()
                         || host.ordinary_prototype(handle)
                         || host.resolve_member_before_call(handle)
                     {

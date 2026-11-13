@@ -241,6 +241,10 @@ impl Bridge<'_> {
                     let native = |node| Value::Host(document_node(index, node));
                     let element = |name: &str| frame.document.nodes.iter().position(|node| matches!(&node.kind, NodeKind::Element { tag, .. } if tag == name)).map_or(Value::Null, native);
                     match property {
+                        "localName" if node!=0=>match &item.kind {NodeKind::Element {tag,..}=>Value::String(tag.clone()),_=>Value::Undefined},
+                        "namespaceURI" if node!=0=>Value::String("http://www.w3.org/1999/xhtml".into()),
+                        "prefix" if node!=0=>Value::Null,
+                        "localName"|"namespaceURI"|"prefix"=>Value::Undefined,
                         name if super::dom_tree::node_constant(name).is_some() =>
                             Value::Number(f64::from(super::dom_tree::node_constant(name).unwrap())),
                         "defaultView" if node == 0 => {
@@ -343,6 +347,24 @@ mod tests {
     }
 
     const CREATE: &str = "var f=document.createElement('iframe');f.hidden=true;document.body.appendChild(f);var w=f.contentWindow;";
+
+    #[test]
+    fn native_element_expandos_validate_owner_across_child_callee_realms() {
+        let source=format!("{CREATE}{}",r#"
+var p=document.createElement('div');p.customProbe=11;
+var html=w.document.documentElement;if(html.localName!=='html'||html.prefix!==null||html.namespaceURI!==p.namespaceURI||'localName' in w.document)throw 'real child Element naming';
+var read=w.Function('node','return node.customProbe;');if(read(p)!==11)throw 'parked owner store';
+var define=w.Function('node','Object.defineProperty(node,"fromChildProbe",{value:17,enumerable:true});return Object.keys(node);');
+var keys=define(p);if(Object.getPrototypeOf(keys)!==w.Array.prototype||p.fromChildProbe!==17)throw 'result realm/native receiver';
+document.title='expando-realm-ok';
+"#);
+        let (mut doc,mut forms,mut page,outcome)=start(&source,&crate::csp::PolicySet::default());
+        assert_eq!(outcome.errors,0,"{}",page.report());
+        assert_eq!(doc.title,"expando-realm-ok");
+        page.set_location(&crate::navigation::Location {url:Some(crate::url::parse("https://other.test/").unwrap().0),path:None,fragment:String::new(),root:None});
+        let outcome=page.console_eval(&mut doc,&mut forms,"read(p);");
+        assert_eq!(outcome.errors,1,"{}",page.report());
+    }
 
     #[test]
     fn srcdoc_reflection_cannot_insert_a_fake_document_or_navigate_a_retained_context() {

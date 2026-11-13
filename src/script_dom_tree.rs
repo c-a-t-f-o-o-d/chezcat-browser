@@ -293,6 +293,10 @@ impl Bridge<'_> {
     }
 
     pub(super) fn dom_readonly(&self, object: u32, property: &str) -> bool {
+        if matches!(property,"localName"|"prefix"|"namespaceURI") {
+            return self.attr_element_receiver(object) && node_index(object).is_some_and(|node|
+                self.doc.nodes[node].namespace==crate::html::Namespace::Html);
+        }
         if matches!(property, "offsetLeft" | "offsetTop" | "offsetWidth" | "offsetHeight" | "scrollWidth" | "scrollHeight") {
             return node_index(object).is_some_and(|node| self.dom_accessible(node)
                 && self.doc.nodes[node].namespace == crate::html::Namespace::Html
@@ -377,6 +381,12 @@ impl Bridge<'_> {
             return Ok(None);
         };
         let node = self.dom_node(node_handle(node))?;
+        if matches!(property,"localName"|"prefix"|"namespaceURI") {
+            if matches!(self.doc.nodes[node].kind,NodeKind::Element {..}) && self.doc.nodes[node].namespace!=crate::html::Namespace::Html {
+                return Err("Element naming requires known namespace provenance.".into());
+            }
+            return Ok(Some(matches!(self.doc.nodes[node].kind,NodeKind::Element {..})));
+        }
         if property == "classList" { return Ok(Some(matches!(self.doc.nodes[node].kind,NodeKind::Element {..}))); }
         if property=="srcdoc" {
             if self.doc.nodes[node].namespace==crate::html::Namespace::UnknownForeign {return Err("srcdoc requires known namespace provenance.".into());}
@@ -440,6 +450,20 @@ impl Bridge<'_> {
             return Ok(None);
         }
         let node = self.dom_node(object)?;
+        if matches!(property,"localName"|"prefix"|"namespaceURI") {
+            if !matches!(self.doc.nodes[node].kind,NodeKind::Element {..}) {return Ok(Some(Value::Undefined));}
+            if self.doc.nodes[node].namespace!=crate::html::Namespace::Html {return Err("Element naming requires known namespace provenance.".into());}
+            return match property {
+                "prefix"=>Ok(Some(Value::Null)),
+                "namespaceURI"=>self.string("http://www.w3.org/1999/xhtml").map(Some),
+                _=>{
+                    let name=tag(self.doc,node);
+                    if name.len()>self.state.limits.host.string_bytes {return Err("Element local name exceeds the host string bound.".into());}
+                    self.state.copies(name.len())?;
+                    Ok(Some(Value::String(name.to_owned())))
+                },
+            };
+        }
         if property=="srcdoc" {return self.iframe_srcdoc_get(node).map(Some);}
         if matches!(property,"scrollWidth"|"scrollHeight") {
             if !matches!(self.doc.nodes[node].kind,NodeKind::Element {..})

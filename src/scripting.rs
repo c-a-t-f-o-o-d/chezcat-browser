@@ -40,6 +40,8 @@ mod script_attr;
 mod script_class_list;
 #[path = "script_normalize.rs"]
 mod script_normalize;
+#[path = "script_element_properties.rs"]
+mod script_element_properties;
 #[path = "script_created_events.rs"]
 mod script_created_events;
 #[path = "script_navigation.rs"]
@@ -2137,6 +2139,7 @@ impl Bridge<'_> {
 }
 
 impl Host for Bridge<'_> {
+    fn expando_owner(&self,object:u32)->Option<u32> {self.element_expando_receiver(object).then_some(WINDOW)}
     fn instance_ancestry(&self, object:u32) -> Option<crate::javascript::NativeAncestry> {
         if let Some(window)=self.frame_instance_window(object) {
             return Some(crate::javascript::NativeAncestry {window,constructor:None});
@@ -2178,6 +2181,7 @@ impl Host for Bridge<'_> {
     }
 
     fn owns_property(&self, object: u32, property: &str) -> bool {
+        if self.element_expando_receiver(object) {return self.element_native_property(object,property);}
         object != NAVIGATOR || navigator_readonly(property)
     }
 
@@ -2636,7 +2640,7 @@ impl Host for Bridge<'_> {
     }
 
     fn own_keys(&mut self, object: u32) -> Result<Vec<String>, String> {
-        if self.class_list_element_receiver(object) && node_index(object).is_some_and(|node|tag(self.doc,node)=="iframe") {
+        if self.element_expando_receiver(object) {
             self.state.work(1)?;
             return Ok(Vec::new());
         }
@@ -2669,17 +2673,17 @@ impl Host for Bridge<'_> {
     }
 
     fn inherited_keys(&mut self,object:u32) -> Result<Vec<String>,String> {
-        if self.class_list_element_receiver(object) && node_index(object).is_some_and(|node|tag(self.doc,node)=="iframe") {
-            return Err("Inherited iframe property enumeration is not implemented.".into());
+        if self.element_expando_receiver(object) {
+            return Err("Inherited native Element property enumeration is not implemented.".into());
         }
         self.own_keys(object)
     }
 
     fn own_data(&mut self, object: u32, property: &str) -> Result<Option<Value>, String> {
-        if self.class_list_element_receiver(object) && node_index(object).is_some_and(|node|tag(self.doc,node)=="iframe") {
-            // This real Element has no expando store or indexed/named own
-            // properties. IDL accessors such as srcdoc live on its prototype;
-            // inspection must neither call them nor grant mutation authority.
+        if self.element_expando_receiver(object) {
+            // VM-backed expandos are inspected before this host path. These
+            // Elements have no indexed/named native own properties; IDL
+            // accessors live on their prototype and must not run here.
             self.state.work(1)?;
             return Ok(None);
         }
@@ -2866,6 +2870,7 @@ impl Host for Bridge<'_> {
         if let Some(result) = self.created_event_has(object, property) { return result; }
         if script_attr::index(object).is_some() { return self.attr_has(object, property); }
         if self.is_frame_handle(object) {
+            if matches!(property,"localName"|"prefix"|"namespaceURI") {return self.frame_get(object,property).unwrap().map(|value|!matches!(value,Value::Undefined));}
             if matches!(property, "isDefaultNamespace" | "compareDocumentPosition") && self.namespace_receiver(object) { return Ok(true); }
             return self.frame_get(object, property).unwrap().map(|_| true);
         }
