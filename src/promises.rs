@@ -271,8 +271,7 @@ impl Runtime {
         let trace = &self.promises.allocation_trace;
         let mut scripts = trace.scripts;
         if let Some((kind, first)) = trace.active {
-            scripts[kind] = scripts[kind].saturating_add(self.functions.iter().skip(first).take(MAX_FUNCTIONS)
-                .filter(|function| matches!(function, Function::Script { .. })).count());
+            scripts[kind] = scripts[kind].saturating_add(self.function_arena.script_created.saturating_sub(first));
         }
         let active = trace.active.map(|(kind, _)| ["callback", "reaction", "thenable"][kind]);
         format!("microtasks-active={active:?}; callback/reaction/thenable-started={:?}; succeeded={:?}; script-created={scripts:?}; queued={}; resolving-pairs={}; promises={}",
@@ -373,15 +372,14 @@ impl Runtime {
 
     fn promise_function(&mut self, closure: Closure) -> Result<Value, Fault> {
         self.step()?;
-        if self.functions.len() >= MAX_FUNCTIONS {
+        if self.function_arena.occupied >= MAX_FUNCTIONS {
             return Err(self.function_limit_fault("promise-closure"));
         }
         let length = closure.arity();
         self.promise_retain(closure.retained_bytes())?;
-        let index = self.functions.len();
-        self.functions.push(Function::Promise(closure));
-        self.initialize_function_properties("", length, false)?;
-        Ok(Value::Function(index))
+        let allocation = self.insert_function_slot(Function::Promise(closure))?;
+        self.initialize_function_properties(allocation, "", length, false)?;
+        Ok(Value::Function(allocation.id))
     }
 
     fn new_promise(&mut self) -> Result<usize, Fault> {
@@ -1332,13 +1330,12 @@ impl Runtime {
                 }
                 executed += 1;
                 let kind = job.allocation_kind();
-                let first = self.functions.len();
+                let first = self.function_arena.script_created;
                 self.promises.allocation_trace.active = Some((kind, first));
                 self.promises.allocation_trace.started[kind] += 1;
                 let result = self.run_promise_job(realm, job, host);
                 self.promises.allocation_trace.active = None;
-                self.promises.allocation_trace.scripts[kind] += self.functions.iter().skip(first).take(MAX_FUNCTIONS)
-                    .filter(|function| matches!(function, Function::Script { .. })).count();
+                self.promises.allocation_trace.scripts[kind] += self.function_arena.script_created.saturating_sub(first);
                 if result.is_ok() { self.promises.allocation_trace.succeeded[kind] += 1; }
                 if let Err(error) = result {
                     if error.exception.is_none() {
@@ -1415,6 +1412,42 @@ fn bounded_diagnostic(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reused_promise_closure_slot_dispatches_its_new_value_and_drops_old_candidate_tag() {
+        let mut runtime = Runtime::new();
+        runtime.execute("var holder={};holder.fn=function gone(){};holder.fn=null;0;", &mut NoHost).unwrap();
+        let id = *runtime.object_assigned_closures.iter().next().unwrap();
+        runtime.retire_proven_inactive_candidate(id).unwrap();
+        let before = (runtime.functions.len(), runtime.function_arena.script_created);
+        let closure = runtime.promise_function(Closure::FinallyValue { value: Value::Number(17.0), reject: false }).unwrap();
+        assert!(matches!(closure, Value::Function(found) if found == id));
+        assert!(!runtime.object_assigned_closures.contains(&id));
+        assert_eq!((runtime.functions.len(), runtime.function_arena.script_created), before);
+        assert_eq!(runtime.invoke(closure, &[], Value::Undefined, &mut NoHost).unwrap().to_number(), 17.0);
+    }
+
+    #[test]
+    fn first_promise_closure_backing_failure_keeps_legacy_capture_charge_for_append_and_reuse() {
+        for reused in [false, true] {
+            let mut runtime = Runtime::new();
+            if reused {
+                runtime.execute("var holder={};holder.fn=function gone(){};holder.fn=null;0;", &mut NoHost).unwrap();
+                let id = *runtime.object_assigned_closures.iter().next().unwrap();
+                runtime.retire_proven_inactive_candidate(id).unwrap();
+            }
+            let before = (runtime.functions.len(), runtime.function_arena.occupied, runtime.value_bytes, runtime.function_arena.script_created);
+            let closure = Closure::FinallyValue { value: Value::String("retained".into()), reject: false };
+            let charge = closure.retained_bytes();
+            runtime.limits.heap.objects = runtime.objects.len();
+            assert!(runtime.promise_function(closure).is_err());
+            assert_eq!((runtime.functions.len(), runtime.function_arena.occupied, runtime.function_arena.script_created), (before.0, before.1, before.3));
+            assert_eq!(runtime.value_bytes, before.2 + charge);
+            assert_eq!(runtime.functions.len(), runtime.function_properties.len());
+            assert_eq!(runtime.functions.len(), runtime.function_realms.len());
+            assert_eq!(runtime.functions.len(), runtime.function_initial_names.len());
+        }
+    }
 
     #[test]
     fn reachability_report_rejects_popped_or_draining_jobs_before_traversal() {

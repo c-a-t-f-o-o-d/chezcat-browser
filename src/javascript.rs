@@ -31,6 +31,8 @@ mod binding_character;
 mod intrinsic_realms;
 #[path = "function_allocation.rs"]
 mod function_allocation;
+#[path = "function_arena.rs"]
+mod function_arena;
 #[path = "function_reachability.rs"]
 mod function_reachability;
 #[path = "transient_roots.rs"]
@@ -2943,6 +2945,7 @@ struct Object {
 }
 
 enum Function {
+    Vacant,
     Native(Builtin),
     Promise(promises::Closure),
     Bound(bound_functions::Bound),
@@ -3018,6 +3021,7 @@ pub struct Runtime {
     environments: Vec<Option<Environment>>,
     free_environments: Vec<usize>,
     functions: Vec<Function>,
+    function_arena: function_arena::Arena,
     /// Ordinary own properties and [[Prototype]] of each callable identity.
     function_properties: Vec<usize>,
     function_realms: Vec<Option<usize>>,
@@ -3127,6 +3131,7 @@ impl Runtime {
             })],
             free_environments: Vec::new(),
             functions: Vec::new(),
+            function_arena: function_arena::Arena::default(),
             function_properties: Vec::new(),
             function_realms: Vec::new(),
             function_initial_names: Vec::new(),
@@ -3354,13 +3359,12 @@ impl Runtime {
         method: &'static str,
     ) -> Result<Value, String> {
         self.ensure_global_intrinsics(name).map_err(Fault::display)?;
-        let value = self.host_function(object, method)?;
+        let allocation = self.allocate_host_function(object, method)?;
+        let value = Value::Function(allocation.id);
+        self.pin_exported_value(&value);
         if let Err(error) = self.define_global(name, value.clone()) {
-            if let Value::Function(id) = value { self.exported_function_roots.remove(&id); }
-            self.functions.pop();
-            self.function_properties.pop();
-            self.function_realms.pop();
-            if let Some(Some(name)) = self.function_initial_names.pop() { self.value_bytes -= name.len(); }
+            self.exported_function_roots.remove(&allocation.id);
+            self.rollback_unpublished_function(allocation).map_err(Fault::display)?;
             return Err(error);
         }
         Ok(value)
@@ -3369,20 +3373,25 @@ impl Runtime {
     /// Allocate a callable host capability without adding a global property.
     /// The host can expose the returned value on one specific native object.
     pub fn host_function(&mut self, object: u32, method: &'static str) -> Result<Value, String> {
-        if self.functions.len() >= MAX_FUNCTIONS {
+        let allocation = self.allocate_host_function(object, method)?;
+        let value = Value::Function(allocation.id);
+        self.pin_exported_value(&value);
+        Ok(value)
+    }
+
+    fn allocate_host_function(&mut self, object: u32, method: &'static str) -> Result<function_arena::Allocation, String> {
+        if self.function_arena.occupied >= MAX_FUNCTIONS {
             return Err(self.function_limit_fault("host").display());
         }
-        let value = Value::Function(self.functions.len());
-        self.functions.push(Function::Host {
+        let allocation = self.insert_function_slot(Function::Host {
             object,
             method,
             receiver_required: false,
             constructible: false,
-        });
-        self.initialize_function_properties(method, 0, false)
+        }).map_err(Fault::display)?;
+        self.initialize_function_properties(allocation, method, 0, false)
             .map_err(Fault::display)?;
-        self.pin_exported_value(&value);
-        Ok(value)
+        Ok(allocation)
     }
 
     /// A native method value keeps its identity but must be called with its
@@ -3391,7 +3400,7 @@ impl Runtime {
         let function = self.host_function(object, method)?;
         if let Some(Function::Host {
             receiver_required, ..
-        }) = self.functions.last_mut()
+        }) = match function { Value::Function(id) => self.functions.get_mut(id), _ => None }
         {
             *receiver_required = true;
         }
@@ -4097,10 +4106,10 @@ impl Runtime {
         &mut self, program: &Rc<Program>, template: usize, environment: usize, this: &Value,
     ) -> Result<Value, Fault> {
         self.step()?;
-        if self.functions.len() == MAX_FUNCTIONS {
+        if self.function_arena.occupied == MAX_FUNCTIONS {
             return Err(self.function_limit_fault("script"));
         }
-        let index = self.functions.len();
+        let index = self.next_function_slot()?;
         // A named expression's private name lives outside its parameter/body
         // scope. A parameter, var, or lexical binding may shadow that name.
         let environment = if let Some(name) = &program.templates[template].name {
@@ -4127,13 +4136,15 @@ impl Runtime {
             None
         };
         self.capture_environment(environment);
-        self.functions.push(Function::Script {
+        let inserted = self.insert_function_slot(Function::Script {
             program: program.clone(),
             template,
             environment,
             lexical_this,
-        });
+        })?;
+        debug_assert_eq!(inserted.id, index);
         self.initialize_function_properties(
+            inserted,
             program.templates[template].name.as_deref().unwrap_or(""),
             program.templates[template].parameter_length(),
             program.templates[template].constructible,
@@ -7281,11 +7292,11 @@ impl Runtime {
             Some(Function::Host { .. }) => {
                 Err(Fault::new("Host constructors are not implemented."))
             }
+            Some(Function::Vacant) | None => Err(Fault::new("Invalid function handle.")),
             Some(_) => Err(Fault::exception(
                 "TypeError",
                 "The value is not a constructor.",
             )),
-            None => Err(Fault::new("Invalid function handle.")),
         }
     }
 
@@ -8107,7 +8118,7 @@ impl Runtime {
                 return self.checked_value(result?);
             }
             Some(Function::Script { .. }) => unreachable!("script dispatch handled separately"),
-            None => return Err(Fault::new("Invalid function handle.")),
+            Some(Function::Vacant) | None => return Err(Fault::new("Invalid function handle.")),
         }
     }
 

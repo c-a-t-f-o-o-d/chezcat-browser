@@ -48,7 +48,7 @@ impl Runtime {
     }
 
     pub(super) fn native_function(&mut self, builtin: Builtin, name: &str) -> Result<Value, Fault> {
-        if self.functions.len() >= MAX_FUNCTIONS {
+        if self.function_arena.occupied >= MAX_FUNCTIONS {
             let requested = match builtin {
                 Builtin::ArrayMethod(_) => "native-array-method",
                 Builtin::StringMethod(_) => "native-string-method",
@@ -105,14 +105,14 @@ impl Runtime {
             Builtin::PrimitiveMethod(_, _) => 0,
             _ => 1,
         };
-        let index = self.functions.len();
-        self.functions.push(Function::Native(builtin));
-        self.initialize_function_properties(name, length, false)?;
-        Ok(Value::Function(index))
+        let allocation = self.insert_function_slot(Function::Native(builtin))?;
+        self.initialize_function_properties(allocation, name, length, false)?;
+        Ok(Value::Function(allocation.id))
     }
 
     pub(super) fn initialize_function_properties(
         &mut self,
+        allocation: super::function_arena::Allocation,
         name: &str,
         length: usize,
         constructible: bool,
@@ -120,32 +120,30 @@ impl Runtime {
         // Every factory enters here, including deferred native materialization.
         // Parallel function metadata is incomplete until initialization finishes.
         let marker = self.inhibit_transient_collection();
-        let result = self.initialize_function_properties_unpublished(name, length, constructible);
+        let result = self.initialize_function_properties_unpublished(allocation, name, length, constructible);
         self.restore_transient_marker(marker);
         result
     }
 
     fn initialize_function_properties_unpublished(
         &mut self,
+        allocation: super::function_arena::Allocation,
         name: &str,
         length: usize,
         constructible: bool,
     ) -> Result<(), Fault> {
-        let index = self.functions.len() - 1;
+        let index = allocation.id;
         let properties = match self.new_object(None) {
             Ok(properties) => properties,
             Err(error) => {
-                self.functions.pop();
+                self.rollback_unpublished_function(allocation)?;
                 return Err(error);
             }
         };
-        self.function_properties.push(properties);
-        let realm = match &self.functions[index] {
-            Function::Bound(bound) => self.function_realms[bound.target],
-            _ => self.active_realm,
-        };
-        self.function_realms.push(realm);
-        self.function_initial_names.push(None);
+        self.function_properties[index] = properties;
+        if matches!(self.functions[index], Function::Script { .. }) {
+            self.function_arena.script_created = self.function_arena.script_created.saturating_add(1);
+        }
         if !matches!(self.functions[index], Function::Script { .. } | Function::Bound(_)) {
             self.work(name.len())?;
             if self.value_bytes.saturating_add(name.len()) > self.limits.heap.retained_values {
@@ -455,6 +453,7 @@ impl Runtime {
                 .function_properties
                 .get(id)
                 .copied()
+                .filter(|properties| self.function_is_occupied(id) && *properties != usize::MAX)
                 .ok_or_else(|| Fault::new("Invalid function handle.")),
         }
     }

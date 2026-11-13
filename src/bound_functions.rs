@@ -33,10 +33,10 @@ impl Runtime {
         host: &mut dyn Host,
     ) -> Result<Value, Fault> {
         self.step()?;
-        if target >= self.functions.len() {
+        if !self.function_is_occupied(target) {
             return Err(Fault::new("Invalid function handle."));
         }
-        if self.functions.len() >= MAX_FUNCTIONS {
+        if self.function_arena.occupied >= MAX_FUNCTIONS {
             return Err(self.function_limit_fault("bound"));
         }
         let receiver = args.first().unwrap_or(&Value::Undefined);
@@ -90,20 +90,20 @@ impl Runtime {
             self.append_string(&mut bound_name, &name)?;
         }
         // User callbacks above may allocate functions or retain values.
-        if self.functions.len() >= MAX_FUNCTIONS {
+        if self.function_arena.occupied >= MAX_FUNCTIONS {
             return Err(self.function_limit_fault("bound"));
         }
         if self.value_bytes.saturating_add(retained) > self.limits.heap.retained_values {
             return Err(Fault::new(format!("Retained value limit reached ({} bytes).", self.limits.heap.retained_values)));
         }
-        let index = self.functions.len();
-        self.functions.push(Function::Bound(Bound {
+        let allocation = self.insert_function_slot(Function::Bound(Bound {
             target,
             receiver,
             arguments,
-        }));
+        }))?;
+        let index = allocation.id;
         self.value_bytes += retained;
-        self.initialize_function_properties(&bound_name, 0, false)?;
+        self.initialize_function_properties(allocation, &bound_name, 0, false)?;
         let properties = self.function_properties[index];
         self.objects[properties].prototype = prototype;
         self.store_property(

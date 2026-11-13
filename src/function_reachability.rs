@@ -23,6 +23,7 @@ impl Edge {
 struct Graph {
     objects: Vec<bool>,
     functions: Vec<bool>,
+    occupied_functions: Vec<bool>,
     environments: Vec<bool>,
     pending: Vec<Edge>,
     invalid: bool,
@@ -39,11 +40,16 @@ impl Graph {
         let mut pending = Vec::new();
         pending.try_reserve_exact(runtime.objects.len().saturating_add(runtime.functions.len()).saturating_add(runtime.environments.len()))
             .map_err(|_| "Unable to allocate bounded reachability scratch.")?;
-        Ok(Self { objects: bitmap(runtime.objects.len())?, functions: bitmap(runtime.functions.len())?,
+        let mut occupied_functions = bitmap(runtime.functions.len())?;
+        for (id, function) in runtime.functions.iter().enumerate() { occupied_functions[id] = !matches!(function, Function::Vacant); }
+        Ok(Self { objects: bitmap(runtime.objects.len())?, functions: bitmap(runtime.functions.len())?, occupied_functions,
             environments: bitmap(runtime.environments.len())?, pending, invalid: false })
     }
 
     fn add(&mut self, edge: Edge) {
+        if let Edge::Function(id) = edge {
+            if !self.occupied_functions.get(id).copied().unwrap_or(false) { self.invalid = true; return; }
+        }
         let slot = match edge {
             Edge::Object(id) => self.objects.get_mut(id),
             Edge::Function(id) => self.functions.get_mut(id),
@@ -55,6 +61,13 @@ impl Graph {
 }
 
 impl Runtime {
+    #[cfg(test)]
+    pub(super) fn retire_proven_inactive_candidate(&mut self, id: usize) -> Result<(), Fault> {
+        let graph = self.mark_root_graph(&[], true, true).map_err(Fault::new)?;
+        if graph.functions.get(id).copied() != Some(false) { return Err(Fault::new("Candidate remains reachable.")); }
+        self.retire_unreachable_script(id)
+    }
+
     pub(super) fn direct_object_closure_assignment(&self, program: &Rc<Program>, right: ExprId, reference: &Reference, value: &Value) -> Option<usize> {
         if !matches!(reference, Reference::Property(Value::Object(_), _) | Reference::SymbolProperty(Value::Object(_), _)
             | Reference::ComputedProperty(Value::Object(_), _)) { return None; }
@@ -69,7 +82,7 @@ impl Runtime {
     // by the existing object/function arenas and never copy script payloads.
     pub(super) fn pin_exported_value(&mut self, value: &Value) {
         match value {
-            Value::Function(id) if *id < self.functions.len() => { self.exported_function_roots.insert(*id); }
+            Value::Function(id) if self.function_is_occupied(*id) => { self.exported_function_roots.insert(*id); }
             Value::Object(id) if *id < self.objects.len() => { self.exported_object_roots.insert(*id); }
             _ => {}
         }
@@ -129,7 +142,7 @@ impl Runtime {
         graph.add(Edge::Environment(self.global_environment));
         for realm in &self.intrinsic_realms { graph.add(Edge::Environment(realm.global_environment)); }
         for (id, function) in self.functions.iter().enumerate() {
-            if !matches!(function, Function::Script { .. }) || conservative_candidates && !self.object_assigned_closures.contains(&id) {
+            if !matches!(function, Function::Vacant) && (!matches!(function, Function::Script { .. }) || conservative_candidates && !self.object_assigned_closures.contains(&id)) {
                 graph.add(Edge::Function(id));
             }
         }
@@ -197,6 +210,31 @@ impl Runtime {
         }
         if graph.invalid { Err("A retained root has no valid arena entry; snapshot rejected.") } else { Ok(graph) }
     }
+}
+
+#[test]
+fn vacant_function_handles_are_rejected_by_dispatch_reflection_and_graph_roots() {
+    struct NoHost;
+    impl Host for NoHost {
+        fn get(&mut self, _: u32, _: &str) -> Result<Value, String> { panic!("unexpected get") }
+        fn set(&mut self, _: u32, _: &str, _: Value) -> Result<(), String> { panic!("unexpected set") }
+        fn call(&mut self, _: u32, _: &str, _: &[Value]) -> Result<Value, String> { panic!("unexpected call") }
+    }
+    let mut runtime = Runtime::new();
+    runtime.execute("var holder={};holder.fn=function gone(){};holder.fn=null;0;", &mut NoHost).unwrap();
+    let id = *runtime.object_assigned_closures.iter().next().unwrap();
+    runtime.retire_proven_inactive_candidate(id).unwrap();
+    runtime.pin_exported_value(&Value::Function(id));
+    assert!(!runtime.exported_function_roots.contains(&id));
+    assert!(runtime.ordinary_id(Ordinary::Function(id)).is_err());
+    assert!(runtime.function_source(id).is_err());
+    assert!(runtime.from_constructor(&Value::Function(id)).is_err());
+    assert!(runtime.bind_function(id, &[], &mut NoHost).is_err());
+    assert!(runtime.call_value(Value::Function(id), &[], Value::Undefined, &mut NoHost).is_err());
+    assert!(runtime.construct_value(Value::Function(id), &[], &mut NoHost).is_err());
+    assert!(runtime.mark_root_graph(&[Value::Function(id)], true, true).is_err());
+    assert!(runtime.mark_root_graph(&[], true, true).is_ok());
+    assert!(runtime.transient_registration_is_empty());
 }
 
 #[test]

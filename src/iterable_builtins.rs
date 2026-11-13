@@ -86,8 +86,8 @@ impl Runtime {
                     | Builtin::Binary(super::binary_data::Op::Constructor(_))
                     | Builtin::TextEncoding(super::text_encoding::Op::Constructor(_)),
                 )) => return Ok(true),
+                Some(Function::Vacant) | None => return Err(Fault::new("Invalid function handle.")),
                 Some(_) => return Ok(false),
-                None => return Err(Fault::new("Invalid function handle.")),
             }
         }
     }

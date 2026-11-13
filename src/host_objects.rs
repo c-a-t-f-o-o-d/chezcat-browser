@@ -35,12 +35,12 @@ impl Runtime {
         method: &'static str,
     ) -> Result<Value, String> {
         let value = self.define_host_function(name, object, method)?;
-        if let Some(Function::Host { constructible, .. }) = self.functions.last_mut() {
-            *constructible = true;
-        }
         let Value::Function(index) = value else {
             unreachable!();
         };
+        if let Some(Function::Host { constructible, .. }) = self.functions.get_mut(index) {
+            *constructible = true;
+        }
         let prototype = self.new_object(None).map_err(Fault::display)?;
         self.store_property(
             prototype,

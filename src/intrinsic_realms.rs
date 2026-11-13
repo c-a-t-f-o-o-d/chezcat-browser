@@ -57,7 +57,6 @@ pub(super) struct IntrinsicRealm {
     pub(super) global_environment: usize,
     roots: Roots,
     promise_roots: (Option<usize>, Option<usize>),
-    function_range: std::ops::Range<usize>,
 }
 
 pub(super) struct ParkedRoots {
@@ -193,12 +192,10 @@ impl Runtime {
         let global_environment = self.new_environment(self.global_environment, true)?;
         self.environment_mut(global_environment).parent = None;
         self.environment_mut(global_environment).captured = true;
-        let start = self.functions.len();
         let id = self.intrinsic_realms.len();
         let previous = self.active_realm;
         self.intrinsic_realms.push(IntrinsicRealm {
             global_environment, roots: Roots::default(), promise_roots: (None, None),
-            function_range: start..start,
         });
         let result = self.with_intrinsic_realm(Some(id), |runtime| {
             runtime.deferred_intrinsics = if deferred { 7 } else { 0 };
@@ -210,10 +207,11 @@ impl Runtime {
             // are published. Drop the unexposed global's binding storage.
             self.discard_environment(global_environment);
             self.intrinsic_realms.pop();
-            for realm in &mut self.function_realms[start..] { *realm = previous; }
+            for (function, realm) in self.functions.iter().zip(&mut self.function_realms) {
+                if !matches!(function, Function::Vacant) && *realm == Some(id) { *realm = previous; }
+            }
             return Err(error);
         }
-        self.intrinsic_realms[id].function_range = start..self.functions.len();
         Ok(id)
     }
 

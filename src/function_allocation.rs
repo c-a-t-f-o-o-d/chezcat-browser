@@ -10,6 +10,7 @@ impl Runtime {
         let mut templates = BTreeMap::new();
         for (index, function) in self.functions.iter().enumerate().take(MAX_FUNCTIONS) {
             let kind = match function {
+                Function::Vacant => continue,
                 Function::Native(_) => 0,
                 Function::Script { .. } => 1,
                 Function::Host { .. } => 2,

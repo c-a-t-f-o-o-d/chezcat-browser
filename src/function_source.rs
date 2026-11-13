@@ -9,8 +9,8 @@ impl Runtime {
                 let template = &program.templates[*template];
                 (Some(Rc::clone(program)), template.source_start..template.source_end, template.dynamic_source)
             }
+            Some(Function::Vacant) | None => return Err(Fault::new("Invalid callable source identity.")),
             Some(_) => (None, 0..0, false),
-            None => return Err(Fault::new("Invalid callable source identity.")),
         };
         if let Some(program) = program {
             let source = program.source.get(span).ok_or_else(|| Fault::new("Invalid retained function source range."))?;
