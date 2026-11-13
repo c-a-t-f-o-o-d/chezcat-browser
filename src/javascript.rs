@@ -83,6 +83,8 @@ mod function_constructor;
 mod host_objects;
 #[path = "runtime_diagnostics.rs"]
 mod runtime_diagnostics;
+#[path = "string_substr.rs"]
+mod string_substr;
 #[path = "global_operations.rs"]
 mod global_operations;
 #[path = "iterable_builtins.rs"]
@@ -8472,6 +8474,7 @@ impl Runtime {
             return self.checked_value(value);
         }
         if let Value::String(text) = object {
+            if method == "substr" { return self.string_substr(&text,args,host); }
             if matches!(method, "search" | "match" | "replace") {
                 return self.regexp_string_method(&text, method, args, host);
             }

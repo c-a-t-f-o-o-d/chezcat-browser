@@ -100,7 +100,7 @@ impl Runtime {
             Builtin::StringMethod(
                 "toString" | "valueOf" | "trim" | "toLowerCase" | "toUpperCase",
             ) => 0,
-            Builtin::StringMethod("split" | "slice" | "substring" | "replace" | "replaceAll") => 2,
+            Builtin::StringMethod("split" | "slice" | "substring" | "substr" | "replace" | "replaceAll") => 2,
             Builtin::PrimitiveMethod("toString", true) => 1,
             Builtin::PrimitiveMethod(_, _) => 0,
             _ => 1,
@@ -407,6 +407,7 @@ impl Runtime {
             "split",
             "slice",
             "substring",
+            "substr",
             "charAt",
             "charCodeAt",
             "codePointAt",
