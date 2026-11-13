@@ -217,8 +217,19 @@ impl Runtime {
                 };
                 let candidates = self.object_assigned_closures.len();
                 let unmarked = self.object_assigned_closures.iter().filter(|&&id| !graph.functions[id]).count();
+                drop(graph);
+                // Diagnostic comparison only. Production collection retains
+                // every existing array seed until the separate audit completes.
+                let arrays = self.objects.iter().filter(|object| object.length.is_some() && Self::plain_array_storage(object)).count();
+                let comparison = self.trace_root_graph_array_policy(&[], true, true, false, false,
+                    &mut Meter { remaining: None, deadline: self.job_deadline });
+                let array_comparison = match comparison {
+                    Ok(graph) => format!("Ordinary-array seed comparison (mark-only): arrays={arrays}; candidates unmarked without these seeds={}. Collector policy unchanged.",
+                        self.object_assigned_closures.iter().filter(|&&id| !graph.functions[id]).count()),
+                    Err(message) => format!("Ordinary-array seed comparison unavailable: {message}"),
+                };
                 let history = if self.function_arena.collections == 0 { "No collection or slot reuse has occurred." } else { "Candidate function slots may be reused." };
-                format!("Callable reachability (inactive stack; conservative native/Promise/API roots): Script allocated={allocated}; reachable={reachable}; exported function/object pins={}/{}. Object-assigned closure candidates={candidates}; unmarked with all other functions/exotic objects rooted={unmarked}. Conservative Script-entry collection: passes={}; functions retired={}; environments retired={}; occupied/high-water={}/{}; Script creations={}; slot allocations={}; Function-literal passes={}. {history} Objects remain append-only.\nEvaluator root snapshots: {}; call-root scopes={}; completion-root scopes={}; peak ID references={}; active registrations=0. Script entries={}; uninhibited={}.\n",
+                format!("Callable reachability (inactive stack; conservative native/Promise/API roots): Script allocated={allocated}; reachable={reachable}; exported function/object pins={}/{}. Object-assigned closure candidates={candidates}; unmarked with all other functions/exotic objects rooted={unmarked}. Conservative Script-entry collection: passes={}; functions retired={}; environments retired={}; occupied/high-water={}/{}; Script creations={}; slot allocations={}; Function-literal passes={}. {history} Objects remain append-only.\n{array_comparison}\nEvaluator root snapshots: {}; call-root scopes={}; completion-root scopes={}; peak ID references={}; active registrations=0. Script entries={}; uninhibited={}.\n",
                     self.exported_function_roots.len(), self.exported_object_roots.len(), self.function_arena.collections, self.function_arena.retired,
                     self.function_arena.environments_retired, self.function_arena.occupied, self.functions.len(), self.function_arena.script_created,
                     self.function_arena.allocations, self.function_arena.demand_collections,
@@ -258,6 +269,17 @@ impl Runtime {
 
     fn trace_root_graph_metered(&self, exported: &[Value], include_registered_exports: bool,
         conservative_candidates: bool, transient: bool, meter: &mut Meter) -> Result<Graph, &'static str> {
+        self.trace_root_graph_array_policy(exported, include_registered_exports, conservative_candidates, transient, true, meter)
+    }
+
+    fn plain_array_storage(object: &Object) -> bool {
+        object.date.is_none() && object.url.is_none() && object.primitive.is_none()
+            && object.promise.is_none() && object.arguments.is_none() && object.binary.is_none() && object.collection.is_none()
+            && object.iterator.is_none() && object.text.is_none() && object.regexp.is_none() && object.error_name.is_none()
+    }
+
+    fn trace_root_graph_array_policy(&self, exported: &[Value], include_registered_exports: bool,
+        conservative_candidates: bool, transient: bool, keep_array_seeds: bool, meter: &mut Meter) -> Result<Graph, &'static str> {
         meter.charge(self.objects.len() + self.functions.len() * 4 + self.environments.len())?;
         let mut graph = Graph::new(self)?;
         // Fixed-size intrinsic families include current and parked main blocks,
@@ -286,9 +308,7 @@ impl Runtime {
         // reporting. This is intentionally broader than eventual precise roots.
         for (id, object) in self.objects.iter().enumerate() {
             meter.charge(1)?;
-            let plain = object.length.is_none() && object.date.is_none() && object.url.is_none() && object.primitive.is_none()
-                && object.promise.is_none() && object.arguments.is_none() && object.binary.is_none() && object.collection.is_none()
-                && object.iterator.is_none() && object.text.is_none() && object.regexp.is_none() && object.error_name.is_none();
+            let plain = (object.length.is_none() || !keep_array_seeds) && Self::plain_array_storage(object);
             if object.promise.is_some() || conservative_candidates && !plain { graph.add(Edge::Object(id)); }
         }
         meter.charge(self.promises.reachability_cost())?;
@@ -373,6 +393,30 @@ fn vacant_function_handles_are_rejected_by_dispatch_reflection_and_graph_roots()
     assert!(runtime.mark_root_graph(&[Value::Function(id)], true, true).is_err());
     assert!(runtime.mark_root_graph(&[], true, true).is_ok());
     assert!(runtime.transient_registration_is_empty());
+}
+
+#[test]
+fn array_seed_comparison_distinguishes_discarded_cycles_without_mutation_or_callbacks() {
+    struct NoHost;
+    impl Host for NoHost {
+        fn get(&mut self, _: u32, _: &str) -> Result<Value, String> { panic!("unexpected get") }
+        fn set(&mut self, _: u32, _: &str, _: Value) -> Result<(), String> { panic!("unexpected set") }
+        fn call(&mut self, _: u32, _: &str, _: &[Value]) -> Result<Value, String> { panic!("unexpected call") }
+    }
+    let mut runtime = Runtime::new();
+    runtime.execute("function build(n){var state=n,c={},a=[c];c.write=function(v){state=v;};c.read=function(){return state;};c.back=a;return a;}var kept=build(71);build(72);0;", &mut NoHost).unwrap();
+    let before = (runtime.function_arena.occupied, runtime.objects.len(), runtime.bindings, runtime.value_bytes,
+        runtime.job_usage(), runtime.job_deadline, runtime.function_arena.collections);
+    let current = runtime.mark_root_graph(&[], true, true).unwrap();
+    assert_eq!(runtime.object_assigned_closures.iter().filter(|&&id| current.functions[id]).count(), 4);
+    let compared = runtime.trace_root_graph_array_policy(&[], true, true, false, false,
+        &mut Meter { remaining: None, deadline: runtime.job_deadline }).unwrap();
+    assert_eq!(runtime.object_assigned_closures.iter().filter(|&&id| compared.functions[id]).count(), 2);
+    let report = runtime.persistent_allocation_report();
+    assert!(report.contains("candidates unmarked without these seeds=2. Collector policy unchanged"), "{report}");
+    assert_eq!((runtime.function_arena.occupied, runtime.objects.len(), runtime.bindings, runtime.value_bytes,
+        runtime.job_usage(), runtime.job_deadline, runtime.function_arena.collections), before);
+    assert_eq!(runtime.execute("kept[0].write(83);kept[0].read();", &mut NoHost).unwrap().to_number(), 83.0);
 }
 
 #[test]
