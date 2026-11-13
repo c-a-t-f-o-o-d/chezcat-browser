@@ -177,10 +177,36 @@ impl Bridge<'_> {
     }
 
     pub(super) fn frame_attribute_guard(&self, node: usize, name: &str) -> Result<(), String> {
+        if tag(self.doc,node)=="iframe" && name=="srcdoc" {
+            let connected=self.state.dom.connected.get(node)==Some(&true);
+            let created=self.state.dom.created.contains(&node);
+            let published=self.state.blank_frames.iter().any(|frame|frame.owner==node);
+            if connected || !created || published {
+                return Err(format!("srcdoc navigation is not implemented. Receiver node={node}; connected={connected}; created={created}; retained-context={published}."));
+            }
+        }
         if tag(self.doc, node) == "iframe" && self.state.dom.connected.get(node) == Some(&true) {
             return Err(format!("Changing connected blank-frame attribute {name:?} is not implemented."));
         }
         Ok(())
+    }
+
+    pub(super) fn iframe_srcdoc_property(&self,node:usize)->bool {
+        self.doc.nodes.get(node).is_some_and(|item|item.namespace==crate::html::Namespace::Html && tag(self.doc,node)=="iframe")
+    }
+
+    pub(super) fn iframe_srcdoc_get(&mut self,node:usize)->Result<Value,String> {
+        if self.doc.nodes[node].namespace==crate::html::Namespace::UnknownForeign {
+            return Err("srcdoc reflection requires known HTML namespace provenance.".into());
+        }
+        if !self.iframe_srcdoc_property(node) {return Ok(Value::Undefined);}
+        let NodeKind::Element {attrs,..}=&self.doc.nodes[node].kind else {unreachable!()};
+        self.state.work(attrs.len())?;
+        self.state.copies(attrs.iter().map(|(name,_)|name.len()).sum())?;
+        let text=self.doc.attr(node,"srcdoc").unwrap_or("");
+        if text.len()>self.state.limits.host.string_bytes {return Err("srcdoc exceeds the host string bound.".into());}
+        self.state.copies(text.len())?;
+        Ok(Value::String(text.to_owned()))
     }
 
     pub(super) fn frame_get(&mut self, handle: u32, property: &str) -> Option<Result<Value, String>> {
@@ -317,6 +343,42 @@ mod tests {
     }
 
     const CREATE: &str = "var f=document.createElement('iframe');f.hidden=true;document.body.appendChild(f);var w=f.contentWindow;";
+
+    #[test]
+    fn srcdoc_reflection_cannot_insert_a_fake_document_or_navigate_a_retained_context() {
+        for source in [
+            "var f=document.createElement('iframe');f.hidden=true;f.srcdoc='';document.body.appendChild(f);",
+            "var f=document.createElement('iframe');f.hidden=true;f.srcdoc='<script>parent.changed=1</script>';document.body.appendChild(f);",
+        ] {
+            let (doc,_,page,outcome)=start(source,&crate::csp::PolicySet::default());
+            assert_eq!(outcome.errors,1,"{}",page.report());
+            assert!(page.state.blank_frames.is_empty());
+            let f=page.state.dom.created.iter().copied().find(|&node|tag(&doc,node)=="iframe").unwrap();
+            assert!(!page.state.dom.connected[f]);
+        }
+        for write in [
+            "f.srcdoc='changed';",
+            "f.parentNode.removeChild(f);f.srcdoc='changed';",
+            "f.setAttribute('srcdoc','changed');",
+        ] {
+            let (mut doc,mut forms,mut page,outcome)=start(CREATE,&crate::csp::PolicySet::default());
+            assert_eq!(outcome.errors,0,"{}",page.report());
+            let outcome=page.console_eval(&mut doc,&mut forms,write);
+            assert_eq!(outcome.errors,1,"{}",page.report());
+            assert_eq!(page.state.blank_frames.len(),1);
+            assert_eq!(doc.attr(page.state.blank_frames[0].owner,"srcdoc"),None);
+        }
+        let (mut doc,mut forms,mut page,outcome)=start("var f=document.createElement('iframe');f.hidden=true;",&crate::csp::PolicySet::default());
+        assert_eq!(outcome.errors,0,"{}",page.report());
+        let outcome=page.console_eval(&mut doc,&mut forms,"var calls=0;f.srcdoc={toString:function(){calls++;document.body.appendChild(f);return 'changed';}};");
+        assert_eq!(outcome.errors,1,"{}",page.report());
+        assert_eq!(page.state.blank_frames.len(),1);
+        assert_eq!(doc.attr(page.state.blank_frames[0].owner,"srcdoc"),None);
+        let outcome=page.console_eval(&mut doc,&mut forms,"if(calls!==1||f.contentWindow===null)throw 'callback effects';");
+        // Coercion connected the frame once; the rejected setter kept that real
+        // callback effect and did not create a second context.
+        assert_eq!(outcome.errors,0,"{}",page.report());
+    }
 
     #[test]
     fn native_instanceof_blank_objects_keep_owner_realm_and_origin_validation() {

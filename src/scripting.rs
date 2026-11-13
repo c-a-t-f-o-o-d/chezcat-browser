@@ -2197,7 +2197,8 @@ impl Host for Bridge<'_> {
     }
 
     fn string_setter(&self, object: u32, property: &str) -> bool {
-        self.class_list_receiver(object) && property == "value"
+        property=="srcdoc" && self.class_list_element_receiver(object) && node_index(object).is_some_and(|node|self.iframe_srcdoc_property(node))
+            || self.class_list_receiver(object) && property == "value"
             || self.class_list_element_receiver(object) && property == "classList"
             || self.attr_receiver(object) && matches!(property, "value" | "nodeValue" | "textContent")
             || self.dom_string_setter(object, property)
@@ -3463,6 +3464,11 @@ impl Host for Bridge<'_> {
             let value = self.text(&value)?;
             return self.attribute(node,"class",Some(value));
         }
+        if property=="srcdoc" && self.iframe_srcdoc_property(node) {
+            let text=self.text(&value)?;
+            let bytes=text.len();
+            return self.attribute(node,"srcdoc",Some(text)).map_err(|error|format!("{error} Converted srcdoc bytes={bytes}."));
+        }
         if property == "isMap" && self.html_image_map_property(node) {
             return self.attribute(node, "ismap", value.truthy().then(String::new));
         }
@@ -3867,7 +3873,8 @@ impl Host for Bridge<'_> {
                 && matches!(name.as_str(), "src" | "alt" | "width" | "height")
                 || self.html_spacing_property(node, &name)
                 || name == "border" && self.html_border_property(node)
-                || name == "ismap" && self.html_image_map_property(node);
+                || name == "ismap" && self.html_image_map_property(node)
+                || name == "srcdoc" && self.iframe_srcdoc_property(node);
             if !matches!(
                 name.as_str(),
                 "id" | "class"

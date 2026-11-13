@@ -378,6 +378,10 @@ impl Bridge<'_> {
         };
         let node = self.dom_node(node_handle(node))?;
         if property == "classList" { return Ok(Some(matches!(self.doc.nodes[node].kind,NodeKind::Element {..}))); }
+        if property=="srcdoc" {
+            if self.doc.nodes[node].namespace==crate::html::Namespace::UnknownForeign {return Err("srcdoc requires known namespace provenance.".into());}
+            return Ok(Some(self.iframe_srcdoc_property(node)));
+        }
         if node_constant(property).is_some() { return Ok(Some(true)); }
         if matches!(property, "tabIndex" | "offsetLeft" | "offsetTop" | "offsetWidth" | "offsetHeight" | "scrollWidth" | "scrollHeight") && matches!(self.doc.nodes[node].kind, NodeKind::Element { .. }) {
             if self.doc.nodes[node].namespace != crate::html::Namespace::Html {
@@ -436,6 +440,7 @@ impl Bridge<'_> {
             return Ok(None);
         }
         let node = self.dom_node(object)?;
+        if property=="srcdoc" {return self.iframe_srcdoc_get(node).map(Some);}
         if matches!(property,"scrollWidth"|"scrollHeight") {
             if !matches!(self.doc.nodes[node].kind,NodeKind::Element {..})
                 || self.doc.nodes[node].namespace != crate::html::Namespace::Html {

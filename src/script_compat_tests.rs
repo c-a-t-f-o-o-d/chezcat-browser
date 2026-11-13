@@ -1,6 +1,25 @@
 use super::*;
 
 #[test]
+fn detached_never_published_srcdoc_reflects_domstring_and_real_attr_identity() {
+    let (doc,_,page,outcome)=page("<p>ordinary</p>",&[r#"
+var f=document.createElement('iframe');if(f.srcdoc!==''||!('srcdoc' in f)||f.hasAttribute('srcdoc')||f.contentWindow!==null)throw 'default';
+var calls=0;f.srcdoc={toString:function(){calls++;return '<p>actual raw source</p>';}};
+if(calls!==1||f.srcdoc!=='<p>actual raw source</p>'||f.getAttribute('srcdoc')!==f.srcdoc||f.contentWindow!==null)throw 'real reflection/no execution';
+var attr=f.getAttributeNode('srcdoc');f.srcdoc=null;if(f.srcdoc!=='null'||attr.value!=='null')throw 'DOMString null';
+f.srcdoc=undefined;if(f.srcdoc!=='undefined'||f.getAttributeNode('srcdoc')!==attr)throw 'undefined/identity';
+var caught=false;try{f.srcdoc=Symbol();}catch(e){caught=e.name==='TypeError';}if(!caught||f.srcdoc!=='undefined')throw 'Symbol atomic';
+var marker={},same=false;try{f.srcdoc={toString:function(){throw marker;}};}catch(e){same=e===marker;}if(!same||f.srcdoc!=='undefined')throw 'throw identity';
+f.removeAttribute('srcdoc');if(f.srcdoc!==''||attr.ownerElement!==null||attr.value!=='undefined')throw 'raw removal/detach';
+for(var e of [document.createElement('div'),document.createTextNode('x')])if('srcdoc' in e||e.srcdoc!==undefined)throw 'brand';
+document.title='srcdoc-reflection-ok';
+"#]);
+    assert_eq!(outcome.errors,0,"{}",page.report());
+    assert_eq!(doc.title,"srcdoc-reflection-ok");
+    assert!(page.state.blank_frames.is_empty());
+}
+
+#[test]
 fn node_normalize_merges_real_text_runs_preserving_first_nonempty_and_detached_data() {
     let (doc,_,page,outcome)=page("<main id=root></main>",&[r#"
 var root=document.getElementById('root'),p=document.createElement('div');root.appendChild(p);
@@ -89,13 +108,13 @@ if(Object.keys(f).length||Object.getOwnPropertyNames(f).length||f.getAttribute('
     let node=(0..doc.nodes.len()).find(|&n|doc.attr(n,"id")==Some("f")).unwrap();
     let inert=(0..doc.nodes.len()).find(|&n|doc.attr(n,"id")==Some("old")).unwrap();
     let mut bridge=Bridge {doc:&mut doc,forms:&mut forms,state:&mut page.state};
-    assert!(bridge.set(node_handle(node),"srcdoc",Value::String("changed".into())).is_err());
-    assert!(bridge.call(node_handle(node),"setAttribute",&[Value::String("srcdoc".into()),Value::String("changed".into())]).is_err());
+    bridge.set(node_handle(node),"srcdoc",Value::String("reflected".into())).unwrap();
+    bridge.call(node_handle(node),"setAttribute",&[Value::String("srcdoc".into()),Value::String("changed".into())]).unwrap();
     assert!(bridge.inherited_keys(node_handle(node)).is_err());
     assert!(bridge.own_data(node_handle(inert),"srcdoc").is_err());
     assert!(bridge.own_keys(node_handle(inert)).is_err());
     assert!(bridge.state.blank_frames.is_empty());
-    assert_eq!(bridge.doc.attr(node,"srcdoc"),None);
+    assert_eq!(bridge.doc.attr(node,"srcdoc"),Some("changed"));
     assert_eq!(bridge.doc.attr(inert,"srcdoc"),Some("authored"));
 }
 
