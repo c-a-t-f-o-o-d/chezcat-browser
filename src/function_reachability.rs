@@ -6,6 +6,10 @@ use super::*;
 #[path = "function_array_tests.rs"]
 mod array_seed_tests;
 
+#[cfg(test)]
+#[path = "scope_candidate_tests.rs"]
+mod scope_candidate_tests;
+
 #[derive(Clone, Copy, Debug)]
 pub(super) enum Edge { Object(usize), Function(usize), Environment(usize) }
 
@@ -198,6 +202,16 @@ impl Runtime {
             if Rc::ptr_eq(program, actual) && template == actual_template).then_some(*id)
     }
 
+    // Mark-only provenance, not production retirement eligibility. Only the
+    // syntactic expression's freshly created anonymous identity may be tagged.
+    pub(super) fn fresh_anonymous_scope_closure(&self, program: &Rc<Program>, expression: ExprId, value: &Value) -> Option<usize> {
+        let ExprKind::Function(template) = &program.exprs[expression].kind else { return None; };
+        if program.templates[*template].name.is_some() { return None; }
+        let Value::Function(id) = value else { return None; };
+        matches!(self.functions.get(*id), Some(Function::Script { program: actual, template: actual_template, .. })
+            if Rc::ptr_eq(program, actual) && template == actual_template).then_some(*id)
+    }
+
     // Raw public Value IDs can be retained by an embedder after a call returns.
     // Pins are permanent until document/runtime teardown. ID-only sets are bounded
     // by the existing object/function arenas and never copy script payloads.
@@ -222,12 +236,21 @@ impl Runtime {
                 let candidates = self.object_assigned_closures.len();
                 let unmarked = self.object_assigned_closures.iter().filter(|&&id| !graph.functions[id]).count();
                 drop(graph);
+                let scope_comparison = match self.mark_scope_candidate_comparison(true) {
+                    Ok(graph) => {
+                        let scope_only = self.scope_assigned_closures.iter().filter(|&&id| !graph.functions[id]).count();
+                        let total = self.object_assigned_closures.union(&self.scope_assigned_closures)
+                            .filter(|&&id| !graph.functions[id]).count();
+                        format!("Scope-binding mark-only comparison (inactive; permanent API pins retained): tagged={}; eligible unmarked={total}; scope unmarked={scope_only}. Production scope retirement remains disabled.", self.scope_assigned_closures.len())
+                    }
+                    Err(message) => format!("Scope-binding mark-only comparison unavailable: {message}"),
+                };
                 // Ordinary arrays retain managed values through their traced
                 // properties/prototype and explicit persistent/transient roots.
                 // Never re-seed discarded arrays: their unreachable slots may
                 // now contain retired IDs, like unreachable plain objects.
                 let arrays = self.objects.iter().filter(|object| object.length.is_some() && Self::plain_array_storage(object)).count();
-                let array_comparison = format!("Ordinary arrays follow traced references: arrays={arrays}; other exotic seed roots retained. Array/object slots remain append-only.");
+                let array_comparison = format!("Ordinary arrays follow traced references: arrays={arrays}; other exotic seed roots retained. Array/object slots remain append-only.\n{scope_comparison}");
                 let program_retention = format!("Program retention: programs={}; source-bytes={}; AST-nodes={}; regexp-accounting-bytes={}; pressure passes={}; programs retired={}. Regexp charges retained.",
                     self.programs.len(), self.retained_source, self.retained_ast, self.retained_regexp,
                     self.program_allocation.passes, self.program_allocation.retired);
@@ -283,6 +306,24 @@ impl Runtime {
 
     fn trace_root_graph_array_policy(&self, exported: &[Value], include_registered_exports: bool,
         conservative_candidates: bool, transient: bool, keep_array_seeds: bool, meter: &mut Meter) -> Result<Graph, &'static str> {
+        self.trace_root_graph_candidate_policy(exported, include_registered_exports, conservative_candidates,
+            transient, keep_array_seeds, false, meter)
+    }
+
+    fn mark_scope_candidate_comparison(&self, include_registered_exports: bool) -> Result<Graph, &'static str> {
+        if self.call_depth != 0 || self.eval_depth != 0 || self.evaluation_frames != 0
+            || self.evaluation_frame_slots != 0 || self.evaluation_argument_slots != 0
+            || !self.active_array_joins.is_empty() || !self.promises.reachability_is_inactive()
+            || !self.transient_registration_is_empty() {
+            return Err("Scope comparison requires inactive JavaScript.");
+        }
+        self.trace_root_graph_candidate_policy(&[], include_registered_exports, true, false, false, true,
+            &mut Meter { remaining: None, deadline: self.job_deadline })
+    }
+
+    fn trace_root_graph_candidate_policy(&self, exported: &[Value], include_registered_exports: bool,
+        conservative_candidates: bool, transient: bool, keep_array_seeds: bool,
+        include_scope_candidates: bool, meter: &mut Meter) -> Result<Graph, &'static str> {
         meter.charge(self.objects.len() + self.functions.len() * 4 + self.environments.len())?;
         let mut graph = Graph::new(self)?;
         // Fixed-size intrinsic families include current and parked main blocks,
@@ -297,7 +338,8 @@ impl Runtime {
         for realm in &self.intrinsic_realms { graph.add(Edge::Environment(realm.global_environment)); }
         for (id, function) in self.functions.iter().enumerate() {
             meter.charge(1)?;
-            if !matches!(function, Function::Vacant) && (!matches!(function, Function::Script { .. }) || conservative_candidates && !self.object_assigned_closures.contains(&id)) {
+            if !matches!(function, Function::Vacant) && (!matches!(function, Function::Script { .. }) || conservative_candidates && !(self.object_assigned_closures.contains(&id)
+                || include_scope_candidates && self.scope_assigned_closures.contains(&id))) {
                 graph.add(Edge::Function(id));
             }
         }

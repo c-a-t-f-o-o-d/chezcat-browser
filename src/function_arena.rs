@@ -104,6 +104,7 @@ impl Runtime {
         self.function_properties[id] = usize::MAX;
         self.function_realms[id] = None;
         self.object_assigned_closures.remove(&id);
+        self.scope_assigned_closures.remove(&id);
         self.function_arena.occupied -= 1;
         if truncate {
             self.functions.pop(); self.function_properties.pop(); self.function_realms.pop(); self.function_initial_names.pop();

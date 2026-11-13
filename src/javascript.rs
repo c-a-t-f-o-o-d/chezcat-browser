@@ -3071,6 +3071,7 @@ pub struct Runtime {
     exported_function_roots: std::collections::BTreeSet<usize>,
     exported_object_roots: std::collections::BTreeSet<usize>,
     object_assigned_closures: std::collections::BTreeSet<usize>,
+    scope_assigned_closures: std::collections::BTreeSet<usize>,
     transient_roots: transient_roots::State,
     global_attributes: BTreeMap<String, (bool, bool, bool)>,
     host_globals: HashSet<String>,
@@ -3183,6 +3184,7 @@ impl Runtime {
             exported_function_roots: std::collections::BTreeSet::new(),
             exported_object_roots: std::collections::BTreeSet::new(),
             object_assigned_closures: std::collections::BTreeSet::new(),
+            scope_assigned_closures: std::collections::BTreeSet::new(),
             transient_roots: transient_roots::State::default(),
             global_attributes: BTreeMap::new(),
             host_globals: HashSet::new(),
@@ -6125,12 +6127,16 @@ impl Runtime {
                     self.step()?;
                     if let Some(expression) = initial {
                         let value = self.eval(program, *expression, env, this, host)?;
+                        let scope_candidate = if matches!(&program.patterns[*pattern].kind, binding_patterns::Kind::Name(_)) {
+                            self.fresh_anonymous_scope_closure(program, *expression, &value)
+                        } else { None };
                         let mode = if *kind == Declaration::Var {
                             binding_patterns::Mode::Var(target)
                         } else {
                             binding_patterns::Mode::Initialize(target)
                         };
                         self.initialize_pattern(program, *pattern, value, mode, env, this, host)?;
+                        if let Some(id) = scope_candidate { self.scope_assigned_closures.insert(id); }
                     } else if *kind == Declaration::Let {
                         self.initialize_pattern(
                             program,

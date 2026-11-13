@@ -695,8 +695,12 @@ impl Runtime {
                 let candidate = if op == "=" {
                     self.direct_object_closure_assignment(program, right, &reference, &result)
                 } else { None };
+                let scope_candidate = if op == "=" && matches!(&reference, Reference::Binding(_, _)) {
+                    self.fresh_anonymous_scope_closure(program, right, &result)
+                } else { None };
                 self.write_reference(reference, result, host)?;
                 if let Some(id) = candidate { self.object_assigned_closures.insert(id); }
+                if let Some(id) = scope_candidate { self.scope_assigned_closures.insert(id); }
                 Ok(done(returned))
             }
             State::PatternValue(pattern) => {
