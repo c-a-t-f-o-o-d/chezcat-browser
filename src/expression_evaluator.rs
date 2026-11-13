@@ -12,12 +12,79 @@ use super::{
     MAX_EVALUATION_FRAME_SLOTS,
 };
 use std::rc::Rc;
+use super::function_reachability::Edge;
+use super::transient_roots::Marker;
 
 #[derive(Clone, Copy)]
 enum Mode {
     Value,
     Reference,
     Chain,
+}
+
+#[cfg(test)]
+mod root_tests {
+    use super::*;
+
+    #[test]
+    fn suspended_heap_snapshot_contains_receivers_operands_references_and_outer_arguments() {
+        let mut runtime = Runtime::new();
+        let objects: Vec<_> = (0..12).map(|_| runtime.new_object(None).unwrap()).collect();
+        let functions: Vec<_> = (0..4).map(|_| {
+            let Value::Function(id) = runtime.native_function(super::super::Builtin::IsNaN, "rootFixture").unwrap() else { unreachable!() }; id
+        }).collect();
+        let frame = |state| Frame { id: 0, state, annotate: true };
+        let scratch = Scratch { frames: vec![
+            frame(State::BinaryRight { op: "+", left: Value::Object(objects[0]) }),
+            frame(State::ReadKey { receiver: Value::Object(objects[1]), end: ReadEnd::Value }),
+            frame(State::MemberKey { receiver: Value::Object(objects[2]), arguments: &[] }),
+            frame(State::ChainKey { receiver: Value::Object(objects[3]), steps: &[], next: 0, end: ChainEnd::Value }),
+            frame(State::AssignmentValue { op: "+=", left: 0, right: 0,
+                reference: Reference::ComputedProperty(Value::Object(objects[4]), Value::Object(objects[5])), before: Some(Value::Function(functions[0])) }),
+            frame(State::Argument(Call { target: Target::Member { receiver: Value::Object(objects[6]), key: PropertyKey::String("f".into()), function: Some(Value::Function(functions[1])) },
+                arguments: &[], index: 0, start: 1, after: AfterCall::Value })),
+        ], arguments: vec![Value::Object(objects[7]), Value::Function(functions[2]), Value::Number(1.0)] };
+        let target = Target::Chain(CallTarget { receiver: Value::Object(objects[9]), function: Some(Value::Function(functions[3])), name: None });
+        let reference = Reference::Binding(0, "fixture".into());
+        let completed = Completion::Reference(Reference::ComputedProperty(Value::Object(objects[10]), Value::Object(objects[11])));
+        let before = (runtime.functions.len(), runtime.objects.len(), runtime.value_bytes, runtime.job_usage());
+        let marker = runtime.publish_heap_roots(&scratch, 0, &Value::Object(objects[8]), Some(&target), Some(&reference), Some(&completed)).unwrap();
+        for &id in &objects { assert!(runtime.transient_roots.roots.iter().any(|edge| matches!(edge, Edge::Object(found) if *found == id)), "object {id}"); }
+        for &id in &functions { assert!(runtime.transient_roots.roots.iter().any(|edge| matches!(edge, Edge::Function(found) if *found == id)), "function {id}"); }
+        assert_eq!(runtime.transient_roots.evaluation_frames, scratch.frames.len() + 1);
+        assert_eq!(runtime.transient_roots.frame_slots, scratch.frames.capacity());
+        assert_eq!(runtime.transient_roots.argument_slots, scratch.arguments.capacity());
+        runtime.restore_transient_marker(marker);
+        assert!(runtime.transient_registration_is_empty());
+        assert_eq!((runtime.functions.len(), runtime.objects.len(), runtime.value_bytes, runtime.job_usage()), before);
+    }
+
+    #[test]
+    fn evaluator_registration_restores_after_nested_callbacks_csp_errors_and_fatal_limits() {
+        struct NoHost;
+        impl Host for NoHost {
+            fn allow_eval(&mut self) -> Result<bool, String> { Ok(false) }
+            fn get(&mut self, _: u32, _: &str) -> Result<Value, String> { panic!("unexpected get") }
+            fn set(&mut self, _: u32, _: &str, _: Value) -> Result<(), String> { panic!("unexpected set") }
+            fn call(&mut self, _: u32, _: &str, _: &[Value]) -> Result<Value, String> { panic!("unexpected call") }
+        }
+        for (source, expected_error) in [
+            ("var o={value:17,get method(){return function(a){return this.value+a;};}};if(o.method((function(){return 2;})())!==19)throw 'snapshot';0;", None),
+            ("var o={get value(){throw 23;}};o.value;", Some("23")),
+            ("Function('return 1;');", Some("Content Security Policy")),
+            ("for(var i=0;i<1100;i++)(function(){})();", Some("Function limit reached (1024)")),
+        ] {
+            let mut runtime = Runtime::new();
+            let result = runtime.execute(source, &mut NoHost);
+            if let Some(expected) = expected_error { assert!(result.unwrap_err().contains(expected), "{source}"); } else { result.unwrap(); }
+            assert!(runtime.transient_registration_is_empty(), "{source}");
+            assert!(runtime.transient_roots.snapshots > 0);
+            assert!(runtime.transient_roots.peak > 0);
+            assert!(!runtime.persistent_allocation_report().contains("unavailable"), "{source}");
+            runtime.begin_job();
+            assert_eq!(runtime.execute("6*7;", &mut NoHost).unwrap().to_number(), 42.0);
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -57,6 +124,22 @@ enum Target {
     Construct(Value),
 }
 
+impl Target {
+    fn root_edges(&self, add: &mut impl FnMut(Edge)) {
+        match self {
+            Self::Value { function, .. } | Self::Construct(function) => Edge::value(function, add),
+            Self::Member { receiver, function, .. } => {
+                Edge::value(receiver, add);
+                if let Some(function) = function { Edge::value(function, add); }
+            }
+            Self::Chain(target) => {
+                Edge::value(&target.receiver, add);
+                if let Some(function) = &target.function { Edge::value(function, add); }
+            }
+        }
+    }
+}
+
 enum AfterCall<'p> {
     Value,
     Chain { steps: &'p [Step], next: usize, end: ChainEnd },
@@ -93,6 +176,22 @@ enum State<'p> {
     Argument(Call<'p>),
     ChainNext { steps: &'p [Step], next: usize, end: ChainEnd },
     ChainKey { receiver: Value, steps: &'p [Step], next: usize, end: ChainEnd },
+}
+
+impl State<'_> {
+    fn root_edges(&self, add: &mut impl FnMut(Edge)) {
+        match self {
+            Self::BinaryRight { left, .. } => Edge::value(left, add),
+            Self::ReadKey { receiver, .. } | Self::MemberKey { receiver, .. }
+                | Self::ChainKey { receiver, .. } => Edge::value(receiver, add),
+            Self::AssignmentValue { reference, before, .. } => {
+                Edge::reference(reference, add);
+                if let Some(value) = before { Edge::value(value, add); }
+            }
+            Self::Argument(call) => call.target.root_edges(add),
+            _ => {}
+        }
+    }
 }
 
 struct Frame<'p> {
@@ -162,6 +261,34 @@ fn compact<T>(items: &mut Vec<T>, total: &mut usize) {
 }
 
 impl Runtime {
+    fn publish_heap_roots(&mut self, scratch: &Scratch<'_>, env: usize, this: &Value,
+        target: Option<&Target>, reference: Option<&Reference>, completed: Option<&Completion>) -> Result<Marker, Fault> {
+        let marker = self.transient_marker();
+        let mut failure = None;
+        let mut add = |edge| {
+            if failure.is_none() {
+                if let Err(error) = self.push_transient_root(edge) { failure = Some(error); }
+            }
+        };
+        add(Edge::Environment(env));
+        Edge::value(this, &mut add);
+        for frame in &scratch.frames { frame.state.root_edges(&mut add); }
+        for value in &scratch.arguments { Edge::value(value, &mut add); }
+        if let Some(target) = target { target.root_edges(&mut add); }
+        if let Some(reference) = reference { Edge::reference(reference, &mut add); }
+        if let Some(completed) = completed {
+            match completed { Completion::Value(value) => Edge::value(value, &mut add), Completion::Reference(reference) => Edge::reference(reference, &mut add) }
+        }
+        drop(add);
+        if let Some(error) = failure { self.restore_transient_marker(marker); return Err(error); }
+        // The popped terminal frame remains in the shared count until Done.
+        self.transient_roots.evaluation_frames += scratch.frames.len() + 1;
+        self.transient_roots.frame_slots += scratch.frames.capacity();
+        self.transient_roots.argument_slots += scratch.arguments.capacity();
+        self.transient_roots.snapshots = self.transient_roots.snapshots.saturating_add(1);
+        Ok(marker)
+    }
+
     pub(super) fn eval_heap(
         &mut self, program: &Rc<Program>, id: ExprId, env: usize,
         this: &Value, host: &mut dyn Host,
@@ -177,7 +304,9 @@ impl Runtime {
                 return Err(Fault::new("Pending evaluation limit reached (4096)."));
             }
             self.evaluation_frames += 1;
+            let marker = self.inhibit_transient_collection();
             let result = self.eval_heap_immediate(program, id, env, this, host);
+            self.restore_transient_marker(marker);
             self.evaluation_frames -= 1;
             return result;
         }
@@ -262,28 +391,48 @@ impl Runtime {
                 Some(position) => error.at(&program.source, position),
                 None => error,
             };
+            let inhibited = self.inhibit_transient_collection();
             let transition = match frame.state {
                 State::Begin(mode) => self.begin_heap_expression(
                     program, frame.id, mode, env, this, host),
                 state => self.resume_heap_expression(
                     program, state, completed.take().expect("completed child"),
                     &mut scratch, env, this, host),
-            }.map_err(located)?;
+            };
+            self.restore_transient_marker(inhibited);
+            let transition = transition.map_err(located)?;
             // Finish callback-capable actions outside begin/resume dispatch.
             // This loop is iterative even when a spread ends directly in a call.
             let mut pending = transition;
             let transition = loop {
                 pending = match pending {
-                    Transition::Invoke(call) => self.finish_heap_call(
-                        call, &mut scratch, env, this, host).map_err(located)?,
-                    Transition::Spread(call, result) => self.finish_heap_spread(
-                        call, result, &mut scratch, env, this, host).map_err(located)?,
-                    Transition::Immediate(id) => done(
-                        self.eval_heap_immediate(program, id, env, this, host).map_err(located)?),
-                    Transition::Read(reference, end) => match end {
-                        ReadEnd::Value => done(self.read_reference(&reference, host).map_err(located)?),
-                        ReadEnd::Reference => Transition::Done(Completion::Reference(reference)),
-                    },
+                    Transition::Invoke(call) => {
+                        let marker = self.publish_heap_roots(&scratch, env, this, Some(&call.target), None, completed.as_ref()).map_err(located)?;
+                        let result = self.finish_heap_call(call, &mut scratch, env, this, host);
+                        self.restore_transient_marker(marker);
+                        result.map_err(located)?
+                    }
+                    Transition::Spread(call, result) => {
+                        let marker = self.inhibit_transient_collection();
+                        let result = self.finish_heap_spread(call, result, &mut scratch, env, this, host);
+                        self.restore_transient_marker(marker);
+                        result.map_err(located)?
+                    }
+                    Transition::Immediate(id) => {
+                        let marker = self.inhibit_transient_collection();
+                        let result = self.eval_heap_immediate(program, id, env, this, host);
+                        self.restore_transient_marker(marker);
+                        done(result.map_err(located)?)
+                    }
+                    Transition::Read(reference, end) => {
+                        let marker = self.publish_heap_roots(&scratch, env, this, None, Some(&reference), completed.as_ref()).map_err(located)?;
+                        let result = match end {
+                            ReadEnd::Value => self.read_reference(&reference, host).map(done),
+                            ReadEnd::Reference => Ok(Transition::Done(Completion::Reference(reference))),
+                        };
+                        self.restore_transient_marker(marker);
+                        result.map_err(located)?
+                    }
                     ready => break ready,
                 };
             };

@@ -9,6 +9,15 @@ impl Edge {
     pub(super) fn value(value: &Value, add: &mut impl FnMut(Edge)) {
         match value { Value::Object(id) => add(Self::Object(*id)), Value::Function(id) => add(Self::Function(*id)), _ => {} }
     }
+
+    pub(super) fn reference(reference: &Reference, add: &mut impl FnMut(Edge)) {
+        match reference {
+            Reference::Binding(id, _) => add(Self::Environment(*id)),
+            Reference::Property(receiver, _) | Reference::SymbolProperty(receiver, _) => Self::value(receiver, add),
+            Reference::ComputedProperty(receiver, key) => { Self::value(receiver, add); Self::value(key, add); }
+            Reference::Missing(_) | Reference::Global(_) => {}
+        }
+    }
 }
 
 struct Graph {
@@ -78,8 +87,8 @@ impl Runtime {
                 };
                 let candidates = self.object_assigned_closures.len();
                 let unmarked = self.object_assigned_closures.iter().filter(|&&id| !graph.functions[id]).count();
-                format!("Callable reachability (inactive stack; conservative native/Promise/API roots): Script allocated={allocated}; reachable={reachable}; exported function/object pins={}/{}. Object-assigned closure candidates={candidates}; unmarked with all other functions/exotic objects rooted={unmarked}. No collection or slot reuse.\n",
-                    self.exported_function_roots.len(), self.exported_object_roots.len())
+                format!("Callable reachability (inactive stack; conservative native/Promise/API roots): Script allocated={allocated}; reachable={reachable}; exported function/object pins={}/{}. Object-assigned closure candidates={candidates}; unmarked with all other functions/exotic objects rooted={unmarked}. No collection or slot reuse.\nEvaluator root snapshots: {}; peak ID references={}; active registrations=0. Other transient coverage remains incomplete.\n",
+                    self.exported_function_roots.len(), self.exported_object_roots.len(), self.transient_roots.snapshots, self.transient_roots.peak)
             }
             Err(message) => format!("Callable reachability unavailable: {message}\n"),
         }
@@ -92,7 +101,8 @@ impl Runtime {
     fn mark_root_graph(&self, exported: &[Value], include_registered_exports: bool, conservative_candidates: bool) -> Result<Graph, &'static str> {
         if self.call_depth != 0 || self.eval_depth != 0 || self.evaluation_frames != 0
             || self.evaluation_frame_slots != 0 || self.evaluation_argument_slots != 0
-            || !self.active_array_joins.is_empty() || !self.promises.reachability_is_inactive() {
+            || !self.active_array_joins.is_empty() || !self.promises.reachability_is_inactive()
+            || !self.transient_registration_is_empty() {
             return Err("Mark-only snapshot requires inactive JavaScript; transient roots are not covered.");
         }
         let mut graph = Graph::new(self)?;

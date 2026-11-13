@@ -33,6 +33,8 @@ mod intrinsic_realms;
 mod function_allocation;
 #[path = "function_reachability.rs"]
 mod function_reachability;
+#[path = "transient_roots.rs"]
+mod transient_roots;
 #[path = "deferred_native_methods.rs"]
 mod deferred_native_methods;
 #[path = "function_source.rs"]
@@ -3053,6 +3055,7 @@ pub struct Runtime {
     exported_function_roots: std::collections::BTreeSet<usize>,
     exported_object_roots: std::collections::BTreeSet<usize>,
     object_assigned_closures: std::collections::BTreeSet<usize>,
+    transient_roots: transient_roots::State,
     global_attributes: BTreeMap<String, (bool, bool, bool)>,
     host_globals: HashSet<String>,
     // Names explicitly exposed as ordinary properties by the embedding host.
@@ -3160,6 +3163,7 @@ impl Runtime {
             exported_function_roots: std::collections::BTreeSet::new(),
             exported_object_roots: std::collections::BTreeSet::new(),
             object_assigned_closures: std::collections::BTreeSet::new(),
+            transient_roots: transient_roots::State::default(),
             global_attributes: BTreeMap::new(),
             host_globals: HashSet::new(),
             operation_globals: HashSet::new(),
