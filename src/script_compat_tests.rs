@@ -900,3 +900,21 @@ setTimeout(function(){attempt('timer');},0);
         assert_eq!(text, if allowed { "scriptpromisetimer" } else { "" });
     }
 }
+
+
+#[test]
+fn dynamic_crossorigin_mode_is_snapshotted_and_cross_origin_is_still_denied() {
+    let (_, _, mut page, outcome) = page("<html><head></head><body></body></html>", &[r#"
+var first=document.createElement('script');first.async=false;first.crossOrigin='anonymous';first.src='/one.js';
+document.head.appendChild(first);first.removeAttribute('crossorigin');
+var second=document.createElement('script');second.async=false;second.crossOrigin='use-credentials';second.src='/two.js';document.head.appendChild(second);
+var third=document.createElement('script');third.async=false;third.crossOrigin='anonymous';third.src='https://other.test/blocked.js';document.head.appendChild(third);
+"#]);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    let requests = page.take_dynamic_scripts();
+    assert_eq!(requests.len(), 3);
+    assert!(requests[0].same_origin_only && requests[0].error.is_none());
+    assert!(requests[1].same_origin_only && requests[1].error.is_none());
+    assert!(requests[2].same_origin_only);
+    assert!(requests[2].error.as_deref().unwrap().contains("CORS-mode"));
+}

@@ -30,7 +30,7 @@ fn id(app: &App, name: &str) -> usize {
         .iter()
         .enumerate()
         .find_map(|(node, _)| (app.document.attr(node, "id") == Some(name)).then_some(node))
-        .unwrap()
+        .unwrap_or_else(|| panic!("Missing fixture element {name:?}; title={:?}; status={}", app.document.title, app.status))
 }
 fn click(app: &mut App, x: i32, y: i32) {
     app.pointer_down(x, y, false);
@@ -212,6 +212,8 @@ impl Site {
             while !ending.load(Ordering::Relaxed) {
                 match listener.accept() {
                     Ok((mut stream, _)) => {
+                        // Accepted Winsock sockets inherit the polling listener mode.
+                        stream.set_nonblocking(false).unwrap();
                         stream
                             .set_read_timeout(Some(Duration::from_secs(2)))
                             .unwrap();
@@ -222,6 +224,10 @@ impl Site {
                                 break;
                             }
                             bytes.push(byte[0]);
+                        }
+                        // Cancellation/EOF is not a request for an empty path.
+                        if !bytes.ends_with(b"\r\n\r\n") {
+                            continue;
                         }
                         let headers = String::from_utf8(bytes).unwrap();
                         let request_method =
@@ -266,7 +272,13 @@ impl Site {
 impl Drop for Site {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Relaxed);
-        self.thread.take().unwrap().join().unwrap();
+        if let Some(thread) = self.thread.take() {
+            if let Err(failure) = thread.join() {
+                if !std::thread::panicking() {
+                    std::panic::resume_unwind(failure);
+                }
+            }
+        }
     }
 }
 
@@ -299,4 +311,24 @@ fn select_actual_get_and_post_requests_contain_the_user_choice() {
             assert_eq!(body, encoded);
         }
     }
+}
+
+#[test]
+fn select_fixture_waits_for_fragmented_requests_and_ignores_cancelled_connections() {
+    let site = Site::new("get");
+    let address = site.base.strip_prefix("http://").unwrap();
+    // Empty accepts occur when the worker is cancelled before sending HTTP.
+    drop(std::net::TcpStream::connect(address).unwrap());
+    let mut client = std::net::TcpStream::connect(address).unwrap();
+    client.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+    client.write_all(b"GET /fo").unwrap();
+    // Let the fixture accept the socket before the remaining request arrives.
+    std::thread::sleep(Duration::from_millis(30));
+    client.write_all(b"rm HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n").unwrap();
+    let mut response = String::new();
+    client.read_to_string(&mut response).unwrap();
+    assert!(response.starts_with("HTTP/1.1 200 OK\r\n"), "{response}");
+    assert!(response.contains("<select id=s"), "{response}");
+    assert_eq!(site.requests.lock().unwrap().as_slice(),
+        &[("GET".to_owned(), "/form".to_owned(), String::new())]);
 }

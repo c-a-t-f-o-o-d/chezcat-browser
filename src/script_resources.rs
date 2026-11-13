@@ -17,6 +17,7 @@ pub struct DynamicScript {
     pub origin: crate::navigation::Location,
     pub nonce: Option<String>,
     pub policy: crate::csp::PolicySet,
+    pub same_origin_only: bool,
     pub error: Option<String>,
 }
 
@@ -144,7 +145,7 @@ impl Bridge<'_> {
         if self.state.dynamic.script_count >= MAX_PAGE_SCRIPTS {
             self.state.error(
                 "Dynamic script",
-                "Document script attempt limit reached (16 including parser-loaded scripts).",
+                &format!("Document script attempt limit reached ({MAX_PAGE_SCRIPTS} including parser-loaded scripts)."),
             );
             return Ok(());
         }
@@ -156,6 +157,7 @@ impl Bridge<'_> {
             .map(|l| l.source.clone())
             .unwrap_or_else(crate::navigation::Location::home);
         let nonce = crate::csp::nonce(self.doc, node).map(str::to_owned);
+        let same_origin_only = self.doc.attr(node, "crossorigin").is_some();
         let prepare = (|| {
             if kind == "module" {
                 return Err("JavaScript modules are not implemented.".to_owned());
@@ -173,9 +175,6 @@ impl Bridge<'_> {
             {
                 return Err("Subresource Integrity is not implemented; the declared-integrity script was not fetched.".into());
             }
-            if self.doc.attr(node, "crossorigin").is_some() {
-                return Err("CORS-mode scripts are not implemented; a crossorigin attribute requires CORS validation before execution.".into());
-            }
             let target = crate::navigation::resolve(
                 reference,
                 self.state.dynamic.base.as_ref().unwrap_or(&origin),
@@ -188,7 +187,7 @@ impl Bridge<'_> {
                 .url
                 .as_ref()
                 .ok_or("Local pages do not automatically fetch network scripts.")?;
-            crate::http::check_classic_script_origin(origin_url, url)?;
+            crate::http::check_classic_script_mode(origin_url, url, same_origin_only)?;
             self.state
                 .dynamic
                 .policy
@@ -205,6 +204,7 @@ impl Bridge<'_> {
             origin,
             nonce,
             policy: self.state.dynamic.policy.clone(),
+            same_origin_only,
             error,
         });
         self.state.dynamic.in_flight += 1;

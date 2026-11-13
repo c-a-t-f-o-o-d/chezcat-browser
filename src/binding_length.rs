@@ -82,19 +82,25 @@ impl Runtime {
                 let key = self.property_key(property, host)?;
                 debug_assert!(matches!(key, PropertyKey::String(key) if key == "length"));
                 self.step()?; // property read
+                // Literal evaluation/key conversion cannot call out or mutate
+                // this binding. A successful earlier read can reuse its count.
+                // Hits still pay normal lookup/key/step costs, but do not scan.
+                if let Some(length) = self.environment(env).bindings[name].utf16_length {
+                    return Ok(Value::Number(length as f64));
+                }
                 self.work_as(bytes, WorkKind::LengthScan)?;
 
-                // Literal evaluation/key conversion above cannot call out or
-                // mutate/reclaim this environment. No map borrow crosses them.
-                // Charge before reborrowing and scanning; only the omitted
-                // binding payload clone is no longer charged.
+                // Charge the full cold scan before doing it or publishing the
+                // memo. A failed charge leaves no cached successful result.
                 let Some(Value::String(text)) =
                     self.environment(env).bindings[name].value.as_ref()
                 else {
                     unreachable!("literal length read changed its binding");
                 };
                 debug_assert_eq!(text.len(), bytes);
-                Ok(Value::Number(text.encode_utf16().count() as f64))
+                let length = text.encode_utf16().count();
+                self.environment_mut(env).bindings.get_mut(name).unwrap().utf16_length = Some(length);
+                Ok(Value::Number(length as f64))
             }
         }
     }
@@ -419,14 +425,16 @@ mod tests {
             .stack_size(1024 * 1024)
             .spawn(|| {
                 for microtask in [false, true] {
-                    // Preserve the 512-read witness as a real improvement;
-                    // 1536 reads must still fail under the same 8 MiB budget.
-                    for iterations in [512, 1536] {
+                    // Both original literal-key witnesses now reuse one scan.
+                    // Dynamic keys retain snapshots and must still exhaust the
+                    // same budget; this does not weaken the cancellation check.
+                    for (iterations, cached) in [(512, true), (1536, true), (1536, false)] {
                         let mut runtime = Runtime::for_test();
                         runtime.define_global("payload", Value::String("A".repeat(8192))).unwrap();
-                        let setup = "var completed=0,total=0,tail=0,sentinel=0;";
+                        let setup = "var completed=0,total=0,tail=0,sentinel=0,key='length';";
+                        let read = if cached { "payload.length" } else { "payload[key]" };
                         let scan = format!(
-                            "while(completed<{iterations}){{total+=payload.length;completed++;}}tail=1;total;"
+                            "while(completed<{iterations}){{total+={read};completed++;}}tail=1;total;"
                         );
                         let queued = "Promise.resolve().then(function(){sentinel++;});";
                         let source = if microtask {
@@ -444,7 +452,7 @@ mod tests {
                         } else {
                             execution
                         };
-                        if iterations == 512 {
+                        if cached {
                             completion.unwrap();
                             assert!(runtime.job_usage().1 < MAX_COPY_BYTES);
                         } else {
@@ -466,9 +474,9 @@ mod tests {
                             .execute("sentinel;", &mut NoHost)
                             .unwrap()
                             .to_number();
-                        if iterations == 512 {
+                        if cached {
                             assert_eq!(total, completed * 8192.0);
-                            assert_eq!(completed, 512.0);
+                            assert_eq!(completed, iterations as f64);
                             assert_eq!((tail, sentinel), (1.0, 1.0));
                         } else {
                             assert!(completed > 0.0 && completed < 1536.0);
@@ -486,4 +494,94 @@ mod tests {
             .join()
             .unwrap();
     }
+
+    #[test]
+    fn binding_length_memo_reuses_only_successful_scan_and_keeps_steps() {
+        for text in ["", "ABCD", "éΩ", "A😀Z"] {
+            for source in ["payload.length;\n", "payload['length'];\n"] {
+                let mut runtime = Runtime::for_test();
+                runtime.define_global("payload", Value::String(text.into())).unwrap();
+                runtime.begin_job();
+                let cold = runtime.execute(source, &mut NoHost).unwrap();
+                let cold_usage = runtime.job_usage();
+                runtime.begin_job(); // the immutable value, not the job, owns the memo
+                let warm = runtime.execute(source, &mut NoHost).unwrap();
+                let warm_usage = runtime.job_usage();
+                assert_eq!(cold.to_number(), text.encode_utf16().count() as f64);
+                assert_eq!(cold.to_number(), warm.to_number());
+                assert_eq!(cold_usage.0, warm_usage.0);
+                assert_eq!(cold_usage.1 - warm_usage.1, text.len());
+                assert_eq!(runtime.environment(0).bindings["payload"].utf16_length,
+                    Some(text.encode_utf16().count()));
+            }
+        }
+    }
+
+    #[test]
+    fn binding_length_memo_resets_on_equal_byte_replacement_and_survives_failed_write() {
+        let mut runtime = Runtime::for_test();
+        runtime.define_global("payload", Value::String("ABCD".into())).unwrap();
+        runtime.execute("payload.length;", &mut NoHost).unwrap();
+        assert_eq!(runtime.environment(0).bindings["payload"].utf16_length, Some(4));
+        runtime.begin_job();
+        runtime.copy_bytes = 0;
+        assert!(runtime.store_binding(0, "payload", Value::String("😀".into()), false).is_err());
+        assert_eq!(runtime.environment(0).bindings["payload"].utf16_length, Some(4));
+        runtime.begin_job();
+        runtime.store_binding(0, "payload", Value::String("😀".into()), false).unwrap();
+        assert_eq!(runtime.environment(0).bindings["payload"].utf16_length, None);
+        assert_eq!(runtime.execute("payload.length;", &mut NoHost).unwrap().to_number(), 2.0);
+        runtime.store_binding(0, "payload", Value::Number(7.0), false).unwrap();
+        assert_eq!(runtime.environment(0).bindings["payload"].utf16_length, None);
+        assert_eq!(runtime.execute("payload.length;", &mut NoHost).unwrap().to_text(), "undefined");
+    }
+
+    #[test]
+    fn binding_length_failed_scan_does_not_publish_memo() {
+        let (program, id) = expression("payload.length;");
+        let mut runtime = Runtime::for_test();
+        runtime.define_global("payload", Value::String("x".repeat(8192))).unwrap();
+        runtime.begin_job();
+        runtime.copy_bytes = 7 + 4 * "length".len() + 8191;
+        assert!(runtime.eval(&program, id, 0, &Value::Undefined, &mut NoHost).is_err());
+        assert_eq!(runtime.environment(0).bindings["payload"].utf16_length, None);
+        runtime.begin_job();
+        assert_eq!(runtime.execute("payload.length;", &mut NoHost).unwrap().to_number(), 8192.0);
+        assert_eq!(runtime.environment(0).bindings["payload"].utf16_length, Some(8192));
+    }
+
+    #[test]
+    fn binding_length_memo_keeps_alias_closure_argument_and_key_order_semantics() {
+        assert_eq!(Runtime::for_test().execute(
+            include_str!("../tools/fixtures/binding-length-memo.js"), &mut NoHost,
+        ).unwrap().to_text(), "ok");
+    }
+
+    #[test]
+    fn binding_length_memo_user_scale_original_workload_scans_once() {
+        let mut runtime = Runtime::new();
+        runtime.define_global("payload", Value::String("x".repeat(17_592))).unwrap();
+        runtime.begin_job();
+        let result = runtime.execute(
+            "var total=0;for(var i=0;i<6530;i++)total+=payload.length;total;", &mut NoHost,
+        ).unwrap();
+        assert_eq!(result.to_number(), (17_592 * 6530) as f64);
+        assert!(runtime.job_usage().1 < 4 * 1024 * 1024);
+        assert_eq!(runtime.environment(0).bindings["payload"].utf16_length, Some(17_592));
+        // One cached count is stored, not a growing table of payloads or keys.
+        assert!(runtime.environment(0).bindings.len() < 256);
+    }
+
+    #[test]
+    fn binding_length_original_attribution_loop_is_now_a_positive_witness() {
+        let mut runtime = Runtime::for_test();
+        runtime.define_global("payload", Value::String("PRIVATE_WORK_PAYLOAD".repeat(256))).unwrap();
+        runtime.execute("var tail=0,sentinel=0;function burn(){var i=0;while(i<64){payload.length;i++;}tail=1;}", &mut NoHost).unwrap();
+        runtime.begin_job();
+        runtime.copy_bytes = 16384;
+        runtime.execute("burn();tail;", &mut NoHost).unwrap();
+        assert_eq!(runtime.execute("tail;", &mut NoHost).unwrap().to_number(), 1.0);
+        assert!(runtime.string_work_failure_report().is_none());
+    }
+
 }

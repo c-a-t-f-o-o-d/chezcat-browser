@@ -92,8 +92,8 @@ impl Worker {
 
     fn submit(&self, job: Job) -> Result<(), String> {
         let mut state = self.state.0.lock().unwrap();
-        if state.stopping || state.queue.len() + state.completed.len() >= 16 {
-            return Err("Dynamic stylesheet worker queue limit reached (16).".into());
+        if state.stopping || state.queue.len() + state.completed.len() >= loader::MAX_STYLESHEETS {
+            return Err(format!("Dynamic stylesheet worker queue limit reached ({}).", loader::MAX_STYLESHEETS));
         }
         state.queue.push_back(job);
         self.state.1.notify_one();

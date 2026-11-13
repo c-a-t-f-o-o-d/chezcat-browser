@@ -29,7 +29,7 @@ fn browser_budget_is_the_default_even_when_compiling_tests() {
     let mut runtime = Runtime::new();
     assert_eq!(runtime.limits, limits::BROWSER);
     runtime.begin_job();
-    assert_eq!(runtime.steps, 5_000_000);
+    assert_eq!(runtime.steps, 50_000_000);
     assert_eq!(runtime.copy_bytes, 256 * 1024 * 1024);
     assert_eq!(runtime.regexp_work, 32_000_000);
     assert_eq!(runtime.job_usage(), (0, 0, 0));
@@ -100,7 +100,7 @@ fn browser_budget_constraining_a_job_never_changes_the_next_jobs_profile() {
     runtime.constrain_job(5000, 5000, 5000, Instant::now() + Duration::from_secs(30));
     assert_eq!(runtime.job_allowance, (123, 456, 789));
     runtime.begin_job();
-    assert_eq!(runtime.job_allowance, (5_000_000, 256 * 1024 * 1024, 32_000_000));
+    assert_eq!(runtime.job_allowance, (50_000_000, 256 * 1024 * 1024, 32_000_000));
     assert_eq!(runtime.limits, limits::BROWSER);
 }
 
@@ -111,7 +111,7 @@ fn browser_budget_step_and_clock_guards_remain_independent() {
     runtime.steps = 1;
     runtime.step().unwrap();
     let error = runtime.step().unwrap_err();
-    assert_eq!(error.message, "Execution step limit reached (5000000 per job).");
+    assert_eq!(error.message, "Execution step limit reached (50000000 per job).");
     assert!(error.exception.is_none());
     runtime.begin_job();
     runtime.job_deadline = Instant::now() - Duration::from_secs(1);
@@ -125,19 +125,27 @@ fn browser_budget_step_and_clock_guards_remain_independent() {
 
 #[test]
 fn browser_budget_runs_original_length_work_beyond_eight_mib() {
-    let source = "var total=0;for(var i=0;i<1024;i++)total+=payload.length;total;";
-    for profile in [limits::REGRESSION, limits::BROWSER] {
-        let mut runtime = Runtime::with_limits(profile);
-        let mut host = Recorder::default();
-        runtime.define_global("payload", Value::String("x".repeat(16 * 1024))).unwrap();
-        runtime.begin_job();
-        let result = runtime.execute(source, &mut host);
-        if profile == limits::REGRESSION {
-            assert!(result.unwrap_err().contains("String/copy work limit"));
+    // Preserve the original literal-key workload as an optimized success.
+    // The dynamic-key control still demonstrates the larger actual budget.
+    for cached in [true, false] {
+        let source = if cached {
+            "var total=0;for(var i=0;i<1024;i++)total+=payload.length;total;"
         } else {
-            assert_eq!(result.unwrap().to_text(), "16777216");
-            assert!(runtime.job_usage().1 > limits::REGRESSION.copy_bytes);
-            assert!(runtime.job_usage().1 < limits::BROWSER.copy_bytes);
+            "var total=0,key='length';for(var i=0;i<1024;i++)total+=payload[key];total;"
+        };
+        for profile in [limits::REGRESSION, limits::BROWSER] {
+            let mut runtime = Runtime::with_limits(profile);
+            let mut host = Recorder::default();
+            runtime.define_global("payload", Value::String("x".repeat(16 * 1024))).unwrap();
+            runtime.begin_job();
+            let result = runtime.execute(source, &mut host);
+            if profile == limits::REGRESSION && !cached {
+                assert!(result.unwrap_err().contains("String/copy work limit"));
+            } else {
+                assert_eq!(result.unwrap().to_text(), "16777216");
+                assert_eq!(runtime.job_usage().1 < limits::REGRESSION.copy_bytes, cached);
+                assert!(runtime.job_usage().1 < limits::BROWSER.copy_bytes);
+            }
         }
     }
 }
@@ -157,7 +165,9 @@ fn browser_budget_microtasks_share_the_enlarged_allowance_and_still_cancel() {
     let before = runtime.job_usage().1;
     runtime.microtask_checkpoint(&mut host).unwrap();
     assert_eq!(host.records, vec!["16777216".to_owned()]);
-    assert!(runtime.job_usage().1 > limits::REGRESSION.copy_bytes + before);
+    assert!(runtime.job_usage().1 > before);
+    assert!(runtime.job_usage().1 < limits::REGRESSION.copy_bytes);
+    // The original loop remains; it now reuses the successful first scan.
     assert!(runtime.copy_bytes < limits::BROWSER.copy_bytes);
     runtime.begin_job();
     host.records.clear();
@@ -190,4 +200,23 @@ fn browser_budget_preserves_native_and_single_string_limits() {
     assert!(limits::BROWSER.startup_regexp >= limits::BROWSER.regexp_work);
     assert!(limits::BROWSER.startup_host_work >= limits::BROWSER.host_work);
     assert!(limits::BROWSER.startup_seconds >= limits::BROWSER.job_seconds);
+}
+
+#[test]
+fn browser_step_allowance_crosses_the_previous_ceiling_without_resetting_the_job() {
+    let mut runtime = Runtime::new();
+    runtime.begin_job();
+    let deadline = runtime.job_deadline;
+    for _ in 0..5_000_001 { runtime.step().unwrap(); }
+    assert_eq!(runtime.job_usage().0, 5_000_001);
+    assert_eq!(runtime.steps, 44_999_999);
+    assert_eq!(runtime.job_deadline, deadline);
+    assert_eq!(runtime.job_allowance.0, 50_000_000);
+    assert_eq!(runtime.limits.startup_steps, 200_000_000);
+    // A larger work allowance does not disable or extend the clock guard.
+    runtime.job_deadline = Instant::now() - Duration::from_secs(1);
+    runtime.steps &= !255;
+    assert!(runtime.step().unwrap_err().message.contains("time limit"));
+    runtime.begin_job();
+    assert_eq!(runtime.steps, 50_000_000);
 }

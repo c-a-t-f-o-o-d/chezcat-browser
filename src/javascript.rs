@@ -50,6 +50,8 @@ mod environment_lifetime_tests;
 mod function_constructor;
 #[path = "host_objects.rs"]
 mod host_objects;
+#[path = "global_operations.rs"]
+mod global_operations;
 #[path = "iterable_builtins.rs"]
 mod iterable_builtins;
 #[path = "iterator_protocol.rs"]
@@ -2738,6 +2740,9 @@ fn validate_body(program: &Program, body: StmtId) -> Result<(), Fault> {
 struct Binding {
     value: Option<Value>,
     kind: Declaration,
+    // Valid only for this immutable primitive value. put_binding resets this
+    // on every successful replacement, including mapped arguments/eval writes.
+    utf16_length: Option<usize>,
 }
 
 struct Environment {
@@ -2973,6 +2978,8 @@ pub struct Runtime {
     host_method_values: BTreeMap<(u32, &'static str), Value>,
     global_attributes: BTreeMap<String, (bool, bool, bool)>,
     host_globals: HashSet<String>,
+    // Names explicitly exposed as ordinary properties by the embedding host.
+    operation_globals: HashSet<&'static str>,
     arguments_thrower: Option<usize>,
     properties: usize,
     retained_source: usize,
@@ -3057,6 +3064,7 @@ impl Runtime {
             host_method_values: BTreeMap::new(),
             global_attributes: BTreeMap::new(),
             host_globals: HashSet::new(),
+            operation_globals: HashSet::new(),
             arguments_thrower: None,
             properties: 0,
             retained_source: 0,
@@ -3693,7 +3701,7 @@ impl Runtime {
         }
         self.environment_mut(env)
             .bindings
-            .insert(name, Binding { value, kind });
+            .insert(name, Binding { value, kind, utf16_length: None });
         self.bindings += usize::from(new);
         self.value_bytes = self.value_bytes - old_bytes + new_bytes;
         Ok(())
@@ -3731,9 +3739,16 @@ impl Runtime {
         let Some((_, properties)) = self.browser_global else {
             return Ok(false);
         };
-        Ok(host.owns_global_property(name)
+        if host.owns_global_property(name)
             || self.global_binding(name)
-            || self.object(properties)?.properties.contains_key(name))
+            || self.object(properties)?.properties.contains_key(name)
+        {
+            return Ok(true);
+        }
+        if self.is_operation_global(name) {
+            return Ok(self.property_owner(Ordinary::Object(properties), name)?.is_some());
+        }
+        Ok(false)
     }
 
     fn global_value(&mut self, name: &str, host: &mut dyn Host) -> Result<Value, Fault> {
@@ -3800,6 +3815,11 @@ impl Runtime {
         host: &mut dyn Host,
     ) -> Result<(), Fault> {
         if env == 0
+            && self.is_operation_global(name)
+            && !self.environment(0).bindings.contains_key(name)
+        {
+            self.set_global(name.into(), value, host)
+        } else if env == 0
             && self.browser_global.is_some()
             && self.global_binding(name)
             && host.owns_global_property(name)
@@ -3977,6 +3997,9 @@ impl Runtime {
                 StmtKind::Declare(Declaration::Let | Declaration::Const, names) => {
                     for (pattern, _) in names {
                         for name in program.pattern_names_with_work(*pattern, |n| self.work(n))? {
+                            if environment == 0 {
+                                self.check_operation_lexical(&name)?;
+                            }
                             if self.environment(environment).bindings.contains_key(&name) {
                                 return Err(Fault::new(format!(
                                     "Duplicate lexical binding {name:?}."
@@ -4027,6 +4050,9 @@ impl Runtime {
                         });
                 for name in variable_names.iter().chain(function_names) {
                     self.step()?;
+                    if self.is_operation_global(name) {
+                        continue;
+                    }
                     if self
                         .object(properties)?
                         .properties
@@ -4042,8 +4068,22 @@ impl Runtime {
                 }
             }
         }
+        if variable_environment == 0 {
+            for name in &variable_names {
+                self.check_operation_declaration(name, false)?;
+            }
+            for &statement in body {
+                if let StmtKind::Function(name, _) = &program.stmts[statement].kind {
+                    self.check_operation_declaration(name, true)?;
+                }
+            }
+        }
         for name in variable_names {
             self.step()?;
+            if variable_environment == 0 && self.is_operation_global(&name) {
+                self.declare_operation_var(&name, environment != variable_environment)?;
+                continue;
+            }
             if !self
                 .environment(variable_environment)
                 .bindings
@@ -4094,6 +4134,14 @@ impl Runtime {
                             Value::String(name.clone()),
                             Some((false, false, true)),
                         )?;
+                    }
+                    if variable_environment == 0 && self.is_operation_global(name) {
+                        self.declare_operation_function(
+                            name,
+                            function,
+                            environment != variable_environment,
+                        )?;
+                        continue;
                     }
                     if variable_environment == 0 && host.owns_global_property(name) {
                         if let Some((handle, _)) = self.browser_global {
@@ -5374,6 +5422,8 @@ impl Runtime {
                         || self.object(properties)?.properties.contains_key(&name)
                     {
                         true
+                    } else if self.is_operation_global(&name) {
+                        self.property_owner(Ordinary::Object(properties), &name)?.is_some()
                     } else {
                         host.has(handle, &name).map_err(Fault::new)?
                     }
@@ -6990,6 +7040,15 @@ impl Runtime {
             Reference::SymbolProperty(object, key) => self.assign_symbol_property(object, key, value, host),
             Reference::Binding(env, name) => self.write_binding(env, &name, value, false, host),
             Reference::Global(name) => self.set_global(name, value, host),
+            Reference::Missing(name) if self.is_operation_global(&name) => {
+                if self.strict {
+                    Err(Fault::exception("ReferenceError", format!("{name} is not defined.")))
+                } else {
+                    // Only a host-selected replaceable operation may be recreated
+                    // this way. The general implicit-global policy is unchanged.
+                    self.set_global(name, value, host)
+                }
+            }
             Reference::Missing(name) => Err(Fault::new(format!(
                 "{name} is not defined; implicit globals are not supported."
             ))),

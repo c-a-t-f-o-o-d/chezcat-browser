@@ -51,12 +51,12 @@ pub struct Limits {
 /// Copy bytes are cumulative charged work, not reserved or retained memory.
 pub const BROWSER: Limits = Limits {
     heap: BROWSER_HEAP,
-    steps: 5_000_000,
+    steps: 50_000_000,
     copy_bytes: 256 * 1024 * 1024,
     regexp_work: 32_000_000,
     job_seconds: 10,
     host_work: 2_000_000,
-    startup_steps: 20_000_000,
+    startup_steps: 200_000_000,
     startup_copy: 1024 * 1024 * 1024,
     startup_regexp: 128_000_000,
     startup_host_work: 10_000_000,

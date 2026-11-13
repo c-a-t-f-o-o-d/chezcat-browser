@@ -647,10 +647,21 @@ impl Page {
             "addEventListener",
             "removeEventListener",
         ] {
-            let function = runtime
-                .define_host_function(name, WINDOW, name)
-                .expect("fixed timer global");
-            state.native_functions.insert(name, function);
+            if matches!(name, "setTimeout" | "clearTimeout") {
+                runtime
+                    .define_global_operation(
+                        name,
+                        WINDOW,
+                        name,
+                        usize::from(name == "setTimeout"),
+                    )
+                    .expect("fixed replaceable timer operation");
+            } else {
+                let function = runtime
+                    .define_host_function(name, WINDOW, name)
+                    .expect("fixed native global");
+                state.native_functions.insert(name, function);
+            }
         }
         for (object, method) in [
             (NAVIGATOR, "javaEnabled"),
@@ -1438,7 +1449,7 @@ impl Page {
         if !self.state.enabled {
             return "JavaScript did not run for this document (disabled or blocked by document policy).\n".into();
         }
-        let mut text = format!("ChezCat JavaScript subset\n{} script(s), {} active listener(s), {} error(s).\n{} pending timer(s), {} timer callback(s) executed.\nClassic scripts run after parsing. Events come from supported controls/forms and completed dynamic scripts/stylesheets.\nFunction timers use the document queue. Bounded eval follows the document CSP.\nLocation inspection reflects the displayed document; same-origin assign/replace/reload and href/search/hash writes queue navigation.\nSession cookies are memory-only with host-only/Domain scope and bundled public-suffix boundaries; document.cookie excludes HttpOnly entries.\nDynamic external classic scripts use CSP, MIME, request-blocking and bounded source checks; cross-origin HTTPS scripts omit credentials. Dynamic LINK stylesheets retain exact-origin checks. HTML injection, modules, persistent storage, fetch and XHR are not implemented.\n\n", self.state.executed, self.state.listeners.len(), self.state.errors, self.state.timers.len(), self.state.timer_callbacks);
+        let mut text = format!("ChezCat JavaScript subset\n{} script(s), {} active listener(s), {} error(s).\n{} pending timer(s), {} timer callback(s) executed.\nClassic scripts run after parsing. Events come from supported controls/forms and completed dynamic scripts/stylesheets.\nFunction timers use the document queue. Bounded eval follows the document CSP.\nLocation inspection reflects the displayed document; same-origin assign/replace/reload and href/search/hash writes queue navigation.\nSession cookies are memory-only with host-only/Domain scope and bundled public-suffix boundaries; document.cookie excludes HttpOnly entries.\nDynamic external classic scripts use CSP, MIME, request-blocking and bounded source checks; cross-origin HTTPS scripts omit credentials. Crossorigin-marked scripts require same-origin at every hop. Dynamic LINK stylesheets retain exact-origin checks. HTML injection, modules, persistent storage, fetch and XHR are not implemented.\n\n", self.state.executed, self.state.listeners.len(), self.state.errors, self.state.timers.len(), self.state.timer_callbacks);
         let attribution = self.runtime.string_work_failure_report();
         // Reserve the fixed snapshot inside the existing log byte allowance.
         // Rendering never mutates the stored log, counters, or error count.
@@ -2596,8 +2607,6 @@ impl Host for Bridge<'_> {
                 | "location"
                 | "addEventListener"
                 | "removeEventListener"
-                | "setTimeout"
-                | "clearTimeout"
                 | "requestAnimationFrame"
                 | "cancelAnimationFrame"
                 | "performance"
@@ -2730,8 +2739,6 @@ impl Host for Bridge<'_> {
                     | "clientInformation"
                     | "addEventListener"
                     | "removeEventListener"
-                    | "setTimeout"
-                    | "clearTimeout"
                     | "requestAnimationFrame"
                     | "cancelAnimationFrame"
                     | "performance"
@@ -3376,6 +3383,11 @@ impl Host for Bridge<'_> {
             };
         }
         if object == WINDOW {
+            if matches!(method, "setTimeout" | "clearTimeout")
+                && (!self.state.enabled || !self.doc.scripting_enabled)
+            {
+                return Err("Timer capability is unavailable while scripting is disabled.".into());
+            }
             match method {
                 "setTimeout" => return self.state.set_timeout(args),
                 "clearTimeout" => return self.state.clear_timeout(args),
@@ -5281,9 +5293,13 @@ mod browser_budget_tests {
         assert_eq!(page.state.host_work, 2_000_000);
         assert_eq!(page.state.copy_work, 256 * 1024 * 1024);
         let report = page.report();
-        assert!(report.contains("5000000 steps / 10 seconds / 256 MiB"));
-        assert!(report.contains("20000000 steps / 30 seconds / 1024 MiB"));
+        assert!(report.contains("50000000 steps / 10 seconds / 256 MiB"));
+        assert!(report.contains("200000000 steps / 30 seconds / 1024 MiB"));
         assert!(report.contains("262144 properties per object / 1048576 per document"));
         assert!(report.contains("65536 object identities; array length 1048576; 64 MiB"));
     }
 }
+
+#[cfg(test)]
+#[path = "script_timer_global_tests.rs"]
+mod timer_global_tests;
