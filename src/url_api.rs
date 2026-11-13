@@ -139,6 +139,15 @@ pub(super) enum Data {
     },
 }
 impl Data {
+    #[cfg(test)]
+    pub(super) fn reachability_edges(&self, add: &mut impl FnMut(super::function_reachability::Edge)) {
+        use super::function_reachability::Edge;
+        match self {
+            Self::Url { params, .. } => add(Edge::Object(*params)),
+            Self::Params { owner, .. } | Self::Iterator { source: owner, .. } => { if let Some(id) = owner { add(Edge::Object(*id)); } }
+        }
+    }
+
     pub(super) fn tag(&self) -> &'static str {
         match self {
             Self::Url { .. } => "URL",
@@ -159,6 +168,13 @@ pub(super) struct Roots {
     url: Option<usize>,
     params: Option<usize>,
     iterator: Option<usize>,
+}
+
+#[cfg(test)]
+impl Roots {
+    pub(super) fn reachability_edges(&self, add: &mut impl FnMut(super::function_reachability::Edge)) {
+        for id in [self.url, self.params, self.iterator].into_iter().flatten() { add(super::function_reachability::Edge::Object(id)); }
+    }
 }
 #[derive(Clone, Copy)]
 pub(super) enum Op {

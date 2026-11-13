@@ -66,6 +66,36 @@ pub(super) struct ParkedRoots {
 }
 
 impl Runtime {
+    #[cfg(test)]
+    pub(super) fn reachability_intrinsic_edges(&self, add: &mut impl FnMut(super::function_reachability::Edge)) {
+        use super::function_reachability::Edge;
+        macro_rules! emit {
+            ($roots:expr) => {{
+                let roots = $roots;
+                for id in [roots.symbol_prototype, roots.object_prototype, roots.array_prototype, roots.regexp_prototype,
+                    roots.date_prototype, roots.string_prototype, roots.number_prototype, roots.boolean_prototype].into_iter().flatten() { add(Edge::Object(id)); }
+                for id in [roots.function_prototype, roots.regexp_constructor, roots.arguments_thrower, roots.array_to_string_intrinsic].into_iter().flatten() { add(Edge::Function(id)); }
+                for &id in roots.error_prototypes.values() { add(Edge::Object(id)); }
+                if let Some((_, id)) = roots.browser_global { add(Edge::Object(id)); }
+                roots.binary_roots.reachability_edges(add);
+                roots.collection_roots.reachability_edges(add);
+                roots.text_roots.reachability_edges(add);
+                roots.url_roots.reachability_edges(add);
+            }};
+        }
+        emit!(self);
+        if let Some(parked) = &self.parked_main_roots {
+            emit!(&parked.roots);
+            if let Some(id) = parked.promise_roots.0 { add(Edge::Object(id)); }
+            if let Some(id) = parked.promise_roots.1 { add(Edge::Function(id)); }
+        }
+        for realm in &self.intrinsic_realms {
+            emit!(&realm.roots);
+            if let Some(id) = realm.promise_roots.0 { add(Edge::Object(id)); }
+            if let Some(id) = realm.promise_roots.1 { add(Edge::Function(id)); }
+        }
+    }
+
     pub(super) fn ensure_global_intrinsics(&mut self, name: &str) -> Result<(), Fault> {
         if self.deferred_intrinsics == 0 && self.failed_intrinsics == 0 { return Ok(()); }
         let (bit, names) = if BINARY_GLOBALS.contains(&name) { (1, BINARY_GLOBALS) }

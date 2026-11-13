@@ -85,6 +85,12 @@ pub(super) enum Data {
     View(View),
 }
 impl Data {
+    #[cfg(test)]
+    pub(super) fn reachability_edges(&self, add: &mut impl FnMut(super::function_reachability::Edge)) {
+        use super::function_reachability::Edge;
+        match self { Self::Typed(view) => add(Edge::Object(view.buffer)), Self::View(view) => add(Edge::Object(view.buffer)), Self::Buffer(_) => {} }
+    }
+
     pub(super) fn tag(&self) -> &'static str {
         match self {
             Self::Buffer(_) => "ArrayBuffer",
@@ -101,6 +107,15 @@ pub(super) struct Roots {
     typed: [Option<usize>; 10],
     buffer_constructor: Option<usize>,
     constructors: [Option<usize>; 10],
+}
+
+#[cfg(test)]
+impl Roots {
+    pub(super) fn reachability_edges(&self, add: &mut impl FnMut(super::function_reachability::Edge)) {
+        use super::function_reachability::Edge;
+        for id in [self.buffer, self.view].into_iter().chain(self.typed).flatten() { add(Edge::Object(id)); }
+        for id in [self.buffer_constructor].into_iter().chain(self.constructors).flatten() { add(Edge::Function(id)); }
+    }
 }
 
 #[derive(Clone, Copy)]

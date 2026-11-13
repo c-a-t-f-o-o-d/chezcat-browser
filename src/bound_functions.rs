@@ -16,6 +16,16 @@ pub(super) struct Bound {
     arguments: Vec<Value>,
 }
 
+#[cfg(test)]
+impl Bound {
+    pub(super) fn reachability_edges(&self, add: &mut impl FnMut(super::function_reachability::Edge)) {
+        use super::function_reachability::Edge;
+        add(Edge::Function(self.target));
+        Edge::value(&self.receiver, add);
+        for value in &self.arguments { Edge::value(value, add); }
+    }
+}
+
 impl Runtime {
     pub(super) fn bind_function(
         &mut self,

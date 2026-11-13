@@ -201,6 +201,65 @@ pub(super) struct Arena {
     allocation_trace: AllocationTrace,
 }
 
+#[cfg(test)]
+impl Capability {
+    fn reachability_edges(&self, add: &mut impl FnMut(super::function_reachability::Edge)) {
+        for value in [&self.promise, &self.resolve, &self.reject] { super::function_reachability::Edge::value(value, add); }
+    }
+}
+
+#[cfg(test)]
+impl Data {
+    pub(super) fn reachability_edges(&self, add: &mut impl FnMut(super::function_reachability::Edge)) {
+        use super::function_reachability::Edge;
+        match &self.state { State::Fulfilled(value) | State::Rejected(value) => Edge::value(value, add), State::Pending => {} }
+        for reaction in &self.reactions {
+            reaction.capability.reachability_edges(add);
+            for id in [reaction.fulfill, reaction.reject].into_iter().flatten() { add(Edge::Function(id)); }
+        }
+    }
+}
+
+#[cfg(test)]
+impl Closure {
+    pub(super) fn reachability_edges(&self, add: &mut impl FnMut(super::function_reachability::Edge)) {
+        use super::function_reachability::Edge;
+        match self {
+            Self::Finally { handler, constructor, .. } => { add(Edge::Function(*handler)); add(Edge::Function(*constructor)); }
+            Self::FinallyValue { value, .. } => Edge::value(value, add),
+            // Pair/slot/group metadata are conservatively rooted by Arena.
+            _ => {}
+        }
+    }
+}
+
+#[cfg(test)]
+impl Arena {
+    pub(super) fn reachability_edges(&self, add: &mut impl FnMut(super::function_reachability::Edge)) {
+        use super::function_reachability::Edge;
+        if let Some(id) = self.prototype { add(Edge::Object(id)); }
+        if let Some(id) = self.constructor { add(Edge::Function(id)); }
+        for pair in &self.pairs { add(Edge::Object(pair.promise)); }
+        for slot in &self.capabilities {
+            for value in [&slot.resolve, &slot.reject].into_iter().flatten() { Edge::value(value, add); }
+        }
+        for group in &self.groups { group.capability.reachability_edges(add); add(Edge::Object(group.values)); }
+        for (_, job) in &self.jobs {
+            match job {
+                Job::Callback(id) => add(Edge::Function(*id)),
+                Job::Thenable { promise, receiver, then } => {
+                    add(Edge::Object(*promise)); Edge::value(receiver, add); Edge::value(then, add);
+                }
+                Job::Reaction { capability, handler, value, .. } => {
+                    capability.reachability_edges(add);
+                    if let Some(id) = handler { add(Edge::Function(*id)); }
+                    Edge::value(value, add);
+                }
+            }
+        }
+    }
+}
+
 impl Runtime {
     pub(super) fn microtask_allocation_diagnostic(&self) -> String {
         let trace = &self.promises.allocation_trace;

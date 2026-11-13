@@ -63,6 +63,44 @@ mod tests {
     }
 
     #[test]
+    fn original_replaced_cells_keep_captured_state_receiver_and_identity_then_reach_cumulative_guard() {
+        struct NoHost;
+        impl Host for NoHost {
+            fn get(&mut self, _: u32, _: &str) -> Result<Value, String> { panic!("unexpected get") }
+            fn set(&mut self, _: u32, _: &str, _: Value) -> Result<(), String> { panic!("unexpected set") }
+            fn call(&mut self, _: u32, _: &str, _: &[Value]) -> Result<Value, String> { panic!("unexpected call") }
+        }
+        let setup = r#"
+var order='',slots=[],first,previous,count=0;
+var model=Object.create(Object.prototype,{payload:{get:function(){order+='g';return this.read();}}});
+function replace(value){
+    var state=value,writes=0;
+    var cell=Object.create(model);
+    cell.write=function(next){order+='w';state=next;writes++;};
+    cell.read=function(){order+='r';return state+writes;};
+    slots[0]=cell;count++;
+    return cell;
+}
+"#;
+        let mut runtime = Runtime::with_limits(limits::BROWSER);
+        runtime.execute(setup, &mut NoHost).unwrap();
+        let initial = runtime.functions.len();
+        runtime.execute("Promise.resolve().then(function(){for(var i=0;i<64;i++){var current=replace(i);if(i===0)first=current;if(previous&&(previous===current||previous.write===current.write||previous.read===current.read))throw 'identity';order='';current.write(i*2);if(current.payload!==i*2+1||order!=='wgr')throw 'receiver/state/order';previous=current;}if(first===slots[0]||first.payload!==1||slots[0].payload!==127)throw 'retained state';});", &mut NoHost).unwrap();
+        runtime.microtask_checkpoint(&mut NoHost).unwrap();
+        let scripts = runtime.functions.iter().filter(|function| matches!(function, Function::Script { .. })).count();
+        assert_eq!(scripts, 131); // shared getter + factory + reaction + two per cell
+        assert!(runtime.functions.len() >= initial + 128);
+        println!("Original replaced cells: 64 cells, 128 distinct stateful methods, retained first/last state and w/g/r order pass; Script identities={scripts}.");
+
+        runtime.begin_job();
+        runtime.execute("Promise.resolve().then(function(){for(var i=0;i<2000;i++){var current=replace(i);current.write(i*2);if(current.payload!==i*2+1)throw 'state';}});", &mut NoHost).unwrap();
+        let error = runtime.microtask_checkpoint(&mut NoHost).unwrap_err();
+        assert!(error.contains("Function limit reached (1024)") && error.contains("microtasks-active=Some(\"reaction\")"), "{error}");
+        assert_eq!(runtime.functions.len(), MAX_FUNCTIONS);
+        println!("Original replacement workload: {error}");
+    }
+
+    #[test]
     fn duplicate_direct_hoists_allocate_only_fresh_survivors() {
         struct NoHost;
         impl Host for NoHost {

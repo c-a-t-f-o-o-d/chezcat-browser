@@ -17,6 +17,13 @@ pub(super) struct Pending {
 }
 
 impl Pending {
+    #[cfg(test)]
+    pub(super) fn reachability_edges(&self, add: &mut impl FnMut(super::function_reachability::Edge)) {
+        use super::function_reachability::Edge;
+        add(Edge::Function(self.function));
+        for value in &self.values { Edge::value(value, add); }
+    }
+
     pub(super) fn bytes(&self) -> usize {
         self.values.iter().map(Value::bytes).sum()
     }

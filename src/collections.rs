@@ -49,6 +49,12 @@ pub(super) struct Data {
     sequence: usize,
 }
 impl Data {
+    #[cfg(test)]
+    pub(super) fn reachability_edges(&self, add: &mut impl FnMut(super::function_reachability::Edge)) {
+        use super::function_reachability::Edge;
+        for entry in self.ordered.values() { Edge::value(&entry.key, add); Edge::value(&entry.value, add); }
+    }
+
     fn new(kind: Kind) -> Self {
         Self {
             kind,
@@ -82,6 +88,11 @@ pub(super) struct IteratorData {
     text: Option<String>,
 }
 impl IteratorData {
+    #[cfg(test)]
+    pub(super) fn reachability_edges(&self, add: &mut impl FnMut(super::function_reachability::Edge)) {
+        if let Some(id) = self.source { add(super::function_reachability::Edge::Object(id)); }
+    }
+
     pub(super) fn tag(&self) -> &'static str {
         match self.family {
             Family::Array => "Array Iterator",
@@ -100,6 +111,15 @@ pub(super) struct Roots {
     set_iterator: Option<usize>,
     string_iterator: Option<usize>,
     array_values: Option<usize>,
+}
+
+#[cfg(test)]
+impl Roots {
+    pub(super) fn reachability_edges(&self, add: &mut impl FnMut(super::function_reachability::Edge)) {
+        use super::function_reachability::Edge;
+        for id in [self.map, self.set, self.array_iterator, self.map_iterator, self.set_iterator, self.string_iterator].into_iter().flatten() { add(Edge::Object(id)); }
+        if let Some(id) = self.array_values { add(Edge::Function(id)); }
+    }
 }
 #[derive(Clone, Copy)]
 pub(super) enum Op {

@@ -92,6 +92,13 @@ pub(super) struct Roots {
     decoder: Option<usize>,
 }
 
+#[cfg(test)]
+impl Roots {
+    pub(super) fn reachability_edges(&self, add: &mut impl FnMut(super::function_reachability::Edge)) {
+        for id in [self.encoder, self.decoder].into_iter().flatten() { add(super::function_reachability::Edge::Object(id)); }
+    }
+}
+
 // The Windows-1252 C1 table is normative code-point data, not implementation
 // code. Its five legacy undefined positions decode to their control values.
 const WINDOWS_C1: [u16; 32] = [

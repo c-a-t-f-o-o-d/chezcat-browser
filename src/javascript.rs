@@ -31,6 +31,9 @@ mod binding_character;
 mod intrinsic_realms;
 #[path = "function_allocation.rs"]
 mod function_allocation;
+#[cfg(test)]
+#[path = "function_reachability.rs"]
+mod function_reachability;
 #[path = "deferred_native_methods.rs"]
 mod deferred_native_methods;
 #[path = "function_source.rs"]
