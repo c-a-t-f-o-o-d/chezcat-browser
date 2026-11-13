@@ -50,9 +50,7 @@ impl Runtime {
             if self.programs.len() >= MAX_PROGRAMS
                 || self.retained_source.saturating_add(source.len()) > MAX_RETAINED_SOURCE
             {
-                return Err(Fault::new(
-                    "Retained script limit reached (128 scripts / 2 MiB source).",
-                ));
+                return Err(self.program_limit_fault(&source, None, "dynamic-constructor", Some(false), false));
             }
             // Newlines terminate trailing line comments. Separate parses and
             // exact wrapper shapes prevent either fragment from supplying the
@@ -131,7 +129,7 @@ impl Runtime {
         let program = Parser::parse_context(source, &mut self.regexp_work, false, self.eval_depth)?;
         let nodes = program.node_count();
         if self.retained_ast.saturating_add(nodes) > MAX_RETAINED_AST {
-            return Err(Fault::new("Retained AST limit reached (262144 nodes)."));
+            return Err(self.program_limit_fault(source, Some(nodes), "dynamic-validation", Some(false), true));
         }
         self.work(nodes.saturating_mul(std::mem::size_of::<usize>()))?;
         Ok(program)

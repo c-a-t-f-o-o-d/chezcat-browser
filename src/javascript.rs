@@ -35,6 +35,8 @@ mod function_allocation;
 mod function_arena;
 #[path = "number_radix.rs"]
 mod number_radix;
+#[path = "program_allocation.rs"]
+mod program_allocation;
 #[path = "function_reachability.rs"]
 mod function_reachability;
 #[cfg(test)]
@@ -3697,9 +3699,7 @@ impl Runtime {
         if self.programs.len() >= MAX_PROGRAMS
             || self.retained_source.saturating_add(source.len()) > MAX_RETAINED_SOURCE
         {
-            return Err(Fault::new(
-                "Retained script limit reached (128 scripts / 2 MiB source).",
-            ));
+            return Err(self.program_limit_fault(source, None, if handler { "handler" } else { "ordinary" }, Some(strict), false));
         }
         self.work(source.len())?;
         let program = Rc::new(if strict || self.eval_depth != 0 {
@@ -3743,9 +3743,7 @@ impl Runtime {
         if self.programs.len() >= MAX_PROGRAMS
             || self.retained_source.saturating_add(program.source.len()) > MAX_RETAINED_SOURCE
         {
-            return Err(Fault::new(
-                "Retained script limit reached (128 scripts / 2 MiB source).",
-            ));
+            return Err(self.program_limit_fault(&program.source, Some(program.node_count()), "parsed-retention", None, false));
         }
         let regexp_bytes = program
             .exprs
@@ -3757,7 +3755,7 @@ impl Runtime {
             .sum::<usize>();
         let nodes = program.node_count();
         if self.retained_ast.saturating_add(nodes) > MAX_RETAINED_AST {
-            return Err(Fault::new("Retained AST limit reached (262144 nodes)."));
+            return Err(self.program_limit_fault(&program.source, Some(nodes), "parsed-retention", None, true));
         }
         self.retain_regexp(regexp_bytes)?;
         self.retained_source += program.source.len();
