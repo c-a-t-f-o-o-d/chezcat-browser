@@ -148,20 +148,19 @@ impl Runtime {
         host: &mut dyn Host,
     ) -> Result<Value, Fault> {
         // Branding happens before any user-observable radix conversion.
-        let receiver = self.wrapped_primitive(&receiver)?.unwrap_or(receiver);
-        if !matches!(&receiver, Value::Number(_) if number)
-            && !matches!(&receiver, Value::Bool(_) if !number)
-        {
-            return Err(Fault::exception(
-                "TypeError",
-                "Primitive value method has an incompatible receiver.",
-            ));
-        }
+        // Read only the required scalar slot, without cloning an unrelated
+        // String wrapper. Preserve the existing zero-byte slot-access charge.
+        self.work(0)?;
+        let receiver = match (&receiver, self.wrapped_data(&receiver), number) {
+            (Value::Number(value), _, true) | (_, Some(Data::Number(value)), true) => Value::Number(*value),
+            (Value::Bool(value), _, false) | (_, Some(Data::Boolean(value)), false) => Value::Bool(*value),
+            _ => return Err(Fault::exception("TypeError", "Primitive value method has an incompatible receiver.")),
+        };
         if method == "valueOf" {
             return Ok(receiver);
         }
-        // Boolean.toString ignores arguments. Number retains the documented
-        // decimal-output subset, but observes ToIntegerOrInfinity on its radix.
+        // Boolean.toString ignores arguments. Number validates the radix before
+        // formatting even NaN/infinity/zero, preserving observable coercion order.
         if number {
             let radix = match args.first() {
                 None | Some(Value::Undefined) => 10.0,
@@ -183,9 +182,8 @@ impl Runtime {
             let simple =
                 matches!(&receiver, Value::Number(value) if !value.is_finite() || *value == 0.0);
             if radix != 10.0 && !simple {
-                return Err(Fault::new(
-                    "Nondecimal Number string conversion is not implemented.",
-                ));
+                let Value::Number(value) = receiver else { unreachable!() };
+                return self.number_radix_string(value, radix as u32);
             }
         }
         self.checked_value(Value::String(receiver.script_text()?))

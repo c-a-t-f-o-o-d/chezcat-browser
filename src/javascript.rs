@@ -33,6 +33,8 @@ mod intrinsic_realms;
 mod function_allocation;
 #[path = "function_arena.rs"]
 mod function_arena;
+#[path = "number_radix.rs"]
+mod number_radix;
 #[path = "function_reachability.rs"]
 mod function_reachability;
 #[cfg(test)]
