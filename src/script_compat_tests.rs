@@ -1,6 +1,38 @@
 use super::*;
 
 #[test]
+fn element_has_attributes_reports_actual_presence_and_borrows_only_element_receivers() {
+    let (doc,_,page,outcome)=page("<p id=p data-x=''></p>",&[r#"
+var p=document.getElementById('p'),f=p.hasAttributes,e=document.createElement('div');
+if(f.length!==0||f!==p.hasAttributes||!p.hasAttributes()||e.hasAttributes())throw 'actual/default presence';
+e.className='';if(!f.call(e))throw 'empty value still present';e.removeAttribute('class');if(f.call(e))throw 'removal';
+var called=0;e.hasAttributes({toString:function(){called++;throw 'not converted';}});if(called)throw 'ignored args';
+var rejected=0;for(var bad of [{},window,document,p.style,document.createTextNode('x')])try{f.call(bad);}catch(x){if(x.name==='TypeError')rejected++;}if(rejected!==5)throw 'brand';
+document.title='has-attributes-ok';
+"#]);
+    assert_eq!(outcome.errors,0,"{}",page.report());
+    assert_eq!(doc.title,"has-attributes-ok");
+}
+
+#[test]
+fn native_instanceof_uses_realm_roots_and_original_mutable_image_prototype() {
+    let (doc,_,page,outcome)=page("<p id=p></p><img id=i>",&[r#"
+var values=[document,navigator,document.getElementById('p'),document.createTextNode('t'),document.getElementsByClassName('x'),document.getElementById('p').classList,document.getElementById('p').style];
+function C(){};for(var x of values){if(x instanceof Array||!(x instanceof Object)||x instanceof C)throw 'real native ancestry';}
+C.prototype=Object.prototype;for(var x of values)if(!(x instanceof C))throw 'prototype identity not constructor name';
+var OriginalImage=Image,img=new Image(),parsed=document.getElementById('i');
+function Alias(){};Alias.prototype=OriginalImage.prototype;
+if(!(img instanceof Alias)||!(parsed instanceof Alias)||!(img instanceof OriginalImage)||img instanceof Array)throw 'image canonical anchor';
+{let Image=function Replacement(){};if(img instanceof Image||!(img instanceof OriginalImage))throw 'shadowed name';}
+Object.setPrototypeOf(OriginalImage.prototype,Array.prototype);
+if(!(img instanceof Array)||!(parsed instanceof Array)||Array.isArray(img))throw 'actual changed image ancestry';
+Object.setPrototypeOf(OriginalImage.prototype,Object.prototype);document.title='native-instanceof-ok';
+"#]);
+    assert_eq!(outcome.errors,0,"{}",page.report());
+    assert_eq!(doc.title,"native-instanceof-ok");
+}
+
+#[test]
 fn host_array_slice_captures_length_but_reads_live_indices_and_keeps_dom_identity() {
     let (doc,_,page,outcome)=page("<main><p id=a class=probe></p><p id=b class=probe></p><p id=c class=probe></p></main>",&[r#"
 var live=document.getElementsByClassName('probe'),a=document.getElementById('a'),b=document.getElementById('b'),c=document.getElementById('c');

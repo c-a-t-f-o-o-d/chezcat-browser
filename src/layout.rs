@@ -256,6 +256,8 @@ pub struct ClientBox {
     pub height: i32,
     pub left: i32,
     pub top: i32,
+    pub right: i32,
+    pub bottom: i32,
 }
 
 pub struct Layout {
@@ -268,6 +270,8 @@ pub struct Layout {
     hits: Vec<HitRegion>,
     pub height: i32,
     pub client_boxes: Vec<Option<ClientBox>>,
+    /// No padding-box record is insufficient to prove no inline CSS box.
+    pub offset_unavailable: Vec<bool>,
     fixed_runs: Vec<bool>,
     fixed_items: Vec<bool>,
     fixed_controls: Vec<bool>,
@@ -599,6 +603,7 @@ pub fn build_viewport_with_fonts(
         hits: Vec::new(),
         height: 0,
         client_boxes: vec![None; doc.nodes.len()],
+        offset_unavailable: vec![true; doc.nodes.len()],
         fixed_runs: Vec::new(),
         fixed_items: Vec::new(),
         fixed_controls: Vec::new(),
@@ -798,6 +803,8 @@ impl Engine<'_> {
                     height: record.height + record.padding[0] + record.padding[2],
                     left: record.border[3],
                     top: record.border[0],
+                    right: record.border[1],
+                    bottom: record.border[2],
                 });
             }
         }
@@ -823,7 +830,23 @@ impl Engine<'_> {
                 height: (control.height - border[0] - border[2]).max(0),
                 left: border[3],
                 top: border[0],
+                right: border[1],
+                bottom: border[2],
             });
+        }
+        // Confirm only genuine no-box cases. Unmeasured inline fragments or
+        // truncated/unsupported layout retain an explicit unavailable result.
+        for node in 0..self.doc.nodes.len() {
+            if self.layout.client_boxes[node].is_some() { continue; }
+            let mut current=Some(node);
+            for _ in 0..MAX_DEPTH {
+                let Some(parent)=current else {break;};
+                if self.styles[parent].display==Display::None || forms::kind(self.doc,parent)==Some(Kind::Hidden) {
+                    self.layout.offset_unavailable[node]=false;
+                    break;
+                }
+                current=self.parents[parent];
+            }
         }
     }
 
@@ -2233,6 +2256,8 @@ impl Engine<'_> {
                 height,
                 left: 0,
                 top: 0,
+                right: 0,
+                bottom: 0,
             });
             // Row groups have no separate paint pass. Their rendered extent
             // spans their rows, including spacing between those rows but not
@@ -2263,6 +2288,8 @@ impl Engine<'_> {
                 height: (bottom - top).max(0),
                 left: 0,
                 top: 0,
+                right: 0,
+                bottom: 0,
             });
         }
     }
@@ -4162,6 +4189,8 @@ impl Engine<'_> {
             height: padding[0] + padding[2],
             left: border[3],
             top: border[0],
+            right: border[1],
+            bottom: border[2],
         });
         self.atoms.push(Atom {
             kind: AtomKind::Image { item, node },

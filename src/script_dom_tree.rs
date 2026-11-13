@@ -278,6 +278,7 @@ impl Bridge<'_> {
         let node = node_index(object).filter(|&node| node < self.doc.nodes.len())?;
         match property {
             "getAttributeNode" if self.attr_element_receiver(object) => Some("getAttributeNode"),
+            "hasAttributes" if self.attr_element_receiver(object) => Some("hasAttributes"),
             "getAttributeNodeNS" if self.attr_element_receiver(object) => Some("getAttributeNodeNS"),
             "removeAttributeNS" if self.attr_element_receiver(object) => Some("removeAttributeNS"),
             "removeAttributeNode" if self.attr_element_receiver(object) => Some("removeAttributeNode"),
@@ -292,7 +293,7 @@ impl Bridge<'_> {
     }
 
     pub(super) fn dom_readonly(&self, object: u32, property: &str) -> bool {
-        if matches!(property, "offsetLeft" | "offsetTop" | "scrollWidth" | "scrollHeight") {
+        if matches!(property, "offsetLeft" | "offsetTop" | "offsetWidth" | "offsetHeight" | "scrollWidth" | "scrollHeight") {
             return node_index(object).is_some_and(|node| self.dom_accessible(node)
                 && self.doc.nodes[node].namespace == crate::html::Namespace::Html
                 && matches!(self.doc.nodes[node].kind, NodeKind::Element { .. }));
@@ -378,7 +379,7 @@ impl Bridge<'_> {
         let node = self.dom_node(node_handle(node))?;
         if property == "classList" { return Ok(Some(matches!(self.doc.nodes[node].kind,NodeKind::Element {..}))); }
         if node_constant(property).is_some() { return Ok(Some(true)); }
-        if matches!(property, "tabIndex" | "offsetLeft" | "offsetTop" | "scrollWidth" | "scrollHeight") && matches!(self.doc.nodes[node].kind, NodeKind::Element { .. }) {
+        if matches!(property, "tabIndex" | "offsetLeft" | "offsetTop" | "offsetWidth" | "offsetHeight" | "scrollWidth" | "scrollHeight") && matches!(self.doc.nodes[node].kind, NodeKind::Element { .. }) {
             if self.doc.nodes[node].namespace != crate::html::Namespace::Html {
                 return Err("tabIndex for unsupported foreign parser contexts is unavailable.".into());
             }
@@ -944,6 +945,11 @@ impl Bridge<'_> {
     ) -> Result<Option<Value>, String> {
         if node_index(object).is_some() {
             match method {
+                "hasAttributes" => {
+                    let node = self.node(object)?;
+                    let NodeKind::Element {attrs,..} = &self.doc.nodes[node].kind else {unreachable!()};
+                    return Ok(Some(Value::Bool(!attrs.is_empty())));
+                }
                 "getAttributeNode" => return self.get_attribute_node(object, args).map(Some),
                 "getAttributeNodeNS" => return self.get_attribute_node_ns(object, args).map(Some),
                 "removeAttributeNS" => return self.remove_attribute_ns(object, args).map(Some),

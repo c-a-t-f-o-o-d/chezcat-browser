@@ -18,6 +18,7 @@ pub struct Geometry {
     images: HashMap<usize, (usize, usize)>,
     fonts: Book,
     boxes: Option<Vec<Option<ClientBox>>>,
+    offset_unavailable: Vec<bool>,
     remaining: usize,
 }
 
@@ -38,6 +39,7 @@ impl Geometry {
             images,
             fonts: fonts.clone(),
             boxes: None,
+            offset_unavailable: Vec::new(),
             remaining: MAX_LAYOUTS_PER_JOB,
         }
     }
@@ -96,6 +98,7 @@ impl Geometry {
     ) {
         self.update(width, height, zoom, images);
         self.boxes = Some(layout.client_boxes.clone());
+        self.offset_unavailable = layout.offset_unavailable.clone();
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -136,6 +139,7 @@ impl Geometry {
                 &self.fonts,
             );
             self.boxes = Some(layout.client_boxes);
+            self.offset_unavailable = layout.offset_unavailable;
         }
         let client = self
             .boxes
@@ -144,6 +148,9 @@ impl Geometry {
             .copied()
             .flatten();
         let Some(client) = client else {
+            if matches!(property,"offsetWidth"|"offsetHeight") && self.offset_unavailable.get(node).copied().unwrap_or(true) {
+                return Err(format!("Offset dimension {property} requires unmeasured inline or unsupported layout fragments. Receiver node={node}."));
+            }
             return Ok(0.0);
         };
         let pixels = match property {
@@ -153,6 +160,8 @@ impl Geometry {
             "clientHeight" => client.height,
             "clientLeft" => client.left,
             "clientTop" => client.top,
+            "offsetWidth" => client.width+client.left+client.right,
+            "offsetHeight" => client.height+client.top+client.bottom,
             _ => return Err("Unknown client geometry property.".into()),
         };
         // Layout stores integer surface pixels. Convert back to CSS pixels;

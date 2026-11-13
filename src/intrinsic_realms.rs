@@ -43,6 +43,7 @@ roots! {
     boolean_prototype: Option<usize>,
     error_prototypes: BTreeMap<&'static str, usize>,
     browser_global: Option<(u32, usize)>,
+    native_constructor_prototypes:BTreeMap<(u32,&'static str),usize>,
     global_attributes: BTreeMap<String, (bool, bool, bool)>,
     deferred_global_orders: BTreeMap<&'static str, usize>,
     host_globals: HashSet<String>,
@@ -66,6 +67,24 @@ pub(super) struct ParkedRoots {
 }
 
 impl Runtime {
+    pub(super) fn native_ancestry_anchor(&self, ancestry:NativeAncestry) -> Result<Ordinary,Fault> {
+        let realm = self.window_realms.get(&ancestry.window).copied()
+            .ok_or_else(||Fault::new("Native prototype owner realm is not initialized."))?;
+        let (object,constructors) = if realm==self.active_realm {
+            (self.object_prototype,&self.native_constructor_prototypes)
+        } else {
+            let roots = if let Some(realm)=realm {
+                &self.intrinsic_realms.get(realm).ok_or_else(||Fault::new("Invalid native prototype realm."))?.roots
+            } else {
+                &self.parked_main_roots.as_ref().ok_or_else(||Fault::new("Main native prototype roots are unavailable."))?.roots
+            };
+            (roots.object_prototype,&roots.native_constructor_prototypes)
+        };
+        let id = if let Some(key)=ancestry.constructor {constructors.get(&key).copied()}
+            else {object};
+        id.map(Ordinary::Object).ok_or_else(||Fault::new("Canonical native prototype anchor is unavailable."))
+    }
+
     pub(super) fn reachability_intrinsic_edges(&self, add: &mut impl FnMut(super::function_reachability::Edge)) {
         use super::function_reachability::Edge;
         macro_rules! emit {
@@ -76,6 +95,7 @@ impl Runtime {
                 for id in [roots.function_prototype, roots.regexp_constructor, roots.arguments_thrower, roots.array_to_string_intrinsic].into_iter().flatten() { add(Edge::Function(id)); }
                 for &id in roots.error_prototypes.values() { add(Edge::Object(id)); }
                 if let Some((_, id)) = roots.browser_global { add(Edge::Object(id)); }
+                for &id in roots.native_constructor_prototypes.values() { add(Edge::Object(id)); }
                 roots.binary_roots.reachability_edges(add);
                 roots.collection_roots.reachability_edges(add);
                 roots.text_roots.reachability_edges(add);

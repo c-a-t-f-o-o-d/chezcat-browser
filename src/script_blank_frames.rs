@@ -27,6 +27,13 @@ fn document_node(index: usize, node: usize) -> u32 {
 }
 
 impl Bridge<'_> {
+    pub(super) fn frame_instance_window(&self, handle:u32) -> Option<u32> {
+        let (index,offset)=frame_handle(handle)?;
+        let frame=self.state.blank_frames.get(index)?;
+        (matches!(offset,0..=2) || matches!(offset,4..=6) && (offset-3) < frame.document.nodes.len() as u32)
+            .then(||window(index))
+    }
+
     pub(super) fn frame_position_path(&mut self, handle: u32) -> Option<Result<super::script_position::PositionPath, String>> {
         let (index, offset) = frame_handle(handle)?;
         Some((|| {
@@ -310,6 +317,32 @@ mod tests {
     }
 
     const CREATE: &str = "var f=document.createElement('iframe');f.hidden=true;document.body.appendChild(f);var w=f.contentWindow;";
+
+    #[test]
+    fn native_instanceof_blank_objects_keep_owner_realm_and_origin_validation() {
+        let source=format!("{CREATE}{}",r#"
+var childObject=w.Object,childArray=w.Array,foreignDocument=w.document;
+if(!(foreignDocument instanceof childObject)||foreignDocument instanceof Object||foreignDocument instanceof childArray||document instanceof childObject)throw 'owner realm';
+function Alias(){};Alias.prototype=childObject.prototype;if(!(foreignDocument instanceof Alias))throw 'foreign prototype identity';
+var bound=childObject.bind(null);if(!(foreignDocument instanceof bound))throw 'bound target';
+var check=w.Function('value','return value instanceof Object;');
+if(check(document)!==false||check(foreignDocument)!==true)throw 'parked main/current child roots';
+document.title='native-child-instanceof-ok';
+"#);
+        let (mut doc,mut forms,mut page,outcome)=start(&source,&crate::csp::PolicySet::default());
+        assert_eq!(outcome.errors,0,"{}",page.report());
+        assert_eq!(doc.title,"native-child-instanceof-ok");
+        {
+            let bridge=Bridge {doc:&mut doc,forms:&mut forms,state:&mut page.state};
+            for handle in [window(0)+3,window(0)+7,window(1)+1,node_handle(bridge.doc.nodes.len()+99)] {
+                assert!(bridge.instance_ancestry(handle).is_none());
+            }
+        }
+        page.set_location(&crate::navigation::Location {url:Some(crate::url::parse("https://other.test/").unwrap().0),path:None,fragment:String::new(),root:None});
+        let result=page.console_eval(&mut doc,&mut forms,"foreignDocument instanceof childObject;");
+        assert_eq!(result.errors,1,"{}",page.report());
+        assert!(page.report().contains("same-origin"));
+    }
 
     #[test]
     fn node_position_blank_documents_have_real_ancestry_and_disconnected_roots() {

@@ -41,6 +41,44 @@ fn report(app: &App) -> String {
 }
 
 #[test]
+fn offset_dimensions_use_actual_asymmetric_border_boxes_and_live_zoomed_layout() {
+    let fixture=Fixture::new();
+    let mut app=fixture.open(r#"<html><head><style>
+#box{width:120px;height:30px;padding:5px 7px;border:2px solid black;border-top:3px solid black;border-right:7px solid black;border-bottom:11px solid black}
+</style></head><body><div id=box></div><div style='display:none'><div id=hidden></div></div><button id=read type=button>Read</button><script>
+var box=document.getElementById('box');
+if(box.clientWidth!==134||box.offsetWidth!==143||box.offsetHeight!==54)throw 'asymmetric border box';
+if(document.getElementById('hidden').offsetWidth!==0)throw 'hidden no box';
+var detached=document.createElement('div');detached.style.width='800px';if(detached.offsetWidth!==0)throw 'detached no box';
+box.offsetWidth=1;if(box.offsetWidth!==143)throw 'readonly';
+box.style.width='200px';if(box.offsetWidth!==223)throw 'live width';
+box.style.width='120px';document.getElementById('read').onclick=function(){document.title=box.offsetWidth+','+box.offsetHeight;};document.title='offset-ready';
+</script></body></html>"#);
+    assert_eq!(app.scripting.as_ref().unwrap().error_count(),0,"{}",report(&app));
+    assert_eq!(app.document.title,"offset-ready");
+    app.set_zoom(2.0);
+    app.activate_control(id(&app,"read"));
+    assert_eq!(app.document.title,"143,54","{}",report(&app));
+    let client=app.page.client_boxes[id(&app,"box")].unwrap();
+    assert_eq!(client.left,4);
+    assert_eq!(client.right,14);
+    assert_eq!(client.bottom,22);
+}
+
+#[test]
+fn offset_dimensions_hidden_root_is_zero_and_unmeasured_inline_rejects() {
+    let fixture=Fixture::new();
+    let app=fixture.open(r#"<html style='display:none'><head><script>
+document.title=document.documentElement.offsetWidth+','+document.documentElement.offsetHeight;
+</script></head><body>Hidden</body></html>"#);
+    assert_eq!(app.document.title,"0,0","{}",report(&app));
+    assert_eq!(app.scripting.as_ref().unwrap().error_count(),0);
+    let inline=fixture.open(r#"<html><body><span id=s>Ordinary inline text</span><script>document.title=document.getElementById('s').offsetWidth;</script></body></html>"#);
+    assert_eq!(inline.scripting.as_ref().unwrap().error_count(),1);
+    assert!(report(&inline).contains("unmeasured inline"),"{}",report(&inline));
+}
+
+#[test]
 fn startup_geometry_uses_loaded_css_and_same_job_mutations() {
     let fixture = Fixture::new();
     std::fs::write(fixture.0.join("geometry.css"),

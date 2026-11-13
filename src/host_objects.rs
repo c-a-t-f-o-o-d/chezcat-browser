@@ -56,6 +56,7 @@ impl Runtime {
             Some((false, false, false)),
         )
         .map_err(Fault::display)?;
+        self.native_constructor_prototypes.insert((object,method),prototype);
         Ok(value)
     }
 

@@ -2135,6 +2135,22 @@ impl Bridge<'_> {
 }
 
 impl Host for Bridge<'_> {
+    fn instance_ancestry(&self, object:u32) -> Option<crate::javascript::NativeAncestry> {
+        if let Some(window)=self.frame_instance_window(object) {
+            return Some(crate::javascript::NativeAncestry {window,constructor:None});
+        }
+        let node=node_index(object).filter(|_|self.namespace_receiver(object));
+        let constructor=node.filter(|&node|tag(self.doc,node)=="img"
+                && self.doc.nodes[node].namespace==crate::html::Namespace::Html)
+            .map(|_|(IMAGE_FACTORY,"Image"));
+        let known=node.is_some() || matches!(object,DOCUMENT|CONSOLE|NAVIGATOR|PLUGINS|MIME_TYPES|DOCUMENT_IMAGES|LOCATION|PERFORMANCE)
+            || self.attr_receiver(object) || self.event_receiver(object) || self.class_list_receiver(object)
+            || node_list_index(object).is_some_and(|index|index<self.state.node_lists.len())
+            || collection_handle_index(object).is_some_and(|index|index<self.state.dom.collections.len())
+            || (STYLE_BASE..EVENT_BASE).contains(&object) && self.attr_element_receiver(node_handle(((object-STYLE_BASE)%500_000) as usize));
+        known.then_some(crate::javascript::NativeAncestry {window:WINDOW,constructor})
+    }
+
     fn window_context(&self, window: u32) -> Option<crate::javascript::WindowContext> {
         self.frame_context(window)
     }
@@ -2568,7 +2584,7 @@ impl Host for Bridge<'_> {
             // event does not revoke borrowing; the actual receiver must be live.
             return (EVENT_BASE..self.state.next_event).contains(&object) && self.event_receiver(receiver);
         }
-        if matches!(method, "getAttributeNode" | "getAttributeNodeNS" | "removeAttributeNS" | "removeAttributeNode") {
+        if matches!(method, "getAttributeNode" | "getAttributeNodeNS" | "removeAttributeNS" | "removeAttributeNode" | "hasAttributes") {
             return self.attr_element_receiver(object) && self.attr_element_receiver(receiver);
         }
         if matches!(method, "isDefaultNamespace" | "compareDocumentPosition") {
@@ -3259,9 +3275,11 @@ impl Host for Bridge<'_> {
             "parentElement" => self.element_parent(node, false),
             "parentNode" => self.element_parent(node, true),
             "ownerDocument" => Ok(Value::Host(DOCUMENT)),
-            "clientWidth" | "clientHeight" | "clientLeft" | "clientTop" => {
+            "clientWidth" | "clientHeight" | "clientLeft" | "clientTop" | "offsetWidth" | "offsetHeight" => {
                 let is_root = self.state.tree.document_element == Some(node);
-                let value = if let Some(geometry) = &mut self.state.geometry {
+                let offset=matches!(property,"offsetWidth"|"offsetHeight");
+                let value = if offset && !self.state.dom.connected[node] {0.0}
+                else if let Some(geometry) = &mut self.state.geometry {
                     geometry.read(
                         self.doc,
                         self.forms,
@@ -3270,6 +3288,8 @@ impl Host for Bridge<'_> {
                         property,
                         &mut self.state.host_work,
                     )?
+                } else if offset {
+                    return Err("Offset dimensions require an attached renderer for this connected Element.".into());
                 } else {
                     // A pure script test has no attached viewport/layout box.
                     0.0

@@ -311,7 +311,15 @@ pub struct WindowContext {
     pub location: u32,
 }
 
+/// Proven ordinary tail of an opaque native interface chain, or the actual
+/// exposed prototype anchored by an original native constructor.
+pub struct NativeAncestry {
+    pub window:u32,
+    pub constructor:Option<(u32,&'static str)>,
+}
+
 pub trait Host {
+    fn instance_ancestry(&self, _object:u32) -> Option<NativeAncestry> { None }
     /// Only a genuine, already-created child context may expose these handles.
     /// The default grants no Window capability to an arbitrary native handle.
     fn window_context(&self, _window: u32) -> Option<WindowContext> { None }
@@ -3175,6 +3183,7 @@ pub struct Runtime {
     active_realm: Option<usize>,
     parked_main_roots: Option<intrinsic_realms::ParkedRoots>,
     window_realms: BTreeMap<u32, Option<usize>>,
+    native_constructor_prototypes:BTreeMap<(u32,&'static str),usize>,
     failed_window_realms: HashSet<u32>,
     deferred_intrinsics: u8,
     failed_intrinsics: u8,
@@ -3306,6 +3315,7 @@ impl Runtime {
             active_realm: None,
             parked_main_roots: None,
             window_realms: BTreeMap::new(),
+            native_constructor_prototypes:BTreeMap::new(),
             failed_window_realms: HashSet::new(),
             deferred_intrinsics: if defer_families { 7 } else { 0 },
             failed_intrinsics: 0,
@@ -7817,8 +7827,10 @@ impl Runtime {
             }),
         ) = (&value, self.functions.get(id))
         {
-            if let Some(matches) = host.is_instance(*handle, *object, method) {
-                return Ok(Value::Bool(matches));
+            if host.instance_ancestry(*handle).is_none() {
+                if let Some(matches) = host.is_instance(*handle, *object, method) {
+                    return Ok(Value::Bool(matches));
+                }
             }
         }
         let prototype =
@@ -7843,6 +7855,15 @@ impl Runtime {
                 return self
                     .inherits_from(Ordinary::Object(properties), prototype)
                     .map(Value::Bool);
+            }
+            self.reject_foreign_window(&Value::Host(handle),host)?;
+            if let Some(ancestry) = host.instance_ancestry(handle) {
+                let caller = self.browser_global.map(|(window,_)|window);
+                if caller != Some(ancestry.window) {
+                    host.validate_window_access(caller,ancestry.window).map_err(Fault::new)?;
+                }
+                let anchor = self.native_ancestry_anchor(ancestry)?;
+                return Ok(Value::Bool(anchor==prototype || self.inherits_from(anchor,prototype)?));
             }
             return Err(Fault::new(
                 "Native host prototype checks are not implemented.",
