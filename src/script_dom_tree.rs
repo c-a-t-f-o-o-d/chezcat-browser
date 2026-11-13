@@ -147,8 +147,14 @@ impl Page {
 }
 
 impl Bridge<'_> {
+    pub(super) fn attr_element_receiver(&self, object: u32) -> bool {
+        node_index(object).is_some_and(|node| self.dom_accessible(node)
+            && matches!(self.doc.nodes[node].kind, NodeKind::Element { .. }))
+    }
+
     pub(super) fn namespace_receiver(&self, object: u32) -> bool {
         object == DOCUMENT
+            || self.attr_receiver(object)
             || node_index(object).is_some_and(|node| self.dom_accessible(node))
             || self.frame_node_constant_readonly(object)
     }
@@ -159,6 +165,9 @@ impl Bridge<'_> {
             Some(Value::String(text)) => if text.is_empty() { None } else { Some(text.as_str()) },
             _ => return Err("isDefaultNamespace requires a converted nullable string.".into()),
         };
+        if let Some(result) = self.attr_default_namespace(object) {
+            return result.map(|namespace| Value::Bool(query == namespace));
+        }
         if let Some(result) = self.frame_default_namespace(object) {
             return result.map(|namespace| Value::Bool(query == namespace));
         }
@@ -201,6 +210,8 @@ impl Bridge<'_> {
         }
         let node = node_index(object).filter(|&node| node < self.doc.nodes.len())?;
         match property {
+            "getAttributeNode" if self.attr_element_receiver(object) => Some("getAttributeNode"),
+            "removeAttributeNode" if self.attr_element_receiver(object) => Some("removeAttributeNode"),
             "appendChild" => Some("appendChild"),
             "insertBefore" => Some("insertBefore"),
             "removeChild" => Some("removeChild"),
@@ -238,6 +249,9 @@ impl Bridge<'_> {
         method: &str,
         args: &[Value],
     ) -> Result<(), (&'static str, String)> {
+        if method == "removeAttributeNode" && node_index(object).is_some() {
+            return self.validate_attr_removal(object, args);
+        }
         if object == DOCUMENT && method == "createElement" {
             if let Some(Value::String(name)) = args.first() {
                 // This HTML subset accepts bounded ASCII element names. Other
@@ -794,6 +808,13 @@ impl Bridge<'_> {
         method: &str,
         args: &[Value],
     ) -> Result<Option<Value>, String> {
+        if node_index(object).is_some() {
+            match method {
+                "getAttributeNode" => return self.get_attribute_node(object, args).map(Some),
+                "removeAttributeNode" => return self.remove_attribute_node(object, args).map(Some),
+                _ => (),
+            }
+        }
         if object == DOCUMENT && matches!(method, "createElement" | "createTextNode") {
             let text = self.text(args.first().ok_or("DOM creation requires one argument.")?)?;
             if method == "createTextNode" {

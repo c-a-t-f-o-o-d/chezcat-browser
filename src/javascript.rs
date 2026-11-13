@@ -386,6 +386,8 @@ pub trait Host {
     fn nullable_string_argument(&self, _object: u32, _method: &str, _index: usize) -> bool {
         false
     }
+    /// Node nullable string setters normalize original nullish inputs to empty.
+    fn nullish_string_setter(&self, _object: u32, _property: &str) -> bool { false }
     fn required_arguments(&self, _object: u32, _method: &str) -> usize {
         0
     }

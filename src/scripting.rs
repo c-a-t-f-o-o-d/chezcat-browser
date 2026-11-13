@@ -30,6 +30,8 @@ use dom_collections::collection_handle_index;
 #[path = "script_dom_tree.rs"]
 mod dom_tree;
 use dom_tree::DomState;
+#[path = "script_attr.rs"]
+mod script_attr;
 #[path = "script_navigation.rs"]
 mod page_navigation;
 pub use page_navigation::Navigation;
@@ -280,6 +282,7 @@ struct State {
     detached_nodes: HashSet<usize>,
     node_lists: Vec<Vec<usize>>,
     node_list_references: usize,
+    attributes: Vec<script_attr::Attr>,
     declined_images: usize,
     declined_beacons: usize,
     eval_allowed: bool,
@@ -335,6 +338,7 @@ impl State {
             detached_nodes: HashSet::new(),
             node_lists: Vec::new(),
             node_list_references: 0,
+            attributes: Vec::new(),
             declined_images: 0,
             declined_beacons: 0,
             eval_allowed: false,
@@ -1731,7 +1735,13 @@ impl Bridge<'_> {
         let new = value
             .as_ref()
             .map_or(0, |value| value.len() * factor + name.len());
-        self.state.replace_bytes(old, new)?;
+        let detached_attr = if value.is_none() {
+            self.state.work(self.state.attributes.len())?;
+            self.state.copies(self.state.attributes.iter().filter(|attr| attr.owner == Some(node)).map(|attr| attr.name.len()).sum())?;
+            self.state.attributes.iter().position(|attr| attr.owner == Some(node) && attr.name == name)
+        } else { None };
+        let retained_value = if detached_attr.is_some() { self.doc.attr(node, name).map_or(0, str::len) } else { 0 };
+        self.state.replace_bytes(old, new + retained_value)?;
         let NodeKind::Element { attrs, id, .. } = &mut self.doc.nodes[node].kind else {
             return Err("Not an element.".into());
         };
@@ -1743,7 +1753,11 @@ impl Bridge<'_> {
             if let Some(value) = value {
                 attrs[index].1 = value;
             } else {
-                attrs.remove(index);
+                let (_, removed) = attrs.remove(index);
+                if let Some(attr) = detached_attr {
+                    self.state.attributes[attr].owner = None;
+                    self.state.attributes[attr].value = removed;
+                }
             }
         } else if let Some(value) = value {
             attrs.push((name.into(), value));
@@ -2129,7 +2143,7 @@ impl Host for Bridge<'_> {
     }
 
     fn readonly_property(&self, object: u32, property: &str) -> bool {
-        self.dom_readonly(object, property)
+        self.attr_readonly(object, property) || self.dom_readonly(object, property)
             || collection_handle_index(object).is_some()
             || node_list_index(object).is_some()
                 && (property == "length" || collection_index(property).is_some())
@@ -2143,7 +2157,8 @@ impl Host for Bridge<'_> {
     }
 
     fn string_setter(&self, object: u32, property: &str) -> bool {
-        self.dom_string_setter(object, property)
+        self.attr_receiver(object) && matches!(property, "value" | "nodeValue" | "textContent")
+            || self.dom_string_setter(object, property)
             || Self::location_string_setter(object, property)
             || object == DOCUMENT && property == "cookie"
             || (DATASET_BASE..EVENT_BASE).contains(&object)
@@ -2158,6 +2173,7 @@ impl Host for Bridge<'_> {
 
     fn argument_conversions(&self, object: u32, method: &str) -> &'static [(usize, bool)] {
         if method == "isDefaultNamespace" && self.namespace_receiver(object) { return &[(0, true)]; }
+        if self.attr_element_receiver(object) && method == "getAttributeNode" { return &[(0, true)]; }
         if collection_handle_index(object).is_some() {
             return match method {
                 "item" => &[(0, false)],
@@ -2204,8 +2220,13 @@ impl Host for Bridge<'_> {
         method == "isDefaultNamespace" && index == 0 && self.namespace_receiver(object)
     }
 
+    fn nullish_string_setter(&self, object: u32, property: &str) -> bool {
+        self.attr_receiver(object) && matches!(property, "nodeValue" | "textContent")
+    }
+
     fn required_arguments(&self, object: u32, method: &str) -> usize {
         if method == "isDefaultNamespace" && self.namespace_receiver(object) { return 1; }
+        if self.attr_element_receiver(object) && matches!(method, "getAttributeNode" | "removeAttributeNode") { return 1; }
         if collection_handle_index(object).is_some() && matches!(method, "item" | "namedItem")
             || (object == DOCUMENT || node_index(object).is_some())
                 && method == "getElementsByTagName"
@@ -2400,6 +2421,7 @@ impl Host for Bridge<'_> {
         // Authorize this protocol explicitly for this realm's Window, Document
         // and real DOM nodes; other native capabilities keep the default deny.
         matches!(object, WINDOW | DOCUMENT)
+            || self.attr_receiver(object)
             || node_index(object).is_some_and(|node| self.doc.nodes.get(node).is_some())
     }
 
@@ -2454,6 +2476,9 @@ impl Host for Bridge<'_> {
     }
 
     fn accepts_receiver(&self, object: u32, method: &str, receiver: u32) -> bool {
+        if matches!(method, "getAttributeNode" | "removeAttributeNode") {
+            return self.attr_element_receiver(object) && self.attr_element_receiver(receiver);
+        }
         if method == "isDefaultNamespace" {
             return self.namespace_receiver(object) && self.namespace_receiver(receiver);
         }
@@ -2659,6 +2684,7 @@ impl Host for Bridge<'_> {
 
     fn has(&mut self, object: u32, property: &str) -> Result<bool, String> {
         self.state.work(1)?;
+        if script_attr::index(object).is_some() { return self.attr_has(object, property); }
         if self.is_frame_handle(object) {
             if property == "isDefaultNamespace" && self.namespace_receiver(object) { return Ok(true); }
             return self.frame_get(object, property).unwrap().map(|_| true);
@@ -2896,6 +2922,7 @@ impl Host for Bridge<'_> {
 
     fn get(&mut self, object: u32, property: &str) -> Result<Value, String> {
         self.state.work(1)?;
+        if script_attr::index(object).is_some() { return self.attr_get(object, property); }
         if let Some(value) = self.frame_get(object, property) { return value; }
         if collection_handle_index(object).is_some() {
             return self.tag_collection_get(object, property);
@@ -3153,6 +3180,10 @@ impl Host for Bridge<'_> {
     }
 
     fn set(&mut self, object: u32, property: &str, value: Value) -> Result<(), String> {
+        if script_attr::index(object).is_some() {
+            self.state.work(1)?;
+            return self.attr_set(object, property, value);
+        }
         if self.is_frame_handle(object) { return Err("Blank child native writes and navigation are not implemented.".into()); }
         self.state.work(1)?;
         if collection_handle_index(object).is_some() {

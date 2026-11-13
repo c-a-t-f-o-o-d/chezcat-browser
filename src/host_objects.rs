@@ -140,6 +140,9 @@ impl Runtime {
             };
         }
         let value = if host.string_setter(handle, &name) {
+            let value = if host.nullish_string_setter(handle, &name) && matches!(value, Value::Null | Value::Undefined) {
+                Value::String(String::new())
+            } else { value };
             let primitive = self.primitive_with_hint(value, true, host)?;
             self.work(primitive.bytes())?;
             self.checked_value(Value::String(primitive.script_text()?))?

@@ -1,6 +1,159 @@
 use super::*;
 
 #[test]
+fn attr_identity_ownership_detach_and_live_values_follow_existing_mutations() {
+    let (doc, _, page, outcome) = page("<div id=p title=old data-x=one style='color:red'></div><div id=q></div>", &[r#"
+var p=document.getElementById('p'),q=document.getElementById('q'),a=p.getAttributeNode('TITLE'),x=p.getAttributeNode('data-x'),s=p.getAttributeNode('style');
+if(a!==p.getAttributeNode('title')||p.getAttributeNode('missing')!==null)throw 'identity/absence';
+if(a.name!=='title'||a.localName!=='title'||a.nodeName!=='title'||a.value!=='old'||a.nodeType!==2||a.ATTRIBUTE_NODE!==2||a.ownerElement!==p||a.ownerDocument!==document||a.namespaceURI!==null||a.prefix!==null||!a.specified||a.isConnected)throw 'metadata';
+if(a.parentNode!==null||a.firstChild!==null||a.lastChild!==null||a.nextSibling!==null||a.previousSibling!==null||a.parentElement!==null)throw 'Attr topology';
+if(!a.isDefaultNamespace('http://www.w3.org/1999/xhtml')||a.isDefaultNamespace(null))throw 'attached namespace';
+p.setAttribute('title','new');p.dataset.x='two';p.style.color='blue';
+if(a.value!=='new'||a.nodeValue!=='new'||a.textContent!=='new'||x.value!=='two'||s.value.indexOf('blue')<0||a!==p.getAttributeNode('title'))throw 'live mutations';
+var wrong=false;try{q.removeAttributeNode(a);}catch(e){wrong=e.name==='NotFoundError';}if(!wrong||a.ownerElement!==p)throw 'wrong owner';
+var remove=q.removeAttributeNode;if(remove.call(p,a)!==a||a.ownerElement!==null||a.value!=='new'||p.hasAttribute('title')||p.getAttributeNode('title')!==null)throw 'detach';
+if(!a.isDefaultNamespace(null)||a.isDefaultNamespace('http://www.w3.org/1999/xhtml'))throw 'detached namespace';
+p.setAttribute('title','fresh');if(p.getAttributeNode('title')===a||a.value!=='new')throw 'readd identity';
+var missing=false;try{p.removeAttributeNode(a);}catch(e){missing=e.name==='NotFoundError';}if(!missing)throw 'detached removal';
+p.removeAttribute('data-x');p.setAttribute('data-x','three');if(x.ownerElement!==null||x.value!=='two'||p.getAttributeNode('data-x')===x)throw 'string removal lifecycle';
+document.title='attr-lifecycle-ok';
+"#]);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    assert_eq!(doc.title, "attr-lifecycle-ok");
+}
+
+#[test]
+fn attr_value_aliases_coerce_once_preserve_nullability_and_do_not_forge_brands() {
+    let (doc, _, page, outcome) = page("<p id=p title=old></p>", &[r#"
+var p=document.getElementById('p'),a=p.getAttributeNode('title'),calls=0;
+var value={toString:function(){calls++;return 'once';},valueOf:function(){throw 'wrong hint';}};
+a.value=value;if(calls!==1||a.value!=='once'||p.getAttribute('title')!=='once')throw 'attached value';
+a.nodeValue=null;if(a.value!=='')throw 'nullable nodeValue';a.textContent=undefined;if(a.value!=='')throw 'nullable textContent';
+a.value=null;if(a.value!=='null')throw 'ordinary value';a.nodeValue={toString:function(){return null;}};if(a.value!=='null')throw 'object-produced null';
+var marker={},caught=false;try{a.value={toString:function(){throw marker;}};}catch(e){caught=e===marker;}if(!caught||a.value!=='null')throw 'failed value';
+var rejected=0;try{a.value=Symbol();}catch(e){if(e.name==='TypeError')rejected++;}
+for(var v of [null,{},p,p.style,document,document.createTextNode('x')]){try{p.removeAttributeNode(v);}catch(e){if(e.name==='TypeError')rejected++;}}
+try{p.getAttributeNode();}catch(e){if(e.name==='TypeError')rejected++;}
+try{p.removeAttributeNode();}catch(e){if(e.name==='TypeError')rejected++;}
+var effect=0;for(var v of [{},window,p.style]){try{p.getAttributeNode.call(v,{toString:function(){effect++;return 'title';}});}catch(e){if(e.name==='TypeError')rejected++;}}
+if(rejected!==12||effect!==0||a.ownerElement!==p)throw 'brand/arity/order';
+var rhs={toString:function(){throw 'readonly coercion';}},result=(a.name=rhs);if(result!==rhs||a.name!=='title')throw 'readonly result';
+caught=false;try{(function(){'use strict';a.ownerElement=p;})();}catch(e){caught=e.name==='TypeError';}if(!caught)throw 'strict readonly';
+p.removeAttributeNode(a);a.value=value;if(a.value!=='once'||calls!==2||p.hasAttribute('title'))throw 'detached write';
+document.title='attr-conversion-ok';
+"#]);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    assert_eq!(doc.title, "attr-conversion-ok");
+}
+
+#[test]
+fn attr_removal_and_setters_keep_resource_control_and_inert_policy() {
+    let (mut doc, mut forms, mut page, outcome) = page("<body><input id=p value=initial onclick='return false'><img id=image src='https://example.test/x.png'><a id=link href='https://example.test/'>link</a><template><i id=inert title=x></i></template></body>", &[]);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    let nodes: Vec<_> = ["p", "image", "link", "inert"].iter().map(|id| (0..doc.nodes.len()).find(|&n| doc.attr(n, "id") == Some(*id)).unwrap()).collect();
+    let mut bridge = Bridge { doc: &mut doc, forms: &mut forms, state: &mut page.state };
+    for (node, name) in [(nodes[0], "value"), (nodes[0], "onclick"), (nodes[1], "src"), (nodes[2], "href")] {
+        let value = bridge.call(node_handle(node), "getAttributeNode", &[Value::String(name.into())]).unwrap();
+        let Value::Host(handle) = value else { panic!("expected real Attr") };
+        let original = bridge.doc.attr(node, name).unwrap().to_owned();
+        let before = bridge.state.retained;
+        assert!(bridge.call(node_handle(node), "removeAttributeNode", &[Value::Host(handle)]).is_err());
+        assert!(bridge.set(handle, "value", Value::String("changed".into())).is_err());
+        assert_eq!(bridge.doc.attr(node, name), Some(original.as_str()));
+        assert_eq!(bridge.state.retained, before);
+        assert_eq!(bridge.state.attributes[script_attr::index(handle).unwrap()].owner, Some(node));
+    }
+    assert!(bridge.call(node_handle(nodes[3]), "getAttributeNode", &[Value::String("title".into())]).is_err());
+}
+
+#[test]
+fn attr_identity_limit_and_failed_materialization_are_atomic_and_keep_live_identity() {
+    let (mut doc, mut forms, mut page, outcome) = page("<p id=p title=old></p>", &[]);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    let p = (0..doc.nodes.len()).find(|&n| doc.attr(n, "id") == Some("p")).unwrap();
+    let mut bridge = Bridge { doc: &mut doc, forms: &mut forms, state: &mut page.state };
+    let before = bridge.state.retained;
+    bridge.state.retained_limit = before;
+    assert!(bridge.call(node_handle(p), "getAttributeNode", &[Value::String("title".into())]).is_err());
+    assert_eq!(bridge.state.retained, before);
+    assert!(bridge.state.attributes.is_empty());
+    bridge.state.retained_limit = before + MAX_EXTRA_BYTES;
+    for i in 0..256 {
+        let name = format!("data-{i}");
+        bridge.call(node_handle(p), "setAttribute", &[Value::String(name.clone()), Value::String("x".into())]).unwrap();
+        let value = bridge.call(node_handle(p), "getAttributeNode", &[Value::String(name)]).unwrap();
+        assert!(matches!(value, Value::Host(handle) if script_attr::index(handle) == Some(i)));
+    }
+    let retained = bridge.state.retained;
+    assert!(bridge.call(node_handle(p), "getAttributeNode", &[Value::String("title".into())]).unwrap_err().contains("256"));
+    assert_eq!(bridge.state.attributes.len(), 256);
+    assert_eq!(bridge.state.retained, retained);
+    let existing = bridge.call(node_handle(p), "getAttributeNode", &[Value::String("data-0".into())]).unwrap();
+    assert!(matches!(existing, Value::Host(handle) if script_attr::index(handle) == Some(0)));
+}
+
+#[test]
+fn attr_detach_retains_exact_value_bytes_and_budget_failures_publish_no_partial_change() {
+    let (mut doc, mut forms, mut page, outcome) = page("<p id=p title=original></p>", &[]);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    let p = (0..doc.nodes.len()).find(|&n| doc.attr(n, "id") == Some("p")).unwrap();
+    let mut bridge = Bridge { doc: &mut doc, forms: &mut forms, state: &mut page.state };
+    let value = bridge.call(node_handle(p), "getAttributeNode", &[Value::String("title".into())]).unwrap();
+    let Value::Host(attr) = value else { panic!("expected Attr") };
+    let before = bridge.state.retained;
+    bridge.state.host_work = 0;
+    assert!(bridge.call(node_handle(p), "removeAttributeNode", &[Value::Host(attr)]).is_err());
+    assert_eq!(bridge.doc.attr(p, "title"), Some("original"));
+    assert_eq!(bridge.state.attributes[script_attr::index(attr).unwrap()].owner, Some(p));
+    assert_eq!(bridge.state.retained, before);
+    bridge.state.host_work = bridge.state.limits.host_work;
+    bridge.state.copy_work = 0;
+    assert!(bridge.call(node_handle(p), "removeAttributeNode", &[Value::Host(attr)]).is_err());
+    assert_eq!(bridge.doc.attr(p, "title"), Some("original"));
+    assert_eq!(bridge.state.retained, before);
+    bridge.state.copy_work = bridge.state.limits.copy_bytes;
+    bridge.call(node_handle(p), "removeAttributeNode", &[Value::Host(attr)]).unwrap();
+    assert_eq!(bridge.state.retained, before - "title".len());
+    assert_eq!(bridge.state.attributes[script_attr::index(attr).unwrap()].value, "original");
+    bridge.set(attr, "value", Value::String("longer-value".into())).unwrap();
+    assert_eq!(bridge.state.retained, before - "title".len() - "original".len() + "longer-value".len());
+    for invalid in [768 + 255, NODE_BASE - 1] {
+        assert!(bridge.get(invalid, "value").is_err());
+        assert!(bridge.has(invalid, "value").is_err());
+        assert!(!bridge.readonly_property(invalid, "name"));
+        assert!(bridge.set(invalid, "value", Value::String("x".into())).is_err());
+    }
+}
+
+#[test]
+fn attr_borrowed_methods_reject_invalid_inert_and_non_element_receivers_before_coercion() {
+    let (mut doc, mut forms, mut page, outcome) = page("<p id=p title=old></p><template><i id=inert title=x></i></template>", &[]);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    let inert = (0..doc.nodes.len()).find(|&n| doc.attr(n, "id") == Some("inert")).unwrap();
+    for handle in [node_handle(0), node_handle(inert), node_handle(doc.nodes.len()+99)] {
+        page.runtime.define_global("invalidAttrReceiver", Value::Host(handle)).unwrap();
+        let outcome = page.console_eval(&mut doc, &mut forms, "var calls=0,p=document.getElementById('p'),arg={toString:function(){calls++;return 'title';}},rejected=0;try{p.getAttributeNode.call(invalidAttrReceiver,arg);}catch(e){if(e.name==='TypeError')rejected++;}try{p.removeAttributeNode.call(invalidAttrReceiver,arg);}catch(e){if(e.name==='TypeError')rejected++;}if(calls!==0||rejected!==2)throw 'invalid native brand';");
+        assert_eq!(outcome.errors, 0, "{}", page.report());
+    }
+    assert!(page.state.attributes.is_empty());
+}
+
+#[test]
+fn attr_coercion_reentrancy_and_promise_resolution_preserve_original_identity() {
+    let (doc, _, page, outcome) = page("<p id=p title=old></p>", &[r#"
+var p=document.getElementById('p'),a=p.getAttributeNode('title'),effects=0;
+a.value={toString:function(){effects++;p.removeAttributeNode(a);p.setAttribute('title','replacement');return 'detached-value';}};
+var fresh=p.getAttributeNode('title');
+if(effects!==1||a.ownerElement!==null||a.value!=='detached-value'||fresh===a||fresh.value!=='replacement'||fresh.ownerElement!==p)throw 'reentrant owner snapshot';
+var name={toString:function(){effects++;p.removeAttribute('title');p.setAttribute('title','after');return 'TITLE';}};
+var after=p.getAttributeNode(name);if(effects!==2||after===fresh||fresh.ownerElement!==null||fresh.value!=='replacement'||after.value!=='after')throw 'lookup conversion order';
+Promise.resolve(a).then(function(value){if(value!==a||value.value!=='detached-value'||value.ownerElement!==null)throw 'Promise Attr identity';document.title='attr-reentrancy-ok';});
+"#]);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    assert_eq!(doc.title, "attr-reentrancy-ok");
+}
+
+#[test]
 fn default_namespace_tracks_real_html_nodes_and_physical_text_parents() {
     let (doc, _, page, outcome) = page("<html><body><div id=p xmlns='urn:other'>text</div><b id=empty xmlns=''></b></body></html>", &[r#"
 var uri='http://www.w3.org/1999/xhtml',p=document.getElementById('p'),t=document.createTextNode('x');
