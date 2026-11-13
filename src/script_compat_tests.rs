@@ -1,5 +1,83 @@
 use super::*;
 
+fn shared_probe(source: &str) -> (Document,Forms,Page,Outcome) {
+    page("<div id=p title=present></div>",&[source])
+}
+
+#[test]
+fn shared_lookup_exception_element_absence_and_accessor_controls() {
+    let (_,_,page,outcome)=shared_probe(r#"
+var p=document.getElementById('p'),calls=0;
+if('offlineMissing' in p||typeof p.offlineMissing!=='undefined'||Object.getOwnPropertyDescriptor(p,'offlineMissing')!==undefined)throw 'absence';
+p.offlineMissing?.(calls++);if(calls!==0)throw 'optional call';
+Object.defineProperty(p,'probe',{get:function(){calls++;if(this!==p)throw 'receiver';return 17;}});
+if(p.probe!==17||calls!==1||Object.getOwnPropertyDescriptor(p,'probe').get===undefined)throw 'accessor';
+var marker={},same=false;try{Object.defineProperty(p,'failure',{get:function(){throw marker;}});p.failure;}catch(e){same=e===marker;}finally{calls++;}
+if(!same||calls!==2)throw 'identity/finally';
+"#);
+    assert_eq!(outcome.errors,0,"{}",page.report());
+}
+
+#[test]
+fn shared_lookup_exception_attr_absence_and_inherited_descriptor() {
+    let (_,_,page,outcome)=shared_probe(r#"
+var attr=document.getElementById('p').getAttributeNode('title'),calls=0;
+if('offlineMissing' in attr||typeof attr.offlineMissing!=='undefined'||Object.getOwnPropertyDescriptor(attr,'offlineMissing')!==undefined)throw 'absence';
+attr.offlineMissing?.(calls++);if(calls!==0||attr.name!=='title'||Object.hasOwn(attr,'name')||Object.getOwnPropertyDescriptor(attr,'name')!==undefined)throw 'Attr contract';
+"#);
+    assert_eq!(outcome.errors,0,"{}",page.report());
+}
+
+#[test]
+fn shared_lookup_exception_created_event_absence_and_inherited_descriptor() {
+    let (_,_,page,outcome)=shared_probe(r#"
+var event=document.createEvent('Event'),calls=0;
+if('offlineMissing' in event||typeof event.offlineMissing!=='undefined'||Object.getOwnPropertyDescriptor(event,'offlineMissing')!==undefined)throw 'absence';
+event.offlineMissing?.(calls++);if(calls!==0||event.type!==''||event.isTrusted||Object.hasOwn(event,'type')||Object.getOwnPropertyDescriptor(event,'type')!==undefined)throw 'Event contract';
+"#);
+    assert_eq!(outcome.errors,0,"{}",page.report());
+}
+
+#[test]
+fn shared_lookup_exception_native_tail_preserves_inherited_accessor_receiver_and_calls() {
+    let (mut doc,mut forms,mut page,outcome)=shared_probe(r#"
+var attr=document.getElementById('p').getAttributeNode('title'),event=document.createEvent('Event'),calls=0,marker={};
+Object.defineProperty(Object.prototype,'offlineInherited',{configurable:true,get:function(){if(this!==attr&&this!==event)throw 'receiver';calls++;return 25;}});
+Object.prototype.offlineCall=function(){return this;};
+Object.defineProperty(Object.prototype,'offlineThrows',{get:function(){throw marker;}});
+for(var item of [attr,event]){
+ if(!('offlineInherited' in item)||Object.hasOwn(item,'offlineInherited')||item.offlineInherited!==25||item.offlineCall()!==item||item.offlineCall?.()!==item)throw 'prototype';
+ var same=false;try{item.offlineThrows;}catch(e){same=e===marker;}if(!same)throw 'thrown identity';
+}
+if(calls!==2||!('normalize' in attr)||typeof attr.normalize!=='function')throw 'presence without accessor execution';
+"#);
+    assert_eq!(outcome.errors,0,"{}",page.report());
+    let mut bridge=Bridge{doc:&mut doc,forms:&mut forms,state:&mut page.state};
+    let Value::Host(event)=bridge.call(DOCUMENT,"createEvent",&[Value::String("Event".into())]).unwrap() else {panic!("native Event")};
+    assert!(bridge.own_data(event,"isTrusted").is_err(),"Do not invent a data descriptor for the unforgeable accessor");
+}
+
+#[test]
+fn shared_lookup_exception_dom_failure_rejects_normally_without_cancelling_tail() {
+    let (doc,_,page,outcome)=shared_probe(r#"
+var p=document.getElementById('p'),orphan=document.createElement('span'),log='';
+Promise.resolve().then(function(){try{p.removeChild(orphan);}catch(e){log+=e.name;}finally{log+=':finally';}});
+Promise.resolve().then(function(){log+=':tail';document.title=log;});
+"#);
+    assert_eq!(outcome.errors,0,"{}",page.report());
+    assert_eq!(doc.title,"NotFoundError:finally:tail");
+}
+
+#[test]
+fn shared_lookup_exception_invalid_attribute_name_is_catchable_without_mutation() {
+    let (_,_,page,outcome)=shared_probe(r#"
+var p=document.getElementById('p'),name='',finallyRan=false;
+try{p.setAttribute('data bad','x');}catch(e){name=e.name;}finally{finallyRan=true;}
+if(name!=='InvalidCharacterError'||!finallyRan||p.getAttribute('title')!=='present'||p.hasAttribute('data bad'))throw 'attribute error contract';
+"#);
+    assert_eq!(outcome.errors,0,"{}",page.report());
+}
+
 #[test]
 fn name_namespace_attribute_values_are_exact_live_and_do_not_allocate_attr_identities() {
     let (mut doc,mut forms,mut page,outcome)=page("<div id=p title=old x:y=colon xmlns:x=raw null=n undefined=u></div>",&[r#"

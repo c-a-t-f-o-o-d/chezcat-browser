@@ -1,0 +1,22 @@
+<!-- Original local fixture. No external URLs, resources or access-check code. -->
+<p id="event-namespace-state">Fixture pending</p>
+<script>
+var fixtureNode=document.getElementById('event-namespace-state');
+fixtureNode.setAttribute('data-sample','value');
+if(fixtureNode.getAttributeNS(null,'data-sample')!=='value'||fixtureNode.getAttributeNS('urn:fixture','data-sample')!==null)throw Error('namespace read');
+var fixtureEvent=document.createEvent('UIEvents');
+fixtureEvent.initUIEvent('fixture',true,true,window,4294967297);
+if(fixtureEvent.view!==window||fixtureEvent.detail!==1||fixtureEvent.isTrusted)throw Error('UI initializer');
+var fixtureError='';try{fixtureNode.setAttribute('data bad','x');}catch(e){fixtureError=e.name;}
+if(fixtureError!=='InvalidCharacterError')throw Error('attribute exception');
+var fixtureOrder='';
+Promise.resolve().then(function(){try{fixtureNode.removeChild(document.createElement('span'));}catch(e){fixtureOrder=e.name;}});
+Promise.resolve().then(function(){if(fixtureOrder!=='NotFoundError')throw Error('Promise exception');fixtureNode.textContent='Event namespace ready';});
+document.addEventListener('keydown',function(event){
+ if(event.view!==window||event.detail!==0||!event.isTrusted)throw Error('native UI fields');
+ var type=event.type;
+ event.initUIEvent('unchanged',false,false,null,7);
+ if(event.type!==type||event.detail!==0||!event.isTrusted)throw Error('native initializer isolation');
+ fixtureNode.textContent='Native UI observed';
+});
+</script>

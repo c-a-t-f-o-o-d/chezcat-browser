@@ -323,6 +323,9 @@ pub struct NativeAncestry {
 }
 
 pub trait Host {
+    /// Explicit read/presence fallback to a proven native owner's Object tail.
+    /// This does not grant expando, mutation or descriptor authority.
+    fn ordinary_lookup_tail(&self, _object:u32) -> bool { false }
     /// Real ordinary expando storage for an explicitly proven native family.
     fn expando_owner(&self, _object:u32) -> Option<u32> { None }
     fn instance_ancestry(&self, _object:u32) -> Option<NativeAncestry> { None }
@@ -5808,6 +5811,8 @@ impl Runtime {
             Value::Host(handle) => {
                 if let Some(object) = self.host_ordinary(handle, &name, host)? {
                     self.property_owner(object, &name)?.is_some()
+                } else if let Some(tail) = self.host_lookup_tail(handle,&name,host)? {
+                    self.property_owner(tail,&name)?.is_some()
                 } else if self.is_browser_global(handle) && !self.host_owns_global(&name, host) {
                     let (_, properties) = self.browser_global.unwrap();
                     if self.global_binding(&name)

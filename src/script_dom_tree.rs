@@ -5,6 +5,10 @@
 //! https://html.spec.whatwg.org/multipage/forms.html#dom-form-nameditem
 use super::*;
 
+pub(super) fn native_node_member(name:&str)->bool {
+    node_constant(name).is_some() || "constructor __proto__ nodeType nodeName baseURI isConnected ownerDocument parentNode parentElement childNodes firstChild lastChild previousSibling nextSibling nodeValue textContent getRootNode hasChildNodes normalize cloneNode isEqualNode isSameNode compareDocumentPosition contains lookupPrefix lookupNamespaceURI isDefaultNamespace insertBefore appendChild replaceChild removeChild addEventListener removeEventListener dispatchEvent".split_ascii_whitespace().any(|candidate|candidate==name)
+}
+
 const MAX_DOM_DEPTH: usize = 128;
 
 #[derive(Default)]
@@ -329,6 +333,13 @@ impl Bridge<'_> {
         method: &str,
         args: &[Value],
     ) -> Result<(), (&'static str, String)> {
+        if method=="setAttribute" && node_index(object).is_some() {
+            if let Some(Value::String(name))=args.first() {
+                if !super::script_attribute_names::valid_name(name) {
+                    return Err(("InvalidCharacterError","Attribute name is not an XML Name.".into()));
+                }
+            }
+        }
         if method == "compareDocumentPosition" {
             if !matches!(args.first(), Some(Value::Host(other)) if self.namespace_receiver(*other)) {
                 return Err(("TypeError", "compareDocumentPosition requires a Node argument.".into()));
@@ -372,6 +383,15 @@ impl Bridge<'_> {
                     "TypeError",
                     "insertBefore requires a node or null reference.".into(),
                 ));
+            }
+            // Removal has its own simple precondition. Pre-insertion hierarchy
+            // validation has different precedence and is not inferred here.
+            if method=="removeChild" {
+                if let (Some(parent),Some(Value::Host(handle)))=(node_index(object).and_then(|id|self.doc.nodes.get(id)),args.first()) {
+                    if node_index(*handle).is_some_and(|child|child<self.doc.nodes.len() && !parent.children.contains(&child)) {
+                        return Err(("NotFoundError","The node is not a child of this parent.".into()));
+                    }
+                }
             }
         }
         Ok(())

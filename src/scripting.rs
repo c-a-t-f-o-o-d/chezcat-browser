@@ -36,6 +36,8 @@ mod script_timezone;
 use dom_tree::DomState;
 #[path = "script_attr.rs"]
 mod script_attr;
+#[path = "script_attribute_names.rs"]
+mod script_attribute_names;
 #[path = "script_class_list.rs"]
 mod script_class_list;
 #[path = "script_normalize.rs"]
@@ -2188,7 +2190,13 @@ impl Host for Bridge<'_> {
 
     fn owns_property(&self, object: u32, property: &str) -> bool {
         if self.element_expando_receiver(object) {return self.element_native_property(object,property);}
+        if self.attr_receiver(object) { return self.attr_native_member(property); }
+        if self.constructed_event_receiver(object) { return self.event_native_member(object,property); }
         object != NAVIGATOR || navigator_readonly(property)
+    }
+
+    fn ordinary_lookup_tail(&self, object:u32) -> bool {
+        self.attr_receiver(object) || self.constructed_event_receiver(object)
     }
 
     fn readonly_property(&self, object: u32, property: &str) -> bool {
@@ -2236,6 +2244,7 @@ impl Host for Bridge<'_> {
         if self.mouse_receiver(object) && method == "initMouseEvent" {
             return &[(0, true), (4, false), (5, false), (6, false), (7, false), (8, false), (13, false)];
         }
+        if self.ui_receiver(object) && method=="initUIEvent" {return &[(0,true),(4,false)];}
         if method == "isDefaultNamespace" && self.namespace_receiver(object) { return &[(0, true)]; }
         if self.attr_element_receiver(object) && method == "getAttributeNode" { return &[(0, true)]; }
         if self.attr_element_receiver(object) && matches!(method,"getAttributeNS" | "getAttributeNodeNS" | "removeAttributeNS") { return &[(0, true), (1, true)]; }
@@ -2288,6 +2297,9 @@ impl Host for Bridge<'_> {
     }
 
     fn method_length(&self, object:u32, method:&str) -> Option<usize> {
+        if self.event_receiver(object) && method=="initEvent"
+            || self.ui_receiver(object) && method=="initUIEvent"
+            || self.mouse_receiver(object) && method=="initMouseEvent" {return Some(1);}
         if object == DOCUMENT && method == "getElementsByName" { return Some(1); }
         if method=="getElementsByClassName" && (object==DOCUMENT || self.attr_element_receiver(object)) { return Some(1); }
         if self.class_list_receiver(object) {
@@ -2321,6 +2333,7 @@ impl Host for Bridge<'_> {
         if object == DOCUMENT && method == "getElementsByName" { return 1; }
         if object == DOCUMENT && method == "createEvent" && self.event_factory_enabled()
             || self.event_receiver(object) && method == "initEvent"
+            || self.ui_receiver(object) && method=="initUIEvent"
             || self.mouse_receiver(object) && method == "initMouseEvent"
         { return 1; }
         if matches!(method, "isDefaultNamespace" | "compareDocumentPosition") && self.namespace_receiver(object) { return 1; }
@@ -2510,6 +2523,7 @@ impl Host for Bridge<'_> {
     }
 
     fn resolve_member_before_call(&self, object: u32) -> bool {
+        if self.attr_receiver(object) || self.constructed_event_receiver(object) { return true; }
         self.form_receiver(object)
     }
 
@@ -2599,6 +2613,9 @@ impl Host for Bridge<'_> {
         }
         if script_class_list::element(object).is_some() { return self.class_list_receiver(object) && self.class_list_receiver(receiver); }
         if method == "initMouseEvent" { return self.mouse_receiver(object) && self.mouse_receiver(receiver); }
+        if method=="initUIEvent" {
+            return (EVENT_BASE..self.state.next_event).contains(&object) && self.ui_receiver(receiver);
+        }
         if matches!(method, "initEvent" | "preventDefault" | "stopPropagation" | "stopImmediatePropagation") {
             // First-class methods are created only from genuine Event handles.
             // Issued IDs are monotonic and never reused. Expiry of the source
@@ -2691,6 +2708,12 @@ impl Host for Bridge<'_> {
     }
 
     fn own_data(&mut self, object: u32, property: &str) -> Result<Option<Value>, String> {
+        if self.attr_receiver(object) { self.state.work(1)?; return Ok(None); }
+        if self.event_receiver(object) {
+            self.state.work(1)?;
+            if property=="isTrusted" { return Err("The unforgeable native Event accessor descriptor is not implemented.".into()); }
+            return Ok(None);
+        }
         if self.element_expando_receiver(object) {
             // VM-backed expandos are inspected before this host path. These
             // Elements have no indexed/named native own properties; IDL
@@ -2896,6 +2919,7 @@ impl Host for Bridge<'_> {
             return Ok(matches!(property, "length" | "item" | "forEach")
                 || !matches!(self.node_list_get(object, property)?, Value::Undefined));
         }
+        if self.ui_receiver(object) && matches!(property,"view"|"detail") {return Ok(true);}
         if (DATASET_BASE..EVENT_BASE).contains(&object) {
             return self
                 .dataset_get(object, property)
@@ -3212,6 +3236,8 @@ impl Host for Bridge<'_> {
                 "cancelBubble" => Value::Bool(event.stopped),
                 "timeStamp" => Value::Number(event.timestamp),
                 "isTrusted" => Value::Bool(true),
+                "view" if event.keyboard.is_some() => Value::Host(WINDOW),
+                "detail" if event.keyboard.is_some() => Value::Number(0.0),
                 name if event.keyboard.is_some() && keyboard_property(name) => {
                     let key = event.keyboard.as_ref().unwrap();
                     match name {
@@ -3647,7 +3673,7 @@ impl Host for Bridge<'_> {
             return self.create_class_collection(object,args.first().ok_or("getElementsByClassName requires one argument.")?);
         }
         if let Some(result) = self.created_event_call(object, method, args) { return result; }
-        if method == "initEvent" && self.state.event.as_ref().is_some_and(|event| event.handle == object) {
+        if (method == "initEvent" || method=="initUIEvent" && self.ui_receiver(object)) && self.state.event.as_ref().is_some_and(|event| event.handle == object) {
             // Ordinary WebIDL conversion has completed. The trusted dispatch
             // flag prevents reinitialization; callback side effects remain.
             return Ok(Value::Undefined);

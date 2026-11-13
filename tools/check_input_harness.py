@@ -3,6 +3,7 @@
 This is controlled harness validation, never evidence of live Google results.
 """
 from datetime import datetime, timezone
+import argparse
 import http.server
 import json
 from pathlib import Path
@@ -17,6 +18,11 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def main():
+    parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--event-namespace",action="store_true",help="include the original local Event/namespace subsystem fixture")
+    args=parser.parse_args()
+    fixture=ROOT/"tools/fixtures/offline-event-namespace.html"
+    extra=fixture.read_text(encoding="utf-8") if args.event_namespace else ""
     folder = ROOT / "results/verification/autonomy" / (
         datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ") + "-input-fixture-" + uuid.uuid4().hex[:8])
     folder.mkdir(parents=True)
@@ -43,6 +49,7 @@ def main():
             html = '<!doctype html><title>Original fixture ' + ("results" if result else "home") + '</title><form action="/search"><input name="q"><button name="send">Search</button></form>'
             if result:
                 html += f'<p><a href="http://127.0.0.1:{destination.server_port}/destination">Original fixture result</a></p>'
+            html += extra
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.end_headers()
@@ -57,13 +64,16 @@ def main():
     for thread in threads:
         thread.start()
     script = folder / "input.tsv"
-    script.write_text("fill\tq\talpha\nkey\tEnter\nsnapshot\tfirst-results\nlink\tOriginal\nsnapshot\tdestination\nback\nsnapshot\tback\nfill\tq\tbeta + café\nkey\tEnter\nsnapshot\tsecond-results\n", encoding="utf-8")
+    actions="fill\tq\talpha\n"+("snapshot\tui-keyboard\n" if args.event_namespace else "")+"key\tEnter\nsnapshot\tfirst-results\nlink\tOriginal\nsnapshot\tdestination\nback\nsnapshot\tback\nfill\tq\tbeta + café\nkey\tEnter\nsnapshot\tsecond-results\n"
+    script.write_text(actions, encoding="utf-8")
     executable = ROOT / "ChezCat.exe"
     evidence = folder / "journey"
     command = [str(executable), f"http://127.0.0.1:{search.server_port}/", "--dev-input-script", str(script),
                "--dev-input-output", str(evidence), "--javascript", "--no-profile"]
     before = capture_tests.source_identity(ROOT)
     record = {"scope": __doc__, "source_before": before, "executable_sha256": capture_tests.sha256(executable)}
+    if args.event_namespace:
+        record["original_subsystem_fixture_sha256"]=capture_tests.sha256(fixture)
     try:
         record["command"] = capture_tests.execute(command, folder / "command.log", ROOT, 180)
     finally:
@@ -77,15 +87,24 @@ def main():
     # Enter selects the named submit button, so its successful empty value is
     # part of the form payload. Assert that actual browser behavior exactly.
     expected = ["search", "/search?q=alpha&send="] in seen and ["destination", "/destination"] in seen and ["search", "/search?q=beta+%2B+caf%C3%A9&send="] in seen
+    def snapshot(label,suffix):
+        path=next(evidence.glob("*-"+label+"."+suffix),None)
+        return path.read_text(encoding="utf-8") if path else ""
     checks = {
         "input_command_completed": record["command"]["state"] == "completed",
         "both_form_queries_and_cross_origin_destination_requested": expected,
-        "first_results_rendered": all(('text="' + word + '"') in (evidence / "03-first-results.layout.txt").read_text(encoding="utf-8") for word in ("Original", "fixture", "result")) if (evidence / "03-first-results.layout.txt").exists() else False,
-        "destination_loaded": "Independent fixture destination" in (evidence / "05-destination.source.html").read_text(encoding="utf-8") if (evidence / "05-destination.source.html").exists() else False,
-        "back_returns_to_results": "Original fixture results" in (evidence / "07-back.source.html").read_text(encoding="utf-8") if (evidence / "07-back.source.html").exists() else False,
+        "first_results_rendered": all(('text="' + word + '"') in snapshot("first-results","layout.txt") for word in ("Original", "fixture", "result")),
+        "destination_loaded": "Independent fixture destination" in snapshot("destination","source.html"),
+        "back_returns_to_results": "Original fixture results" in snapshot("back","source.html"),
         "second_query_typed": 'beta + café' in (evidence / "input.log").read_text(encoding="utf-8") if (evidence / "input.log").exists() else False,
         "source_unchanged": before == record["source_after"],
     }
+    if args.event_namespace:
+        initial=(evidence/"00-initial.layout.txt").read_text(encoding="utf-8") if (evidence/"00-initial.layout.txt").is_file() else ""
+        checks["event_namespace_startup_rendered"]=all(('text="'+word+'"') in initial for word in ("Event","namespace","ready"))
+        checks["native_ui_keyboard_rendered"]=all(('text="'+word+'"') in snapshot("ui-keyboard","layout.txt") for word in ("Native","UI","observed"))
+        activities=list(evidence.glob("*.activity.txt"))
+        checks["subsystem_has_no_script_errors"]=bool(activities) and all("0 error(s)." in path.read_text(encoding="utf-8") for path in activities)
     record["checks"] = checks
     record["passed"] = all(checks.values())
     record["files"] = {str(path.relative_to(folder)): {"bytes": path.stat().st_size, "sha256": capture_tests.sha256(path)}

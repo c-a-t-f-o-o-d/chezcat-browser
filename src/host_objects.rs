@@ -4,6 +4,13 @@
 use super::{Fault, Function, Host, Ordinary, Runtime, Value};
 
 impl Runtime {
+    pub(super) fn host_lookup_tail(&mut self,handle:u32,name:&str,host:&dyn Host)->Result<Option<Ordinary>,Fault> {
+        if !host.ordinary_lookup_tail(handle) || host.owns_property(handle,name) { return Ok(None); }
+        let ancestry=host.instance_ancestry(handle).ok_or_else(||Fault::new("Native lookup prototype provenance is unavailable."))?;
+        let caller=self.browser_global.map(|(window,_)|window);
+        if caller!=Some(ancestry.window) { host.validate_window_access(caller,ancestry.window).map_err(Fault::new)?; }
+        self.native_ancestry_anchor(ancestry).map(Some)
+    }
     pub(super) fn ensure_native_expando(&mut self,handle:u32,host:&dyn Host,create:bool)->Result<(),Fault> {
         let Some(owner)=host.expando_owner(handle) else {
             if self.native_expando_owners.contains_key(&handle) {return Err(Fault::new("Native expando receiver is no longer accessible."));}
@@ -127,6 +134,9 @@ impl Runtime {
             self.host_method_values
                 .insert((handle, method), value.clone());
             return Ok(value);
+        }
+        if let Some(tail) = self.host_lookup_tail(handle,name,host)? {
+            return self.get_ordinary_property_with_receiver(tail,name,&Value::Host(handle),host);
         }
         let value = host.get(handle, name).map_err(Fault::new)?;
         if matches!(value, Value::Undefined)

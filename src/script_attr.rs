@@ -25,6 +25,9 @@ fn property(name: &str) -> bool {
 }
 
 impl Bridge<'_> {
+    pub(super) fn attr_native_member(&self,name:&str)->bool {
+        property(name) || dom_tree::native_node_member(name)
+    }
     pub(super) fn attr_receiver(&self, handle: u32) -> bool {
         index(handle).is_some_and(|id| self.state.attributes.get(id).is_some())
     }
@@ -36,7 +39,7 @@ impl Bridge<'_> {
 
     pub(super) fn attr_has(&self, handle: u32, name: &str) -> Result<bool, String> {
         if !self.attr_receiver(handle) { return Err("Invalid Attr handle.".into()); }
-        Ok(property(name))
+        Ok(property(name) || self.method(handle,name).is_some())
     }
 
     pub(super) fn attr_get(&mut self, handle: u32, name: &str) -> Result<Value, String> {
