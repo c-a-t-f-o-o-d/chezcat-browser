@@ -1,5 +1,9 @@
 @echo off
 setlocal DisableDelayedExpansion
+if /I not "%~1"=="--allow-live" (
+    echo Live diagnostics are paused. Coordinate an attempt, then pass --allow-live explicitly.
+    exit /b 2
+)
 for %%I in ("%~dp0..\..") do set "chezcat_root=%%~fI"
 cd /d "%chezcat_root%"
 if errorlevel 1 exit /b 1
