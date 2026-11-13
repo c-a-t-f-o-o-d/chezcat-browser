@@ -166,6 +166,7 @@ impl Runtime {
         host: &mut dyn Host,
     ) -> Result<Vec<String>, Fault> {
         self.reject_foreign_window(&Value::Host(handle), host)?;
+        if self.is_browser_global(handle) { return self.window_keys(inherited, true, host); }
         let keys = if let Some(&id) = self.host_objects.get(&handle) {
             if inherited {
                 self.inherited_keys(Ordinary::Object(id))?
@@ -194,13 +195,9 @@ impl Runtime {
         host: &mut dyn Host,
     ) -> Result<bool, Fault> {
         self.reject_foreign_window(&Value::Host(handle), host)?;
-        if self.is_browser_global(handle) && self.is_operation_global(name) {
-            let (_, id) = self.browser_global.unwrap();
-            return if enumerable {
-                self.own_enumerable(id, name)
-            } else {
-                self.owns_property(id, name)
-            };
+        if self.is_browser_global(handle) {
+            let own = self.window_own_enumerable(name, host)?;
+            return Ok(own.is_some_and(|is_enumerable| !enumerable || is_enumerable));
         }
         if let Some(object) = self.host_ordinary(handle, name, host) {
             let id = self.ordinary_id(object)?;

@@ -2727,6 +2727,22 @@ impl Host for Bridge<'_> {
         ) || handler_event(property).is_some_and(|event| event != "error")
     }
 
+    fn window_properties(&mut self, window: u32) -> Result<&'static [(&'static str, bool)], String> {
+        self.state.work(1)?;
+        if window == WINDOW {
+            return Ok(&[("window", true), ("self", true), ("globalThis", false),
+                ("document", true), ("console", true), ("navigator", true),
+                ("clientInformation", true), ("location", true), ("performance", true),
+                ("onclick", true), ("oninput", true), ("onchange", true), ("onsubmit", true),
+                ("onreset", true), ("onload", true), ("onkeydown", true), ("onkeyup", true)]);
+        }
+        if self.frame_context(window).is_none() { return Err("Unknown Window key receiver.".into()); }
+        self.frame_window_access(Some(WINDOW), window)?;
+        Ok(&[("window", true), ("self", true), ("globalThis", false),
+            ("document", true), ("location", true), ("parent", true), ("top", true),
+            ("frameElement", true), ("closed", true), ("length", true), ("origin", true)])
+    }
+
     fn has(&mut self, object: u32, property: &str) -> Result<bool, String> {
         self.state.work(1)?;
         if let Some(result) = self.created_event_has(object, property) { return result; }

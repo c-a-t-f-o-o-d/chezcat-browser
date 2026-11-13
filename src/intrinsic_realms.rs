@@ -6,10 +6,10 @@
 use super::*;
 
 const MAX_INTRINSIC_REALMS: usize = 8;
-const BINARY_GLOBALS: &[&str] = &["ArrayBuffer", "DataView", "Int8Array", "Uint8Array", "Uint8ClampedArray",
+pub(super) const BINARY_GLOBALS: &[&str] = &["ArrayBuffer", "DataView", "Int8Array", "Uint8Array", "Uint8ClampedArray",
     "Int16Array", "Uint16Array", "Int32Array", "Uint32Array", "Float16Array", "Float32Array", "Float64Array"];
-const URL_GLOBALS: &[&str] = &["URL", "URLSearchParams"];
-const TEXT_GLOBALS: &[&str] = &["TextEncoder", "TextDecoder"];
+pub(super) const URL_GLOBALS: &[&str] = &["URL", "URLSearchParams"];
+pub(super) const TEXT_GLOBALS: &[&str] = &["TextEncoder", "TextDecoder"];
 
 macro_rules! roots {
     ($($field:ident: $kind:ty),* $(,)?) => {
@@ -44,6 +44,7 @@ roots! {
     error_prototypes: BTreeMap<&'static str, usize>,
     browser_global: Option<(u32, usize)>,
     global_attributes: BTreeMap<String, (bool, bool, bool)>,
+    deferred_global_orders: BTreeMap<&'static str, usize>,
     host_globals: HashSet<String>,
     operation_globals: HashSet<&'static str>,
     arguments_thrower: Option<usize>,

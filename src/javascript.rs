@@ -135,6 +135,8 @@ pub mod limits;
 #[cfg(test)]
 #[path = "execution_limits_tests.rs"]
 mod execution_limits_tests;
+#[path = "window_keys.rs"]
+mod window_keys;
 #[cfg(test)]
 #[path = "browser_capacity_tests.rs"]
 mod browser_capacity_tests;
@@ -352,6 +354,12 @@ pub trait Host {
     }
     fn own_keys(&mut self, _object: u32) -> Result<Vec<String>, String> {
         Err("Enumerating this native host object is not implemented.".into())
+    }
+
+    /// Implemented native Window own names and their enumerable attributes.
+    /// ES bindings and ordinary expandos are supplied by the active realm.
+    fn window_properties(&mut self, _window: u32) -> Result<&'static [(&'static str, bool)], String> {
+        Ok(&[])
     }
     /// Present named data properties have writable/enumerable/configurable
     /// descriptors. Native accessor/prototype attributes are not own data.
@@ -2845,6 +2853,7 @@ fn validate_body(program: &Program, body: StmtId) -> Result<(), Fault> {
 
 #[derive(Clone)]
 struct Binding {
+    order: usize,
     value: Option<Value>,
     kind: Declaration,
     // Valid only for this immutable primitive value. put_binding resets this
@@ -2856,6 +2865,7 @@ struct Binding {
 }
 
 struct Environment {
+    next_order: usize,
     // A closure or mapped arguments object can outlive the current activation.
     // Pin its ancestor chain before publishing the retaining handle.
     captured: bool,
@@ -3116,6 +3126,7 @@ pub struct Runtime {
     scope_assigned_closures: std::collections::BTreeSet<usize>,
     transient_roots: transient_roots::State,
     global_attributes: BTreeMap<String, (bool, bool, bool)>,
+    deferred_global_orders: BTreeMap<&'static str, usize>,
     host_globals: HashSet<String>,
     // Names explicitly exposed as ordinary properties by the embedding host.
     operation_globals: HashSet<&'static str>,
@@ -3197,6 +3208,7 @@ impl Runtime {
     fn with_intrinsic_startup(limits: limits::Limits, defer_families: bool) -> Self {
         let mut runtime = Self {
             environments: vec![Some(Environment {
+                next_order: 0,
                 captured: true,
                 arguments: None,
                 parent: None,
@@ -3246,6 +3258,7 @@ impl Runtime {
             scope_assigned_closures: std::collections::BTreeSet::new(),
             transient_roots: transient_roots::State::default(),
             global_attributes: BTreeMap::new(),
+            deferred_global_orders: BTreeMap::new(),
             host_globals: HashSet::new(),
             operation_globals: HashSet::new(),
             arguments_thrower: None,
@@ -3330,12 +3343,15 @@ impl Runtime {
         self.initialize_symbols()?;
         self.initialize_number_statics()?;
         if self.deferred_intrinsics & 1 == 0 { self.initialize_binary()?; }
+        else { self.reserve_deferred_global_orders(intrinsic_realms::BINARY_GLOBALS)?; }
         self.initialize_collections()?;
         self.initialize_iterable_builtins()?;
         self.initialize_promises()?;
         self.initialize_date()?;
         if self.deferred_intrinsics & 2 == 0 { self.initialize_url_api()?; }
+        else { self.reserve_deferred_global_orders(intrinsic_realms::URL_GLOBALS)?; }
         if self.deferred_intrinsics & 4 == 0 { self.initialize_text_encoding()?; }
+        else { self.reserve_deferred_global_orders(intrinsic_realms::TEXT_GLOBALS)?; }
         for (name, value) in [
             ("undefined", Value::Undefined),
             ("NaN", Value::Number(f64::NAN)),
@@ -3886,6 +3902,7 @@ impl Runtime {
     fn new_environment(&mut self, parent: usize, function_scope: bool) -> Result<usize, Fault> {
         self.step()?;
         let env = Some(Environment {
+            next_order: 0,
             captured: false,
             arguments: None,
             parent: Some(parent),
@@ -3912,6 +3929,11 @@ impl Runtime {
         kind: Declaration,
         replace: bool,
     ) -> Result<(), Fault> {
+        self.put_binding_ordered(env, name, value, kind, replace, None)
+    }
+
+    fn put_binding_ordered(&mut self, env: usize, name: String, value: Option<Value>,
+        kind: Declaration, replace: bool, preserved_order: Option<usize>) -> Result<(), Fault> {
         if name.len() > self.limits.capacity.property_bytes {
             return Err(Fault::new(format!("Identifier length limit reached ({} bytes).", self.limits.capacity.property_bytes)));
         }
@@ -3941,7 +3963,21 @@ impl Runtime {
             return Err(Fault::new(format!("Retained value limit reached ({} bytes).", self.limits.heap.retained_values)));
         }
         let new = old.is_none();
+        let inherited_order = old.map(|binding| binding.order).or(preserved_order).or_else(|| {
+            (env == self.global_environment && kind == Declaration::Var)
+                .then_some(self.browser_global).flatten()
+                .and_then(|(_, id)| self.objects[id].properties.get(&name).map(|property| property.order))
+        }).or_else(|| {
+            (env == self.global_environment && kind == Declaration::Var)
+                .then(|| self.deferred_global_orders.get(name.as_str()).copied()).flatten()
+        });
+        let order = inherited_order.unwrap_or(self.environment(env).next_order);
+        let next_order = self.environment(env).next_order.checked_add(usize::from(inherited_order.is_none()))
+            .ok_or_else(|| Fault::new("Binding creation order limit reached."))?;
         self.work_as(new_bytes.saturating_add(name.len()), WorkKind::BindingStore)?;
+        if env == self.global_environment && kind == Declaration::Var {
+            self.deferred_global_orders.remove(name.as_str());
+        }
         if name == "arguments" {
             if let Some(pending) = self.environment_mut(env).arguments.take() {
                 self.value_bytes -= pending.bytes();
@@ -3949,7 +3985,8 @@ impl Runtime {
         }
         self.environment_mut(env)
             .bindings
-            .insert(name, Binding { value, kind, utf16_length: None, utf16_cursor: None });
+            .insert(name, Binding { order, value, kind, utf16_length: None, utf16_cursor: None });
+        self.environment_mut(env).next_order = next_order;
         self.bindings += usize::from(new);
         self.value_bytes = self.value_bytes - old_bytes + new_bytes;
         Ok(())
@@ -4387,6 +4424,9 @@ impl Runtime {
                 .bindings
                 .contains_key(&name)
             {
+                let migrated_order = if variable_environment == self.global_environment {
+                    self.browser_global.and_then(|(_, id)| self.objects[id].properties.get(&name).map(|property| property.order))
+                } else { None };
                 let value = if variable_environment == self.global_environment {
                     if let Some((_, properties)) = self.browser_global {
                         if self.object(properties)?.properties.contains_key(&name) {
@@ -4408,12 +4448,13 @@ impl Runtime {
                     && environment != variable_environment
                     && self.browser_global.is_some_and(|(_, properties)| !self.objects[properties].properties.contains_key(&name));
                 let descriptor_name = if eval_global { self.work(name.len())?; Some(name.clone()) } else { None };
-                self.put_binding(
+                self.put_binding_ordered(
                     variable_environment,
                     name,
                     Some(value),
                     Declaration::Var,
                     false,
+                    migrated_order,
                 )?;
                 if let Some(name) = descriptor_name { self.global_attributes.insert(name, (true, true, true)); }
             }
@@ -5520,7 +5561,7 @@ impl Runtime {
         {
             return Err(self.property_limit_fault(object));
         }
-        let order = previous.map_or(object.next_order, |property| property.order);
+        let (order, next_order) = self.property_creation_order(id, previous.map(|property| property.order))?;
         let enumerable = attributes.map_or_else(
             || previous.is_none_or(|property| property.enumerable),
             |attrs| attrs.0,
@@ -5530,10 +5571,6 @@ impl Runtime {
             || previous.is_none_or(|property| property.configurable),
             |attrs| attrs.2,
         );
-        let next_order = object
-            .next_order
-            .checked_add(usize::from(is_new))
-            .ok_or_else(|| Fault::new("Object property order limit reached."))?;
         let new_bytes = value.bytes();
         if new_bytes > self.limits.capacity.string_bytes {
             return Err(Fault::new(format!("String limit reached ({} KiB).", self.limits.capacity.string_bytes / 1024)));
@@ -5565,6 +5602,7 @@ impl Runtime {
         if retained > self.limits.heap.retained_values {
             return Err(Fault::new(format!("Retained value limit reached ({} bytes).", self.limits.heap.retained_values)));
         }
+        self.commit_property_creation_order(id, next_order);
         let object = &mut self.objects[id];
         object.properties.insert(
             name,
@@ -6640,7 +6678,9 @@ impl Runtime {
                             continue;
                         }
                     } else if let Value::Host(handle) = source {
-                        if let Some(object) = self.host_ordinary(*handle, &name, host) {
+                        if self.is_browser_global(*handle) {
+                            if !self.window_enumerable(&name, host)? { continue; }
+                        } else if let Some(object) = self.host_ordinary(*handle, &name, host) {
                             let Some(owner) = self.property_owner(object, &name)? else {
                                 continue;
                             };

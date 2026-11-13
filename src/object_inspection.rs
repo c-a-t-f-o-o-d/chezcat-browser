@@ -25,7 +25,9 @@ impl Runtime {
             let id = self.ordinary_id(object)?;
             self.inspection_string_keys(id)?
         } else if let Value::Host(handle) = value {
-            if let Some(&id) = self.host_objects.get(handle) {
+            if self.is_browser_global(*handle) {
+                self.window_keys(false, false, host)?
+            } else if let Some(&id) = self.host_objects.get(handle) {
                 self.inspection_string_keys(id)?
             } else {
                 // The Host contract supplies only its explicitly supported

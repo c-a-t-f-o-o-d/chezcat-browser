@@ -458,7 +458,7 @@ impl Runtime {
         {
             return Err(self.property_limit_fault(object));
         }
-        let order = previous.map_or(object.next_order, |property| property.order);
+        let (order, next_order) = self.property_creation_order(id, previous.map(|property| property.order))?;
         let enumerable = attributes.map_or_else(
             || previous.is_none_or(|property| property.enumerable),
             |attrs| attrs.0,
@@ -468,10 +468,6 @@ impl Runtime {
             || previous.is_none_or(|property| property.configurable),
             |attrs| attrs.2,
         );
-        let next_order = object
-            .next_order
-            .checked_add(usize::from(is_new))
-            .ok_or_else(|| Fault::new("Object property order limit reached."))?;
         let bytes = value.bytes();
         if bytes > self.limits.capacity.string_bytes {
             return Err(Fault::new(format!("String limit reached ({} KiB).", self.limits.capacity.string_bytes / 1024)));
@@ -482,6 +478,7 @@ impl Runtime {
             return Err(Fault::new(format!("Retained value limit reached ({} bytes).", self.limits.heap.retained_values)));
         }
         self.work(bytes)?;
+        self.commit_property_creation_order(id, next_order);
         self.objects[id].symbol_properties.insert(
             key,
             Property {

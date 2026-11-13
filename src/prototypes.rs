@@ -1652,7 +1652,9 @@ impl Runtime {
                         continue;
                     }
                     let keys = if let Value::Host(handle) = source {
-                        if let Some(&id) = self.host_objects.get(handle) {
+                        if self.is_browser_global(*handle) {
+                            self.window_keys(false, false, host)?
+                        } else if let Some(&id) = self.host_objects.get(handle) {
                             self.own_string_keys(id, false)?
                         } else {
                             self.host_keys(*handle, false, host)?

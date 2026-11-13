@@ -284,6 +284,48 @@ mod tests {
     const CREATE: &str = "var f=document.createElement('iframe');f.hidden=true;document.body.appendChild(f);var w=f.contentWindow;";
 
     #[test]
+    fn active_child_window_keys_use_real_realm_names_flags_order_and_prototypes() {
+        let source = format!("{CREATE}{}", r#"
+var parentSecret=17;
+w.eval("var child_z=1;window.child_a=2;let child_lexical=3;const child_const=4;");
+var keys=w.Object.keys(w),all=w.Object.getOwnPropertyNames(w);
+if(Object.getPrototypeOf(keys)!==w.Array.prototype||Object.getPrototypeOf(all)!==w.Array.prototype)throw 'result realm';
+for(var name of ['window','self','document','location','parent','top','frameElement','closed','length','origin']){if(keys.indexOf(name)<0)throw 'native own names';}
+if(keys.indexOf('globalThis')>=0||all.indexOf('globalThis')<0||keys.indexOf('Object')>=0||all.indexOf('Object')<0)throw 'native/intrinsic attributes';
+for(var name of ['parentSecret','child_lexical','child_const','setTimeout']){if(all.indexOf(name)>=0)throw 'unavailable/lexical/foreign names';}
+if(keys.indexOf('child_z')<0||keys.indexOf('child_a')<keys.indexOf('child_z')||all.indexOf('URL')>all.indexOf('child_z'))throw 'creation order';
+var inherited=w.Function("Object.prototype.child_inherited=1;Object.defineProperty(this,'child_hidden',{value:2,enumerable:false});Object.prototype.child_hidden=3;var names=[];for(var name in this){if(name.indexOf('child_')===0)names.push(name);}delete Object.prototype.child_inherited;delete Object.prototype.child_hidden;return names;")();
+if(inherited.join(',')!=='child_z,child_a,child_inherited')throw 'inherited names/shadowing';
+w.eval('delete window.URL;');if(w.Object.getOwnPropertyNames(w).indexOf('URL')>=0)throw 'deleted intrinsic resurrected';
+if(parentSecret!==17||typeof child_z!=='undefined')throw 'realm leakage';document.title='child-window-keys-ok';
+"#);
+        let (mut doc, mut forms, mut page, outcome) = start(&source, &crate::csp::PolicySet::default());
+        assert_eq!(outcome.errors, 0, "{}", page.report());
+        assert_eq!(doc.title, "child-window-keys-ok");
+        let mut bridge = Bridge { doc: &mut doc, forms: &mut forms, state: &mut page.state };
+        assert!(bridge.window_properties(window(0)+1).is_err());
+        bridge.state.host_work = 0;
+        assert!(bridge.window_properties(window(0)).is_err());
+        page.set_location(&crate::navigation::Location { url: Some(crate::url::parse("https://other.test/").unwrap().0), path: None, fragment: String::new(), root: None });
+        let outcome = page.console_eval(&mut doc, &mut forms, "w.Object.keys(w);");
+        assert_eq!(outcome.errors, 1, "{}", page.report());
+    }
+
+    #[test]
+    fn saved_child_window_key_builtins_validate_origin_before_deferred_allocation() {
+        let source = format!("{CREATE}var savedKeys=w.Object.keys,savedHasOwn=w.Object.hasOwn;");
+        let (mut doc, mut forms, mut page, outcome) = start(&source, &crate::csp::PolicySet::default());
+        assert_eq!(outcome.errors, 0, "{}", page.report());
+        let before = page.runtime.window_allocation_state_for_test();
+        page.set_location(&crate::navigation::Location { url: Some(crate::url::parse("https://other.test/").unwrap().0), path: None, fragment: String::new(), root: None });
+        for source in ["savedKeys(w);", "savedHasOwn(w,'Uint8Array');"] {
+            let outcome = page.console_eval(&mut doc, &mut forms, source);
+            assert_eq!(outcome.errors, 1, "{}", page.report());
+            assert_eq!(page.runtime.window_allocation_state_for_test(), before);
+        }
+    }
+
+    #[test]
     fn tab_index_child_getter_keeps_actual_node_and_origin_validation() {
         let source = format!("{CREATE}for(var n of [w.document.documentElement,w.document.head,w.document.body]){{if(!('tabIndex' in n)||n.tabIndex!==-1)throw 'child tabIndex';}}var saved=w.document.body;");
         let (mut doc, mut forms, mut page, outcome) = start(&source, &crate::csp::PolicySet::default());
