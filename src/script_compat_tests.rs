@@ -117,7 +117,7 @@ fn attr_detach_retains_exact_value_bytes_and_budget_failures_publish_no_partial_
     assert_eq!(bridge.state.attributes[script_attr::index(attr).unwrap()].value, "original");
     bridge.set(attr, "value", Value::String("longer-value".into())).unwrap();
     assert_eq!(bridge.state.retained, before - "title".len() - "original".len() + "longer-value".len());
-    for invalid in [768 + 255, NODE_BASE - 1] {
+    for invalid in [768 + 1, NODE_BASE - 1] {
         assert!(bridge.get(invalid, "value").is_err());
         assert!(bridge.has(invalid, "value").is_err());
         assert!(!bridge.readonly_property(invalid, "name"));
@@ -460,6 +460,8 @@ fn event_interface_diagnostic_is_bounded_and_does_not_echo_payload_or_claim_supp
 fn event_interface_diagnostic_invokes_no_coercion_or_event_lifecycle() {
     let (mut doc, mut forms, mut page, outcome) = page("<p>Events</p>", &["var conversions=0,request={toString:function(){conversions++;return 'Event';}};"]);
     assert_eq!(outcome.errors, 0, "{}", page.report());
+    // Preserve the original unsupported-factory diagnostic baseline explicitly.
+    page.state.disable_event_factory = true;
     let before = (page.state.next_event, page.state.event.is_some(), page.state.listeners.len());
     let outcome = page.console_eval(&mut doc, &mut forms, "document.createEvent(request);");
     assert_eq!(outcome.errors, 1, "{}", page.report());

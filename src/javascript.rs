@@ -388,6 +388,9 @@ pub trait Host {
     }
     /// Node nullable string setters normalize original nullish inputs to empty.
     fn nullish_string_setter(&self, _object: u32, _property: &str) -> bool { false }
+    /// Pure interface checks interleaved with scalar conversion in table order.
+    fn validate_argument_prefix(&self, _object: u32, _method: &str, _next_index: usize, _args: &[Value])
+        -> Result<(), (&'static str, String)> { Ok(()) }
     fn required_arguments(&self, _object: u32, _method: &str) -> usize {
         0
     }
@@ -7787,6 +7790,8 @@ impl Runtime {
             }
             for &(index, string_hint) in conversions {
                 if let Some(value) = converted.get(index).cloned() {
+                    host.validate_argument_prefix(object, method, index, &converted)
+                        .map_err(|(kind, message)| Fault::exception(kind, message))?;
                     if string_hint && host.nullable_string_argument(object, method, index)
                         && matches!(value, Value::Null | Value::Undefined)
                     {

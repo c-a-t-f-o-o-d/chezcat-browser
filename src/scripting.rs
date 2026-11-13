@@ -32,6 +32,8 @@ mod dom_tree;
 use dom_tree::DomState;
 #[path = "script_attr.rs"]
 mod script_attr;
+#[path = "script_created_events.rs"]
+mod script_created_events;
 #[path = "script_navigation.rs"]
 mod page_navigation;
 pub use page_navigation::Navigation;
@@ -300,6 +302,9 @@ struct State {
     next_listener: u32,
     next_event: u32,
     event: Option<Event>,
+    created_events: Vec<script_created_events::CreatedEvent>,
+    #[cfg(test)]
+    disable_event_factory: bool,
     tree: Tree,
     dirty: bool,
     limits: crate::javascript::limits::Limits,
@@ -356,6 +361,9 @@ impl State {
             next_listener: 0,
             next_event: EVENT_BASE,
             event: None,
+            created_events: Vec::new(),
+            #[cfg(test)]
+            disable_event_factory: false,
             tree: Tree::default(),
             dirty: true,
             limits: crate::javascript::limits::BROWSER,
@@ -2143,7 +2151,7 @@ impl Host for Bridge<'_> {
     }
 
     fn readonly_property(&self, object: u32, property: &str) -> bool {
-        self.attr_readonly(object, property) || self.dom_readonly(object, property)
+        self.created_event_readonly(object, property) || self.attr_readonly(object, property) || self.dom_readonly(object, property)
             || collection_handle_index(object).is_some()
             || node_list_index(object).is_some()
                 && (property == "length" || collection_index(property).is_some())
@@ -2172,6 +2180,12 @@ impl Host for Bridge<'_> {
     }
 
     fn argument_conversions(&self, object: u32, method: &str) -> &'static [(usize, bool)] {
+        if object == DOCUMENT && method == "createEvent" && self.event_factory_enabled()
+            || self.event_receiver(object) && method == "initEvent"
+        { return &[(0, true)]; }
+        if self.mouse_receiver(object) && method == "initMouseEvent" {
+            return &[(0, true), (4, false), (5, false), (6, false), (7, false), (8, false), (13, false)];
+        }
         if method == "isDefaultNamespace" && self.namespace_receiver(object) { return &[(0, true)]; }
         if self.attr_element_receiver(object) && method == "getAttributeNode" { return &[(0, true)]; }
         if collection_handle_index(object).is_some() {
@@ -2220,11 +2234,20 @@ impl Host for Bridge<'_> {
         method == "isDefaultNamespace" && index == 0 && self.namespace_receiver(object)
     }
 
+    fn validate_argument_prefix(&self, object: u32, method: &str, next_index: usize, args: &[Value])
+        -> Result<(), (&'static str, String)> {
+        self.validate_event_prefix(object, method, next_index, args)
+    }
+
     fn nullish_string_setter(&self, object: u32, property: &str) -> bool {
         self.attr_receiver(object) && matches!(property, "nodeValue" | "textContent")
     }
 
     fn required_arguments(&self, object: u32, method: &str) -> usize {
+        if object == DOCUMENT && method == "createEvent" && self.event_factory_enabled()
+            || self.event_receiver(object) && method == "initEvent"
+            || self.mouse_receiver(object) && method == "initMouseEvent"
+        { return 1; }
         if method == "isDefaultNamespace" && self.namespace_receiver(object) { return 1; }
         if self.attr_element_receiver(object) && matches!(method, "getAttributeNode" | "removeAttributeNode") { return 1; }
         if collection_handle_index(object).is_some() && matches!(method, "item" | "namedItem")
@@ -2272,6 +2295,7 @@ impl Host for Bridge<'_> {
         method: &str,
         args: &[Value],
     ) -> Result<(), (&'static str, String)> {
+        self.validate_created_event_call(object, method, args)?;
         // These existing methods still convert primitive arguments inside the
         // bridge. Reject Symbol before that boundary so the error is catchable
         // and no timer, listener or style mutation has begun. Timer callback
@@ -2422,6 +2446,7 @@ impl Host for Bridge<'_> {
         // and real DOM nodes; other native capabilities keep the default deny.
         matches!(object, WINDOW | DOCUMENT)
             || self.attr_receiver(object)
+            || self.constructed_event_receiver(object)
             || node_index(object).is_some_and(|node| self.doc.nodes.get(node).is_some())
     }
 
@@ -2431,6 +2456,8 @@ impl Host for Bridge<'_> {
     }
 
     fn method(&self, object: u32, property: &str) -> Option<&'static str> {
+        if object == DOCUMENT && property == "createEvent" && self.event_factory_enabled() { return Some("createEvent"); }
+        if let Some(method) = self.created_event_method(object, property) { return Some(method); }
         if property == "submit" {
             return self.form_submit_method(object);
         }
@@ -2476,6 +2503,13 @@ impl Host for Bridge<'_> {
     }
 
     fn accepts_receiver(&self, object: u32, method: &str, receiver: u32) -> bool {
+        if method == "initMouseEvent" { return self.mouse_receiver(object) && self.mouse_receiver(receiver); }
+        if matches!(method, "initEvent" | "preventDefault" | "stopPropagation" | "stopImmediatePropagation") {
+            // First-class methods are created only from genuine Event handles.
+            // Issued IDs are monotonic and never reused. Expiry of the source
+            // event does not revoke borrowing; the actual receiver must be live.
+            return (EVENT_BASE..self.state.next_event).contains(&object) && self.event_receiver(receiver);
+        }
         if matches!(method, "getAttributeNode" | "removeAttributeNode") {
             return self.attr_element_receiver(object) && self.attr_element_receiver(receiver);
         }
@@ -2684,6 +2718,7 @@ impl Host for Bridge<'_> {
 
     fn has(&mut self, object: u32, property: &str) -> Result<bool, String> {
         self.state.work(1)?;
+        if let Some(result) = self.created_event_has(object, property) { return result; }
         if script_attr::index(object).is_some() { return self.attr_has(object, property); }
         if self.is_frame_handle(object) {
             if property == "isDefaultNamespace" && self.namespace_receiver(object) { return Ok(true); }
@@ -2754,6 +2789,7 @@ impl Host for Bridge<'_> {
             {
                 return Err("Event handle has expired.".into());
             }
+            if self.created_event_method(object, property).is_some() { return Ok(true); }
             let keyboard = self.state.event.as_ref().unwrap().keyboard.is_some();
             return Ok(keyboard && keyboard_property(property)
                 || matches!(
@@ -2820,6 +2856,7 @@ impl Host for Bridge<'_> {
         }
         if object == DOCUMENT {
             if dom_tree::node_constant(property).is_some() { return Ok(true); }
+            if property == "createEvent" && self.event_factory_enabled() { return Ok(true); }
             if property == "isDefaultNamespace" { return Ok(true); }
             if matches!(property, "location" | "URL" | "documentURI") {
                 return Ok(self.state.location.is_some());
@@ -2922,6 +2959,7 @@ impl Host for Bridge<'_> {
 
     fn get(&mut self, object: u32, property: &str) -> Result<Value, String> {
         self.state.work(1)?;
+        if let Some(result) = self.created_event_get(object, property) { return result; }
         if script_attr::index(object).is_some() { return self.attr_get(object, property); }
         if let Some(value) = self.frame_get(object, property) { return value; }
         if collection_handle_index(object).is_some() {
@@ -3384,7 +3422,14 @@ impl Host for Bridge<'_> {
         if self.is_frame_handle(object) { return Err("Blank child native methods are not implemented.".into()); }
         self.state.work(1)?;
         if object == DOCUMENT && method == "createEvent" {
-            return Err(unsupported_event_interface(args.first()));
+            return if self.event_factory_enabled() { self.create_event(args) }
+                else { Err(unsupported_event_interface(args.first())) };
+        }
+        if let Some(result) = self.created_event_call(object, method, args) { return result; }
+        if method == "initEvent" && self.state.event.as_ref().is_some_and(|event| event.handle == object) {
+            // Ordinary WebIDL conversion has completed. The trusted dispatch
+            // flag prevents reinitialization; callback side effects remain.
+            return Ok(Value::Undefined);
         }
         if method == "submit" {
             return self.submit_form(object);
