@@ -33,6 +33,8 @@ mod intrinsic_realms;
 mod function_allocation;
 #[path = "deferred_native_methods.rs"]
 mod deferred_native_methods;
+#[path = "function_source.rs"]
+mod function_source;
 #[cfg(test)]
 #[path = "statement_expression_tests.rs"]
 mod statement_expression_tests;
@@ -663,6 +665,7 @@ enum TokenKind {
 struct Token {
     kind: TokenKind,
     at: usize,
+    end: usize,
     newline: bool,
 }
 
@@ -1288,6 +1291,7 @@ fn tokenize(source: &str, regexp_budget: &mut usize) -> Result<Vec<Token>, Fault
         tokens.push(Token {
             kind,
             at: start,
+            end: at,
             newline,
         });
         newline = false;
@@ -1300,6 +1304,7 @@ fn tokenize(source: &str, regexp_budget: &mut usize) -> Result<Vec<Token>, Fault
     tokens.push(Token {
         kind: TokenKind::End,
         at,
+        end: at,
         newline,
     });
     Ok(tokens)
@@ -1403,6 +1408,9 @@ struct Parameter {
 }
 
 struct Template {
+    source_start: usize,
+    source_end: usize,
+    dynamic_source: bool,
     arrow: bool,
     constructible: bool,
     strict: bool,
@@ -1534,7 +1542,7 @@ impl Parser {
         Ok(parser.program)
     }
 
-    fn defer_body(&mut self, template: Template) -> Result<usize, Fault> {
+    fn defer_body(&mut self, mut template: Template) -> Result<usize, Fault> {
         if self.functions >= MAX_PARSE_DEPTH {
             return Err(self.unsupported("Function syntax nesting limit reached (64)."));
         }
@@ -1544,6 +1552,7 @@ impl Parser {
         if end == usize::MAX {
             return Err(self.error("Unterminated function body."));
         }
+        template.source_end = self.tokens[end].end;
         let id = self.program.templates.len();
         self.program.templates.push(template);
         // Each queued body has a function AST node; the existing source/token/
@@ -1883,7 +1892,7 @@ impl Parser {
             kind
         } else if self.eat("function") {
             let name = self.name()?;
-            let function = self.function(None)?;
+            let function = self.function(None, at)?;
             StmtKind::Function(name, function)
         } else if self.eat("if") {
             self.if_statement(id)?
@@ -2043,10 +2052,13 @@ impl Parser {
         Ok((params, rest, trailing))
     }
 
-    fn function(&mut self, name: Option<String>) -> Result<usize, Fault> {
+    fn function(&mut self, name: Option<String>, start: usize) -> Result<usize, Fault> {
         self.enter()?;
         let (params, rest, trailing_parameter_comma) = self.parameters(false)?;
         let id = self.defer_body(Template {
+            source_start: start,
+            source_end: start,
+            dynamic_source: false,
             arrow: false,
             constructible: true,
             strict: self.strict,
@@ -2130,6 +2142,9 @@ impl Parser {
         self.need("=>")?;
         if self.is("{") {
             let template = self.defer_body(Template {
+                source_start: at,
+                source_end: at,
+                dynamic_source: false,
                 arrow: true,
                 constructible: false,
                 strict: self.strict,
@@ -2167,6 +2182,9 @@ impl Parser {
         self.depth -= 1;
         let template = self.program.templates.len();
         self.program.templates.push(Template {
+            source_start: at,
+            source_end: self.tokens[self.current - 1].end,
+            dynamic_source: false,
             arrow: true,
             constructible: false,
             strict,
@@ -2230,7 +2248,7 @@ impl Parser {
                         } else {
                             Some(self.name()?)
                         };
-                        ExprKind::Function(self.function(name)?)
+                        ExprKind::Function(self.function(name, at)?)
                     }
                     _ if !reserved(&word) => ExprKind::Name(word),
                     _ => {
@@ -2335,7 +2353,7 @@ impl Parser {
                 {
                     return Err(self.error("A setter parameter cannot be followed by a comma."));
                 }
-                let template = self.function(None)?;
+                let template = self.function(None, position)?;
                 let params = &self.program.templates[template].params;
                 let kind = accessor.unwrap_or(Kind::Method);
                 if kind == Kind::Getter && !params.is_empty() {
@@ -2999,6 +3017,7 @@ pub struct Runtime {
     /// Ordinary own properties and [[Prototype]] of each callable identity.
     function_properties: Vec<usize>,
     function_realms: Vec<Option<usize>>,
+    function_initial_names: Vec<Option<String>>,
     programs: Vec<Rc<Program>>,
     objects: Vec<Object>,
     symbols: Vec<symbols::Data>,
@@ -3098,6 +3117,7 @@ impl Runtime {
             functions: Vec::new(),
             function_properties: Vec::new(),
             function_realms: Vec::new(),
+            function_initial_names: Vec::new(),
             programs: Vec::new(),
             objects: Vec::new(),
             symbols: Vec::new(),
@@ -3322,6 +3342,7 @@ impl Runtime {
             self.functions.pop();
             self.function_properties.pop();
             self.function_realms.pop();
+            if let Some(Some(name)) = self.function_initial_names.pop() { self.value_bytes -= name.len(); }
             return Err(error);
         }
         Ok(value)

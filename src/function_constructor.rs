@@ -71,8 +71,9 @@ impl Runtime {
 
             // The final parse enforces parameter/body early errors together,
             // including duplicate bindings and strict directives with rest.
-            let program = self.parse_function_source(&source)?;
+            let mut program = self.parse_function_source(&source)?;
             let template = Self::function_source_template(&program, false, false)?;
+            program.templates[template].dynamic_source = true;
             let program = self.retain_parsed_program(Rc::new(program))?;
             let function = self.make_function(&program, template, self.global_environment, &Value::Undefined)?;
             let properties = self.ordinary_id(self.ordinary_required(&function)?)?;

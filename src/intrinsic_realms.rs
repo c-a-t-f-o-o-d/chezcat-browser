@@ -305,6 +305,7 @@ if(ChildFunction('return Symbol.iterator;')()!==Symbol.iterator||ChildFunction('
         assert_eq!(runtime.active_realm, None);
         assert_eq!(runtime.global_environment, 0);
         assert_eq!(runtime.function_realms.len(), runtime.functions.len());
+        assert_eq!(runtime.function_initial_names.len(), runtime.functions.len());
         runtime.collect_environments();
         assert_eq!(runtime.execute("closure()[0];", &mut NoHost).unwrap().to_number(), 17.0);
     }
@@ -328,6 +329,24 @@ if(typeof childOnly!=='undefined'||ChildFunction('return childOnly;')()!==27)thr
 'ok';
 "#, &mut NoHost).unwrap().to_text(), "ok");
         assert_eq!((runtime.active_realm, runtime.global_environment), (None, 0));
+    }
+
+    #[test]
+    fn borrowed_source_stringification_keeps_foreign_source_and_ignores_names() {
+        let mut runtime = Runtime::new();
+        expose_test_realm(&mut runtime);
+        assert_eq!(runtime.execute(r#"
+var f=ChildFunction('x','return x;'),read=Function.prototype.toString;
+if(read.call(f)!=='function anonymous(x\n) {\nreturn x;\n}')throw 'foreign dynamic source';
+var nested=ChildFunction('return function /*child*/ named(){return 17;};')();
+var childRead=ChildFunction('return Function.prototype.toString;')();
+if(read.call(nested)!=='function /*child*/ named(){return 17;}'||childRead.call(nested)!==read.call(nested))throw 'borrowed source';
+Object.defineProperty(nested,'name',{get:function(){throw 'name getter';}});
+if(read.call(nested)!=='function /*child*/ named(){return 17;}')throw 'mutable source name';
+'ok';
+"#, &mut NoHost).unwrap().to_text(), "ok");
+        assert_eq!((runtime.active_realm, runtime.global_environment), (None, 0));
+        assert_eq!(runtime.function_initial_names.len(), runtime.functions.len());
     }
 
     #[test]

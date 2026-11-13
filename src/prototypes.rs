@@ -131,6 +131,15 @@ impl Runtime {
             _ => self.active_realm,
         };
         self.function_realms.push(realm);
+        self.function_initial_names.push(None);
+        if !matches!(self.functions[index], Function::Script { .. } | Function::Bound(_)) {
+            self.work(name.len())?;
+            if self.value_bytes.saturating_add(name.len()) > self.limits.heap.retained_values {
+                return Err(Fault::new(format!("Retained value limit reached ({} bytes).", self.limits.heap.retained_values)));
+            }
+            self.function_initial_names[index] = Some(name.into());
+            self.value_bytes += name.len();
+        }
         if let Some(prototype) = self.function_prototype {
             self.objects[properties].prototype = Some(Ordinary::Function(prototype));
         }
@@ -1947,27 +1956,7 @@ impl Runtime {
                     return self.bind_function(index, args, host);
                 }
                 if method == "toString" {
-                    if matches!(self.functions.get(index), Some(Function::Bound(_))) {
-                        return Ok(Value::String("function () { [native code] }".into()));
-                    }
-                    if matches!(self.functions.get(index), Some(Function::Script { .. })) {
-                        return Err(Fault::new(
-                            "Script function source-string conversion is not implemented.",
-                        ));
-                    }
-                    let name = self.get_ordinary_property_with_host(
-                        Ordinary::Function(index),
-                        "name",
-                        host,
-                    )?;
-                    let name = if let Value::String(name) = name {
-                        name
-                    } else {
-                        String::new()
-                    };
-                    return self.checked_value(Value::String(format!(
-                        "function {name}() {{ [native code] }}"
-                    )));
+                    return self.function_source(index);
                 }
                 let receiver = self.copy_value(args.first().unwrap_or(&Value::Undefined))?;
                 if method == "apply" {

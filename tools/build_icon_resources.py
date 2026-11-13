@@ -55,10 +55,10 @@ def main():
         for output in [resource, coff]:
             shutil.copyfile(output, root / 'resources' / output.name)
     files = [source, icon, root / 'resources/chezcat.res', root / 'resources/chezcat-x64.o']
-    report = {str(path.relative_to(root)): hashlib.sha256(path.read_bytes()).hexdigest()
+    report = {path.relative_to(root).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
               for path in files}
-    (root / 'resources/SHA256SUMS.txt').write_text(
-        ''.join(f'{digest}  {name}\n' for name, digest in report.items()), encoding='utf-8')
+    (root / 'resources/SHA256SUMS.txt').write_bytes(
+        ''.join(f'{digest}  {name}\n' for name, digest in report.items()).encode('utf-8'))
     print(json.dumps(report, indent=2))
 
 
