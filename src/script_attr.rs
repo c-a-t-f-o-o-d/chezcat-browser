@@ -104,18 +104,19 @@ impl Bridge<'_> {
         Ok(())
     }
 
-    pub(super) fn get_attribute_node(&mut self, object: u32, args: &[Value]) -> Result<Value, String> {
+    fn attr_element_node(&mut self, object: u32) -> Result<usize, String> {
         let node = self.node(object)?;
         if self.doc.nodes[node].namespace != crate::html::Namespace::Html {
             return Err("Attr namespace provenance for foreign parser contexts is unavailable.".into());
         }
-        let text = self.text(args.first().ok_or("getAttributeNode requires a name.")?)?;
-        self.state.copies(text.len())?;
-        let name = text.to_ascii_lowercase();
+        Ok(node)
+    }
+
+    fn lookup_attribute_node(&mut self, node: usize, name: String) -> Result<Value, String> {
         let NodeKind::Element { attrs, .. } = &self.doc.nodes[node].kind else { unreachable!() };
         self.state.work(attrs.len())?;
         self.state.copies(attrs.iter().map(|(name, _)| name.len()).sum())?;
-        if self.doc.attr(node, &name).is_none() { return Ok(Value::Null); }
+        if !attrs.iter().any(|(key, _)| key == &name) { return Ok(Value::Null); }
         self.state.work(self.state.attributes.len())?;
         self.state.copies(self.state.attributes.iter().filter(|attr| attr.owner == Some(node)).map(|attr| attr.name.len()).sum())?;
         if let Some(id) = self.state.attributes.iter().position(|attr| attr.owner == Some(node) && attr.name == name) {
@@ -127,6 +128,28 @@ impl Bridge<'_> {
         let handle = ATTR_BASE + self.state.attributes.len() as u32;
         self.state.attributes.push(Attr { owner: Some(node), name, value: String::new() });
         Ok(Value::Host(handle))
+    }
+
+    pub(super) fn get_attribute_node(&mut self, object: u32, args: &[Value]) -> Result<Value, String> {
+        let node = self.attr_element_node(object)?;
+        let text = self.text(args.first().ok_or("getAttributeNode requires a name.")?)?;
+        self.state.copies(text.len())?;
+        self.lookup_attribute_node(node, text.to_ascii_lowercase())
+    }
+
+    pub(super) fn get_attribute_node_ns(&mut self, object: u32, args: &[Value]) -> Result<Value, String> {
+        let node = self.attr_element_node(object)?;
+        let namespace = match args.first() {
+            Some(Value::Null | Value::Undefined) => None,
+            Some(Value::String(text)) => if text.is_empty() { None } else { Some(text.as_str()) },
+            _ => return Err("getAttributeNodeNS requires a converted nullable namespace.".into()),
+        };
+        let name = self.text(args.get(1).ok_or("getAttributeNodeNS requires two arguments.")?)?;
+        // Every attribute produced by this supported HTML parser/mutation model
+        // has null namespace and no prefix. Foreign parser contexts were rejected
+        // above; namespace-aware factories/attachment remain unavailable.
+        if namespace.is_some() { return Ok(Value::Null); }
+        self.lookup_attribute_node(node, name)
     }
 
     pub(super) fn validate_attr_removal(&self, object: u32, args: &[Value]) -> Result<(), (&'static str, String)> {

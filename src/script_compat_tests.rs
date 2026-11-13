@@ -1,6 +1,93 @@
 use super::*;
 
 #[test]
+fn attr_namespace_lookup_keeps_exact_local_names_raw_colons_and_stable_identity() {
+    let (doc, _, page, outcome) = page("<p id=p TITLE=old x:y=colon xmlns='urn:raw' xmlns:x='urn:x' null=n undefined=u></p>", &[r#"
+var p=document.getElementById('p'),a=p.getAttributeNode('TITLE');
+if(p.getAttributeNodeNS(null,'title')!==a||p.getAttributeNodeNS(undefined,'title')!==a||p.getAttributeNodeNS('','title')!==a||p.getAttributeNodeNS(null,'TITLE')!==null)throw 'namespace/case/identity';
+if(p.getAttributeNodeNS('urn:x','title')!==null||p.getAttributeNodeNS('http://www.w3.org/1999/xhtml','title')!==null)throw 'unqualified attrs';
+var colon=p.getAttributeNodeNS(null,'x:y');if(colon!==p.getAttributeNode('x:y')||colon.localName!=='x:y'||colon.prefix!==null||colon.namespaceURI!==null||p.getAttributeNodeNS(null,'y')!==null||p.getAttributeNodeNS('urn:x','y')!==null)throw 'raw colon';
+if(p.getAttributeNodeNS(null,'xmlns').namespaceURI!==null||p.getAttributeNodeNS('http://www.w3.org/2000/xmlns/','x')!==null||p.getAttributeNodeNS(null,'xmlns:x').localName!=='xmlns:x')throw 'raw xmlns';
+if(p.getAttributeNodeNS(null,null).value!=='n'||p.getAttributeNodeNS(undefined,undefined).value!=='u'||p.getAttributeNodeNS(null,'bad name')!==null||p.getAttributeNodeNS(null,'')!==null)throw 'local DOMString/query syntax';
+p.setAttribute('title','live');if(p.getAttributeNodeNS(null,'title')!==a||a.value!=='live')throw 'live attr';
+p.removeAttributeNode(a);p.setAttribute('title','fresh');if(p.getAttributeNodeNS(null,'title')===a||a.value!=='live'||a.ownerElement!==null)throw 'detach/readd';
+var get=p.getAttributeNodeNS;if(get!==p.getAttributeNodeNS||get.call(p,null,'title').value!=='fresh')throw 'method borrowing';
+document.title='attr-namespace-lookup-ok';
+"#]);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    assert_eq!(doc.title, "attr-namespace-lookup-ok");
+}
+
+#[test]
+fn attr_namespace_conversion_order_nullability_failures_and_reentrancy_are_real() {
+    let (doc, _, page, outcome) = page("<p id=p title=old></p>", &[r#"
+var p=document.getElementById('p'),log='',marker={},old=p.getAttributeNode('title');
+var ns={toString:function(){log+='N';return '';},valueOf:function(){throw 'wrong hint';}},name={toString:function(){log+='L';return 'title';},valueOf:function(){throw 'wrong hint';}};
+if(p.getAttributeNodeNS(ns,name)!==old||log!=='NL')throw 'ordered once conversion';
+log='';if(p.getAttributeNodeNS({toString:function(){log+='N';return null;}},name)!==null||log!=='NL')throw 'object-produced null';
+log='';if(p.getAttributeNodeNS({toString:function(){log+='N';return undefined;}},name)!==null||log!=='NL')throw 'object-produced undefined';
+log='';var rejected=0;try{p.getAttributeNodeNS(ns);}catch(e){if(e.name==='TypeError')rejected++;}if(log!=='')throw 'arity before conversion';
+try{p.getAttributeNodeNS(Symbol(),name);}catch(e){if(e.name==='TypeError')rejected++;}if(log!=='')throw 'namespace Symbol first';
+try{p.getAttributeNodeNS('urn:x',Symbol());}catch(e){if(e.name==='TypeError')rejected++;}
+var caught=false;try{p.getAttributeNodeNS({toString:function(){throw marker;}},name);}catch(e){caught=e===marker;}if(!caught||log!=='')throw 'namespace throw identity';
+caught=false;try{p.getAttributeNodeNS(null,{toString:function(){throw marker;}});}catch(e){caught=e===marker;}if(!caught||old.value!=='old')throw 'name throw identity';
+var fresh=p.getAttributeNodeNS(null,{toString:function(){p.removeAttribute('title');p.setAttribute('title','after');return 'title';}});
+if(fresh===old||fresh.value!=='after'||old.ownerElement!==null||old.value!=='old'||rejected!==3)throw 'post-coercion lookup';
+var calls=0,arg={toString:function(){calls++;return 'title';}};
+for(var bad of [{},window,document,p.style,p.dataset,document.createTextNode('x')]){try{p.getAttributeNodeNS.call(bad,arg,arg);}catch(e){if(e.name==='TypeError')rejected++;}}
+if(calls!==0||rejected!==9)throw 'brand before arguments';
+document.title='attr-namespace-conversion-ok';
+"#]);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    assert_eq!(doc.title, "attr-namespace-conversion-ok");
+}
+
+#[test]
+fn attr_namespace_misses_do_not_consume_identity_capacity_or_retained_bytes() {
+    let (mut doc, mut forms, mut page, outcome) = page("<p id=p title=old></p>", &[]);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    let p = (0..doc.nodes.len()).find(|&n| doc.attr(n, "id") == Some("p")).unwrap();
+    let mut bridge = Bridge { doc: &mut doc, forms: &mut forms, state: &mut page.state };
+    for i in 0..256 {
+        let name = format!("data-{i}");
+        bridge.call(node_handle(p), "setAttribute", &[Value::String(name.clone()), Value::String("v".into())]).unwrap();
+        bridge.call(node_handle(p), "getAttributeNode", &[Value::String(name)]).unwrap();
+    }
+    let before = bridge.state.retained;
+    for (namespace, name) in [(Value::Null, "missing"), (Value::Null, "TITLE"), (Value::String("urn:x".into()), "title")] {
+        assert!(matches!(bridge.call(node_handle(p), "getAttributeNodeNS", &[namespace, Value::String(name.into())]).unwrap(), Value::Null));
+    }
+    assert_eq!(bridge.state.attributes.len(), 256);
+    assert_eq!(bridge.state.retained, before);
+    let existing = bridge.call(node_handle(p), "getAttributeNodeNS", &[Value::Null, Value::String("data-0".into())]).unwrap();
+    assert!(matches!(existing, Value::Host(handle) if script_attr::index(handle) == Some(0)));
+    assert!(bridge.call(node_handle(p), "getAttributeNodeNS", &[Value::Null, Value::String("title".into())]).unwrap_err().contains("256"));
+    assert_eq!(bridge.state.retained, before);
+}
+
+#[test]
+fn attr_namespace_foreign_context_and_failed_new_record_keep_existing_boundaries() {
+    let (mut doc, mut forms, mut page, outcome) = page("<p id=p title=old></p><svg><g id=f title=unknown></g></svg><template><i id=inert></i></template>", &[]);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    let find = |id: &str| (0..doc.nodes.len()).find(|&n| doc.attr(n, "id") == Some(id)).unwrap();
+    let p = find("p"); let foreign = find("f"); let inert = find("inert");
+    let invalid = [node_handle(0), node_handle(doc.nodes.len()+99), node_handle(inert)];
+    let mut bridge = Bridge { doc: &mut doc, forms: &mut forms, state: &mut page.state };
+    for handle in invalid {
+        assert!(!bridge.accepts_receiver(node_handle(p), "getAttributeNodeNS", handle));
+        assert!(bridge.method(handle, "getAttributeNodeNS").is_none());
+    }
+    for namespace in [Value::Null, Value::String("urn:x".into())] {
+        assert!(bridge.call(node_handle(foreign), "getAttributeNodeNS", &[namespace, Value::String("title".into())]).unwrap_err().contains("foreign"));
+    }
+    let before = bridge.state.retained;
+    bridge.state.retained_limit = before;
+    assert!(bridge.call(node_handle(p), "getAttributeNodeNS", &[Value::Null, Value::String("title".into())]).is_err());
+    assert!(bridge.state.attributes.is_empty());
+    assert_eq!(bridge.state.retained, before);
+}
+
+#[test]
 fn tab_index_getter_uses_tag_defaults_and_physical_summary_parent() {
     let (doc, _, page, outcome) = page("<html><body><input id=hidden type=hidden><input id=disabled disabled><a id=a>No href</a><div id=d></div><details><i>lead</i><summary id=first>First</summary><summary id=second>Second</summary></details><summary id=outside>Outside</summary></body></html>", &[r#"
 for(var id of ['hidden','disabled','a']){if(document.getElementById(id).tabIndex!==0)throw 'default historical zero';}

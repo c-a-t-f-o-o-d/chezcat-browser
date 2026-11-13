@@ -2188,6 +2188,7 @@ impl Host for Bridge<'_> {
         }
         if method == "isDefaultNamespace" && self.namespace_receiver(object) { return &[(0, true)]; }
         if self.attr_element_receiver(object) && method == "getAttributeNode" { return &[(0, true)]; }
+        if self.attr_element_receiver(object) && method == "getAttributeNodeNS" { return &[(0, true), (1, true)]; }
         if collection_handle_index(object).is_some() {
             return match method {
                 "item" => &[(0, false)],
@@ -2232,6 +2233,7 @@ impl Host for Bridge<'_> {
 
     fn nullable_string_argument(&self, object: u32, method: &str, index: usize) -> bool {
         method == "isDefaultNamespace" && index == 0 && self.namespace_receiver(object)
+            || method == "getAttributeNodeNS" && index == 0 && self.attr_element_receiver(object)
     }
 
     fn validate_argument_prefix(&self, object: u32, method: &str, next_index: usize, args: &[Value])
@@ -2244,6 +2246,7 @@ impl Host for Bridge<'_> {
     }
 
     fn required_arguments(&self, object: u32, method: &str) -> usize {
+        if self.attr_element_receiver(object) && method == "getAttributeNodeNS" { return 2; }
         if object == DOCUMENT && method == "createEvent" && self.event_factory_enabled()
             || self.event_receiver(object) && method == "initEvent"
             || self.mouse_receiver(object) && method == "initMouseEvent"
@@ -2510,7 +2513,7 @@ impl Host for Bridge<'_> {
             // event does not revoke borrowing; the actual receiver must be live.
             return (EVENT_BASE..self.state.next_event).contains(&object) && self.event_receiver(receiver);
         }
-        if matches!(method, "getAttributeNode" | "removeAttributeNode") {
+        if matches!(method, "getAttributeNode" | "getAttributeNodeNS" | "removeAttributeNode") {
             return self.attr_element_receiver(object) && self.attr_element_receiver(receiver);
         }
         if method == "isDefaultNamespace" {
