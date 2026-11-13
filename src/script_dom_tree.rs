@@ -474,7 +474,8 @@ impl Bridge<'_> {
                 || name == "script" && !self.dom_script(node)
                 || name == "link" && !self.dom_stylesheet(node)
             {
-                return Err("DOM tree mutation of controls, loaded resources or structural roots is not implemented.".into());
+                return Err(format!("DOM tree mutation of controls, loaded resources or structural roots is not implemented. Blocked node={node}; tag={:?}; connected={}; created={}.",
+                    prefix(name, 64), self.state.dom.connected.get(node).copied().unwrap_or(false), self.state.dom.created.contains(&node)));
             }
             if let Some(id) = self.doc.attr(node, "id").filter(|id| !id.is_empty()) {
                 self.state.work(self.forms.controls.len())?;
@@ -554,7 +555,9 @@ impl Bridge<'_> {
         if let Some(old_parent) = old_parent {
             self.mutation_ancestors(old_parent)?;
         }
-        let (descendants, depth) = self.mutation_subtree(child)?;
+        let (descendants, depth) = self.mutation_subtree(child).map_err(|error| format!(
+            "{error} Operation={method}; parent={parent}<{:?}>; child={child}<{:?}>; old_parent={old_parent:?}; reference={reference:?}.",
+            prefix(tag(self.doc, parent), 64), prefix(tag(self.doc, child), 64)))?;
         if method != "removeChild" && parent_depth.saturating_add(depth) > MAX_DOM_DEPTH {
             return Err("DOM tree depth limit reached (128).".into());
         }

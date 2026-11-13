@@ -67,6 +67,7 @@ fn main() {
                     || arg == "--diagnose"
                     || arg == "--activity-report"
                     || arg == "--save-source"
+                    || arg == "--dev-input-script"
             }) {
                 eprintln!("{}", error);
             } else {
@@ -102,9 +103,19 @@ fn run() -> Result<(), String> {
     let mut profile_directory: Option<PathBuf> = None;
     let mut no_profile = false;
     let mut wait_ms = 0;
+    let mut input_script: Option<PathBuf> = None;
+    let mut input_output: Option<PathBuf> = None;
     let mut args = std::env::args_os().skip(1);
     while let Some(arg) = args.next() {
         match arg.to_str() {
+            Some("--dev-input-script") => {
+                if input_script.is_some() { return Err("Pass --dev-input-script once.".into()); }
+                input_script = Some(args.next().ok_or("--dev-input-script requires a local script path")?.into());
+            }
+            Some("--dev-input-output") => {
+                if input_output.is_some() { return Err("Pass --dev-input-output once.".into()); }
+                input_output = Some(args.next().ok_or("--dev-input-output requires a new output directory")?.into());
+            }
             Some("--render") => {
                 render = Some(
                     args.next()
@@ -228,7 +239,7 @@ fn run() -> Result<(), String> {
                 )
             }
             Some("--help") | Some("-h") => {
-                let help = r#"ChezCat 0.54
+                let help = r#"ChezCat 0.55
 
 Open local HTML, UTF-8 text, supported images or a website address. Bare hosts such as google.com default to HTTPS; explicit http:// remains supported.
 Ctrl+O: file picker; Ctrl+L: address; Esc: stop loading.
@@ -279,7 +290,14 @@ HTTP, the TLS 1.3/1.2 HTTPS subset, gzip/deflate decoding, images, layout, contr
             }
         }
     }
-    if wait_ms > 0 && render.is_none() && activity_report.is_none() && save_source.is_none() {
+    if input_script.is_some() != input_output.is_some() {
+        return Err("Use --dev-input-script with --dev-input-output.".into());
+    }
+    if input_script.is_some() && (render.is_some() || activity_report.is_some() || save_source.is_some()
+        || source_view || resource_view || inspector_view.is_some() || browser_view.is_some() || find.is_some()) {
+        return Err("Use development input mode separately from other output/view options.".into());
+    }
+    if wait_ms > 0 && render.is_none() && activity_report.is_none() && save_source.is_none() && input_script.is_none() {
         return Err(
             "--wait-ms requires --render, --activity-report or --save-source output.".into(),
         );
@@ -339,6 +357,7 @@ HTTP, the TLS 1.3/1.2 HTTPS subset, gzip/deflate decoding, images, layout, contr
             || browser_view.is_some()
             || activity_report.is_some()
             || save_source.is_some()
+            || input_script.is_some()
             || find.is_some()
             || profile_directory.is_some()
         {
@@ -349,7 +368,7 @@ HTTP, the TLS 1.3/1.2 HTTPS subset, gzip/deflate decoding, images, layout, contr
         let path = diagnostic_report.ok_or("--diagnose requires --report output.txt")?;
         return diagnostics::write_report(&path, &diagnostic_urls, &trust);
     }
-    let headless = render.is_some() || activity_report.is_some() || save_source.is_some();
+    let headless = render.is_some() || activity_report.is_some() || save_source.is_some() || input_script.is_some();
     let mut browser = app::App::new();
     browser.use_system_fonts();
     // Headless output is independent of personal settings unless a profile
@@ -410,6 +429,9 @@ HTTP, the TLS 1.3/1.2 HTTPS subset, gzip/deflate decoding, images, layout, contr
         browser.wait_for_load();
     }
     browser.wait_for_script_timers(std::time::Duration::from_millis(wait_ms as u64));
+    if let (Some(script), Some(output)) = (input_script, input_output) {
+        return browser.run_input_script(&script, &output);
+    }
     if let Some(path) = activity_report {
         std::fs::write(&path, browser.activity_report())
             .map_err(|error| format!("Cannot write activity report {}: {error}", path.display()))?;

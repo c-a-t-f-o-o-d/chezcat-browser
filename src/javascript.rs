@@ -25,6 +25,11 @@ mod base64;
 mod binary_data;
 #[path = "binding_length.rs"]
 mod binding_length;
+#[path = "binding_character.rs"]
+mod binding_character;
+#[cfg(test)]
+#[path = "statement_expression_tests.rs"]
+mod statement_expression_tests;
 #[path = "binding_patterns.rs"]
 mod binding_patterns;
 #[path = "bound_functions.rs"]
@@ -2743,6 +2748,9 @@ struct Binding {
     // Valid only for this immutable primitive value. put_binding resets this
     // on every successful replacement, including mapped arguments/eval writes.
     utf16_length: Option<usize>,
+    // One scalar boundary in this immutable value, never a payload/index table.
+    // Replacement through put_binding invalidates both UTF-16 memos.
+    utf16_cursor: Option<(usize, usize)>,
 }
 
 struct Environment {
@@ -3526,10 +3534,16 @@ impl Runtime {
         }
         self.work(source.len())?;
         let program = Rc::new(if strict || self.eval_depth != 0 {
-            Parser::parse_context(source, &mut self.regexp_work, strict, self.eval_depth)?
+            Parser::parse_context(source, &mut self.regexp_work, strict, self.eval_depth)
         } else {
-            Parser::parse(source, &mut self.regexp_work)?
-        });
+            Parser::parse(source, &mut self.regexp_work)
+        }.map_err(|mut fault| {
+            if fault.message.contains("Parser nesting limit") && self.eval_depth != 0 {
+                fault.message.push_str(&format!(" Active native entries={}; calls={}; heap expression frames={}.",
+                    self.eval_depth, self.call_depth, self.evaluation_frames));
+            }
+            fault
+        })?);
         if handler {
             let valid = match program.body.as_slice() {
                 [statement] => match program.stmts[*statement].kind {
@@ -3701,7 +3715,7 @@ impl Runtime {
         }
         self.environment_mut(env)
             .bindings
-            .insert(name, Binding { value, kind, utf16_length: None });
+            .insert(name, Binding { value, kind, utf16_length: None, utf16_cursor: None });
         self.bindings += usize::from(new);
         self.value_bytes = self.value_bytes - old_bytes + new_bytes;
         Ok(())
@@ -5677,8 +5691,32 @@ impl Runtime {
             return Err(Fault::new("Evaluation nesting limit reached (128)."));
         }
         self.eval_depth += 1;
-        let result =
+        // Expression/return statements have no pending statement work while
+        // their expression runs. Enter the heap evaluator from this activation,
+        // rather than retaining statement_inner plus a second eval wrapper.
+        // Keep the expression step and all heap/call quotas; eval_depth counts
+        // the live native activation once. Compound statements keep their guard.
+        let expression = match program.stmts[id].kind {
+            StmtKind::Expr(expression) => Some((expression, false)),
+            StmtKind::Return(Some(expression)) => Some((expression, true)),
+            _ => None,
+        };
+        let result = if let Some((expression, returning)) = expression {
+            self.step().and_then(|_| {
+                #[cfg(test)]
+                let value = if self.recursive_evaluation_oracle {
+                    self.eval_inner(program, expression, env, this, host)
+                } else {
+                    self.eval_heap(program, expression, env, this, host)
+                };
+                #[cfg(not(test))]
+                let value = self.eval_heap(program, expression, env, this, host);
+                value.map_err(|error| error.at(&program.source, program.exprs[expression].at))
+                    .map(|value| if returning { Control::Return(value) } else { Control::Normal(Some(value)) })
+            })
+        } else {
             self.statement_inner(program, id, env, this, host)
+        }
                 .map(|control| match control {
                     Control::Break(target, value) if target == id => Control::Normal(value),
                     other => other,
@@ -6684,6 +6722,9 @@ impl Runtime {
         this: &Value,
         host: &mut dyn Host,
     ) -> Result<Value, Fault> {
+        if let Some(result) = self.try_binding_character(program, object, property, arguments, env, host) {
+            return result;
+        }
         let (object, property, function) =
             self.prepare_member_call(program, object, property, env, this, host)?;
         let args = self.eval_argument_list(program, arguments, env, this, host)?;

@@ -27,6 +27,8 @@ mod chrome;
 mod download_ui;
 #[path = "app_inspector.rs"]
 mod inspector;
+#[path = "app_input_harness.rs"]
+mod input_harness;
 #[path = "app_keyboard.rs"]
 pub(crate) mod keyboard;
 #[path = "app_scripts.rs"]

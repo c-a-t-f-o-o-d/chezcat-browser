@@ -393,8 +393,12 @@ impl Runtime {
             ExprKind::Update(target, increase, prefix) => Transition::Child(Request::Reference(*target),
                 State::UpdateReference { increase: *increase, prefix: *prefix }),
             ExprKind::Call(callee, arguments) => match &program.exprs[*callee].kind {
-                ExprKind::Member(base, key) => Transition::Child(Request::Value(*base),
-                    State::MemberBase { key: *key, arguments }),
+                ExprKind::Member(base, key) => {
+                    if let Some(result) = self.try_binding_character(program, *base, *key, arguments, env, host) {
+                        return result.map(done);
+                    }
+                    Transition::Child(Request::Value(*base), State::MemberBase { key: *key, arguments })
+                }
                 ExprKind::OptionalChain(..) => Transition::Child(Request::Chain(*callee), State::GroupedCall(arguments)),
                 kind => Transition::Child(Request::Value(*callee), State::Callee { arguments,
                     direct_eval: matches!(kind, ExprKind::Name(name) if name == "eval"), construct: false }),

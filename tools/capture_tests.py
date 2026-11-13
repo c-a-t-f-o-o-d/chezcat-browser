@@ -138,7 +138,9 @@ def analyze(log):
     with log.open("rb") as stream:
         data = stream.read(MAX_LOG_BYTES + 1)
     truncated = len(data) > MAX_LOG_BYTES
-    text = data[:MAX_LOG_BYTES].decode("utf-8", errors="replace")
+    # Raw logs/hashes stay byte-for-byte intact. Python/native producers on
+    # Windows may use CRLF; line-oriented harness analysis accepts both forms.
+    text = data[:MAX_LOG_BYTES].decode("utf-8", errors="replace").replace("\r\n", "\n")
     starts = START.findall(text)
     summaries = SUMMARY.findall(text)
     result = {"analysis_truncated": truncated,
