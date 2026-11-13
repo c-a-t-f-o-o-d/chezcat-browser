@@ -46,6 +46,15 @@ impl Graph {
 }
 
 impl Runtime {
+    pub(super) fn direct_object_closure_assignment(&self, program: &Rc<Program>, right: ExprId, reference: &Reference, value: &Value) -> Option<usize> {
+        if !matches!(reference, Reference::Property(Value::Object(_), _) | Reference::SymbolProperty(Value::Object(_), _)
+            | Reference::ComputedProperty(Value::Object(_), _)) { return None; }
+        let ExprKind::Function(template) = &program.exprs[right].kind else { return None; };
+        let Value::Function(id) = value else { return None; };
+        matches!(self.functions.get(*id), Some(Function::Script { program: actual, template: actual_template, .. })
+            if Rc::ptr_eq(program, actual) && template == actual_template).then_some(*id)
+    }
+
     // Raw public Value IDs can be retained by an embedder after a call returns.
     // Pins are permanent until document/runtime teardown. ID-only sets are bounded
     // by the existing object/function arenas and never copy script payloads.
@@ -62,7 +71,14 @@ impl Runtime {
             Ok(graph) => {
                 let allocated = self.functions.iter().filter(|function| matches!(function, Function::Script { .. })).count();
                 let reachable = self.functions.iter().enumerate().filter(|(id, function)| graph.functions[*id] && matches!(function, Function::Script { .. })).count();
-                format!("Callable reachability (inactive stack; conservative native/Promise/API roots): Script allocated={allocated}; reachable={reachable}; exported function/object pins={}/{}. No collection or slot reuse.\n",
+                drop(graph);
+                let graph = match self.mark_root_graph(&[], true, true) {
+                    Ok(graph) => graph,
+                    Err(message) => return format!("Callable reachability unavailable: {message}\n"),
+                };
+                let candidates = self.object_assigned_closures.len();
+                let unmarked = self.object_assigned_closures.iter().filter(|&&id| !graph.functions[id]).count();
+                format!("Callable reachability (inactive stack; conservative native/Promise/API roots): Script allocated={allocated}; reachable={reachable}; exported function/object pins={}/{}. Object-assigned closure candidates={candidates}; unmarked with all other functions/exotic objects rooted={unmarked}. No collection or slot reuse.\n",
                     self.exported_function_roots.len(), self.exported_object_roots.len())
             }
             Err(message) => format!("Callable reachability unavailable: {message}\n"),
@@ -70,6 +86,10 @@ impl Runtime {
     }
 
     fn mark_persistent_functions(&self, exported: &[Value], include_registered_exports: bool) -> Result<Graph, &'static str> {
+        self.mark_root_graph(exported, include_registered_exports, false)
+    }
+
+    fn mark_root_graph(&self, exported: &[Value], include_registered_exports: bool, conservative_candidates: bool) -> Result<Graph, &'static str> {
         if self.call_depth != 0 || self.eval_depth != 0 || self.evaluation_frames != 0
             || self.evaluation_frame_slots != 0 || self.evaluation_argument_slots != 0
             || !self.active_array_joins.is_empty() || !self.promises.reachability_is_inactive() {
@@ -80,7 +100,9 @@ impl Runtime {
         graph.add(Edge::Environment(self.global_environment));
         for realm in &self.intrinsic_realms { graph.add(Edge::Environment(realm.global_environment)); }
         for (id, function) in self.functions.iter().enumerate() {
-            if !matches!(function, Function::Script { .. }) { graph.add(Edge::Function(id)); }
+            if !matches!(function, Function::Script { .. }) || conservative_candidates && !self.object_assigned_closures.contains(&id) {
+                graph.add(Edge::Function(id));
+            }
         }
         for &id in self.host_objects.values() { graph.add(Edge::Object(id)); }
         for value in self.host_method_values.values().chain(exported) { Edge::value(value, &mut |edge| graph.add(edge)); }
@@ -91,7 +113,10 @@ impl Runtime {
         // Conservatively preserve all Promise metadata and pending rejection
         // reporting. This is intentionally broader than eventual precise roots.
         for (id, object) in self.objects.iter().enumerate() {
-            if object.promise.is_some() { graph.add(Edge::Object(id)); }
+            let plain = object.length.is_none() && object.date.is_none() && object.url.is_none() && object.primitive.is_none()
+                && object.promise.is_none() && object.arguments.is_none() && object.binary.is_none() && object.collection.is_none()
+                && object.iterator.is_none() && object.text.is_none() && object.regexp.is_none() && object.error_name.is_none();
+            if object.promise.is_some() || conservative_candidates && !plain { graph.add(Edge::Object(id)); }
         }
         self.promises.reachability_edges(&mut |edge| graph.add(edge));
         self.reachability_intrinsic_edges(&mut |edge| graph.add(edge));
@@ -321,4 +346,56 @@ fn host_validation_dictionary_and_failed_hoist_exports_remain_roots() {
         assert!(runtime.mark_persistent_functions(&[], true).unwrap().functions[id], "{mode}");
         assert!(!runtime.mark_persistent_functions(&[], false).unwrap().functions[id], "{mode}");
     }
+}
+
+#[test]
+fn object_assignment_candidates_preserve_aliases_exports_and_constructor_cycles() {
+    struct NoHost;
+    impl Host for NoHost {
+        fn get(&mut self, _: u32, _: &str) -> Result<Value, String> { panic!("unexpected get") }
+        fn set(&mut self, _: u32, _: &str, _: Value) -> Result<(), String> { panic!("unexpected set") }
+        fn call(&mut self, _: u32, _: &str, _: &[Value]) -> Result<Value, String> { panic!("unexpected call") }
+    }
+    let mut runtime = Runtime::new();
+    runtime.execute("var cell={};cell.read=function(){return 1;};var alias=cell.read;cell.read=function(){return 2;};var ordinary=function(){return 3;};(function(){return 4;})();var literal={read(){return 5;}};0;", &mut NoHost).unwrap();
+    assert_eq!(runtime.object_assigned_closures.len(), 2);
+    let candidates: Vec<_> = runtime.object_assigned_closures.iter().copied().collect();
+    let graph = runtime.mark_root_graph(&[], true, true).unwrap();
+    assert!(candidates.iter().all(|&id| graph.functions[id]));
+    runtime.execute("alias=null;cell.read=null;0;", &mut NoHost).unwrap();
+    let graph = runtime.mark_root_graph(&[], true, true).unwrap();
+    assert!(candidates.iter().all(|&id| !graph.functions[id]));
+    // Automatic prototype.constructor backlinks did not tag the other functions.
+    for (id, function) in runtime.functions.iter().enumerate() {
+        if matches!(function, Function::Script { .. }) && !runtime.object_assigned_closures.contains(&id) { assert!(graph.functions[id]); }
+    }
+
+    runtime.execute("cell.read=function(){return 17;};0;", &mut NoHost).unwrap();
+    let exported = runtime.execute("cell.read;", &mut NoHost).unwrap();
+    let Value::Function(id) = exported else { panic!("export") };
+    runtime.execute("cell.read=null;0;", &mut NoHost).unwrap();
+    assert!(!runtime.mark_root_graph(&[], false, true).unwrap().functions[id]);
+    assert!(runtime.mark_root_graph(&[], true, true).unwrap().functions[id]);
+    assert_eq!(runtime.invoke(exported, &[], Value::Undefined, &mut NoHost).unwrap().to_number(), 17.0);
+}
+
+#[test]
+fn candidate_tagging_observes_successful_writes_without_reconverting_keys_or_replaying_setters() {
+    struct NoHost;
+    impl Host for NoHost {
+        fn get(&mut self, _: u32, _: &str) -> Result<Value, String> { panic!("unexpected get") }
+        fn set(&mut self, _: u32, _: &str, _: Value) -> Result<(), String> { panic!("unexpected set") }
+        fn call(&mut self, _: u32, _: &str, _: &[Value]) -> Result<Value, String> { panic!("unexpected call") }
+    }
+    let mut runtime = Runtime::new();
+    runtime.execute("var conversions=0,sets=0,escaped=null;var target={set value(f){sets++;escaped=f;}};var key={toString(){conversions++;return 'value';}};target[key]=function(){return 17;};if(conversions!==1||sets!==1||escaped()!==17)throw 'key/set order';0;", &mut NoHost).unwrap();
+    assert_eq!(runtime.object_assigned_closures.len(), 1);
+    let id = *runtime.object_assigned_closures.iter().next().unwrap();
+    assert!(runtime.mark_root_graph(&[], true, true).unwrap().functions[id]);
+    runtime.execute("escaped=null;0;", &mut NoHost).unwrap();
+    assert!(!runtime.mark_root_graph(&[], true, true).unwrap().functions[id]);
+    runtime.execute("var rejected={set value(f){throw 23;}};try{rejected.value=function(){return 99;};throw 'missing';}catch(e){if(e!==23)throw e;}0;", &mut NoHost).unwrap();
+    assert_eq!(runtime.object_assigned_closures.len(), 1);
+    runtime.execute("var symbol=Symbol('slot'),holder={};holder[symbol]=function(){return 31;};if(holder[symbol]()!==31)throw 'symbol';0;", &mut NoHost).unwrap();
+    assert_eq!(runtime.object_assigned_closures.len(), 2);
 }

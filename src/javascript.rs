@@ -3052,6 +3052,7 @@ pub struct Runtime {
     host_method_values: BTreeMap<(u32, &'static str), Value>,
     exported_function_roots: std::collections::BTreeSet<usize>,
     exported_object_roots: std::collections::BTreeSet<usize>,
+    object_assigned_closures: std::collections::BTreeSet<usize>,
     global_attributes: BTreeMap<String, (bool, bool, bool)>,
     host_globals: HashSet<String>,
     // Names explicitly exposed as ordinary properties by the embedding host.
@@ -3158,6 +3159,7 @@ impl Runtime {
             host_method_values: BTreeMap::new(),
             exported_function_roots: std::collections::BTreeSet::new(),
             exported_object_roots: std::collections::BTreeSet::new(),
+            object_assigned_closures: std::collections::BTreeSet::new(),
             global_attributes: BTreeMap::new(),
             host_globals: HashSet::new(),
             operation_globals: HashSet::new(),

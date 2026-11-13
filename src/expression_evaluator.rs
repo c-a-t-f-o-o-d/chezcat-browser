@@ -497,7 +497,11 @@ impl Runtime {
                     result = self.binary_value(&op[..op.len() - 1], before, result, host)?;
                 }
                 let returned = self.copy_value(&result)?;
+                let candidate = if op == "=" {
+                    self.direct_object_closure_assignment(program, right, &reference, &result)
+                } else { None };
                 self.write_reference(reference, result, host)?;
+                if let Some(id) = candidate { self.object_assigned_closures.insert(id); }
                 Ok(done(returned))
             }
             State::PatternValue(pattern) => {
