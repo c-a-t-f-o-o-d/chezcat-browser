@@ -2451,6 +2451,7 @@ impl Host for Bridge<'_> {
     }
 
     fn method_length(&self, object:u32, method:&str) -> Option<usize> {
+        if method=="load" && self.media_element_receiver(object) {return Some(0);}
         if method=="dispatchEvent"&&self.dispatch_receiver(object){return Some(1);}
         if object==DOCUMENT && matches!(method,"createAttributeNS"|"createElementNS") {return Some(2);}
         if object==DOCUMENT && method=="createAttribute" || self.attr_element_receiver(object)&&matches!(method,"setAttributeNode"|"setAttributeNodeNS") {return Some(1);}
@@ -2738,6 +2739,7 @@ impl Host for Bridge<'_> {
     }
 
     fn method(&self, object: u32, property: &str) -> Option<&'static str> {
+        if property=="load" && self.media_element_receiver(object) {return Some("load");}
         if matches!(property,"addEventListener"|"removeEventListener"|"dispatchEvent") && self.form_named_control(object,property) {return None;}
         if self.node_event_method(object,property) {return None;}
         if property=="dispatchEvent"&&self.dispatch_receiver(object)&&!self.form_named_control(object,property){return Some("dispatchEvent");}
@@ -2796,6 +2798,7 @@ impl Host for Bridge<'_> {
     }
 
     fn accepts_receiver(&self, object: u32, method: &str, receiver: u32) -> bool {
+        if method=="load" && self.media_element_receiver(object) {return self.media_element_receiver(receiver);}
         if matches!(method,"dispatchEvent"|"addEventListener"|"removeEventListener") {
             return (self.event_target_interface(object)||self.dispatch_receiver(object)) && self.dispatch_receiver(receiver);
         }
@@ -3890,6 +3893,11 @@ impl Host for Bridge<'_> {
     }
 
     fn call(&mut self, object: u32, method: &str, args: &[Value]) -> Result<Value, String> {
+        if method=="load" && self.media_element_receiver(object) {
+            self.state.work(1)?;
+            self.commit_media_source_change(node_index(object).unwrap())?;
+            return Ok(Value::Undefined);
+        }
         if method=="EventTarget" && self.event_target_interface(object) {return self.create_standalone_target(object);}
         if script_named_map::element(object).is_some() { return self.named_map_call(object, method, args); }
         if method=="normalize" {self.state.work(1)?;return self.normalize_node(object);}

@@ -4,13 +4,21 @@
 <style>body{margin:20px}video{display:block;width:480px;height:360px;object-fit:contain}#media-state{font-size:18px}</style>
 </head><body>
 <h1>Authored video element</h1>
+<button id="reload" name="reload" type="button">Reload the same video with JavaScript</button>
 <video id="authored-video" src="scene-intra.ivf" controls width="480" height="360" onloadedmetadata="window.inlineMetadata=event.target.videoWidth;">Fallback must not appear.</video>
 <p id="media-state">Source pending</p><p id="media-position">Position pending</p>
+<p id="reload-state">Not reloaded</p>
 <input name="other" value="Other page input"><a href="authored-video-next.html">Leave video</a>
 <script>
 var video=document.getElementById('authored-video'),mediaEvents=[],initialMediaState=video.readyState,mediaWindowLoaded=false;
 if(video.nodeName!=='VIDEO'||video.readyState!==0||video.videoWidth!==0||!isNaN(video.duration)||!video.paused||video.ended||!video.controls)throw Error('pending video state');
 if(video.play!==undefined||video.canPlayType!==undefined)throw Error('unsupported media method advertised');
+document.getElementById('reload').onclick=function(){
+ var attr=video.getAttributeNode('src'),raw=attr.value;
+ if(video.load({toString:function(){throw Error('ignored load argument');}})!==undefined||video.readyState!==0||video.currentTime!==0||!video.paused||!isNaN(video.duration))throw Error('synchronous load reset');
+ if(video.getAttributeNode('src')!==attr||attr.value!==raw)throw Error('load changed raw Attr');
+ Promise.resolve().then(function(){if(video.networkState!==2||video.getAttributeNode('src')!==attr||attr.value!==raw)throw Error('stable load selection');document.getElementById('reload-state').textContent='Raw source retained after load';});
+};
 function recordMedia(e){
  if(e.target!==video||!e.isTrusted||e.cancelable||e.bubbles)throw Error('native media event identity');
  mediaEvents.push(e.type);
@@ -27,7 +35,7 @@ function recordMedia(e){
  }
  document.getElementById('media-position').textContent='Time '+(Math.round(video.currentTime*100)/100)+' seconds';
 }
-for(var name of ['loadstart','durationchange','loadedmetadata','loadeddata','canplay','canplaythrough','play','playing','pause','seeking','seeked','timeupdate','ended','abort','error'])video.addEventListener(name,recordMedia);
+for(var name of ['loadstart','durationchange','loadedmetadata','loadeddata','canplay','canplaythrough','play','playing','pause','seeking','seeked','timeupdate','ended','abort','emptied','error'])video.addEventListener(name,recordMedia);
 window.addEventListener('load',function(){if(mediaEvents.indexOf('loadeddata')<0||initialMediaState!==0||window.inlineMetadata!==64)throw Error('load before real video data');mediaWindowLoaded=true;});
 </script>
 </body></html>

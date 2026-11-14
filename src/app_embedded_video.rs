@@ -362,6 +362,15 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn authored_video_javascript_load_restarts_same_source_and_rejects_old_completion() {
+        let mut app=open("authored-video.html");app.wait_for_load();let node=app.media.as_ref().unwrap().node;let first=app.images[&node].clone();let retired=app.embedded_video.as_ref().unwrap().retired.clone();
+        app.input_media_action("Play").unwrap();run(&mut app,Duration::from_millis(650));
+        eval(&mut app,"var reloadAttr=video.getAttributeNode('src'),reloadRaw=reloadAttr.value;mediaEvents=[];if(video.load()!==undefined||video.currentTime!==0||!video.paused||video.readyState!==0||video.seeking||!isNaN(video.duration)||video.getAttributeNode('src')!==reloadAttr||reloadAttr.value!==reloadRaw)throw 'load reset/identity';");
+        assert!(retired.load(Ordering::Relaxed));app.wait_for_load();assert_eq!(app.images[&node].pixels,first.pixels);assert!(!app.media.as_ref().unwrap().playing());assert_eq!(app.media.as_ref().unwrap().position(Instant::now()),Duration::ZERO);
+        eval(&mut app,"if(mediaEvents.slice(0,4).join(',')!=='abort,emptied,timeupdate,loadstart'||video.readyState!==4||video.duration!==3||video.getAttributeNode('src')!==reloadAttr||reloadAttr.value!==reloadRaw)throw 'real reload events '+mediaEvents.join(',')+' ready='+video.readyState;video.load();");app.process_media_selection();let stale=app.embedded_video.as_ref().unwrap().plan.clone().unwrap();
+        eval(&mut app,"video.load();");app.process_media_selection();let asset=media::Clip::load(include_bytes!("../tools/fixtures/scene-intra.ivf").to_vec(),media::Limits::default(),&||Ok(())).unwrap();assert!(!app.accept_embedded_video(Completion {plan:stale,result:Ok(asset)}));assert!(app.media.is_none());app.wait_for_load();assert_eq!(app.images[&node].pixels,first.pixels);
+    }
     fn open(name: &str) -> App {
         let mut app = App::new();
         app.scripts_enabled = true;
@@ -558,7 +567,7 @@ mod tests {
                 fragment: String::new(),
                 root: None,
             });
-        eval(&mut app,"var f=document.createElement('iframe');f.hidden=true;document.body.appendChild(f);var w=f.contentWindow,read=w.Function('v','return v.duration;'),present=w.Function('v','return \"duration\" in v;'),writeOwned=w.Function('v','x','v.src=x;'),sourceConversions=0;if(read(video)!==3||!present(video))throw 'same origin native owner';");
+        eval(&mut app,"var f=document.createElement('iframe');f.hidden=true;document.body.appendChild(f);var w=f.contentWindow,read=w.Function('v','return v.duration;'),present=w.Function('v','return \"duration\" in v;'),writeOwned=w.Function('v','x','v.src=x;'),reloadOwned=w.Function('v','v.load();'),savedLoad=video.load,borrowLoad=w.Function('fn','v','fn.call(v);'),sourceConversions=0;if(read(video)!==3||!present(video))throw 'same origin native owner';");
         let p = app.scripting.as_mut().unwrap();
         p.set_location(&crate::navigation::Location {
             url: Some(crate::url::parse("https://other.test/").unwrap().0),
@@ -567,7 +576,7 @@ mod tests {
             root: None,
         });
         let count = app.document.nodes.len();
-        for source in ["read(video);", "present(video);", "writeOwned(video,{toString:function(){sourceConversions++;return 'scene-replacement.ivf';}});"] {
+        for source in ["read(video);", "present(video);", "writeOwned(video,{toString:function(){sourceConversions++;return 'scene-replacement.ivf';}});","reloadOwned(video);","borrowLoad(savedLoad,video);"] {
             let out = p.console_eval(&mut app.document, &mut app.forms, source);
             assert_eq!(out.errors, 1, "{}", p.report());
             assert!(p.report().contains("same-origin"));

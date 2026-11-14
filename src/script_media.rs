@@ -1,4 +1,4 @@
-//! Readonly state and real native events for the one bound authored video.
+//! Measured state, real reload control and native events for the bound video.
 use super::*;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -86,7 +86,23 @@ mod tests {
         (doc, forms, p, node)
     }
     #[test]
+    fn native_media_load_preserves_raw_attr_and_uses_real_fifo_selection() {
+        let(mut doc,mut forms,mut p,node)=page(crate::javascript::limits::BROWSER);
+        let s=p.state.embedded_video.as_mut().unwrap();s.position=Duration::from_secs(1);s.playing=true;
+        let retired=s.retired.clone();let commits=p.state.dom_commits;
+        let out=p.console_eval(&mut doc,&mut forms,r#"
+var attr=video.getAttributeNode('src'),raw=attr.value,loadMethod=video.load,order='';
+if(typeof loadMethod!=='function'||loadMethod!==video.load||loadMethod.length!==0||!('load' in video))throw 'method identity';
+queueMicrotask(function(){if(video.networkState!==3||video.currentSrc!=='previous'||video.readyState!==0)throw 'before selection';order+='before;';});
+if(video.load({toString:function(){throw 'ignored';}})!==undefined||video.getAttributeNode('src')!==attr||attr.value!==raw||!video.paused||video.currentTime!==0||!isNaN(video.duration)||video.readyState!==0||video.seeking||video.ended)throw 'synchronous reset';
+queueMicrotask(function(){if(video.networkState!==2||video.currentSrc.indexOf('scene-intra.ivf')<0||video.getAttributeNode('src')!==attr)throw 'after selection';order+='after;';});
+"#);assert_eq!(out.errors,0,"{}",p.report());assert!(retired.load(Ordering::Relaxed));assert_eq!(doc.attr(node,"src"),Some("scene-intra.ivf"));assert_eq!(p.state.dom_commits,commits);
+        let selection=p.take_media_selection().unwrap();assert!(selection.abort&&selection.emptied&&selection.timeupdate);assert_eq!(selection.raw.as_deref(),Some("scene-intra.ivf"));
+        let out=p.console_eval(&mut doc,&mut forms,"if(order!=='before;after;')throw 'FIFO';var wrong=0;try{loadMethod.call({});}catch(e){if(e instanceof TypeError)wrong++;}try{new loadMethod();}catch(e){if(e instanceof TypeError)wrong++;}if(wrong!==2)throw 'brand/new';video.load();video.load();");assert_eq!(out.errors,0,"{}",p.report());assert!(p.take_media_selection().is_some());assert_eq!(p.state.dom_commits,commits);
+    }
+    #[test]
     fn native_media_queue_quota_and_identity_overflow_reject_before_mutation() {
+        for operation in ["video.src='scene-replacement.ivf';","video.load();"] {
         for overflow in [false, true] {
             let mut limits = crate::javascript::limits::CAPACITY_REGRESSION;
             if !overflow {
@@ -97,13 +113,14 @@ mod tests {
                 p.state.media_changes.next = u64::MAX;
             }
             let token = p.state.embedded_video.as_ref().unwrap().retired.clone();
-            let out = p.console_eval(&mut doc, &mut forms, "video.src='scene-replacement.ivf';");
+            let out = p.console_eval(&mut doc, &mut forms, operation);
             assert_eq!(out.errors, 1, "{}", p.report());
             assert_eq!(doc.attr(node, "src"), Some("scene-intra.ivf"));
             assert!(!token.load(Ordering::Relaxed));
             assert!(!p.has_media_selection());
             assert!(!p.runtime.has_microtasks());
             assert!(p.state.media_changes.prepared.is_none());
+        }
         }
     }
     #[test]
@@ -250,6 +267,7 @@ impl Bridge<'_> {
             return false;
         }
         (match member {
+            "load" => true,
             "setAttribute" => {
                 matches!(args.first(),Some(Value::String(name)) if name.eq_ignore_ascii_case("src"))
             }
@@ -464,7 +482,8 @@ impl Bridge<'_> {
             | "currentTime" | "paused" | "ended" | "seeking" | "readyState" | "networkState" => {
                 Some(true)
             }
-            "play" | "pause" | "load" | "canPlayType" => Some(false),
+            "load" => Some(true),
+            "play" | "pause" | "canPlayType" => Some(false),
             _ => None,
         })
     }

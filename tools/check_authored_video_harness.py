@@ -18,14 +18,14 @@ def main():
     folder = ROOT / 'results/verification/autonomy' / (datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S.%fZ') + '-authored-video-journey-' + uuid.uuid4().hex[:8])
     folder.mkdir(parents=True)
     script = folder / 'authored.tsv'
-    script.write_text('snapshot\tmetadata\nmedia\tPlay\nwait\t650\nmedia\tPause\nsnapshot\tpaused\nwait\t500\nsnapshot\tfrozen\nmedia\tSeek:2200\nsnapshot\tseeked\nmedia\tPlay\nwait\t1200\nsnapshot\tended\nmedia\tPlay\nsnapshot\treplay\nmedia\tStop\nsnapshot\tstopped\nlink\tLeave\nsnapshot\tnavigated\n', encoding='utf-8', newline='\n')
+    script.write_text('snapshot\tmetadata\nmedia\tPlay\nwait\t650\nmedia\tPause\nsnapshot\tpaused\nwait\t500\nsnapshot\tfrozen\nclick\treload\nsnapshot\treloaded\nmedia\tSeek:2200\nsnapshot\tseeked\nmedia\tPlay\nwait\t1200\nsnapshot\tended\nmedia\tPlay\nsnapshot\treplay\nmedia\tStop\nsnapshot\tstopped\nlink\tLeave\nsnapshot\tnavigated\n', encoding='utf-8', newline='\n')
     before = capture_tests.source_identity(ROOT)
     out = folder / 'journey'
     row = capture_tests.execute([str(ROOT / 'ChezCat.exe'), str(ROOT / 'tools/fixtures/authored-video.html'), '--dev-input-script', str(script), '--dev-input-output', str(out), '--javascript', '--no-profile'], folder / 'command.log', ROOT, 120)
     checks = {'process_completed': row['state'] == 'completed' and row['exit_code'] == 0}
     stages = {}
     reference = (ROOT / 'tools/fixtures/scene-intra.rgba').read_bytes()
-    for name in ['metadata', 'paused', 'frozen', 'seeked', 'ended', 'replay', 'stopped', 'navigated']:
+    for name in ['metadata', 'paused', 'frozen', 'reloaded', 'seeked', 'ended', 'replay', 'stopped', 'navigated']:
         file = next(out.glob('*-' + name + '.activity.txt'), None)
         if file is None:
             checks[name + '_snapshot'] = False
@@ -46,6 +46,9 @@ def main():
             continue
         state = dict(playing=match[1] == 'true', ended=match[2] == 'true', time_ms=int(match[3]), duration_ms=int(match[4]), frame=int(match[5]), error=match[11], pending=match[7])
         state['events'] = re.search(r'Media lifecycle dropped=\d+ (.*)', text)[1].split(',')
+        if name == 'reloaded':
+            checks['reload_preserved_raw_attr_identity'] = all(('text="' + word + '"') in file.with_name(file.name.replace('.activity.txt', '.layout.txt')).read_text(encoding='utf-8') for word in ['Raw','source','retained','after','load'])
+            checks['reload_reset_real_player'] = not state['playing'] and state['time_ms'] == 0 and state['frame'] == 0
         x, y, w, h = map(int, rect.groups())
         ppm = file.with_name(file.name.replace('.activity.txt', '.ppm')).read_bytes().split(b'\n', 3)
         width, height = map(int, ppm[1].split())
