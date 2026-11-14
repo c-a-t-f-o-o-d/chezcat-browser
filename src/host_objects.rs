@@ -11,15 +11,18 @@ impl Runtime {
         }
         Ok(())
     }
-    pub(super) fn host_lookup_tail(&mut self,handle:u32,name:&str,host:&dyn Host)->Result<Option<Ordinary>,Fault> {
-        if !host.ordinary_lookup_tail(handle) || host.owns_property(handle,name) { return Ok(None); }
-        self.host_inherited_read_tail(handle, host)
+    pub(super) fn host_lookup_tail(&mut self,handle:u32,name:&str,host:&mut dyn Host)->Result<Option<Ordinary>,Fault> {
+        if !host.ordinary_lookup_tail_property(handle,name) || host.owns_property(handle,name) { return Ok(None); }
+        self.host_inherited_read_tail(handle, name, host)
     }
-    pub(super) fn host_inherited_read_tail(&mut self,handle:u32,host:&dyn Host)->Result<Option<Ordinary>,Fault> {
-        if !host.ordinary_lookup_tail(handle) { return Ok(None); }
+    pub(super) fn host_inherited_read_tail(&mut self,handle:u32,name:&str,host:&mut dyn Host)->Result<Option<Ordinary>,Fault> {
+        if !host.ordinary_lookup_tail_property(handle,name) { return Ok(None); }
         let ancestry=host.instance_ancestry(handle).ok_or_else(||Fault::new("Native lookup prototype provenance is unavailable."))?;
         let caller=self.browser_global.map(|(window,_)|window);
         if caller!=Some(ancestry.window) { host.validate_window_access(caller,ancestry.window).map_err(Fault::new)?; }
+        // Native child identity reads deliberately do not allocate ES roots.
+        // Initialize the actual owner's roots only after origin validation.
+        self.ensure_window_realm(ancestry.window,host)?;
         self.native_ancestry_anchor(ancestry).map(Some)
     }
     pub(super) fn ensure_native_expando(&mut self,handle:u32,host:&dyn Host,create:bool)->Result<(),Fault> {
@@ -152,10 +155,10 @@ impl Runtime {
         }
         let value = host.get(handle, name).map_err(Fault::new)?;
         if matches!(value, Value::Undefined)
-            && (host.ordinary_prototype(handle) || host.ordinary_lookup_tail(handle))
+            && (host.ordinary_prototype(handle) || host.ordinary_lookup_tail_property(handle,name))
             && !host.has(handle, name).map_err(Fault::new)?
         {
-            let prototype = self.host_inherited_read_tail(handle, host)?
+            let prototype = self.host_inherited_read_tail(handle, name, host)?
                 .unwrap_or(Ordinary::Object(self.object_prototype.unwrap()));
             return self.get_ordinary_property_with_receiver(
                 prototype,

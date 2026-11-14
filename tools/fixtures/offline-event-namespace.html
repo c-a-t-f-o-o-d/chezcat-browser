@@ -3,8 +3,17 @@
 <div id="geometry-state" style="width:40px;height:20px;padding:3px 5px;border:2px solid black"></div>
 <div id="fragment-fixture"><p id="fragment-old" title="retained">Old fragment</p></div>
 <p id="history-state">History pending</p>
+<p id="location-state">Location pending</p>
 <script>
 var fixtureNode=document.getElementById('event-namespace-state');
+var locationFrame=document.createElement('iframe');locationFrame.hidden=true;document.getElementById('geometry-state').appendChild(locationFrame);
+var locationChild=locationFrame.contentWindow,locationInstance=locationChild.location;
+if(locationInstance.prototype!==undefined||('prototype' in locationInstance)||location.prototype!==undefined)throw Error('fresh Location instance');
+Object.prototype.prototype=41;locationChild.eval('Object.prototype.prototype=43;');
+if(location.prototype!==41||locationInstance.prototype!==43||!('prototype' in locationInstance)||locationInstance.href!=='about:blank')throw Error('Location owner realm');
+delete Object.prototype.prototype;locationChild.eval('delete Object.prototype.prototype;');
+if(locationInstance.prototype!==undefined||('prototype' in locationInstance))throw Error('Location tail deletion');
+document.getElementById('location-state').textContent='Location instance ready';
 if(history!==window.history||history.state!==null||history.replaceState.length!==2)throw Error('real History surface');
 var fixtureHistoryURL=location.pathname+location.search+'#fixture';
 history.replaceState(history.state,'',fixtureHistoryURL);

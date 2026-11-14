@@ -41,6 +41,7 @@ impl Page {
 }
 
 impl Bridge<'_> {
+    pub(super) fn location_instance_owner(&self,object:u32)->Option<u32>{if object==LOCATION {self.state.location.is_some().then_some(WINDOW)}else{self.frame_location_owner(object)}}
     pub(super) fn location_string_setter(object: u32, property: &str) -> bool {
         matches!(object, WINDOW | DOCUMENT) && property == "location"
             || object == LOCATION && matches!(property, "href" | "hash" | "search")

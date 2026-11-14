@@ -341,6 +341,10 @@ pub trait Host {
     /// Explicit read/presence fallback to a proven native owner's Object tail.
     /// This does not grant expando, mutation or descriptor authority.
     fn ordinary_lookup_tail(&self, _object:u32) -> bool { false }
+    /// A host may restrict the read-only tail to particular absent keys.
+    fn ordinary_lookup_tail_property(&self, object:u32, _property:&str) -> bool {
+        self.ordinary_lookup_tail(object)
+    }
     /// Owner validation without granting an ordinary expando or definition store.
     fn native_access_owner(&self, _object: u32) -> Option<u32> { None }
     /// Real renderer border-box snapshot, when the host implements this method.
@@ -5871,7 +5875,7 @@ impl Runtime {
                     }
                 } else {
                     if host.has(handle, &name).map_err(Fault::new)? { true }
-                    else if let Some(tail) = self.host_inherited_read_tail(handle, host)? {
+                    else if let Some(tail) = self.host_inherited_read_tail(handle, &name, host)? {
                         self.property_owner(tail, &name)?.is_some()
                     } else {
                         host.ordinary_prototype(handle)
@@ -7329,6 +7333,7 @@ impl Runtime {
                     if self.foreign_window(*handle, host)
                         || self.host_ordinary(*handle, property, host)?.is_some()
                         || host.ordinary_prototype(*handle)
+                        || host.ordinary_lookup_tail_property(*handle,property)
                         || host.resolve_member_before_call(*handle)
                     {
                         Some(self.host_read(*handle, property, host)?)

@@ -170,8 +170,15 @@ impl Runtime {
             let value = host.get(handle, name).map_err(Fault::new)?;
             return self.checked_value(value);
         }
-        let realm = if let Some(realm) = self.window_realms.get(&handle).copied() {
-            realm
+        let realm = self.ensure_window_realm(handle,host)?;
+        self.with_intrinsic_realm(realm, |runtime| runtime.global_value(name, host))
+    }
+
+    pub(super) fn ensure_window_realm(&mut self,handle:u32,host:&mut dyn Host)->Result<Option<usize>,Fault> {
+        let caller=self.browser_global.map(|(window,_)|window);
+        if caller!=Some(handle) {host.validate_window_access(caller,handle).map_err(Fault::new)?;}
+        if let Some(realm) = self.window_realms.get(&handle).copied() {
+            Ok(realm)
         } else {
             if self.failed_window_realms.contains(&handle) {
                 return Err(Fault::new("Child Window intrinsics are unavailable after an earlier bounded initialization failure."));
@@ -195,9 +202,8 @@ impl Runtime {
                 self.failed_window_realms.insert(handle);
                 return Err(error);
             }
-            Some(realm)
-        };
-        self.with_intrinsic_realm(realm, |runtime| runtime.global_value(name, host))
+            Ok(Some(realm))
+        }
     }
 
     pub(super) fn immutable_object_prototype(&self, id: usize) -> bool {

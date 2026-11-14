@@ -411,6 +411,7 @@ impl Runtime {
                     if self.foreign_window(handle, host)
                         || self.host_ordinary(handle, &name, host)?.is_some()
                         || host.ordinary_prototype(handle)
+                        || host.ordinary_lookup_tail_property(handle,&name)
                         || host.resolve_member_before_call(handle)
                     {
                         Some(self.host_read(handle, &name, host)?)

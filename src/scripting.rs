@@ -2247,6 +2247,7 @@ impl Host for Bridge<'_> {
     }
 
     fn owns_property(&self, object: u32, property: &str) -> bool {
+        if property=="prototype"&&self.location_instance_owner(object).is_some(){return false;}
         if self.element_expando_receiver(object) {return self.element_native_property(object,property);}
         if self.attr_receiver(object) { return self.attr_native_member(property); }
         if self.constructed_event_receiver(object) { return self.event_native_member(object,property); }
@@ -2254,10 +2255,14 @@ impl Host for Bridge<'_> {
     }
 
     fn ordinary_lookup_tail(&self, object:u32) -> bool {
-        object == HISTORY || self.attr_receiver(object) || self.constructed_event_receiver(object) || self.named_map_receiver(object)
+        self.location_instance_owner(object).is_some() || object == HISTORY || self.attr_receiver(object) || self.constructed_event_receiver(object) || self.named_map_receiver(object)
+    }
+    fn ordinary_lookup_tail_property(&self,object:u32,property:&str)->bool {
+        if self.location_instance_owner(object).is_some() {property=="prototype"}
+        else {self.ordinary_lookup_tail(object)}
     }
     fn native_access_owner(&self, object: u32) -> Option<u32> {
-        (object == HISTORY || self.named_map_receiver(object)).then_some(WINDOW)
+        self.location_instance_owner(object).or_else(||(object == HISTORY || self.named_map_receiver(object)).then_some(WINDOW))
     }
     fn bounding_rect_snapshot(&mut self, object: u32) -> Option<Result<[f64; 4], String>> {
         if !self.class_list_element_receiver(object) { return None; }
@@ -3036,6 +3041,7 @@ impl Host for Bridge<'_> {
         if let Some(result) = self.created_event_has(object, property) { return result; }
         if script_attr::index(object).is_some() { return self.attr_has(object, property); }
         if self.is_frame_handle(object) {
+            if property=="prototype"&&self.frame_location_owner(object).is_some(){return self.frame_get(object,property).unwrap().map(|value|!matches!(value,Value::Undefined));}
             if matches!(property,"localName"|"prefix"|"namespaceURI") {return self.frame_get(object,property).unwrap().map(|value|!matches!(value,Value::Undefined));}
             if matches!(property, "isDefaultNamespace" | "compareDocumentPosition") && self.namespace_receiver(object) { return Ok(true); }
             return self.frame_get(object, property).unwrap().map(|_| true);
@@ -3357,6 +3363,7 @@ impl Host for Bridge<'_> {
         }
         if object == HISTORY { return self.history_get(property); }
         if object == LOCATION {
+            if property=="prototype"{self.location_handle()?;return Ok(Value::Undefined);}
             if property == "valueOf" {
                 return Ok(Value::Undefined);
             }

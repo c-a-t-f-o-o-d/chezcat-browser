@@ -27,6 +27,7 @@ fn document_node(index: usize, node: usize) -> u32 {
 }
 
 impl Bridge<'_> {
+    pub(super) fn frame_location_owner(&self,handle:u32)->Option<u32>{let(index,offset)=frame_handle(handle)?;(offset==2&&self.state.blank_frames.get(index).is_some()).then(||window(index))}
     pub(super) fn frame_instance_window(&self, handle:u32) -> Option<u32> {
         let (index,offset)=frame_handle(handle)?;
         let frame=self.state.blank_frames.get(index)?;
@@ -227,6 +228,10 @@ impl Bridge<'_> {
                     _ => return Err(format!("Blank child Window property {property:?} is not implemented.")),
                 },
                 2 => match property {
+                    // An instance has no constructor's `prototype` member.
+                    // Native ownership/origin was validated above; ordinary
+                    // inherited lookup uses the real owner realm separately.
+                    "prototype" => Value::Undefined,
                     "href" => Value::String("about:blank".into()),
                     "protocol" => Value::String("about:".into()),
                     "pathname" => Value::String("blank".into()),
@@ -347,6 +352,109 @@ mod tests {
     }
 
     const CREATE: &str = "var f=document.createElement('iframe');f.hidden=true;document.body.appendChild(f);var w=f.contentWindow;";
+
+    #[test]
+    fn location_instance_prototype_lookup_uses_fresh_real_owner_and_getter_receiver() {
+        let source=format!("{CREATE}{}",r#"
+var rootLocation=location,childLocation=w.location;
+// These precede every child intrinsic read, including Object and Function.
+if(childLocation.prototype!==undefined||('prototype' in childLocation)||location.prototype!==undefined||('prototype' in location))throw 'fresh instance absence';
+Object.prototype.prototype=17;
+w.eval('Object.prototype.prototype=29;');
+if(location.prototype!==17||childLocation.prototype!==29||!('prototype' in location)||!('prototype' in childLocation))throw 'owner realm tail';
+delete Object.prototype.prototype;w.eval('delete Object.prototype.prototype;');
+var rootReads=0;
+Object.defineProperty(Object.prototype,'prototype',{get:function(){if(this!==rootLocation)throw 'root receiver';rootReads++;return 31;},configurable:true});
+w.eval("var childReads=0;Object.defineProperty(Object.prototype,'prototype',{get:function(){if(this!==location)throw 'child receiver';childReads++;return 37;},configurable:true});");
+if(!('prototype' in location)||!('prototype' in childLocation)||rootReads!==0||w.childReads!==0)throw 'presence invoked getter';
+if(location.prototype!==31||childLocation.prototype!==37||rootReads!==1||w.childReads!==1)throw 'real getter';
+delete Object.prototype.prototype;w.eval('delete Object.prototype.prototype;');
+if(location.prototype!==undefined||childLocation.prototype!==undefined||('prototype' in location)||('prototype' in childLocation))throw 'tail deletion';
+if(location.href!=='https://example.test/parent/page'||childLocation.href!=='about:blank')throw 'lookup navigated';
+document.title='location-owner-ok';
+"#);
+        let(doc,_,page,outcome)=start(&source,&crate::csp::PolicySet::default());
+        assert_eq!(outcome.errors,0,"{}",page.report());
+        assert_eq!(doc.title,"location-owner-ok");
+        assert!(page.state.navigation.is_none());
+    }
+
+    #[test]
+    fn location_inherited_member_calls_read_before_arguments_and_keep_receiver() {
+        for expression in ["location.prototype(argument())","location['prototype'](argument())","location?.prototype(argument())","location.prototype?.(argument())","childLocation.prototype(argument())","childLocation?.prototype(argument())","childLocation.prototype?.(argument())"] {
+            let source=format!("{CREATE}{}var expected={};if({expression}!==19||order!=='getargcall')throw 'call lookup order';",r#"
+var childLocation=w.location,order='';
+function argument(){order+='arg';return 17;}
+function getter(){if(this!==expected)throw 'getter receiver';order+='get';return function(n){if(this!==expected)throw 'call receiver';order+='call';return n+2;};}
+Object.defineProperty(Object.prototype,'prototype',{get:getter,configurable:true});
+Object.defineProperty(w.Object.prototype,'prototype',{get:getter,configurable:true});
+"#,if expression.starts_with("childLocation") {"childLocation"}else{"location"});
+            let(mut doc,mut forms,mut page,outcome)=start(&source,&crate::csp::PolicySet::default());
+            assert_eq!(outcome.errors,0,"{expression}: {}",page.report());
+            let outcome=page.console_eval(&mut doc,&mut forms,"delete Object.prototype.prototype;delete w.Object.prototype.prototype;order='';if(location.prototype?.(argument())!==undefined||childLocation.prototype?.(argument())!==undefined||order!=='')throw 'absent optional call effects';");
+            assert_eq!(outcome.errors,0,"{}",page.report());
+            assert!(page.state.navigation.is_none());
+        }
+    }
+
+    #[test]
+    fn location_saved_receivers_validate_origin_before_lookup_or_allocation() {
+        let source=format!("{CREATE}{}",r#"
+var savedRootLocation=location,savedChildLocation=w.location;
+var readLocation=w.Function('l','return l.prototype;'),hasLocation=w.Function('l',"return 'prototype' in l;");
+var rootReads=0;
+Object.defineProperty(Object.prototype,'prototype',{get:function(){rootReads++;return 1;},configurable:true});
+w.eval("Object.defineProperty(Object.prototype,'prototype',{get:function(){throw 'foreign getter ran';},configurable:true});");
+"#);
+        let(mut doc,mut forms,mut page,outcome)=start(&source,&crate::csp::PolicySet::default());
+        assert_eq!(outcome.errors,0,"{}",page.report());
+        page.set_location(&crate::navigation::Location {url:Some(crate::url::parse("https://other.test/").unwrap().0),path:None,fragment:String::new(),root:None});
+        let before=page.runtime.window_allocation_state_for_test();
+        for operation in ["savedChildLocation.prototype;","'prototype' in savedChildLocation;","readLocation(savedRootLocation);","hasLocation(savedRootLocation);"] {
+            let outcome=page.console_eval(&mut doc,&mut forms,operation);
+            assert_eq!(outcome.errors,1,"{operation}: {}",page.report());
+            assert!(page.report().contains("same-origin"),"{}",page.report());
+            assert_eq!(page.runtime.window_allocation_state_for_test(),before);
+            assert!(page.state.navigation.is_none());
+        }
+        let outcome=page.console_eval(&mut doc,&mut forms,"if(rootReads!==0)throw 'foreign lookup effects';delete Object.prototype.prototype;");
+        assert_eq!(outcome.errors,0,"{}",page.report());
+
+        // A never-initialized child must also deny before allocating its roots.
+        let(mut doc,mut forms,mut page,outcome)=start(&format!("{CREATE}var saved=w.location;"),&crate::csp::PolicySet::default());
+        assert_eq!(outcome.errors,0,"{}",page.report());
+        page.set_location(&crate::navigation::Location {url:Some(crate::url::parse("https://other.test/").unwrap().0),path:None,fragment:String::new(),root:None});
+        let before=page.runtime.window_allocation_state_for_test();
+        for operation in ["saved.prototype;","'prototype' in saved;"] {
+            let outcome=page.console_eval(&mut doc,&mut forms,operation);
+            assert_eq!(outcome.errors,1,"{}",page.report());
+            assert!(page.report().contains("same-origin"),"{}",page.report());
+            assert_eq!(page.runtime.window_allocation_state_for_test(),before);
+        }
+    }
+
+    #[test]
+    fn location_lookup_does_not_expand_other_keys_or_mutation_authority() {
+        let(mut doc,mut forms,mut page,outcome)=start(&format!("{CREATE}var childLocation=w.location;Object.prototype.valueOf=function(){{throw 'unsafe inherited conversion';}};if(location.valueOf!==undefined||('valueOf' in location))throw 'broadened Location tail';"),&crate::csp::PolicySet::default());
+        assert_eq!(outcome.errors,0,"{}",page.report());
+        for operation in ["childLocation.constructor;","location.constructor;","childLocation.valueOf;","location.arbitraryAbsentKey;","location.prototype=3;","childLocation.prototype=3;","Object.defineProperty(location,'prototype',{value:3});","Object.defineProperty(childLocation,'prototype',{value:3});","childLocation.href='/unexpected';"] {
+            let outcome=page.console_eval(&mut doc,&mut forms,operation);
+            assert_eq!(outcome.errors,1,"{operation}: {}",page.report());
+            assert!(page.state.navigation.is_none());
+        }
+        let outcome=page.console_eval(&mut doc,&mut forms,"if(location.prototype!==undefined||childLocation.prototype!==undefined||location.href!=='https://example.test/parent/page'||childLocation.href!=='about:blank')throw 'denied mutation changed receiver';");
+        assert_eq!(outcome.errors,0,"{}",page.report());
+        let mut bridge=Bridge {doc:&mut doc,forms:&mut forms,state:&mut page.state};
+        for handle in [window(0)+3,window(0)+7,window(MAX_BLANK_FRAMES-1)+2] {
+            assert_eq!(bridge.location_instance_owner(handle),None);
+            assert!(!bridge.ordinary_lookup_tail_property(handle,"prototype"));
+            assert!(bridge.get(handle,"prototype").is_err());
+        }
+        bridge.state.location=None;
+        assert_eq!(bridge.location_instance_owner(LOCATION),None);
+        assert!(!bridge.ordinary_lookup_tail_property(LOCATION,"prototype"));
+        assert!(bridge.get(LOCATION,"prototype").is_err());
+    }
 
     #[test]
     fn history_replace_state_uses_canonical_main_method_and_checks_saved_child_callers() {
