@@ -581,6 +581,7 @@ impl Bridge<'_> {
             self.frame_window_access(Some(WINDOW), *handle).map_err(|message| ("SecurityError", message))?;
             return Ok(Some(*handle));
         }
+        if !window_only && self.standalone_target_owner(*handle).is_some() {return Ok(Some(*handle));}
         if !window_only && self.namespace_receiver(*handle) { return Ok(Some(*handle)); }
         Err(("TypeError", if window_only { "MouseEvent view must be a Window or null." } else { "MouseEvent relatedTarget must be an EventTarget or null." }.into()))
     }

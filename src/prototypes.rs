@@ -1486,6 +1486,7 @@ impl Runtime {
             )),
             "getPrototypeOf" => {
                 let prototype = match first {
+                    Value::Host(handle)=>Some(self.native_instance_prototype(*handle,host)?),
                     Value::String(_) => self.string_prototype.map(Ordinary::Object),
                     Value::Number(_) => self.number_prototype.map(Ordinary::Object),
                     Value::Bool(_) => self.boolean_prototype.map(Ordinary::Object),
@@ -1833,7 +1834,8 @@ impl Runtime {
         host: &mut dyn Host,
     ) -> Result<Value, Fault> {
         if method == "toString" {
-            if Ordinary::from_value(&this).is_some() {
+            if Ordinary::from_value(&this).is_some() || matches!(&this,Value::Host(handle) if host.exposed_native_prototype(*handle)) {
+                if let Value::Host(handle)=this {self.validate_native_access(handle,host)?;}
                 if let Some(key) = self.symbol_to_string_tag {
                     let receiver = self.copy_value(&this)?;
                     if let Value::String(tag) = self.get_symbol_property(receiver, key, host)? {
@@ -1888,6 +1890,7 @@ impl Runtime {
                         "Object"
                     }
                 }
+                Value::Host(handle) if host.exposed_native_prototype(*handle)=>"Object",
                 Value::Host(_) => {
                     return Err(Fault::new("Native host object tags are not implemented."))
                 }
@@ -1895,6 +1898,12 @@ impl Runtime {
             return self.checked_value(Value::String(format!("[object {name}]")));
         }
         if method == "isPrototypeOf" {
+            if let Some(Value::Host(handle))=args.first() {
+                let anchor=self.native_instance_prototype(*handle,host)?;
+                if matches!(this,Value::Null|Value::Undefined) {return Err(Fault::exception("TypeError","Cannot convert null or undefined to an object."));}
+                let Some(prototype)=Ordinary::from_value(&this) else {return Ok(Value::Bool(false));};
+                return Ok(Value::Bool(anchor==prototype || self.inherits_from(anchor,prototype)?));
+            }
             let Some(value) = args.first().and_then(Ordinary::from_value) else {
                 if matches!(args.first(), Some(Value::Host(_))) {
                     return Err(Fault::new(

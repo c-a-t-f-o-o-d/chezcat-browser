@@ -352,6 +352,31 @@ mod tests {
     }
 
     const CREATE: &str = "var f=document.createElement('iframe');f.hidden=true;document.body.appendChild(f);var w=f.contentWindow;";
+    #[test]
+    fn standalone_event_target_realms_and_saved_foreign_capabilities_are_guarded() {
+        let source=format!("{CREATE}{}",r#"
+var ChildTarget=w.EventTarget,RootTarget=EventTarget,child=new ChildTarget(),root=new EventTarget(),bound=ChildTarget.bind(null),rootBound=RootTarget.bind(null),effects=0;
+if(ChildTarget===EventTarget||Object.getPrototypeOf(ChildTarget)!==w.Function.prototype||Object.getPrototypeOf(child)!==ChildTarget.prototype||Object.getPrototypeOf(root)!==EventTarget.prototype)throw 'owner prototypes';
+if(!(child instanceof ChildTarget)||child instanceof EventTarget||!(root instanceof EventTarget)||root instanceof ChildTarget||!(new bound() instanceof ChildTarget)||!ChildTarget.prototype.isPrototypeOf(child))throw 'owner instanceof';
+if(child.addEventListener!==ChildTarget.prototype.addEventListener||Object.getPrototypeOf(child.addEventListener)!==w.Function.prototype)throw 'method owner';
+var e=document.createEvent('Event');e.initEvent('x',false,false);child.addEventListener('x',function(ev){if(this!==child||ev.target!==child)throw 'child dispatch';effects++;});if(!child.dispatchEvent(e)||effects!==1)throw 'real child listener';
+var read=w.Function('x','return x.addEventListener;'),inspect=w.Function('x','return Object.getPrototypeOf(x);'),inherit=w.Function('p','x','return p.isPrototypeOf(x);'),instance=w.Function('x','C','return x instanceof C;'),construct=w.Function('C','a','return new C(a);'),constructBound=w.Function('C','return new C();');
+if(read(root)!==root.addEventListener||inspect(root)!==EventTarget.prototype||!inherit(EventTarget.prototype,root)||!instance(root,EventTarget)||!(construct(RootTarget,{toString:function(){throw 'unused';}}) instanceof RootTarget))throw 'same-origin borrowing';
+var add=child.addEventListener,arg={toString:function(){effects++;return 'x';}},options={get capture(){effects++;return false;}},callback=function(){},invoke=function(){add.call(child,arg,callback,options);};
+var rootDiv=document.body,addRoot=EventTarget.prototype.addEventListener,boundRoot=addRoot.bind(rootDiv),callRoot=w.Function('add','target','arg','cb','options','return add.call(target,arg,cb,options);'),applyRoot=w.Function('add','target','args','return add.apply(target,args);'),invokeBoundRoot=w.Function('fn','args','return fn.apply(null,args);'),rootArgs=[arg,callback,options];
+callRoot(addRoot,rootDiv,'local-before',callback,false);
+applyRoot(addRoot,rootDiv,['local-before',callback,false]);invokeBoundRoot(boundRoot,['local-before',callback,false]);
+var mouse=document.createEvent('MouseEvent');mouse.initMouseEvent('before',false,false,null,0,0,0,0,0,false,false,false,false,0,child);if(mouse.relatedTarget!==child)throw 'related target identity';
+document.title='event-target-realms-ok';
+"#);
+        let(mut doc,mut forms,mut page,outcome)=start(&source,&crate::csp::PolicySet::default());assert_eq!(outcome.errors,0,"{}",page.report());assert_eq!(doc.title,"event-target-realms-ok");
+        page.set_location(&crate::navigation::Location {url:Some(crate::url::parse("https://other.test/").unwrap().0),path:None,root:None,fragment:String::new()});
+        let allocations=page.runtime.window_allocation_state_for_test();let targets=page.state.standalone_targets.len();let listeners=page.state.listeners.len();let retained=page.state.retained;
+        for operation in ["new ChildTarget();","new bound();","construct(RootTarget,arg);","constructBound(rootBound);","read(root);","inspect(root);","inherit(RootTarget.prototype,root);","instance(root,RootTarget);","Object.getPrototypeOf(child);","ChildTarget.prototype.isPrototypeOf(child);","invoke();","callRoot(addRoot,rootDiv,arg,callback,options);","applyRoot(addRoot,rootDiv,rootArgs);","invokeBoundRoot(boundRoot,rootArgs);","mouse.initMouseEvent('after',false,false,null,0,0,0,0,0,false,false,false,false,0,child);"] {
+            let out=page.console_eval(&mut doc,&mut forms,operation);assert_eq!(out.errors,1,"{operation}: {}",page.report());assert!(page.report().contains("same-origin"),"{operation}: {}",page.report());assert_eq!(page.runtime.window_allocation_state_for_test(),allocations,"{operation}");assert_eq!(page.state.standalone_targets.len(),targets);assert_eq!(page.state.listeners.len(),listeners);assert_eq!(page.state.retained,retained);
+        }
+        let out=page.console_eval(&mut doc,&mut forms,"if(effects!==1||mouse.type!=='before')throw 'foreign effects';");assert_eq!(out.errors,0,"{}",page.report());
+    }
 
     #[test]
     fn navigation_timing_is_measured_readonly_stable_and_owner_guarded() {

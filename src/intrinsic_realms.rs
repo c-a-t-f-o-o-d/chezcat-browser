@@ -193,7 +193,9 @@ impl Runtime {
                     ("document", context.document), ("location", context.location)] {
                     runtime.define_global(name, Value::Host(value)).map_err(Fault::new)?;
                 }
-                runtime.bind_browser_global(handle).map_err(Fault::new)
+                runtime.bind_browser_global(handle).map_err(Fault::new)?;
+                if host.event_target_interface(handle) {runtime.define_event_target_interface(handle).map_err(Fault::new)?;}
+                Ok(())
             });
             if let Err(error) = result {
                 // The real host context remains. No partial realm is published;

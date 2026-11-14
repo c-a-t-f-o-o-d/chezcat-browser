@@ -15,6 +15,44 @@ pub(super) struct Dispatch {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn standalone_event_target_has_real_prototype_and_target_only_dispatch() {
+        let(doc,_,page,outcome)=start(r#"
+var t=new EventTarget({toString:function(){throw 'unused';}}),other=new EventTarget(),e=document.createEvent('Event'),log='';
+if(t===other||!(t instanceof EventTarget)||Object.getPrototypeOf(t)!==EventTarget.prototype||!EventTarget.prototype.isPrototypeOf(t)||!Object.prototype.isPrototypeOf(t))throw 'ancestry';
+if(t.constructor!==EventTarget||Object.prototype.toString.call(t)!=='[object EventTarget]'||Object.keys(t).length!==0)throw 'identity';
+if(t.addEventListener!==other.addEventListener||t.addEventListener!==EventTarget.prototype.addEventListener||t.dispatchEvent.length!==1||t.addEventListener.length!==2)throw 'canonical methods';
+var names=[];for(var key in t)names.push(key);names.sort();if(names.join(',')!=='addEventListener,dispatchEvent,removeEventListener')throw 'inherited enumeration';t.own='own';Object.defineProperty(t,'dispatchEvent',{enumerable:false,configurable:true,value:t.dispatchEvent});names=[];for(var key in t)names.push(key);names.sort();if(names.join(',')!=='addEventListener,own,removeEventListener')throw 'shadowed enumeration';delete t.dispatchEvent;delete t.own;
+var d=Object.getOwnPropertyDescriptor(window,'EventTarget'),m=Object.getOwnPropertyDescriptor(EventTarget.prototype,'dispatchEvent');
+if(d.enumerable||!d.writable||!d.configurable||!m.enumerable||!m.writable||!m.configurable||EventTarget.length!==0)throw 'descriptors';
+var caught=0;try{EventTarget();}catch(x){if(x instanceof TypeError)caught++;}try{new t.dispatchEvent(e);}catch(x){if(x instanceof TypeError)caught++;}try{t.addEventListener.call({},'x',function(){});}catch(x){if(x instanceof TypeError)caught++;}if(caught!==3)throw 'brands';
+e.initEvent('x',true,true);window.addEventListener('x',function(){throw 'window propagation';});document.addEventListener('x',function(){throw 'document propagation';});other.addEventListener('x',function(){throw 'other target';});
+var mouse=document.createEvent('MouseEvent');mouse.initMouseEvent('hover',false,false,null,0,0,0,0,0,false,false,false,false,0,t);if(mouse.relatedTarget!==t)throw 'relatedTarget';
+t.onclick=function(){throw 'ordinary onclick';};t.onx=function(){throw 'ordinary onx';};
+t.addEventListener('x',function(ev){if(this!==t||ev!==e||ev.target!==t||ev.currentTarget!==t||ev.eventPhase!==2)throw 'target phase';log+='capture;';},{capture:true,once:true});
+t.addEventListener('x',function(ev){log+='passive;';ev.preventDefault();},{passive:true});
+function cancel(ev){log+='cancel;';ev.preventDefault();}t.addEventListener('x',cancel);t.addEventListener('x',cancel);
+if(t.dispatchEvent(e)!==false||log!=='capture;passive;cancel;'||!e.defaultPrevented||e.currentTarget!==null||e.eventPhase!==0)throw 'dispatch';
+t.removeEventListener('x',cancel);e.initEvent('x',false,true);log='';if(!t.dispatchEvent(e)||log!=='passive;'||e.defaultPrevented)throw 'once/remove/passive';
+var proto=EventTarget.prototype,original=proto.dispatchEvent;proto.dispatchEvent=function(ev){return this===t&&ev===e?'prototype-override':'wrong';};if(t.dispatchEvent(e)!=='prototype-override')throw 'override';proto.dispatchEvent=original;
+t.dispatchEvent=function(){return 'instance-override';};if(t.dispatchEvent(e)!=='instance-override')throw 'own override';delete t.dispatchEvent;if(t.dispatchEvent!==original)throw 'delete';
+Object.defineProperty(proto,'receiverProbe',{configurable:true,get:function(){return this;}});if(t.receiverProbe!==t||other.receiverProbe!==other)throw 'getter receiver';
+var saved=EventTarget;EventTarget=17;if(!(t instanceof saved)||t.constructor!==saved||window.EventTarget!==17)throw 'replaced global';delete window.EventTarget;if(typeof EventTarget!=='undefined'||Object.getPrototypeOf(t)!==proto)throw 'deleted global';
+document.title='standalone-event-target-ok';
+"#);
+        assert_eq!(outcome.errors,0,"{}",page.report());assert_eq!(doc.title,"standalone-event-target-ok");
+        assert_eq!(page.state.standalone_targets.len(),2);
+    }
+    #[test]
+    fn standalone_event_target_capacity_failure_is_atomic_and_recovers() {
+        let(mut doc,mut forms,mut page,outcome)=start("var t=new EventTarget();");assert_eq!(outcome.errors,0,"{}",page.report());
+        page.state.limits.host.event_targets=1;let retained=page.state.retained;
+        let out=page.console_eval(&mut doc,&mut forms,"new EventTarget();");assert_eq!(out.errors,1);assert_eq!(page.state.standalone_targets.len(),1);assert_eq!(page.state.retained,retained);
+        page.state.limits.host.event_targets=crate::javascript::limits::BROWSER.host.event_targets;let out=page.console_eval(&mut doc,&mut forms,"for(var i=0;i<300;i++)new EventTarget();");assert_eq!(out.errors,0,"{}",page.report());assert_eq!(page.state.standalone_targets.len(),301);
+        page.state.retained_limit=page.state.retained;let out=page.console_eval(&mut doc,&mut forms,"new EventTarget();");assert_eq!(out.errors,1);assert_eq!(page.state.standalone_targets.len(),301);
+        page.state.retained_limit=usize::MAX;let out=page.console_eval(&mut doc,&mut forms,"var recovered=new EventTarget();if(!(recovered instanceof EventTarget))throw 'recovery';");assert_eq!(out.errors,0,"{}",page.report());
+        let bridge=Bridge {doc:&mut doc,forms:&mut forms,state:&mut page.state};assert!(bridge.standalone_target_owner(0x9000_ffff).is_none());assert!(!bridge.dispatch_receiver(0x9000_ffff));assert!(!bridge.exposed_native_prototype(0x9000_ffff));
+    }
     fn start(source: &str) -> (Document, Forms, Page, Outcome) {
         let mut doc = crate::html::parse(
             "<html><body><div id=p><button id=b type=button>Click</button></div></body></html>",
@@ -216,8 +254,23 @@ var budgetEvent=document.createEvent('Event');budgetEvent.initEvent('budget');b.
 }
 
 impl Bridge<'_> {
+    pub(super) fn standalone_target_owner(&self,handle:u32)->Option<u32> {
+        handle.checked_sub(0x9000_0000).and_then(|id|self.state.standalone_targets.get(id as usize)).copied()
+    }
+    pub(super) fn create_standalone_target(&mut self,owner:u32)->Result<Value,String> {
+        self.state.work(1)?;
+        if self.state.standalone_targets.len()>=self.state.limits.host.event_targets {return Err("Standalone EventTarget limit reached.".into());}
+        let index=u32::try_from(self.state.standalone_targets.len()).map_err(|_|"EventTarget identity overflow.")?;
+        let handle=0x9000_0000u32.checked_add(index).filter(|id|*id<0xc000_0000).ok_or("EventTarget identity overflow.")?;
+        let bytes=std::mem::size_of::<u32>();
+        let retained=self.state.retained.checked_add(bytes).filter(|n|*n<=self.state.retained_limit).ok_or("EventTarget retained allocation limit reached.")?;
+        self.state.standalone_targets.try_reserve(1).map_err(|_|"Could not reserve EventTarget storage.")?;
+        self.state.standalone_targets.push(owner);
+        self.state.retained=retained;
+        Ok(Value::Host(handle))
+    }
     pub(super) fn dispatch_receiver(&self, object: u32) -> bool {
-        matches!(object, WINDOW | DOCUMENT) || self.attr_element_receiver(object)
+        self.standalone_target_owner(object).is_some() || matches!(object, WINDOW | DOCUMENT) || self.attr_element_receiver(object)
     }
     pub(super) fn validate_dispatch(
         &self,
@@ -299,7 +352,7 @@ impl Bridge<'_> {
             if name != "load" {
                 path.push(WINDOW);
             }
-        } else if object != WINDOW {
+        } else if object != WINDOW && self.standalone_target_owner(object).is_none() {
             let node = self.node(object)?;
             let mut parent = self.state.tree.parents[node];
             while let Some(node) = parent {

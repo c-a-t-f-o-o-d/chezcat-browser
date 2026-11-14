@@ -352,6 +352,10 @@ pub trait Host {
     /// Real ordinary expando storage for an explicitly proven native family.
     fn expando_owner(&self, _object:u32) -> Option<u32> { None }
     fn instance_ancestry(&self, _object:u32) -> Option<NativeAncestry> { None }
+    /// Actual exposed immediate prototype, distinct from a read-only Object tail.
+    fn exposed_native_prototype(&self, _object:u32) -> bool { false }
+    /// Only real browser Window contexts may publish this native interface.
+    fn event_target_interface(&self, _window:u32) -> bool { false }
     /// Only a genuine, already-created child context may expose these handles.
     /// The default grants no Window capability to an arbitrary native handle.
     fn window_context(&self, _window: u32) -> Option<WindowContext> { None }
@@ -453,6 +457,8 @@ pub trait Host {
     fn argument_conversions(&self, _object: u32, _method: &str) -> &'static [(usize, bool)] {
         &[]
     }
+    /// Native interface references checked after ordered primitive conversion.
+    fn native_reference_arguments(&self,_object:u32,_method:&str)->&'static [usize] {&[]}
     /// Explicit WebIDL variadic DOMString conversion, in argument order before
     /// method validation. It shares the caller's argument/copy/work budgets.
     fn variadic_string_arguments(&self, _object: u32, _method: &str) -> bool { false }
@@ -7420,6 +7426,9 @@ impl Runtime {
     }
 
     fn construct_value_routed(&mut self, constructor: Value, args: &[Value], host: &mut dyn Host) -> Result<Value, Fault> {
+        if self.changes_native_access_caller(&constructor) {
+            return self.construct_with_native_access_caller(constructor,args,host);
+        }
         let realm = match &constructor { Value::Function(id) => self.function_realms.get(*id).copied().unwrap_or(self.active_realm), _ => self.active_realm };
         if realm == self.active_realm { return self.construct_value_in_realm(constructor, args, host); }
         if !self.from_constructor(&constructor)? {
@@ -7427,6 +7436,16 @@ impl Runtime {
             return Err(Fault::exception("TypeError", "The value is not a constructor."));
         }
         self.with_intrinsic_realm(realm, |runtime| runtime.construct_value_in_realm(constructor, args, host))
+    }
+
+    #[inline(never)]
+    fn construct_with_native_access_caller(&mut self,constructor:Value,args:&[Value],host:&mut dyn Host)->Result<Value,Fault> {
+        let previous=self.native_access_caller;
+        self.native_access_caller=if matches!(&constructor,Value::Function(id) if matches!(self.functions.get(*id),Some(Function::Script {..}))) {None}
+            else {Some(self.browser_global.map(|(window,_)|window))};
+        let result=self.construct_value_routed(constructor,args,host);
+        self.native_access_caller=previous;
+        result
     }
 
     fn construct_value_in_realm(
@@ -7933,6 +7952,10 @@ impl Runtime {
                     .map(Value::Bool);
             }
             self.reject_foreign_window(&Value::Host(handle),host)?;
+            if host.exposed_native_prototype(handle) {
+                let anchor=self.native_instance_prototype(handle,host)?;
+                return Ok(Value::Bool(anchor==prototype || self.inherits_from(anchor,prototype)?));
+            }
             if let Some(ancestry) = host.instance_ancestry(handle) {
                 let caller = self.browser_global.map(|(window,_)|window);
                 if caller != Some(ancestry.window) {
@@ -8012,6 +8035,9 @@ impl Runtime {
             &converted
         };
         for value in args { self.pin_exported_value(value); }
+        for &index in host.native_reference_arguments(object,method) {
+            if let Some(Value::Host(handle))=args.get(index) {self.validate_native_access(*handle,host)?;}
+        }
         if host.synchronous_event_dispatch(object,method) {host.prepare_event_dispatch().map_err(Fault::new)?;}
         host.validate_call(object, method, args)
             .map_err(|(kind, message)| Fault::exception(kind, message))?;

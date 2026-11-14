@@ -345,6 +345,7 @@ struct State {
     next_event: u32,
     event: Option<Event>,
     created_events: Vec<script_created_events::CreatedEvent>,
+    standalone_targets: Vec<u32>,
     synthetic_dispatches: Vec<script_dispatch::Dispatch>,
     #[cfg(test)]
     disable_event_factory: bool,
@@ -413,6 +414,7 @@ impl State {
             next_event: EVENT_BASE,
             event: None,
             created_events: Vec::new(),
+            standalone_targets: Vec::new(),
             synthetic_dispatches: Vec::new(),
             #[cfg(test)]
             disable_event_factory: false,
@@ -653,18 +655,23 @@ impl State {
         if self.listeners.len() >= self.limits.host.listeners {
             return Err("Event listener limit reached (64 per document).".into());
         }
-        self.next_listener = self
+        let serial = self
             .next_listener
             .checked_add(1)
             .ok_or("Event listener identity limit reached.")?;
+        let mut name=String::new();
+        name.try_reserve_exact(event.len()).map_err(|_|"Could not reserve event listener name.")?;
+        name.push_str(event);
+        self.listeners.try_reserve(1).map_err(|_|"Could not reserve event listener storage.")?;
         self.listeners.push(Listener {
-            serial: self.next_listener,
+            serial,
             target,
-            event: event.into(),
+            event: name,
             function,
             property,
             options,
         });
+        self.next_listener=serial;
         Ok(())
     }
 }
@@ -787,6 +794,7 @@ impl Page {
             .define_host_constructor("Image", IMAGE_FACTORY, "Image")
             .expect("fixed image constructor");
         state.native_functions.insert("Image", image);
+        runtime.define_event_target_interface(WINDOW).expect("fixed EventTarget interface");
         Self { runtime, state }
     }
 
@@ -2047,7 +2055,7 @@ impl Bridge<'_> {
         if event.len() > self.state.limits.host.event_type_bytes {
             return Err("Event type exceeds the 256-byte limit.".into());
         }
-        if !matches!(handle, DOCUMENT | WINDOW) {
+        if self.standalone_target_owner(handle).is_none() && !matches!(handle, DOCUMENT | WINDOW) {
             self.node(handle)?;
         }
         Ok(())
@@ -2242,8 +2250,13 @@ impl Bridge<'_> {
 }
 
 impl Host for Bridge<'_> {
-    fn expando_owner(&self,object:u32)->Option<u32> {self.element_expando_receiver(object).then_some(WINDOW)}
+    fn expando_owner(&self,object:u32)->Option<u32> {self.standalone_target_owner(object).or_else(||self.element_expando_receiver(object).then_some(WINDOW))}
+    fn exposed_native_prototype(&self,object:u32)->bool {self.standalone_target_owner(object).is_some()}
+    fn event_target_interface(&self,window:u32)->bool {window==WINDOW || self.frame_context(window).is_some()}
     fn instance_ancestry(&self, object:u32) -> Option<crate::javascript::NativeAncestry> {
+        if let Some(window)=self.standalone_target_owner(object) {
+            return Some(crate::javascript::NativeAncestry {window,constructor:Some((window,"EventTarget"))});
+        }
         if let Some(window)=self.frame_instance_window(object) {
             return Some(crate::javascript::NativeAncestry {window,constructor:None});
         }
@@ -2280,10 +2293,11 @@ impl Host for Bridge<'_> {
         } else { self.owns_global_property(property) }
     }
     fn primitive_conversion(&self, object: u32) -> bool {
-        object == LOCATION || self.class_list_receiver(object)
+        object == LOCATION || self.class_list_receiver(object) || self.standalone_target_owner(object).is_some()
     }
 
     fn owns_property(&self, object: u32, property: &str) -> bool {
+        if self.standalone_target_owner(object).is_some() {return false;}
         if property=="prototype"&&self.location_instance_owner(object).is_some(){return false;}
         if self.element_expando_receiver(object) {return self.element_native_property(object,property);}
         if self.attr_receiver(object) { return self.attr_native_member(property); }
@@ -2300,6 +2314,9 @@ impl Host for Bridge<'_> {
         else {self.ordinary_lookup_tail(object)}
     }
     fn native_access_owner(&self, object: u32) -> Option<u32> {
+        if self.event_target_interface(object) {return Some(object);}
+        if let Some(owner)=self.standalone_target_owner(object) {return Some(owner);}
+        if self.attr_element_receiver(object) {return Some(WINDOW);}
         self.location_instance_owner(object).or_else(||(matches!(object,DOCUMENT|PERFORMANCE|PERFORMANCE_TIMING|HISTORY) || self.named_map_receiver(object) || self.attr_receiver(object) || self.media_element_receiver(object)).then_some(WINDOW))
     }
     fn bounding_rect_snapshot(&mut self, object: u32) -> Option<Result<[f64; 4], String>> {
@@ -2455,6 +2472,11 @@ impl Host for Bridge<'_> {
     fn validate_argument_prefix(&self, object: u32, method: &str, next_index: usize, args: &[Value])
         -> Result<(), (&'static str, String)> {
         self.validate_event_prefix(object, method, next_index, args)
+    }
+    fn native_reference_arguments(&self,object:u32,method:&str)->&'static [usize] {
+        if method=="initMouseEvent" && self.mouse_receiver(object) {&[3,14]}
+        else if method=="initUIEvent" && self.ui_receiver(object) {&[3]}
+        else {&[]}
     }
 
     fn nullish_string_setter(&self, object: u32, property: &str) -> bool {
@@ -2678,6 +2700,7 @@ impl Host for Bridge<'_> {
     }
 
     fn resolve_member_before_call(&self, object: u32) -> bool {
+        if self.standalone_target_owner(object).is_some() {return true;}
         if object == HISTORY || self.attr_receiver(object) || self.constructed_event_receiver(object) || self.named_map_receiver(object) || self.media_element_receiver(object) { return true; }
         self.form_receiver(object)
     }
@@ -2761,7 +2784,9 @@ impl Host for Bridge<'_> {
     }
 
     fn accepts_receiver(&self, object: u32, method: &str, receiver: u32) -> bool {
-        if method=="dispatchEvent"{return self.dispatch_receiver(object)&&self.dispatch_receiver(receiver);}
+        if matches!(method,"dispatchEvent"|"addEventListener"|"removeEventListener") {
+            return (self.event_target_interface(object)||self.dispatch_receiver(object)) && self.dispatch_receiver(receiver);
+        }
         if object==DOCUMENT && matches!(method,"createAttribute"|"createAttributeNS"|"createElementNS") {return receiver==DOCUMENT;}
         if object == HISTORY { return receiver == HISTORY && method == "replaceState"; }
         if method == "getBoundingClientRect" { return self.class_list_element_receiver(object) && self.class_list_element_receiver(receiver); }
@@ -2812,10 +2837,6 @@ impl Host for Bridge<'_> {
                     .is_some_and(|node| matches!(node.kind, NodeKind::Element { .. }))
             })
         };
-        if matches!(method, "addEventListener" | "removeEventListener") {
-            let target = |handle| matches!(handle, WINDOW | DOCUMENT) || element(handle);
-            return target(object) && target(receiver);
-        }
         if element(object) && self.method(object, method).is_some() {
             return element(receiver);
         }
@@ -2830,6 +2851,7 @@ impl Host for Bridge<'_> {
     }
 
     fn own_keys(&mut self, object: u32) -> Result<Vec<String>, String> {
+        if self.standalone_target_owner(object).is_some() {self.state.work(1)?;return Ok(Vec::new());}
         if script_named_map::element(object).is_some() {
             self.named_map_get(object, "length")?;
             return Err("NamedNodeMap complete indexed/named enumeration is not implemented; use length and item.".into());
@@ -2875,6 +2897,7 @@ impl Host for Bridge<'_> {
     }
 
     fn own_data(&mut self, object: u32, property: &str) -> Result<Option<Value>, String> {
+        if self.standalone_target_owner(object).is_some() {self.state.work(1)?;return Ok(None);}
         if script_named_map::element(object).is_some() { return self.named_map_own_data(object, property); }
         if self.attr_receiver(object) { self.state.work(1)?; return Ok(None); }
         if self.event_receiver(object) {
@@ -3855,6 +3878,7 @@ impl Host for Bridge<'_> {
     }
 
     fn call(&mut self, object: u32, method: &str, args: &[Value]) -> Result<Value, String> {
+        if method=="EventTarget" && self.event_target_interface(object) {return self.create_standalone_target(object);}
         if script_named_map::element(object).is_some() { return self.named_map_call(object, method, args); }
         if method=="normalize" {self.state.work(1)?;return self.normalize_node(object);}
         if script_class_list::element(object).is_some() {

@@ -4,6 +4,39 @@
 use super::{Fault, Function, Host, Ordinary, Runtime, Value};
 
 impl Runtime {
+    /// Publish the real interface only after its complete private prototype is ready.
+    pub fn define_event_target_interface(&mut self, window:u32) -> Result<(),String> {
+        let marker=self.inhibit_transient_collection();
+        let result=(|| {
+            let allocation=self.allocate_host_function_with_length(window,"EventTarget",0).map_err(Fault::new)?;
+            if let Some(Function::Host {constructible,..})=self.functions.get_mut(allocation.id) {*constructible=true;}
+            let constructor=Value::Function(allocation.id);
+            let prototype=self.new_object(None)?;
+            self.store_property(prototype,"constructor".into(),constructor.clone(),Some((false,true,true)))?;
+            self.store_property(self.function_properties[allocation.id],"prototype".into(),Value::Object(prototype),Some((false,false,false)))?;
+            for (name,length) in [("addEventListener",2),("removeEventListener",2),("dispatchEvent",1)] {
+                let method=self.allocate_host_function_with_length(window,name,length).map_err(Fault::new)?;
+                if let Some(Function::Host {receiver_required,..})=self.functions.get_mut(method.id) {*receiver_required=true;}
+                self.store_property(prototype,name.into(),Value::Function(method.id),Some((true,true,true)))?;
+            }
+            self.store_symbol_property(prototype,self.symbol_to_string_tag.unwrap(),Value::String("EventTarget".into()),Some((false,false,true)))?;
+            self.put_binding(self.global_environment,"EventTarget".into(),Some(constructor),super::Declaration::Var,false)?;
+            self.global_attributes.insert("EventTarget".into(),(false,true,true));
+            self.native_constructor_prototypes.insert((window,"EventTarget"),prototype);
+            Ok(())
+        })();
+        self.restore_transient_marker(marker);
+        result.map_err(Fault::display)
+    }
+    pub(super) fn native_instance_prototype(&mut self,handle:u32,host:&mut dyn Host)->Result<Ordinary,Fault> {
+        self.validate_native_access(handle,host)?;
+        if !host.exposed_native_prototype(handle) {return Err(Fault::new("Native host prototype inspection is not implemented for this receiver."));}
+        let ancestry=host.instance_ancestry(handle).ok_or_else(||Fault::new("Native prototype provenance is unavailable."))?;
+        let caller=self.native_access_caller.unwrap_or_else(||self.browser_global.map(|(window,_)|window));
+        if caller!=Some(ancestry.window) {host.validate_window_access(caller,ancestry.window).map_err(Fault::new)?;}
+        self.ensure_window_realm(ancestry.window,host)?;
+        self.native_ancestry_anchor(ancestry)
+    }
     pub(super) fn validate_native_access(&self, handle: u32, host: &dyn Host) -> Result<(), Fault> {
         if let Some(owner) = host.native_access_owner(handle) {
             let caller = self.native_access_caller.unwrap_or_else(|| self.browser_global.map(|(window, _)| window));
@@ -229,8 +262,8 @@ impl Runtime {
     ) -> Result<Vec<String>, Fault> {
         self.reject_foreign_window(&Value::Host(handle), host)?;
         if self.is_browser_global(handle) { return self.window_keys(inherited, true, host); }
-        self.ensure_native_expando(handle,host,false)?;
-        if inherited && host.expando_owner(handle).is_some() {
+        self.ensure_native_expando(handle,host,inherited && host.exposed_native_prototype(handle))?;
+        if inherited && host.expando_owner(handle).is_some() && !host.exposed_native_prototype(handle) {
             return Err(Fault::new("Inherited native Element enumeration is not implemented."));
         }
         let keys = if let Some(&id) = self.host_objects.get(&handle) {
