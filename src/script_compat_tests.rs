@@ -5,6 +5,101 @@ fn shared_probe(source: &str) -> (Document,Forms,Page,Outcome) {
 }
 
 #[test]
+fn attribute_metadata_nonce_updates_real_attr_without_rerunning_a_parsed_script() {
+    let (mut doc,mut forms,mut page,outcome)=page("<script id=script nonce=original></script>",&["var count=1,script=document.getElementById('script'),nonce=script.getAttributeNode('nonce');script.setAttribute('nonce','changed');if(nonce.value!=='changed'||script.getAttribute('nonce')!=='changed')throw 'metadata';"]);
+    assert_eq!(outcome.errors,0,"{}",page.report());
+    assert!(page.take_dynamic_scripts().is_empty());
+    let outcome=page.console_eval(&mut doc,&mut forms,"if(count!==1||script.getAttribute('nonce')!=='changed')throw 'parsed script rerun';");assert_eq!(outcome.errors,0,"{}",page.report());
+}
+
+#[test]
+fn attribute_nodes_shorter_payload_and_prefix_transfers_fit_the_exact_final_retention() {
+    for (markup,setup) in [
+        ("<div id=p title='a much longer original payload'></div>","var p=document.getElementById('p'),old=p.getAttributeNode('title'),incoming=document.createAttribute('title');incoming.value='x';"),
+        ("<div id=p></div>","var p=document.getElementById('p');p.setAttributeNS('urn:original','veryLongPrefix:token','long original value');var old=p.getAttributeNodeNS('urn:original','token'),incoming=document.createAttributeNS('urn:original','p:token');incoming.value='x';"),
+    ] {
+        let (mut doc,mut forms,mut page,outcome)=page(markup,&[setup]);assert_eq!(outcome.errors,0,"{}",page.report());
+        let retained=page.state.retained;page.state.retained_limit=retained;
+        let outcome=page.console_eval(&mut doc,&mut forms,"if(p.setAttributeNodeNS(incoming)!==old||incoming.ownerElement!==p||old.ownerElement!==null||incoming.value!=='x')throw 'exact-limit transfer';");
+        assert_eq!(outcome.errors,0,"{}",page.report());assert!(page.state.retained<=retained);
+    }
+}
+
+#[test]
+fn attribute_nodes_small_work_retention_and_identity_failures_are_atomic_and_recover() {
+    for mode in 0..3 {
+        let (mut doc,mut forms,mut page,outcome)=page("<div id=p title=old></div>",&["var incoming=document.createAttribute('title');incoming.value='replacement payload';"]);
+        assert_eq!(outcome.errors,0);
+        let node=doc.nodes.iter().enumerate().find_map(|(n,_)|(doc.attr(n,"id")==Some("p")).then_some(n)).unwrap();
+        let incoming=script_attr::ATTR_BASE;
+        let retained=page.state.retained;let identities=page.state.attributes.len();let limit=page.state.retained_limit;let identity_limit=page.state.limits.host.attribute_identities;
+        match mode {0=>page.state.host_work=0,1=>page.state.retained_limit=retained,_=>page.state.limits.host.attribute_identities=identities}
+        let error=Bridge{doc:&mut doc,forms:&mut forms,state:&mut page.state}.call(node_handle(node),"setAttributeNode",&[Value::Host(incoming)]).unwrap_err();
+        assert!(!error.is_empty());assert_eq!(doc.attr(node,"title"),Some("old"));assert_eq!(page.state.attributes.len(),identities);assert_eq!(page.state.attributes[0].owner,None);assert_eq!(page.state.attributes[0].value,"replacement payload");assert_eq!(page.state.retained,retained);
+        page.state.retained_limit=limit;page.state.limits.host.attribute_identities=identity_limit;page.begin_job();
+        let outcome=page.console_eval(&mut doc,&mut forms,"var removed=document.getElementById('p').setAttributeNode(incoming);if(removed.value!=='old'||removed.ownerElement!==null||incoming.ownerElement!==document.getElementById('p'))throw 'recovery';");
+        assert_eq!(outcome.errors,0,"{}",page.report());assert_eq!(doc.attr(node,"title"),Some("replacement payload"));
+    }
+}
+
+#[test]
+fn attribute_nodes_existing_identity_moves_payload_without_double_retention_and_refuses_active_resource_adoption() {
+    let (mut doc,mut forms,mut page,outcome)=page("<div id=p title=old></div>",&["var p=document.getElementById('p'),old=p.getAttributeNode('title'),incoming=document.createAttribute('title');incoming.value='replacement payload';"]);
+    assert_eq!(outcome.errors,0);let retained=page.state.retained;
+    let outcome=page.console_eval(&mut doc,&mut forms,"if(p.setAttributeNode(incoming)!==old)throw 'returned node';");assert_eq!(outcome.errors,0,"{}",page.report());assert_eq!(page.state.retained,retained);
+    for tag in ["script","link"] {
+        let source=format!("var resource=document.createElement('{tag}');var attr=document.createAttribute('{}');attr.value='/must-not-fetch';",if tag=="script"{"src"}else{"href"});
+        let (mut doc,mut forms,mut page,outcome)=self::page("<div>Test</div>",&[&source]);assert_eq!(outcome.errors,0,"{}",page.report());
+        let resource=page.state.dom.created.iter().copied().find(|&n|super::tag(&doc,n)==tag).unwrap();
+        let retained=page.state.retained;let commits=page.state.dom_commits;
+        assert!(Bridge{doc:&mut doc,forms:&mut forms,state:&mut page.state}.call(node_handle(resource),"setAttributeNode",&[Value::Host(script_attr::ATTR_BASE)]).unwrap_err().contains("active script/stylesheet"));
+        assert_eq!(page.state.retained,retained);assert_eq!(page.state.dom_commits,commits);assert!(doc.attr(resource,if tag=="script"{"src"}else{"href"}).is_none());assert_eq!(page.state.attributes[0].owner,None);
+    }
+}
+
+#[test]
+fn attribute_nodes_create_attach_replace_and_move_real_identities_in_list_order() {
+    let (_,_,page,outcome)=page("<div id=p title=old data-tail=tail></div><div id=q></div>",&[r#"
+var p=document.getElementById('p'),q=document.getElementById('q'),map=p.attributes,old=p.getAttributeNode('title'),saved=old;
+if(document.createAttribute.length!==1||document.createAttributeNS.length!==2||p.setAttributeNode.length!==1||p.setAttributeNodeNS.length!==1)throw 'arity';
+var incoming=document.createAttribute('TITLE');incoming.value='new';
+if(incoming.name!=='title'||incoming.ownerElement!==null||incoming.ownerDocument!==document||incoming.value!=='new')throw 'factory';
+if(p.setAttributeNode(incoming)!==old||old!==saved||incoming.ownerElement!==p||old.ownerElement!==null||old.value!=='old'||p.title!=='new'||map.getNamedItem('title')!==incoming||map.item(1)!==incoming)throw 'replacement identity/order';
+old.value='saved';if(p.title!=='new')throw 'detached saved reference';
+if(p.setAttributeNode(incoming)!==incoming||map.item(1)!==incoming)throw 'same node';
+if(p.removeAttributeNode(incoming)!==incoming||incoming.ownerElement!==null||incoming.value!=='new')throw 'remove';
+if(q.setAttributeNode(incoming)!==null||q.getAttributeNode('title')!==incoming||incoming.ownerElement!==q)throw 'move after removal';
+if(p.setAttributeNode(old)!==null||p.title!=='saved'||p.attributes.item(p.attributes.length-1)!==old)throw 'append/order';
+var a=document.createAttributeNS('urn:original','one:token');a.value='first';p.setAttributeNodeNS(a);
+var b=document.createAttributeNS('urn:original','two:token');b.value='second';
+if(p.setAttributeNode(b)!==a||a.ownerElement!==null||a.name!=='one:token'||a.value!=='first'||b.ownerElement!==p||b.prefix!=='two'||p.getAttributeNodeNS('urn:original','token')!==b||p.getAttribute('one:token')!==null||p.getAttribute('two:token')!=='second')throw 'expanded replacement';
+var upper=document.createAttributeNS(null,'ID');upper.value='inert-case';p.setAttributeNodeNS(upper);if(p.id!=='p'||p.getAttributeNS(null,'ID')!=='inert-case')throw 'case namespace';
+var namespaced=document.createAttributeNS('urn:no-permission','n:src');namespaced.value='https://forbidden.test/';p.setAttributeNode(namespaced);if(p.getAttributeNS('urn:no-permission','src')!=='https://forbidden.test/')throw 'inert namespace';
+"#]);
+    assert_eq!(outcome.errors,0,"{}",page.report());
+}
+
+#[test]
+fn attribute_nodes_named_exceptions_conversions_and_independent_promise_tail() {
+    let (_,_,page,outcome)=page("<div id=p title=old></div><div id=q></div>",&[r#"
+var p=document.getElementById('p'),q=document.getElementById('q'),a=p.getAttributeNode('title'),calls=0;
+function error(name,fn){var caught=false;try{fn();}catch(e){caught=e.name===name;}if(!caught)throw name;}
+var duck={name:'title',value:'fake',toString:function(){calls++;return 'title';}};
+error('TypeError',function(){p.setAttributeNode(duck);});error('TypeError',function(){p.setAttributeNode();});
+error('TypeError',function(){p.setAttributeNode.call({},a);});error('InUseAttributeError',function(){q.setAttributeNode(a);});
+if(calls!==0||a.ownerElement!==p||p.title!=='old'||q.hasAttribute('title'))throw 'invalid argument effects';
+error('InvalidCharacterError',function(){document.createAttribute('bad name');});error('NamespaceError',function(){document.createAttributeNS(null,'p:x');});
+var order='',ns={toString:function(){order+='N';return 'urn:original';}},name={toString:function(){order+='Q';return 'a:token';}};
+var b=document.createAttributeNS(ns,name);if(order!=='NQ'||b.namespaceURI!=='urn:original'||b.prefix!=='a'||b.localName!=='token'||b.value!=='')throw 'factory conversions';
+var marker={},caught=false;try{document.createAttribute({toString:function(){throw marker;}});}catch(e){caught=e===marker;}if(!caught)throw 'factory throw identity';
+error('TypeError',function(){document.createAttribute(Symbol());});
+var log='';Promise.resolve().then(function(){try{q.setAttributeNode(a);}catch(e){if(e.name!=='InUseAttributeError')throw e;log+='caught';}}).finally(function(){log+='-finally';});
+Promise.resolve().then(function(){log+='-tail';});window.addEventListener('load',function(){if(log.indexOf('caught')<0||log.indexOf('finally')<0||log.indexOf('tail')<0)throw 'promise continuation';});
+"#]);
+    assert_eq!(outcome.errors,0,"{}",page.report());
+}
+
+#[test]
 fn html_direction_language_and_alignment_reflect_native_attributes_and_keep_conversion_atomic() {
     let (doc,_,page,outcome)=page("<div id=p dir=RtL lang=EN align=LeFt>Text</div><span id=s></span>",&[r#"
 var p=document.getElementById('p'),s=document.getElementById('s');

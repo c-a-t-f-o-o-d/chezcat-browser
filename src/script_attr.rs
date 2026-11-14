@@ -43,6 +43,92 @@ fn name_text<'a>(name: &'a AttributeName, property: &str) -> Option<&'a str> {
 }
 
 impl Bridge<'_> {
+    pub(super) fn create_attribute(&mut self,args:&[Value],namespaced:bool)->Result<Value,String> {
+        let qualified=self.text(args.get(usize::from(namespaced)).ok_or("Attribute creation requires a name.")?)?;
+        let name=if namespaced {
+            let ns=namespace(args)?;
+            super::script_attribute_names::validate_namespace(ns,&qualified).map_err(|(_,message)|message)?;
+            if let Some(uri)=ns {
+                let (prefix,local)=qualified.split_once(':').map_or((None,qualified.as_str()),|(prefix,local)|(Some(prefix),local));
+                self.state.copies(uri.len().checked_add(qualified.len()).ok_or("Attribute name accounting overflow.")?)?;
+                let namespace=AttributeNamespace{uri:uri.into(),prefix:prefix.map(str::to_owned),local:local.into()};
+                AttributeName{qualified,namespace:Some(namespace)}
+            } else {AttributeName::unqualified(qualified)}
+        } else {AttributeName::unqualified(qualified.to_ascii_lowercase())};
+        let limit=self.state.limits.host.attribute_identities.min(MAX_ATTRS);
+        if self.state.attributes.len()>=limit {return Err(format!("Attr identity limit reached ({limit} per document)."));}
+        self.state.attributes.try_reserve(1).map_err(|_|"Attr storage reservation failed.")?;
+        self.state.replace_bytes(0,name.bytes())?;
+        let handle=ATTR_BASE+self.state.attributes.len() as u32;
+        self.state.attributes.push(Attr{owner:None,name,value:String::new()});self.state.dom_committed();
+        Ok(Value::Host(handle))
+    }
+
+    pub(super) fn validate_attr_attachment(&self,object:u32,args:&[Value])->Result<(),(&'static str,String)> {
+        let Some(Value::Host(handle))=args.first() else {return Err(("TypeError","setAttributeNode requires a genuine Attr.".into()));};
+        let Some(attr)=index(*handle).and_then(|id|self.state.attributes.get(id)) else {return Err(("TypeError","setAttributeNode requires a genuine Attr.".into()));};
+        if attr.owner.is_some() && attr.owner!=node_index(object) {return Err(("InUseAttributeError","Attr already belongs to another Element.".into()));}
+        Ok(())
+    }
+
+    /// The element value/effects commit once through the existing checked path.
+    /// All identity/name/value staging precedes it; nothing fallible follows it.
+    pub(super) fn set_attribute_node(&mut self,object:u32,args:&[Value])->Result<Value,String> {
+        self.validate_attr_attachment(object,args).map_err(|(_,message)|message)?;
+        let node=self.attr_element_node(object)?;
+        let Value::Host(handle)=args[0] else {unreachable!()};let incoming=index(handle).unwrap();
+        if self.state.attributes[incoming].owner==Some(node) {return Ok(Value::Host(handle));}
+        let attr=&self.state.attributes[incoming];
+        let active_name=attr.name.namespace.is_none() && !attr.name.qualified.contains(':');
+        if active_name && (self.dom_script(node) && matches!(attr.name.qualified.as_str(),"src"|"type"|"charset"|"nonce"|"integrity"|"crossorigin"|"referrerpolicy"|"fetchpriority"|"async"|"defer"|"nomodule")
+            || self.dom_stylesheet(node) && matches!(attr.name.qualified.as_str(),"href"|"rel"|"type"|"media"|"as"|"nonce"|"integrity"|"crossorigin"|"referrerpolicy"|"fetchpriority"|"disabled")) {
+            return Err("Attribute-node adoption for active script/stylesheet settings is not implemented; no attribute was changed.".into());
+        }
+        let name_bytes=attr.name.bytes();let value_bytes=attr.value.len();
+        self.state.copies(name_bytes.checked_mul(2).and_then(|n|n.checked_add(value_bytes)).ok_or("Attribute copy accounting overflow.")?)?;
+        let element_name=self.state.attributes[incoming].name.copy();let write_name=element_name.copy();let value=self.state.attributes[incoming].value.clone();
+        let slot=self.attribute_slot(node,element_name.namespace_uri(),element_name.local())?;
+        self.state.work(self.state.attributes.len())?;
+        let old_id=self.state.attributes.iter().position(|attr|attr.owner==Some(node)&&attr.name.same_expanded_name(&element_name));
+        let (old_name,old_value)=if let Some(slot)=slot {
+            let NodeKind::Element{attrs,..}=&self.doc.nodes[node].kind else {unreachable!()};let old=&attrs[slot];
+            self.state.copies(old.name.bytes().checked_add(old.value.len()).ok_or("Attribute copy accounting overflow.")?)?;
+            (Some(old.name.copy()),old.value.clone())
+        } else {(None,String::new())};
+        let new_old_identity=slot.is_some()&&old_id.is_none();
+        if new_old_identity {
+            let limit=self.state.limits.host.attribute_identities.min(MAX_ATTRS);
+            if self.state.attributes.len()>=limit {return Err(format!("Attr identity limit reached ({limit} per document)."));}
+            self.state.attributes.try_reserve(1).map_err(|_|"Attr storage reservation failed.")?;
+        }
+        let old_name_bytes=old_name.as_ref().map_or(0,AttributeName::bytes);
+        let removed=value_bytes.checked_add(old_name_bytes).ok_or("Attribute accounting overflow.")?;
+        let added=old_value.len().checked_add(if slot.is_some(){name_bytes}else{0}).and_then(|n|n.checked_add(if new_old_identity{old_name_bytes}else{0})).ok_or("Attribute accounting overflow.")?;
+        let retained_before=self.state.retained;
+        let factor=if element_name.html_is("id"){2}else{1};
+        let public_old=if slot.is_some(){old_value.len().checked_mul(factor).and_then(|n|n.checked_add(old_name_bytes)).ok_or("Attribute accounting overflow.")?}else{0};
+        let public_new=value_bytes.checked_mul(factor).and_then(|n|n.checked_add(if slot.is_some(){old_name_bytes}else{name_bytes})).ok_or("Attribute accounting overflow.")?;
+        let total_removed=removed.checked_add(public_old).ok_or("Attribute accounting overflow.")?;
+        let total_added=added.checked_add(public_new).ok_or("Attribute accounting overflow.")?;
+        let retained_after=if total_added>=total_removed {retained_before.checked_add(total_added-total_removed)}else{retained_before.checked_sub(total_removed-total_added)}.ok_or("Attribute retained accounting overflow/underflow.")?;
+        if retained_after>self.state.retained_limit {return Err("DOM retained attribute growth allowance reached.".into());}
+        self.state.copies(added)?;
+        // Credit transferred payload before a growing write; for a shrinking
+        // write, defer positive identity accounting until its successful commit.
+        if removed>added {self.state.retained=retained_before.checked_sub(removed-added).ok_or("Attribute retained accounting underflow.")?;}
+        if let Err(error)=self.public_attribute(node,write_name,Some(value)) {self.state.retained=retained_before;return Err(error);}
+        self.state.retained=retained_after;
+        if let Some(slot)=slot {let NodeKind::Element{attrs,..}=&mut self.doc.nodes[node].kind else {unreachable!()};attrs[slot].name=element_name;}
+        let result=if let Some(old_id)=old_id {
+            self.state.attributes[old_id].owner=None;self.state.attributes[old_id].value=old_value;
+            Value::Host(ATTR_BASE+old_id as u32)
+        } else if let Some(old_name)=old_name {
+            let handle=ATTR_BASE+self.state.attributes.len() as u32;
+            self.state.attributes.push(Attr{owner:None,name:old_name,value:old_value});Value::Host(handle)
+        } else {Value::Null};
+        self.state.attributes[incoming].owner=Some(node);self.state.attributes[incoming].value.clear();
+        Ok(result)
+    }
     pub(super) fn attr_native_member(&self, name: &str) -> bool {
         property(name) || dom_tree::native_node_member(name)
     }
@@ -268,9 +354,13 @@ impl Bridge<'_> {
             || key == "border" && self.html_border_property(node)
             || key == "ismap" && self.html_image_map_property(node)
             || key == "srcdoc" && self.iframe_srcdoc_property(node);
-        if !matches!(key, "id" | "class" | "style" | "title" | "hidden" | "disabled" | "role" | "lang" | "dir")
+        // Nonce text follows existing CSP snapshots/queues; changing metadata
+        // does not rerun a parsed script. Attribution reporting is unavailable:
+        // preserve its content attribute without advertising an IDL API or
+        // generating an attribution/report request.
+        if !matches!(key, "id" | "class" | "style" | "title" | "hidden" | "disabled" | "role" | "lang" | "dir" | "nonce" | "attributionsrc")
             && !inert_attribute_name(key) && !image_attribute {
-            return Err("Supported attributes are id, class, style, title, hidden, disabled, role, lang, dir, data-* and aria-*; use .value/.checked for live controls.".into());
+            return Err(format!("Supported attributes exclude {key:?} on {} in this native/metadata subset; no attribute was changed.",tag(self.doc,node)));
         }
         if key == "src" && image_attribute {
             return self.image_source_change(node, value);

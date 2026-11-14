@@ -216,6 +216,18 @@ impl Bridge<'_> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn attribute_nodes_image_attempt_failure_preserves_identity_payload_and_next_job_recovers() {
+        let (mut doc,mut forms,mut page,node)=fixture();
+        let outcome=page.console_eval(&mut doc,&mut forms,"var candidate=document.createAttribute('src');candidate.value='/two.ppm';");assert_eq!(outcome.errors,0,"{}",page.report());
+        page.state.images.attempts=MAX_IMAGE_REQUESTS;let retained=page.state.retained;let commits=page.state.dom_commits;let count=page.state.attributes.len();
+        let error=Bridge{doc:&mut doc,forms:&mut forms,state:&mut page.state}.call(node_handle(node),"setAttributeNode",&[Value::Host(script_attr::ATTR_BASE)]).unwrap_err();
+        assert!(error.contains("image attempt"),"{error}");assert_eq!(doc.attr(node,"src"),Some("/one.ppm"));assert_eq!(page.state.retained,retained);assert_eq!(page.state.dom_commits,commits);assert_eq!(page.state.attributes.len(),count);assert_eq!(page.state.attributes[0].owner,None);assert_eq!(page.state.attributes[0].value,"/two.ppm");assert!(!page.state.images.has_changes());
+        page.state.images.attempts=0;page.begin_job();
+        let outcome=page.console_eval(&mut doc,&mut forms,"var old=document.getElementById('i').setAttributeNode(candidate);if(old.value!=='/one.ppm'||old.ownerElement!==null||candidate.ownerElement!==document.getElementById('i'))throw 'recovery';");assert_eq!(outcome.errors,0,"{}",page.report());
+        assert_eq!(page.take_image_changes().2.len(),1);
+    }
+
     fn fixture() -> (Document, Forms, Page, usize) {
         let mut doc = crate::html::parse("<html><head></head><body><img id=i src='/one.ppm'><picture id=p></picture></body></html>");
         doc.scripting_enabled = true;

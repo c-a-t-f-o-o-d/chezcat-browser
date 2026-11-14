@@ -146,6 +146,26 @@ fn image(app: &App) -> usize {
 }
 
 #[test]
+fn attribute_nodes_connected_image_source_keeps_real_attr_ownership_and_decoded_pixels() {
+    let site=Site::new();let mut app=open(&site,"/start");wait(&mut app,|app|!app.is_loading());
+    eval(&mut app,"var original=img.getAttributeNode('src'),incoming=document.createAttribute('src');incoming.value='/two.ppm';if(img.setAttributeNode(incoming)!==original||original.ownerElement!==null||original.value!=='/one.ppm'||incoming.ownerElement!==img||img.getAttributeNode('src')!==incoming)throw 'source identity';original.value='/must-not-fetch.ppm';");
+    wait(&mut app,|app|!app.is_loading());
+    assert_eq!(app.images[&image(&app)].pixels,[0xff00ff00;3]);assert!(!site.requested("/must-not-fetch.ppm"));
+    eval(&mut app,"if(loads!==2||errors||img.naturalHeight!==3||incoming.value!=='/two.ppm')throw 'real replacement';incoming.value='/one.ppm';");
+    wait(&mut app,|app|!app.is_loading());
+    assert_eq!(app.images[&image(&app)].width,2);assert!(site.requested("/two.ppm"));
+    eval(&mut app,"if(loads!==3||errors||original.ownerElement!==null||img.getAttributeNode('src')!==incoming)throw 'new Attr setter';");
+}
+
+#[test]
+fn attribute_metadata_attribution_remains_inert_while_real_image_requests_stay_separate() {
+    let site=Site::new();let mut app=open(&site,"/start");wait(&mut app,|app|!app.is_loading());
+    eval(&mut app,"img.setAttribute('attributionsrc','/must-not-report');var attr=document.createAttribute('attributionsrc');attr.value='/must-not-report-either';var old=img.setAttributeNode(attr);if(old.value!=='/must-not-report'||img.getAttribute('attributionsrc')!=='/must-not-report-either'||'attributionSrc' in img)throw 'inert metadata/capability';img.src='/two.ppm';");
+    wait(&mut app,|app|!app.is_loading());
+    assert_eq!(app.images[&image(&app)].pixels,[0xff00ff00;3]);assert!(!site.requested("/must-not-report")&&!site.requested("/must-not-report-either"));
+}
+
+#[test]
 fn connected_images_fetch_real_pixels_and_commit_before_events() {
     let site = Site::new();
     let mut app = open(&site, "/start");

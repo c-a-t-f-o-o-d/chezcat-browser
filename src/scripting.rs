@@ -2316,6 +2316,7 @@ impl Host for Bridge<'_> {
         }
         if self.ui_receiver(object) && method=="initUIEvent" {return &[(0,true),(4,false)];}
         if method == "isDefaultNamespace" && self.namespace_receiver(object) { return &[(0, true)]; }
+        if object==DOCUMENT && method=="createAttributeNS" {return &[(0,true),(1,true)];}
         if self.attr_element_receiver(object) && method == "getAttributeNode" { return &[(0, true)]; }
         if self.attr_element_receiver(object) && method == "setAttributeNS" { return &[(0, true), (1, true), (2, true)]; }
         if self.attr_element_receiver(object) && matches!(method,"getAttributeNS" | "getAttributeNodeNS" | "removeAttributeNS") { return &[(0, true), (1, true)]; }
@@ -2339,7 +2340,7 @@ impl Host for Bridge<'_> {
             return &[(0, false), (1, false)];
         }
         if object == NAVIGATOR && method == "sendBeacon"
-            || object == DOCUMENT && matches!(method, "createElement" | "createTextNode")
+            || object == DOCUMENT && matches!(method, "createElement" | "createTextNode" | "createAttribute")
         {
             return &[(0, true)];
         }
@@ -2368,6 +2369,8 @@ impl Host for Bridge<'_> {
     }
 
     fn method_length(&self, object:u32, method:&str) -> Option<usize> {
+        if object==DOCUMENT && method=="createAttributeNS" {return Some(2);}
+        if object==DOCUMENT && method=="createAttribute" || self.attr_element_receiver(object)&&matches!(method,"setAttributeNode"|"setAttributeNodeNS") {return Some(1);}
         if node_index(object).is_some() && method == "replaceChild" { return Some(2); }
         if object == HISTORY && method == "replaceState" { return Some(2); }
         if method == "getBoundingClientRect" && self.class_list_element_receiver(object) { return Some(0); }
@@ -2385,6 +2388,7 @@ impl Host for Bridge<'_> {
     }
 
     fn nullable_string_argument(&self, object: u32, method: &str, index: usize) -> bool {
+        if object==DOCUMENT && method=="createAttributeNS" && index==0 {return true;}
         if object == HISTORY && method == "replaceState" && index == 2 { return true; }
         if self.named_map_receiver(object) { return method == "getNamedItemNS" && index == 0; }
         method == "isDefaultNamespace" && index == 0 && self.namespace_receiver(object)
@@ -2407,6 +2411,8 @@ impl Host for Bridge<'_> {
     }
 
     fn required_arguments(&self, object: u32, method: &str) -> usize {
+        if object==DOCUMENT && method=="createAttributeNS" {return 2;}
+        if object==DOCUMENT && method=="createAttribute" || self.attr_element_receiver(object)&&matches!(method,"setAttributeNode"|"setAttributeNodeNS") {return 1;}
         if object == HISTORY && method == "replaceState" { return 2; }
         if self.named_map_receiver(object) { return match method { "item" | "getNamedItem" => 1, "getNamedItemNS" => 2, _ => 0 }; }
         if self.attr_element_receiver(object) && method == "setAttributeNS" { return 3; }
@@ -2694,6 +2700,7 @@ impl Host for Bridge<'_> {
     }
 
     fn accepts_receiver(&self, object: u32, method: &str, receiver: u32) -> bool {
+        if object==DOCUMENT && matches!(method,"createAttribute"|"createAttributeNS") {return receiver==DOCUMENT;}
         if object == HISTORY { return receiver == HISTORY && method == "replaceState"; }
         if method == "getBoundingClientRect" { return self.class_list_element_receiver(object) && self.class_list_element_receiver(receiver); }
         if script_named_map::element(object).is_some() { return self.named_map_receiver(object) && self.named_map_receiver(receiver); }
@@ -2715,7 +2722,7 @@ impl Host for Bridge<'_> {
             // event does not revoke borrowing; the actual receiver must be live.
             return (EVENT_BASE..self.state.next_event).contains(&object) && self.event_receiver(receiver);
         }
-        if matches!(method, "getAttributeNS" | "getAttributeNode" | "getAttributeNodeNS" | "removeAttributeNS" | "setAttributeNS" | "removeAttributeNode" | "hasAttributes") {
+        if matches!(method, "getAttributeNS" | "getAttributeNode" | "getAttributeNodeNS" | "removeAttributeNS" | "setAttributeNS" | "removeAttributeNode" | "setAttributeNode" | "setAttributeNodeNS" | "hasAttributes") {
             return self.attr_element_receiver(object) && self.attr_element_receiver(receiver);
         }
         if matches!(method, "isDefaultNamespace" | "compareDocumentPosition") {
@@ -3183,6 +3190,8 @@ impl Host for Bridge<'_> {
                     | "querySelectorAll"
                     | "createElement"
                     | "createTextNode"
+                    | "createAttribute"
+                    | "createAttributeNS"
                     | "addEventListener"
                     | "removeEventListener"
             ) || !matches!(self.named_document_property(property)?, Value::Undefined));

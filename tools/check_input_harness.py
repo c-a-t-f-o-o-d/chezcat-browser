@@ -21,9 +21,24 @@ ROOT = Path(__file__).resolve().parents[1]
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--event-namespace",action="store_true",help="include the original local Event/namespace subsystem fixture")
+    parser.add_argument("--attribute-nodes",action="store_true",help="exercise real Attr replacement, native disabled state and applied style")
     args=parser.parse_args()
     fixture=ROOT/"tools/fixtures/offline-event-namespace.html"
     extra=fixture.read_text(encoding="utf-8") if args.event_namespace else ""
+    if args.attribute_nodes:
+        extra+='''<div id="attr-target" title="old">Waiting for attribute nodes</div><script>
+(function(){
+var target=document.getElementById('attr-target'),old=target.getAttributeNode('title');
+var incoming=document.createAttribute('TITLE');incoming.value='replacement';
+if(target.setAttributeNode(incoming)!==old||old.ownerElement!==null||old.value!=='old'||incoming.ownerElement!==target||target.getAttributeNode('title')!==incoming)throw 'Attr identity';
+var first=document.createAttributeNS('urn:original','one:token');first.value='first';target.setAttributeNodeNS(first);
+var next=document.createAttributeNS('urn:original','two:token');next.value='next';
+if(target.setAttributeNode(next)!==first||first.ownerElement!==null||target.getAttributeNS('urn:original','token')!=='next'||target.getAttribute('one:token')!==null)throw 'expanded name';
+var button=document.getElementsByName('send').item(0),disabled=document.createAttribute('disabled');
+button.setAttributeNode(disabled);if(!button.disabled)throw 'native disabled';button.removeAttributeNode(disabled);if(button.disabled)throw 'native enabled';
+var style=document.createAttribute('style');style.value='display:block;width:133px;color:#445566';target.setAttributeNode(style);
+if(target.clientWidth!==133)throw 'applied geometry';target.textContent='Attribute nodes ready';
+})();</script>'''
     folder = ROOT / "results/verification/autonomy" / (
         datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ") + "-input-fixture-" + uuid.uuid4().hex[:8])
     folder.mkdir(parents=True)
@@ -81,6 +96,10 @@ def main():
                "--dev-input-output", str(evidence), "--javascript", "--no-profile"]
     before = capture_tests.source_identity(ROOT)
     record = {"scope": __doc__, "source_before": before, "executable_sha256": capture_tests.sha256(executable)}
+    record["runner_sha256"]=capture_tests.sha256(Path(__file__))
+    if args.attribute_nodes:
+        import hashlib
+        record["attribute_fixture_sha256"]=hashlib.sha256(extra.encode("utf-8")).hexdigest()
     if args.event_namespace:
         record["original_subsystem_fixture_sha256"]=capture_tests.sha256(fixture)
     try:
@@ -146,6 +165,9 @@ def main():
         checks["backed_history_rewrite_rendered"]=all(('text="'+word+'"') in initial for word in ("History","entry","ready"))
         activities=list(evidence.glob("*.activity.txt"))
         checks["subsystem_has_no_script_errors"]=bool(activities) and all("0 error(s)." in path.read_text(encoding="utf-8") for path in activities)
+    if args.attribute_nodes:
+        checks["attribute_nodes_identity_namespace_native_control_and_geometry_rendered"]=all(('text="'+word+'"') in snapshot("first-results","layout.txt") for word in ("Attribute","nodes","ready"))
+        checks["attribute_nodes_have_no_script_errors"]=all("0 error(s)." in path.read_text(encoding="utf-8") for path in activities)
     record["checks"] = checks
     record["passed"] = all(checks.values())
     record["files"] = {str(path.relative_to(folder)): {"bytes": path.stat().st_size, "sha256": capture_tests.sha256(path)}

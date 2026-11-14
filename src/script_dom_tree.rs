@@ -273,6 +273,7 @@ impl Bridge<'_> {
     }
 
     pub(super) fn dom_method(&self, object: u32, property: &str) -> Option<&'static str> {
+        if object==DOCUMENT {match property {"createAttribute"=>return Some("createAttribute"),"createAttributeNS"=>return Some("createAttributeNS"),_=>{}}}
         if self.namespace_receiver(object) {
             match property {
                 "isDefaultNamespace" => return Some("isDefaultNamespace"),
@@ -290,6 +291,8 @@ impl Bridge<'_> {
             "setAttributeNS" if self.attr_element_receiver(object) => Some("setAttributeNS"),
             "removeAttributeNS" if self.attr_element_receiver(object) => Some("removeAttributeNS"),
             "removeAttributeNode" if self.attr_element_receiver(object) => Some("removeAttributeNode"),
+            "setAttributeNode" if self.attr_element_receiver(object) => Some("setAttributeNode"),
+            "setAttributeNodeNS" if self.attr_element_receiver(object) => Some("setAttributeNodeNS"),
             "appendChild" => Some("appendChild"),
             "insertBefore" => Some("insertBefore"),
             "replaceChild" => Some("replaceChild"),
@@ -340,6 +343,16 @@ impl Bridge<'_> {
         method: &str,
         args: &[Value],
     ) -> Result<(), (&'static str, String)> {
+        if object==DOCUMENT && method=="createAttribute" {
+            if let Some(Value::String(name))=args.first() {if !super::script_attribute_names::valid_attribute_name(name) {return Err(("InvalidCharacterError","Invalid attribute local name.".into()));}}
+        }
+        if object==DOCUMENT && method=="createAttributeNS" {
+            if let (Some(namespace),Some(Value::String(name)))=(args.first(),args.get(1)) {
+                let namespace=match namespace{Value::String(value) if !value.is_empty()=>Some(value.as_str()),_=>None};
+                super::script_attribute_names::validate_namespace(namespace,name)?;
+            }
+        }
+        if matches!(method,"setAttributeNode"|"setAttributeNodeNS") && node_index(object).is_some() {return self.validate_attr_attachment(object,args);}
         if method == "replaceChild" && node_index(object).is_some() {
             return self.validate_replace_child(object, args);
         }
@@ -1169,9 +1182,11 @@ impl Bridge<'_> {
                 "setAttributeNS" => return self.set_attribute_ns(object, args).map(Some),
                 "removeAttributeNS" => return self.remove_attribute_ns(object, args).map(Some),
                 "removeAttributeNode" => return self.remove_attribute_node(object, args).map(Some),
+                "setAttributeNode"|"setAttributeNodeNS"=>return self.set_attribute_node(object,args).map(Some),
                 _ => (),
             }
         }
+        if object==DOCUMENT && matches!(method,"createAttribute"|"createAttributeNS") {return self.create_attribute(args,method=="createAttributeNS").map(Some);}
         if object == DOCUMENT && matches!(method, "createElement" | "createTextNode") {
             let text = self.text(args.first().ok_or("DOM creation requires one argument.")?)?;
             if method == "createTextNode" {
