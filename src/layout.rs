@@ -21,6 +21,8 @@ const MAX_DEPTH: usize = 128;
 const MAX_FLEX_ITEMS: usize = 2_048;
 const MAX_FLEX_WORK: usize = 4_000_000;
 const MAX_POSITIONED: usize = 2_048;
+#[path="layout_scroll.rs"]
+mod scrolling;
 
 fn clipped_bottom(x: i32, y: i32, width: i32, height: i32, clip: Option<ClipRect>) -> Option<i32> {
     // Preserve zero-width layout extents when they are not clipped.
@@ -283,6 +285,9 @@ pub struct Layout {
     hits: Vec<HitRegion>,
     pub height: i32,
     pub client_boxes: Vec<Option<ClientBox>>,
+    pub scroll_heights: Vec<Option<i32>>,
+    pub viewport_scroll_height:i32,
+    pub viewport_scroll_unavailable:bool,
     pub border_rects: Vec<Option<BorderRect>>,
     /// No padding-box record is insufficient to prove no inline CSS box.
     pub offset_unavailable: Vec<bool>,
@@ -543,6 +548,7 @@ struct Engine<'a> {
     intrinsics: Vec<Option<Intrinsic>>,
     measure_visits: usize,
     boxes: Vec<Option<BoxRecord>>,
+    used_margins:HashMap<usize,[i32;4]>,
     placed_boxes: Vec<usize>,
     flex_work: usize,
     viewport: ContainingBlock,
@@ -642,6 +648,9 @@ pub fn build_viewport_with_fonts(
         hits: Vec::new(),
         height: 0,
         client_boxes: vec![None; doc.nodes.len()],
+        scroll_heights:vec![None;doc.nodes.len()],
+        viewport_scroll_height:0,
+        viewport_scroll_unavailable:false,
         border_rects: vec![None; doc.nodes.len()],
         offset_unavailable: vec![true; doc.nodes.len()],
         fixed_runs: Vec::new(),
@@ -704,6 +713,7 @@ pub fn build_viewport_with_fonts(
         intrinsics: vec![None; doc.nodes.len()],
         measure_visits: 0,
         boxes: (0..doc.nodes.len()).map(|_| None).collect(),
+        used_margins:HashMap::new(),
         placed_boxes: Vec::new(),
         flex_work: MAX_FLEX_WORK,
         viewport: ContainingBlock {
@@ -734,6 +744,9 @@ pub fn build_viewport_with_fonts(
     engine.apply_relative();
     engine.place_positioned();
     let fixed_boxes = engine.mark_fixed();
+    engine.finish_client_boxes();
+    engine.finish_border_rects(&fixed_boxes);
+    engine.finish_scroll_heights(&fixed_boxes);
     let atom_clips = engine.clip_overflow();
     // Flex children may move up as well as down after their single paint pass.
     // Recompute the final extent instead of retaining intermediate coordinates.
@@ -815,8 +828,6 @@ pub fn build_viewport_with_fonts(
     engine.order_positioned_paint();
     engine.build_hits();
     engine.restore_source_order();
-    engine.finish_client_boxes();
-    engine.finish_border_rects(&fixed_boxes);
     let indices = |flags: &[bool]| {
         flags
             .iter()
@@ -1037,7 +1048,7 @@ impl Engine<'_> {
         auto_margin: [bool; 2],
         fallback: i32,
         vertical: bool,
-    ) -> i32 {
+    ) -> (i32,[i32;2]) {
         let [start, end] = inset;
         let [mut before, mut after] = margin;
         let [auto_before, auto_after] = auto_margin;
@@ -1057,10 +1068,11 @@ impl Engine<'_> {
                 _ => {}
             }
         }
-        start
+        let position=start
             .map(|start| start + before)
             .or_else(|| end.map(|end| size - end - extent - after))
-            .unwrap_or(fallback + before)
+            .unwrap_or(fallback + before);
+        (position,[before,after])
     }
 
     fn place_positioned(&mut self) {
@@ -1228,8 +1240,7 @@ impl Engine<'_> {
             self.finish_line(false, 0);
             self.cache_decorations();
             let outer_height = self.flow.y.max(0);
-            let x = cb.x
-                + Self::positioned_axis(
+            let (offset_x,horizontal_margin)=Self::positioned_axis(
                     [inset[3], inset[1]],
                     cb.width,
                     width + edges[0],
@@ -1241,8 +1252,7 @@ impl Engine<'_> {
                     fallback.0 - cb.x,
                     false,
                 );
-            let y = cb.y
-                + Self::positioned_axis(
+            let (offset_y,vertical_margin)=Self::positioned_axis(
                     [inset[0], inset[2]],
                     cb.height,
                     outer_height,
@@ -1254,6 +1264,8 @@ impl Engine<'_> {
                     fallback.1 - cb.y,
                     true,
                 );
+            let x=cb.x.saturating_add(offset_x);let y=cb.y.saturating_add(offset_y);
+            self.used_margins.insert(node,[vertical_margin[0],horizontal_margin[1],vertical_margin[1],horizontal_margin[0]]);
             if let Some(span) = self.spans[node] {
                 self.move_span(span, x, y);
             }
@@ -2084,6 +2096,7 @@ impl Engine<'_> {
             hit_box,
             flex,
         });
+        self.used_margins.insert(index,margin);
         self.placed_boxes.push(index);
         // A min/max-height constraint can establish a different final flex size.
         if style.display == Display::Flex && content_height != natural_height {
@@ -3487,6 +3500,16 @@ impl Engine<'_> {
                 }
                 item.x = x;
                 item.y = y;
+                if let Some(&node)=item.nodes.first() {
+                    let mut used=item.margin;
+                    if item.style.margin[start_side]==Length::Auto {used[start_side]=(main_offset.round()-(main_offset-auto_margin).round()) as i32;}
+                    if item.style.margin[end_side]==Length::Auto {let boundary=main_offset+f64::from(outer_main);used[end_side]=((boundary+auto_margin).round()-boundary.round()) as i32;}
+                    if spare>0 {
+                        if auto_start {used[cross_start]=used[cross_start].saturating_add(if auto_end{spare/2}else{spare});}
+                        if auto_end {used[cross_end]=used[cross_end].saturating_add(if auto_start{spare-spare/2}else{spare});}
+                    }
+                    self.used_margins.insert(node,used);
+                }
                 main_offset += f64::from(outer_main + item.margin[end_side] + main_gap)
                     + main_extra
                     + if item.style.margin[end_side] == Length::Auto {
@@ -3590,6 +3613,7 @@ impl Engine<'_> {
         self.flow = previous;
         self.inline_context = previous_context;
         self.move_span(span, x, y);
+        self.used_margins.insert(index,margin);
         self.atoms.push(Atom {
             kind: AtomKind::InlineBlock(span),
             x,
@@ -3967,6 +3991,7 @@ impl Engine<'_> {
             background: style.background,
             image: None,
         });
+        self.used_margins.insert(node,margin);
         self.layout.items.push(PaintItem::Control(index));
         self.atoms.push(Atom {
             kind: AtomKind::Control(index),
@@ -4100,6 +4125,7 @@ impl Engine<'_> {
                 presentation: self.image_presentation(node, style),
             }),
         });
+        self.used_margins.insert(node,margin);
         self.layout.items.push(PaintItem::Control(index));
         self.atoms.push(Atom {
             kind: AtomKind::Control(index),
@@ -4273,6 +4299,7 @@ impl Engine<'_> {
             bottom: border[2],
             padding,
         });
+        self.used_margins.insert(node,margin);
         self.atoms.push(Atom {
             kind: AtomKind::Image { item, node },
             x,

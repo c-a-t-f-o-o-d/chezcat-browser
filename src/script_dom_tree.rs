@@ -553,6 +553,12 @@ impl Bridge<'_> {
             // A detached Element has no associated CSS layout box. Connected
             // extents require renderer measurements, never a client-size alias.
             if !self.state.dom.connected[node] { return Ok(Some(Value::Number(0.0))); }
+            if property=="scrollHeight" {
+                if let Some(geometry)=&mut self.state.geometry {
+                    let root=self.state.tree.document_element==Some(node);
+                    return geometry.read(self.doc,self.forms,node,root,property,&mut self.state.host_work).map(|value|Some(Value::Number(value)));
+                }
+            }
             return Err(self.unavailable_scroll(node,property));
         }
         if property == "classList" {

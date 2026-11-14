@@ -179,10 +179,12 @@ if(target.clientWidth!==133)throw 'applied geometry';target.textContent='Attribu
         checks["real_namespaced_html_creation_rendered"]=all(('text="'+word+'"') in initial for word in ("Namespaced","HTML","ready"))
         checks["parsed_script_source_reflection_rendered"]=all(('text="'+word+'"') in initial for word in ("Parsed","script","URL","ready"))
         checks["measured_document_timing_rendered"]=all(('text="'+word+'"') in initial for word in ("Measured","document","timing","ready"))
+        checks["measured_scroll_height_loaded_css_and_mutation_rendered"]=all(('text="'+word+'"') in initial for word in ("Measured","scroll","height","ready"))
         checks["unavailable_animation_detection_rendered"]=all(('text="'+word+'"') in initial for word in ("Unavailable","animation","detected"))
         checks["real_token_selector_style_and_query_rendered"]=all(('text="'+word+'"') in initial for word in ("Token","selector","ready"))
         first_pixels=(evidence/'00-initial.ppm').read_bytes().split(b'\n',3)[3]
         checks["token_selector_real_style_background_painted"]=sum(first_pixels[index:index+3]==bytes([49,95,154]) for index in range(0,len(first_pixels),3))>100
+        checks["scroll_overflow_real_clipped_background_painted"]=sum(first_pixels[index:index+3]==bytes([72,117,47]) for index in range(0,len(first_pixels),3))>100
         checks["token_stylesheet_fetched_once_per_document"]=sum(row==["search","/fixture-token.css"] for row in seen)==sum(row[0]=="search" and urllib.parse.urlsplit(row[1]).path in ["/","/search"] for row in seen)
         timings=[re.search(r'Measured document timing \(integer epoch ms\): navigationStart=(\d+) requestStart=(\d+) responseStart=(\d+) responseEnd=(\d+) finalHeadersParsed=(\d+)',path.read_text(encoding='utf-8')) for path in activities]
         checks["actual_native_timing_measurements_reported"]=bool(timings) and all(match and 0<int(match[1])<=int(match[2])<=int(match[3])<=int(match[4]) and int(match[5])>=int(match[3]) for match in timings)

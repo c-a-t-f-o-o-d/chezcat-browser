@@ -45,6 +45,38 @@ fn report(app: &App) -> String {
 }
 
 #[test]
+fn measured_scroll_height_uses_real_body_padding_overflow_hidden_root_and_live_mutation(){
+    let fixture=Fixture::new();let app=fixture.open(r#"<html><head><style>body{margin:0}#box{height:40px;padding-bottom:50px;overflow:hidden}#child{height:150px}</style></head><body><div id=box><div id=child></div></div><div id=hidden style='display:none;height:900px'></div><script>
+var box=document.getElementById('box'),child=document.getElementById('child'),viewport=document.documentElement.clientHeight;
+if(box.scrollHeight!==200||document.body.scrollHeight!==90||document.documentElement.scrollHeight!==viewport)throw 'actual scrolling areas';
+child.style.height='30px';if(box.scrollHeight!==90||document.body.scrollHeight!==90)throw 'same job invalidation';
+child.style.height='300px';if(box.scrollHeight!==350||document.body.scrollHeight!==90)throw 'hidden receiver overflow';box.scrollHeight=1;if(box.scrollHeight!==350)throw 'readonly';
+if(document.createElement('div').scrollHeight!==0||document.getElementById('hidden').scrollHeight!==0)throw 'no box';
+document.documentElement.style.display='none';if(document.documentElement.scrollHeight!==viewport||document.body.scrollHeight!==0)throw 'root before no box';
+document.documentElement.style.display='block';if(box.scrollHeight!==350||document.body.scrollHeight!==90)throw 'restored actual layout';document.title='measured-scroll-ok';
+</script></body></html>"#);
+    assert_eq!(app.scripting.as_ref().unwrap().error_count(),0,"{}",report(&app));assert_eq!(app.document.title,"measured-scroll-ok");
+    let app=fixture.open("<html><body style='margin:17px;border:3px solid black;padding:5px;height:40px'><div style='height:20px'></div><script>if(document.body.scrollHeight!==50)throw 'body own margins and borders';</script></body></html>");assert_eq!(app.scripting.as_ref().unwrap().error_count(),0,"{}",report(&app));
+    let app=fixture.open("<html><body><div id=reverse style='display:flex;flex-direction:column-reverse;height:40px'><div style='height:100px;flex:none'></div></div><script>document.getElementById('reverse').scrollHeight;document.title='unmeasured value';</script></body></html>");assert_eq!(app.scripting.as_ref().unwrap().error_count(),1,"{}",report(&app));assert!(report(&app).contains("unsupported scrolling-area origin"));assert_ne!(app.document.title,"unmeasured value");
+    for (root,body) in [("height:40px;overflow:hidden","margin:0;height:40px"),("","margin:0;height:40px;overflow:hidden")] {
+        let app=fixture.open(&format!("<html style='{root}'><body style='{body}'><div style='height:300px'></div><script>if(document.body.scrollHeight!==300)throw 'actual body area';document.documentElement.scrollHeight;document.title='unmeasured viewport';</script></body></html>"));assert_eq!(app.scripting.as_ref().unwrap().error_count(),1,"{}",report(&app));assert!(report(&app).contains("unsupported viewport overflow propagation"));assert_ne!(app.document.title,"unmeasured viewport");
+    }
+}
+
+#[test]
+fn measured_scroll_height_zoom_scroll_resize_and_small_profile_recover(){
+    let fixture=Fixture::new();let mut app=fixture.open(r#"<html><head><style>body{margin:0}#box{height:2000px}</style></head><body><div id=box></div><script>function measureScroll(){document.title=document.body.scrollHeight+','+document.documentElement.scrollHeight;}</script></body></html>"#);
+    for zoom in [1.0,1.25,2.0] {
+        app.set_zoom(zoom);app.set_scroll(123);
+        let page=app.scripting.as_mut().unwrap();let out=page.console_eval(&mut app.document,&mut app.forms,"measureScroll();");assert_eq!(out.errors,0,"{}",report(&app));assert_eq!(app.document.title,"2000,2000");
+    }
+    app.show_resources();app.resize(812,600);app.set_zoom(1.5);
+    let page=app.scripting.as_mut().unwrap();let out=page.console_eval(&mut app.document,&mut app.forms,"measureScroll();");assert_eq!(out.errors,0,"{}",report(&app));assert_eq!(app.document.title,"2000,2000");
+    let mut app=fixture.open_with_limits(r#"<html><body><div id=box style='height:10px'></div><script>var box=document.getElementById('box');setTimeout(function(){document.title='Recovered '+box.scrollHeight;},0);for(var i=0;i<5;i++){box.style.height=(10+i)+'px';box.scrollHeight;}</script></body></html>"#,crate::script_geometry::Limits {layouts_per_job:4});
+    assert_eq!(app.scripting.as_ref().unwrap().error_count(),1,"{}",report(&app));assert!(report(&app).contains("DOM geometry layout limit"));assert!(app.poll_script_timer());assert_eq!(app.document.title,"Recovered 14");
+}
+
+#[test]
 fn domrect_renderer_snapshots_include_real_borders_mutation_and_no_box_cases() {
     let fixture = Fixture::new();
     let app = fixture.open(r#"<html><head><style>

@@ -2,6 +2,7 @@
 <p id="event-namespace-state">Fixture pending</p>
 <link id="token-sheet" rel="preload StyleSheet" href="/fixture-token.css">
 <div id="token-selector-state" data-words="cold ready">Token pending</div>
+<div id="scroll-box"><div id="scroll-content">Real clipped scroll content</div></div><p id="scroll-state">Scroll pending</p>
 <div id="geometry-state" style="width:40px;height:20px;padding:3px 5px;border:2px solid black"></div>
 <div id="fragment-fixture"><p id="fragment-old" title="retained">Old fragment</p></div>
 <p id="history-state">History pending</p>
@@ -13,6 +14,11 @@
 <script id="parsed-source-fixture" src="/fixture-parser.js"></script>
 <script>
 var fixtureNode=document.getElementById('event-namespace-state');
+var scrollBox=document.getElementById('scroll-box'),scrollContent=document.getElementById('scroll-content');
+if(scrollBox.scrollHeight!==100||scrollBox.clientHeight!==50)throw Error('loaded CSS scrolling area');
+scrollContent.style.height='140px';if(scrollBox.scrollHeight!==150||scrollBox.clientHeight!==50)throw Error('live scrolling area');
+scrollContent.style.height='90px';if(scrollBox.scrollHeight!==100)throw Error('restored scrolling area');scrollBox.scrollHeight=1;if(scrollBox.scrollHeight!==100)throw Error('readonly scrolling area');
+document.getElementById('scroll-state').textContent='Measured scroll height ready';
 var tokenTarget=document.getElementById('token-selector-state'),tokenSheet=document.getElementById('token-sheet'),tokenStyles=document.querySelectorAll('link[rel~="stylesheet"]');
 if(tokenStyles.length!==1||tokenStyles[0]!==tokenSheet||document.querySelector('link[rel~=stylesheet s]')!==null||document.querySelector('link[rel~=StyleSheet s]')!==tokenSheet||tokenTarget.clientWidth!==137||tokenTarget.clientHeight!==20)throw Error('real stylesheet token selector');
 if(!('href' in tokenSheet)||tokenStyles[0].href!==location.origin+'/fixture-token.css'||tokenStyles[0].href!==tokenStyles[0].href||tokenSheet.getAttribute('href')!=='/fixture-token.css')throw Error('real parsed stylesheet URL');

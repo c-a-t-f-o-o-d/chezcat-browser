@@ -20,6 +20,9 @@ pub struct Geometry {
     images: HashMap<usize, (usize, usize)>,
     fonts: Book,
     boxes: Option<Vec<Option<ClientBox>>>,
+    scroll_heights:Vec<Option<i32>>,
+    viewport_scroll_height:i32,
+    viewport_scroll_unavailable:bool,
     rects: Vec<Option<layout::BorderRect>>,
     scroll: i32,
     offset_unavailable: Vec<bool>,
@@ -44,6 +47,9 @@ impl Geometry {
             images,
             fonts: fonts.clone(),
             boxes: None,
+            scroll_heights:Vec::new(),
+            viewport_scroll_height:0,
+            viewport_scroll_unavailable:false,
             rects: Vec::new(),
             scroll: 0,
             offset_unavailable: Vec::new(),
@@ -117,6 +123,9 @@ impl Geometry {
     ) {
         self.update(width, height, zoom, images);
         self.boxes = Some(layout.client_boxes.clone());
+        self.scroll_heights=layout.scroll_heights.clone();
+        self.viewport_scroll_height=layout.viewport_scroll_height;
+        self.viewport_scroll_unavailable=layout.viewport_scroll_unavailable;
         self.offset_unavailable = layout.offset_unavailable.clone();
         self.rects = layout.border_rects.clone();
     }
@@ -150,6 +159,9 @@ impl Geometry {
                 &self.fonts,
             );
             self.boxes = Some(layout.client_boxes);
+            self.scroll_heights=layout.scroll_heights;
+            self.viewport_scroll_height=layout.viewport_scroll_height;
+            self.viewport_scroll_unavailable=layout.viewport_scroll_unavailable;
             self.offset_unavailable = layout.offset_unavailable;
             self.rects = layout.border_rects;
         }
@@ -175,6 +187,16 @@ impl Geometry {
         property: &str, host_work: &mut usize,
     ) -> Result<f64, String> {
         self.ensure_layout(doc, forms, host_work)?;
+        if property=="scrollHeight" {
+            if is_root &&self.viewport_scroll_unavailable{return Err("Root scroll height requires unsupported viewport overflow propagation.".into());}
+            if self.scroll_heights.get(node).copied().flatten().is_none() && self.boxes.as_ref().and_then(|boxes|boxes.get(node)).is_some_and(Option::is_some) {return Err(format!("Scroll height requires unsupported scrolling-area origin geometry. Receiver node={node}."));}
+            let pixels=if is_root {self.height.max(self.viewport_scroll_height)}
+                else if let Some(height)=self.scroll_heights.get(node).copied().flatten(){height}
+                else if self.offset_unavailable.get(node).copied().unwrap_or(true){return Err(format!("Scroll height requires unmeasured layout fragments. Receiver node={node}."));}
+                else {0};
+            return Ok((f64::from(pixels)/f64::from(self.zoom)).round());
+        }
+
         let client = self
             .boxes
             .as_ref()
