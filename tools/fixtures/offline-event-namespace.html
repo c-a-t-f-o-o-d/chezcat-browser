@@ -2,8 +2,14 @@
 <p id="event-namespace-state">Fixture pending</p>
 <div id="geometry-state" style="width:40px;height:20px;padding:3px 5px;border:2px solid black"></div>
 <div id="fragment-fixture"><p id="fragment-old" title="retained">Old fragment</p></div>
+<p id="history-state">History pending</p>
 <script>
 var fixtureNode=document.getElementById('event-namespace-state');
+if(history!==window.history||history.state!==null||history.replaceState.length!==2)throw Error('real History surface');
+var fixtureHistoryURL=location.pathname+location.search+'#fixture';
+history.replaceState(history.state,'',fixtureHistoryURL);
+if(location.href!==location.origin+fixtureHistoryURL||document.URL!==location.href)throw Error('synchronous History rewrite');
+document.getElementById('history-state').textContent='History entry ready';
 fixtureNode.setAttribute('data-sample','value');
 if(fixtureNode.getAttributeNS(null,'data-sample')!=='value'||fixtureNode.getAttributeNS('urn:fixture','data-sample')!==null)throw Error('namespace read');
 fixtureNode.setAttributeNS('urn:fixture','a:sample','first');

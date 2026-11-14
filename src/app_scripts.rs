@@ -270,6 +270,7 @@ fn fetch(
 
 impl App {
     pub(super) fn cancel_script_requests(&mut self) {
+        self.apply_history_replacement();
         self.cancel_stylesheet_requests();
         self.cancel_image_requests();
         if let Some(worker) = &self.dynamic_scripts {
@@ -295,13 +296,14 @@ impl App {
         if self.script_jobs_paused() {
             return false;
         }
+        let history_changed = self.apply_history_replacement();
         let Some(page) = &mut self.scripting else {
             return false;
         };
         let focus = page.take_focus_request();
         let navigation = page.take_navigation();
         let requests = page.take_dynamic_scripts();
-        let changed = focus.is_some() || navigation.is_some() || !requests.is_empty();
+        let changed = history_changed || focus.is_some() || navigation.is_some() || !requests.is_empty();
         if let Some(node) = focus {
             self.focus_control(node);
         }

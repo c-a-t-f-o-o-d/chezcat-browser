@@ -113,6 +113,7 @@ def main():
         checks["native_ui_keyboard_rendered"]=all(('text="'+word+'"') in snapshot("ui-keyboard","layout.txt") for word in ("Native","UI","observed"))
         checks["fragment_and_real_image_completion_rendered"]=all(('text="'+word+'"') in initial for word in ("Fragment","image","loaded"))
         checks["fragment_image_requested_and_inert_script_unfetched"]=["search","/fixture-image.ppm"] in seen and not any(row[1].startswith("/fixture-inert.js") for row in seen)
+        checks["backed_history_rewrite_rendered"]=all(('text="'+word+'"') in initial for word in ("History","entry","ready"))
         activities=list(evidence.glob("*.activity.txt"))
         checks["subsystem_has_no_script_errors"]=bool(activities) and all("0 error(s)." in path.read_text(encoding="utf-8") for path in activities)
     record["checks"] = checks

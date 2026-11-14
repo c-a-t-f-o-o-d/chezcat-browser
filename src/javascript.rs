@@ -3532,6 +3532,10 @@ impl Runtime {
     }
 
     fn allocate_host_function(&mut self, object: u32, method: &'static str) -> Result<function_arena::Allocation, String> {
+        self.allocate_host_function_with_length(object, method, usize::from(method == "compareDocumentPosition"))
+    }
+
+    fn allocate_host_function_with_length(&mut self, object: u32, method: &'static str, length: usize) -> Result<function_arena::Allocation, String> {
         if self.function_arena.occupied >= self.limits.capacity.functions {
             return Err(self.function_limit_fault("host").display());
         }
@@ -3541,7 +3545,6 @@ impl Runtime {
             receiver_required: false,
             constructible: false,
         }).map_err(Fault::display)?;
-        let length = usize::from(method == "compareDocumentPosition");
         self.initialize_function_properties(allocation, method, length, false)
             .map_err(Fault::display)?;
         Ok(allocation)
@@ -3550,7 +3553,15 @@ impl Runtime {
     /// A native method value keeps its identity but must be called with its
     /// native receiver, unlike a global capability such as setTimeout.
     pub fn host_method(&mut self, object: u32, method: &'static str) -> Result<Value, String> {
-        let function = self.host_function(object, method)?;
+        self.host_method_with_length(object, method, usize::from(method == "compareDocumentPosition"))
+    }
+
+    /// Allocate fixed native methods in their owner realm with their actual
+    /// interface arity, before a foreign reader can materialize a wrapper.
+    pub fn host_method_with_length(&mut self, object: u32, method: &'static str, length: usize) -> Result<Value, String> {
+        let allocation = self.allocate_host_function_with_length(object, method, length)?;
+        let function = Value::Function(allocation.id);
+        self.pin_exported_value(&function);
         if let Some(Function::Host {
             receiver_required, ..
         }) = match function { Value::Function(id) => self.functions.get_mut(id), _ => None }

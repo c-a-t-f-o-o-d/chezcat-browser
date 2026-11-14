@@ -72,7 +72,9 @@ pub struct Loaded {
     /// The final document exchange, after any redirects. Assets never inherit it.
     pub request: http::Request,
     pub cookie_same_site: bool,
+    pub document_redirected: bool,
     pub base: Location,
+    pub base_is_document_url: bool,
     pub document: Document,
     pub raw: String,
     pub styles: HashMap<usize, String>,
@@ -579,6 +581,7 @@ fn load_request_progressively(
     let mut location = initial.clone();
     let mut final_request = http::Request::Get;
     let mut final_cookie_same_site = false;
+    let mut document_redirected = false;
     let mut events = Vec::new();
     events.push(options.blocking.description());
     if mode == http::FetchMode::FullReload {
@@ -596,6 +599,7 @@ fn load_request_progressively(
     let raw = if let Some(url) = &initial.url {
         progress(format!("Loading {}", url.display()));
         let response = pool.fetch_document(url, request, mode)?;
+        document_redirected = response.redirected;
         final_cookie_same_site = response.cookie_same_site;
         if response
             .header("content-disposition")
@@ -750,9 +754,11 @@ fn load_request_progressively(
     let mut loaded = Loaded {
         network,
         base: location.clone(),
+        base_is_document_url: true,
         location,
         request: final_request,
         cookie_same_site: final_cookie_same_site,
+        document_redirected,
         document,
         raw,
         styles: HashMap::new(),
@@ -829,6 +835,7 @@ fn load_request_progressively(
                         Ok(()) => {
                             loaded.events.push(format!("BASE: {}", base.display()));
                             loaded.base = base;
+                            loaded.base_is_document_url = false;
                         }
                         Err(error) => loaded.events.push(format!("BASE skipped: {error}")),
                     },

@@ -96,6 +96,9 @@ impl Request {
 #[derive(Debug)]
 pub struct Response {
     pub url: HttpUrl,
+    /// Actual followed redirect provenance, including chains returning to the
+    /// original URL. Never infer document identity from a final URL comparison.
+    pub redirected: bool,
     /// None preserves the caller's fragment; Some("") explicitly clears it.
     pub fragment: Option<String>,
     pub status: u16,
@@ -388,6 +391,7 @@ fn fetch_in_pool(
                 message.body.len()
             ));
             return Ok(Response {
+                redirected: redirects != 0,
                 url: current,
                 fragment,
                 status: message.status,

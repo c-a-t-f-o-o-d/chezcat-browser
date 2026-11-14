@@ -53,6 +53,7 @@ fn complete(manager: &mut Manager) {
 }
 fn response(body: &[u8], disposition: &str) -> http::Response {
     http::Response {
+        redirected: false,
         url: crate::url::parse("https://download.invalid/payload")
             .unwrap()
             .0,

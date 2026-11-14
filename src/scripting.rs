@@ -70,6 +70,10 @@ pub(crate) use script_images::MAX_IMAGE_REQUESTS;
 use script_images::ImagesState;
 #[path = "script_inner_html.rs"]
 mod script_inner_html;
+#[path = "script_history.rs"]
+mod script_history;
+pub use script_history::HistoryData;
+use script_history::HistoryState;
 
 const WINDOW: u32 = 1;
 const DOCUMENT: u32 = 2;
@@ -81,6 +85,7 @@ const DOCUMENT_IMAGES: u32 = 7;
 const LOCATION: u32 = 8;
 const PERFORMANCE: u32 = 9;
 const IMAGE_FACTORY: u32 = 10;
+const HISTORY: u32 = 11;
 const NODE_LIST_BASE: u32 = 32;
 const MAX_NODE_LISTS: usize = 128;
 const MAX_NODE_LIST_REFERENCES: usize = 16_384;
@@ -304,6 +309,7 @@ struct State {
     dynamic: DynamicState,
     stylesheets: StylesheetState,
     images: ImagesState,
+    history: HistoryState,
     listeners: Vec<Listener>,
     native_functions: HashMap<&'static str, Value>,
     native_methods: Vec<(u32, &'static str, Value)>,
@@ -364,6 +370,7 @@ impl State {
             dynamic: DynamicState::default(),
             stylesheets: StylesheetState::default(),
             images: ImagesState::default(),
+            history: HistoryState::default(),
             listeners: Vec::new(),
             native_functions: HashMap::new(),
             native_methods: Vec::new(),
@@ -672,6 +679,7 @@ impl Page {
             ("navigator", NAVIGATOR),
             ("clientInformation", NAVIGATOR),
             ("location", LOCATION),
+            ("history", HISTORY),
             ("performance", PERFORMANCE),
         ] {
             runtime
@@ -724,6 +732,7 @@ impl Page {
             (LOCATION, "assign"),
             (LOCATION, "replace"),
             (LOCATION, "reload"),
+            (HISTORY, "replaceState"),
             (PERFORMANCE, "now"),
             (DOCUMENT, "getElementById"),
             (DOCUMENT, "getElementsByTagName"),
@@ -734,9 +743,8 @@ impl Page {
             (DOCUMENT, "addEventListener"),
             (DOCUMENT, "removeEventListener"),
         ] {
-            let function = runtime
-                .host_method(object, method)
-                .expect("fixed navigator method");
+            let function = if object == HISTORY { runtime.host_method_with_length(object, method, 2) }
+                else { runtime.host_method(object, method) }.expect("fixed native method");
             state.native_methods.push((object, method, function));
         }
         let navigator_methods: Vec<_> = state
@@ -1057,6 +1065,7 @@ impl Page {
         let resource_base = self.state.dynamic.base.take();
         let stylesheet_bytes = self.state.stylesheets.source_bytes;
         let images = std::mem::take(&mut self.state.images);
+        let history = std::mem::take(&mut self.state.history);
         let limits = self.state.limits;
         *self = Self::with_limits(limits);
         self.state.geometry = geometry;
@@ -1065,6 +1074,7 @@ impl Page {
         self.state.dynamic.base = resource_base;
         self.state.stylesheets.source_bytes = stylesheet_bytes;
         self.state.images = images;
+        self.state.history = history;
         self.state.dynamic.policy = policy.clone();
         self.state.dynamic.script_count = sources.len();
         self.state.dynamic.source_bytes = sources.iter().map(|script| script.source.len()).sum();
@@ -2183,7 +2193,7 @@ impl Host for Bridge<'_> {
         let constructor=node.filter(|&node|tag(self.doc,node)=="img"
                 && self.doc.nodes[node].namespace==crate::html::Namespace::Html)
             .map(|_|(IMAGE_FACTORY,"Image"));
-        let known=node.is_some() || matches!(object,DOCUMENT|CONSOLE|NAVIGATOR|PLUGINS|MIME_TYPES|DOCUMENT_IMAGES|LOCATION|PERFORMANCE)
+        let known=node.is_some() || matches!(object,DOCUMENT|CONSOLE|NAVIGATOR|PLUGINS|MIME_TYPES|DOCUMENT_IMAGES|LOCATION|PERFORMANCE|HISTORY)
             || self.attr_receiver(object) || self.event_receiver(object) || self.class_list_receiver(object) || self.named_map_receiver(object)
             || node_list_index(object).is_some_and(|index|index<self.state.node_lists.len())
             || collection_handle_index(object).is_some_and(|index|index<self.state.dom.collections.len())
@@ -2223,10 +2233,10 @@ impl Host for Bridge<'_> {
     }
 
     fn ordinary_lookup_tail(&self, object:u32) -> bool {
-        self.attr_receiver(object) || self.constructed_event_receiver(object) || self.named_map_receiver(object)
+        object == HISTORY || self.attr_receiver(object) || self.constructed_event_receiver(object) || self.named_map_receiver(object)
     }
     fn native_access_owner(&self, object: u32) -> Option<u32> {
-        self.named_map_receiver(object).then_some(WINDOW)
+        (object == HISTORY || self.named_map_receiver(object)).then_some(WINDOW)
     }
     fn bounding_rect_snapshot(&mut self, object: u32) -> Option<Result<[f64; 4], String>> {
         if !self.class_list_element_receiver(object) { return None; }
@@ -2239,7 +2249,8 @@ impl Host for Bridge<'_> {
     }
 
     fn readonly_property(&self, object: u32, property: &str) -> bool {
-        self.created_event_readonly(object, property) || self.attr_readonly(object, property) || self.dom_readonly(object, property)
+        object == WINDOW && property == "history" || object == HISTORY && property == "state"
+            || self.created_event_readonly(object, property) || self.attr_readonly(object, property) || self.dom_readonly(object, property)
             || collection_handle_index(object).is_some()
             || self.class_list_receiver(object) && (property == "length" || collection_index(property).is_some())
             || self.named_map_receiver(object) && (property == "length" || collection_index(property).is_some())
@@ -2275,6 +2286,7 @@ impl Host for Bridge<'_> {
     }
 
     fn argument_conversions(&self, object: u32, method: &str) -> &'static [(usize, bool)] {
+        if object == HISTORY && method == "replaceState" { return &[(1, true), (2, true)]; }
         if self.named_map_receiver(object) {
             return match method { "item" => &[(0, false)], "getNamedItem" => &[(0, true)], "getNamedItemNS" => &[(0, true), (1, true)], _ => &[] };
         }
@@ -2341,6 +2353,7 @@ impl Host for Bridge<'_> {
     }
 
     fn method_length(&self, object:u32, method:&str) -> Option<usize> {
+        if object == HISTORY && method == "replaceState" { return Some(2); }
         if method == "getBoundingClientRect" && self.class_list_element_receiver(object) { return Some(0); }
         if self.named_map_receiver(object) { return match method { "item" | "getNamedItem" => Some(1), "getNamedItemNS" => Some(2), _ => None }; }
         if self.attr_element_receiver(object) && method == "setAttributeNS" { return Some(3); }
@@ -2356,6 +2369,7 @@ impl Host for Bridge<'_> {
     }
 
     fn nullable_string_argument(&self, object: u32, method: &str, index: usize) -> bool {
+        if object == HISTORY && method == "replaceState" && index == 2 { return true; }
         if self.named_map_receiver(object) { return method == "getNamedItemNS" && index == 0; }
         method == "isDefaultNamespace" && index == 0 && self.namespace_receiver(object)
             || matches!(method,"getAttributeNS" | "getAttributeNodeNS" | "removeAttributeNS" | "setAttributeNS") && index == 0 && self.attr_element_receiver(object)
@@ -2377,6 +2391,7 @@ impl Host for Bridge<'_> {
     }
 
     fn required_arguments(&self, object: u32, method: &str) -> usize {
+        if object == HISTORY && method == "replaceState" { return 2; }
         if self.named_map_receiver(object) { return match method { "item" | "getNamedItem" => 1, "getNamedItemNS" => 2, _ => 0 }; }
         if self.attr_element_receiver(object) && method == "setAttributeNS" { return 3; }
         if self.class_list_receiver(object) && matches!(method,"item"|"contains") { return 1; }
@@ -2434,6 +2449,13 @@ impl Host for Bridge<'_> {
         method: &str,
         args: &[Value],
     ) -> Result<(), (&'static str, String)> {
+        if object == HISTORY && method == "replaceState" {
+            if self.state.history.current.is_none() { self.history_target(args)?; }
+            if matches!(args.first(), Some(Value::Function(_) | Value::Symbol(_))) { return Err(("DataCloneError", "This History value cannot be serialized for storage.".into())); }
+            if matches!(args.first(), Some(Value::Object(_) | Value::Host(_))) { return Ok(()); }
+            self.history_target(args)?;
+            return Ok(());
+        }
         if method=="getElementsByClassName" && !(object==DOCUMENT || self.attr_element_receiver(object)) {
             return Err(("TypeError","getElementsByClassName requires a Document or Element.".into()));
         }
@@ -2574,7 +2596,7 @@ impl Host for Bridge<'_> {
     }
 
     fn resolve_member_before_call(&self, object: u32) -> bool {
-        if self.attr_receiver(object) || self.constructed_event_receiver(object) || self.named_map_receiver(object) { return true; }
+        if object == HISTORY || self.attr_receiver(object) || self.constructed_event_receiver(object) || self.named_map_receiver(object) { return true; }
         self.form_receiver(object)
     }
 
@@ -2656,6 +2678,7 @@ impl Host for Bridge<'_> {
     }
 
     fn accepts_receiver(&self, object: u32, method: &str, receiver: u32) -> bool {
+        if object == HISTORY { return receiver == HISTORY && method == "replaceState"; }
         if method == "getBoundingClientRect" { return self.class_list_element_receiver(object) && self.class_list_element_receiver(receiver); }
         if script_named_map::element(object).is_some() { return self.named_map_receiver(object) && self.named_map_receiver(receiver); }
         if method == "getElementsByName" { return object == DOCUMENT && receiver == DOCUMENT; }
@@ -2932,6 +2955,7 @@ impl Host for Bridge<'_> {
                 | "navigator"
                 | "clientInformation"
                 | "location"
+                | "history"
                 | "addEventListener"
                 | "removeEventListener"
                 | "requestAnimationFrame"
@@ -2992,6 +3016,13 @@ impl Host for Bridge<'_> {
         }
         if object == PERFORMANCE {
             return Ok(property == "now");
+        }
+        if object == HISTORY {
+            return match property {
+                "state" | "replaceState" => Ok(true),
+                "constructor" | "__proto__" | "length" | "scrollRestoration" | "go" | "back" | "forward" | "pushState" => Err(format!("History property {property:?} is not implemented.")),
+                _ => Ok(false),
+            };
         }
         if object == LOCATION {
             return Ok(self.state.location.as_ref().is_some_and(|location| {
@@ -3097,6 +3128,7 @@ impl Host for Bridge<'_> {
                     | "console"
                     | "navigator"
                     | "clientInformation"
+                    | "history"
                     | "addEventListener"
                     | "removeEventListener"
                     | "requestAnimationFrame"
@@ -3278,6 +3310,7 @@ impl Host for Bridge<'_> {
         if object == DOCUMENT_IMAGES {
             return self.image_collection_get(property);
         }
+        if object == HISTORY { return self.history_get(property); }
         if object == LOCATION {
             if property == "valueOf" {
                 return Ok(Value::Undefined);
@@ -3340,6 +3373,7 @@ impl Host for Bridge<'_> {
             }
             return match property {
                 "window" | "self" | "globalThis" => Ok(Value::Host(WINDOW)),
+                "history" => Ok(Value::Host(HISTORY)),
                 "document" => Ok(Value::Host(DOCUMENT)),
                 "console" => Ok(Value::Host(CONSOLE)),
                 "performance" => Ok(Value::Host(PERFORMANCE)),
@@ -3791,6 +3825,7 @@ impl Host for Bridge<'_> {
         if object == LOCATION {
             return self.location_call(method, args);
         }
+        if object == HISTORY && method == "replaceState" { return self.history_replace(args); }
         if object == DOCUMENT_IMAGES {
             if args.is_empty() {
                 return Err("Image collection methods require one argument.".into());

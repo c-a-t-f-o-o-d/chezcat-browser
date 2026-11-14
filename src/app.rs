@@ -38,6 +38,8 @@ mod script_jobs;
 mod search_tests;
 #[path = "app_stylesheets.rs"]
 mod style_jobs;
+#[path = "app_session_history.rs"]
+mod session_history;
 #[path = "app_images.rs"]
 mod image_jobs;
 #[path = "app_textarea.rs"]
@@ -142,6 +144,8 @@ struct HistoryEntry {
     location: Location,
     scroll: i32,
     request: crate::http::Request,
+    document: u64,
+    data: crate::scripting::HistoryData,
 }
 #[derive(Clone, Copy)]
 enum NavigationKind {
@@ -186,6 +190,7 @@ pub struct App {
     location: Location,
     current_request: crate::http::Request,
     base_location: Location,
+    base_is_document_url: bool,
     home_location: Location,
     raw: String,
     styles: HashMap<usize, String>,
@@ -283,6 +288,7 @@ impl App {
             location: location.clone(),
             current_request: crate::http::Request::Get,
             base_location: location.clone(),
+            base_is_document_url: true,
             home_location: location.clone(),
             raw: START.to_owned(),
             styles: HashMap::new(),
@@ -326,6 +332,8 @@ impl App {
                 location,
                 scroll: 0,
                 request: crate::http::Request::Get,
+                document: 0,
+                data: Default::default(),
             }],
             history_index: 0,
             zoom: 1.0,
@@ -374,8 +382,11 @@ impl App {
                     location,
                     scroll: 0,
                     request: crate::http::Request::Get,
+                    document: self.script_epoch,
+                    data: Default::default(),
                 }];
                 self.history_index = 0;
+                self.apply_history_replacement();
             }
         }
     }
@@ -969,7 +980,17 @@ impl App {
         self.save_scroll();
         let location = loaded.location.clone();
         let same = self.location == location && self.current_request == loaded.request;
-        self.commit(location.clone(), loaded, images_pending);
+        let data = if loaded.document_redirected { Default::default() } else { match kind {
+            NavigationKind::Reload(_) => self.history[self.history_index].data.clone(),
+            NavigationKind::History(index, _) => self.history[index].data.clone(),
+            _ => Default::default(),
+        }};
+        let previous_document = if loaded.document_redirected { None } else { match kind {
+            NavigationKind::Reload(_) => Some(self.history[self.history_index].document),
+            NavigationKind::History(index, _) => Some(self.history[index].document),
+            _ => None,
+        }};
+        self.commit_with_history(location.clone(), loaded, images_pending, data.clone());
         match kind {
             NavigationKind::New | NavigationKind::ScriptNew => {
                 if !same {
@@ -978,6 +999,8 @@ impl App {
                         location,
                         scroll: self.scroll,
                         request: self.current_request.clone(),
+                        document: self.script_epoch,
+                        data: data.clone(),
                     });
                     if self.history.len() > 128 {
                         self.history.remove(0);
@@ -1004,6 +1027,19 @@ impl App {
                 self.set_scroll(scroll.clamp(0, self.max_scroll()));
             }
         }
+        if let Some(previous) = previous_document {
+            for entry in &mut self.history {
+                let compatible = match (&entry.location.url, &self.location.url) {
+                    (Some(old), Some(current)) => old.same_origin(current),
+                    (None, None) => entry.location.path == self.location.path && entry.location.root == self.location.root,
+                    _ => false,
+                };
+                if entry.document == previous && compatible { entry.document = self.script_epoch; }
+            }
+        }
+        self.history[self.history_index].document = self.script_epoch;
+        self.history[self.history_index].data = data;
+        self.apply_history_replacement();
         self.record_browsing_visit();
     }
     pub fn home(&mut self) {
@@ -1021,6 +1057,7 @@ impl App {
         self.reload_with_mode(crate::http::FetchMode::Normal);
     }
     fn reload_with_mode(&mut self, mode: crate::http::FetchMode) {
+        self.apply_history_replacement();
         if let Some(pending) = self.pending.as_ref().filter(|pending| !pending.committed) {
             let (location, kind) = (pending.location.clone(), pending.kind);
             let request = pending.request.clone();
@@ -1134,6 +1171,7 @@ impl App {
         fragment_navigation: bool,
         replace: bool,
     ) {
+        self.apply_history_replacement();
         let location = if location.url.is_none()
             && location.path.is_none()
             && self.home_location.path.is_some()
@@ -1190,6 +1228,7 @@ impl App {
         self.last_failed_navigation = None;
         self.save_scroll();
         let same = self.location == location;
+        let data = crate::scripting::HistoryData::default();
         if let Some(loaded) = loaded {
             self.commit(location.clone(), loaded, false);
             self.record_browsing_visit();
@@ -1197,6 +1236,7 @@ impl App {
             self.location = location.clone();
             if let Some(page) = &mut self.scripting {
                 page.set_location(&self.location);
+                if !same { page.set_history_context(Default::default(), self.base_is_document_url); }
             }
             self.address.set(&self.location.display());
             if self.view != View::Page {
@@ -1222,7 +1262,10 @@ impl App {
                     location,
                     scroll: self.scroll,
                     request: self.current_request.clone(),
+                    document: self.script_epoch,
+                    data,
                 };
+                self.apply_history_replacement();
                 return;
             }
             self.history.truncate(self.history_index + 1);
@@ -1230,12 +1273,15 @@ impl App {
                 location,
                 scroll: self.scroll,
                 request: self.current_request.clone(),
+                document: self.script_epoch,
+                data,
             });
             if self.history.len() > 128 {
                 self.history.remove(0);
             }
             self.history_index = self.history.len() - 1;
         }
+        self.apply_history_replacement();
     }
     fn navigation_history_index(&self) -> usize {
         match self
@@ -1249,6 +1295,7 @@ impl App {
         }
     }
     fn history_move(&mut self, delta: isize) {
+        self.apply_history_replacement();
         let index = self.navigation_history_index() as isize + delta;
         if index < 0 || index >= self.history.len() as isize {
             return;
@@ -1257,10 +1304,12 @@ impl App {
         let location = self.history[index].location.clone();
         let scroll = self.history[index].scroll;
         let request = self.history[index].request.clone();
-        let same_document = location.url == self.location.url
-            && location.path == self.location.path
-            && location.root == self.location.root
-            && request == self.current_request;
+        let compatible = match (&location.url, &self.location.url) {
+            (Some(old), Some(current)) => old.same_origin(current),
+            (None, None) => location.path == self.location.path && location.root == self.location.root,
+            _ => false,
+        };
+        let same_document = self.history[index].document == self.script_epoch && compatible;
         let keep_images = same_document
             && self
                 .pending
@@ -1277,7 +1326,10 @@ impl App {
             self.location = location;
             if let Some(page) = &mut self.scripting {
                 page.set_location(&self.location);
+                page.set_history_context(self.history[index].data.clone(), self.base_is_document_url);
             }
+            if self.base_is_document_url { self.base_location = self.location.clone(); }
+            if let Some(page) = &mut self.scripting { page.set_resource_base(&self.base_location); }
             self.address.set(&self.location.display());
             if self.view != View::Page {
                 self.view = View::Page;
@@ -1317,12 +1369,16 @@ impl App {
         }
     }
     fn follow(&mut self, href: &str) {
+        self.apply_history_replacement();
         match navigation::resolve(href, &self.base_location) {
             Ok(location) => self.navigate_location(location, href.contains('#')),
             Err(e) => self.error(e),
         }
     }
     fn commit(&mut self, location: Location, loaded: Loaded, images_pending: bool) {
+        self.commit_with_history(location, loaded, images_pending, Default::default());
+    }
+    fn commit_with_history(&mut self, location: Location, loaded: Loaded, images_pending: bool, history_data: crate::scripting::HistoryData) {
         self.cancel_script_requests();
         self.script_epoch = self.script_epoch.wrapping_add(1);
         self.network = loaded.network.clone();
@@ -1335,6 +1391,7 @@ impl App {
         self.document_policy = loaded.csp.clone();
         self.scripting = None;
         self.base_location = loaded.base;
+        self.base_is_document_url = loaded.base_is_document_url;
         self.document = loaded.document;
         self.document.scripting_enabled = self.scripts_enabled && self.scripting_blocked.is_none();
         self.forms = Forms::new(&self.document);
@@ -1370,6 +1427,7 @@ impl App {
             page.set_location(&self.location);
             page.set_cookie_session(self.cookies.clone());
             page.set_resource_base(&self.base_location);
+            page.set_history_context(history_data, self.base_is_document_url);
             page.set_stylesheet_bytes(self.styles.values().map(String::len).sum());
             page.set_initial_images(loaded.image_sources, &self.images, images_pending && self.images_enabled, self.images_enabled);
             page.set_geometry(crate::script_geometry::Geometry::new(
@@ -1404,6 +1462,7 @@ impl App {
         };
     }
     fn show_script_errors(&mut self) {
+        self.apply_history_replacement();
         let script_errors = self.scripting.as_ref().map_or(0, |page| page.error_count());
         if script_errors != 0 {
             self.status = format!("JavaScript subset: {script_errors} script error(s). Ctrl+I shows details; Ctrl+J toggles scripting.");
@@ -2367,6 +2426,7 @@ impl App {
             event,
             cancelable,
         );
+        self.apply_history_replacement();
         if outcome.layout_changed {
             self.reflow();
         }

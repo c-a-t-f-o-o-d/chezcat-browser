@@ -9,6 +9,7 @@ struct Site {
     stopped: Arc<AtomicBool>,
     requests: Arc<Mutex<Vec<String>>>,
     gate: Arc<(Mutex<bool>, Condvar)>,
+    redirect: Arc<Mutex<Option<String>>>,
     worker: Option<std::thread::JoinHandle<()>>,
 }
 
@@ -19,6 +20,8 @@ impl Site {
         let stopped = Arc::new(AtomicBool::new(false));
         let requests = Arc::new(Mutex::new(Vec::new()));
         let gate = Arc::new((Mutex::new(false), Condvar::new()));
+        let redirect = Arc::new(Mutex::new(None::<String>));
+        let redirecting = redirect.clone();
         let (stop, seen, held) = (stopped.clone(), requests.clone(), gate.clone());
         let worker = std::thread::spawn(move || {
             let mut workers = Vec::new();
@@ -26,6 +29,7 @@ impl Site {
                 let Ok(mut stream) = stream else { break };
                 if stop.load(Ordering::Relaxed) { break; }
                 let (seen, held) = (seen.clone(), held.clone());
+                let redirecting = redirecting.clone();
                 workers.push(std::thread::spawn(move || {
                     stream.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
                     stream.set_write_timeout(Some(Duration::from_secs(2))).unwrap();
@@ -38,11 +42,17 @@ impl Site {
                     let request = String::from_utf8_lossy(&request);
                     let path = request.split_ascii_whitespace().nth(1).unwrap_or("").to_owned();
                     seen.lock().unwrap().push(path.clone());
+                    let redirect_target = if path.starts_with("/history-redirect") { redirecting.lock().unwrap().take() } else { None };
                     let mut status = "200 OK";
                     let mut headers = String::new();
                     let mut mime = "text/html";
                     let body = match path.as_str() {
-                        "/one.ppm" | "/assets/one.ppm" | "/two.ppm" | "/held.ppm" | "/forbidden.ppm" => {
+                        _ if redirect_target.is_some() => {
+                            status = "302 Found";
+                            headers = format!("Location: {}\r\n", redirect_target.unwrap());
+                            Vec::new()
+                        }
+                        "/one.ppm" | "/assets/one.ppm" | "/folder/one.ppm" | "/two.ppm" | "/held.ppm" | "/forbidden.ppm" => {
                             if path == "/held.ppm" {
                                 let _ = held.1.wait_timeout_while(held.0.lock().unwrap(), Duration::from_secs(8), |open| !*open).unwrap();
                             }
@@ -65,10 +75,14 @@ impl Site {
                         "/fresh" => b"<html><head><title>Fresh document</title></head><body><p>Fresh</p></body></html>".to_vec(),
                         _ => {
                             let source = if path == "/parser-held" { "/held.ppm" } else if path == "/start" { "/one.ppm" } else { "" };
-                            let base = if path == "/base" { "<base href='/assets/'>" } else { "" };
+                            let base = if path == "/base" || path.starts_with("/history-explicit-base") || path.starts_with("/history-blocked-base") { "<base href='/assets/'>" } else { "" };
+                            let history_content = if path.starts_with("/history-form") { "<form id=history-form><input id=entry name=q value=original><button id=go name=send>Go</button></form><div style='height:2000px'>History form fixture</div>" }
+                                else if path.starts_with("/history") { "<input id=entry value=original><div style='height:2000px'>History scroll fixture</div>" } else { "" };
                             let meta = if path == "/meta" { "<meta http-equiv='Content-Security-Policy' content=\"img-src 'none'\">" } else { "" };
                             if path == "/blocked" { headers = "Content-Security-Policy: script-src 'unsafe-inline'; img-src 'none'\r\n".into(); }
+                            if path.starts_with("/history-blocked-base") { headers = "Content-Security-Policy: base-uri 'none'\r\n".into(); }
                             let action = match path.as_str() {
+                                "/history-startup" => "if(history.state!==null)throw Error('initial entry');history.replaceState('startup','','/history-startup-clean?keep=2#ready');if(history.state!=='startup'||document.URL!==location.origin+'/history-startup-clean?keep=2#ready')throw Error('startup History');var startupMarker=61;",
                                 "/parser-held" => "img.src='/two.ppm';",
                                 "/blocked" | "/meta" | "/disabled" => "img.src='/forbidden.ppm';",
                                 "/base" => "img.src='one.ppm';",
@@ -77,7 +91,7 @@ impl Site {
                             };
                             let denied = matches!(path.as_str(), "/blocked" | "/meta" | "/redirect" | "/disabled");
                             let window_check = if denied { "if(loads||errors!==1||windows!==1||!img.complete||img.naturalWidth)throw Error('resource denial');document.title+='-window-'+windows;" } else { "" };
-                            format!(r#"<html><head><title>Waiting</title>{base}</head><body><img id=picture src='{source}'>{meta}<script>
+                            format!(r#"<html><head><title>Waiting</title>{base}</head><body><img id=picture src='{source}'>{meta}{history_content}<script>
 var img=document.getElementById('picture'),loads=0,errors=0,windows=0,order='';
 img.onload=function(event){{if(this!==img||event.target!==img||event.type!=='load'||!img.complete||!img.naturalWidth)throw Error('image completion');loads++;order+='L';document.title='loaded-'+loads;}};
 img.onerror=function(event){{if(this!==img||event.target!==img||!img.complete||img.naturalWidth!==0)throw Error('broken image');errors++;order+='E';document.title='error-'+errors;}};
@@ -92,7 +106,7 @@ window.onload=function(){{windows++;order+='W';{window_check}}};
             }
             for worker in workers { worker.join().unwrap(); }
         });
-        Self { address, stopped, requests, gate, worker: Some(worker) }
+        Self { address, stopped, requests, gate, redirect, worker: Some(worker) }
     }
     fn location(&self, path: &str) -> Location {
         navigation::address(&format!("http://{}{path}", self.address), &Location::home()).unwrap()
@@ -298,4 +312,172 @@ fn inner_html_images_use_real_resources_and_detached_old_requests_keep_ownership
     let pixels = app.images[&image(&app)].clone();
     assert_eq!(pixels.pixels, [0xff00ff00; 3]);
     assert_eq!(app.scripting.as_ref().unwrap().error_count(), 0);
+}
+
+#[test]
+fn history_replace_state_updates_real_entries_without_fetch_and_preserves_document_group() {
+    let site = Site::new();
+    let mut app = open(&site, "/history?temporary=1&keep=2#one");
+    wait(&mut app, |app| !app.is_loading());
+    let epoch = app.script_epoch;
+    let nodes = app.document.nodes.as_ptr();
+    eval(&mut app, "if(history!==window.history||!('history' in window)||history.state!==null||history.replaceState.length!==2||history.replaceState!==history.replaceState)throw Error('History surface '+[history===window.history,history.state,history.replaceState.length,history.replaceState===history.replaceState].join(','));var marker={value:17},field=document.getElementById('entry');field.value='edited';");
+    app.navigate_location(site.location("/history?temporary=1&keep=2#two"), true);
+    let (length, index) = (app.history.len(), app.history_index);
+    app.set_scroll(180);
+    let scroll = app.scroll;
+    let requests = site.requests.lock().unwrap().len();
+    eval(&mut app, "var order='';var result=history.replaceState(history.state,{toString:function(){order+='unused';return '';}},{toString:function(){order+='url';return '/history?keep=2#two';}});if(result!==undefined||order!=='unusedurl'||history.state!==null||location.href!==location.origin+'/history?keep=2#two'||document.URL!==location.href||document.documentURI!==location.href||field.value!=='edited'||marker.value!==17||windows!==1)throw Error('synchronous rewrite');");
+    assert_eq!((app.history.len(), app.history_index), (length, index));
+    assert_eq!(app.location, site.location("/history?keep=2#two"));
+    assert_eq!(app.history[index].location, app.location);
+    assert_eq!(app.base_location, app.location);
+    assert_eq!((app.script_epoch, app.document.nodes.as_ptr(), app.scroll), (epoch, nodes, scroll));
+    app.history_move(-1);
+    assert_eq!(app.location, site.location("/history?temporary=1&keep=2#one"));
+    eval(&mut app, "if(marker.value!==17||field!==document.getElementById('entry')||field.value!=='edited'||history.state!==null)throw Error('back realm');");
+    app.history_move(1);
+    assert_eq!(app.location, site.location("/history?keep=2#two"));
+    eval(&mut app, "history.replaceState(7,'');if(history.state!==7||location.href!==location.origin+'/history?keep=2#two')throw Error('primitive state');");
+    app.history_move(-1);
+    eval(&mut app, "if(history.state!==null||marker.value!==17)throw Error('entry-specific state');");
+    app.history_move(1);
+    eval(&mut app, "if(history.state!==7||marker.value!==17)throw Error('forward state');var saved=location.href,caught=false;try{history.replaceState(null,'','http://localhost:1/forbidden');}catch(e){caught=e.name==='SecurityError';}if(!caught||location.href!==saved||history.state!==7)throw Error('security atomicity');var bad=0;try{history.replaceState.call({},null,'');}catch(e){if(e.name==='TypeError')bad++;}try{history.replaceState(null);}catch(e){if(e.name==='TypeError')bad++;}try{history.replaceState(function(){},'');}catch(e){if(e.name==='DataCloneError')bad++;}if(bad!==3)throw Error('brand/arity/clone');");
+    assert_eq!(site.requests.lock().unwrap().len(), requests);
+    assert_eq!(app.script_epoch, epoch);
+    eval(&mut app, "if(history.valueOf()!==history||history.absent!==undefined||('absent' in history))throw Error('ordinary History tail');");
+    app.navigate_location(site.location("/history?keep=2#three"), true);
+    eval(&mut app, "if(history.state!==null||marker.value!==17)throw Error('native fragment starts null state');");
+    app.history_move(-1);
+    eval(&mut app, "if(history.state!==7||marker.value!==17)throw Error('fragment predecessor state');");
+    assert_eq!(app.scripting.as_ref().unwrap().error_count(), 0);
+}
+
+#[test]
+fn history_replace_state_survives_real_reload_and_rejoins_fragment_document_group() {
+    let site = Site::new();
+    let mut app = open(&site, "/history?temporary=1#one");
+    wait(&mut app, |app| !app.is_loading());
+    app.navigate_location(site.location("/history?temporary=1#two"), true);
+    eval(&mut app, "history.replaceState('kept café','','/history?clean=1#two');var oldRealm=1;");
+    app.navigate_location(site.location("/fresh"), true);
+    wait(&mut app, |app| !app.is_loading());
+    app.history_move(-1);
+    wait(&mut app, |app| !app.is_loading());
+    eval(&mut app, "if(history.state!=='kept café'||typeof oldRealm!=='undefined')throw Error('reload session data');var revived=27;");
+    let epoch = app.script_epoch;
+    let requests = site.requests.lock().unwrap().len();
+    app.history_move(-1);
+    eval(&mut app, "if(revived!==27||history.state!==null||location.search!=='?temporary=1')throw Error('revived group back');");
+    app.history_move(1);
+    eval(&mut app, "if(revived!==27||history.state!=='kept café'||location.search!=='?clean=1')throw Error('revived group forward');");
+    assert_eq!(site.requests.lock().unwrap().len(), requests);
+    assert_eq!(app.script_epoch, epoch);
+    app.reload();
+    wait(&mut app, |app| !app.is_loading());
+    assert!(app.script_epoch > epoch);
+    eval(&mut app, "if(history.state!=='kept café'||typeof revived!=='undefined')throw Error('real reload');var afterReload=39;");
+    let requests = site.requests.lock().unwrap().len();
+    app.history_move(-1);
+    eval(&mut app, "if(afterReload!==39||history.state!==null)throw Error('reload group');");
+    assert_eq!(site.requests.lock().unwrap().len(), requests);
+}
+
+#[test]
+fn history_replace_state_redirects_clear_data_and_do_not_revive_sibling_entries() {
+    for cross_origin in [false, true] {
+        let site = Site::new();
+        let remote = Site::new();
+        let mut app = open(&site, "/history-redirect?first=1#one");
+        wait(&mut app, |app| !app.is_loading());
+        app.navigate_location(site.location("/history-redirect?first=1#two"), true);
+        eval(&mut app, "history.replaceState('private-state','');");
+        app.navigate_location(site.location("/fresh"), true);
+        wait(&mut app, |app| !app.is_loading());
+        let redirect_target = if cross_origin { remote.location("/fresh#two") } else { site.location("/history-after-redirect?first=1#two") };
+        *site.redirect.lock().unwrap() = Some(redirect_target.display());
+        let before_redirect = app.script_epoch;
+        app.history_move(-1);
+        wait(&mut app, |app| !app.is_loading());
+        assert_eq!(app.location, redirect_target);
+        assert!(app.script_epoch > before_redirect);
+        eval(&mut app, "if(history.state!==null)throw Error('redirect state leak');var redirectRealm=57;");
+        let epoch = app.script_epoch;
+        let requests = site.requests.lock().unwrap().len();
+        app.history_move(-1);
+        wait(&mut app, |app| !app.is_loading());
+        assert!(app.script_epoch > epoch, "redirected entry must not alias an unloaded sibling");
+        assert!(site.requests.lock().unwrap().len() > requests);
+        assert_eq!(app.location, site.location("/history-redirect?first=1#one"));
+        eval(&mut app, "if(typeof redirectRealm!=='undefined'||history.state!==null)throw Error('redirected sibling realm');");
+    }
+}
+
+#[test]
+fn history_replace_state_commits_before_real_form_default_or_cancellation() {
+    for cancel in [false, true] {
+        let site = Site::new();
+        let mut app = open(&site, "/history-form/start");
+        wait(&mut app, |app| !app.is_loading());
+        eval(&mut app, &format!("document.getElementById('history-form').onsubmit=function(event){{history.replaceState(null,'','/folder/history-submit');{} }};", if cancel { "event.preventDefault();" } else { "" }));
+        let epoch = app.script_epoch;
+        let requests = site.requests.lock().unwrap().len();
+        let submit = (0..app.document.nodes.len()).find(|&node| app.document.attr(node, "id") == Some("go")).unwrap();
+        app.activate_control(submit);
+        if cancel {
+            assert_eq!(app.location, site.location("/folder/history-submit"));
+            assert_eq!(app.script_epoch, epoch);
+            assert_eq!(site.requests.lock().unwrap().len(), requests);
+            assert!(!app.is_loading());
+        } else {
+            wait(&mut app, |app| !app.is_loading());
+            assert!(site.requested("/folder/history-submit?q=original&send="), "{:?}", site.requests.lock().unwrap());
+            assert!(app.script_epoch > epoch);
+        }
+        assert_eq!(app.scripting.as_ref().unwrap().error_count(), 0, "{}", app.scripting.as_ref().unwrap().report());
+    }
+}
+
+#[test]
+fn history_replace_state_startup_uses_new_entry_and_stop_keeps_committed_mutation() {
+    let site = Site::new();
+    let mut app = App::new();
+    let home = app.history[0].location.clone();
+    app.navigate_location(site.location("/history-startup"), true);
+    wait(&mut app, |app| !app.is_loading());
+    assert_eq!(app.location, site.location("/history-startup-clean?keep=2#ready"));
+    assert_eq!(app.history.len(), 2);
+    assert_eq!(app.history[0].location, home);
+    assert_eq!(app.history[1].location, app.location);
+    eval(&mut app, "if(startupMarker!==61||history.state!=='startup')throw Error('startup entry state');");
+    assert_eq!(site.requests.lock().unwrap().as_slice(), ["/history-startup"]);
+    let epoch = app.script_epoch;
+    let outcome = app.scripting.as_mut().unwrap().console_eval(&mut app.document, &mut app.forms, "history.replaceState('stopped','','/history-stopped');");
+    assert_eq!(outcome.errors, 0);
+    assert!(app.is_loading());
+    app.stop_loading();
+    assert!(!app.is_loading());
+    assert_eq!(app.location, site.location("/history-stopped"));
+    assert_eq!(app.history[1].location, app.location);
+    assert_eq!(app.script_epoch, epoch);
+    eval(&mut app, "if(history.state!=='stopped'||startupMarker!==61||document.URL!==location.href)throw Error('Stop dropped committed History');");
+    assert_eq!(site.requests.lock().unwrap().as_slice(), ["/history-startup"]);
+}
+
+#[test]
+fn history_replace_state_keeps_explicit_base_and_updates_fallback_base_for_real_images() {
+    for (path, expected, document_base) in [("/history-explicit-base", "/assets/one.ppm", false), ("/history-blocked-base", "/folder/one.ppm", true)] {
+        let site = Site::new();
+        let mut app = open(&site, path);
+        wait(&mut app, |app| !app.is_loading());
+        assert_eq!(app.base_is_document_url, document_base);
+        let requests = site.requests.lock().unwrap().len();
+        eval(&mut app, "history.replaceState(null,'','/folder/history-clean?keep=2');if(document.URL!==location.origin+'/folder/history-clean?keep=2')throw Error('base rewrite');");
+        assert_eq!(site.requests.lock().unwrap().len(), requests);
+        eval(&mut app, "img.src='one.ppm';");
+        wait(&mut app, |app| !app.is_loading());
+        assert!(site.requested(expected), "{path}\n{:?}", site.requests.lock().unwrap());
+        assert_eq!(app.images[&image(&app)].pixels, [0xffff0000; 2]);
+        assert_eq!(app.scripting.as_ref().unwrap().error_count(), 0, "{}", app.scripting.as_ref().unwrap().report());
+    }
 }
