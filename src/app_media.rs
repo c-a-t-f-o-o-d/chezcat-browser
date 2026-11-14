@@ -22,6 +22,7 @@ pub(super) struct ControlState {
     pub pending: bool,
 }
 pub(super) struct Player {
+    sync:Option<Synchronized>,
     clip: Arc<media::Clip>,
     node: usize,
     poster: Arc<Bitmap>,
@@ -40,6 +41,7 @@ pub(super) struct Player {
     deadline: Option<Instant>,
     suspended: bool,
 }
+struct Synchronized {position:Duration,playing:bool,drained:bool,resume_after_seek:bool}
 
 #[cfg(test)]
 mod tests {
@@ -269,8 +271,100 @@ mod tests {
         assert!(Arc::ptr_eq(&app.images[&player.node], &poster));
         assert!(!player.ended_reported);
     }
+
+    fn av_app()->App {
+        let mut app=App::new();app.scripts_enabled=false;app.open(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tools/fixtures/scene-av.mkv"));app.wait_for_load();
+        assert!(!app.failed,"{}",app.status);assert!(app.synchronized_media());app
+    }
+    fn settle_av(app:&mut App) {
+        let deadline=Instant::now()+Duration::from_secs(3);
+        while app.media_control_state().unwrap().pending&&Instant::now()<deadline {app.poll_load();app.poll_page_timer();std::thread::sleep(Duration::from_millis(1));}
+        assert!(!app.media_control_state().unwrap().pending,"{}{}",app.media_report(),app.audio_report());
+    }
+    #[test]
+    fn matroska_app_paused_seek_decodes_without_device_and_metadata_eof_is_not_drain() {
+        let mut app=av_app();assert!(app.audio_worker.is_none());
+        app.synchronized_seek(Duration::from_millis(2200),false);settle_av(&mut app);
+        assert_eq!(app.media.as_ref().unwrap().displayed,4);assert_eq!(app.media_control_state().unwrap().position,Duration::from_millis(2200));
+        assert_eq!(app.audio_worker.as_ref().unwrap().ownership(),(false,0,false));
+        assert!(!app.media.as_ref().unwrap().clock.playing());
+        app.synchronized_seek(Duration::from_secs(3),false);settle_av(&mut app);
+        assert_eq!(app.media.as_ref().unwrap().displayed,5);assert!(!app.media.as_ref().unwrap().ended_reported);
+        // Independently acknowledge a hypothetical completed device drain to
+        // isolate the controller's final-frame publication gate (no device).
+        let p=app.media.as_mut().unwrap();p.sync.as_mut().unwrap().drained=true;p.displayed=4;
+        app.finish_media_tick(Instant::now());assert!(!app.media.as_ref().unwrap().ended_reported);
+        app.media.as_mut().unwrap().displayed=5;app.finish_media_tick(Instant::now());assert!(app.media.as_ref().unwrap().ended_reported);
+        app.stop_media();settle_av(&mut app);assert_eq!(app.media.as_ref().unwrap().displayed,0);assert!(!app.media.as_ref().unwrap().ended_reported);
+    }
+    #[test]
+    fn matroska_app_mock_device_stall_never_uses_wall_time_and_rapid_intents_preserve_frames() {
+        let mut app=av_app();app.audio_worker=Some(crate::audio_output::Worker::mock_for_app(app.wake.clone()).unwrap());
+        app.input_media_action("Play").unwrap();settle_av(&mut app);
+        let p=app.media.as_ref().unwrap();assert!(p.playing());assert!(!p.clock.playing());
+        let future=Instant::now()+Duration::from_secs(30);app.poll_media_timer_at(future);
+        assert_eq!(app.media_control_state().unwrap().position,Duration::ZERO);assert_eq!(app.media.as_ref().unwrap().displayed,0);
+        app.synchronized_seek(Duration::from_millis(2200),true);
+        assert!(!app.audio_sync_state().unwrap().wants_play);
+        let deadline=Instant::now()+Duration::from_secs(3);
+        while app.media_control_state().unwrap().pending&&Instant::now()<deadline {
+            app.poll_audio();let state=app.audio_sync_state().unwrap();
+            if app.media.as_ref().unwrap().seeking {assert!(!state.wants_play);}
+            app.poll_media();app.poll_media_sync();std::thread::sleep(Duration::from_millis(1));
+        }
+        settle_av(&mut app);assert!(app.media_control_state().unwrap().playing);assert_eq!(app.media.as_ref().unwrap().displayed,4);
+        app.synchronized_seek(Duration::from_millis(700),true);app.synchronized_seek(Duration::from_millis(1200),true);app.stop_media();app.synchronized_activate(Control::Toggle);settle_av(&mut app);
+        assert_eq!(app.media_control_state().unwrap().position,Duration::ZERO);assert_eq!(app.media.as_ref().unwrap().displayed,0);
+        assert!(app.media_control_state().unwrap().playing);
+        app.suspend_media();app.poll_media_timer_at(future);assert!(app.next_media_timer().is_none());assert!(app.media.as_ref().unwrap().pending.is_none());
+    }
+    #[test]
+    fn matroska_app_navigation_replacement_and_small_profile_recover_without_device() {
+        let mut app=av_app();app.synchronized_seek(Duration::from_millis(2200),false);
+        app.open(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("pages/second.html"));app.wait_for_load();
+        std::thread::sleep(Duration::from_millis(15));app.poll_load();assert!(app.media.is_none()&&app.audio.is_none());assert!(app.next_media_timer().is_none());
+        app.media_limits.frames=1;let path=std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tools/fixtures/scene-av.mkv");app.open(&path);app.wait_for_load();assert!(app.failed&&!app.synchronized_media());
+        app.media_limits=media::Limits::default();app.open(&path);app.wait_for_load();assert!(!app.failed&&app.synchronized_media());
+        app.synchronized_seek(Duration::from_millis(1200),false);app.reload();app.wait_for_load();app.poll_load();assert_eq!(app.media.as_ref().unwrap().displayed,0);assert!(!app.media_control_state().unwrap().playing);
+    }
+    #[test]
+    fn matroska_app_pending_pcm_gates_every_frame_route_and_generation_fault_pauses_master() {
+        let mut app=av_app();app.audio_worker=Some(crate::audio_output::Worker::mock_for_app(app.wake.clone()).unwrap());
+        app.synchronized_seek(Duration::from_millis(2200),false);settle_av(&mut app);
+        // A renderer lagged the previous acknowledged sample position when
+        // the user requested another seek. No old frame may enter its epoch.
+        app.media.as_mut().unwrap().displayed=0;
+        app.synchronized_seek(Duration::from_millis(700),false);
+        assert!(app.audio_sync_state().unwrap().pending);
+        app.media_request_frame(Instant::now());assert!(app.media.as_ref().unwrap().pending.is_none());
+        let due=app.next_media_timer().unwrap();app.poll_media_timer_at(due);assert!(app.media.as_ref().unwrap().pending.is_none());
+        settle_av(&mut app);assert_eq!(app.media.as_ref().unwrap().displayed,1);
+        app.synchronized_activate(Control::Toggle);settle_av(&mut app);assert!(app.audio_sync_state().unwrap().playing);
+        app.synchronized_seek(Duration::from_millis(900),true);assert!(app.media.as_ref().unwrap().seeking);
+        app.media.as_mut().unwrap().generation=u64::MAX;
+        app.synchronized_seek(Duration::from_millis(1200),true);
+        assert!(app.media.as_ref().unwrap().error.as_deref().is_some_and(|e|e.contains("exhausted")));
+        assert!(!app.media.as_ref().unwrap().decoder_enabled);
+        assert!(!app.media.as_ref().unwrap().seeking);assert!(app.next_media_timer().is_none());
+        let deadline=Instant::now()+Duration::from_secs(3);while app.audio_sync_state().unwrap().pending&&Instant::now()<deadline {app.poll_audio();std::thread::sleep(Duration::from_millis(1));}
+        assert!(!app.audio_sync_state().unwrap().playing);assert!(!app.media.as_ref().unwrap().clock.playing());
+    }
+    #[test]
+    fn matroska_app_real_video_decode_fault_clears_shared_resume_intent() {
+        let mut app=av_app();app.audio_worker=Some(crate::audio_output::Worker::mock_for_app(app.wake.clone()).unwrap());
+        let source=include_bytes!("../tools/fixtures/scene-intra.ivf");let mut bytes=source[..32].to_vec();let mut offset=32;let mut index=0;
+        while offset<source.len(){let size=u32::from_le_bytes(source[offset..offset+4].try_into().unwrap()) as usize;let n=if index==2 {10}else{size};bytes.extend_from_slice(&(n as u32).to_le_bytes());bytes.extend_from_slice(&source[offset+4..offset+12]);bytes.extend_from_slice(&source[offset+12..offset+12+n]);offset+=12+size;index+=1;}
+        app.install_media(Some(media::Clip::load(bytes,media::Limits::default(),&||Ok(())).unwrap()));app.install_media_sync();
+        app.synchronized_seek(Duration::from_millis(1200),true);
+        let deadline=Instant::now()+Duration::from_secs(3);while app.media.as_ref().unwrap().error.is_none()&&Instant::now()<deadline {app.poll_load();std::thread::sleep(Duration::from_millis(1));}
+        assert!(app.media.as_ref().unwrap().error.is_some());assert!(!app.media_control_state().unwrap().playing);assert!(!app.media.as_ref().unwrap().sync.as_ref().unwrap().resume_after_seek);
+        assert!(!app.audio_sync_state().unwrap().wants_play);assert!(!app.poll_media_sync());
+    }
 }
 impl Player {
+    fn position(&self,now:Instant)->Duration {self.sync.as_ref().map_or_else(||self.clock.position(now),|s|s.position)}
+    fn playing(&self)->bool {self.sync.as_ref().map_or_else(||self.clock.playing(),|s|s.playing)}
+    fn drained(&self)->bool {self.sync.as_ref().map_or(self.clock.ended,|s|s.drained)}
     fn event(&mut self, event: &'static str) {
         if self.events.len() == 128 {
             self.events.pop_front();
@@ -292,6 +386,66 @@ impl Player {
     }
 }
 impl App {
+    pub(super) fn install_media_sync(&mut self) {
+        if self.audio.is_some() {if let Some(p)=&mut self.media {p.sync=Some(Synchronized {position:Duration::ZERO,playing:false,drained:false,resume_after_seek:false});}}
+    }
+    fn synchronized_media(&self)->bool {self.media.as_ref().is_some_and(|p|p.sync.is_some())}
+    /// Only an acknowledged PCM sample position chooses video presentation.
+    /// The video Instant clock is never started in this mode.
+    pub(super) fn poll_media_sync(&mut self)->bool {
+        if !self.synchronized_media(){return false;}
+        let Some(audio)=self.audio_sync_state() else{return false;};
+        let player=self.media.as_mut().unwrap();
+        if player.suspended{return false;}
+        if let Some(error)=audio.error {
+            let error=format!("Shared PCM output: {error}");
+            let changed=player.error.as_ref()!=Some(&error);
+            if changed {player.error=Some(error);player.invalidate();player.event("error");if let Some(w)=&self.media_worker{w.cancel();}}
+            player.seeking=false;let sync=player.sync.as_mut().unwrap();sync.playing=false;sync.resume_after_seek=false;return changed;
+        }
+        if player.error.is_some() {
+            let sync=player.sync.as_mut().unwrap();sync.playing=false;sync.resume_after_seek=false;
+            if audio.wants_play {self.activate_audio(Control::Toggle);return true;}
+            return false;
+        }
+        if audio.pending{return false;}
+        let sync=player.sync.as_mut().unwrap();
+        let mut changed=sync.position!=audio.position||sync.playing!=audio.playing||sync.drained!=audio.drained;
+        sync.position=audio.position;sync.playing=audio.playing;sync.drained=audio.drained;
+        self.media_request_frame(Instant::now());
+        let player=self.media.as_mut().unwrap();
+        if player.seeking&&player.pending.is_none()&&player.displayed==player.clip.index_at(audio.position)&&player.error.is_none() {
+            player.seeking=false;player.event("seeked");changed=true;
+            let resume=std::mem::take(&mut player.sync.as_mut().unwrap().resume_after_seek);
+            // EOF selection is not a request to replay from zero.
+            if resume&&audio.position<player.clip.duration {self.activate_audio(Control::Toggle);}
+        }
+        self.finish_media_tick(Instant::now());changed
+    }
+    fn synchronized_seek(&mut self,position:Duration,resume:bool) {
+        if let Some(w)=&self.media_worker{w.cancel();}
+        let Some(p)=&mut self.media else{return;};
+        p.invalidate();
+        if !p.decoder_enabled {p.seeking=false;if let Some(s)=&mut p.sync{s.playing=false;s.resume_after_seek=false;}self.suspend_audio();return;}
+        p.suspended=false;p.error=None;p.ended_reported=false;
+        p.seeking=true;p.event("seeking");let sync=p.sync.as_mut().unwrap();sync.resume_after_seek=resume;sync.drained=false;sync.playing=false;
+        self.audio_sync_seek(position);
+        self.finish_media_tick(Instant::now());
+    }
+    fn synchronized_activate(&mut self,control:Control) {
+        let Some(audio)=self.audio_sync_state()else{return;};
+        match control {
+            Control::Stop=>self.stop_media(),
+            Control::Seek(x)=>{let(start,width)=self.media_track();let p=self.media.as_ref().unwrap();let resume=audio.wants_play||p.sync.as_ref().unwrap().resume_after_seek;let position=p.clip.duration.mul_f64(f64::from((x-start).clamp(0,width))/f64::from(width));self.synchronized_seek(position,resume);}
+            Control::Toggle=>{
+                let p=self.media.as_mut().unwrap();p.suspended=false;
+                if p.seeking {let s=p.sync.as_mut().unwrap();s.resume_after_seek=!s.resume_after_seek;return;}
+                if !audio.wants_play&&(audio.desired>=p.clip.duration||p.error.is_some()) {let position=if audio.desired>=p.clip.duration{Duration::ZERO}else{audio.desired};self.synchronized_seek(position,true);return;}
+                if audio.wants_play {if let Some(w)=&self.media_worker{w.cancel();}p.invalidate();}
+                self.activate_audio(Control::Toggle);
+            }
+        }
+    }
     pub(super) fn install_media(&mut self, asset: Option<media::Asset>) {
         if let Some(worker) = &self.media_worker {
             worker.cancel();
@@ -313,6 +467,7 @@ impl App {
         };
         self.images.insert(node, asset.first.clone());
         let mut player = Player {
+            sync:None,
             clock: Clock::new(asset.clip.duration),
             clip: asset.clip,
             node,
@@ -344,12 +499,21 @@ impl App {
             player.clock.pause(Instant::now());
             player.invalidate();
             player.suspended = true;
+            if let Some(s)=&mut player.sync{s.playing=false;s.resume_after_seek=false;}
             player.seeking = false;
             player.pressed = None;
             player.event("cancel");
         }
     }
     fn media_request_frame(&mut self, now: Instant) {
+        // Every request route (timer, completion and controller) observes the
+        // PCM acknowledgement gate. Old cached time cannot enter a new seek.
+        if self.synchronized_media() {
+            let Some(audio)=self.audio_sync_state() else{return;};
+            if audio.pending||audio.error.is_some(){return;}
+            let s=self.media.as_mut().unwrap().sync.as_mut().unwrap();
+            s.position=audio.position;s.playing=audio.playing;s.drained=audio.drained;
+        }
         let Some(player) = &mut self.media else {
             return;
         };
@@ -360,12 +524,12 @@ impl App {
         {
             return;
         }
-        if player.clock.playing() && player.deadline.is_none() {
+        if player.playing() && player.deadline.is_none() {
             player.deadline = Some(now + Duration::from_millis(20));
         }
-        let index = player.clip.index_at(player.clock.position(now));
+        let index = player.clip.index_at(player.position(now));
         if index == player.displayed {
-            if player.seeking {
+            if player.seeking&&player.sync.is_none() {
                 player.seeking = false;
                 player.event("seeked");
             }
@@ -374,7 +538,7 @@ impl App {
         if index == player.initial {
             self.images.insert(player.node, player.poster.clone());
             player.displayed = index;
-            if player.seeking {
+            if player.seeking&&player.sync.is_none() {
                 player.seeking = false;
                 player.event("seeked");
             }
@@ -385,6 +549,8 @@ impl App {
                 Ok(worker) => self.media_worker = Some(worker),
                 Err(error) => {
                     player.clock.pause(now);
+                    if let Some(s)=&mut player.sync{s.playing=false;s.resume_after_seek=false;}
+                    player.seeking=false;
                     player.error = Some(error);
                     player.event("error");
                     return;
@@ -418,13 +584,14 @@ impl App {
             Ok(bitmap) => {
                 self.images.insert(player.node, bitmap);
                 player.displayed = completion.index;
-                if player.seeking {
+                if player.seeking&&player.sync.is_none() {
                     player.seeking = false;
                     player.event("seeked");
                 }
             }
             Err(error) => {
                 player.clock.pause(Instant::now());
+                if let Some(s)=&mut player.sync{s.playing=false;s.resume_after_seek=false;}
                 player.error = Some(error);
                 player.seeking = false;
                 player.event("error");
@@ -441,8 +608,9 @@ impl App {
         if !self.next_media_timer().is_some_and(|due| due <= now) {
             return false;
         }
+        self.poll_media_sync();
         if let Some(player) = &mut self.media {
-            player.clock.tick(now);
+            if player.sync.is_none(){player.clock.tick(now);}
         }
         self.media_request_frame(now);
         self.finish_media_tick(now);
@@ -451,7 +619,8 @@ impl App {
     fn finish_media_tick(&mut self, now: Instant) {
         if let Some(player) = &mut self.media {
             if !player.suspended
-                && player.clock.ended
+                && player.drained()
+                && !player.seeking
                 && player.error.is_none()
                 && player.pending.is_none()
                 && player.displayed == player.clip.frame_count() - 1
@@ -461,7 +630,7 @@ impl App {
                 player.event("ended");
             }
             player.deadline = (!player.suspended
-                && (player.clock.playing() || player.pending.is_some()))
+                && (player.playing() || player.pending.is_some()||player.sync.is_some()&&player.seeking))
             .then_some(now + Duration::from_millis(20));
         }
     }
@@ -492,6 +661,7 @@ impl App {
         if let Some(player) = &mut self.media {
             player.clock.pause(Instant::now());
             player.clock.seek(Duration::ZERO, Instant::now());
+            if let Some(s)=&mut player.sync {s.position=Duration::ZERO;s.playing=false;s.drained=false;s.resume_after_seek=false;}
             player.invalidate();
             player.suspended = true;
             if player.decoder_enabled {
@@ -505,6 +675,7 @@ impl App {
         }
     }
     fn media_activate(&mut self, control: Control) {
+        if self.synchronized_media(){self.synchronized_activate(control);return;}
         if self.audio.is_some() {
             self.activate_audio(control);
             return;
@@ -569,6 +740,10 @@ impl App {
             && !self.downloads_open()
     }
     fn media_control_state(&self) -> Option<ControlState> {
+        if self.synchronized_media() {
+            let p=self.media.as_ref().unwrap();let s=p.sync.as_ref().unwrap();let audio=self.audio_sync_state()?;
+            return Some(ControlState {playing:audio.wants_play||s.resume_after_seek,ended:p.ended_reported,position:s.position,duration:p.clip.duration,error:p.error.is_some()||audio.error.is_some(),pending:audio.pending||p.pending.is_some()||p.seeking});
+        }
         if let Some(state) = self.audio_control_state() {
             return Some(state);
         }
@@ -641,6 +816,7 @@ impl App {
         match key {
             0x20 => self.media_activate(Control::Toggle),
             0x25 | 0x27 => {
+                if self.synchronized_media(){let audio=self.audio_sync_state().unwrap();let p=self.media.as_ref().unwrap();let resume=audio.wants_play||p.sync.as_ref().unwrap().resume_after_seek;let target=if key==0x25 {audio.desired.saturating_sub(Duration::from_secs(5))}else{audio.desired.saturating_add(Duration::from_secs(5))};self.synchronized_seek(target,resume);return true;}
                 if self.audio.is_some() {
                     self.audio_seek_relative(key == 0x27);
                     return true;
@@ -730,7 +906,8 @@ impl App {
             }
             _ => None,
         });
-        format!("Local video: standalone IVF/VP8 intra, video only; native viewer events (no HTMLMediaElement)\nMedia playing={} ended={} time_ms={} duration_ms={} frame={} frames={} pending={:?} canvas={}x{} generation={} error={:?}\nMedia timeline_eof={}\nMedia lifecycle dropped={} {}\nMedia rendered rect={rect:?}\n",player.clock.playing(),player.ended_reported,player.clock.position(Instant::now()).as_millis(),player.clip.duration.as_millis(),player.displayed,player.clip.frame_count(),player.pending,player.clip.width,player.clip.height,player.generation,player.error,player.clock.ended,player.dropped,player.events.iter().copied().collect::<Vec<_>>().join(","))
+        let scope=if player.sync.is_some(){"local Matroska VP8 intra + PCM16, device-sample clock"}else{"standalone IVF/VP8 intra, video only"};
+        format!("Local video: {scope}; native viewer events (no HTMLMediaElement)\nMedia playing={} ended={} time_ms={} duration_ms={} frame={} frames={} pending={:?} canvas={}x{} generation={} error={:?}\nMedia timeline_eof={}\nMedia lifecycle dropped={} {}\nMedia rendered rect={rect:?}\n",player.playing(),player.ended_reported,player.position(Instant::now()).as_millis(),player.clip.duration.as_millis(),player.displayed,player.clip.frame_count(),player.pending,player.clip.width,player.clip.height,player.generation,player.error,player.position(Instant::now())>=player.clip.duration,player.dropped,player.events.iter().copied().collect::<Vec<_>>().join(","))
     }
     pub(super) fn input_media_action(&mut self, action: &str) -> Result<(i32, i32), String> {
         if !self.media_visible() {

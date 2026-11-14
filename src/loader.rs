@@ -725,6 +725,7 @@ fn load_request_progressively(
     } else if let Some(path) = &location.path {
         let video = path.extension().and_then(|ext| ext.to_str()).is_some_and(|ext| ext.eq_ignore_ascii_case("ivf"));
         let audio = path.extension().and_then(|ext| ext.to_str()).is_some_and(|ext| ext.eq_ignore_ascii_case("wav"));
+        let muxed = path.extension().and_then(|ext| ext.to_str()).is_some_and(|ext| ext.eq_ignore_ascii_case("mkv"));
         let local_type = image_file_type(path);
         image_document = local_type.is_some();
         if let Some(mime) = local_type {
@@ -737,7 +738,7 @@ fn load_request_progressively(
             plain = true;
             document_type = "text/plain".into();
         }
-        let bytes = if video||audio {read_local_media(path,if audio{options.audio_limits.input_bytes}else{options.media_limits.input_bytes},cancel)?} else {navigation::read_limited(
+        let bytes = if video||audio||muxed {read_local_media(path,if muxed{options.media_limits.input_bytes.min(options.audio_limits.input_bytes)}else if audio{options.audio_limits.input_bytes}else{options.media_limits.input_bytes},cancel)?} else {navigation::read_limited(
             path,
             if image_document {
                 image::MAX_INPUT_BYTES
@@ -745,7 +746,13 @@ fn load_request_progressively(
                 1_048_576
             },
         )?};
-        if video {
+        if muxed {
+            let asset=crate::matroska::load(bytes,options.media_limits,options.audio_limits,&||check_cancel(cancel))?;
+            document_type="video/x-matroska".into();
+            scripting_blocked=Some("Standalone local Matroska viewer; no HTMLMediaElement/WebM capability is advertised.".into());
+            let markup=format!("<title>Local audio and video</title><body><h1>Local audio and video</h1><p>{}</p><img id='media-frame' width='{}' height='{}'><p>Matroska / VP8 intra and PCM16, {} frames, {} Hz, {:.3} seconds. Device samples drive video time. Use Play, Pause, Stop and the seek bar below.</p></body>",escape(&location.display()),asset.video.clip.width,asset.video.clip.height,asset.video.clip.frame_count(),asset.audio.sample_rate,asset.audio.duration.as_secs_f64());
+            document_media=Some(asset.video);document_audio=Some(asset.audio);markup
+        } else if video {
             let asset=crate::media::Clip::load(bytes,options.media_limits,&||check_cancel(cancel))?;
             document_type="video/x-ivf".into();
             scripting_blocked=Some("Standalone local video viewer; HTMLMediaElement and page scripts are not implemented here.".into());

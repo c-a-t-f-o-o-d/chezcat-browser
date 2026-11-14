@@ -15,7 +15,7 @@ pub fn is_local_media(location: &crate::navigation::Location) -> bool {
             .as_ref()
             .and_then(|path| path.extension())
             .and_then(|ext| ext.to_str())
-            .is_some_and(|ext| ext.eq_ignore_ascii_case("ivf")||ext.eq_ignore_ascii_case("wav"))
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("ivf")||ext.eq_ignore_ascii_case("wav")||ext.eq_ignore_ascii_case("mkv"))
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -102,6 +102,24 @@ fn time(ticks: u64, scale: u32, rate: u32) -> Result<Duration, String> {
     )?))
 }
 impl Clip {
+    /// Validated packet input from our local container demuxer, not a wrapper
+    /// file manufactured for the IVF parser. Timestamps share the container origin.
+    pub(crate) fn from_packets(data:Vec<u8>, packets:Vec<(Range<usize>,Duration)>,width:usize,height:usize,duration:Duration,limits:Limits,check:&dyn Fn()->Result<(),String>)->Result<Self,String> {
+        if data.len()>limits.input_bytes||packets.is_empty()||packets.len()>limits.frames
+            ||width==0||height==0||width>16383||height>16383||width.checked_mul(height).is_none_or(|n|n>limits.pixels)
+            ||duration.is_zero()||duration>limits.duration {return Err("Muxed video dimensions/index/duration allowance exceeded.".into());}
+        let mut frames=Vec::new();let mut previous=None;
+        for (bytes,time) in packets {
+            check()?;
+            let payload=data.get(bytes.clone()).filter(|p|!p.is_empty()&&p.len()<=limits.frame_bytes).ok_or("Invalid muxed video packet range.")?;
+            if time>=duration||previous.is_none()&&!time.is_zero()||previous.is_some_and(|old|time<=old) {return Err("Muxed video timestamps must start at zero and increase.".into());}
+            if payload.len()<10||payload[0]&1!=0||payload[0]&16==0||payload[3..6]!=[0x9d,1,0x2a]
+                ||usize::from(u16_at(payload,6)?)!=width||usize::from(u16_at(payload,8)?)!=height {return Err("Muxed video requires matching visible VP8 intra frames without scaling.".into());}
+            frames.try_reserve(1).map_err(|_|"Could not grow muxed video index.")?;
+            previous=Some(time);frames.push(Frame {bytes,time});
+        }
+        Ok(Self {data,frames,width,height,duration,limits})
+    }
     pub fn parse(
         data: Vec<u8>,
         limits: Limits,

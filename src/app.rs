@@ -687,7 +687,7 @@ impl App {
             | self.poll_dynamic_images()
             | self.process_image_requests();
         let revision = self.network.revision();
-        let mut changed = script_changed | self.poll_media() | self.poll_audio() | self.poll_downloads()
+        let mut changed = script_changed | self.poll_media() | self.poll_audio() | self.poll_media_sync() | self.poll_downloads()
             || revision != self.last_network_revision
             || self.network_needs_tick();
         self.last_network_revision = revision;
@@ -1461,6 +1461,7 @@ impl App {
         self.events = loaded.events;
         self.install_media(loaded.media);
         self.install_audio(loaded.audio);
+        self.install_media_sync();
         self.last_failed_navigation = None;
         self.source = location.path.clone();
         self.location = location;

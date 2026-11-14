@@ -38,6 +38,8 @@ pub(super) struct Player {
     dropped: u64,
 }
 
+pub(super) struct SyncState {pub position:Duration,pub desired:Duration,pub pending:bool,pub playing:bool,pub wants_play:bool,pub drained:bool,pub error:Option<String>}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -171,6 +173,20 @@ mod tests {
         settle(&mut app);
     }
 }
+#[cfg(test)]
+mod sync_fault_tests {
+    use super::*;
+    #[test]
+    fn matroska_shared_audio_fault_latches_once_without_timer_spin_or_resume_intent() {
+        let mut app=App::new();app.open(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tools/fixtures/scene-av.mkv"));app.wait_for_load();assert!(!app.failed);
+        // Controller-level backend report, separate from native ownership
+        // tests in audio_output. This control never opens a device.
+        let p=app.audio.as_mut().unwrap();p.error=Some("original injected device failure".into());p.playing=false;p.pending=false;
+        assert!(app.poll_media_sync());assert!(!app.poll_media_sync());assert!(!app.poll_media_sync());
+        assert!(app.media_report().contains("Shared PCM output: original injected device failure"));
+        assert!(app.input_media_action("Pause").is_err());assert!(app.next_media_timer().is_none());assert!(app.audio_worker.is_none());
+    }
+}
 impl Player {
     fn event(&mut self, name: &'static str) {
         if self.events.len() == 128 {
@@ -181,6 +197,12 @@ impl Player {
     }
 }
 impl App {
+    pub(super) fn audio_sync_state(&self)->Option<SyncState> {
+        self.audio.as_ref().map(|p|SyncState {position:p.clip.time_at(p.frame),desired:p.clip.time_at(p.desired_frame.unwrap_or(p.frame)),pending:p.pending,playing:p.playing,wants_play:if p.pending {p.desired_playing}else{p.playing},drained:p.ended&&p.frame==p.clip.frames&&p.submitted>0&&p.retired==p.submitted&&p.queued==0,error:p.error.clone()})
+    }
+    pub(super) fn audio_sync_seek(&mut self,position:Duration) {
+        if let Some(p)=&mut self.audio {p.suspended=false;let frame=p.clip.frame_at(position);self.submit_audio(Action::Seek {frame,resume:false});}
+    }
     pub(super) fn install_audio(&mut self, clip: Option<Arc<Clip>>) {
         if let Some(worker) = &self.audio_worker {
             worker.clear();
@@ -485,6 +507,7 @@ impl App {
         let Some(player) = &self.audio else {
             return format!("Local audio: none\n{owner}Last audio output notice: {notice}\n");
         };
-        format!("Local audio: standalone integer PCM WAVE, native viewer lifecycle (no HTMLMediaElement)\nAudio playing={} ended={} pending={} time_ms={} duration_ms={} frame={} frames={} generation={} error={:?}\nAudio device opened={} queued={} submitted={} retired={} position_unit={:?} retained_buffers={}\n{owner}Audio lifecycle dropped={} {}\nAudio clock: {}; device acceptance/completion does not prove physical audibility or synchronized A/V.\nLast audio output notice: {notice}\n",player.playing,player.ended,player.pending,player.clip.time_at(player.frame).as_millis(),player.clip.duration.as_millis(),player.frame,player.clip.frames,player.generation,player.error,player.opened,player.queued,player.submitted,player.retired,player.unit,player.retained,player.dropped,player.events.iter().copied().collect::<Vec<_>>().join(","),if player.opened{"reported device position and returned PCM buffers"}else{"selected metadata sample offset; device not opened"})
+        let scope=if self.media.is_some(){"Matroska PCM16 track with shared video clock"}else{"standalone integer PCM WAVE"};
+        format!("Local audio: {scope}, native viewer lifecycle (no HTMLMediaElement)\nAudio playing={} ended={} pending={} time_ms={} duration_ms={} frame={} frames={} generation={} error={:?}\nAudio device opened={} queued={} submitted={} retired={} position_unit={:?} retained_buffers={}\n{owner}Audio lifecycle dropped={} {}\nAudio clock: {}; device acceptance/completion does not prove physical audibility; A/V evidence is recorded separately.\nLast audio output notice: {notice}\n",player.playing,player.ended,player.pending,player.clip.time_at(player.frame).as_millis(),player.clip.duration.as_millis(),player.frame,player.clip.frames,player.generation,player.error,player.opened,player.queued,player.submitted,player.retired,player.unit,player.retained,player.dropped,player.events.iter().copied().collect::<Vec<_>>().join(","),if player.opened{"reported device position and returned PCM buffers"}else{"selected metadata sample offset; device not opened"})
     }
 }

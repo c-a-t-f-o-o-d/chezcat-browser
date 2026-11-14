@@ -65,6 +65,18 @@ fn dword(data: &[u8], at: usize) -> Result<u32, String> {
     ))
 }
 impl Clip {
+    /// Real, already-demuxed continuous PCM16; no WAVE wrapper or resampling.
+    pub(crate) fn from_pcm16(data:Vec<u8>,channels:u16,sample_rate:u32,limits:Limits,check:&dyn Fn()->Result<(),String>)->Result<Self,String> {
+        check()?;
+        let align=usize::from(channels).checked_mul(2).ok_or("Muxed PCM alignment overflow.")?;
+        if data.len()>limits.input_bytes||channels==0||channels>limits.channels||sample_rate==0||sample_rate>limits.sample_rate||sample_rate>1_000_000_000||limits.block_frames==0||data.is_empty()||data.len()%align!=0 {return Err("Muxed PCM16 format/frame/byte allowance exceeded.".into());}
+        let frames=u64::try_from(data.len()/align).map_err(|_|"Muxed PCM frame count overflow.")?;
+        let nanos=(u128::from(frames)*1_000_000_000).div_ceil(u128::from(sample_rate));
+        let duration=Duration::from_nanos(u64::try_from(nanos).map_err(|_|"Muxed PCM duration overflow.")?);
+        if duration>limits.duration {return Err("Muxed PCM duration allowance exceeded.".into());}
+        let samples=0..data.len();
+        Ok(Self {data,samples,channels,sample_rate,bits:16,frames,duration,align,limits})
+    }
     pub fn parse(
         data: Vec<u8>,
         limits: Limits,
