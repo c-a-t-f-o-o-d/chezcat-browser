@@ -2366,6 +2366,7 @@ impl Host for Bridge<'_> {
     }
 
     fn method_length(&self, object:u32, method:&str) -> Option<usize> {
+        if node_index(object).is_some() && method == "replaceChild" { return Some(2); }
         if object == HISTORY && method == "replaceState" { return Some(2); }
         if method == "getBoundingClientRect" && self.class_list_element_receiver(object) { return Some(0); }
         if self.named_map_receiver(object) { return match method { "item" | "getNamedItem" => Some(1), "getNamedItemNS" => Some(2), _ => None }; }
@@ -2426,7 +2427,7 @@ impl Host for Bridge<'_> {
         if object == LOCATION && matches!(method, "assign" | "replace") {
             return 1;
         }
-        if node_index(object).is_some() && matches!(method, "setAttribute" | "insertBefore") {
+        if node_index(object).is_some() && matches!(method, "setAttribute" | "insertBefore" | "replaceChild") {
             2
         } else if (object == DOCUMENT || node_index(object).is_some())
             && matches!(
@@ -2726,7 +2727,7 @@ impl Host for Bridge<'_> {
         {
             return collection_handle_index(receiver).is_some() || receiver == DOCUMENT_IMAGES;
         }
-        if matches!(method, "appendChild" | "insertBefore" | "removeChild") {
+        if matches!(method, "appendChild" | "insertBefore" | "replaceChild" | "removeChild") {
             let node = |handle| {
                 node_index(handle).is_some_and(|node| node > 0 && node < self.doc.nodes.len())
             };

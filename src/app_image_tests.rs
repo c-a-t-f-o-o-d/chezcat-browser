@@ -174,6 +174,23 @@ fn connected_images_fetch_real_pixels_and_commit_before_events() {
 }
 
 #[test]
+fn replace_child_connected_images_keep_detached_request_owner_and_load_replacement_pixels() {
+    let site=Site::new();
+    let mut app=open(&site,"/start");
+    wait(&mut app,|app|!app.is_loading());
+    eval(&mut app,"img.src='/held.ppm';");
+    wait(&mut app,|_|site.requested("/held.ppm"));
+    eval(&mut app,"var replacement=new Image(),replacementLoads=0;replacement.id='replacement';replacement.src='/two.ppm';replacement.onload=function(){if(!replacement.complete||replacement.naturalHeight!==3)throw Error('replacement pixels');replacementLoads++;};if(document.body.replaceChild(replacement,img)!==img||img.parentNode!==null||img.isConnected||!replacement.isConnected||img.ownerDocument!==document)throw Error('replace image identity');");
+    site.release();
+    wait(&mut app,|app|!app.is_loading());
+    eval(&mut app,"if(loads!==2||replacementLoads!==1||errors||img.naturalWidth!==4||img.isConnected||replacement.naturalHeight!==3||windows!==1)throw Error('detached and new requests');");
+    let replacement=(0..app.document.nodes.len()).find(|&node|app.document.attr(node,"id")==Some("replacement")).unwrap();
+    assert_eq!(app.images[&replacement].pixels,[0xff00ff00;3]);
+    assert!(site.requested("/held.ppm")&&site.requested("/two.ppm"));
+    assert_eq!(app.scripting.as_ref().unwrap().error_count(),0);
+}
+
+#[test]
 fn connected_images_cancel_superseded_requests_and_discard_parser_results() {
     let site = Site::new();
     let mut app = open(&site, "/start");

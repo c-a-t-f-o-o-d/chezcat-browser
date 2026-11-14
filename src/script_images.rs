@@ -275,4 +275,34 @@ mod tests {
         assert_eq!(bridge.doc.attr(node, "src"), Some("/one.ppm"));
         assert!(!bridge.state.images.has_changes());
     }
+
+#[test]
+fn replace_child_image_preparation_failure_preserves_both_parents_and_recovers() {
+    let mut doc=crate::html::parse("<div id=p><span id=old>old</span></div><div id=q><img id=incoming src='/original-image.ppm'></div>");
+    doc.scripting_enabled=true;
+    let mut forms=Forms::new(&doc);
+    let mut page=Page::for_test();
+    let outcome=page.start(&mut doc,&mut forms,&[]);
+    assert_eq!(outcome.errors,0);
+    let node=|id:&str|doc.nodes.iter().enumerate().find_map(|(node,_)|(doc.attr(node,"id")==Some(id)).then_some(node)).unwrap();
+    let (parent,source,old,incoming)=(node("p"),node("q"),node("old"),node("incoming"));
+    let before=(doc.nodes[parent].children.clone(),doc.nodes[source].children.clone(),page.state.dom_commits);
+    let attempts=page.state.images.attempts;
+    page.state.images.attempts=usize::MAX; // Exhaustion/overflow fixture, no large allocation.
+    let error=Bridge{doc:&mut doc,forms:&mut forms,state:&mut page.state}.call(node_handle(parent),"replaceChild",&[Value::Host(node_handle(incoming)),Value::Host(node_handle(old))]).unwrap_err();
+    assert!(error.contains("image attempt"),"{error}");
+    assert_eq!((doc.nodes[parent].children.clone(),doc.nodes[source].children.clone(),page.state.dom_commits),before);
+    assert_eq!(page.state.tree.parents[old],Some(parent));
+    assert_eq!(page.state.tree.parents[incoming],Some(source));
+    assert!(page.state.dom.connected[old]&&page.state.dom.connected[incoming]);
+    assert!(!page.state.images.has_changes()&&page.state.images.entries.is_empty());
+    assert_eq!(page.state.images.attempts,usize::MAX);
+    page.state.images.attempts=attempts;
+    page.begin_job();
+    let result=page.console_eval(&mut doc,&mut forms,"if(document.getElementById('p').replaceChild(document.getElementById('incoming'),document.getElementById('old')).id!=='old')throw 'recovery';");
+    assert_eq!(result.errors,0,"{}",page.report());
+    assert_eq!(doc.nodes[parent].children,[incoming]);
+    assert_eq!(page.take_image_changes().2.len(),1);
+}
+
 }

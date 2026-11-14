@@ -292,6 +292,7 @@ impl Bridge<'_> {
             "removeAttributeNode" if self.attr_element_receiver(object) => Some("removeAttributeNode"),
             "appendChild" => Some("appendChild"),
             "insertBefore" => Some("insertBefore"),
+            "replaceChild" => Some("replaceChild"),
             "removeChild" => Some("removeChild"),
             "focus" if matches!(self.doc.nodes[node].kind, NodeKind::Element { .. }) => {
                 Some("focus")
@@ -338,6 +339,9 @@ impl Bridge<'_> {
         method: &str,
         args: &[Value],
     ) -> Result<(), (&'static str, String)> {
+        if method == "replaceChild" && node_index(object).is_some() {
+            return self.validate_replace_child(object, args);
+        }
         if method=="setAttribute" && node_index(object).is_some() {
             if let Some(Value::String(name))=args.first() {
                 if !super::script_attribute_names::valid_attribute_name(name) {
@@ -787,6 +791,117 @@ impl Bridge<'_> {
         Ok((nodes, depth))
     }
 
+    fn validate_replace_child(&self, object: u32, args: &[Value]) -> Result<(), (&'static str, String)> {
+        // Web IDL converts BOTH Node arguments before the tree algorithm.
+        if args.iter().take(2).count() != 2 || !args.iter().take(2).all(|value|
+            matches!(value, Value::Host(handle) if self.namespace_receiver(*handle))) {
+            return Err(("TypeError", "replaceChild requires two Node arguments.".into()));
+        }
+        let parent = node_index(object).unwrap();
+        if !matches!(self.doc.nodes[parent].kind, NodeKind::Element { .. }) {
+            return Err(("HierarchyRequestError", "Text nodes cannot contain children.".into()));
+        }
+        let Value::Host(incoming) = args[0] else { unreachable!() };
+        // An inclusive ancestor is invalid before old-child membership is tested.
+        let mut ancestor = Some(parent);
+        while let Some(node) = ancestor {
+            if node_index(incoming) == Some(node) || incoming == DOCUMENT && node == 0 {
+                return Err(("HierarchyRequestError", "Replacement would create a DOM cycle.".into()));
+            }
+            ancestor = self.state.tree.parents.get(node).copied().flatten();
+        }
+        let Value::Host(outgoing) = args[1] else { unreachable!() };
+        if node_index(outgoing).is_none_or(|child| !self.doc.nodes[parent].children.contains(&child)) {
+            return Err(("NotFoundError", "The replaced node is not a child of this parent.".into()));
+        }
+        if incoming == DOCUMENT || self.attr_receiver(incoming) {
+            return Err(("HierarchyRequestError", "A Document or Attr cannot be inserted as a child.".into()));
+        }
+        Ok(())
+    }
+
+    fn replace_dom_child(&mut self, parent: usize, args: &[Value]) -> Result<Value, String> {
+        // The named hierarchy/membership errors have already passed validate_call.
+        let Value::Host(incoming) = args[0] else { unreachable!() };
+        let Value::Host(outgoing) = args[1] else { unreachable!() };
+        let child = self.dom_node(incoming)?;
+        let old = self.dom_node(outgoing)?;
+        if child == old { return Ok(Value::Host(outgoing)); }
+        self.mutation_ancestors(parent)?;
+        let source_parent = self.state.tree.parents[child];
+        if let Some(source) = source_parent { self.mutation_ancestors(source)?; }
+        let (incoming_nodes, depth) = self.mutation_subtree(child)?;
+        let (outgoing_nodes, _) = self.mutation_subtree(old)?;
+        if self.doc.nodes[parent].namespace != crate::html::Namespace::Html
+            || matches!(tag(self.doc, parent), "script" | "link" | "iframe")
+            || incoming_nodes.iter().chain(&outgoing_nodes).any(|&node|
+                self.doc.nodes[node].namespace == crate::html::Namespace::UnknownForeign
+                    || matches!(tag(self.doc, node), "script" | "link" | "iframe")) {
+            return Err("replaceChild in foreign, script, stylesheet or frame contexts is not implemented; no tree was changed.".into());
+        }
+        if tag(self.doc, parent) == "picture" && tag(self.doc, child) == "img" {
+            return Err("Dynamic picture image selection is not implemented.".into());
+        }
+        let mut parent_depth = 0usize;
+        let mut ancestor = Some(parent);
+        while let Some(node) = ancestor {
+            self.state.work(1)?;
+            parent_depth += 1;
+            ancestor = self.state.tree.parents[node];
+        }
+        if parent_depth.saturating_add(depth) > MAX_DOM_DEPTH { return Err("DOM tree depth limit reached during replacement.".into()); }
+        let work = self.doc.nodes[parent].children.len()
+            .checked_add(source_parent.map_or(0, |node| self.doc.nodes[node].children.len()))
+            .and_then(|count| count.checked_add(incoming_nodes.len()))
+            .and_then(|count| count.checked_add(outgoing_nodes.len()))
+            .ok_or("DOM replacement work size overflow.")?;
+        self.state.work(work)?;
+
+        // Stage the final vectors. Removing an existing sibling before locating
+        // old handles either sibling order; incoming may also descend from old.
+        let mut children = Vec::new();
+        children.try_reserve(self.doc.nodes[parent].children.len()).map_err(|_| "DOM replacement children reservation failed.")?;
+        for &node in &self.doc.nodes[parent].children {
+            if node == child { continue; }
+            children.push(if node == old { child } else { node });
+        }
+        let mut source_children = Vec::new();
+        if let Some(source) = source_parent.filter(|&source| source != parent) {
+            source_children.try_reserve(self.doc.nodes[source].children.len()).map_err(|_| "DOM replacement source reservation failed.")?;
+            source_children.extend(self.doc.nodes[source].children.iter().copied().filter(|&node| node != child));
+        }
+        let mut incoming_set = HashSet::new();
+        incoming_set.try_reserve(incoming_nodes.len()).map_err(|_| "DOM replacement topology reservation failed.")?;
+        incoming_set.extend(incoming_nodes.iter().copied());
+        let detach_count = incoming_nodes.len().checked_add(outgoing_nodes.len()).ok_or("DOM replacement detached count overflow.")?;
+        self.state.detached_nodes.try_reserve(detach_count).map_err(|_| "DOM replacement detached identity reservation failed.")?;
+        let connected = self.state.dom.connected[parent];
+        let changed_layout = connected || self.state.dom.connected[child];
+        let images = self.prepare_image_connections(&incoming_nodes, connected)?;
+
+        // No fallible work remains after publishing either parent's new list.
+        if let Some(source) = source_parent.filter(|&source| source != parent) { self.doc.nodes[source].children = source_children; }
+        self.doc.nodes[parent].children = children;
+        self.state.tree.parents[old] = None;
+        self.state.tree.parents[child] = Some(parent);
+        for node in outgoing_nodes {
+            if !incoming_set.contains(&node) {
+                self.state.dom.connected[node] = false;
+                self.state.detached_nodes.insert(node);
+            }
+        }
+        for node in incoming_nodes {
+            self.state.dom.connected[node] = connected;
+            if connected { self.state.detached_nodes.remove(&node); }
+            else { self.state.detached_nodes.insert(node); }
+        }
+        self.commit_image_connections(images);
+        self.state.dom_committed();
+        self.state.dirty = true;
+        if changed_layout { self.state.layout_changed(); }
+        Ok(Value::Host(outgoing))
+    }
+
     fn mutate_dom_tree(
         &mut self,
         parent: usize,
@@ -1067,6 +1182,10 @@ impl Bridge<'_> {
         }
         if node_index(object).is_none() {
             return Ok(None);
+        }
+        if method == "replaceChild" {
+            let node = self.dom_node(object)?;
+            return self.replace_dom_child(node, args).map(Some);
         }
         if matches!(method, "appendChild" | "insertBefore" | "removeChild") {
             let node = self.dom_node(object)?;

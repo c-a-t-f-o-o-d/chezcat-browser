@@ -7,6 +7,16 @@ use std::path::Path;
 use std::time::Duration;
 
 impl App {
+    fn input_access_blocked(&self) -> bool {
+        let status_denied = self.network.snapshot().rows.iter().any(|row|
+            row.kind == "document" && matches!(row.status, Some(401 | 403 | 429)));
+        let rendered = self.page.runs.iter().map(|run| run.text.as_str()).collect::<Vec<_>>().join(" ").to_lowercase();
+        status_denied || ["unusual traffic", "verify you are human", "verify that you're not a robot",
+            "verify that you are not a robot", "confirm that you are not a robot", "access denied",
+            "access to this page has been denied", "complete the captcha", "before you continue to google",
+            "rate limit exceeded", "too many requests"].iter().any(|signal| rendered.contains(signal))
+    }
+
     pub fn run_input_script(&mut self, script: &Path, output: &Path) -> Result<(), String> {
         if std::fs::metadata(script).map_err(|e| e.to_string())?.len() > 16 * 1024 {
             return Err("Development input script exceeds 16 KiB.".into());
@@ -24,10 +34,8 @@ impl App {
             log.flush().map_err(|e| e.to_string())?;
             let fields: Vec<_> = line.splitn(3, '\t').collect();
             let result = (|| {
-                let rendered = self.page.runs.iter().map(|run| run.text.as_str()).collect::<Vec<_>>().join(" ").to_lowercase();
-                if matches!(fields[0], "fill" | "click" | "link") &&
-                    ["unusual traffic", "verify you are human", "access denied", "complete the captcha"].iter().any(|signal| rendered.contains(signal)) {
-                    return Err("Visible access denial/human verification; stopping without retry.".into());
+                if matches!(fields[0], "fill" | "click" | "link" | "key" | "back" | "address") && self.input_access_blocked() {
+                    return Err("Visible access denial/human verification or document rate limit; stopping without retry.".into());
                 }
                 match fields.as_slice() {
                     ["snapshot", name] if !name.is_empty() && name.len() <= 48 && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_') => {
@@ -153,5 +161,29 @@ impl App {
         }
         std::fs::write(output.join(format!("{name}.layout.txt")), layout).map_err(|e| e.to_string())?;
         rendered
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn input_guard_uses_document_status_and_keeps_compatibility_response_distinct() {
+        for status in [401,403,429] {
+            let app=App::new();
+            app.network.begin("GET","https://fixture.test/","document").response(status);
+            assert!(app.input_access_blocked());
+        }
+        let mut app=App::new();
+        app.network.begin("GET","https://fixture.test/font.woff","font").response(403);
+        app.document=crate::html::parse("<p>Update your browser. Your browser is not supported anymore.</p>");
+        app.forms=crate::forms::Forms::new(&app.document);
+        app.reflow();
+        assert!(!app.input_access_blocked(),"Resource denial and compatibility text do not deny the whole search service");
+        app.document=crate::html::parse("<p>Our systems have detected unusual traffic. Verify that you are not a robot.</p>");
+        app.forms=crate::forms::Forms::new(&app.document);
+        app.reflow();
+        assert!(app.input_access_blocked());
     }
 }

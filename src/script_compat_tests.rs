@@ -5,6 +5,108 @@ fn shared_probe(source: &str) -> (Document,Forms,Page,Outcome) {
 }
 
 #[test]
+fn replace_child_returns_removed_identity_and_preserves_detached_references_and_collections() {
+    let (_,_,page,outcome)=page("<div id=p><span id=old title=kept><b id=inside>old</b></span><em id=tail>tail</em></div><div id=q><i id=incoming>new</i></div>", &[r#"
+var p=document.getElementById('p'),q=document.getElementById('q'),old=document.getElementById('old'),inside=document.getElementById('inside'),tail=document.getElementById('tail'),incoming=document.getElementById('incoming');
+var attr=old.getAttributeNode('title'),marker={value:13};old.marker=marker;
+var live=p.getElementsByTagName('span'),snapshot=p.querySelectorAll('span');
+if(typeof p.replaceChild!=='function'||p.replaceChild.length!==2||!('replaceChild' in p))throw 'method binding';
+if(p.replaceChild(incoming,old)!==old||p.firstChild!==incoming||incoming.nextSibling!==tail||tail.previousSibling!==incoming||p.lastChild!==tail||q.firstChild!==null)throw 'replacement order';
+if(old.parentNode!==null||old.isConnected||inside.parentNode!==old||inside.isConnected||old.ownerDocument!==document||attr.ownerElement!==old||attr.value!=='kept'||old.marker!==marker)throw 'detached identities';
+if(live.length!==0||snapshot.length!==1||snapshot.item(0)!==old||document.getElementById('old')!==null)throw 'live/static lookup';
+if(p.replaceChild(incoming,incoming)!==incoming||p.firstChild!==incoming||incoming.nextSibling!==tail)throw 'same node';
+var text=document.createTextNode('replacement text');if(p.replaceChild(text,tail)!==tail||text.parentNode!==p||text.previousSibling!==incoming||p.lastChild!==text||tail.parentNode!==null)throw 'text replacement';
+"#]);
+    assert_eq!(outcome.errors,0,"{}",page.report());
+}
+
+#[test]
+fn replace_child_moves_either_sibling_and_extracts_an_incoming_descendant_from_removed_subtree() {
+    let (_,_,page,outcome)=page("<div id=p><i id=a></i><i id=b></i><i id=c></i><i id=d></i></div><div id=r><div id=old><section id=inside><span id=incoming>new</span><b id=stay>stay</b></section></div><em id=tail>tail</em></div>", &[r#"
+var p=document.getElementById('p'),a=document.getElementById('a'),b=document.getElementById('b'),c=document.getElementById('c'),d=document.getElementById('d');
+if(p.replaceChild(a,c)!==c||p.firstChild!==b||b.nextSibling!==a||a.nextSibling!==d||c.parentNode!==null)throw 'preceding sibling';
+if(p.replaceChild(d,b)!==b||p.firstChild!==d||d.nextSibling!==a||p.lastChild!==a||a.previousSibling!==d||b.parentNode!==null)throw 'following sibling';
+var r=document.getElementById('r'),old=document.getElementById('old'),inside=document.getElementById('inside'),incoming=document.getElementById('incoming'),stay=document.getElementById('stay'),tail=document.getElementById('tail');
+if(r.replaceChild(incoming,old)!==old||r.firstChild!==incoming||incoming.nextSibling!==tail||incoming.parentNode!==r||!incoming.isConnected)throw 'incoming descendant';
+if(old.parentNode!==null||old.isConnected||inside.parentNode!==old||inside.firstChild!==stay||stay.parentNode!==inside||stay.isConnected||old.getElementsByTagName('span').length!==0)throw 'outgoing descendants';
+var detached=document.createElement('div'),first=document.createElement('b'),second=document.createElement('i');detached.appendChild(first);if(detached.replaceChild(second,first)!==first||second.parentNode!==detached||second.isConnected||first.parentNode!==null)throw 'detached parent';
+"#]);
+    assert_eq!(outcome.errors,0,"{}",page.report());
+}
+
+#[test]
+fn replace_child_named_errors_keep_order_and_promise_tail_without_coercing_non_nodes() {
+    let (doc,_,page,outcome)=page("<div id=p title=attribute><span id=old></span></div>", &[r#"
+var p=document.getElementById('p'),old=document.getElementById('old'),orphan=document.createElement('i'),text=document.createTextNode('text'),attr=p.getAttributeNode('title'),coercions=0;
+function check(name,call){var caught='';try{call();}catch(e){caught=e.name;}if(caught!==name)throw 'wrong exception '+caught+' expected '+name;}
+check('TypeError',function(){p.replaceChild();});check('TypeError',function(){p.replaceChild(orphan);});
+check('TypeError',function(){p.replaceChild({toString:function(){coercions++;return 'node';}},old);});
+check('TypeError',function(){p.replaceChild(p,null);});check('TypeError',function(){p.replaceChild.call({},orphan,old);});
+check('HierarchyRequestError',function(){text.replaceChild(orphan,old);});
+check('HierarchyRequestError',function(){p.replaceChild(p,orphan);});
+check('HierarchyRequestError',function(){p.replaceChild(document,old);});check('HierarchyRequestError',function(){p.replaceChild(attr,old);});
+check('NotFoundError',function(){p.replaceChild(attr,orphan);});check('HierarchyRequestError',function(){p.replaceChild(document,orphan);});
+var detached=document.createElement('div'),detachedOld=document.createElement('b');detached.appendChild(detachedOld);
+check('NotFoundError',function(){detached.replaceChild(document,orphan);});check('HierarchyRequestError',function(){detached.replaceChild(document,detachedOld);});
+check('NotFoundError',function(){p.replaceChild(orphan,orphan);});check('NotFoundError',function(){p.replaceChild(orphan,attr);});
+if(coercions||p.firstChild!==old||old.parentNode!==p||orphan.parentNode!==null)throw 'exception side effects';
+var log='';Promise.resolve().then(function(){try{p.replaceChild(orphan,orphan);}catch(e){log+=e.name;}finally{log+=':finally';}});Promise.resolve().then(function(){log+=':tail';document.title=log;});
+"#]);
+    assert_eq!(outcome.errors,0,"{}",page.report());
+    assert_eq!(doc.title,"NotFoundError:finally:tail");
+}
+
+#[test]
+fn replace_child_rejects_unsupported_native_subtrees_before_editing_either_parent() {
+    for (old,new) in [("<span id=old>old</span>","<section id=incoming><input id=field value=original></section>"),
+        ("<span id=old><input id=field value=original></span>","<section id=incoming>new</section>")] {
+        let html=format!("<div id=p>{old}</div><div id=q>{new}</div>");
+        let (mut doc,mut forms,mut page,outcome)=page(&html,&["document.getElementById('field').value='edited';"]);
+        assert_eq!(outcome.errors,0,"{}",page.report());
+        let node=|id:&str|doc.nodes.iter().enumerate().find_map(|(node,_)|(doc.attr(node,"id")==Some(id)).then_some(node)).unwrap();
+        let (parent,source,old,incoming)=(node("p"),node("q"),node("old"),node("incoming"));
+        let before=(doc.nodes[parent].children.clone(),doc.nodes[source].children.clone());
+        {
+            let mut bridge=Bridge{doc:&mut doc,forms:&mut forms,state:&mut page.state};
+            assert!(bridge.call(node_handle(parent),"replaceChild",&[Value::Host(node_handle(incoming)),Value::Host(node_handle(old))]).is_err());
+        }
+        assert_eq!((doc.nodes[parent].children.clone(),doc.nodes[source].children.clone()),before);
+        let result=page.console_eval(&mut doc,&mut forms,"if(document.getElementById('field').value!=='edited'||document.getElementById('old').parentNode!==document.getElementById('p')||document.getElementById('incoming').parentNode!==document.getElementById('q'))throw 'partial replacement';");
+        assert_eq!(result.errors,0,"{}",page.report());
+    }
+}
+
+#[test]
+fn replace_child_work_exhaustion_is_atomic_and_next_job_recovers() {
+    let mut failures=0;
+    let mut successes=0;
+    for allowance in [0,1,4,16,64,256] {
+        let (mut doc,mut forms,mut page,outcome)=page("<div id=p><span id=old>old</span></div><div id=q><section id=incoming>new</section></div>",&[]);
+        assert_eq!(outcome.errors,0);
+        let node=|id:&str|doc.nodes.iter().enumerate().find_map(|(node,_)|(doc.attr(node,"id")==Some(id)).then_some(node)).unwrap();
+        let (parent,source,old,incoming)=(node("p"),node("q"),node("old"),node("incoming"));
+        let before=(doc.nodes[parent].children.clone(),doc.nodes[source].children.clone());
+        let commits=page.state.dom_commits;
+        page.state.host_work=allowance;
+        let result=Bridge{doc:&mut doc,forms:&mut forms,state:&mut page.state}.call(node_handle(parent),"replaceChild",&[Value::Host(node_handle(incoming)),Value::Host(node_handle(old))]);
+        if result.is_err() {
+            failures+=1;
+            assert_eq!((doc.nodes[parent].children.clone(),doc.nodes[source].children.clone()),before);
+            assert_eq!(page.state.tree.parents[old],Some(parent));
+            assert_eq!(page.state.tree.parents[incoming],Some(source));
+            assert_eq!(page.state.dom_commits,commits);
+            page.begin_job();
+            let result=page.console_eval(&mut doc,&mut forms,"document.getElementById('p').replaceChild(document.getElementById('incoming'),document.getElementById('old'));");
+            assert_eq!(result.errors,0,"{}",page.report());
+        } else { successes+=1; }
+        assert_eq!(doc.nodes[parent].children,[incoming]);
+        assert!(doc.nodes[source].children.is_empty());
+    }
+    assert!(failures>0&&successes>0,"Exercise small failure profiles and ordinary completion separately");
+}
+
+
+#[test]
 fn shared_lookup_exception_element_absence_and_accessor_controls() {
     let (_,_,page,outcome)=shared_probe(r#"
 var p=document.getElementById('p'),calls=0;
