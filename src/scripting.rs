@@ -2273,6 +2273,7 @@ impl Host for Bridge<'_> {
     }
     fn ordinary_lookup_tail_property(&self,object:u32,property:&str)->bool {
         if self.location_instance_owner(object).is_some() {property=="prototype"}
+        else if property=="animate" && self.element_expando_receiver(object) {true}
         else {self.ordinary_lookup_tail(object)}
     }
     fn native_access_owner(&self, object: u32) -> Option<u32> {
@@ -2562,9 +2563,10 @@ impl Host for Bridge<'_> {
                 ));
             };
             if !crate::css::valid_query_selector(source) {
+                let excerpt: String = source.chars().take(160).collect();
                 return Err((
                     "SyntaxError",
-                    "Invalid selector or selector syntax outside the supported subset.".into(),
+                    format!("Invalid selector or selector syntax outside the supported subset: {excerpt:?} ({} UTF-8 bytes; excerpt at most 160 characters).",source.len()),
                 ));
             }
         }
@@ -3244,9 +3246,10 @@ impl Host for Bridge<'_> {
         }
         let node = self.node(object)?;
         if self.doc.nodes[node].namespace==crate::html::Namespace::Html && tag(self.doc,node)!="form"
-            && matches!(property,"prototype"|"setCapture"|"releaseCapture") {
-            // These Elements are instances, not constructors. Legacy mouse
-            // capture extensions are absent; no capture operation is advertised.
+            && matches!(property,"prototype"|"setCapture"|"releaseCapture")
+            || property=="animate" && self.element_expando_receiver(object) {
+            // Instance prototype/legacy capture and unimplemented animation
+            // reads are absent. No capture/animation operation is advertised.
             return Ok(false);
         }
         if tag(self.doc, node) == "img"
@@ -3500,7 +3503,8 @@ impl Host for Bridge<'_> {
         }
         let node = self.node(object)?;
         if self.doc.nodes[node].namespace==crate::html::Namespace::Html && tag(self.doc,node)!="form"
-            && matches!(property,"prototype"|"setCapture"|"releaseCapture") {
+            && matches!(property,"prototype"|"setCapture"|"releaseCapture")
+            || property=="animate" && self.element_expando_receiver(object) {
             return Ok(Value::Undefined);
         }
         if let Some(value) = self.image_get(node, property)? {

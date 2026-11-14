@@ -508,6 +508,17 @@ w.eval("Object.defineProperty(Object.prototype,'prototype',{get:function(){throw
     }
 
     #[test]
+    fn animation_absence_checks_keep_saved_foreign_element_readers_guarded() {
+        let source=format!("{CREATE}var element=document.documentElement,read=w.Function('element','return element.animate;'),has=w.Function('element','return \"animate\" in element;');if(read(element)!==undefined||has(element))throw 'same origin absence';");
+        let (mut doc,mut forms,mut page,outcome)=start(&source,&crate::csp::PolicySet::default());assert_eq!(outcome.errors,0,"{}",page.report());
+        page.set_location(&crate::navigation::Location {url:Some(crate::url::parse("https://other.test/").unwrap().0),path:None,fragment:String::new(),root:None});
+        let nodes=doc.nodes.len();let frames=page.state.blank_frames.len();let commits=page.state.dom_commits;
+        for operation in ["read(element);","has(element);"] {
+            let outcome=page.console_eval(&mut doc,&mut forms,operation);assert_eq!(outcome.errors,1,"{operation}: {}",page.report());assert_eq!(doc.nodes.len(),nodes);assert_eq!(page.state.blank_frames.len(),frames);assert_eq!(page.state.dom_commits,commits);
+        }
+    }
+
+    #[test]
     fn history_replace_state_uses_canonical_main_method_and_checks_saved_child_callers() {
         let source = format!("{CREATE}{}", r#"
 var historyRead=w.Function('h','return h.state;'),lengthRead=w.Function('h','return h.length;'),methodRead=w.Function('h','return h.replaceState;');

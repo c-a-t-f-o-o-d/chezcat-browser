@@ -7,9 +7,13 @@
 <p id="namespace-create-state">Namespaced creation pending</p>
 <p id="script-source-state">Parsed script pending</p>
 <p id="timing-state">Timing pending</p>
+<p id="animation-state">Animation feature pending</p>
 <script id="parsed-source-fixture" src="/fixture-parser.js"></script>
 <script>
 var fixtureNode=document.getElementById('event-namespace-state');
+if(document.documentElement.animate!==undefined||'animate' in document.documentElement)throw Error('unavailable native animation');
+if(document.documentElement.animate)throw Error('false animation capability');
+document.getElementById('animation-state').textContent='Unavailable animation detected';
 var fixtureTiming=performance.timing,fixtureResponseStart=fixtureTiming.responseStart;
 if(fixtureTiming!==performance.timing||fixtureTiming.navigationStart<=0||Math.floor(fixtureResponseStart)!==fixtureResponseStart||fixtureTiming.requestStart<fixtureTiming.navigationStart||fixtureResponseStart<fixtureTiming.requestStart||fixtureTiming.responseEnd<fixtureResponseStart||fixtureTiming.responseEnd>Date.now()||performance.now()+fixtureTiming.navigationStart+1<fixtureTiming.responseEnd)throw Error('real measured document timing');
 fixtureTiming.responseStart=0;performance.timing=0;if(performance.timing!==fixtureTiming||fixtureTiming.responseStart!==fixtureResponseStart)throw Error('timing readonly');
