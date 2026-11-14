@@ -1,0 +1,89 @@
+{
+  "scope": "Author a tiny original intra-only VP8/IVF scene; encoder is development-only.\n\nThe shipped browser and offline checks use the checked-in bytes, never FFmpeg.\n",
+  "source_rgb_sha256": "335b04cf8f6f6923833998bd2f9b13866d76cdc6721685db5bc5e160ae4b9a02",
+  "ivf_sha256": "8d92ca698ea73c0fa07ee6151fa5e35e5e5d480ac21a65e8aae7dae822bfa684",
+  "reference_rgba_sha256": "cdc6a81119b059305ffeaa8db53e2fd6a55e9ff5f487a88255b861f5184f7a6f",
+  "width": 64,
+  "height": 48,
+  "rate": 2,
+  "scale": 1,
+  "frames": [
+    {
+      "timestamp": 0,
+      "bytes": 413,
+      "payload_sha256": "caece0afc7fe520d6004ead77bcffedf83649bb22dcc291f129d9b27e5a77c61",
+      "reference_rgba_sha256": "57040511a694580af1f1d8196a004eff9851b1df98ecc02b4c53dd6513907bf1"
+    },
+    {
+      "timestamp": 1,
+      "bytes": 426,
+      "payload_sha256": "58ea22ab87328063a56bcdfcbd73cb10587435f0f03b4b80d17b380078bd69c1",
+      "reference_rgba_sha256": "9625270510480788abfaf2ca996b7b557b414889620179a988996a7aa67a215d"
+    },
+    {
+      "timestamp": 2,
+      "bytes": 468,
+      "payload_sha256": "f117faa72cbb7fde6fdaaf99208aa0d6f07bef63617f9ddcd4cbed77bb595492",
+      "reference_rgba_sha256": "66958f58cad2a6bc90c6fe3da856bbccefbce84fd496b612e4ac35b87a017360"
+    },
+    {
+      "timestamp": 3,
+      "bytes": 445,
+      "payload_sha256": "91a94ebf6495de6b40760e5f81ab185a8babf06319eb11dc8086f3419b6c0edf",
+      "reference_rgba_sha256": "6d2b965ef72ac7379f28f140c347ca4d12933becf736cb073e3d827690437e71"
+    },
+    {
+      "timestamp": 4,
+      "bytes": 349,
+      "payload_sha256": "48000054d43647783db477a6bbb479ad0710346d024b3ab9935082cbe555977f",
+      "reference_rgba_sha256": "82fb545bac7d4c3a2cf7f5c6dcb9d7515608c7a671121efe014ca36800631e9d"
+    },
+    {
+      "timestamp": 5,
+      "bytes": 451,
+      "payload_sha256": "3cea826d0842c105c09a0a2f8736d3139df87813cd1732e0b54f9a60ed8efbdb",
+      "reference_rgba_sha256": "437932258de60053ef8f7c637a3e28120d8cfb97c58431d41af3ff713f40264c"
+    }
+  ],
+  "encoder_command": [
+    "ffmpeg",
+    "-hide_banner",
+    "-loglevel",
+    "error",
+    "-f",
+    "rawvideo",
+    "-pixel_format",
+    "rgb24",
+    "-video_size",
+    "64x48",
+    "-framerate",
+    "2",
+    "-i",
+    "pipe:0",
+    "-an",
+    "-c:v",
+    "libvpx",
+    "-pix_fmt",
+    "yuv420p",
+    "-g",
+    "1",
+    "-auto-alt-ref",
+    "0",
+    "-lag-in-frames",
+    "0",
+    "-deadline",
+    "best",
+    "-cpu-used",
+    "0",
+    "-crf",
+    "8",
+    "-b:v",
+    "100k",
+    "-threads",
+    "1",
+    "-f",
+    "ivf",
+    "-y",
+    "tools/fixtures/scene-intra.ivf"
+  ]
+}

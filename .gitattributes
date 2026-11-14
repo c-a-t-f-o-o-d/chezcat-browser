@@ -28,6 +28,8 @@
 *.woff binary
 *.woff2 binary
 *.bin binary
+*.ivf binary
+*.rgba binary
 *.zip binary
 results/** -text
 tools/reference/test262/** -text

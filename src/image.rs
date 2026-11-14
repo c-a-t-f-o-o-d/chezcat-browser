@@ -193,6 +193,10 @@ pub fn decode_checked(
 }
 
 fn dimensions(width: usize, height: usize) -> ImageResult<usize> {
+    dimensions_with_limit(width,height,MAX_PIXELS)
+}
+
+fn dimensions_with_limit(width:usize,height:usize,maximum:usize)->ImageResult<usize> {
     let count = width
         .checked_mul(height)
         .ok_or("Image dimensions overflow.")?;
@@ -200,11 +204,17 @@ fn dimensions(width: usize, height: usize) -> ImageResult<usize> {
         || height == 0
         || width > MAX_DIMENSION
         || height > MAX_DIMENSION
-        || count > MAX_PIXELS
+        || count > maximum
     {
-        return Err("Image exceeds the 4-megapixel or 16384-pixel dimension limit.".into());
+        return Err(if maximum==MAX_PIXELS {"Image exceeds the 4-megapixel or 16384-pixel dimension limit.".into()}else{format!("Image exceeds the {maximum}-pixel or {MAX_DIMENSION}-pixel dimension allowance.")});
     }
     Ok(count)
+}
+
+/// Raw intra VP8 frames share the original codec, with a host-selected pixel
+/// allowance. No WebP/animation container is involved in the video path.
+pub(crate) fn decode_vp8_frame_checked(data:&[u8],maximum_pixels:usize,check:&dyn Fn()->ImageResult<()>)->ImageResult<Bitmap> {
+    webp::decode_vp8_frame(data,maximum_pixels,check)
 }
 
 fn reserved<T>(count: usize) -> ImageResult<Vec<T>> {

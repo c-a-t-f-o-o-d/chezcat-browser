@@ -13,9 +13,31 @@ use std::time::{Duration, Instant};
 
 pub type Wake = Arc<dyn Fn() + Send + Sync>;
 
+fn read_local_video(path: &std::path::Path, limit: usize, cancel: &AtomicBool) -> Result<Vec<u8>, String> {
+    use std::io::Read;
+    check_cancel(cancel)?;
+    let mut file = navigation::open_local_file(path)?;
+    if file.metadata().map_err(|error| error.to_string())?.len() > limit as u64 {
+        return Err("Video input byte allowance exceeded.".into());
+    }
+    let mut bytes = Vec::new();
+    let mut chunk = [0u8; 64 * 1024];
+    loop {
+        check_cancel(cancel)?;
+        let count = file.read(&mut chunk).map_err(|error| error.to_string())?;
+        if count == 0 { return Ok(bytes); }
+        if bytes.len().checked_add(count).is_none_or(|size| size > limit) {
+            return Err("Video input byte allowance exceeded.".into());
+        }
+        bytes.try_reserve(count).map_err(|_| "Could not grow the encoded video buffer.")?;
+        bytes.extend_from_slice(&chunk[..count]);
+    }
+}
+
 /// User-controlled capabilities captured once for each document load.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LoadOptions {
+    pub media_limits: crate::media::Limits,
     /// Host-selected script policy; page content cannot change it.
     pub stylesheet_limits: css::StylesheetLimits,
     pub script_capacity: crate::javascript::limits::Capacities,
@@ -38,6 +60,7 @@ pub struct LoadOptions {
 impl Default for LoadOptions {
     fn default() -> Self {
         Self {
+            media_limits: crate::media::Limits::default(),
             stylesheet_limits: css::StylesheetLimits::default(),
             script_capacity: crate::javascript::limits::BROWSER_CAPACITIES,
             javascript: true,
@@ -69,6 +92,7 @@ pub struct Script {
 }
 
 pub struct Loaded {
+    pub media: Option<crate::media::Asset>,
     pub network: crate::network_trace::Trace,
     pub location: Location,
     /// The final document exchange, after any redirects. Assets never inherit it.
@@ -592,9 +616,10 @@ fn load_request_progressively(
     let mut notice = String::new();
     let mut plain = false;
     let mut document_image = None;
+    let mut document_media = None;
     let mut image_document = false;
     let mut document_type = "text/html".to_owned();
-    let scripting_blocked =
+    let mut scripting_blocked =
         (!options.javascript).then(|| "JavaScript disabled by user.".to_owned());
     let mut csp_headers = Vec::new();
     let mut embedder_headers = Vec::new();
@@ -694,6 +719,7 @@ fn load_request_progressively(
         ));
         raw
     } else if let Some(path) = &location.path {
+        let video = path.extension().and_then(|ext| ext.to_str()).is_some_and(|ext| ext.eq_ignore_ascii_case("ivf"));
         let local_type = image_file_type(path);
         image_document = local_type.is_some();
         if let Some(mime) = local_type {
@@ -706,15 +732,21 @@ fn load_request_progressively(
             plain = true;
             document_type = "text/plain".into();
         }
-        let bytes = navigation::read_limited(
+        let bytes = if video {read_local_video(path,options.media_limits.input_bytes,cancel)?} else {navigation::read_limited(
             path,
             if image_document {
                 image::MAX_INPUT_BYTES
             } else {
                 1_048_576
             },
-        )?;
-        if image_document {
+        )?};
+        if video {
+            let asset=crate::media::Clip::load(bytes,options.media_limits,&||check_cancel(cancel))?;
+            document_type="video/x-ivf".into();
+            scripting_blocked=Some("Standalone local video viewer; HTMLMediaElement and page scripts are not implemented here.".into());
+            let markup=format!("<title>Local video</title><body><h1>Local video</h1><p>{}</p><img id='media-frame' width='{}' height='{}'><p>IVF / VP8 keyframes, {} frames, {:.3} seconds. Video only. Use Play, Pause, Stop and the seek bar below.</p></body>",escape(&location.display()),asset.clip.width,asset.clip.height,asset.clip.frame_count(),asset.clip.duration.as_secs_f64());
+            document_media=Some(asset);markup
+        } else if image_document {
             if options.images {
                 document_image = Some(image::decode_asset_checked(&bytes, &|| {
                     check_cancel(cancel)
@@ -754,6 +786,7 @@ fn load_request_progressively(
     }
     events.push(format!("HTML/text loaded: {}", location.display()));
     let mut loaded = Loaded {
+        media: document_media,
         network,
         base: location.clone(),
         base_is_document_url: true,

@@ -2,7 +2,7 @@
 //! Only the normative numeric tables are shared with the format specification.
 //! No video reference buffers, external codecs, platform decoding or unsafe code.
 
-use super::super::{dimensions, le16, pixel, reserved, Bitmap, ImageResult};
+use super::super::{dimensions_with_limit, le16, pixel, reserved, Bitmap, ImageResult};
 use std::cell::Cell;
 
 #[path = "image_vp8_tables.rs"]
@@ -696,6 +696,10 @@ fn upsample(plane: &Plane, x: usize, y: usize, width: usize, height: usize) -> i
 }
 
 pub(super) fn decode(data: &[u8], check: &dyn Fn() -> ImageResult<()>) -> ImageResult<Bitmap> {
+    decode_with_pixels(data,check,super::super::MAX_PIXELS)
+}
+
+pub(super) fn decode_with_pixels(data:&[u8],check:&dyn Fn()->ImageResult<()>,maximum_pixels:usize)->ImageResult<Bitmap> {
     check()?;
     if data.len() < 10 {
         return Err("Lossy WebP has a truncated VP8 frame header.".into());
@@ -720,7 +724,7 @@ pub(super) fn decode(data: &[u8], check: &dyn Fn() -> ImageResult<()>) -> ImageR
     }
     let width = usize::from(w);
     let height = usize::from(h);
-    let pixels = dimensions(width, height)?;
+    let pixels = dimensions_with_limit(width, height,maximum_pixels)?;
     let first_end = 10usize
         .checked_add(tag >> 5)
         .filter(|&n| n <= data.len())

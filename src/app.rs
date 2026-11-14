@@ -12,6 +12,8 @@ use std::path::{Path, PathBuf};
 
 #[path = "app_animation.rs"]
 mod animation;
+#[path = "app_media.rs"]
+mod media_ui;
 #[path = "app_browser_ui.rs"]
 mod browser_ui;
 use browser_ui::BrowserPanel;
@@ -203,6 +205,9 @@ pub struct App {
     images: HashMap<usize, std::sync::Arc<Bitmap>>,
     image_densities: HashMap<usize, f64>,
     animations: HashMap<usize, animation::Playback>,
+    media: Option<media_ui::Player>,
+    media_worker: Option<crate::media::Worker>,
+    media_limits: crate::media::Limits,
     events: Vec<String>,
     last_failed_navigation: Option<String>,
     scripts_enabled: bool,
@@ -305,6 +310,9 @@ impl App {
             images: HashMap::new(),
             image_densities: HashMap::new(),
             animations: HashMap::new(),
+            media: None,
+            media_worker: None,
+            media_limits: crate::media::Limits::default(),
             events: vec!["Loaded bundled start page (no external resources).".to_owned()],
             last_failed_navigation: None,
             scripts_enabled: true,
@@ -459,6 +467,7 @@ impl App {
         }
     }
     pub fn set_load_wake(&mut self, wake: loader::Wake) {
+        if let Some(worker)=&self.media_worker {worker.set_wake(wake.clone());}
         if let Some(worker) = &self.worker {
             worker.set_wake(wake.clone());
         }
@@ -506,6 +515,7 @@ impl App {
     }
     fn load_options(&self) -> loader::LoadOptions {
         loader::LoadOptions {
+            media_limits: self.media_limits,
             stylesheet_limits: self.stylesheet_limits,
             script_capacity: crate::javascript::limits::BROWSER_CAPACITIES,
             javascript: self.scripts_enabled,
@@ -546,6 +556,7 @@ impl App {
                 .is_some_and(|page| page.has_host_tasks())
     }
     fn cancel_pending(&mut self) {
+        self.suspend_media();
         if let Some(worker) = &self.worker {
             worker.cancel();
         }
@@ -553,6 +564,7 @@ impl App {
         self.resubmission = None;
     }
     pub fn stop_loading(&mut self) {
+        self.stop_media();
         if !self.is_loading() {
             return;
         }
@@ -587,6 +599,7 @@ impl App {
         request: crate::http::Request,
         form_policy: Option<crate::csp::PolicySet>,
     ) {
+        self.suspend_media();
         self.cancel_script_requests();
         self.select_popup = None;
         self.resubmission = None;
@@ -661,7 +674,7 @@ impl App {
             | self.poll_dynamic_images()
             | self.process_image_requests();
         let revision = self.network.revision();
-        let mut changed = script_changed | self.poll_downloads()
+        let mut changed = script_changed | self.poll_media() | self.poll_downloads()
             || revision != self.last_network_revision
             || self.network_needs_tick();
         self.last_network_revision = revision;
@@ -966,6 +979,7 @@ impl App {
     }
 
     pub fn script_timer_unavailable(&mut self) {
+        self.suspend_media();
         if let Some(page) = &mut self.scripting {
             page.stop_timers("The operating system could not schedule the timer wake-up.");
         }
@@ -1104,7 +1118,7 @@ impl App {
         } else {
             self.page_scroll
         };
-        if self.location.url.is_some() {
+        if self.location.url.is_some() || crate::media::is_local_video(&self.location) {
             if self.current_request.is_post() {
                 self.ask_resubmission(
                     self.location.clone(),
@@ -1228,7 +1242,7 @@ impl App {
                 Some(LoadingScroll::Fragment)
             };
         }
-        if !same_document && location.url.is_some() {
+        if !same_document && (location.url.is_some() || crate::media::is_local_video(&location)) {
             self.start_network(
                 location,
                 if replace {
@@ -1371,7 +1385,7 @@ impl App {
             self.failed = false;
             return;
         }
-        if location.url.is_some() {
+        if location.url.is_some() || crate::media::is_local_video(&location) {
             if request.is_post() {
                 self.ask_resubmission(
                     location,
@@ -1432,6 +1446,7 @@ impl App {
         self.animations.clear();
         self.install_animations(loaded.animations);
         self.events = loaded.events;
+        self.install_media(loaded.media);
         self.last_failed_navigation = None;
         self.source = location.path.clone();
         self.location = location;
@@ -1718,6 +1733,7 @@ impl App {
         );
         for error in crate::css::stylesheet_diagnostics(&self.document,&self.styles) {report.push_str(&format!("CSS: {error}\n"));}
         report.push_str(&self.stage_report());
+        report.push_str(&self.media_report());
         report
     }
     fn toggle_view(&mut self, requested: View) {
@@ -2604,6 +2620,7 @@ impl App {
             self.select_popup = None;
             self.drag = Drag::None;
         }
+        if !ctrl && !alt && self.media_key(key) {return PlatformAction::None;}
         if alt {
             match key {
                 0x25 => self.history_move(-1),
@@ -3118,6 +3135,7 @@ impl App {
         if self.chrome_pointer_down(x, y, shift) {
             return PlatformAction::None;
         }
+        if self.media_pointer_down(x,y) {return PlatformAction::None;}
         if y < self.content_top() || y >= self.content_bottom() {
             return PlatformAction::None;
         }
@@ -3343,6 +3361,7 @@ impl App {
             self.browser_pointer_up(x, y);
             return PlatformAction::None;
         }
+        if self.media_pointer_up(x,y) {return PlatformAction::None;}
         let drag = std::mem::replace(&mut self.drag, Drag::None);
         if let Drag::SelectOption { node, index } = drag {
             if self.select_popup.is_some_and(|popup| popup.node == node)
@@ -3416,6 +3435,7 @@ impl App {
         PlatformAction::None
     }
     pub fn pointer_cancel(&mut self) {
+        self.media_pointer_cancel();
         self.downloads_pointer_cancel();
         self.cancel_bookmark_pointer();
         self.inspector.cancel_pointer();
@@ -3452,6 +3472,7 @@ impl App {
                 .and_then(|row| self.select_row_option(popup.node, row))
                 .is_some();
         }
+        if self.media_hit(x,y).is_some(){return true;}
         if self.view == View::Page && y >= self.content_top() && y < self.content_bottom() {
             if let Some(node) = self
                 .page
@@ -3721,6 +3742,7 @@ impl App {
                 ui::TEAL
             },
         );
+        self.draw_media_controls(&mut canvas);
         self.draw_browser_panel(&mut canvas);
         self.draw_bookmark_popup(&mut canvas);
         self.draw_downloads(&mut canvas);

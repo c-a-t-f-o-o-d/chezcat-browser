@@ -190,6 +190,7 @@ impl App {
         self.next_script_timer()
             .into_iter()
             .chain(self.next_image_frame())
+            .chain(self.next_media_timer())
             .min()
     }
 
@@ -199,7 +200,8 @@ impl App {
             .is_some_and(|due| due <= Instant::now())
             && self.poll_script_timer();
         let images = self.poll_image_frames_at(Instant::now());
-        scripts || images
+        let media=self.poll_media_timer_at(Instant::now());
+        scripts || images || media
     }
 }
 

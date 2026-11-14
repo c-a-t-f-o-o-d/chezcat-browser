@@ -43,6 +43,7 @@ impl App {
                         Ok(())
                     }
                     ["settings", action] => self.input_settings_action(action),
+                    ["media", action] => {let (x,y)=self.input_media_action(action)?;writeln!(log,"Pointer native media control={action} x={x} y={y}").map_err(|e|e.to_string())?;Ok(())},
                     ["address", text] if text.chars().count()<=4096 => {
                         self.input_key("l","KeyL",0x4c,true,false,None)?;
                         if self.focus!=Focus::Address { return Err("Address shortcut did not focus browser chrome.".into()); }
@@ -80,7 +81,13 @@ impl App {
                     ["wait", value] => {
                         let millis: u64 = value.parse().map_err(|_| "Invalid wait milliseconds")?;
                         if millis > 10000 { return Err("Wait exceeds 10000 milliseconds.".into()); }
-                        self.wait_for_script_timers(Duration::from_millis(millis));
+                        // Explicit input-script waits honor wall time even when
+                        // the page has no queued timers (e.g. paused video).
+                        let deadline=std::time::Instant::now()+Duration::from_millis(millis);
+                        while std::time::Instant::now()<deadline {
+                            self.poll_load();self.poll_page_timer();
+                            std::thread::sleep(deadline.saturating_duration_since(std::time::Instant::now()).min(Duration::from_millis(10)));
+                        }
                         Ok(())
                     }
                     _ => Err("Unknown/invalid development input action.".into()),

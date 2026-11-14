@@ -319,15 +319,7 @@ fn starts_web_url(input: &str) -> bool {
 
 /// Read only a regular local file, and never allocate based on its reported size.
 pub fn read_limited(path: &Path, limit: usize) -> Result<Vec<u8>, String> {
-    let path = canonical_file(path)?;
-    let file = File::open(&path).map_err(|error| format!("Cannot open file: {error}"))?;
-    if !file
-        .metadata()
-        .map_err(|error| format!("Cannot inspect file: {error}"))?
-        .is_file()
-    {
-        return Err("Choose a regular local file.".to_owned());
-    }
+    let file = open_local_file(path)?;
     let maximum = u64::try_from(limit)
         .ok()
         .and_then(|value| value.checked_add(1))
@@ -340,6 +332,20 @@ pub fn read_limited(path: &Path, limit: usize) -> Result<Vec<u8>, String> {
         return Err(format!("This file exceeds the {limit}-byte size limit."));
     }
     Ok(bytes)
+}
+
+/// Shared regular-file/path checks for bounded and cancellable readers.
+pub(crate) fn open_local_file(path: &Path) -> Result<File, String> {
+    let path = canonical_file(path)?;
+    let file = File::open(&path).map_err(|error| format!("Cannot open file: {error}"))?;
+    if !file
+        .metadata()
+        .map_err(|error| format!("Cannot inspect file: {error}"))?
+        .is_file()
+    {
+        return Err("Choose a regular local file.".to_owned());
+    }
+    Ok(file)
 }
 
 fn address_path(path: &Path, current: &Location) -> PathBuf {
