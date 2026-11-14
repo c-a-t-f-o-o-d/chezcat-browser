@@ -1074,6 +1074,7 @@ impl Page {
         let cookies = self.state.cookies.clone();
         let resource_base = self.state.dynamic.base.take();
         let stylesheet_bytes = self.state.stylesheets.source_bytes;
+        let stylesheet_rules = self.state.stylesheets.source_rules;
         let images = std::mem::take(&mut self.state.images);
         let history = std::mem::take(&mut self.state.history);
         let limits = self.state.limits;
@@ -1083,6 +1084,7 @@ impl Page {
         self.state.cookies = cookies;
         self.state.dynamic.base = resource_base;
         self.state.stylesheets.source_bytes = stylesheet_bytes;
+        self.state.stylesheets.source_rules = stylesheet_rules;
         self.state.images = images;
         self.state.history = history;
         self.state.dynamic.policy = policy.clone();

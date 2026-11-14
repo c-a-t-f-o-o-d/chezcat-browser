@@ -17,6 +17,7 @@ pub type Wake = Arc<dyn Fn() + Send + Sync>;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LoadOptions {
     /// Host-selected script policy; page content cannot change it.
+    pub stylesheet_limits: css::StylesheetLimits,
     pub script_capacity: crate::javascript::limits::Capacities,
     pub javascript: bool,
     pub images: bool,
@@ -37,6 +38,7 @@ pub struct LoadOptions {
 impl Default for LoadOptions {
     fn default() -> Self {
         Self {
+            stylesheet_limits: css::StylesheetLimits::default(),
             script_capacity: crate::javascript::limits::BROWSER_CAPACITIES,
             javascript: true,
             images: true,
@@ -885,7 +887,7 @@ fn load_request_progressively(
         ));
         image_plan.clear();
     }
-    load_critical_resources(&mut loaded, &mut stats, cancel, progress, &pool, mode, options.script_capacity)?;
+    load_critical_resources(&mut loaded, &mut stats, cancel, progress, &pool, mode, options.script_capacity, options.stylesheet_limits)?;
     check_cancel(cancel)?;
     loaded.events.push(format!(
         "DISPLAY READY: {} ms after document request; CSS, fonts and classic script sources ready; images load afterward.",
@@ -1007,14 +1009,18 @@ fn load_critical_resources(
     pool: &http::Pool<'_>,
     mode: http::FetchMode,
     capacity: crate::javascript::limits::Capacities,
+    stylesheet_limits: css::StylesheetLimits,
 ) -> Result<(), String> {
+    loaded.document.stylesheet_limits=stylesheet_limits;
+    loaded.document.scripting_enabled=loaded.scripting_blocked.is_none();
     let inert = inert_nodes(&loaded.document, loaded.scripting_blocked.is_none());
     let script_inert = inert_nodes(&loaded.document, true);
     let mut cache = HashMap::<ResourceKey, ResourceOutcome>::new();
     let mut style_bases = HashMap::<usize, Location>::new();
-    let mut css_bytes = 0usize;
+    let mut css_usage=css::StylesheetUsage::default();
     let mut script_bytes = 0usize;
-    for (node, item) in loaded.document.nodes.iter().enumerate() {
+    for node in css::document_order(&loaded.document) {
+        let item=&loaded.document.nodes[node];
         check_cancel(cancel)?;
         if inert[node] {
             continue;
@@ -1022,6 +1028,11 @@ fn load_critical_resources(
         let NodeKind::Element { tag, .. } = &item.kind else {
             continue;
         };
+        if tag=="style" && css::media_supported(loaded.document.attr(node,"media").unwrap_or("")) {
+            match css::inline_stylesheet(&loaded.document,node).and_then(|source|stylesheet_limits.accept(&source,css_usage)) {
+                Ok(next)=>css_usage=next,Err(error)=>loaded.events.push(format!("CSS node {node}: {error}")),
+            }
+        }
         let kind = if tag == "link"
             && loaded.document.attr(node, "rel").is_some_and(|value| {
                 value
@@ -1102,8 +1113,8 @@ fn load_critical_resources(
                 }) {
                     return Err("Alternate stylesheets are not enabled.".to_owned());
                 }
-                if css_bytes >= 512 * 1024 {
-                    return Err("Stylesheet budget is full (512 KiB).".to_owned());
+                if css_usage.bytes >= stylesheet_limits.document_bytes {
+                    return Err("Stylesheet document byte allowance is full.".to_owned());
                 }
             }
             let resolved = navigation::resolve(target, &loaded.base)?;
@@ -1143,10 +1154,7 @@ fn load_critical_resources(
                 stats.reused += 1;
                 return match outcome {
                     ResourceOutcome::Css(source, base) => {
-                        if css_bytes + source.len() > 512 * 1024 {
-                            return Err("Stylesheet budget exceeded (512 KiB).".to_owned());
-                        }
-                        css_bytes += source.len();
+                        css_usage=stylesheet_limits.accept(&source,css_usage)?;
                         loaded.styles.insert(node, source);
                         style_bases.insert(node, base);
                         Ok("reused stylesheet from this document load".to_owned())
@@ -1180,7 +1188,7 @@ fn load_critical_resources(
                 }
                 progress(format!("Loading {kind} {label}"));
                 let limit = if kind == "CSS" {
-                    128 * 1024
+                    stylesheet_limits.sheet_bytes
                 } else {
                     capacity.source_bytes
                 };
@@ -1252,7 +1260,7 @@ fn load_critical_resources(
                     .as_ref()
                     .ok_or("This resource has no local file path.")?;
                 let limit = if kind == "CSS" {
-                    128 * 1024
+                    stylesheet_limits.sheet_bytes
                 } else {
                     capacity.source_bytes
                 };
@@ -1266,10 +1274,7 @@ fn load_critical_resources(
             let resolved_name = resolved_location.display();
             let source = decode_text(&bytes, &encoding, false)?;
             if kind == "CSS" {
-                if css_bytes + source.len() > 512 * 1024 {
-                    return Err("Stylesheet budget exceeded (512 KiB).".to_owned());
-                }
-                css_bytes += source.len();
+                css_usage=stylesheet_limits.accept(&source,css_usage)?;
                 loaded.styles.insert(node, source);
                 style_bases.insert(node, resolved_location);
                 Ok(format!("loaded {resolved_name}"))
@@ -1364,52 +1369,14 @@ fn load_fonts(
     pool: &http::Pool<'_>,
     mode: http::FetchMode,
 ) -> Result<(), String> {
-    let inert = inert_nodes(&loaded.document, loaded.scripting_blocked.is_none());
     let mut plan = Vec::new();
-    for (node, item) in loaded.document.nodes.iter().enumerate() {
-        if inert[node] {
-            continue;
+    for (node,source) in css::accepted_stylesheets(&loaded.document,&loaded.styles).0 {
+        let base=style_bases.get(&node).unwrap_or(&loaded.base);
+        for face in css::font_faces_with_limits(&source,loaded.document.stylesheet_limits) {
+            if plan.len()==128 {break;}
+            plan.push((base.clone(),face));
         }
-        let NodeKind::Element { tag, .. } = &item.kind else {
-            continue;
-        };
-        if tag != "style" && tag != "link" {
-            continue;
-        }
-        let media = loaded.document.attr(node, "media").unwrap_or("").trim();
-        if !media.is_empty()
-            && !media.eq_ignore_ascii_case("screen")
-            && !media.eq_ignore_ascii_case("all")
-        {
-            continue;
-        }
-        let inline;
-        let (source, base) = if tag == "style" {
-            inline = item
-                .children
-                .iter()
-                .filter_map(|&child| match &loaded.document.nodes[child].kind {
-                    NodeKind::Text(text) => Some(text.as_str()),
-                    _ => None,
-                })
-                .collect::<String>();
-            (inline.as_str(), &loaded.base)
-        } else if let (Some(source), Some(base)) =
-            (loaded.styles.get(&node), style_bases.get(&node))
-        {
-            (source.as_str(), base)
-        } else {
-            continue;
-        };
-        for face in css::font_faces(source) {
-            if plan.len() == 128 {
-                break;
-            }
-            plan.push((base.clone(), face));
-        }
-        if plan.len() == 128 {
-            break;
-        }
+        if plan.len()==128 {break;}
     }
     if plan.is_empty() {
         return Ok(());
@@ -2331,6 +2298,35 @@ pub(crate) fn decode_text(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn shared_stylesheet_initial_inline_order_and_noscript_follow_renderer_admission() {
+        let folder=Folder::new();folder.file("small.css","#target{width:77px}");
+        let inline=format!("<style>/*{}*/#target{{width:199px}}</style>","x".repeat(70));
+        for (markup,expected,external_count) in [
+            (format!("<link rel=stylesheet href=small.css>{inline}<div id=target>T</div>"),77.0,1),
+            (format!("{inline}<link rel=stylesheet href=small.css><div id=target>T</div>"),199.0,0),
+            (format!("<noscript>{inline}</noscript><link rel=stylesheet href=small.css><div id=target>T</div>"),77.0,1),
+        ] {
+            let page=folder.page(&markup);
+            let loaded=local_with_options(&page,LoadOptions{stylesheet_limits:css::StylesheetLimits{sheet_bytes:128,document_bytes:100,rules:8},..LoadOptions::default()}).unwrap();
+            assert_eq!(loaded.styles.len(),external_count,"{:?}",loaded.events);
+            let target=loaded.document.nodes.iter().enumerate().find_map(|(n,_)|(loaded.document.attr(n,"id")==Some("target")).then_some(n)).unwrap();
+            assert_eq!(css::compute(&loaded.document,&loaded.styles)[target].width,css::Length::Px(expected));
+        }
+    }
+
+    #[test]
+    fn shared_stylesheet_local_file_retains_complete_tail_and_small_profile_refuses_whole_sheet() {
+        let folder=Folder::new();
+        let source=String::from_utf8(crate::compression::gzip(include_bytes!("../tools/fixtures/large-tail.css.gz"),8*1024*1024,&||Ok(())).unwrap()).unwrap();
+        folder.file("large.css",&source);let page=folder.page("<link rel=stylesheet href=large.css><div id=target>Target</div>");
+        let loaded=local(&page).unwrap();assert_eq!(loaded.styles.values().next().unwrap(),&source);
+        let target=loaded.document.nodes.iter().enumerate().find_map(|(n,_)|(loaded.document.attr(n,"id")==Some("target")).then_some(n)).unwrap();
+        assert_eq!(crate::css::compute(&loaded.document,&loaded.styles)[target].width,crate::css::Length::Px(173.0));
+        let small=local_with_options(&page,LoadOptions{stylesheet_limits:css::StylesheetLimits{sheet_bytes:64*1024,document_bytes:128*1024,rules:32},..LoadOptions::default()}).unwrap();
+        assert!(small.styles.is_empty());assert_eq!(crate::css::compute(&small.document,&small.styles)[target].width,crate::css::Length::Auto);
+    }
+
     use super::*;
     use std::io::{Read, Write};
     use std::net::TcpListener;

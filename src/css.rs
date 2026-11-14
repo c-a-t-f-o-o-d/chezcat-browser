@@ -3,11 +3,94 @@ use std::collections::HashMap;
 
 use crate::html::{Document, NodeKind};
 
-const MAX_CSS_BYTES: usize = 1_048_576;
-const MAX_RULES: usize = 2_048;
-const MAX_DECLARATIONS: usize = 128;
+const MAX_DECLARATIONS: usize = 4096;
 const MAX_SELECTOR_BYTES: usize = 512;
-const MAX_MATCH_STEPS: usize = 4_000_000;
+const MAX_MATCH_STEPS: usize = 128_000_000;
+
+/// Host policy, shared by resource decoding, retention and the complete parser.
+/// These are allowances, never sizes used for maximum-sized preallocation.
+#[derive(Clone,Copy,Debug,PartialEq,Eq)]
+pub struct StylesheetLimits { pub sheet_bytes:usize, pub document_bytes:usize, pub rules:usize }
+impl Default for StylesheetLimits {
+    fn default()->Self {Self{sheet_bytes:8*1024*1024,document_bytes:64*1024*1024,rules:65_536}}
+}
+#[derive(Clone,Copy,Debug,Default,PartialEq,Eq)]
+pub struct StylesheetUsage {pub bytes:usize,pub rules:usize}
+impl StylesheetLimits {
+    pub fn accept(self,source:&str,usage:StylesheetUsage)->Result<StylesheetUsage,String> {
+        let bytes=usage.bytes.checked_add(source.len()).ok_or("Stylesheet byte accounting overflow.")?;
+        if source.len()>self.sheet_bytes || bytes>self.document_bytes {
+            return Err(format!("Complete stylesheet refused: {} decoded UTF-8 bytes; allowances {} per sheet / {} per document.",source.len(),self.sheet_bytes,self.document_bytes));
+        }
+        let mut rules=usage.rules;
+        let mut exhausted=false;
+        let mut declarations_exhausted=false;
+        sheet_blocks(source,|_,body| {
+            if parse_declarations_bounded(body,MAX_DECLARATIONS+1).len()>MAX_DECLARATIONS {declarations_exhausted=true;return false;}
+            match rules.checked_add(1) {Some(next) if next<=self.rules=>rules=next,_=>exhausted=true}
+            !exhausted
+        });
+        if declarations_exhausted {return Err(format!("Complete stylesheet refused: per-block declaration allowance {MAX_DECLARATIONS} reached."));}
+        if exhausted {return Err(format!("Complete stylesheet refused: document parser block allowance {} reached.",self.rules));}
+        Ok(StylesheetUsage{bytes,rules})
+    }
+}
+
+/// The same ordered, whole-sheet admission is used for rendering and reports.
+/// A refusal never supplies a prefix to the parser or consumes the next sheet's
+/// allowance. The DOM retains the author's complete text.
+fn accepted_stylesheets_with<'a>(doc:&'a Document,external:&'a HashMap<usize,String>,replacement:Option<(usize,&'a str)>) -> (Vec<(usize,std::borrow::Cow<'a,str>)>,Vec<String>,StylesheetUsage) {
+    let mut accepted=Vec::new();let mut errors=Vec::new();let mut usage=StylesheetUsage::default();
+    let mut seen=vec![false;doc.nodes.len()];let mut stack=if doc.nodes.is_empty(){Vec::new()}else{vec![0]};
+    while let Some(node)=stack.pop() {
+        if node>=doc.nodes.len() || seen[node] {continue;}seen[node]=true;
+        let entry=&doc.nodes[node];
+        let tag=match &entry.kind {NodeKind::Element{tag,..}=>tag.as_str(),_=>""};
+        if matches!(tag,"template"|"iframe"|"object") || tag=="noscript"&&doc.scripting_enabled {continue;}
+        stack.extend(entry.children.iter().rev().copied().filter(|&child|child!=0));
+        if !matches!(tag,"style"|"link") {continue;}
+        if !media_supported(doc.attr(node,"media").unwrap_or("")) {continue;}
+        let source=if tag=="link" {
+            let source=if let Some((_,source))=replacement.filter(|(owner,_)|*owner==node) {source} else {let Some(source)=external.get(&node) else {continue;};source.as_str()};
+            std::borrow::Cow::Borrowed(source)
+        } else {
+            let mut length=Some(0usize);
+            for &child in &entry.children {if let Some(crate::html::Node{kind:NodeKind::Text(text),..})=doc.nodes.get(child) {length=length.and_then(|n|n.checked_add(text.len()));}}
+            let Some(length)=length.filter(|&n|n<=doc.stylesheet_limits.sheet_bytes) else {errors.push(format!("CSS node {node}: complete inline stylesheet exceeds its byte allowance."));continue;};
+            let mut source=String::new();
+            if source.try_reserve(length).is_err() {errors.push(format!("CSS node {node}: stylesheet allocation failed."));continue;}
+            for &child in &entry.children {if let Some(crate::html::Node{kind:NodeKind::Text(text),..})=doc.nodes.get(child) {source.push_str(text);}}
+            std::borrow::Cow::Owned(source)
+        };
+        match doc.stylesheet_limits.accept(&source,usage) {
+            Ok(next)=>{usage=next;accepted.push((node,source));},
+            Err(error)=>errors.push(format!("CSS node {node}: {error}")),
+        }
+    }
+    (accepted,errors,usage)
+}
+pub(crate) fn accepted_stylesheets<'a>(doc:&'a Document,external:&'a HashMap<usize,String>)->(Vec<(usize,std::borrow::Cow<'a,str>)>,Vec<String>,StylesheetUsage) {accepted_stylesheets_with(doc,external,None)}
+pub fn check_stylesheet_candidate(doc:&Document,external:&HashMap<usize,String>,node:usize,source:&str)->Result<(),String> {
+    let (accepted,errors,_)=accepted_stylesheets_with(doc,external,Some((node,source)));
+    if accepted.iter().any(|(owner,_)|*owner==node) {return Ok(());}
+    let prefix=format!("CSS node {node}:");
+    Err(errors.into_iter().find(|error|error.starts_with(&prefix)).unwrap_or_else(||"Stylesheet is not active in the current connected document.".into()))
+}
+pub(crate) fn document_order(doc:&Document)->Vec<usize> {
+    let mut order=Vec::new();let mut seen=vec![false;doc.nodes.len()];let mut stack=if doc.nodes.is_empty(){Vec::new()}else{vec![0]};
+    while let Some(node)=stack.pop(){if node>=seen.len()||seen[node]{continue;}seen[node]=true;order.push(node);stack.extend(doc.nodes[node].children.iter().rev().copied().filter(|&child|child!=0));}order
+}
+pub(crate) fn inline_stylesheet(doc:&Document,node:usize)->Result<String,String> {
+    let mut source=String::new();
+    for &child in &doc.nodes[node].children {if let Some(crate::html::Node{kind:NodeKind::Text(text),..})=doc.nodes.get(child) {
+        let length=source.len().checked_add(text.len()).ok_or("Stylesheet text length overflow.")?;
+        if length>doc.stylesheet_limits.sheet_bytes {return Err("Complete inline stylesheet exceeds its byte allowance.".into());}
+        source.try_reserve(text.len()).map_err(|_|"Inline stylesheet allocation failed.")?;source.push_str(text);
+    }}Ok(source)
+}
+pub fn stylesheet_usage(doc:&Document,external:&HashMap<usize,String>)->StylesheetUsage {accepted_stylesheets(doc,external).2}
+pub fn stylesheet_diagnostics(doc:&Document,external:&HashMap<usize,String>)->Vec<String> {accepted_stylesheets(doc,external).1}
+pub(crate) fn media_supported(value:&str)->bool {let value=value.trim();value.is_empty()||value.eq_ignore_ascii_case("all")||value.eq_ignore_ascii_case("screen")}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Length {
@@ -579,49 +662,7 @@ pub fn compute_with_state(
         }
     }
     let mut rules = Vec::new();
-    let mut bytes_left = MAX_CSS_BYTES;
-    for &index in &order {
-        let node = &doc.nodes[index];
-        if inert[index] {
-            continue;
-        }
-        let NodeKind::Element { tag, .. } = &node.kind else {
-            continue;
-        };
-        if matches!(tag.as_str(), "style" | "link") {
-            let media = doc.attr(index, "media").unwrap_or("").trim();
-            if !media.is_empty()
-                && !media.eq_ignore_ascii_case("all")
-                && !media.eq_ignore_ascii_case("screen")
-            {
-                continue;
-            }
-        }
-        if bytes_left == 0 || rules.len() == MAX_RULES {
-            break;
-        }
-        if tag == "style" {
-            let mut text = String::new();
-            for &child in &node.children {
-                if let Some(crate::html::Node {
-                    kind: NodeKind::Text(content),
-                    ..
-                }) = doc.nodes.get(child)
-                {
-                    let take = prefix(content, bytes_left.saturating_sub(text.len()));
-                    text.push_str(take);
-                }
-            }
-            bytes_left = bytes_left.saturating_sub(text.len());
-            parse_sheet(&text, &mut rules);
-        } else if tag == "link" {
-            if let Some(text) = external.get(&index) {
-                let text = prefix(text, bytes_left);
-                bytes_left -= text.len();
-                parse_sheet(text, &mut rules);
-            }
-        }
-    }
+    for (_,source) in accepted_stylesheets(doc,external).0 {parse_sheet(&source,&mut rules);}
 
     let mut computed = vec![Style::default(); doc.nodes.len()];
     let mut budget = MAX_MATCH_STEPS;
@@ -983,7 +1024,7 @@ fn parse_sheet(source: &str, rules: &mut Vec<Rule>) {
                 }
             }
         }
-        rules.len() < MAX_RULES
+        true
     });
 }
 
@@ -1009,9 +1050,14 @@ pub struct FontFace {
 
 /// Descriptors retain source order and URL case; the loader supplies the URL of
 /// the stylesheet which owns them. Unsupported data never grants a fetch.
+#[cfg(test)]
 pub fn font_faces(source: &str) -> Vec<FontFace> {
+    font_faces_with_limits(source,StylesheetLimits::default())
+}
+pub fn font_faces_with_limits(source:&str,limits:StylesheetLimits)->Vec<FontFace> {
     let mut faces = Vec::new();
-    sheet_blocks(prefix(source, MAX_CSS_BYTES), |prelude, body| {
+    if limits.accept(source,StylesheetUsage::default()).is_err() {return faces;}
+    sheet_blocks(source, |prelude, body| {
         if prelude.trim().eq_ignore_ascii_case("@font-face") {
             let mut face = FontFace {
                 family: String::new(),
@@ -2063,6 +2109,9 @@ fn matches_selector(
 }
 
 fn parse_declarations(source: &str) -> Vec<Declaration> {
+    parse_declarations_bounded(source,MAX_DECLARATIONS)
+}
+fn parse_declarations_bounded(source:&str,maximum:usize)->Vec<Declaration> {
     let source = without_comments(source);
     let mut declarations = Vec::new();
     let mut start = 0;
@@ -2118,7 +2167,7 @@ fn parse_declarations(source: &str) -> Vec<Declaration> {
             }
         }
         start = (index + 1).min(source.len());
-        if declarations.len() == MAX_DECLARATIONS {
+        if declarations.len() == maximum {
             break;
         }
     }
@@ -2902,6 +2951,48 @@ fn color(value: &str) -> Option<u32> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn shared_stylesheet_declarations_beyond_old_prefix_apply_or_refuse_whole_block() {
+        let doc=crate::html::parse("<link href=sheet><p id=target>Target</p>");
+        let node=doc.nodes.iter().enumerate().find_map(|(n,_)|(doc.attr(n,"id")==Some("target")).then_some(n)).unwrap();
+        let link=doc.nodes.iter().enumerate().find_map(|(n,_)|(doc.attr(n,"href")==Some("sheet")).then_some(n)).unwrap();
+        let source=format!("#target{{width:1px;{}width:99px}}","height:1px;".repeat(512));
+        let mut external=HashMap::from([(link,source)]);assert_eq!(compute(&doc,&external)[node].width,Length::Px(99.0));
+        external.insert(link,format!("#target{{width:1px;{}width:99px}}","height:1px;".repeat(MAX_DECLARATIONS)));
+        assert_eq!(compute(&doc,&external)[node].width,Length::Auto);assert!(stylesheet_diagnostics(&doc,&external)[0].contains("declaration allowance"));
+    }
+
+    #[test]
+    fn shared_stylesheet_candidate_rechecks_changed_inline_sources_before_publication() {
+        let mut doc=crate::html::parse("<style>/*changed after request*/</style><link rel=stylesheet href=sheet><div id=target>T</div>");
+        doc.stylesheet_limits=StylesheetLimits{sheet_bytes:128,document_bytes:100,rules:8};
+        let link=doc.nodes.iter().enumerate().find_map(|(n,_)|(doc.attr(n,"href")==Some("sheet")).then_some(n)).unwrap();
+        let text=doc.nodes.iter().position(|node|matches!(&node.kind,NodeKind::Text(value) if value.contains("changed after request"))).unwrap();
+        let source="#target{width:77px}";let external=HashMap::new();
+        assert!(check_stylesheet_candidate(&doc,&external,link,source).is_ok());
+        doc.nodes[text].kind=NodeKind::Text(format!("/*{}*/#target{{width:199px}}","x".repeat(70)));
+        assert!(check_stylesheet_candidate(&doc,&external,link,source).unwrap_err().contains("per document"));
+        assert!(external.is_empty(),"Preflight must not publish the source");
+        doc.nodes[text].kind=NodeKind::Text(String::new());assert!(check_stylesheet_candidate(&doc,&external,link,source).is_ok());
+    }
+
+    #[test]
+    fn shared_stylesheet_parser_admits_complete_sources_or_reports_atomic_refusal() {
+        let mut doc=crate::html::parse("<link rel=stylesheet href=sheet><div id=target>Target</div>");
+        let link=doc.nodes.iter().enumerate().find_map(|(n,_)|(doc.attr(n,"href")==Some("sheet")).then_some(n)).unwrap();
+        let target=doc.nodes.iter().enumerate().find_map(|(n,_)|(doc.attr(n,"id")==Some("target")).then_some(n)).unwrap();
+        let source=String::from_utf8(crate::compression::gzip(include_bytes!("../tools/fixtures/large-tail.css.gz"),8*1024*1024,&||Ok(())).unwrap()).unwrap();
+        let mut external=HashMap::from([(link,source)]);
+        assert_eq!(compute(&doc,&external)[target].width,Length::Px(173.0));
+        assert_eq!(stylesheet_usage(&doc,&external).rules,4097);
+        doc.stylesheet_limits=StylesheetLimits{sheet_bytes:2*1024*1024,document_bytes:2*1024*1024,rules:32};
+        assert_eq!(compute(&doc,&external)[target].width,Length::Auto);assert!(stylesheet_diagnostics(&doc,&external)[0].contains("parser block allowance"));
+        external.insert(link,"#target{width:47px}".into());assert_eq!(compute(&doc,&external)[target].width,Length::Px(47.0));
+        let limits=StylesheetLimits::default();assert!(limits.accept("a{}",StylesheetUsage{bytes:usize::MAX,rules:0}).is_err());assert!(limits.accept("a{}",StylesheetUsage{bytes:0,rules:usize::MAX}).is_err());
+        let huge_comment=format!("/*{}*/@font-face{{font-family:TailFace;src:local(TailFace)}}","x".repeat(1500000));
+        assert_eq!(font_faces(&huge_comment)[0].family,"TailFace");
+    }
+
     #[test]
     fn image_rendering_inherits_and_preserves_valid_cascade_values() {
         use super::ImageRendering::*;

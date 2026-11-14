@@ -209,6 +209,7 @@ pub struct App {
     images_enabled: bool,
     profile: crate::profile::Store,
     input_search_provider: Option<String>,
+    stylesheet_limits: crate::css::StylesheetLimits,
     downloads: crate::downloads::Manager,
     downloads_ui: download_ui::DownloadsUi,
     bookmarks_bar: bookmarks_bar::BookmarkBar,
@@ -310,6 +311,7 @@ impl App {
             images_enabled: true,
             profile: crate::profile::Store::memory(),
             input_search_provider: None,
+            stylesheet_limits: crate::css::StylesheetLimits::default(),
             downloads: crate::downloads::Manager::default(),
             downloads_ui: download_ui::DownloadsUi::default(),
             bookmarks_bar: bookmarks_bar::BookmarkBar::default(),
@@ -504,6 +506,7 @@ impl App {
     }
     fn load_options(&self) -> loader::LoadOptions {
         loader::LoadOptions {
+            stylesheet_limits: self.stylesheet_limits,
             script_capacity: crate::javascript::limits::BROWSER_CAPACITIES,
             javascript: self.scripts_enabled,
             images: self.images_enabled,
@@ -1453,7 +1456,7 @@ impl App {
             page.set_cookie_session(self.cookies.clone());
             page.set_resource_base(&self.base_location);
             page.set_history_context(history_data, self.base_is_document_url, history_length);
-            page.set_stylesheet_bytes(self.styles.values().map(String::len).sum());
+            page.set_stylesheet_usage(crate::css::stylesheet_usage(&self.document,&self.styles));
             page.set_initial_images(loaded.image_sources, &self.images, images_pending && self.images_enabled, self.images_enabled);
             page.set_geometry(crate::script_geometry::Geometry::new(
                 self.width - 12,
@@ -1713,6 +1716,7 @@ impl App {
             self.events.join("\n\n"),
             self.script_activity(),
         );
+        for error in crate::css::stylesheet_diagnostics(&self.document,&self.styles) {report.push_str(&format!("CSS: {error}\n"));}
         report.push_str(&self.stage_report());
         report
     }

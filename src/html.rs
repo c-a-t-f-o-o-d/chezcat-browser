@@ -16,6 +16,8 @@ const MAX_DEPTH: usize = 128; // Open-element stack, including the synthetic roo
 
 #[derive(Debug)]
 pub struct Document {
+    /// Host-owned resource policy, never exposed as a document capability.
+    pub stylesheet_limits: crate::css::StylesheetLimits,
     pub title: String,
     /// The committed resource's MIME essence. Synthetic text/image viewers
     /// retain the source type; plain parser callers create HTML documents.
@@ -145,6 +147,7 @@ fn parse_internal(input: &str, context: Option<&str>, scripting: bool) -> Result
         return Err("HTML fragment NULL handling outside text-only contexts is not implemented.".into());
     }
     let mut document = Document {
+        stylesheet_limits: crate::css::StylesheetLimits::default(),
         title: String::new(),
         content_type: "text/html".into(),
         scripting_enabled: false,

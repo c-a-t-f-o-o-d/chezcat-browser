@@ -53,6 +53,24 @@ pub(super) fn dataset_attribute(name: &str) -> String {
 }
 
 impl Bridge<'_> {
+    /// Genuine HTML string reflections, not a general expando/native alias.
+    pub(super) fn html_text_reflection(&self,node:usize,name:&str)->Option<&'static str> {
+        if !self.doc.nodes.get(node).is_some_and(|entry|entry.namespace==crate::html::Namespace::Html && matches!(entry.kind,NodeKind::Element{..})) {return None;}
+        match name {
+            "dir"=>Some("dir"),"lang"=>Some("lang"),
+            "align" if matches!(tag(self.doc,node),"div"|"p"|"h1"|"h2"|"h3"|"h4"|"h5"|"h6"|"hr"|"img"|"input"|"iframe"|"object"|"embed"|"table"|"caption"|"thead"|"tbody"|"tfoot"|"tr"|"td"|"th"|"col"|"colgroup")=>Some("align"),
+            _=>None,
+        }
+    }
+    pub(super) fn html_text_reflection_get(&mut self,node:usize,name:&str)->Result<Value,String> {
+        if self.doc.nodes[node].namespace==crate::html::Namespace::UnknownForeign {return Err("HTML reflection requires a known namespace context.".into());}
+        let Some(attribute)=self.html_text_reflection(node,name) else {return Ok(Value::Undefined);};
+        let NodeKind::Element{attrs,..}=&self.doc.nodes[node].kind else {unreachable!()};self.state.work(attrs.len())?;
+        let value=self.doc.attr(node,attribute).unwrap_or("");
+        let value=if name=="dir" {["ltr","rtl","auto"].into_iter().find(|known|value.eq_ignore_ascii_case(known)).unwrap_or("")}else{value};
+        if value.len()>self.state.limits.host.string_bytes {return Err("Reflected HTML value exceeds the DOM string allowance.".into());}
+        self.state.copies(value.len())?;Ok(Value::String(value.to_owned()))
+    }
     pub(super) fn html_image_map_property(&self, node: usize) -> bool {
         self.doc.nodes.get(node).is_some_and(|item| item.namespace == crate::html::Namespace::Html)
             && tag(self.doc, node) == "img"

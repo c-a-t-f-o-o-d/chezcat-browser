@@ -178,7 +178,7 @@ fn fetch(
         .with_resource_filter(&filter);
     let response = pool.fetch_kind(
         url,
-        128 * 1024,
+        job.request.limits.sheet_bytes,
         Some(origin),
         crate::http::FetchMode::Normal,
         "STYLESHEET",
@@ -195,9 +195,7 @@ fn fetch(
         return Err("Dynamic external stylesheets require a text/css Content-Type.".into());
     }
     let source = loader::decode_text(&response.body, &content_type, false)?;
-    if source.len() > 128 * 1024 {
-        return Err("Decoded dynamic stylesheet exceeds 128 KiB.".into());
-    }
+    job.request.limits.accept(&source,crate::css::StylesheetUsage::default())?;
     events.push(format!(
         "DYNAMIC STYLESHEET node {}: loaded {} bytes from {}",
         job.request.node,
@@ -375,10 +373,22 @@ mod tests {
                         let request = String::from_utf8_lossy(&request);
                         let path = request.split_ascii_whitespace().nth(1).unwrap_or("").to_owned();
                         seen.lock().unwrap().push(path.clone());
+                        if matches!(path.as_str(),"/large.css"|"/latin.css") {
+                            let (body,extra)=if path=="/large.css" {(include_bytes!("../tools/fixtures/large-tail.css.gz").to_vec(),"Content-Encoding: gzip\r\n")} else {
+                                let mut body=b"/*".to_vec();body.extend(std::iter::repeat_n(0xa3,1000));body.extend_from_slice(b"*/#target{width:999px}");(body,"")
+                            };
+                            let encoding=if path=="/latin.css" {"windows-1252"}else{"utf-8"};
+                            let header=format!("HTTP/1.1 200 OK\r\nContent-Type: text/css; charset={encoding}\r\n{extra}Content-Length: {}\r\nConnection: close\r\n\r\n",body.len());
+                            let _=stream.write_all(header.as_bytes());let _=stream.write_all(&body);return;
+                        }
                         let mut mime = "text/html";
                         let mut status = "200 OK";
                         let mut headers = String::new();
                         let body = match path.as_str() {
+                            "/refused-font"=>format!("<style>#target{{font-family:RefusedFace}}</style><style>/*{}*/@font-face{{font-family:RefusedFace;src:url('/forbidden.woff')}}</style><div id=target>Used family</div>","x".repeat(200)),
+                            "/initial-large"=>"<head><link rel=stylesheet href=/large.css><link rel=stylesheet href=/large.css></head><body><div id=target>Tail target</div>".to_owned(),
+                            "/initial-latin"=>"<head><link rel=stylesheet href=/latin.css></head><body><div id=target>Tail target</div>".to_owned(),
+                            "/dynamic-large"=>"<head></head><body><div id=target>Tail target</div><script>var sheet=document.createElement('link');sheet.rel='stylesheet';sheet.href='/large.css';sheet.onload=function(){if(document.getElementById('target').clientWidth!==173)throw 'tail geometry';document.title='Large applied';};sheet.onerror=function(){document.title='Large refused';};document.head.appendChild(sheet);</script>".to_owned(),
                             "/sheet.css" | "/held.css" => {
                                 if path == "/held.css" {
                                     let _ = held.1.wait_timeout_while(held.0.lock().unwrap(), Duration::from_secs(4), |open| !*open).unwrap();
@@ -598,4 +608,51 @@ document.head.appendChild(sheet);
             );
         }
     }
+
+    fn original_large_css()->String {
+        String::from_utf8(crate::compression::gzip(include_bytes!("../tools/fixtures/large-tail.css.gz"),8*1024*1024,&||Ok(())).unwrap()).unwrap()
+    }
+    #[test]
+    fn shared_stylesheet_large_gzip_initial_reuse_and_dynamic_apply_the_complete_tail() {
+        let site=Site::new();let expected=original_large_css();assert!(expected.len()>1024*1024);
+        let mut app=open(&site,"/initial-large");wait(&mut app,|app|!app.is_loading());
+        assert_eq!(app.styles.len(),2);assert!(app.styles.values().all(|source|source==&expected));
+        assert_eq!(site.requests.lock().unwrap().iter().filter(|path|path.as_str()=="/large.css").count(),1);
+        let target=app.document.nodes.iter().enumerate().find_map(|(n,_)|(app.document.attr(n,"id")==Some("target")).then_some(n)).unwrap();
+        let styles=crate::css::compute(&app.document,&app.styles);assert_eq!(styles[target].width,crate::css::Length::Px(173.0));assert_eq!(styles[target].height,crate::css::Length::Px(29.0));
+        assert!(app.draw().pixels.contains(&0x123456));assert!(crate::css::stylesheet_diagnostics(&app.document,&app.styles).is_empty());
+        let mut dynamic=open(&site,"/dynamic-large");wait(&mut dynamic,|app|!app.is_loading());
+        assert_eq!(dynamic.document.title,"Large applied","{}",dynamic.scripting.as_ref().unwrap().report());
+        assert_eq!(dynamic.scripting.as_ref().unwrap().error_count(),0);assert_eq!(dynamic.styles.values().next().unwrap(),&expected);
+        assert!(dynamic.draw().pixels.contains(&0x123456));
+    }
+    #[test]
+    fn shared_stylesheet_small_decode_profile_refuses_whole_source_and_later_recovers() {
+        let site=Site::new();let mut app=App::new();
+        app.stylesheet_limits=crate::css::StylesheetLimits{sheet_bytes:64*1024,document_bytes:256*1024,rules:32};
+        app.navigate_location(site.location("/dynamic-large"),true);wait(&mut app,|app|!app.is_loading());
+        assert_eq!(app.document.title,"Large refused");assert!(app.styles.is_empty());assert!(!app.draw().pixels.contains(&0x123456));
+        eval(&mut app,"sheet.onload=function(){if(document.getElementById('target').clientWidth!==77)throw 'recovery geometry';document.title='Recovered';};sheet.onerror=function(){throw 'recovery source';};sheet.href='/next.css';");
+        wait(&mut app,|app|!app.is_loading());assert_eq!(app.document.title,"Recovered");assert_eq!(app.styles.len(),1);
+        assert!(app.styles.values().all(|source|source.len()<1024));
+    }
+    #[test]
+    fn shared_stylesheet_checks_decoded_utf8_expansion_after_http_bytes() {
+        let site=Site::new();let mut app=App::new();
+        app.stylesheet_limits=crate::css::StylesheetLimits{sheet_bytes:1500,document_bytes:8192,rules:16};
+        app.navigate_location(site.location("/initial-latin"),true);wait(&mut app,|app|!app.is_loading());
+        assert!(app.styles.is_empty());assert!(app.events.iter().any(|event|event.contains("decoded UTF-8")),"{:?}",app.events);
+        app.navigate_location(site.location("/home"),true);wait(&mut app,|app|!app.is_loading());
+        assert_eq!(app.document.title,"parser-sheet-window");assert_eq!(app.styles.len(),1);
+    }
+
+    #[test]
+    fn shared_stylesheet_refused_inline_source_cannot_supply_font_fetches() {
+        let site=Site::new();let mut app=App::new();
+        app.stylesheet_limits=crate::css::StylesheetLimits{sheet_bytes:128,document_bytes:256,rules:16};
+        app.navigate_location(site.location("/refused-font"),true);wait(&mut app,|app|!app.is_loading());
+        assert!(!site.requests.lock().unwrap().iter().any(|path|path=="/forbidden.woff"));
+        assert!(!crate::css::stylesheet_diagnostics(&app.document,&app.styles).is_empty());
+    }
+
 }

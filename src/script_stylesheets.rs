@@ -4,12 +4,11 @@
 use super::*;
 use std::collections::VecDeque;
 
-pub(super) const MAX_SHEET_BYTES: usize = 128 * 1024;
-const MAX_STYLESHEET_BYTES: usize = 1024 * 1024;
 const MAX_STYLESHEET_REQUESTS: usize = crate::loader::MAX_STYLESHEETS;
 
 #[derive(Clone, Debug)]
 pub struct DynamicStylesheet {
+    pub limits: crate::css::StylesheetLimits,
     pub node: usize,
     pub generation: u64,
     pub target: crate::navigation::Location,
@@ -40,6 +39,7 @@ pub(super) struct StylesheetState {
     entries: HashMap<usize, SheetEntry>,
     attempts: usize,
     pub source_bytes: usize,
+    pub source_rules: usize,
     pub in_flight: usize,
 }
 
@@ -62,8 +62,9 @@ pub(super) fn link_attribute(property: &str) -> Option<&'static str> {
 
 impl Page {
     /// Include already retained external styles in the dynamic-source budget.
-    pub fn set_stylesheet_bytes(&mut self, bytes: usize) {
-        self.state.stylesheets.source_bytes = bytes;
+    pub fn set_stylesheet_usage(&mut self, usage: crate::css::StylesheetUsage) {
+        self.state.stylesheets.source_bytes = usage.bytes;
+        self.state.stylesheets.source_rules = usage.rules;
     }
 
     pub fn take_dynamic_stylesheets(&mut self) -> VecDeque<DynamicStylesheet> {
@@ -105,20 +106,16 @@ impl Page {
         let mut changed = false;
         if current {
             let result = result.and_then(|source| {
-                if source.len() > MAX_SHEET_BYTES
-                    || source.len()
-                        > MAX_STYLESHEET_BYTES.saturating_sub(self.state.stylesheets.source_bytes)
-                {
-                    Err("Dynamic stylesheet exceeds the 128 KiB sheet or 1 MiB document source limit.".into())
-                } else {
-                    Ok(source)
-                }
+                crate::css::check_stylesheet_candidate(doc,styles,request.node,&source)?;
+                let next=request.limits.accept(&source,crate::css::StylesheetUsage{bytes:self.state.stylesheets.source_bytes,rules:self.state.stylesheets.source_rules})?;
+                Ok((source,next))
             });
             let event = match result {
-                Ok(source) => {
+                Ok((source,next)) => {
                     // Count every accepted source, even if later removed. This
                     // prevents repeated href changes from resetting the budget.
-                    self.state.stylesheets.source_bytes += source.len();
+                    self.state.stylesheets.source_bytes = next.bytes;
+                    self.state.stylesheets.source_rules = next.rules;
                     if let Some(geometry) = &mut self.state.geometry {
                         geometry.set_stylesheet(request.node, Some(&source));
                     }
@@ -339,6 +336,7 @@ impl Bridge<'_> {
             Err(error) => (origin.clone(), Some(error)),
         };
         self.state.stylesheets.pending.push_back(DynamicStylesheet {
+            limits: self.doc.stylesheet_limits,
             node,
             generation,
             target,

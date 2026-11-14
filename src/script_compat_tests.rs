@@ -5,6 +5,28 @@ fn shared_probe(source: &str) -> (Document,Forms,Page,Outcome) {
 }
 
 #[test]
+fn html_direction_language_and_alignment_reflect_native_attributes_and_keep_conversion_atomic() {
+    let (doc,_,page,outcome)=page("<div id=p dir=RtL lang=EN align=LeFt>Text</div><span id=s></span>",&[r#"
+var p=document.getElementById('p'),s=document.getElementById('s');
+if(p.dir!=='rtl'||p.lang!=='EN'||p.align!=='LeFt'||!('dir' in p)||!('lang' in p)||!('align' in p))throw 'initial reflection';
+var attr=p.getAttributeNode('align'),calls=0;p.align={toString:function(){calls++;return 'right';}};
+if(calls!==1||p.align!=='right'||attr.value!=='right'||p.getAttribute('align')!=='right')throw 'native attribute identity';
+p.dir='AUTO';if(p.dir!=='auto'||p.getAttribute('dir')!=='AUTO')throw 'known direction value';
+p.dir='invalid';if(p.dir!==''||p.getAttribute('dir')!=='invalid')throw 'invalid direction';
+p.dir=null;if(p.dir!==''||p.getAttribute('dir')!=='null')throw 'DOMString conversion';
+p.lang=17;if(p.lang!=='17'||p.getAttribute('lang')!=='17')throw 'language string';
+var marker={},caught=false;try{p.align={toString:function(){throw marker;}};}catch(x){caught=x===marker;}if(!caught||p.align!=='right')throw 'conversion rollback';
+caught=false;try{p.align=Symbol();}catch(x){caught=x.name==='TypeError';}if(!caught||p.align!=='right')throw 'symbol';
+p.removeAttribute('dir');p.removeAttribute('lang');if(p.dir!==''||p.lang!=='')throw 'absence';
+if('align' in s||s.align!==undefined)throw 'unrelated interface';
+var t=document.createTextNode('t');if('dir' in t||t.dir!==undefined)throw 'text brand';
+"#]);
+    assert_eq!(outcome.errors,0,"{}",page.report());
+    let node=doc.nodes.iter().enumerate().find_map(|(n,_)|(doc.attr(n,"id")==Some("p")).then_some(n)).unwrap();
+    assert_eq!(crate::css::compute(&doc,&HashMap::new())[node].align,crate::css::Align::Right);
+}
+
+#[test]
 fn replace_child_returns_removed_identity_and_preserves_detached_references_and_collections() {
     let (_,_,page,outcome)=page("<div id=p><span id=old title=kept><b id=inside>old</b></span><em id=tail>tail</em></div><div id=q><i id=incoming>new</i></div>", &[r#"
 var p=document.getElementById('p'),q=document.getElementById('q'),old=document.getElementById('old'),inside=document.getElementById('inside'),tail=document.getElementById('tail'),incoming=document.getElementById('incoming');

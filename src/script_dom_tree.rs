@@ -325,6 +325,7 @@ impl Bridge<'_> {
         let Some(node) = node_index(object).filter(|&node| node < self.doc.nodes.len()) else {
             return false;
         };
+        if self.html_text_reflection(node,property).is_some() {return true;}
         self.dom_script(node)
             && script_attribute(property).is_some_and(|name| !boolean_script_attribute(name))
             || self.dom_stylesheet(node)
@@ -417,6 +418,10 @@ impl Bridge<'_> {
             return Ok(None);
         };
         let node = self.dom_node(node_handle(node))?;
+        if matches!(property,"dir"|"lang"|"align") {
+            if self.doc.nodes[node].namespace==crate::html::Namespace::UnknownForeign {return Err("HTML reflection requires a known namespace context.".into());}
+            return Ok(Some(self.html_text_reflection(node,property).is_some()));
+        }
         if property == "getBoundingClientRect" { return Ok(Some(self.class_list_element_receiver(object))); }
         if property == "attributes" {
             if !matches!(self.doc.nodes[node].kind, NodeKind::Element { .. }) { return Ok(Some(false)); }
@@ -493,6 +498,7 @@ impl Bridge<'_> {
             return Ok(None);
         }
         let node = self.dom_node(object)?;
+        if matches!(property,"dir"|"lang"|"align") {return self.html_text_reflection_get(node,property).map(Some);}
         if property == "innerHTML" && matches!(self.doc.nodes[node].kind, NodeKind::Element { .. }) { return self.inner_html(node).map(Some); }
         if property == "attributes" {
             if !matches!(self.doc.nodes[node].kind, NodeKind::Element { .. }) { return Ok(Some(Value::Undefined)); }
@@ -1085,6 +1091,9 @@ impl Bridge<'_> {
             return Ok(false);
         }
         let node = self.dom_node(object)?;
+        if let Some(attribute)=self.html_text_reflection(node,property) {
+            let value=self.text(value)?;self.attribute(node,attribute,Some(value))?;return Ok(true);
+        }
         if let NodeKind::Text(old) = &self.doc.nodes[node].kind {
             if !matches!(property, "data" | "nodeValue" | "textContent") {
                 return Ok(false);

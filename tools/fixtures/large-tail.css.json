@@ -1,0 +1,9 @@
+{
+  "scope": "Original compressible CSS with meaningful tail rules; no third-party assets.",
+  "decoded_bytes": 1726356,
+  "decoded_sha256": "78a9540be8711b0a818abd42abf8b0d84c563ed484059df8783238797235f48d",
+  "gzip_bytes": 16068,
+  "gzip_sha256": "b9b08ada902be5c1f638e55ab1a3d12b331378def3d4ba223d4942a2363980e6",
+  "padding_rules": 4096,
+  "tail": "#target{display:block;width:173px;height:29px;color:#123456}"
+}

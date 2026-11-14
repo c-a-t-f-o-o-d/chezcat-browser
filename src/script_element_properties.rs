@@ -134,6 +134,7 @@ impl Bridge<'_> {
         node_index(object).is_some_and(|node| {
             let tag = tag(self.doc, node);
             contains(specific(tag), name)
+                || self.html_text_reflection(node,name).is_some()
                 || self.html_spacing_property(node, name)
                 || matches!(tag, "a" | "area") && contains(URL, name)
                 || matches!(tag, "input" | "button" | "textarea") && contains(VALIDATION, name)
