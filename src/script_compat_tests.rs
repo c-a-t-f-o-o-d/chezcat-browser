@@ -209,7 +209,7 @@ document.title='element-expando-first-ok';
 fn native_element_expandos_preserve_unsupported_native_and_enumeration_boundaries() {
     let (mut doc,mut forms,mut page,outcome)=page("<div id=p></div><iframe id=inert srcdoc=x></iframe>",&["var p=document.getElementById('p');p.customProbe=1;"]);
     assert_eq!(outcome.errors,0,"{}",page.report());
-    for operation in ["p.getBoundingClientRect;","Object.defineProperty(p,'innerHTML',{value:'x'});","Object.defineProperty(document.createElement('input'),'files',{value:[]});","Object.defineProperty(document.createElement('blockquote'),'cite',{value:'https://example.test/'});","Object.defineProperty(document.createElement('meta'),'content',{value:'x'});","Object.defineProperty(document.createElement('link'),'as',{value:'script'});","Object.setPrototypeOf(p,Array.prototype);","for(var key in p){};"] {
+    for operation in ["p.getBoxQuads;","Object.defineProperty(p,'innerHTML',{value:'x'});","Object.defineProperty(document.createElement('input'),'files',{value:[]});","Object.defineProperty(document.createElement('blockquote'),'cite',{value:'https://example.test/'});","Object.defineProperty(document.createElement('meta'),'content',{value:'x'});","Object.defineProperty(document.createElement('link'),'as',{value:'script'});","Object.setPrototypeOf(p,Array.prototype);","for(var key in p){};"] {
         let outcome=page.console_eval(&mut doc,&mut forms,operation);
         assert_eq!(outcome.errors,1,"{operation}: {}",page.report());
     }

@@ -63,7 +63,7 @@ impl Runtime {
         let native = host.window_properties(handle).map_err(Fault::new)?;
         // Deferred families are real nonenumerable own globals. Materialize
         // before snapshotting; deleted initialized names are never recreated.
-        for family in ["Uint8Array", "URL", "TextEncoder"] { self.ensure_global_intrinsics(family)?; }
+        for family in ["Uint8Array", "URL", "TextEncoder", "DOMRect"] { self.ensure_global_intrinsics(family)?; }
         let environment = self.environment(self.global_environment);
         let raw_count = environment.bindings.len().checked_add(self.objects[properties].properties.len())
             .and_then(|n| n.checked_add(native.len())).ok_or_else(|| Fault::new("Window key accounting overflow."))?;
@@ -135,7 +135,7 @@ mod tests {
         for source in [
             "var key_a=1;let key_lexical=9;const key_const=8;window.key_b=2;window.key_c=3;window[10]=10;window[2]=2;",
             "var key_b;function key_c(){}window.key_d=4;window.key_e=5;delete window.key_d;window.key_d=6;",
-            "var names=Object.keys(window);if(names[0]!=='2'||names[1]!=='10')throw 'integer order';if(names.filter(function(n){return n.indexOf('key_')===0;}).join(',')!=='key_a,key_b,key_c,key_e,key_d')throw 'creation order';var all=Object.getOwnPropertyNames(window);for(var n of ['undefined','NaN','Infinity','Uint8Array','URL','TextEncoder']){if(all.indexOf(n)<0||all.indexOf(n)>all.indexOf('key_a')||names.indexOf(n)>=0)throw 'intrinsic metadata/order';}if(all.indexOf('key_lexical')>=0||all.indexOf('key_const')>=0)throw 'lexical leakage';",
+            "var names=Object.keys(window);if(names[0]!=='2'||names[1]!=='10')throw 'integer order';if(names.filter(function(n){return n.indexOf('key_')===0;}).join(',')!=='key_a,key_b,key_c,key_e,key_d')throw 'creation order';var all=Object.getOwnPropertyNames(window);for(var n of ['undefined','NaN','Infinity','Uint8Array','URL','TextEncoder','DOMRectReadOnly','DOMRect']){if(all.indexOf(n)<0||all.indexOf(n)>all.indexOf('key_a')||names.indexOf(n)>=0)throw 'intrinsic metadata/order';}if(all.indexOf('key_lexical')>=0||all.indexOf('key_const')>=0)throw 'lexical leakage';",
         ] { runtime.begin_job(); runtime.execute(source, &mut NoHost).unwrap(); }
     }
 

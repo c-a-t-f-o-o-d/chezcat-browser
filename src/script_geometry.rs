@@ -18,6 +18,8 @@ pub struct Geometry {
     images: HashMap<usize, (usize, usize)>,
     fonts: Book,
     boxes: Option<Vec<Option<ClientBox>>>,
+    rects: Vec<Option<layout::BorderRect>>,
+    scroll: i32,
     offset_unavailable: Vec<bool>,
     remaining: usize,
 }
@@ -39,6 +41,8 @@ impl Geometry {
             images,
             fonts: fonts.clone(),
             boxes: None,
+            rects: Vec::new(),
+            scroll: 0,
             offset_unavailable: Vec::new(),
             remaining: MAX_LAYOUTS_PER_JOB,
         }
@@ -47,6 +51,8 @@ impl Geometry {
     pub fn begin_job(&mut self) {
         self.remaining = MAX_LAYOUTS_PER_JOB;
     }
+
+    pub fn set_scroll(&mut self, scroll: i32) { self.scroll = scroll.max(0); }
 
     pub fn image_dimensions(&self, node: usize) -> Option<(usize, usize)> {
         self.images.get(&node).copied()
@@ -99,18 +105,10 @@ impl Geometry {
         self.update(width, height, zoom, images);
         self.boxes = Some(layout.client_boxes.clone());
         self.offset_unavailable = layout.offset_unavailable.clone();
+        self.rects = layout.border_rects.clone();
     }
 
-    #[allow(clippy::too_many_arguments)]
-    pub fn read(
-        &mut self,
-        doc: &Document,
-        forms: &Forms,
-        node: usize,
-        is_root: bool,
-        property: &str,
-        host_work: &mut usize,
-    ) -> Result<f64, String> {
+    fn ensure_layout(&mut self, doc: &Document, forms: &Forms, host_work: &mut usize) -> Result<(), String> {
         if self.boxes.is_none() {
             if self.remaining == 0 {
                 return Err("DOM geometry layout limit reached (4 rebuilds per job).".into());
@@ -140,7 +138,30 @@ impl Geometry {
             );
             self.boxes = Some(layout.client_boxes);
             self.offset_unavailable = layout.offset_unavailable;
+            self.rects = layout.border_rects;
         }
+        Ok(())
+    }
+
+    pub fn bounding_rect(&mut self, doc: &Document, forms: &Forms, node: usize, host_work: &mut usize) -> Result<[f64; 4], String> {
+        self.ensure_layout(doc, forms, host_work)?;
+        if let Some(rect) = self.rects.get(node).copied().flatten() {
+            let zoom = f64::from(self.zoom);
+            let y = if rect.fixed { f64::from(rect.y) } else { f64::from(rect.y) - f64::from(self.scroll) };
+            return Ok([f64::from(rect.x) / zoom, y / zoom, f64::from(rect.width) / zoom, f64::from(rect.height) / zoom]);
+        }
+        if self.offset_unavailable.get(node).copied().unwrap_or(true) {
+            return Err(format!("Bounding rectangle requires unmeasured inline, replaced, table-row or unsupported layout fragments. Receiver node={node}."));
+        }
+        Ok([0.0; 4])
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn read(
+        &mut self, doc: &Document, forms: &Forms, node: usize, is_root: bool,
+        property: &str, host_work: &mut usize,
+    ) -> Result<f64, String> {
+        self.ensure_layout(doc, forms, host_work)?;
         let client = self
             .boxes
             .as_ref()

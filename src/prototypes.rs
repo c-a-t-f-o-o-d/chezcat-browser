@@ -58,6 +58,7 @@ impl Runtime {
                 Builtin::Promise(_) => "native-promise",
                 Builtin::Date(_) => "native-date",
                 Builtin::Url(_) => "native-url",
+                Builtin::Rect(_) => "native-rect",
                 Builtin::TextEncoding(_) => "native-text-encoding",
                 _ => "native-core",
             };
@@ -73,6 +74,7 @@ impl Runtime {
             Builtin::Promise(operation) => operation.arity(),
             Builtin::Date(operation) => operation.arity(),
             Builtin::Url(operation) => operation.arity(),
+            Builtin::Rect(operation) => operation.arity(),
             Builtin::EmptyFunction | Builtin::ThrowTypeError => 0,
             Builtin::RegExp | Builtin::ParseInt | Builtin::JsonParse => 2,
             Builtin::JsonStringify => 3,
@@ -1831,6 +1833,15 @@ impl Runtime {
         host: &mut dyn Host,
     ) -> Result<Value, Fault> {
         if method == "toString" {
+            if Ordinary::from_value(&this).is_some() {
+                if let Some(key) = self.symbol_to_string_tag {
+                    let receiver = self.copy_value(&this)?;
+                    if let Value::String(tag) = self.get_symbol_property(receiver, key, host)? {
+                        self.work(tag.len())?;
+                        return self.checked_value(Value::String(format!("[object {tag}]")));
+                    }
+                }
+            }
             let name = match &this {
                 Value::Undefined => "Undefined",
                 Value::Null => "Null",

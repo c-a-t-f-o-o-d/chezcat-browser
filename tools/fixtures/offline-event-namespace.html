@@ -1,5 +1,6 @@
 <!-- Original local fixture. No external URLs, resources or access-check code. -->
 <p id="event-namespace-state">Fixture pending</p>
+<div id="geometry-state" style="width:40px;height:20px;padding:3px 5px;border:2px solid black"></div>
 <script>
 var fixtureNode=document.getElementById('event-namespace-state');
 fixtureNode.setAttribute('data-sample','value');
@@ -12,6 +13,10 @@ fixtureNode.removeAttributeNS('urn:fixture','sample');
 if(fixtureAttr.ownerElement!==null||fixtureAttr.value!=='second')throw Error('namespace detachment');
 var fixtureMap=fixtureNode.attributes;
 if(fixtureMap!==fixtureNode.attributes||fixtureMap.getNamedItem('data-sample')!==fixtureNode.getAttributeNode('data-sample')||fixtureMap.item(0)!==fixtureMap[0])throw Error('live attribute map');
+var geometryNode=document.getElementById('geometry-state'),geometryRect=geometryNode.getBoundingClientRect();
+if(!(geometryRect instanceof DOMRect)||geometryRect.width!==54||geometryRect.height!==30||geometryRect===geometryNode.getBoundingClientRect())throw Error('real renderer DOMRect');
+geometryNode.style.width='60px';
+if(geometryNode.getBoundingClientRect().width!==74||geometryRect.width!==54)throw Error('layout refresh and snapshot stability');
 var fixtureEvent=document.createEvent('UIEvents');
 fixtureEvent.initUIEvent('fixture',true,true,window,4294967297);
 if(fixtureEvent.view!==window||fixtureEvent.detail!==1||fixtureEvent.isTrusted)throw Error('UI initializer');

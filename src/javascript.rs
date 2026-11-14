@@ -64,6 +64,8 @@ mod bound_functions;
 mod collections;
 #[path = "date.rs"]
 mod date;
+#[path = "rect_api.rs"]
+mod rect_api;
 #[path = "expression_parser.rs"]
 mod expression_parser;
 #[path = "expression_evaluator.rs"]
@@ -328,6 +330,8 @@ pub trait Host {
     fn ordinary_lookup_tail(&self, _object:u32) -> bool { false }
     /// Owner validation without granting an ordinary expando or definition store.
     fn native_access_owner(&self, _object: u32) -> Option<u32> { None }
+    /// Real renderer border-box snapshot, when the host implements this method.
+    fn bounding_rect_snapshot(&mut self, _object: u32) -> Option<Result<[f64; 4], String>> { None }
     /// Real ordinary expando storage for an explicitly proven native family.
     fn expando_owner(&self, _object:u32) -> Option<u32> { None }
     fn instance_ancestry(&self, _object:u32) -> Option<NativeAncestry> { None }
@@ -2923,6 +2927,7 @@ enum Builtin {
     Promise(promises::Op),
     Date(date::Op),
     Url(url_api::Op),
+    Rect(rect_api::Op),
     Eval,
     JsonParse,
     JsonStringify,
@@ -3024,6 +3029,7 @@ struct Property {
 struct Object {
     date: Option<f64>,
     url: Option<url_api::Data>,
+    rect: Option<rect_api::Data>,
     primitive: Option<primitive_wrappers::Data>,
     promise: Option<promises::Data>,
     arguments: Option<arguments::Data>,
@@ -3133,6 +3139,7 @@ pub struct Runtime {
     symbol_dispose: Option<usize>,
     symbol_to_primitive: Option<usize>,
     symbol_iterator: Option<usize>,
+    symbol_to_string_tag: Option<usize>,
     symbol_species: Option<usize>,
     promises: promises::Arena,
     binary_roots: binary_data::Roots,
@@ -3148,6 +3155,7 @@ pub struct Runtime {
     regexp_constructor: Option<usize>,
     date_prototype: Option<usize>,
     url_roots: url_api::Roots,
+    rect_roots: rect_api::Roots,
     string_prototype: Option<usize>,
     number_prototype: Option<usize>,
     boolean_prototype: Option<usize>,
@@ -3271,6 +3279,7 @@ impl Runtime {
             symbol_dispose: None,
             symbol_to_primitive: None,
             symbol_iterator: None,
+            symbol_to_string_tag: None,
             symbol_species: None,
             promises: promises::Arena::default(),
             binary_roots: binary_data::Roots::default(),
@@ -3286,6 +3295,7 @@ impl Runtime {
             regexp_constructor: None,
             date_prototype: None,
             url_roots: url_api::Roots::default(),
+            rect_roots: rect_api::Roots::default(),
             string_prototype: None,
             number_prototype: None,
             boolean_prototype: None,
@@ -3337,7 +3347,7 @@ impl Runtime {
             native_access_caller: None,
             diagnostics: runtime_diagnostics::Data::default(),
             failed_window_realms: HashSet::new(),
-            deferred_intrinsics: if defer_families { 7 } else { 0 },
+            deferred_intrinsics: (if defer_families { 7 } else { 0 }) | 8,
             failed_intrinsics: 0,
             array_to_string_intrinsic: None,
             deferred_native_methods: Vec::new(),
@@ -3397,6 +3407,8 @@ impl Runtime {
         else { self.reserve_deferred_global_orders(intrinsic_realms::URL_GLOBALS)?; }
         if self.deferred_intrinsics & 4 == 0 { self.initialize_text_encoding()?; }
         else { self.reserve_deferred_global_orders(intrinsic_realms::TEXT_GLOBALS)?; }
+        if self.deferred_intrinsics & 8 == 0 { self.initialize_rect_api()?; }
+        else { self.reserve_deferred_global_orders(intrinsic_realms::RECT_GLOBALS)?; }
         for (name, value) in [
             ("undefined", Value::Undefined),
             ("NaN", Value::Number(f64::NAN)),
@@ -5237,6 +5249,7 @@ impl Runtime {
         self.objects.push(Object {
             date: None,
             url: None,
+            rect: None,
             primitive: None,
             promise: None,
             arguments: None,
@@ -7402,6 +7415,9 @@ impl Runtime {
             Some(Function::Native(Builtin::Url(url_api::Op::Constructor(kind)))) => {
                 self.url_construct(*kind, args, host)
             }
+            Some(Function::Native(Builtin::Rect(rect_api::Op::Constructor(mutable)))) => {
+                self.rect_construct(*mutable, args, host)
+            }
             Some(Function::Native(Builtin::Promise(promises::Op::Constructor))) => {
                 self.construct_promise(args, host)
             }
@@ -7960,6 +7976,17 @@ impl Runtime {
         for value in args { self.pin_exported_value(value); }
         host.validate_call(object, method, args)
             .map_err(|(kind, message)| Fault::exception(kind, message))?;
+        if method == "getBoundingClientRect" {
+            if let Some(ancestry) = host.instance_ancestry(object) {
+                let caller = self.native_access_caller.unwrap_or_else(|| self.browser_global.map(|(window, _)| window));
+                if caller != Some(ancestry.window) { host.validate_window_access(caller, ancestry.window).map_err(Fault::new)?; }
+                if let Some(snapshot) = host.bounding_rect_snapshot(object) {
+                    let values = snapshot.map_err(Fault::new)?;
+                    let realm = self.window_realms.get(&ancestry.window).copied().ok_or_else(|| Fault::new("Rectangle owner realm is unavailable."))?;
+                    return self.with_intrinsic_realm(realm, |runtime| runtime.new_rect_value(values, true));
+                }
+            }
+        }
         if host.indexed_for_each(object, method) {
             let callback = args.first().cloned().unwrap_or(Value::Undefined);
             if !matches!(callback, Value::Function(_)) {
@@ -8256,6 +8283,9 @@ impl Runtime {
             }
             Some(Function::Native(Builtin::Url(operation))) => {
                 return self.url_builtin(*operation, args, this, host);
+            }
+            Some(Function::Native(Builtin::Rect(operation))) => {
+                return self.rect_builtin(*operation, args, this, host);
             }
             Some(Function::Native(Builtin::Promise(operation))) => {
                 return self.promise_builtin(*operation, args, this, host);
@@ -8814,6 +8844,7 @@ impl Runtime {
             | Builtin::Promise(_)
             | Builtin::Date(_)
             | Builtin::Url(_)
+            | Builtin::Rect(_)
             | Builtin::Binary(_)
             | Builtin::Collection(_)
             | Builtin::Iterator(_)

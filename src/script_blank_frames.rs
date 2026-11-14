@@ -349,6 +349,30 @@ mod tests {
     const CREATE: &str = "var f=document.createElement('iframe');f.hidden=true;document.body.appendChild(f);var w=f.contentWindow;";
 
     #[test]
+    fn domrect_snapshots_use_element_owner_realm_and_validate_saved_foreign_calls() {
+        let source = format!("{CREATE}{}", r#"
+var p=document.createElement('div'),read=w.Function('node','return node.getBoundingClientRect();');
+var snapshot=read(p),original=DOMRect;
+var child=new w.DOMRect(1,2,3,4);if(!(child instanceof w.DOMRect)||child instanceof DOMRect||child.width!==3||Object.getPrototypeOf(child)!==w.DOMRect.prototype)throw 'cross-realm constructor metadata';
+if(!(snapshot instanceof DOMRect)||snapshot instanceof w.DOMRect||Object.getPrototypeOf(snapshot)!==DOMRect.prototype||snapshot.width!==0)throw 'snapshot owner realm';
+var native=p.getBoundingClientRect,forward=w.Function('method','node','return method.call(node);');
+if(!(forward(native,p) instanceof original))throw 'saved method owner realm';
+document.title='domrect-owner-ok';
+"#);
+        let (mut doc, mut forms, mut page, outcome) = start(&source, &crate::csp::PolicySet::default());
+        assert_eq!(outcome.errors, 0, "{}", page.report());
+        assert_eq!(doc.title, "domrect-owner-ok");
+        page.set_location(&crate::navigation::Location {url:Some(crate::url::parse("https://other.test/").unwrap().0),path:None,fragment:String::new(),root:None});
+        for source in ["read(p);", "forward(native,p);"] {
+            let outcome = page.console_eval(&mut doc, &mut forms, source);
+            assert_eq!(outcome.errors, 1, "{}", page.report());
+            assert!(page.report().contains("same-origin"), "{}", page.report());
+        }
+        let outcome = page.console_eval(&mut doc, &mut forms, "if(snapshot.width!==0||!(p.getBoundingClientRect() instanceof original))throw 'restore after denied owner';");
+        assert_eq!(outcome.errors, 0, "{}", page.report());
+    }
+
+    #[test]
     fn named_map_native_fields_and_saved_forwarders_validate_original_script_owner() {
         let source = format!("{CREATE}{}", r#"
 var p=document.createElement('div');p.id='probe';var map=p.attributes,attr=p.getAttributeNode('id');

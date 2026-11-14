@@ -762,6 +762,10 @@ impl Page {
         }
     }
 
+    pub fn set_geometry_scroll(&mut self, scroll: i32) {
+        if let Some(geometry) = &mut self.state.geometry { geometry.set_scroll(scroll); }
+    }
+
     pub fn update_geometry(
         &mut self,
         width: i32,
@@ -2210,6 +2214,15 @@ impl Host for Bridge<'_> {
     fn native_access_owner(&self, object: u32) -> Option<u32> {
         self.named_map_receiver(object).then_some(WINDOW)
     }
+    fn bounding_rect_snapshot(&mut self, object: u32) -> Option<Result<[f64; 4], String>> {
+        if !self.class_list_element_receiver(object) { return None; }
+        Some((|| {
+            let node = self.node(object)?;
+            if !self.state.dom.connected.get(node).copied().unwrap_or(false) { return Ok([0.0; 4]); }
+            self.state.geometry.as_mut().ok_or("Bounding rectangle requires the actual document renderer.")?
+                .bounding_rect(self.doc, self.forms, node, &mut self.state.host_work)
+        })())
+    }
 
     fn readonly_property(&self, object: u32, property: &str) -> bool {
         self.created_event_readonly(object, property) || self.attr_readonly(object, property) || self.dom_readonly(object, property)
@@ -2314,6 +2327,7 @@ impl Host for Bridge<'_> {
     }
 
     fn method_length(&self, object:u32, method:&str) -> Option<usize> {
+        if method == "getBoundingClientRect" && self.class_list_element_receiver(object) { return Some(0); }
         if self.named_map_receiver(object) { return match method { "item" | "getNamedItem" => Some(1), "getNamedItemNS" => Some(2), _ => None }; }
         if self.attr_element_receiver(object) && method == "setAttributeNS" { return Some(3); }
         if self.event_receiver(object) && method=="initEvent"
@@ -2627,6 +2641,7 @@ impl Host for Bridge<'_> {
     }
 
     fn accepts_receiver(&self, object: u32, method: &str, receiver: u32) -> bool {
+        if method == "getBoundingClientRect" { return self.class_list_element_receiver(object) && self.class_list_element_receiver(receiver); }
         if script_named_map::element(object).is_some() { return self.named_map_receiver(object) && self.named_map_receiver(receiver); }
         if method == "getElementsByName" { return object == DOCUMENT && receiver == DOCUMENT; }
         if method=="normalize" {return !self.is_frame_handle(object) && !self.is_frame_handle(receiver)

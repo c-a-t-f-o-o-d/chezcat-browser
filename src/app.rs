@@ -1478,6 +1478,9 @@ impl App {
         }
         self.scroll = scroll;
         self.page.set_scroll(self.scroll);
+        if let Some(page) = &mut self.scripting {
+            page.set_geometry_scroll(if self.view == View::Page { self.scroll } else { self.page_scroll });
+        }
     }
     pub fn scroll_by(&mut self, delta: i32) {
         self.user_changed_loading_position();

@@ -41,6 +41,69 @@ fn report(app: &App) -> String {
 }
 
 #[test]
+fn domrect_renderer_snapshots_include_real_borders_mutation_and_no_box_cases() {
+    let fixture = Fixture::new();
+    let app = fixture.open(r#"<html><head><style>
+body{margin:0}#box{width:120px;height:30px;padding:5px 7px;border:2px solid black;border-top:3px solid black;border-right:7px solid black;border-bottom:11px solid black}
+</style></head><body><div id=box></div><div style='display:none'><div id=hidden></div></div><div id=zero style='position:absolute;left:20px;top:30px;width:0;height:0'></div><img id=image width=10 height=12 alt=Image style='padding:3px 5px;border:2px solid black'><button id=control>Control</button><script>
+var box=document.getElementById('box'),r=box.getBoundingClientRect(),x=r.x;
+if(!(r instanceof DOMRect)||!(r instanceof DOMRectReadOnly)||r.width!==143||r.height!==54||r.right-r.left!==143||r.bottom-r.top!==54)throw 'real border rectangle';
+if(r===box.getBoundingClientRect()||box.getBoundingClientRect.length!==0)throw 'fresh snapshot/method';
+var zero=document.getElementById('zero').getBoundingClientRect();if(zero.x!==20||zero.y!==30||zero.width!==0||zero.height!==0)throw 'empty box preserves position';
+var image=document.getElementById('image').getBoundingClientRect();if(image.width!==24||image.height!==22)throw 'actual replaced border box';
+var control=document.getElementById('control').getBoundingClientRect();if(control.width<=0||control.height<=0)throw 'native control box';
+box.style.width='200px';var changed=box.getBoundingClientRect();if(changed.width!==223||r.width!==143)throw 'live layout and stable snapshot';
+r.x=987;if(box.getBoundingClientRect().x!==x||changed.x!==x)throw 'snapshot cannot move DOM';
+var originalCtor=DOMRect;DOMRect=function(){throw 'mutable binding used';};if(!(box.getBoundingClientRect() instanceof originalCtor))throw 'private canonical prototype';DOMRect=originalCtor;
+for(var node of [document.getElementById('hidden'),document.createElement('div')]){var empty=node.getBoundingClientRect();if(empty.x!==0||empty.y!==0||empty.width!==0||empty.height!==0)throw 'genuine no box';}
+var caught=false;try{box.getBoundingClientRect.call(document);}catch(e){caught=e.name==='TypeError';}if(!caught)throw 'wrong receiver';
+document.title='renderer-domrect-ok';
+</script></body></html>"#);
+    assert_eq!(app.scripting.as_ref().unwrap().error_count(), 0, "{}", report(&app));
+    assert_eq!(app.document.title, "renderer-domrect-ok");
+    let actual = app.page.border_rects[id(&app, "box")].unwrap();
+    assert_eq!((actual.width, actual.height), (223, 54));
+}
+
+#[test]
+fn domrect_scroll_zoom_and_alternate_view_use_the_underlying_rendered_page() {
+    let fixture = Fixture::new();
+    let mut app = fixture.open(r#"<html><head><style>body{margin:0}#box{width:101px;height:31px;border:1px solid black}#fixed{position:fixed;left:1px;top:7px;width:9px;height:11px}</style></head><body><div id=box></div><div id=fixed></div><div style='height:2000px'></div><script>
+function measureRect(){var r=document.getElementById('box').getBoundingClientRect(),f=document.getElementById('fixed').getBoundingClientRect();document.title=r.x+','+r.y+','+r.width+','+r.height+'|'+f.x+','+f.y+','+f.width+','+f.height;}
+</script></body></html>"#);
+    app.set_zoom(1.5);
+    let normal = app.page.border_rects[id(&app, "box")].unwrap();
+    let fixed = app.page.border_rects[id(&app, "fixed")].unwrap();
+    assert!(fixed.fixed); assert!(!normal.fixed);
+    app.set_scroll(123);
+    let expected = [normal.x as f64/1.5, (normal.y-123) as f64/1.5, normal.width as f64/1.5, normal.height as f64/1.5,
+        fixed.x as f64/1.5, fixed.y as f64/1.5, fixed.width as f64/1.5, fixed.height as f64/1.5];
+    for alternate in [false, true] {
+        if alternate { app.show_resources(); app.set_scroll(45); }
+        let outcome = app.scripting.as_mut().unwrap().console_eval(&mut app.document, &mut app.forms, "measureRect();");
+        assert_eq!(outcome.errors, 0, "{}", report(&app));
+        let actual: Vec<f64> = app.document.title.split([',','|']).map(|v|v.parse().unwrap()).collect();
+        assert_eq!(actual.len(), expected.len());
+        for (actual, expected) in actual.into_iter().zip(expected) { assert!((actual-expected).abs()<1e-9, "{actual} != {expected}"); }
+    }
+}
+
+#[test]
+fn domrect_unmeasured_inline_is_explicit_and_layout_flush_limit_still_recovers() {
+    let fixture = Fixture::new();
+    let app = fixture.open("<html><body><span id=s>Real inline</span><script>document.getElementById('s').getBoundingClientRect();document.title='fake zero';</script></body></html>");
+    assert_eq!(app.scripting.as_ref().unwrap().error_count(), 1);
+    assert!(report(&app).contains("unmeasured inline")); assert_ne!(app.document.title, "fake zero");
+    let mut app = fixture.open(r#"<html><body><div id=box style='width:10px;height:10px'></div><script>
+var box=document.getElementById('box');setTimeout(function(){document.title='Recovered '+box.getBoundingClientRect().width;},0);
+for(var i=0;i<5;i++){box.style.width=(10+i)+'px';box.getBoundingClientRect();}
+</script></body></html>"#);
+    assert_eq!(app.scripting.as_ref().unwrap().error_count(), 1, "{}", report(&app));
+    assert!(report(&app).contains("DOM geometry layout limit reached"));
+    assert!(app.poll_script_timer()); assert_eq!(app.document.title, "Recovered 14");
+}
+
+#[test]
 fn offset_dimensions_use_actual_asymmetric_border_boxes_and_live_zoomed_layout() {
     let fixture=Fixture::new();
     let mut app=fixture.open(r#"<html><head><style>

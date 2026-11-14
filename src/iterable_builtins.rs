@@ -72,6 +72,7 @@ impl Runtime {
                     Builtin::Object
                     | Builtin::Date(super::date::Op::Constructor)
                     | Builtin::Url(super::url_api::Op::Constructor(_))
+                    | Builtin::Rect(super::rect_api::Op::Constructor(_))
                     | Builtin::Promise(
                         super::promises::Op::Constructor | super::promises::Op::AggregateError,
                     )

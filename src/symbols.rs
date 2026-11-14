@@ -138,6 +138,12 @@ impl Runtime {
             Value::Symbol(key),
             Some((false, false, false)),
         )?;
+        let key = if let Some(key) = self.symbol_to_string_tag { key } else {
+            let Value::Symbol(key) = self.new_symbol(Some("Symbol.toStringTag".into()), false)? else { unreachable!() };
+            key
+        };
+        self.symbol_to_string_tag = Some(key);
+        self.store_property(owner, "toStringTag".into(), Value::Symbol(key), Some((false, false, false)))?;
         let key = if let Some(key) = self.symbol_species { key } else {
             let Value::Symbol(key) = self.new_symbol(Some("Symbol.species".into()), false)? else { unreachable!() };
             key

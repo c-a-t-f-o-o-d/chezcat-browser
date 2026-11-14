@@ -258,6 +258,19 @@ pub struct ClientBox {
     pub top: i32,
     pub right: i32,
     pub bottom: i32,
+    pub padding: [i32; 4],
+}
+
+/// Final unclipped border box in build coordinates. Fixed y is viewport-relative;
+/// ordinary y is document-relative. Painting may translate fixed items on scroll,
+/// while this canonical measurement remains unchanged for CSSOM snapshots.
+#[derive(Clone, Copy, Debug)]
+pub struct BorderRect {
+    pub x: i32,
+    pub y: i32,
+    pub width: i32,
+    pub height: i32,
+    pub fixed: bool,
 }
 
 pub struct Layout {
@@ -270,6 +283,7 @@ pub struct Layout {
     hits: Vec<HitRegion>,
     pub height: i32,
     pub client_boxes: Vec<Option<ClientBox>>,
+    pub border_rects: Vec<Option<BorderRect>>,
     /// No padding-box record is insufficient to prove no inline CSS box.
     pub offset_unavailable: Vec<bool>,
     fixed_runs: Vec<bool>,
@@ -603,6 +617,7 @@ pub fn build_viewport_with_fonts(
         hits: Vec::new(),
         height: 0,
         client_boxes: vec![None; doc.nodes.len()],
+        border_rects: vec![None; doc.nodes.len()],
         offset_unavailable: vec![true; doc.nodes.len()],
         fixed_runs: Vec::new(),
         fixed_items: Vec::new(),
@@ -776,6 +791,7 @@ pub fn build_viewport_with_fonts(
     engine.build_hits();
     engine.restore_source_order();
     engine.finish_client_boxes();
+    engine.finish_border_rects(&fixed_boxes);
     let indices = |flags: &[bool]| {
         flags
             .iter()
@@ -794,6 +810,38 @@ pub fn build_viewport_with_fonts(
 }
 
 impl Engine<'_> {
+    fn finish_border_rects(&mut self, fixed_boxes: &[bool]) {
+        for (node, record) in self.boxes.iter().enumerate() {
+            if let Some(record) = record {
+                self.layout.border_rects[node] = Some(BorderRect {
+                    x: record.x, y: record.y,
+                    width: record.width + record.padding[1] + record.padding[3] + record.border[1] + record.border[3],
+                    height: record.height + record.padding[0] + record.padding[2] + record.border[0] + record.border[2],
+                    fixed: fixed_boxes.get(node).copied().unwrap_or(false),
+                });
+            }
+        }
+        for (index, item) in self.layout.items.iter().enumerate() {
+            if let PaintItem::Image { node, x, y, .. } = item {
+                if let Some(client) = self.layout.client_boxes[*node] {
+                    self.layout.border_rects[*node] = Some(BorderRect {
+                        x: *x - client.padding[3] - client.left,
+                        y: *y - client.padding[0] - client.top,
+                        width: client.width + client.left + client.right,
+                        height: client.height + client.top + client.bottom,
+                        fixed: self.layout.fixed_items.get(index).copied().unwrap_or(false),
+                    });
+                }
+            }
+        }
+        for (index, control) in self.layout.controls.iter().enumerate() {
+            self.layout.border_rects[control.node] = Some(BorderRect {
+                x: control.x, y: control.y, width: control.width, height: control.height,
+                fixed: self.layout.fixed_controls.get(index).copied().unwrap_or(false),
+            });
+        }
+    }
+
     fn finish_client_boxes(&mut self) {
         // Read the final sizes, after flex stretching and positioned layout.
         for (node, record) in self.boxes.iter().enumerate() {
@@ -805,6 +853,7 @@ impl Engine<'_> {
                     top: record.border[0],
                     right: record.border[1],
                     bottom: record.border[2],
+                    padding: record.padding,
                 });
             }
         }
@@ -832,6 +881,7 @@ impl Engine<'_> {
                 top: border[0],
                 right: border[1],
                 bottom: border[2],
+                padding: [0; 4],
             });
         }
         // Confirm only genuine no-box cases. Unmeasured inline fragments or
@@ -2258,6 +2308,7 @@ impl Engine<'_> {
                 top: 0,
                 right: 0,
                 bottom: 0,
+                padding: [0; 4],
             });
             // Row groups have no separate paint pass. Their rendered extent
             // spans their rows, including spacing between those rows but not
@@ -2290,6 +2341,7 @@ impl Engine<'_> {
                 top: 0,
                 right: 0,
                 bottom: 0,
+                padding: [0; 4],
             });
         }
     }
@@ -4191,6 +4243,7 @@ impl Engine<'_> {
             top: border[0],
             right: border[1],
             bottom: border[2],
+            padding,
         });
         self.atoms.push(Atom {
             kind: AtomKind::Image { item, node },

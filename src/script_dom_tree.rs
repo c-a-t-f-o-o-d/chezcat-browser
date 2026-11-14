@@ -281,6 +281,7 @@ impl Bridge<'_> {
         }
         let node = node_index(object).filter(|&node| node < self.doc.nodes.len())?;
         match property {
+            "getBoundingClientRect" if self.class_list_element_receiver(object) => Some("getBoundingClientRect"),
             "getAttributeNode" if self.attr_element_receiver(object) => Some("getAttributeNode"),
             "hasAttributes" if self.attr_element_receiver(object) => Some("hasAttributes"),
             "getAttributeNodeNS" if self.attr_element_receiver(object) => Some("getAttributeNodeNS"),
@@ -410,6 +411,7 @@ impl Bridge<'_> {
             return Ok(None);
         };
         let node = self.dom_node(node_handle(node))?;
+        if property == "getBoundingClientRect" { return Ok(Some(self.class_list_element_receiver(object))); }
         if property == "attributes" {
             if !matches!(self.doc.nodes[node].kind, NodeKind::Element { .. }) { return Ok(Some(false)); }
             if self.doc.nodes[node].namespace != crate::html::Namespace::Html { return Err("Attribute map requires known namespace provenance.".into()); }
