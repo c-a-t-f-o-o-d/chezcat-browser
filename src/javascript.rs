@@ -8205,14 +8205,6 @@ impl Runtime {
         }
         let realm = match &function { Value::Function(id) => self.function_realms.get(*id).copied().unwrap_or(self.active_realm), _ => self.active_realm };
         if realm == self.active_realm { return self.call_value_in_realm(function, args, this, host); }
-        self.call_value_other_realm(realm, function, args, this, host)
-    }
-
-    // Keep realm-switch restoration and its Result scratch space outside the
-    // ordinary recursive Script route, including unoptimized one-MiB controls.
-    #[inline(never)]
-    fn call_value_other_realm(&mut self, realm: Option<usize>, function: Value, args: &[Value], this: Value,
-        host: &mut dyn Host) -> Result<Value, Fault> {
         self.with_intrinsic_realm(realm, |runtime| runtime.call_value_in_realm(function, args, this, host))
     }
 
@@ -8259,18 +8251,20 @@ impl Runtime {
             return Err(self.string_limit_fault());
         }
         let Value::Function(index) = function else {
-            return Err(Fault::exception(
-                "TypeError",
-                format!(
-                    "The value is not a callable function. Actual value type: {}.",
-                    function.diagnostic_type()
-                ),
-            ));
+            return Err(Self::not_callable_fault(&function));
         };
         if matches!(self.functions.get(index), Some(Function::Script { .. })) {
             return self.call_script_value(index, args, this, host);
         }
         self.call_non_script_value(index, args, this, host)
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn not_callable_fault(function: &Value) -> Fault {
+        Fault::exception("TypeError", format!(
+            "The value is not a callable function. Actual value type: {}.",
+            function.diagnostic_type()))
     }
 
     #[inline(never)]
