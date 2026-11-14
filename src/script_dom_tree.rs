@@ -439,6 +439,7 @@ impl Bridge<'_> {
         };
         let node = self.dom_node(node_handle(node))?;
         if property=="src"&&tag(self.doc,node)=="script"&&self.doc.nodes[node].namespace==crate::html::Namespace::Html {return Ok(Some(true));}
+        if property=="href"&&tag(self.doc,node)=="link"&&self.doc.nodes[node].namespace==crate::html::Namespace::Html {return Ok(Some(true));}
         if matches!(property,"dir"|"lang"|"align"|"useMap") {
             if self.doc.nodes[node].namespace==crate::html::Namespace::UnknownForeign {return Err("HTML reflection requires a known namespace context.".into());}
             return Ok(Some(self.html_text_reflection(node,property).is_some()));
@@ -521,6 +522,7 @@ impl Bridge<'_> {
         }
         let node = self.dom_node(object)?;
         if property=="src"&&tag(self.doc,node)=="script"&&self.doc.nodes[node].namespace==crate::html::Namespace::Html {return self.image_source(node).map(Some);}
+        if property=="href"&&tag(self.doc,node)=="link"&&self.doc.nodes[node].namespace==crate::html::Namespace::Html {return self.reflected_url(node,"href").map(Some);}
         if matches!(property,"dir"|"lang"|"align"|"useMap") {return self.html_text_reflection_get(node,property).map(Some);}
         if property == "innerHTML" && matches!(self.doc.nodes[node].kind, NodeKind::Element { .. }) { return self.inner_html(node).map(Some); }
         if property == "attributes" {

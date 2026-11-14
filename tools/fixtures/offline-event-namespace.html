@@ -15,6 +15,7 @@
 var fixtureNode=document.getElementById('event-namespace-state');
 var tokenTarget=document.getElementById('token-selector-state'),tokenSheet=document.getElementById('token-sheet'),tokenStyles=document.querySelectorAll('link[rel~="stylesheet"]');
 if(tokenStyles.length!==1||tokenStyles[0]!==tokenSheet||document.querySelector('link[rel~=stylesheet s]')!==null||document.querySelector('link[rel~=StyleSheet s]')!==tokenSheet||tokenTarget.clientWidth!==137||tokenTarget.clientHeight!==20)throw Error('real stylesheet token selector');
+if(!('href' in tokenSheet)||tokenStyles[0].href!==location.origin+'/fixture-token.css'||tokenStyles[0].href!==tokenStyles[0].href||tokenSheet.getAttribute('href')!=='/fixture-token.css')throw Error('real parsed stylesheet URL');
 var tokenSnapshot=document.querySelectorAll('[data-words~=ready]');tokenTarget.setAttribute('data-words','cold disabled');
 if(tokenSnapshot.length!==1||tokenSnapshot[0]!==tokenTarget||document.querySelector('[data-words~=ready]')!==null||tokenTarget.clientWidth===137)throw Error('token selector mutation snapshot');
 tokenTarget.setAttribute('data-words','cold ready');if(tokenTarget.clientWidth!==137||!tokenTarget.matches('[data-words~=ready]'))throw Error('token selector style restoration');tokenTarget.textContent='Token selector ready';

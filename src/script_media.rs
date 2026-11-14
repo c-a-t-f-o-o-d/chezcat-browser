@@ -4,34 +4,6 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
 };
-fn selection_copy_cost(
-    raw: &str,
-    base: Option<&crate::navigation::Location>,
-) -> Result<usize, String> {
-    let mut bytes = raw.len();
-    if let Some(base) = base {
-        for count in [
-            base.fragment.len(),
-            base.path.as_ref().map_or(0, |p| p.as_os_str().len()),
-            base.url.as_ref().map_or(0, |u| u.host.len()),
-            base.url.as_ref().map_or(0, |u| u.path.len()),
-            base.url
-                .as_ref()
-                .and_then(|u| u.query.as_ref())
-                .map_or(0, String::len),
-        ] {
-            bytes = bytes
-                .checked_add(count)
-                .ok_or("Media URL copy accounting overflow.")?;
-        }
-    }
-    // Covers resolution temporaries, file percent encoding and both retained
-    // URI copies; no allocation depends on a claimed resource size.
-    bytes
-        .checked_mul(20)
-        .and_then(|n| n.checked_add(1024))
-        .ok_or_else(|| "Media URL copy accounting overflow.".into())
-}
 struct Prepared {
     ticket: u64,
     retired: Arc<AtomicBool>,
@@ -395,7 +367,7 @@ impl Bridge<'_> {
         let node = snapshot.node;
         let retired = snapshot.retired.clone();
         let raw = self.doc.attr(node, "src");
-        let mut error = selection_copy_cost(raw.unwrap_or(""), self.state.dynamic.base.as_ref())
+        let mut error = dom_compat::url_copy_cost(raw.unwrap_or(""), self.state.dynamic.base.as_ref())
             .and_then(|cost| self.state.copies(cost))
             .err();
         let raw = if error.is_none() {
@@ -502,19 +474,7 @@ impl Bridge<'_> {
         key: &str,
     ) -> Result<Option<Value>, String> {
         let node = self.node(object)?;
-        if key == "src" {
-            let Some(raw)=self.doc.attr(node,"src") else{return self.string("").map(Some);};
-            self.state
-                .copies(selection_copy_cost(raw, self.state.dynamic.base.as_ref())?)?;
-            let selected = self
-                .state
-                .dynamic
-                .base
-                .as_ref()
-                .and_then(|base| crate::navigation::selection_url(raw, base).ok())
-                .unwrap_or_else(|| raw.to_owned());
-            return self.string(&selected).map(Some);
-        }
+        if key == "src" {return self.reflected_url(node,"src").map(Some);}
         if key == "controls" {
             return Ok(Some(Value::Bool(self.doc.attr(node, "controls").is_some())));
         }

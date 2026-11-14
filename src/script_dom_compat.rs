@@ -52,6 +52,34 @@ pub(super) fn dataset_attribute(name: &str) -> String {
     attribute
 }
 
+pub(super) fn url_copy_cost(
+    raw: &str,
+    base: Option<&crate::navigation::Location>,
+) -> Result<usize, String> {
+    let mut bytes = raw.len();
+    if let Some(base) = base {
+        for count in [
+            base.fragment.len(),
+            base.path.as_ref().map_or(0, |p| p.as_os_str().len()),
+            base.url.as_ref().map_or(0, |u| u.host.len()),
+            base.url.as_ref().map_or(0, |u| u.path.len()),
+            base.url
+                .as_ref()
+                .and_then(|u| u.query.as_ref())
+                .map_or(0, String::len),
+        ] {
+            bytes = bytes
+                .checked_add(count)
+                .ok_or("URL copy accounting overflow.")?;
+        }
+    }
+    // Covers resolution temporaries, file percent encoding and both retained
+    // URI copies; no allocation depends on a claimed resource size.
+    bytes
+        .checked_mul(20)
+        .and_then(|n| n.checked_add(1024))
+        .ok_or_else(|| "URL copy accounting overflow.".into())
+}
 impl Bridge<'_> {
     /// Genuine HTML string reflections, not a general expando/native alias.
     pub(super) fn html_text_reflection(&self,node:usize,name:&str)->Option<&'static str> {
@@ -210,6 +238,18 @@ impl Bridge<'_> {
         self.state.tree.parents.push(None);
         self.state.dom.connected.push(false);
         Ok(Value::Host(node_handle(node)))
+    }
+
+    /// Reflect a URL content attribute without admitting or opening a resource.
+    pub(super) fn reflected_url(&mut self,node:usize,attribute:&str)->Result<Value,String>{
+        let Some(raw)=self.doc.attr(node,attribute) else{return self.string("");};
+        if raw.len()>self.state.limits.host.string_bytes{return Err("Reflected URL exceeds the configured string allowance.".into());}
+        let base=self.state.dynamic.base.as_ref().or_else(||self.state.location.as_ref().map(|location|&location.source));
+        let cost=url_copy_cost(raw,base)?;
+        self.state.copies(cost)?;
+        let base=self.state.dynamic.base.as_ref().or_else(||self.state.location.as_ref().map(|location|&location.source));
+        let resolved=base.and_then(|base|crate::navigation::selection_url(raw,base).ok()).unwrap_or_else(||raw.to_owned());
+        self.string(&resolved)
     }
 
     pub(super) fn image_source(&mut self, node: usize) -> Result<Value, String> {

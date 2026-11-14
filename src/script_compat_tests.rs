@@ -5,6 +5,38 @@ fn shared_probe(source: &str) -> (Document,Forms,Page,Outcome) {
 }
 
 #[test]
+fn parsed_link_href_reflects_real_url_without_resource_or_mutation_authority(){
+    let (mut doc,mut forms,mut page,outcome)=page("<link id=relative rel=stylesheet href='../original.css?q=1#section'><link id=absolute href='https://other.test/read-only.css'><link id=missing><link id=empty href=''><link id=invalid href='http://[broken'>",&[]);assert_eq!(outcome.errors,0);
+    page.set_resource_base(&crate::navigation::address("https://base.test/assets/index.html",&crate::navigation::Location::home()).unwrap());
+    let commits=page.state.dom_commits;
+    let out=page.console_eval(&mut doc,&mut forms,r#"
+var relative=document.getElementById('relative'),missing=document.getElementById('missing'),empty=document.getElementById('empty');
+if(!('href' in relative)||!('href' in missing)||document.querySelectorAll('link[rel~="stylesheet"]')[0]!==relative||relative.href!=='https://base.test/original.css?q=1#section'||relative.getAttribute('href')!=='../original.css?q=1#section')throw 'real stylesheet URL';
+if(document.getElementById('absolute').href!=='https://other.test/read-only.css'||missing.href!==''||empty.href!=='https://base.test/assets/index.html'||document.getElementById('invalid').href!=='http://[broken')throw 'URL reflection states';
+"#);assert_eq!(out.errors,0,"{}",page.report());assert_eq!(page.state.dom_commits,commits);assert!(page.take_dynamic_stylesheets().is_empty());assert!(!page.has_host_tasks());
+    for operation in ["relative.href='/must-not-fetch.css';","relative.setAttribute('href','/must-not-fetch.css');","relative.removeAttribute('href');","relative.parentNode.removeChild(relative);"]{
+        let out=page.console_eval(&mut doc,&mut forms,operation);assert_eq!(out.errors,1,"{operation}: {}",page.report());assert_eq!(page.state.dom_commits,commits);assert!(!page.has_host_tasks());
+    }
+    page.set_resource_base(&crate::navigation::address("https://base.test/new/",&crate::navigation::Location::home()).unwrap());
+    let out=page.console_eval(&mut doc,&mut forms,"if(relative.href!=='https://base.test/original.css?q=1#section'||empty.href!=='https://base.test/new/')throw 'live base';missing.setAttributeNS('urn:metadata','href','/inert.css');if(missing.href!=='')throw 'namespace metadata';var created=document.createElement('link');created.href='';if(created.href!=='https://base.test/new/')throw 'created empty';");assert_eq!(out.errors,0,"{}",page.report());assert!(!page.has_host_tasks());
+}
+
+#[test]
+fn parsed_link_href_limits_local_selection_and_foreign_callers_preserve_boundaries(){
+    let (mut doc,mut forms,mut page,outcome)=page("<html><body><link id=sheet href='missing-selected.css'></body></html>",&[]);assert_eq!(outcome.errors,0);
+    let node=doc.nodes.iter().position(|n|matches!(&n.kind,NodeKind::Element {tag,..} if tag=="link")).unwrap();let commits=page.state.dom_commits;
+    let local=crate::navigation::explicit(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tools/fixtures/authored-video.html")).unwrap();page.set_resource_base(&local);
+    let value=Bridge {doc:&mut doc,forms:&mut forms,state:&mut page.state}.get(node_handle(node),"href").unwrap();assert!(matches!(value,Value::String(s) if s.ends_with("/missing-selected.css")&&s.starts_with("file:///")));
+    let original=page.state.limits.host.string_bytes;page.state.limits.host.string_bytes=4;
+    assert!(Bridge {doc:&mut doc,forms:&mut forms,state:&mut page.state}.get(node_handle(node),"href").is_err());page.state.limits.host.string_bytes=original;page.begin_job();page.state.copy_work=0;
+    assert!(Bridge {doc:&mut doc,forms:&mut forms,state:&mut page.state}.get(node_handle(node),"href").is_err());assert_eq!(page.state.dom_commits,commits);page.begin_job();
+    page.set_resource_base(&crate::navigation::address("https://www.google.com/assets/",&crate::navigation::Location::home()).unwrap());
+    let out=page.console_eval(&mut doc,&mut forms,"var sheet=document.getElementById('sheet'),f=document.createElement('iframe');f.hidden=true;document.body.appendChild(f);var readHref=f.contentWindow.Function('l','return l.href;'),hasHref=f.contentWindow.Function('l','return \"href\" in l;');if(readHref(sheet)!=='https://www.google.com/assets/missing-selected.css'||!hasHref(sheet))throw 'same origin reader';");assert_eq!(out.errors,0,"{}",page.report());
+    page.set_location(&crate::navigation::address("https://different.test/",&crate::navigation::Location::home()).unwrap());
+    for operation in ["readHref(sheet);","hasHref(sheet);"]{let out=page.console_eval(&mut doc,&mut forms,operation);assert_eq!(out.errors,1,"{}",page.report());assert!(page.report().contains("same-origin"));assert!(!page.has_host_tasks());}
+}
+
+#[test]
 fn parsed_script_source_reflects_actual_attribute_and_resource_base_without_requests() {
     let (mut doc,mut forms,mut page,outcome)=page("<script id=relative src='../original.js?q=1#section'></script><script id=absolute src='https://other.test/read-only.js'></script><script id=missing></script><script id=empty src=''></script><script id=invalid src='http://[broken'></script>",&[]);
     assert_eq!(outcome.errors,0);
