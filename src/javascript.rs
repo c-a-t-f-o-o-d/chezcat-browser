@@ -324,7 +324,20 @@ pub struct NativeAncestry {
     pub constructor:Option<(u32,&'static str)>,
 }
 
+/// One callback from a host-owned synchronous event propagation plan. The host
+/// never receives interpreter access; the runtime keeps the current job/realm.
+pub struct EventCallback {pub function:Value,pub target:u32,pub event:u32}
+
 pub trait Host {
+    fn synchronous_event_dispatch(&self,_object:u32,_method:&str)->bool {false}
+    fn prepare_event_dispatch(&mut self)->Result<(),String> {Err("Synchronous event dispatch is not authorized by this host.".into())}
+    fn begin_event_dispatch(&mut self,_object:u32,_args:&[Value])->Result<usize,String> {Err("Synchronous event dispatch is not authorized by this host.".into())}
+    fn next_event_callback(&mut self,_token:usize)->Result<Option<EventCallback>,String> {Err("Synchronous event dispatch is not authorized by this host.".into())}
+    fn event_callback_result(&mut self,_token:usize,_returned_false:bool) {}
+    fn event_callback_error(&mut self,_token:usize,_message:&str) {}
+    /// Always called after successful begin, including a fatal interpreter fault.
+    /// Cleanup must not depend on an unexhausted work/allocation allowance.
+    fn finish_event_dispatch(&mut self,_token:usize)->bool {false}
     /// Explicit read/presence fallback to a proven native owner's Object tail.
     /// This does not grant expando, mutation or descriptor authority.
     fn ordinary_lookup_tail(&self, _object:u32) -> bool { false }
@@ -7987,8 +8000,27 @@ impl Runtime {
             &converted
         };
         for value in args { self.pin_exported_value(value); }
+        if host.synchronous_event_dispatch(object,method) {host.prepare_event_dispatch().map_err(Fault::new)?;}
         host.validate_call(object, method, args)
             .map_err(|(kind, message)| Fault::exception(kind, message))?;
+        if host.synchronous_event_dispatch(object,method) {
+            let token=host.begin_event_dispatch(object,args).map_err(Fault::new)?;
+            let result=(|| {
+                loop {
+                    self.step()?;
+                    let Some(callback)=host.next_event_callback(token).map_err(Fault::new)? else {return Ok(());};
+                    // This is nested in the caller's JavaScript stack. Do not
+                    // use invoke(), begin a fresh job or drain microtasks here.
+                    match self.call_value(callback.function,&[Value::Host(callback.event)],Value::Host(callback.target),host) {
+                        Ok(value)=>host.event_callback_result(token,matches!(value,Value::Bool(false))),
+                        Err(fault) if fault.exception.is_some()=>host.event_callback_error(token,&fault.display()),
+                        Err(fault)=>return Err(fault),
+                    }
+                }
+            })();
+            let accepted=host.finish_event_dispatch(token);
+            return result.map(|()|Value::Bool(accepted));
+        }
         if method == "getBoundingClientRect" {
             if let Some(ancestry) = host.instance_ancestry(object) {
                 let caller = self.native_access_caller.unwrap_or_else(|| self.browser_global.map(|(window, _)| window));

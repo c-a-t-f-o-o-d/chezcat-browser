@@ -1,0 +1,15 @@
+<!doctype html><title>Dispatch fixture ready</title><body>
+<p id="result">Dispatch fixture ready</p>
+<button type="button" name="deep" id="deep">Exercise nested dispatch guard</button>
+<button type="button" name="recover" id="recover">Recover dispatch</button>
+<script>
+var button=document.getElementById('deep'),first=document.createEvent('Event');first.initEvent('nested-original',true,true);
+function nested(){var next=document.createEvent('Event');next.initEvent('nested-original',true,true);button.dispatchEvent(next);}
+button.addEventListener('nested-original',nested);
+button.onclick=function(){button.dispatchEvent(first);throw Error('call guard was not reached');};
+document.getElementById('recover').onclick=function(){
+ button.removeEventListener('nested-original',nested);
+ if(first.currentTarget!==null||first.eventPhase!==0||first.isTrusted||!button.dispatchEvent(first)||first.target!==button)throw Error('dispatch recovery failed');
+ document.getElementById('result').textContent='Nested dispatch recovered';document.title='Nested dispatch recovered';
+};
+</script></body>

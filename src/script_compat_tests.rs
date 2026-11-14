@@ -122,6 +122,26 @@ var t=document.createTextNode('t');if('dir' in t||t.dir!==undefined)throw 'text 
 }
 
 #[test]
+fn html_use_map_reflects_raw_attribute_identity_conversion_and_unrelated_interfaces() {
+    let(_,_,page,outcome)=page("<img id=pic usemap='#Raw Map'><input id=entry usemap='#Input'><span id=other></span>",&[r#"
+var pic=document.getElementById('pic'),entry=document.getElementById('entry'),other=document.getElementById('other'),attr=pic.getAttributeNode('usemap'),calls=0;
+if(pic.useMap!=='#Raw Map'||entry.useMap!=='#Input'||!('useMap' in pic)||!('useMap' in entry)||'useMap' in other||other.useMap!==undefined)throw 'interfaces/raw read';
+pic.useMap={toString:function(){calls++;return 'https://example.invalid/maps#Raw';}};
+if(calls!==1||pic.useMap!=='https://example.invalid/maps#Raw'||attr!==pic.getAttributeNode('usemap')||attr.value!==pic.useMap)throw 'real string reflection';
+pic.setAttribute('usemap','#Changed');if(pic.useMap!=='#Changed'||attr.value!=='#Changed')throw 'attribute path';pic.removeAttribute('usemap');if(pic.useMap!==''||attr.ownerElement!==null||attr.value!=='#Changed')throw 'remove identity';
+pic.useMap=null;if(pic.useMap!=='null')throw 'DOMString';var marker={},caught=false;try{pic.useMap={toString:function(){throw marker;}};}catch(e){caught=e===marker;}if(!caught||pic.useMap!=='null')throw 'abrupt conversion';caught=false;try{pic.useMap=Symbol();}catch(e){caught=e.name==='TypeError';}if(!caught||pic.useMap!=='null')throw 'symbol';
+var detached=new Image();if(detached.useMap!=='')throw 'default';detached.useMap='#Detached';if(detached.getAttribute('usemap')!=='#Detached'||detached.useMap!=='#Detached')throw 'detached reflection';entry.useMap=17;if(entry.useMap!=='17'||entry.getAttribute('usemap')!=='17')throw 'input string';
+"#]);assert_eq!(outcome.errors,0,"{}",page.report());
+}
+
+#[test]
+fn html_use_map_retained_and_copy_failures_preserve_native_attribute() {
+    let(mut doc,mut forms,mut page,outcome)=page("<img id=pic usemap='#old'>",&["var pic=document.getElementById('pic');var saved=pic.getAttributeNode('usemap');"]);assert_eq!(outcome.errors,0,"{}",page.report());let node=(0..doc.nodes.len()).find(|&node|doc.attr(node,"id")==Some("pic")).unwrap();let before=page.state.retained;let limit=page.state.retained_limit;page.state.retained_limit=before;
+    let mut bridge=Bridge{doc:&mut doc,forms:&mut forms,state:&mut page.state};assert!(bridge.dom_set(node_handle(node),"useMap",&Value::String("#a-longer-name".into())).is_err());assert_eq!(bridge.doc.attr(node,"usemap"),Some("#old"));assert_eq!(bridge.state.retained,before);bridge.state.retained_limit=limit;let copies=bridge.state.copy_work;bridge.state.copy_work=0;assert!(bridge.dom_get(node_handle(node),"useMap").is_err());assert_eq!(bridge.doc.attr(node,"usemap"),Some("#old"));bridge.state.copy_work=copies;
+    let outcome=page.console_eval(&mut doc,&mut forms,"if(saved!==pic.getAttributeNode('usemap')||saved.value!=='#old'||pic.useMap!=='#old')throw 'failed mutation';pic.useMap='#new';if(saved.value!=='#new')throw 'recovery';");assert_eq!(outcome.errors,0,"{}",page.report());
+}
+
+#[test]
 fn replace_child_returns_removed_identity_and_preserves_detached_references_and_collections() {
     let (_,_,page,outcome)=page("<div id=p><span id=old title=kept><b id=inside>old</b></span><em id=tail>tail</em></div><div id=q><i id=incoming>new</i></div>", &[r#"
 var p=document.getElementById('p'),q=document.getElementById('q'),old=document.getElementById('old'),inside=document.getElementById('inside'),tail=document.getElementById('tail'),incoming=document.getElementById('incoming');
@@ -1894,7 +1914,7 @@ fn event_interface_diagnostic_invokes_no_coercion_or_event_lifecycle() {
     assert_eq!(outcome.errors, 1, "{}", page.report());
     assert!(page.report().contains("Requested interface class=non-string"));
     assert_eq!((page.state.next_event, page.state.event.is_some(), page.state.listeners.len()), before);
-    let outcome = page.console_eval(&mut doc, &mut forms, "if(conversions!==0||'createEvent' in document||'dispatchEvent' in document||'dispatchEvent' in window)throw 'false capability';");
+    let outcome = page.console_eval(&mut doc, &mut forms, "if(conversions!==0||'createEvent' in document||typeof document.dispatchEvent!=='function'||typeof window.dispatchEvent!=='function')throw 'factory/dispatch isolation';");
     assert_eq!(outcome.errors, 0, "{}", page.report());
 }
 

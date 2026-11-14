@@ -350,6 +350,7 @@ impl Bridge<'_> {
         }
         let image_attribute = tag(self.doc, node) == "img" && matches!(key, "src" | "alt" | "width" | "height")
             || key=="align" && self.html_text_reflection(node,"align").is_some()
+            || key=="usemap" && self.html_text_reflection(node,"useMap").is_some()
             || self.html_spacing_property(node, key)
             || key == "border" && self.html_border_property(node)
             || key == "ismap" && self.html_image_map_property(node)

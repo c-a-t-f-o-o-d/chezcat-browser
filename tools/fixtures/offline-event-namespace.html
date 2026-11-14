@@ -34,11 +34,16 @@ fragmentImage.onload=function(){
 };
 fragmentImage.onerror=function(){throw Error('loopback fragment image failed');};
 var fixtureEvent=document.createEvent('UIEvents');
+var mapImage=new Image();mapImage.useMap='#original-map';if(mapImage.useMap!=='#original-map'||mapImage.getAttribute('usemap')!=='#original-map')throw Error('image map reflection');
 fixtureEvent.initUIEvent('fixture',true,true,window,4294967297);
 if(fixtureEvent.view!==window||fixtureEvent.detail!==1||fixtureEvent.isTrusted)throw Error('UI initializer');
 var fixtureError='';try{fixtureNode.setAttribute('data bad','x');}catch(e){fixtureError=e.name;}
 if(fixtureError!=='InvalidCharacterError')throw Error('attribute exception');
 var fixtureOrder='';
+var dispatchOrder='',dispatchEventObject=document.createEvent('Event');dispatchEventObject.initEvent('original-fixture',true,true);
+fixtureNode.addEventListener('original-fixture',function(event){if(event!==dispatchEventObject||event.isTrusted||event.target!==fixtureNode||event.currentTarget!==fixtureNode||event.eventPhase!==2)throw Error('real synchronous dispatch');dispatchOrder+='listener';event.preventDefault();Promise.resolve().then(function(){dispatchOrder+='microtask';});},{once:true});
+if(fixtureNode.dispatchEvent(dispatchEventObject)!==false||dispatchOrder!=='listener'||dispatchEventObject.target!==fixtureNode||dispatchEventObject.currentTarget!==null)throw Error('dispatch return/persistent identity');dispatchOrder+='caller';
+Promise.resolve().then(function(){if(dispatchOrder!=='listenercallermicrotask')throw Error('dispatch checkpoint');});
 Promise.resolve().then(function(){try{fixtureNode.removeChild(document.createElement('span'));}catch(e){fixtureOrder=e.name;}});
 Promise.resolve().then(function(){if(fixtureOrder!=='NotFoundError')throw Error('Promise exception');fixtureNode.textContent='Event namespace ready';});
 document.addEventListener('keydown',function(event){

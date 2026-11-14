@@ -34,4 +34,12 @@ fn main() {
         resource.display()
     );
     println!("cargo:rustc-link-arg={}", resource.display());
+    // Nested EventTarget callbacks add real interpreter/host frames. Measured
+    // validation reaches the existing call guard with this virtual reserve;
+    // the old 1 MiB prototype overflowed. Work/time guards stay independent.
+    if env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc") {
+        println!("cargo:rustc-link-arg=/STACK:8388608");
+    } else {
+        println!("cargo:rustc-link-arg=-Wl,--stack,8388608");
+    }
 }

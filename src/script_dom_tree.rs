@@ -431,7 +431,7 @@ impl Bridge<'_> {
             return Ok(None);
         };
         let node = self.dom_node(node_handle(node))?;
-        if matches!(property,"dir"|"lang"|"align") {
+        if matches!(property,"dir"|"lang"|"align"|"useMap") {
             if self.doc.nodes[node].namespace==crate::html::Namespace::UnknownForeign {return Err("HTML reflection requires a known namespace context.".into());}
             return Ok(Some(self.html_text_reflection(node,property).is_some()));
         }
@@ -511,7 +511,7 @@ impl Bridge<'_> {
             return Ok(None);
         }
         let node = self.dom_node(object)?;
-        if matches!(property,"dir"|"lang"|"align") {return self.html_text_reflection_get(node,property).map(Some);}
+        if matches!(property,"dir"|"lang"|"align"|"useMap") {return self.html_text_reflection_get(node,property).map(Some);}
         if property == "innerHTML" && matches!(self.doc.nodes[node].kind, NodeKind::Element { .. }) { return self.inner_html(node).map(Some); }
         if property == "attributes" {
             if !matches!(self.doc.nodes[node].kind, NodeKind::Element { .. }) { return Ok(Some(Value::Undefined)); }

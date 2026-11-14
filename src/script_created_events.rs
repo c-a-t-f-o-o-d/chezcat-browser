@@ -1,5 +1,5 @@
 //! Persistent untrusted Event/UIEvent/MouseEvent state. These records never enter the
-//! trusted dispatch slot and provide no synthetic dispatch or activation path.
+//! trusted dispatch slot. Synchronous base/UI dispatch is separate and untrusted.
 use super::*;
 
 #[cfg(test)]
@@ -239,7 +239,7 @@ if('view' in events[0]||'initMouseEvent' in events[0]||!('initMouseEvent' in eve
 var calls=0,converted=document.createEvent({toString:function(){calls++;return 'MouseEvents';}});if(calls!==1||converted.isTrusted)throw 'factory conversion';
 var errors=0;for(var name of ['CompositionEvent','KeyboardEvent','CustomEvent','Event ','unknown']){try{document.createEvent(name);}catch(e){if(e.name==='NotSupportedError')errors++;}}
 try{document.createEvent();}catch(e){if(e.name==='TypeError')errors++;}try{document.createEvent(Symbol());}catch(e){if(e.name==='TypeError')errors++;}
-if(errors!==7||'dispatchEvent' in document||'dispatchEvent' in window||'dispatchEvent' in events[0])throw 'false capability';
+if(errors!==7||typeof document.dispatchEvent!=='function'||typeof window.dispatchEvent!=='function'||'dispatchEvent' in events[0])throw 'factory/target capability';
 if(document.createEvent!==document.createEvent||converted.initEvent!==converted.initEvent)throw 'method identity';
 document.title='created-defaults-ok';
 "#);
@@ -406,13 +406,18 @@ var prefix=0;document.title='created-interfaces-ok';
 }
 
 pub(super) struct CreatedEvent {
-    handle: u32,
-    name: String,
-    bubbles: bool,
-    cancelable: bool,
-    prevented: bool,
-    stopped: bool,
-    immediate: bool,
+    pub(super) handle: u32,
+    pub(super) name: String,
+    pub(super) bubbles: bool,
+    pub(super) cancelable: bool,
+    pub(super) prevented: bool,
+    pub(super) stopped: bool,
+    pub(super) immediate: bool,
+    pub(super) target: Option<u32>,
+    pub(super) current: Option<u32>,
+    pub(super) phase: u8,
+    pub(super) dispatching: bool,
+    pub(super) passive: bool,
     timestamp: f64,
     ui: Option<UiData>,
     mouse: Option<MouseData>,
@@ -457,7 +462,7 @@ impl Bridge<'_> {
         true
     }
 
-    fn created_event_index(&self, handle: u32) -> Option<usize> {
+    pub(super) fn created_event_index(&self, handle: u32) -> Option<usize> {
         (EVENT_BASE..script_class_list::BASE).contains(&handle).then(|| self.state.created_events.iter().position(|event| event.handle == handle)).flatten()
     }
 
@@ -518,12 +523,13 @@ impl Bridge<'_> {
             let event = &self.state.created_events[id];
             let native = |handle: Option<u32>| handle.map_or(Value::Null, Value::Host);
             Ok(match name {
-                "target" | "currentTarget" => Value::Null,
+                "target" => native(event.target),
+                "currentTarget" => native(event.current),
                 "bubbles" => Value::Bool(event.bubbles),
                 "cancelable" => Value::Bool(event.cancelable),
                 "defaultPrevented" => Value::Bool(event.prevented),
                 "cancelBubble" => Value::Bool(event.stopped),
-                "eventPhase" => Value::Number(0.0),
+                "eventPhase" => Value::Number(f64::from(event.phase)),
                 "timeStamp" => Value::Number(event.timestamp),
                 "isTrusted" | "composed" => Value::Bool(false),
                 name if constant(name).is_some() => Value::Number(f64::from(constant(name).unwrap())),
@@ -602,7 +608,7 @@ impl Bridge<'_> {
                 self.mouse_interface_argument(args.get(3), true)?;
                 self.mouse_interface_argument(args.get(14), false)?;
             }
-            if matches!(args.first(), Some(Value::String(name)) if name.len() > self.state.limits.host.event_type_bytes) {
+            if !self.state.created_events[self.created_event_index(object).unwrap()].dispatching && matches!(args.first(), Some(Value::String(name)) if name.len() > self.state.limits.host.event_type_bytes) {
                 return Err(("QuotaExceededError", "Event type exceeds 256 UTF-8 bytes.".into()));
             }
         }
@@ -618,6 +624,7 @@ impl Bridge<'_> {
         let handle = self.state.next_event;
         let event = CreatedEvent { handle, name: String::new(), bubbles: false, cancelable: false,
             prevented: false, stopped: false, immediate: false,
+            target:None,current:None,phase:0,dispatching:false,passive:false,
             timestamp: self.state.clock_ms(Instant::now()),
             ui: matches!(interface,Interface::Ui|Interface::Mouse).then(UiData::default),
             mouse: matches!(interface,Interface::Mouse).then(MouseData::default) };
@@ -636,6 +643,7 @@ impl Bridge<'_> {
                         return Err("initMouseEvent requires a MouseEvent.".into());
                     }
                     self.validate_created_event_call(object, method, args).map_err(|(_, message)| message)?;
+                    if self.state.created_events[id].dispatching {return Ok(Value::Undefined);}
                     let name = self.text(args.first().ok_or("Event initializer requires a type.")?)?;
                     let number = |index| args.get(index).map(timer_integer).transpose().map(|n| n.unwrap_or(0));
                     let ui=if matches!(method,"initUIEvent"|"initMouseEvent") {
@@ -660,10 +668,11 @@ impl Bridge<'_> {
                     event.bubbles = args.get(1).is_some_and(Value::truthy);
                     event.cancelable = args.get(2).is_some_and(Value::truthy);
                     event.prevented = false; event.stopped = false; event.immediate = false;
+                    event.target=None;
                     if let Some(ui)=ui {event.ui=Some(ui);}
                     if let Some(mouse) = mouse { event.mouse = Some(mouse); }
                 }
-                "preventDefault" => { let event = &mut self.state.created_events[id]; if event.cancelable { event.prevented = true; } }
+                "preventDefault" => { let event = &mut self.state.created_events[id]; if event.cancelable && !event.passive { event.prevented = true; } }
                 "stopPropagation" => { self.state.created_events[id].stopped = true; }
                 "stopImmediatePropagation" => { let event = &mut self.state.created_events[id]; event.stopped = true; event.immediate = true; }
                 _ => return Err(format!("Constructed Event method {method:?} is not implemented.")),

@@ -48,6 +48,8 @@ mod script_normalize;
 mod script_element_properties;
 #[path = "script_created_events.rs"]
 mod script_created_events;
+#[path = "script_dispatch.rs"]
+mod script_dispatch;
 #[path = "script_navigation.rs"]
 mod page_navigation;
 pub use page_navigation::Navigation;
@@ -336,6 +338,7 @@ struct State {
     next_event: u32,
     event: Option<Event>,
     created_events: Vec<script_created_events::CreatedEvent>,
+    synthetic_dispatches: Vec<script_dispatch::Dispatch>,
     #[cfg(test)]
     disable_event_factory: bool,
     tree: Tree,
@@ -400,6 +403,7 @@ impl State {
             next_event: EVENT_BASE,
             event: None,
             created_events: Vec::new(),
+            synthetic_dispatches: Vec::new(),
             #[cfg(test)]
             disable_event_factory: false,
             tree: Tree::default(),
@@ -711,6 +715,7 @@ impl Page {
             "cancelAnimationFrame",
             "addEventListener",
             "removeEventListener",
+            "dispatchEvent",
         ] {
             if matches!(name, "setTimeout" | "clearTimeout") {
                 runtime
@@ -752,6 +757,7 @@ impl Page {
             (DOCUMENT, "createTextNode"),
             (DOCUMENT, "addEventListener"),
             (DOCUMENT, "removeEventListener"),
+            (DOCUMENT, "dispatchEvent"),
         ] {
             let function = if object == HISTORY { runtime.host_method_with_length(object, method, 2) }
                 else { runtime.host_method(object, method) }.expect("fixed native method");
@@ -2369,6 +2375,7 @@ impl Host for Bridge<'_> {
     }
 
     fn method_length(&self, object:u32, method:&str) -> Option<usize> {
+        if method=="dispatchEvent"&&self.dispatch_receiver(object){return Some(1);}
         if object==DOCUMENT && method=="createAttributeNS" {return Some(2);}
         if object==DOCUMENT && method=="createAttribute" || self.attr_element_receiver(object)&&matches!(method,"setAttributeNode"|"setAttributeNodeNS") {return Some(1);}
         if node_index(object).is_some() && method == "replaceChild" { return Some(2); }
@@ -2411,6 +2418,7 @@ impl Host for Bridge<'_> {
     }
 
     fn required_arguments(&self, object: u32, method: &str) -> usize {
+        if method=="dispatchEvent"&&self.dispatch_receiver(object){return 1;}
         if object==DOCUMENT && method=="createAttributeNS" {return 2;}
         if object==DOCUMENT && method=="createAttribute" || self.attr_element_receiver(object)&&matches!(method,"setAttributeNode"|"setAttributeNodeNS") {return 1;}
         if object == HISTORY && method == "replaceState" { return 2; }
@@ -2471,6 +2479,7 @@ impl Host for Bridge<'_> {
         method: &str,
         args: &[Value],
     ) -> Result<(), (&'static str, String)> {
+        if method=="dispatchEvent"{return self.validate_dispatch(object,args);}
         if object == HISTORY && method == "replaceState" {
             if self.state.history.current.is_none() { self.history_target(args)?; }
             if matches!(args.first(), Some(Value::Function(_) | Value::Symbol(_))) { return Err(("DataCloneError", "This History value cannot be serialized for storage.".into())); }
@@ -2645,6 +2654,7 @@ impl Host for Bridge<'_> {
     }
 
     fn method(&self, object: u32, property: &str) -> Option<&'static str> {
+        if property=="dispatchEvent"&&self.dispatch_receiver(object)&&!self.form_named_control(object,property){return Some("dispatchEvent");}
         if script_named_map::element(object).is_some() { return self.named_map_receiver(object).then(|| script_named_map::method(property)).flatten(); }
         if object == DOCUMENT && property == "getElementsByName" { return Some("getElementsByName"); }
         if property=="normalize" && !self.is_frame_handle(object) && self.namespace_receiver(object) {return Some("normalize");}
@@ -2700,6 +2710,7 @@ impl Host for Bridge<'_> {
     }
 
     fn accepts_receiver(&self, object: u32, method: &str, receiver: u32) -> bool {
+        if method=="dispatchEvent"{return self.dispatch_receiver(object)&&self.dispatch_receiver(receiver);}
         if object==DOCUMENT && matches!(method,"createAttribute"|"createAttributeNS") {return receiver==DOCUMENT;}
         if object == HISTORY { return receiver == HISTORY && method == "replaceState"; }
         if method == "getBoundingClientRect" { return self.class_list_element_receiver(object) && self.class_list_element_receiver(receiver); }
@@ -2894,6 +2905,13 @@ impl Host for Bridge<'_> {
         }
         Err("Deleting this native host property is not implemented.".into())
     }
+    fn synchronous_event_dispatch(&self,object:u32,method:&str)->bool {method=="dispatchEvent"&&self.dispatch_receiver(object)}
+    fn prepare_event_dispatch(&mut self)->Result<(),String>{self.state.work(self.state.created_events.len().checked_mul(5).ok_or("Event validation work overflow.")?)}
+    fn begin_event_dispatch(&mut self,object:u32,args:&[Value])->Result<usize,String>{self.begin_synthetic_dispatch(object,args)}
+    fn next_event_callback(&mut self,token:usize)->Result<Option<crate::javascript::EventCallback>,String>{self.next_synthetic_callback(token)}
+    fn event_callback_result(&mut self,token:usize,returned_false:bool){self.synthetic_callback_result(token,returned_false);}
+    fn event_callback_error(&mut self,token:usize,message:&str){self.synthetic_callback_error(token,message);}
+    fn finish_event_dispatch(&mut self,token:usize)->bool{self.finish_synthetic_dispatch(token)}
     fn dictionary_argument(
         &self,
         _object: u32,
@@ -2968,6 +2986,7 @@ impl Host for Bridge<'_> {
     }
 
     fn owns_global_property(&self, property: &str) -> bool {
+        if property=="dispatchEvent"{return true;}
         matches!(
             property,
             "window"
@@ -3005,6 +3024,7 @@ impl Host for Bridge<'_> {
     }
 
     fn has(&mut self, object: u32, property: &str) -> Result<bool, String> {
+        if property=="dispatchEvent"&&self.dispatch_receiver(object){return Ok(true);}
         self.state.work(1)?;
         if script_named_map::element(object).is_some() { return self.named_map_has(object, property); }
         if property=="normalize" && !self.is_frame_handle(object) && self.namespace_receiver(object) {return Ok(true);}
@@ -5022,7 +5042,7 @@ window.removeEventListener('test',custom,true);
 window.removeEventListener('Test',custom,false);
 window.addEventListener('test',custom);
 window.removeEventListener('test',custom);
-if('dispatchEvent' in b || 'dispatchEvent' in window)throw Error('new dispatch capability');
+if(typeof b.dispatchEvent!=='function'||typeof window.dispatchEvent!=='function')throw Error('real dispatch capability');
 "#],
         );
         assert_eq!(outcome.errors, 0, "{}", page.report());
