@@ -354,6 +354,37 @@ mod tests {
     const CREATE: &str = "var f=document.createElement('iframe');f.hidden=true;document.body.appendChild(f);var w=f.contentWindow;";
 
     #[test]
+    fn namespaced_creation_child_first_method_read_keeps_main_owner_prototype() {
+        let source=format!("{CREATE}{}",r#"
+var rootDocument=document,read=w.Function('doc','return doc.createElementNS;');
+var first=read(rootDocument);
+if(Object.getPrototypeOf(first)!==Function.prototype||Object.getPrototypeOf(first)===w.Function.prototype||first!==document.createElementNS||first.length!==2)throw 'method owner realm';
+if(first.call(rootDocument,'http://www.w3.org/1999/xhtml','div').ownerDocument!==document)throw 'real factory';
+document.title='creation-owner-ok';
+"#);
+        let(doc,_,page,result)=start(&source,&crate::csp::PolicySet::default());assert_eq!(result.errors,0,"{}",page.report());assert_eq!(doc.title,"creation-owner-ok");
+    }
+
+    #[test]
+    fn namespaced_creation_saved_child_callers_guard_main_document_before_coercion() {
+        let source=format!("{CREATE}{}",r#"
+var ns='http://www.w3.org/1999/xhtml',factory=document.createElementNS,rootDocument=document,bound=factory.bind(document),effects=0;
+var argument={toString:function(){effects++;return ns;}};
+var argumentsList=[argument,'div'];
+var call=w.Function('factory','doc','args','return factory.call(doc,args[0],args[1]);');
+var apply=w.Function('factory','doc','args','return factory.apply(doc,args);');
+var invokeBound=w.Function('bound','args','return bound.apply(null,args);');
+if(call(factory,rootDocument,argumentsList).ownerDocument!==document||apply(factory,rootDocument,argumentsList).ownerDocument!==document||invokeBound(bound,argumentsList).ownerDocument!==document||effects!==3)throw 'same-origin creation';
+"#);
+        let(mut doc,mut forms,mut page,result)=start(&source,&crate::csp::PolicySet::default());assert_eq!(result.errors,0,"{}",page.report());let nodes=doc.nodes.len();
+        page.set_location(&crate::navigation::Location {url:Some(crate::url::parse("https://other.test/").unwrap().0),path:None,root:None,fragment:String::new()});let allocations=page.runtime.window_allocation_state_for_test();
+        for operation in ["call(factory,rootDocument,argumentsList);","apply(factory,rootDocument,argumentsList);","invokeBound(bound,argumentsList);"] {
+            let result=page.console_eval(&mut doc,&mut forms,operation);assert_eq!(result.errors,1,"{}",page.report());assert!(page.report().contains("same-origin"));assert_eq!(doc.nodes.len(),nodes);assert_eq!(page.runtime.window_allocation_state_for_test(),allocations);
+        }
+        let result=page.console_eval(&mut doc,&mut forms,"if(effects!==3)throw 'denied conversion ran';");assert_eq!(result.errors,0,"{}",page.report());
+    }
+
+    #[test]
     fn location_instance_prototype_lookup_uses_fresh_real_owner_and_getter_receiver() {
         let source=format!("{CREATE}{}",r#"
 var rootLocation=location,childLocation=w.location;

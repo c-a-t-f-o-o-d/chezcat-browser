@@ -352,6 +352,12 @@ impl Bridge<'_> {
                 super::script_attribute_names::validate_namespace(namespace,name)?;
             }
         }
+        if object==DOCUMENT && method=="createElementNS" {
+            if let (Some(namespace),Some(Value::String(name)))=(args.first(),args.get(1)) {
+                let namespace=match namespace{Value::String(value) if !value.is_empty()=>Some(value.as_str()),_=>None};
+                super::script_attribute_names::validate_element_namespace(namespace,name)?;
+            }
+        }
         if matches!(method,"setAttributeNode"|"setAttributeNodeNS") && node_index(object).is_some() {return self.validate_attr_attachment(object,args);}
         if method == "replaceChild" && node_index(object).is_some() {
             return self.validate_replace_child(object, args);
@@ -1187,6 +1193,18 @@ impl Bridge<'_> {
             }
         }
         if object==DOCUMENT && matches!(method,"createAttribute"|"createAttributeNS") {return self.create_attribute(args,method=="createAttributeNS").map(Some);}
+        if object==DOCUMENT && method=="createElementNS" {
+            let namespace=match args.first(){Some(Value::String(s)) if !s.is_empty()=>Some(s.as_str()),_=>None};
+            let name=self.text(args.get(1).ok_or("createElementNS requires two arguments.")?)?;
+            super::script_attribute_names::validate_element_namespace(namespace,&name).map_err(|(_,message)|message)?;
+            if namespace!=Some("http://www.w3.org/1999/xhtml")||name.contains(':') {return Err("createElementNS currently implements the HTML namespace with a null prefix; no node was created.".into());}
+            if args.get(2).is_some_and(|v|!matches!(v,Value::Null|Value::Undefined)) {return Err("Element creation options/custom registries are not implemented; no node was created.".into());}
+            if !name.bytes().all(|c|c.is_ascii_alphanumeric()||matches!(c,b'-'|b'_'|b'.')) {return Err("Valid element name is outside the supported factory spelling subset; no node was created.".into());}
+            // Unlike createElement, preserve local-name case. Uppercase IMG is
+            // an ordinary unknown HTML element, never an Image/resource alias.
+            if name=="img" {return self.create_image(&[]).map(Some);}
+            return self.create_dom_node(NodeKind::Element {tag:name,id:None,href:None,attrs:Vec::new()}).map(Some);
+        }
         if object == DOCUMENT && matches!(method, "createElement" | "createTextNode") {
             let text = self.text(args.first().ok_or("DOM creation requires one argument.")?)?;
             if method == "createTextNode" {
@@ -1345,4 +1363,75 @@ pub(super) fn node_constant(property: &str) -> Option<u16> {
         "DOCUMENT_POSITION_IMPLEMENTATION_SPECIFIC" => 32,
         _ => return None,
     })
+}
+
+#[cfg(test)]
+mod namespaced_creation_tests {
+    use super::*;
+    fn start(source:&str)->(Document,Forms,Page,Outcome) {
+        let mut doc=crate::html::parse("<html><head></head><body><p id='target'>Original</p></body></html>");doc.scripting_enabled=true;
+        let mut forms=Forms::new(&doc);let mut page=Page::for_test();
+        let outcome=page.start(&mut doc,&mut forms,&[Script {node:0,label:"Original namespaced creation".into(),source:source.into()}]);(doc,forms,page,outcome)
+    }
+    #[test]
+    fn namespaced_html_creation_preserves_case_owner_identity_and_real_tree() {
+        let source=r#"
+var ns='http://www.w3.org/1999/xhtml',factory=document.createElementNS;
+if(factory!==document.createElementNS||factory.length!==2||!('createElementNS' in document))throw 'method identity';
+var lower=factory.call(document,ns,'div'),mixed=factory.bind(document)(ns,'DiV'),upper=factory.apply(document,[ns,'IMG']),image=factory.call(document,ns,'img');
+if(lower.localName!=='div'||mixed.localName!=='DiV'||upper.localName!=='IMG'||mixed.tagName!=='DIV'||mixed.nodeName!=='DIV')throw 'case identity';
+if(lower.nodeType!==1||lower.ownerDocument!==document||lower.parentNode!==null||lower.prefix!==null||lower.namespaceURI!==ns||!lower.isDefaultNamespace(ns))throw 'owner namespace';
+if(upper instanceof Image||!(image instanceof Image))throw 'uppercase resource alias';
+lower.id='created';lower.textContent='Namespaced original';document.body.appendChild(lower);
+if(document.getElementById('created')!==lower||!lower.isConnected||lower.parentNode!==document.body||lower.textContent!=='Namespaced original')throw 'real tree';
+var failed=0;try{new factory(ns,'div');}catch(e){if(e.name==='TypeError')failed++;}if(failed!==1)throw 'constructible method';
+document.title='namespaced-ok';
+"#;
+        let(doc,_,page,result)=start(source);assert_eq!(result.errors,0,"{}",page.report());assert_eq!(doc.title,"namespaced-ok");assert!(!page.has_host_tasks());
+    }
+    #[test]
+    fn namespaced_creation_conversion_reentry_branding_arity_and_typed_validation_order() {
+        let source=r#"
+var ns='http://www.w3.org/1999/xhtml',order='',factory=document.createElementNS;
+var namespace={toString:function(){order+='namespace';var nested=factory.call(document,ns,'span');if(nested.ownerDocument!==document)throw 'nested owner';return ns;}};
+var name={toString:function(){order+='name';return 'div';}};
+var created=factory.call(document,namespace,name);if(order!=='namespacename'||created.localName!=='div')throw 'conversion order';
+order='';var caught=0;
+try{factory.call({},namespace,name);}catch(e){if(e.name==='TypeError')caught++;}
+try{factory.call(document,namespace);}catch(e){if(e.name==='TypeError')caught++;}
+if(caught!==2||order!=='')throw 'preconversion validation';
+try{factory.call(document,Symbol('namespace'),name);}catch(e){if(e.name==='TypeError')caught++;}
+if(caught!==3||order!=='')throw 'Symbol conversion order';
+try{factory.call(document,namespace,Symbol('name'));}catch(e){if(e.name==='TypeError')caught++;}
+if(caught!==4||order!=='namespace')throw 'name Symbol order';
+for(var pair of [[null,'p:bad name'],[ns,':div'],[ns,'p:'],[ns,'1invalid']]){try{factory.call(document,pair[0],pair[1]);throw 'accepted invalid name';}catch(e){if(e.name!=='InvalidCharacterError')throw e;}}
+for(var pair of [[null,'p:div'],['','p:div'],[ns,'xml:div'],[ns,'xmlns'],['http://www.w3.org/2000/xmlns/','div']]){try{factory.call(document,pair[0],pair[1]);throw 'accepted namespace mismatch';}catch(e){if(e.name!=='NamespaceError')throw e;}}
+document.title='conversions-ok';
+"#;
+        let(doc,_,page,result)=start(source);assert_eq!(result.errors,0,"{}",page.report());assert_eq!(doc.title,"conversions-ok");assert!(!page.has_host_tasks());
+    }
+    #[test]
+    fn namespaced_creation_unsupported_slices_do_not_allocate_or_queue_resources() {
+        let(mut doc,mut forms,mut page,result)=start("var ns='http://www.w3.org/1999/xhtml';");assert_eq!(result.errors,0);
+        let nodes=doc.nodes.len();let created=page.state.dom.created.clone();
+        for operation in ["document.createElementNS(null,'div');","document.createElementNS('','div');","document.createElementNS('http://www.w3.org/2000/svg','script');","document.createElementNS('urn:original','img');","document.createElementNS(ns,'p:div');","document.createElementNS(ns,'div',{});","document.createElementNS(ns,'div',{is:'original-custom'});","document.createElementNS(ns,'div=valid');","document.createElementNS(ns,'élement');"] {
+            let result=page.console_eval(&mut doc,&mut forms,operation);assert_eq!(result.errors,1,"{operation}: {}",page.report());assert_eq!(doc.nodes.len(),nodes);assert_eq!(page.state.dom.created,created);assert!(!page.has_host_tasks());
+        }
+        // '=' is a valid element local-name character after ASCII alpha, even
+        // though this factory's spelling slice declines it. Attribute rules
+        // cannot replace the actual element-context name/namespace validation.
+        assert!(super::super::script_attribute_names::validate_element_namespace(Some("urn:original"),"div=valid").is_ok());
+        let err=super::super::script_attribute_names::validate_element_namespace(None,"xml:div=valid").unwrap_err();assert_eq!(err.0,"NamespaceError");
+    }
+    #[test]
+    fn namespaced_creation_small_profiles_rollback_and_names_exceed_old_128_bytes() {
+        let(mut doc,mut forms,mut page,result)=start("var ns='http://www.w3.org/1999/xhtml';");assert_eq!(result.errors,0);
+        let before=doc.nodes.len();let retained=page.state.retained;let old_nodes=page.state.node_limit;page.state.node_limit=before;
+        let result=page.console_eval(&mut doc,&mut forms,"document.createElementNS(ns,'div');");assert_eq!(result.errors,1);assert_eq!(doc.nodes.len(),before);assert_eq!(page.state.retained,retained);
+        page.state.node_limit=old_nodes;let old_retained=page.state.retained_limit;page.state.retained_limit=retained+2;
+        let result=page.console_eval(&mut doc,&mut forms,"document.createElementNS(ns,'div');");assert_eq!(result.errors,1);assert_eq!(doc.nodes.len(),before);assert_eq!(page.state.retained,retained);
+        page.state.retained_limit=old_retained;
+        let source=format!("var name='{}';var element=document.createElementNS(ns,name);if(element.localName!==name)throw 'name truncated';", "n".repeat(512));
+        let result=page.console_eval(&mut doc,&mut forms,&source);assert_eq!(result.errors,0,"{}",page.report());assert_eq!(doc.nodes.len(),before+1);assert_eq!(page.state.retained,retained+512);assert!(!page.has_host_tasks());
+    }
 }

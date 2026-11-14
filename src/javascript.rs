@@ -7510,7 +7510,7 @@ impl Runtime {
                 self.call_host(object, method, args, host)
             }
             Some(Function::Host { .. }) => {
-                Err(Fault::new("Host constructors are not implemented."))
+                Err(Fault::exception("TypeError", "The native method is not a constructor."))
             }
             Some(Function::Vacant) | None => Err(Fault::new("Invalid function handle.")),
             Some(_) => Err(Fault::exception(

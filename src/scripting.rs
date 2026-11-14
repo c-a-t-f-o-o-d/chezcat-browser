@@ -754,12 +754,13 @@ impl Page {
             (DOCUMENT, "querySelector"),
             (DOCUMENT, "querySelectorAll"),
             (DOCUMENT, "createElement"),
+            (DOCUMENT, "createElementNS"),
             (DOCUMENT, "createTextNode"),
             (DOCUMENT, "addEventListener"),
             (DOCUMENT, "removeEventListener"),
             (DOCUMENT, "dispatchEvent"),
         ] {
-            let function = if object == HISTORY { runtime.host_method_with_length(object, method, 2) }
+            let function = if object == HISTORY || object==DOCUMENT&&method=="createElementNS" { runtime.host_method_with_length(object, method, 2) }
                 else { runtime.host_method(object, method) }.expect("fixed native method");
             state.native_methods.push((object, method, function));
         }
@@ -2262,7 +2263,7 @@ impl Host for Bridge<'_> {
         else {self.ordinary_lookup_tail(object)}
     }
     fn native_access_owner(&self, object: u32) -> Option<u32> {
-        self.location_instance_owner(object).or_else(||(object == HISTORY || self.named_map_receiver(object)).then_some(WINDOW))
+        self.location_instance_owner(object).or_else(||(matches!(object,DOCUMENT|HISTORY) || self.named_map_receiver(object)).then_some(WINDOW))
     }
     fn bounding_rect_snapshot(&mut self, object: u32) -> Option<Result<[f64; 4], String>> {
         if !self.class_list_element_receiver(object) { return None; }
@@ -2327,7 +2328,7 @@ impl Host for Bridge<'_> {
         }
         if self.ui_receiver(object) && method=="initUIEvent" {return &[(0,true),(4,false)];}
         if method == "isDefaultNamespace" && self.namespace_receiver(object) { return &[(0, true)]; }
-        if object==DOCUMENT && method=="createAttributeNS" {return &[(0,true),(1,true)];}
+        if object==DOCUMENT && matches!(method,"createAttributeNS"|"createElementNS") {return &[(0,true),(1,true)];}
         if self.attr_element_receiver(object) && method == "getAttributeNode" { return &[(0, true)]; }
         if self.attr_element_receiver(object) && method == "setAttributeNS" { return &[(0, true), (1, true), (2, true)]; }
         if self.attr_element_receiver(object) && matches!(method,"getAttributeNS" | "getAttributeNodeNS" | "removeAttributeNS") { return &[(0, true), (1, true)]; }
@@ -2381,7 +2382,7 @@ impl Host for Bridge<'_> {
 
     fn method_length(&self, object:u32, method:&str) -> Option<usize> {
         if method=="dispatchEvent"&&self.dispatch_receiver(object){return Some(1);}
-        if object==DOCUMENT && method=="createAttributeNS" {return Some(2);}
+        if object==DOCUMENT && matches!(method,"createAttributeNS"|"createElementNS") {return Some(2);}
         if object==DOCUMENT && method=="createAttribute" || self.attr_element_receiver(object)&&matches!(method,"setAttributeNode"|"setAttributeNodeNS") {return Some(1);}
         if node_index(object).is_some() && method == "replaceChild" { return Some(2); }
         if object == HISTORY && method == "replaceState" { return Some(2); }
@@ -2400,7 +2401,7 @@ impl Host for Bridge<'_> {
     }
 
     fn nullable_string_argument(&self, object: u32, method: &str, index: usize) -> bool {
-        if object==DOCUMENT && method=="createAttributeNS" && index==0 {return true;}
+        if object==DOCUMENT && matches!(method,"createAttributeNS"|"createElementNS") && index==0 {return true;}
         if object == HISTORY && method == "replaceState" && index == 2 { return true; }
         if self.named_map_receiver(object) { return method == "getNamedItemNS" && index == 0; }
         method == "isDefaultNamespace" && index == 0 && self.namespace_receiver(object)
@@ -2424,7 +2425,7 @@ impl Host for Bridge<'_> {
 
     fn required_arguments(&self, object: u32, method: &str) -> usize {
         if method=="dispatchEvent"&&self.dispatch_receiver(object){return 1;}
-        if object==DOCUMENT && method=="createAttributeNS" {return 2;}
+        if object==DOCUMENT && matches!(method,"createAttributeNS"|"createElementNS") {return 2;}
         if object==DOCUMENT && method=="createAttribute" || self.attr_element_receiver(object)&&matches!(method,"setAttributeNode"|"setAttributeNodeNS") {return 1;}
         if object == HISTORY && method == "replaceState" { return 2; }
         if self.named_map_receiver(object) { return match method { "item" | "getNamedItem" => 1, "getNamedItemNS" => 2, _ => 0 }; }
@@ -2716,7 +2717,7 @@ impl Host for Bridge<'_> {
 
     fn accepts_receiver(&self, object: u32, method: &str, receiver: u32) -> bool {
         if method=="dispatchEvent"{return self.dispatch_receiver(object)&&self.dispatch_receiver(receiver);}
-        if object==DOCUMENT && matches!(method,"createAttribute"|"createAttributeNS") {return receiver==DOCUMENT;}
+        if object==DOCUMENT && matches!(method,"createAttribute"|"createAttributeNS"|"createElementNS") {return receiver==DOCUMENT;}
         if object == HISTORY { return receiver == HISTORY && method == "replaceState"; }
         if method == "getBoundingClientRect" { return self.class_list_element_receiver(object) && self.class_list_element_receiver(receiver); }
         if script_named_map::element(object).is_some() { return self.named_map_receiver(object) && self.named_map_receiver(receiver); }
@@ -3215,6 +3216,7 @@ impl Host for Bridge<'_> {
                     | "querySelector"
                     | "querySelectorAll"
                     | "createElement"
+                    | "createElementNS"
                     | "createTextNode"
                     | "createAttribute"
                     | "createAttributeNS"

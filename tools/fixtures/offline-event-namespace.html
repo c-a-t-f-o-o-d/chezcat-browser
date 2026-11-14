@@ -4,6 +4,7 @@
 <div id="fragment-fixture"><p id="fragment-old" title="retained">Old fragment</p></div>
 <p id="history-state">History pending</p>
 <p id="location-state">Location pending</p>
+<p id="namespace-create-state">Namespaced creation pending</p>
 <script>
 var fixtureNode=document.getElementById('event-namespace-state');
 var locationFrame=document.createElement('iframe');locationFrame.hidden=true;document.getElementById('geometry-state').appendChild(locationFrame);
@@ -14,6 +15,9 @@ if(location.prototype!==41||locationInstance.prototype!==43||!('prototype' in lo
 delete Object.prototype.prototype;locationChild.eval('delete Object.prototype.prototype;');
 if(locationInstance.prototype!==undefined||('prototype' in locationInstance))throw Error('Location tail deletion');
 document.getElementById('location-state').textContent='Location instance ready';
+var namespaceElement=document.createElementNS('http://www.w3.org/1999/xhtml','span');
+if(namespaceElement.localName!=='span'||namespaceElement.prefix!==null||namespaceElement.namespaceURI!=='http://www.w3.org/1999/xhtml'||namespaceElement.ownerDocument!==document)throw Error('real namespaced creation');
+namespaceElement.textContent='Namespaced HTML ready';document.getElementById('namespace-create-state').textContent='';document.getElementById('namespace-create-state').appendChild(namespaceElement);
 if(history!==window.history||history.state!==null||history.replaceState.length!==2)throw Error('real History surface');
 var fixtureHistoryURL=location.pathname+location.search+'#fixture';
 history.replaceState(history.state,'',fixtureHistoryURL);
