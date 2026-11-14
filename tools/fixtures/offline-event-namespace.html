@@ -1,5 +1,6 @@
 <!-- Original local fixture. Only loopback resources; no access-check code. -->
 <p id="event-namespace-state">Fixture pending</p>
+<p id="style-type-state">Style type pending</p>
 <link id="token-sheet" rel="preload StyleSheet" href="/fixture-token.css">
 <div id="token-selector-state" data-words="cold ready">Token pending</div>
 <div id="scroll-box"><div id="scroll-content">Real clipped scroll content</div></div><p id="scroll-state">Scroll pending</p>
@@ -14,6 +15,12 @@
 <script id="parsed-source-fixture" src="/fixture-parser.js"></script>
 <script>
 var fixtureNode=document.getElementById('event-namespace-state');
+var fixtureStyle=document.createElement('style');fixtureStyle.setAttribute('type','text/css');
+var fixtureStyleAttr=fixtureStyle.getAttributeNode('type');
+if(!('type' in fixtureStyle)||fixtureStyle.type!=='text/css'||fixtureStyle.isConnected||fixtureStyle.parentNode!==null)throw Error('detached style type');
+fixtureStyle.type='  TEXT/CSS  ';if(fixtureStyleAttr.value!==fixtureStyle.type||fixtureStyle.getAttributeNode('type')!==fixtureStyleAttr)throw Error('style type raw identity');
+fixtureStyleAttr.value='text/css';fixtureStyle.setAttributeNS('urn:metadata','type','inert');if(fixtureStyle.type!=='text/css'||fixtureStyle.getAttribute('type')!=='text/css')throw Error('style namespace metadata');
+document.getElementById('style-type-state').textContent='Detached style type ready';
 var scrollBox=document.getElementById('scroll-box'),scrollContent=document.getElementById('scroll-content');
 if(scrollBox.scrollHeight!==100||scrollBox.clientHeight!==50)throw Error('loaded CSS scrolling area');
 scrollContent.style.height='140px';if(scrollBox.scrollHeight!==150||scrollBox.clientHeight!==50)throw Error('live scrolling area');

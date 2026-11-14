@@ -268,6 +268,15 @@ impl Bridge<'_> {
         tag(self.doc, node) == "link" && self.state.dom.created.contains(&node)
     }
 
+    /// Created, detached STYLE metadata only. Parsed/admitted styles and
+    /// stylesheet insertion/content retain their existing separate guards.
+    pub(super) fn style_type_receiver(&self,object:u32)->bool {
+        node_index(object).is_some_and(|node|self.state.dom.created.contains(&node)
+            && self.state.dom.connected.get(node)==Some(&false)
+            && self.doc.nodes.get(node).is_some_and(|n|n.namespace==crate::html::Namespace::Html
+                && matches!(&n.kind,NodeKind::Element {tag,..} if tag=="style")))
+    }
+
     pub(super) fn dom_script(&self, node: usize) -> bool {
         tag(self.doc, node) == "script" && self.state.dom.created.contains(&node)
     }
@@ -438,6 +447,7 @@ impl Bridge<'_> {
             return Ok(None);
         };
         let node = self.dom_node(node_handle(node))?;
+        if property=="type"&&self.style_type_receiver(object){return Ok(Some(true));}
         if property=="src"&&tag(self.doc,node)=="script"&&self.doc.nodes[node].namespace==crate::html::Namespace::Html {return Ok(Some(true));}
         if property=="href"&&tag(self.doc,node)=="link"&&self.doc.nodes[node].namespace==crate::html::Namespace::Html {return Ok(Some(true));}
         if matches!(property,"dir"|"lang"|"align"|"useMap") {
@@ -521,6 +531,11 @@ impl Bridge<'_> {
             return Ok(None);
         }
         let node = self.dom_node(object)?;
+        if property=="type"&&self.style_type_receiver(object){
+            let raw=self.doc.attr(node,"type").unwrap_or("");
+            if raw.len()>self.state.limits.host.string_bytes{return Err("Style type result exceeds the configured string allowance.".into());}
+            self.state.copies(raw.len())?;return Ok(Some(Value::String(raw.to_owned())));
+        }
         if property=="src"&&tag(self.doc,node)=="script"&&self.doc.nodes[node].namespace==crate::html::Namespace::Html {return self.image_source(node).map(Some);}
         if property=="href"&&tag(self.doc,node)=="link"&&self.doc.nodes[node].namespace==crate::html::Namespace::Html {return self.reflected_url(node,"href").map(Some);}
         if matches!(property,"dir"|"lang"|"align"|"useMap") {return self.html_text_reflection_get(node,property).map(Some);}

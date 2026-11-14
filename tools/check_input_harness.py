@@ -175,6 +175,7 @@ if(target.clientWidth!==133)throw 'applied geometry';target.textContent='Attribu
     if args.event_namespace:
         initial=(evidence/"00-initial.layout.txt").read_text(encoding="utf-8") if (evidence/"00-initial.layout.txt").is_file() else ""
         checks["event_namespace_startup_rendered"]=all(('text="'+word+'"') in initial for word in ("Event","namespace","ready"))
+        checks["detached_style_type_raw_attribute_identity_rendered"]=all(('text="'+word+'"') in initial for word in ("Detached","style","type","ready"))
         checks["fresh_location_instance_owner_lookup_rendered"]=all(('text="'+word+'"') in initial for word in ("Location","instance","ready"))
         checks["real_namespaced_html_creation_rendered"]=all(('text="'+word+'"') in initial for word in ("Namespaced","HTML","ready"))
         checks["parsed_script_source_reflection_rendered"]=all(('text="'+word+'"') in initial for word in ("Parsed","script","URL","ready"))

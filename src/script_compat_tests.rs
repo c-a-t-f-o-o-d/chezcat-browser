@@ -5,6 +5,45 @@ fn shared_probe(source: &str) -> (Document,Forms,Page,Outcome) {
 }
 
 #[test]
+fn detached_style_type_uses_real_attribute_identity_domstring_and_metadata_routes(){
+    let (mut doc,mut forms,mut page,outcome)=page("<html><body><p id=p>Existing page</p></body></html>",&[r#"
+var detachedStyle=document.createElement('style'),conversions='';
+if(!('type' in detachedStyle)||detachedStyle.type!==''||detachedStyle.getAttribute('type')!==null||detachedStyle.isConnected)throw 'initial type';
+detachedStyle.setAttribute('type','text/css');var styleTypeAttr=detachedStyle.getAttributeNode('type');
+detachedStyle.type={toString:function(){conversions+='idl;';return '  TEXT/CSS  ';}};
+if(detachedStyle.type!=='  TEXT/CSS  '||styleTypeAttr.value!==detachedStyle.type||detachedStyle.getAttributeNode('type')!==styleTypeAttr)throw 'raw reflection';
+detachedStyle.setAttribute('TYPE',{toString:function(){conversions+='attribute;';return 'application/metadata';}});
+if(detachedStyle.type!=='application/metadata'||conversions!=='idl;attribute;')throw 'attribute parity';
+styleTypeAttr.value='text/css; charset=utf-8';if(detachedStyle.type!==styleTypeAttr.value)throw 'attached Attr';
+var replacementType=document.createAttribute('type');replacementType.value='replacement';if(detachedStyle.setAttributeNode(replacementType)!==styleTypeAttr||styleTypeAttr.ownerElement!==null||detachedStyle.type!=='replacement')throw 'adopted Attr';
+detachedStyle.setAttributeNS('urn:metadata','type','inert');if(detachedStyle.type!=='replacement')throw 'namespace decoy';
+detachedStyle.type=null;if(detachedStyle.type!=='null'||replacementType.value!=='null')throw 'DOMString null';
+detachedStyle.removeAttribute('type');if(detachedStyle.type!==''||!('type' in detachedStyle)||replacementType.ownerElement!==null)throw 'removal';
+detachedStyle.type='text/css';var symbol=Symbol('type'),caught=0;
+for(var operation of [function(){detachedStyle.type=symbol;},function(){detachedStyle.setAttribute('type',symbol);},function(){detachedStyle.getAttributeNode('type').value=symbol;}]){try{operation();}catch(e){if(e instanceof TypeError)caught++;else throw e;}}
+if(caught!==3||detachedStyle.type!=='text/css')throw 'symbol rollback';
+var thrown=false;try{detachedStyle.type={toString:function(){throw 17;}};}catch(e){thrown=e===17;}if(!thrown||detachedStyle.type!=='text/css')throw 'throwing conversion';
+document.title='detached-style-type-ok';
+"#]);assert_eq!(outcome.errors,0,"{}",page.report());assert_eq!(doc.title,"detached-style-type-ok");assert!(!page.has_host_tasks());assert!(page.take_dynamic_stylesheets().is_empty());
+    let style=doc.nodes.iter().position(|n|matches!(&n.kind,NodeKind::Element {tag,..} if tag=="style")).unwrap();let nodes=doc.nodes.len();let commits=page.state.dom_commits;
+    for source in ["document.body.appendChild(detachedStyle);","detachedStyle.textContent='body{display:none}';","detachedStyle.innerHTML='body{display:none}';"]{
+        let out=page.console_eval(&mut doc,&mut forms,source);assert_eq!(out.errors,1,"{source}: {}",page.report());assert_eq!(doc.nodes.len(),nodes);assert_eq!(page.state.dom_commits,commits);assert!(doc.nodes[style].children.is_empty());assert!(!page.has_host_tasks());
+    }
+}
+
+#[test]
+fn detached_style_type_limits_and_foreign_owner_fail_before_effects(){
+    let (mut doc,mut forms,mut page,outcome)=page("<html><body></body></html>",&["var detachedStyle=document.createElement('style');detachedStyle.type='text/css';var observedType=detachedStyle.getAttributeNode('type');"]);assert_eq!(outcome.errors,0,"{}",page.report());
+    let node=doc.nodes.iter().position(|n|matches!(&n.kind,NodeKind::Element {tag,..} if tag=="style")).unwrap();let commits=page.state.dom_commits;let retained_limit=page.state.retained_limit;page.state.retained_limit=page.state.retained;
+    let out=page.console_eval(&mut doc,&mut forms,"detachedStyle.type='a-much-longer-type-value';");assert_eq!(out.errors,1,"{}",page.report());assert_eq!(doc.attr(node,"type"),Some("text/css"));assert_eq!(page.state.dom_commits,commits);page.state.retained_limit=retained_limit;
+    let limit=page.state.limits.host.string_bytes;page.state.limits.host.string_bytes=2;assert!(Bridge {doc:&mut doc,forms:&mut forms,state:&mut page.state}.get(node_handle(node),"type").is_err());page.state.limits.host.string_bytes=limit;page.begin_job();page.state.copy_work=0;assert!(Bridge {doc:&mut doc,forms:&mut forms,state:&mut page.state}.get(node_handle(node),"type").is_err());page.begin_job();
+    let out=page.console_eval(&mut doc,&mut forms,"if(detachedStyle.type!=='text/css'||observedType.value!=='text/css')throw 'recovered reflection';var f=document.createElement('iframe');f.hidden=true;document.body.appendChild(f);var readType=f.contentWindow.Function('s','return s.type;'),hasType=f.contentWindow.Function('s','return \"type\" in s;'),writeType=f.contentWindow.Function('s','v','s.type=v;'),readTypeAttr=f.contentWindow.Function('a','return a.value;'),hasTypeAttr=f.contentWindow.Function('a','return \"value\" in a;'),writeTypeAttr=f.contentWindow.Function('a','v','a.value=v;'),styleConversions=0;if(readType(detachedStyle)!=='text/css'||!hasType(detachedStyle)||readTypeAttr(observedType)!=='text/css'||!hasTypeAttr(observedType))throw 'same origin';");assert_eq!(out.errors,0,"{}",page.report());
+    page.set_location(&crate::navigation::address("https://different.test/",&crate::navigation::Location::home()).unwrap());
+    for source in ["readType(detachedStyle);","hasType(detachedStyle);","writeType(detachedStyle,{toString:function(){styleConversions++;return 'changed';}});","writeTypeAttr(observedType,{toString:function(){styleConversions++;return 'changed';}});","readTypeAttr(observedType);","hasTypeAttr(observedType);"]{let out=page.console_eval(&mut doc,&mut forms,source);assert_eq!(out.errors,1,"{}",page.report());assert!(page.report().contains("same-origin"));assert_eq!(doc.attr(node,"type"),Some("text/css"));assert!(!page.has_host_tasks());}
+    let out=page.console_eval(&mut doc,&mut forms,"if(styleConversions!==0)throw 'foreign coercion';");assert_eq!(out.errors,0,"{}",page.report());
+}
+
+#[test]
 fn parsed_link_href_reflects_real_url_without_resource_or_mutation_authority(){
     let (mut doc,mut forms,mut page,outcome)=page("<link id=relative rel=stylesheet href='../original.css?q=1#section'><link id=absolute href='https://other.test/read-only.css'><link id=missing><link id=empty href=''><link id=invalid href='http://[broken'>",&[]);assert_eq!(outcome.errors,0);
     page.set_resource_base(&crate::navigation::address("https://base.test/assets/index.html",&crate::navigation::Location::home()).unwrap());
