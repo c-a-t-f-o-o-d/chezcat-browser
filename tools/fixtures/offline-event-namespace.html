@@ -1,5 +1,7 @@
 <!-- Original local fixture. Only loopback resources; no access-check code. -->
 <p id="event-namespace-state">Fixture pending</p>
+<link id="token-sheet" rel="preload StyleSheet" href="/fixture-token.css">
+<div id="token-selector-state" data-words="cold ready">Token pending</div>
 <div id="geometry-state" style="width:40px;height:20px;padding:3px 5px;border:2px solid black"></div>
 <div id="fragment-fixture"><p id="fragment-old" title="retained">Old fragment</p></div>
 <p id="history-state">History pending</p>
@@ -11,6 +13,11 @@
 <script id="parsed-source-fixture" src="/fixture-parser.js"></script>
 <script>
 var fixtureNode=document.getElementById('event-namespace-state');
+var tokenTarget=document.getElementById('token-selector-state'),tokenSheet=document.getElementById('token-sheet'),tokenStyles=document.querySelectorAll('link[rel~="stylesheet"]');
+if(tokenStyles.length!==1||tokenStyles[0]!==tokenSheet||document.querySelector('link[rel~=stylesheet s]')!==null||document.querySelector('link[rel~=StyleSheet s]')!==tokenSheet||tokenTarget.clientWidth!==137||tokenTarget.clientHeight!==20)throw Error('real stylesheet token selector');
+var tokenSnapshot=document.querySelectorAll('[data-words~=ready]');tokenTarget.setAttribute('data-words','cold disabled');
+if(tokenSnapshot.length!==1||tokenSnapshot[0]!==tokenTarget||document.querySelector('[data-words~=ready]')!==null||tokenTarget.clientWidth===137)throw Error('token selector mutation snapshot');
+tokenTarget.setAttribute('data-words','cold ready');if(tokenTarget.clientWidth!==137||!tokenTarget.matches('[data-words~=ready]'))throw Error('token selector style restoration');tokenTarget.textContent='Token selector ready';
 if(document.documentElement.animate!==undefined||'animate' in document.documentElement)throw Error('unavailable native animation');
 if(document.documentElement.animate)throw Error('false animation capability');
 document.getElementById('animation-state').textContent='Unavailable animation detected';

@@ -1,5 +1,5 @@
 //! Read-only CSSOM client dimensions from the same layout used for painting.
-//! A script may force a few synchronous layouts after mutations; repeated reads
+//! Scripts may force synchronous layouts after mutations; repeated reads
 //! reuse measurements. No guessed screen dimensions or external renderer.
 use std::collections::HashMap;
 
@@ -8,7 +8,9 @@ use crate::forms::{Forms, Kind};
 use crate::html::Document;
 use crate::layout::{self, ClientBox, Layout};
 
-const MAX_LAYOUTS_PER_JOB: usize = 4;
+#[derive(Clone,Copy,Debug,PartialEq,Eq)]
+pub struct Limits {pub layouts_per_job:usize}
+impl Default for Limits {fn default()->Self{Self {layouts_per_job:1024}}}
 
 pub struct Geometry {
     width: i32,
@@ -22,6 +24,7 @@ pub struct Geometry {
     scroll: i32,
     offset_unavailable: Vec<bool>,
     remaining: usize,
+    limits:Limits,
 }
 
 impl Geometry {
@@ -44,13 +47,15 @@ impl Geometry {
             rects: Vec::new(),
             scroll: 0,
             offset_unavailable: Vec::new(),
-            remaining: MAX_LAYOUTS_PER_JOB,
+            remaining: Limits::default().layouts_per_job,
+            limits:Limits::default(),
         }
     }
 
     pub fn begin_job(&mut self) {
-        self.remaining = MAX_LAYOUTS_PER_JOB;
+        self.remaining = self.limits.layouts_per_job;
     }
+    pub fn with_limits(mut self,limits:Limits)->Self{self.limits=limits;self.remaining=limits.layouts_per_job;self}
 
     pub fn set_scroll(&mut self, scroll: i32) { self.scroll = scroll.max(0); }
 
@@ -119,7 +124,7 @@ impl Geometry {
     fn ensure_layout(&mut self, doc: &Document, forms: &Forms, host_work: &mut usize) -> Result<(), String> {
         if self.boxes.is_none() {
             if self.remaining == 0 {
-                return Err("DOM geometry layout limit reached (4 rebuilds per job).".into());
+                return Err(format!("DOM geometry layout limit reached ({} rebuilds per job).",self.limits.layouts_per_job));
             }
             if doc.nodes.len() > *host_work {
                 *host_work = 0;

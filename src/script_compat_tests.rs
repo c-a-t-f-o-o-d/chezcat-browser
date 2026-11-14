@@ -781,6 +781,19 @@ fn class_name_collection_accounting_failures_keep_existing_storage_and_dom() {
 }
 
 #[test]
+fn token_attribute_queries_use_real_attributes_snapshots_namespaces_and_dynamic_matching() {
+    let (doc,_,page,outcome)=page("<html><head><link id=sheet rel='preload StyleSheet' href='/original.css'></head><body><div id=word data-words='cold Ready'><span id=child></span></div><p id=metadata></p></body></html>",&[r#"
+var sheet=document.getElementById('sheet'),word=document.getElementById('word'),child=document.getElementById('child'),metadata=document.getElementById('metadata');
+var styles=document.querySelectorAll('link[rel~="stylesheet"]');if(styles.length!==1||styles[0]!==sheet||document.querySelector('link[rel~=stylesheet s]')!==null||document.querySelector('link[rel~=StyleSheet s]')!==sheet)throw 'actual rel words';
+if(word.matches('[data-words~=ready]')||!word.matches('[data-words~=ready i]')||child.closest('[data-words~=ready i]')!==word||document.querySelector('[data-words~=""]')!==null||document.querySelector('[data-words~="cold Ready"]')!==null)throw 'case word empty';
+var saved=document.querySelectorAll('[data-words~=ready i]');word.setAttribute('data-words','cold disabled');if(saved.length!==1||saved[0]!==word||document.querySelector('[data-words~=ready i]')!==null||child.closest('[data-words~=ready i]')!==null)throw 'snapshot and current mutation';
+metadata.setAttributeNS('urn:original','rel','stylesheet');if(metadata.getAttributeNS('urn:original','rel')!=='stylesheet'||metadata.matches('[rel~=stylesheet]'))throw 'namespace decoy';
+word.setAttribute('data-words','left\u000bready');if(word.matches('[data-words~=ready]'))throw 'VT is not CSS whitespace';word.setAttribute('data-words','left\u00a0ready');if(word.matches('[data-words~=ready]')||!word.matches('[data-words~="left\u00a0ready"]'))throw 'NBSP token';
+word.setAttribute('data-words','left\tready\nlast\fend\rtrail');if(!word.matches('[data-words~=ready]')||!word.matches('[data-words~=end]')||!word.matches('[data-words~=trail]'))throw 'ASCII separators';document.title='token-query-ok';
+"#]);assert_eq!(outcome.errors,0,"{}",page.report());assert_eq!(doc.title,"token-query-ok");
+}
+
+#[test]
 fn unavailable_animation_feature_reads_are_absent_without_advertising_or_running_animation() {
     let (mut doc,mut forms,mut page,outcome)=page("<html><body><div id=d></div><form id=f><input name=animate id=control></form><video id=video></video><x-custom id=custom></x-custom><svg id=foreign></svg></body></html>",&[r#"
 var d=document.getElementById('d'),created=document.createElement('span'),calls=0;

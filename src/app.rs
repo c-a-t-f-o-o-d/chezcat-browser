@@ -212,6 +212,7 @@ pub struct App {
     embedded_video: Option<media_ui::Embedded>,
     embedded_video_worker: Option<crate::embedded_video::Worker>,
     media_limits: crate::media::Limits,
+    geometry_limits: crate::script_geometry::Limits,
     audio: Option<audio_ui::Player>,
     audio_worker: Option<crate::audio_output::Worker>,
     audio_limits: crate::audio::Limits,
@@ -323,6 +324,7 @@ impl App {
             embedded_video: None,
             embedded_video_worker: None,
             media_limits: crate::media::Limits::default(),
+            geometry_limits: crate::script_geometry::Limits::default(),
             audio: None,
             audio_worker: None,
             audio_limits: crate::audio::Limits::default(),
@@ -1508,7 +1510,7 @@ impl App {
                 &self.styles,
                 natural_image_sizes(&self.images, &self.image_densities),
                 &self.fonts,
-            ));
+            ).with_limits(self.geometry_limits));
             if images_pending || self.embedded_video.is_some() {
                 page.start_before_load(&mut self.document, &mut self.forms, &scripts, &loaded.csp);
             } else {

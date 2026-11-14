@@ -69,6 +69,14 @@ if(target.clientWidth!==133)throw 'applied geometry';target.textContent='Attribu
                 self.end_headers()
                 self.wfile.write(body)
                 return
+            if path.path == "/fixture-token.css":
+                body=(ROOT/'tools/fixtures/token-attribute.css').read_bytes()
+                self.send_response(200)
+                self.send_header("Content-Type","text/css")
+                self.send_header("Content-Length",str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
             if path.path == "/fixture-image.ppm":
                 body=b"P6\n2 1\n255\n"+bytes([12,34,56,78,90,123])
                 self.send_response(200)
@@ -172,6 +180,10 @@ if(target.clientWidth!==133)throw 'applied geometry';target.textContent='Attribu
         checks["parsed_script_source_reflection_rendered"]=all(('text="'+word+'"') in initial for word in ("Parsed","script","URL","ready"))
         checks["measured_document_timing_rendered"]=all(('text="'+word+'"') in initial for word in ("Measured","document","timing","ready"))
         checks["unavailable_animation_detection_rendered"]=all(('text="'+word+'"') in initial for word in ("Unavailable","animation","detected"))
+        checks["real_token_selector_style_and_query_rendered"]=all(('text="'+word+'"') in initial for word in ("Token","selector","ready"))
+        first_pixels=(evidence/'00-initial.ppm').read_bytes().split(b'\n',3)[3]
+        checks["token_selector_real_style_background_painted"]=sum(first_pixels[index:index+3]==bytes([49,95,154]) for index in range(0,len(first_pixels),3))>100
+        checks["token_stylesheet_fetched_once_per_document"]=sum(row==["search","/fixture-token.css"] for row in seen)==sum(row[0]=="search" and urllib.parse.urlsplit(row[1]).path in ["/","/search"] for row in seen)
         timings=[re.search(r'Measured document timing \(integer epoch ms\): navigationStart=(\d+) requestStart=(\d+) responseStart=(\d+) responseEnd=(\d+) finalHeadersParsed=(\d+)',path.read_text(encoding='utf-8')) for path in activities]
         checks["actual_native_timing_measurements_reported"]=bool(timings) and all(match and 0<int(match[1])<=int(match[2])<=int(match[3])<=int(match[4]) and int(match[5])>=int(match[3]) for match in timings)
         checks["parsed_script_fetch_once_per_document_and_reading_never_refetches"]=sum(row==["search","/fixture-parser.js"] for row in seen)==sum(row[0]=="search" and urllib.parse.urlsplit(row[1]).path in ["/","/search"] for row in seen)

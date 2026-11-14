@@ -15,9 +15,13 @@ impl Fixture {
         Self(path)
     }
     fn open(&self, markup: &str) -> App {
+        self.open_with_limits(markup,crate::script_geometry::Limits::default())
+    }
+    fn open_with_limits(&self, markup: &str,limits:crate::script_geometry::Limits) -> App {
         let path = self.0.join("page.html");
         std::fs::write(&path, markup).unwrap();
         let mut app = App::new();
+        app.geometry_limits=limits;
         app.open(&path);
         assert!(!app.failed, "{}", app.status);
         app
@@ -94,10 +98,10 @@ fn domrect_unmeasured_inline_is_explicit_and_layout_flush_limit_still_recovers()
     let app = fixture.open("<html><body><span id=s>Real inline</span><script>document.getElementById('s').getBoundingClientRect();document.title='fake zero';</script></body></html>");
     assert_eq!(app.scripting.as_ref().unwrap().error_count(), 1);
     assert!(report(&app).contains("unmeasured inline")); assert_ne!(app.document.title, "fake zero");
-    let mut app = fixture.open(r#"<html><body><div id=box style='width:10px;height:10px'></div><script>
+    let mut app = fixture.open_with_limits(r#"<html><body><div id=box style='width:10px;height:10px'></div><script>
 var box=document.getElementById('box');setTimeout(function(){document.title='Recovered '+box.getBoundingClientRect().width;},0);
 for(var i=0;i<5;i++){box.style.width=(10+i)+'px';box.getBoundingClientRect();}
-</script></body></html>"#);
+</script></body></html>"#,crate::script_geometry::Limits {layouts_per_job:4});
     assert_eq!(app.scripting.as_ref().unwrap().error_count(), 1, "{}", report(&app));
     assert!(report(&app).contains("DOM geometry layout limit reached"));
     assert!(app.poll_script_timer()); assert_eq!(app.document.title, "Recovered 14");
@@ -243,12 +247,12 @@ document.getElementById('change').onclick=function(){c.checked=false;document.ti
 #[test]
 fn excessive_script_layout_flushes_stop_the_job_and_next_timer_recovers() {
     let fixture = Fixture::new();
-    let mut app = fixture.open(
+    let mut app = fixture.open_with_limits(
         r#"<html><body><div id=box style='width:10px;height:10px'></div><script>
 var box=document.getElementById('box');
 setTimeout(function(){document.title='Recovered '+box.clientWidth;},0);
 for(var i=0;i<5;i++){box.style.width=(10+i)+'px';var measured=box.clientWidth;}
-</script></body></html>"#,
+</script></body></html>"#,crate::script_geometry::Limits {layouts_per_job:4},
     );
     assert_eq!(
         app.scripting.as_ref().unwrap().error_count(),
@@ -259,4 +263,11 @@ for(var i=0;i<5;i++){box.style.width=(10+i)+'px';var measured=box.clientWidth;}
     assert!(report(&app).contains("DOM geometry layout limit reached"));
     assert!(app.poll_script_timer());
     assert_eq!(app.document.title, "Recovered 14");
+}
+
+#[test]
+fn generous_normal_geometry_policy_measures_many_mutations_without_maximum_preallocation(){
+    let fixture=Fixture::new();let app=fixture.open(r#"<html><body><div id=box style='width:10px;height:10px'></div><script>
+var box=document.getElementById('box');for(var i=0;i<128;i++){box.style.width=(10+i)+'px';if(box.clientWidth!==10+i||box.getBoundingClientRect().width!==10+i)throw 'measured mutation';}document.title='Generous geometry ready';
+</script></body></html>"#);assert_eq!(app.scripting.as_ref().unwrap().error_count(),0,"{}",report(&app));assert_eq!(app.document.title,"Generous geometry ready");assert!(app.geometry_limits.layouts_per_job>=1024);
 }

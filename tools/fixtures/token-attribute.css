@@ -1,0 +1,7 @@
+/* Original shared style/query token-selector witness, loopback only. */
+#token-selector-state[data-words~="ready"] {
+  width: 137px;
+  height: 20px;
+  color: white;
+  background: #315f9a;
+}

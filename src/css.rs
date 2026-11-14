@@ -480,8 +480,11 @@ struct Compound {
 struct AttributeSelector {
     name: String,
     value: Option<String>,
+    operator: AttributeOperator,
     ascii_insensitive: bool,
 }
+#[derive(Clone,Copy,Debug)]
+enum AttributeOperator {Exact,Token}
 
 #[derive(Clone, Copy, Debug)]
 enum Relation {
@@ -1773,11 +1776,13 @@ fn parse_attribute(source: &str, position: &mut usize) -> Option<AttributeSelect
         return Some(AttributeSelector {
             name,
             value: None,
+            operator:AttributeOperator::Exact,
             ascii_insensitive,
         });
     }
-    // Only exact equality and presence are supported. Other operators and
-    // namespaces reject the selector rather than matching a broader set.
+    // Presence, exact equality and whitespace-token equality. Other operators
+    // and namespaces reject rather than matching a broader set.
+    let operator=if bytes.get(*position)==Some(&b'~') {*position+=1;AttributeOperator::Token}else{AttributeOperator::Exact};
     if bytes.get(*position) != Some(&b'=') {
         return None;
     }
@@ -1829,6 +1834,7 @@ fn parse_attribute(source: &str, position: &mut usize) -> Option<AttributeSelect
     Some(AttributeSelector {
         name,
         value: Some(value),
+        operator,
         ascii_insensitive,
     })
 }
@@ -2031,7 +2037,18 @@ fn matches_selector(
                 return false;
             };
             if let Some(expected) = &attribute.value {
-                if !context.equal(actual, expected, attribute.ascii_insensitive, budget) {
+                let matches=match attribute.operator {
+                    AttributeOperator::Exact=>context.equal(actual, expected, attribute.ascii_insensitive, budget),
+                    AttributeOperator::Token=>{
+                        // Pay for token scanning/comparisons and expected-token
+                        // validation before scanning borrowed text. No token Vec.
+                        let cost=actual.len().saturating_mul(2).saturating_add(expected.len());
+                        context.text_work(cost,budget) && !expected.is_empty()
+                            && !expected.as_bytes().iter().any(u8::is_ascii_whitespace)
+                            && actual.split_ascii_whitespace().any(|token|if attribute.ascii_insensitive {token.eq_ignore_ascii_case(expected)}else{token==expected})
+                    }
+                };
+                if !matches {
                     return false;
                 }
             }
@@ -3095,6 +3112,34 @@ mod tests {
     }
 
     #[test]
+    fn token_attribute_selectors_match_complete_ascii_words_and_preserve_case_rules() {
+        for (attribute,selector,expected) in [
+            ("rel='alternate STYLESHEET'","link[rel~=\"stylesheet\"]",true),
+            ("rel='alternate STYLESHEET'","link[rel~=stylesheet s]",false),
+            ("rel='alternate STYLESHEET'","link[rel~=STYLESHEET S]",true),
+            ("rel='alternate STYLESHEET'","link[rel~=stylesheet I]",true),
+            ("rel='xstylesheet stylesheetx'","[rel~=stylesheet]",false),
+            ("rel=''","[rel~='']",false),
+            ("rel='alternate stylesheet'","[rel~='alternate stylesheet']",false),
+            ("rel='alternate stylesheet'","[rel~='\t']",false),
+            ("data-words='left&#9;ready&#10;middle&#12;other&#13;last end'","[data-words~=ready]",true),
+            ("data-words='left&#9;ready&#10;middle&#12;other&#13;last end'","[data-words~=other]",true),
+            ("data-words='left&#11;ready'","[data-words~=ready]",false),
+            ("data-words='left&#160;ready'","[data-words~=ready]",false),
+            ("data-words='left&#160;ready'","[data-words~='left\u{a0}ready']",true),
+            ("data-words='Ready'","[data-words~=ready]",false),
+            ("data-words='Ready'","[data-words~=ready i]",true),
+            ("data-words='Ä'","[data-words~='ä' i]",false),
+            ("data-words='Ä'","[data-words~='Ä' i]",true),
+            ("data-empty=''","[data-words~=ready]",false),
+        ] {
+            assert!(super::valid_query_selector(selector),"{selector}");
+            let doc=parse(&format!("<style>{selector}{{color:#123456}}</style><link id=target {attribute}>"));let node=doc.nodes.iter().position(|item|matches!(&item.kind,NodeKind::Element {id:Some(id),..} if id=="target")).unwrap();
+            assert_eq!(compute(&doc,&HashMap::new())[node].color==0x123456,expected,"{attribute} {selector}");let mut budget=1_000_000;assert_eq!(super::query_first(&doc,selector,&[node],None,&mut budget).unwrap().is_some(),expected,"{selector}");
+        }
+    }
+
+    #[test]
     fn query_text_scans_share_the_job_budget_without_charging_unread_values() {
         let large_class = "unrelated ".repeat(190_000);
         let doc = crate::html::parse(&format!("<style>.missing{{color:red}} div{{color:#123456}}</style><div class='{large_class}'></div>"));
@@ -3124,6 +3169,9 @@ mod tests {
             super::compute(&doc, &std::collections::HashMap::new())[node].color,
             0x123456
         );
+        let mut budget=1000; // Explicit small text-scan profile, not a normal cap.
+        assert!(super::query_first(&doc,"[class~=missing]",&[node],None,&mut budget).is_err());assert_eq!(budget,0);
+        assert!(super::query_first(&doc,"[class~=missing]",&[node],None,&mut budget).is_err());let mut fresh=1000;assert_eq!(super::query_first(&doc,"div",&[node],None,&mut fresh).unwrap(),Some(node));
     }
 
     #[test]
@@ -3550,6 +3598,8 @@ mod tests {
             ("[lang=en]", true),
             ("[role=button]", false),
             ("input:checked[TYPE=checkbox]", true),
+            ("[type~=checkbox]",true),
+            ("input, [type~=checkbox]",true),
         ] {
             let doc = parse(&format!("<style>{selector}{{color:#123456}}</style>{html}"));
             let styles = compute(&doc, &HashMap::new());
@@ -3593,7 +3643,9 @@ mod tests {
             "input:not(:checked)",
             "input:checked +",
             "input + ~ div",
-            "[type~=checkbox]",
+            "[type~=]",
+            "[type~ =checkbox]",
+            "[type~==checkbox]",
             "[type|=checkbox]",
             "[type^=check]",
             "[type$=box]",
@@ -3614,7 +3666,7 @@ mod tests {
             "input,",
             ",input",
             "input,[broken",
-            "input, [type~=checkbox]",
+            "input, [type~=]",
             "\u{2003}input",
         ] {
             let mut rules = Vec::new();
