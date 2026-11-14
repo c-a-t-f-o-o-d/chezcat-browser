@@ -5,6 +5,46 @@ fn shared_probe(source: &str) -> (Document,Forms,Page,Outcome) {
 }
 
 #[test]
+fn parsed_script_source_reflects_actual_attribute_and_resource_base_without_requests() {
+    let (mut doc,mut forms,mut page,outcome)=page("<script id=relative src='../original.js?q=1#section'></script><script id=absolute src='https://other.test/read-only.js'></script><script id=missing></script><script id=empty src=''></script><script id=invalid src='http://[broken'></script>",&[]);
+    assert_eq!(outcome.errors,0);
+    let base=crate::navigation::address("https://base.test/assets/index.html",&crate::navigation::Location::home()).unwrap();page.set_resource_base(&base);
+    let source=r#"
+var relative=document.getElementById('relative'),absolute=document.getElementById('absolute'),missing=document.getElementById('missing'),empty=document.getElementById('empty'),invalid=document.getElementById('invalid');
+if(!('src' in relative)||!('src' in missing)||relative.src!=='https://base.test/original.js?q=1#section'||relative.getAttribute('src')!=='../original.js?q=1#section')throw 'relative reflection';
+if(absolute.src!=='https://other.test/read-only.js'||missing.src!==''||empty.src!=='https://base.test/assets/index.html'||invalid.src!=='http://[broken')throw 'missing empty absolute invalid';
+missing.setAttributeNS('urn:original','src','https://metadata.test/never.js');
+if(missing.src!==''||missing.getAttributeNS('urn:original','src')!=='https://metadata.test/never.js')throw 'namespace metadata';
+relative.setAttributeNS('urn:original','src','/never.js');if(relative.src!=='https://base.test/original.js?q=1#section')throw 'namespaced override';
+document.title='parsed-src-ok';
+"#;
+    let outcome=page.console_eval(&mut doc,&mut forms,source);assert_eq!(outcome.errors,0,"{}",page.report());assert_eq!(doc.title,"parsed-src-ok");assert!(page.take_dynamic_scripts().is_empty());assert!(!page.has_host_tasks());
+    page.set_resource_base(&crate::navigation::address("https://base.test/new/",&crate::navigation::Location::home()).unwrap());
+    let outcome=page.console_eval(&mut doc,&mut forms,"if(relative.src!=='https://base.test/original.js?q=1#section'||empty.src!=='https://base.test/new/')throw 'current base';");assert_eq!(outcome.errors,0,"{}",page.report());
+}
+
+#[test]
+fn parsed_script_source_read_does_not_enable_loaded_script_mutation_or_foreign_aliases() {
+    let (mut doc,mut forms,mut page,outcome)=page("<html><body><script id=parsed src='/original.js'></script><svg><script id=foreign src='/foreign.js'></script></svg></body></html>",&["var parsed=document.getElementById('parsed');if(parsed.src!=='https://www.google.com/original.js')throw 'read';"]);assert_eq!(outcome.errors,0,"{}",page.report());
+    let node=doc.nodes.iter().enumerate().find_map(|(n,_)|(doc.attr(n,"id")==Some("parsed")).then_some(n)).unwrap();let commits=page.state.dom_commits;let retained=page.state.retained;
+    for operation in ["parsed.src='/must-not-fetch.js';","parsed.setAttribute('src','/must-not-fetch.js');","parsed.removeAttribute('src');","parsed.text='throw 17;';"] {
+        let outcome=page.console_eval(&mut doc,&mut forms,operation);assert_eq!(outcome.errors,1,"{operation}: {}",page.report());assert_eq!(doc.attr(node,"src"),Some("/original.js"));assert_eq!(page.state.dom_commits,commits);assert_eq!(page.state.retained,retained);assert!(page.take_dynamic_scripts().is_empty());assert!(!page.has_host_tasks());
+    }
+    let foreign=doc.nodes.iter().enumerate().find_map(|(n,_)|(doc.attr(n,"id")==Some("foreign")).then_some(n)).unwrap();assert_eq!(doc.nodes[foreign].namespace,crate::html::Namespace::UnknownForeign);
+    let mut bridge=Bridge {doc:&mut doc,forms:&mut forms,state:&mut page.state};assert!(bridge.get(node_handle(foreign),"src").is_err());assert!(!matches!(bridge.has(node_handle(foreign),"src"),Ok(true)));
+}
+
+#[test]
+fn parsed_script_source_small_copy_and_result_profiles_recover_without_mutation() {
+    let (mut doc,mut forms,mut page,outcome)=page("<script id=parsed src='/original.js'></script>",&[]);assert_eq!(outcome.errors,0);let node=doc.nodes.iter().position(|n|matches!(&n.kind,NodeKind::Element {tag,..} if tag=="script")).unwrap();let commits=page.state.dom_commits;
+    let original=page.state.limits.host.string_bytes;page.state.limits.host.string_bytes=4;
+    assert!(Bridge {doc:&mut doc,forms:&mut forms,state:&mut page.state}.get(node_handle(node),"src").is_err());assert_eq!(page.state.dom_commits,commits);
+    page.state.limits.host.string_bytes=original;page.begin_job();page.state.copy_work=0;
+    assert!(Bridge {doc:&mut doc,forms:&mut forms,state:&mut page.state}.get(node_handle(node),"src").is_err());assert_eq!(page.state.dom_commits,commits);
+    page.begin_job();let value=Bridge {doc:&mut doc,forms:&mut forms,state:&mut page.state}.get(node_handle(node),"src").unwrap();assert!(matches!(value,Value::String(s) if s=="https://www.google.com/original.js"));assert!(!page.has_host_tasks());
+}
+
+#[test]
 fn attribute_metadata_nonce_updates_real_attr_without_rerunning_a_parsed_script() {
     let (mut doc,mut forms,mut page,outcome)=page("<script id=script nonce=original></script>",&["var count=1,script=document.getElementById('script'),nonce=script.getAttributeNode('nonce');script.setAttribute('nonce','changed');if(nonce.value!=='changed'||script.getAttribute('nonce')!=='changed')throw 'metadata';"]);
     assert_eq!(outcome.errors,0,"{}",page.report());

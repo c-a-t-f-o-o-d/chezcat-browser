@@ -61,6 +61,14 @@ if(target.clientWidth!==133)throw 'applied geometry';target.textContent='Attribu
         def do_GET(self):
             seen.append(["search", self.path])
             path = urllib.parse.urlsplit(self.path)
+            if path.path == "/fixture-parser.js":
+                body=b"window.fixtureParserLoads=(window.fixtureParserLoads||0)+1;"
+                self.send_response(200)
+                self.send_header("Content-Type","application/javascript")
+                self.send_header("Content-Length",str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
             if path.path == "/fixture-image.ppm":
                 body=b"P6\n2 1\n255\n"+bytes([12,34,56,78,90,123])
                 self.send_response(200)
@@ -161,6 +169,8 @@ if(target.clientWidth!==133)throw 'applied geometry';target.textContent='Attribu
         checks["event_namespace_startup_rendered"]=all(('text="'+word+'"') in initial for word in ("Event","namespace","ready"))
         checks["fresh_location_instance_owner_lookup_rendered"]=all(('text="'+word+'"') in initial for word in ("Location","instance","ready"))
         checks["real_namespaced_html_creation_rendered"]=all(('text="'+word+'"') in initial for word in ("Namespaced","HTML","ready"))
+        checks["parsed_script_source_reflection_rendered"]=all(('text="'+word+'"') in initial for word in ("Parsed","script","URL","ready"))
+        checks["parsed_script_fetch_once_per_document_and_reading_never_refetches"]=sum(row==["search","/fixture-parser.js"] for row in seen)==sum(row[0]=="search" and urllib.parse.urlsplit(row[1]).path in ["/","/search"] for row in seen)
         checks["native_ui_keyboard_rendered"]=all(('text="'+word+'"') in snapshot("ui-keyboard","layout.txt") for word in ("Native","UI","observed"))
         checks["fragment_and_real_image_completion_rendered"]=all(('text="'+word+'"') in initial for word in ("Fragment","image","loaded"))
         checks["fragment_image_requested_and_inert_script_unfetched"]=["search","/fixture-image.ppm"] in seen and not any(row[1].startswith("/fixture-inert.js") for row in seen)

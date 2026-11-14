@@ -244,7 +244,7 @@ fn run() -> Result<(), String> {
                 )
             }
             Some("--help") | Some("-h") => {
-                let help = r#"ChezCat 0.66
+                let help = r#"ChezCat 0.67
 
 Open local HTML, UTF-8 text, supported images or a website address. Bare hosts such as google.com default to HTTPS; explicit http:// remains supported.
 Ctrl+O: file picker; Ctrl+L: address; Esc: stop loading.

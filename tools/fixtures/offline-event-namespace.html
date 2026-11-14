@@ -5,8 +5,17 @@
 <p id="history-state">History pending</p>
 <p id="location-state">Location pending</p>
 <p id="namespace-create-state">Namespaced creation pending</p>
+<p id="script-source-state">Parsed script pending</p>
+<script id="parsed-source-fixture" src="/fixture-parser.js"></script>
 <script>
 var fixtureNode=document.getElementById('event-namespace-state');
+function checkParsedSource(){
+ var scripts=document.querySelectorAll('script[src]'),parsed=document.getElementById('parsed-source-fixture'),inert=document.getElementById('fragment-inert'),found=false;
+ if(scripts.length!==(inert?2:1)||window.fixtureParserLoads!==1||window.fragmentExecuted!==undefined)throw Error('parsed count/once-only execution');
+ for(var i=0;i<scripts.length;i++){var script=scripts[i];if(!('src' in script))throw Error('source member');if(script===parsed){found=true;if(script.src!==location.origin+'/fixture-parser.js'||script.getAttribute('src')!=='/fixture-parser.js')throw Error('parsed source URL');}else if(script===inert){if(script.src!==location.origin+'/fixture-inert.js')throw Error('inert source URL');}else{throw Error('unexpected script identity');}}
+ if(!found)throw Error('parsed script absent');document.getElementById('script-source-state').textContent='Parsed script URL ready';
+}
+checkParsedSource();document.addEventListener('DOMContentLoaded',checkParsedSource);
 var locationFrame=document.createElement('iframe');locationFrame.hidden=true;document.getElementById('geometry-state').appendChild(locationFrame);
 var locationChild=locationFrame.contentWindow,locationInstance=locationChild.location;
 if(locationInstance.prototype!==undefined||('prototype' in locationInstance)||location.prototype!==undefined)throw Error('fresh Location instance');
