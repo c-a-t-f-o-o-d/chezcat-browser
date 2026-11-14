@@ -1,5 +1,6 @@
 //! Small live DOM surfaces needed by ordinary page initialization. No requests
-//! leave this module: image source changes and beacons are reported as declined.
+//! leave this module: image changes use the document resource queue. Fresh
+//! detached Image requests and beacons retain their explicit declined boundary.
 use super::*;
 
 pub(super) fn navigator_readonly(name: &str) -> bool {
@@ -183,6 +184,7 @@ impl Bridge<'_> {
         });
         self.state.detached_images.insert(node);
         self.state.dom.created.insert(node);
+        self.state.detached_nodes.insert(node);
         // Detached elements have no tree parent and never enter document.images,
         // ID lookup, layout traversal or the document resource loader.
         self.state.tree.active.push(false);
@@ -197,20 +199,10 @@ impl Bridge<'_> {
         };
         self.state.copies(source.len())?;
         let source = source.to_owned();
-        let resolved = self
-            .state
-            .location
-            .as_ref()
-            .and_then(|location| crate::url::parse(&location.href).ok())
-            .and_then(|(base, _)| base.resolve(&source).ok())
-            .map(|(url, fragment)| {
-                let mut text = url.display();
-                if !fragment.is_empty() {
-                    text.push('#');
-                    text.push_str(&fragment);
-                }
-                text
-            })
+        let resolved = self.state.dynamic.base.as_ref()
+            .or_else(|| self.state.location.as_ref().map(|location| &location.source))
+            .and_then(|base| crate::navigation::resolve(&source, base).ok())
+            .map(|target| target.display())
             .unwrap_or(source);
         self.string(&resolved)
     }
@@ -223,7 +215,8 @@ impl Bridge<'_> {
             .state
             .geometry
             .as_ref()
-            .and_then(|geometry| geometry.image_dimensions(node));
+            .and_then(|geometry| geometry.image_dimensions(node))
+            .filter(|_| self.state.images.entries.get(&node).is_none_or(|entry| entry.available));
         Ok(Some(match name {
             "src" => return self.image_source(node).map(Some),
             "alt" => {
@@ -243,9 +236,15 @@ impl Bridge<'_> {
             "naturalWidth" => Value::Number(dimensions.map_or(0, |size| size.0) as f64),
             "naturalHeight" => Value::Number(dimensions.map_or(0, |size| size.1) as f64),
             "complete" => Value::Bool(
-                dimensions.is_some() || self.doc.attr(node, "src").is_none_or(str::is_empty),
+                self.state.images.entries.get(&node).map_or_else(
+                    || dimensions.is_some() || self.doc.attr(node, "src").is_none_or(str::is_empty),
+                    |entry| !entry.pending || self.doc.attr(node, "src").is_none_or(str::is_empty)),
             ),
             "currentSrc" => {
+                if let Some(entry) = self.state.images.entries.get(&node) {
+                    let current = entry.current.clone();
+                    return self.string(&current).map(Some);
+                }
                 if dimensions.is_some() {
                     return self.image_source(node).map(Some);
                 } else {
@@ -265,18 +264,14 @@ impl Bridge<'_> {
         if tag(self.doc, node) != "img" || !matches!(name, "src" | "alt" | "width" | "height") {
             return Ok(false);
         }
-        if name == "src" && !self.state.detached_images.contains(&node) {
-            return Err("Changing a connected image source is not implemented; its decoded resource remains unchanged.".into());
-        }
         let value = if matches!(name, "width" | "height") {
             (timer_integer(value)? as u32).to_string()
         } else {
             self.text(value)?
         };
-        self.attribute(node, name, Some(value))?;
         if name == "src" {
-            self.state.declined_images = self.state.declined_images.saturating_add(1);
-        }
+            self.image_source_change(node, Some(value))?;
+        } else { self.attribute(node, name, Some(value))?; }
         Ok(true)
     }
 

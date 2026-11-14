@@ -63,6 +63,11 @@ mod script_blank_frames;
 mod script_stylesheets;
 pub use script_stylesheets::DynamicStylesheet;
 use script_stylesheets::StylesheetState;
+#[path = "script_images.rs"]
+mod script_images;
+pub use script_images::DynamicImage;
+pub(crate) use script_images::MAX_IMAGE_REQUESTS;
+use script_images::ImagesState;
 
 const WINDOW: u32 = 1;
 const DOCUMENT: u32 = 2;
@@ -296,6 +301,7 @@ struct State {
     dom: DomState,
     dynamic: DynamicState,
     stylesheets: StylesheetState,
+    images: ImagesState,
     listeners: Vec<Listener>,
     native_functions: HashMap<&'static str, Value>,
     native_methods: Vec<(u32, &'static str, Value)>,
@@ -355,6 +361,7 @@ impl State {
             dom: DomState::default(),
             dynamic: DynamicState::default(),
             stylesheets: StylesheetState::default(),
+            images: ImagesState::default(),
             listeners: Vec::new(),
             native_functions: HashMap::new(),
             native_methods: Vec::new(),
@@ -1047,6 +1054,7 @@ impl Page {
         let cookies = self.state.cookies.clone();
         let resource_base = self.state.dynamic.base.take();
         let stylesheet_bytes = self.state.stylesheets.source_bytes;
+        let images = std::mem::take(&mut self.state.images);
         let limits = self.state.limits;
         *self = Self::with_limits(limits);
         self.state.geometry = geometry;
@@ -1054,6 +1062,7 @@ impl Page {
         self.state.cookies = cookies;
         self.state.dynamic.base = resource_base;
         self.state.stylesheets.source_bytes = stylesheet_bytes;
+        self.state.images = images;
         self.state.dynamic.policy = policy.clone();
         self.state.dynamic.script_count = sources.len();
         self.state.dynamic.source_bytes = sources.iter().map(|script| script.source.len()).sum();
@@ -1223,7 +1232,8 @@ impl Page {
             return Outcome::default();
         }
         self.state.dynamic.load_ready = true;
-        if self.state.dynamic.in_flight != 0 || self.state.stylesheets.in_flight != 0 {
+        if self.state.dynamic.in_flight != 0 || self.state.stylesheets.in_flight != 0
+            || self.state.images.entries.values().any(|entry| entry.pending) {
             return Outcome::default();
         }
         self.begin_job();
@@ -1304,7 +1314,8 @@ impl Page {
                 .is_some_and(|c| !matches!(c.kind, Kind::Hidden | Kind::Unsupported)),
             "submit" | "reset" => tag(doc, target) == "form",
             "load" | "error" => {
-                matches!(tag(doc, target), "script" | "link")
+                tag(doc, target) == "img" && self.state.images.entries.contains_key(&target)
+                    || matches!(tag(doc, target), "script" | "link")
                     && self.state.dom.created.contains(&target)
             }
             _ => false,
@@ -1468,6 +1479,7 @@ impl Page {
         let node = node_index(target).ok_or("Unknown event target.")?;
         if !self.state.tree.active.get(node).copied().unwrap_or(false)
             && !(tag(doc, node) == "script" && self.state.dom.created.contains(&node))
+            && !(tag(doc, node) == "img" && self.state.images.entries.contains_key(&node))
         {
             return Err("Event target is no longer connected.".into());
         }
@@ -1525,7 +1537,7 @@ impl Page {
         text.push_str(&promises);
         text.push_str(&caught);
         text.push_str(&format!("Animation frames: {} pending callback(s), {} executed. Whole-millisecond monotonic timestamps; 16 ms minimum frame interval.\n", self.state.animation_frames.len(), self.state.animation_callbacks));
-        text.push_str(&format!("Classic scripts have independent execution jobs ({} steps / {} seconds / {} MiB string-copy work). Aggregate startup: {} steps / {} seconds / {} MiB string-copy work. Native-stack and allocation guards are separate.\nDynamic image requests declined: {}. Detached Image nodes reflect attributes; no request or load event was fabricated.\nBeacon requests declined: {}. sendBeacon returns false; no data was queued or transmitted.\n", self.state.limits.steps, self.state.limits.job_seconds, self.state.limits.copy_bytes / (1024 * 1024), self.state.limits.startup_steps, self.state.limits.startup_seconds, self.state.limits.startup_copy / (1024 * 1024), self.state.declined_images, self.state.declined_beacons));
+text.push_str(&format!("Classic scripts have independent execution jobs ({} steps / {} seconds / {} MiB string-copy work). Aggregate startup: {} steps / {} seconds / {} MiB string-copy work. Native-stack and allocation guards are separate.\nFresh detached image requests declined: {}. Ordinary connected HTML img source changes use cancelable real resource requests; current/pending/broken state and completion events follow actual decoding. Detached never-connected Image nodes only reflect attributes; no request or load event was fabricated. Responsive dynamic selection remains unsupported.\nBeacon requests declined: {}. sendBeacon returns false; no data was queued or transmitted.\n", self.state.limits.steps, self.state.limits.job_seconds, self.state.limits.copy_bytes / (1024 * 1024), self.state.limits.startup_steps, self.state.limits.startup_seconds, self.state.limits.startup_copy / (1024 * 1024), self.state.declined_images, self.state.declined_beacons));
         let heap = self.state.limits.heap;
         text.push_str(&format!(
             "Script heap caps: {} properties per object / {} per document; {} object identities; array length {}; {} MiB retained-value payload accounting (not process memory). No up-front reservation.\n",

@@ -271,6 +271,7 @@ fn fetch(
 impl App {
     pub(super) fn cancel_script_requests(&mut self) {
         self.cancel_stylesheet_requests();
+        self.cancel_image_requests();
         if let Some(worker) = &self.dynamic_scripts {
             worker.cancel();
         }
@@ -280,7 +281,7 @@ impl App {
         }
     }
 
-    fn script_jobs_paused(&self) -> bool {
+    pub(super) fn script_jobs_paused(&self) -> bool {
         !self.scripts_enabled
             || !self.document.scripting_enabled
             || self.resubmission.is_some()

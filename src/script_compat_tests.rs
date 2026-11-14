@@ -647,9 +647,12 @@ document.title='remove-ns-conversion-ok';
     let (mut doc,mut forms,mut page,_) = page("<img id=i src='https://example.test/a.png'>",&[]);
     let node = (0..doc.nodes.len()).find(|&n|doc.attr(n,"id")==Some("i")).unwrap();
     let mut bridge = Bridge {doc:&mut doc,forms:&mut forms,state:&mut page.state};
-    let error = bridge.remove_attribute_ns(node_handle(node),&[Value::Null,Value::String("src".into())]).unwrap_err();
-    assert!(error.contains("connected image"),"{error}");
-    assert_eq!(bridge.doc.attr(node,"src"),Some("https://example.test/a.png"));
+    bridge.remove_attribute_ns(node_handle(node),&[Value::Null,Value::String("src".into())]).unwrap();
+    assert_eq!(bridge.doc.attr(node,"src"),None);
+    assert!(bridge.state.images.entries.contains_key(&node));
+    let (changed, removed, pending) = page.take_image_changes();
+    assert!(changed.contains(&node) && removed.contains(&node));
+    assert!(pending.is_empty());
 }
 
 #[test]
@@ -1245,7 +1248,7 @@ document.title='attr-conversion-ok';
 
 #[test]
 fn attr_removal_and_setters_keep_resource_control_and_inert_policy() {
-    let (mut doc, mut forms, mut page, outcome) = page("<body><input id=p value=initial onclick='return false'><img id=image src='https://example.test/x.png'><a id=link href='https://example.test/'>link</a><template><i id=inert title=x></i></template></body>", &[]);
+    let (mut doc, mut forms, mut page, outcome) = page("<body><input id=p value=initial onclick='return false'><img id=image src='https://example.test/x.png' srcset='responsive.png 1x'><a id=link href='https://example.test/'>link</a><template><i id=inert title=x></i></template></body>", &[]);
     assert_eq!(outcome.errors, 0, "{}", page.report());
     let nodes: Vec<_> = ["p", "image", "link", "inert"].iter().map(|id| (0..doc.nodes.len()).find(|&n| doc.attr(n, "id") == Some(*id)).unwrap()).collect();
     let mut bridge = Bridge { doc: &mut doc, forms: &mut forms, state: &mut page.state };
@@ -2244,7 +2247,7 @@ if(!first.isConnected||first.parentNode!==document.head||second.isConnected||!da
 #[test]
 fn dom_tree_rejections_preserve_existing_controls_resources_and_parent_links() {
     let (doc, forms, page, outcome) = page(
-        "<html><head></head><body><div id=root><span id=child>old</span></div><span id=outside>outside</span><form id=form><input id=query value=original></form><img id=image src=pixel.png></body></html>",
+        "<html><head></head><body><div id=root><span id=child>old</span></div><span id=outside>outside</span><form id=form><input id=query value=original></form><img id=image src=pixel.png srcset='responsive.png 1x'></body></html>",
         &[
             "var root=document.getElementById('root'),child=document.getElementById('child'),outside=document.getElementById('outside');child.appendChild(root);",
             "root.insertBefore(document.createElement('p'),outside);",

@@ -38,6 +38,8 @@ mod script_jobs;
 mod search_tests;
 #[path = "app_stylesheets.rs"]
 mod style_jobs;
+#[path = "app_images.rs"]
+mod image_jobs;
 #[path = "app_textarea.rs"]
 mod textarea;
 
@@ -218,6 +220,8 @@ pub struct App {
     dynamic_pending: usize,
     dynamic_stylesheets: Option<style_jobs::Worker>,
     pending_stylesheets: usize,
+    dynamic_images: Option<image_jobs::Worker>,
+    pending_images: HashMap<usize, u64>,
     script_epoch: u64,
     script_navigation_count: usize,
     script_navigation_since: std::time::Instant,
@@ -313,6 +317,8 @@ impl App {
             dynamic_pending: 0,
             dynamic_stylesheets: None,
             pending_stylesheets: 0,
+            dynamic_images: None,
+            pending_images: HashMap::new(),
             script_epoch: 0,
             script_navigation_count: 0,
             script_navigation_since: std::time::Instant::now(),
@@ -429,6 +435,7 @@ impl App {
         if let Some(worker) = &self.dynamic_stylesheets {
             worker.set_wake(wake.clone());
         }
+        if let Some(worker) = &self.dynamic_images { worker.set_wake(wake.clone()); }
         self.wake = wake;
     }
     /// Called at startup; trust is immutable for all requests in this worker.
@@ -437,6 +444,7 @@ impl App {
         self.cancel_script_requests();
         self.dynamic_scripts = None;
         self.dynamic_stylesheets = None;
+        self.dynamic_images = None;
         self.worker = None;
         self.trust = trust;
     }
@@ -497,6 +505,7 @@ impl App {
         self.pending.is_some()
             || self.dynamic_pending != 0
             || self.pending_stylesheets != 0
+            || !self.pending_images.is_empty()
             || self
                 .scripting
                 .as_ref()
@@ -606,7 +615,7 @@ impl App {
         }
     }
     pub fn network_needs_tick(&self) -> bool {
-        (self.pending.is_some() || self.dynamic_pending != 0 || self.pending_stylesheets != 0)
+        (self.pending.is_some() || self.dynamic_pending != 0 || self.pending_stylesheets != 0 || !self.pending_images.is_empty())
             && self.inspector.network_visible()
     }
     pub fn poll_load(&mut self) -> bool {
@@ -614,7 +623,9 @@ impl App {
         let script_changed = self.poll_dynamic_scripts()
             | self.process_script_requests()
             | self.poll_dynamic_stylesheets()
-            | self.process_stylesheet_requests();
+            | self.process_stylesheet_requests()
+            | self.poll_dynamic_images()
+            | self.process_image_requests();
         let revision = self.network.revision();
         let mut changed = script_changed | self.poll_downloads()
             || revision != self.last_network_revision
@@ -676,16 +687,35 @@ impl App {
                 changed = true;
             }
         }
-        if let Some((id, update)) = poll.images {
+        if let Some((id, mut update)) = poll.images {
             if self
                 .pending
                 .as_ref()
                 .is_some_and(|pending| pending.id == id && pending.committed)
             {
-                let has_images = !update.images.is_empty();
-                self.images.extend(update.images);
-                self.install_animations(update.animations);
+                update.images.retain(|node, _| self.scripting.as_ref().is_none_or(|page| page.initial_image_current(*node)));
+                update.animations.retain(|node, _| update.images.contains_key(node));
+                update.outcomes.retain(|(node, _)| self.scripting.as_ref().is_none_or(|page| page.initial_image_current(*node)));
+                // Dynamic and parser assets share the retained document bound.
+                let nodes: Vec<_> = update.outcomes.iter().map(|(node, _)| *node).filter(|node| update.images.contains_key(node)).collect();
+                for node in nodes {
+                    let mut asset = crate::image::DecodedImage { bitmap: update.images.remove(&node).unwrap(), animation: update.animations.remove(&node), notice: None };
+                    let result = self.fit_document_image(node, &mut asset);
+                    if let Err(error) = result {
+                        if let Some((_, success)) = update.outcomes.iter_mut().find(|(candidate, _)| *candidate == node) { *success = false; }
+                        update.events.push(format!("IMAGE node {node}: {error}"));
+                    } else {
+                        self.animations.remove(&node);
+                        if let Some(notice) = asset.notice { update.events.push(format!("IMAGE node {node}: {notice}")); }
+                        self.images.insert(node, asset.bitmap);
+                        if let Some(animation) = asset.animation { self.install_animations(HashMap::from([(node, animation)])); }
+                    }
+                }
+                let has_images = update.outcomes.iter().any(|(_, success)| *success);
                 self.events.extend(update.events);
+                if let Some(page) = &mut self.scripting {
+                    for &(node, success) in &update.outcomes { page.settle_initial_image(node, success); }
+                }
                 if has_images {
                     self.update_script_geometry();
                 }
@@ -696,6 +726,15 @@ impl App {
                     self.restore_loading_scroll();
                     self.sync_editors();
                 }
+                for (node, success) in update.outcomes {
+                    if let Some(page) = &mut self.scripting {
+                        if page.initial_image_current(node) {
+                            let outcome = page.finish_image_event(&mut self.document, &mut self.forms, node, success);
+                            if outcome.layout_changed { self.reflow(); }
+                        }
+                    }
+                }
+                self.show_script_errors();
                 changed = true;
             }
         }
@@ -1332,6 +1371,7 @@ impl App {
             page.set_cookie_session(self.cookies.clone());
             page.set_resource_base(&self.base_location);
             page.set_stylesheet_bytes(self.styles.values().map(String::len).sum());
+            page.set_initial_images(loaded.image_sources, &self.images, images_pending && self.images_enabled, self.images_enabled);
             page.set_geometry(crate::script_geometry::Geometry::new(
                 self.width - 12,
                 self.viewport_height(),

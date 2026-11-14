@@ -58,6 +58,12 @@ impl Geometry {
         self.images.get(&node).copied()
     }
 
+    pub fn set_image(&mut self, node: usize, dimensions: Option<(usize, usize)>) {
+        if let Some(dimensions) = dimensions { self.images.insert(node, dimensions); }
+        else { self.images.remove(&node); }
+        self.invalidate();
+    }
+
     pub fn set_stylesheet(&mut self, node: usize, source: Option<&str>) {
         if let Some(source) = source {
             self.styles.insert(node, source.to_owned());

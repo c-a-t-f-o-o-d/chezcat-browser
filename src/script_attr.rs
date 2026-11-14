@@ -271,8 +271,7 @@ impl Bridge<'_> {
             return Err("Supported attributes are id, class, style, title, hidden, disabled, role, lang, dir, data-* and aria-*; use .value/.checked for live controls.".into());
         }
         if key == "src" && image_attribute {
-            if let Some(value) = value { self.image_set(node, "src", &Value::String(value))?; return Ok(()); }
-            if !self.state.detached_images.contains(&node) { return Err("Changing a connected image source is not implemented.".into()); }
+            return self.image_source_change(node, value);
         }
         if key == "style" {
             if let Some(value) = value.as_ref() { validate_style(value, self.state.limits.host.string_bytes)?; }

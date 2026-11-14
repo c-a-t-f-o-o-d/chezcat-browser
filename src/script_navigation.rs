@@ -30,6 +30,7 @@ impl Page {
             || !self.state.dynamic.pending.is_empty()
             || !self.state.stylesheets.pending.is_empty()
             || !self.state.stylesheets.removed.is_empty()
+            || self.state.images.has_changes()
             || self.state.dom.pending_focus.is_some()
     }
 

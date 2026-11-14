@@ -58,7 +58,7 @@ const MAX_RESOURCE_ATTEMPTS: usize = 8192;
 pub(crate) const MAX_SCRIPT_BYTES: usize = crate::javascript::limits::BROWSER_CAPACITIES.source_bytes;
 // Decoded-image counts stay independent from CSS/script request capacities.
 const MAX_UNIQUE_IMAGES: usize = 64;
-const MAX_DECODED_IMAGE_BYTES: usize = 64 * 1024 * 1024;
+pub(crate) const MAX_DECODED_IMAGE_BYTES: usize = 64 * 1024 * 1024;
 
 pub struct Script {
     pub node: usize,
@@ -79,6 +79,7 @@ pub struct Loaded {
     pub fonts: fonts::Book,
     pub images: HashMap<usize, Arc<Bitmap>>,
     pub image_densities: HashMap<usize, f64>,
+    pub image_sources: HashMap<usize, String>,
     pub animations: HashMap<usize, Arc<Animation>>,
     pub scripts: Vec<Script>,
     pub csp: csp::PolicySet,
@@ -124,6 +125,7 @@ pub struct Completion {
 pub struct ImageUpdate {
     pub images: HashMap<usize, Arc<Bitmap>>,
     pub animations: HashMap<usize, Arc<Animation>>,
+    pub outcomes: Vec<(usize, bool)>,
     pub events: Vec<String>,
     /// New skipped references since the preceding delivery.
     pub skipped: usize,
@@ -246,6 +248,7 @@ impl Worker {
                                     debug_assert_eq!(*id, request.id);
                                     queued.images.extend(update.images);
                                     queued.animations.extend(update.animations);
+                                    queued.outcomes.extend(update.outcomes);
                                     queued.events.extend(update.events);
                                     queued.skipped += update.skipped;
                                 } else {
@@ -756,6 +759,7 @@ fn load_request_progressively(
         fonts: fonts::Book::empty(),
         images: HashMap::new(),
         image_densities: HashMap::new(),
+        image_sources: HashMap::new(),
         animations: HashMap::new(),
         scripts: Vec::new(),
         csp,
@@ -850,6 +854,11 @@ fn load_request_progressively(
         .iter()
         .map(|image| (image.node, image.density))
         .collect();
+    loaded.image_sources = image_plan.iter().map(|image| {
+        let source = if crate::image_data::is_data(&image.target) { image.target.clone() }
+            else { navigation::resolve(&image.target, &loaded.base).map(|target| target.display()).unwrap_or_else(|_| image.target.clone()) };
+        (image.node, source)
+    }).collect();
     if !options.images {
         for image in &image_plan {
             if let Ok(resolved) = navigation::resolve(&image.target, &loaded.base) {
@@ -1701,6 +1710,7 @@ fn load_images(
     let mut update = ImageUpdate {
         images: HashMap::new(),
         animations: HashMap::new(),
+        outcomes: Vec::new(),
         events: Vec::new(),
         skipped: 0,
     };
@@ -1919,6 +1929,7 @@ fn load_images(
                 pool.network_trace().blocked(address, "image", error);
             }
         }
+        update.outcomes.push((image.node, result.is_ok()));
         stats.record("IMAGE", &label, was_reused, result, &mut update.events);
         update.skipped += stats.skipped - before_skipped;
         // At most one delivery per physical batch, plus the final repeated refs.
@@ -1934,12 +1945,13 @@ fn publish_images(
     update: &mut ImageUpdate,
     deliver: &mut dyn FnMut(Delivery) -> Result<(), String>,
 ) -> Result<(), String> {
-    if !update.images.is_empty() || !update.events.is_empty() || update.skipped != 0 {
+    if !update.images.is_empty() || !update.events.is_empty() || !update.outcomes.is_empty() || update.skipped != 0 {
         let ready = std::mem::replace(
             update,
             ImageUpdate {
                 images: HashMap::new(),
                 animations: HashMap::new(),
+                outcomes: Vec::new(),
                 events: Vec::new(),
                 skipped: 0,
             },
@@ -1959,7 +1971,7 @@ fn animation_description(animation: &Animation) -> String {
     )
 }
 
-fn fit_image_budget(asset: &mut image::DecodedImage, used: usize) -> Result<usize, String> {
+pub(crate) fn fit_image_budget(asset: &mut image::DecodedImage, used: usize) -> Result<usize, String> {
     let available = MAX_DECODED_IMAGE_BYTES.saturating_sub(used);
     let mut bytes = asset.retained_bytes()?;
     if bytes > available && asset.animation.is_some() {

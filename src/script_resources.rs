@@ -39,6 +39,7 @@ impl Page {
 
     pub fn clear_host_requests(&mut self) {
         self.clear_stylesheet_requests();
+        self.clear_image_requests();
         self.state.dynamic.pending.clear();
         self.state.dynamic.in_flight = 0;
         self.state.navigation = None;

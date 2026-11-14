@@ -720,7 +720,6 @@ impl Bridge<'_> {
                         | "legend"
                         | "option"
                         | "optgroup"
-                        | "img"
                         | "style"
                         | "title"
                         | "object"
@@ -747,7 +746,10 @@ impl Bridge<'_> {
                 return Err(format!("DOM tree mutation of controls, loaded resources or structural roots is not implemented. Blocked node={node}; tag={:?}; connected={}; created={}.{frame}",
                     prefix(name, 64), self.state.dom.connected.get(node).copied().unwrap_or(false), self.state.dom.created.contains(&node)));
             }
-            if name == "iframe" { self.validate_blank_frame(node)?; }
+            let frame = name == "iframe";
+            let image = name == "img";
+            if frame { self.validate_blank_frame(node)?; }
+            if image { self.validate_plain_image(node)?; }
             if let Some(id) = self.doc.attr(node, "id").filter(|id| !id.is_empty()) {
                 self.state.work(self.forms.controls.len())?;
                 self.state.copies(
@@ -829,6 +831,9 @@ impl Bridge<'_> {
         let (descendants, depth) = self.mutation_subtree(child).map_err(|error| format!(
             "{error} Operation={method}; parent={parent}<{:?}>; child={child}<{:?}>; old_parent={old_parent:?}; reference={reference:?}.",
             prefix(tag(self.doc, parent), 64), prefix(tag(self.doc, child), 64)))?;
+        if method != "removeChild" && tag(self.doc, parent) == "picture" && tag(self.doc, child) == "img" {
+            return Err("Dynamic picture image selection is not implemented.".into());
+        }
         if method != "removeChild" && parent_depth.saturating_add(depth) > MAX_DOM_DEPTH {
             return Err("DOM tree depth limit reached (128).".into());
         }
@@ -844,6 +849,7 @@ impl Bridge<'_> {
         )?;
         let was_connected = self.state.dom.connected[child];
         let connected = method != "removeChild" && self.state.dom.connected[parent];
+        let image_plans = self.prepare_image_connections(&descendants, connected)?;
         let frames = self.prepare_blank_frames(&descendants, connected, parent)?;
         if let Some(old_parent) = old_parent {
             self.doc.nodes[old_parent]
@@ -875,6 +881,7 @@ impl Bridge<'_> {
             }
         }
         self.commit_blank_frames(&descendants, frames);
+        self.commit_image_connections(image_plans);
         self.state.dirty = true;
         if was_connected || connected {
             self.state.layout_changed();
