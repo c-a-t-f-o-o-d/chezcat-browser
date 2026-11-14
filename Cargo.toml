@@ -1,6 +1,6 @@
 [package]
 name = "chezcat"
-version = "0.57.0"
+version = "0.58.0"
 edition = "2021"
 publish = false
 description = "A small independently written browser experiment."

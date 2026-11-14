@@ -22,6 +22,7 @@ struct MouseData {
     shift: bool,
     meta: bool,
     button: i16,
+    which: u32,
     related: Option<u32>,
 }
 
@@ -38,6 +39,40 @@ mod tests {
         page.set_location(&location);
         let outcome = page.start(&mut doc, &mut forms, &[Script { node: 0, label: "Original constructed-event fixture".into(), source: source.into() }]);
         (doc, forms, page, outcome)
+    }
+
+    #[test]
+    fn constructed_mouse_coordinates_alias_clients_and_track_css_viewport_scroll() {
+        let (mut doc,mut forms,mut page,outcome)=start(r#"
+var e=document.createEvent('MouseEvents');
+if(e.pageX!==0||e.pageY!==0||e.x!==0||e.y!==0||e.offsetX!==0||e.offsetY!==0||!('pageX' in e))throw 'zero';
+e.initMouseEvent('probe',false,false,null,0,900,800,-7,11);
+if(e.x!==-7||e.y!==11||e.pageX!==-7||e.pageY!==11||e.offsetX!==-7||e.offsetY!==11)throw 'client aliases';
+e.pageX=99;if(e.pageX!==-7)throw 'readonly';
+var strict=false;try{(function(){'use strict';e.pageY=99;})();}catch(x){strict=x.name==='TypeError';}if(!strict)throw 'strict readonly';
+var base=document.createEvent('Event');if('pageX' in base||base.pageX!==undefined)throw 'brand';
+"#);
+        assert_eq!(outcome.errors,0,"{}",page.report());
+        page.set_geometry(crate::script_geometry::Geometry::new(800,600,2.0,&HashMap::new(),HashMap::new(),&crate::fonts::Book::default()));
+        page.set_geometry_scroll(246);
+        let outcome=page.console_eval(&mut doc,&mut forms,"if(e.pageY!==134||e.offsetY!==134||e.y!==11||e.pageX!==-7)throw 'current CSS scroll';");
+        assert_eq!(outcome.errors,0,"{}",page.report());
+        page.set_geometry_scroll(40);
+        let outcome=page.console_eval(&mut doc,&mut forms,"if(e.pageY!==31||e.offsetY!==31)throw 'live scroll';e.initMouseEvent('reset');if(e.clientY!==0||e.pageY!==20||e.offsetY!==20)throw 'init reset';");
+        assert_eq!(outcome.errors,0,"{}",page.report());
+    }
+
+    #[test]
+    fn constructed_mouse_and_ui_which_preserve_initialization_and_readonly_brands() {
+        let (_,_,page,outcome)=start(r#"
+var e=document.createEvent('MouseEvents'),ui=document.createEvent('UIEvent'),base=document.createEvent('Event');
+if(e.which!==0||ui.which!==0||!('which' in e)||!('which' in ui)||'which' in base||base.which!==undefined)throw 'factory defaults/brands';
+for(var b of [0,1,2,-1]){e.initMouseEvent('x',false,false,null,0,0,0,0,0,false,false,false,false,b);if(e.which!==b+1||e.button!==b)throw 'initialized button';}
+e.which=17;if(e.which!==0)throw 'readonly';var caught=false;try{(function(){'use strict';ui.which=4;})();}catch(x){caught=x.name==='TypeError';}if(!caught)throw 'strict readonly';
+e.initMouseEvent('middle',false,false,null,0,0,0,0,0,false,false,false,false,1);e.initEvent('renamed');if(e.which!==2)throw 'base init preserves subclass';
+ui.initUIEvent('u',true,true,window,7);if(ui.which!==0)throw 'UI has no keyboard or button data';
+"#);
+        assert_eq!(outcome.errors,0,"{}",page.report());
     }
 
     #[test]
@@ -403,10 +438,10 @@ fn base_property(name: &str) -> bool {
         | "defaultPrevented" | "eventPhase" | "timeStamp" | "isTrusted" | "composed" | "cancelBubble")
 }
 
-fn ui_property(name:&str)->bool { matches!(name,"view"|"detail") }
+fn ui_property(name:&str)->bool { matches!(name,"view"|"detail"|"which") }
 
 fn mouse_property(name: &str) -> bool {
-    matches!(name, "screenX" | "screenY" | "clientX" | "clientY"
+    matches!(name, "screenX" | "screenY" | "clientX" | "clientY" | "x" | "y" | "pageX" | "pageY" | "offsetX" | "offsetY"
         | "ctrlKey" | "altKey" | "shiftKey" | "metaKey" | "button" | "buttons" | "relatedTarget")
 }
 
@@ -494,12 +529,19 @@ impl Bridge<'_> {
                 name if constant(name).is_some() => Value::Number(f64::from(constant(name).unwrap())),
                 "view" if event.ui.is_some() => native(event.ui.as_ref().unwrap().view),
                 "detail" if event.ui.is_some() => Value::Number(f64::from(event.ui.as_ref().unwrap().detail)),
+                "which" if event.ui.is_some() => Value::Number(f64::from(event.mouse.as_ref().map_or(0,|mouse|mouse.which))),
                 name if event.mouse.is_some() && mouse_property(name) => {
                     let mouse = event.mouse.as_ref().unwrap();
                     match name {
                         "relatedTarget" => native(mouse.related),
                         "screenX" => Value::Number(f64::from(mouse.screen_x)), "screenY" => Value::Number(f64::from(mouse.screen_y)),
-                        "clientX" => Value::Number(f64::from(mouse.client_x)), "clientY" => Value::Number(f64::from(mouse.client_y)),
+                        "clientX" | "x" => Value::Number(f64::from(mouse.client_x)), "clientY" | "y" => Value::Number(f64::from(mouse.client_y)),
+                        // Constructed events never enter trusted dispatch here.
+                        // CSSOM View: page = client + the realm Window's current
+                        // scroll; undispatched offset coordinates alias page.
+                        // https://drafts.csswg.org/cssom-view/#dom-mouseevent-pagex
+                        "pageX" | "offsetX" => Value::Number(f64::from(mouse.client_x)),
+                        "pageY" | "offsetY" => Value::Number(f64::from(mouse.client_y)+self.state.geometry.as_ref().map_or(0.0,|geometry|geometry.css_scroll_y())),
                         "button" => Value::Number(f64::from(mouse.button)), "buttons" => Value::Number(0.0),
                         "ctrlKey" => Value::Bool(mouse.ctrl), "altKey" => Value::Bool(mouse.alt),
                         "shiftKey" => Value::Bool(mouse.shift), "metaKey" => Value::Bool(mouse.meta),
@@ -605,6 +647,10 @@ impl Bridge<'_> {
                             ctrl: args.get(9).is_some_and(Value::truthy), alt: args.get(10).is_some_and(Value::truthy),
                             shift: args.get(11).is_some_and(Value::truthy), meta: args.get(12).is_some_and(Value::truthy),
                             button: number(13)? as i16,
+                            // Legacy UI Events supplemental information. A
+                            // factory-created event is initially zero; the
+                            // mouse initializer supplies button + 1.
+                            which: (i32::from(number(13)? as i16)+1) as u32,
                             related: self.mouse_interface_argument(args.get(14), false).map_err(|(_, message)| message)?,
                         })
                     } else { None };

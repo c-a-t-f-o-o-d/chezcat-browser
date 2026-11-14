@@ -581,6 +581,11 @@ impl App {
             },
             self.browser_palette(),
         );
+        if self.address.text().is_empty() {
+            canvas.set_clip(Some(crate::paint::ClipRect::new(x+8,16,(width-16).max(0),36)));
+            canvas.text(x+12,27,self.profile.data().settings.search_engine.hint(),1,self.browser_palette().muted);
+            canvas.set_clip(None);
+        }
         if self.current_bookmarked() {
             if let Some((x, y, w, h)) = self.chrome_rect(Bookmark) {
                 ui::icon(

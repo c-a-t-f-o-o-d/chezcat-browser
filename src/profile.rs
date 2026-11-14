@@ -38,6 +38,8 @@ pub fn format_color(value: Option<u32>) -> String {
     value.map(|v| format!("#{v:06X}")).unwrap_or_default()
 }
 
+pub use crate::search::SearchEngine;
+
 pub const MAX_BOOKMARKS: usize = 512;
 pub const MAX_TITLE_BYTES: usize = 1024;
 pub const MAX_ADDRESS_BYTES: usize = 16 * 1024;
@@ -49,6 +51,7 @@ pub const MAX_FOLDER_DEPTH: usize = 16;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Settings {
+    pub search_engine: SearchEngine,
     pub javascript: bool,
     pub images: bool,
     pub blocking: crate::blocking::Config,
@@ -65,6 +68,7 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
+            search_engine: SearchEngine::Google,
             javascript: true,
             images: true,
             blocking: crate::blocking::Config::default(),
@@ -149,10 +153,13 @@ impl Store {
     /// Retain a failed profile's identity and error without making its contents
     /// writable. A startup failure must never turn into an empty overwrite.
     pub fn unavailable(path: PathBuf, reason: String) -> Self {
+        let mut fallback=Self::memory();
+        // A corrupt/unknown preference must never silently send typed text.
+        fallback.data.settings.search_engine=SearchEngine::None;
         Self {
             path: Some(absolute_path(path.clone()).unwrap_or(path)),
             problem: Some(reason),
-            ..Self::memory()
+            ..fallback
         }
     }
 
@@ -454,6 +461,10 @@ fn decode(bytes: &[u8]) -> Result<Data, String> {
                     data.settings.visited_color = color;
                 }
             }
+            ["search_engine", value] => {
+                if !extension_settings.insert("search_engine") { return Err(bad()); }
+                data.settings.search_engine=SearchEngine::parse(value)?;
+            }
             ["download_folder", value] => {
                 if !extension_settings.insert("download_folder") {
                     return Err(bad());
@@ -564,6 +575,7 @@ fn encode(data: &Data) -> Result<Vec<u8>, String> {
         data.settings.download_folder.as_deref().unwrap_or(""),
     )?;
     text.push('\n');
+    text.push_str(&format!("search_engine\t{}\n",data.settings.search_engine.name()));
     for folder in &data.folders {
         text.push_str(&format!(
             "folder\t{}\t{}\t{}\t",
@@ -700,6 +712,25 @@ impl Drop for Temporary {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn address_search_profiles_migrate_without_writes_and_keep_explicit_none() {
+        let fixture=Fixture::new();
+        let legacy=b"OwnBrowser profile 1\njavascript\ttrue\nimages\ttrue\ndefault_zoom\t100\nhome\t\n";
+        fs::write(fixture.file(),legacy).unwrap();
+        let mut store=Store::open(fixture.file()).unwrap();
+        assert_eq!(store.data().settings.search_engine,SearchEngine::Google);
+        assert_eq!(fs::read(fixture.file()).unwrap(),legacy);
+        let mut data=sample();data.settings.search_engine=SearchEngine::None;
+        store.save(data.clone()).unwrap();assert_eq!(Store::open(fixture.file()).unwrap().data(),&data);
+        for engine in SearchEngine::ALL {data.settings.search_engine=engine;assert_eq!(decode(&encode(&data).unwrap()).unwrap(),data);}
+        for tail in ["search_engine\tUnknown\n","search_engine\t\n","search_engine\tGoogle\nsearch_engine\tNone\n"] {
+            let bytes=[legacy.as_slice(),tail.as_bytes()].concat();fs::write(fixture.file(),&bytes).unwrap();
+            let error=Store::open(fixture.file()).unwrap_err();let mut store=Store::unavailable(fixture.file(),error);
+            assert!(store.problem().is_some());assert_eq!(store.data().settings.search_engine,SearchEngine::None);
+            assert!(store.save(Data::default()).is_err());assert_eq!(fs::read(fixture.file()).unwrap(),bytes);
+        }
+    }
 
     struct Fixture(PathBuf);
     impl Fixture {
@@ -916,7 +947,8 @@ mod tests {
             let mut store = Store::unavailable(fixture.file(), error);
             assert!(store.problem().is_some());
             assert!(store.save(sample()).unwrap_err().contains("read-only"));
-            assert_eq!(store.data(), &Data::default());
+            let mut safe=Data::default();safe.settings.search_engine=SearchEngine::None;
+            assert_eq!(store.data(), &safe);
             assert_eq!(fs::read(fixture.file()).unwrap(), text.as_bytes());
         }
     }

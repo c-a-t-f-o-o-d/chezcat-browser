@@ -34,10 +34,23 @@ impl App {
             log.flush().map_err(|e| e.to_string())?;
             let fields: Vec<_> = line.splitn(3, '\t').collect();
             let result = (|| {
-                if matches!(fields[0], "fill" | "click" | "link" | "key" | "back" | "address") && self.input_access_blocked() {
+                if matches!(fields[0], "fill" | "click" | "link" | "link-target" | "key" | "back" | "address") && self.input_access_blocked() {
                     return Err("Visible access denial/human verification or document rate limit; stopping without retry.".into());
                 }
                 match fields.as_slice() {
+                    ["provider", endpoint] => {
+                        self.input_search_provider=Some(crate::search::local_fixture(endpoint)?);
+                        Ok(())
+                    }
+                    ["settings", action] => self.input_settings_action(action),
+                    ["address", text] if text.chars().count()<=4096 => {
+                        self.input_key("l","KeyL",0x4c,true,false,None)?;
+                        if self.focus!=Focus::Address { return Err("Address shortcut did not focus browser chrome.".into()); }
+                        self.input_key("a","KeyA",0x41,true,false,None)?;
+                        for ch in text.chars() { self.input_key(&ch.to_string(),"Unidentified",0,false,false,Some(ch))?; }
+                        if self.address.text()!=*text {return Err("Actual address input differs from requested text.".into());}
+                        Ok(())
+                    }
                     ["snapshot", name] if !name.is_empty() && name.len() <= 48 && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_') => {
                         self.input_snapshot(output, &format!("{:02}-{name}", index + 1))
                     }
@@ -62,7 +75,8 @@ impl App {
                     ["click", name] => self.input_click_control(name, false, &mut log),
                     ["key", "Enter"] => self.input_key("Enter", "Enter", 0x0d, false, false, None),
                     ["back"] => self.input_key("ArrowLeft", "ArrowLeft", 0x25, false, true, None),
-                    ["link", needle] if !needle.is_empty() => self.input_click_link(needle, &mut log),
+                    ["link", needle] if !needle.is_empty() => self.input_click_link(needle, false, &mut log),
+                    ["link-target", needle] if !needle.is_empty() && needle.len()<=256 => self.input_click_link(needle, true, &mut log),
                     ["wait", value] => {
                         let millis: u64 = value.parse().map_err(|_| "Invalid wait milliseconds")?;
                         if millis > 10000 { return Err("Wait exceeds 10000 milliseconds.".into()); }
@@ -118,9 +132,11 @@ impl App {
         Ok(())
     }
 
-    fn input_click_link(&mut self, needle: &str, log: &mut impl Write) -> Result<(), String> {
-        let index = self.page.runs.iter().position(|run| run.link.is_some() && run.text.contains(needle))
-            .ok_or_else(|| format!("No rendered link title containing {needle:?}"))?;
+    fn input_click_link(&mut self, needle: &str, by_target: bool, log: &mut impl Write) -> Result<(), String> {
+        let index = self.page.runs.iter().position(|run| run.link.is_some() && if by_target {
+            run.link.and_then(|index|self.page.link_targets().nth(index)).is_some_and(|target|target.contains(needle))
+        } else {run.text.contains(needle)})
+            .ok_or_else(|| format!("No rendered link {} containing {needle:?}",if by_target {"target"} else {"title"}))?;
         let y = self.page.runs[index].y;
         self.scroll_by(y - self.scroll - self.viewport_height() / 3);
         let run = &self.page.runs[index];

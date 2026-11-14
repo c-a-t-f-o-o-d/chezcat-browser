@@ -111,6 +111,44 @@ pub fn stored_address(input: &str) -> Result<String, String> {
 /// Explicit paths and existing local files take precedence over that shorthand.
 /// Raw paths preserve '%' literally; URI paths and fragments use UTF-8 percent
 /// escapes. Matching quotes make a raw path literal, including '#' characters.
+#[derive(Clone,Copy,Debug,PartialEq,Eq)]
+pub enum AddressIntent { Navigate, Search }
+
+/// Classify before navigation, never as a fallback after a failure. Only the
+/// address bar uses this policy; links, forms and scripts keep address/resolve.
+pub fn address_intent(input: &str, current: &Location) -> Result<AddressIntent,String> {
+    if input.len()>16*1024 || input.chars().any(char::is_control) {
+        return Err("Address input exceeds 16 KiB or contains control characters.".into());
+    }
+    let input=input.trim();
+    if input.is_empty() { return Err("Enter a search or address.".into()); }
+    let path_syntax=|value:&str|value.starts_with(['/', '\\']) || value=="." || value==".."
+        || value.starts_with("./") || value.starts_with("../") || value.contains('\\')
+        || value.as_bytes().get(1)==Some(&b':') && value.as_bytes()[0].is_ascii_alphabetic();
+    if let Some(inner)=quoted_path(input) {
+        let literal=Path::new(inner);
+        let exists=validate_local_path(literal).is_ok() && address_path(literal,current).is_file();
+        return Ok(if path_syntax(inner) || exists || starts_web_url(inner) || starts_file_uri(inner) {
+            AddressIntent::Navigate
+        } else {AddressIntent::Search});
+    }
+    if path_syntax(input) || input.starts_with(['#','[']) || input.parse::<std::net::IpAddr>().is_ok() || existing_address_file(input,current) {
+        return Ok(AddressIntent::Navigate);
+    }
+    let first=input.split_whitespace().next().unwrap_or("").trim_start_matches('-');
+    if first.split_once(':').is_some_and(|(name,_)|["site","filetype","ext","intitle","inurl","intext","allintitle","allinurl","allintext","related","cache","define","before","after"].iter().any(|op|name.eq_ignore_ascii_case(op))) {
+        return Ok(AddressIntent::Search);
+    }
+    if input.contains("://") || input.split_once(':').is_some_and(|(scheme,_)|!scheme.is_empty()
+        && scheme.as_bytes()[0].is_ascii_alphabetic() && scheme.bytes().all(|b|b.is_ascii_alphanumeric()||matches!(b,b'+'|b'-'|b'.'))) {
+        return Ok(AddressIntent::Navigate);
+    }
+    if !input.chars().any(char::is_whitespace) && (bare_web_address(input) || input.starts_with('[') || input.contains('/')) {
+        return Ok(AddressIntent::Navigate);
+    }
+    Ok(AddressIntent::Search)
+}
+
 pub fn address(input: &str, current: &Location) -> Result<Location, String> {
     if input.chars().any(char::is_control) {
         return Err("Addresses cannot contain control characters.".to_owned());
@@ -554,6 +592,25 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     struct Folder(PathBuf);
+
+    #[test]
+    fn address_search_intent_keeps_explicit_failures_local_and_preserves_files() {
+        let folder=Folder::new();
+        let page=folder.file("page.html",b"page");
+        folder.file("existing note.html",b"local");folder.file("local.test",b"local");folder.file("report#2026.html",b"literal");
+        let current=explicit(&page).unwrap();
+        for input in ["cupcake recipes","youtube","cheetos","meow","crazy html","ponies","C++ & C#","café 🦀","100%","\"quoted ordinary phrase\"","hello.world phrase",".NET tutorial","site:rust-lang.org ownership","-filetype:pdf"] {
+            assert_eq!(address_intent(input,&current).unwrap(),AddressIntent::Search,"{input}");
+        }
+        for input in ["https://example.test/a?q=x#f","HTTP://example.test/","example.test","localhost","127.0.0.1:8080/a","[::1]:80/","2001:db8::abcd","[::1] bad","machine:8080","about:home","#part","./missing.html","folder/missing.html","C:\\missing folder\\a.html","\\\\server\\share\\page.html","file:///C:/missing.html","existing note.html","\"existing note.html\"","local.test","https:/broken","http://[broken","ftp://example.test/","mailto:private@example.test","javascript:alert(1)","localhost:bad","example.test:99999","http://user@example.test/","\"C:\\missing folder\\a.html\""] {
+            assert_eq!(address_intent(input,&current).unwrap(),AddressIntent::Navigate,"{input}");
+        }
+        for input in ["","   ","a\nb","\0"] {assert!(address_intent(input,&current).is_err(),"{input:?}");}
+        assert!(address_intent(&"x".repeat(16385),&current).is_err());
+        assert_eq!(address_intent("\"report#2026.html\"",&current).unwrap(),AddressIntent::Navigate);
+        assert_eq!(address("\"report#2026.html\"",&current).unwrap().path.unwrap().file_name().unwrap(),"report#2026.html");
+        assert!(resolve("file:///C:/page.html",&address("https://example.test/",&Location::home()).unwrap()).is_err());
+    }
 
     impl Folder {
         fn new() -> Self {

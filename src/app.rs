@@ -208,6 +208,7 @@ pub struct App {
     scripts_enabled: bool,
     images_enabled: bool,
     profile: crate::profile::Store,
+    input_search_provider: Option<String>,
     downloads: crate::downloads::Manager,
     downloads_ui: download_ui::DownloadsUi,
     bookmarks_bar: bookmarks_bar::BookmarkBar,
@@ -308,6 +309,7 @@ impl App {
             scripts_enabled: true,
             images_enabled: true,
             profile: crate::profile::Store::memory(),
+            input_search_provider: None,
             downloads: crate::downloads::Manager::default(),
             downloads_ui: download_ui::DownloadsUi::default(),
             bookmarks_bar: bookmarks_bar::BookmarkBar::default(),
@@ -414,6 +416,16 @@ impl App {
             Ok(location) => self.navigate(location),
             Err(e) => self.navigation_error(&path.to_string_lossy(), e),
         }
+    }
+    fn submit_address_bar(&mut self, input: &str) {
+        let engine=self.profile.data().settings.search_engine;
+        if engine==crate::search::SearchEngine::None { self.open_address(input); return; }
+        let query=match navigation::address_intent(input,&self.location) {
+            Ok(navigation::AddressIntent::Navigate)=>{self.open_address(input);return;},
+            Ok(navigation::AddressIntent::Search)=>engine.query_url(input.trim(),self.input_search_provider.as_deref()),
+            Err(error)=>Err(error),
+        };
+        match query {Ok(address)=>self.open_address(&address),Err(error)=>{self.cancel_pending();self.navigation_error(input,error);}}
     }
     pub fn open_address(&mut self, address: &str) {
         match navigation::address(address, &self.location) {
@@ -2744,7 +2756,7 @@ impl App {
                         self.find_next(shift);
                     } else {
                         let address = self.address.text();
-                        self.open_address(&address);
+                        self.submit_address_bar(&address);
                     }
                 }
                 0x08 if self.editor_editable() => self.editor().backspace(),
@@ -4330,6 +4342,20 @@ mod tests {
         app.pointer_down(2, top + 2, false);
         app.pointer_up(2, top + 2);
         assert_eq!(app.document.title, "Visible link");
+    }
+    #[test]
+    fn scripted_overflow_clips_pixels_and_hit_targets_and_can_be_removed() {
+        let files=Fixture::new();
+        let path=files.write("script-clip.html","<body style='margin:0'><div id=p style='width:30px;height:20px'><a href=next.html style='display:block;width:100px;height:100px;background:red'></a></div><script>var p=document.getElementById('p');p.style.overflow='hidden';if(p.style.getPropertyValue('overflow')!=='hidden')throw 'declaration';</script>");
+        files.write("next.html","<title>Next</title>");
+        let mut app=App::new();app.set_javascript_enabled(true);app.open(&path);
+        assert_eq!(app.scripting.as_ref().unwrap().error_count(),0);
+        let top=app.content_top();let canvas=app.draw();
+        assert_eq!(canvas.pixels[(top+2) as usize*canvas.width+35],0xffffff);
+        assert!(app.wants_hand(2,top+2));assert!(!app.wants_hand(35,top+2));
+        let result=app.scripting.as_mut().unwrap().console_eval(&mut app.document,&mut app.forms,"if(p.style.removeProperty('overflow')!=='hidden')throw 'old value';");
+        assert_eq!(result.errors,0);app.reflow();
+        let canvas=app.draw();assert_eq!(canvas.pixels[(top+2) as usize*canvas.width+35],0xff0000);assert!(app.wants_hand(35,top+2));
     }
     struct Fixture(PathBuf);
     impl Fixture {

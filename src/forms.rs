@@ -1214,6 +1214,13 @@ fn append_entry(name: &str, value: &str, output: &mut String, limit: usize) -> R
     encode_into(value, output, limit)
 }
 
+pub fn encode_query_component(text: &str, limit: usize) -> Result<String,String> {
+    if text.len()>limit { return Err("Search query exceeds the address allowance.".into()); }
+    let mut output=String::new();
+    encode_into(text,&mut output,limit)?;
+    Ok(output)
+}
+
 fn encode_into(text: &str, output: &mut String, limit: usize) -> Result<(), String> {
     // Convert lone CR/LF to CRLF before UTF-8 application/x-www-form-urlencoded.
     let mut chars = text.chars().peekable();

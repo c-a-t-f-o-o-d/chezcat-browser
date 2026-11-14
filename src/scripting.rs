@@ -4197,6 +4197,7 @@ fn css_name(name: &str) -> Result<String, String> {
     if !matches!(
         css.as_str(),
         "display"
+            | "overflow"
             | "position"
             | "inset"
             | "top"

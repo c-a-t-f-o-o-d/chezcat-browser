@@ -279,7 +279,7 @@ fn settings_apply_controls_scripts_images_zoom_home_and_persists() {
     assert!(focus(&app) == Action::BlockingOptions);
     key(&mut app, 0x09);
     assert_eq!(focus(&app), Action::DarkMode);
-    for _ in 0..12 {
+    for _ in 0..app.browser_focus_order().len() {
         if focus(&app) == Action::Apply {
             break;
         }
@@ -1069,4 +1069,47 @@ fn deleting_history_rebuilds_visited_colors_after_the_last_retained_visit() {
     key(&mut app, 0x2e);
     assert!(app.browsing_history.data().entries.is_empty());
     assert_eq!(app.link_paint.get(&0), Some(&0x123456));
+}
+
+
+#[test]
+fn address_search_settings_hits_cancel_apply_restart_and_stale_save_are_atomic() {
+    use crate::profile::SearchEngine;
+    let fixture=Fixture::new();
+    let mut app=fixture.app("<title>Preserved page</title><script>window.marker={value:17};</script>");
+    let location=app.location.clone();let epoch=app.script_epoch;app.resize(420,260);
+    app.input_settings_action("Open").unwrap();app.input_settings_action("Bing").unwrap();
+    assert_eq!(app.profile.data().settings.search_engine,SearchEngine::Google);
+    app.input_settings_action("Cancel").unwrap();
+    assert_eq!(app.profile.data().settings.search_engine,SearchEngine::Google);assert!(!fixture.profile().exists());
+    for engine in [SearchEngine::Bing,SearchEngine::DuckDuckGo,SearchEngine::None,SearchEngine::Google] {
+        app.input_settings_action("Open").unwrap();app.input_settings_action(engine.name()).unwrap();
+        assert_eq!(app.browser_panel.as_ref().unwrap().search_engine,engine);
+        app.input_settings_action("Apply").unwrap();assert!(app.browser_panel.is_none(),"{}",app.status);
+        assert_eq!(app.profile.data().settings.search_engine,engine);
+        let mut reopened=App::new();reopened.attach_profile(Store::open(fixture.profile()).unwrap());
+        assert_eq!(reopened.profile.data().settings.search_engine,engine);
+        assert_eq!(app.location,location);assert_eq!(app.script_epoch,epoch,"Changing only search engine must not reload");
+    }
+    let before=std::fs::read(fixture.profile()).unwrap();
+    let mut other=Store::open(fixture.profile()).unwrap();let mut changed=other.data().clone();changed.settings.bookmark_bar=false;other.save(changed).unwrap();
+    let external=std::fs::read(fixture.profile()).unwrap();assert_ne!(external,before);
+    app.input_settings_action("Open").unwrap();app.input_settings_action("None").unwrap();app.input_settings_action("Apply").unwrap();
+    assert!(app.browser_panel.is_some());assert!(!app.browser_panel.as_ref().unwrap().error.is_empty());
+    assert_eq!(app.profile.data().settings.search_engine,SearchEngine::Google);assert_eq!(std::fs::read(fixture.profile()).unwrap(),external);
+    app.input_settings_action("Cancel").unwrap();
+}
+
+#[test]
+fn address_search_none_errors_and_non_chrome_navigation_never_contact_provider() {
+    use crate::profile::SearchEngine;
+    let fixture=Fixture::new();let mut app=fixture.app("<title>Local</title>");
+    app.input_search_provider=Some("http://127.0.0.1:1/search".into());
+    for input in ["http://[bad","example.test:99999","C:\\missing\\not-there.html","javascript:alert(1)"] {
+        app.submit_address_bar(input);assert!(app.failed,"{input}");assert!(app.pending.is_none());
+        assert!(app.network.snapshot().rows.is_empty(),"Explicit invalid input must never search: {input}");
+    }
+    let mut data=app.profile.data().clone();data.settings.search_engine=SearchEngine::None;app.profile.save(data).unwrap();
+    app.submit_address_bar("private ordinary text");assert!(app.failed&&app.pending.is_none());assert!(app.network.snapshot().rows.is_empty());
+    app.open_address("cupcake recipes");assert!(app.failed&&app.pending.is_none());assert!(app.network.snapshot().rows.is_empty(),"Programmatic opens do not search");
 }

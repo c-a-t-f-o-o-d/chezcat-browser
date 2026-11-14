@@ -54,6 +54,8 @@ impl Geometry {
 
     pub fn set_scroll(&mut self, scroll: i32) { self.scroll = scroll.max(0); }
 
+    pub fn css_scroll_y(&self) -> f64 { f64::from(self.scroll)/f64::from(self.zoom) }
+
     pub fn image_dimensions(&self, node: usize) -> Option<(usize, usize)> {
         self.images.get(&node).copied()
     }

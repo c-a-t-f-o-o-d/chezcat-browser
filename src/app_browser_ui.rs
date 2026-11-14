@@ -31,6 +31,7 @@ enum Action {
     CancelBookmark,
     JavaScript,
     Images,
+    SearchEngine(crate::profile::SearchEngine),
     BlockingEnabled,
     BlockingOptions,
     BuiltinBlocking,
@@ -118,6 +119,7 @@ pub(super) struct BrowserPanel {
     destination: u32,
 
     images: bool,
+    search_engine: crate::profile::SearchEngine,
     blocking: crate::blocking::Config,
     error: String,
     pressed: Option<Action>,
@@ -154,6 +156,7 @@ impl BrowserPanel {
             destination: 0,
 
             images: true,
+            search_engine: crate::profile::SearchEngine::Google,
             blocking: crate::blocking::Config::default(),
             error: String::new(),
             pressed: None,
@@ -210,6 +213,23 @@ struct Control {
 }
 
 impl App {
+    /// Development TSV only. Selection and Apply/Cancel use native panel hits;
+    /// making a control visible changes scroll/focus, never its stored value.
+    pub(super) fn input_settings_action(&mut self, name: &str) -> Result<(),String> {
+        if name=="Open" {self.show_settings();return Ok(());}
+        let action=match name {"Apply"=>Action::Apply,"Cancel"=>Action::Cancel,
+            value=>Action::SearchEngine(crate::profile::SearchEngine::parse(value)?)};
+        let panel=self.browser_panel.as_mut().ok_or("Settings panel is not open.")?;
+        if !matches!(panel.kind,PanelKind::Settings) {return Err("Expected the settings panel.".into());}
+        panel.focus=action;
+        self.ensure_browser_focus_visible();
+        let control=self.browser_controls().into_iter().find(|control|control.action==action&&control.enabled).ok_or("Settings control is unavailable.")?;
+        let (x,y)=(control.rect.x+control.rect.w/2,control.rect.y+control.rect.h/2);
+        let body=self.browser_body();
+        if self.browser_body_action(action) && !body.contains(x,y) {return Err("Settings control is not visible.".into());}
+        self.pointer_down(x,y,false);self.pointer_up(x,y);
+        Ok(())
+    }
     /// Startup only: applying a profile does not execute a page or navigate.
     /// App::new remains deterministic and memory-only for tests/headless use.
     pub fn attach_profile(&mut self, store: Store) {
@@ -554,6 +574,7 @@ impl App {
         // the effective choices shown here, while Cancel leaves both untouched.
         panel.javascript = self.scripts_enabled;
         panel.images = self.images_enabled;
+        panel.search_engine = settings.search_engine;
         panel.blocking = settings.blocking.clone();
         panel.dark_mode = settings.dark_mode;
         panel.dark_pages = settings.dark_pages;
@@ -812,6 +833,7 @@ impl App {
         data.settings.download_folder = (!folder.is_empty()).then_some(folder);
         data.settings.javascript = javascript;
         data.settings.images = images;
+        data.settings.search_engine = panel.search_engine;
         data.settings.blocking = blocking;
         data.settings.default_zoom = zoom;
         data.settings.home = home;
@@ -1301,6 +1323,9 @@ impl App {
             }
         }
         if matches!(panel.kind, PanelKind::Settings) {
+            for (index,engine) in crate::profile::SearchEngine::ALL.into_iter().enumerate() {
+                controls.push(Control {action:Action::SearchEngine(engine),rect:Rect{x:body.x,y:body.y+1192+index as i32*44-panel.scroll,w:body.w,h:36},label:engine.name(),enabled:true});
+            }
             controls.extend(self.appearance_controls(body, panel));
         }
         if matches!(panel.kind, PanelKind::EditBookmark { .. }) {
@@ -1323,6 +1348,7 @@ impl App {
                 | Action::Address
                 | Action::JavaScript
                 | Action::Images
+                | Action::SearchEngine(_)
                 | Action::BlockingEnabled
                 | Action::BlockingOptions
                 | Action::BuiltinBlocking
@@ -1462,6 +1488,10 @@ impl App {
                 Action::BookmarksOptions,
                 Action::DownloadFolder,
                 Action::DefaultDownloads,
+                Action::SearchEngine(crate::profile::SearchEngine::Google),
+                Action::SearchEngine(crate::profile::SearchEngine::Bing),
+                Action::SearchEngine(crate::profile::SearchEngine::DuckDuckGo),
+                Action::SearchEngine(crate::profile::SearchEngine::None),
                 Action::Apply,
                 Action::Cancel,
                 Action::Close,
@@ -1527,7 +1557,7 @@ impl App {
 
     fn browser_content_height(&self) -> i32 {
         match self.browser_panel.as_ref().map(|panel| panel.kind) {
-            Some(PanelKind::Settings) => 1140,
+            Some(PanelKind::Settings) => 1412,
             Some(PanelKind::BlockingRules) => self.browser_body().h.max(272),
             Some(PanelKind::HistoryOptions) => 390,
             Some(PanelKind::HistoryClear) => 300,
@@ -1669,6 +1699,7 @@ impl App {
                     panel.javascript = !panel.javascript;
                 }
             }
+            Action::SearchEngine(engine) => {if let Some(panel)=&mut self.browser_panel { panel.search_engine=engine; }}
             Action::Images => {
                 if let Some(panel) = &mut self.browser_panel {
                     panel.images = !panel.images;
@@ -2524,6 +2555,7 @@ impl App {
             }
             PanelKind::Settings => {
                 self.paint_appearance_settings(canvas, body, panel);
+                canvas.text(body.x,body.y+1158-panel.scroll,"Address-bar search engine",2,palette.foreground);
                 canvas.text(
                     body.x,
                     body.y + 153 - panel.scroll,
@@ -2600,11 +2632,13 @@ impl App {
                     | Action::RecordHistory
                     | Action::ClearOnExit
                     | Action::Retention(_)
+                    | Action::SearchEngine(_)
                     | Action::ClearRange(_)
             ) {
                 let checked = match control.action {
                     Action::JavaScript => panel.javascript,
                     Action::Images => panel.images,
+                    Action::SearchEngine(engine) => panel.search_engine==engine,
                     Action::DarkMode => panel.dark_mode,
                     Action::DarkPages => panel.dark_pages,
                     Action::BookmarkBar => panel.bookmark_bar,
@@ -2637,7 +2671,7 @@ impl App {
                         palette.border
                     },
                 );
-                let radio = matches!(control.action, Action::Retention(_) | Action::ClearRange(_));
+                let radio = matches!(control.action, Action::Retention(_) | Action::ClearRange(_) | Action::SearchEngine(_));
                 let marker = (control.rect.x + 9, control.rect.y + 8, 20, 20);
                 let radius = if radio { 10.0 } else { 5.0 };
                 ui::rounded_rect(

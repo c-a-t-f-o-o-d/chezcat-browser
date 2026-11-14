@@ -1358,3 +1358,24 @@ fn url_search_params_roundtrip_queries_and_repeated_search() {
 fn promise_string_url_pipeline_navigates_and_searches_again() {
     run_search_flow(true, true, "combined041");
 }
+
+
+#[test]
+fn address_search_enter_uses_one_query_component_and_typing_does_not_contact_provider() {
+    let destination=Site::new(None);let site=Site::new(Some(destination.url("")));
+    let mut app=App::new();app.open_address(&site.url("/home-input"));wait(&mut app);
+    app.input_search_provider=Some(crate::search::local_fixture(&site.url("/search-input")).unwrap());
+    for engine in [crate::profile::SearchEngine::Google,crate::profile::SearchEngine::Bing,crate::profile::SearchEngine::DuckDuckGo] {
+        let mut data=app.profile.data().clone();data.settings.search_engine=engine;app.profile.save(data).unwrap();
+        let count=site.requests.lock().unwrap().len();
+        app.key(0x4c,true,false,false);assert!(app.focus==Focus::Address);
+        let query=format!("C++ & C# café 🦀 {}",engine.name());
+        for ch in query.chars() {app.text_input(ch);}
+        assert_eq!(app.address.text(),query);
+        assert!(app.pending.is_none());assert_eq!(site.requests.lock().unwrap().len(),count);
+        app.key(0x0d,false,false,false);wait(&mut app);
+        assert!(site.seen(&format!("/search-input?q=C%2B%2B+%26+C%23+caf%C3%A9+%F0%9F%A6%80+{}",engine.name())));
+        assert_eq!(site.requests.lock().unwrap().len(),count+1);
+        assert!(app.page.runs.iter().any(|run|run.text.contains("C++")),"Real fixture result text is rendered");
+    }
+}
