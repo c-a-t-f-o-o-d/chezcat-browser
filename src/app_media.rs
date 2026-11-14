@@ -6,6 +6,13 @@ use crate::media::{self, Clock};
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+#[path="app_embedded_video.rs"]
+mod embedded;
+
+pub(super) struct Embedded {
+    node:usize,raw:String,source:String,plan:Option<Arc<crate::embedded_video::Plan>>,
+    error:Option<String>,aborted:bool,events:VecDeque<&'static str>,last_update:Duration,
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Control {
@@ -22,9 +29,13 @@ pub(super) struct ControlState {
     pub pending: bool,
 }
 pub(super) struct Player {
+    embedded:bool,
+    controls_focused:bool,
+    dom_events:VecDeque<&'static str>,
+    dom_playback_started:bool,
     sync:Option<Synchronized>,
     clip: Arc<media::Clip>,
-    node: usize,
+    pub(super) node: usize,
     poster: Arc<Bitmap>,
     initial: usize,
     clock: Clock,
@@ -241,7 +252,7 @@ mod tests {
             index += 1;
         }
         let asset = media::Clip::load(bytes, media::Limits::default(), &|| Ok(())).unwrap();
-        app.install_media(Some(asset));
+        let node=app.media.as_ref().map(|p|p.node);app.install_media(Some(asset),node,false);
         app.media_seek(Duration::from_millis(1200), Instant::now());
         settle(&mut app);
         let player = app.media.as_ref().unwrap();
@@ -354,7 +365,7 @@ mod tests {
         let mut app=av_app();app.audio_worker=Some(crate::audio_output::Worker::mock_for_app(app.wake.clone()).unwrap());
         let source=include_bytes!("../tools/fixtures/scene-intra.ivf");let mut bytes=source[..32].to_vec();let mut offset=32;let mut index=0;
         while offset<source.len(){let size=u32::from_le_bytes(source[offset..offset+4].try_into().unwrap()) as usize;let n=if index==2 {10}else{size};bytes.extend_from_slice(&(n as u32).to_le_bytes());bytes.extend_from_slice(&source[offset+4..offset+12]);bytes.extend_from_slice(&source[offset+12..offset+12+n]);offset+=12+size;index+=1;}
-        app.install_media(Some(media::Clip::load(bytes,media::Limits::default(),&||Ok(())).unwrap()));app.install_media_sync();
+        let node=app.media.as_ref().map(|p|p.node);app.install_media(Some(media::Clip::load(bytes,media::Limits::default(),&||Ok(())).unwrap()),node,false);app.install_media_sync();
         app.synchronized_seek(Duration::from_millis(1200),true);
         let deadline=Instant::now()+Duration::from_secs(3);while app.media.as_ref().unwrap().error.is_none()&&Instant::now()<deadline {app.poll_load();std::thread::sleep(Duration::from_millis(1));}
         assert!(app.media.as_ref().unwrap().error.is_some());assert!(!app.media_control_state().unwrap().playing);assert!(!app.media.as_ref().unwrap().sync.as_ref().unwrap().resume_after_seek);
@@ -366,11 +377,23 @@ impl Player {
     fn playing(&self)->bool {self.sync.as_ref().map_or_else(||self.clock.playing(),|s|s.playing)}
     fn drained(&self)->bool {self.sync.as_ref().map_or(self.clock.ended,|s|s.drained)}
     fn event(&mut self, event: &'static str) {
+        if self.embedded && crate::scripting::media_event_name(event) && (self.decoder_enabled||event=="error") {
+            if event=="ended" {
+                if self.dom_playback_started {self.queue_dom_event("timeupdate");self.queue_dom_event("pause");self.queue_dom_event("ended");self.dom_playback_started=false;}
+            }else{
+                self.queue_dom_event(event);
+                if event=="play"{self.dom_playback_started=self.decoder_enabled&&self.clock.playing();}
+                if matches!(event,"pause"|"error"){self.dom_playback_started=false;}
+            }
+        }
         if self.events.len() == 128 {
             self.events.pop_front();
             self.dropped = self.dropped.saturating_add(1);
         }
         self.events.push_back(event);
+    }
+    fn queue_dom_event(&mut self,event:&'static str){
+        if self.dom_events.try_reserve(1).is_ok(){self.dom_events.push_back(event);}else{self.clock.pause(Instant::now());self.decoder_enabled=false;self.error=Some("Could not retain a native media event.".into());}
     }
     fn invalidate(&mut self) {
         self.pending = None;
@@ -446,7 +469,7 @@ impl App {
             }
         }
     }
-    pub(super) fn install_media(&mut self, asset: Option<media::Asset>) {
+    pub(super) fn install_media(&mut self, asset: Option<media::Asset>,node:Option<usize>,embedded:bool) {
         if let Some(worker) = &self.media_worker {
             worker.cancel();
         }
@@ -454,19 +477,10 @@ impl App {
         let Some(asset) = asset else {
             return;
         };
-        let Some(node) = self
-            .document
-            .nodes
-            .iter()
-            .enumerate()
-            .find_map(|(node, _)| {
-                (self.document.attr(node, "id") == Some("media-frame")).then_some(node)
-            })
-        else {
-            return;
-        };
+        let Some(node)=node.filter(|&node|self.document.nodes.get(node).is_some_and(|item|item.namespace==crate::html::Namespace::Html&&matches!(&item.kind,crate::html::NodeKind::Element {tag,..} if tag==if embedded{"video"}else{"img"}))) else{return;};
         self.images.insert(node, asset.first.clone());
         let mut player = Player {
+            embedded,controls_focused:false,dom_events:VecDeque::new(),dom_playback_started:false,
             sync:None,
             clock: Clock::new(asset.clip.duration),
             clip: asset.clip,
@@ -486,17 +500,22 @@ impl App {
             deadline: None,
             suspended: false,
         };
+        if embedded {player.event("durationchange");}
         player.event("loadedmetadata");
         player.event("loadeddata");
+        if embedded {player.event("canplay");player.event("canplaythrough");}
         self.media = Some(player);
     }
     pub(super) fn suspend_media(&mut self) {
+        self.cancel_embedded_video();
         self.suspend_audio();
         if let Some(worker) = &self.media_worker {
             worker.cancel();
         }
         if let Some(player) = &mut self.media {
+            let was_playing=player.playing();
             player.clock.pause(Instant::now());
+            if was_playing && player.embedded {player.event("pause");}
             player.invalidate();
             player.suspended = true;
             if let Some(s)=&mut player.sync{s.playing=false;s.resume_after_seek=false;}
@@ -504,6 +523,7 @@ impl App {
             player.pressed = None;
             player.event("cancel");
         }
+        self.flush_embedded_video();
     }
     fn media_request_frame(&mut self, now: Instant) {
         // Every request route (timer, completion and controller) observes the
@@ -614,6 +634,7 @@ impl App {
         }
         self.media_request_frame(now);
         self.finish_media_tick(now);
+        self.flush_embedded_video();
         true
     }
     fn finish_media_tick(&mut self, now: Instant) {
@@ -654,11 +675,13 @@ impl App {
         self.finish_media_tick(now);
     }
     pub(super) fn stop_media(&mut self) {
+        self.cancel_embedded_video();
         self.stop_audio();
         if let Some(worker) = &self.media_worker {
             worker.cancel();
         }
         if let Some(player) = &mut self.media {
+            let was_playing=player.playing();let moved=player.position(Instant::now())!=Duration::ZERO;
             player.clock.pause(Instant::now());
             player.clock.seek(Duration::ZERO, Instant::now());
             if let Some(s)=&mut player.sync {s.position=Duration::ZERO;s.playing=false;s.drained=false;s.resume_after_seek=false;}
@@ -672,7 +695,10 @@ impl App {
             player.displayed = player.initial;
             self.images.insert(player.node, player.poster.clone());
             player.event("stop");
+            if was_playing && player.embedded {player.event("pause");}
+            if moved && player.embedded {player.event("seeking");player.event("timeupdate");player.event("seeked");}
         }
+        self.flush_embedded_video();
     }
     fn media_activate(&mut self, control: Control) {
         if self.synchronized_media(){self.synchronized_activate(control);return;}
@@ -726,6 +752,7 @@ impl App {
                     player.ended_reported = false;
                     player.clock.play(now);
                     player.event("play");
+                    if player.embedded {player.event("playing");}
                 }
                 self.media_request_frame(now);
                 self.finish_media_tick(now);
@@ -734,6 +761,7 @@ impl App {
     }
     fn media_visible(&self) -> bool {
         (self.media.is_some() || self.audio.is_some())
+            && self.media_control_rect().is_some()
             && self.view == View::Page
             && !self.menu
             && self.browser_panel.is_none()
@@ -757,19 +785,16 @@ impl App {
         })
     }
     pub(super) fn media_track(&self) -> (i32, i32) {
-        (170, (self.width - 194).max(1))
+        self.media_control_rect().map_or((170,(self.width-194).max(1)),|r|(r.left+170,(r.right-r.left-194).max(1)))
     }
     pub(super) fn media_hit(&self, x: i32, y: i32) -> Option<Control> {
-        if !self.media_visible()
-            || self.content_bottom() - 44 < self.content_top()
-            || y < self.content_bottom() - 44
-            || y >= self.content_bottom()
-        {
-            return None;
-        }
-        if (8..84).contains(&x) {
+        if !self.media_visible(){return None;}
+        let rect=self.media_control_rect()?;
+        if !rect.contains(x,y) || y<self.content_top() || y>=self.content_bottom() || x<0 || x>=self.width {return None;}
+        if self.media.as_ref().is_some_and(|p|p.embedded&&!self.page.image_topmost_at(p.node,x,y-self.content_top()+self.scroll)){return None;}
+        if (rect.left+8..rect.left+84).contains(&x) {
             Some(Control::Toggle)
-        } else if (90..160).contains(&x) {
+        } else if (rect.left+90..rect.left+160).contains(&x) {
             Some(Control::Stop)
         } else {
             let (start, width) = self.media_track();
@@ -778,10 +803,12 @@ impl App {
     }
     pub(super) fn media_pointer_down(&mut self, x: i32, y: i32) -> bool {
         let Some(control) = self.media_hit(x, y) else {
+            if let Some(p)=&mut self.media {p.controls_focused=false;}
             return false;
         };
         if let Some(player) = &mut self.media {
             player.pressed = Some(control);
+            player.controls_focused=true;
         }
         self.press_audio(control);
         self.focus = Focus::Page;
@@ -799,6 +826,7 @@ impl App {
         if let Some(hit) = self.media_hit(x, y) {
             if hit == pressed || matches!((hit, pressed), (Control::Seek(_), Control::Seek(_))) {
                 self.media_activate(hit);
+                self.flush_embedded_video();
             }
         }
         true
@@ -810,6 +838,7 @@ impl App {
         }
     }
     pub(super) fn media_key(&mut self, key: u32) -> bool {
+        if self.media.as_ref().is_some_and(|p|p.embedded&&!p.controls_focused){return false;}
         if self.focus != Focus::Page || !self.media_visible() {
             return false;
         }
@@ -832,22 +861,20 @@ impl App {
             }
             _ => return false,
         }
-        true
+        self.flush_embedded_video();true
     }
-    pub(super) fn draw_media_controls(&self, canvas: &mut Canvas) {
-        if !self.media_visible() {
-            return;
-        }
+    pub(super) fn draw_media_controls(&self,canvas:&mut Canvas){
+        if !self.media_visible() || self.media.as_ref().is_some_and(|p|p.embedded){return;}
+        if let Some(rect)=self.media_control_rect(){self.draw_media_bar(canvas,rect);}
+    }
+    fn draw_media_bar(&self,canvas:&mut Canvas,rect:crate::paint::ClipRect) {
         let state = self.media_control_state().unwrap();
-        let y = self.content_bottom() - 44;
-        if y < self.content_top() {
-            return;
-        }
-        canvas.fill_rect(0, y, self.width, 44, 0xff162d3d);
-        canvas.fill_rect(8, y + 5, 76, 30, 0xff346277);
-        canvas.fill_rect(90, y + 5, 70, 30, 0xff346277);
+        let y=rect.top;let left=rect.left;let bar_width=rect.right-rect.left;
+        canvas.fill_rect(left, y, bar_width, 44, 0xff162d3d);
+        canvas.fill_rect(left+8, y + 5, 76, 30, 0xff346277);
+        canvas.fill_rect(left+90, y + 5, 70, 30, 0xff346277);
         canvas.text(
-            16,
+            left+16,
             y + 15,
             if state.playing {
                 "Pause"
@@ -859,7 +886,7 @@ impl App {
             1,
             0xffffffff,
         );
-        canvas.text(100, y + 15, "Stop", 1, 0xffffffff);
+        canvas.text(left+100, y + 15, "Stop", 1, 0xffffffff);
         let (start, width) = self.media_track();
         canvas.fill_rect(start, y + 8, width, 8, 0xff6d8794);
         let fraction = state.position.as_secs_f64() / state.duration.as_secs_f64();
@@ -890,8 +917,9 @@ impl App {
         );
     }
     pub(super) fn media_report(&self) -> String {
+        let element=self.embedded_video_snapshot().map_or_else(String::new,|s|format!("HTML video binding node={} ready_state={} network_state={} width={} height={} paused={} ended={} seeking={} current_ms={} duration_ms={:?} source_pending={} error={:?}\n",s.node,s.ready,s.network,s.width,s.height,!s.playing,s.ended,s.seeking,s.position().as_millis(),s.duration.map(|d|d.as_millis()),self.embedded_video_loading(),self.embedded_video.as_ref().and_then(|v|v.error.as_deref())));
         let Some(player) = &self.media else {
-            return "Local video: none\n".into();
+            return element+"Local video: none\n";
         };
         let rect = self.page.items.iter().find_map(|item| match item {
             crate::layout::PaintItem::Image {
@@ -906,8 +934,8 @@ impl App {
             }
             _ => None,
         });
-        let scope=if player.sync.is_some(){"local Matroska VP8 intra + PCM16, device-sample clock"}else{"standalone IVF/VP8 intra, video only"};
-        format!("Local video: {scope}; native viewer events (no HTMLMediaElement)\nMedia playing={} ended={} time_ms={} duration_ms={} frame={} frames={} pending={:?} canvas={}x{} generation={} error={:?}\nMedia timeline_eof={}\nMedia lifecycle dropped={} {}\nMedia rendered rect={rect:?}\n",player.playing(),player.ended_reported,player.position(Instant::now()).as_millis(),player.clip.duration.as_millis(),player.displayed,player.clip.frame_count(),player.pending,player.clip.width,player.clip.height,player.generation,player.error,player.position(Instant::now())>=player.clip.duration,player.dropped,player.events.iter().copied().collect::<Vec<_>>().join(","))
+        let scope=if player.embedded{"authored HTML video, local IVF/VP8 intra, partial readonly state/native events; no audio/network/play()"}else if player.sync.is_some(){"local Matroska VP8 intra + PCM16, device-sample clock; native viewer events (no HTMLMediaElement)"}else{"standalone IVF/VP8 intra, video only; native viewer events (no HTMLMediaElement)"};
+        element+&format!("Local video: {scope}\nMedia playing={} ended={} time_ms={} duration_ms={} frame={} frames={} pending={:?} canvas={}x{} generation={} error={:?}\nMedia timeline_eof={}\nMedia lifecycle dropped={} {}\nMedia rendered rect={rect:?}\n",player.playing(),player.ended_reported,player.position(Instant::now()).as_millis(),player.clip.duration.as_millis(),player.displayed,player.clip.frame_count(),player.pending,player.clip.width,player.clip.height,player.generation,player.error,player.position(Instant::now())>=player.clip.duration,player.dropped,player.events.iter().copied().collect::<Vec<_>>().join(","))
     }
     pub(super) fn input_media_action(&mut self, action: &str) -> Result<(i32, i32), String> {
         if !self.media_visible() {
@@ -919,9 +947,9 @@ impl App {
                 if playing != (action == "Pause") {
                     return Err("Media Play/Pause state differs from the requested control.".into());
                 }
-                40
+                self.media_control_rect().ok_or("Media controls have no element box.")?.left+40
             }
-            "Stop" => 120,
+            "Stop" => self.media_control_rect().ok_or("Media controls have no element box.")?.left+120,
             _ => {
                 let millis: u64 = action
                     .strip_prefix("Seek:")
@@ -935,7 +963,7 @@ impl App {
                 start + (f64::from(width) * fraction).round() as i32
             }
         };
-        let y = self.content_bottom() - 28;
+        let y = self.media_control_rect().ok_or("Media controls have no element box.")?.top+16;
         if self.media_hit(x, y).is_none() {
             return Err("Media control is not a visible hit target.".into());
         }

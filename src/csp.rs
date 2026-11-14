@@ -1,8 +1,8 @@
-//! Original, bounded Content Security Policy checks for scripts, styles, fonts and images.
+//! Original, bounded Content Security Policy checks for scripts, styles, fonts, images and media.
 //!
 //! CSP3 source-list, nonce/hash, fallback and multiple-policy semantics:
 //! https://www.w3.org/TR/CSP3/
-//! This is not full CSP: script, linked-style, font, image and base-uri sources are implemented;
+//! This is not full CSP: script, linked-style, font, image, media and base-uri sources are implemented;
 //! other resource/navigation directives are diagnosed but not implemented.
 //! Both parser-loaded and inserted external classic scripts use the same bounded
 //! source checks. strict-dynamic never propagates trust in this subset;
@@ -44,6 +44,7 @@ struct Policy {
     style_elements: Option<Vec<Source>>,
     fonts: Option<Vec<Source>>,
     images: Option<Vec<Source>>,
+    media: Option<Vec<Source>>,
     base: Option<Vec<Source>>,
     forms: Option<Vec<Source>>,
     sandbox: bool,
@@ -109,7 +110,7 @@ impl PolicySet {
         for policy in &self.policies {
             bytes += std::mem::size_of::<Policy>();
             for sources in [&policy.default, &policy.scripts, &policy.elements, &policy.attributes,
-                &policy.styles, &policy.style_elements, &policy.fonts, &policy.images, &policy.base, &policy.forms].into_iter().flatten() {
+                &policy.styles, &policy.style_elements, &policy.fonts, &policy.images, &policy.media, &policy.base, &policy.forms].into_iter().flatten() {
                 bytes += sources.iter().map(|source| std::mem::size_of::<Source>() + match source {
                     Source::Origin { host, .. } => host.len(),
                     Source::Nonce(text) | Source::Hash(_, text) => text.len(),
@@ -185,7 +186,7 @@ impl PolicySet {
                 Ok((policy, unknown_sources, other_directives)) => {
                     self.policies.push(policy);
                     let delivery = if meta { "meta" } else { "header" };
-                    self.note(format!("CSP {delivery}: script/linked-style/font/image/base-uri/form-action policy enforced; {unknown_sources} unsupported source expression(s) grant no permission; {other_directives} other directive(s) are outside this subset. No violation reports are sent."));
+                    self.note(format!("CSP {delivery}: script/linked-style/font/image/media/base-uri/form-action policy enforced; {unknown_sources} unsupported source expression(s) grant no permission; {other_directives} other directive(s) are outside this subset. No violation reports are sent."));
                 }
                 Err(reason) => self.block_from(start, reason),
             }
@@ -395,6 +396,17 @@ impl PolicySet {
         }
         Ok(())
     }
+
+    pub fn allows_media(&self, node: usize, target: &Location) -> Result<(), String> {
+        for policy in self.active(node)? {
+            if let Some(list) = policy.media.as_ref().or(policy.default.as_ref()) {
+                if !list.iter().any(|source| url_matches(source,self.origin.as_ref(),target)) {
+                    return Err("Content Security Policy media-src/default-src blocked this media source.".into());
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 impl Policy {
@@ -434,6 +446,7 @@ fn parse_policy(
         style_elements: None,
         fonts: None,
         images: None,
+        media: None,
         base: None,
         forms: None,
         sandbox: false,
@@ -470,6 +483,7 @@ fn parse_policy(
             "style-src-elem" => &mut policy.style_elements,
             "font-src" => &mut policy.fonts,
             "img-src" => &mut policy.images,
+            "media-src" => &mut policy.media,
             "base-uri" => &mut policy.base,
             "form-action" => &mut policy.forms,
             "sandbox" => {
@@ -754,7 +768,8 @@ mod tests {
         assert!(p.allows_inline(1, None, "1;").is_err());
         let p = policy("media-src 'none'; made-up anything");
         assert!(p.allows_inline(1, None, "1;").is_ok());
-        assert!(p.diagnostics()[0].contains("2 other directive"));
+        assert!(p.diagnostics()[0].contains("1 other directive"));
+        assert!(p.allows_media(1,&same).is_err());
     }
 
     #[test]

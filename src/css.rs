@@ -833,6 +833,7 @@ fn prefix(text: &str, maximum: usize) -> &str {
 }
 
 fn user_agent(style: &mut Style, tag: &str, link: bool, hidden: bool) {
+    if tag=="video" {style.object_fit=ObjectFit::Contain;}
     if matches!(
         tag,
         "#document"

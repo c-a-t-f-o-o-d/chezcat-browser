@@ -209,6 +209,8 @@ pub struct App {
     animations: HashMap<usize, animation::Playback>,
     media: Option<media_ui::Player>,
     media_worker: Option<crate::media::Worker>,
+    embedded_video: Option<media_ui::Embedded>,
+    embedded_video_worker: Option<crate::embedded_video::Worker>,
     media_limits: crate::media::Limits,
     audio: Option<audio_ui::Player>,
     audio_worker: Option<crate::audio_output::Worker>,
@@ -318,6 +320,8 @@ impl App {
             animations: HashMap::new(),
             media: None,
             media_worker: None,
+            embedded_video: None,
+            embedded_video_worker: None,
             media_limits: crate::media::Limits::default(),
             audio: None,
             audio_worker: None,
@@ -478,6 +482,7 @@ impl App {
     }
     pub fn set_load_wake(&mut self, wake: loader::Wake) {
         if let Some(worker)=&self.media_worker {worker.set_wake(wake.clone());}
+        if let Some(worker)=&self.embedded_video_worker {worker.set_wake(wake.clone());}
         if let Some(worker)=&self.audio_worker {worker.set_wake(wake.clone());}
         if let Some(worker) = &self.worker {
             worker.set_wake(wake.clone());
@@ -516,7 +521,7 @@ impl App {
         if self.images_enabled != enabled {
             self.images_enabled = enabled;
             if !enabled {
-                self.images.clear();
+                self.images.retain(|node,_|self.media.as_ref().is_some_and(|player|player.node==*node));
                 self.image_densities.clear();
                 self.animations.clear();
                 self.reflow();
@@ -559,6 +564,7 @@ impl App {
     }
     pub fn is_loading(&self) -> bool {
         self.pending.is_some()
+            || self.embedded_video_loading()
             || self.dynamic_pending != 0
             || self.pending_stylesheets != 0
             || !self.pending_images.is_empty()
@@ -576,8 +582,9 @@ impl App {
         self.resubmission = None;
     }
     pub fn stop_loading(&mut self) {
+        let was_loading=self.is_loading();
         self.stop_media();
-        if !self.is_loading() {
+        if !was_loading {
             return;
         }
         self.cancel_script_requests();
@@ -687,9 +694,10 @@ impl App {
             | self.poll_dynamic_images()
             | self.process_image_requests();
         let revision = self.network.revision();
-        let mut changed = script_changed | self.poll_media() | self.poll_audio() | self.poll_media_sync() | self.poll_downloads()
+        let mut changed = script_changed | self.poll_embedded_video() | self.poll_media() | self.poll_audio() | self.poll_media_sync() | self.poll_downloads()
             || revision != self.last_network_revision
             || self.network_needs_tick();
+        changed |= self.flush_embedded_video();
         self.last_network_revision = revision;
         let Some(worker) = &self.worker else {
             return changed;
@@ -1433,6 +1441,8 @@ impl App {
         self.commit_with_history(location, loaded, images_pending, Default::default(), history_length);
     }
     fn commit_with_history(&mut self, location: Location, loaded: Loaded, images_pending: bool, history_data: crate::scripting::HistoryData, history_length: usize) {
+        self.cancel_embedded_video();
+        self.embedded_video=None;
         self.cancel_script_requests();
         self.script_epoch = self.script_epoch.wrapping_add(1);
         self.committed_request = None;
@@ -1459,12 +1469,13 @@ impl App {
         self.animations.clear();
         self.install_animations(loaded.animations);
         self.events = loaded.events;
-        self.install_media(loaded.media);
+        self.install_media(loaded.media,loaded.media_node,false);
         self.install_audio(loaded.audio);
         self.install_media_sync();
         self.last_failed_navigation = None;
         self.source = location.path.clone();
         self.location = location;
+        self.prepare_embedded_video();
         self.remember_visit();
         self.close_bookmark_popup();
         self.view = View::Page;
@@ -1483,6 +1494,7 @@ impl App {
         if self.document.scripting_enabled {
             let mut page = crate::scripting::Page::new();
             page.set_navigation_timing(loaded.document_timing);
+            page.set_embedded_video(self.embedded_video_snapshot());
             page.set_location(&self.location);
             page.set_cookie_session(self.cookies.clone());
             page.set_resource_base(&self.base_location);
@@ -1497,7 +1509,7 @@ impl App {
                 natural_image_sizes(&self.images, &self.image_densities),
                 &self.fonts,
             ));
-            if images_pending {
+            if images_pending || self.embedded_video.is_some() {
                 page.start_before_load(&mut self.document, &mut self.forms, &scripts, &loaded.csp);
             } else {
                 page.start_with_policy(&mut self.document, &mut self.forms, &scripts, &loaded.csp);
@@ -1507,6 +1519,7 @@ impl App {
         self.reflow();
         self.jump_fragment();
         self.show_script_errors();
+        self.flush_embedded_video();
     }
     fn set_load_status(&mut self, notice: &str, skipped: usize) {
         self.status = if skipped == 0 {
@@ -3575,6 +3588,13 @@ impl App {
                         continue;
                     }
                     if self.view == View::Page {
+                        let video=self.document.nodes.get(node).is_some_and(|n|n.namespace==crate::html::Namespace::Html&&matches!(&n.kind,crate::html::NodeKind::Element {tag,..} if tag=="video"));
+                        if video {
+                            let rect=crate::paint::ClipRect::new(x,y,width,height);canvas.fill_rect(x,y,width,height,0xff000000);
+                            if let Some(bitmap)=self.images.get(&node){canvas.fitted_image(rect,bitmap,presentation);}
+                            self.draw_embedded_video_controls(&mut canvas,node,rect);
+                            continue;
+                        }
                         if let Some(bitmap) = self.images.get(&node) {
                             canvas.fitted_image(
                                 crate::paint::ClipRect::new(x, y, width, height),

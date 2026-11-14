@@ -21,6 +21,7 @@ mod diagnostics;
 mod downloads;
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 mod editor;
+mod embedded_video;
 mod font;
 mod fonts;
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
@@ -244,7 +245,7 @@ fn run() -> Result<(), String> {
                 )
             }
             Some("--help") | Some("-h") => {
-                let help = r#"ChezCat 0.69
+                let help = r#"ChezCat 0.70
 
 Open local HTML, UTF-8 text, supported images or a website address. Bare hosts such as google.com default to HTTPS; explicit http:// remains supported.
 Ctrl+O: file picker; Ctrl+L: address; Esc: stop loading.

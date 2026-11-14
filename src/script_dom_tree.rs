@@ -433,6 +433,7 @@ impl Bridge<'_> {
     }
 
     pub(super) fn dom_has(&mut self, object: u32, property: &str) -> Result<Option<bool>, String> {
+        if self.media_element_receiver(object) {if let Some(value)=self.media_element_has(object,property)? {return Ok(Some(value));}}
         let Some(node) = node_index(object) else {
             return Ok(None);
         };
@@ -514,6 +515,7 @@ impl Bridge<'_> {
     }
 
     pub(super) fn dom_get(&mut self, object: u32, property: &str) -> Result<Option<Value>, String> {
+        if self.media_element_receiver(object) {if let Some(value)=self.media_element_get(object,property)? {return Ok(Some(value));}}
         if node_index(object).is_none() {
             return Ok(None);
         }
@@ -726,6 +728,7 @@ impl Bridge<'_> {
                         | "option"
                         | "optgroup"
                         | "textarea"
+                        | "video" | "audio" | "source"
                 )
                 || tag(self.doc, index) == "noscript" && self.doc.scripting_enabled
             {
@@ -762,6 +765,7 @@ impl Bridge<'_> {
                         | "base"
                         | "meta"
                         | "template"
+                        | "video" | "audio" | "source"
                 )
                 || name == "noscript" && self.doc.scripting_enabled
                 || name == "script" && !self.dom_script(node)

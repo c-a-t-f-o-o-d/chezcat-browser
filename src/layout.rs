@@ -393,6 +393,23 @@ impl Layout {
         self.item_clips.get(item_index).copied().flatten()
     }
 
+    /// Native video controls occupy their image item, including its paint order.
+    /// A later painted/hit box at this point prevents activation through it.
+    pub(crate) fn image_topmost_at(&self,node:usize,x:i32,y:i32)->bool {
+        for (index,item) in self.items.iter().enumerate().rev(){
+            if self.paint_clip(index).is_some_and(|clip|!clip.contains(x,y)){continue;}
+            let rect=match item {
+                PaintItem::Image {node:owner,x:left,y:top,width,height,..}=>{if ClipRect::new(*left,*top,*width,*height).contains(x,y){return *owner==node;}continue;},
+                PaintItem::Rect {x,y,width,height,..}=>ClipRect::new(*x,*y,*width,*height),
+                PaintItem::HitBox {x,y,width,height,link,control}=>{if link.is_none()&&control.is_none(){continue;}ClipRect::new(*x,*y,*width,*height)},
+                PaintItem::Text(i)=>{let r=&self.runs[*i];ClipRect::new(r.x,r.y,r.width(),r.height())},
+                PaintItem::Control(i)=>{let r=&self.controls[*i];ClipRect::new(r.x,r.y,r.width,r.height)},
+            };
+            if rect.contains(x,y){return false;}
+        }
+        false
+    }
+
     pub fn run_clip(&self, run_index: usize) -> Option<ClipRect> {
         self.run_clips.get(run_index).copied().flatten()
     }
@@ -914,8 +931,10 @@ impl Engine<'_> {
 
     fn replaced_image(&self, node: usize) -> bool {
         matches!(&self.doc.nodes[node].kind, NodeKind::Element { tag, .. } if tag == "img")
+            || self.video(node)
             || self.loaded_image_control(node)
     }
+    fn video(&self,node:usize)->bool {self.doc.nodes[node].namespace==crate::html::Namespace::Html&&matches!(&self.doc.nodes[node].kind,NodeKind::Element {tag,..} if tag=="video")}
 
     fn containing_block(&self, node: usize, positioned: bool) -> ContainingBlock {
         if positioned && self.styles[node].position == Position::Fixed {
@@ -1788,7 +1807,7 @@ impl Engine<'_> {
                     self.separate("\n");
                     return;
                 }
-                if tag == "img" {
+                if tag == "img" || self.video(index) {
                     if style.display.block_level() {
                         self.finish_line(false, 0);
                         self.separate("\n");
@@ -2480,8 +2499,8 @@ impl Engine<'_> {
                     },
                 }
             }
-            NodeKind::Element { tag, .. } if tag == "img" || self.loaded_image_control(node) => {
-                let width = if tag != "img" {
+            NodeKind::Element { tag, .. } if tag == "img" || self.video(node) || self.loaded_image_control(node) => {
+                let width = if tag != "img" && !self.video(node) {
                     let mut intrinsic_style = style.clone();
                     if matches!(intrinsic_style.width, Length::Percent(_)) {
                         intrinsic_style.width = Length::Auto;
@@ -4147,6 +4166,7 @@ impl Engine<'_> {
                 )
             })
             .unwrap_or_else(|| {
+                if self.video(node){return ((300.0*self.zoom).round() as i32,(150.0*self.zoom).round() as i32);}
                 let alt = self
                     .doc
                     .attr(node, "alt")

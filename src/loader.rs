@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 
 pub type Wake = Arc<dyn Fn() + Send + Sync>;
 
-fn read_local_media(path: &std::path::Path, limit: usize, cancel: &AtomicBool) -> Result<Vec<u8>, String> {
+pub(crate) fn read_local_media(path: &std::path::Path, limit: usize, cancel: &AtomicBool) -> Result<Vec<u8>, String> {
     use std::io::Read;
     check_cancel(cancel)?;
     let mut file = navigation::open_local_file(path)?;
@@ -96,6 +96,7 @@ pub struct Script {
 pub struct Loaded {
     pub document_timing:Option<crate::network_trace::DocumentTiming>,
     pub media: Option<crate::media::Asset>,
+    pub media_node: Option<usize>,
     pub audio: Option<Arc<crate::audio::Clip>>,
     pub network: crate::network_trace::Trace,
     pub location: Location,
@@ -797,6 +798,8 @@ fn load_request_progressively(
         raw.clone()
     };
     let mut document = html::parse(&markup);
+    let media_node = document_media.as_ref().and_then(|_|document.nodes.iter().enumerate().find_map(|(node,item)|
+        (item.namespace==html::Namespace::Html && matches!(&item.kind,NodeKind::Element {tag,..} if tag=="img") && document.attr(node,"id")==Some("media-frame")).then_some(node)));
     document.content_type = document_type;
     let mut csp = csp::PolicySet::new(&location);
     for value in csp_headers {
@@ -809,6 +812,7 @@ fn load_request_progressively(
     let mut loaded = Loaded {
         document_timing,
         media: document_media,
+        media_node,
         audio: document_audio,
         network,
         base: location.clone(),

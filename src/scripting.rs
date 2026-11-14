@@ -67,6 +67,9 @@ pub use script_stylesheets::DynamicStylesheet;
 use script_stylesheets::StylesheetState;
 #[path = "script_images.rs"]
 mod script_images;
+#[path = "script_media.rs"]
+mod script_media;
+pub(crate) use script_media::event_name as media_event_name;
 pub use script_images::DynamicImage;
 pub(crate) use script_images::MAX_IMAGE_REQUESTS;
 use script_images::ImagesState;
@@ -331,6 +334,7 @@ struct State {
     animation_callbacks: u64,
     clock_origin: Instant,
     navigation_timing:Option<crate::network_trace::DocumentTiming>,
+    embedded_video:Option<crate::embedded_video::Snapshot>,
     pending_keyboard: Option<KeyboardInput>,
     next_timer: u32,
     timer_bytes: usize,
@@ -397,6 +401,7 @@ impl State {
             animation_callbacks: 0,
             clock_origin: Instant::now(),
             navigation_timing:None,
+            embedded_video:None,
             pending_keyboard: None,
             next_timer: 0,
             timer_bytes: 0,
@@ -795,6 +800,7 @@ impl Page {
         if let Some(t)=timing {self.state.clock_origin=t.origin();}
         self.state.navigation_timing=timing;
     }
+    pub fn set_embedded_video(&mut self,snapshot:Option<crate::embedded_video::Snapshot>){self.state.embedded_video=snapshot;}
 
     pub fn set_geometry(&mut self, geometry: crate::script_geometry::Geometry) {
         self.state.geometry = Some(geometry);
@@ -1095,9 +1101,11 @@ impl Page {
         let images = std::mem::take(&mut self.state.images);
         let history = std::mem::take(&mut self.state.history);
         let navigation_timing=self.state.navigation_timing;
+        let embedded_video=self.state.embedded_video.take();
         let limits = self.state.limits;
         *self = Self::with_limits(limits);
         self.set_navigation_timing(navigation_timing);
+        self.set_embedded_video(embedded_video);
         self.state.geometry = geometry;
         self.state.location = location;
         self.state.cookies = cookies;
@@ -1150,7 +1158,11 @@ impl Page {
                 "onload",
                 "onkeydown",
                 "onkeyup",
+                "onerror","onloadstart","onabort","ondurationchange","onloadedmetadata","onloadeddata",
+                "oncanplay","oncanplaythrough","onplay","onplaying","onpause","onseeking","onseeked","ontimeupdate","onended",
             ] {
+                if !matches!(name,"onclick"|"oninput"|"onchange"|"onsubmit"|"onreset"|"onload"|"onkeydown"|"onkeyup")
+                    && !self.state.embedded_video.as_ref().is_some_and(|video|video.node==node) {continue;}
                 let Some(source) = doc.attr(node, name) else {
                     continue;
                 };
@@ -1276,6 +1288,7 @@ impl Page {
         }
         self.state.dynamic.load_ready = true;
         if self.state.dynamic.in_flight != 0 || self.state.stylesheets.in_flight != 0
+            || self.state.embedded_video.as_ref().is_some_and(|video|video.network==2)
             || self.state.images.entries.values().any(|entry| entry.pending) {
             return Outcome::default();
         }
@@ -1796,6 +1809,10 @@ impl Bridge<'_> {
     }
 
     fn attribute_named(&mut self, node: usize, name: crate::html::AttributeName, value: Option<String>) -> Result<(), String> {
+        if self.doc.nodes[node].namespace==crate::html::Namespace::Html && tag(self.doc,node)=="video"
+            && ["src","controls","width","height","poster","autoplay","loop","muted","preload","crossorigin"].iter().any(|key|name.html_is(key)) {
+            return Err("Changing parser-authored video source or native media attributes is not implemented; no attribute was changed.".into());
+        }
         if name.namespace.is_none() { self.frame_attribute_guard(node, &name.qualified)?; }
         let NodeKind::Element { attrs, .. } = &self.doc.nodes[node].kind else {
             return Err("Not an element.".into());
@@ -2033,7 +2050,7 @@ impl Bridge<'_> {
     fn handler_event_target(&mut self, handle: u32, event: &str) -> Result<(), String> {
         // Keep native on* property availability unchanged. Custom names are
         // accepted through add/removeEventListener on existing EventTargets.
-        let allowed = matches!(
+        let allowed = self.media_element_receiver(handle) && script_media::event_name(event) || matches!(
             event,
             "click" | "input" | "change" | "submit" | "reset" | "keydown" | "keyup"
         ) || event == "DOMContentLoaded" && matches!(handle, DOCUMENT | WINDOW)
@@ -2051,7 +2068,7 @@ impl Bridge<'_> {
     }
 
     fn handler(&mut self, object: u32, property: &str) -> Result<Option<Value>, String> {
-        let Some(event) = handler_event(property) else {
+        let Some(event) = self.media_handler_event(object,property) else {
             return Ok(None);
         };
         let object = self.handler_target(object, event);
@@ -2066,7 +2083,7 @@ impl Bridge<'_> {
     }
 
     fn set_handler(&mut self, object: u32, property: &str, value: Value) -> Result<bool, String> {
-        let Some(event) = handler_event(property) else {
+        let Some(event) = self.media_handler_event(object,property) else {
             return Ok(false);
         };
         let object = self.handler_target(object, event);
@@ -2277,7 +2294,7 @@ impl Host for Bridge<'_> {
         else {self.ordinary_lookup_tail(object)}
     }
     fn native_access_owner(&self, object: u32) -> Option<u32> {
-        self.location_instance_owner(object).or_else(||(matches!(object,DOCUMENT|PERFORMANCE|PERFORMANCE_TIMING|HISTORY) || self.named_map_receiver(object)).then_some(WINDOW))
+        self.location_instance_owner(object).or_else(||(matches!(object,DOCUMENT|PERFORMANCE|PERFORMANCE_TIMING|HISTORY) || self.named_map_receiver(object) || self.media_element_receiver(object)).then_some(WINDOW))
     }
     fn bounding_rect_snapshot(&mut self, object: u32) -> Option<Result<[f64; 4], String>> {
         if !self.class_list_element_receiver(object) { return None; }
@@ -2290,6 +2307,7 @@ impl Host for Bridge<'_> {
     }
 
     fn readonly_property(&self, object: u32, property: &str) -> bool {
+        if self.media_element_receiver(object) && matches!(property,"currentSrc"|"videoWidth"|"videoHeight"|"duration"|"paused"|"ended"|"seeking"|"readyState"|"networkState") {return true;}
         if object==PERFORMANCE&&property=="timing"||object==PERFORMANCE_TIMING&&self.state.navigation_timing.is_some_and(|t|t.value(property).is_some()) {return true;}
         object == WINDOW && property == "history" || object == HISTORY && matches!(property, "state" | "length")
             || self.created_event_readonly(object, property) || self.attr_readonly(object, property) || self.dom_readonly(object, property)
@@ -2649,7 +2667,7 @@ impl Host for Bridge<'_> {
     }
 
     fn resolve_member_before_call(&self, object: u32) -> bool {
-        if object == HISTORY || self.attr_receiver(object) || self.constructed_event_receiver(object) || self.named_map_receiver(object) { return true; }
+        if object == HISTORY || self.attr_receiver(object) || self.constructed_event_receiver(object) || self.named_map_receiver(object) || self.media_element_receiver(object) { return true; }
         self.form_receiver(object)
     }
 
@@ -3167,7 +3185,8 @@ impl Host for Bridge<'_> {
         if object == CONSOLE {
             return Ok(matches!(property, "log" | "info" | "warn" | "error"));
         }
-        if let Some(event) = handler_event(property) {
+        if let Some(event) = self.media_handler_event(object,property) {
+            if self.media_element_receiver(object)&&script_media::event_name(event){return Ok(true);}
             return if matches!(event, "load" | "error") {
                 Ok(self.handler_target(object, event) == WINDOW
                     || node_index(object).is_some_and(|node| {
