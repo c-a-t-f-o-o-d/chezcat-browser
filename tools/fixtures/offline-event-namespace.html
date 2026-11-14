@@ -6,9 +6,15 @@
 <p id="location-state">Location pending</p>
 <p id="namespace-create-state">Namespaced creation pending</p>
 <p id="script-source-state">Parsed script pending</p>
+<p id="timing-state">Timing pending</p>
 <script id="parsed-source-fixture" src="/fixture-parser.js"></script>
 <script>
 var fixtureNode=document.getElementById('event-namespace-state');
+var fixtureTiming=performance.timing,fixtureResponseStart=fixtureTiming.responseStart;
+if(fixtureTiming!==performance.timing||fixtureTiming.navigationStart<=0||Math.floor(fixtureResponseStart)!==fixtureResponseStart||fixtureTiming.requestStart<fixtureTiming.navigationStart||fixtureResponseStart<fixtureTiming.requestStart||fixtureTiming.responseEnd<fixtureResponseStart||fixtureTiming.responseEnd>Date.now()||performance.now()+fixtureTiming.navigationStart+1<fixtureTiming.responseEnd)throw Error('real measured document timing');
+fixtureTiming.responseStart=0;performance.timing=0;if(performance.timing!==fixtureTiming||fixtureTiming.responseStart!==fixtureResponseStart)throw Error('timing readonly');
+document.getElementById('timing-state').textContent='Measured document timing ready';
+document.addEventListener('DOMContentLoaded',function(){if(performance.timing!==fixtureTiming||fixtureTiming.responseStart!==fixtureResponseStart)throw Error('stable document timing');});
 function checkParsedSource(){
  var scripts=document.querySelectorAll('script[src]'),parsed=document.getElementById('parsed-source-fixture'),inert=document.getElementById('fragment-inert'),found=false;
  if(scripts.length!==(inert?2:1)||window.fixtureParserLoads!==1||window.fragmentExecuted!==undefined)throw Error('parsed count/once-only execution');

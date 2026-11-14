@@ -170,6 +170,9 @@ if(target.clientWidth!==133)throw 'applied geometry';target.textContent='Attribu
         checks["fresh_location_instance_owner_lookup_rendered"]=all(('text="'+word+'"') in initial for word in ("Location","instance","ready"))
         checks["real_namespaced_html_creation_rendered"]=all(('text="'+word+'"') in initial for word in ("Namespaced","HTML","ready"))
         checks["parsed_script_source_reflection_rendered"]=all(('text="'+word+'"') in initial for word in ("Parsed","script","URL","ready"))
+        checks["measured_document_timing_rendered"]=all(('text="'+word+'"') in initial for word in ("Measured","document","timing","ready"))
+        timings=[re.search(r'Measured document timing \(integer epoch ms\): navigationStart=(\d+) requestStart=(\d+) responseStart=(\d+) responseEnd=(\d+) finalHeadersParsed=(\d+)',path.read_text(encoding='utf-8')) for path in activities]
+        checks["actual_native_timing_measurements_reported"]=bool(timings) and all(match and 0<int(match[1])<=int(match[2])<=int(match[3])<=int(match[4]) and int(match[5])>=int(match[3]) for match in timings)
         checks["parsed_script_fetch_once_per_document_and_reading_never_refetches"]=sum(row==["search","/fixture-parser.js"] for row in seen)==sum(row[0]=="search" and urllib.parse.urlsplit(row[1]).path in ["/","/search"] for row in seen)
         checks["native_ui_keyboard_rendered"]=all(('text="'+word+'"') in snapshot("ui-keyboard","layout.txt") for word in ("Native","UI","observed"))
         checks["fragment_and_real_image_completion_rendered"]=all(('text="'+word+'"') in initial for word in ("Fragment","image","loaded"))

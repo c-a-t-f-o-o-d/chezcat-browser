@@ -18,6 +18,42 @@ fn request_head(stream: &mut TcpStream) -> String {
 }
 
 #[test]
+fn navigation_timing_uses_final_redirect_request_first_byte_and_last_byte_before_decode() {
+    let listener=TcpListener::bind("127.0.0.1:0").unwrap();let port=listener.local_addr().unwrap().port();let trace=Trace::default();let observed=trace.clone();
+    let peer=std::thread::spawn(move|| {
+        let(mut redirect,_)=listener.accept().unwrap();assert!(request_head(&mut redirect).starts_with("GET /redirect "));std::thread::sleep(Duration::from_millis(25));
+        redirect.write_all(b"HTTP/1.1 302 Found\r\nLocation: /final\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").unwrap();drop(redirect);
+        let(mut stream,_)=listener.accept().unwrap();assert!(request_head(&mut stream).starts_with("GET /final "));
+        stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 3\r\nConnection: close\r\n\r\n").unwrap();
+        // Wait for the actual client to observe/parse these headers, avoiding
+        // a scheduler-dependent assumption that a sleep alone split its reads.
+        let until=Instant::now()+Duration::from_secs(3);
+        while !observed.snapshot().rows.iter().any(|r|r.url.ends_with("/final")&&r.status==Some(200)&&r.http_bytes>0) {assert!(Instant::now()<until);std::thread::sleep(Duration::from_millis(1));}
+        std::thread::sleep(Duration::from_millis(25));stream.write_all(b"abc").unwrap();
+    });
+    let url=crate::url::parse(&format!("http://127.0.0.1:{port}/redirect")).unwrap().0;let cancel=AtomicBool::new(false);let trust=trust::Store::unconfigured();let pool=Pool::new(&cancel,&trust).with_network_trace(trace.clone());
+    let response=pool.fetch_document(&url,&Request::Get,FetchMode::Normal).unwrap();peer.join().unwrap();assert_eq!(response.body,b"abc");assert!(response.url.display().ends_with("/final"));assert!(response.redirected);
+    let t=response.document_timing.unwrap();let start=t.value("navigationStart").unwrap();let request=t.value("requestStart").unwrap();let first=t.value("responseStart").unwrap();let last=t.value("responseEnd").unwrap();
+    assert!(request>=start+15,"final request must follow the real delayed redirect");assert!(first>=request);assert!(last>=first+15,"first byte must precede the withheld body");
+    assert!(last<=std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as u64);assert_eq!(t.value("redirectStart"),None);
+}
+
+#[test]
+fn navigation_timing_stale_get_retry_returns_only_the_successful_fresh_attempt() {
+    let listener=TcpListener::bind("127.0.0.1:0").unwrap();let port=listener.local_addr().unwrap().port();let trace=Trace::default();
+    let peer=std::thread::spawn(move|| {
+        let(mut old,_)=listener.accept().unwrap();request_head(&mut old);old.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 1\r\n\r\nx").unwrap();
+        assert!(request_head(&mut old).starts_with("GET /document "));std::thread::sleep(Duration::from_millis(25));drop(old);
+        let(mut fresh,_)=listener.accept().unwrap();assert!(request_head(&mut fresh).starts_with("GET /document "));fresh.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 1\r\nConnection: close\r\n\r\ny").unwrap();
+    });
+    let cancel=AtomicBool::new(false);let trust=trust::Store::unconfigured();let pool=Pool::new(&cancel,&trust).with_network_trace(trace.clone());let base=crate::url::parse(&format!("http://127.0.0.1:{port}/warm")).unwrap().0;
+    let warm=pool.fetch_kind(&base,100,None,FetchMode::Normal,"image").unwrap();assert!(warm.document_timing.is_none());
+    let document=crate::url::parse(&format!("http://127.0.0.1:{port}/document")).unwrap().0;let response=pool.fetch_document(&document,&Request::Get,FetchMode::Normal).unwrap();peer.join().unwrap();assert_eq!(response.body,b"y");
+    let rows=trace.snapshot().rows;assert_eq!(rows.len(),3);assert_eq!(rows[1].outcome,Outcome::Failed);assert!(rows[1].reused_connection);assert_eq!(rows[2].outcome,Outcome::Complete);assert!(!rows[2].reused_connection);
+    let t=response.document_timing.unwrap();assert!(t.value("requestStart").unwrap()-t.value("navigationStart").unwrap()>=rows[2].start.as_millis() as u64);assert!(response.events.iter().any(|e|e.contains("retrying once")));
+}
+
+#[test]
 fn network_trace_measures_real_wait_receive_and_connection_reuse() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port();

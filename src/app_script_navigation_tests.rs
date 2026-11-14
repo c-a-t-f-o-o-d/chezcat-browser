@@ -129,12 +129,20 @@ impl Peer {
                         .find(|(name, _)| name.eq_ignore_ascii_case("cookie"))
                         .map_or_else(String::new, |(_, value)| value.trim().to_owned());
                     requests.lock().unwrap().push(Request { method, path: path.clone(), cookie });
-                    if matches!(path.as_str(), "/search?q=test" | "/held.js") {
+                    if path=="/timing-held" {
+                        let body="<html><body><script>document.title='STALE timing';</script></body></html>";
+                        let header=format!("HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",body.len());let _=stream.write_all(header.as_bytes());
+                        let open=gate.0.lock().unwrap();let _=gate.1.wait_timeout_while(open,Duration::from_secs(10),|open|!*open).unwrap();let _=stream.write_all(body.as_bytes());return;
+                    }
+                    if matches!(path.as_str(), "/search?q=test" | "/held.js"|"/timing-held") {
                         let open = gate.0.lock().unwrap();
                         let _ = gate.1.wait_timeout_while(open, Duration::from_secs(10), |open| !*open).unwrap();
                     }
                     let (mut status, mut mime, mut extra) = (200, "text/html", String::new());
                     let body = match path.as_str() {
+                        "/timed"=>{std::thread::sleep(Duration::from_millis(15));"<html><head><title>Timing pending</title></head><body><script>var savedTiming=performance.timing,savedStamp=savedTiming.responseStart;if(savedTiming.navigationStart<=0||savedTiming.requestStart<savedTiming.navigationStart||savedStamp<savedTiming.requestStart||savedTiming.responseEnd<savedStamp||savedTiming.responseEnd>Date.now()||performance.now()+savedTiming.navigationStart+1<savedTiming.responseEnd)throw Error('actual timing unavailable before startup');document.title='Timing ready';</script></body></html>".into()},
+                        "/timing-held"=>"<html><body><script>document.title='STALE timing';</script></body></html>".into(),
+                        "/timing-fail"=>{status=204;String::new()},
                         "/home" => {
                             extra.push_str("Set-Cookie: sid=server; HttpOnly; Path=/\r\n");
                             HOME.to_owned()
@@ -259,6 +267,17 @@ fn no_script_errors(app: &App) {
         "{}",
         report(app)
     );
+}
+
+#[test]
+fn navigation_timing_reaches_actual_startup_and_only_matching_document_commit() {
+    let peer=Peer::new(None);let mut app=App::new();app.open_address(&peer.url("/timed"));app.wait_for_load();assert!(!app.failed,"{}",app.status);assert_eq!(app.document.title,"Timing ready","{}",report(&app));no_script_errors(&app);
+    let timing_line=|app:&App|report(app).lines().find(|l|l.starts_with("Measured document timing")).unwrap().to_owned();let original=timing_line(&app);
+    app.open_address(&peer.url("/timed#same-document"));app.wait_for_load();assert_eq!(timing_line(&app),original);
+    let outcome=app.scripting.as_mut().unwrap().console_eval(&mut app.document,&mut app.forms,"if(performance.timing!==savedTiming||savedTiming.responseStart!==savedStamp)throw 'same-document record changed';");assert_eq!(outcome.errors,0,"{}",report(&app));
+    app.open_address(&peer.url("/timing-fail"));app.wait_for_load();assert_eq!(app.document.title,"Timing ready");assert_eq!(timing_line(&app),original);
+    app.open_address(&peer.url("/timing-held"));until(&mut app,|app|app.network.snapshot().rows.iter().any(|r|r.url.ends_with("/timing-held")&&r.status==Some(200)&&r.http_bytes>0));assert_eq!(timing_line(&app),original);app.stop_loading();peer.release();app.wait_for_load();assert_eq!(app.document.title,"Timing ready");assert_eq!(timing_line(&app),original);
+    app.reload();app.wait_for_load();assert!(!app.failed,"{}",app.status);assert_eq!(app.document.title,"Timing ready");no_script_errors(&app);assert_ne!(timing_line(&app),original);
 }
 
 #[test]

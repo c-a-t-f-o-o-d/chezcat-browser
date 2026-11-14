@@ -23,7 +23,7 @@ mod network_tests;
 
 const MAX_BODY_BYTES: usize = 32 * 1024 * 1024;
 pub const MAX_FORM_BYTES: usize = 128 * 1024;
-pub const USER_AGENT: &str = "ChezCat/0.67";
+pub const USER_AGENT: &str = "ChezCat/0.68";
 const MAX_HEADER_BYTES: usize = 32 * 1024;
 const MAX_LINE_BYTES: usize = 8 * 1024;
 const MAX_CHUNK_METADATA: usize = 512 * 1024;
@@ -95,6 +95,7 @@ impl Request {
 
 #[derive(Debug)]
 pub struct Response {
+    pub document_timing:Option<network_trace::DocumentTiming>,
     pub url: HttpUrl,
     /// Actual followed redirect provenance, including chains returning to the
     /// original URL. Never infer document identity from a final URL comparison.
@@ -391,6 +392,7 @@ fn fetch_in_pool(
                 message.body.len()
             ));
             return Ok(Response {
+                document_timing:message.document_timing,
                 redirected: redirects != 0,
                 url: current,
                 fragment,
@@ -1559,6 +1561,7 @@ fn reserve_body(output: &mut Vec<u8>, count: usize, limit: usize) -> Result<(), 
 
 #[derive(Debug)]
 struct Message {
+    document_timing:Option<network_trace::DocumentTiming>,
     status: u16,
     headers: Vec<(String, String)>,
     body: Vec<u8>,
@@ -1754,6 +1757,7 @@ fn read_response_traced<R: Read>(
                 && input.position == input.filled
                 && !empty_has_framing;
             return Ok(Message {
+                document_timing:if document {trace.and_then(network_trace::Ticket::document_timing)}else{None},
                 status,
                 headers,
                 body,

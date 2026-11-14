@@ -1482,6 +1482,7 @@ impl App {
         self.failed = false;
         if self.document.scripting_enabled {
             let mut page = crate::scripting::Page::new();
+            page.set_navigation_timing(loaded.document_timing);
             page.set_location(&self.location);
             page.set_cookie_session(self.cookies.clone());
             page.set_resource_base(&self.base_location);

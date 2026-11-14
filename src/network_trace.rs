@@ -2,7 +2,7 @@
 //! Times share one monotonic clock. Missing phases stay missing; no timing is
 //! inferred from activity strings, response sizes, or site-supplied headers.
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 pub const MAX_REQUESTS: usize = 384;
 const MAX_PHASES: usize = 12;
@@ -95,6 +95,7 @@ struct State {
 #[derive(Debug)]
 struct Inner {
     start: Instant,
+    epoch: Option<Duration>,
     state: Mutex<State>,
 }
 #[derive(Clone, Debug)]
@@ -103,6 +104,7 @@ impl Default for Trace {
     fn default() -> Self {
         Self(Arc::new(Inner {
             start: Instant::now(),
+            epoch: SystemTime::now().duration_since(UNIX_EPOCH).ok(),
             state: Mutex::new(State {
                 rows: Vec::new(),
                 revision: 0,
@@ -169,6 +171,7 @@ impl Trace {
             trace: self.clone(),
             id,
             finished: false,
+            document: (kind=="document").then(||Mutex::new(DocumentAttempt::default())),
         }
     }
     pub fn blocked(&self, url: &str, kind: &'static str, reason: &str) {
@@ -190,8 +193,37 @@ pub struct Ticket {
     trace: Trace,
     id: Option<u64>,
     finished: bool,
+    // Native document measurements survive diagnostic row truncation. They
+    // travel on the actual returned response, never a "last row" heuristic.
+    document: Option<Mutex<DocumentAttempt>>,
+}
+
+#[derive(Default,Clone,Copy)]
+struct DocumentAttempt {request:Option<Duration>,first:Option<Duration>,last:Option<Duration>,headers:Option<Duration>}
+
+#[derive(Clone,Copy,Debug)]
+pub struct DocumentTiming {
+    origin:Instant,
+    navigation_start:u64,
+    request_start:u64,
+    response_start:u64,
+    response_end:u64,
+    final_headers:u64,
+}
+impl DocumentTiming {
+    pub fn origin(&self)->Instant {self.origin}
+    pub fn value(&self,name:&str)->Option<u64> {Some(match name {"navigationStart"=>self.navigation_start,"requestStart"=>self.request_start,"responseStart"=>self.response_start,"responseEnd"=>self.response_end,_=>return None})}
+    pub fn report(&self)->String {format!("Measured document timing (integer epoch ms): navigationStart={} requestStart={} responseStart={} responseEnd={} finalHeadersParsed={}. Redirect/DNS/DOM event timing is not exposed.\n",self.navigation_start,self.request_start,self.response_start,self.response_end,self.final_headers)}
 }
 impl Ticket {
+    pub fn document_timing(&self)->Option<DocumentTiming> {
+        let a=*self.document.as_ref()?.lock().unwrap_or_else(|e|e.into_inner());
+        let epoch=self.trace.0.epoch?;
+        let stamp=|offset:Duration| {let n=u64::try_from(epoch.checked_add(offset)?.as_millis()).ok()?;(n<=9_007_199_254_740_991).then_some(n)};
+        let(request,first,last,headers)=(a.request?,a.first?,a.last?,a.headers?);
+        if first<request||last<first||headers<first {return None;}
+        Some(DocumentTiming {origin:self.trace.0.start,navigation_start:stamp(Duration::ZERO)?,request_start:stamp(request)?,response_start:stamp(first)?,response_end:stamp(last)?,final_headers:stamp(headers)?})
+    }
     fn update(&self, change: impl FnOnce(&mut Exchange, Duration)) {
         let Some(id) = self.id else {
             return;
@@ -203,6 +235,7 @@ impl Ticket {
         }
     }
     pub fn phase(&self, kind: PhaseKind) {
+        if kind==PhaseKind::Send {if let Some(a)=&self.document {a.lock().unwrap_or_else(|e|e.into_inner()).request=Some(self.trace.elapsed());}}
         self.update(|row, now| {
             if let Some(phase) = row.phases.last_mut() {
                 if phase.kind == kind && phase.end.is_none() {
@@ -235,6 +268,7 @@ impl Ticket {
         });
     }
     pub fn received(&self, bytes: usize) {
+        if bytes!=0 {let now=self.trace.elapsed();if let Some(a)=&self.document {let mut a=a.lock().unwrap_or_else(|e|e.into_inner());a.first.get_or_insert(now);a.last=Some(now);}}
         self.update(|row, now| {
             if row.http_bytes == 0 && bytes != 0 {
                 if let Some(phase) = row.phases.last_mut().filter(|p| p.end.is_none()) {
@@ -250,6 +284,7 @@ impl Ticket {
         });
     }
     pub fn response(&self, status: u16) {
+        if let Some(a)=&self.document {a.lock().unwrap_or_else(|e|e.into_inner()).headers=Some(self.trace.elapsed());}
         self.update(|row, _| row.status = Some(status));
     }
     pub fn complete(
@@ -299,6 +334,23 @@ fn bounded(value: &str, maximum: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn navigation_timing_document_observations_survive_trace_cap_and_require_all_measurements() {
+        let trace=Trace::default();for _ in 0..MAX_REQUESTS {trace.begin("GET","https://fixture.test/metadata","image").fail("original fixture");}
+        let ticket=trace.begin("GET","https://fixture.test/document","document");assert!(ticket.id.is_none());assert!(ticket.document_timing().is_none());
+        ticket.phase(PhaseKind::Send);ticket.received(0);assert!(ticket.document_timing().is_none());
+        ticket.received(1);assert!(ticket.document_timing().is_none());ticket.response(200);let initial=ticket.document_timing().unwrap();std::thread::sleep(Duration::from_millis(3));ticket.received(2);
+        let t=ticket.document_timing().unwrap();assert_eq!(t.response_start,initial.response_start);assert!(t.response_end>=initial.response_end);assert!(t.navigation_start<=t.request_start&&t.request_start<=t.response_start);assert!(t.navigation_start>0);assert_eq!(t.value("redirectStart"),None);
+        ticket.complete(200,Some(3),Some(3),"");assert_eq!(trace.snapshot().rows.len(),MAX_REQUESTS);
+        let resource=trace.begin("GET","https://fixture.test/subresource","script");resource.phase(PhaseKind::Send);resource.received(10);resource.response(200);assert!(resource.document_timing().is_none());
+    }
+    #[test]
+    fn navigation_timing_missing_epoch_or_unsafe_integer_never_becomes_zero_success() {
+        for epoch in [None,Some(Duration::from_secs(u64::MAX))] {
+            let trace=Trace(Arc::new(Inner {start:Instant::now(),epoch,state:Mutex::new(State {rows:Vec::new(),revision:0,omitted:0})}));
+            let ticket=trace.begin("GET","https://fixture.test/document","document");ticket.phase(PhaseKind::Send);ticket.received(1);ticket.response(200);assert!(ticket.document_timing().is_none());
+        }
+    }
     #[test]
     fn bounded_trace_records_no_fabricated_phases() {
         let trace = Trace::default();

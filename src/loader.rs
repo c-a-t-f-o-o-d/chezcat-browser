@@ -94,6 +94,7 @@ pub struct Script {
 }
 
 pub struct Loaded {
+    pub document_timing:Option<crate::network_trace::DocumentTiming>,
     pub media: Option<crate::media::Asset>,
     pub audio: Option<Arc<crate::audio::Clip>>,
     pub network: crate::network_trace::Trace,
@@ -621,6 +622,7 @@ fn load_request_progressively(
     let mut document_image = None;
     let mut document_media = None;
     let mut document_audio = None;
+    let mut document_timing=None;
     let mut image_document = false;
     let mut document_type = "text/html".to_owned();
     let mut scripting_blocked =
@@ -630,6 +632,7 @@ fn load_request_progressively(
     let raw = if let Some(url) = &initial.url {
         progress(format!("Loading {}", url.display()));
         let response = pool.fetch_document(url, request, mode)?;
+        document_timing=response.document_timing;
         document_redirected = response.redirected;
         final_cookie_same_site = response.cookie_same_site;
         if response
@@ -804,6 +807,7 @@ fn load_request_progressively(
     }
     events.push(format!("HTML/text loaded: {}", location.display()));
     let mut loaded = Loaded {
+        document_timing,
         media: document_media,
         audio: document_audio,
         network,

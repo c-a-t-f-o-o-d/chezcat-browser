@@ -354,6 +354,26 @@ mod tests {
     const CREATE: &str = "var f=document.createElement('iframe');f.hidden=true;document.body.appendChild(f);var w=f.contentWindow;";
 
     #[test]
+    fn navigation_timing_is_measured_readonly_stable_and_owner_guarded() {
+        let(mut doc,mut forms,mut page,outcome)=start("if(performance.timing!==undefined||('timing' in performance))throw 'fabricated measurement';",&crate::csp::PolicySet::default());assert_eq!(outcome.errors,0,"{}",page.report());
+        let trace=crate::network_trace::Trace::default();let ticket=trace.begin("GET","https://example.test/parent/page","document");ticket.phase(crate::network_trace::PhaseKind::Send);ticket.received(1);ticket.response(200);let timing=ticket.document_timing().unwrap();ticket.complete(200,Some(1),Some(1),"");page.set_navigation_timing(Some(timing));
+        let source=format!("{CREATE}{}",r#"
+var savedTiming=performance.timing,savedPerformance=performance,stamp=savedTiming.responseStart;
+if(savedTiming!==performance.timing||!('responseStart' in savedTiming)||('redirectStart' in savedTiming)||stamp<=0||Math.floor(stamp)!==stamp||savedTiming.navigationStart>savedTiming.requestStart||savedTiming.requestStart>stamp||stamp>savedTiming.responseEnd)throw 'measured timing';
+savedTiming.responseStart=17;performance.timing=17;if(savedTiming.responseStart!==stamp||performance.timing!==savedTiming)throw 'readonly timing';
+var strictErrors=0;try{(function(){'use strict';savedTiming.responseStart=17;})();}catch(e){if(e.name==='TypeError')strictErrors++;}if(strictErrors!==1)throw 'strict readonly';
+var childRead=w.Function('t','return t.responseStart;'),childPerformance=w.Function('p','return p.timing.responseStart;');
+if(childRead(savedTiming)!==stamp||childPerformance(savedPerformance)!==stamp)throw 'same-origin timing';
+"#);
+        let outcome=page.console_eval(&mut doc,&mut forms,&source);assert_eq!(outcome.errors,0,"{}",page.report());
+        page.set_location(&crate::navigation::Location {url:Some(crate::url::parse("https://example.test/same-document#hash").unwrap().0),path:None,root:None,fragment:String::new()});
+        let outcome=page.console_eval(&mut doc,&mut forms,"if(performance.timing!==savedTiming||savedTiming.responseStart!==stamp)throw 'history replaced timing';");assert_eq!(outcome.errors,0,"{}",page.report());
+        page.set_location(&crate::navigation::Location {url:Some(crate::url::parse("https://other.test/").unwrap().0),path:None,root:None,fragment:String::new()});let allocations=page.runtime.window_allocation_state_for_test();
+        for operation in ["childRead(savedTiming);","childPerformance(savedPerformance);"] {let outcome=page.console_eval(&mut doc,&mut forms,operation);assert_eq!(outcome.errors,1,"{}",page.report());assert!(page.report().contains("same-origin"));assert_eq!(page.runtime.window_allocation_state_for_test(),allocations);}
+        let outcome=page.console_eval(&mut doc,&mut forms,"if(savedTiming.responseStart!==stamp)throw 'foreign read mutated timing';");assert_eq!(outcome.errors,0,"{}",page.report());
+    }
+
+    #[test]
     fn namespaced_creation_child_first_method_read_keeps_main_owner_prototype() {
         let source=format!("{CREATE}{}",r#"
 var rootDocument=document,read=w.Function('doc','return doc.createElementNS;');

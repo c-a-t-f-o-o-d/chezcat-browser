@@ -88,6 +88,7 @@ const LOCATION: u32 = 8;
 const PERFORMANCE: u32 = 9;
 const IMAGE_FACTORY: u32 = 10;
 const HISTORY: u32 = 11;
+const PERFORMANCE_TIMING:u32=12;
 const NODE_LIST_BASE: u32 = 32;
 const MAX_NODE_LISTS: usize = 128;
 const MAX_NODE_LIST_REFERENCES: usize = 16_384;
@@ -329,6 +330,7 @@ struct State {
     animation_due: Option<Instant>,
     animation_callbacks: u64,
     clock_origin: Instant,
+    navigation_timing:Option<crate::network_trace::DocumentTiming>,
     pending_keyboard: Option<KeyboardInput>,
     next_timer: u32,
     timer_bytes: usize,
@@ -394,6 +396,7 @@ impl State {
             animation_due: None,
             animation_callbacks: 0,
             clock_origin: Instant::now(),
+            navigation_timing:None,
             pending_keyboard: None,
             next_timer: 0,
             timer_bytes: 0,
@@ -786,6 +789,13 @@ impl Page {
         self.state.location = Some(LocationView::new(location));
     }
 
+    /// Set only on a newly committed document, before any startup script. A
+    /// failed/pending load and same-document history never call this setter.
+    pub fn set_navigation_timing(&mut self,timing:Option<crate::network_trace::DocumentTiming>) {
+        if let Some(t)=timing {self.state.clock_origin=t.origin();}
+        self.state.navigation_timing=timing;
+    }
+
     pub fn set_geometry(&mut self, geometry: crate::script_geometry::Geometry) {
         self.state.geometry = Some(geometry);
     }
@@ -1084,8 +1094,10 @@ impl Page {
         let stylesheet_rules = self.state.stylesheets.source_rules;
         let images = std::mem::take(&mut self.state.images);
         let history = std::mem::take(&mut self.state.history);
+        let navigation_timing=self.state.navigation_timing;
         let limits = self.state.limits;
         *self = Self::with_limits(limits);
+        self.set_navigation_timing(navigation_timing);
         self.state.geometry = geometry;
         self.state.location = location;
         self.state.cookies = cookies;
@@ -1569,6 +1581,7 @@ impl Page {
         text.push_str(&caught);
         text.push_str(&format!("Animation frames: {} pending callback(s), {} executed. Whole-millisecond monotonic timestamps; 16 ms minimum frame interval.\n", self.state.animation_frames.len(), self.state.animation_callbacks));
         text.push_str(&format!("Accepted script navigation requests: {}.\n", self.state.navigation_requests));
+        if let Some(t)=self.state.navigation_timing {text.push_str(&t.report());}
 text.push_str(&format!("Classic scripts have independent execution jobs ({} steps / {} seconds / {} MiB string-copy work). Aggregate startup: {} steps / {} seconds / {} MiB string-copy work. Native-stack and allocation guards are separate.\nFresh detached image requests declined: {}. Ordinary connected HTML img source changes use cancelable real resource requests; current/pending/broken state and completion events follow actual decoding. Detached never-connected Image nodes only reflect attributes; no request or load event was fabricated. Responsive dynamic selection remains unsupported.\nBeacon requests declined: {}. sendBeacon returns false; no data was queued or transmitted.\n", self.state.limits.steps, self.state.limits.job_seconds, self.state.limits.copy_bytes / (1024 * 1024), self.state.limits.startup_steps, self.state.limits.startup_seconds, self.state.limits.startup_copy / (1024 * 1024), self.state.declined_images, self.state.declined_beacons));
         let heap = self.state.limits.heap;
         text.push_str(&format!(
@@ -2215,7 +2228,7 @@ impl Host for Bridge<'_> {
         let constructor=node.filter(|&node|tag(self.doc,node)=="img"
                 && self.doc.nodes[node].namespace==crate::html::Namespace::Html)
             .map(|_|(IMAGE_FACTORY,"Image"));
-        let known=node.is_some() || matches!(object,DOCUMENT|CONSOLE|NAVIGATOR|PLUGINS|MIME_TYPES|DOCUMENT_IMAGES|LOCATION|PERFORMANCE|HISTORY)
+        let known=node.is_some() || matches!(object,DOCUMENT|CONSOLE|NAVIGATOR|PLUGINS|MIME_TYPES|DOCUMENT_IMAGES|LOCATION|PERFORMANCE|PERFORMANCE_TIMING|HISTORY)
             || self.attr_receiver(object) || self.event_receiver(object) || self.class_list_receiver(object) || self.named_map_receiver(object)
             || node_list_index(object).is_some_and(|index|index<self.state.node_lists.len())
             || collection_handle_index(object).is_some_and(|index|index<self.state.dom.collections.len())
@@ -2263,7 +2276,7 @@ impl Host for Bridge<'_> {
         else {self.ordinary_lookup_tail(object)}
     }
     fn native_access_owner(&self, object: u32) -> Option<u32> {
-        self.location_instance_owner(object).or_else(||(matches!(object,DOCUMENT|HISTORY) || self.named_map_receiver(object)).then_some(WINDOW))
+        self.location_instance_owner(object).or_else(||(matches!(object,DOCUMENT|PERFORMANCE|PERFORMANCE_TIMING|HISTORY) || self.named_map_receiver(object)).then_some(WINDOW))
     }
     fn bounding_rect_snapshot(&mut self, object: u32) -> Option<Result<[f64; 4], String>> {
         if !self.class_list_element_receiver(object) { return None; }
@@ -2276,6 +2289,7 @@ impl Host for Bridge<'_> {
     }
 
     fn readonly_property(&self, object: u32, property: &str) -> bool {
+        if object==PERFORMANCE&&property=="timing"||object==PERFORMANCE_TIMING&&self.state.navigation_timing.is_some_and(|t|t.value(property).is_some()) {return true;}
         object == WINDOW && property == "history" || object == HISTORY && matches!(property, "state" | "length")
             || self.created_event_readonly(object, property) || self.attr_readonly(object, property) || self.dom_readonly(object, property)
             || collection_handle_index(object).is_some()
@@ -3065,8 +3079,9 @@ impl Host for Bridge<'_> {
                 .map(|value| !matches!(value, Value::Undefined));
         }
         if object == PERFORMANCE {
-            return Ok(property == "now");
+            return Ok(property == "now"||property=="timing"&&self.state.navigation_timing.is_some());
         }
+        if object==PERFORMANCE_TIMING {return Ok(self.state.navigation_timing.is_some_and(|t|t.value(property).is_some()));}
         if object == HISTORY {
             return match property {
                 "state" | "length" | "replaceState" => Ok(true),
@@ -3325,8 +3340,9 @@ impl Host for Bridge<'_> {
             return Ok(function.clone());
         }
         if object == PERFORMANCE {
-            return Ok(Value::Undefined);
+            return Ok(if property=="timing"&&self.state.navigation_timing.is_some(){Value::Host(PERFORMANCE_TIMING)}else{Value::Undefined});
         }
+        if object==PERFORMANCE_TIMING {return self.state.navigation_timing.and_then(|t|t.value(property)).map(|n|Value::Number(n as f64)).ok_or_else(||format!("Unmeasured or unsupported PerformanceTiming member {property:?}."));}
         if object == NAVIGATOR {
             return Ok(match property {
                 "userAgent" => Value::String(crate::http::USER_AGENT.into()),
@@ -3610,7 +3626,7 @@ impl Host for Bridge<'_> {
             let value = self.text(&value)?;
             return self.attribute(node, &dataset_attribute(property), Some(value));
         }
-        if object == PERFORMANCE {
+        if matches!(object,PERFORMANCE|PERFORMANCE_TIMING) {
             return Err("Performance is read-only in this subset.".into());
         }
         if object == LOCATION {
