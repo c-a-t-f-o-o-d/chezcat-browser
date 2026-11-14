@@ -303,6 +303,14 @@ impl Layout {
     pub fn link_targets(&self) -> impl Iterator<Item = &str> {
         self.targets.iter().map(String::as_str)
     }
+    /// Positive clipped hit regions intersecting this viewport. Regions may
+    /// overlap or be occluded; only link_at at an actual point proves a hit.
+    pub(crate) fn viewport_link_regions(&self, width: i32, scroll: i32, height: i32) -> usize {
+        if width <= 0 || height <= 0 { return 0; }
+        self.hits.iter().filter(|hit| hit.link.is_some_and(|index| index < self.targets.len())
+            && hit.width > 0 && hit.height > 0 && hit.x < width && hit.x.saturating_add(hit.width) > 0
+            && hit.y < scroll.saturating_add(height) && hit.y.saturating_add(hit.height) > scroll).count()
+    }
     pub fn link_node_at(&self, x: i32, y: i32) -> Option<usize> {
         for hit in self.hits.iter().rev() {
             if x >= hit.x
@@ -5284,6 +5292,20 @@ mod tests {
         let zoomed = build_viewport(&doc, 600, 450, 1.5, &HashMap::new(), &HashMap::new());
         assert_eq!(rectangle(&page, 0xffff00), decoration);
         assert_eq!(rectangle(&zoomed, 0x0000ff), (435, 300, 150, 120));
+    }
+
+    #[test]
+    fn stage_observations_distinguish_viewport_candidates_from_occluded_hits() {
+        let doc = parse("<body style='margin:0'><a href=visible>Visible</a><a href=empty></a><a href=hidden style='display:none'>Hidden</a><div style='height:0;overflow:hidden'><a href=clipped>Clipped</a></div><a href=fixed style='position:fixed;left:150px;top:20px'>Fixed</a><div style='height:1200px'></div><a href=below>Below</a><div style='position:absolute;left:0;top:0;width:120px;height:60px;background:red'></div></body>");
+        let mut page = build_viewport(&doc, 400, 200, 1.0, &HashMap::new(), &HashMap::new());
+        let fixed = page.runs.iter().find(|r| r.text == "Fixed").unwrap();
+        assert_eq!(page.link_at(fixed.x + 1, fixed.y + 1), Some("fixed"));
+        assert_eq!(page.link_at(1, 1), None); // Visible link is genuinely occluded.
+        assert_eq!(page.viewport_link_regions(400, 0, 200), 3); // Fixed link has box and text regions.
+        assert!(page.link_targets().count() > page.viewport_link_regions(400, 0, 200));
+        page.set_scroll(500);
+        assert_eq!(page.viewport_link_regions(400, 500, 200), 2);
+        assert_eq!(page.viewport_link_regions(0, 500, 200), 0);
     }
 
     #[test]

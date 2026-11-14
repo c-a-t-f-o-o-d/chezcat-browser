@@ -1349,6 +1349,7 @@ impl Runtime {
                     if error.exception.is_none() {
                         return Err(error);
                     }
+                    self.record_stage_fault("microtask", &error);
                     if diagnostics.len() < MAX_DIAGNOSTICS {
                         diagnostics.push(format!(
                             "Microtask callback error: {}",
@@ -1375,6 +1376,7 @@ impl Runtime {
             Ok(())
         })();
         self.promises.draining = false;
+        if let Err(error) = &result { self.record_stage_fault("microtask", error); }
         if result.is_err() {
             self.cancel_microtasks();
         }

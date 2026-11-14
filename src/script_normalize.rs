@@ -166,6 +166,7 @@ impl Bridge<'_> {
             self.state.dom.connected[node] = false;
             self.state.tree.parents[node] = None;
         }
+        self.state.dom_committed();
         self.state.dirty = true;
         if connected {
             self.state.layout_changed();

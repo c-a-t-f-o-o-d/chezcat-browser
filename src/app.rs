@@ -29,6 +29,8 @@ mod download_ui;
 mod inspector;
 #[path = "app_input_harness.rs"]
 mod input_harness;
+#[path = "app_observations.rs"]
+mod observations;
 #[path = "app_keyboard.rs"]
 pub(crate) mod keyboard;
 #[path = "app_scripts.rs"]
@@ -257,6 +259,8 @@ pub struct App {
     wake: loader::Wake,
     pending: Option<Pending>,
     next_request: u64,
+    committed_request: Option<u64>,
+    observations: observations::Data,
     resubmission: Option<Resubmission>,
     next_confirmation: u64,
 }
@@ -361,6 +365,8 @@ impl App {
             wake: std::sync::Arc::new(|| {}),
             pending: None,
             next_request: 0,
+            committed_request: None,
+            observations: observations::Data::new(),
             resubmission: None,
             next_confirmation: 0,
         }
@@ -694,6 +700,7 @@ impl App {
                     _ => None,
                 };
                 self.finish_navigation(kind, loaded, true);
+                self.committed_request = Some(id);
                 self.status.push_str(" | Loading images; Esc stops");
                 changed = true;
             }
@@ -1381,6 +1388,7 @@ impl App {
     fn commit_with_history(&mut self, location: Location, loaded: Loaded, images_pending: bool, history_data: crate::scripting::HistoryData) {
         self.cancel_script_requests();
         self.script_epoch = self.script_epoch.wrapping_add(1);
+        self.committed_request = None;
         self.network = loaded.network.clone();
         self.cookie_same_site = loaded.cookie_same_site;
         self.current_request = loaded.request;
@@ -1515,6 +1523,7 @@ impl App {
                 &self.fonts,
             )
         };
+        self.observe_layout();
         self.rebuild_link_colors();
         if self.alternate.is_none() {
             let viewport_height = self.viewport_height();
@@ -1671,7 +1680,7 @@ impl App {
     }
     /// Export the current activity without changing the view or executing code.
     pub fn activity_report(&self) -> String {
-        format!(
+        let mut report = format!(
             "{} activity report\nStatus: {}\nPage title: {}\nJavaScript enabled: {}\nImages enabled: {}\n\nTRUST FILE: {}\n\nLAST FAILED NAVIGATION: {}\n\nDOCUMENT: {}\nCONTENT ROOT / ORIGIN: {}\n\n{}\n\nJavaScript\n{}\n",
             crate::http::USER_AGENT,
             self.status,
@@ -1686,7 +1695,9 @@ impl App {
                 .unwrap_or_else(|| "bundled".to_owned()),
             self.events.join("\n\n"),
             self.script_activity(),
-        )
+        );
+        report.push_str(&self.stage_report());
+        report
     }
     fn toggle_view(&mut self, requested: View) {
         let view = if self.view == requested {
@@ -3363,8 +3374,12 @@ impl App {
                 && (y - start_y).abs() <= 4
                 && y >= self.content_top()
                 && y < self.content_bottom()
-                && self.page.link_at(x, y - self.content_top() + self.scroll) == Some(href.as_str())
             {
+                let page_y = y - self.content_top() + self.scroll;
+                let matched = self.page.link_at(x, page_y) == Some(href.as_str());
+                let node = self.page.link_node_at(x, page_y);
+                self.observe_link_hit(x, y, page_y, node, matched);
+                if !matched { return PlatformAction::None; }
                 let download = self
                     .page
                     .link_node_at(x, y - self.content_top() + self.scroll)
@@ -3690,6 +3705,7 @@ impl App {
         self.draw_downloads(&mut canvas);
         self.draw_menu(&mut canvas);
         self.draw_chrome_tooltip(&mut canvas);
+        self.observe_canvas(&canvas);
         canvas
     }
 }

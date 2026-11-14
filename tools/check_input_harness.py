@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 import argparse
 import http.server
 import json
+import re
 from pathlib import Path
 import sys
 import threading
@@ -107,6 +108,35 @@ def main():
         "second_query_typed": 'beta + café' in (evidence / "input.log").read_text(encoding="utf-8") if (evidence / "input.log").exists() else False,
         "source_unchanged": before == record["source_after"],
     }
+    def stage(text, prefix):
+        line=next((line for line in text.splitlines() if line.startswith(prefix)), "")
+        return dict(re.findall(r"(\w+)=([^\s]+)",line))
+    def paired(path):
+        text=path.read_text(encoding="utf-8")
+        current=stage(text,"Stage document=")
+        layout=stage(text,"Stage layout=")
+        canvas=stage(text,"Stage canvas=")
+        ppm=path.with_name(path.name.removesuffix(".activity.txt")+".ppm")
+        return ("Stage paired_ppm_written=1" in text and ppm.is_file() and ppm.stat().st_size>32
+                and current.get("document", "unknown")!="unknown"
+                and canvas.get("document")==current.get("document")==layout.get("layout_document")
+                and canvas.get("dom_commit")==current.get("dom_commit")
+                and canvas.get("layout")==layout.get("layout")!="unknown"
+                and canvas.get("layout_dom")==layout.get("layout_dom") and canvas.get("page_view")=="1")
+    activities=list(evidence.glob("*.activity.txt"))
+    checks["stage_snapshots_match_generated_ppm_and_document_layout"]=bool(activities) and all(paired(path) for path in activities)
+    first= snapshot("first-results","activity.txt")
+    arrived=snapshot("destination","activity.txt")
+    first_doc=stage(first,"Stage document=")
+    first_layout=stage(first,"Stage layout=")
+    hit=stage(arrived,"Stage last_link_hit ")
+    arrived_doc=stage(arrived,"Stage document=")
+    checks["stage_real_activation_preserves_originating_document_and_layout"]=(
+        int(first_layout.get("viewport_link_regions","0"))>0 and hit.get("matched_press")=="1"
+        and hit.get("node","unknown")!="unknown" and hit.get("document")==first_doc.get("document")
+        and hit.get("layout")==first_layout.get("layout")
+        and arrived_doc.get("document")!=hit.get("document")
+        and first_doc.get("navigation_committed","unknown")!="unknown")
     if args.event_namespace:
         initial=(evidence/"00-initial.layout.txt").read_text(encoding="utf-8") if (evidence/"00-initial.layout.txt").is_file() else ""
         checks["event_namespace_startup_rendered"]=all(('text="'+word+'"') in initial for word in ("Event","namespace","ready"))

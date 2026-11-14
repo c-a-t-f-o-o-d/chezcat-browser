@@ -138,6 +138,7 @@ impl Bridge<'_> {
         } else {
             self.state.replace_bytes(self.state.attributes[id].value.len(), value.len())?;
             self.state.attributes[id].value = value;
+            self.state.dom_committed();
         }
         Ok(())
     }

@@ -161,6 +161,7 @@ impl Bridge<'_> {
         self.state.dom.fragment_scripts.extend(scripts);
         self.doc.nonce_unsafe_nodes.extend(staged.nonce_unsafe_nodes.into_iter().map(|local| base + local - 1));
         self.commit_image_connections(image_plans);
+        self.state.dom_committed();
         self.state.dirty = true;
         if connected { self.state.layout_changed(); }
         Ok(())

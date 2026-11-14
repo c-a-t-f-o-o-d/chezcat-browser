@@ -3637,6 +3637,7 @@ impl Runtime {
             }
         })();
         self.strict = previous_strict;
+        self.record_entry_result(false, &result);
         if result
             .as_ref()
             .is_err_and(|error| error.exception.is_none())
@@ -3827,6 +3828,7 @@ impl Runtime {
         self.pin_exported_value(&this);
         for value in args { self.pin_exported_value(value); }
         let result = self.call_value(function, args, this, host);
+        self.record_entry_result(true, &result);
         if result
             .as_ref()
             .is_err_and(|error| error.exception.is_none())

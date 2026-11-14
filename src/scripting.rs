@@ -340,6 +340,9 @@ struct State {
     disable_event_factory: bool,
     tree: Tree,
     dirty: bool,
+    // Committed DOM writes, including detached nodes; not native form values,
+    // allocations, ordinary JS properties, layout work or resource completion.
+    dom_commits: Option<u64>,
     limits: crate::javascript::limits::Limits,
     host_work: usize,
     copy_work: usize,
@@ -401,6 +404,7 @@ impl State {
             disable_event_factory: false,
             tree: Tree::default(),
             dirty: true,
+            dom_commits: Some(0),
             limits: crate::javascript::limits::BROWSER,
             host_work: crate::javascript::limits::BROWSER.host_work,
             copy_work: crate::javascript::limits::BROWSER.copy_bytes,
@@ -416,6 +420,10 @@ impl State {
             enabled: false,
             ready: "loading",
         }
+    }
+
+    fn dom_committed(&mut self) {
+        self.dom_commits = self.dom_commits.and_then(|value| value.checked_add(1));
     }
 
     fn layout_changed(&mut self) {
@@ -659,6 +667,8 @@ impl Default for Page {
 }
 
 impl Page {
+    pub(crate) fn dom_commit_generation(&self) -> Option<u64> { self.state.dom_commits }
+
     pub fn new() -> Self {
         Self::with_limits(crate::javascript::limits::BROWSER)
     }
@@ -1549,6 +1559,7 @@ impl Page {
         text.push_str(&promises);
         text.push_str(&caught);
         text.push_str(&format!("Animation frames: {} pending callback(s), {} executed. Whole-millisecond monotonic timestamps; 16 ms minimum frame interval.\n", self.state.animation_frames.len(), self.state.animation_callbacks));
+        text.push_str(&format!("Accepted script navigation requests: {}.\n", self.state.navigation_requests));
 text.push_str(&format!("Classic scripts have independent execution jobs ({} steps / {} seconds / {} MiB string-copy work). Aggregate startup: {} steps / {} seconds / {} MiB string-copy work. Native-stack and allocation guards are separate.\nFresh detached image requests declined: {}. Ordinary connected HTML img source changes use cancelable real resource requests; current/pending/broken state and completion events follow actual decoding. Detached never-connected Image nodes only reflect attributes; no request or load event was fabricated. Responsive dynamic selection remains unsupported.\nBeacon requests declined: {}. sendBeacon returns false; no data was queued or transmitted.\n", self.state.limits.steps, self.state.limits.job_seconds, self.state.limits.copy_bytes / (1024 * 1024), self.state.limits.startup_steps, self.state.limits.startup_seconds, self.state.limits.startup_copy / (1024 * 1024), self.state.declined_images, self.state.declined_beacons));
         let heap = self.state.limits.heap;
         text.push_str(&format!(
@@ -1835,6 +1846,7 @@ impl Bridge<'_> {
         if disabled {
             self.forms.refresh_disabled(self.doc);
         }
+        if slot.is_some() || new != 0 { self.state.dom_committed(); }
         if self.state.tree.active.get(node).copied().unwrap_or(false) {
             self.state.layout_changed();
         }
@@ -1977,6 +1989,7 @@ impl Bridge<'_> {
             }
         }
         self.state.dirty |= reuse.is_none();
+        self.state.dom_committed();
         if self.state.tree.active.get(node).copied().unwrap_or(false) {
             self.state.layout_changed();
         }
@@ -3584,6 +3597,7 @@ impl Host for Bridge<'_> {
             self.state
                 .replace_bytes(self.doc.title.len(), value.len())?;
             self.doc.title = value;
+            self.state.dom_committed();
             self.state.layout_changed();
             return Ok(());
         }

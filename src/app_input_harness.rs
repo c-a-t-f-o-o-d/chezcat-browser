@@ -128,7 +128,19 @@ impl App {
     }
 
     fn input_snapshot(&self, output: &Path, name: &str) -> Result<(), String> {
-        std::fs::write(output.join(format!("{name}.activity.txt")), self.activity_report()).map_err(|e| e.to_string())?;
+        // Draw before reporting so the numeric stamp describes this PPM. Keep
+        // text evidence even if the surface allocation or file output fails.
+        let rendered = (|| -> Result<(), String> {
+            let canvas = self.draw();
+            if canvas.pixels.is_empty() { return Err("Could not allocate harness render surface.".into()); }
+            let mut file = std::io::BufWriter::new(std::fs::File::create(output.join(format!("{name}.ppm"))).map_err(|e| e.to_string())?);
+            write!(file, "P6\n{} {}\n255\n", canvas.width, canvas.height).map_err(|e| e.to_string())?;
+            for pixel in &canvas.pixels { file.write_all(&[(pixel >> 16) as u8, (pixel >> 8) as u8, *pixel as u8]).map_err(|e| e.to_string())?; }
+            file.flush().map_err(|e| e.to_string())
+        })();
+        let mut activity = self.activity_report();
+        activity.push_str(&format!("Stage paired_ppm_written={}\n", u8::from(rendered.is_ok())));
+        std::fs::write(output.join(format!("{name}.activity.txt")), activity).map_err(|e| e.to_string())?;
         std::fs::write(output.join(format!("{name}.source.html")), self.document_source()).map_err(|e| e.to_string())?;
         let mut layout = String::new();
         for run in &self.page.runs {
@@ -140,11 +152,6 @@ impl App {
             layout.push_str(&format!("control={} name={:?} value={value:?} x={} y={} w={} h={}\n", rect.node, self.document.attr(rect.node, "name"), rect.x, rect.y, rect.width, rect.height));
         }
         std::fs::write(output.join(format!("{name}.layout.txt")), layout).map_err(|e| e.to_string())?;
-        let canvas = self.draw();
-        if canvas.pixels.is_empty() { return Err("Could not allocate harness render surface.".into()); }
-        let mut file = std::io::BufWriter::new(std::fs::File::create(output.join(format!("{name}.ppm"))).map_err(|e| e.to_string())?);
-        write!(file, "P6\n{} {}\n255\n", canvas.width, canvas.height).map_err(|e| e.to_string())?;
-        for pixel in &canvas.pixels { file.write_all(&[(pixel >> 16) as u8, (pixel >> 8) as u8, *pixel as u8]).map_err(|e| e.to_string())?; }
-        file.flush().map_err(|e| e.to_string())
+        rendered
     }
 }

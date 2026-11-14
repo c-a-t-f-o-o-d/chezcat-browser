@@ -886,6 +886,7 @@ impl Bridge<'_> {
         }
         self.commit_blank_frames(&descendants, frames);
         self.commit_image_connections(image_plans);
+        self.state.dom_committed();
         self.state.dirty = true;
         if was_connected || connected {
             self.state.layout_changed();
@@ -951,6 +952,7 @@ impl Bridge<'_> {
                 self.state.detached_nodes.remove(&child);
             }
         }
+        self.state.dom_committed();
         self.state.dirty = true;
         if self.state.dom.connected[node] {
             self.queue_dynamic_script(node)?;
@@ -981,6 +983,7 @@ impl Bridge<'_> {
             };
             self.state.replace_bytes(old_len, text.len())?;
             self.doc.nodes[node].kind = NodeKind::Text(text);
+            self.state.dom_committed();
             if self.state.dom.connected[node] {
                 self.state.layout_changed();
                 if let Some(parent) =
