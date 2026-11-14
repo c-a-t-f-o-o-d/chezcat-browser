@@ -118,6 +118,21 @@ pub enum NodeKind {
 }
 
 pub fn parse(input: &str) -> Document {
+    parse_internal(input, None, false).expect("Document parsing retains its bounded prefix behavior.")
+}
+
+/// Checked fragment subset. The context sets the tokenizer state directly;
+/// callers never create a source wrapper that markup could escape. Unsupported
+/// tree-builder recovery and unrepresented comment nodes reject explicitly.
+pub(crate) fn parse_fragment(input: &str, context: &str, scripting: bool) -> Result<Document, String> {
+    if !matches!(context, "div" | "span" | "p" | "a" | "section" | "article" | "main" | "header" | "footer" | "aside" | "nav" | "li" | "ul" | "ol" | "dl" | "dt" | "dd" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6" | "em" | "b" | "strong" | "i" | "u" | "small" | "label" | "pre" | "blockquote" | "body" | "title" | "textarea" | "script" | "style" | "xmp" | "iframe" | "noembed" | "noframes" | "plaintext") {
+        return Err("HTML fragment parsing for this element context is not implemented.".into());
+    }
+    parse_internal(input, Some(context), scripting)
+}
+
+fn parse_internal(input: &str, context: Option<&str>, scripting: bool) -> Result<Document, String> {
+    let checked = context.is_some();
     // HTML input preprocessing happens before tokenization, so an LF produced
     // by a numeric reference remains distinct from a literal source CR.
     let normalized = if input.contains('\r') {
@@ -126,6 +141,9 @@ pub fn parse(input: &str) -> Document {
         Cow::Borrowed(input)
     };
     let input = normalized.as_ref();
+    if checked && input.contains('\0') && !context.is_some_and(|name| matches!(name, "title" | "textarea" | "script" | "style" | "xmp" | "iframe" | "noembed" | "noframes" | "plaintext")) {
+        return Err("HTML fragment NULL handling outside text-only contexts is not implemented.".into());
+    }
     let mut document = Document {
         title: String::new(),
         content_type: "text/html".into(),
@@ -133,7 +151,7 @@ pub fn parse(input: &str) -> Document {
         nonce_unsafe_nodes: HashSet::new(),
         nodes: vec![Node {
             kind: NodeKind::Element {
-                tag: "#document".into(),
+                tag: context.unwrap_or("#document").into(),
                 id: None,
                 href: None,
                 attrs: Vec::new(),
@@ -142,26 +160,41 @@ pub fn parse(input: &str) -> Document {
             namespace: Namespace::None,
         }],
     };
+    if context.is_some_and(|name| matches!(name, "title" | "textarea" | "script" | "style" | "xmp" | "iframe" | "noembed" | "noframes" | "plaintext")) {
+        let text = if matches!(context, Some("title" | "textarea")) { decode_entities(input) } else { input.to_owned() }.replace('\0', "\u{fffd}");
+        if !append_text_value(&mut document, 0, text) { return Err("HTML fragment node limit reached.".into()); }
+        document.scripting_enabled = scripting;
+        return Ok(document);
+    }
     let mut stack = vec![0];
     let mut position = 0;
     let mut title_seen = false;
     // If unsupported foreign recovery escapes through an unrelated ancestor,
     // later elements cannot safely be classified from this subset's stack.
     let mut uncertain_foreign_recovery = false;
+    let mut ignore_fragment_lf = None;
 
     while position < input.len() {
         let parent = *stack.last().unwrap();
         let rest = &input[position..];
         if !rest.starts_with('<') {
             let end = position + rest.find('<').unwrap_or(rest.len());
-            if !append_text(&mut document, parent, &input[position..end]) {
+            let appended = if checked {
+                let mut text = decode_entities(&input[position..end]);
+                if ignore_fragment_lf.take() == Some(parent) && text.starts_with('\n') { text.remove(0); }
+                append_text_value(&mut document, parent, text)
+            } else { append_text(&mut document, parent, &input[position..end]) };
+            if !appended {
+                if checked { return Err("HTML fragment node limit reached.".into()); }
                 break;
             }
             position = end;
             continue;
         }
+        ignore_fragment_lf = None;
 
         if let Some(comment) = rest.strip_prefix("<!--") {
+            if checked { return Err("HTML fragment comment nodes are not implemented.".into()); }
             position = match comment.find("-->") {
                 Some(end) => position + 4 + end + 3,
                 None => input.len(),
@@ -169,15 +202,19 @@ pub fn parse(input: &str) -> Document {
             continue;
         }
         if rest.starts_with("<!") || rest.starts_with("<?") {
+            if checked { return Err("HTML fragment declaration/comment tokens are not implemented.".into()); }
             position += rest.find('>').map_or(rest.len(), |end| end + 1);
             continue;
         }
 
-        let tag = match read_tag(input, position) {
+        let tag = match read_tag_mode(input, position, checked) {
             TagToken::Complete(tag) => tag,
             TagToken::Incomplete => break,
+            TagToken::Unsupported(error) => return Err(error.into()),
             TagToken::NotATag => {
+                if checked && rest.starts_with("</") { return Err("HTML fragment bogus end-tag/comment recovery is not implemented.".into()); }
                 if !append_text(&mut document, parent, "<") {
+                    if checked { return Err("HTML fragment node limit reached.".into()); }
                     break;
                 }
                 position += 1;
@@ -185,6 +222,28 @@ pub fn parse(input: &str) -> Document {
             }
         };
         position = tag.end;
+
+        if checked {
+            if matches!(tag.name.as_str(), "html" | "head" | "body" | "frameset" | "frame" | "table" | "caption" | "colgroup" | "col" | "tbody" | "thead" | "tfoot" | "tr" | "td" | "th" | "select" | "option" | "optgroup" | "template" | "svg" | "math" | "picture" | "image" | "xmp" | "noembed" | "noframes" | "plaintext" | "listing") || tag.name == "noscript" && scripting {
+                return Err("HTML fragment structural, table/select or foreign-content recovery is not implemented.".into());
+            }
+            if !tag.closing {
+                let heading = |name: &str| matches!(name, "h1" | "h2" | "h3" | "h4" | "h5" | "h6");
+                if stack.iter().skip(1).any(|&node| matches!(&document.nodes[node].kind, NodeKind::Element {tag: open, ..} if (matches!(tag.name.as_str(), "dt" | "dd") && matches!(open.as_str(), "dt" | "dd")) || (heading(&tag.name) && heading(open)) || (open == "p" && matches!(tag.name.as_str(), "address" | "aside" | "details" | "dialog" | "dl" | "dt" | "dd" | "figcaption" | "figure" | "hgroup" | "listing" | "menu" | "nav" | "search" | "summary")))) {
+                    return Err("HTML fragment implied definition/heading/block recovery is not implemented.".into());
+                }
+            }
+            if tag.closing {
+                if tag.name == "br" || tag.name == "p" && !stack.iter().skip(1).any(|&node| matches!(&document.nodes[node].kind, NodeKind::Element {tag, ..} if tag == "p")) { return Err("HTML fragment special end-tag recovery is not implemented.".into()); }
+                if let Some(position) = stack.iter().rposition(|&node| matches!(&document.nodes[node].kind, NodeKind::Element {tag: name, ..} if name == &tag.name)) {
+                    if position > 0 && (fragment_formatting(&tag.name) && position + 1 != stack.len() || stack[position+1..].iter().any(|&node| matches!(&document.nodes[node].kind, NodeKind::Element {tag, ..} if fragment_formatting(tag)))) {
+                        return Err("HTML fragment formatting-element reconstruction is not implemented.".into());
+                    }
+                }
+            } else if fragment_formatting(&tag.name) && stack.iter().skip(1).any(|&node| matches!(&document.nodes[node].kind, NodeKind::Element {tag: name, ..} if name == &tag.name)) {
+                return Err("HTML fragment nested formatting recovery is not implemented.".into());
+            }
+        }
 
         if tag.closing {
             if let Some(index) = stack.iter().rposition(|&node| {
@@ -204,7 +263,11 @@ pub fn parse(input: &str) -> Document {
         }
 
         let was_foreign = document.nodes[*stack.last().unwrap()].namespace == Namespace::UnknownForeign;
+        let previous_stack = checked.then(|| stack.clone());
         close_implied(&mut stack, &document, &tag.name);
+        if previous_stack.as_ref().is_some_and(|previous| previous[stack.len()..].iter().any(|&node| matches!(&document.nodes[node].kind, NodeKind::Element {tag, ..} if fragment_formatting(tag)))) {
+            return Err("HTML fragment implied-close formatting reconstruction is not implemented.".into());
+        }
         let parent = *stack.last().unwrap();
         if was_foreign && document.nodes[parent].namespace != Namespace::UnknownForeign {
             uncertain_foreign_recovery = true;
@@ -212,6 +275,7 @@ pub fn parse(input: &str) -> Document {
         let raw = matches!(tag.name.as_str(), "script" | "style" | "title" | "textarea");
         let void = is_void(&tag.name);
         if document.nodes.len() == MAX_NODES || (!raw && !void && stack.len() == MAX_DEPTH) {
+            if checked { return Err("HTML fragment node/depth limit reached.".into()); }
             break;
         }
         let node = document.nodes.len();
@@ -234,7 +298,8 @@ pub fn parse(input: &str) -> Document {
         });
 
         if raw {
-            let (content_end, after_end_tag) = raw_text_end(input, position, &tag.name);
+            let (content_end, after_end_tag) = raw_text_end_mode(input, position, &tag.name, checked)?;
+            if checked && tag.name == "script" && input[position..content_end].contains("<!--") { return Err("HTML fragment escaped script-data tokenization is not implemented.".into()); }
             if matches!(tag.name.as_str(), "title" | "textarea") {
                 // RCDATA recognizes only its own end tag as markup. Decode
                 // entities after finding that tag so '&lt;/textarea&gt;' stays
@@ -253,11 +318,13 @@ pub fn parse(input: &str) -> Document {
                         .join(" ");
                 }
                 if !append_text_value(&mut document, node, content) {
+                    if checked { return Err("HTML fragment node limit reached.".into()); }
                     break;
                 }
             } else if matches!(tag.name.as_str(), "style" | "script")
                 && !append_text_value(&mut document, node, input[position..content_end].to_owned())
             {
+                if checked { return Err("HTML fragment node limit reached.".into()); }
                 break;
             }
             // CSS and classic JavaScript remain raw text. Their consumers apply
@@ -266,10 +333,16 @@ pub fn parse(input: &str) -> Document {
         } else if !void {
             // A trailing slash does not close a non-void HTML element.
             stack.push(node);
+            if checked && tag.name == "pre" { ignore_fragment_lf = Some(node); }
         }
     }
 
-    document
+    if checked { document.scripting_enabled = scripting; }
+    Ok(document)
+}
+
+fn fragment_formatting(name: &str) -> bool {
+    matches!(name, "a" | "b" | "i" | "em" | "strong" | "u" | "small" | "big" | "code" | "font" | "nobr" | "s" | "strike" | "tt")
 }
 
 fn append_text(document: &mut Document, parent: usize, source: &str) -> bool {
@@ -313,9 +386,14 @@ enum TagToken {
     Complete(Tag),
     Incomplete,
     NotATag,
+    Unsupported(&'static str),
 }
 
-fn read_tag(input: &str, start: usize) -> TagToken {
+fn tag_space(byte: u8, checked: bool) -> bool {
+    if checked { matches!(byte, b' ' | b'\t' | b'\n' | b'\r' | b'\x0c') } else { byte.is_ascii_whitespace() }
+}
+
+fn read_tag_mode(input: &str, start: usize, checked: bool) -> TagToken {
     let bytes = input.as_bytes();
     let mut position = start + 1;
     let closing = bytes.get(position) == Some(&b'/');
@@ -333,12 +411,13 @@ fn read_tag(input: &str, start: usize) -> TagToken {
         position += 1;
     }
     let name = input[name_start..position].to_ascii_lowercase();
+    if checked && bytes.get(position).is_some_and(|byte| !tag_space(*byte, true) && !matches!(*byte, b'/' | b'>')) { return TagToken::Unsupported("HTML fragment tag-name tokenization is not implemented for this boundary."); }
     let mut attrs: Vec<(String, String)> = Vec::new();
     let mut seen = HashSet::new();
     let mut duplicate_attributes = false;
 
     while position < bytes.len() {
-        while position < bytes.len() && bytes[position].is_ascii_whitespace() {
+        while position < bytes.len() && tag_space(bytes[position], checked) {
             position += 1;
         }
         if position == bytes.len() {
@@ -368,25 +447,26 @@ fn read_tag(input: &str, start: usize) -> TagToken {
 
         let attribute_start = position;
         while position < bytes.len()
-            && !bytes[position].is_ascii_whitespace()
+            && !tag_space(bytes[position], checked)
             && !matches!(bytes[position], b'=' | b'/' | b'>')
         {
             position += 1;
         }
         if position == attribute_start {
+            if checked { return TagToken::Unsupported("HTML fragment attribute-name recovery is not implemented."); }
             // A stray '=' must still advance the parser.
             position += 1;
             continue;
         }
         let attribute = &input[attribute_start..position];
-        while position < bytes.len() && bytes[position].is_ascii_whitespace() {
+        while position < bytes.len() && tag_space(bytes[position], checked) {
             position += 1;
         }
 
         let mut value = "";
         if bytes.get(position) == Some(&b'=') {
             position += 1;
-            while position < bytes.len() && bytes[position].is_ascii_whitespace() {
+            while position < bytes.len() && tag_space(bytes[position], checked) {
                 position += 1;
             }
             if matches!(bytes.get(position), Some(b'\'' | b'"')) {
@@ -403,7 +483,7 @@ fn read_tag(input: &str, start: usize) -> TagToken {
             } else {
                 let value_start = position;
                 while position < bytes.len()
-                    && !bytes[position].is_ascii_whitespace()
+                    && !tag_space(bytes[position], checked)
                     && bytes[position] != b'>'
                 {
                     position += 1;
@@ -497,7 +577,7 @@ fn close_in_scope(stack: &mut Vec<usize>, document: &Document, target: &str, bar
     }
 }
 
-fn raw_text_end(input: &str, start: usize, name: &str) -> (usize, usize) {
+fn raw_text_end_mode(input: &str, start: usize, name: &str, checked: bool) -> Result<(usize, usize), String> {
     let bytes = input.as_bytes();
     let mut position = start;
     while let Some(offset) = input[position..].find('<') {
@@ -510,19 +590,20 @@ fn raw_text_end(input: &str, start: usize, name: &str) -> (usize, usize) {
                 .is_some_and(|candidate| candidate.eq_ignore_ascii_case(name.as_bytes()))
             && bytes
                 .get(name_end)
-                .is_some_and(|byte| byte.is_ascii_whitespace() || matches!(byte, b'/' | b'>'))
+                .is_some_and(|byte| tag_space(*byte, checked) || matches!(byte, b'/' | b'>'))
         {
-            return match read_tag(input, opening) {
-                TagToken::Complete(tag) => (opening, tag.end),
-                _ => (input.len(), input.len()),
+            return match read_tag_mode(input, opening, checked) {
+                TagToken::Complete(tag) => Ok((opening, tag.end)),
+                _ if checked => Err("HTML fragment raw-text end-tag recovery is not implemented.".into()),
+                _ => Ok((input.len(), input.len())),
             };
         }
         position = opening + 1;
     }
-    (input.len(), input.len())
+    Ok((input.len(), input.len()))
 }
 
-fn is_void(name: &str) -> bool {
+pub(crate) fn is_void(name: &str) -> bool {
     matches!(
         name,
         "area"

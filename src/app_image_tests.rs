@@ -280,3 +280,22 @@ fn connected_images_shared_pixels_do_not_consume_the_document_budget_twice() {
     let mut extra = crate::image::DecodedImage::still(Bitmap { width: 1, height: 1, pixels: vec![0xff123456] });
     assert!(app.fit_document_image(5, &mut extra).is_err());
 }
+
+#[test]
+fn inner_html_images_use_real_resources_and_detached_old_requests_keep_ownership() {
+    let site = Site::new();
+    let mut app = open(&site, "/fresh");
+    wait(&mut app, |app| !app.is_loading());
+    eval(&mut app, "var holder=document.createElement('div');document.body.appendChild(holder);var loads=0;holder.innerHTML='<img id=old src=\"/held.ppm\"><script id=inert src=\"/must-not-fetch.js\">document.title=\"WRONG\";</script>';var old=document.getElementById('old'),inert=document.getElementById('inert');old.onload=function(){if(old.isConnected||old.ownerDocument!==document||old.naturalWidth!==4||!old.complete)throw Error('old resource owner');loads++;};");
+    wait(&mut app, |_| site.requested("/held.ppm"));
+    eval(&mut app, "var saved=old.getBoundingClientRect();holder.innerHTML='<p id=caption>Replacement image</p><img id=picture src=\"/two.ppm\">';var img=document.getElementById('picture');img.onload=function(){if(!img.complete||img.naturalHeight!==3||img.getBoundingClientRect().height!==3||old.parentNode!==null||old.isConnected)throw Error('fragment image');loads++;document.title='fragment-loaded';};inert.src='/still-must-not-fetch.js';document.body.appendChild(inert);");
+    site.release();
+    wait(&mut app, |app| !app.is_loading());
+    assert_eq!(app.document.title, "fragment-loaded");
+    assert!(!site.requested("/must-not-fetch.js") && !site.requested("/still-must-not-fetch.js"));
+    assert!(site.requested("/two.ppm"));
+    eval(&mut app, "if(loads!==2||old.naturalWidth!==4||img.naturalHeight!==3||document.getElementById('old')!==null||inert.parentNode!==document.body||document.getElementById('caption').textContent!=='Replacement image')throw Error('fragment result');");
+    let pixels = app.images[&image(&app)].clone();
+    assert_eq!(pixels.pixels, [0xff00ff00; 3]);
+    assert_eq!(app.scripting.as_ref().unwrap().error_count(), 0);
+}

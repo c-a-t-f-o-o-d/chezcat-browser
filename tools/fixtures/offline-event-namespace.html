@@ -1,6 +1,7 @@
-<!-- Original local fixture. No external URLs, resources or access-check code. -->
+<!-- Original local fixture. Only loopback resources; no access-check code. -->
 <p id="event-namespace-state">Fixture pending</p>
 <div id="geometry-state" style="width:40px;height:20px;padding:3px 5px;border:2px solid black"></div>
+<div id="fragment-fixture"><p id="fragment-old" title="retained">Old fragment</p></div>
 <script>
 var fixtureNode=document.getElementById('event-namespace-state');
 fixtureNode.setAttribute('data-sample','value');
@@ -17,6 +18,15 @@ var geometryNode=document.getElementById('geometry-state'),geometryRect=geometry
 if(!(geometryRect instanceof DOMRect)||geometryRect.width!==54||geometryRect.height!==30||geometryRect===geometryNode.getBoundingClientRect())throw Error('real renderer DOMRect');
 geometryNode.style.width='60px';
 if(geometryNode.getBoundingClientRect().width!==74||geometryRect.width!==54)throw Error('layout refresh and snapshot stability');
+var fragmentNode=document.getElementById('fragment-fixture'),fragmentOld=document.getElementById('fragment-old'),fragmentAttr=fragmentOld.getAttributeNode('title');
+fragmentNode.innerHTML='<p id="fragment-state">Fragment waiting</p><img id="fragment-image" src="/fixture-image.ppm"><script id="fragment-inert" src="/fixture-inert.js">window.fragmentExecuted=true;<\/script>';
+if(fragmentOld.parentNode!==null||fragmentOld.isConnected||fragmentAttr.ownerElement!==fragmentOld||fragmentAttr.value!=='retained'||document.getElementById('fragment-old')!==null||fragmentNode.innerHTML.indexOf('<img id="fragment-image"')<0)throw Error('fragment replacement and retained identity');
+var fragmentImage=document.getElementById('fragment-image');
+fragmentImage.onload=function(){
+ if(!fragmentImage.complete||fragmentImage.naturalWidth!==2||fragmentImage.naturalHeight!==1||fragmentImage.getBoundingClientRect().width!==2||window.fragmentExecuted!==undefined)throw Error('real fragment image completion');
+ document.getElementById('fragment-state').textContent='Fragment image loaded';
+};
+fragmentImage.onerror=function(){throw Error('loopback fragment image failed');};
 var fixtureEvent=document.createEvent('UIEvents');
 fixtureEvent.initUIEvent('fixture',true,true,window,4294967297);
 if(fixtureEvent.view!==window||fixtureEvent.detail!==1||fixtureEvent.isTrusted)throw Error('UI initializer');

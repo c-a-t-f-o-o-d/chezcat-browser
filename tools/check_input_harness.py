@@ -45,6 +45,14 @@ def main():
         def do_GET(self):
             seen.append(["search", self.path])
             path = urllib.parse.urlsplit(self.path)
+            if path.path == "/fixture-image.ppm":
+                body=b"P6\n2 1\n255\n"+bytes([12,34,56,78,90,123])
+                self.send_response(200)
+                self.send_header("Content-Type","image/x-portable-pixmap")
+                self.send_header("Content-Length",str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
             result = path.path == "/search"
             html = '<!doctype html><title>Original fixture ' + ("results" if result else "home") + '</title><form action="/search"><input name="q"><button name="send">Search</button></form>'
             if result:
@@ -103,6 +111,8 @@ def main():
         initial=(evidence/"00-initial.layout.txt").read_text(encoding="utf-8") if (evidence/"00-initial.layout.txt").is_file() else ""
         checks["event_namespace_startup_rendered"]=all(('text="'+word+'"') in initial for word in ("Event","namespace","ready"))
         checks["native_ui_keyboard_rendered"]=all(('text="'+word+'"') in snapshot("ui-keyboard","layout.txt") for word in ("Native","UI","observed"))
+        checks["fragment_and_real_image_completion_rendered"]=all(('text="'+word+'"') in initial for word in ("Fragment","image","loaded"))
+        checks["fragment_image_requested_and_inert_script_unfetched"]=["search","/fixture-image.ppm"] in seen and not any(row[1].startswith("/fixture-inert.js") for row in seen)
         activities=list(evidence.glob("*.activity.txt"))
         checks["subsystem_has_no_script_errors"]=bool(activities) and all("0 error(s)." in path.read_text(encoding="utf-8") for path in activities)
     record["checks"] = checks

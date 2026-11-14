@@ -142,15 +142,8 @@ impl Bridge<'_> {
     pub(super) fn prepare_image_connections(&mut self, nodes: &[usize], connected: bool) -> Result<Vec<(usize, ImageChange)>, String> {
         if !connected { return Ok(Vec::new()); }
         let candidates: Vec<_> = nodes.iter().copied().filter(|node| tag(self.doc, *node) == "img" && !self.state.images.entries.contains_key(node)).collect();
-        // Each committed candidate also scans the candidates queued before it.
-        let batch_work = candidates.len().checked_mul(candidates.len().saturating_sub(1)).ok_or("Image connection work overflow.")? / 2;
-        self.state.work(batch_work)?;
         let attempts = candidates.iter().filter(|&&node| self.doc.attr(node, "src").is_some()).count();
-        if self.state.images.attempts.saturating_add(attempts) > MAX_IMAGE_REQUESTS { return Err("Dynamic image attempt limit reached.".into()); }
-        self.state.images.entries.try_reserve(candidates.len()).map_err(|_| "Image entry reservation failed.")?;
-        self.state.images.changed.try_reserve(candidates.len()).map_err(|_| "Image change reservation failed.")?;
-        self.state.images.removed.try_reserve(candidates.len()).map_err(|_| "Image removal reservation failed.")?;
-        self.state.images.pending.try_reserve(candidates.len()).map_err(|_| "Image request reservation failed.")?;
+        self.reserve_image_changes(candidates.len(), attempts)?;
         let mut plans = Vec::new();
         plans.try_reserve(candidates.len()).map_err(|_| "Image connection reservation failed.")?;
         for node in candidates {
@@ -161,11 +154,23 @@ impl Bridge<'_> {
         Ok(plans)
     }
 
+    pub(super) fn reserve_image_changes(&mut self, count: usize, attempts: usize) -> Result<(), String> {
+        // Each committed candidate also scans the candidates queued before it.
+        let batch_work = count.checked_mul(count.saturating_sub(1)).ok_or("Image connection work overflow.")? / 2;
+        self.state.work(batch_work)?;
+        if self.state.images.attempts.saturating_add(attempts) > MAX_IMAGE_REQUESTS { return Err("Dynamic image attempt limit reached.".into()); }
+        self.state.images.entries.try_reserve(count).map_err(|_| "Image entry reservation failed.")?;
+        self.state.images.changed.try_reserve(count).map_err(|_| "Image change reservation failed.")?;
+        self.state.images.removed.try_reserve(count).map_err(|_| "Image removal reservation failed.")?;
+        self.state.images.pending.try_reserve(count).map_err(|_| "Image request reservation failed.")?;
+        Ok(())
+    }
+
     pub(super) fn commit_image_connections(&mut self, plans: Vec<(usize, ImageChange)>) {
         for (node, plan) in plans { self.commit_image_change(node, plan); }
     }
 
-    fn prepare_image_change(&mut self, node: usize, source: Option<&str>) -> Result<ImageChange, String> {
+    pub(super) fn prepare_image_change(&mut self, node: usize, source: Option<&str>) -> Result<ImageChange, String> {
         self.state.work(self.state.images.pending.len())?;
         let generation = self.state.images.entries.get(&node).map_or(Some(1), |entry| entry.generation.checked_add(1)).ok_or("Image request generation exhausted.")?;
         if source.is_some() && self.state.images.attempts >= MAX_IMAGE_REQUESTS {

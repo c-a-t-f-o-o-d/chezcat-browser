@@ -119,6 +119,7 @@ impl Bridge<'_> {
             || !self.state.dom.created.contains(&node)
             || !self.state.dom.connected.get(node).copied().unwrap_or(false)
             || self.state.dynamic.started.contains(&node)
+            || self.state.dom.fragment_scripts.contains(&node)
         {
             return Ok(());
         }

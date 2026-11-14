@@ -17,6 +17,7 @@ pub(super) struct DomState {
     pub(super) connected: Vec<bool>,
     pub(super) pending_focus: Option<usize>,
     pub(super) collections: Vec<dom_collections::TagCollection>,
+    pub(super) fragment_scripts: HashSet<usize>,
     force_async: HashSet<usize>,
 }
 
@@ -319,6 +320,7 @@ impl Bridge<'_> {
     }
 
     pub(super) fn dom_string_setter(&self, object: u32, property: &str) -> bool {
+        if property == "innerHTML" { return self.attr_element_receiver(object); }
         let Some(node) = node_index(object).filter(|&node| node < self.doc.nodes.len()) else {
             return false;
         };
@@ -460,6 +462,7 @@ impl Bridge<'_> {
             }
             return Ok(Some(self.html_image_map_property(node)));
         }
+        if property == "innerHTML" && matches!(self.doc.nodes[node].kind, NodeKind::Element { .. }) { return Ok(Some(true)); }
         if common_node_property(property) || self.dom_method(object, property).is_some() {
             return Ok(Some(true));
         }
@@ -486,6 +489,7 @@ impl Bridge<'_> {
             return Ok(None);
         }
         let node = self.dom_node(object)?;
+        if property == "innerHTML" && matches!(self.doc.nodes[node].kind, NodeKind::Element { .. }) { return self.inner_html(node).map(Some); }
         if property == "attributes" {
             if !matches!(self.doc.nodes[node].kind, NodeKind::Element { .. }) { return Ok(Some(Value::Undefined)); }
             if self.doc.nodes[node].namespace != crate::html::Namespace::Html { return Err("Attribute map requires known namespace provenance.".into()); }
@@ -701,7 +705,7 @@ impl Bridge<'_> {
         Ok(())
     }
 
-    fn mutation_subtree(&mut self, root: usize) -> Result<(Vec<usize>, usize), String> {
+    pub(super) fn mutation_subtree(&mut self, root: usize) -> Result<(Vec<usize>, usize), String> {
         let mut nodes = Vec::new();
         let mut stack = vec![(root, 1usize)];
         let mut depth = 0;
@@ -985,6 +989,11 @@ impl Bridge<'_> {
                     self.queue_dynamic_script(parent)?;
                 }
             }
+            return Ok(true);
+        }
+        if property == "innerHTML" {
+            let text = self.text(value)?;
+            self.set_inner_html(node, &text)?;
             return Ok(true);
         }
         if self.stylesheet_set(node, property, value)? {

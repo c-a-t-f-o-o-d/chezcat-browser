@@ -68,6 +68,8 @@ mod script_images;
 pub use script_images::DynamicImage;
 pub(crate) use script_images::MAX_IMAGE_REQUESTS;
 use script_images::ImagesState;
+#[path = "script_inner_html.rs"]
+mod script_inner_html;
 
 const WINDOW: u32 = 1;
 const DOCUMENT: u32 = 2;
@@ -1504,7 +1506,7 @@ impl Page {
         if !self.state.enabled {
             return "JavaScript did not run for this document (disabled or blocked by document policy).\n".into();
         }
-        let mut text = format!("ChezCat JavaScript subset\n{} script(s), {} active listener(s), {} error(s).\n{} pending timer(s), {} timer callback(s) executed.\nClassic scripts run after parsing. Events come from supported controls/forms and completed dynamic scripts/stylesheets.\nFunction timers use the document queue. Bounded eval follows the document CSP.\nLocation inspection reflects the displayed document; same-origin assign/replace/reload and href/search/hash writes queue navigation.\nSession cookies are memory-only with host-only/Domain scope and bundled public-suffix boundaries; document.cookie excludes HttpOnly entries.\nDynamic external classic scripts use CSP, MIME, request-blocking and bounded source checks; cross-origin HTTPS scripts omit credentials. Crossorigin-marked scripts require same-origin at every hop. Dynamic LINK stylesheets retain exact-origin checks. HTML injection, modules, persistent storage, fetch and XHR are not implemented.\n\n", self.state.executed, self.state.listeners.len(), self.state.errors, self.state.timers.len(), self.state.timer_callbacks);
+        let mut text = format!("ChezCat JavaScript subset\n{} script(s), {} active listener(s), {} error(s).\n{} pending timer(s), {} timer callback(s) executed.\nClassic scripts run after parsing. Events come from supported controls/forms and completed dynamic scripts/stylesheets.\nFunction timers use the document queue. Bounded eval follows the document CSP.\nLocation inspection reflects the displayed document; same-origin assign/replace/reload and href/search/hash writes queue navigation.\nSession cookies are memory-only with host-only/Domain scope and bundled public-suffix boundaries; document.cookie excludes HttpOnly entries.\nDynamic external classic scripts use CSP, MIME, request-blocking and bounded source checks; cross-origin HTTPS scripts omit credentials. Crossorigin-marked scripts require same-origin at every hop. Dynamic LINK stylesheets retain exact-origin checks. Checked innerHTML replaces ordinary HTML fragments with inert injected scripts and real image queues; unsupported parser recovery and native form/resource changes reject before replacement. Modules, persistent storage, fetch and XHR are not implemented.\n\n", self.state.executed, self.state.listeners.len(), self.state.errors, self.state.timers.len(), self.state.timer_callbacks);
         let attribution = self.runtime.string_work_failure_report();
         let reachability = self.runtime.persistent_allocation_report();
         let promises = self.runtime.promise_state_report();
@@ -2369,7 +2371,8 @@ impl Host for Bridge<'_> {
     }
 
     fn null_string_setter(&self, object: u32, property: &str) -> bool {
-        property == "border" && node_index(object).is_some_and(|node|
+        property == "innerHTML" && self.attr_element_receiver(object)
+            || property == "border" && node_index(object).is_some_and(|node|
             self.html_border_property(node) && matches!(tag(self.doc, node), "img" | "object"))
     }
 
