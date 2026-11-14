@@ -795,6 +795,7 @@ impl Page {
             .expect("fixed image constructor");
         state.native_functions.insert("Image", image);
         runtime.define_event_target_interface(WINDOW).expect("fixed EventTarget interface");
+        runtime.define_node_interfaces(WINDOW,dom_tree::NODE_CONSTANTS,Some((IMAGE_FACTORY,"Image"))).expect("fixed Node interfaces");
         Self { runtime, state }
     }
 
@@ -2055,9 +2056,7 @@ impl Bridge<'_> {
         if event.len() > self.state.limits.host.event_type_bytes {
             return Err("Event type exceeds the 256-byte limit.".into());
         }
-        if self.standalone_target_owner(handle).is_none() && !matches!(handle, DOCUMENT | WINDOW) {
-            self.node(handle)?;
-        }
+        if !self.dispatch_receiver(handle) {return Err("Listener receiver is not a supported EventTarget.".into());}
         Ok(())
     }
 
@@ -2252,18 +2251,25 @@ impl Bridge<'_> {
 impl Host for Bridge<'_> {
     fn expando_owner(&self,object:u32)->Option<u32> {self.standalone_target_owner(object).or_else(||self.element_expando_receiver(object).then_some(WINDOW))}
     fn exposed_native_prototype(&self,object:u32)->bool {self.standalone_target_owner(object).is_some()}
+    fn native_ancestry_inspection(&self,object:u32)->bool {self.exposed_native_prototype(object)||self.namespace_receiver(object)}
     fn event_target_interface(&self,window:u32)->bool {window==WINDOW || self.frame_context(window).is_some()}
+    fn node_interface_constants(&self,window:u32)->Option<&'static [(&'static str,u16)]> {self.event_target_interface(window).then_some(dom_tree::NODE_CONSTANTS)}
     fn instance_ancestry(&self, object:u32) -> Option<crate::javascript::NativeAncestry> {
         if let Some(window)=self.standalone_target_owner(object) {
             return Some(crate::javascript::NativeAncestry {window,constructor:Some((window,"EventTarget"))});
         }
         if let Some(window)=self.frame_instance_window(object) {
-            return Some(crate::javascript::NativeAncestry {window,constructor:None});
+            let constructor=self.frame_node_interface(object).map(|name|(window,name));
+            return Some(crate::javascript::NativeAncestry {window,constructor});
         }
         let node=node_index(object).filter(|_|self.namespace_receiver(object));
-        let constructor=node.filter(|&node|tag(self.doc,node)=="img"
-                && self.doc.nodes[node].namespace==crate::html::Namespace::Html)
-            .map(|_|(IMAGE_FACTORY,"Image"));
+        let constructor=if let Some(node)=node {
+            Some(if matches!(self.doc.nodes[node].kind,NodeKind::Element {..}) {
+                if self.doc.nodes[node].namespace==crate::html::Namespace::Html {
+                    if tag(self.doc,node)=="img" {(IMAGE_FACTORY,"Image")} else {(WINDOW,"HTMLElement")}
+                } else {(WINDOW,"Element")}
+            } else {(WINDOW,"Node")})
+        } else if object==DOCUMENT || self.attr_receiver(object) {Some((WINDOW,"Node"))} else {None};
         let known=node.is_some() || matches!(object,DOCUMENT|CONSOLE|NAVIGATOR|PLUGINS|MIME_TYPES|DOCUMENT_IMAGES|LOCATION|PERFORMANCE|PERFORMANCE_TIMING|HISTORY)
             || self.attr_receiver(object) || self.event_receiver(object) || self.class_list_receiver(object) || self.named_map_receiver(object)
             || node_list_index(object).is_some_and(|index|index<self.state.node_lists.len())
@@ -2297,6 +2303,7 @@ impl Host for Bridge<'_> {
     }
 
     fn owns_property(&self, object: u32, property: &str) -> bool {
+        if self.node_event_method(object,property) {return false;}
         if self.standalone_target_owner(object).is_some() {return false;}
         if property=="prototype"&&self.location_instance_owner(object).is_some(){return false;}
         if self.element_expando_receiver(object) {return self.element_native_property(object,property);}
@@ -2309,14 +2316,16 @@ impl Host for Bridge<'_> {
         self.location_instance_owner(object).is_some() || object == HISTORY || self.attr_receiver(object) || self.constructed_event_receiver(object) || self.named_map_receiver(object)
     }
     fn ordinary_lookup_tail_property(&self,object:u32,property:&str)->bool {
-        if self.location_instance_owner(object).is_some() {property=="prototype"}
+        if self.node_event_method(object,property) {true}
+        else if self.location_instance_owner(object).is_some() {property=="prototype"}
         else if property=="animate" && self.element_expando_receiver(object) {true}
         else {self.ordinary_lookup_tail(object)}
     }
     fn native_access_owner(&self, object: u32) -> Option<u32> {
         if self.event_target_interface(object) {return Some(object);}
         if let Some(owner)=self.standalone_target_owner(object) {return Some(owner);}
-        if self.attr_element_receiver(object) {return Some(WINDOW);}
+        if let Some(window)=self.frame_instance_window(object) {return Some(window);}
+        if self.namespace_receiver(object) {return Some(WINDOW);}
         self.location_instance_owner(object).or_else(||(matches!(object,DOCUMENT|PERFORMANCE|PERFORMANCE_TIMING|HISTORY) || self.named_map_receiver(object) || self.attr_receiver(object) || self.media_element_receiver(object)).then_some(WINDOW))
     }
     fn bounding_rect_snapshot(&mut self, object: u32) -> Option<Result<[f64; 4], String>> {
@@ -2551,6 +2560,7 @@ impl Host for Bridge<'_> {
         method: &str,
         args: &[Value],
     ) -> Result<(), (&'static str, String)> {
+        if self.event_target_interface(object) && matches!(method,"Node"|"Element"|"HTMLElement") {return Err(("TypeError","Illegal constructor for this native interface.".into()));}
         if method=="dispatchEvent"{return self.validate_dispatch(object,args);}
         if object == HISTORY && method == "replaceState" {
             if self.state.history.current.is_none() { self.history_target(args)?; }
@@ -2728,6 +2738,8 @@ impl Host for Bridge<'_> {
     }
 
     fn method(&self, object: u32, property: &str) -> Option<&'static str> {
+        if matches!(property,"addEventListener"|"removeEventListener"|"dispatchEvent") && self.form_named_control(object,property) {return None;}
+        if self.node_event_method(object,property) {return None;}
         if property=="dispatchEvent"&&self.dispatch_receiver(object)&&!self.form_named_control(object,property){return Some("dispatchEvent");}
         if script_named_map::element(object).is_some() { return self.named_map_receiver(object).then(|| script_named_map::method(property)).flatten(); }
         if object == DOCUMENT && property == "getElementsByName" { return Some("getElementsByName"); }

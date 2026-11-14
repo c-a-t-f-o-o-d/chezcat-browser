@@ -31,11 +31,56 @@ impl Runtime {
     pub(super) fn native_instance_prototype(&mut self,handle:u32,host:&mut dyn Host)->Result<Ordinary,Fault> {
         self.validate_native_access(handle,host)?;
         if !host.exposed_native_prototype(handle) {return Err(Fault::new("Native host prototype inspection is not implemented for this receiver."));}
+        self.native_instance_anchor(handle,host)
+    }
+    pub(super) fn native_instance_anchor(&mut self,handle:u32,host:&mut dyn Host)->Result<Ordinary,Fault> {
+        self.validate_native_access(handle,host)?;
+        if !host.native_ancestry_inspection(handle) {return Err(Fault::new("Native host ancestry inspection is not implemented for this receiver."));}
         let ancestry=host.instance_ancestry(handle).ok_or_else(||Fault::new("Native prototype provenance is unavailable."))?;
         let caller=self.native_access_caller.unwrap_or_else(||self.browser_global.map(|(window,_)|window));
         if caller!=Some(ancestry.window) {host.validate_window_access(caller,ancestry.window).map_err(Fault::new)?;}
         self.ensure_window_realm(ancestry.window,host)?;
         self.native_ancestry_anchor(ancestry)
+    }
+    /// Base-interface suffixes for genuine DOM nodes. Specialized immediate
+    /// interfaces are not implied by these anchors or exposed for inspection.
+    pub fn define_node_interfaces(&mut self,window:u32,constants:&[(&str,u16)],image:Option<(u32,&'static str)>)->Result<(),String> {
+        let marker=self.inhibit_transient_collection();
+        let result=(|| {
+            let mut parent=*self.native_constructor_prototypes.get(&(window,"EventTarget")).ok_or_else(||Fault::new("EventTarget must precede Node interfaces."))?;
+            for name in ["Node","Element","HTMLElement"] {
+                let parent_constructor=self.objects[parent].properties.get("constructor").ok_or_else(||Fault::new("Missing native parent constructor."))?.value.as_value()?.clone();
+                let Value::Function(parent_function)=parent_constructor else {return Err(Fault::new("Invalid native parent constructor."));};
+                let allocation=self.allocate_host_function_with_length(window,name,0).map_err(Fault::new)?;
+                if let Some(Function::Host {constructible,..})=self.functions.get_mut(allocation.id) {*constructible=true;}
+                let prototype=self.new_object(None)?;
+                self.objects[prototype].prototype=Some(Ordinary::Object(parent));
+                self.objects[self.function_properties[allocation.id]].prototype=Some(Ordinary::Function(parent_function));
+                let constructor=Value::Function(allocation.id);
+                self.store_property(prototype,"constructor".into(),constructor.clone(),Some((false,true,true)))?;
+                self.store_property(self.function_properties[allocation.id],"prototype".into(),Value::Object(prototype),Some((false,false,false)))?;
+                self.store_symbol_property(prototype,self.symbol_to_string_tag.unwrap(),Value::String(name.into()),Some((false,false,true)))?;
+                if name=="Node" {
+                    for &(key,value) in constants {
+                        for object in [prototype,self.function_properties[allocation.id]] {
+                            self.store_property(object,key.into(),Value::Number(f64::from(value)),Some((true,false,false)))?;
+                        }
+                    }
+                }
+                self.put_binding(self.global_environment,name.into(),Some(constructor),super::Declaration::Var,false)?;
+                self.global_attributes.insert(name.into(),(false,true,true));
+                self.native_constructor_prototypes.insert((window,name),prototype);
+                parent=prototype;
+            }
+            if let Some(key)=image {
+                let image=*self.native_constructor_prototypes.get(&key).ok_or_else(||Fault::new("Missing canonical Image prototype."))?;
+                self.objects[image].prototype=Some(Ordinary::Object(parent));
+                self.store_symbol_property(image,self.symbol_to_string_tag.unwrap(),Value::String("HTMLImageElement".into()),Some((false,false,true)))?;
+            }
+            Ok(())
+        })();
+        self.restore_transient_marker(marker);
+        result.map_err(Fault::display)
     }
     pub(super) fn validate_native_access(&self, handle: u32, host: &dyn Host) -> Result<(), Fault> {
         if let Some(owner) = host.native_access_owner(handle) {

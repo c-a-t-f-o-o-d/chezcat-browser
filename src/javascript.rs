@@ -354,8 +354,11 @@ pub trait Host {
     fn instance_ancestry(&self, _object:u32) -> Option<NativeAncestry> { None }
     /// Actual exposed immediate prototype, distinct from a read-only Object tail.
     fn exposed_native_prototype(&self, _object:u32) -> bool { false }
+    /// Proven ancestry suffix; does not claim an immediate prototype identity.
+    fn native_ancestry_inspection(&self,object:u32)->bool {self.exposed_native_prototype(object)}
     /// Only real browser Window contexts may publish this native interface.
     fn event_target_interface(&self, _window:u32) -> bool { false }
+    fn node_interface_constants(&self,_window:u32)->Option<&'static [(&'static str,u16)]> {None}
     /// Only a genuine, already-created child context may expose these handles.
     /// The default grants no Window capability to an arbitrary native handle.
     fn window_context(&self, _window: u32) -> Option<WindowContext> { None }
@@ -7952,8 +7955,8 @@ impl Runtime {
                     .map(Value::Bool);
             }
             self.reject_foreign_window(&Value::Host(handle),host)?;
-            if host.exposed_native_prototype(handle) {
-                let anchor=self.native_instance_prototype(handle,host)?;
+            if host.native_ancestry_inspection(handle) {
+                let anchor=self.native_instance_anchor(handle,host)?;
                 return Ok(Value::Bool(anchor==prototype || self.inherits_from(anchor,prototype)?));
             }
             if let Some(ancestry) = host.instance_ancestry(handle) {

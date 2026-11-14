@@ -314,6 +314,11 @@ impl Runtime {
         let Some(object) = object else {
             return Ok(Value::Undefined);
         };
+        if self.symbol_to_string_tag==Some(key) && matches!(&receiver,Value::Host(handle)
+            if host.native_ancestry_inspection(*handle) && !host.exposed_native_prototype(*handle))
+            && !self.objects[self.ordinary_id(object)?].symbol_properties.contains_key(&key) {
+            return Err(Fault::new("Native concrete interface tags are not implemented for this ancestry-only receiver."));
+        }
         let Some(owner) = self.symbol_property_owner(object, key)? else {
             return Ok(Value::Undefined);
         };

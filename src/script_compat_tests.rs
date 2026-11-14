@@ -1,5 +1,56 @@
 use super::*;
 
+#[test]
+fn base_node_interfaces_link_real_ancestry_and_author_element_polyfills() {
+    let(doc,_,page,outcome)=page("<html><body><div id='base'>Text</div><svg id='vector'></svg></body></html>",&[r#"
+var d=document.getElementById('base');d.beforeInterfaceRead=1;
+if(Object.getPrototypeOf(HTMLElement)!==Element||Object.getPrototypeOf(Element)!==Node||Object.getPrototypeOf(Node)!==EventTarget||Object.getPrototypeOf(HTMLElement.prototype)!==Element.prototype||Object.getPrototypeOf(Element.prototype)!==Node.prototype||Object.getPrototypeOf(Node.prototype)!==EventTarget.prototype)throw 'interface chain';
+var text=d.firstChild,attr=document.createAttribute('title'),img=new Image(),svg=document.getElementById('vector');
+if(!(d instanceof HTMLElement)||!(d instanceof Element)||!(d instanceof Node)||!(d instanceof EventTarget)||!(document instanceof Node)||!(text instanceof Node)||!(attr instanceof Node)||text instanceof Element||attr instanceof HTMLElement||document instanceof Element)throw 'node brands';
+if(!Element.prototype.isPrototypeOf(d)||!Node.prototype.isPrototypeOf(text)||!Node.prototype.isPrototypeOf(attr)||!Node.prototype.isPrototypeOf(document)||Element.prototype.isPrototypeOf(text)||!EventTarget.prototype.isPrototypeOf(d))throw 'known suffix inspection';
+if(!(svg instanceof Element)||svg instanceof HTMLElement||!(img instanceof Image)||!(img instanceof HTMLElement)||!(img instanceof Node)||d instanceof Image||Object.getPrototypeOf(Image.prototype)!==HTMLElement.prototype)throw 'element/image ancestry';
+if(Node.ELEMENT_NODE!==1||Node.DOCUMENT_POSITION_IMPLEMENTATION_SPECIFIC!==32||Element.TEXT_NODE!==3||HTMLElement.DOCUMENT_NODE!==9||Node.prototype.ATTRIBUTE_NODE!==2)throw 'constants';
+var constant=Object.getOwnPropertyDescriptor(Node,'ELEMENT_NODE'),prototype=Object.getOwnPropertyDescriptor(Element,'prototype'),global=Object.getOwnPropertyDescriptor(window,'Element');
+if(constant.writable||constant.configurable||!constant.enumerable||prototype.writable||prototype.configurable||global.enumerable||!global.writable||!global.configurable)throw 'descriptors';
+var conversions=0,illegal=0;for(var C of [Node,Element,HTMLElement]){try{new C({toString:function(){conversions++;}});}catch(e){if(e instanceof TypeError)illegal++;else throw e;}try{C();}catch(e){if(e instanceof TypeError)illegal++;else throw e;}}if(illegal!==6||conversions!==0)throw 'illegal constructors';
+if(d.beforeInterfaceRead!==1||typeof d.animate!=='undefined'||'animate' in d)throw 'initial absence';
+var reads=0,calls='',polyfill=function(a,b){if(this!==d)throw 'polyfill receiver';calls+=a+b;this.setAttribute('data-polyfill',calls);return this;};
+Object.defineProperty(Element.prototype,'animate',{configurable:true,get:function(){reads++;return polyfill;}});
+if(!('animate' in d)||reads!==0||d.animate('A','B')!==d||d['animate']?.('C','D')!==d||reads!==2||d.getAttribute('data-polyfill')!=='ABCD')throw 'polyfill inheritance';
+Object.defineProperty(Element.prototype,'nodeType',{configurable:true,get:function(){throw 'native shadow';}});if(d.nodeType!==1)throw 'native precedence';delete Element.prototype.nodeType;
+delete Element.prototype.animate;if(typeof d.animate!=='undefined'||'animate' in d)throw 'polyfill deletion';
+var oldElement=Element,oldNode=Node;Element=17;delete window.Node;if(!(d instanceof oldElement)||!(text instanceof oldNode)||typeof Node!=='undefined')throw 'canonical anchors';
+document.title='base-node-interfaces-ok';
+"#]);assert_eq!(outcome.errors,0,"{}",page.report());assert_eq!(doc.title,"base-node-interfaces-ok");
+}
+
+#[test]
+fn node_event_methods_are_canonical_and_text_attr_paths_are_real() {
+    let(doc,_,page,outcome)=page("<html><body><div id='base'>Text</div></body></html>",&[r#"
+var d=document.getElementById('base'),text=d.firstChild,attr=document.createAttribute('title'),event=document.createEvent('Event'),log='';d.setAttributeNode(attr);
+if(d.addEventListener!==EventTarget.prototype.addEventListener||text.dispatchEvent!==d.dispatchEvent||attr.removeEventListener!==document.removeEventListener||document.addEventListener!==d.addEventListener)throw 'canonical node methods';
+text.addEventListener('x',function(e){if(this!==text||e.target!==text||e.eventPhase!==2)throw 'text target';log+='T';});d.addEventListener('x',function(e){if(e.target!==text||e.currentTarget!==d||e.eventPhase!==3)throw 'text parent';log+='D';});
+event.initEvent('x',true,false);text.dispatchEvent(event);if(log!=='TD')throw 'text propagation';
+attr.addEventListener('x',function(e){if(this!==attr||e.target!==attr||e.eventPhase!==2)throw 'attr target';log+='A';});attr.dispatchEvent(event);if(log!=='TDA'||event.target!==attr)throw 'Attr has no parent path';
+var original=EventTarget.prototype.dispatchEvent,wrapped=0;EventTarget.prototype.dispatchEvent=function(e){wrapped++;return original.call(this,e);};attr.dispatchEvent(event);if(log!=='TDAA'||wrapped!==1)throw 'prototype override';
+delete EventTarget.prototype.dispatchEvent;if('dispatchEvent' in d||'dispatchEvent' in text||'dispatchEvent' in attr||'dispatchEvent' in document||typeof d.dispatchEvent!=='undefined')throw 'removed prototype method';EventTarget.prototype.dispatchEvent=original;
+d.dispatchEvent=function(){return 'own';};if(d.dispatchEvent(event)!=='own')throw 'own method';delete d.dispatchEvent;if(d.dispatchEvent!==original)throw 'own deletion';
+document.title='node-event-methods-ok';
+"#]);assert_eq!(outcome.errors,0,"{}",page.report());assert_eq!(doc.title,"node-event-methods-ok");
+}
+
+#[test]
+fn node_interface_suffix_keeps_concrete_tags_and_named_forms_truthful() {
+    let(mut doc,mut forms,mut page,outcome)=page("<html><body><div id='base'></div><form id='f'><input name='addEventListener'><input name='removeEventListener'><input name='dispatchEvent'></form></body></html>",&[r#"
+var d=document.getElementById('base'),f=document.getElementById('f');
+if(f.addEventListener.getAttribute('name')!=='addEventListener'||f.removeEventListener.getAttribute('name')!=='removeEventListener'||f.dispatchEvent.getAttribute('name')!=='dispatchEvent')throw 'named form precedence';
+var seen=0,e=document.createEvent('Event');e.initEvent('x',false,false);EventTarget.prototype.addEventListener.call(f,'x',function(){seen++;});EventTarget.prototype.dispatchEvent.call(f,e);if(seen!==1)throw 'borrowed form delivery';
+if(Node.prototype[Symbol.toStringTag]!=='Node'||Element.prototype[Symbol.toStringTag]!=='Element'||HTMLElement.prototype[Symbol.toStringTag]!=='HTMLElement')throw 'prototype tags';
+Object.defineProperty(d,Symbol.toStringTag,{value:'OwnAuthorTag',configurable:true});if(d[Symbol.toStringTag]!=='OwnAuthorTag')throw 'own symbol';delete d[Symbol.toStringTag];
+"#]);assert_eq!(outcome.errors,0,"{}",page.report());
+    for source in ["d[Symbol.toStringTag];","Object.getPrototypeOf(d);","d.constructor;"] {let out=page.console_eval(&mut doc,&mut forms,source);assert_eq!(out.errors,1,"{source}: {}",page.report());}
+}
+
 fn shared_probe(source: &str) -> (Document,Forms,Page,Outcome) {
     page("<div id=p title=present></div>",&[source])
 }

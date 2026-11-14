@@ -1899,7 +1899,7 @@ impl Runtime {
         }
         if method == "isPrototypeOf" {
             if let Some(Value::Host(handle))=args.first() {
-                let anchor=self.native_instance_prototype(*handle,host)?;
+                let anchor=self.native_instance_anchor(*handle,host)?;
                 if matches!(this,Value::Null|Value::Undefined) {return Err(Fault::exception("TypeError","Cannot convert null or undefined to an object."));}
                 let Some(prototype)=Ordinary::from_value(&this) else {return Ok(Value::Bool(false));};
                 return Ok(Value::Bool(anchor==prototype || self.inherits_from(anchor,prototype)?));

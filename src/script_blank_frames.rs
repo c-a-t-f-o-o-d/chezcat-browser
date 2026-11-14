@@ -27,6 +27,13 @@ fn document_node(index: usize, node: usize) -> u32 {
 }
 
 impl Bridge<'_> {
+    pub(super) fn frame_node_interface(&self,handle:u32)->Option<&'static str> {
+        let(index,offset)=frame_handle(handle)?;let frame=self.state.blank_frames.get(index)?;
+        if offset==1 {return Some("Node");}
+        if !matches!(offset,4..=6) {return None;}
+        let node=frame.document.nodes.get((offset-3) as usize)?;
+        Some(if matches!(node.kind,NodeKind::Element {..}) {if node.namespace==crate::html::Namespace::Html {"HTMLElement"} else {"Element"}} else {"Node"})
+    }
     pub(super) fn frame_location_owner(&self,handle:u32)->Option<u32>{let(index,offset)=frame_handle(handle)?;(offset==2&&self.state.blank_frames.get(index).is_some()).then(||window(index))}
     pub(super) fn frame_instance_window(&self, handle:u32) -> Option<u32> {
         let (index,offset)=frame_handle(handle)?;
@@ -352,6 +359,25 @@ mod tests {
     }
 
     const CREATE: &str = "var f=document.createElement('iframe');f.hidden=true;document.body.appendChild(f);var w=f.contentWindow;";
+    #[test]
+    fn base_node_interfaces_keep_owner_suffixes_and_foreign_polyfills_guarded() {
+        let source=format!("{CREATE}{}",r#"
+var RootNode=Node,RootElement=Element,ChildNode=w.Node,ChildElement=w.Element,childBody=w.document.body,root=document.createElement('div'),text=document.createTextNode('x'),attr=document.createAttribute('data-x'),effects=0;
+if(ChildNode===Node||ChildElement===Element||Object.getPrototypeOf(w.HTMLElement)!==ChildElement||Object.getPrototypeOf(ChildElement)!==ChildNode||Object.getPrototypeOf(ChildNode)!==w.EventTarget)throw 'child constructors';
+if(!(childBody instanceof w.HTMLElement)||!(childBody instanceof ChildNode)||childBody instanceof RootNode||!(w.document instanceof ChildNode)||w.document instanceof RootNode||w.location instanceof ChildNode||!(root instanceof RootElement)||root instanceof ChildElement)throw 'owner suffixes';
+if(!ChildNode.prototype.isPrototypeOf(childBody)||!ChildElement.prototype.isPrototypeOf(childBody)||ChildElement.ELEMENT_NODE!==1||Object.getPrototypeOf(ChildNode.prototype)!==w.EventTarget.prototype)throw 'child prototype suffix';
+Object.defineProperty(Element.prototype,'polyfillOwner',{configurable:true,get:function(){effects++;return this;}});var read=w.Function('x','return x.polyfillOwner;'),isNode=w.Function('x','C','return x instanceof C;'),hasBase=w.Function('p','x','return p.isPrototypeOf(x);'),construct=w.Function('C','a','return new C(a);');
+if(read(root)!==root||effects!==1||!isNode(text,RootNode)||!hasBase(RootNode.prototype,attr))throw 'same-origin use';
+var argument={toString:function(){effects++;return 'unused';}};
+document.title='node-interface-owners-ok';
+"#);
+        let(mut doc,mut forms,mut page,outcome)=start(&source,&crate::csp::PolicySet::default());assert_eq!(outcome.errors,0,"{}",page.report());assert_eq!(doc.title,"node-interface-owners-ok");
+        page.set_location(&crate::navigation::Location {url:Some(crate::url::parse("https://other.test/").unwrap().0),path:None,root:None,fragment:String::new()});let allocations=page.runtime.window_allocation_state_for_test();
+        for operation in ["read(root);","isNode(text,RootNode);","hasBase(RootNode.prototype,attr);","ChildNode.prototype.isPrototypeOf(childBody);","childBody instanceof ChildElement;","construct(RootElement,argument);"] {
+            let out=page.console_eval(&mut doc,&mut forms,operation);assert_eq!(out.errors,1,"{operation}: {}",page.report());assert!(page.report().contains("same-origin"),"{operation}: {}",page.report());assert_eq!(page.runtime.window_allocation_state_for_test(),allocations,"{operation}");
+        }
+        let out=page.console_eval(&mut doc,&mut forms,"if(effects!==1)throw 'foreign getter/conversion';");assert_eq!(out.errors,0,"{}",page.report());
+    }
     #[test]
     fn standalone_event_target_realms_and_saved_foreign_capabilities_are_guarded() {
         let source=format!("{CREATE}{}",r#"

@@ -254,6 +254,11 @@ var budgetEvent=document.createEvent('Event');budgetEvent.initEvent('budget');b.
 }
 
 impl Bridge<'_> {
+    pub(super) fn node_event_method(&self,object:u32,name:&str)->bool {
+        !self.is_frame_handle(object) && self.namespace_receiver(object)
+            && matches!(name,"addEventListener"|"removeEventListener"|"dispatchEvent")
+            && !self.form_named_control(object,name)
+    }
     pub(super) fn standalone_target_owner(&self,handle:u32)->Option<u32> {
         handle.checked_sub(0x9000_0000).and_then(|id|self.state.standalone_targets.get(id as usize)).copied()
     }
@@ -270,7 +275,7 @@ impl Bridge<'_> {
         Ok(Value::Host(handle))
     }
     pub(super) fn dispatch_receiver(&self, object: u32) -> bool {
-        self.standalone_target_owner(object).is_some() || matches!(object, WINDOW | DOCUMENT) || self.attr_element_receiver(object)
+        self.standalone_target_owner(object).is_some() || object==WINDOW || !self.is_frame_handle(object) && self.namespace_receiver(object)
     }
     pub(super) fn validate_dispatch(
         &self,
@@ -352,8 +357,8 @@ impl Bridge<'_> {
             if name != "load" {
                 path.push(WINDOW);
             }
-        } else if object != WINDOW && self.standalone_target_owner(object).is_none() {
-            let node = self.node(object)?;
+        } else if object != WINDOW && self.standalone_target_owner(object).is_none() && !self.attr_receiver(object) {
+            let node = node_index(object).ok_or("Event target is not a genuine DOM node.")?;
             let mut parent = self.state.tree.parents[node];
             while let Some(node) = parent {
                 self.state.work(1)?;

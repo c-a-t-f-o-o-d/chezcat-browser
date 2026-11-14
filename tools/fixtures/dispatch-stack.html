@@ -1,9 +1,18 @@
 <!doctype html><title>Dispatch fixture ready</title><body>
 <p id="result">Dispatch fixture ready</p>
+<button type="button" name="interface" id="interface">Exercise Element prototype extension</button>
 <button type="button" name="target" id="target">Exercise standalone EventTarget</button>
 <button type="button" name="deep" id="deep">Exercise nested dispatch guard</button>
 <button type="button" name="recover" id="recover">Recover dispatch</button>
 <script>
+document.getElementById('interface').onclick=function(){
+ var node=document.getElementById('result');
+ if(!(node instanceof HTMLElement)||!(node instanceof Element)||!(node instanceof Node)||!(node instanceof EventTarget)||typeof node.animate!=='undefined')throw Error('Element ancestry failed');
+ Element.prototype.animate=function(text){this.textContent=text;return this;};
+ try {if(node.animate('Element prototype extension delivered')!==node||!('animate' in node))throw Error('Element extension failed');}finally{delete Element.prototype.animate;}
+ if(typeof node.animate!=='undefined')throw Error('Element extension removal failed');
+ document.title='Element prototype extension delivered';
+};
 document.getElementById('target').onclick=function(){
  var target=new EventTarget(),other=new EventTarget(),event=document.createEvent('Event'),seen=0;
  event.initEvent('original-target-event',true,true);
