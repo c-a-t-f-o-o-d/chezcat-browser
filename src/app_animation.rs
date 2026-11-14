@@ -191,6 +191,7 @@ impl App {
             .into_iter()
             .chain(self.next_image_frame())
             .chain(self.next_media_timer())
+            .chain(self.next_audio_timer())
             .min()
     }
 
@@ -201,7 +202,8 @@ impl App {
             && self.poll_script_timer();
         let images = self.poll_image_frames_at(Instant::now());
         let media=self.poll_media_timer_at(Instant::now());
-        scripts || images || media
+        let audio=self.poll_audio_timer_at(Instant::now());
+        scripts || images || media || audio
     }
 }
 

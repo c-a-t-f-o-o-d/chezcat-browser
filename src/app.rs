@@ -14,6 +14,8 @@ use std::path::{Path, PathBuf};
 mod animation;
 #[path = "app_media.rs"]
 mod media_ui;
+#[path = "app_audio.rs"]
+mod audio_ui;
 #[path = "app_browser_ui.rs"]
 mod browser_ui;
 use browser_ui::BrowserPanel;
@@ -208,6 +210,10 @@ pub struct App {
     media: Option<media_ui::Player>,
     media_worker: Option<crate::media::Worker>,
     media_limits: crate::media::Limits,
+    audio: Option<audio_ui::Player>,
+    audio_worker: Option<crate::audio_output::Worker>,
+    audio_limits: crate::audio::Limits,
+    audio_notice: Option<String>,
     events: Vec<String>,
     last_failed_navigation: Option<String>,
     scripts_enabled: bool,
@@ -313,6 +319,10 @@ impl App {
             media: None,
             media_worker: None,
             media_limits: crate::media::Limits::default(),
+            audio: None,
+            audio_worker: None,
+            audio_limits: crate::audio::Limits::default(),
+            audio_notice: None,
             events: vec!["Loaded bundled start page (no external resources).".to_owned()],
             last_failed_navigation: None,
             scripts_enabled: true,
@@ -468,6 +478,7 @@ impl App {
     }
     pub fn set_load_wake(&mut self, wake: loader::Wake) {
         if let Some(worker)=&self.media_worker {worker.set_wake(wake.clone());}
+        if let Some(worker)=&self.audio_worker {worker.set_wake(wake.clone());}
         if let Some(worker) = &self.worker {
             worker.set_wake(wake.clone());
         }
@@ -516,6 +527,7 @@ impl App {
     fn load_options(&self) -> loader::LoadOptions {
         loader::LoadOptions {
             media_limits: self.media_limits,
+            audio_limits: self.audio_limits,
             stylesheet_limits: self.stylesheet_limits,
             script_capacity: crate::javascript::limits::BROWSER_CAPACITIES,
             javascript: self.scripts_enabled,
@@ -570,6 +582,7 @@ impl App {
         }
         self.cancel_script_requests();
         self.cancel_pending();
+        self.stop_audio();
         self.address.set(&self.location.display());
         self.status = "Loading stopped.".to_owned();
         self.failed = false;
@@ -674,7 +687,7 @@ impl App {
             | self.poll_dynamic_images()
             | self.process_image_requests();
         let revision = self.network.revision();
-        let mut changed = script_changed | self.poll_media() | self.poll_downloads()
+        let mut changed = script_changed | self.poll_media() | self.poll_audio() | self.poll_downloads()
             || revision != self.last_network_revision
             || self.network_needs_tick();
         self.last_network_revision = revision;
@@ -1118,7 +1131,7 @@ impl App {
         } else {
             self.page_scroll
         };
-        if self.location.url.is_some() || crate::media::is_local_video(&self.location) {
+        if self.location.url.is_some() || crate::media::is_local_media(&self.location) {
             if self.current_request.is_post() {
                 self.ask_resubmission(
                     self.location.clone(),
@@ -1242,7 +1255,7 @@ impl App {
                 Some(LoadingScroll::Fragment)
             };
         }
-        if !same_document && (location.url.is_some() || crate::media::is_local_video(&location)) {
+        if !same_document && (location.url.is_some() || crate::media::is_local_media(&location)) {
             self.start_network(
                 location,
                 if replace {
@@ -1385,7 +1398,7 @@ impl App {
             self.failed = false;
             return;
         }
-        if location.url.is_some() || crate::media::is_local_video(&location) {
+        if location.url.is_some() || crate::media::is_local_media(&location) {
             if request.is_post() {
                 self.ask_resubmission(
                     location,
@@ -1447,6 +1460,7 @@ impl App {
         self.install_animations(loaded.animations);
         self.events = loaded.events;
         self.install_media(loaded.media);
+        self.install_audio(loaded.audio);
         self.last_failed_navigation = None;
         self.source = location.path.clone();
         self.location = location;
@@ -1734,6 +1748,7 @@ impl App {
         for error in crate::css::stylesheet_diagnostics(&self.document,&self.styles) {report.push_str(&format!("CSS: {error}\n"));}
         report.push_str(&self.stage_report());
         report.push_str(&self.media_report());
+        report.push_str(&self.audio_report());
         report
     }
     fn toggle_view(&mut self, requested: View) {

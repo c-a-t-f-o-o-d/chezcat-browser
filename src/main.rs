@@ -3,6 +3,8 @@
 // The Windows message pump owns the interactive methods; headless builds don't.
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 mod app;
+mod audio;
+mod audio_output;
 mod blocking;
 mod compression;
 mod cookies;
@@ -241,7 +243,7 @@ fn run() -> Result<(), String> {
                 )
             }
             Some("--help") | Some("-h") => {
-                let help = r#"ChezCat 0.62
+                let help = r#"ChezCat 0.63
 
 Open local HTML, UTF-8 text, supported images or a website address. Bare hosts such as google.com default to HTTPS; explicit http:// remains supported.
 Ctrl+O: file picker; Ctrl+L: address; Esc: stop loading.

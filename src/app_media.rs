@@ -13,6 +13,14 @@ pub(super) enum Control {
     Stop,
     Seek(i32),
 }
+pub(super) struct ControlState {
+    pub playing: bool,
+    pub ended: bool,
+    pub position: Duration,
+    pub duration: Duration,
+    pub error: bool,
+    pub pending: bool,
+}
 pub(super) struct Player {
     clip: Arc<media::Clip>,
     node: usize,
@@ -328,6 +336,7 @@ impl App {
         self.media = Some(player);
     }
     pub(super) fn suspend_media(&mut self) {
+        self.suspend_audio();
         if let Some(worker) = &self.media_worker {
             worker.cancel();
         }
@@ -476,6 +485,7 @@ impl App {
         self.finish_media_tick(now);
     }
     pub(super) fn stop_media(&mut self) {
+        self.stop_audio();
         if let Some(worker) = &self.media_worker {
             worker.cancel();
         }
@@ -495,6 +505,10 @@ impl App {
         }
     }
     fn media_activate(&mut self, control: Control) {
+        if self.audio.is_some() {
+            self.activate_audio(control);
+            return;
+        }
         let now = Instant::now();
         match control {
             Control::Stop => self.stop_media(),
@@ -548,13 +562,26 @@ impl App {
         }
     }
     fn media_visible(&self) -> bool {
-        self.media.is_some()
+        (self.media.is_some() || self.audio.is_some())
             && self.view == View::Page
             && !self.menu
             && self.browser_panel.is_none()
             && !self.downloads_open()
     }
-    fn media_track(&self) -> (i32, i32) {
+    fn media_control_state(&self) -> Option<ControlState> {
+        if let Some(state) = self.audio_control_state() {
+            return Some(state);
+        }
+        self.media.as_ref().map(|player| ControlState {
+            playing: player.clock.playing(),
+            ended: player.ended_reported,
+            position: player.clock.position(Instant::now()),
+            duration: player.clip.duration,
+            error: player.error.is_some(),
+            pending: player.pending.is_some(),
+        })
+    }
+    pub(super) fn media_track(&self) -> (i32, i32) {
         (170, (self.width - 194).max(1))
     }
     pub(super) fn media_hit(&self, x: i32, y: i32) -> Option<Control> {
@@ -581,13 +608,16 @@ impl App {
         if let Some(player) = &mut self.media {
             player.pressed = Some(control);
         }
+        self.press_audio(control);
         self.focus = Focus::Page;
         self.inspector.focused = false;
         self.drag = super::Drag::None;
         true
     }
     pub(super) fn media_pointer_up(&mut self, x: i32, y: i32) -> bool {
-        let pressed = self.media.as_mut().and_then(|player| player.pressed.take());
+        let pressed = self
+            .take_audio_press()
+            .or_else(|| self.media.as_mut().and_then(|player| player.pressed.take()));
         let Some(pressed) = pressed else {
             return false;
         };
@@ -599,6 +629,7 @@ impl App {
         true
     }
     pub(super) fn media_pointer_cancel(&mut self) {
+        self.cancel_audio_press();
         if let Some(player) = &mut self.media {
             player.pressed = None;
         }
@@ -610,6 +641,10 @@ impl App {
         match key {
             0x20 => self.media_activate(Control::Toggle),
             0x25 | 0x27 => {
+                if self.audio.is_some() {
+                    self.audio_seek_relative(key == 0x27);
+                    return true;
+                }
                 let player = self.media.as_ref().unwrap();
                 let current = player.clock.position(Instant::now());
                 let target = if key == 0x25 {
@@ -627,7 +662,7 @@ impl App {
         if !self.media_visible() {
             return;
         }
-        let player = self.media.as_ref().unwrap();
+        let state = self.media_control_state().unwrap();
         let y = self.content_bottom() - 44;
         if y < self.content_top() {
             return;
@@ -638,9 +673,9 @@ impl App {
         canvas.text(
             16,
             y + 15,
-            if player.clock.playing() {
+            if state.playing {
                 "Pause"
-            } else if player.ended_reported {
+            } else if state.ended {
                 "Replay"
             } else {
                 "Play"
@@ -651,8 +686,7 @@ impl App {
         canvas.text(100, y + 15, "Stop", 1, 0xffffffff);
         let (start, width) = self.media_track();
         canvas.fill_rect(start, y + 8, width, 8, 0xff6d8794);
-        let fraction = player.clock.position(Instant::now()).as_secs_f64()
-            / player.clip.duration.as_secs_f64();
+        let fraction = state.position.as_secs_f64() / state.duration.as_secs_f64();
         canvas.fill_rect(
             start,
             y + 8,
@@ -665,10 +699,12 @@ impl App {
             y + 24,
             &format!(
                 "{:.2} / {:.2} s{}",
-                player.clock.position(Instant::now()).as_secs_f64(),
-                player.clip.duration.as_secs_f64(),
-                if player.error.is_some() {
-                    "  decode error"
+                state.position.as_secs_f64(),
+                state.duration.as_secs_f64(),
+                if state.error {
+                    "  media error"
+                } else if state.pending {
+                    "  working"
                 } else {
                     ""
                 }
@@ -698,13 +734,13 @@ impl App {
     }
     pub(super) fn input_media_action(&mut self, action: &str) -> Result<(i32, i32), String> {
         if !self.media_visible() {
-            return Err("Local video controls are not visible.".into());
+            return Err("Local media controls are not visible.".into());
         }
         let x = match action {
             "Play" | "Pause" => {
-                let playing = self.media.as_ref().unwrap().clock.playing();
+                let playing = self.media_control_state().unwrap().playing;
                 if playing != (action == "Pause") {
-                    return Err("Video Play/Pause state differs from the requested control.".into());
+                    return Err("Media Play/Pause state differs from the requested control.".into());
                 }
                 40
             }
@@ -715,11 +751,10 @@ impl App {
                     .ok_or("Unknown media input control.")?
                     .parse()
                     .map_err(|_| "Invalid media seek milliseconds.")?;
-                let player = self.media.as_ref().unwrap();
+                let duration = self.media_control_state().unwrap().duration;
                 let (start, width) = self.media_track();
-                let fraction = (Duration::from_millis(millis).min(player.clip.duration))
-                    .as_secs_f64()
-                    / player.clip.duration.as_secs_f64();
+                let fraction = (Duration::from_millis(millis).min(duration)).as_secs_f64()
+                    / duration.as_secs_f64();
                 start + (f64::from(width) * fraction).round() as i32
             }
         };

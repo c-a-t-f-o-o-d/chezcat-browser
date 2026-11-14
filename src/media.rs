@@ -8,14 +8,14 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
-pub fn is_local_video(location: &crate::navigation::Location) -> bool {
+pub fn is_local_media(location: &crate::navigation::Location) -> bool {
     location.url.is_none()
         && location
             .path
             .as_ref()
             .and_then(|path| path.extension())
             .and_then(|ext| ext.to_str())
-            .is_some_and(|ext| ext.eq_ignore_ascii_case("ivf"))
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("ivf")||ext.eq_ignore_ascii_case("wav"))
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

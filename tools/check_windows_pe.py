@@ -17,13 +17,14 @@ import sys
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-# The 13 system DLLs recorded by the original 0.40 release inspector and
-# preserved in 0.41. A build may omit an unused DLL; it may not add another
+# The original 13 system DLLs, plus the intentional 0.63 WinMM PCM output API.
+# A build may omit an unused DLL; it may not add another
 # dependency silently. --baseline-exe additionally requires the same import set.
 SYSTEM_DLLS = {
     "api-ms-win-core-synch-l1-2-0.dll", "bcryptprimitives.dll", "bcrypt.dll",
     "comdlg32.dll", "dwmapi.dll", "gdi32.dll", "kernel32.dll", "msvcrt.dll",
     "ntdll.dll", "ole32.dll", "shell32.dll", "user32.dll", "ws2_32.dll",
+    "winmm.dll",
 }
 
 

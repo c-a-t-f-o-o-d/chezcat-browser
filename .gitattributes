@@ -30,6 +30,7 @@
 *.bin binary
 *.ivf binary
 *.rgba binary
+*.wav binary
 *.zip binary
 results/** -text
 tools/reference/test262/** -text
