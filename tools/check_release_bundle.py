@@ -71,12 +71,13 @@ class Guards(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'current passing verification source identity'):package.verified(commit)
     def test_new_refused_run_invalidates_old_passing_pointer(self):
         self.fixture()
-        with patch.object(verification,'ROOT',self.root),patch.dict(os.environ,{'RUST_TEST_THREADS':'1'}),contextlib.redirect_stdout(io.StringIO()):
-            self.assertEqual(verification.main(),1)
-        pointer=json.loads((self.root/'results/verification/latest-offline.json').read_text())
-        report=json.loads((self.root/pointer['report']).read_text())
-        self.assertFalse(report['passed']);self.assertEqual(report['state'],'refused')
-        self.assertIn('RUST_TEST_THREADS',report['override_names'])
+        for name in ['RUST_TEST_THREADS','RUST_MIN_STACK']:
+            with self.subTest(override=name),patch.object(verification,'ROOT',self.root),patch.dict(os.environ,{name:'1'}),contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(verification.main(),1)
+            pointer=json.loads((self.root/'results/verification/latest-offline.json').read_text())
+            report=json.loads((self.root/pointer['report']).read_text())
+            self.assertFalse(report['passed']);self.assertEqual(report['state'],'refused')
+            self.assertIn(name,report['override_names'])
     def test_source_archive_does_not_inherit_parent_git_identity(self):
         self.fixture();child=self.root/'unpacked-source';child.mkdir()
         (child/'SOURCE_REVISION').write_text('a'*40+'\n')

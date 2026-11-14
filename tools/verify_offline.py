@@ -75,7 +75,7 @@ def main():
     capture_tests.write_json(folder/'verification.json',{'passed':False,'state':'running','runs':[]})
     capture_tests.write_json(pointer,{'report':relative,'build_info':str((folder/'build-info.json').relative_to(ROOT))})
     before=capture_tests.source_identity(ROOT);initial_commit,initial_dirty=git_state()
-    overrides=[name for name in ['RUST_TEST_THREADS','RUSTUP_TOOLCHAIN','RUSTFLAGS','CARGO_ENCODED_RUSTFLAGS','RUSTC','RUSTC_WRAPPER','RUSTC_WORKSPACE_WRAPPER','CARGO_TARGET_DIR','CARGO_BUILD_TARGET'] if os.environ.get(name)]
+    overrides=[name for name in ['RUST_TEST_THREADS','RUST_MIN_STACK','RUSTUP_TOOLCHAIN','RUSTFLAGS','CARGO_ENCODED_RUSTFLAGS','RUSTC','RUSTC_WRAPPER','RUSTC_WORKSPACE_WRAPPER','CARGO_TARGET_DIR','CARGO_BUILD_TARGET'] if os.environ.get(name)]
     if initial_dirty is True or overrides:
         capture_tests.write_json(folder/'verification.json',{'passed':False,'state':'refused','reason':'Clean normal verification requires no tracked edits or listed build/test overrides.','override_names':overrides,'dirty':initial_dirty})
         print('Refused dirty/overridden verification; latest pointer invalidated.',flush=True);return 1
