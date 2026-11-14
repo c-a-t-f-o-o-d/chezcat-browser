@@ -1,8 +1,8 @@
-//! Original, bounded Content Security Policy checks for classic scripts, linked stylesheets and fonts.
+//! Original, bounded Content Security Policy checks for scripts, styles, fonts and images.
 //!
 //! CSP3 source-list, nonce/hash, fallback and multiple-policy semantics:
 //! https://www.w3.org/TR/CSP3/
-//! This is not full CSP: script sources, linked style sources, font-src and base-uri are implemented;
+//! This is not full CSP: script, linked-style, font, image and base-uri sources are implemented;
 //! other resource/navigation directives are diagnosed but not implemented.
 //! Both parser-loaded and inserted external classic scripts use the same bounded
 //! source checks. strict-dynamic never propagates trust in this subset;
@@ -43,6 +43,7 @@ struct Policy {
     styles: Option<Vec<Source>>,
     style_elements: Option<Vec<Source>>,
     fonts: Option<Vec<Source>>,
+    images: Option<Vec<Source>>,
     base: Option<Vec<Source>>,
     forms: Option<Vec<Source>>,
     sandbox: bool,
@@ -53,6 +54,7 @@ enum Source {
     SelfOrigin,
     AnyHttp,
     Scheme(bool),
+    Data,
     Origin {
         secure: bool,
         host: String,
@@ -107,7 +109,7 @@ impl PolicySet {
         for policy in &self.policies {
             bytes += std::mem::size_of::<Policy>();
             for sources in [&policy.default, &policy.scripts, &policy.elements, &policy.attributes,
-                &policy.styles, &policy.style_elements, &policy.fonts, &policy.base, &policy.forms].into_iter().flatten() {
+                &policy.styles, &policy.style_elements, &policy.fonts, &policy.images, &policy.base, &policy.forms].into_iter().flatten() {
                 bytes += sources.iter().map(|source| std::mem::size_of::<Source>() + match source {
                     Source::Origin { host, .. } => host.len(),
                     Source::Nonce(text) | Source::Hash(_, text) => text.len(),
@@ -158,7 +160,7 @@ impl PolicySet {
     fn block_from(&mut self, start: usize, reason: &str) {
         self.blocked_from = Some(self.blocked_from.map_or(start, |old| old.min(start)));
         self.note(format!(
-            "CSP: {reason}; subsequent scripts, linked stylesheets, fonts and inline handlers are blocked."
+            "CSP: {reason}; subsequent scripts, linked stylesheets, fonts, images and inline handlers are blocked."
         ));
     }
 
@@ -183,7 +185,7 @@ impl PolicySet {
                 Ok((policy, unknown_sources, other_directives)) => {
                     self.policies.push(policy);
                     let delivery = if meta { "meta" } else { "header" };
-                    self.note(format!("CSP {delivery}: script/linked-style/font/base-uri/form-action policy enforced; {unknown_sources} unsupported source expression(s) grant no permission; {other_directives} other directive(s) are outside this subset. No violation reports are sent."));
+                    self.note(format!("CSP {delivery}: script/linked-style/font/image/base-uri/form-action policy enforced; {unknown_sources} unsupported source expression(s) grant no permission; {other_directives} other directive(s) are outside this subset. No violation reports are sent."));
                 }
                 Err(reason) => self.block_from(start, reason),
             }
@@ -369,6 +371,30 @@ impl PolicySet {
         }
         Ok(())
     }
+
+    /// Images use img-src, then default-src; script/style nonces confer no image
+    /// permission. Dynamic mutations pass usize::MAX to apply every meta policy.
+    pub fn allows_image(&self, node: usize, target: &Location) -> Result<(), String> {
+        for policy in self.active(node)? {
+            if let Some(list) = policy.images.as_ref().or(policy.default.as_ref()) {
+                if !list.iter().any(|source| url_matches(source, self.origin.as_ref(), target)) {
+                    return Err("Content Security Policy img-src/default-src blocked this image source.".into());
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub fn allows_embedded_image(&self, node: usize) -> Result<(), String> {
+        for policy in self.active(node)? {
+            if let Some(list) = policy.images.as_ref().or(policy.default.as_ref()) {
+                if !list.iter().any(|source| matches!(source, Source::Data)) {
+                    return Err("Content Security Policy img-src/default-src blocked this embedded image source.".into());
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 impl Policy {
@@ -407,6 +433,7 @@ fn parse_policy(
         styles: None,
         style_elements: None,
         fonts: None,
+        images: None,
         base: None,
         forms: None,
         sandbox: false,
@@ -442,6 +469,7 @@ fn parse_policy(
             "style-src" => &mut policy.styles,
             "style-src-elem" => &mut policy.style_elements,
             "font-src" => &mut policy.fonts,
+            "img-src" => &mut policy.images,
             "base-uri" => &mut policy.base,
             "form-action" => &mut policy.forms,
             "sandbox" => {
@@ -485,6 +513,7 @@ fn parse_source(value: &str) -> Option<Source> {
         "'unsafe-hashes'" => return Some(Source::UnsafeHashes),
         "'strict-dynamic'" => return Some(Source::StrictDynamic),
         "'none'" | "'wasm-unsafe-eval'" | "'report-sample'" => return Some(Source::Deny),
+        "data:" => return Some(Source::Data),
         _ => {}
     }
     if lower.starts_with("'nonce-") && value.ends_with('\'') {
@@ -723,7 +752,7 @@ mod tests {
         assert!(p.allows_external(1, None, &same).is_ok());
         assert!(p.allows_external(1, None, &other).is_err());
         assert!(p.allows_inline(1, None, "1;").is_err());
-        let p = policy("img-src 'none'; made-up anything");
+        let p = policy("media-src 'none'; made-up anything");
         assert!(p.allows_inline(1, None, "1;").is_ok());
         assert!(p.diagnostics()[0].contains("2 other directive"));
     }
@@ -815,6 +844,35 @@ mod tests {
         set.add_meta("style-src 'none'", 10);
         assert!(set.allows_external_style(9, None, &same).is_ok());
         assert!(set.allows_external_style(usize::MAX, None, &same).is_err());
+    }
+
+    #[test]
+    fn image_csp_sources_use_their_own_fallback_without_nonce_or_script_permission() {
+        let same = location("https://example.test/pixel.png");
+        let other = location("https://other.test/pixel.png");
+        for text in ["", "img-src 'self'", "default-src 'none'; img-src 'self'", "script-src 'none'; img-src https:"] {
+            assert!(policy(text).allows_image(1, &same).is_ok(), "{text}");
+        }
+        for text in ["default-src 'none'", "img-src 'none'; img-src *", "img-src 'self', img-src 'none'", "img-src 'nonce-One' 'unsafe-inline'", "default-src 'self'; img-src data:"] {
+            assert!(policy(text).allows_image(1, &same).is_err(), "{text}");
+        }
+        assert!(policy("img-src 'self'").allows_image(1, &other).is_err());
+        assert!(policy("img-src https:").allows_image(1, &other).is_ok());
+        assert!(policy("img-src data:").allows_embedded_image(1).is_ok());
+        assert!(policy("default-src data:").allows_embedded_image(1).is_ok());
+        for text in ["img-src 'none'", "img-src 'self'", "img-src *", "img-src 'nonce-One'", "default-src 'none'", "img-src data:, img-src 'none'"] {
+            assert!(policy(text).allows_embedded_image(1).is_err(), "{text}");
+        }
+        let p = policy("script-src data:; img-src data:");
+        assert!(p.allows_inline(1, None, "1;").is_err());
+        assert!(p.allows_external(1, None, &same).is_err());
+        let mut p = policy("img-src 'self'");
+        p.add_meta("img-src 'none'", 10);
+        assert!(p.allows_image(9, &same).is_ok());
+        assert!(p.allows_image(11, &same).is_err());
+        assert!(p.allows_image(usize::MAX, &same).is_err());
+        p.add_meta(&" ".repeat(MAX_POLICY_BYTES + 1), 12);
+        assert!(p.allows_embedded_image(usize::MAX).is_err());
     }
 
     #[test]

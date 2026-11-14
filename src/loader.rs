@@ -877,6 +877,7 @@ fn load_request_progressively(
     ));
     let base = loaded.base.clone();
     let origin = loaded.location.url.clone();
+    let image_policy = loaded.csp.clone();
     let notice = loaded.notice.clone();
     loaded.skipped = stats.skipped;
     deliver(Delivery::Document(Box::new(loaded)))?;
@@ -884,6 +885,7 @@ fn load_request_progressively(
         &image_plan,
         &base,
         origin.as_ref(),
+        &image_policy,
         &mut stats,
         cancel,
         progress,
@@ -1684,6 +1686,7 @@ fn load_images(
     plan: &[ImageReference],
     base: &Location,
     origin: Option<&crate::url::HttpUrl>,
+    policy: &crate::csp::PolicySet,
     stats: &mut LoadStats,
     cancel: &AtomicBool,
     progress: &dyn Fn(String),
@@ -1731,9 +1734,12 @@ fn load_images(
                 .map(|r| r.as_ref().map_err(Clone::clone))
                 .transpose()?;
             let resolved = if embedded.is_some() {
+                policy.allows_embedded_image(image.node)?;
                 None
             } else {
-                Some(navigation::resolve(&image.target, base)?)
+                let resolved = navigation::resolve(&image.target, base)?;
+                policy.allows_image(image.node, &resolved)?;
+                Some(resolved)
             };
             if let Some(url) = resolved.as_ref().and_then(|r| r.url.as_ref()) {
                 pool.check_resource(url)?;
@@ -1821,6 +1827,7 @@ fn load_images(
                         &cache,
                         &prefetched,
                         pool,
+                        policy,
                     );
                     stats.attempts += urls.len() - 1;
                     let responses = fetch_image_batch(
@@ -1829,9 +1836,10 @@ fn load_images(
                         origin,
                         pool,
                         mode,
+                        policy,
                     );
                     let mut current = None;
-                    for (index, (address, response)) in urls.into_iter().zip(responses).enumerate()
+                    for (index, ((address, _), response)) in urls.into_iter().zip(responses).enumerate()
                     {
                         if let Ok(response) = &response {
                             stats.network_bytes += response.body.len();
@@ -1980,8 +1988,9 @@ fn image_batch_urls(
     cache: &HashMap<ResourceKey, ResourceOutcome>,
     pending: &HashMap<ResourceKey, Result<http::Response, String>>,
     pool: &http::Pool<'_>,
-) -> Vec<crate::url::HttpUrl> {
-    let mut urls = vec![current.clone()];
+    policy: &crate::csp::PolicySet,
+) -> Vec<(crate::url::HttpUrl, usize)> {
+    let mut urls = vec![(current.clone(), plan[current_index].node)];
     if slots < 2 {
         return urls;
     }
@@ -1995,10 +2004,11 @@ fn image_batch_urls(
         let Ok(location) = navigation::resolve(&image.target, base) else {
             continue;
         };
+        if policy.allows_image(image.node, &location).is_err() { continue; }
         let Some(url) = location.url else {
             continue;
         };
-        if !origin.same_origin(&url) || urls.contains(&url) || pool.check_resource(&url).is_err() {
+        if !origin.same_origin(&url) || urls.iter().any(|(candidate, _)| candidate == &url) || pool.check_resource(&url).is_err() {
             continue;
         }
         let key = ResourceKey {
@@ -2008,7 +2018,7 @@ fn image_batch_urls(
         if cache.contains_key(&key) || pending.contains_key(&key) {
             continue;
         }
-        urls.push(url);
+        urls.push((url, image.node));
         if urls.len() == slots {
             break;
         }
@@ -2017,23 +2027,31 @@ fn image_batch_urls(
 }
 
 fn fetch_image_batch(
-    urls: &[crate::url::HttpUrl],
+    urls: &[(crate::url::HttpUrl, usize)],
     limit: usize,
     origin: &crate::url::HttpUrl,
     pool: &http::Pool<'_>,
     mode: http::FetchMode,
+    policy: &crate::csp::PolicySet,
 ) -> Vec<Result<http::Response, String>> {
+    let fetch = |url: &crate::url::HttpUrl, node: usize| {
+        let guard = |target: &crate::url::HttpUrl| policy.allows_image(node, &Location {
+            url: Some(target.clone()), path: None, root: None, fragment: String::new(),
+        });
+        pool.fetch_kind_checked(url, limit, origin, mode, "image", &guard)
+    };
     if urls.len() == 1 {
-        return vec![pool.fetch_kind(&urls[0], limit, Some(origin), mode, "image")];
+        return vec![fetch(&urls[0].0, urls[0].1)];
     }
     std::thread::scope(|scope| {
         let workers: Vec<_> = urls
             .iter()
-            .map(|url| {
+            .map(|(url, node)| {
+                let fetch = &fetch;
                 std::thread::Builder::new()
                     .name("image-fetch".to_owned())
                     .spawn_scoped(scope, move || {
-                        pool.fetch_kind(url, limit, Some(origin), mode, "image")
+                        fetch(url, *node)
                     })
             })
             .collect();
@@ -2378,6 +2396,20 @@ mod tests {
     }
 
     struct Folder(PathBuf);
+    #[test]
+    fn image_csp_local_and_embedded_sources_are_checked_before_decoding() {
+        let folder = Folder::new();
+        folder.file("pixel.ppm", "P3 1 1 255 255 0 0");
+        for (policy, expected_file, expected_data) in [("", true, true), ("img-src 'none'", false, false), ("img-src 'self'", true, false), ("img-src data:", false, true), ("default-src 'none'; img-src 'self'", true, false), ("default-src data:", false, true)] {
+            let meta = if policy.is_empty() { String::new() } else { format!("<meta http-equiv=Content-Security-Policy content=\"{policy}\">") };
+            let page = folder.page(&format!("{meta}<img id=file src=pixel.ppm><img id=data src='data:image/x-portable-pixmap,P3%201%201%20255%20255%200%200'>"));
+            let loaded = local(&page).unwrap();
+            let node = |id| loaded.document.nodes.iter().enumerate().find(|(node, _)| loaded.document.attr(*node, "id") == Some(id)).unwrap().0;
+            assert_eq!(loaded.images.contains_key(&node("file")), expected_file, "{policy}: {:?}", loaded.events);
+            assert_eq!(loaded.images.contains_key(&node("data")), expected_data, "{policy}: {:?}", loaded.events);
+            for image in loaded.images.values() { assert_eq!((image.width, image.height), (1, 1)); }
+        }
+    }
     impl Folder {
         fn new() -> Self {
             static NEXT: AtomicUsize = AtomicUsize::new(0);
@@ -2761,6 +2793,13 @@ mod tests {
                         (200, "text/html;charset=utf-8", String::new());
                     let body = match path.as_str() {
                         "/font-page" => "<link rel=stylesheet href=/font-redirect.css><link rel=stylesheet href=/font-redirect.css><p style='font-family:Page'>AV</p><p style='font-family:Other'>A</p>".into(),
+                        "/image-csp-none" => { extra="Content-Security-Policy: img-src 'none'\r\n".into(); "<img src=/image-csp-forbidden.ppm>".into() },
+                        "/image-csp-default" => { extra="Content-Security-Policy: default-src 'none'\r\n".into(); "<img src=/image-csp-forbidden.ppm>".into() },
+                        "/image-csp-allow" => { extra="Content-Security-Policy: default-src 'none'; img-src 'self'\r\n".into(); "<img src=/post-image.ppm><img src=/post-image-2.ppm><img src=/post-image-3.ppm><img src=/post-image.ppm#again>".into() },
+                        "/image-csp-meta" => "<img id=early src=/post-image.ppm><meta http-equiv=Content-Security-Policy content=\"img-src 'none'\"><img id=late src=/post-image.ppm><img src=/image-csp-forbidden.ppm>".into(),
+                        "/image-csp-redirect" => { extra="Content-Security-Policy: img-src 'self'\r\n".into(); "<img src=/image-csp-hop>".into() },
+                        "/image-csp-hop" => { status=302; extra=format!("Location: http://localhost:{port}/image-csp-forbidden.ppm\r\n"); String::new() },
+                        "/image-csp-report" => { extra="Content-Security-Policy-Report-Only: img-src 'none'\r\n".into(); "<img src=/post-image.ppm>".into() },
                         "/font-blocked" => { extra="Content-Security-Policy: default-src 'self'; font-src 'none'\r\n".into(); "<link rel=stylesheet href=/font-redirect.css><p style='font-family:Page'>AV</p>".into() },
                         "/font-redirect.css" => { status=302; extra="Location: /assets/font.css\r\n".into(); String::new() },
                         "/assets/font.css" => { mime="text/css"; format!("@font-face{{font-family:Page;src:url(page-font.ttf) format(truetype)}}@font-face{{font-family:Other;src:url(http://localhost:{port}/must-not-fetch.ttf)}}") },
@@ -2790,7 +2829,7 @@ mod tests {
                         "/script-nav-cross" => { status=302; extra=format!("Location: http://localhost:{port}/fresh\r\n"); String::new() },
                         "/repeat-resources" => format!("<link rel=stylesheet href=/post-style.css><style>p{{color:#abcdef}}</style><link rel=stylesheet href='./post-style.css#again'><p id=result>Repeat</p>{}{}<img src='/post-image.ppm#after-many-references'><script src=/ok.js></script><script src=/ok.js></script>", "<img src=/post-image.ppm>".repeat(40), "<img src=/unsupported.gif>".repeat(60)),
                         "/unsupported.gif" => { mime="image/gif"; "GIF89a-not-an-implemented-format".into() },
-                        "/post-image.ppm" | "/held.ppm" => { mime="image/x-portable-pixmap"; "P3\n1 1\n255\n255 0 0\n".into() },
+                        "/post-image.ppm" | "/post-image-2.ppm" | "/post-image-3.ppm" | "/image-csp-forbidden.ppm" | "/held.ppm" => { mime="image/x-portable-pixmap"; "P3\n1 1\n255\n255 0 0\n".into() },
                         _ => panic!("Unexpected resource request {path}"),
                     };
                     let content_type = if mime.is_empty() {
@@ -2836,6 +2875,32 @@ mod tests {
                 }
             }
         }
+        }
+    }
+
+    #[test]
+    fn image_csp_blocks_before_prefetch_cache_reuse_and_redirect_hops() {
+        for (path, count) in [("/image-csp-none", 0), ("/image-csp-default", 0), ("/image-csp-meta", 1), ("/image-csp-redirect", 0), ("/image-csp-allow", 4), ("/image-csp-report", 1)] {
+            let site = Site::new();
+            let loaded = site.load(path, http::FetchMode::Normal, true);
+            assert_eq!(loaded.images.len(), count, "{path}: {:?}", loaded.events);
+            let requests = site.requests.lock().unwrap();
+            let paths: Vec<_> = requests.iter().map(|request| request.split_ascii_whitespace().nth(1).unwrap()).collect();
+            assert!(!paths.iter().any(|path| path.ends_with("/image-csp-forbidden.ppm")), "{path}: {paths:?}");
+            if path == "/image-csp-meta" {
+                assert_eq!(paths, [path, "/post-image.ppm"]);
+                let early = loaded.document.nodes.iter().enumerate().find(|(node, _)| loaded.document.attr(*node, "id") == Some("early")).unwrap().0;
+                assert!(loaded.images.contains_key(&early));
+            }
+            if path == "/image-csp-allow" {
+                assert_eq!(paths.len(), 4); // One actual fetch per URL, repeated ref reuses pixels.
+                for expected in ["/post-image.ppm", "/post-image-2.ppm", "/post-image-3.ppm"] { assert_eq!(paths.iter().filter(|&&path| path == expected).count(), 1); }
+            }
+            if matches!(path, "/image-csp-none" | "/image-csp-default") { assert_eq!(paths, [path]); }
+            if path == "/image-csp-redirect" {
+                assert_eq!(paths, [path, "/image-csp-hop"]);
+                assert!(loaded.events.iter().any(|line| line.contains("img-src/default-src blocked")), "{:?}", loaded.events);
+            }
         }
     }
 
