@@ -42,6 +42,7 @@ impl Site {
                     let request = String::from_utf8_lossy(&request);
                     let path = request.split_ascii_whitespace().nth(1).unwrap_or("").to_owned();
                     seen.lock().unwrap().push(path.clone());
+                    if path == "/history-length-failure" { return; } // Deterministic EOF before HTTP headers.
                     let redirect_target = if path.starts_with("/history-redirect") { redirecting.lock().unwrap().take() } else { None };
                     let mut status = "200 OK";
                     let mut headers = String::new();
@@ -83,6 +84,7 @@ impl Site {
                             if path.starts_with("/history-blocked-base") { headers = "Content-Security-Policy: base-uri 'none'\r\n".into(); }
                             let action = match path.as_str() {
                                 "/history-startup" => "if(history.state!==null)throw Error('initial entry');history.replaceState('startup','','/history-startup-clean?keep=2#ready');if(history.state!=='startup'||document.URL!==location.origin+'/history-startup-clean?keep=2#ready')throw Error('startup History');var startupMarker=61;",
+                                path if path.starts_with("/history-length") => "var startupHistoryLength=history.length;history.replaceState(null,'');if(history.length!==startupHistoryLength)throw Error('replacement count');Promise.resolve().then(function(){if(history.length!==startupHistoryLength)throw Error('microtask count');document.title='History count ready';});",
                                 "/parser-held" => "img.src='/two.ppm';",
                                 "/blocked" | "/meta" | "/disabled" => "img.src='/forbidden.ppm';",
                                 "/base" => "img.src='one.ppm';",
@@ -312,6 +314,141 @@ fn inner_html_images_use_real_resources_and_detached_old_requests_keep_ownership
     let pixels = app.images[&image(&app)].clone();
     assert_eq!(pixels.pixels, [0xff00ff00; 3]);
     assert_eq!(app.scripting.as_ref().unwrap().error_count(), 0);
+}
+
+fn assert_history_length(app: &mut App, startup: bool) {
+    let length = app.history.len();
+    assert_eq!(app.scripting.as_ref().unwrap().error_count(), 0, "{}", app.scripting.as_ref().unwrap().report());
+    eval(app, &format!("if(history.length!=={length}||typeof history.length!=='number'||!('length' in history))throw Error('actual session count');{}",
+        if startup { format!("if(startupHistoryLength!=={length})throw Error('startup count');") } else { String::new() }));
+    assert_eq!(app.scripting.as_ref().unwrap().error_count(), 0, "{}", app.scripting.as_ref().unwrap().report());
+    if startup && app.location.url.is_some() {
+        assert_eq!(app.document.title, "History count ready", "Startup Promise must have completed");
+    }
+}
+
+#[test]
+fn history_length_tracks_startup_forward_entries_branching_reloads_and_readonly_writes() {
+    let site = Site::new();
+    let mut app = open(&site, "/history-length-a");
+    wait(&mut app, |app| !app.is_loading());
+    assert_history_length(&mut app, true);
+    let initial = app.history.len();
+    eval(&mut app, "var countBefore=history.length,coercions=0;history.length={valueOf:function(){coercions++;return 99;}};if(history.length!==countBefore||coercions)throw Error('sloppy readonly');var caught=false;(function(){'use strict';try{history.length=19;}catch(e){caught=e.name==='TypeError';}})();if(!caught||history.length!==countBefore||coercions)throw Error('strict readonly');");
+    let requests = site.requests.lock().unwrap().len();
+    let epoch = app.script_epoch;
+    for fragment in ["one", "two", "three"] {
+        app.navigate_location(site.location(&format!("/history-length-a#{fragment}")), true);
+        assert_history_length(&mut app, false);
+    }
+    assert_eq!(app.history.len(), initial + 3);
+    app.history_move(-2);
+    assert_eq!(app.history.len(), initial + 3, "Back keeps forward entries");
+    assert_history_length(&mut app, false);
+    app.history_move(1);
+    assert_history_length(&mut app, false);
+    app.history_move(-1);
+    app.navigate_location(site.location("/history-length-a#branch"), true);
+    assert_eq!(app.history.len(), initial + 2, "New branch removes the forward suffix");
+    assert_history_length(&mut app, false);
+    assert_eq!(app.script_epoch, epoch);
+    assert_eq!(site.requests.lock().unwrap().len(), requests, "Fragment changes do not fetch");
+    app.history_move(-1);
+    app.navigate_location(site.location("/history-length-b"), true);
+    wait(&mut app, |app| !app.is_loading());
+    assert_history_length(&mut app, true);
+    assert_eq!(app.history.len(), initial + 2);
+    let length = app.history.len();
+    app.reload();
+    wait(&mut app, |app| !app.is_loading());
+    assert_eq!(app.history.len(), length);
+    assert_history_length(&mut app, true);
+    eval(&mut app, "location.replace('/history-length-c');");
+    wait(&mut app, |app| !app.is_loading());
+    assert_eq!(app.history.len(), length);
+    assert_history_length(&mut app, true);
+    app.history_move(-1);
+    wait(&mut app, |app| !app.is_loading());
+    assert_eq!(app.history.len(), length);
+    assert_history_length(&mut app, true);
+}
+
+#[test]
+fn history_length_redirects_retention_and_cancelled_navigation_use_real_entries() {
+    for cross_origin in [false, true] {
+        let site = Site::new();
+        let remote = Site::new();
+        let mut app = open(&site, "/history-length-a");
+        wait(&mut app, |app| !app.is_loading());
+        let initial = app.history.len();
+        let destination = if cross_origin { remote.location("/history-length-redirected") }
+            else { site.location("/history-length-redirected") };
+        *site.redirect.lock().unwrap() = Some(destination.display());
+        app.navigate_location(site.location("/history-redirect-new"), true);
+        wait(&mut app, |app| !app.is_loading());
+        assert_eq!(app.location, destination);
+        assert_eq!(app.history.len(), initial + 1, "Redirect adds only its committed entry");
+        assert_history_length(&mut app, true);
+        app.history_move(-1);
+        wait(&mut app, |app| !app.is_loading());
+        assert_eq!(app.history.len(), initial + 1);
+        assert_history_length(&mut app, true);
+    }
+    let site = Site::new();
+    let mut app = open(&site, "/history-length-a");
+    wait(&mut app, |app| !app.is_loading());
+    let requests = site.requests.lock().unwrap().len();
+    for index in 0..MAX_SESSION_HISTORY_ENTRIES + 3 {
+        app.navigate_location(site.location(&format!("/history-length-a#entry-{index}")), true);
+    }
+    assert_eq!(app.history.len(), MAX_SESSION_HISTORY_ENTRIES);
+    assert_history_length(&mut app, false);
+    assert_eq!(site.requests.lock().unwrap().len(), requests);
+    let site = Site::new();
+    let mut app = open(&site, "/history-length-a");
+    wait(&mut app, |app| !app.is_loading());
+    let length = app.history.len();
+    let previous_location = app.location.clone();
+    app.navigate_location(site.location("/history-length-cancelled"), true);
+    app.stop_loading();
+    assert_eq!(app.history.len(), length);
+    assert_eq!(app.location, previous_location);
+    assert_history_length(&mut app, false);
+    app.navigate_location(site.location("/history-length-failure"), true);
+    wait(&mut app, |app| !app.is_loading());
+    assert!(app.failed);
+    assert!(site.requested("/history-length-failure"));
+    assert_eq!(app.history.len(), length);
+    assert_eq!(app.location, previous_location);
+    assert_history_length(&mut app, false);
+}
+
+#[test]
+fn history_length_local_startup_and_home_reset_publish_correct_count_before_scripts() {
+    let directory = std::env::temp_dir().join(format!("chezcat-history-length-{}-{}", std::process::id(),
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+    std::fs::create_dir(&directory).unwrap();
+    struct LocalHistory(std::path::PathBuf);
+    impl Drop for LocalHistory {
+        fn drop(&mut self) {
+            for name in ["one.html", "two.html"] { let _ = std::fs::remove_file(self.0.join(name)); }
+            let _ = std::fs::remove_dir(&self.0);
+        }
+    }
+    let fixture = LocalHistory(directory);
+    for name in ["one.html", "two.html"] {
+        std::fs::write(fixture.0.join(name), "<html><body><p>Original local History count</p><script>var startupHistoryLength=history.length;</script></body></html>").unwrap();
+    }
+    let mut app = App::new();
+    app.use_home_file(fixture.0.join("one.html"));
+    assert_eq!(app.history.len(), 1);
+    assert_history_length(&mut app, true);
+    app.open(&fixture.0.join("two.html"));
+    assert_eq!(app.history.len(), 2);
+    assert_history_length(&mut app, true);
+    app.use_home_file(fixture.0.join("one.html"));
+    assert_eq!(app.history.len(), 1);
+    assert_history_length(&mut app, true);
 }
 
 #[test]

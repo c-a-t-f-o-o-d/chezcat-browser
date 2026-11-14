@@ -2262,7 +2262,7 @@ impl Host for Bridge<'_> {
     }
 
     fn readonly_property(&self, object: u32, property: &str) -> bool {
-        object == WINDOW && property == "history" || object == HISTORY && property == "state"
+        object == WINDOW && property == "history" || object == HISTORY && matches!(property, "state" | "length")
             || self.created_event_readonly(object, property) || self.attr_readonly(object, property) || self.dom_readonly(object, property)
             || collection_handle_index(object).is_some()
             || self.class_list_receiver(object) && (property == "length" || collection_index(property).is_some())
@@ -3032,8 +3032,8 @@ impl Host for Bridge<'_> {
         }
         if object == HISTORY {
             return match property {
-                "state" | "replaceState" => Ok(true),
-                "constructor" | "__proto__" | "length" | "scrollRestoration" | "go" | "back" | "forward" | "pushState" => Err(format!("History property {property:?} is not implemented.")),
+                "state" | "length" | "replaceState" => Ok(true),
+                "constructor" | "__proto__" | "scrollRestoration" | "go" | "back" | "forward" | "pushState" => Err(format!("History property {property:?} is not implemented.")),
                 _ => Ok(false),
             };
         }

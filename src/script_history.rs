@@ -26,7 +26,7 @@ mod tests {
         let mut page = Page::for_test();
         page.set_location(&location);
         page.set_resource_base(&location);
-        page.set_history_context(HistoryData::Null, true);
+        page.set_history_context(HistoryData::Null, true, 1);
         page.start(&mut doc, &mut forms, &[]);
         let mut bridge = Bridge { doc: &mut doc, forms: &mut forms, state: &mut page.state };
         bridge.history_replace(&[Value::Number(-0.0), Value::String(String::new())]).unwrap();
@@ -43,6 +43,7 @@ mod tests {
         assert_eq!(bridge.state.history.pending.as_ref().unwrap().location, pending);
         assert_eq!(bridge.state.location.as_ref().unwrap().source, location);
         bridge.state.history.current = None;
+        assert!(bridge.history_get("length").is_err(), "No invented count without an active App context");
         assert_eq!(bridge.validate_call(HISTORY, "replaceState", &[Value::Function(0), Value::String(String::new())]).unwrap_err().0, "SecurityError");
     }
 }
@@ -69,16 +70,19 @@ pub struct HistoryReplace {
 #[derive(Default)]
 pub(super) struct HistoryState {
     pub current: Option<HistoryData>,
+    pub length: Option<usize>,
     pub pending: Option<HistoryReplace>,
     pub document_base: bool,
     updates: usize,
 }
 
 impl Page {
-    pub fn set_history_context(&mut self, data: HistoryData, document_base: bool) {
+    pub fn set_history_context(&mut self, data: HistoryData, document_base: bool, length: usize) {
         self.state.history.current = Some(data);
+        self.set_history_length(length);
         self.state.history.document_base = document_base;
     }
+    pub fn set_history_length(&mut self, length: usize) { self.state.history.length = Some(length); }
     pub fn take_history_replacement(&mut self) -> Option<HistoryReplace> { self.state.history.pending.take() }
 }
 
@@ -106,12 +110,17 @@ impl Bridge<'_> {
 
     pub(super) fn history_get(&mut self, property: &str) -> Result<Value, String> {
         match property {
+            "length" => {
+                let length = self.state.history.length.filter(|_| self.state.history.current.is_some())
+                    .ok_or("History has no active App session entry count.")?;
+                Ok(Value::Number(length as f64))
+            }
             "state" => {
                 let data = self.state.history.current.as_ref().ok_or("History has no active App session entry.")?;
                 self.state.copies(data.bytes())?;
                 Ok(self.state.history.current.as_ref().unwrap().value())
             }
-            "constructor" | "__proto__" | "length" | "scrollRestoration" | "go" | "back" | "forward" | "pushState" => Err(format!("History property {property:?} is not implemented.")),
+            "constructor" | "__proto__" | "scrollRestoration" | "go" | "back" | "forward" | "pushState" => Err(format!("History property {property:?} is not implemented.")),
             _ => Ok(Value::Undefined),
         }
     }

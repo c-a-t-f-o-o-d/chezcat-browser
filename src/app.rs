@@ -142,6 +142,8 @@ struct SelectPopupBox {
     visible: usize,
     scale: i32,
 }
+const MAX_SESSION_HISTORY_ENTRIES: usize = 128;
+
 struct HistoryEntry {
     location: Location,
     scroll: i32,
@@ -383,7 +385,7 @@ impl App {
         if let Ok(location) = navigation::explicit(&path) {
             if let Ok(loaded) = loader::local_with_options(&location, self.load_options()) {
                 self.home_location = location.clone();
-                self.commit(location.clone(), loaded, false);
+                self.commit(location.clone(), loaded, false, 1);
                 self.history = vec![HistoryEntry {
                     location,
                     scroll: 0,
@@ -997,7 +999,9 @@ impl App {
             NavigationKind::History(index, _) => Some(self.history[index].document),
             _ => None,
         }};
-        self.commit_with_history(location.clone(), loaded, images_pending, data.clone());
+        let history_length = self.history_length_after_navigation(
+            !same && matches!(kind, NavigationKind::New | NavigationKind::ScriptNew));
+        self.commit_with_history(location.clone(), loaded, images_pending, data.clone(), history_length);
         match kind {
             NavigationKind::New | NavigationKind::ScriptNew => {
                 if !same {
@@ -1009,7 +1013,7 @@ impl App {
                         document: self.script_epoch,
                         data: data.clone(),
                     });
-                    if self.history.len() > 128 {
+                    if self.history.len() > MAX_SESSION_HISTORY_ENTRIES {
                         self.history.remove(0);
                     }
                     self.history_index = self.history.len() - 1;
@@ -1236,14 +1240,15 @@ impl App {
         self.save_scroll();
         let same = self.location == location;
         let data = crate::scripting::HistoryData::default();
+        let history_length = self.history_length_after_navigation(!same && !replace);
         if let Some(loaded) = loaded {
-            self.commit(location.clone(), loaded, false);
+            self.commit(location.clone(), loaded, false, history_length);
             self.record_browsing_visit();
         } else {
             self.location = location.clone();
             if let Some(page) = &mut self.scripting {
                 page.set_location(&self.location);
-                if !same { page.set_history_context(Default::default(), self.base_is_document_url); }
+                if !same { page.set_history_context(Default::default(), self.base_is_document_url, history_length); }
             }
             self.address.set(&self.location.display());
             if self.view != View::Page {
@@ -1283,7 +1288,7 @@ impl App {
                 document: self.script_epoch,
                 data,
             });
-            if self.history.len() > 128 {
+            if self.history.len() > MAX_SESSION_HISTORY_ENTRIES {
                 self.history.remove(0);
             }
             self.history_index = self.history.len() - 1;
@@ -1333,7 +1338,7 @@ impl App {
             self.location = location;
             if let Some(page) = &mut self.scripting {
                 page.set_location(&self.location);
-                page.set_history_context(self.history[index].data.clone(), self.base_is_document_url);
+                page.set_history_context(self.history[index].data.clone(), self.base_is_document_url, self.history.len());
             }
             if self.base_is_document_url { self.base_location = self.location.clone(); }
             if let Some(page) = &mut self.scripting { page.set_resource_base(&self.base_location); }
@@ -1382,10 +1387,10 @@ impl App {
             Err(e) => self.error(e),
         }
     }
-    fn commit(&mut self, location: Location, loaded: Loaded, images_pending: bool) {
-        self.commit_with_history(location, loaded, images_pending, Default::default());
+    fn commit(&mut self, location: Location, loaded: Loaded, images_pending: bool, history_length: usize) {
+        self.commit_with_history(location, loaded, images_pending, Default::default(), history_length);
     }
-    fn commit_with_history(&mut self, location: Location, loaded: Loaded, images_pending: bool, history_data: crate::scripting::HistoryData) {
+    fn commit_with_history(&mut self, location: Location, loaded: Loaded, images_pending: bool, history_data: crate::scripting::HistoryData, history_length: usize) {
         self.cancel_script_requests();
         self.script_epoch = self.script_epoch.wrapping_add(1);
         self.committed_request = None;
@@ -1435,7 +1440,7 @@ impl App {
             page.set_location(&self.location);
             page.set_cookie_session(self.cookies.clone());
             page.set_resource_base(&self.base_location);
-            page.set_history_context(history_data, self.base_is_document_url);
+            page.set_history_context(history_data, self.base_is_document_url, history_length);
             page.set_stylesheet_bytes(self.styles.values().map(String::len).sum());
             page.set_initial_images(loaded.image_sources, &self.images, images_pending && self.images_enabled, self.images_enabled);
             page.set_geometry(crate::script_geometry::Geometry::new(

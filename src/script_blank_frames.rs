@@ -351,7 +351,7 @@ mod tests {
     #[test]
     fn history_replace_state_uses_canonical_main_method_and_checks_saved_child_callers() {
         let source = format!("{CREATE}{}", r#"
-var historyRead=w.Function('h','return h.state;'),methodRead=w.Function('h','return h.replaceState;');
+var historyRead=w.Function('h','return h.state;'),lengthRead=w.Function('h','return h.length;'),methodRead=w.Function('h','return h.replaceState;');
 var method=methodRead(history);
 if(Object.getPrototypeOf(method)!==Function.prototype||Object.getPrototypeOf(method)===w.Function.prototype||method.length!==2||method!==history.replaceState)throw 'History method owner';
 var forward=w.Function('f','h','url','return f.call(h,null,"",url);'),coercions=0,url={toString:function(){coercions++;return '/next';}};
@@ -359,8 +359,8 @@ document.title='history-owner-ready';
 "#);
         let (mut doc, mut forms, mut page, outcome) = start(&source, &crate::csp::PolicySet::default());
         assert_eq!(outcome.errors, 0, "{}", page.report());
-        page.set_history_context(HistoryData::Null, false);
-        let outcome = page.console_eval(&mut doc, &mut forms, "if(historyRead(history)!==null)throw 'same-origin state';forward(method,history,url);if(coercions!==1)throw 'conversion';");
+        page.set_history_context(HistoryData::Null, false, 7);
+        let outcome = page.console_eval(&mut doc, &mut forms, "if(historyRead(history)!==null||lengthRead(history)!==7)throw 'same-origin state/count';forward(method,history,url);if(coercions!==1)throw 'conversion';");
         assert_eq!(outcome.errors, 0, "{}", page.report());
         let pending = page.state.history.pending.as_ref().unwrap().location.clone();
         for source in ["w.history;", "w.Function('return history;')();"] {
@@ -369,7 +369,7 @@ document.title='history-owner-ready';
             assert_eq!(page.state.history.pending.as_ref().unwrap().location, pending);
         }
         page.set_location(&crate::navigation::Location { url: Some(crate::url::parse("https://other.test/").unwrap().0), path: None, fragment: String::new(), root: None });
-        for source in ["historyRead(history);", "methodRead(history);", "forward(method,history,url);"] {
+        for source in ["historyRead(history);", "lengthRead(history);", "methodRead(history);", "forward(method,history,url);"] {
             let outcome = page.console_eval(&mut doc, &mut forms, source);
             assert_eq!(outcome.errors, 1, "{}", page.report());
             assert!(page.report().contains("same-origin"), "{}", page.report());
