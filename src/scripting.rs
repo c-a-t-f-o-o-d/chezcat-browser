@@ -335,6 +335,7 @@ struct State {
     clock_origin: Instant,
     navigation_timing:Option<crate::network_trace::DocumentTiming>,
     embedded_video:Option<crate::embedded_video::Snapshot>,
+    media_changes:script_media::Changes,
     pending_keyboard: Option<KeyboardInput>,
     next_timer: u32,
     timer_bytes: usize,
@@ -402,6 +403,7 @@ impl State {
             clock_origin: Instant::now(),
             navigation_timing:None,
             embedded_video:None,
+            media_changes:script_media::Changes::default(),
             pending_keyboard: None,
             next_timer: 0,
             timer_bytes: 0,
@@ -940,6 +942,7 @@ impl Page {
 
     pub fn stop_timers(&mut self, reason: &str) {
         self.runtime.cancel_microtasks();
+        self.cancel_media_selection();
         self.state.timers.clear();
         self.state.animation_frames.clear();
         self.state.animation_due = None;
@@ -1158,7 +1161,7 @@ impl Page {
                 "onload",
                 "onkeydown",
                 "onkeyup",
-                "onerror","onloadstart","onabort","ondurationchange","onloadedmetadata","onloadeddata",
+                "onerror","onloadstart","onabort","onemptied","ondurationchange","onloadedmetadata","onloadeddata",
                 "oncanplay","oncanplaythrough","onplay","onplaying","onpause","onseeking","onseeked","ontimeupdate","onended",
             ] {
                 if !matches!(name,"onclick"|"oninput"|"onchange"|"onsubmit"|"onreset"|"onload"|"onkeydown"|"onkeyup")
@@ -1809,8 +1812,10 @@ impl Bridge<'_> {
     }
 
     fn attribute_named(&mut self, node: usize, name: crate::html::AttributeName, value: Option<String>) -> Result<(), String> {
+        let media_source=name.html_is("src")&&self.media_element_receiver(node_handle(node));let media_change=media_source&&value.is_some();
+        if media_change&&!self.media_source_prepared(){return Err("Media source change requires its reserved stable-state task.".into());}
         if self.doc.nodes[node].namespace==crate::html::Namespace::Html && tag(self.doc,node)=="video"
-            && ["src","controls","width","height","poster","autoplay","loop","muted","preload","crossorigin"].iter().any(|key|name.html_is(key)) {
+            && !media_source && ["src","controls","width","height","poster","autoplay","loop","muted","preload","crossorigin"].iter().any(|key|name.html_is(key)) {
             return Err("Changing parser-authored video source or native media attributes is not implemented; no attribute was changed.".into());
         }
         if name.namespace.is_none() { self.frame_attribute_guard(node, &name.qualified)?; }
@@ -1889,6 +1894,7 @@ impl Bridge<'_> {
         if self.state.tree.active.get(node).copied().unwrap_or(false) {
             self.state.layout_changed();
         }
+        if media_change{self.commit_media_source_change(node)?;}
         Ok(())
     }
 
@@ -2326,6 +2332,7 @@ impl Host for Bridge<'_> {
     }
 
     fn string_setter(&self, object: u32, property: &str) -> bool {
+        if self.media_element_receiver(object)&&property=="src"{return true;}
         property=="srcdoc" && self.class_list_element_receiver(object) && node_index(object).is_some_and(|node|self.iframe_srcdoc_property(node))
             || self.class_list_receiver(object) && property == "value"
             || self.class_list_element_receiver(object) && property == "classList"
@@ -2338,6 +2345,9 @@ impl Host for Bridge<'_> {
                 && matches!(property, "src" | "alt")
             || property == "border" && node_index(object).is_some_and(|node| self.html_border_property(node))
     }
+    fn prepare_native_microtask(&mut self,object:u32,member:&str,args:&[Value],setter:bool)->Result<Option<u64>,String>{self.prepare_media_microtask(object,member,args,setter)}
+    fn finish_native_microtask(&mut self,ticket:u64)->bool{self.finish_media_microtask(ticket)}
+    fn run_native_microtask(&mut self,ticket:u64)->Result<(),String>{self.run_media_microtask(ticket)}
 
     fn number_setter(&self, object: u32, property: &str) -> bool {
         node_index(object).is_some_and(|node| tag(self.doc, node) == "img")
@@ -3616,6 +3626,7 @@ impl Host for Bridge<'_> {
     }
 
     fn set(&mut self, object: u32, property: &str, value: Value) -> Result<(), String> {
+        if self.media_element_receiver(object)&&property=="src" {let node=self.node(object)?;let text=self.text(&value)?;return self.attribute(node,"src",Some(text));}
         if script_named_map::element(object).is_some() { self.named_map_get(object, "length")?; return Err("NamedNodeMap property writes are not implemented.".into()); }
         if script_class_list::element(object).is_some() {
             self.state.work(1)?;

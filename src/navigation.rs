@@ -239,6 +239,23 @@ fn preserve_current_root(mut location: Location, current: &Location) -> Location
 
 /// Resolve a document link or asset without widening its original content root.
 /// Queries such as image.bmp?v=2 are rejected rather than silently discarded.
+/// URL selection/reflection only: no existence check, new root, open or authority.
+/// Callers MUST separately use resolve/local-file protection before resource IO.
+pub(crate) fn selection_url(input:&str,current:&Location)->Result<String,String>{
+    if let Some(url)=&current.url{return Ok(web_location(url.resolve(input)?).display());}
+    if starts_web_url(input.trim()){return Ok(web_location(url::parse(input)?).display());}
+    let (reference,fragment)=split_reference(input.trim())?;
+    if reference.is_empty(){let mut selected=current.clone();selected.fragment=fragment;return Ok(selected.display());}
+    if reference.eq_ignore_ascii_case("about:home"){return Ok(Location {fragment,..Location::home()}.display());}
+    let path=if starts_file_uri(reference){file_uri_path(reference)?}else{let decoded=percent_decode(reference)?;validate_local_path(Path::new(&decoded))?;PathBuf::from(decoded)};
+    let source=current.path.as_ref().ok_or("A local URL selection requires the document path.")?;
+    let candidate=if path.is_absolute(){path}else{source.parent().ok_or("The local document has no parent folder.")?.join(path)};
+    let mut lexical=PathBuf::new();
+    for part in candidate.components(){match part{std::path::Component::CurDir=>{},std::path::Component::ParentDir=>{if lexical.file_name().is_some(){lexical.pop();}},part=>lexical.push(part.as_os_str())}}
+    validate_local_path(&lexical)?;
+    Ok(Location {path:Some(lexical),url:None,fragment,root:current.root.clone()}.display())
+}
+
 pub fn resolve(input: &str, current: &Location) -> Result<Location, String> {
     if let Some(url) = &current.url {
         return Ok(web_location(url.resolve(input)?));
@@ -598,6 +615,16 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     struct Folder(PathBuf);
+    #[test]
+    fn selected_media_url_does_not_require_existence_or_grant_file_authority(){
+        let folder=Folder::new();let page=folder.file("page.html",b"page");let base=explicit(&page).unwrap();
+        let selected=selection_url("missing%20clip.ivf#frame",&base).unwrap();
+        assert!(selected.ends_with("missing%20clip.ivf#frame"),"{selected}");
+        assert!(resolve("missing%20clip.ivf#frame",&base).is_err());
+        assert!(selection_url("../outside.ivf",&base).is_ok());assert!(resolve("../outside.ivf",&base).is_err());
+        assert!(selection_url("clip.ivf?unsupported=query",&base).is_err());
+        assert_eq!(selection_url("../b?q=1#x",&address("https://example.test/a/file",&Location::home()).unwrap()).unwrap(),"https://example.test/b?q=1#x");
+    }
 
     #[test]
     fn address_search_intent_keeps_explicit_failures_local_and_preserves_files() {

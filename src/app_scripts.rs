@@ -278,6 +278,7 @@ impl App {
         }
         self.dynamic_pending = 0;
         if let Some(page) = &mut self.scripting {
+            page.cancel_media_selection();
             page.clear_host_requests();
         }
     }

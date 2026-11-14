@@ -11,6 +11,7 @@ use std::sync::{
 use std::time::{Duration, Instant};
 
 pub struct Plan {
+    pub retired: Arc<AtomicBool>,
     pub node: usize,
     pub raw: String,
     pub source: Location,
@@ -24,6 +25,32 @@ impl Plan {
         base: &Location,
         policy: &crate::csp::PolicySet,
         limits: media::Limits,
+    ) -> Result<Self, String> {
+        let raw = doc
+            .attr(node, "src")
+            .ok_or("This video slice requires src; source children are not implemented.")?;
+        Self::selected(
+            node,
+            raw,
+            Arc::new(AtomicBool::new(false)),
+            doc,
+            location,
+            base,
+            policy,
+            limits,
+            node,
+        )
+    }
+    pub fn selected(
+        node: usize,
+        raw: &str,
+        retired: Arc<AtomicBool>,
+        doc: &Document,
+        location: &Location,
+        base: &Location,
+        policy: &crate::csp::PolicySet,
+        limits: media::Limits,
+        policy_scope: usize,
     ) -> Result<Self, String> {
         if !doc.nodes.get(node).is_some_and(|n| {
             n.namespace == Namespace::Html
@@ -40,7 +67,9 @@ impl Plan {
         {
             return Err(format!("Authored video attribute {name:?} is not implemented in this element slice; source was not loaded."));
         }
-        let raw=doc.attr(node,"src").filter(|s|!s.trim().is_empty()).ok_or("This video slice requires an authored nonempty src; source children are not implemented.")?;
+        if raw.is_empty() {
+            return Err("The selected media src is empty.".into());
+        }
         let source = crate::navigation::resolve(raw, base)?;
         if source.url.is_some() || source.path.is_none() || source.root != location.root {
             return Err(
@@ -48,7 +77,7 @@ impl Plan {
                     .into(),
             );
         }
-        policy.allows_media(node, &source)?;
+        policy.allows_media(policy_scope, &source)?;
         if !source
             .path
             .as_ref()
@@ -60,6 +89,7 @@ impl Plan {
             return Err("Embedded video currently decodes original local IVF/VP8-intra video only; other containers/audio/network are not enabled for this element slice.".into());
         }
         Ok(Self {
+            retired,
             node,
             raw: raw.into(),
             source,
@@ -68,20 +98,20 @@ impl Plan {
     }
     fn load(&self, cancel: &AtomicBool) -> Result<media::Asset, String> {
         let check = || {
-            if cancel.load(Ordering::Relaxed) {
+            if cancel.load(Ordering::Relaxed) || self.retired.load(Ordering::Relaxed) {
                 Err("Embedded video source cancelled.".into())
             } else {
                 Ok(())
             }
         };
         check()?;
-        let bytes = crate::loader::read_local_media(
+        let bytes = crate::loader::read_local_media_checked(
             self.source
                 .path
                 .as_ref()
                 .ok_or("Missing local video path.")?,
             self.limits.input_bytes,
-            cancel,
+            &check,
         )?;
         media::Clip::load(bytes, self.limits, &check)
     }
@@ -113,6 +143,7 @@ pub fn authored_node(doc: &Document) -> Option<usize> {
 
 #[derive(Clone)]
 pub struct Snapshot {
+    pub retired: Arc<AtomicBool>,
     pub node: usize,
     pub current_src: String,
     pub width: u32,
@@ -125,6 +156,16 @@ pub struct Snapshot {
     pub seeking: bool,
     pub ready: u8,
     pub network: u8,
+}
+pub struct Selection {
+    pub node: usize,
+    pub retired: Arc<AtomicBool>,
+    pub raw: Option<String>,
+    pub uri: Option<String>,
+    pub error: Option<String>,
+    pub abort: bool,
+    pub emptied: bool,
+    pub timeupdate: bool,
 }
 impl Snapshot {
     pub fn position(&self) -> Duration {
@@ -193,7 +234,9 @@ impl Worker {
                     if s.stopping {
                         return;
                     }
-                    if job.cancel.load(Ordering::Relaxed) {
+                    if job.cancel.load(Ordering::Relaxed)
+                        || job.plan.retired.load(Ordering::Relaxed)
+                    {
                         continue;
                     }
                     s.finished = Some(Completion {
@@ -305,6 +348,21 @@ mod tests {
         )
         .is_ok());
         assert!(policy.allows_media(node + 1, &location).is_err());
+        assert!(
+            Plan::selected(
+                node,
+                "scene-intra.ivf",
+                Arc::new(AtomicBool::new(false)),
+                &doc,
+                &location,
+                &location,
+                &policy,
+                media::Limits::default(),
+                usize::MAX
+            )
+            .is_err(),
+            "Dynamic selection observes all installed meta policies."
+        );
         for source in [
             "../../Cargo.toml",
             "https://example.test/clip.ivf",

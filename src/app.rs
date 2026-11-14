@@ -696,7 +696,7 @@ impl App {
             | self.poll_dynamic_images()
             | self.process_image_requests();
         let revision = self.network.revision();
-        let mut changed = script_changed | self.poll_embedded_video() | self.poll_media() | self.poll_audio() | self.poll_media_sync() | self.poll_downloads()
+        let mut changed = script_changed | self.process_media_selection() | self.poll_embedded_video() | self.poll_media() | self.poll_audio() | self.poll_media_sync() | self.poll_downloads()
             || revision != self.last_network_revision
             || self.network_needs_tick();
         changed |= self.flush_embedded_video();
@@ -1536,6 +1536,7 @@ impl App {
         };
     }
     fn show_script_errors(&mut self) {
+        self.process_media_selection();
         self.apply_history_replacement();
         let script_errors = self.scripting.as_ref().map_or(0, |page| page.error_count());
         if script_errors != 0 {
@@ -3593,7 +3594,7 @@ impl App {
                         let video=self.document.nodes.get(node).is_some_and(|n|n.namespace==crate::html::Namespace::Html&&matches!(&n.kind,crate::html::NodeKind::Element {tag,..} if tag=="video"));
                         if video {
                             let rect=crate::paint::ClipRect::new(x,y,width,height);canvas.fill_rect(x,y,width,height,0xff000000);
-                            if let Some(bitmap)=self.images.get(&node){canvas.fitted_image(rect,bitmap,presentation);}
+                            if !self.embedded_video_retired(){if let Some(bitmap)=self.images.get(&node){canvas.fitted_image(rect,bitmap,presentation);}}
                             self.draw_embedded_video_controls(&mut canvas,node,rect);
                             continue;
                         }

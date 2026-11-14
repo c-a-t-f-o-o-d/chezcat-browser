@@ -14,8 +14,11 @@ use std::time::{Duration, Instant};
 pub type Wake = Arc<dyn Fn() + Send + Sync>;
 
 pub(crate) fn read_local_media(path: &std::path::Path, limit: usize, cancel: &AtomicBool) -> Result<Vec<u8>, String> {
+    read_local_media_checked(path,limit,&||check_cancel(cancel))
+}
+pub(crate) fn read_local_media_checked(path: &std::path::Path, limit: usize, check: &dyn Fn()->Result<(),String>) -> Result<Vec<u8>, String> {
     use std::io::Read;
-    check_cancel(cancel)?;
+    check()?;
     let mut file = navigation::open_local_file(path)?;
     if file.metadata().map_err(|error| error.to_string())?.len() > limit as u64 {
         return Err("Media input byte allowance exceeded.".into());
@@ -23,7 +26,7 @@ pub(crate) fn read_local_media(path: &std::path::Path, limit: usize, cancel: &At
     let mut bytes = Vec::new();
     let mut chunk = [0u8; 64 * 1024];
     loop {
-        check_cancel(cancel)?;
+        check()?;
         let count = file.read(&mut chunk).map_err(|error| error.to_string())?;
         if count == 0 { return Ok(bytes); }
         if bytes.len().checked_add(count).is_none_or(|size| size > limit) {

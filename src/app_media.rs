@@ -5,12 +5,14 @@ use crate::image::Bitmap;
 use crate::media::{self, Clock};
 use std::collections::VecDeque;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool,Ordering};
 use std::time::{Duration, Instant};
 #[path="app_embedded_video.rs"]
 mod embedded;
 
 pub(super) struct Embedded {
-    node:usize,raw:String,source:String,plan:Option<Arc<crate::embedded_video::Plan>>,
+    retired:Arc<AtomicBool>,
+    node:usize,raw:String,source:String,plan:Option<Arc<crate::embedded_video::Plan>>,network:u8,
     error:Option<String>,aborted:bool,events:VecDeque<&'static str>,last_update:Duration,
 }
 
@@ -526,6 +528,7 @@ impl App {
         self.flush_embedded_video();
     }
     fn media_request_frame(&mut self, now: Instant) {
+        if self.embedded_video_retired(){return;}
         // Every request route (timer, completion and controller) observes the
         // PCM acknowledgement gate. Old cached time cannot enter a new seek.
         if self.synchronized_media() {
@@ -584,9 +587,10 @@ impl App {
         self.media_worker
             .as_ref()
             .unwrap()
-            .submit(player.clip.clone(), player.generation, index);
+            .submit_for_source(player.clip.clone(), player.generation, index,self.embedded_video.as_ref().filter(|_|player.embedded).map(|v|v.retired.clone()));
     }
     pub(super) fn poll_media(&mut self) -> bool {
+        if self.embedded_video_retired(){return false;}
         let Some(completion) = self.media_worker.as_ref().and_then(|worker| worker.take()) else {
             return false;
         };
@@ -622,6 +626,7 @@ impl App {
         true
     }
     pub(super) fn next_media_timer(&self) -> Option<Instant> {
+        if self.embedded_video_retired(){return None;}
         self.media.as_ref().and_then(|player| player.deadline)
     }
     pub(super) fn poll_media_timer_at(&mut self, now: Instant) -> bool {

@@ -150,11 +150,14 @@ enum Job {
         reject: bool,
     },
     Callback(usize),
+    /// A native stable-state procedure owns no ECMAScript references. It runs
+    /// in the host document, sharing FIFO order and all normal job allowances.
+    Host(u64),
 }
 
 impl Job {
     fn allocation_kind(&self) -> usize {
-        match self { Self::Callback(_) => 0, Self::Reaction { .. } => 1, Self::Thenable { .. } => 2 }
+        match self { Self::Callback(_) | Self::Host(_) => 0, Self::Reaction { .. } => 1, Self::Thenable { .. } => 2 }
     }
 
     fn retained_bytes(&self) -> usize {
@@ -169,7 +172,7 @@ impl Job {
                         + capability.reject.bytes()
                         + value.bytes()
                 }
-                Self::Callback(_) => 0,
+                Self::Callback(_) | Self::Host(_) => 0,
             }
     }
 }
@@ -255,6 +258,7 @@ impl Arena {
         for group in &self.groups { group.capability.reachability_edges(add); add(Edge::Object(group.values)); }
         for (_, job) in &self.jobs {
             match job {
+                Job::Host(_)=>{},
                 Job::Callback(id) => add(Edge::Function(*id)),
                 Job::Thenable { promise, receiver, then } => {
                     add(Edge::Object(*promise)); Edge::value(receiver, add); Edge::value(then, add);
@@ -524,9 +528,20 @@ impl Runtime {
             Job::Reaction { handler: Some(id), .. } | Job::Callback(id) => Some(*id),
             _ => None,
         };
-        let realm = callback.map_or(self.active_realm, |id| self.function_realms[id]);
+        let realm = if matches!(job,Job::Host(_)){None}else{callback.map_or(self.active_realm, |id| self.function_realms[id])};
         self.promises.jobs.push_back((realm, job));
         Ok(())
+    }
+    pub(super) fn prepare_host_microtask(&mut self,host:&mut dyn Host,object:u32,member:&str,args:&[Value],setter:bool)->Result<Option<u64>,Fault>{
+        let ticket=host.prepare_native_microtask(object,member,args,setter).map_err(Fault::new)?;
+        if let Some(id)=ticket {if let Err(error)=self.promise_enqueue(Job::Host(id)){host.finish_native_microtask(id);return Err(error);}}
+        Ok(ticket)
+    }
+    pub(super) fn finish_host_microtask(&mut self,host:&mut dyn Host,ticket:Option<u64>)->Result<(),Fault>{
+        if let Some(id)=ticket {if !host.finish_native_microtask(id){
+            if !self.promises.jobs.back().is_some_and(|(_,job)|matches!(job,Job::Host(ticket) if *ticket==id)){return Err(Fault::new("Native microtask reservation lost its queue position."));}
+            let (_,job)=self.promises.jobs.pop_back().unwrap();self.value_bytes-=job.retained_bytes()+std::mem::size_of::<Option<usize>>();
+        }}Ok(())
     }
 
     fn promise_settle(&mut self, promise: usize, value: Value, reject: bool) -> Result<(), Fault> {
@@ -1244,6 +1259,7 @@ impl Runtime {
         let result = (|| {
             use super::function_reachability::Edge;
             match &job {
+                Job::Host(_)=>{},
                 Job::Callback(function) => self.push_transient_root(Edge::Function(*function))?,
                 Job::Thenable { promise, receiver, then } => {
                     self.push_transient_root(Edge::Object(*promise))?;
@@ -1270,6 +1286,7 @@ impl Runtime {
     fn run_promise_job_registered(&mut self, job: Job, host: &mut dyn Host) -> Result<(), Fault> {
         self.step()?;
         match job {
+            Job::Host(ticket)=>{host.run_native_microtask(ticket).map_err(Fault::new)?;}
             Job::Callback(function) => {
                 self.call_value(Value::Function(function), &[], Value::Undefined, host)?;
             }
@@ -1433,6 +1450,7 @@ impl Runtime {
         format!("Promise snapshot: pending={pending}; fulfilled={fulfilled}; rejected={rejected} (handled={handled}, reported={reported}); pending reactions={reactions}; queued callback/reaction/thenable={queued:?}; lifetime jobs started={:?}, succeeded={:?}. Snapshot does not run jobs or change rejection reporting.\n{samples}",self.promises.jobs_started,self.promises.jobs_succeeded)
     }
 
+    pub fn has_queued_microtasks(&self)->bool { !self.promises.jobs.is_empty() }
     #[cfg(test)]
     pub fn has_microtasks(&self) -> bool {
         !self.promises.jobs.is_empty()

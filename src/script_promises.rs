@@ -6,8 +6,12 @@ use super::*;
 
 impl Page {
     pub(super) fn microtask_checkpoint(&mut self, doc: &mut Document, forms: &mut Forms) {
+        // Fatal execute/invoke exits may already have discarded the VM queue.
+        // A host selection must never outlive its missing stable-state job.
+        if self.state.media_changes.pending.is_some() && !self.runtime.has_queued_microtasks(){self.cancel_media_selection();}
         if !self.state.enabled || !doc.scripting_enabled {
             self.runtime.cancel_microtasks();
+            self.cancel_media_selection();
             return;
         }
         match self.runtime.microtask_checkpoint(&mut Bridge {
@@ -20,7 +24,7 @@ impl Page {
                     self.state.error("Microtask", &diagnostic);
                 }
             }
-            Err(error) => self.state.error("Microtask checkpoint", &error),
+            Err(error) => {self.cancel_media_selection();self.state.error("Microtask checkpoint", &error);},
         }
     }
 }

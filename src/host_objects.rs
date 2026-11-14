@@ -215,7 +215,10 @@ impl Runtime {
         self.pin_exported_value(&value);
         host.validate_set(handle, &name, &value)
             .map_err(|(kind, message)| Fault::exception(kind, message))?;
-        host.set(handle, &name, value).map_err(Fault::new)
+        let ticket=self.prepare_host_microtask(host,handle,&name,std::slice::from_ref(&value),true)?;
+        let result=host.set(handle,&name,value).map_err(Fault::new);
+        self.finish_host_microtask(host,ticket)?;
+        result
     }
 
     pub(super) fn host_keys(

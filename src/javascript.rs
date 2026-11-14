@@ -527,6 +527,13 @@ pub trait Host {
     }
     fn get(&mut self, object: u32, property: &str) -> Result<Value, String>;
     fn set(&mut self, object: u32, property: &str, value: Value) -> Result<(), String>;
+    /// Reserve a native stable-state microtask before a host mutation commits.
+    /// The ticket is host-owned data, never a script callback or native handle.
+    fn prepare_native_microtask(&mut self,_object:u32,_member:&str,_args:&[Value],_setter:bool)->Result<Option<u64>,String>{Ok(None)}
+    /// True only if the operation committed the prepared task; false rolls the
+    /// reserved queue entry back without touching previously queued jobs.
+    fn finish_native_microtask(&mut self,_ticket:u64)->bool{false}
+    fn run_native_microtask(&mut self,_ticket:u64)->Result<(),String>{Err("Native microtask is unavailable.".into())}
     fn call(&mut self, object: u32, method: &str, args: &[Value]) -> Result<Value, String>;
 }
 
@@ -8085,8 +8092,10 @@ impl Runtime {
             }
         }
         if let Some(fields) = &fields { for (_, value) in fields { self.pin_exported_value(value); } }
-        host.call_with_dictionary(object, method, args, fields.as_deref())
-            .map_err(Fault::new)
+        let ticket=self.prepare_host_microtask(host,object,method,args,false)?;
+        let result=host.call_with_dictionary(object, method, args, fields.as_deref()).map_err(Fault::new);
+        self.finish_host_microtask(host,ticket)?;
+        result
     }
 
     fn binary_value(

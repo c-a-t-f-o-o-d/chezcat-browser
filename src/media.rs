@@ -341,6 +341,7 @@ struct Job {
     pub generation: u64,
     index: usize,
     cancel: Arc<AtomicBool>,
+    retired:Option<Arc<AtomicBool>>,
 }
 pub struct Completion {
     pub clip: Arc<Clip>,
@@ -387,7 +388,7 @@ impl Worker {
                     job
                 };
                 let result = job.clip.decode(job.index, &|| {
-                    if job.cancel.load(Ordering::Relaxed) {
+                    if job.cancel.load(Ordering::Relaxed) || job.retired.as_ref().is_some_and(|flag|flag.load(Ordering::Relaxed)) {
                         Err("Video frame decode cancelled.".into())
                     } else {
                         Ok(())
@@ -399,7 +400,7 @@ impl Worker {
                     if state.stopping {
                         return;
                     }
-                    if job.cancel.load(Ordering::Relaxed) {
+                    if job.cancel.load(Ordering::Relaxed) || job.retired.as_ref().is_some_and(|flag|flag.load(Ordering::Relaxed)) {
                         continue;
                     }
                     state.finished = Some(Completion {
@@ -418,7 +419,11 @@ impl Worker {
     pub fn set_wake(&self, wake: crate::loader::Wake) {
         self.shared.0.lock().unwrap().wake = wake;
     }
+    #[cfg(test)]
     pub fn submit(&self, clip: Arc<Clip>, generation: u64, index: usize) {
+        self.submit_for_source(clip,generation,index,None);
+    }
+    pub fn submit_for_source(&self,clip:Arc<Clip>,generation:u64,index:usize,retired:Option<Arc<AtomicBool>>) {
         let mut state = self.shared.0.lock().unwrap();
         if let Some(cancel) = &state.active {
             cancel.store(true, Ordering::Relaxed);
@@ -429,6 +434,7 @@ impl Worker {
             generation,
             index,
             cancel: Arc::new(AtomicBool::new(false)),
+            retired,
         });
         self.shared.1.notify_one();
     }

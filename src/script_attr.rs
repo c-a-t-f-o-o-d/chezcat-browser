@@ -341,6 +341,7 @@ impl Bridge<'_> {
             return self.attribute_named(node, name, value);
         }
         let key = name.qualified.as_str();
+        let media_source=key=="src"&&self.media_element_receiver(node_handle(node));
         if self.stylesheet_attribute_change(node, key, value.as_deref())? { return Ok(()); }
         if self.dom_script(node) && matches!(key, "src" | "type" | "charset" | "nonce" | "integrity" | "crossorigin" | "referrerpolicy" | "fetchpriority" | "async" | "defer" | "nomodule") {
             let queue = key == "src" && self.state.dom.connected[node];
@@ -360,7 +361,7 @@ impl Bridge<'_> {
         // preserve its content attribute without advertising an IDL API or
         // generating an attribution/report request.
         if !matches!(key, "id" | "class" | "style" | "title" | "hidden" | "disabled" | "role" | "lang" | "dir" | "nonce" | "attributionsrc")
-            && !inert_attribute_name(key) && !image_attribute {
+            && !inert_attribute_name(key) && !image_attribute && !media_source {
             return Err(format!("Supported attributes exclude {key:?} on {} in this native/metadata subset; no attribute was changed.",tag(self.doc,node)));
         }
         if key == "src" && image_attribute {
