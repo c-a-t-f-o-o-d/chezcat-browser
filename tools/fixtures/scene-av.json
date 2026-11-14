@@ -1,0 +1,20 @@
+{
+  "scope": "Author original finite Matroska VP8/PCM16 using only Python stdlib.\n\nVP8 packets and independent RGB reference reuse the original scene fixture.\nThe quiet three-second PCM signal is authored here. No runtime helper is used.\n",
+  "mkv_sha256": "d9137b33e704c62ccf11e6a8c65aa0c507167c89fa6837b7a476f6985ef69be5",
+  "pcm_sha256": "edb8b25f7e315689e47795fbb2b868b5e3bb4339ceb1c3a265c781e233f8f652",
+  "video_packet_sha256": [
+    "caece0afc7fe520d6004ead77bcffedf83649bb22dcc291f129d9b27e5a77c61",
+    "58ea22ab87328063a56bcdfcbd73cb10587435f0f03b4b80d17b380078bd69c1",
+    "f117faa72cbb7fde6fdaaf99208aa0d6f07bef63617f9ddcd4cbed77bb595492",
+    "91a94ebf6495de6b40760e5f81ab185a8babf06319eb11dc8086f3419b6c0edf",
+    "48000054d43647783db477a6bbb479ad0710346d024b3ab9935082cbe555977f",
+    "3cea826d0842c105c09a0a2f8736d3139df87813cd1732e0b54f9a60ed8efbdb"
+  ],
+  "duration_ms": 3000,
+  "video_frames": 6,
+  "pcm_frames": 144000,
+  "sample_rate": 48000,
+  "channels": 2,
+  "bits": 16,
+  "audio_packet_frames": 6000
+}

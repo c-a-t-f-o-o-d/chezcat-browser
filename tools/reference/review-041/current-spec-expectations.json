@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "captured_at_utc": "2026-11-11",
+  "fixture_sha256": "1c4262c95e648258acdd4219598c6fcbe1827c85ba154417b896bd37102f72fd",
+  "source_review": "TC39 live ECMAScript2027 GetValue6.2.5.5 step3c and PutValue6.2.5.6 step3c, independently opened and inspected before current implementation outcomes. Logical and arithmetic compound assignments reuse their original Reference Record.",
+  "cases": [
+    {
+      "id": "operators-logical-reference-and-key-order",
+      "source_sha256": "dc16733fb8e91872202fafac77f0691560bfd26f4d42a31ce4ec18af33ddc772",
+      "expected_ok": true,
+      "expected_value": "string:6f6b",
+      "expected_records": [
+        "number:4008000000000000",
+        "string:626b677273",
+        "number:4008000000000000",
+        "string:626b67",
+        "number:4008000000000000",
+        "string:626b677273"
+      ],
+      "reason": "Current GetValue converts and caches [[ReferencedName]] once on the Reference Record. The following PutValue reuses this property key. Node24.22.1 converts the object key again when assigning. Original Node records and test programs stay unchanged; this case does not count as a Node match.",
+      "standards": [
+        "https://tc39.es/ecma262/#sec-getvalue",
+        "https://tc39.es/ecma262/#sec-putvalue",
+        "https://tc39.es/ecma262/#sec-assignment-operators-runtime-semantics-evaluation"
+      ]
+    },
+    {
+      "id": "operators-power-reference-key-coercion-order",
+      "source_sha256": "742b1c3d85f5864478cbebbc020b52a764087ec50239be8520e4864d3782e626",
+      "expected_ok": true,
+      "expected_value": "string:6f6b",
+      "expected_records": [
+        "number:4022000000000000",
+        "number:4022000000000000",
+        "string:626b67726c6573"
+      ],
+      "reason": "Current GetValue converts and caches [[ReferencedName]] once on the Reference Record. The following PutValue reuses this property key. Node24.22.1 converts the object key again when assigning. Original Node records and test programs stay unchanged; this case does not count as a Node match.",
+      "standards": [
+        "https://tc39.es/ecma262/#sec-getvalue",
+        "https://tc39.es/ecma262/#sec-putvalue",
+        "https://tc39.es/ecma262/#sec-assignment-operators-runtime-semantics-evaluation"
+      ]
+    }
+  ]
+}

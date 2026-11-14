@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "scope": "Original syntax corpus; no ChezCat execution",
+  "node": "v22.16.0",
+  "acorn": "8.15.0",
+  "seed": 47,
+  "accepted": 1431,
+  "rejected": 5,
+  "sha256": "5d7d64352661922822686cc33effb1d3b4d777b5f6f8e542c5a92a40648b4ff3",
+  "sources": [
+    "https://tc39.es/ecma262/multipage/ecmascript-language-expressions.html",
+    "https://github.com/acornjs/acorn"
+  ],
+  "rejected_cases": [
+    {
+      "source": "a && b ?? c;",
+      "name": "SyntaxError",
+      "message": "Unexpected token '??'"
+    },
+    {
+      "source": "a || b ?? c;",
+      "name": "SyntaxError",
+      "message": "Unexpected token '??'"
+    },
+    {
+      "source": "a ?? b && c;",
+      "name": "SyntaxError",
+      "message": "Unexpected token '&&'"
+    },
+    {
+      "source": "a ?? b || c;",
+      "name": "SyntaxError",
+      "message": "Unexpected token '||'"
+    },
+    {
+      "source": "a?b=c,d:e;",
+      "name": "SyntaxError",
+      "message": "Unexpected token ','"
+    }
+  ]
+}

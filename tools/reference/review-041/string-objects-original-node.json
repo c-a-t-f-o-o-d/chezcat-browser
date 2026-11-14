@@ -1,0 +1,355 @@
+{
+  "fixture_sha256": "3a76c65e11ea82cacfd8f6e357173b2910e54baaa0bddab416836b7d9cffbece",
+  "helper_sha256": "a4baebca7391c14523f116343a0bbcde7eb922a1efed75e5a825347c0cb90470",
+  "node": "v24.22.1",
+  "cases": [
+    {
+      "id": "string-object-empty-default-undefined",
+      "kind": "comparison",
+      "source": "test.record(new String().valueOf());test.record(new String(undefined).valueOf());test.record(new String(null).valueOf());test.record(new String(false).valueOf());test.record(new String(-0).valueOf());test.record(new String().length);'ok';",
+      "source_sha256": "0626804997611a2290d2b023d0d667be1a1167c771753985eeded3335adc33e4",
+      "reference": {
+        "ok": true,
+        "records": [
+          "string:",
+          "string:756e646566696e6564",
+          "string:6e756c6c",
+          "string:66616c7365",
+          "string:30",
+          "number:0000000000000000"
+        ],
+        "error": null,
+        "value": "string:6f6b"
+      }
+    },
+    {
+      "id": "string-object-construction-conversion",
+      "kind": "comparison",
+      "source": "let log='',v={toString(){log+='s';return {};},valueOf(){log+='v';return 17;}};test.record(new String(v).valueOf());test.record(log);let mark={};try{new String({toString(){throw mark;}});}catch(e){test.record(e===mark);}test.record(String(Symbol('tag')));try{new String(Symbol('tag'));}catch(e){test.record(e.name);}'ok';",
+      "source_sha256": "ddeebb01fd268d029b95d7c7fd7dee30cc55c9b8d7642d7a1d2f3caeb5426274",
+      "reference": {
+        "ok": true,
+        "records": [
+          "string:3137",
+          "string:7376",
+          "boolean:true",
+          "string:53796d626f6c2874616729",
+          "string:547970654572726f72"
+        ],
+        "error": null,
+        "value": "string:6f6b"
+      }
+    },
+    {
+      "id": "string-object-inherited-virtual-index",
+      "kind": "comparison",
+      "source": "let b=new String('a😀Z'),o=Object.create(b);test.record(o[0]);test.record(o[3]);test.record(o.length);test.record(0 in o);test.record(o.hasOwnProperty(0));test.record(Object.keys(o).join());let keys=[];for(let k in o)keys.push(k);test.record(keys.join());o[0]='q';test.record(o[0]);test.record(o.hasOwnProperty(0));'ok';",
+      "source_sha256": "357e97b11cfcae5d76d5f850bee92341a2a83b6385349be8f51d67089c10a0c7",
+      "reference": {
+        "ok": true,
+        "records": [
+          "string:61",
+          "string:5a",
+          "number:4010000000000000",
+          "boolean:true",
+          "boolean:false",
+          "string:",
+          "string:302c312c322c33",
+          "string:61",
+          "boolean:false"
+        ],
+        "error": null,
+        "value": "string:6f6b"
+      }
+    },
+    {
+      "id": "string-object-index-canonical-names",
+      "kind": "comparison",
+      "source": "let b=new String('ab');b['01']='n';b['-0']='z';b['1.0']='d';b['2']='c';b['4294967295']='large';let s=Symbol('s');b[s]=9;test.record(Object.getOwnPropertyNames(b).join('|'));test.record(b['01']+b['-0']+b['1.0']+b[2]);test.record(b[s]);test.record(Object.getOwnPropertySymbols(b)[0]===s);'ok';",
+      "source_sha256": "848861bfabe01fb7447a39e697ebca26c1aeb1e79499979759338203a9756f31",
+      "reference": {
+        "ok": true,
+        "records": [
+          "string:307c317c327c6c656e6774687c30317c2d307c312e307c34323934393637323935",
+          "string:6e7a6463",
+          "number:4022000000000000",
+          "boolean:true"
+        ],
+        "error": null,
+        "value": "string:6f6b"
+      }
+    },
+    {
+      "id": "string-object-surrogate-descriptor-without-value",
+      "kind": "comparison",
+      "source": "let b=new String('😀');Object.defineProperty(b,0,{writable:false,enumerable:true,configurable:false});test.record(b.length);test.record(Object.keys(b).join());test.record(b.hasOwnProperty(1));try{Object.defineProperty(b,0,{value:'x'});}catch(e){test.record(e.name);}test.record(delete b[0]);'ok';",
+      "source_sha256": "42837919cf4b73367970c2edc1eba3554956b6e685ab3c3b71f120392d855e31",
+      "reference": {
+        "ok": true,
+        "records": [
+          "number:4000000000000000",
+          "string:302c31",
+          "boolean:true",
+          "string:547970654572726f72",
+          "boolean:false"
+        ],
+        "error": null,
+        "value": "string:6f6b"
+      }
+    },
+    {
+      "id": "string-object-fixed-descriptor-validation",
+      "kind": "comparison",
+      "source": "let b=new String('ab');for(let d of [{value:'a'},{writable:false},{enumerable:true},{configurable:false},{}])Object.defineProperty(b,0,d);let errors=[];for(let d of [{value:'b'},{writable:true},{enumerable:false},{configurable:true},{get(){return 'a';}}]){try{Object.defineProperty(b,0,d);}catch(e){errors.push(e.name);}}test.record(errors.join());test.record(b[0]);test.record(Object.getOwnPropertyDescriptor(b,0).value);'ok';",
+      "source_sha256": "d2f77a26cd020726ea3aec840112cae227e6110fe332fee391541ce1a7bfd4ba",
+      "reference": {
+        "ok": true,
+        "records": [
+          "string:547970654572726f722c547970654572726f722c547970654572726f722c547970654572726f722c547970654572726f72",
+          "string:61",
+          "string:61"
+        ],
+        "error": null,
+        "value": "string:6f6b"
+      }
+    },
+    {
+      "id": "string-object-prototype-changes-keep-brand",
+      "kind": "comparison",
+      "source": "let b=new String('abc'),value=String.prototype.valueOf,to=String.prototype.toString;Object.setPrototypeOf(b,null);test.record(value.call(b));test.record(to.call(b));test.record(Object.getOwnPropertyNames(b).join());test.record(Object.prototype.toString.call(b));let fake=Object.create(String.prototype);try{value.call(fake);}catch(e){test.record(e.name);}'ok';",
+      "source_sha256": "2f0de2e404165f95f66684024188331db963c0db04ed04323d58e2753bda61e3",
+      "reference": {
+        "ok": true,
+        "records": [
+          "string:616263",
+          "string:616263",
+          "string:302c312c322c6c656e677468",
+          "string:5b6f626a65637420537472696e675d",
+          "string:547970654572726f72"
+        ],
+        "error": null,
+        "value": "string:6f6b"
+      }
+    },
+    {
+      "id": "string-object-boxing-generic-object-apis",
+      "kind": "comparison",
+      "source": "test.record(Object.keys('abc').join());test.record(Object.values('abc').join());test.record(JSON.stringify(Object.entries('ab')));test.record(Object.getOwnPropertyNames('ab').join());test.record(Object.getOwnPropertyDescriptor('ab',0).value);test.record(Object.getOwnPropertyDescriptors('ab').length.value);test.record(Object.prototype.valueOf.call('ab').valueOf());'ok';",
+      "source_sha256": "f07da897b3234287a3303ff7f062397d02b3d67a682aba1f92b54e5fe466270d",
+      "reference": {
+        "ok": true,
+        "records": [
+          "string:302c312c32",
+          "string:612c622c63",
+          "string:5b5b2230222c2261225d2c5b2231222c2262225d5d",
+          "string:302c312c6c656e677468",
+          "string:61",
+          "number:4000000000000000",
+          "string:6162"
+        ],
+        "error": null,
+        "value": "string:6f6b"
+      }
+    },
+    {
+      "id": "string-object-assign-primitive-sources-and-targets",
+      "kind": "comparison",
+      "source": "test.record(JSON.stringify(Object.assign({},'ab')));let b=Object.assign('ab',{x:2});test.record(typeof b);test.record(b.valueOf());test.record(b.x);try{Object.assign('ab',{0:'z'});}catch(e){test.record(e.name);}'ok';",
+      "source_sha256": "4435c883a32b0779c54a8d82ace2040fbfe7750088707d59e34fb2adaf47228f",
+      "reference": {
+        "ok": true,
+        "records": [
+          "string:7b2230223a2261222c2231223a2262227d",
+          "string:6f626a656374",
+          "string:6162",
+          "number:4000000000000000",
+          "string:547970654572726f72"
+        ],
+        "error": null,
+        "value": "string:6f6b"
+      }
+    },
+    {
+      "id": "string-object-json-gap-and-replacer-conversion",
+      "kind": "comparison",
+      "source": "let space=new String('..');space.toString=function(){return '--';};test.record(JSON.stringify({a:1},null,space));let key=new String('x');key.toString=function(){return 'b';};test.record(JSON.stringify({a:1,b:2},[key]));let text=new String('raw');text.toString=function(){return 'changed';};test.record(JSON.stringify(text));'ok';",
+      "source_sha256": "e63573944aaecb71c8dc05276ae9b34cd73f8d0025bd3859286de84ee06cd6d3",
+      "reference": {
+        "ok": true,
+        "records": [
+          "string:7b0a2d2d2261223a20310a7d",
+          "string:7b2262223a327d",
+          "string:226368616e67656422"
+        ],
+        "error": null,
+        "value": "string:6f6b"
+      }
+    },
+    {
+      "id": "string-object-bound-constructor-and-identity",
+      "kind": "comparison",
+      "source": "let Bound=String.bind(null,'abc'),b=new Bound();test.record(b.valueOf());test.record(b instanceof String);test.record(b instanceof Bound);test.record(Object(b)===b);test.record(new Object(b)===b);test.record(Object('a')===Object('a'));'ok';",
+      "source_sha256": "61cdbb63c8cde8ba853301b51916191aec5fa212b3e05af083a22f5399416639",
+      "reference": {
+        "ok": true,
+        "records": [
+          "string:616263",
+          "boolean:true",
+          "boolean:true",
+          "boolean:true",
+          "boolean:true",
+          "boolean:false"
+        ],
+        "error": null,
+        "value": "string:6f6b"
+      }
+    },
+    {
+      "id": "string-object-receiver-write-errors",
+      "kind": "comparison",
+      "source": "let b=new String('abc');b[0]='z';b.length=20;test.record(b.valueOf());test.record(b.length);try{(function(){'use strict';b[0]='z';})();}catch(e){test.record(e.name);}try{(function(){'use strict';delete b[0];})();}catch(e){test.record(e.name);}Object.defineProperty(b,'extra',{get(){return 3;},enumerable:true});test.record(b.extra);'ok';",
+      "source_sha256": "4cf3ce8d2123e3e2c5356999920f08aaec6b66fead91247e4a29fe8fe65e099d",
+      "reference": {
+        "ok": true,
+        "records": [
+          "string:616263",
+          "number:4008000000000000",
+          "string:547970654572726f72",
+          "string:547970654572726f72",
+          "number:4008000000000000"
+        ],
+        "error": null,
+        "value": "string:6f6b"
+      }
+    },
+    {
+      "id": "string-object-primitive-setters-and-index-shadowing",
+      "kind": "comparison",
+      "source": "let log='',received;Object.defineProperty(String.prototype,'extra',{set(v){'use strict';log+=typeof this+':'+v;received=this;},configurable:true});'abc'.extra=4;test.record(log);test.record(received);Object.defineProperty(String.prototype,'0',{set(v){log+='wrong';},configurable:true});'abc'[0]=7;test.record(log);'abc'.untracked=1;try{(function(){'use strict';'abc'.untracked=1;})();}catch(e){test.record(e.name);}'ok';",
+      "source_sha256": "93828ffef21a41a935588af316173045a5c4b619233920052f7d8ce2aaec5197",
+      "reference": {
+        "ok": true,
+        "records": [
+          "string:737472696e673a34",
+          "string:616263",
+          "string:737472696e673a34",
+          "string:547970654572726f72"
+        ],
+        "error": null,
+        "value": "string:6f6b"
+      }
+    },
+    {
+      "id": "string-object-astral-iteration-and-method-coercion",
+      "kind": "comparison",
+      "source": "let b=new String('A😀Z');test.record(Array.from(b).join('|'));test.record(b.charCodeAt(1));test.record(b.codePointAt(1));test.record(b.slice(1,3));b.toString=function(){return 'changed';};test.record(b.slice(0,2));test.record(String.prototype.valueOf.call(b));'ok';",
+      "source_sha256": "37bca92382a1ae365dcbb6d092b6e510a7a3e33c830ef01648b951545aedffed",
+      "reference": {
+        "ok": true,
+        "records": [
+          "string:417cf09f98807c5a",
+          "number:40eb07a000000000",
+          "number:40ff600000000000",
+          "string:f09f9880",
+          "string:6368",
+          "string:41f09f98805a"
+        ],
+        "error": null,
+        "value": "string:6f6b"
+      }
+    },
+    {
+      "id": "string-object-long-box-without-enumeration",
+      "kind": "comparison",
+      "source": "let s='a';for(let i=0;i<16;i++)s+=s;let b=new String(s);test.record(b.length);test.record(b[65535]);test.record(b.valueOf()===s);test.record(Object.isFrozen(b));Object.preventExtensions(b);test.record(Object.isFrozen(b));'ok';",
+      "source_sha256": "1c74b78164672ebf5229a08cde8f8c38c43ecac7a16bfb7b6d6bffdf452fa10f",
+      "reference": {
+        "ok": true,
+        "records": [
+          "number:40f0000000000000",
+          "string:61",
+          "boolean:true",
+          "boolean:false",
+          "boolean:true"
+        ],
+        "error": null,
+        "value": "string:6f6b"
+      }
+    },
+    {
+      "id": "string-object-lone-surrogate-read-fatal",
+      "kind": "boundary",
+      "source": "try{new String('😀')[0];}catch(e){test.record('catch');}finally{test.record('finally');}'ok';",
+      "source_sha256": "ffd1f7e9a40e37fa5759b7e35849da2e1734eb8eadbaf3c3a6991862b8c1a29d",
+      "error_contains": "lone UTF-16",
+      "reference": {
+        "ok": true,
+        "records": [
+          "string:66696e616c6c79"
+        ],
+        "error": null,
+        "value": "string:6f6b"
+      }
+    },
+    {
+      "id": "string-object-enumeration-bound-fatal",
+      "kind": "boundary",
+      "source": "let s='a';for(let i=0;i<13;i++)s+=s;try{Object.keys(new String(s));}catch(e){test.record('catch');}finally{test.record('finally');}'ok';",
+      "source_sha256": "db095ce13742582333feb8103ee26f11c91eba89648ad1e8475f300114c35e13",
+      "error_contains": "Property enumeration limit",
+      "reference": {
+        "ok": true,
+        "records": [
+          "string:66696e616c6c79"
+        ],
+        "error": null,
+        "value": "string:6f6b"
+      }
+    },
+    {
+      "id": "string-object-retained-string-bound-fatal",
+      "kind": "boundary",
+      "source": "let s='a';for(let i=0;i<16;i++)s+=s;try{for(let i=0;i<40;i++)new String(s);}catch(e){test.record('catch');}finally{test.record('finally');}'ok';",
+      "source_sha256": "d533c07ff6777564cb7810fa6eb4168e05bf82d0039341b4d9847279913288f4",
+      "error_contains": "Retained value limit",
+      "reference": {
+        "ok": true,
+        "records": [
+          "string:66696e616c6c79"
+        ],
+        "error": null,
+        "value": "string:6f6b"
+      }
+    },
+    {
+      "id": "string-object-arena-bound-fatal",
+      "kind": "boundary",
+      "source": "try{for(var i=0;i<4096;i++)new String('a');}catch(e){test.record('catch');}finally{test.record('finally');}'ok';",
+      "source_sha256": "509261b35e1dbc6631343ffd185d752e196e0dda65ee6d989ec4000270b889be",
+      "error_contains": "Object identity limit",
+      "reference": {
+        "ok": true,
+        "records": [
+          "string:66696e616c6c79"
+        ],
+        "error": null,
+        "value": "string:6f6b"
+      }
+    },
+    {
+      "id": "string-object-copy-work-bound-fatal",
+      "kind": "boundary",
+      "source": "let s='a';for(let i=0;i<16;i++)s+=s;let b=new String(s);try{for(var i=0;i<1000;i++)b.valueOf();}catch(e){test.record('catch');}finally{test.record('finally');}'ok';",
+      "source_sha256": "304604a6ff99c347bfc4ab4f8990999ee1ee299636f1710f8fcbe396e4dd05d8",
+      "error_contains": "String/copy work limit",
+      "reference": {
+        "ok": true,
+        "records": [
+          "string:66696e616c6c79"
+        ],
+        "error": null,
+        "value": "string:6f6b"
+      }
+    }
+  ]
+}

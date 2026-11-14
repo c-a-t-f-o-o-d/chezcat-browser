@@ -1,0 +1,14 @@
+snapshot	home
+fill	q	rust browser
+snapshot	query-typed
+key	Enter
+wait	2500
+snapshot	first-results
+link	Rust
+snapshot	destination
+back
+snapshot	back
+fill	q	rust programming language
+key	Enter
+wait	2500
+snapshot	second-results

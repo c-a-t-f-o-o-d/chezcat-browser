@@ -1,0 +1,484 @@
+{
+  "schema_version": 1,
+  "scope": "Independent original finite defaults/destructuring/named-RegExp review. Cases frozen before inspecting implementation outcomes; resource/early-error assertions are separate from matching counts.",
+  "node": "v24.22.1",
+  "cases": [
+    {
+      "id": "default-undefined-only",
+      "group": "defaults",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "function f(a=7,b=9){test.record(a);test.record(b);}\nf();f(undefined,null);f(0,false);f('',NaN);\n'ok';\n",
+      "source_sha256": "266b3cec01e0a38202e11a5d7a6e99cfb8771f5b59362d2489fc437bb37e5395",
+      "note": ""
+    },
+    {
+      "id": "default-left-to-right-and-outer-effects",
+      "group": "defaults",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "var log='';function value(tag,x){log+=tag;return x;}\nfunction f(a=value('a',2),b=value('b',a+3),c=value('c',b+4)){return a+b+c;}\ntest.record(f());test.record(log);log='';test.record(f(10,undefined,30));test.record(log);\n'ok';\n",
+      "source_sha256": "4c82c44683c6f493bea6e8e011bba1775556c1d7d0c236ed3fe547433660efaa",
+      "note": ""
+    },
+    {
+      "id": "default-self-and-later-parameter-tdz",
+      "group": "defaults",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "var effects=0;function f(a=a){effects++;}function g(a=b,b=2){effects++;}\ntry{f();}catch(e){test.record(e.name);}try{g();}catch(e){test.record(e.name);}test.record(effects);\n'ok';\n",
+      "source_sha256": "20201e96f66adfed4ad4a0761c205f18a589dcc946afa3d9f3a5d67425c15723",
+      "note": ""
+    },
+    {
+      "id": "default-body-environment-isolation",
+      "group": "defaults",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "var outer=13;function f(a=outer,read=function(){return a;}){var outer=17;var a=19;return [a,read(),outer].join(',');}\ntest.record(f());function g(a=function(){return bodyOnly;}){var bodyOnly=23;return a;}\ntry{g()();}catch(e){test.record(e.name);}test.record(outer);\n'ok';\n",
+      "source_sha256": "4dda3702ab5b2c1d3553999c6bbdb15d90de5232890aa119c40ba5b50553a5cf",
+      "note": ""
+    },
+    {
+      "id": "default-arguments-are-unmapped",
+      "group": "defaults",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "function f(a=3,b=4){arguments[0]=30;a=31;b=32;test.record(arguments.length);test.record(arguments[0]);test.record(arguments[1]);return a+b;}\ntest.record(f(10,20));test.record(f());\nfunction g(a=arguments.length,b=arguments[0]){test.record(a);test.record(b);}\ng(undefined,8);g();\n'ok';\n",
+      "source_sha256": "fe92c6a8860c1f4922b9edb3596a1be669c2050a5b4fe50f8c91e81f9fd97036",
+      "note": ""
+    },
+    {
+      "id": "default-closure-persists-across-calls",
+      "group": "defaults",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "function factory(value=1,read=function(){return ++value;}){var value=99;return read;}\nvar a=factory(),b=factory(10);test.record(a());test.record(a());test.record(b());test.record(a());\n'ok';\n",
+      "source_sha256": "17c869d252d9a47b1b5574fb0c13ea90395591ae29321aa67b84d2b3b45e0938",
+      "note": ""
+    },
+    {
+      "id": "default-length-rest-and-bind",
+      "group": "defaults",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "function a(x,y=4,z){}function b(x=3,y){}function c(x,...tail){}function d(x,y=5,...tail){return [x,y,tail.join('|')].join(',');}\ntest.record(a.length);test.record(b.length);test.record(c.length);test.record(d.length);test.record(d.bind(null,2).length);test.record(d(2,undefined,6,7));\n'ok';\n",
+      "source_sha256": "8b45fac57f14d3a9eeef1188ac767e3a3ea096a916eff714a4ba90c77c62e3af",
+      "note": ""
+    },
+    {
+      "id": "default-arrow-method-and-construction",
+      "group": "defaults",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "var fn=(a=4,b=a+1)=>a+b,o={seed:8,read(x=this.seed){return x;}};\nfunction C(x=this.seed){this.value=x;}C.prototype.seed=12;\ntest.record(fn());test.record(o.read());test.record(new C().value);test.record(new C(15).value);\nfunction lexical(){var f=(a=this.seed)=>a;return f();}test.record(lexical.call(o));\n'ok';\n",
+      "source_sha256": "8960192c1cbe0184b05b3593911fb7487bfd60ede06e7050027be84ff5b9bbcc",
+      "note": ""
+    },
+    {
+      "id": "default-initializer-abrupt-and-skipped",
+      "group": "defaults",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "var log='',marker={};function fail(){log+='f';throw marker;}function later(){log+='l';return 2;}\nfunction f(a=fail(),b=later()){log+='b';}try{f();}catch(e){test.record(e===marker);}test.record(log);\nlog='';f(1,2);test.record(log);\n'ok';\n",
+      "source_sha256": "059ce4c2e09e4d3fd5a840a583d35e45cddf49be013103098f22ea982140bc94",
+      "note": ""
+    },
+    {
+      "id": "default-direct-eval-parameter-environment",
+      "group": "defaults",
+      "kind": "comparison",
+      "browser_global": true,
+      "source": "function f(a=eval('var local=3;local'),b=function(){return local;}){var local=4;return [a,b(),local].join(',');}\ntest.record(f());function g(a=eval('1+2')){return a;}test.record(g());\n'ok';\n",
+      "source_sha256": "6523d555c35024e846abf0922050627c3e5e7e7b27d881b4378bf6b79509ce3e",
+      "note": ""
+    },
+    {
+      "id": "default-anonymous-function-name-and-arguments-shadow",
+      "group": "defaults",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "function f(callback=function(){},arrow=()=>1){test.record(callback.name);test.record(arrow.name);}\nf();function g(arguments=5){return arguments;}test.record(g());test.record(g(8));\n'ok';\n",
+      "source_sha256": "2cae63d306a36992bd38768b5152e92e73f1aa78550f140c342226a4eab2ab63",
+      "note": ""
+    },
+    {
+      "id": "default-dynamic-function",
+      "group": "defaults",
+      "kind": "comparison",
+      "browser_global": true,
+      "source": "var f=Function('a=3','b=a+4','return a+b;');test.record(f());test.record(f(10));test.record(f.length);\ntry{Function('a=1','\"use strict\";return a;');}catch(e){test.record(e.name);}\n'ok';\n",
+      "source_sha256": "f0ec775cbd0df6161d18005fea06c4d10af4846a4a4a3dac07180114beb7e846",
+      "note": ""
+    },
+    {
+      "id": "destructure-binding-nested-defaults",
+      "group": "destructuring",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "let [a,[b=3],c=4]=[1,[],undefined];const {x:y=7,nested:{z=8}={}}={};\ntest.record([a,b,c,y,z].join(','));var {p:{q=9}={}}={p:{}};test.record(q);\n'ok';\n",
+      "source_sha256": "6fc219e37df460a2e76eb7b172f2b5c50531a6fb726d1a2bedbfb21632754881",
+      "note": ""
+    },
+    {
+      "id": "destructure-array-elision-rest",
+      "group": "destructuring",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "let [,a,...rest]=[1,,3,4];test.record(a);test.record(rest.join(','));test.record(Object.keys(rest).join(','));\nlet [x,...tail]='\ud83d\ude00ab';test.record(x);test.record(tail.join('|'));let [...empty]=[];test.record(empty.length);\n'ok';\n",
+      "source_sha256": "c54d9ffbdaf438b8b87a044851d90e8f618df029cafe8be1f0490c3ea5241865",
+      "note": ""
+    },
+    {
+      "id": "destructure-object-getters-computed-order",
+      "group": "destructuring",
+      "kind": "comparison",
+      "browser_global": true,
+      "source": "var log='';function key(){log+='k';return 'x';}function fallback(){log+='d';return 5;}\nvar source={get x(){log+='x';return undefined;},get y(){log+='y';return 7;}};\nlet {[key()]:a=fallback(),y:b}=source;test.record(a+b);test.record(log);\n'ok';\n",
+      "source_sha256": "558030b96bd8ab3ef4cbc4443dad7db0e851bea17ff128d2f07e3110b31dc708",
+      "note": ""
+    },
+    {
+      "id": "destructure-object-rest-symbols-and-descriptors",
+      "group": "destructuring",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "var s=Symbol('side'),o=Object.create({inherited:1});o.x=2;o[s]=3;\nObject.defineProperty(o,'hidden',{value:4});Object.defineProperty(o,'value',{enumerable:true,get:function(){return 5;}});\nlet {x,...rest}=o;test.record(x);test.record(Object.keys(rest).join(','));test.record(rest[s]);test.record(rest.inherited);\nvar d=Object.getOwnPropertyDescriptor(rest,'value');test.record(d.value);test.record(d.writable&&d.enumerable&&d.configurable);\nlet {[s]:side,...other}=o;test.record(side);test.record(Object.getOwnPropertySymbols(other).length);\n'ok';\n",
+      "source_sha256": "556170299074949677c358c52f1d8206b4e77d677b4683be09f85f55221bf31d",
+      "note": ""
+    },
+    {
+      "id": "destructure-assignment-return-and-target-order",
+      "group": "destructuring",
+      "kind": "comparison",
+      "browser_global": true,
+      "source": "var log='',o={},source={get x(){log+='g';return 11;}},a;\nfunction target(){log+='t';return o;}var result=({x:target().value}=source);\ntest.record(result===source);test.record(o.value);test.record(log);[a,o.value]=[12,13];test.record(a);test.record(o.value);\n'ok';\n",
+      "source_sha256": "da27c32725fbcf56acef81b3062c0b22b1e57de9c6f0af97706fa8496a7e2db9",
+      "note": ""
+    },
+    {
+      "id": "destructure-iterator-close-normal-and-elision",
+      "group": "destructuring",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "var log='',it={};it[Symbol.iterator]=function(){log+='i';var n=0;return {next:function(){log+='n';return {value:++n,done:false};},return:function(){log+='r';return {};}};};\nlet [a,,b]=it;test.record(a);test.record(b);test.record(log);log='';let []=it;test.record(log);\n'ok';\n",
+      "source_sha256": "a3d21f8908139125f907f93e062157a51a9d2530633d530e22f4bd115b75a3cc",
+      "note": ""
+    },
+    {
+      "id": "destructure-iterator-close-on-default-throw",
+      "group": "destructuring",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "var log='',marker={},it={};it[Symbol.iterator]=function(){return {next:function(){log+='n';return {value:undefined,done:false};},return:function(){log+='r';throw 99;}};};\nfunction fail(){log+='f';throw marker;}try{let [a=fail()]=it;}catch(e){test.record(e===marker);}test.record(log);\n'ok';\n",
+      "source_sha256": "b6b28a603542ae92c6102100096bd5a50b48183220185c4f80ba908b02cd917a",
+      "note": ""
+    },
+    {
+      "id": "destructure-iterator-next-error-does-not-close",
+      "group": "destructuring",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "var log='',marker={},it={};it[Symbol.iterator]=function(){return {next:function(){log+='n';throw marker;},return:function(){log+='r';return {};}};};\ntry{let [a]=it;}catch(e){test.record(e===marker);}test.record(log);\n'ok';\n",
+      "source_sha256": "250429483a710d8cdd0adb4374853493b685b9b14e47d17565d36994c85c1f2e",
+      "note": ""
+    },
+    {
+      "id": "destructure-parameters-and-defaults",
+      "group": "destructuring",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "function f({x=2,y=3}={},[a,b=4]=[5],...tail){return [x,y,a,b,tail.length].join(',');}\ntest.record(f());test.record(f({x:8},[9,10],11));test.record(f.length);\nvar g=({x},[y])=>x+y;test.record(g({x:12},[13]));\n'ok';\n",
+      "source_sha256": "c7b403e949a022a6d8773891f325937cbc97a00962f51a51f8213c2667648086",
+      "note": ""
+    },
+    {
+      "id": "destructure-for-of-and-catch",
+      "group": "destructuring",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "var callbacks=[];for(let [a,b] of [[1,2],[3,4]])callbacks.push(function(){return a+b;});\ntest.record(callbacks[0]());test.record(callbacks[1]());\ntry{throw {value:7,nested:[8]};}catch({value,nested:[other]}){test.record(value+other);}\n'ok';\n",
+      "source_sha256": "afb0220cf798951c1f2123f786f6c3f43eea7677a2e2cb781df98de2bbbb3929",
+      "note": ""
+    },
+    {
+      "id": "destructure-binding-tdz-and-nullish",
+      "group": "destructuring",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "try{let [a=a]=[];}catch(e){test.record(e.name);}try{let {x:y=z,z}= {z:1};}catch(e){test.record(e.name);}\ntry{let {}=null;}catch(e){test.record(e.name);}try{let []=undefined;}catch(e){test.record(e.name);}\n'ok';\n",
+      "source_sha256": "a10a15dc666bd08f696e56e4a5d7cdb3d0d8fd238322bd29ed2811947f20c70f",
+      "note": ""
+    },
+    {
+      "id": "destructure-empty-rest-and-inherited-read",
+      "group": "destructuring",
+      "kind": "comparison",
+      "browser_global": true,
+      "source": "var source=Object.create({x:17});let {x,...rest}=source;test.record(x);test.record(Object.keys(rest).length);\nlet {}=19;var a,b;({x:a=2,y:b=3}={x:null});test.record(a);test.record(b);\n'ok';\n",
+      "source_sha256": "458f59f9a1fc97efb2c6528e9df02ac49f2db128d49398e917f55ab0d8398cbe",
+      "note": ""
+    },
+    {
+      "id": "destructure-default-function-names",
+      "group": "destructuring",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "let [a=function(){}]=[],{b=()=>1}={};test.record(a.name);test.record(b.name);\nvar c;({c=function(){}}={});test.record(c.name);\n'ok';\n",
+      "source_sha256": "5ef5de9771584cf524ea5b37778dc5271865c1b2f9c884d9520143c42cbd83c5",
+      "note": ""
+    },
+    {
+      "id": "destructure-rest-live-reads-and-excluded-getter",
+      "group": "destructuring",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "var log='',o={get x(){log+='x';return 1;},get y(){log+='y';delete o.z;o.added=9;return 2;},z:3};\nlet {x,...rest}=o;test.record(x);test.record(log);test.record(Object.keys(rest).join(','));test.record(rest.y);test.record(rest.z);test.record(rest.added);\n'ok';\n",
+      "source_sha256": "58cb739f5946da3282e39c52005221144947cd6049ad672bdfad77f5d931037f",
+      "note": ""
+    },
+    {
+      "id": "named-capture-exec-groups-shape",
+      "group": "named-regexp",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "var m=/(?<left>a)(b)(?<right>c)?/.exec('ab');test.record(m[0]);test.record(m[1]);test.record(m[2]);test.record(m[3]);\ntest.record(Object.getPrototypeOf(m.groups)===null);test.record(Object.keys(m.groups).join(','));test.record(m.groups.left);test.record(m.groups.right);\nvar d=Object.getOwnPropertyDescriptor(m.groups,'left');test.record(d.writable&&d.enumerable&&d.configurable);\n'ok';\n",
+      "source_sha256": "fe259764d73572916391dd2795ff6ba275a2ca83a7b8b395a2ed309b4919b473",
+      "note": ""
+    },
+    {
+      "id": "named-capture-template-replacement",
+      "group": "named-regexp",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "test.record('ab ac'.replace(/a(?<tail>b|c)/g,'[$<tail>][$1][$<absent>]'));\ntest.record('ab'.replace(/(?<x>a)(?<optional>z)?b/,'$<x>-$<optional>-$<absent>'));\ntest.record('a'.replace(/a/,'$<x>'));test.record('a'.replace(/(?<x>a)/,'$<x'));\n'ok';\n",
+      "source_sha256": "d11dd98d61bc7087fde4080794810427a078f883a6246d42602d7e9fdf8857d1",
+      "note": ""
+    },
+    {
+      "id": "named-capture-replacer-argument-and-receiver",
+      "group": "named-regexp",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "var out='xab'.replace(/(?<first>a)(?<last>b)/,function(match,a,b,offset,input,groups){'use strict';\ntest.record(this===undefined);test.record(arguments.length);test.record(match);test.record(offset);test.record(input);\ntest.record(Object.getPrototypeOf(groups)===null);return groups.last+groups.first;});test.record(out);\n'ok';\n",
+      "source_sha256": "4a45ab2ff7736f49be0b6484b7bf9a84836330de063d72d704974592a894bd12",
+      "note": ""
+    },
+    {
+      "id": "named-capture-replaceall-fresh-groups",
+      "group": "named-regexp",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "var previous;test.record('ab ab'.replaceAll(/(?<a>a)(?<b>b)/g,function(match,a,b,offset,input,groups){\ntest.record(previous===groups);test.record(groups.a);previous=groups;groups.a='changed';return groups.b;}));\n'ok';\n",
+      "source_sha256": "f86b5b410249333e53f03ca7ff15b8d0f6e48c9eb1db9ebd46d0aa036a375373",
+      "note": ""
+    },
+    {
+      "id": "named-capture-backreference",
+      "group": "named-regexp",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "var re=/(?<letter>a|b)\\k<letter>/g;test.record(re.exec('abba')[0]);test.record(re.lastIndex);test.record(re.exec('abba'));\ntest.record(/\\k<later>(?<later>x)/.test('x'));test.record(/(?<x>a)?\\k<x>b/.test('b'));\n'ok';\n",
+      "source_sha256": "fe1b3eb39c4ddcd317b87a222046c58191dd8601a7468810baa8cddd29a93c1b",
+      "note": ""
+    },
+    {
+      "id": "named-capture-backtracking-and-lastindex",
+      "group": "named-regexp",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "var re=/(?<x>a|ab)b/g,m=re.exec('abb');test.record(m[0]);test.record(m.groups.x);test.record(re.lastIndex);\ntest.record(/(?<x>a)+/.exec('aaa').groups.x);test.record(/(?:(?<x>a)|b)+/.exec('ab').groups.x);\n'ok';\n",
+      "source_sha256": "d018c114bc5f27abe0b820692ed8b732b4c9492e3773305720fd4e8eee242c5d",
+      "note": ""
+    },
+    {
+      "id": "named-capture-constructor-and-source",
+      "group": "named-regexp",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "var re=new RegExp('(?<item>cat)','g');test.record(re.source);test.record(re.flags);test.record(re.exec('cat').groups.item);\ntest.record(new RegExp(re).exec('cat').groups.item);\n'ok';\n",
+      "source_sha256": "cdebf33f435a6f49760f9dac1a827abe8ff952a1b9e450f76cad805a6b5c116b",
+      "note": ""
+    },
+    {
+      "id": "named-capture-identity-k-without-names",
+      "group": "named-regexp",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "test.record(/\\k<plain>/.test('k<plain>'));test.record(new RegExp('\\\\k<plain>').test('k<plain>'));\ntest.record(/[\\k]/.test('k'));\n'ok';\n",
+      "source_sha256": "03b8114700bf59529f8151015f4ddda173eefeea033ddbfb0e52c06c9c571888",
+      "note": ""
+    },
+    {
+      "id": "named-capture-lookaround-and-escaped-identifier",
+      "group": "named-regexp",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "test.record(/(?=(?<x>a))a/.exec('a').groups.x);test.record(/(?<x>a)(?!z)/.exec('a').groups.x);\ntest.record(new RegExp('(?<\\\\u0061>x)\\\\k<a>').test('xx'));\n'ok';\n",
+      "source_sha256": "7fcd20b8e785f1441a5237c1955e81143a79cae6c03e333346aea72a72f8b4d3",
+      "note": ""
+    },
+    {
+      "id": "named-capture-invalid-dynamic-patterns",
+      "group": "named-regexp",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "for(var pattern of ['(?<x>a)(?<x>b)','(?<1x>a)','(?<>a)','(?<x>a)\\\\k<missing>','(?<x>a)\\\\k<','(?<x>a)\\\\k']){\ntry{new RegExp(pattern);test.record('unexpected success');}catch(e){test.record(e.name);}}\n'ok';\n",
+      "source_sha256": "a4d8eb66a9dcef8f6f2807a4bac603f3ef54940d9cc9f1993c6458b2fb752203",
+      "note": ""
+    },
+    {
+      "id": "named-capture-disjoint-duplicate-alternatives",
+      "group": "named-regexp",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "var re=/(?:(?<x>a)|(?<x>b))\\k<x>/g,m=re.exec('aabb');test.record(m[0]);test.record(m.groups.x);test.record(Object.keys(m.groups).join(','));\nm=re.exec('aabb');test.record(m[0]);test.record(m.groups.x);test.record(m[1]);test.record(m[2]);\ntest.record('a b'.replace(/(?<x>a)|(?<x>b)/g,'$<x>!'));\n'ok';\n",
+      "source_sha256": "e6da8a4ff93fba4c8cfe2428513fb64477f077f32cf50ea24423a3ec9c0ea79d",
+      "note": ""
+    },
+    {
+      "id": "named-capture-backward-and-numbered-reference",
+      "group": "named-regexp",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "test.record(/(?<=(?<x>a))\\k<x>/.exec('aa').groups.x);test.record(/(a)\\1/.test('aa'));test.record(/\\1(a)/.test('a'));\ntest.record(/(?<x>a)(b)\\1\\2/.test('abab'));test.record(/(?<x>ab)\\k<x>/i.test('abAB'));\n'ok';\n",
+      "source_sha256": "2c03a4ddccbbb9ed4a200b2d82f2f99b92f7a463aae9939cf5adfd68aa94cfec",
+      "note": ""
+    },
+    {
+      "id": "default-duplicate-parameters",
+      "group": "defaults",
+      "kind": "early_error",
+      "browser_global": false,
+      "source": "test.record('must not execute');\nfunction f(a=1,a){}\n'ok';\n",
+      "source_sha256": "94408fddecb64028c7f5a55b2bc4c71d2279528718ef413ae7f77f94c882261a",
+      "note": ""
+    },
+    {
+      "id": "default-strict-directive",
+      "group": "defaults",
+      "kind": "early_error",
+      "browser_global": false,
+      "source": "test.record('must not execute');\nfunction f(a=1){\"use strict\";}\n'ok';\n",
+      "source_sha256": "fcdb34829419c07f7040506852b272ba9008426f4fdb4e71793acf66719765bd",
+      "note": ""
+    },
+    {
+      "id": "default-rest-initializer",
+      "group": "defaults",
+      "kind": "early_error",
+      "browser_global": false,
+      "source": "test.record('must not execute');\nfunction f(...rest=[]){}\n'ok';\n",
+      "source_sha256": "781753cb5fd9377ca6043e4a93bef8f55ed6a8b1f5c8efb3a6e2e803f15d09de",
+      "note": ""
+    },
+    {
+      "id": "default-arrow-duplicate",
+      "group": "defaults",
+      "kind": "early_error",
+      "browser_global": false,
+      "source": "test.record('must not execute');\nvar f=(a,a=2)=>a;\n'ok';\n",
+      "source_sha256": "35feebdd91780fad1fb91cce3eb2138e085a9c03d98e5ad64b908e6dc9013e13",
+      "note": ""
+    },
+    {
+      "id": "destructure-duplicate-lexical",
+      "group": "destructuring",
+      "kind": "early_error",
+      "browser_global": false,
+      "source": "test.record('must not execute');\nlet [a,a]=[1,2];\n'ok';\n",
+      "source_sha256": "a246186ce6b1a368a3f6666a1cd84a6d2708bc8525b3607ceb7b1e1c6fcaa77f",
+      "note": ""
+    },
+    {
+      "id": "destructure-missing-initializer",
+      "group": "destructuring",
+      "kind": "early_error",
+      "browser_global": false,
+      "source": "test.record('must not execute');\nlet {x};\n'ok';\n",
+      "source_sha256": "5f5cfc44d85653fc6814307e41cabb09cbbcd0134089a0c1d80e1b0f2bf93e90",
+      "note": ""
+    },
+    {
+      "id": "destructure-rest-followed-by-item",
+      "group": "destructuring",
+      "kind": "early_error",
+      "browser_global": false,
+      "source": "test.record('must not execute');\nlet [...tail,x]=[1,2];\n'ok';\n",
+      "source_sha256": "a0adc7bab5d8970bd10fd3da8897d364630469b815050f9374b5c07255e10b55",
+      "note": ""
+    },
+    {
+      "id": "destructure-rest-trailing-comma",
+      "group": "destructuring",
+      "kind": "early_error",
+      "browser_global": false,
+      "source": "test.record('must not execute');\nlet [...tail,]=[1];\n'ok';\n",
+      "source_sha256": "4f59e3abe3c87234959221cbe7da61bebc0a52b48e586e0a39956a3295001752",
+      "note": ""
+    },
+    {
+      "id": "destructure-object-rest-default",
+      "group": "destructuring",
+      "kind": "early_error",
+      "browser_global": false,
+      "source": "test.record('must not execute');\nlet {...tail={}}={};\n'ok';\n",
+      "source_sha256": "7934dcaa18fea3b834473a2a6da804d0e6ad3a2d34e12c4043915fc3e5144aa7",
+      "note": ""
+    },
+    {
+      "id": "destructure-invalid-assignment-target",
+      "group": "destructuring",
+      "kind": "early_error",
+      "browser_global": false,
+      "source": "test.record('must not execute');\n([1]=[2]);\n'ok';\n",
+      "source_sha256": "8f954d006e7a24a37018656de41214c90ff6091a3275f9f18077d6f78bc3099e",
+      "note": ""
+    },
+    {
+      "id": "destructure-parameter-strict-directive",
+      "group": "destructuring",
+      "kind": "early_error",
+      "browser_global": false,
+      "source": "test.record('must not execute');\nfunction f({x}){\"use strict\";}\n'ok';\n",
+      "source_sha256": "4c7ad96f100b384743b0e4695058d206c2d84c3f1b57a6906d766ba63f8c39f8",
+      "note": ""
+    },
+    {
+      "id": "named-capture-invalid-literal-name",
+      "group": "named-regexp",
+      "kind": "early_error",
+      "browser_global": false,
+      "source": "test.record('must not execute');\nvar re=/(?<1x>a)/;\n'ok';\n",
+      "source_sha256": "0ce8f49acf256b4ab63168cc375d9c0ec285da744d72839696535138b801b4e4",
+      "note": ""
+    },
+    {
+      "id": "named-capture-duplicate-literal",
+      "group": "named-regexp",
+      "kind": "early_error",
+      "browser_global": false,
+      "source": "test.record('must not execute');\nvar re=/(?<x>a)(?<x>b)/;\n'ok';\n",
+      "source_sha256": "58dfa8d12384e35c46b35e448ab6134e9588ce8dbae78b399798f6c55ff55b72",
+      "note": ""
+    },
+    {
+      "id": "named-capture-invalid-literal-reference",
+      "group": "named-regexp",
+      "kind": "early_error",
+      "browser_global": false,
+      "source": "test.record('must not execute');\nvar re=/(?<x>a)\\k<missing>/;\n'ok';\n",
+      "source_sha256": "2236b5bf739fe2491d523da53c91dedb7747647a7539b3ece5bc26b44c7740df",
+      "note": ""
+    },
+    {
+      "id": "named-capture-class-k-with-names",
+      "group": "named-regexp",
+      "kind": "early_error",
+      "browser_global": false,
+      "source": "test.record('must not execute');\nvar re=/(?<x>a)[\\k]/;\n'ok';\n",
+      "source_sha256": "3537273cf135b9bbc9172d9083e59f0869dd02a7b4539bdcb039a35b5dae81d5",
+      "note": ""
+    }
+  ]
+}

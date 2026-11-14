@@ -1,0 +1,34 @@
+name: Offline Windows verification
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-2025
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.14.8'
+      - name: Install pinned Rust
+        run: rustup toolchain install 1.99.1 --profile minimal --component clippy --no-self-update
+      - name: Normal tests, build, PE and local journeys
+        run: python tools/verify_offline.py
+      - name: Save bounded identity reports
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: offline-verification
+          path: |
+            results/verification/latest-offline.json
+            results/verification/offline/*/verification.json
+            results/verification/offline/*/build-info.json
+          if-no-files-found: ignore
+          retention-days: 7

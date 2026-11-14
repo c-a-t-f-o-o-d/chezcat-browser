@@ -1,0 +1,7 @@
+{
+  "id": "string-object-retained-string-bound-fatal",
+  "source_sha256": "d533c07ff6777564cb7810fa6eb4168e05bf82d0039341b4d9847279913288f4",
+  "original_error_contains": "Retained value limit",
+  "accepted_error_contains": "String/copy work limit",
+  "reason": "The existing per-job copy quota is reached before the retained-value quota. Original fixture and actual result are preserved. A separate Rust regression allocates String payloads across fresh jobs and verifies the 2 MiB retained-value limit before further object allocation."
+}

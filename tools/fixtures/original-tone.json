@@ -1,0 +1,10 @@
+{
+  "scope": "Author an original quiet stereo PCM scene using Python's standard library.",
+  "frames": 96000,
+  "channels": 2,
+  "sample_rate": 48000,
+  "bits": 16,
+  "duration_seconds": 2,
+  "wav_sha256": "4ca3b5d65a1524f4c26d7ecfcc50664632828035465691267b5ecd8e93fba679",
+  "pcm_sha256": "bf184837287154a09aecd84fae1a56de3039734360d6ad00eb61b512026b7bc6"
+}

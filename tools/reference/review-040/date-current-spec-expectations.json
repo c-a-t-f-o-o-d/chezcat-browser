@@ -1,0 +1,47 @@
+{
+  "scope": "Explicit current-ECMA algorithm assertions, independently derived before inspecting ChezCat Date outputs. Original fixtures and observed Node outputs are unchanged. These cases never count as Node matches.",
+  "current_source_date_result_inspected_before_recording": false,
+  "fixture_sha256": "89d51f6563bc23ff82ae28a010c37133dab47973aa06a46765cc10edcd97edb2",
+  "references_retrieved": "ECMAScript2027draft,21.4.4.29/21.4.4.33; retrieved2026-11-11",
+  "cases": [
+    {
+      "id": "date-utc-setter-snapshots-before-conversion",
+      "source_sha256": "77bed879c367ba35739d73b9ea36436f8a03b73ecd74b8b878916ab48ccd056f",
+      "expected_ok": true,
+      "expected_value": "string:6f6b",
+      "expected_records": [
+        "number:426b8d59f5800000",
+        "string:323030302d30312d30315430303a30303a30302e3030305a",
+        "string:79",
+        "number:426bb354dc000000",
+        "string:323030302d30322d32395430303a30303a30302e3030305a",
+        "string:6d64"
+      ],
+      "reason": "setUTCFullYear/setUTCMonth snapshot DateValue before converting arguments. Setter callbacks mutate the live object but do not replace that snapshot used for omitted fields and day calculations. The independently derived final dates are 2000-01-01 and 2000-02-29.",
+      "primary_references": [
+        "https://tc39.es/ecma262/multipage/numbers-and-dates.html#sec-date.prototype.setutcfullyear",
+        "https://tc39.es/ecma262/multipage/numbers-and-dates.html#sec-date.prototype.setutcmonth"
+      ]
+    },
+    {
+      "id": "date-invalid-setter-callback-effects-and-full-year-reset",
+      "source_sha256": "1eac504d6ee81e82ee3012f9a94cbe101b45b1c6e536b808c2fb2f293f5fb02a",
+      "expected_ok": true,
+      "expected_value": "string:6f6b",
+      "expected_records": [
+        "boolean:true",
+        "number:405ec00000000000",
+        "string:6d",
+        "number:426b8d59f5800000",
+        "string:323030302d30312d30315430303a30303a30302e3030305a",
+        "boolean:true",
+        "boolean:true"
+      ],
+      "reason": "setUTCMonth snapshots NaN, performs the observable month conversion, then returns NaN without assigning DateValue; the callback-set123 remains. setUTCFullYear subsequently initializes its NaN snapshot to epoch and writes2000-01-01.",
+      "primary_references": [
+        "https://tc39.es/ecma262/multipage/numbers-and-dates.html#sec-date.prototype.setutcmonth",
+        "https://tc39.es/ecma262/multipage/numbers-and-dates.html#sec-date.prototype.setutcfullyear"
+      ]
+    }
+  ]
+}

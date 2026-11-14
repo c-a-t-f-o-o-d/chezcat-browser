@@ -1,0 +1,30 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>ChezCat 0.41 fixture pending</title>
+<style>body{margin:24px;font-family:sans-serif;font-size:18px;background:#f7f8fa;color:#182238}h1{font-size:28px}pre{font-size:16px;color:#145d32;white-space:pre-wrap}p{max-width:840px}</style>
+</head><body><h1 id="heading">ChezCat 0.41 compatibility fixture</h1>
+<p>This original local fixture checks the new capabilities in the page runtime. URL values below are local calculations; this page makes no requests to Google, Bing or another website.</p>
+<pre id="results">JavaScript has not finished.</pre>
+<script>
+var results=[];
+function expect(ok,label){if(!ok)throw Error(label);results.push('PASS: '+label);}
+var boxed=new String('A😀Z'),shape=Object.getOwnPropertyDescriptor(boxed,0);
+expect(boxed.length===4&&boxed.valueOf()==='A😀Z'&&shape.value==='A'&&!shape.writable&&shape.enumerable&&!shape.configurable&&Object.keys(boxed).join(',')==='0,1,2,3','String objects, UTF-16 length and immutable index descriptors');
+var options={},skipped=0;options.key||='Enter';options.key||=(skipped++,'wrong');options.enabled??=false;options.enabled&&=(skipped++,true);
+expect(options.key==='Enter'&&options.enabled===false&&skipped===0,'logical assignments and skipped right-hand expressions');
+var power=2;power**=3;
+expect(2**3**2===512&&power===8&&Object.is((-0)**3,-0)&&Object.is(NaN,NaN)&&!Object.is(0,-0),'Number exponentiation and SameValue comparisons');
+var target=new URL('../search?old=1','https://EXAMPLE.test:443/section/page');
+expect(target.href==='https://example.test/search?old=1'&&target.origin==='https://example.test'&&target.pathname==='/search','HTTP(S) URL parsing and relative resolution');
+var params=target.searchParams;target.search='?q=old';params.set('q','beta + café');
+expect(params===target.searchParams&&new URL(target.href).searchParams.get('q')==='beta + café'&&target.search==='?q=beta+%2B+caf%C3%A9','live URL/query coupling and UTF-8 form encoding');
+var query=new URLSearchParams([['b','1'],['a','2'],['b','3']]);query.sort();
+expect(query.toString()==='a=2&b=1&b=3'&&query.getAll('b').join(',')==='1,3'&&query.size===3,'stable query sorting and duplicate values');
+expect(Array.from(query.keys()).join(',')==='a,b,b'&&Object.fromEntries(query).b==='3','query iterators and existing iterable helpers');
+Promise.resolve({then(resolve){resolve(new String('second search'));}}).then(function(value){
+params.set('q',value);
+expect(JSON.parse(JSON.stringify({query:value,url:target})).query==='second search'&&target.searchParams.get('q')==='second search','Promise resolution, String conversion and URL JSON serialization');
+document.getElementById('results').textContent=results.join('\n');
+document.getElementById('heading').textContent='All eight local checks passed';
+document.title='ChezCat 0.41 fixture passed';
+});
+</script></body></html>

@@ -1,0 +1,303 @@
+{
+  "scope": "Original finite supplementary 0.41 operator inputs; created before production changes. Current-spec key caching is counted separately from Node equality.",
+  "spec_urls": [
+    "https://tc39.es/ecma262/multipage/ecmascript-language-expressions.html#sec-assignment-operators",
+    "https://tc39.es/ecma262/multipage/ecmascript-language-expressions.html#sec-exp-operator",
+    "https://tc39.es/ecma262/multipage/ecmascript-data-types-and-values.html#sec-numeric-types-number-exponentiate",
+    "https://tc39.es/ecma262/multipage/ecmascript-data-types-and-values.html#sec-getvalue"
+  ],
+  "cases": [
+    {
+      "id": "operator-supplement-logical-values",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "for(var v of [false,0,-0,NaN,'',null,undefined,true,1,'x',{}]){var a=v,b=v,c=v;test.record(a&&=7);test.record(b||=8);test.record(c??=9);} 'ok';",
+      "source_sha256": "fd4adc032da331657876d13a71898b9187a03a9083216f105a2912578c9db540"
+    },
+    {
+      "id": "operator-supplement-logical-bindings",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "const a=0,b=4,c=null;test.record(a&&=9);test.record(b||=9);test.record(b??=9);for(var f of [()=>a||=1,()=>b&&=1,()=>c??=1]){try{f();}catch(e){test.record(e.name);}}'ok';",
+      "source_sha256": "f2de89bb7d6a569eb09bf5c57d484a25ec6bacb505eb09c97f356ce3c949d2d8"
+    },
+    {
+      "id": "operator-supplement-logical-accessors",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "var log='',value=0,o={get x(){log+='g';return value;},set x(v){log+='s';value=v;}};function base(){log+='b';return o;}function key(){log+='k';return 'x';}function rhs(){log+='r';return 5;}test.record(base()[key()]||=rhs());test.record(log);log='';test.record(base()[key()]||=rhs());test.record(log);log='';test.record(base()[key()]&&=rhs());test.record(log);log='';test.record(base()[key()]??=rhs());test.record(log);'ok';",
+      "source_sha256": "f293656dd2828605028ed8b7bf92c57ae60cccdacde42fcf814551d9a1d15a89"
+    },
+    {
+      "id": "operator-supplement-logical-abrupt",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "var log='',o={get x(){log+='g';throw 'get';},set x(v){log+='s';}},k={toString(){log+='k';throw 'key';}};function rhs(){log+='r';throw 'rhs';}for(var f of [()=>o.x||=rhs(),()=>o[k]&&=rhs(),()=>null[k]??=rhs()]){try{f();}catch(e){test.record(e.name||e);}test.record(log);log='';}o={get x(){log+='g';return 0;},set x(v){log+='s';throw 'set';}};try{o.x||=rhs();}catch(e){test.record(e);}test.record(log);log='';try{o.x||=3;}catch(e){test.record(e);}test.record(log);'ok';",
+      "source_sha256": "51714750e9ed64a76670d8cfa2aa20be31200d395062cafd2d54b4a1fd9d64f0"
+    },
+    {
+      "id": "operator-supplement-logical-strict-writes",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "'use strict';var a={},b={},c=Object.preventExtensions({});Object.defineProperty(a,'x',{value:4});Object.defineProperty(b,'x',{get:function(){return 0;}});test.record(a.x||=9);test.record(a.x??=9);for(var f of [()=>a.x&&=3,()=>b.x||=3,()=>c.x??=3]){try{f();}catch(e){test.record(e.name);}}'ok';",
+      "source_sha256": "cde1ffe99e8dc18a3fcef5304f41b21e33b2c0fd1cb92b6f84f5d11dc2f4e2d7"
+    },
+    {
+      "id": "operator-supplement-logical-symbol-identity",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "var s=Symbol('x'),o={},v={n:1};o[s]=null;test.record((o[s]??=v)===v);test.record(o[s]===v);test.record((o[s]||={})===v);test.record((o[s]&&=v)===v);test.record(Object.getOwnPropertySymbols(o)[0]===s);'ok';",
+      "source_sha256": "4d4d9f31714a3cc245588977ca25717dbb58369e5d2ad061b78e4e492f990c4e"
+    },
+    {
+      "id": "operator-supplement-logical-no-coercion",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "var o={valueOf(){throw 'valueOf';},toString(){throw 'toString';}},a=o,b=o,c=o;test.record((a||=2)===o);test.record((b??=3)===o);test.record(c&&=4);'ok';",
+      "source_sha256": "d11ac8d596ac8d1edc375d6b519ecc74d3b79e79eef7f27bd7c61f704e55a8e4"
+    },
+    {
+      "id": "operator-supplement-logical-chain",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "var a=null,b=0,c=1,n=0;test.record(a??=b||=c&&=++n);test.record([a,b,c,n].join());test.record(a||=b&&=++n);test.record(n);'ok';",
+      "source_sha256": "154d0e4761645c981c248ffa94e385d1b46638bd5ecb875805d7e01dbdd992f7"
+    },
+    {
+      "id": "operator-supplement-logical-name-inference",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "var a,b,c=true,d,e; a ||= function(){return a;};b??=()=>3;c&&=(function(){});d||=function explicit(){};e||=a;test.record([a.name,b.name,c.name,d.name,e.name].join('|'));test.record(a()===a);var x,y;x||=y??=function(){};test.record(x.name+':'+y.name);var o={};o.f||=function(){};test.record(o.f.name);'ok';",
+      "source_sha256": "02b33c8076c8329cbbf47f572cdf184f205387c967cda6a80b7b3bba04490b16"
+    },
+    {
+      "id": "operator-supplement-logical-name-no-private-binding",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "var selected;selected||=function(){return selected;};var first=selected;selected=9;test.record(first());var named;named||=function explicit(){return explicit;};test.record(named()===named);test.record(Object.getOwnPropertyDescriptor(named,'name').writable);'ok';",
+      "source_sha256": "feecb1b25887dcfa71f4da7107ba1475b4c88eebc4e8ed9231294b464db5596c"
+    },
+    {
+      "id": "operator-supplement-power-precedence",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "test.record(2**3**2);test.record(2*3**2);test.record(3**2*2);test.record(2**-3);test.record((-2)**3);test.record(-(2**2));test.record(2**(3**2));test.record((2**3)**2);var x=1;test.record(++x**2);test.record(x++**2);test.record(x);'ok';",
+      "source_sha256": "17dc24427f31b8b83741ef1868e87d65d75c15695d7567508da4250e28b4edb2"
+    },
+    {
+      "id": "operator-supplement-power-coercion",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "var log='';function v(n){log+='e'+n;return {valueOf(){log+='v'+n;return n;}};}test.record(v(2)**v(3)**v(2));test.record(log);log='';var a={valueOf(){log+='l';return 2;}},b={valueOf(){log+='r';return 4;}};test.record(a**b);test.record(log);test.record('3'**true);test.record(null**0);'ok';",
+      "source_sha256": "23fa7a55b63559eec458b10f4d673fa8a442ac7ea9166cf941a66cd6318f4b8f"
+    },
+    {
+      "id": "operator-supplement-power-symbol-abrupt",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "var log='',r={valueOf(){log+='r';return 2;}};function right(){log+='e';return r;}try{Symbol('x')**right();}catch(e){test.record(e.name);}test.record(log);log='';var a={valueOf(){log+='a';throw 'left';}};try{a**right();}catch(e){test.record(e);}test.record(log);'ok';",
+      "source_sha256": "2d675d6a27272e975e33112769fa51ee032eff6491f7574e755fa8cb7ca84c28"
+    },
+    {
+      "id": "operator-supplement-power-assignment",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "var log='',v=3,o={get x(){log+='g';return v;},set x(n){log+='s';v=n;}};function base(){log+='b';return o;}function key(){log+='k';return 'x';}test.record(base()[key()]**=(log+='r',2));test.record(log);test.record(v);var a=2,b=3;a**=b**=2;test.record(a);test.record(b);'ok';",
+      "source_sha256": "be87dc4d68ed20e39cb53545ff0da7df54ffc9d33c4979ec44ef6f1c52d78c51"
+    },
+    {
+      "id": "operator-supplement-power-specials",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "var bases=[NaN,0,-0,Infinity,-Infinity,1,-1,2,-2,0.5,-0.5],exps=[NaN,0,-0,Infinity,-Infinity,1,2,3,-1,-2,-3,0.5];for(var b of bases){for(var e of exps){test.record(b**e);}}'ok';",
+      "source_sha256": "b8b5b1291a3c0dcb278dd39623699df0580b9487d2826bd7e89881a186d457cb"
+    },
+    {
+      "id": "operator-supplement-math-pow-specials-preserved",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "var bases=[NaN,0,-0,Infinity,-Infinity,1,-1,2,-2,0.5,-0.5],exps=[NaN,0,-0,Infinity,-Infinity,1,2,3,-1,-2,-3,0.5];for(var b of bases){for(var e of exps){test.record(Math.pow(b,e));}}'ok';",
+      "source_sha256": "c62631816dfeaae2b22cab3b6b04f3ee63283c87aefda7bf4f1fe1d0f7774f21"
+    },
+    {
+      "id": "operator-supplement-power-extremes",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "test.record(2**1024);test.record(2**-1074);test.record(2**-1075);test.record((-2)**1023);test.record((-2)**1025);test.record((-2)**-1075);test.record((-1)**9007199254740991);test.record((-1)**9007199254740992);'ok';",
+      "source_sha256": "3dd10a6b46d0dc5336e339f4db9398e70e6535c335e5918aa83bcd2d98d85700"
+    },
+    {
+      "id": "operator-supplement-logical-cached-object-key",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "var log='',n=0,o={x:0,y:7},k={toString(){log+='k';return n++?'y':'x';}};test.record(String(o[k]||=(log+='r',3)));test.record(log);test.record(o.x+':'+o.y);'ok';",
+      "source_sha256": "74a1d6fbc8afe3dfb00c5f1dd44afb1e59ffa6525d1f41cadacc01fc811d81d3",
+      "current_spec_records": [
+        "string:33",
+        "string:6b72",
+        "string:333a37"
+      ]
+    },
+    {
+      "id": "operator-supplement-power-cached-object-key",
+      "kind": "comparison",
+      "browser_global": false,
+      "source": "var log='',n=0,o={x:2,y:7},k={toString(){log+='k';return n++?'y':'x';}};test.record(String(o[k]**=(log+='r',3)));test.record(log);test.record(o.x+':'+o.y);'ok';",
+      "source_sha256": "43bb66f9bf577cbbeada0f5ef19952dd36f7bbc1031fb20be94af40be9bbc301",
+      "current_spec_records": [
+        "string:38",
+        "string:6b72",
+        "string:383a37"
+      ]
+    },
+    {
+      "id": "operator-supplement-early-1",
+      "kind": "early-error",
+      "browser_global": false,
+      "source": "test.record('early');-2 ** 2;",
+      "source_sha256": "c556ec3fc9bc309b1f44a8dee53ab9f267b076a7182c18c337b77c6b97551957"
+    },
+    {
+      "id": "operator-supplement-early-2",
+      "kind": "early-error",
+      "browser_global": false,
+      "source": "test.record('early');+2 ** 2;",
+      "source_sha256": "aba8996f3fe716ae6bbfc7b4e0d195b1ffed93d7c9668ebcf9fe210a26baa120"
+    },
+    {
+      "id": "operator-supplement-early-3",
+      "kind": "early-error",
+      "browser_global": false,
+      "source": "test.record('early');!true ** 2;",
+      "source_sha256": "8edab0d797cc0158c4195d4d82fb8d6f6ad1ba75b508a2d356a67d8998419247"
+    },
+    {
+      "id": "operator-supplement-early-4",
+      "kind": "early-error",
+      "browser_global": false,
+      "source": "test.record('early');~2 ** 2;",
+      "source_sha256": "100b73605f2da74c24e7c8d9a14e5b9ec091efd517708e09240d2bafa91baad0"
+    },
+    {
+      "id": "operator-supplement-early-5",
+      "kind": "early-error",
+      "browser_global": false,
+      "source": "test.record('early');typeof x ** 2;",
+      "source_sha256": "6fc2da94a0bc557123504c25443238d7d6b0f9ad3ab01d8edbccac387d95ee14"
+    },
+    {
+      "id": "operator-supplement-early-6",
+      "kind": "early-error",
+      "browser_global": false,
+      "source": "test.record('early');void 0 ** 2;",
+      "source_sha256": "326cd719e0d6f4facff5d77f81d1f379f530ac06ef8c3f08ff665216c0e1e40b"
+    },
+    {
+      "id": "operator-supplement-early-7",
+      "kind": "early-error",
+      "browser_global": false,
+      "source": "test.record('early');delete x.y ** 2;",
+      "source_sha256": "819f7221bf69648885ff288d8a2e729ecf86f78851c33cbdd04aa33bf3d9f781"
+    },
+    {
+      "id": "operator-supplement-early-8",
+      "kind": "early-error",
+      "browser_global": false,
+      "source": "test.record('early');2 ** -3 ** 2;",
+      "source_sha256": "1ed9ac3e6339404dead089f49b87d2f037517a318409a224667d3ed8e8ab6d0c"
+    },
+    {
+      "id": "operator-supplement-early-9",
+      "kind": "early-error",
+      "browser_global": false,
+      "source": "test.record('early');x?.y ||= 1;",
+      "source_sha256": "ccd1d0760eb210329da0422ec58e34c39f42848d88b33d7dc9928aa8135f937b"
+    },
+    {
+      "id": "operator-supplement-early-10",
+      "kind": "early-error",
+      "browser_global": false,
+      "source": "test.record('early');1 &&= 2;",
+      "source_sha256": "f1f6d805d42a50a0e29e8aaaf1a7155470b44f9c2b32ff58bac263655bfa0342"
+    },
+    {
+      "id": "operator-supplement-early-11",
+      "kind": "early-error",
+      "browser_global": false,
+      "source": "test.record('early');(x+y) ??= 2;",
+      "source_sha256": "c71b150025966fc50be44760b02ebe935d421abd3eb57aacf1bde1fafac28934"
+    },
+    {
+      "id": "operator-supplement-early-12",
+      "kind": "early-error",
+      "browser_global": false,
+      "source": "test.record('early');[x] ||= [];",
+      "source_sha256": "3a5fde5ed54e413db2da6ceb70c90f00f9f46f0c7f547c699a4ff70e36fdbdf9"
+    },
+    {
+      "id": "operator-supplement-early-13",
+      "kind": "early-error",
+      "browser_global": false,
+      "source": "test.record('early');({x} &&= {});",
+      "source_sha256": "981649bba5d4f8df427acccff1b20d7e9f9b7bd753866d47830b85ed0dc17d29"
+    },
+    {
+      "id": "operator-supplement-early-14",
+      "kind": "early-error",
+      "browser_global": false,
+      "source": "test.record('early');x **=;",
+      "source_sha256": "259892f157bf109686bb40c13448591609bafea5adf8c2fc773ebc820078ab97"
+    },
+    {
+      "id": "operator-supplement-early-15",
+      "kind": "early-error",
+      "browser_global": false,
+      "source": "test.record('early');2 *** 3;",
+      "source_sha256": "b4aee2d20f7b6c20c3fa95dd00678a859ac203c1ce51660dfee1af90fadc3189"
+    },
+    {
+      "id": "operator-supplement-early-16",
+      "kind": "early-error",
+      "browser_global": false,
+      "source": "test.record('early');2 ** ** 3;",
+      "source_sha256": "8d243645c6383ecceb53a663ac90aa6dcaf21d516759c648b762ab145ab84482"
+    },
+    {
+      "id": "operator-supplement-early-17",
+      "kind": "early-error",
+      "browser_global": false,
+      "source": "'use strict';test.record('early');'use strict';arguments ||= 2;",
+      "source_sha256": "1ad48ba9de0d326949c8294898f2e739c2b3c2f7722e5497a9df963ab7ad1b6e"
+    }
+  ],
+  "bounds": [
+    {
+      "id": "operator-supplement-logical-pending-frames",
+      "source": "test.record('early');var x;x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=x||=1;",
+      "source_sha256": "502a3f274aeb9ee6cab2b8d352731ecc576c24559b2f346e53479befa16ae356",
+      "browser_global": false,
+      "error_fragment": "pending expression limit"
+    },
+    {
+      "id": "operator-supplement-power-pending-frames",
+      "source": "test.record('early');function unused(){return 1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1;}",
+      "source_sha256": "f43f06423c0958a91d19cac5b60860a0388f54b85e836293e464a9c17cde9538",
+      "browser_global": false,
+      "error_fragment": "pending expression limit"
+    },
+    {
+      "id": "operator-supplement-power-evaluation-depth",
+      "source": "try{1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1**1;}catch(e){test.record('caught');}finally{test.record('finally');}",
+      "source_sha256": "e6e877dc28c722ab65b537b83676ba31d82b0f5eab188ca49551605cea90a237",
+      "browser_global": false,
+      "error_fragment": "evaluation nesting limit"
+    },
+    {
+      "id": "operator-supplement-logical-execution-steps",
+      "source": "var x=0;try{while(true){x ||= 1;}}catch(e){test.record('caught');}finally{test.record('finally');}",
+      "source_sha256": "84b37da16c41af54222206009143956b40db015e3cfcbc7ee1b36dfc21e6524d",
+      "browser_global": false,
+      "error_fragment": "execution step limit"
+    }
+  ]
+}

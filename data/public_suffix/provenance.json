@@ -1,0 +1,14 @@
+{
+  "upstream_revision": "823beb1425def931c8b0b170a6bc33b424c3f9b0",
+  "upstream_date": "2025-05-12",
+  "upstream_url": "https://raw.githubusercontent.com/publicsuffix/list/823beb1425def931c8b0b170a6bc33b424c3f9b0/public_suffix_list.dat",
+  "source_representation": "Reconstructed rule lines from OpenJDK data; not byte-identical upstream text",
+  "distribution": "Debian openjdk-21-jre-headless 21.0.12.1+1-1~deb13u1",
+  "distribution_archive_sha256": "16b42002aa6f83a7763c4cdbd399ecf738460377d447e362884495545afd60a3",
+  "distribution_notice_sha256": "861de1e4992a7d28f1de25c73cd50d26a94779ebd749c0643fecfa56442c3429",
+  "icann_rules": 6870,
+  "private_rules": 2892,
+  "runtime_network": false,
+  "license": "MPL-2.0",
+  "freshness": "Historical snapshot; review and refresh for distribution. Never call it up to date."
+}

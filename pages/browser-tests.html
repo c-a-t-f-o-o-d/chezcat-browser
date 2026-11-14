@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<title>Browser checks - ChezCat</title>
+<link rel="stylesheet" href="styles.css">
+<style>
+  main { max-width: 940px; }
+  .hero { background: #17394a; color: #eef8fc; padding: 24px; }
+  .hero a { color: #9fe9d2; }
+  .hero h1 { margin-top: 0; }
+  .scope { background: #e4edf2; padding: 12px; }
+  .actions { display: flex; flex-wrap: wrap; gap: 12px; }
+  .actions a { display: inline-block; padding: 10px; border: 1px solid #9bb6c4; }
+</style></head><body><main>
+<div class="hero">
+  <p><a href="start.html">Home</a> &middot; <a href="javascript-demo.html">JavaScript workshop</a></p>
+  <h1>See what a site can see.</h1>
+  <p>These links open independent services in this browser. Their results come from the browser and connection making the request.</p>
+</div>
+
+<div class="card">
+  <h2>EFF: HTTP-header fingerprint</h2>
+  <p>Start with EFF's server-rendered report. It compares the request's user agent, Accept headers, cookie presence and Do Not Track header with its visitor dataset.</p>
+  <p class="scope">This endpoint does not measure JavaScript properties. Fields marked "no javascript" are placeholders in this report. It does not run the full tracking test.</p>
+  <p class="actions"><a href="https://coveryourtracks.eff.org/fingerprint-nojs">Open EFF's header report</a></p>
+  <p>A distinct User-Agent can identify this browser within EFF's sample by itself. Fewer exposed features do not guarantee that a fingerprint is shared with other visitors. The listed identifying bits are not added together.</p>
+  <p>Use Ctrl+J to turn scripting off if you want to inspect the page without running any of its scripts. EFF generates the report on its server either way.</p>
+</div>
+
+<div class="card">
+  <h2>EFF: Cover Your Tracks</h2>
+  <p>The full test combines browser fingerprinting with simulated trackers across several sites. Its current scripts need modules, a larger JavaScript subset, frames, timers and browser APIs that are still missing here.</p>
+  <p class="scope">Full test compatibility is incomplete. A test that stops, or a feature that is unavailable, is not a measured privacy score.</p>
+  <p class="actions"><a href="https://coveryourtracks.eff.org/">Open Cover Your Tracks</a> <a href="https://coveryourtracks.eff.org/about">Read EFF's methodology</a></p>
+  <p>Uniqueness describes the site's sample of recent visitors. An unusual browser can stand out even while exposing fewer features.</p>
+</div>
+
+<div class="card">
+  <h2>GRC: ShieldsUP!</h2>
+  <p>ShieldsUP probes the public Internet connection reaching GRC. Port results concern that connection, including its router or firewall. Its browser-header check instead shows information in the web request.</p>
+  <p>Open GRC, review its introduction, then choose the check you want. This build supports native POST form submission for sites that use a Proceed button.</p>
+  <p class="scope">HTTPS offers TLS 1.3 and TLS 1.2, including the older ECDHE-RSA AES-CBC combinations. TLS 1.2 servers that omit Extended Master Secret can use a full handshake. A connection error means the test did not run. Ctrl+I now preserves the selected version, cipher and response progress even if receiving the page fails. Check-Connections.cmd saves those details to a text file.</p>
+  <p class="actions"><a href="https://www.grc.com/shieldsup">Open ShieldsUP!</a></p>
+</div>
+
+<div class="card">
+  <h2>Inspect actual requests locally</h2>
+  <p>Run Run-Http-Demo.cmd first. The header report shows the request received by that server. The original POST demo sends editable values, a checkbox and the button you used. The server echoes what it actually received.</p>
+  <p class="actions"><a href="http://127.0.0.1:8765/browser-report">Inspect local request headers</a> <a href="browser-post-demo.html">Open the POST demo</a> <a href="http://127.0.0.1:8765/pages/browser-post-demo.html">Open the HTTP demo server copy</a></p>
+</div>
+
+<p class="muted">Ctrl+I lists requests, skipped resources and script errors. Ctrl+U shows the received source. Results produced in another browser or on another network do not describe this browser on your connection.</p>
+<p><a href="start.html">Back to Home</a></p>
+</main></body></html>

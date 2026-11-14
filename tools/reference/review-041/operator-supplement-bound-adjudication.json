@@ -1,0 +1,20 @@
+{
+  "fixture_sha256": "13100646eff83975f3ecf12b6979a2cdc9dd90edfee86dd675a44072c6392fa0",
+  "scope": "Original source and initial expectation preserved verbatim. The original loop block consumes a fresh lexical environment per iteration and reaches the unchanged 4096-environment limit before the step limit. This explicit assertion classifies the existing fatal limit actually exercised; it does not alter the input or any production quota. A separate Rust regression exercises the step quota without a loop block.",
+  "cases": [
+    {
+      "id": "operator-supplement-logical-execution-steps",
+      "source_sha256": "84b37da16c41af54222206009143956b40db015e3cfcbc7ee1b36dfc21e6524d",
+      "original_error_fragment": "execution step limit",
+      "adjudicated_error_fragment": "environment limit reached (4096)",
+      "first_observation": {
+        "ok": false,
+        "value": null,
+        "error": "ERROR\tJavaScript error at line 1, column 24: Environment limit reached (4096). Source: var x=0;try{while(true)[here]{x ||= 1;}}catch(e){test.record(\\'caught\\');}finally{test.record(\\'...",
+        "protocol_error": false,
+        "records": [],
+        "seconds": 0.004778974000146263
+      }
+    }
+  ]
+}

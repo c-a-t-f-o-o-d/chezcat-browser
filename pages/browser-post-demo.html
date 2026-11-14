@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<title>POST form workshop - ChezCat</title>
+<link rel="stylesheet" href="styles.css">
+<style>
+  main { max-width: 850px; }
+  .hero { background: #17394a; color: #eef8fc; padding: 24px; }
+  .hero a { color: #9fe9d2; }
+  .hero h1 { margin-top: 0; }
+  .field { display: block; width: 90%; max-width: 520px; margin: 8px 0 18px; }
+  .actions { display: flex; flex-wrap: wrap; gap: 12px; margin: 18px 0; }
+  .image-actions { display: flex; flex-wrap: wrap; gap: 24px; margin: 18px 0; align-items: flex-start; }
+  .image-option { width: 270px; }
+  .image-submit { display: block; border: 2px solid #176e89; padding: 6px; background: #e4edf2; }
+  .palette-submit { width: 240px; height: 128px; }
+  .grid-submit { width: 144px; height: 144px; }
+  .scope { background: #e4edf2; padding: 12px; }
+</style></head><body><main>
+<div class="hero">
+  <p><a href="start.html">Home</a> &middot; <a href="browser-tests.html">Browser checks</a> &middot; <a href="forms.html">GET forms</a></p>
+  <h1>Send values in a POST.</h1>
+  <p>A native HTML form. No JavaScript is needed.</p>
+</div>
+<div class="card">
+  <h2>Start the optional demo server</h2>
+  <p>Run <strong>Run-Http-Demo.cmd</strong>, leave that terminal open, and <a href="http://127.0.0.1:8765/pages/browser-post-demo.html">open this page over local HTTP</a>. The local-file copy supports editing and reset, but submission needs the demo server.</p>
+  <p>For encrypted loopback testing, use the HTTPS demo launchers and open <a href="https://localhost:8766/pages/browser-post-demo.html">the HTTPS copy</a>.</p>
+</div>
+<div class="card">
+  <h2>Try the request</h2>
+  <form action="/form-result" method="post" enctype="application/x-www-form-urlencoded">
+    <label for="query">A message</label>
+    <input id="query" class="field" name="message" value="Hello from ChezCat" maxlength="120" required>
+    <label for="symbols">Spaces and symbols</label>
+    <input id="symbols" class="field" name="symbols" value="one + two & three" maxlength="120">
+    <input type="hidden" name="source" value="browser-post-demo">
+    <p><label><input type="checkbox" name="details" value="yes" checked> Include the details value</label></p>
+    <div class="actions">
+      <button type="submit" name="action" value="inspect">Send values</button>
+      <button type="submit" name="action" value="alternate">Send with alternate action</button>
+      <button type="reset">Reset fields</button>
+    </div>
+  </form>
+  <p class="scope">The result page should report POST and show the received values. The chosen button supplies the action value; an unchecked checkbox supplies no details entry. POST places these values in the request body.</p>
+  <p>POST does not itself encrypt a request. The HTTP demo is unencrypted loopback traffic; the HTTPS demo uses the browser's TLS implementation.</p>
+</div>
+<div class="card">
+  <h2>Submit by clicking a picture</h2>
+  <p>These are native HTML image buttons using drawings from this project. Click different positions to send the selected button's coordinates to the same local request report.</p>
+  <form action="/form-result" method="post" enctype="application/x-www-form-urlencoded">
+    <label for="image-note">A note for this request</label>
+    <input id="image-note" class="field" name="note" value="Native image submit" maxlength="120" required>
+    <input type="hidden" name="source" value="image-submit-workshop">
+    <div class="image-actions">
+      <div class="image-option">
+        <p><strong>Palette drawing</strong></p>
+        <input type="image" class="image-submit palette-submit" name="palette" src="images/gif-palette.gif" alt="Send the palette position">
+        <p>Reports palette.x and palette.y.</p>
+      </div>
+      <div class="image-option">
+        <p><strong>Enlarged grid</strong></p>
+        <input type="image" class="image-submit grid-submit" name="grid" src="images/grid.ppm" alt="Send the grid position">
+        <p>Reports grid.x and grid.y. This drawing is displayed at 144 by 144 CSS pixels.</p>
+      </div>
+    </div>
+    <p>This button deliberately has no picture. Its alt text supplies the visible fallback:</p>
+    <input type="image" name="fallback" alt="Send using text fallback">
+    <p><button type="reset">Reset the note</button></p>
+  </form>
+  <p class="scope">Only the chosen picture supplies coordinates. They are CSS-pixel offsets from the displayed image's top-left corner; resizing the picture changes its coordinate range. Browser zoom does not turn them into screen-pixel coordinates.</p>
+  <p>For a keyboard check, reload this page, Tab to an image button, and press Enter. Its initial coordinates are 0,0. Clear the required note and try again to check that validation stops the request. This workshop uses no JavaScript.</p>
+</div>
+<p><a href="browser-tests.html">Back to browser checks</a></p>
+</main></body></html>

@@ -1,0 +1,664 @@
+{
+  "schema": 1,
+  "fixture_sources_sha256": "eb5179373eb1cb26dd7e838351f481a2b41b96a22dcfa26e0a39e72a48796ca3",
+  "bounds_sources_sha256": "1ddf250afa06a815ef470626848f6389f00ecc8daa9e420ea27334a416541830",
+  "helper_sha256": "a4baebca7391c14523f116343a0bbcde7eb922a1efed75e5a825347c0cb90470",
+  "ordinary": [
+    {
+      "name": "url-components",
+      "source": "var u=new URL('HTTPS://User:Pass@EXAMPLE.org:443/a/../b c?x=hello world#two words');test.record([u.href,u.origin,u.protocol,u.username,u.password,u.host,u.hostname,u.port,u.pathname,u.search,u.hash].join('|'))",
+      "node": {
+        "ok": true,
+        "records": [
+          "string:68747470733a2f2f557365723a50617373406578616d706c652e6f72672f62253230633f783d68656c6c6f253230776f726c642374776f253230776f7264737c68747470733a2f2f6578616d706c652e6f72677c68747470733a7c557365727c506173737c6578616d706c652e6f72677c6578616d706c652e6f72677c7c2f62253230637c3f783d68656c6c6f253230776f726c647c2374776f253230776f726473"
+        ],
+        "error": null,
+        "value": "undefined"
+      }
+    },
+    {
+      "name": "url-relative",
+      "source": "var b='https://example.org/a/b?old=yes#old';for(var s of ['next','../up','./','/root','?x=2','#part','','../../..','//other.test:8443/p'])test.record(new URL(s,b).href)",
+      "node": {
+        "ok": true,
+        "records": [
+          "string:68747470733a2f2f6578616d706c652e6f72672f612f6e657874",
+          "string:68747470733a2f2f6578616d706c652e6f72672f7570",
+          "string:68747470733a2f2f6578616d706c652e6f72672f612f",
+          "string:68747470733a2f2f6578616d706c652e6f72672f726f6f74",
+          "string:68747470733a2f2f6578616d706c652e6f72672f612f623f783d32",
+          "string:68747470733a2f2f6578616d706c652e6f72672f612f623f6f6c643d7965732370617274",
+          "string:68747470733a2f2f6578616d706c652e6f72672f612f623f6f6c643d796573",
+          "string:68747470733a2f2f6578616d706c652e6f72672f",
+          "string:68747470733a2f2f6f746865722e746573743a383434332f70"
+        ],
+        "error": null,
+        "value": "undefined"
+      }
+    },
+    {
+      "name": "url-same-scheme",
+      "source": "for(var s of ['https:next','https:/next','https://next','http:next','https:'])test.record(new URL(s,'https://example.org/a/b').href)",
+      "node": {
+        "ok": true,
+        "records": [
+          "string:68747470733a2f2f6578616d706c652e6f72672f612f6e657874",
+          "string:68747470733a2f2f6578616d706c652e6f72672f6e657874",
+          "string:68747470733a2f2f6e6578742f",
+          "string:687474703a2f2f6e6578742f",
+          "string:68747470733a2f2f6578616d706c652e6f72672f612f62"
+        ],
+        "error": null,
+        "value": "undefined"
+      }
+    },
+    {
+      "name": "url-dot-encoding",
+      "source": "for(var p of ['/a/%2e/b','/a/.%2E/c','/a/%2E%2e/','/a//b/../','/././','/a/.../b'])test.record(new URL(p,'https://example.org').href)",
+      "node": {
+        "ok": true,
+        "records": [
+          "string:68747470733a2f2f6578616d706c652e6f72672f612f62",
+          "string:68747470733a2f2f6578616d706c652e6f72672f63",
+          "string:68747470733a2f2f6578616d706c652e6f72672f",
+          "string:68747470733a2f2f6578616d706c652e6f72672f612f2f",
+          "string:68747470733a2f2f6578616d706c652e6f72672f",
+          "string:68747470733a2f2f6578616d706c652e6f72672f612f2e2e2e2f62"
+        ],
+        "error": null,
+        "value": "undefined"
+      }
+    },
+    {
+      "name": "url-hosts",
+      "source": "for(var s of ['http://127.0.0.1:80','https://[2001:0DB8:0:0:0:0:0:1]:443/a','https://exam%70le.org./']){var u=new URL(s);test.record(u.href);test.record(u.hostname)}",
+      "node": {
+        "ok": true,
+        "records": [
+          "string:687474703a2f2f3132372e302e302e312f",
+          "string:3132372e302e302e31",
+          "string:68747470733a2f2f5b323030313a6462383a3a315d2f61",
+          "string:5b323030313a6462383a3a315d",
+          "string:68747470733a2f2f6578616d706c652e6f72672e2f",
+          "string:6578616d706c652e6f72672e"
+        ],
+        "error": null,
+        "value": "undefined"
+      }
+    },
+    {
+      "name": "url-ipv4-forms",
+      "source": "for(var s of ['http://127.1','http://0x7f000001','http://0177.0.0.1','http://2130706433'])test.record(new URL(s).href)",
+      "node": {
+        "ok": true,
+        "records": [
+          "string:687474703a2f2f3132372e302e302e312f",
+          "string:687474703a2f2f3132372e302e302e312f",
+          "string:687474703a2f2f3132372e302e302e312f",
+          "string:687474703a2f2f3132372e302e302e312f"
+        ],
+        "error": null,
+        "value": "undefined"
+      }
+    },
+    {
+      "name": "url-normalize-input",
+      "source": "test.record(new URL(' \\tHTTPS:\\\\example.org\\\\a\\\\..\\\\b\\r\\n?x=1#h ').href)",
+      "node": {
+        "ok": true,
+        "records": [
+          "string:68747470733a2f2f6578616d706c652e6f72672f623f783d312368"
+        ],
+        "error": null,
+        "value": "undefined"
+      }
+    },
+    {
+      "name": "url-userinfo",
+      "source": "var u=new URL('https://one@two:p:a@EXAMPLE.org/');test.record(u.href);u.username='a@/: b';u.password='c:@/ ';test.record(u.href);test.record(u.origin)",
+      "node": {
+        "ok": true,
+        "records": [
+          "string:68747470733a2f2f6f6e6525343074776f3a7025334161406578616d706c652e6f72672f",
+          "string:68747470733a2f2f61253430253246253341253230623a63253341253430253246253230406578616d706c652e6f72672f",
+          "string:68747470733a2f2f6578616d706c652e6f7267"
+        ],
+        "error": null,
+        "value": "undefined"
+      }
+    },
+    {
+      "name": "url-empty-query-hash",
+      "source": "var u=new URL('https://example.org/?#');test.record([u.href,u.search,u.hash].join('|'));u.search='';test.record(u.href);u.hash='';test.record(u.href);u.search='?';u.hash='#';test.record(u.href);u.searchParams.sort();test.record(u.href)",
+      "node": {
+        "ok": true,
+        "records": [
+          "string:68747470733a2f2f6578616d706c652e6f72672f3f237c7c",
+          "string:68747470733a2f2f6578616d706c652e6f72672f23",
+          "string:68747470733a2f2f6578616d706c652e6f72672f",
+          "string:68747470733a2f2f6578616d706c652e6f72672f3f23",
+          "string:68747470733a2f2f6578616d706c652e6f72672f23"
+        ],
+        "error": null,
+        "value": "undefined"
+      }
+    },
+    {
+      "name": "url-setters",
+      "source": "var u=new URL('https://example.org:8080/a?q=old#old');u.protocol='http:';u.hostname='OTHER.test';u.port='80';u.pathname='x y/../z?x#y';u.search='a=hello world&x=~';u.hash='a b#c';test.record(u.href);test.record(u.searchParams.get('a'))",
+      "node": {
+        "ok": true,
+        "records": [
+          "string:687474703a2f2f6f746865722e746573742f7a25334678253233793f613d68656c6c6f253230776f726c6426783d7e2361253230622363",
+          "string:68656c6c6f20776f726c64"
+        ],
+        "error": null,
+        "value": "undefined"
+      }
+    },
+    {
+      "name": "url-host-setters",
+      "source": "var u=new URL('https://example.org:8080/');u.host='other.test';test.record(u.href);u.host='third.test:443';test.record(u.href);u.hostname='[2001:db8::2]';test.record(u.href);u.hostname='bad:name';test.record(u.href);u.port='123abc';test.record(u.href);u.port='999999';test.record(u.href)",
+      "node": {
+        "ok": true,
+        "records": [
+          "string:68747470733a2f2f6f746865722e746573743a383038302f",
+          "string:68747470733a2f2f74686972642e746573742f",
+          "string:68747470733a2f2f5b323030313a6462383a3a325d2f",
+          "string:68747470733a2f2f5b323030313a6462383a3a325d2f",
+          "string:68747470733a2f2f5b323030313a6462383a3a325d3a3132332f",
+          "string:68747470733a2f2f5b323030313a6462383a3a325d3a3132332f"
+        ],
+        "error": null,
+        "value": "undefined"
+      }
+    },
+    {
+      "name": "url-href-live",
+      "source": "var u=new URL('https://example.org/?a=1&a=2'),p=u.searchParams;u.href='http://other.test/b?b=3#p';test.record(p===u.searchParams);test.record(p.toString());p.append('c','a b');test.record(u.href);u.search='?z=4';test.record(p.toString())",
+      "node": {
+        "ok": true,
+        "records": [
+          "boolean:true",
+          "string:623d33",
+          "string:687474703a2f2f6f746865722e746573742f623f623d3326633d612b622370",
+          "string:7a3d34"
+        ],
+        "error": null,
+        "value": "undefined"
+      }
+    },
+    {
+      "name": "url-live-canonicalization",
+      "source": "var u=new URL('https://example.org/?b=two%20words&a=~'),p=u.searchParams;test.record(u.href);p.sort();test.record(u.href);p.delete('a');test.record(u.href);p.delete('b');test.record(u.href)",
+      "node": {
+        "ok": true,
+        "records": [
+          "string:68747470733a2f2f6578616d706c652e6f72672f3f623d74776f253230776f72647326613d7e",
+          "string:68747470733a2f2f6578616d706c652e6f72672f3f613d25374526623d74776f2b776f726473",
+          "string:68747470733a2f2f6578616d706c652e6f72672f3f623d74776f2b776f726473",
+          "string:68747470733a2f2f6578616d706c652e6f72672f"
+        ],
+        "error": null,
+        "value": "undefined"
+      }
+    },
+    {
+      "name": "url-string-json",
+      "source": "var u=new URL('https://example.org/a?x=1#f');test.record(String(u));test.record(u.toString());test.record(u.toJSON());test.record(JSON.stringify({u:u}))",
+      "node": {
+        "ok": true,
+        "records": [
+          "string:68747470733a2f2f6578616d706c652e6f72672f613f783d312366",
+          "string:68747470733a2f2f6578616d706c652e6f72672f613f783d312366",
+          "string:68747470733a2f2f6578616d706c652e6f72672f613f783d312366",
+          "string:7b2275223a2268747470733a2f2f6578616d706c652e6f72672f613f783d312366227d"
+        ],
+        "error": null,
+        "value": "undefined"
+      }
+    },
+    {
+      "name": "url-invalid",
+      "source": "for(var s of ['','/relative','https://','https://bad host/','https://x:65536','https://[::bad::]','https://x%23y/']){try{new URL(s);test.record('bad')}catch(e){test.record(e.name)}}",
+      "node": {
+        "ok": true,
+        "records": [
+          "string:547970654572726f72",
+          "string:547970654572726f72",
+          "string:547970654572726f72",
+          "string:547970654572726f72",
+          "string:547970654572726f72",
+          "string:547970654572726f72",
+          "string:547970654572726f72"
+        ],
+        "error": null,
+        "value": "undefined"
+      }
+    },
+    {
+      "name": "url-static",
+      "source": "test.record(URL.canParse('../a','https://example.org/x'));test.record(URL.canParse('bad'));test.record(URL.parse('bad'));test.record(URL.parse('/next','https://example.org').href);try{URL.canParse()}catch(e){test.record(e.name)}",
+      "node": {
+        "ok": true,
+        "records": [
+          "boolean:true",
+          "boolean:false",
+          "null",
+          "string:68747470733a2f2f6578616d706c652e6f72672f6e657874",
+          "string:547970654572726f72"
+        ],
+        "error": null,
+        "value": "undefined"
+      }
+    },
+    {
+      "name": "url-convert-order",
+      "source": "var log='',a={toString(){log+='a';return '/x'}},b={toString(){log+='b';return 'https://example.org'}};test.record(new URL(a,b).href);test.record(log);try{new URL({toString(){throw 8}},b)}catch(e){test.record(e)}test.record(log)",
+      "node": {
+        "ok": true,
+        "records": [
+          "string:68747470733a2f2f6578616d706c652e6f72672f78",
+          "string:6162",
+          "number:4020000000000000",
+          "string:6162"
+        ],
+        "error": null,
+        "value": "undefined"
+      }
+    },
+    {
+      "name": "url-brand-errors",
+      "source": "var d=Object.getOwnPropertyDescriptor(URL.prototype,'href');try{d.get.call({})}catch(e){test.record(e.name)}try{d.set.call({},'https://x.test')}catch(e){test.record(e.name)}try{URL('https://x.test')}catch(e){test.record(e.name)}test.record(URL.name);test.record(URL.length);test.record(d.enumerable);test.record(d.configurable)",
+      "node": {
+        "ok": true,
+        "records": [
+          "string:547970654572726f72",
+          "string:547970654572726f72",
+          "string:547970654572726f72",
+          "string:55524c",
+          "number:3ff0000000000000",
+          "boolean:true",
+          "boolean:true"
+        ],
+        "error": null,
+        "value": "undefined"
+      }
+    },
+    {
+      "name": "params-empty-input",
+      "source": "for(var v of [undefined,null,1,true,'','?','??a=1'])test.record(new URLSearchParams(v).toString())",
+      "node": {
+        "ok": true,
+        "records": [
+          "string:",
+          "string:6e756c6c3d",
+          "string:313d",
+          "string:747275653d",
+          "string:",
+          "string:",
+          "string:253346613d31"
+        ],
+        "error": null,
+        "value": "undefined"
+      }
+    },
+    {
+      "name": "params-parse",
+      "source": "var p=new URLSearchParams('?a=1&&a=2&bare&=empty&x=a=b&plus=a+b&encoded=%26%3D');test.record(p.toString());test.record(p.size);test.record(p.getAll('a').join('|'));test.record(p.get('missing'));test.record(p.get('x'))",
+      "node": {
+        "ok": true,
+        "records": [
+          "string:613d3126613d3226626172653d263d656d70747926783d612533446226706c75733d612b6226656e636f6465643d253236253344",
+          "number:401c000000000000",
+          "string:317c32",
+          "null",
+          "string:613d62"
+        ],
+        "error": null,
+        "value": "undefined"
+      }
+    },
+    {
+      "name": "params-encoding",
+      "source": "var p=new URLSearchParams();p.append('a b+','é😀~!*()');p.append('line','a\\r\\nb');test.record(p.toString());test.record(new URLSearchParams(p.toString()).get('a b+'))",
+      "node": {
+        "ok": true,
+        "records": [
+          "string:612b622532423d2543332541392546302539462539382538302537452532312a253238253239266c696e653d6125304425304162",
+          "string:c3a9f09f98807e212a2829"
+        ],
+        "error": null,
+        "value": "undefined"
+      }
+    },
+    {
+      "name": "params-malformed-utf8",
+      "source": "for(var s of ['x=%','x=%GG','x=%FF','x=%E2%82','x=%E2%28%A1','x=%EF%BB%BF','x=%00','x=%C0%AF']){var p=new URLSearchParams(s);test.record(p.get('x'));test.record(p.toString())}",
+      "node": {
+        "ok": true,
+        "records": [
+          "string:25",
+          "string:783d253235",
+          "string:254747",
+          "string:783d2532354747",
+          "string:efbfbd",
+          "string:783d254546254246254244",
+          "string:efbfbd",
+          "string:783d254546254246254244",
+          "string:efbfbd28efbfbd",
+          "string:783d254546254246254244253238254546254246254244",
+          "string:efbbbf",
+          "string:783d254546254242254246",
+          "string:00",
+          "string:783d253030",
+          "string:efbfbdefbfbd",
+          "string:783d254546254246254244254546254246254244"
+        ],
+        "error": null,
+        "value": "undefined"
+      }
+    },
+    {
+      "name": "params-record",
+      "source": "var proto={inherited:'no'},o=Object.create(proto);o.z=3;o['2']='two';o['1']='one';Object.defineProperty(o,'hidden',{value:7});o.a=null;o.b=undefined;test.record(new URLSearchParams(o).toString())",
+      "node": {
+        "ok": true,
+        "records": [
+          "string:313d6f6e6526323d74776f267a3d3326613d6e756c6c26623d756e646566696e6564"
+        ],
+        "error": null,
+        "value": "undefined"
+      }
+    },
+    {
+      "name": "params-record-getters",
+      "source": "var log='',o={get a(){log+='a';return {toString(){log+='A';return 'one'}}},get b(){log+='b';return 'two'}};test.record(new URLSearchParams(o).toString());test.record(log)",
+      "node": {
+        "ok": true,
+        "records": [
+          "string:613d6f6e6526623d74776f",
+          "string:614162"
+        ],
+        "error": null,
+        "value": "undefined"
+      }
+    },
+    {
+      "name": "params-iterable",
+      "source": "var p=new URLSearchParams([['x',1],['x',2],['y',false]]);test.record(p.toString());test.record(new URLSearchParams(p).toString());test.record(new URLSearchParams(new Map([['a','b'],['c','d']])).toString())",
+      "node": {
+        "ok": true,
+        "records": [
+          "string:783d3126783d3226793d66616c7365",
+          "string:783d3126783d3226793d66616c7365",
+          "string:613d6226633d64"
+        ],
+        "error": null,
+        "value": "undefined"
+      }
+    },
+    {
+      "name": "params-bad-pairs",
+      "source": "for(var x of [[[1]],[[1,2,3]],[null],['ab']]){try{new URLSearchParams(x);test.record('bad')}catch(e){test.record(e.name)}}",
+      "node": {
+        "ok": true,
+        "records": [
+          "string:547970654572726f72",
+          "string:547970654572726f72",
+          "string:547970654572726f72",
+          "string:547970654572726f72"
+        ],
+        "error": null,
+        "value": "undefined"
+      }
+    },
+    {
+      "name": "params-get-set",
+      "source": "var p=new URLSearchParams('a=1&b=2&a=3&c=4');test.record(p.set('a','x'));test.record(p.toString());p.set('z','y');test.record(p.toString());test.record(p.getAll('none').length);test.record(p.has('b'));test.record(p.has('b','2'));test.record(p.has('b','3'));test.record(p.has('b',undefined))",
+      "node": {
+        "ok": true,
+        "records": [
+          "undefined",
+          "string:613d7826623d3226633d34",
+          "string:613d7826623d3226633d34267a3d79",
+          "number:0000000000000000",
+          "boolean:true",
+          "boolean:true",
+          "boolean:false",
+          "boolean:true"
+        ],
+        "error": null,
+        "value": "undefined"
+      }
+    },
+    {
+      "name": "params-delete-value",
+      "source": "var p=new URLSearchParams('a=1&a=2&a=1&b=3');test.record(p.delete('a','1'));test.record(p.toString());p.delete('a',undefined);test.record(p.toString());p.delete('missing');test.record(p.toString())",
+      "node": {
+        "ok": true,
+        "records": [
+          "undefined",
+          "string:613d3226623d33",
+          "string:623d33",
+          "string:623d33"
+        ],
+        "error": null,
+        "value": "undefined"
+      }
+    },
+    {
+      "name": "params-stable-sort",
+      "source": "var p=new URLSearchParams([['z','0'],['a','1'],['a','2'],['😀','3'],['','4'],['é','5'],['A','6']]);test.record(p.sort());test.record(p.toString());test.record(Array.from(p.keys()).join('|'))",
+      "node": {
+        "ok": true,
+        "records": [
+          "undefined",
+          "string:413d3626613d3126613d32267a3d30262543332541393d35262546302539462539382538303d33262545452538302538303d34",
+          "string:417c617c617c7a7cc3a97cf09f98807cee8080"
+        ],
+        "error": null,
+        "value": "undefined"
+      }
+    },
+    {
+      "name": "params-iterators",
+      "source": "var p=new URLSearchParams('a=1&b=2');test.record(p.entries===p[Symbol.iterator]);test.record(Array.from(p).map(x=>x.join(':')).join('|'));test.record(Array.from(p.keys()).join('|'));test.record(Array.from(p.values()).join('|'));var i=p.entries();test.record(i[Symbol.iterator]()===i);test.record(i.next().value.join(':'));test.record(i.next().value.join(':'));test.record(i.next().done);p.append('c','3');test.record(i.next().done)",
+      "node": {
+        "ok": true,
+        "records": [
+          "boolean:true",
+          "string:613a317c623a32",
+          "string:617c62",
+          "string:317c32",
+          "boolean:true",
+          "string:613a31",
+          "string:623a32",
+          "boolean:true",
+          "boolean:false"
+        ],
+        "error": null,
+        "value": "undefined"
+      }
+    },
+    {
+      "name": "params-live-iterator",
+      "source": "var p=new URLSearchParams('a=1&b=2'),i=p.entries();test.record(i.next().value.join(':'));p.delete('a');p.append('c','3');test.record(i.next().value.join(':'));test.record(i.next().done)",
+      "node": {
+        "ok": true,
+        "records": [
+          "string:613a31",
+          "string:633a33",
+          "boolean:true"
+        ],
+        "error": null,
+        "value": "undefined"
+      }
+    },
+    {
+      "name": "params-foreach",
+      "source": "var p=new URLSearchParams('a=1&b=2'),receiver={},log='';p.forEach(function(v,k,o){log+=k+v+(o===p)+(this===receiver);if(k==='a')p.append('c','3')},receiver);test.record(log)",
+      "node": {
+        "ok": true,
+        "records": [
+          "string:613174727565747275656232747275657472756563337472756574727565"
+        ],
+        "error": null,
+        "value": "undefined"
+      }
+    },
+    {
+      "name": "params-coercion-mutation",
+      "source": "var p=new URLSearchParams('a=1');p.set({toString(){p.append('b','2');return 'a'}},{toString(){p.append('c','3');return 'x'}});test.record(p.toString())",
+      "node": {
+        "ok": true,
+        "records": [
+          "string:613d7826623d3226633d33"
+        ],
+        "error": null,
+        "value": "undefined"
+      }
+    },
+    {
+      "name": "params-frozen",
+      "source": "var p=new URLSearchParams('a=1');Object.freeze(p);p.append('b','2');test.record(p.toString());var u=new URL('https://example.org/');Object.freeze(u);u.search='?q=yes';test.record(u.href)",
+      "node": {
+        "ok": true,
+        "records": [
+          "string:613d3126623d32",
+          "string:68747470733a2f2f6578616d706c652e6f72672f3f713d796573"
+        ],
+        "error": null,
+        "value": "undefined"
+      }
+    },
+    {
+      "name": "params-brands",
+      "source": "try{URLSearchParams()}catch(e){test.record(e.name)}try{URLSearchParams.prototype.get.call({},'x')}catch(e){test.record(e.name)}try{Object.getOwnPropertyDescriptor(URLSearchParams.prototype,'size').get.call({})}catch(e){test.record(e.name)}test.record(URLSearchParams.length);test.record(URLSearchParams.prototype.append.length);test.record(URLSearchParams.prototype.delete.length)",
+      "node": {
+        "ok": true,
+        "records": [
+          "string:547970654572726f72",
+          "string:547970654572726f72",
+          "string:547970654572726f72",
+          "number:0000000000000000",
+          "number:4000000000000000",
+          "number:3ff0000000000000"
+        ],
+        "error": null,
+        "value": "undefined"
+      }
+    },
+    {
+      "name": "params-required",
+      "source": "var p=new URLSearchParams;for(var name of ['append','set','get','getAll','has','delete']){try{p[name]();test.record('bad')}catch(e){test.record(e.name)}}try{p.append('a')}catch(e){test.record(e.name)}try{p.forEach(1)}catch(e){test.record(e.name)}",
+      "node": {
+        "ok": true,
+        "records": [
+          "string:547970654572726f72",
+          "string:547970654572726f72",
+          "string:547970654572726f72",
+          "string:547970654572726f72",
+          "string:547970654572726f72",
+          "string:547970654572726f72",
+          "string:547970654572726f72",
+          "string:547970654572726f72"
+        ],
+        "error": null,
+        "value": "undefined"
+      }
+    },
+    {
+      "name": "params-symbol-values",
+      "source": "var p=new URLSearchParams;try{p.append(Symbol(),'a')}catch(e){test.record(e.name)}try{new URLSearchParams({a:Symbol()})}catch(e){test.record(e.name)}test.record(p.size)",
+      "node": {
+        "ok": true,
+        "records": [
+          "string:547970654572726f72",
+          "string:547970654572726f72",
+          "number:0000000000000000"
+        ],
+        "error": null,
+        "value": "undefined"
+      }
+    },
+    {
+      "name": "params-coercion-throw",
+      "source": "var p=new URLSearchParams('a=1'),o={toString(){throw 23}};try{p.append('b',o)}catch(e){test.record(e)}test.record(p.toString())",
+      "node": {
+        "ok": true,
+        "records": [
+          "number:4037000000000000",
+          "string:613d31"
+        ],
+        "error": null,
+        "value": "undefined"
+      }
+    },
+    {
+      "name": "url-invalid-setter-atomic",
+      "source": "var u=new URL('https://example.org/a?x=1');u.hostname='bad host';u.port='-1';test.record(u.href);try{u.href='/relative'}catch(e){test.record(e.name)}test.record(u.href)",
+      "node": {
+        "ok": true,
+        "records": [
+          "string:68747470733a2f2f6578616d706c652e6f72672f613f783d31",
+          "string:547970654572726f72",
+          "string:68747470733a2f2f6578616d706c652e6f72672f613f783d31"
+        ],
+        "error": null,
+        "value": "undefined"
+      }
+    },
+    {
+      "name": "url-query-followup",
+      "source": "var u=new URL('/search?q=first','https://example.org/'),p=u.searchParams;p.set('q','second term');p.append('start','10');var next=new URL('?q=third',u);test.record(u.href);test.record(next.href);test.record(next.searchParams.get('q'))",
+      "node": {
+        "ok": true,
+        "records": [
+          "string:68747470733a2f2f6578616d706c652e6f72672f7365617263683f713d7365636f6e642b7465726d2673746172743d3130",
+          "string:68747470733a2f2f6578616d706c652e6f72672f7365617263683f713d7468697264",
+          "string:7468697264"
+        ],
+        "error": null,
+        "value": "undefined"
+      }
+    }
+  ],
+  "bounds": [
+    {
+      "name": "url-scheme-boundary",
+      "source": "new URL('data:text/plain,hello')",
+      "diagnostic": "only HTTP(S)"
+    },
+    {
+      "name": "url-idna-boundary",
+      "source": "new URL('https://é.test/')",
+      "diagnostic": "IDNA"
+    },
+    {
+      "name": "url-source-bound",
+      "source": "new URL('https://example.org/'+ 'x'.repeat(16384))",
+      "diagnostic": "URL length limit"
+    },
+    {
+      "name": "params-source-bound",
+      "source": "new URLSearchParams('x'.repeat(65537))",
+      "diagnostic": "URLSearchParams byte limit"
+    },
+    {
+      "name": "params-entry-bound",
+      "source": "new URLSearchParams('a=1&'.repeat(1025))",
+      "diagnostic": "URLSearchParams entry limit"
+    },
+    {
+      "name": "url-attached-query-bound",
+      "source": "var u=new URL('https://example.org/');u.searchParams.set('x','a'.repeat(16384))",
+      "diagnostic": "URL length limit"
+    },
+    {
+      "name": "params-recursive-coercion",
+      "source": "var p=new URLSearchParams,o={toString(){return p.get(o)}};p.append(o,'x')",
+      "diagnostic": "limit"
+    }
+  ]
+}

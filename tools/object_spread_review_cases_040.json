@@ -1,0 +1,93 @@
+{
+  "schema_version": 1,
+  "scope": "Original independent bounded object-spread review; separate from the177-probe inventory and112fixedcohort.",
+  "node": "v24.22.1",
+  "cases": [
+    {
+      "id": "object-spread-nullish-and-primitive-sources",
+      "source": "var out={...null,...undefined,...19,...false,...Symbol('empty'),...'ab'};\ntest.record(Object.keys(out).join(','));test.record(out[0]);test.record(out[1]);test.record(Object.getPrototypeOf(out)===Object.prototype);\n'ok';\n",
+      "source_sha256": "ca0a0baed008f34139ce9bda4205b69d281355191e20430be4685fd8efc1b934",
+      "browser_global": false,
+      "kind": "comparison"
+    },
+    {
+      "id": "object-spread-own-enumerable-symbols-and-data-descriptors",
+      "source": "var key=Symbol('key'),input=Object.create({inherited:1});input.x=2;input[key]=3;\nObject.defineProperty(input,'hidden',{value:4});Object.defineProperty(input,'value',{enumerable:true,get:function(){return 5;}});\nvar out={...input};test.record(Object.keys(out).join(','));test.record(out[key]);test.record(out.inherited);\nvar d=Object.getOwnPropertyDescriptor(out,'value');test.record(d.value);test.record(d.writable&&d.enumerable&&d.configurable);test.record('get' in d);\n'ok';\n",
+      "source_sha256": "e94f3c58e24a235299947458fdcc6176cfad85a1053d827796f5cd437a74de77",
+      "browser_global": false,
+      "kind": "comparison"
+    },
+    {
+      "id": "object-spread-left-to-right-and-overwrite-order",
+      "source": "var log='';function input(tag,value){log+=tag;return {get x(){log+='g';return value;}};}\nvar out={a:(log+='a',1),...input('b',2),x:(log+='c',3),...input('d',4),z:(log+='e',5)};\ntest.record(log);test.record(Object.keys(out).join(','));test.record(out.x);test.record(out.a+out.z);\n'ok';\n",
+      "source_sha256": "89d4bca55dc7fb90ed4f4c5d47696b8a10c958106e63c47930990c97a74c8b26",
+      "browser_global": false,
+      "kind": "comparison"
+    },
+    {
+      "id": "object-spread-snapshot-keys-live-enumerability",
+      "source": "var log='',input={get x(){log+='x';delete input.y;Object.defineProperty(input,'z',{enumerable:false});input.added=9;return 1;},y:2,z:3};\nvar out={...input};test.record(log);test.record(Object.keys(out).join(','));test.record(out.x);test.record(out.y);test.record(out.z);test.record(out.added);\n'ok';\n",
+      "source_sha256": "7fa504ea01f20827dd6d3bca757f72b8cfd665e769d60da4772a001454017bd5",
+      "browser_global": false,
+      "kind": "comparison"
+    },
+    {
+      "id": "object-spread-own-data-write-ignores-inherited-setters",
+      "source": "var calls=0;Object.defineProperty(Object.prototype,'side',{set:function(){calls++;},configurable:true});\nvar out={...{side:7}};delete Object.prototype.side;test.record(calls);test.record(out.side);test.record(out.hasOwnProperty('side'));\n'ok';\n",
+      "source_sha256": "63731a03fc07d00d7a476aa4c945874d30243726e3db64f7de226dc011e44653",
+      "browser_global": false,
+      "kind": "comparison"
+    },
+    {
+      "id": "object-spread-accessor-replacement-and-getter-receiver",
+      "source": "var calls=0,input={get x(){calls++;test.record(this===input);return 11;}};\nvar out={get x(){return 1;},set x(v){throw 'must not invoke';},...input};test.record(out.x);test.record(calls);\nvar d=Object.getOwnPropertyDescriptor(out,'x');test.record(d.value);test.record('get' in d);\nvar later={...input,get x(){return 13;}};test.record(later.x);test.record(calls);\n'ok';\n",
+      "source_sha256": "d5d1a287afc822f38a73c4313217ee8075d5bd327c346480232659db558ce24f",
+      "browser_global": false,
+      "kind": "comparison"
+    },
+    {
+      "id": "object-spread-abrupt-getter-stops-following-initializers",
+      "source": "var log='',marker={},input={get x(){log+='x';throw marker;},get y(){log+='y';return 2;}};\ntry{var out={a:(log+='a',1),...input,b:(log+='b',3)};}catch(e){test.record(e===marker);}\ntest.record(log);test.record(typeof out);\n'ok';\n",
+      "source_sha256": "bf36b9a5035ee81dacc40355007a7c75f68babe443094fe5265f3d37d643c710",
+      "browser_global": false,
+      "kind": "comparison"
+    },
+    {
+      "id": "object-spread-array-and-function-sources",
+      "source": "var array=[1,,3];array.extra=4;function fn(a,b){}fn.visible=5;\nvar out={...array,...fn};test.record(Object.keys(out).join(','));test.record(out[0]);test.record(out[1]);test.record(out[2]);test.record(out.extra);test.record(out.visible);\ntest.record(out.hasOwnProperty('length'));test.record(out.hasOwnProperty('prototype'));\n'ok';\n",
+      "source_sha256": "6f4905bd683b84d5a42c2db0972fbebfa90d5d186c7706b0c1223b8359d01480",
+      "browser_global": false,
+      "kind": "comparison"
+    },
+    {
+      "id": "object-spread-missing-expression",
+      "source": "test.record('must not execute');\nvar out={...};\n'ok';\n",
+      "source_sha256": "cc48c234ba2d08bf8add3dad40c1d12305b912a6723e24d91ebcaaa354667337",
+      "browser_global": false,
+      "kind": "early_error"
+    },
+    {
+      "id": "object-spread-colon-after-source",
+      "source": "test.record('must not execute');\nvar input={};var out={...input:1};\n'ok';\n",
+      "source_sha256": "9d691aed47774c5baefde255ea572a7cbccf7b29313731cc639054e5810f4dcc",
+      "browser_global": false,
+      "kind": "early_error"
+    }
+  ],
+  "bounds": [
+    {
+      "id": "object-spread-native-host-capability-bound",
+      "source": "try{var out={...test};}catch(e){test.record(\"must not catch\");}finally{test.record(\"must not finalize\");}",
+      "source_sha256": "b74898fd619d020e959d3f48af0e2a72daa6a2a55a3276f4ba8fe9de74d29a8f",
+      "browser_global": false,
+      "error_fragment": "native"
+    },
+    {
+      "id": "object-spread-getter-work-bound",
+      "source": "var input={get x(){while(true){}}};try{var out={...input};}catch(e){test.record(\"must not catch\");}finally{test.record(\"must not finalize\");}",
+      "source_sha256": "3d2b1d54855b5b6cd4242880d86fe3ef83cf71cefb58cde68ebe554b2a174c94",
+      "browser_global": false,
+      "error_fragment": "limit"
+    }
+  ]
+}

@@ -1,0 +1,36 @@
+<!doctype html><title>Dispatch fixture ready</title><body>
+<p id="result">Dispatch fixture ready</p>
+<button type="button" name="interface" id="interface">Exercise Element prototype extension</button>
+<button type="button" name="target" id="target">Exercise standalone EventTarget</button>
+<button type="button" name="deep" id="deep">Exercise nested dispatch guard</button>
+<button type="button" name="recover" id="recover">Recover dispatch</button>
+<script>
+document.getElementById('interface').onclick=function(){
+ var node=document.getElementById('result');
+ if(!(node instanceof HTMLElement)||!(node instanceof Element)||!(node instanceof Node)||!(node instanceof EventTarget)||typeof node.animate!=='undefined')throw Error('Element ancestry failed');
+ Element.prototype.animate=function(text){this.textContent=text;return this;};
+ try {if(node.animate('Element prototype extension delivered')!==node||!('animate' in node))throw Error('Element extension failed');}finally{delete Element.prototype.animate;}
+ if(typeof node.animate!=='undefined')throw Error('Element extension removal failed');
+ document.title='Element prototype extension delivered';
+};
+document.getElementById('target').onclick=function(){
+ var target=new EventTarget(),other=new EventTarget(),event=document.createEvent('Event'),seen=0;
+ event.initEvent('original-target-event',true,true);
+ if(Object.getPrototypeOf(target)!==EventTarget.prototype||!(target instanceof EventTarget)||target.addEventListener!==other.addEventListener)throw Error('EventTarget prototype failed');
+ target.addEventListener('original-target-event',function(e){if(this!==target||e.target!==target||e.currentTarget!==target||e.eventPhase!==2)throw Error('EventTarget identity failed');seen++;e.preventDefault();},{once:true});
+ var original=EventTarget.prototype.dispatchEvent,wrapped=0;
+ EventTarget.prototype.dispatchEvent=function(e){wrapped++;return original.call(this,e);};
+ try {if(target.dispatchEvent(event)!==false||seen!==1||wrapped!==1||event.currentTarget!==null||event.eventPhase!==0)throw Error('EventTarget delivery failed');}finally{EventTarget.prototype.dispatchEvent=original;}
+ event.initEvent('original-target-event',true,true);if(!target.dispatchEvent(event)||seen!==1)throw Error('EventTarget once failed');
+ document.getElementById('result').textContent='Standalone EventTarget delivered';document.title='Standalone EventTarget delivered';
+};
+var button=document.getElementById('deep'),first=document.createEvent('Event');first.initEvent('nested-original',true,true);
+function nested(){var next=document.createEvent('Event');next.initEvent('nested-original',true,true);button.dispatchEvent(next);}
+button.addEventListener('nested-original',nested);
+button.onclick=function(){button.dispatchEvent(first);throw Error('call guard was not reached');};
+document.getElementById('recover').onclick=function(){
+ button.removeEventListener('nested-original',nested);
+ if(first.currentTarget!==null||first.eventPhase!==0||first.isTrusted||!button.dispatchEvent(first)||first.target!==button)throw Error('dispatch recovery failed');
+ document.getElementById('result').textContent='Nested dispatch recovered';document.title='Nested dispatch recovered';
+};
+</script></body>

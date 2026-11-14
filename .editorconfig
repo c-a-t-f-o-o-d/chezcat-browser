@@ -1,0 +1,25 @@
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+
+[*.cmd]
+end_of_line = crlf
+
+# Binary files and exact response captures must never pass through text converters.
+[*.{exe,dll,ico,cur,o,res,png,apng,jpg,jpeg,gif,webp,bmp,tif,tiff,qoi,ppm,pgm,pbm,pam,pnm,tga,pcx,ttf,otf,woff,woff2,bin,zip}]
+charset = unset
+end_of_line = unset
+insert_final_newline = false
+
+[results/**]
+charset = unset
+end_of_line = unset
+insert_final_newline = false
+
+[tools/reference/test262/**]
+charset = unset
+end_of_line = unset
+insert_final_newline = false

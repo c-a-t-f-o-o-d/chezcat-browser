@@ -1,0 +1,322 @@
+{
+  "cases": [
+    {
+      "id": "date-timestamp-and-utc-fields",
+      "source": "for(var value of [0,-1,951827696789]){var d=new Date(value);test.record(d.getTime());test.record(d.valueOf());test.record(d.toISOString());\ntest.record([d.getUTCFullYear(),d.getUTCMonth(),d.getUTCDate(),d.getUTCDay(),d.getUTCHours(),d.getUTCMinutes(),d.getUTCSeconds(),d.getUTCMilliseconds()].join(','));}\n'ok';\n",
+      "source_sha256": "e27a84803101fd8485e9f3b4ba792b4d9c502b102df842b5aed0e97c697231c6",
+      "browser_global": false,
+      "reference": {
+        "ok": true,
+        "records": [
+          "number:0000000000000000",
+          "number:0000000000000000",
+          "string:313937302d30312d30315430303a30303a30302e3030305a",
+          "string:313937302c302c312c342c302c302c302c30",
+          "number:bff0000000000000",
+          "number:bff0000000000000",
+          "string:313936392d31322d33315432333a35393a35392e3939395a",
+          "string:313936392c31312c33312c332c32332c35392c35392c393939",
+          "number:426bb3ab4192a000",
+          "number:426bb3ab4192a000",
+          "string:323030302d30322d32395431323a33343a35362e3738395a",
+          "string:323030302c312c32392c322c31322c33342c35362c373839"
+        ],
+        "error": null,
+        "value": "string:6f6b"
+      },
+      "valid_reference": true
+    },
+    {
+      "id": "date-utc-conversion-rollovers-and-short-years",
+      "source": "for(var args of [[0],[99,0],[100,0],[-1,0],[2000,1,29],[2001,1,29],[2000,12,0],[2000,-1,1],[2000,0,1,25,61,61,1001]]){\nvar value=Date.UTC.apply(null,args);test.record(value);test.record(new Date(value).toISOString());}\ntest.record(Number.isNaN(Date.UTC(2000,undefined)));test.record(Number.isNaN(Date.UTC()));\n'ok';\n",
+      "source_sha256": "4fa587401dfe1413507e3afb81c3d7617ce87679ef64091c71d07b633e7c6fcd",
+      "browser_global": false,
+      "reference": {
+        "ok": true,
+        "records": [
+          "number:c280128ff1200000",
+          "string:313930302d30312d30315430303a30303a30302e3030305a",
+          "number:426aa263d0000000",
+          "string:313939392d30312d30315430303a30303a30302e3030305a",
+          "number:c2cad5d6881a0000",
+          "string:303130302d30312d30315430303a30303a30302e3030305a",
+          "number:c2cc48e35ac60000",
+          "string:2d3030303030312d30312d30315430303a30303a30302e3030305a",
+          "number:426bb354dc000000",
+          "string:323030302d30322d32395430303a30303a30302e3030305a",
+          "number:426c9eefcd000000",
+          "string:323030312d30332d30315430303a30303a30302e3030305a",
+          "number:426c78501b000000",
+          "string:323030302d31322d33315430303a30303a30302e3030305a",
+          "number:426b796551000000",
+          "string:313939392d31322d30315430303a30303a30302e3030305a",
+          "number:426b8e0cb8322000",
+          "string:323030302d30312d30325430323a30323a30322e3030315a",
+          "boolean:true",
+          "boolean:true"
+        ],
+        "error": null,
+        "value": "string:6f6b"
+      },
+      "valid_reference": true
+    },
+    {
+      "id": "date-timeclip-negative-zero-and-boundaries",
+      "source": "for(var value of [-0,-0.9,0.9,-1.9,1.9,8640000000000000,-8640000000000000]){\nvar d=new Date(value);test.record(d.getTime());test.record(1/d.getTime());test.record(d.toISOString());}\nfor(var value of [NaN,Infinity,-Infinity,8640000000000001]){var d=new Date(value);test.record(Number.isNaN(d.getTime()));\ntry{d.toISOString();}catch(e){test.record(e.name);}test.record(d.toJSON());}\n'ok';\n",
+      "source_sha256": "fda3386246ebc16942b00e72aa9b97bfb63b11b6e7a6391ad47aea88d11ba46b",
+      "browser_global": false,
+      "reference": {
+        "ok": true,
+        "records": [
+          "number:0000000000000000",
+          "number:7ff0000000000000",
+          "string:313937302d30312d30315430303a30303a30302e3030305a",
+          "number:0000000000000000",
+          "number:7ff0000000000000",
+          "string:313937302d30312d30315430303a30303a30302e3030305a",
+          "number:0000000000000000",
+          "number:7ff0000000000000",
+          "string:313937302d30312d30315430303a30303a30302e3030305a",
+          "number:bff0000000000000",
+          "number:bff0000000000000",
+          "string:313936392d31322d33315432333a35393a35392e3939395a",
+          "number:3ff0000000000000",
+          "number:3ff0000000000000",
+          "string:313937302d30312d30315430303a30303a30302e3030315a",
+          "number:433eb208c2dc0000",
+          "number:3ca0ae1463b9c17c",
+          "string:2b3237353736302d30392d31335430303a30303a30302e3030305a",
+          "number:c33eb208c2dc0000",
+          "number:bca0ae1463b9c17c",
+          "string:2d3237313832312d30342d32305430303a30303a30302e3030305a",
+          "boolean:true",
+          "string:52616e67654572726f72",
+          "null",
+          "boolean:true",
+          "string:52616e67654572726f72",
+          "null",
+          "boolean:true",
+          "string:52616e67654572726f72",
+          "null",
+          "boolean:true",
+          "string:52616e67654572726f72",
+          "null"
+        ],
+        "error": null,
+        "value": "string:6f6b"
+      },
+      "valid_reference": true
+    },
+    {
+      "id": "date-cloning-skips-overridden-conversion",
+      "source": "var original=new Date(123456),log='';original.valueOf=function(){log+='v';throw 1;};original.toString=function(){log+='s';throw 2;};\noriginal[Symbol.toPrimitive]=function(){log+='p';throw 3;};var copy=new Date(original);test.record(copy.getTime());test.record(log);test.record(copy!==original);\ncopy.setTime(42);test.record(Date.prototype.getTime.call(original));test.record(copy.getTime());\n'ok';\n",
+      "source_sha256": "c4cf18963a76578f5757cb05b4d655c064c4a4b4e68bf8fffde4bae78486e0a0",
+      "browser_global": false,
+      "reference": {
+        "ok": true,
+        "records": [
+          "number:40fe240000000000",
+          "string:",
+          "boolean:true",
+          "number:40fe240000000000",
+          "number:4045000000000000"
+        ],
+        "error": null,
+        "value": "string:6f6b"
+      },
+      "valid_reference": true
+    },
+    {
+      "id": "date-iso-parser-offsets-date-only-and-extended-years",
+      "source": "for(var text of ['1970','1970-01','1970-01-01','2000-02-29T12:34:56.789Z','2000-01-01T01:30:00+01:30','2000-01-01T00:00:00-02:00','2000-12-31T24:00:00Z','+010000-01-01T00:00:00.000Z','-000001-01-01T00:00:00.000Z']){\ntest.record(Date.parse(text));test.record(new Date(text).toISOString());}\nfor(var text of ['not a date','2020-13-01','2020-00-01','2020-01-32','2020-01-01T25:00:00Z','2020-01-01T24:00:01Z','-000000-01-01T00:00:00Z'])test.record(Number.isNaN(Date.parse(text)));\n'ok';\n",
+      "source_sha256": "e936a230174081a6ebcefc52b23e6d0c4e9ffbf1b2498ab6c9d3cbe8d89d0494",
+      "browser_global": false,
+      "reference": {
+        "ok": true,
+        "records": [
+          "number:0000000000000000",
+          "string:313937302d30312d30315430303a30303a30302e3030305a",
+          "number:0000000000000000",
+          "string:313937302d30312d30315430303a30303a30302e3030305a",
+          "number:0000000000000000",
+          "string:313937302d30312d30315430303a30303a30302e3030305a",
+          "number:426bb3ab4192a000",
+          "string:323030302d30322d32395431323a33343a35362e3738395a",
+          "number:426b8d59f5800000",
+          "string:323030302d30312d30315430303a30303a30302e3030305a",
+          "number:426b8d67b1200000",
+          "string:323030302d30312d30315430323a30303a30302e3030305a",
+          "number:426c78f4e6800000",
+          "string:323030312d30312d30315430303a30303a30302e3030305a",
+          "number:42eccefa43fb8000",
+          "string:2b3031303030302d30312d30315430303a30303a30302e3030305a",
+          "number:c2cc48e35ac60000",
+          "string:2d3030303030312d30312d30315430303a30303a30302e3030305a",
+          "boolean:true",
+          "boolean:true",
+          "boolean:true",
+          "boolean:true",
+          "boolean:true",
+          "boolean:true",
+          "boolean:true"
+        ],
+        "error": null,
+        "value": "string:6f6b"
+      },
+      "valid_reference": true
+    },
+    {
+      "id": "date-utc-setters-normalize-and-return-time",
+      "source": "var d=new Date(0);test.record(d.setUTCFullYear(2000,1,29));test.record(d.setUTCMonth(12));test.record(d.setUTCDate(0));\ntest.record(d.setUTCHours(25,61,62,1003));test.record(d.setUTCMinutes(-1,2,3));test.record(d.setUTCSeconds(61,1001));\ntest.record(d.setUTCMilliseconds(-1));test.record(d.toISOString());test.record(d.setTime(7.8));test.record(d.getTime());\n'ok';\n",
+      "source_sha256": "05347c587a25f75c53f802d8546dcaf68557559423c13ca1cc279ecd826ffeec",
+      "browser_global": false,
+      "reference": {
+        "ok": true,
+        "records": [
+          "number:426bb354dc000000",
+          "number:426c8afb28800000",
+          "number:426c78501b000000",
+          "number:426c7902de2f6000",
+          "number:426c790285ce6000",
+          "number:426c7902a31a2000",
+          "number:426c7902a319e000",
+          "string:323030312d30312d30315430323a30303a30312e3939395a",
+          "number:401c000000000000",
+          "number:401c000000000000"
+        ],
+        "error": null,
+        "value": "string:6f6b"
+      },
+      "valid_reference": true
+    },
+    {
+      "id": "date-utc-setter-snapshots-before-conversion",
+      "source": "var d=new Date(0),log='';var year={valueOf:function(){log+='y';d.setTime(86400000);return 2000;}};\ntest.record(d.setUTCFullYear(year));test.record(d.toISOString());test.record(log);\nlog='';var month={valueOf:function(){log+='m';d.setTime(0);return 1;}},day={valueOf:function(){log+='d';return 29;}};\ntest.record(d.setUTCMonth(month,day));test.record(d.toISOString());test.record(log);\n'ok';\n",
+      "source_sha256": "77bed879c367ba35739d73b9ea36436f8a03b73ecd74b8b878916ab48ccd056f",
+      "browser_global": false,
+      "reference": {
+        "ok": true,
+        "records": [
+          "number:426b8dfec1000000",
+          "string:323030302d30312d30325430303a30303a30302e3030305a",
+          "string:79",
+          "number:41f2fd7340000000",
+          "string:313937302d30332d30315430303a30303a30302e3030305a",
+          "string:6d64"
+        ],
+        "error": null,
+        "value": "string:6f6b"
+      },
+      "valid_reference": true
+    },
+    {
+      "id": "date-invalid-setter-callback-effects-and-full-year-reset",
+      "source": "var d=new Date(NaN),log='';var month={valueOf:function(){log+='m';d.setTime(123);return 1;}};\ntest.record(Number.isNaN(d.setUTCMonth(month)));test.record(d.getTime());test.record(log);\nd.setTime(NaN);test.record(d.setUTCFullYear(2000));test.record(d.toISOString());\nd.setTime(0);test.record(Number.isNaN(d.setUTCDate()));test.record(Number.isNaN(d.getTime()));\n'ok';\n",
+      "source_sha256": "1eac504d6ee81e82ee3012f9a94cbe101b45b1c6e536b808c2fb2f293f5fb02a",
+      "browser_global": false,
+      "reference": {
+        "ok": true,
+        "records": [
+          "boolean:false",
+          "number:41e3f4a48f600000",
+          "string:6d",
+          "number:426b8d59f5800000",
+          "string:323030302d30312d30315430303a30303a30302e3030305a",
+          "boolean:true",
+          "boolean:true"
+        ],
+        "error": null,
+        "value": "string:6f6b"
+      },
+      "valid_reference": true
+    },
+    {
+      "id": "date-generic-tojson-order-and-invalid-shortcut",
+      "source": "var log='',o={valueOf:function(){log+='v';return 5;},toISOString:function(){log+='i';return 'custom';}};\ntest.record(Date.prototype.toJSON.call(o,'key'));test.record(log);\nvar invalid={valueOf:function(){return NaN;},get toISOString(){throw 'must not read';}};test.record(Date.prototype.toJSON.call(invalid));\nvar text={valueOf:function(){return 'value';},toISOString:function(){return 19;}};test.record(Date.prototype.toJSON.call(text));\ntest.record(JSON.stringify({d:new Date(0),invalid:new Date(NaN)}));\n'ok';\n",
+      "source_sha256": "5b0b8e8de3e59b6c73d791e161e1bff878f2b1e81fb7c34fc6eea1fd8aa66f81",
+      "browser_global": false,
+      "reference": {
+        "ok": true,
+        "records": [
+          "string:637573746f6d",
+          "string:7669",
+          "null",
+          "number:4033000000000000",
+          "string:7b2264223a22313937302d30312d30315430303a30303a30302e3030305a222c22696e76616c6964223a6e756c6c7d"
+        ],
+        "error": null,
+        "value": "string:6f6b"
+      },
+      "valid_reference": true
+    },
+    {
+      "id": "date-primitive-protocol-and-receiver-brand",
+      "source": "var d=new Date(42);test.record(+d);test.record(d[Symbol.toPrimitive]('number'));\nvar log='',o={toString:function(){log+='s';return 'text';},valueOf:function(){log+='v';return 9;}};\ntest.record(Date.prototype[Symbol.toPrimitive].call(o,'default'));test.record(Date.prototype[Symbol.toPrimitive].call(o,'number'));test.record(log);\ntry{d[Symbol.toPrimitive]('bad');}catch(e){test.record(e.name);}try{Date.prototype.getTime.call({});}catch(e){test.record(e.name);}\ntry{Date.prototype.getTime();}catch(e){test.record(e.name);}test.record(d instanceof Date);\n'ok';\n",
+      "source_sha256": "9be0b588789e320d50fd63b7d4cbeb92bce176a432ef3823cf049264ad6593bd",
+      "browser_global": false,
+      "reference": {
+        "ok": true,
+        "records": [
+          "number:4045000000000000",
+          "number:4045000000000000",
+          "string:74657874",
+          "number:4022000000000000",
+          "string:7376",
+          "string:547970654572726f72",
+          "string:547970654572726f72",
+          "string:547970654572726f72",
+          "boolean:true"
+        ],
+        "error": null,
+        "value": "string:6f6b"
+      },
+      "valid_reference": true
+    },
+    {
+      "id": "date-utc-string-alias-and-roundtrip",
+      "source": "test.record(Date.prototype.toUTCString===Date.prototype.toGMTString);test.record(Date.length);\nfor(var value of [0,946684800000,951827696000,-1000]){var d=new Date(value);test.record(d.toUTCString());test.record(Date.parse(d.toUTCString())===value);}\ntest.record(new Date(NaN).toUTCString());\n'ok';\n",
+      "source_sha256": "b9a15ee68223f2d50efe025a91e0ba920e6156297c889d6b55eed07d9ed73ea7",
+      "browser_global": false,
+      "reference": {
+        "ok": true,
+        "records": [
+          "boolean:true",
+          "number:401c000000000000",
+          "string:5468752c203031204a616e20313937302030303a30303a303020474d54",
+          "boolean:true",
+          "string:5361742c203031204a616e20323030302030303a30303a303020474d54",
+          "boolean:true",
+          "string:5475652c2032392046656220323030302031323a33343a353620474d54",
+          "boolean:true",
+          "string:5765642c2033312044656320313936392032333a35393a353920474d54",
+          "boolean:true",
+          "string:496e76616c69642044617465"
+        ],
+        "error": null,
+        "value": "string:6f6b"
+      },
+      "valid_reference": true
+    },
+    {
+      "id": "date-construction-and-static-conversion-order",
+      "source": "var log='',input={valueOf:function(){log+='v';return 123;},toString:function(){log+='s';return '1970-01-01';}};\ntest.record(new Date(input).getTime());test.record(log);log='';test.record(Date.parse(input));test.record(log);\nlog='';function part(k,v){return {valueOf:function(){log+=k;return v;}};}\ntest.record(Date.UTC(part('y',2000),part('m',1),part('d',29)));test.record(log);\n'ok';\n",
+      "source_sha256": "9b1fc12ac1cadd0ce9919343199e25862fd870f7ab8b4cca3ad216f33a749648",
+      "browser_global": false,
+      "reference": {
+        "ok": true,
+        "records": [
+          "number:405ec00000000000",
+          "string:76",
+          "number:0000000000000000",
+          "string:73",
+          "number:426bb354dc000000",
+          "string:796d64"
+        ],
+        "error": null,
+        "value": "string:6f6b"
+      },
+      "valid_reference": true
+    }
+  ],
+  "all_references_valid": true
+}

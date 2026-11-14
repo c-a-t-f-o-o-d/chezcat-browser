@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "scope": "Own-runtime-only fatal work/allocation assertions; never executed under Node or counted as matching samples.",
+  "cases": [
+    {
+      "id": "default-initializer-infinite-work-fatal",
+      "group": "defaults",
+      "source": "function loop(){while(true){}}function f(a=loop()){}try{f();}catch(e){test.record('must not catch');}finally{test.record('must not finalize');}",
+      "source_sha256": "1418929fd31c484c8b236e8b0dd8f18944854133868b7f6c7ccb99282b8b55cb",
+      "browser_global": false,
+      "error_fragment": "limit"
+    },
+    {
+      "id": "destructure-infinite-rest-fatal",
+      "group": "destructuring",
+      "source": "var it={};it[Symbol.iterator]=function(){return {next:function(){return {value:1,done:false};},return:function(){test.record('must not close after fatal');return {};}};};try{let [...all]=it;}catch(e){test.record('must not catch');}finally{test.record('must not finalize');}",
+      "source_sha256": "b2a6c769d75037b40dfa2b2486e2c03b668bbefc4bfa0a2139cfac24305fe1c8",
+      "browser_global": false,
+      "error_fragment": "limit"
+    },
+    {
+      "id": "named-regexp-backtracking-work-fatal",
+      "group": "named-regexp",
+      "source": "var text='';for(var i=0;i<30;i++)text+='a';try{/(?<x>a+)+b/.test(text);}catch(e){test.record('must not catch');}finally{test.record('must not finalize');}",
+      "source_sha256": "9e2dbb56c84000b5a370b2f93d4dfea5b959410e7a2f82d210e9b0a32f81778b",
+      "browser_global": false,
+      "error_fragment": "limit"
+    }
+  ]
+}

@@ -1,0 +1,396 @@
+{
+  "node": "v24.22.1",
+  "fixture_sha256": "500ff5d500ce333853725033744f268508107ca975bbe6a29c7943e798450a4a",
+  "cases": [
+    {
+      "id": "string-review-primitive-symbol-strict-setter",
+      "source": "var k=Symbol('setter'),log='';Object.defineProperty(String.prototype,k,{configurable:true,set:function(v){'use strict';log+=typeof this+':'+this+':'+v;}});'ab'[k]=7;test.record(log);test.record(Object.hasOwn('ab',k));'ok';",
+      "source_sha256": "162523ae6fee0e3db828f69f182583c07c4dc69dbe0efad838bd451a478313f1",
+      "browser_global": false,
+      "reference": {
+        "ok": true,
+        "records": [
+          "string:737472696e673a61623a37",
+          "boolean:false"
+        ],
+        "error": null,
+        "value": "string:6f6b"
+      }
+    },
+    {
+      "id": "string-review-primitive-symbol-sloppy-creation",
+      "source": "var k=Symbol('new');test.record('ab'[k]=7);test.record('ab'[k]);test.record(Object.hasOwn('ab',k));'ok';",
+      "source_sha256": "c1a415509768f0fc21ada98dea97c2e2c94f9473c7a02ab5c5c730bba414bc95",
+      "browser_global": false,
+      "reference": {
+        "ok": true,
+        "records": [
+          "number:401c000000000000",
+          "undefined",
+          "boolean:false"
+        ],
+        "error": null,
+        "value": "string:6f6b"
+      }
+    },
+    {
+      "id": "string-review-primitive-symbol-strict-write",
+      "source": "'use strict';var k=Symbol('new');try{'ab'[k]=7;}catch(e){test.record(e.name);}test.record(Object.hasOwn('ab',k));'ok';",
+      "source_sha256": "a8692a1f7b141b8216727c5098191ca310b596ee4166ef45c9a990c4408ab74a",
+      "browser_global": false,
+      "reference": {
+        "ok": true,
+        "records": [
+          "string:547970654572726f72",
+          "boolean:false"
+        ],
+        "error": null,
+        "value": "string:6f6b"
+      }
+    },
+    {
+      "id": "string-review-primitive-sloppy-setter-boxes-this",
+      "source": "var log='';Object.defineProperty(String.prototype,'field',{set:function(v){log+=typeof this+':'+(this instanceof String)+':'+this.valueOf()+':'+v;},configurable:true});'ab'.field=3;test.record(log);'ok';",
+      "source_sha256": "5915b478189ad47f09770b53a7355243896ffc39ff8970ba20bcf260e0d76191",
+      "browser_global": false,
+      "reference": {
+        "ok": true,
+        "records": [
+          "string:6f626a6563743a747275653a61623a33"
+        ],
+        "error": null,
+        "value": "string:6f6b"
+      }
+    },
+    {
+      "id": "string-review-primitive-own-shadow-setters",
+      "source": "var log='';Object.defineProperty(String.prototype,'0',{set:function(v){log+='0';},configurable:true});Object.defineProperty(String.prototype,'length',{value:0,writable:false,enumerable:false,configurable:false});'ab'[0]='z';'ab'.length=9;test.record(log);test.record('ab'[0]);test.record('ab'.length);try{(function(){'use strict';'ab'[0]='z';})();}catch(e){test.record(e.name);}'ok';",
+      "source_sha256": "cdabae543caebc62ef9dbc2248348df9e4ba42ee52e6e73b2aa032e9d2f24ec8",
+      "browser_global": false,
+      "reference": {
+        "ok": true,
+        "records": [
+          "string:",
+          "string:61",
+          "number:4000000000000000",
+          "string:547970654572726f72"
+        ],
+        "error": null,
+        "value": "string:6f6b"
+      }
+    },
+    {
+      "id": "string-review-primitive-symbol-inherited-readonly",
+      "source": "var k=Symbol('readonly');Object.defineProperty(String.prototype,k,{value:4});test.record('ab'[k]=7);test.record('ab'[k]);try{(function(){'use strict';'ab'[k]=8;})();}catch(e){test.record(e.name);}'ok';",
+      "source_sha256": "0c7d3c5f93f571401875b5b3de82a28f0611f85aa5de37506d76ff8068a1b238",
+      "browser_global": false,
+      "reference": {
+        "ok": true,
+        "records": [
+          "number:401c000000000000",
+          "number:4010000000000000",
+          "string:547970654572726f72"
+        ],
+        "error": null,
+        "value": "string:6f6b"
+      }
+    },
+    {
+      "id": "string-review-boxed-symbol-metadata",
+      "source": "var b=new String('ab'),k=Symbol('k');Object.defineProperty(b,k,{value:7,enumerable:true});test.record(b[k]);test.record(Object.getOwnPropertySymbols(b)[0]===k);test.record(delete b[k]);test.record(Object.keys(b).join());test.record(Object.getOwnPropertyDescriptor(b,k).writable);'ok';",
+      "source_sha256": "8873805c4469761bb8f03696d76c3c90fbe2f83d939d0ec0d6ee28c115836a38",
+      "browser_global": false,
+      "reference": {
+        "ok": true,
+        "records": [
+          "number:401c000000000000",
+          "boolean:true",
+          "boolean:false",
+          "string:302c31",
+          "boolean:false"
+        ],
+        "error": null,
+        "value": "string:6f6b"
+      }
+    },
+    {
+      "id": "string-review-canonical-index-keys",
+      "source": "var b=new String('ab');for(var k of ['-0','00','01','1.0','1e0','+1','4294967295'])b[k]=k;Object.defineProperty(b,-0,{value:'a'});test.record(Object.getOwnPropertyNames(b).join('|'));for(var k of ['-0','00','01','1.0','1e0','+1','4294967295'])test.record(b[k]);test.record(b[0]);'ok';",
+      "source_sha256": "6959835541b929e59c76ea54b0179b6b79199a333d32983d79001d0e1ef9ebb9",
+      "browser_global": false,
+      "reference": {
+        "ok": true,
+        "records": [
+          "string:307c317c6c656e6774687c2d307c30307c30317c312e307c3165307c2b317c34323934393637323935",
+          "string:2d30",
+          "string:3030",
+          "string:3031",
+          "string:312e30",
+          "string:316530",
+          "string:2b31",
+          "string:34323934393637323935",
+          "string:61"
+        ],
+        "error": null,
+        "value": "string:6f6b"
+      }
+    },
+    {
+      "id": "string-review-descriptor-conversion-once",
+      "source": "var b=new String('a'),log='',key={toString(){log+='k';return '0';}},d={get enumerable(){log+='e';return true;},get configurable(){log+='c';return false;},get value(){log+='v';return 'a';},get writable(){log+='w';return false;}};Object.defineProperty(b,key,d);test.record(log);test.record(b[0]);test.record(Object.getOwnPropertyDescriptor(b,0).value);'ok';",
+      "source_sha256": "da9af7c4a9602fa4f274950df16311b7a47a3be0c98cca8fae94a9c7d1dbfe96",
+      "browser_global": false,
+      "reference": {
+        "ok": true,
+        "records": [
+          "string:6b65637677",
+          "string:61",
+          "string:61"
+        ],
+        "error": null,
+        "value": "string:6f6b"
+      }
+    },
+    {
+      "id": "string-review-virtual-index-fail-identity-not-coercion",
+      "source": "var b=new String('a'),n=0,value={toString(){n++;return 'a';}};for(var d of [{value:value},{value:1},{get:undefined},{set:undefined},{get:function(){return 'a';}}]){try{Object.defineProperty(b,0,d);}catch(e){test.record(e.name);}}test.record(n);test.record(b[0]);'ok';",
+      "source_sha256": "55f71d947b89fea1a445c662c7a192beaed02d122bbf80cf2aba780a84f196af",
+      "browser_global": false,
+      "reference": {
+        "ok": true,
+        "records": [
+          "string:547970654572726f72",
+          "string:547970654572726f72",
+          "string:547970654572726f72",
+          "string:547970654572726f72",
+          "string:547970654572726f72",
+          "number:0000000000000000",
+          "string:61"
+        ],
+        "error": null,
+        "value": "string:6f6b"
+      }
+    },
+    {
+      "id": "string-review-virtual-own-index-before-inherited-getters",
+      "source": "var hits=0,p={get 0(){hits++;return 'bad';},get 2(){hits++;return 'tail';}},b=new String('ab');Object.setPrototypeOf(b,p);test.record(b[0]);test.record(b[2]);test.record(hits);test.record(Object.getOwnPropertyNames(b).join());test.record(String.prototype.valueOf.call(b));'ok';",
+      "source_sha256": "067034ba43257df740f7eb2b85bf2c2220b75a89a183520dedfa6220de74c10c",
+      "browser_global": false,
+      "reference": {
+        "ok": true,
+        "records": [
+          "string:61",
+          "string:7461696c",
+          "number:3ff0000000000000",
+          "string:302c312c6c656e677468",
+          "string:6162"
+        ],
+        "error": null,
+        "value": "string:6f6b"
+      }
+    },
+    {
+      "id": "string-review-inherited-string-index-overrides",
+      "source": "var p=new String('ab'),c=Object.create(p);c[0]='bad';test.record(c[0]);test.record(Object.hasOwn(c,0));Object.defineProperty(c,0,{value:'own',writable:true,enumerable:true,configurable:true});test.record(c[0]);test.record(p[0]);delete c[0];test.record(c[0]);test.record(Object.getOwnPropertyNames(c).join());'ok';",
+      "source_sha256": "76ede2a2b2cf3e7a20c153726239e8579433c92b77c16d17b48a4a570a5cd692",
+      "browser_global": false,
+      "reference": {
+        "ok": true,
+        "records": [
+          "string:61",
+          "boolean:false",
+          "string:6f776e",
+          "string:61",
+          "string:61",
+          "string:"
+        ],
+        "error": null,
+        "value": "string:6f6b"
+      }
+    },
+    {
+      "id": "string-review-assign-target-readonly-order",
+      "source": "var b=new String('ab'),log='',s={get 0(){log+='0';return 'a';},get x(){log+='x';return 7;}};try{Object.assign(b,s);}catch(e){test.record(e.name);}test.record(log);test.record(b.x);test.record(b[0]);'ok';",
+      "source_sha256": "a2492300c10b2c44a34dd8fcafca0ef72a261b801ec0edf40cae6703642673df",
+      "browser_global": false,
+      "reference": {
+        "ok": true,
+        "records": [
+          "string:547970654572726f72",
+          "string:30",
+          "undefined",
+          "string:61"
+        ],
+        "error": null,
+        "value": "string:6f6b"
+      }
+    },
+    {
+      "id": "string-review-astral-metadata-without-materialization",
+      "source": "var b=new String('a\ud83d\ude00b');test.record(b.length);test.record(Object.keys(b).join());test.record(Object.getOwnPropertyNames(b).join());for(var k of [0,1,2,3,4]){test.record(Object.hasOwn(b,k));test.record(b.propertyIsEnumerable(k));}test.record(delete b[1]);Object.defineProperty(b,1,{});Object.defineProperty(b,2,{writable:false,enumerable:true,configurable:false});test.record(Object.preventExtensions(b)===b);test.record(Object.isFrozen(b));test.record(Array.from(b).join('|'));'ok';",
+      "source_sha256": "d32379ae90cad7bdd601561c8216dd2b86f1e9debaf963bbc4b25244fb11ba96",
+      "browser_global": false,
+      "reference": {
+        "ok": true,
+        "records": [
+          "number:4010000000000000",
+          "string:302c312c322c33",
+          "string:302c312c322c332c6c656e677468",
+          "boolean:true",
+          "boolean:true",
+          "boolean:true",
+          "boolean:true",
+          "boolean:true",
+          "boolean:true",
+          "boolean:true",
+          "boolean:true",
+          "boolean:false",
+          "boolean:false",
+          "boolean:false",
+          "boolean:true",
+          "boolean:true",
+          "string:617cf09f98807c62"
+        ],
+        "error": null,
+        "value": "string:6f6b"
+      }
+    },
+    {
+      "id": "string-review-astral-generic-method-overrides",
+      "source": "var b=new String('\ud83d\ude00');b.toString=function(){return 'AB';};test.record(b.charAt(1));test.record(Array.from(b).join('|'));test.record(String.prototype.toString.call(b));test.record(String.prototype.valueOf.call(b));test.record(JSON.stringify(b));'ok';",
+      "source_sha256": "5147b8cfd7ca92af9dedf1776647583fec1ec32a5a459b09e1c827aabcf4a6db",
+      "browser_global": false,
+      "reference": {
+        "ok": true,
+        "records": [
+          "string:42",
+          "string:417c42",
+          "string:f09f9880",
+          "string:f09f9880",
+          "string:22414222"
+        ],
+        "error": null,
+        "value": "string:6f6b"
+      }
+    },
+    {
+      "id": "string-review-json-wrapper-coercion-and-symbol-errors",
+      "source": "var b=new String('a'),log='';b.toString=function(){log+='s';return 3;};test.record(JSON.stringify(b));test.record(log);b[Symbol.toPrimitive]=function(h){log+=h;return Symbol('x');};try{JSON.stringify(b);}catch(e){test.record(e.name);}test.record(log);'ok';",
+      "source_sha256": "e88d539602f964d5f92c4fc2f30f8a57f357b9c634e9b1a56bb1d3f3ec610cbe",
+      "browser_global": false,
+      "reference": {
+        "ok": true,
+        "records": [
+          "string:223322",
+          "string:73",
+          "string:547970654572726f72",
+          "string:73737472696e67"
+        ],
+        "error": null,
+        "value": "string:6f6b"
+      }
+    },
+    {
+      "id": "string-review-json-replacer-before-unboxing",
+      "source": "var b=new String('a'),log='';b.toJSON=function(k){log+='j'+k;return this;};b.toString=function(){log+='s';return 'b';};test.record(JSON.stringify([b],function(k,v){if(k==='0'){log+='r';return 42;}return v;}));test.record(log);'ok';",
+      "source_sha256": "84785dddd182885a40232e725108f23bb06809779a443e52a46e4293a59d83d0",
+      "browser_global": false,
+      "reference": {
+        "ok": true,
+        "records": [
+          "string:5b34325d",
+          "string:6a3072"
+        ],
+        "error": null,
+        "value": "string:6f6b"
+      }
+    },
+    {
+      "id": "string-review-json-wrapper-propertylist-gap-order",
+      "source": "var log='',k=new String('a'),gap=new String('x');k.toString=function(){log+='k';return 'b';};gap.toString=function(){log+='g';return 3;};test.record(JSON.stringify({a:1,b:2},[k,k],gap));test.record(log);'ok';",
+      "source_sha256": "40898b10113cc0eb673dc012b7815ef1ba21db517ed3e96beb8bafffa943d3a3",
+      "browser_global": false,
+      "reference": {
+        "ok": true,
+        "records": [
+          "string:7b0a332262223a20320a7d",
+          "string:6b6b67"
+        ],
+        "error": null,
+        "value": "string:6f6b"
+      }
+    },
+    {
+      "id": "string-review-null-prototype-branding-and-json",
+      "source": "var b=new String('a');Object.setPrototypeOf(b,null);test.record(String.prototype.valueOf.call(b));test.record(Object.keys(b).join());try{JSON.stringify(b);}catch(e){test.record(e.name);}try{String(b);}catch(e){test.record(e.name);}test.record(Object.prototype.toString.call(b));'ok';",
+      "source_sha256": "860c444c82c3c022b91ac0a5f5a042dc10ff74f51fe2e6b3bf0e691b9121906f",
+      "browser_global": false,
+      "reference": {
+        "ok": true,
+        "records": [
+          "string:61",
+          "string:30",
+          "string:547970654572726f72",
+          "string:547970654572726f72",
+          "string:5b6f626a65637420537472696e675d"
+        ],
+        "error": null,
+        "value": "string:6f6b"
+      }
+    },
+    {
+      "id": "string-review-prototype-branding-not-inherited",
+      "source": "var p=new String('a'),b=Object.create(p);test.record(Object.prototype.toString.call(b));try{String.prototype.valueOf.call(b);}catch(e){test.record(e.name);}test.record(JSON.stringify(b));test.record(b[0]);'ok';",
+      "source_sha256": "ce8ecd799dbcf43d0f951c9bde0c644dec383d23058cf11ffa0660d88ab7e5c9",
+      "browser_global": false,
+      "reference": {
+        "ok": true,
+        "records": [
+          "string:5b6f626a656374204f626a6563745d",
+          "string:547970654572726f72",
+          "string:7b7d",
+          "string:61"
+        ],
+        "error": null,
+        "value": "string:6f6b"
+      }
+    },
+    {
+      "id": "string-review-empty-primitive-descriptor-source",
+      "source": "var b=new String('a');test.record(Object.defineProperties(b,'')===b);test.record(Object.create(null,'')!==null);test.record(b[0]);'ok';",
+      "source_sha256": "4557f594bb8ab2c17dc1495e9160f6e0985c0b6306b90e9ba2e75383c200f8ff",
+      "browser_global": false,
+      "reference": {
+        "ok": true,
+        "records": [
+          "boolean:true",
+          "boolean:true",
+          "string:61"
+        ],
+        "error": null,
+        "value": "string:6f6b"
+      }
+    },
+    {
+      "id": "string-review-integrity-properties-retained",
+      "source": "var b=new String('ab'),k=Symbol('x');b.extra=7;b[k]=9;test.record(Object.isSealed(b));Object.seal(b);b.extra=8;b[k]=10;test.record(Object.isFrozen(b));test.record(b.extra);test.record(b[k]);Object.freeze(b);b.extra=9;b[k]=11;test.record(Object.isFrozen(b));test.record(b.extra);test.record(b[k]);test.record(Object.getOwnPropertyNames(b).join());'ok';",
+      "source_sha256": "e3b05b1bfa26ae8836f751df15ecdb2b872a446bb4d289654f09ebbf52f31804",
+      "browser_global": false,
+      "reference": {
+        "ok": true,
+        "records": [
+          "boolean:false",
+          "boolean:false",
+          "number:4020000000000000",
+          "number:4024000000000000",
+          "boolean:true",
+          "number:4020000000000000",
+          "number:4024000000000000",
+          "string:302c312c6c656e6774682c6578747261"
+        ],
+        "error": null,
+        "value": "string:6f6b"
+      }
+    }
+  ]
+}

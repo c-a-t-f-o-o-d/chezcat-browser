@@ -1,0 +1,360 @@
+//! Small live DOM surfaces needed by ordinary page initialization. No requests
+//! leave this module: image changes use the document resource queue. Fresh
+//! detached Image requests and beacons retain their explicit declined boundary.
+use super::*;
+
+pub(super) fn navigator_readonly(name: &str) -> bool {
+    matches!(
+        name,
+        "userAgent"
+            | "appVersion"
+            | "appCodeName"
+            | "appName"
+            | "product"
+            | "vendor"
+            | "platform"
+            | "language"
+            | "cookieEnabled"
+            | "webdriver"
+            | "pdfViewerEnabled"
+            | "plugins"
+            | "mimeTypes"
+    )
+}
+
+pub(super) fn dataset_key(attribute: &str) -> Option<String> {
+    let suffix = attribute.strip_prefix("data-")?;
+    if suffix.bytes().any(|byte| byte.is_ascii_uppercase()) {
+        return None;
+    }
+    let mut key = String::with_capacity(suffix.len());
+    let mut chars = suffix.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '-' && chars.peek().is_some_and(char::is_ascii_lowercase) {
+            key.push(chars.next().unwrap().to_ascii_uppercase());
+        } else {
+            key.push(ch);
+        }
+    }
+    Some(key)
+}
+
+pub(super) fn dataset_attribute(name: &str) -> String {
+    let mut attribute = String::from("data-");
+    for ch in name.chars() {
+        if ch.is_ascii_uppercase() {
+            attribute.push('-');
+            attribute.push(ch.to_ascii_lowercase());
+        } else {
+            attribute.push(ch);
+        }
+    }
+    attribute
+}
+
+pub(super) fn url_copy_cost(
+    raw: &str,
+    base: Option<&crate::navigation::Location>,
+) -> Result<usize, String> {
+    let mut bytes = raw.len();
+    if let Some(base) = base {
+        for count in [
+            base.fragment.len(),
+            base.path.as_ref().map_or(0, |p| p.as_os_str().len()),
+            base.url.as_ref().map_or(0, |u| u.host.len()),
+            base.url.as_ref().map_or(0, |u| u.path.len()),
+            base.url
+                .as_ref()
+                .and_then(|u| u.query.as_ref())
+                .map_or(0, String::len),
+        ] {
+            bytes = bytes
+                .checked_add(count)
+                .ok_or("URL copy accounting overflow.")?;
+        }
+    }
+    // Covers resolution temporaries, file percent encoding and both retained
+    // URI copies; no allocation depends on a claimed resource size.
+    bytes
+        .checked_mul(20)
+        .and_then(|n| n.checked_add(1024))
+        .ok_or_else(|| "URL copy accounting overflow.".into())
+}
+impl Bridge<'_> {
+    /// Genuine HTML string reflections, not a general expando/native alias.
+    pub(super) fn html_text_reflection(&self,node:usize,name:&str)->Option<&'static str> {
+        if !self.doc.nodes.get(node).is_some_and(|entry|entry.namespace==crate::html::Namespace::Html && matches!(entry.kind,NodeKind::Element{..})) {return None;}
+        match name {
+            "dir"=>Some("dir"),"lang"=>Some("lang"),
+            "useMap" if matches!(tag(self.doc,node),"img"|"input"|"object")=>Some("usemap"),
+            "align" if matches!(tag(self.doc,node),"div"|"p"|"h1"|"h2"|"h3"|"h4"|"h5"|"h6"|"hr"|"img"|"input"|"iframe"|"object"|"embed"|"table"|"caption"|"thead"|"tbody"|"tfoot"|"tr"|"td"|"th"|"col"|"colgroup")=>Some("align"),
+            _=>None,
+        }
+    }
+    pub(super) fn html_text_reflection_get(&mut self,node:usize,name:&str)->Result<Value,String> {
+        if self.doc.nodes[node].namespace==crate::html::Namespace::UnknownForeign {return Err("HTML reflection requires a known namespace context.".into());}
+        let Some(attribute)=self.html_text_reflection(node,name) else {return Ok(Value::Undefined);};
+        let NodeKind::Element{attrs,..}=&self.doc.nodes[node].kind else {unreachable!()};self.state.work(attrs.len())?;
+        let value=self.doc.attr(node,attribute).unwrap_or("");
+        let value=if name=="dir" {["ltr","rtl","auto"].into_iter().find(|known|value.eq_ignore_ascii_case(known)).unwrap_or("")}else{value};
+        if value.len()>self.state.limits.host.string_bytes {return Err("Reflected HTML value exceeds the DOM string allowance.".into());}
+        self.state.copies(value.len())?;Ok(Value::String(value.to_owned()))
+    }
+    pub(super) fn html_image_map_property(&self, node: usize) -> bool {
+        self.doc.nodes.get(node).is_some_and(|item| item.namespace == crate::html::Namespace::Html)
+            && tag(self.doc, node) == "img"
+    }
+
+    pub(super) fn html_image_map_get(&mut self, node: usize) -> Result<Value, String> {
+        if self.doc.nodes[node].namespace == crate::html::Namespace::UnknownForeign {
+            return Err("Image-map reflection requires a known namespace context.".into());
+        }
+        if !self.html_image_map_property(node) { return Ok(Value::Undefined); }
+        let NodeKind::Element { attrs, .. } = &self.doc.nodes[node].kind else { unreachable!() };
+        self.state.work(attrs.len())?;
+        Ok(Value::Bool(self.doc.attr(node, "ismap").is_some()))
+    }
+
+    pub(super) fn html_border_property(&self, node: usize) -> bool {
+        self.doc.nodes.get(node).is_some_and(|item| item.namespace == crate::html::Namespace::Html)
+            && matches!(tag(self.doc, node), "img" | "object" | "table")
+    }
+
+    pub(super) fn html_border_get(&mut self, node: usize) -> Result<Value, String> {
+        if self.doc.nodes[node].namespace == crate::html::Namespace::UnknownForeign {
+            return Err("Border lookup requires a known namespace context.".into());
+        }
+        if !self.html_border_property(node) { return Ok(Value::Undefined); }
+        let NodeKind::Element { attrs, .. } = &self.doc.nodes[node].kind else { unreachable!() };
+        self.state.work(attrs.len())?;
+        let value = self.doc.attr(node, "border").unwrap_or("");
+        if value.len() > self.state.limits.host.string_bytes { return Err("Border value exceeds the DOM string limit.".into()); }
+        self.state.copies(value.len())?;
+        Ok(Value::String(value.to_owned()))
+    }
+
+    pub(super) fn html_spacing_property(&self, node: usize, name: &str) -> bool {
+        matches!(name, "vspace" | "hspace")
+            && self.doc.nodes.get(node).is_some_and(|item| item.namespace == crate::html::Namespace::Html)
+            && matches!(tag(self.doc, node), "img" | "input" | "object" | "embed" | "marquee")
+    }
+
+    pub(super) fn html_spacing_get(&mut self, node: usize, name: &str) -> Result<Value, String> {
+        if self.doc.nodes[node].namespace == crate::html::Namespace::UnknownForeign {
+            return Err("Spacing lookup requires a known namespace context.".into());
+        }
+        if !self.html_spacing_property(node, name) { return Ok(Value::Undefined); }
+        if let NodeKind::Element { attrs, .. } = &self.doc.nodes[node].kind {
+            self.state.work(attrs.len())?;
+        }
+        let value = self.doc.attr(node, name).unwrap_or("");
+        self.state.work(value.len().saturating_add(1))?;
+        Ok(Value::Number(f64::from(crate::forms::parse_tab_index(value).filter(|n| *n >= 0).unwrap_or(0))))
+    }
+
+    pub(super) fn html_spacing_set(&mut self, node: usize, name: &str, value: &Value) -> Result<(), String> {
+        let value = timer_integer(value)? as u32;
+        let value = if value > i32::MAX as u32 { 0 } else { value };
+        self.attribute(node, name, Some(value.to_string()))
+    }
+
+    pub(super) fn dataset_node(&mut self, handle: u32) -> Result<usize, String> {
+        if !(DATASET_BASE..EVENT_BASE).contains(&handle) {
+            return Err("Invalid dataset handle.".into());
+        }
+        self.node(node_handle((handle - DATASET_BASE) as usize))
+    }
+
+    pub(super) fn dataset_get(&mut self, handle: u32, name: &str) -> Result<Value, String> {
+        let node = self.dataset_node(handle)?;
+        // A literal hyphen followed by a lowercase ASCII letter cannot be a
+        // supported DOMStringMap key. Do not alias it to the camel-case key.
+        if name
+            .as_bytes()
+            .windows(2)
+            .any(|pair| pair[0] == b'-' && pair[1].is_ascii_lowercase())
+        {
+            return Ok(Value::Undefined);
+        }
+        let attribute = dataset_attribute(name);
+        self.state.copies(attribute.len())?;
+        if let NodeKind::Element { attrs, .. } = &self.doc.nodes[node].kind {
+            self.state.work(attrs.len())?;
+        }
+        let value = match &self.doc.nodes[node].kind {
+            NodeKind::Element { attrs, .. } => attrs
+                .iter()
+                .find(|attr| attr.name.html_is(&attribute))
+                .map(|attr| &attr.value),
+            _ => None,
+        };
+        if let Some(value) = value {
+            if value.len() > self.state.limits.host.string_bytes {
+                return Err("Dataset value exceeds 32 KiB.".into());
+            }
+            self.state.copies(value.len())?;
+            Ok(Value::String(value.clone()))
+        } else {
+            Ok(Value::Undefined)
+        }
+    }
+
+    pub(super) fn create_image(&mut self, args: &[Value]) -> Result<Value, String> {
+        self.state.rebuild(self.doc)?;
+        if self.doc.nodes.len().saturating_add(self.state.blank_frame_nodes) >= self.state.node_limit {
+            return Err("DOM appended-node limit reached (256 per document).".into());
+        }
+        let mut attrs = Vec::new();
+        for (index, name) in ["width", "height"].iter().enumerate() {
+            if let Some(value) = args.get(index) {
+                // Web IDL unsigned long wraps after truncation; it is not a
+                // pointer size or a raster allocation request.
+                let dimension = timer_integer(value)? as u32;
+                attrs.push(crate::html::Attribute::unqualified((*name).into(), dimension.to_string()));
+            }
+        }
+        let bytes = 3 + attrs
+            .iter()
+            .map(crate::html::Attribute::bytes)
+            .sum::<usize>();
+        self.state.replace_bytes(0, bytes)?;
+        let node = self.doc.nodes.len();
+        self.doc.nodes.push(Node {
+            namespace: crate::html::Namespace::Html,
+            kind: NodeKind::Element {
+                tag: "img".into(),
+                id: None,
+                href: None,
+                attrs,
+            },
+            children: Vec::new(),
+        });
+        self.state.detached_images.insert(node);
+        self.state.dom.created.insert(node);
+        self.state.detached_nodes.insert(node);
+        // Detached elements have no tree parent and never enter document.images,
+        // ID lookup, layout traversal or the document resource loader.
+        self.state.tree.active.push(false);
+        self.state.tree.parents.push(None);
+        self.state.dom.connected.push(false);
+        Ok(Value::Host(node_handle(node)))
+    }
+
+    /// Reflect a URL content attribute without admitting or opening a resource.
+    pub(super) fn reflected_url(&mut self,node:usize,attribute:&str)->Result<Value,String>{
+        let Some(raw)=self.doc.attr(node,attribute) else{return self.string("");};
+        if raw.len()>self.state.limits.host.string_bytes{return Err("Reflected URL exceeds the configured string allowance.".into());}
+        let base=self.state.dynamic.base.as_ref().or_else(||self.state.location.as_ref().map(|location|&location.source));
+        let cost=url_copy_cost(raw,base)?;
+        self.state.copies(cost)?;
+        let base=self.state.dynamic.base.as_ref().or_else(||self.state.location.as_ref().map(|location|&location.source));
+        let resolved=base.and_then(|base|crate::navigation::selection_url(raw,base).ok()).unwrap_or_else(||raw.to_owned());
+        self.string(&resolved)
+    }
+
+    pub(super) fn image_source(&mut self, node: usize) -> Result<Value, String> {
+        let Some(source) = self.doc.attr(node, "src") else {
+            return Ok(Value::String(String::new()));
+        };
+        self.state.copies(source.len())?;
+        let source = source.to_owned();
+        let resolved = self.state.dynamic.base.as_ref()
+            .or_else(|| self.state.location.as_ref().map(|location| &location.source))
+            .and_then(|base| crate::navigation::resolve(&source, base).ok())
+            .map(|target| target.display())
+            .unwrap_or(source);
+        self.string(&resolved)
+    }
+
+    pub(super) fn image_get(&mut self, node: usize, name: &str) -> Result<Option<Value>, String> {
+        if tag(self.doc, node) != "img" {
+            return Ok(None);
+        }
+        let dimensions = self
+            .state
+            .geometry
+            .as_ref()
+            .and_then(|geometry| geometry.image_dimensions(node))
+            .filter(|_| self.state.images.entries.get(&node).is_none_or(|entry| entry.available));
+        Ok(Some(match name {
+            "src" => return self.image_source(node).map(Some),
+            "alt" => {
+                let value = self.doc.attr(node, "alt").unwrap_or("").to_owned();
+                return self.string(&value).map(Some);
+            }
+            "width" | "height" => Value::Number(
+                self.doc
+                    .attr(node, name)
+                    .and_then(|text| text.trim().parse::<u32>().ok())
+                    .map(f64::from)
+                    .or_else(|| {
+                        dimensions.map(|(w, h)| if name == "width" { w as f64 } else { h as f64 })
+                    })
+                    .unwrap_or(0.0),
+            ),
+            "naturalWidth" => Value::Number(dimensions.map_or(0, |size| size.0) as f64),
+            "naturalHeight" => Value::Number(dimensions.map_or(0, |size| size.1) as f64),
+            "complete" => Value::Bool(
+                self.state.images.entries.get(&node).map_or_else(
+                    || dimensions.is_some() || self.doc.attr(node, "src").is_none_or(str::is_empty),
+                    |entry| !entry.pending || self.doc.attr(node, "src").is_none_or(str::is_empty)),
+            ),
+            "currentSrc" => {
+                if let Some(entry) = self.state.images.entries.get(&node) {
+                    let current = entry.current.clone();
+                    return self.string(&current).map(Some);
+                }
+                if dimensions.is_some() {
+                    return self.image_source(node).map(Some);
+                } else {
+                    Value::String(String::new())
+                }
+            }
+            _ => return Ok(None),
+        }))
+    }
+
+    pub(super) fn image_set(
+        &mut self,
+        node: usize,
+        name: &str,
+        value: &Value,
+    ) -> Result<bool, String> {
+        if tag(self.doc, node) != "img" || !matches!(name, "src" | "alt" | "width" | "height") {
+            return Ok(false);
+        }
+        let value = if matches!(name, "width" | "height") {
+            (timer_integer(value)? as u32).to_string()
+        } else {
+            self.text(value)?
+        };
+        if name == "src" {
+            self.image_source_change(node, Some(value))?;
+        } else { self.attribute(node, name, Some(value))?; }
+        Ok(true)
+    }
+
+    pub(super) fn send_beacon(&mut self, args: &[Value]) -> Result<Value, String> {
+        let value = args.first().ok_or("sendBeacon requires a URL.")?;
+        let source = self.text(value)?;
+        // Validation uses the same URL parser as navigation. This is inspection
+        // only; no DNS, socket, cookie, credential or background queue exists.
+        if !self.beacon_url_valid(&source) {
+            return Err("sendBeacon requires a valid HTTP or HTTPS URL.".into());
+        }
+        if let Some(Value::String(body)) = args.get(1) {
+            self.state.copies(body.len())?;
+        }
+        self.state.declined_beacons = self.state.declined_beacons.saturating_add(1);
+        Ok(Value::Bool(false))
+    }
+
+    pub(super) fn beacon_url_valid(&self, source: &str) -> bool {
+        self.state
+            .location
+            .as_ref()
+            .and_then(|location| crate::url::parse(&location.href).ok())
+            .map(|(base, _)| base.resolve(source).is_ok())
+            .unwrap_or_else(|| crate::url::parse(source).is_ok())
+    }
+}

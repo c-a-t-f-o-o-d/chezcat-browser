@@ -1,0 +1,31 @@
+<!doctype html><html><head><meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="media-src 'self'">
+<title>Local video source replacement</title>
+<style>body{margin:20px}video{display:block;width:480px;height:360px;object-fit:contain}button{margin:4px}</style>
+</head><body><h1>Video source replacement</h1>
+<button type="button" id="replace" name="replace">Replace source</button><button type="button" id="restore" name="restore">Restore source</button><button type="button" id="clear" name="clear">Remove before selection</button><button type="button" id="missing" name="missing">Missing source</button>
+<video id="authored-video" src="scene-intra.ivf" controls></video>
+<p id="state">Source pending</p><p id="order">No replacement yet</p><a href="authored-video-next.html">Leave video</a>
+<script>
+var video=document.getElementById('authored-video'),events=[],order='';
+for(var name of ['loadstart','abort','emptied','timeupdate','durationchange','loadedmetadata','loadeddata','canplay','canplaythrough','play','playing','pause','error'])video.addEventListener(name,function(e){
+ if(e.target!==video||!e.isTrusted||e.bubbles||e.cancelable)throw Error('real event identity');
+ events.push(e.type);
+ if(e.type==='loadedmetadata'){
+  if(video.videoWidth!==64||video.videoHeight!==48||video.duration!==3||!video.paused||video.currentTime!==0)throw Error('real replacement metadata');
+  document.getElementById('state').textContent='Ready '+video.currentSrc;
+ }
+ if(e.type==='error')document.getElementById('state').textContent='Source failed '+video.currentSrc;
+ if(e.type==='emptied')document.getElementById('state').textContent='Source emptied';
+});
+document.getElementById('replace').addEventListener('click',function(){
+ var previous=video.currentSrc;order='';
+ queueMicrotask(function(){if(video.currentSrc!==previous||video.networkState!==3||video.readyState!==0)throw Error('before stable');order+='before;';});
+ video.src='scene-replacement.ivf';
+ if(video.currentSrc!==previous||video.currentTime!==0||!video.paused||!isNaN(video.duration))throw Error('synchronous load reset');
+ Promise.resolve().then(function(){if(video.currentSrc.indexOf('scene-replacement.ivf')<0||video.networkState!==2)throw Error('after stable');order+='after;';document.getElementById('order').textContent=order;});
+});
+document.getElementById('restore').addEventListener('click',function(){video.getAttributeNode('src').value='scene-intra.ivf';});
+document.getElementById('clear').addEventListener('click',function(){video.src='scene-replacement.ivf';video.removeAttribute('src');});
+document.getElementById('missing').addEventListener('click',function(){video.setAttribute('src','missing-selected.ivf');});
+</script></body></html>
