@@ -20,9 +20,8 @@ Acceptance: descriptors and aliases; getter-before-argument evaluation; no hidde
 native restoration after deletion; real wrapped callback/cancellation/microtasks;
 small-profile failure/recovery and generous default; saved call/apply/bound owner
 controls; disabled scripting; normal suite/build/PE and a real local page journey.
-Completed for the0.79.0-alpha.1 milestone on the clean lineage. Original source
-changes were recovered without private ancestry or process documents. Acceptance
-is exercised by src/script_timer_global_tests.rs, src/script_blank_frames.rs,
+Implemented for the main window. Acceptance is exercised by
+src/script_timer_global_tests.rs, src/script_blank_frames.rs,
 src/app_script_tests.rs and tools/check_animation_harness.py with original
 animation-global-properties.js/animation-wrappers.html fixtures.
 

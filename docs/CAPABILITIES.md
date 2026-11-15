@@ -18,26 +18,12 @@ physical desktop/device evidence and live-service outcomes are different scopes.
 | Browser UI | Native settings, address input, bookmarks/history/download controls and local input paths | Full accessibility, richer UI and native locked-session presentation unverified | src/app*.rs, src/ui.rs, src/platform.rs; App/input journeys |
 | Diagnostics | Source/activity/layout/pixels, inspector, measured network phases and finite local tooling | Reports can contain private URLs/paths/session data; titles/200/errors alone are not acceptance | src/diagnostics.rs, src/network_trace.rs; offline harness reports |
 | Platform/isolation | Windows x64, explicit FFI ownership, worker retirement/cancellation and watchdogs | No OS renderer sandbox; independent native/crypto/aggregate-memory assurance remains incomplete | src/platform.rs, src/audio_output.rs; native negative tests and PE checks |
-| Build/release | std-only production manifest, generated resources, pinned compiler and offline local gates | Publication and CSAPUL adoption are complete; the snapshot and each replacement binary require their own exact tagged build, payload/extracted journey and actual upload verification | Build.cmd, tools/verify_offline.py, docs/RELEASING.md |
+| Build/release | std-only production manifest, generated resources, pinned compiler and offline local gates | Each release requires an exact tagged build, complete payload, extracted-runtime checks and downloadable-asset verification | Build.cmd, tools/verify_offline.py, docs/RELEASING.md |
 
-Google manual-session results/result-opening/one-Back/different-query were reported
-successful. A different fresh-process verification reached a gate; that does not
-erase the manual report or establish fresh-session success. Images returned an
-observed browser-compatibility page. Maps had distinct CSS-capacity, font-policy
-and UTF-16 failures; improving the shared CSS allowance did not establish Maps
-support. The recorded 0.78 YouTube homepage remained unreadable with interface
-errors; no watch navigation or playback is claimed. Routine CI never revisits
-these services or attempts human challenges.
+Google Search, Images and Maps are not fully supported. YouTube page compatibility
+is limited, and playback is unsupported.
 
-The 0.78 baseline passed 1,748 normal Windows tests and eleven offline journeys.
-A new cleaned-checkout report must identify its own source/executable hashes;
-rewritten history does not inherit old cryptographic build attestations.
-
-F1 adds replace/delete/restore and saved call/apply/bound operation behavior, strict/
-sloppy callback-this semantics, checked on-demand queues and full-u32 identifiers.
-A frame shares work/deadline allowance with its microtask checkpoints, including
-retained-object rejection scans. Ordinary callback errors continue; fatal jobs
-retire pending work and recover only through a new job. Child frame schedulers
-remain unsupported. The new original executable journey checks actual wrapped
-callbacks, cancellation, strictly later frames, pixels/text and navigation.
-Milestone test/build identities belong to its actual CI/release records.
+Main-window animation operations support replacement and real callback scheduling
+and cancellation. Child-frame animation schedulers are unsupported. See the
+[F1 feature contract](FEATURE_CONTRACTS.md#f1--replaceable-animation-frame-operations)
+for the technical scope and acceptance criteria.

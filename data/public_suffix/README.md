@@ -7,15 +7,13 @@ Java runtime, or downloaded feature pack is required. This directory contains
 
 ## Provenance and freshness
 
-The available full dataset is pinned to upstream Public Suffix List revision
-`823beb1425def931c8b0b170a6bc33b424c3f9b0`, dated **2025-05-12**. It is a historical
-snapshot, **not an up-to-date November 2026 list**. A stale list can miss newer
-public/private hosting boundaries. Review/refresh it before distributing this
-candidate beyond development use; do not describe this release as comprehensive
-current cookie isolation.
+The dataset is pinned to upstream Public Suffix List revision
+`823beb1425def931c8b0b170a6bc33b424c3f9b0`, dated **2025-05-12**. This historical
+snapshot is not a current list and can miss newer public/private hosting
+boundaries. Review and refresh it for current hosting boundaries; do not describe
+it as comprehensive current cookie-isolation data.
 
-Direct downloads into this build environment were unavailable. The complete
-rule set was recovered from Debian's OpenJDK distribution data, whose separate
+The rule set was recovered from Debian's OpenJDK distribution data, whose separate
 MPL notice identifies the upstream revision. The exact distribution archive is
 retained in `tools/reference/public-suffix/openjdk-public-suffix.dat` (relative
 to the project root). No Java implementation was copied. `source.dat` reconstructs

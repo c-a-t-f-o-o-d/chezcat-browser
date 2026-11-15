@@ -1,6 +1,6 @@
 # ChezCat icon
 
-The selected direction is the C-cat monogram: a cream C with two feline ears and a teal tail terminal on a midnight navy rounded tile. This is the third concept selected by the user for ChezCat.
+The ChezCat icon is a C-cat monogram: a cream C with two feline ears and a teal tail terminal on a midnight navy rounded tile.
 
 ## Included assets
 

@@ -23,15 +23,14 @@ and licensing obligations; see [third-party notices](THIRD_PARTY_NOTICES.md).
 - Selected local IVF/VP8-intra video, PCM audio and constrained Matroska A/V.
   One authored HTML video supports native controls, source replacement and real
   JavaScript load(). Script play/pause/seek and network media remain incomplete.
-- Replaceable main-Window animation-frame operations, with real saved-native
-  callbacks/cancellation, shared measured frame timestamps and deferred next frames.
+- Replaceable main-window animation operations that schedule and cancel real
+  callbacks. Child-frame schedulers are unsupported.
 - Original local regression fixtures and App/input/offscreen interaction tests.
 
 These are scoped foundations, not complete standards support. The
 [capability matrix](docs/CAPABILITIES.md) separates implementation from evidence.
-Google has worked in particular recorded/manual sessions; fresh-session behavior
-is still unresolved. Images and Maps have separate gaps. YouTube playback is not
-implemented, and a homepage title/HTTP success is not playback or browsing success.
+Google Search, Images and Maps are not fully supported. YouTube page compatibility
+is limited, and playback is unsupported.
 
 ## Build
 
