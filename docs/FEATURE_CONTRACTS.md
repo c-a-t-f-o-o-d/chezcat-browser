@@ -89,6 +89,19 @@ unfinished tail. Admission failure leaves state unchanged. Existing native
 controls, standalone playback and source-replacement coverage remain required.
 Full F3 additionally requires the seeking/play-promise acceptance above.
 
+Seek sub-contract: finite double conversion, signed premetadata defaults and
+job-stable official positions feed the existing real decoder. Source-bound
+controls apply in FIFO order independently of task dispatch and decode completion.
+Requested bitmaps precede completion notifications; playing seeks retain intent
+while the clock waits for data. Native Play during a pending seek also waits.
+Default-start metadata precedes target data-ready events and document load.
+Original Page, queue and actual worker/App tests cover clamping, same-frame/EOF,
+supersession, pause interleavings, producer failure and stale source/generation.
+Control admission reserves its entry before projection; later asynchronous
+notification-allocation failure enters a reported stopped media error. A small
+capacity test proves that failure and real reload/seek recovery. No future-event
+storage guarantee or script-play promise support is implied.
+
 ## F4 — network media transaction
 
 Outcome: one original supported clip plays from controlled HTTP(S) origins using

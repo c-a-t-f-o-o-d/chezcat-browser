@@ -18,7 +18,7 @@ def main():
     folder = ROOT / 'results/verification/autonomy' / (datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S.%fZ') + '-authored-video-journey-' + uuid.uuid4().hex[:8])
     folder.mkdir(parents=True)
     script = folder / 'authored.tsv'
-    script.write_text('snapshot\tmetadata\nmedia\tPlay\nwait\t650\nmedia\tPause\nsnapshot\tpaused\nwait\t500\nsnapshot\tfrozen\nclick\treload\nsnapshot\treloaded\nmedia\tPlay\nwait\t650\nclick\tjs-pause\nsnapshot\tjs-issued\nwait\t1000\nsnapshot\tjs-settled\nwait\t750\nsnapshot\tjs-frozen\nmedia\tSeek:2200\nsnapshot\tseeked\nmedia\tPlay\nwait\t1200\nsnapshot\tended\nmedia\tPlay\nsnapshot\treplay\nmedia\tStop\nsnapshot\tstopped\nlink\tLeave\nsnapshot\tnavigated\n', encoding='utf-8', newline='\n')
+    script.write_text('snapshot\tmetadata\nmedia\tPlay\nwait\t650\nmedia\tPause\nsnapshot\tpaused\nwait\t500\nsnapshot\tfrozen\nclick\treload\nsnapshot\treloaded\nmedia\tPlay\nwait\t650\nclick\tjs-pause\nsnapshot\tjs-issued\nwait\t1000\nsnapshot\tjs-settled\nwait\t750\nsnapshot\tjs-frozen\nclick\tjs-seek\nwait\t1000\nsnapshot\tjs-seek-settled\nwait\t750\nsnapshot\tjs-seek-frozen\nmedia\tSeek:2200\nsnapshot\tseeked\nmedia\tPlay\nwait\t1200\nsnapshot\tended\nmedia\tPlay\nsnapshot\treplay\nmedia\tStop\nsnapshot\tstopped\nlink\tLeave\nsnapshot\tnavigated\n', encoding='utf-8', newline='\n')
     before = capture_tests.source_identity(ROOT)
     out = folder / 'journey'
     row = capture_tests.execute([str(ROOT / 'ChezCat.exe'), str(ROOT / 'tools/fixtures/authored-video.html'), '--dev-input-script', str(script), '--dev-input-output', str(out), '--javascript', '--no-profile'], folder / 'command.log', ROOT, 120)
@@ -28,7 +28,7 @@ def main():
     clip = json.loads((ROOT / 'tools/fixtures/scene-intra.json').read_text(encoding='utf-8'))
     checks['independent_reference_identity'] = hashlib.sha256(reference).hexdigest() == clip['reference_rgba_sha256']
     checks['original_clip_identity'] = capture_tests.sha256(ROOT / 'tools/fixtures/scene-intra.ivf') == clip['ivf_sha256']
-    for name in ['metadata', 'paused', 'frozen', 'reloaded', 'js-issued', 'js-settled', 'js-frozen', 'seeked', 'ended', 'replay', 'stopped', 'navigated']:
+    for name in ['metadata', 'paused', 'frozen', 'reloaded', 'js-issued', 'js-settled', 'js-frozen', 'js-seek-settled', 'js-seek-frozen', 'seeked', 'ended', 'replay', 'stopped', 'navigated']:
         file = next(out.glob('*-' + name + '.activity.txt'), None)
         if file is None:
             checks[name + '_snapshot'] = False
@@ -52,7 +52,7 @@ def main():
         state['generation'] = int(match[10])
         state['node'] = int(binding[1]) if binding else None
         reference_frame = state['frame']
-        if name.startswith('js-'):
+        if name in ['js-issued', 'js-settled', 'js-frozen']:
             layout = file.with_name(file.name.replace('.activity.txt', '.layout.txt')).read_text(encoding='utf-8')
             visible = ' '.join(re.findall(r'text="([^"\n]*)"', layout))
             observed = dict(re.findall(r'\b(js_pause_sync|js_pause_microtask|js_pause_ms|js_pause_events)=(\d+)', visible))
@@ -63,14 +63,31 @@ def main():
             checks[name + '_paused_before_end'] = (not state['playing'] and not state['ended']
                 and 0 < state['time_ms'] < state['duration_ms']
                 and re.search(r'HTML video binding[^\n]*\bpaused=true\b', text) is not None)
-            if name in ['js-settled', 'js-frozen']:
-                # Derive the target from original timestamp/timebase metadata,
-                # independently of the player's displayed frame report.
-                expected_frame = max(index for index, frame in enumerate(clip['frames'])
-                    if frame['timestamp'] * clip['scale'] * 1000 <= state['time_ms'] * clip['rate'])
-                state['expected_frame_from_frozen_time'] = expected_frame
-                checks[name + '_frame_matches_frozen_time'] = state['frame'] == expected_frame
-                reference_frame = expected_frame
+        if name in ['js-seek-settled', 'js-seek-frozen']:
+            layout = file.with_name(file.name.replace('.activity.txt', '.layout.txt')).read_text(encoding='utf-8')
+            visible = ' '.join(re.findall(r'text="([^"\n]*)"', layout))
+            observed = dict(re.findall(r'\b(js_seek_sync|js_seek_ms|js_seek_complete)=(\d+)', visible))
+            order = re.search(r'\bjs_seek_order=([a-z,]+)', visible)
+            events = order[1].split(',') if order else []
+            state['js_seek'] = observed
+            state['js_seek_events'] = events
+            checks[name + '_genuine_js_seek_observed'] = (observed.get('js_seek_sync') == '1'
+                and observed.get('js_seek_ms') == '1250' and observed.get('js_seek_complete') == '1')
+            checks[name + '_ordered_seek_completion_events'] = (len(events) >= 3 and events[0] == 'seeking'
+                and events.count('seeking') == 1 and events.count('seeked') == 1
+                and events[-2:] == ['timeupdate', 'seeked'] and all(event in ['seeking', 'timeupdate', 'seeked'] for event in events))
+            checks[name + '_real_paused_target'] = (not state['playing'] and not state['ended']
+                and state['time_ms'] == 1250 and state['frame'] == 2
+                and re.search(r'HTML video binding[^\n]*\bpaused=true\b', text) is not None
+                and re.search(r'HTML video binding[^\n]*\bseeking=false\b', text) is not None)
+        if name in ['js-settled', 'js-frozen', 'js-seek-settled', 'js-seek-frozen']:
+            # Derive the target from original timestamp/timebase metadata,
+            # independently of the player's displayed frame report.
+            expected_frame = max(index for index, frame in enumerate(clip['frames'])
+                if frame['timestamp'] * clip['scale'] * 1000 <= state['time_ms'] * clip['rate'])
+            state['expected_frame_from_frozen_time'] = expected_frame
+            checks[name + '_frame_matches_frozen_time'] = state['frame'] == expected_frame
+            reference_frame = expected_frame
         if name == 'reloaded':
             checks['reload_preserved_raw_attr_identity'] = all(('text="' + word + '"') in file.with_name(file.name.replace('.activity.txt', '.layout.txt')).read_text(encoding='utf-8') for word in ['Raw','source','retained','after','load'])
             checks['reload_reset_real_player'] = not state['playing'] and state['time_ms'] == 0 and state['frame'] == 0
@@ -115,6 +132,13 @@ def main():
             and issued['generation'] == settled['generation'] == frozen['generation'])
         checks['js_pause_settled_pixels_remain_frozen'] = (settled['frame'] == frozen['frame']
             and settled['frame_sample_sha256'] == frozen['frame_sample_sha256'])
+    checks['js_seek_all_snapshots_present'] = all(name in stages for name in ['js-seek-settled', 'js-seek-frozen'])
+    if checks['js_seek_all_snapshots_present']:
+        settled, frozen = (stages[name] for name in ['js-seek-settled', 'js-seek-frozen'])
+        checks['js_seek_stays_paused_at_real_target'] = settled['time_ms'] == frozen['time_ms'] == 1250
+        checks['js_seek_frozen_source_generation'] = (settled['node'] == frozen['node']
+            and settled['generation'] == frozen['generation'])
+        checks['js_seek_decoded_pixels_stay_frozen'] = settled['frame_sample_sha256'] == frozen['frame_sample_sha256']
     checks['source_unchanged'] = before == capture_tests.source_identity(ROOT)
     capture_tests.write_json(folder / 'manifest.json', {'scope': __doc__, 'executable_sha256': capture_tests.sha256(ROOT / 'ChezCat.exe'), 'source_before': before, 'source_after': capture_tests.source_identity(ROOT), 'run': row, 'checks': checks, 'stages': stages})
     print(json.dumps(checks, indent=2))

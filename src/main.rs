@@ -39,6 +39,7 @@ mod layout;
 mod license_acceptance;
 mod loader;
 mod media;
+mod media_tasks;
 mod matroska;
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 mod navigation;

@@ -6,9 +6,11 @@
 <h1>Authored video element</h1>
 <button id="reload" name="reload" type="button">Reload the same video with JavaScript</button>
 <button id="js-pause" name="js-pause" type="button">Pause with JavaScript</button>
+<button id="js-seek" name="js-seek" type="button">Seek with JavaScript</button>
 <video id="authored-video" src="scene-intra.ivf" controls width="480" height="360" onloadedmetadata="window.inlineMetadata=event.target.videoWidth;">Fallback must not appear.</video>
 <p id="media-state">Source pending</p><p id="media-position">Position pending</p>
 <p id="reload-state">Not reloaded</p><p id="js-pause-state">JavaScript pause not requested</p>
+<p id="js-seek-state">JavaScript seek not requested</p>
 <input name="other" value="Other page input"><a href="authored-video-next.html">Leave video</a>
 <script>
 var video=document.getElementById('authored-video'),mediaEvents=[],initialMediaState=video.readyState,mediaWindowLoaded=false;
@@ -30,6 +32,19 @@ document.getElementById('js-pause').onclick=function(e){
   jsPauseMicrotask=1;renderJsPause();
  });
 };
+var jsSeekActive=false,jsSeekTarget=1.25,jsSeekSync=0,jsSeekComplete=0,jsSeekEvents=[],jsSeekAttr=null,jsSeekRaw='';
+function renderJsSeek(){
+ document.getElementById('js-seek-state').textContent='JavaScript seek observed js_seek_sync='+jsSeekSync+' js_seek_ms='+Math.floor(jsSeekTarget*1000)+' js_seek_complete='+jsSeekComplete+' js_seek_order='+jsSeekEvents.join(',');
+}
+document.getElementById('js-seek').onclick=function(e){
+ if(!e.isTrusted||!video.paused||video.seeking||video.ended)throw Error('JS seek requires real paused input');
+ jsSeekAttr=video.getAttributeNode('src');jsSeekRaw=jsSeekAttr.value;
+ jsSeekSync=0;jsSeekComplete=0;jsSeekEvents=[];jsSeekActive=true;
+ video.currentTime=jsSeekTarget;
+ if(video.currentTime!==jsSeekTarget||!video.seeking||!video.paused||video.ended)throw Error('JS seek synchronous official position');
+ if(video.getAttributeNode('src')!==jsSeekAttr||jsSeekAttr.value!==jsSeekRaw)throw Error('JS seek changed raw source');
+ jsSeekSync=1;renderJsSeek();
+};
 document.getElementById('reload').onclick=function(){
  var attr=video.getAttributeNode('src'),raw=attr.value;
  if(video.load({toString:function(){throw Error('ignored load argument');}})!==undefined||video.readyState!==0||video.currentTime!==0||!video.paused||!isNaN(video.duration))throw Error('synchronous load reset');
@@ -39,6 +54,16 @@ document.getElementById('reload').onclick=function(){
 function recordMedia(e){
  if(e.target!==video||!e.isTrusted||e.cancelable||e.bubbles)throw Error('native media event identity');
  mediaEvents.push(e.type);
+ if(jsSeekActive&&(e.type==='seeking'||e.type==='timeupdate'||e.type==='seeked')){
+  if(e.type==='seeking'&&jsSeekEvents.length!==0)throw Error('JS seek repeated or reordered seeking');
+  if(e.type!=='seeking'&&jsSeekEvents[0]!=='seeking')throw Error('JS seek missing seeking event');
+  if(e.type==='seeked'){
+   if(jsSeekEvents[jsSeekEvents.length-1]!=='timeupdate'||video.seeking||!video.paused||video.currentTime!==jsSeekTarget)throw Error('JS seek completion task/state');
+   if(video.getAttributeNode('src')!==jsSeekAttr||jsSeekAttr.value!==jsSeekRaw)throw Error('JS seek completion source identity');
+   jsSeekComplete=1;jsSeekActive=false;
+  }
+  jsSeekEvents.push(e.type);renderJsSeek();
+ }
  if(e.type==='play'||e.type==='seeking'||e.type==='loadstart')jsPauseActive=false;
  if(e.type==='pause'&&jsPauseActive){
   jsPauseEvents++;

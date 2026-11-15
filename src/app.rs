@@ -688,7 +688,7 @@ impl App {
             && self.inspector.network_visible()
     }
     pub fn poll_load(&mut self) -> bool {
-        let pause_changed=if self.scripting.as_ref().is_some_and(|p|p.media_pause().is_some()) {self.flush_embedded_video()} else {false};
+        let pause_changed=if self.scripting.as_ref().is_some_and(|p|p.has_media_tasks()) {self.flush_embedded_video()} else {false};
         self.inspector.invalidate();
         let script_changed = self.poll_dynamic_scripts()
             | self.process_script_requests()

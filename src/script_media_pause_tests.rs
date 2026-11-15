@@ -10,10 +10,11 @@ fn page() -> (Document, Forms, Page, usize) {
     let base=crate::navigation::explicit(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tools/fixtures/authored-video.html")).unwrap();
     p.set_location(&base);p.set_resource_base(&base);
     p.set_embedded_video(Some(crate::embedded_video::Snapshot {
+        tasks:crate::media_tasks::shared(crate::javascript::limits::BROWSER.host.media_tasks),
         node,retired:Arc::new(AtomicBool::new(false)),current_src:"previous".into(),
         width:64,height:48,duration:Some(Duration::from_secs(3)),
         position:Duration::from_millis(750),observed:Instant::now(),
-        playing:true,paused:false,ended:false,seeking:false,ready:4,network:1,
+        playing:true,paused:false,load_pending:false,ended:false,seeking:false,ready:4,network:1,
     }));
     let out=p.start(&mut doc,&mut forms,&[]);assert_eq!(out.errors,0,"{}",p.report());
     eval(&mut p,&mut doc,&mut forms,"var video=document.getElementById('v');");
@@ -210,4 +211,52 @@ fn native_media_current_time_is_official_and_stable_within_job_and_microtasks() 
     eval(&mut p,&mut doc,&mut forms,"if(video.currentTime<1.75||video.currentTime===official)throw 'new stable state did not refresh';video.pause();var frozenOfficial=video.currentTime;if(!video.paused||video.currentTime!==frozenOfficial)throw 'pause official update';");
     assert!(p.state.media_changes.official_position>before);
     assert_eq!(p.state.media_changes.official_position,p.media_pause().unwrap().position.as_secs_f64());
+}
+
+#[test]
+fn native_media_time_finite_conversion_projects_a_real_source_bound_seek_control() {
+    let(mut doc,mut forms,mut p,node)=page();
+    let source=p.state.embedded_video.as_ref().unwrap().retired.clone();
+    eval(&mut p,&mut doc,&mut forms,"var attr=video.getAttributeNode('src'),raw=attr.value;video.currentTime={valueOf:function(){return 1.25;}};if(video.currentTime!==1.25||!video.seeking||video.paused||video.getAttributeNode('src')!==attr||attr.value!==raw)throw 'seek projection/identity';");
+    let tasks=p.media_tasks().unwrap();let mut tasks=tasks.lock().unwrap();
+    assert_eq!(tasks.count_tasks(),0,"seeking/completion tasks are not fabricated at setter issue");
+    let(_,scope,control)=tasks.take_control().unwrap();
+    assert_eq!(scope.node,node);assert!(Arc::ptr_eq(&scope.retired,&source));
+    assert!(matches!(control,crate::media_tasks::Control::Seek {seconds} if seconds==1.25));
+    assert!(!tasks.has_pending());
+}
+
+#[test]
+fn native_media_time_nonfinite_or_throwing_conversion_and_admission_are_atomic() {
+    for expression in ["NaN","Infinity","-Infinity","Symbol('time')","({valueOf:function(){throw Error('conversion');}})"] {
+        let(mut doc,mut forms,mut p,_)=page();
+        let old=p.state.embedded_video.as_ref().unwrap().clone();let next=p.state.media_changes.next;
+        eval(&mut p,&mut doc,&mut forms,&format!("var caught=0;try{{video.currentTime={expression};}}catch(e){{caught++;}}if(caught!==1||video.seeking||video.paused)throw 'conversion refusal';"));
+        unchanged(&p,&old);assert_eq!(p.state.media_changes.next,next);
+    }
+    for overflow in [false,true] {
+        let(mut doc,mut forms,mut p,_)=page();let old=p.state.embedded_video.as_ref().unwrap().clone();
+        if overflow {p.state.media_changes.next=u64::MAX;} else {p.state.limits.host.media_tasks=0;}
+        let out=p.console_eval(&mut doc,&mut forms,"video.currentTime=2;");
+        assert_eq!(out.errors,1,"{}",p.report());unchanged(&p,&old);
+    }
+}
+
+#[test]
+fn native_media_time_default_start_is_signed_and_metadata_resets_both_signs() {
+    for seconds in [-2.5,0.0,2.5,f64::MAX] {
+        let(mut doc,mut forms,mut p,_)=page();
+        let s=p.state.embedded_video.as_mut().unwrap();s.ready=0;s.duration=None;s.position=Duration::ZERO;s.playing=false;s.paused=true;
+        let source=s.retired.clone();
+        eval(&mut p,&mut doc,&mut forms,&format!("video.currentTime={seconds};if(video.currentTime!=={seconds}||video.seeking||!video.paused)throw 'signed default';"));
+        assert!(!p.media_tasks().unwrap().lock().unwrap().has_pending());
+        let default=p.take_media_default_start(&source);
+        assert_eq!(default,if seconds>0.0 {Some(seconds)}else{None});
+        assert_eq!(p.state.media_changes.default_start,0.0);
+    }
+    let(mut doc,mut forms,mut p,_)=page();
+    eval(&mut p,&mut doc,&mut forms,"video.currentTime={valueOf:function(){video.load();return 1.5;}};if(video.currentTime!==1.5||video.readyState!==0||video.seeking)throw 'conversion source reentry';");
+    assert_eq!(p.state.media_changes.default_start,1.5);
+    assert!(p.take_media_selection().is_some());
+    assert!(!p.media_tasks().unwrap().lock().unwrap().has_pending());
 }

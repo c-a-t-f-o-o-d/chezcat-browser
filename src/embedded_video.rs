@@ -143,6 +143,7 @@ pub fn authored_node(doc: &Document) -> Option<usize> {
 
 #[derive(Clone)]
 pub struct Snapshot {
+    pub tasks: crate::media_tasks::Shared,
     pub retired: Arc<AtomicBool>,
     pub node: usize,
     pub current_src: String,
@@ -153,6 +154,7 @@ pub struct Snapshot {
     pub observed: Instant,
     pub playing: bool,
     pub paused: bool,
+    pub load_pending: bool,
     pub ended: bool,
     pub seeking: bool,
     pub ready: u8,

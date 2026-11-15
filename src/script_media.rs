@@ -4,8 +4,7 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
 };
-#[derive(Clone, Copy)]
-pub(crate) enum MediaTask { Single(&'static str), Pause }
+pub(crate) use crate::media_tasks::Task as MediaTask;
 #[derive(Clone)]
 pub(crate) struct PauseRequest {
     pub node: usize,
@@ -30,13 +29,13 @@ pub(super) struct Changes {
     // continue to advance, but repeated script reads cannot observe wall time
     // passing within the same script/listener microtask checkpoint.
     official_position: f64,
+    default_start: f64,
     next: u64,
     prepared: Option<Prepared>,
     pub(super) pending: Option<Pending>,
     ready: Option<crate::embedded_video::Selection>,
-    // There is one bound player and no script play: at most one transition can
-    // await the controller. This slot owns both request and task storage.
-    pause: Option<PauseRequest>,
+    // Accepted controls/tasks share the bound player's source-scoped FIFO.
+    // Request admission lives in the actual Snapshot task handle.
 }
 pub(crate) fn event_name(name: &str) -> bool {
     matches!(
@@ -78,6 +77,7 @@ mod tests {
         p.set_location(&base);
         p.set_resource_base(&base);
         p.set_embedded_video(Some(crate::embedded_video::Snapshot {
+            tasks: crate::media_tasks::shared(limits.host.media_tasks),
             node,
             retired: Arc::new(AtomicBool::new(false)),
             current_src: "previous".into(),
@@ -88,6 +88,7 @@ mod tests {
             observed: Instant::now(),
             playing: false,
             paused: true,
+            load_pending: false,
             ended: false,
             seeking: false,
             ready: 4,
@@ -203,12 +204,51 @@ impl Page {
             .as_ref().map_or(0.0, |snapshot| snapshot.position().as_secs_f64());
     }
 
-    pub(crate) fn media_pause(&self) -> Option<&PauseRequest> { self.state.media_changes.pause.as_ref() }
-    pub(crate) fn mark_media_pause_applied(&mut self) { if let Some(p)=&mut self.state.media_changes.pause {p.applied=true;} }
-    pub(crate) fn take_media_pause_task(&mut self) -> Option<PauseRequest> {
-        if self.media_pause().is_some_and(|p|p.applied) {self.state.media_changes.pause.take()} else {None}
+    /// Metadata processing resets the default even when it is negative. Only a
+    /// positive default initiates actual seeking on the matching accepted source.
+    pub(crate) fn take_media_default_start(&mut self, retired: &Arc<AtomicBool>) -> Option<f64> {
+        if !self.state.embedded_video.as_ref().is_some_and(|snapshot|Arc::ptr_eq(&snapshot.retired,retired)) {
+            return None;
+        }
+        let value=std::mem::replace(&mut self.state.media_changes.default_start,0.0);
+        (value>0.0).then_some(value)
     }
-    pub(crate) fn cancel_media_pause(&mut self) {self.state.media_changes.pause=None;}
+
+    #[cfg(test)]
+    pub(crate) fn set_media_task_capacity_for_test(&mut self, limit:usize) {
+        self.state.limits.host.media_tasks=limit;
+        if let Some(tasks)=self.media_tasks() {tasks.lock().unwrap().set_limit(limit);}
+    }
+
+    pub(crate) fn media_tasks(&self) -> Option<crate::media_tasks::Shared> {
+        self.state.embedded_video.as_ref().map(|snapshot|snapshot.tasks.clone())
+    }
+    pub(crate) fn has_media_tasks(&self) -> bool {
+        self.media_tasks().is_some_and(|tasks|tasks.lock().map_or(true,|queue|queue.has_pending()))
+    }
+    pub(crate) fn media_pause(&self) -> Option<PauseRequest> {
+        let tasks=self.media_tasks()?;
+        let (_,scope,issued,position,applied)=tasks.lock().ok()?.peek_pause()?;
+        Some(PauseRequest {node:scope.node,retired:scope.retired,issued,position,applied})
+    }
+    #[cfg(test)]
+    pub(crate) fn mark_media_pause_applied(&mut self) {
+        if let Some(tasks)=self.media_tasks() {tasks.lock().unwrap().take_control();}
+    }
+    #[cfg(test)]
+    pub(crate) fn take_media_pause_task(&mut self) -> Option<PauseRequest> {
+        let request=self.media_pause().filter(|request|request.applied)?;
+        let tasks=self.media_tasks()?;
+        let (_,scope,task)=tasks.lock().ok()?.take_task()?;
+        assert!(matches!(task,MediaTask::Pause));
+        assert!(Arc::ptr_eq(&scope.retired,&request.retired));
+        Some(request)
+    }
+    pub(crate) fn cancel_media_pause(&mut self) {
+        if let Some(snapshot)=self.state.embedded_video.as_ref() {
+            if let Ok(mut tasks)=snapshot.tasks.lock() {tasks.cancel_source(&snapshot.retired);}
+        }
+    }
     pub fn take_media_selection(&mut self) -> Option<crate::embedded_video::Selection> {
         self.state.media_changes.ready.take()
     }
@@ -225,15 +265,6 @@ impl Page {
         self.state.media_changes.pending = None;
         self.state.media_changes.ready = None;
         self.state.media_changes.prepared = None;
-    }
-    pub fn dispatch_media(
-        &mut self,
-        doc: &mut Document,
-        forms: &mut Forms,
-        node: usize,
-        event: &'static str,
-    ) -> Outcome {
-        self.dispatch_media_task(doc, forms, node, MediaTask::Single(event))
     }
     pub(crate) fn dispatch_media_task(&mut self, doc:&mut Document, forms:&mut Forms, node:usize, task:MediaTask) -> Outcome {
         let event=match task {MediaTask::Single(event)=>event,MediaTask::Pause=>"timeupdate"};
@@ -389,6 +420,7 @@ impl Bridge<'_> {
             emptied: snapshot.network != 0,
             timeupdate: snapshot.position() != Duration::ZERO,
         };
+        if let Ok(mut tasks)=snapshot.tasks.lock() {tasks.cancel_source(&snapshot.retired);}
         snapshot.retired.store(true, Ordering::Relaxed);
         snapshot.retired = prepared.retired;
         snapshot.width = 0;
@@ -403,8 +435,10 @@ impl Bridge<'_> {
         snapshot.ready = 0;
         snapshot.network = 3;
         self.state.media_changes.official_position = 0.0;
+        self.state.media_changes.default_start = 0.0;
         self.state.media_changes.ready = None;
-        self.state.media_changes.pause = None;
+        // The new source keeps this Document's same queue/order domain;
+        // old queued entries have lost their source authority.
         self.state.media_changes.pending = Some(pending);
         Ok(())
     }
@@ -491,6 +525,36 @@ impl Bridge<'_> {
         });
         Ok(())
     }
+    pub(super) fn set_media_time(&mut self, node:usize, seconds:f64) -> Result<(),String> {
+        self.state.work(1)?;
+        if !self.state.enabled || !self.doc.scripting_enabled {return Err("Scripting is disabled.".into());}
+        if !seconds.is_finite() {return Err("Media time must be finite.".into());}
+        let snapshot=self.state.embedded_video.as_ref().filter(|snapshot|snapshot.node==node)
+            .ok_or("Media binding is unavailable.")?;
+        if snapshot.retired.load(Ordering::Relaxed) {return Err("Media source is retired.".into());}
+        if snapshot.ready==0 {
+            // No Duration conversion or decoder request at HAVE_NOTHING.
+            self.state.media_changes.default_start=seconds;
+            return Ok(());
+        }
+        let duration=snapshot.duration.ok_or("Media metadata is unavailable.")?;
+        let target=Duration::try_from_secs_f64(seconds.clamp(0.0,duration.as_secs_f64()))
+            .map_err(|_|"Media time cannot be represented safely.")?;
+        let ticket=self.state.media_changes.next.checked_add(1).ok_or("Media control identity exhausted.")?;
+        let mut tasks=snapshot.tasks.lock().map_err(|_|"Media task queue is unavailable.")?;
+        tasks.set_limit(self.state.limits.host.media_tasks);
+        tasks.enqueue(crate::media_tasks::Scope {node,retired:snapshot.retired.clone()},
+            Some(crate::media_tasks::Control::Seek {seconds}),None)?;
+        drop(tasks);
+        self.state.media_changes.next=ticket;
+        self.state.media_changes.default_start=0.0;
+        self.state.media_changes.official_position=seconds;
+        let snapshot=self.state.embedded_video.as_mut().unwrap();
+        snapshot.position=target;snapshot.observed=Instant::now();snapshot.playing=false;
+        snapshot.seeking=true;snapshot.ended=false;
+        Ok(())
+    }
+
     pub(super) fn pause_media(&mut self, node:usize) -> Result<Value,String> {
         self.state.work(1)?;
         if !self.state.enabled || !self.doc.scripting_enabled {return Err("Scripting is disabled.".into());}
@@ -499,18 +563,21 @@ impl Bridge<'_> {
         }
         let snapshot=self.state.embedded_video.as_ref().ok_or("Media binding is unavailable.")?;
         if snapshot.paused {return Ok(Value::Undefined);}
-        if self.state.limits.host.media_tasks==0 || self.state.media_changes.pause.is_some() {
+        if self.state.limits.host.media_tasks==0 {
             return Err("Media task allowance reached.".into());
         }
         let ticket=self.state.media_changes.next.checked_add(1).ok_or("Media control identity exhausted.")?;
         if snapshot.retired.load(Ordering::Relaxed) {return Err("Media source is retired.".into());}
         let issued=Instant::now();
         let position=snapshot.position_at(issued);
-        let request=PauseRequest {node,retired:snapshot.retired.clone(),issued,position,applied:false};
-        // All fallible admission precedes the synchronous projection. App owns
-        // the same clock; the committed slot survives producer-job failure.
+        let mut tasks=snapshot.tasks.lock().map_err(|_|"Media task queue is unavailable.")?;
+        tasks.set_limit(self.state.limits.host.media_tasks);
+        tasks.enqueue(crate::media_tasks::Scope {node,retired:snapshot.retired.clone()},
+            Some(crate::media_tasks::Control::Pause {issued,position}),Some(MediaTask::Pause))?;
+        drop(tasks);
+        // Queue storage/control identity are admitted before projection. The
+        // source-bound physical effect survives a producer-job failure.
         self.state.media_changes.next=ticket;
-        self.state.media_changes.pause=Some(request);
         let snapshot=self.state.embedded_video.as_mut().unwrap();
         snapshot.position=position;snapshot.observed=issued;snapshot.playing=false;snapshot.paused=true;
         self.state.media_changes.official_position=position.as_secs_f64();
@@ -580,7 +647,9 @@ impl Bridge<'_> {
             "videoWidth" => Value::Number(f64::from(s.width)),
             "videoHeight" => Value::Number(f64::from(s.height)),
             "duration" => Value::Number(s.duration.map_or(f64::NAN, |d| d.as_secs_f64())),
-            "currentTime" => Value::Number(self.state.media_changes.official_position),
+            "currentTime" => Value::Number(if self.state.media_changes.default_start!=0.0 {
+                self.state.media_changes.default_start
+            } else {self.state.media_changes.official_position}),
             "paused" => Value::Bool(s.paused),
             "ended" => Value::Bool(s.ended),
             "seeking" => Value::Bool(s.seeking),

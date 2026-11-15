@@ -196,7 +196,7 @@ impl App {
     }
 
     pub fn poll_page_timer(&mut self) -> bool {
-        let pause_changed=if self.scripting.as_ref().is_some_and(|p|p.media_pause().is_some()) {self.flush_embedded_video()} else {false};
+        let pause_changed=if self.scripting.as_ref().is_some_and(|p|p.has_media_tasks()) {self.flush_embedded_video()} else {false};
         let scripts = self
             .next_script_timer()
             .is_some_and(|due| due <= Instant::now())

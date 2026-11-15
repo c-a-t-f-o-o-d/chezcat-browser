@@ -3,6 +3,7 @@
 use super::{App, Canvas, Focus, View};
 use crate::image::Bitmap;
 use crate::media::{self, Clock};
+use crate::media_tasks::{self, Shared as MediaTasks, Scope as MediaScope, Task as MediaTask};
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool,Ordering};
@@ -13,7 +14,7 @@ mod embedded;
 pub(super) struct Embedded {
     retired:Arc<AtomicBool>,
     node:usize,raw:String,source:String,plan:Option<Arc<crate::embedded_video::Plan>>,network:u8,
-    error:Option<String>,aborted:bool,events:VecDeque<&'static str>,last_update:Duration,
+    error:Option<String>,aborted:bool,tasks:MediaTasks,last_update:Duration,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -33,9 +34,13 @@ pub(super) struct ControlState {
 pub(super) struct Player {
     embedded:bool,
     controls_focused:bool,
-    dom_events:VecDeque<&'static str>,
+    task_binding:Option<(MediaTasks,MediaScope)>,
     dom_playback_started:bool,
     paused:bool,
+    // Authored seek readiness freezes the physical position while retaining
+    // logical play intent; the requested bitmap must be published first.
+    seek_resume:Option<bool>,
+    initial_data_pending:bool,
     sync:Option<Synchronized>,
     clip: Arc<media::Clip>,
     pub(super) node: usize,
@@ -375,6 +380,21 @@ mod tests {
         assert!(!app.audio_sync_state().unwrap().wants_play);assert!(!app.poll_media_sync());
     }
 }
+impl Embedded {
+    fn task_scope(&self) -> MediaScope { MediaScope {node:self.node,retired:self.retired.clone()} }
+    fn fail_tasks(&mut self, problem:String) {
+        if let Ok(mut tasks)=self.tasks.lock() {tasks.cancel_source(&self.retired);}
+        self.plan=None;self.network=3;self.aborted=true;self.error=Some(problem);
+    }
+    fn enqueue_events(&mut self, events:impl IntoIterator<Item=&'static str>) -> bool {
+        let scope=self.task_scope();
+        let result=self.tasks.lock().map_err(|_|"Media task queue is unavailable.".to_owned()).and_then(|mut tasks| {
+            for event in events {tasks.enqueue(scope.clone(),None,Some(MediaTask::Single(event)))?;}
+            Ok(())
+        });
+        if let Err(problem)=result {self.fail_tasks(problem);false}else{true}
+    }
+}
 impl Player {
     fn position(&self,now:Instant)->Duration {self.sync.as_ref().map_or_else(||self.clock.position(now),|s|s.position)}
     fn playing(&self)->bool {self.sync.as_ref().map_or_else(||self.clock.playing(),|s|s.playing)}
@@ -383,6 +403,8 @@ impl Player {
         if event=="play" {self.paused=false;}
         if matches!(event,"pause"|"stop"|"cancel"|"error"|"ended") {self.paused=true;}
         if matches!(event,"stop"|"cancel") {self.dom_playback_started=false;}
+        if matches!(event,"stop"|"cancel"|"error") {self.seek_resume=None;}
+        if event=="pause" && self.seek_resume.is_some() {self.seek_resume=Some(false);}
 
         if self.embedded && crate::scripting::media_event_name(event) && (self.decoder_enabled||event=="error") {
             if event=="ended" {
@@ -399,10 +421,45 @@ impl Player {
         }
         self.events.push_back(event);
     }
-    fn queue_dom_event(&mut self,event:&'static str){
-        if self.dom_events.try_reserve(1).is_ok(){self.dom_events.push_back(event);}else{self.clock.pause(Instant::now());self.decoder_enabled=false;self.error=Some("Could not retain a native media event.".into());}
+    fn fail_task_queue(&mut self, problem:String) {
+        if let Some((tasks,scope))=&self.task_binding {
+            if let Ok(mut tasks)=tasks.lock() {tasks.cancel_source(&scope.retired);}
+        }
+        self.clock.pause(Instant::now());self.paused=true;self.dom_playback_started=false;
+        self.decoder_enabled=false;self.pending=None;self.deadline=None;self.seeking=false;self.seek_resume=None;
+        self.suspended=true;self.error=Some(problem);
     }
+    fn queue_dom_event(&mut self,event:&'static str){
+        let Some((tasks,scope))=&self.task_binding else {return;};
+        // Commit at the actual native event time. No separate Player event lane.
+        let result=tasks.lock().map_err(|_|"Media task queue is unavailable.".to_owned())
+            .and_then(|mut tasks|tasks.enqueue(scope.clone(),None,Some(MediaTask::Single(event))).map(|_|()));
+        if let Err(problem)=result {self.fail_task_queue(problem);}
+    }
+    fn publish_initial_data(&mut self) {
+        if self.initial_data_pending {
+            self.initial_data_pending=false;
+            self.event("loadeddata");self.event("canplay");self.event("canplaythrough");
+        }
+    }
+    fn complete_seek(&mut self, now:Instant) {
+        self.seeking=false;
+        if self.embedded {
+            let resume=self.seek_resume.take().unwrap_or(false);
+            if resume && !self.paused && self.clock.position(now)<self.clip.duration {
+                self.clock.play(now);
+                if !self.dom_playback_started {
+                    self.dom_playback_started=true;
+                    self.event("playing");
+                }
+            }
+            self.event("timeupdate");
+        }
+        self.event("seeked");
+    }
+
     fn invalidate(&mut self) {
+        self.seek_resume=None;
         self.pending = None;
         self.deadline = None;
         if let Some(next) = self.generation.checked_add(1) {
@@ -477,6 +534,9 @@ impl App {
         }
     }
     pub(super) fn install_media(&mut self, asset: Option<media::Asset>,node:Option<usize>,embedded:bool) {
+        self.install_media_with_readiness(asset,node,embedded,false);
+    }
+    pub(super) fn install_media_with_readiness(&mut self, asset: Option<media::Asset>,node:Option<usize>,embedded:bool,defer_data:bool) {
         if let Some(worker) = &self.media_worker {
             worker.cancel();
         }
@@ -487,7 +547,10 @@ impl App {
         let Some(node)=node.filter(|&node|self.document.nodes.get(node).is_some_and(|item|item.namespace==crate::html::Namespace::Html&&matches!(&item.kind,crate::html::NodeKind::Element {tag,..} if tag==if embedded{"video"}else{"img"}))) else{return;};
         self.images.insert(node, asset.first.clone());
         let mut player = Player {
-            embedded,controls_focused:false,dom_events:VecDeque::new(),dom_playback_started:false,paused:true,
+            embedded,controls_focused:false,
+            task_binding:self.embedded_video.as_ref().filter(|v|embedded&&v.node==node)
+                .map(|v|(v.tasks.clone(),v.task_scope())),
+            dom_playback_started:false,paused:true,seek_resume:None,initial_data_pending:embedded&&defer_data,
             sync:None,
             clock: Clock::new(asset.clip.duration),
             clip: asset.clip,
@@ -509,8 +572,10 @@ impl App {
         };
         if embedded {player.event("durationchange");}
         player.event("loadedmetadata");
-        player.event("loadeddata");
-        if embedded {player.event("canplay");player.event("canplaythrough");}
+        if !defer_data {
+            player.event("loadeddata");
+            if embedded {player.event("canplay");player.event("canplaythrough");}
+        }
         self.media = Some(player);
     }
     pub(super) fn suspend_media(&mut self) {
@@ -534,6 +599,11 @@ impl App {
     }
     fn media_request_frame(&mut self, now: Instant) {
         self.apply_media_pause();
+        self.media_request_frame_physical(now);
+    }
+    // Controller draining calls this only after every admitted control is set.
+    // It never recursively drains a later control during an earlier seek.
+    pub(in crate::app) fn media_request_frame_physical(&mut self, now: Instant) {
         if self.embedded_video_retired(){return;}
         // Every request route (timer, completion and controller) observes the
         // PCM acknowledgement gate. Old cached time cannot enter a new seek.
@@ -558,18 +628,18 @@ impl App {
         }
         let index = player.clip.index_at(player.position(now));
         if index == player.displayed {
+            player.publish_initial_data();
             if player.seeking&&player.sync.is_none() {
-                player.seeking = false;
-                player.event("seeked");
+                player.complete_seek(now);
             }
             return;
         }
         if index == player.initial {
             self.images.insert(player.node, player.poster.clone());
             player.displayed = index;
+            player.publish_initial_data();
             if player.seeking&&player.sync.is_none() {
-                player.seeking = false;
-                player.event("seeked");
+                player.complete_seek(now);
             }
             return;
         }
@@ -623,9 +693,9 @@ impl App {
             Ok(bitmap) => {
                 self.images.insert(player.node, bitmap);
                 player.displayed = completion.index;
+                player.publish_initial_data();
                 if player.seeking&&player.sync.is_none() {
-                    player.seeking = false;
-                    player.event("seeked");
+                    player.complete_seek(Instant::now());
                 }
             }
             Err(error) => {
@@ -658,7 +728,7 @@ impl App {
         self.flush_embedded_video();
         true
     }
-    fn finish_media_tick(&mut self, now: Instant) {
+    pub(in crate::app) fn finish_media_tick(&mut self, now: Instant) {
         if let Some(player) = &mut self.media {
             if !player.suspended
                 && player.drained()
@@ -678,6 +748,11 @@ impl App {
     }
     fn media_seek(&mut self, position: Duration, now: Instant) {
         self.apply_media_pause();
+        self.media_seek_physical(position,now);
+        self.media_request_frame_physical(now);
+        self.finish_media_tick(now);
+    }
+    pub(in crate::app) fn media_seek_physical(&mut self, position: Duration, now: Instant) {
         if let Some(worker) = &self.media_worker {
             worker.cancel();
         }
@@ -689,12 +764,15 @@ impl App {
             player.suspended = false;
             player.error = None;
             player.ended_reported = false;
-            player.clock.seek(position, now);
+            if player.embedded {
+                let resume=!player.paused;
+                player.clock.pause(now);
+                player.clock.seek(position,now);
+                player.seek_resume=Some(resume);
+            } else {player.clock.seek(position, now);}
             player.seeking = true;
             player.event("seeking");
         }
-        self.media_request_frame(now);
-        self.finish_media_tick(now);
     }
     pub(super) fn stop_media(&mut self) {
         self.cancel_embedded_video();
@@ -723,7 +801,9 @@ impl App {
         self.flush_embedded_video();
     }
     fn media_activate(&mut self, control: Control) {
-        if self.scripting.as_ref().is_some_and(|p|p.media_pause().is_some()) {self.flush_embedded_video();}
+        // Earlier script controls take effect before the native default. Their
+        // notifications remain in the same FIFO ahead of this native action.
+        self.apply_media_pause();
         if self.synchronized_media(){self.synchronized_activate(control);return;}
         if self.audio.is_some() {
             self.activate_audio(control);
@@ -773,9 +853,16 @@ impl App {
                     player.suspended = false;
                     player.error = None;
                     player.ended_reported = false;
-                    player.clock.play(now);
-                    player.event("play");
-                    if player.embedded {player.event("playing");}
+                    if player.embedded && player.seeking && player.seek_resume.is_some() {
+                        // Native Play changes intent while the requested frame
+                        // remains pending; actual playing waits for publication.
+                        player.seek_resume=Some(true);
+                        player.event("play");
+                    } else {
+                        player.clock.play(now);
+                        player.event("play");
+                        if player.embedded {player.event("playing");}
+                    }
                 }
                 self.media_request_frame(now);
                 self.finish_media_tick(now);

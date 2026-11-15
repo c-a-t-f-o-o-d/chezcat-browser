@@ -69,7 +69,7 @@ use script_stylesheets::StylesheetState;
 mod script_images;
 #[path = "script_media.rs"]
 mod script_media;
-pub(crate) use script_media::{event_name as media_event_name, MediaTask};
+pub(crate) use script_media::event_name as media_event_name;
 pub use script_images::DynamicImage;
 pub(crate) use script_images::MAX_IMAGE_REQUESTS;
 use script_images::ImagesState;
@@ -1323,7 +1323,7 @@ impl Page {
         }
         self.state.dynamic.load_ready = true;
         if self.state.dynamic.in_flight != 0 || self.state.stylesheets.in_flight != 0
-            || self.state.embedded_video.as_ref().is_some_and(|video|video.network==2)
+            || self.state.embedded_video.as_ref().is_some_and(|video|video.load_pending)
             || self.state.images.entries.values().any(|entry| entry.pending) {
             return Outcome::default();
         }
@@ -2426,6 +2426,7 @@ impl Host for Bridge<'_> {
     fn run_native_microtask(&mut self,ticket:u64)->Result<(),String>{self.run_media_microtask(ticket)}
 
     fn number_setter(&self, object: u32, property: &str) -> bool {
+        if property=="currentTime" && self.media_element_receiver(object) {return true;}
         node_index(object).is_some_and(|node| tag(self.doc, node) == "img")
             && matches!(property, "width" | "height")
             || node_index(object).is_some_and(|node| self.html_spacing_property(node, property))
@@ -2717,6 +2718,14 @@ impl Host for Bridge<'_> {
         property: &str,
         value: &Value,
     ) -> Result<(), (&'static str, String)> {
+        if property=="currentTime" && self.media_element_receiver(object) {
+            if !self.state.enabled || !self.doc.scripting_enabled {
+                return Err(("InvalidStateError","Scripting is disabled.".into()));
+            }
+            if !matches!(value,Value::Number(seconds) if seconds.is_finite()) {
+                return Err(("TypeError","Media time must be a finite double.".into()));
+            }
+        }
         if matches!(value, Value::Symbol(_)) {
             let text_or_index = object == DOCUMENT && property == "title"
                 || (STYLE_BASE..DATASET_BASE).contains(&object) && css_name(property).is_ok()
@@ -3730,6 +3739,10 @@ impl Host for Bridge<'_> {
     }
 
     fn set(&mut self, object: u32, property: &str, value: Value) -> Result<(), String> {
+        if property=="currentTime" && self.media_element_receiver(object) {
+            let Value::Number(seconds)=value else {return Err("Media time requires numeric conversion.".into());};
+            return self.set_media_time(node_index(object).unwrap(),seconds);
+        }
         if property=="type"&&self.style_type_receiver(object){let node=self.node(object)?;let text=self.text(&value)?;return self.attribute(node,"type",Some(text));}
         if self.media_element_receiver(object)&&property=="src" {let node=self.node(object)?;let text=self.text(&value)?;return self.attribute(node,"src",Some(text));}
         if script_named_map::element(object).is_some() { self.named_map_get(object, "length")?; return Err("NamedNodeMap property writes are not implemented.".into()); }

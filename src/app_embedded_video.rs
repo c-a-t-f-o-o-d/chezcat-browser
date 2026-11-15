@@ -25,6 +25,9 @@ impl App {
             self.images.remove(&player.node);
         }
         let previous = self.embedded_video.take();
+        let tasks=previous.as_ref().map(|v|v.tasks.clone())
+            .or_else(||self.scripting.as_ref().and_then(|page|page.media_tasks()))
+            .unwrap_or_else(||media_tasks::shared(crate::javascript::limits::BROWSER.host.media_tasks));
         let mut binding = Embedded {
             node: selection.node,
             raw: selection.raw.clone().unwrap_or_default(),
@@ -38,21 +41,19 @@ impl App {
             network: 0,
             error: None,
             aborted: false,
-            events: VecDeque::new(),
+            tasks,
             last_update: Duration::ZERO,
         };
-        if selection.abort {
-            binding.events.push_back("abort");
+        let selecting=selection.raw.is_some() || selection.error.is_some();
+        if !binding.enqueue_events([
+            selection.abort.then_some("abort"),selection.emptied.then_some("emptied"),
+            selection.timeupdate.then_some("timeupdate"),selecting.then_some("loadstart")
+        ].into_iter().flatten()) {
+            self.events.push(format!("VIDEO node {}: {}",binding.node,binding.error.as_deref().unwrap_or("Media task queue failed.")));
+            self.embedded_video=Some(binding);self.reflow();return true;
         }
-        if selection.emptied {
-            binding.events.push_back("emptied");
-        }
-        if selection.timeupdate {
-            binding.events.push_back("timeupdate");
-        }
-        if selection.raw.is_some() || selection.error.is_some() {
+        if selecting {
             binding.network = 2;
-            binding.events.push_back("loadstart");
             let result = selection
                 .error
                 .map_or_else(
@@ -89,7 +90,7 @@ impl App {
                     .push(format!("VIDEO node {}: {error}", binding.node));
                 binding.error = Some(error);
                 binding.network = 3;
-                binding.events.push_back("error");
+                binding.enqueue_events(["error"]);
             }
         }
         self.embedded_video = Some(binding);
@@ -159,7 +160,7 @@ impl App {
     }
     pub(in crate::app) fn embedded_video_loading(&self) -> bool {
         self.embedded_video.as_ref().is_some_and(|v| {
-            (v.plan.is_some() || !v.aborted && !v.events.is_empty())
+            (v.plan.is_some() || !v.aborted && v.tasks.lock().map_or(false,|tasks|tasks.has_pending()))
                 && !v.retired.load(Ordering::Relaxed)
         })
     }
@@ -175,7 +176,7 @@ impl App {
             if v.plan.take().is_some() {
                 v.aborted = true;
                 v.network = 1;
-                v.events.push_back("abort");
+                v.enqueue_events(["abort"]);
             }
         }
     }
@@ -196,9 +197,14 @@ impl App {
             plan: None,
             error: None,
             aborted: false,
-            events: VecDeque::from(["loadstart"]),
+            tasks:self.scripting.as_ref().and_then(|page|page.media_tasks())
+                .unwrap_or_else(||media_tasks::shared(crate::javascript::limits::BROWSER.host.media_tasks)),
             last_update: Duration::ZERO,
         };
+        if !binding.enqueue_events(["loadstart"]) {
+            self.events.push(format!("VIDEO node {node}: {}",binding.error.as_deref().unwrap_or("Media task queue failed.")));
+            self.embedded_video=Some(binding);return;
+        }
         let result = Plan::new(
             node,
             &self.document,
@@ -212,8 +218,9 @@ impl App {
                 self.embedded_video_worker =
                     Some(crate::embedded_video::Worker::new(self.wake.clone())?);
             }
-            let plan = Arc::new(plan);
-            binding.retired = plan.retired.clone();
+            let mut plan=plan;
+            plan.retired=binding.retired.clone();
+            let plan=Arc::new(plan);
             binding.source = plan.source.display();
             self.embedded_video_worker
                 .as_ref()
@@ -226,7 +233,7 @@ impl App {
             self.events.push(format!("VIDEO node {node}: {error}"));
             binding.error = Some(error);
             binding.network = 3;
-            binding.events.push_back("error");
+            binding.enqueue_events(["error"]);
         }
         self.embedded_video = Some(binding);
     }
@@ -237,6 +244,7 @@ impl App {
         }
         let now = Instant::now();
         let mut s = Snapshot {
+            tasks:v.tasks.clone(),
             retired: v.retired.clone(),
             node: v.node,
             current_src: v.source.clone(),
@@ -247,6 +255,7 @@ impl App {
             observed: now,
             playing: false,
             paused: true,
+            load_pending: v.plan.is_some()&&!v.aborted,
             ended: false,
             seeking: false,
             ready: 0,
@@ -265,7 +274,8 @@ impl App {
             s.paused = p.paused;
             s.ended = p.ended_reported;
             s.seeking = p.seeking;
-            s.ready = if p.error.is_some() || p.seeking && p.pending.is_some() {
+            s.load_pending|=p.initial_data_pending&&p.error.is_none();
+            s.ready = if p.error.is_some() || p.initial_data_pending || p.seeking && p.pending.is_some() {
                 1
             } else {
                 4
@@ -293,14 +303,28 @@ impl App {
         v.plan = None;
         if crate::embedded_video::authored_node(&self.document) != Some(v.node) {
             v.aborted = true;
-            v.events.push_back("abort");
+            v.enqueue_events(["abort"]);
             return true;
         }
         let node = v.node;
         v.network = 1;
         match completion.result {
             Ok(asset) => {
-                self.install_media(Some(asset), Some(node), true);
+                let source=self.embedded_video.as_ref().unwrap().retired.clone();
+                // Metadata processing always clears the signed default. A
+                // positive start enters the same real seek/decode path, and
+                // initial data-ready events wait for its requested bitmap.
+                let start=self.scripting.as_mut().and_then(|page|page.take_media_default_start(&source));
+                self.install_media_with_readiness(Some(asset),Some(node),true,start.is_some());
+                if let Some(seconds)=start {
+                    let duration=self.media.as_ref().unwrap().clip.duration;
+                    let target=Duration::try_from_secs_f64(seconds.min(duration.as_secs_f64()))
+                        .unwrap_or(duration).min(duration);
+                    let now=Instant::now();
+                    self.media_seek_physical(target,now);
+                    self.media_request_frame_physical(now);
+                    self.finish_media_tick(now);
+                }
                 self.reflow();
             }
             Err(error) => {
@@ -308,80 +332,111 @@ impl App {
                 let v = self.embedded_video.as_mut().unwrap();
                 v.error = Some(error);
                 v.network = 3;
-                v.events.push_back("error");
+                v.enqueue_events(["error"]);
             }
         }
         true
     }
+    fn fail_media_queue(&mut self, problem:String) {
+        self.events.push(format!("VIDEO: {problem}"));
+        if let Some(worker)=&self.media_worker {worker.cancel();}
+        if let Some(worker)=&self.embedded_video_worker {worker.cancel();}
+        if let Some(v)=&mut self.embedded_video {v.fail_tasks(problem.clone());}
+        if let Some(player)=self.media.as_mut().filter(|player|player.embedded) {player.fail_task_queue(problem);}
+    }
+    // Legacy call sites keep their issue-time guard, now draining all admitted
+    // controls in the shared source FIFO before any tick or JS notification.
     pub(in crate::app) fn apply_media_pause(&mut self) -> bool {
-        let Some(request)=self.scripting.as_ref().and_then(|p|p.media_pause()).filter(|p|!p.applied).cloned() else {return false;};
-        let valid=!request.retired.load(Ordering::Relaxed) && self.embedded_video.as_ref().is_some_and(|v|v.node==request.node&&Arc::ptr_eq(&v.retired,&request.retired));
-        if valid {
-            if let Some(player)=self.media.as_mut().filter(|p|p.embedded&&p.node==request.node&&p.sync.is_none()) {
-                player.clock.pause(request.issued);
-                player.paused=true;player.dom_playback_started=false;
-                // Keep pending decode/seek/generation/source intact. The snapshot
-                // issue time was sampled from this clock before any later tick.
-                debug_assert_eq!(player.clock.position(request.issued),request.position);
-                if player.pending.is_none() {player.deadline=None;}
+        let Some(tasks)=self.embedded_video.as_ref().map(|v|v.tasks.clone())
+            .or_else(||self.scripting.as_ref().and_then(|page|page.media_tasks())) else {return false;};
+        let mut applied=false;
+        loop {
+            let next=tasks.lock().map(|mut queue|queue.take_control())
+                .map_err(|_|"Media task queue is unavailable.".to_owned());
+            let request=match next {Ok(Some(request))=>request,Ok(None)=>break,Err(problem)=>{self.fail_media_queue(problem);break;}};
+            let (_,scope,control)=request;
+            let valid=!scope.retired.load(Ordering::Relaxed) && self.embedded_video.as_ref().is_some_and(|v|
+                v.node==scope.node&&Arc::ptr_eq(&v.retired,&scope.retired)&&Arc::ptr_eq(&v.tasks,&tasks));
+            if !valid {continue;}
+            match control {
+                crate::media_tasks::Control::Pause {issued,position}=>{
+                    if let Some(player)=self.media.as_mut().filter(|p|p.embedded&&p.node==scope.node&&p.sync.is_none()) {
+                        player.clock.pause(issued);player.paused=true;player.dom_playback_started=false;
+                        if player.seek_resume.is_some() {player.seek_resume=Some(false);}
+                        debug_assert_eq!(player.clock.position(issued),position);
+                        if player.pending.is_none() {player.deadline=None;}
+                    }
+                }
+                crate::media_tasks::Control::Seek {seconds}=>{
+                    let Some(duration)=self.media.as_ref().filter(|p|p.embedded&&p.node==scope.node&&p.sync.is_none()).map(|p|p.clip.duration) else {
+                        self.fail_media_queue("Media seek has no bound decoded player.".into());break;
+                    };
+                    if !seconds.is_finite() {self.fail_media_queue("Media seek position must be finite.".into());break;}
+                    let target=Duration::from_secs_f64(seconds.max(0.0).min(duration.as_secs_f64())).min(duration);
+                    self.media_seek_physical(target,Instant::now());
+                }
             }
-            self.scripting.as_mut().unwrap().mark_media_pause_applied();
-        } else {self.scripting.as_mut().unwrap().cancel_media_pause();}
-        valid
+            applied=true;
+        }
+        // Completion work is requested only after the full physical-control
+        // pass. Neither helper re-enters the control drain or dispatches JS.
+        if applied {
+            let now=Instant::now();self.media_request_frame_physical(now);self.finish_media_tick(now);
+        }
+        applied
     }
     pub(in crate::app) fn flush_embedded_video(&mut self) -> bool {
-        let paused=self.apply_media_pause();
-        let processed = self.process_media_selection() | paused;
-        if self.embedded_video_retired() {
-            return false;
+        let controls=self.apply_media_pause();
+        let processed=self.process_media_selection() | controls;
+        let controls=self.apply_media_pause() | controls;
+        if self.embedded_video_retired() {return processed | controls;}
+        if let Some(problem)=self.media.as_ref().filter(|player|player.embedded&&!player.decoder_enabled)
+            .and_then(|player|player.error.clone()) {
+            if self.embedded_video.as_ref().is_some_and(|v|v.error.as_ref()!=Some(&problem)||!v.aborted) {
+                self.fail_media_queue(problem);return true;
+            }
         }
-        let Some(v) = &mut self.embedded_video else {
-            return false;
+        let Some(v)=&mut self.embedded_video else {return processed | controls;};
+        let node=v.node;let resource=v.retired.clone();let tasks=v.tasks.clone();
+        if let Some(player)=self.media.as_ref().filter(|player|player.embedded&&player.node==node) {
+            let position=player.position(Instant::now());
+            if position.abs_diff(v.last_update)>=Duration::from_millis(250) {
+                if !v.enqueue_events(["timeupdate"]) {
+                    let problem=v.error.clone().unwrap_or_else(||"Media task queue failed.".into());
+                    self.fail_media_queue(problem);return true;
+                }
+                v.last_update=position;
+            }
+        }
+        let finish=v.plan.is_none()&&!v.aborted;
+        let snapshot=self.embedded_video_snapshot();
+        if let Some(page)=&mut self.scripting {page.set_embedded_video(snapshot);}
+        let budget=match tasks.lock().map(|queue|queue.count_tasks())
+            .map_err(|_|"Media task queue is unavailable.".to_owned()) {
+            Ok(count)=>count,Err(problem)=>{self.fail_media_queue(problem);return true;}
         };
-        let node = v.node;
-        let resource = v.retired.clone();
-        let mut events = std::mem::take(&mut v.events);
-        if let Some(p) = self.media.as_mut().filter(|p| p.embedded && p.node == node) {
-            events.append(&mut p.dom_events);
-            let position = p.position(Instant::now());
-            if position.abs_diff(v.last_update) >= Duration::from_millis(250) {
-                events.push_back("timeupdate");
-                v.last_update = position;
+        let mut changed=processed | controls;
+        for _ in 0..budget {
+            let next=tasks.lock().map(|mut queue|queue.take_task())
+                .map_err(|_|"Media task queue is unavailable.".to_owned());
+            let (_,scope,task)=match next {Ok(Some(task))=>task,Ok(None)=>break,Err(problem)=>{self.fail_media_queue(problem);break;}};
+            // The queue lock is gone before authority checks and JS. Check the
+            // source once before a task, never between members of a Pause pair.
+            if scope.retired.load(Ordering::Relaxed) || !self.embedded_video.as_ref().is_some_and(|v|
+                v.node==scope.node&&Arc::ptr_eq(&v.retired,&scope.retired)&&Arc::ptr_eq(&v.tasks,&tasks)) {
+                continue;
+            }
+            if self.script_jobs_paused() {continue;}
+            if let Some(page)=&mut self.scripting {
+                let outcome=page.dispatch_media_task(&mut self.document,&mut self.forms,scope.node,task);
+                if outcome.layout_changed {self.reflow();}
+                changed=true;
             }
         }
-        let finish = v.plan.is_none() && !v.aborted;
-        let snapshot = self.embedded_video_snapshot();
-        let mut changed = processed;
-        if let Some(page) = &mut self.scripting {
-            page.set_embedded_video(snapshot);
-        }
-        for event in events {
-            if resource.load(Ordering::Relaxed) {
-                break;
-            }
-            if let Some(page) = &mut self.scripting {
-                let outcome = page.dispatch_media(&mut self.document, &mut self.forms, node, event);
-                if outcome.layout_changed {
-                    self.reflow();
-                }
-                changed = true;
-            }
-        }
-        if let Some(request)=self.scripting.as_mut().and_then(|p|p.take_media_pause_task()) {
-            if !request.retired.load(Ordering::Relaxed) && !self.script_jobs_paused() {
-                if let Some(page)=&mut self.scripting {
-                    let outcome=page.dispatch_media_task(&mut self.document,&mut self.forms,node,crate::scripting::MediaTask::Pause);
-                    if outcome.layout_changed {self.reflow();}
-                    changed=true;
-                }
-            }
-        }
-        if finish && !resource.load(Ordering::Relaxed) {
-            if let Some(page) = &mut self.scripting {
-                let outcome = page.finish_loading(&mut self.document, &mut self.forms);
-                if outcome.layout_changed {
-                    self.reflow();
-                }
+        if finish&&!resource.load(Ordering::Relaxed) {
+            if let Some(page)=&mut self.scripting {
+                let outcome=page.finish_loading(&mut self.document,&mut self.forms);
+                if outcome.layout_changed {self.reflow();}
             }
         }
         changed
@@ -887,5 +942,149 @@ mod tests {
         assert!(!app.media.as_ref().unwrap().playing());
         assert_eq!(app.media.as_ref().unwrap().displayed,5);
         assert_reference_frame(&app,5);
+    }
+
+    fn take_decoded_frame(app:&App)->media::Completion {
+        let deadline=Instant::now()+Duration::from_secs(5);
+        loop {
+            if let Some(frame)=app.media_worker.as_ref().unwrap().take() {return frame;}
+            assert!(Instant::now()<deadline,"real decoder completion timed out");
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
+
+    #[test]
+    fn script_current_time_paused_seek_publishes_frame_before_completion_events() {
+        let mut app=open("authored-video.html");app.wait_for_load();
+        eval(&mut app,"mediaEvents=[];video.currentTime=1.25;if(video.currentTime!==1.25||!video.seeking||!video.paused)throw 'immediate seek';");
+        app.apply_media_pause();
+        assert_eq!(app.media.as_ref().unwrap().pending,Some(2));
+        let frame=take_decoded_frame(&app);
+        eval(&mut app,"if(mediaEvents.indexOf('seeked')>=0||!video.seeking)throw 'early completion';");
+        assert!(app.accept_media_frame(frame));
+        assert_eq!(app.media.as_ref().unwrap().displayed,2);assert_reference_frame(&app,2);
+        assert!(!app.media.as_ref().unwrap().seeking);
+        app.flush_embedded_video();
+        eval(&mut app,"if(video.currentTime!==1.25||!video.paused||video.seeking||mediaEvents.indexOf('seeking')<0||mediaEvents.indexOf('timeupdate')>mediaEvents.indexOf('seeked')||mediaEvents.indexOf('seeked')<0)throw 'settled seek state/events';");
+    }
+
+    #[test]
+    fn script_current_time_playing_seek_waits_for_real_frame_and_pending_pause_wins() {
+        for pause in [false,true] {
+            let mut app=open("authored-video.html");app.wait_for_load();app.input_media_action("Play").unwrap();
+            eval(&mut app,"video.currentTime=1.25;");app.apply_media_pause();
+            assert!(!app.media.as_ref().unwrap().paused);
+            assert!(!app.media.as_ref().unwrap().clock.playing());
+            assert_eq!(app.media.as_ref().unwrap().seek_resume,Some(true));
+            let frame=take_decoded_frame(&app);
+            app.poll_media_timer_at(Instant::now()+Duration::from_secs(4));
+            assert_eq!(app.media.as_ref().unwrap().clock.position(Instant::now()),Duration::from_millis(1250));
+            assert_eq!(app.media.as_ref().unwrap().pending,Some(2));
+            if pause {eval(&mut app,"video.pause();");app.apply_media_pause();}
+            assert!(app.accept_media_frame(frame));assert_reference_frame(&app,2);
+            let player=app.media.as_ref().unwrap();assert_eq!(player.paused,pause);
+            assert_eq!(player.clock.playing(),!pause);assert!(!player.seeking);
+            assert!(player.seek_resume.is_none());
+        }
+    }
+
+    #[test]
+    fn script_current_time_metadata_defaults_clamp_and_use_actual_decoded_frames() {
+        for (seconds,position,index) in [(-2.5,0,0),(1.75,1750,3),(f64::MAX,3000,5)] {
+            let mut app=open("authored-video-default.html");
+            eval(&mut app,&format!("video.currentTime={seconds};if(video.currentTime!=={seconds}||video.readyState!==0||video.seeking)throw 'premetadata default';"));
+            app.wait_for_load();settle(&mut app);
+            assert_eq!(app.media.as_ref().unwrap().displayed,index);assert_reference_frame(&app,index);
+            assert_eq!(app.media.as_ref().unwrap().clock.position(Instant::now()),Duration::from_millis(position));
+            eval(&mut app,&format!("if(video.currentTime!=={}||video.seeking||!video.paused)throw 'default actual playback position';",position as f64/1000.0));
+        }
+    }
+
+    #[test]
+    fn script_current_time_repeated_same_frame_and_ordered_pause_seek_controls() {
+        let mut app=open("authored-video.html");app.wait_for_load();
+        eval(&mut app,"video.currentTime=0;");app.flush_embedded_video();
+        assert!(app.media.as_ref().unwrap().pending.is_none());assert!(!app.media.as_ref().unwrap().seeking);
+        app.input_media_action("Play").unwrap();
+        eval(&mut app,"video.currentTime=2.2;video.pause();video.currentTime=0.7;if(!video.paused||!video.seeking||video.currentTime!==0.7)throw 'ordered projection';");
+        app.apply_media_pause();settle(&mut app);assert_reference_frame(&app,1);
+        assert_eq!(app.media.as_ref().unwrap().clock.position(Instant::now()),Duration::from_millis(700));
+        assert!(app.media.as_ref().unwrap().paused);assert!(!app.media.as_ref().unwrap().playing());
+        eval(&mut app,"video.currentTime=-100;if(video.currentTime!==-100)throw 'finite negative official';");
+        app.flush_embedded_video();assert_reference_frame(&app,0);
+        eval(&mut app,"if(video.currentTime!==0||video.seeking)throw 'negative real clamp';");
+    }
+
+    #[test]
+    fn script_current_time_supersedes_real_worker_completion_and_survives_producer_failure() {
+        let mut app=open("authored-video.html");app.wait_for_load();
+        eval(&mut app,"video.currentTime=1.25;");app.apply_media_pause();let old=take_decoded_frame(&app);
+        eval(&mut app,"video.currentTime=2.2;");app.apply_media_pause();
+        assert!(!app.accept_media_frame(old));assert_eq!(app.media.as_ref().unwrap().pending,Some(4));
+        let current=take_decoded_frame(&app);assert!(app.accept_media_frame(current));assert_reference_frame(&app,4);
+        let result=app.scripting.as_mut().unwrap().console_eval(&mut app.document,&mut app.forms,
+            "video.currentTime=1.25;queueMicrotask(function(){throw 'stale seek job';});document.body.scrollWidth;");
+        assert_eq!(result.errors,1);app.show_script_errors();
+        let current=take_decoded_frame(&app);assert!(app.accept_media_frame(current));assert_reference_frame(&app,2);
+        app.flush_embedded_video();
+        assert_eq!(app.media.as_ref().unwrap().clock.position(Instant::now()),Duration::from_millis(1250));
+    }
+
+    #[test]
+    fn script_current_time_native_play_waits_for_requested_bitmap() {
+        let mut app=open("authored-video.html");app.wait_for_load();
+        eval(&mut app,"mediaEvents=[];video.currentTime=1.25;");app.apply_media_pause();
+        let frame=take_decoded_frame(&app);
+        app.input_media_action("Play").unwrap();
+        assert!(!app.media.as_ref().unwrap().clock.playing(),"native Play must not advance on the old bitmap");
+        assert_eq!(app.media.as_ref().unwrap().seek_resume,Some(true));
+        assert!(!app.media.as_ref().unwrap().paused);
+        eval(&mut app,"if(mediaEvents.indexOf('playing')>=0)throw 'playing before requested data';");
+        assert!(app.accept_media_frame(frame));assert_reference_frame(&app,2);
+        assert!(app.media.as_ref().unwrap().clock.playing());
+        app.flush_embedded_video();
+        eval(&mut app,"if(video.paused||video.seeking||mediaEvents.indexOf('playing')<0)throw 'ready native play';");
+    }
+
+    #[test]
+    fn script_current_time_default_data_events_wait_for_requested_frame() {
+        let mut app=open("authored-video-default.html");
+        eval(&mut app,"var firstData=0;video.onloadeddata=function(){if(video.readyState<2||video.seeking)throw 'loadeddata before requested frame';firstData++;};video.currentTime=1.75;");
+        let deadline=Instant::now()+Duration::from_secs(5);
+        let source=loop {
+            if let Some(done)=app.embedded_video_worker.as_ref().unwrap().take(){break done;}
+            assert!(Instant::now()<deadline);std::thread::sleep(Duration::from_millis(1));
+        };
+        assert!(app.accept_embedded_video(source));
+        let frame=take_decoded_frame(&app);
+        app.flush_embedded_video();
+        assert_eq!(app.scripting.as_ref().unwrap().error_count(),0,"{}",app.scripting.as_ref().unwrap().report());
+        eval(&mut app,"if(firstData!==0||mediaWindowLoaded)throw 'early data/window load';");
+        assert!(app.accept_media_frame(frame));assert_reference_frame(&app,3);
+        app.flush_embedded_video();
+        eval(&mut app,"if(firstData!==1||!mediaWindowLoaded||video.currentTime!==1.75||video.seeking)throw 'ready default data';");
+    }
+
+    #[test]
+    fn script_current_time_async_notification_capacity_fails_closed_and_reload_recovers() {
+        let mut app=open("authored-video.html");app.wait_for_load();
+        app.scripting.as_mut().unwrap().set_media_task_capacity_for_test(2);
+        // One genuine older task occupies the front. The seek control itself
+        // can be admitted, but later native notification storage may fail.
+        app.media.as_mut().unwrap().event("timeupdate");
+        eval(&mut app,"video.currentTime=1.25;if(!video.seeking)throw 'accepted control';");
+        app.apply_media_pause();app.flush_embedded_video();
+        let player=app.media.as_ref().unwrap();
+        assert!(player.error.as_ref().is_some_and(|error|error.contains("allowance")));
+        assert!(!player.decoder_enabled&&player.paused&&!player.clock.playing());
+        assert!(player.pending.is_none()&&!player.seeking);
+        assert!(!app.scripting.as_ref().unwrap().media_tasks().unwrap().lock().unwrap().has_pending());
+        assert!(app.embedded_video.as_ref().unwrap().error.is_some());
+        app.scripting.as_mut().unwrap().set_media_task_capacity_for_test(crate::javascript::limits::BROWSER.host.media_tasks);
+        eval(&mut app,"video.load();");app.wait_for_load();
+        assert!(app.media.as_ref().unwrap().decoder_enabled);
+        assert!(app.media.as_ref().unwrap().error.is_none());
+        eval(&mut app,"video.currentTime=0.7;");app.apply_media_pause();settle(&mut app);assert_reference_frame(&app,1);
+        assert!(app.media.as_ref().unwrap().error.is_none());
     }
 }

@@ -22,8 +22,8 @@ and licensing obligations; see [third-party notices](THIRD_PARTY_NOTICES.md).
 - Settings, bookmarks, optional browser history, downloads and local diagnostics.
 - Selected local IVF/VP8-intra video, PCM audio and constrained Matroska A/V.
   One authored HTML video supports native controls, source replacement and real
-  JavaScript load() and issue-time pause(). Script play promises, writable seeking
-  and network media remain incomplete.
+  JavaScript load(), issue-time pause() and real currentTime seeking. Script play
+  promises and network media remain incomplete.
 - Replaceable main-window animation operations that schedule and cancel real
   callbacks. Child-frame schedulers are unsupported.
 - Original local regression fixtures and App/input/offscreen interaction tests.
