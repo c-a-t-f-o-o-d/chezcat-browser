@@ -207,7 +207,7 @@ and does not open the audio device.
 Semantic basis: [RFC6386](https://www.rfc-editor.org/rfc/rfc6386.html), especially
 sections9–10 and16–18. Viewing-format conversion is explicit under section5.
 Container, audio and network contracts remain separate: no new WebM/audio codec,
-network element audio, range streaming, MSE, or public-service acceptance.
+additional audio codecs, range streaming, MSE, or public-service acceptance.
 
 ## C1 — a CSS image path through the shared renderer
 
@@ -295,12 +295,20 @@ cleanup once; failed native storage remains truthfully owned until safe release.
 Standalone unfenced behavior is preserved. Mock-backend ownership and genuine
 App snapshot tests have a different scope from coordinated WinMM acceptance.
 
-Finite local authored A/V: the bound VIDEO also accepts the existing supported
-local Matroska VP8/PCM16 profile. Its typed source installs both decoded tracks
+Finite authored A/V: the bound VIDEO also accepts the existing supported
+Matroska VP8/PCM16 profile from local or bounded HTTP(S) sources. Its typed source installs both decoded tracks
 and the source-bound PCM owner before default/explicit seek or retained Play.
 Input bytes obey both host limits; local-root/CSP and cancellation checks remain.
-HTTP(S) element media remains the separately validated IVF-only transaction.
-Muted Matroska, autoplay, loop, poster and multiple players remain unsupported.
+HTTP(S) retains the complete final200/no-partial transaction and shared TLS,
+redirect/CORS/credential/cookie/CSP/blocking/cancellation checks. One explicit
+video/x-ivf or video/x-matroska response MIME selects exactly one original
+decoder; URL suffixes never guess or rescue mismatched bytes. The original
+video-only Context API remains IVF-only. Transfer obeys the media input cap;
+Matroska also obeys captured audio byte limits before demux and its original
+audio/video profile limits. A small audio cap does not shrink IVF transfers.
+Muted Matroska refuses after its MIME is known, before decoding/installing PCM;
+policy denials still prevent contact. No unchanged failure automatically retries.
+Autoplay, loop, poster, muted Matroska and multiple players remain unsupported.
 
 JavaScript load(), pause(), currentTime and play() share the existing source FIFO
 and native Pause capture. PCM time advances only through accepted sample
@@ -319,8 +327,12 @@ current-ack readiness, native Pause and actual worker error paths. The routine
 local authored-A/V journey selects paused PCM positions and independent decoded
 frames, checks EOF selection without claiming drain, switches the same element
 to IVF and back, and verifies navigation teardown. It keeps audio output closed.
-Advancing authored-A/V device playback and physical audibility need separate
-explicit evidence; these checks do not complete F6 service acceptance.
+The controlled HTTP and TLS1.3 journey repeats those actual sample/frame and
+source-lifetime checks with exact served MIME/body hashes and no Range/If-Range.
+It reuses the existing transport fixture server and process-only public test CA;
+operating-system trust stays unchanged. Routine CI opens no audio device.
+Coordinated device acceptance remains separate from these routine checks;
+physical audibility and F6 service acceptance are not established by them.
 
 
 Every later feature records semantic references, original and selected conformance

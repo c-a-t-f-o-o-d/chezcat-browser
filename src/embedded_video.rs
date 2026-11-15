@@ -1,5 +1,5 @@
-//! Authored IVF video and local Matroska VP8/PCM source loading.
-//! Network resources remain the separately validated IVF-only slice.
+//! Authored IVF and supported Matroska VP8/PCM16 source loading.
+//! Network container admission uses the bounded response MIME, never its URL suffix.
 //! Network plans require an immutable document-origin resource context before IO.
 use crate::{
     html::{Document, Namespace, NodeKind},
@@ -21,7 +21,7 @@ impl From<media::Asset> for Asset {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum SourceKind { Ivf, LocalMatroska }
+enum SourceKind { Ivf, LocalMatroska, Network }
 
 pub struct Plan {
     pub retired: Arc<AtomicBool>,
@@ -31,6 +31,7 @@ pub struct Plan {
     limits: media::Limits,
     audio_limits: Option<crate::audio::Limits>,
     kind: SourceKind,
+    muted: bool,
     document_origin: Option<crate::url::HttpUrl>,
     pub(crate) cors_mode: Option<crate::http::MediaCredentials>,
     network: Option<crate::network_media::Context>,
@@ -133,9 +134,9 @@ impl Plan {
         };
         policy.allows_media(policy_scope, &source)?;
         let kind = if source.url.is_some() {
-            // A URL suffix never opts network bytes into a different decoder.
-            // Context still validates exactly video/x-ivf before returning data.
-            SourceKind::Ivf
+            // Network container admission is unknown until the completed
+            // response supplies one strictly validated supported MIME type.
+            SourceKind::Network
         } else {
             let extension = source.path.as_ref().unwrap().extension().and_then(|value| value.to_str()).unwrap_or("");
             if extension.eq_ignore_ascii_case("ivf") { SourceKind::Ivf }
@@ -153,6 +154,7 @@ impl Plan {
             limits,
             audio_limits: None,
             kind,
+            muted: doc.attr(node, "muted").is_some(),
             document_origin: location.url.clone(),
             cors_mode,
             network: None,
@@ -207,23 +209,43 @@ impl Plan {
             Some(self.audio_limits.ok_or("Local Matroska requires its owning App audio limits before loading.")?)
         } else { None };
         let input_limit = audio_limits.map_or(self.limits.input_bytes, |limits| self.limits.input_bytes.min(limits.input_bytes));
-        let bytes = if let Some(source) = &self.source.url {
-            self.network.as_ref()
-                .ok_or("The selected network video has no owning resource context.")?
-                .load(source, self.limits.input_bytes, cancel)?
+        let asset = if let Some(source) = &self.source.url {
+            let context = self.network.as_ref()
+                .ok_or("The selected network video has no owning resource context.")?;
+            if let Some(audio_limits) = self.audio_limits {
+                let resource = context.load_resource(source, self.limits.input_bytes, cancel)?;
+                check()?;
+                match resource.format {
+                    crate::network_media::Format::Ivf => Asset::from(media::Clip::load(resource.bytes, self.limits, &check)?),
+                    crate::network_media::Format::MatroskaPcm16 => {
+                        if self.muted { return Err("Authored PCM muting is not implemented; the Matroska response was not decoded.".into()); }
+                        // The full transfer already observed the media byte cap.
+                        // The PCM policy applies additionally before demux; it
+                        // must not shrink unrelated video-only IVF transfers.
+                        if resource.bytes.len() > audio_limits.input_bytes {
+                            return Err("Muxed network media exceeds its captured audio input byte allowance.".into());
+                        }
+                        let asset = crate::matroska::load(resource.bytes, self.limits, audio_limits, &check)?;
+                        Asset { video: asset.video, audio: Some(asset.audio) }
+                    }
+                }
+            } else {
+                // Callers without captured audio authority keep the old
+                // genuine IVF-only Context API and receive no PCM payload.
+                let bytes = context.load(source, self.limits.input_bytes, cancel)?;
+                Asset::from(media::Clip::load(bytes, self.limits, &check)?)
+            }
         } else {
-            crate::loader::read_local_media_checked(
-                self.source.path.as_ref().ok_or("Missing local video path.")?,
-                input_limit,
-                &check,
-            )?
-        };
-        check()?;
-        let asset = if let Some(audio_limits) = audio_limits {
-            let asset = crate::matroska::load(bytes, self.limits, audio_limits, &check)?;
-            Asset { video: asset.video, audio: Some(asset.audio) }
-        } else {
-            Asset::from(media::Clip::load(bytes, self.limits, &check)?)
+            let bytes = crate::loader::read_local_media_checked(
+                self.source.path.as_ref().ok_or("Missing local video path.")?, input_limit, &check,
+            )?;
+            check()?;
+            if let Some(audio_limits) = audio_limits {
+                let asset = crate::matroska::load(bytes, self.limits, audio_limits, &check)?;
+                Asset { video: asset.video, audio: Some(asset.audio) }
+            } else {
+                Asset::from(media::Clip::load(bytes, self.limits, &check)?)
+            }
         };
         check()?;
         Ok(asset)

@@ -46,9 +46,13 @@ def fixture_payloads(fixture_stem=None):
     }
 
 
-def run_case(transport, folder, fixture_stem=None, display_profile=None):
+def run_case(transport, folder, fixture_stem=None, display_profile=None, *,
+             authored_runner=None, served_payloads=None, entry_path='/authored-video.html',
+             route_checks=None, scope=None):
     folder.mkdir()
-    payloads = fixture_payloads(fixture_stem)
+    payloads = fixture_payloads(fixture_stem) if served_payloads is None else served_payloads
+    if transport not in TRANSPORTS or entry_path not in payloads:
+        raise ValueError('Expected one controlled HTTP(S) fixture entry.')
     records = []
     lock = threading.Lock()
 
@@ -68,6 +72,7 @@ def run_case(transport, folder, fixture_stem=None, display_profile=None):
                 'bytes': len(body), 'sha256': hashlib.sha256(body).hexdigest(),
                 'bytes_written': 0, 'completed': False,
                 'range_requested': self.headers.get('Range') is not None,
+                'if_range_requested': self.headers.get('If-Range') is not None,
                 'tls': None,
             }
             if isinstance(self.connection, ssl.SSLSocket):
@@ -112,12 +117,15 @@ def run_case(transport, folder, fixture_stem=None, display_profile=None):
     worker = threading.Thread(target=server.serve_forever,
         kwargs={'poll_interval': .1}, daemon=True)
     worker.start()
-    source = f'{transport}://{host}:{server.server_port}/authored-video.html'
+    source = f'{transport}://{host}:{server.server_port}{entry_path}'
     child_log = folder / 'authored-checker.log'
     try:
         with child_log.open('w', encoding='utf-8', newline='\n') as output:
             with contextlib.redirect_stdout(output):
-                status = authored.main(source=source, trust_file=trust_file, fixture_stem=fixture_stem, display_profile=display_profile)
+                if authored_runner is None:
+                    status = authored.main(source=source, trust_file=trust_file, fixture_stem=fixture_stem, display_profile=display_profile)
+                else:
+                    status = authored_runner(source=source, trust_file=trust_file)
     finally:
         server.shutdown()
         server.server_close()
@@ -137,11 +145,14 @@ def run_case(transport, folder, fixture_stem=None, display_profile=None):
         'caller_source_and_process_trust_retained': child.get('source') == source
             and child.get('trust_file_sha256') == (capture_tests.sha256(trust_file) if trust_file else None),
         'server_worker_stopped': not worker.is_alive(),
-        'page_served': any(row['target'] == '/authored-video.html' for row in responses),
-        'clip_served_and_reloaded': sum(row['target'] == '/scene-intra.ivf' for row in responses) >= 2,
-        'leave_destination_served': any(row['target'] == '/authored-video-next.html' for row in responses),
         'only_exact_original_routes': bool(responses) and all(row['target'] in payloads for row in responses),
         'full_fetch_without_range': bool(responses) and all(not row['range_requested'] for row in responses)}
+    required = route_checks if route_checks is not None else {
+        'page_served': ('/authored-video.html', 1),
+        'clip_served_and_reloaded': ('/scene-intra.ivf', 2),
+        'leave_destination_served': ('/authored-video-next.html', 1)}
+    checks.update({name: sum(row['target'] == route for row in responses) >= minimum
+                   for name, (route, minimum) in required.items()})
     checks['exact_served_response_bytes_mime_and_hash'] = bool(responses) and all(
         row['target'] in payloads and row['status'] == 200 and row['completed'] is True
         and row['mime'] == payloads[row['target']][0]
@@ -159,7 +170,7 @@ def run_case(transport, folder, fixture_stem=None, display_profile=None):
         'source_before': child['source_before'], 'source_after': child['source_after'],
         'executable_sha256': child['executable_sha256'], 'responses': responses,
         'trust_file_sha256': capture_tests.sha256(trust_file) if trust_file else None,
-        'scope': __doc__, 'license_accepted_by_driver': False,
+        'scope': __doc__ if scope is None else scope, 'license_accepted_by_driver': False,
         'os_trust_changed': False, 'public_service_requests_made_by_driver': 0}
     capture_tests.write_json(folder / 'manifest.json', result)
     return result

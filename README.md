@@ -25,12 +25,13 @@ and licensing obligations; see [third-party notices](THIRD_PARTY_NOTICES.md).
   and dependency-aware seeking; SPLITMV and hidden frames remain unsupported.
   One authored HTML video supports native controls, source replacement and real
   JavaScript load(), pause(), currentTime seeking and play() with pending promises
-  tied to decoded output. Local supported Matroska adds source-bound PCM and
-  acknowledged sample time; routine checks keep audio output closed. Network
-  element video remains IVF-only through bounded complete HTTP(S) transactions,
-  including authored crossorigin anonymous/use-credentials modes with real CORS
-  checks. Network element audio, unmarked foreign sources, dynamic crossOrigin
-  controls, muted Matroska and multiple players remain unsupported.
+  tied to decoded output. Supported Matroska adds source-bound PCM and
+  acknowledged sample time. Complete HTTP(S) transfers admit explicit IVF or
+  Matroska MIME and preserve authored crossorigin/credential checks. Routine
+  local and controlled HTTP/TLS A/V checks keep audio output closed; device
+  playback requires separate coordinated verification. Unmarked foreign sources,
+  dynamic crossOrigin controls, muted Matroska, streaming and multiple players
+  remain unsupported.
 - Replaceable main-window animation operations that schedule and cancel real
   callbacks. Child-frame schedulers are unsupported.
 - Original local regression fixtures and App/input/offscreen interaction tests.

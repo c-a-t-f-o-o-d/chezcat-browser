@@ -1,10 +1,12 @@
-"""Original finite local authored A/V App/input/offscreen journey.
+"""Original finite authored A/V App/input/offscreen journey.
 
-Owned offscreen App/input/renderer only. Original local multiplexed MKV metadata,
+Owned offscreen App/input/renderer only. Original multiplexed MKV metadata,
 paused seek/sample selection, independent displayed pixels, same-element IVF
-replacement and MKV reselection. Native Play runs ONLY for the retained IVF
-regression. No device, network, physical input, automatic license acceptance,
-build, public service, advancing PCM or physical audibility claim.
+replacement and MKV reselection. The default source is the retained local page;
+a caller may provide controlled loopback HTTP(S) and process-only test trust.
+Native Play runs ONLY for the retained IVF regression. No device, physical
+input, automatic license acceptance, build, public service, advancing PCM or
+physical audibility claim.
 """
 import argparse
 from datetime import datetime, timezone
@@ -76,14 +78,15 @@ def frame_at(clip, milliseconds):
                if frame['timestamp'] * clip['scale'] * 1000 <= milliseconds * clip['rate'])
 
 
-def main():
+def main(*, source=None, trust_file=None, argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--repo', type=Path, default=ROOT)
     parser.add_argument('--exe', type=Path)
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     repo = args.repo.resolve()
     exe = (args.exe or repo / 'ChezCat.exe').resolve()
     fixtures = repo / 'tools/fixtures'
+    source = str(source if source is not None else fixtures / 'authored-av.html')
     sys.path.insert(0, str(repo / 'tools'))
     import accept_license
     import capture_tests
@@ -93,7 +96,8 @@ def main():
     exe_sha = capture_tests.sha256(exe)
     checks = {'existing_exact_acceptance': False, 'actual_journey_completed': False}
     observations, snapshots = {}, {}
-    record = {'scope': __doc__,
+    record = {'scope': __doc__, 'source': source,
+        'trust_file_sha256': capture_tests.sha256(trust_file) if trust_file is not None else None,
         'service_acceptance_claimed': False, 'device_attempt': False,
         'advancing_acknowledged_pcm_playback_verified': False, 'physical_audibility_verified': False,
         'decoded_pcm_bytes_verified_by_this_journey': False,
@@ -136,9 +140,11 @@ def main():
         script = folder / 'input.tsv'
         script.write_text(actions, encoding='utf-8', newline='\n')
         output = folder / 'journey'
-        run = capture_tests.execute([str(exe), str(fixtures / 'authored-av.html'),
-            '--dev-input-script', str(script), '--dev-input-output', str(output),
-            '--javascript', '--no-profile'], folder / 'command.log', repo, 120)
+        command = [str(exe), source, '--dev-input-script', str(script),
+            '--dev-input-output', str(output), '--javascript', '--no-profile']
+        if trust_file is not None:
+            command.extend(['--trust-file', str(trust_file)])
+        run = capture_tests.execute(command, folder / 'command.log', repo, 120)
         record['run'] = run
         checks['process_completed'] = run['state'] == 'completed' and run['exit_code'] == 0
         for label in LABELS:

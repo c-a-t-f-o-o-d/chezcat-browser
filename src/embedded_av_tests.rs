@@ -72,13 +72,13 @@ fn authored_muxed_cancellation_and_retired_source_never_return_a_payload() {
 }
 
 #[test]
-fn authored_network_mkv_spelling_stays_ivf_only_and_ivf_payload_has_no_audio() {
+fn authored_network_spelling_does_not_select_container_and_ivf_payload_has_no_audio() {
     let location = crate::navigation::address("https://example.test/page", &Location::home()).unwrap();
     let doc = crate::html::parse("<video src='/same-origin-spelling.mkv'></video>");
     let selected = Plan::new(authored_node(&doc).unwrap(), &doc, &location, &location,
         &crate::csp::PolicySet::new(&location), media::Limits::default()).unwrap()
         .with_audio_limits(crate::audio::Limits::default());
-    assert_eq!(selected.kind, SourceKind::Ivf);
+    assert_eq!(selected.kind, SourceKind::Network);
     assert!(selected.load(&AtomicBool::new(false)).err().unwrap().contains("no owning resource context"));
     let plain = plan("scene-inter.ivf", "", media::Limits::default()).unwrap().load(&AtomicBool::new(false)).unwrap();
     assert!(plain.audio.is_none()); assert_eq!(plain.video.clip.frame_count(), 24);

@@ -1508,6 +1508,7 @@ mod tests {
         assert!(!app.scripting.as_ref().unwrap().has_media_play_promises_for_test());
     }
     include!("app_network_media_tests.rs");
+    include!("app_network_av_tests.rs");
     include!("app_cors_media_tests.rs");
     include!("app_interframe_tests.rs");
 }

@@ -1,8 +1,17 @@
-//! Complete bounded IVF media transfers through the browser's HTTP stack.
+//! Complete bounded IVF and finite Matroska/PCM transfers through the browser's HTTP stack.
 //! No attribute keeps exact-origin policy; authored CORS uses its dedicated path.
 //! No ranges, helper processes, codec substitution or automatic media retries.
 use crate::{blocking, cookies, csp, http, loader, navigation::Location, network_trace, trust, url::HttpUrl};
 use std::sync::{atomic::{AtomicBool, Ordering}, Arc};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Format { Ivf, MatroskaPcm16 }
+pub(crate) struct Resource { pub(crate) format: Format, pub(crate) bytes: Vec<u8> }
+impl std::fmt::Debug for Resource {
+    fn fmt(&self, out: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        out.debug_struct("NetworkMediaResource").field("format", &self.format).field("bytes", &self.bytes.len()).finish()
+    }
+}
 
 #[derive(Clone)]
 pub(crate) struct Context {
@@ -18,7 +27,16 @@ pub(crate) struct Context {
 }
 
 impl Context {
+    /// Existing video-only callers retain their exact IVF-only admission.
     pub(crate) fn load(&self, source: &HttpUrl, limit: usize, cancel: &AtomicBool) -> Result<Vec<u8>, String> {
+        let resource = self.load_resource(source, limit, cancel)?;
+        if resource.format != Format::Ivf {
+            return Err("Video-only network loading requires video/x-ivf; Matroska needs captured audio policy.".into());
+        }
+        Ok(resource.bytes)
+    }
+    /// MIME chooses exactly one known decoder after the same bounded full fetch.
+    pub(crate) fn load_resource(&self, source: &HttpUrl, limit: usize, cancel: &AtomicBool) -> Result<Resource, String> {
         let guard = |target: &HttpUrl| {
             if cancel.load(Ordering::Acquire) || self.retired.load(Ordering::Acquire) {
                 return Err("Network media source cancelled.".into());
@@ -54,47 +72,53 @@ impl Context {
         }
         let mut types = response.headers.iter().filter(|(name, _)| name.eq_ignore_ascii_case("content-type"));
         let content_type = types.next().map(|(_, value)| value.as_str())
-            .ok_or("Network media requires a video/x-ivf Content-Type.")?;
-        if types.next().is_some() || !ivf_content_type(content_type) {
-            return Err("Network media requires one valid video/x-ivf Content-Type.".into());
+            .ok_or("Network media requires one known Content-Type.")?;
+        if types.next().is_some() {
+            return Err("Network media requires exactly one Content-Type.".into());
         }
-        Ok(response.body)
+        let format = media_content_type(content_type)
+            .ok_or("Network media requires one valid video/x-ivf or video/x-matroska Content-Type.")?;
+        Ok(Resource { format, bytes: response.body })
     }
 }
 
-// Validate this one accepted MIME type and its ordinary token/quoted-string
-// parameters. Normalization remains the loader's shared media_type operation.
-fn ivf_content_type(value: &str) -> bool {
+// Validate only the two admitted MIME types and the existing ordinary
+// token/quoted-string parameters. Parameters never substitute for real decoding.
+fn media_content_type(value: &str) -> Option<Format> {
     let essence = value.split(';').next().unwrap_or("").trim_matches([' ', '\t']);
-    if !essence.eq_ignore_ascii_case("video/x-ivf") || loader::media_type(value) != "video/x-ivf" { return false; }
+    let format = if essence.eq_ignore_ascii_case("video/x-ivf") && loader::media_type(value) == "video/x-ivf" {
+        Format::Ivf
+    } else if essence.eq_ignore_ascii_case("video/x-matroska") && loader::media_type(value) == "video/x-matroska" {
+        Format::MatroskaPcm16
+    } else { return None; };
     let bytes=value.as_bytes();let mut i=value.find(';').unwrap_or(bytes.len());
     let ows=|b:u8| matches!(b,b' '|b'\t');
     let token=|b:u8| b.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&b);
     while i<bytes.len() {
         while i<bytes.len()&&ows(bytes[i]) {i+=1;}
-        if i==bytes.len() {return true;}
-        if bytes[i]!=b';' {return false;}i+=1;
+        if i==bytes.len() {return Some(format);}
+        if bytes[i]!=b';' {return None;}i+=1;
         while i<bytes.len()&&ows(bytes[i]) {i+=1;}
         let start=i;while i<bytes.len()&&token(bytes[i]) {i+=1;}
-        if i==start {return false;}
+        if i==start {return None;}
         while i<bytes.len()&&ows(bytes[i]) {i+=1;}
-        if bytes.get(i)!=Some(&b'=') {return false;}i+=1;
+        if bytes.get(i)!=Some(&b'=') {return None;}i+=1;
         while i<bytes.len()&&ows(bytes[i]) {i+=1;}
         if bytes.get(i)==Some(&b'"') {
             i+=1;let mut closed=false;
             while i<bytes.len() {
                 let mut b=bytes[i];i+=1;
                 if b==b'"' {closed=true;break;}
-                if b==b'\\' {let Some(&escaped)=bytes.get(i) else{return false;};b=escaped;i+=1;}
-                if b<32&&b!=b'\t'||b==127 {return false;}
+                if b==b'\\' {let Some(&escaped)=bytes.get(i) else{return None;};b=escaped;i+=1;}
+                if b<32&&b!=b'\t'||b==127 {return None;}
             }
-            if !closed {return false;}
+            if !closed {return None;}
         } else {
             let start=i;while i<bytes.len()&&token(bytes[i]) {i+=1;}
-            if i==start {return false;}
+            if i==start {return None;}
         }
     }
-    true
+    Some(format)
 }
 
 #[cfg(test)]
@@ -144,6 +168,10 @@ mod tests {
         let mut bytes=vec![31,139,8,0,0,0,0,0,0,255];let count=body.len().div_ceil(65535);
         for (i,chunk) in body.chunks(65535).enumerate() {let len=chunk.len() as u16;bytes.push(u8::from(i+1==count));bytes.extend_from_slice(&len.to_le_bytes());bytes.extend_from_slice(&(!len).to_le_bytes());bytes.extend_from_slice(chunk);}
         bytes.extend_from_slice(&crate::compression::crc32(body).to_le_bytes());bytes.extend_from_slice(&(body.len() as u32).to_le_bytes());bytes
+    }
+
+    mod av_tests {
+        include!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/network_av_tests.rs"));
     }
 
     #[test]
