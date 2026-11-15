@@ -1,5 +1,5 @@
 //! Parser-authored IVF video source loading with separate local/network authority.
-//! Network plans require an immutable same-origin resource context before IO.
+//! Network plans require an immutable document-origin resource context before IO.
 use crate::{
     html::{Document, Namespace, NodeKind},
     media,
@@ -17,6 +17,8 @@ pub struct Plan {
     pub raw: String,
     pub source: Location,
     limits: media::Limits,
+    document_origin: Option<crate::url::HttpUrl>,
+    pub(crate) cors_mode: Option<crate::http::MediaCredentials>,
     network: Option<crate::network_media::Context>,
 }
 impl Plan {
@@ -68,13 +70,25 @@ impl Plan {
         }
         if let Some(name) = ["loop", "poster", "autoplay", "crossorigin"]
             .into_iter()
-            .find(|name| doc.attr(node, name).is_some())
+            .find(|name| (*name != "crossorigin" || location.url.is_none())
+                && doc.attr(node, name).is_some())
         {
             return Err(format!("Authored video attribute {name:?} is not implemented in this element slice; source was not loaded."));
         }
         if raw.is_empty() {
             return Err("The selected media src is empty.".into());
         }
+        // Enumerated attribute: missing keeps the conservative no-CORS
+        // path. Any present value except the exact ASCII-insensitive
+        // use-credentials keyword selects anonymous/same-origin credentials.
+        // Do not trim: whitespace is an invalid value with that same default.
+        let cors_mode = doc.attr(node, "crossorigin").map(|value| {
+            if value.eq_ignore_ascii_case("use-credentials") {
+                crate::http::MediaCredentials::Include
+            } else {
+                crate::http::MediaCredentials::SameOrigin
+            }
+        });
         let source = if let Some(origin) = &location.url {
             // Check the base before resolution: network documents must never
             // enter local canonicalization/opening, even for a malformed base.
@@ -83,8 +97,14 @@ impl Plan {
             }
             let source = crate::navigation::resolve(raw, base)?;
             let target = source.url.as_ref().ok_or("A network video source must use HTTP(S).")?;
-            if source.path.is_some() || source.root.is_some() || !target.same_origin(origin) {
-                return Err("Network video currently requires the document's exact HTTP(S) origin.".into());
+            if source.path.is_some() || source.root.is_some() {
+                return Err("A network video source cannot carry local-file authority.".into());
+            }
+            if origin.secure && !target.secure {
+                return Err("HTTPS media cannot use an unencrypted HTTP source.".into());
+            }
+            if cors_mode.is_none() && !target.same_origin(origin) {
+                return Err("Network video without crossorigin requires the document's exact HTTP(S) origin.".into());
             }
             source
         } else {
@@ -111,6 +131,8 @@ impl Plan {
             raw: raw.into(),
             source,
             limits,
+            document_origin: location.url.clone(),
+            cors_mode,
             network: None,
         })
     }
@@ -125,10 +147,19 @@ impl Plan {
         if !Arc::ptr_eq(&self.retired, &context.retired) {
             return Err("The network media context belongs to a different source lifetime.".into());
         }
+        let origin = self.document_origin.as_ref()
+            .ok_or("A local document cannot grant network video authority.")?;
+        if !context.origin.same_origin(origin) {
+            return Err("The network media context does not match the selecting document origin.".into());
+        }
+        if context.credentials != self.cors_mode {
+            return Err("The network media context does not match the selected crossorigin mode.".into());
+        }
         if self.source.path.is_some() || self.source.root.is_some()
-            || !source.same_origin(&context.origin)
+            || origin.secure && !source.secure
+            || self.cors_mode.is_none() && !source.same_origin(origin)
         {
-            return Err("The network media context does not match the selected source origin.".into());
+            return Err("The network media source violates its selecting document authority.".into());
         }
         context.policy.allows_media(context.policy_scope, &self.source)?;
         self.network = Some(context);
@@ -490,14 +521,9 @@ mod tests {
         let mut denied = policy.clone();
         denied.add_header("media-src 'none'");
         assert!(plan("clip", &location, &denied).err().unwrap().contains("media-src/default-src"));
-        for attribute in ["crossorigin", "crossorigin=anonymous", "crossorigin=use-credentials"] {
-            let doc = crate::html::parse(&format!("<video {attribute} src=clip></video>"));
-            assert!(Plan::new(authored_node(&doc).unwrap(), &doc, &location,
-                &location, &policy, media::Limits::default()).err().unwrap()
-                .contains("source was not loaded"));
-        }
         let make_context = |selected: &Plan, origin, policy| crate::network_media::Context {
             origin,
+            credentials: selected.cors_mode,
             retired: selected.retired.clone(),
             trust: Arc::new(crate::trust::Store::unconfigured()),
             cookies: Arc::new(crate::cookies::Session::default()),
@@ -520,6 +546,74 @@ mod tests {
         let selected = plan("clip", &location, &policy).unwrap();
         let context = make_context(&selected, location.url.clone().unwrap(), policy);
         assert!(selected.with_network_context(context).is_ok());
+    }
+    #[test]
+    fn embedded_network_authored_cors_mode_keeps_document_origin_and_local_boundaries() {
+        use crate::http::MediaCredentials::{Include, SameOrigin};
+        let location = crate::navigation::address(
+            "https://document.example.test/page", &Location::home(),
+        ).unwrap();
+        let policy = crate::csp::PolicySet::new(&location);
+        let selected = |attribute: &str, source: &str, policy: &crate::csp::PolicySet| {
+            let doc = crate::html::parse(&format!("<video {attribute} src='{source}'></video>"));
+            Plan::new(authored_node(&doc).unwrap(), &doc, &location, &location,
+                policy, media::Limits::default())
+        };
+        assert!(selected("", "https://foreign.example.test/clip", &policy).is_err());
+        let missing = selected("", "/clip", &policy).unwrap();
+        assert_eq!(missing.cors_mode, None);
+        for (attribute, expected) in [
+            ("crossorigin", SameOrigin), ("crossorigin=''", SameOrigin),
+            ("crossorigin='anonymous'", SameOrigin), ("crossorigin='ANONYMOUS'", SameOrigin),
+            ("crossorigin='invalid'", SameOrigin), ("crossorigin=' use-credentials'", SameOrigin),
+            ("crossorigin='use-credentials '", SameOrigin), ("crossorigin='匿名'", SameOrigin),
+            ("crossorigin='use-credentials'", Include), ("crossorigin='UsE-CrEdEnTiAlS'", Include),
+        ] {
+            let plan = selected(attribute, "https://foreign.example.test/clip", &policy).unwrap();
+            assert_eq!(plan.cors_mode, Some(expected), "{attribute}");
+            assert!(plan.document_origin.as_ref().unwrap().same_origin(location.url.as_ref().unwrap()));
+            assert!(plan.network.is_none());
+            assert!(plan.load(&AtomicBool::new(false)).err().unwrap().contains("no owning resource context"));
+            assert!(selected(attribute, "http://foreign.example.test/clip", &policy)
+                .err().unwrap().contains("unencrypted"));
+            assert!(selected(attribute, "file:///C:/not-opened.ivf", &policy).is_err());
+            let mut self_only = policy.clone(); self_only.add_header("media-src 'self'");
+            assert!(selected(attribute, "https://foreign.example.test/clip", &self_only)
+                .err().unwrap().contains("media-src/default-src"));
+        }
+        let make_context = |plan: &Plan| crate::network_media::Context {
+            origin: location.url.clone().unwrap(), credentials: plan.cors_mode,
+            retired: plan.retired.clone(),
+            trust: Arc::new(crate::trust::Store::unconfigured()),
+            cookies: Arc::new(crate::cookies::Session::default()),
+            blocking: Arc::new(crate::blocking::Policy::default()),
+            policy: policy.clone(), policy_scope: usize::MAX,
+            network: crate::network_trace::Trace::default(),
+        };
+        let foreign = "https://foreign.example.test/clip";
+        let plan = selected("crossorigin", foreign, &policy).unwrap();
+        let mut context = make_context(&plan); context.origin = plan.source.url.clone().unwrap();
+        assert!(plan.with_network_context(context).err().unwrap().contains("document origin"));
+        for mode in [None, Some(Include)] {
+            let plan = selected("crossorigin", foreign, &policy).unwrap();
+            let mut context = make_context(&plan); context.credentials = mode;
+            assert!(plan.with_network_context(context).err().unwrap().contains("crossorigin mode"));
+        }
+        let plan = selected("crossorigin", foreign, &policy).unwrap();
+        let mut context = make_context(&plan); context.retired = Arc::new(AtomicBool::new(false));
+        assert!(plan.with_network_context(context).err().unwrap().contains("source lifetime"));
+        for attribute in ["crossorigin", "crossorigin=use-credentials"] {
+            let plan = selected(attribute, foreign, &policy).unwrap();
+            let context = make_context(&plan);
+            assert!(plan.with_network_context(context).is_ok());
+        }
+        let local = super::tests::location();
+        for attribute in ["crossorigin", "crossorigin=anonymous", "crossorigin=use-credentials"] {
+            let doc = crate::html::parse(&format!("<video {attribute} src=scene-intra.ivf></video>"));
+            assert!(Plan::new(authored_node(&doc).unwrap(), &doc, &local, &local,
+                &crate::csp::PolicySet::new(&local), media::Limits::default())
+                .err().unwrap().contains("source was not loaded"));
+        }
     }
     #[test]
     fn embedded_video_real_source_worker_cancellation_latest_plan_and_small_profile_recovery() {

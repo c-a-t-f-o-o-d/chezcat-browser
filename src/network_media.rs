@@ -1,4 +1,5 @@
-//! Complete same-origin IVF media transfers through the browser's HTTP stack.
+//! Complete bounded IVF media transfers through the browser's HTTP stack.
+//! No attribute keeps exact-origin policy; authored CORS uses its dedicated path.
 //! No ranges, helper processes, codec substitution or automatic media retries.
 use crate::{blocking, cookies, csp, http, loader, navigation::Location, network_trace, trust, url::HttpUrl};
 use std::sync::{atomic::{AtomicBool, Ordering}, Arc};
@@ -6,6 +7,7 @@ use std::sync::{atomic::{AtomicBool, Ordering}, Arc};
 #[derive(Clone)]
 pub(crate) struct Context {
     pub(crate) origin: HttpUrl,
+    pub(crate) credentials: Option<http::MediaCredentials>,
     pub(crate) trust: Arc<trust::Store>,
     pub(crate) cookies: Arc<cookies::Session>,
     pub(crate) blocking: Arc<blocking::Policy>,
@@ -24,7 +26,7 @@ impl Context {
             if self.origin.secure && !target.secure {
                 return Err("HTTPS media cannot use an unencrypted HTTP source.".into());
             }
-            if !self.origin.same_origin(target) {
+            if self.credentials.is_none() && !self.origin.same_origin(target) {
                 return Err("Cross-origin media navigation or redirect was blocked.".into());
             }
             self.blocking.check(target)?;
@@ -35,7 +37,11 @@ impl Context {
         let pool = http::Pool::new(cancel, &self.trust)
             .with_cookie_session(self.cookies.clone(), Some(self.origin.clone()))
             .with_network_trace(self.network.clone());
-        let response = pool.fetch_kind_checked(source, limit, &self.origin, http::FetchMode::Normal, "media", &guard)?;
+        let response = if let Some(credentials) = self.credentials {
+            pool.fetch_cors_media(source, limit, &self.origin, credentials, http::FetchMode::Normal, &guard)?
+        } else {
+            pool.fetch_kind_checked(source, limit, &self.origin, http::FetchMode::Normal, "media", &guard)?
+        };
         // Job cancellation is checked inside HTTP framing/decompression. The
         // immutable retirement token also gates each redirect and this final
         // return; retirement alone does not wake an in-progress socket read.
@@ -125,7 +131,7 @@ mod tests {
         fn context(&self)->Context {
             let location=Location {url:Some(self.origin.clone()),path:None,root:None,fragment:String::new()};
             let mut policy=csp::PolicySet::new(&location);policy.add_header("media-src 'self'");
-            Context {origin:self.origin.clone(),trust:Arc::new(trust::Store::unconfigured()),cookies:Arc::new(cookies::Session::default()),
+            Context {origin:self.origin.clone(),credentials:None,trust:Arc::new(trust::Store::unconfigured()),cookies:Arc::new(cookies::Session::default()),
                 blocking:Arc::new(blocking::Policy::default()),policy,policy_scope:usize::MAX,network:network_trace::Trace::default(),retired:Arc::new(AtomicBool::new(false))}
         }
         fn requests(&self)->Vec<String> {self.requests.lock().unwrap().clone()}

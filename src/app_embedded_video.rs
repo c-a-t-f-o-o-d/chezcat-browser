@@ -11,8 +11,10 @@ impl App {
         let origin = self.location.url.clone()
             .ok_or("A local document cannot grant network video authority.")?;
         let retired = plan.retired.clone();
+        let credentials = plan.cors_mode;
         plan.with_network_context(crate::network_media::Context {
             origin,
+            credentials,
             retired,
             trust: self.trust.clone(),
             cookies: self.cookies.clone(),
@@ -1353,4 +1355,5 @@ mod tests {
         assert!(!app.scripting.as_ref().unwrap().has_media_play_promises_for_test());
     }
     include!("app_network_media_tests.rs");
+    include!("app_cors_media_tests.rs");
 }

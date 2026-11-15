@@ -24,9 +24,10 @@ and licensing obligations; see [third-party notices](THIRD_PARTY_NOTICES.md).
   One authored HTML video supports native controls, source replacement and real
   JavaScript load(), issue-time pause(), currentTime seeking and play() with
   genuine pending promises, measured playback time and decoded frames. Supported
-  video can also load through a bounded complete same-origin HTTP(S) transaction.
-  Cross-origin/crossorigin-marked video, element audio and multiple players remain
-  unsupported.
+  video can also load through bounded complete HTTP(S) transactions, including
+  explicit authored crossorigin anonymous/use-credentials modes with real CORS
+  checks. Unmarked foreign sources, dynamic crossOrigin controls, element audio
+  and multiple players remain unsupported.
 - Replaceable main-window animation operations that schedule and cancel real
   callbacks. Child-frame schedulers are unsupported.
 - Original local regression fixtures and App/input/offscreen interaction tests.

@@ -1105,7 +1105,7 @@ impl App {
             }
             _ => None,
         });
-        let scope=if player.embedded{"authored HTML video, local IVF/VP8 intra, partial readonly state/native events; no audio/network/play()"}else if player.sync.is_some(){"local Matroska VP8 intra + PCM16, device-sample clock; native viewer events (no HTMLMediaElement)"}else{"standalone IVF/VP8 intra, video only; native viewer events (no HTMLMediaElement)"};
+        let scope=if player.embedded{"authored HTML video, IVF/VP8 intra, script load/play/pause/currentTime and native controls; no element audio/MSE"}else if player.sync.is_some(){"local Matroska VP8 intra + PCM16, device-sample clock; native viewer events (no HTMLMediaElement)"}else{"standalone IVF/VP8 intra, video only; native viewer events (no HTMLMediaElement)"};
         element+&format!("Local video: {scope}\nMedia playing={} ended={} time_ms={} duration_ms={} frame={} frames={} pending={:?} canvas={}x{} generation={} error={:?}\nMedia timeline_eof={}\nMedia lifecycle dropped={} {}\nMedia rendered rect={rect:?}\n",player.playing(),player.ended_reported,player.position(Instant::now()).as_millis(),player.clip.duration.as_millis(),player.displayed,player.clip.frame_count(),player.pending,player.clip.width,player.clip.height,player.generation,player.error,player.position(Instant::now())>=player.clip.duration,player.dropped,player.events.iter().copied().collect::<Vec<_>>().join(","))
     }
     pub(super) fn input_media_action(&mut self, action: &str) -> Result<(i32, i32), String> {

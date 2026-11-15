@@ -95,6 +95,17 @@ impl Session {
         self.set_at(url, header, true, now_seconds())
     }
 
+    /// Process a credential-eligible HTTP subresource Set-Cookie field.
+    /// The caller supplies the request's schemeful SameSite context, including
+    /// redirect history; CORS response visibility does not grant or undo cookies.
+    /// Cross-site subresources cannot create, replace or delete non-None
+    /// SameSite cookies. All normal syntax/security/store limits still apply.
+    pub(crate) fn set_http_subresource(
+        &self, url: &HttpUrl, header: &str, same_site: bool,
+    ) -> Result<(), String> {
+        self.set_at_context(url, header, true, same_site, now_seconds())
+    }
+
     /// Process a document.cookie assignment. Invalid/protected writes return
     /// a generic error so the DOM setter can ignore them without exposing data.
     pub fn set_document(&self, url: &HttpUrl, text: &str) -> Result<(), String> {
@@ -115,7 +126,16 @@ impl Session {
     }
 
     fn set_at(&self, url: &HttpUrl, text: &str, http: bool, now: i64) -> Result<(), String> {
+        self.set_at_context(url, text, http, true, now)
+    }
+
+    fn set_at_context(
+        &self, url: &HttpUrl, text: &str, http: bool, same_site: bool, now: i64,
+    ) -> Result<(), String> {
         let mut cookie = parse_cookie(url, text, http, now)?;
+        if !same_site && cookie.same_site != SameSite::None {
+            return Err("Cross-site subresources cannot set non-None SameSite cookies.".into());
+        }
         let mut store = self
             .store
             .lock()
@@ -621,6 +641,104 @@ mod tests {
 
     fn request(session: &Session, target: &HttpUrl) -> String {
         session.get_at(target, false, true, false, NOW)
+    }
+
+    #[test]
+    fn cross_site_subresource_non_none_creation_overwrite_and_deletion_leave_store_untouched() {
+        let target = url("https://resource.example.test/");
+        for suffix in ["", "; SameSite=Lax", "; SameSite=Strict", "; SameSite=invalid"] {
+            let session = Session::default();
+            session.set_at(&target, "id=kept; Path=/; Secure; HttpOnly; SameSite=None", true, NOW).unwrap();
+            session.set_at(&target, "expired=retained; Path=/; Max-Age=1", true, NOW).unwrap();
+            for assignment in [format!("new=refused; Path=/{suffix}"),
+                format!("id=refused; Path=/{suffix}"),
+                format!("id=; Path=/; Max-Age=0{suffix}")] {
+                let error = session.set_at_context(&target, &assignment, true, false, NOW + 2).unwrap_err();
+                assert!(!error.contains("refused") && !error.contains("kept"));
+                // Refusal precedes even expiry cleanup, not just replacement.
+                let store = session.store.lock().unwrap();
+                assert_eq!(store.next_creation, 2);
+                assert_eq!(store.cookies.len(), 2);
+                assert_eq!(store.cookies[0].name, "id");
+                assert_eq!(store.cookies[0].value, "kept");
+                assert!(store.cookies[0].http_only && store.cookies[0].secure);
+                assert_eq!(store.cookies[0].creation, 0);
+                assert_eq!(store.cookies[1].name, "expired");
+                assert_eq!(store.cookies[1].expires, Some(NOW + 1));
+            }
+            assert_eq!(session.get_at(&target, false, false, false, NOW + 2), "id=kept");
+            assert_eq!(session.get_at(&target, true, true, false, NOW + 2), "");
+        }
+    }
+
+    #[test]
+    fn cross_site_subresource_none_secure_uses_normal_http_only_scope_expiry_and_replacement() {
+        let session = Session::default();
+        let target = url("https://resource.example.test/a/page");
+        session.set_at_context(&target, "visible=one; Path=/a; Secure; SameSite=None; Max-Age=10", true, false, NOW).unwrap();
+        session.set_at_context(&target, "hidden=secret; Path=/a; Secure; HttpOnly; SameSite=None", true, false, NOW).unwrap();
+        assert_eq!(session.get_at(&target, false, false, false, NOW), "visible=one; hidden=secret");
+        assert_eq!(session.get_at(&target, true, true, false, NOW), "visible=one");
+        assert_eq!(session.get_at(&url("http://resource.example.test/a/page"), false, false, false, NOW), "");
+        assert_eq!(session.get_at(&url("https://resource.example.test/else"), false, false, false, NOW), "");
+        assert_eq!(session.get_at(&url("https://other.example.test/a/page"), false, false, false, NOW), "");
+        session.set_at_context(&target, "visible=two; Path=/a; Secure; SameSite=None; Max-Age=10", true, false, NOW + 1).unwrap();
+        assert_eq!(session.store.lock().unwrap().cookies[0].creation, 0);
+        assert_eq!(session.get_at(&target, false, false, false, NOW + 10), "visible=two; hidden=secret");
+        assert_eq!(session.get_at(&target, false, false, false, NOW + 11), "hidden=secret");
+        session.set_at_context(&target, "hidden=; Path=/a; Secure; HttpOnly; SameSite=None; Max-Age=0", true, false, NOW + 11).unwrap();
+        assert_eq!(session.get_at(&target, false, false, false, NOW + 11), "");
+        // The restriction uses the incoming flag, not the old cookie's flag.
+        session.set_at(&target, "old=first; Path=/a; SameSite=Strict", true, NOW + 12).unwrap();
+        session.set_at_context(&target, "old=changed; Path=/a; Secure; SameSite=None", true, false, NOW + 12).unwrap();
+        assert_eq!(session.get_at(&target, false, false, false, NOW + 12), "old=changed");
+        assert!(!format!("{session:?}").contains("changed"));
+    }
+
+    #[test]
+    fn same_site_subresource_keeps_existing_creation_and_safe_retrieval_semantics() {
+        let legacy = Session::default();
+        let resource = Session::default();
+        let target = url("https://resource.example.test/a/page");
+        for assignment in ["default=one; Path=/", "lax=two; Path=/; SameSite=Lax",
+            "strict=three; Path=/; SameSite=Strict", "invalid=four; Path=/; SameSite=invalid",
+            "none=five; Path=/; Secure; SameSite=None", "hidden=six; Path=/; Secure; HttpOnly",
+            "deep=seven; Path=/a", "deep=changed; Path=/a", "default=; Path=/; Max-Age=0"] {
+            legacy.set_at(&target, assignment, true, NOW).unwrap();
+            resource.set_at_context(&target, assignment, true, true, NOW).unwrap();
+        }
+        for at in [NOW, NOW + 1] {
+            for same_site in [false, true] {
+                for top_level_safe in [false, true] {
+                    assert_eq!(resource.get_at(&target, false, same_site, top_level_safe, at),
+                        legacy.get_at(&target, false, same_site, top_level_safe, at));
+                }
+            }
+            assert_eq!(resource.get_at(&target, true, true, false, at),
+                legacy.get_at(&target, true, true, false, at));
+        }
+    }
+
+    #[test]
+    fn subresource_none_still_requires_secure_origin_domain_and_prefix_protections() {
+        let session = Session::default();
+        let target = url("https://resource.example.test/a/page");
+        for assignment in ["bad=one; SameSite=None", "bad=one; Secure; SameSite=None; Domain=other.test",
+            "bad=one; Secure; SameSite=None; Domain=test",
+            "__Host-bad=one; Secure; SameSite=None; Path=/other",
+            "__Host-bad=one; Secure; SameSite=None; Path=/; Domain=resource.example.test"] {
+            assert!(session.set_at_context(&target, assignment, true, false, NOW).is_err());
+        }
+        assert!(session.set_at_context(&url("http://resource.example.test/a/page"),
+            "bad=one; Secure; SameSite=None", true, false, NOW).is_err());
+        assert_eq!(session.store.lock().unwrap().cookies.len(), 0);
+        session.set_at_context(&target, "protected=secret; Path=/; Secure; HttpOnly; SameSite=None", true, false, NOW).unwrap();
+        for assignment in ["protected=changed; Path=/; Secure; SameSite=None",
+            "protected=; Path=/; Secure; SameSite=None; Max-Age=0"] {
+            assert!(session.set_at(&target, assignment, false, NOW).is_err());
+        }
+        assert_eq!(session.get_at(&target, false, false, false, NOW), "protected=secret");
+        assert_eq!(session.get_at(&target, true, true, false, NOW), "");
     }
 
     #[test]

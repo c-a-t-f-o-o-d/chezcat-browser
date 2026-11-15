@@ -109,7 +109,7 @@ mod network_media_tests {
             "/partial-page" => denied_page("partial.ivf", "", "media-src 'self'").into_bytes(),
             "/csp-page" => denied_page("csp-target.ivf", "", "media-src 'none'").into_bytes(),
             "/cross-page" => denied_page(&format!("http://localhost:{port}/cross-target.ivf"), "", "media-src *").into_bytes(),
-            "/attribute-page" => denied_page("attribute-target.ivf", "crossorigin=\"anonymous\"", "media-src 'self'").into_bytes(),
+            "/attribute-page" => AUTHORED.replace("src=\"scene-intra.ivf\"", "src=\"attribute-target.ivf\" crossorigin=\"anonymous\"").into_bytes(),
             "/next" => b"<!doctype html><title>Network next document</title><p>No video in this document.</p>".to_vec(),
             "/redirect.ivf" => { status = 302; extra = "Location: /scene-intra.ivf\r\n".into(); Vec::new() }
             "/bad-mime.ivf" => { mime = "text/plain"; IVF.to_vec() }
@@ -133,7 +133,7 @@ mod network_media_tests {
 
     #[test]
     fn network_media_full_get_redirect_real_play_pause_seek_and_reference_pixels() {
-        for path in ["/page", "/redirect-page"] {
+        for path in ["/page", "/redirect-page", "/attribute-page"] {
             let site = Site::new(); let mut app = site.open(path); app.wait_for_load();
             assert!(!app.failed, "{}", app.status); assert!(app.media.is_some()); assert_reference_frame(&app, 0);
             eval(&mut app, "if(video.readyState!==4||video.networkState!==1||video.duration!==3||video.videoWidth!==64||video.videoHeight!==48||!mediaWindowLoaded)throw 'HTTP metadata';var networkSettles=0,networkPlay='pending';");
@@ -148,14 +148,16 @@ mod network_media_tests {
             eval(&mut app, "video.currentTime=2.2;"); app.flush_embedded_video(); settle(&mut app);
             assert_reference_frame(&app, 4);
             eval(&mut app, "if(!video.paused||video.seeking||video.currentTime!==2.2)throw 'HTTP settled seek';");
-            assert_eq!(site.count("/scene-intra.ivf"), 1); assert_eq!(site.count("/redirect.ivf"), usize::from(path == "/redirect-page"));
+            assert_eq!(site.count("/scene-intra.ivf"), usize::from(path != "/attribute-page"));
+            assert_eq!(site.count("/attribute-target.ivf"), usize::from(path == "/attribute-page"));
+            assert_eq!(site.count("/redirect.ivf"), usize::from(path == "/redirect-page"));
         }
     }
 
     #[test]
     fn network_media_transport_refusals_and_policy_denials_do_not_install_a_player() {
         for (page, target, contacts) in [("/mime-page","/bad-mime.ivf",1),("/partial-page","/partial.ivf",1),
-            ("/csp-page","/csp-target.ivf",0),("/cross-page","/cross-target.ivf",0),("/attribute-page","/attribute-target.ivf",0)] {
+            ("/csp-page","/csp-target.ivf",0),("/cross-page","/cross-target.ivf",0)] {
             let site = Site::new(); let mut app = site.open(page); app.wait_for_load();
             assert!(!app.failed, "document fetch failed: {}", app.status); assert!(app.media.is_none(), "{page}");
             assert!(app.embedded_video.as_ref().is_some_and(|video| video.error.is_some()), "{page}");

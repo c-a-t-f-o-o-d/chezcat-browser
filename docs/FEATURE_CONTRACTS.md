@@ -138,12 +138,26 @@ absence of unsolicited partial-content metadata before the original IVF decoder.
 Retained complete bytes serve real seeking. Preserve TLS, per-hop CSP/blocking,
 credentials and cancellation; no automatic retry beyond the transport's existing
 safe stale-connection handling. Explicit load/source selection owns a new attempt.
-The first integration supports exact-origin HTTP(S) documents/resources and keeps
-local-file authority separate. Cross-origin and crossorigin-marked resources stay
-explicitly declined until the separate credentials/CORS matrix passes; this first
-slice cannot establish full F4 completion. Encoded/decompressed media uses the
+Network documents retain separate local-file authority. Missing crossorigin keeps
+exact-origin policy. Explicit authored anonymous and use-credentials states use
+genuine CORS checks, including redirect-origin taint, credential history, required
+response headers and normal SameSite/secure/HttpOnly cookie boundaries. Invalid
+or empty attribute values use anonymous semantics. Dynamic crossOrigin APIs and
+opaque unmarked foreign loading remain outside this finite slice.
+Encoded/decompressed media uses the
 adjustable media input allowance with a 512 MiB transport ceiling and checked growth;
 ordinary document/download/resource caller limits stay unchanged.
+
+Original transport and actual App tests cover fixed/chunked/compressed complete
+responses, MIME/status/partial-content refusal, bounded encoded/expanded input,
+policy denial before contact, CORS/credential headers and cookie effects, redirect
+history, Stop/replacement/navigation, stale completions and explicit recovery.
+Actual foreign playback uses genuine Play promises, measured time and independent
+frame pixels. Optimized HTTP and authenticated TLS 1.3 journeys repeat the full
+local control/frame contract. Separate executable media-source negatives prove
+issuer/hostname rejection before media HTTP and player installation, with a real
+rendered error event. These establish the finite F4 transaction, not general
+streaming, Fetch/CORS, format or live-service support.
 
 Every later feature records semantic references, original and selected conformance
 tests, security review, native/device/live checks still pending and exact final

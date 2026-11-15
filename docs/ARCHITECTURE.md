@@ -29,9 +29,12 @@ prevent stale work from publishing. Native presentation/audio APIs do not replac
 decoding. The authored element currently supports one connected parser video,
 IVF/VP8 intra, native controls, src replacement and genuine JavaScript
 load/play/pause/currentTime operations. Sources retain separate in-root local-file
-authority or an immutable exact-origin HTTP(S) transaction context. Network media
-uses complete bounded GET responses and the existing decoder/player, without
-ranges or a separate runtime. CORS/cross-origin media remains unsupported.
+authority or an immutable document-owned HTTP(S) transaction context. Network
+media uses complete bounded GET responses and the existing decoder/player,
+without ranges or a separate runtime. Missing crossorigin keeps exact-origin
+policy; explicit authored modes use dedicated CORS/credential checks, sticky
+redirect state and normal cookie protections. Dynamic crossOrigin APIs remain
+unsupported.
 Standalone PCM and Matroska A/V have separate supported contracts. Network media,
 script play promises and complete HTMLMediaElement behavior are future work.
 

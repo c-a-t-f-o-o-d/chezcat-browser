@@ -19,7 +19,7 @@ The optimized-executable original App/input/offscreen journey verifies a trusted
 script play click, Promise/state/event order, measured clock advancement and
 independently derived decoded-frame pixels, then script pause with frozen time
 and pixels. Existing source identity, native controls, seek, EOF/replay, Stop and
-navigation checks remain. Authored element audio, cross-origin media, multiple players
+navigation checks remain. Authored element audio, unmarked foreign media, multiple players
 and broader HTMLMediaElement conformance remain unsupported; this adds no
 live-site, physical-desktop or audio-device acceptance.
 
@@ -30,7 +30,15 @@ partial content. Existing source tokens cancel obsolete work. The adjustable med
 input allowance uses checked growth up to the 512 MiB HTTP/decompression ceiling;
 ordinary document/download/image caller limits remain unchanged. Original HTTP
 and authenticated TLS 1.3 executable journeys verify actual controls, time and
-independent pixels. Cross-origin/CORS acceptance remains a separate open task.
+independent pixels. Explicit authored crossorigin anonymous/use-credentials modes
+now apply genuine CORS checks to each tainted response and redirect, preserving
+Origin and credential history. Credential-eligible cookie effects precede CORS
+visibility checks; cross-site subresource writes preserve SameSite creation and
+overwrite/deletion rules. Real App tests verify foreign playback, credentials,
+refusals and independent pixels. Executable TLS negatives verify certificate
+issuer/identity rejection before media HTTP or player installation. Dynamic
+crossOrigin APIs, opaque cross-origin loading, streaming/ranges and broader media
+conformance remain unsupported.
 
 
 ## 0.79.0-alpha.2
