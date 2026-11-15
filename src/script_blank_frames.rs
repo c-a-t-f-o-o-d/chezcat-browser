@@ -249,9 +249,13 @@ impl Bridge<'_> {
     }
 
     pub(super) fn frame_get(&mut self, handle: u32, property: &str) -> Option<Result<Value, String>> {
+        self.frame_get_with_caller(Some(WINDOW),handle,property)
+    }
+
+    pub(super) fn frame_get_with_caller(&mut self, caller:Option<u32>, handle:u32, property:&str)->Option<Result<Value,String>> {
         let (index, offset) = frame_handle(handle)?;
         let result = (|| {
-            self.frame_window_access(Some(WINDOW), window(index))?;
+            self.frame_window_access(caller, window(index))?;
             let frame = self.state.blank_frames.get(index).ok_or("Unknown blank-frame handle.")?;
             let value = match offset {
                 0 => match property {
@@ -369,6 +373,10 @@ impl Bridge<'_> {
             && self.frame_window_access(Some(WINDOW), window(index)).is_ok()
     }
 }
+
+#[cfg(test)]
+#[path = "script_child_native_read_tests.rs"]
+mod child_native_read_tests;
 
 #[cfg(test)]
 mod tests {

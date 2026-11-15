@@ -3568,6 +3568,15 @@ impl Host for Bridge<'_> {
         })
     }
 
+    fn get_with_caller(&mut self, caller:Option<u32>, object:u32, property:&str)->Result<Value,String> {
+        if self.is_frame_handle(object) {
+            self.state.work(1)?;
+            return self.frame_get_with_caller(caller,object,property)
+                .ok_or_else(||"Invalid blank-frame handle.".to_string())?;
+        }
+        self.get(object,property)
+    }
+
     fn get(&mut self, object: u32, property: &str) -> Result<Value, String> {
         self.state.work(1)?;
         if script_named_map::element(object).is_some() { return self.named_map_get(object, property); }

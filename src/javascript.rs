@@ -577,6 +577,11 @@ pub trait Host {
         Err("String evaluation is not enabled by this host.".into())
     }
     fn get(&mut self, object: u32, property: &str) -> Result<Value, String>;
+    /// One primitive native read with the original script/native caller. Hosts
+    /// without caller-sensitive fields retain their original getter behavior.
+    fn get_with_caller(&mut self, _caller: Option<u32>, object: u32, property: &str) -> Result<Value, String> {
+        self.get(object, property)
+    }
     fn set(&mut self, object: u32, property: &str, value: Value) -> Result<(), String>;
     /// Incumbent native caller, captured independently of a saved method's owner
     /// realm. Called after coercion and immediately before a host operation.
@@ -4209,7 +4214,7 @@ impl Runtime {
         let (handle, properties) = self.browser_global.expect("bound browser global");
         self.property_name(name)?;
         if self.host_owns_global(name, host) {
-            let value = host.get(handle, name).map_err(Fault::new)?;
+            let value = self.host_get_checked(handle, name, host)?;
             self.checked_value(value)
         } else if self.global_binding(name) {
             self.binding_value(self.global_environment, name)
@@ -8147,7 +8152,7 @@ impl Runtime {
                     "forEach requires a callable callback.",
                 ));
             }
-            let Value::Number(length) = host.get(object, "length").map_err(Fault::new)? else {
+            let Value::Number(length) = self.host_get_checked(object, "length", host)? else {
                 return Err(Fault::new("Invalid native collection length."));
             };
             if length < 0.0 || length.fract() != 0.0 || length > self.limits.heap.object_properties as f64 {

@@ -7,7 +7,9 @@ Event/UI slots, with readonly branded fields, exact interleaved dictionary
 conversion and legacy initialization. Real dispatch/cancellation, native keyboard
 ancestry and child owners are covered by original model and executable-input
 checks. MouseEvent/KeyboardEvent/CustomEvent constructors and native immediate
-prototypes remain outside this finite slice.
+prototypes remain outside this finite slice. Primitive native reads now preserve
+their actual caller, allowing a retained child's own Window/Document/Location
+fields while retaining foreign-owner denial and callback/exception restoration.
 
 Prospective CSAPUL 1.1 with full offline native first-run acceptance, explicit
 source/headless and organization acceptance, strict local receipts outside

@@ -319,9 +319,20 @@ click producers currently provide base Event state, without fabricated UI data.
 The actual UIEvent App/input journey uses owned HTTP for its child context,
 one native key down/up pair and two trusted activations with real UI construction,
 dispatch/cancellation, independent path copies and readable changed pixels.
-It retains the original dispatch/guard/recovery cases. Retained own-child native
-global reads after a parent-origin change remain a separate unsupported profile;
-constructor owner tests use the real Window captured while same-origin.
+It retains the original dispatch/guard/recovery cases.
+
+Primitive native reads carry the actual Script/native caller independently of a
+borrowed builtin's owner realm. The runtime validates the native owner before
+performing one getter; existing Host implementations default to their original
+getter. A retained genuine blank child can read its own Window aliases,
+Document/body and Location primitives after the parent's origin changes. Parent
+reads of foreign child fields and child reads of foreign main fields still refuse.
+Original Page tests cover that divergence, direct UI construction with the child's
+real Window, saved event denials before coercion, borrowed native/getter/callback
+reentry, exceptions, policy refusal and later-job recovery. Existing App journeys
+separately exercise same-origin child owners; they do not simulate a cross-origin
+parent navigation. Child navigation, mutation, has/key enumeration and broader
+Window APIs retain their existing separate support limits.
 
 Semantic references: [UIEvent](https://w3c.github.io/uievents/#interface-uievent),
 [UIEventInit](https://w3c.github.io/uievents/#dictdef-uieventinit) and

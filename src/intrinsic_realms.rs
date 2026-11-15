@@ -168,11 +168,12 @@ impl Runtime {
     }
 
     pub(super) fn read_foreign_window(&mut self, handle: u32, name: &str, host: &mut dyn Host) -> Result<Value, Fault> {
-        host.validate_window_access(self.browser_global.map(|(handle, _)| handle), handle).map_err(Fault::new)?;
+        let caller=self.native_access_caller.unwrap_or_else(||self.browser_global.map(|(window,_)|window));
+        host.validate_window_access(caller, handle).map_err(Fault::new)?;
         // Native identity/document/location reads do not require allocating the
         // child's ES intrinsics. The host already owns a real child context.
         if host.owns_window_property(Some(handle), name) {
-            let value = host.get(handle, name).map_err(Fault::new)?;
+            let value = self.host_get_checked(handle, name, host)?;
             return self.checked_value(value);
         }
         let realm = self.ensure_window_realm(handle,host)?;
