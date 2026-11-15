@@ -252,6 +252,62 @@ controls and real decoded video/audio output. Authored fixtures
 and interface prerequisites establish finite progress; they do not establish
 YouTube or other public-service acceptance.
 
+Finite Media/Video interface prerequisite: genuine owner-Window
+HTMLMediaElement and HTMLVideoElement interface objects and prototypes expose
+the existing implemented player. Constructor/prototype inheritance follows
+Media to HTMLElement and Video to Media. Direct calls and construction throw
+TypeError; they are not element factories. Main-document HTML VIDEO class
+identity is independent of its selected source or Snapshot lifetime. Real VIDEO
+nodes have an ordinary expando store and actual immediate Video prototype;
+unrelated element families retain their existing immediate-prototype policy.
+AUDIO retains opaque immediate identity with genuine Media ancestry.
+
+The Media prototype exposes load(), pause(), play(), src/currentTime accessors,
+and currentSrc, controls, duration, paused, ended, seeking, readyState and
+networkState getters. The Video prototype exposes decoded videoWidth/videoHeight.
+The real NETWORK_* and HAVE_* constants are inherited from the Media prototype
+and also appear on its interface object. Canonical methods/accessors have
+ordinary Web IDL descriptors, genuine brands and owner Function/Promise/
+DOMException realms. Ordinary instance/prototype shadows remain observable;
+saved canonical operations read or change native slots independently of them.
+
+Canonical src/currentTime setters share the existing native write transaction:
+primitive conversion, validate_set, semantic source-selection reservation,
+original native incumbent, actual native write, pending-Promise effects and
+stable-task completion. A missing setter argument is Undefined and undergoes
+that attribute's conversion. Canonical load/pause/play reuse the actual control
+FIFO, issue-time position, decoded-frame/acknowledged-PCM readiness and genuine
+play Promise registry. Saved canonical holder and actual receiver origins are
+checked before coercion; existing Event/DOM borrowing policies are unchanged.
+
+Class identity alone does not add a player. Genuine unbound VIDEO/AUDIO
+load/pause calls throw a real NotSupportedError DOMException; play returns a
+genuine rejected Promise with that reason. Their state getters/setters still
+decline the missing binding explicitly. These refusals do not install an EMPTY
+player or alter another player's source, control queue or device. Child players
+and additional controllers remain unsupported. controls has the existing actual getter only; its setter, VIDEO
+width/height content reflection, canPlayType, MediaError/TimeRanges and the wider
+media API remain deferred. Existing authored A/V, transport and physical-control
+profiles are unchanged.
+
+Semantic references: [Media](https://html.spec.whatwg.org/multipage/media.html#htmlmediaelement),
+[Video](https://html.spec.whatwg.org/multipage/media.html#htmlvideoelement) and
+[Web IDL attribute setters](https://webidl.spec.whatwg.org/#dfn-attribute-setter).
+
+Seven original Page/Runtime controls cover canonical roots/descriptors/constants,
+slot reads versus ordinary shadows, real Promise reasons and pause/load queues,
+extracted setters and stable src FIFO, owner/foreign checks before effects,
+unbound-class identity/refusal, and bounded getter-work failure/recovery. Queue
+acknowledgement in these tests is a Page/App handoff, not playback evidence.
+check_media_interface_harness.py joins the required normal offline journeys.
+The matching optimized executable passed actual canonical controls despite own
+shadows, with the original clock, independent pixels, events, source lifetime,
+seek, EOF/replay, Stop and navigation checks and paired document/layout/canvas
+identity. Validation scope is the finite model/interface and App/input/offscreen
+slice; full normal verification remains a separate required integration gate.
+The broader F6 objective remains in progress. This adds no device, audibility,
+physical-desktop or public-service acceptance.
+
 Base Event prerequisite: new Event(type, init) uses a real owner-realm
 constructor and canonical prototype, branded getters/methods, phase constants
 and an own unforgeable isTrusted accessor. Required DOMString conversion and
@@ -282,8 +338,8 @@ visible results have paired document/layout/canvas pixels and zero current
 interpreter errors. That child check uses an owned loopback web origin; child
 contexts for local files remain unavailable.
 
-KeyboardEvent and CustomEvent constructors, their immediate specialized
-prototypes and native-input immediate prototypes remain unsupported. Synthetic
+KeyboardEvent construction, its specialized prototype and native-input
+immediate prototypes remain unsupported. Synthetic
 Mouse dispatch/default activation and native pointer payloads remain unsupported.
 Changing native host prototypes, arbitrary native subclassing/newTarget and
 shadow-DOM retargeting are also unsupported. These finite interfaces establish
@@ -314,9 +370,11 @@ new record, retaining valid earlier/reentrant effects and consuming issued IDs.
 Original tests cover descriptors, order, defaults, numeric wrapping, abrupt
 completion, real owner clocks, foreign denial, small profiles and recovery.
 
-Genuine legacy Mouse and active native keyboard events have supported UIEvent
-ancestry and borrowed getters; their immediate prototypes remain opaque. Native
-click producers currently provide base Event state, without fabricated UI data.
+Genuine legacy Mouse events have their MouseEvent prototype and UIEvent
+ancestry with borrowed getters. Active native keyboard events have UIEvent
+ancestry and borrowed getters while their specialized immediate prototypes
+remain opaque. Native click producers currently provide base Event state,
+without fabricated UI data.
 The actual UIEvent App/input journey uses owned HTTP for its child context,
 one native key down/up pair and two trusted activations with real UI construction,
 dispatch/cancellation, independent path copies and readable changed pixels.
@@ -373,7 +431,7 @@ owners and legacy reinitialization. It requires synthetic Mouse dispatch to refu
 before delivery/activation or target-state mutation. Earlier guard/Custom/base/UI
 cases remain. Native click is not relabeled from its type string; native keyboard
 retains genuine UI ancestry and rejects Mouse-only operations. PointerLock,
-region/sourceCapabilities, Pointer/Keyboard/Custom constructors and arbitrary
+region/sourceCapabilities, Pointer/Keyboard constructors and arbitrary
 native subclassing/prototype mutation remain outside this finite slice.
 
 Semantic references: [MouseEvent core](https://www.w3.org/TR/pointerevents4/#mouseevent-interface),
@@ -387,31 +445,53 @@ Semantic references: [UIEvent](https://w3c.github.io/uievents/#interface-uievent
 
 Semantic reference: [DOM Event, initialization and dispatch](https://dom.spec.whatwg.org/#interface-event).
 
-Legacy notification prerequisite: the main document's singular, case-insensitive
-createEvent('CustomEvent') creates a genuine existing-model event. Its readonly
-detail stores the actual any value, preserving object/function identity. The
-branded initCustomEvent converts arguments in order, uses declared defaults,
-returns without reinitialization during dispatch, and otherwise updates the same
-event atomically. Base initEvent preserves subclass detail. A real initialized
-flag distinguishes a fresh factory event from an initialized empty type.
+CustomEvent constructor/prototype prerequisite: new CustomEvent(type, init)
+uses a genuine owner-Window CustomEvent constructor inheriting Event and a
+CustomEvent.prototype inheriting Event.prototype. The readonly branded detail
+getter, canonical initCustomEvent and own unforgeable isTrusted accessor reuse
+the existing record and owner clocks. Ordinary shadows remain observable;
+borrowed canonical operations still read or change actual native slots.
 
-Existing synchronous dispatch, propagation, cancellation, trust, fatal cleanup,
-host quotas and owner-realm machinery remain authoritative. Initializer methods
-retain their genuine Function realm and validate owner access on both fresh and
-cached reads. Direct detail strings use checked retained-byte accounting and
-fallible copies; object graphs retain the existing conservative exported-argument
-lifetime. Legacy CustomEvent adds no specialized constructor/prototype,
-child factory, activation grant or collector redesign. Its immediate prototype
-stays opaque while the genuine base Event ancestry and borrowed operations are
-available. A global CustomEvent constructor remains absent.
+The required DOMString type converts first, followed by inherited EventInit
+bubbles/cancelable/composed members and detail in dictionary order. Detail is
+actual any, defaults to Null and undergoes no string/numeric conversion; object,
+function, symbol and native-reference identities remain real across realms.
+Retaining a native reference grants no new authority to read that reference.
+Checked combined type/direct-detail string bytes and fallible copies precede
+record publication; object graphs retain the existing conservative exported-
+argument lifetime. Failed per-instance setup withdraws only the exact newest
+unpublished record and both retained strings. Prior/reentrant effects survive;
+issued identities and work are not rewound.
 
-Original Page tests cover defaults/brands, identity, readonly state, conversion
-effects and failures, dispatch/empty-type initialization, string/creation bounds,
-cross-realm method/detail behavior, cached access and fatal recovery. The offline
-dispatch journey preserves its prior guard/standalone/prototype checks and adds
-two real native button activations, actual listener detail/cancellation guards,
-current zero-error diagnostics and paired readable output/pixel changes. It makes
-no service request or physical-desktop claim.
+The main document's singular, case-insensitive createEvent('CustomEvent') uses
+the same genuine prototype and detail slots. The factory remains uninitialized
+until initCustomEvent; construction initializes even an empty type. The branded
+initializer converts positional arguments in order, returns without resetting
+an event during dispatch, and otherwise updates that same event atomically.
+Base initEvent preserves subclass detail; legacy initialization preserves
+composed and timeStamp while resetting the specified cancellation/propagation
+state. Genuine child constructors and their canonical owner roots are supported;
+child-document factories remain outside this slice.
+
+Existing synchronous dispatch, propagation, cancellation, trust, fatal cleanup
+and host quotas remain authoritative. Fresh/cached access and saved canonical
+holder/receiver calls retain owner checks before coercion. No activation grant,
+native CustomEvent input, shadow-DOM retargeting or collector redesign is added.
+
+Original Page/Runtime controls cover real roots/descriptors, brands and readonly
+slots, ordered/reentrant conversion, defaults and any identity, initialized
+constructor/factory behavior, dispatch/init cleanup, combined retention and
+bounded creation/work/identity refusal, exact unpublished rollback and recovery.
+The actual optimized App/input/offscreen journey uses two trusted base-input
+clicks to construct and deliver untrusted CustomEvent objects. It verifies any
+detail identity and mutation, canonical initialization through own shadows,
+capture/target/bubble cancellation, independent path copies, child owner roots
+and real child-realm detail. Readable output has paired document/DOM/layout/
+canvas pixels and current zero interpreter errors. The original legacy
+notification, stack guard/recovery, base/UI/Mouse cases remain. Full normal
+verification remains a required integration gate; broader F6/service acceptance
+remains in progress. This proof adds no device, audibility or physical-desktop
+claim.
 
 Semantic reference: [DOM CustomEvent and legacy initialization](https://dom.spec.whatwg.org/#interface-customevent).
 

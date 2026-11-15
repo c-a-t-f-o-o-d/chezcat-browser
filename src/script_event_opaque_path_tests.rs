@@ -89,10 +89,7 @@ if(read(ui)!==canonicalPath||savedRead(ui,canonicalPath).length)throw 'same-orig
 "#);
     evaluate(&mut page,&mut doc,&mut forms,"if(Object.getPrototypeOf(ui)!==UIEvent.prototype||!(ui instanceof UIEvent))throw 'genuine UIEvent factory interface';");
     evaluate(&mut page,&mut doc,&mut forms,"if(Object.getPrototypeOf(mouse)!==MouseEvent.prototype||!(mouse instanceof MouseEvent))throw 'genuine MouseEvent factory interface';");
-    for source in ["Object.getPrototypeOf(custom);"] {
-        let outcome=page.console_eval(&mut doc,&mut forms,source);
-        assert_eq!(outcome.errors,1,"Immediate subclass prototypes stay explicitly opaque.");
-    }
+    evaluate(&mut page,&mut doc,&mut forms,"if(Object.getPrototypeOf(custom)!==CustomEvent.prototype||!(custom instanceof CustomEvent))throw 'genuine CustomEvent factory prototype';");
     page.set_location(&crate::navigation::Location {url:Some(crate::url::parse("https://other.test/").unwrap().0),path:None,root:None,fragment:String::new()});
     for source in ["read(ui);","savedRead(ui,canonicalPath);","callInit(ui,savedInit,type);"] {
         let outcome=page.console_eval(&mut doc,&mut forms,source);

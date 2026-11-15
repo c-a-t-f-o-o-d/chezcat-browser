@@ -43,7 +43,7 @@ def fixture_reference(stem, display_profile=None):
     return clip, reference, profile['reference_rgba_sha256'], profile
 
 
-def main(source=None, trust_file=None, fixture_stem=None, display_profile=None):
+def main(source=None, trust_file=None, fixture_stem=None, display_profile=None, exe=None):
     folder = ROOT / 'results/verification/autonomy' / (datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S.%fZ') + '-authored-video-journey-' + uuid.uuid4().hex[:8])
     folder.mkdir(parents=True)
     script = folder / 'authored.tsv'
@@ -51,7 +51,8 @@ def main(source=None, trust_file=None, fixture_stem=None, display_profile=None):
     before = capture_tests.source_identity(ROOT)
     out = folder / 'journey'
     source = str(source if source is not None else ROOT / 'tools/fixtures/authored-video.html')
-    command = [str(ROOT / 'ChezCat.exe'), source, '--dev-input-script', str(script), '--dev-input-output', str(out), '--javascript', '--no-profile']
+    executable = Path(exe) if exe is not None else ROOT / 'ChezCat.exe'
+    command = [str(executable), source, '--dev-input-script', str(script), '--dev-input-output', str(out), '--javascript', '--no-profile']
     if trust_file is not None:
         command.extend(['--trust-file', str(trust_file)])
     row = capture_tests.execute(command, folder / 'command.log', ROOT, 120)
@@ -220,7 +221,7 @@ def main(source=None, trust_file=None, fixture_stem=None, display_profile=None):
             and playing['generation'] == paused['generation'] == frozen['generation'])
         checks['js_play_paused_decoded_pixels_frozen'] = paused['frame_sample_sha256'] == frozen['frame_sample_sha256']
     checks['source_unchanged'] = before == capture_tests.source_identity(ROOT)
-    capture_tests.write_json(folder / 'manifest.json', {'scope': __doc__, 'source': source, 'trust_file_sha256': capture_tests.sha256(trust_file) if trust_file is not None else None, 'executable_sha256': capture_tests.sha256(ROOT / 'ChezCat.exe'), 'source_before': before, 'source_after': capture_tests.source_identity(ROOT), 'run': row, 'checks': checks, 'stages': stages})
+    capture_tests.write_json(folder / 'manifest.json', {'scope': __doc__, 'source': source, 'trust_file_sha256': capture_tests.sha256(trust_file) if trust_file is not None else None, 'executable_sha256': capture_tests.sha256(executable), 'source_before': before, 'source_after': capture_tests.source_identity(ROOT), 'run': row, 'checks': checks, 'stages': stages})
     print(json.dumps(checks, indent=2))
     print('Evidence: ' + str(folder))
     return 0 if all(checks.values()) else 1

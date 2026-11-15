@@ -488,11 +488,11 @@ impl Bridge<'_> {
             .or_else(||self.state.event.as_ref().filter(|event|event.handle==object).map(|_|WINDOW))
     }
     pub(super) fn construct_base_event(&mut self,owner:u32,args:&[Value],fields:Option<&[(&str,Value)]>)->Result<Value,String> {
-        self.construct_event_record(owner,args,fields,None,None)
+        self.construct_event_record(owner,args,fields,None,None,None)
     }
     pub(super) fn ordinary_event_owner(&self,object:u32)->Option<u32> {
         let event=&self.state.created_events[self.created_event_index(object)?];
-        event.custom.is_none().then_some(event.owner)
+        Some(event.owner)
     }
     pub(super) fn ui_view_argument(&self,owner:u32,value:Option<&Value>)->Result<Option<u32>,(&'static str,String)> {
         let Some(value)=value else {return Ok(None)};
@@ -508,7 +508,7 @@ impl Bridge<'_> {
         let field=|key|fields.and_then(|fields|fields.iter().find(|(name,_)|*name==key).map(|(_,value)|value));
         let detail=field("detail").map(timer_integer).transpose()?.unwrap_or(0);
         let view=self.ui_view_argument(owner,field("view")).map_err(|(_,message)|message)?;
-        self.construct_event_record(owner,args,fields,Some(UiData {view,detail}),None)
+        self.construct_event_record(owner,args,fields,Some(UiData {view,detail}),None,None)
     }
     pub(super) fn mouse_target_argument(&self,owner:u32,value:Option<&Value>)->Result<Option<u32>,(&'static str,String)> {
         let Some(value)=value else {return Ok(None)};
@@ -542,9 +542,15 @@ impl Bridge<'_> {
             // The separate optional which-init dictionary extension is absent.
             button,buttons:integer("buttons")? as u16,modifiers,which:(i32::from(button)+1) as u32,
             related:self.mouse_target_argument(owner,field("relatedTarget")).map_err(|(_,message)|message)?};
-        self.construct_event_record(owner,args,fields,Some(ui),Some(mouse))
+        self.construct_event_record(owner,args,fields,Some(ui),Some(mouse),None)
     }
-    fn construct_event_record(&mut self,owner:u32,args:&[Value],fields:Option<&[(&str,Value)]>,ui:Option<UiData>,mouse:Option<MouseData>)->Result<Value,String> {
+    pub(super) fn construct_custom_event(&mut self,owner:u32,args:&[Value],fields:Option<&[(&str,Value)]>)->Result<Value,String> {
+        let default=Value::Null;
+        let detail=fields.and_then(|fields|fields.iter().find(|(name,_)|*name=="detail").map(|(_,value)|value))
+            .filter(|value|!matches!(value,Value::Undefined)).unwrap_or(&default);
+        self.construct_event_record(owner,args,fields,None,None,Some(detail))
+    }
+    fn construct_event_record(&mut self,owner:u32,args:&[Value],fields:Option<&[(&str,Value)]>,ui:Option<UiData>,mouse:Option<MouseData>,custom:Option<&Value>)->Result<Value,String> {
         if !self.state.enabled||!self.doc.scripting_enabled {return Err("Event construction is disabled.".into());}
         let admission=self.state.created_events.len().checked_mul(8).and_then(|n|n.checked_add(1))
             .ok_or("Event admission lookup work overflow.")?;
@@ -553,8 +559,11 @@ impl Bridge<'_> {
         if source.len()>self.state.limits.host.event_type_bytes||source.len()>self.state.limits.host.string_bytes {
             return Err("Event type exceeds the host event-type/string allowance.".into());
         }
-        self.state.copies(source.len())?;
-        let retained=self.state.retained.checked_add(source.len()).filter(|&n|n<=self.state.retained_limit)
+        let detail_bytes=custom.map_or(0,custom_bytes);
+        if detail_bytes>self.state.limits.host.string_bytes {return Err("CustomEvent detail exceeds the host string bound.".into());}
+        let bytes=source.len().checked_add(detail_bytes).ok_or("Event retained text size overflow.")?;
+        self.state.copies(bytes)?;
+        let retained=self.state.retained.checked_add(bytes).filter(|&n|n<=self.state.retained_limit)
             .ok_or("Event retained text allowance exceeded.")?;
         if self.state.created_events.len()>=self.state.limits.host.created_events {return Err("Constructed Event allowance exceeded.".into());}
         let next=self.state.next_event.checked_add(1).filter(|next|*next<=script_class_list::BASE)
@@ -562,6 +571,7 @@ impl Bridge<'_> {
         let mut name=String::new();
         name.try_reserve(source.len()).map_err(|_|"Could not reserve Event type.")?;
         name.push_str(source);
+        let custom=custom.map(copy_custom_value).transpose()?;
         self.state.created_events.try_reserve(1).map_err(|_|"Could not reserve Event record.")?;
         let flag=|key|fields.is_some_and(|fields|fields.iter().any(|(name,value)|*name==key&&value.truthy()));
         let handle=self.state.next_event;
@@ -569,7 +579,7 @@ impl Bridge<'_> {
         let event=CreatedEvent {owner,composed:flag("composed"),handle,name,
             bubbles:flag("bubbles"),cancelable:flag("cancelable"),prevented:false,stopped:false,immediate:false,
             target:None,current:None,phase:0,dispatching:false,initialized:true,passive:false,
-            timestamp,ui,mouse,custom:None};
+            timestamp,ui,mouse,custom};
         self.state.created_events.push(event);
         self.state.retained=retained;
         self.state.next_event=next;
@@ -577,9 +587,10 @@ impl Bridge<'_> {
     }
     pub(super) fn rollback_base_event(&mut self,handle:u32)->Result<(),String> {
         let Some(event)=self.state.created_events.last() else {return Err("No unpublished Event record exists.".into());};
-        if event.handle!=handle||event.custom.is_some()
-            || event.dispatching||event.target.is_some() {return Err("Unpublished Event rollback identity mismatch.".into());}
-        let retained=self.state.retained.checked_sub(event.name.len()).ok_or("Event rollback retention mismatch.")?;
+        if event.handle!=handle||event.dispatching||event.target.is_some() {return Err("Unpublished Event rollback identity mismatch.".into());}
+        let bytes=event.name.len().checked_add(event.custom.as_ref().map_or(0,custom_bytes))
+            .ok_or("Event rollback retained text overflow.")?;
+        let retained=self.state.retained.checked_sub(bytes).ok_or("Event rollback retention mismatch.")?;
         self.state.created_events.pop();
         self.state.retained=retained;
         // Identity allocation and work remain charged; no capability ID is reused.
@@ -875,6 +886,10 @@ impl Bridge<'_> {
         })())
     }
 }
+
+#[cfg(test)]
+#[path = "script_custom_event_interface_tests.rs"]
+mod custom_interface_tests;
 
 #[cfg(test)]
 #[path = "script_custom_event_tests.rs"]

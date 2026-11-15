@@ -90,6 +90,41 @@ impl Runtime {
         result.map_err(Fault::display)
     }
 
+    pub fn define_custom_event_interface(&mut self,window:u32)->Result<(),String> {
+        let marker=self.inhibit_transient_collection();
+        let result=(|| {
+            let parent=*self.native_constructor_prototypes.get(&(window,"Event"))
+                .ok_or_else(||Fault::new("CustomEvent requires the canonical Event interface."))?;
+            let parent_constructor=self.objects[parent].properties.get("constructor")
+                .ok_or_else(||Fault::new("Canonical Event constructor is unavailable."))?.value.as_value()?.clone();
+            let Value::Function(parent_constructor)=parent_constructor else {
+                return Err(Fault::new("Canonical Event constructor is invalid."));
+            };
+            let allocation=self.allocate_host_function_with_length(window,"CustomEvent",1).map_err(Fault::new)?;
+            if let Some(Function::Host {constructible,..})=self.functions.get_mut(allocation.id) {*constructible=true;}
+            let constructor=Value::Function(allocation.id);
+            self.objects[self.function_properties[allocation.id]].prototype=Some(Ordinary::Function(parent_constructor));
+            let prototype=self.new_object(None)?;
+            self.objects[prototype].prototype=Some(Ordinary::Object(parent));
+            self.store_property(prototype,"constructor".into(),constructor.clone(),Some((false,true,true)))?;
+            self.store_property(self.function_properties[allocation.id],"prototype".into(),
+                Value::Object(prototype),Some((false,false,false)))?;
+            let Value::Function(get)=self.event_native_function(window,"\0CustomEvent.get.detail","get detail",0)?
+                else {unreachable!()};
+            self.store_accessor_property(prototype,"detail".into(),Accessors {get:Some(get),set:None},(true,true))?;
+            let initializer=self.event_native_function(window,"initCustomEvent","initCustomEvent",1)?;
+            self.store_property(prototype,"initCustomEvent".into(),initializer,Some((true,true,true)))?;
+            self.store_symbol_property(prototype,self.symbol_to_string_tag.unwrap(),
+                Value::String("CustomEvent".into()),Some((false,false,true)))?;
+            self.native_constructor_prototypes.insert((window,"CustomEvent"),prototype);
+            self.put_binding(self.global_environment,"CustomEvent".into(),Some(constructor),super::Declaration::Var,false)?;
+            self.global_attributes.insert("CustomEvent".into(),(false,true,true));
+            Ok(())
+        })();
+        self.restore_transient_marker(marker);
+        result.map_err(Fault::display)
+    }
+
     pub fn define_ui_event_interface(&mut self,window:u32)->Result<(),String> {
         let marker=self.inhibit_transient_collection();
         let result=(|| {

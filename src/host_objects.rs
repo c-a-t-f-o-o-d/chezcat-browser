@@ -127,7 +127,7 @@ impl Runtime {
         if self.host_objects.contains_key(&handle) {return Err(Fault::new("Native expando store conflicts with an existing host binding."));}
         let ancestry=host.instance_ancestry(handle).ok_or_else(||Fault::new("Native expando prototype provenance is unavailable."))?;
         if ancestry.window!=owner {return Err(Fault::new("Native expando prototype owner mismatch."));}
-        let base_event=matches!(ancestry.constructor,Some((window,"Event"|"UIEvent"|"MouseEvent")) if window==owner);
+        let base_event=matches!(ancestry.constructor,Some((window,"Event"|"UIEvent"|"MouseEvent"|"CustomEvent")) if window==owner);
         let prototype=self.native_ancestry_anchor(ancestry)?;
         let id=self.new_object(None)?;
         self.objects[id].prototype=Some(prototype);
@@ -297,15 +297,25 @@ impl Runtime {
                 Ok(())
             };
         }
-        let value = if host.string_setter(handle, &name) {
-            let value = if host.nullish_string_setter(handle, &name) && matches!(value, Value::Null | Value::Undefined)
-                || host.null_string_setter(handle, &name) && matches!(value, Value::Null) {
+        self.host_set_native(handle,&name,value,host)
+    }
+
+    /// Shared native conversion/validation/selection transaction. A canonical
+    /// accessor calls this directly, so own shadows cannot intercept its slots.
+    pub(super) fn host_set_native(&mut self,handle:u32,name:&str,value:Value,host:&mut dyn Host)
+        ->Result<(),Fault>
+    {
+        self.validate_native_access(handle,host)?;
+        self.reject_foreign_window(&Value::Host(handle),host)?;
+        let value = if host.string_setter(handle, name) {
+            let value = if host.nullish_string_setter(handle, name) && matches!(value, Value::Null | Value::Undefined)
+                || host.null_string_setter(handle, name) && matches!(value, Value::Null) {
                 Value::String(String::new())
             } else { value };
             let primitive = self.primitive_with_hint(value, true, host)?;
             self.work(primitive.bytes())?;
             self.checked_value(Value::String(primitive.script_text()?))?
-        } else if host.number_setter(handle, &name) {
+        } else if host.number_setter(handle, name) {
             let primitive = self.primitive_with_hint(value, false, host)?;
             self.work(primitive.bytes())?;
             Value::Number(primitive.script_number()?)
@@ -313,12 +323,12 @@ impl Runtime {
             self.checked_value(value)?
         };
         self.pin_exported_value(&value);
-        host.validate_set(handle, &name, &value)
+        host.validate_set(handle, name, &value)
             .map_err(|(kind, message)| Fault::exception(kind, message))?;
-        let ticket=self.prepare_host_microtask(host,handle,&name,std::slice::from_ref(&value),true)?;
+        let ticket=self.prepare_host_microtask(host,handle,name,std::slice::from_ref(&value),true)?;
         host.native_operation_caller(self.native_access_caller
             .unwrap_or_else(|| self.browser_global.map(|(window, _)| window)));
-        let result=host.set(handle,&name,value).map_err(Fault::new);
+        let result=host.set(handle,name,value).map_err(Fault::new);
         if self.drain_native_promise_effects(host)?!=0 {
             self.defer_host_microtask_after_effects(ticket)?;
         }

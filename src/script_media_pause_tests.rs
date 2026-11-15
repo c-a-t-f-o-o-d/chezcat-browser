@@ -49,12 +49,13 @@ fn native_media_pause_identity_brand_ignored_arguments_and_frozen_idempotence() 
 var method=video.pause,attribute=video.getAttributeNode('src'),raw=attribute.value,coercions=0;
 if(typeof method!=='function'||method!==video.pause||method.length!==0||!('pause' in video))throw 'method identity';
 var ignored={toString:function(){coercions++;throw Error('coerced');},valueOf:function(){coercions++;throw Error('coerced value');}},brands=0;
-for(var receiver of [{},document.body,document.getElementById('unbound'),null,undefined,17]){
+for(var receiver of [{},document.body,null,undefined,17]){
  try{method.call(receiver,ignored);}catch(e){if(e instanceof TypeError)brands++;else throw e;}
 }
 try{var saved=method;saved(ignored);}catch(e){if(e instanceof TypeError)brands++;else throw e;}
 try{new method(ignored);}catch(e){if(e instanceof TypeError)brands++;else throw e;}
-if(brands!==8||coercions!==0||video.paused)throw 'brand effects';
+var unsupported=0;try{method.call(document.getElementById('unbound'),ignored);}catch(e){if(e instanceof DOMException&&e.name==='NotSupportedError')unsupported++;else throw e;}
+if(brands!==7||unsupported!==1||coercions!==0||video.paused)throw 'brand and unimplemented-binding effects';
 if(video.pause(ignored,Symbol('ignored'))!==undefined)throw 'result';
 var frozen=video.currentTime;
 if(!video.paused||frozen<0.75||frozen>3||video.currentTime!==frozen||video.seeking||video.ended)throw 'sync frozen state';

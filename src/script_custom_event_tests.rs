@@ -36,7 +36,7 @@ fn legacy_custom_event_defaults_any_detail_identity_readonly_and_receiver_brands
         r#"
 var e=document.createEvent('cUsToMeVeNt'),other=document.createEvent('CustomEvent'),base=document.createEvent('Event'),ui=document.createEvent('UIEvent');
 if(e.type!==''||e.detail!==null||e.target!==null||e.bubbles||e.cancelable||e.isTrusted||e.composed||!('detail' in e)||'view' in e||'which' in e||'initUIEvent' in e||base.detail!==undefined||ui.detail!==0)throw 'factory slots';
-if(typeof e.initCustomEvent!=='function'||e.initCustomEvent!==e.initCustomEvent||e.initCustomEvent.length!==1||typeof CustomEvent!=='undefined'||'CustomEvent' in window)throw 'method/constructor policy';
+if(typeof e.initCustomEvent!=='function'||e.initCustomEvent!==e.initCustomEvent||e.initCustomEvent.length!==1||typeof CustomEvent!=='function'||!('CustomEvent' in window)||Object.getPrototypeOf(e)!==CustomEvent.prototype||!(e instanceof CustomEvent))throw 'method/constructor policy';
 var payload={value:7},symbol=Symbol('detail'),callable=function(){return 19;};
 for(var value of [payload,callable,symbol,document.body,window,'Original string',0,false,null]){
  e.initCustomEvent('actual',true,true,value);if(e.detail!==value||e.isTrusted||!e.bubbles||!e.cancelable)throw 'actual any identity';
@@ -266,13 +266,11 @@ fn legacy_custom_event_text_retention_copy_quota_creation_refusal_and_recovery_a
 }
 
 #[test]
-fn legacy_custom_event_keeps_opaque_event_prototype_policy_and_saved_native_after_error() {
+fn legacy_custom_event_keeps_real_prototype_and_saved_native_after_error() {
     let (mut doc,mut forms,mut page)=page("var e=document.createEvent('CustomEvent');e.initCustomEvent('kept',false,false,{value:53});var saved=e.initCustomEvent;");
-    let outcome = page.console_eval(&mut doc, &mut forms, "Object.getPrototypeOf(e);");
-    assert_eq!(
-        outcome.errors, 1,
-        "No fabricated exposed Event/CustomEvent prototype should be advertised."
-    );
+    evaluate(&mut page,&mut doc,&mut forms,"if(Object.getPrototypeOf(e)!==CustomEvent.prototype||!(e instanceof CustomEvent))throw 'genuine CustomEvent prototype';");
+    let outcome=page.console_eval(&mut doc,&mut forms,"document.body.scrollWidth;");
+    assert_eq!(outcome.errors,1,"Retain a real independent native-capability failure before saved-method recovery.");
     evaluate(&mut page,&mut doc,&mut forms,"saved.call(e,'recovered',false,false,e.detail);if(e.type!=='recovered'||e.detail.value!==53)throw 'saved native recovery';");
 }
 

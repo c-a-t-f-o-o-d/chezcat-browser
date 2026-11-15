@@ -112,6 +112,7 @@ impl Bridge<'_> {
                         | "input"
                         | "textarea"
                         | "img"
+                        | "video"
                         | "iframe"
                         | "script"
                         | "style"

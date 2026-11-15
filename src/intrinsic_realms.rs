@@ -202,9 +202,13 @@ impl Runtime {
                 runtime.bind_browser_global(handle).map_err(Fault::new)?;
                 if host.event_target_interface(handle) {runtime.define_event_target_interface(handle).map_err(Fault::new)?;}
                 if host.event_target_interface(handle) {runtime.define_event_interface(handle).map_err(Fault::new)?;}
+                if host.event_target_interface(handle) {runtime.define_custom_event_interface(handle).map_err(Fault::new)?;}
                 if host.event_target_interface(handle) {runtime.define_ui_event_interface(handle).map_err(Fault::new)?;}
                 if host.event_target_interface(handle) {runtime.define_mouse_event_interface(handle).map_err(Fault::new)?;}
-                if let Some(constants)=host.node_interface_constants(handle) {runtime.define_node_interfaces(handle,constants,None).map_err(Fault::new)?;}
+                if let Some(constants)=host.node_interface_constants(handle) {
+                    runtime.define_node_interfaces(handle,constants,None).map_err(Fault::new)?;
+                    runtime.define_media_interfaces(handle).map_err(Fault::new)?;
+                }
                 Ok(())
             });
             if let Err(error) = result {

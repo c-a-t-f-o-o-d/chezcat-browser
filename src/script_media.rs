@@ -5,6 +5,22 @@ use std::sync::{
     Arc,
 };
 pub(crate) use crate::media_tasks::Task as MediaTask;
+
+pub(super) fn interface_operation(method:&str)->Option<&'static str> {
+    match method {"\0Media.load"=>Some("load"),"\0Media.pause"=>Some("pause"),"\0Media.play"=>Some("play"),_=>None}
+}
+pub(super) fn interface_setter(method:&str)->Option<&'static str> {
+    match method {"\0Media.set.src"=>Some("src"),"\0Media.set.currentTime"=>Some("currentTime"),_=>None}
+}
+pub(super) fn interface_getter(method:&str)->Option<&str> {
+    method.strip_prefix("\0Media.get.").or_else(||method.strip_prefix("\0Video.get."))
+}
+pub(super) fn interface_member(property:&str)->bool {
+    matches!(property,"constructor"|"load"|"pause"|"play"|"src"|"currentSrc"|"currentTime"|"controls"
+        |"duration"|"paused"|"ended"|"seeking"|"readyState"|"networkState"|"videoWidth"|"videoHeight"
+        |"NETWORK_EMPTY"|"NETWORK_IDLE"|"NETWORK_LOADING"|"NETWORK_NO_SOURCE"|"HAVE_NOTHING"
+        |"HAVE_METADATA"|"HAVE_CURRENT_DATA"|"HAVE_FUTURE_DATA"|"HAVE_ENOUGH_DATA")
+}
 #[derive(Clone)]
 pub(crate) struct PauseRequest {
     pub node: usize,
@@ -747,6 +763,20 @@ impl Bridge<'_> {
                 .flatten()
         })
     }
+    // Class identity follows the genuine node, never a transient source or
+    // player snapshot. AUDIO gets only its truthful opaque Media suffix.
+    pub(super) fn media_interface_receiver(&self,object:u32)->bool {
+        node_index(object).is_some_and(|node|self.doc.nodes.get(node).is_some_and(|n|
+            n.namespace==crate::html::Namespace::Html
+                && matches!(&n.kind,NodeKind::Element {tag,..} if tag=="video"||tag=="audio")))
+    }
+    pub(super) fn video_interface_receiver(&self,object:u32)->bool {
+        self.media_interface_receiver(object)&&node_index(object).is_some_and(|node|tag(self.doc,node)=="video")
+    }
+    pub(super) fn require_bound_media(&self,object:u32)->Result<(),String> {
+        if self.media_element_receiver(object) {Ok(())}
+        else {Err("Media operations require this document's implemented player binding; additional or unbound players are not implemented.".into())}
+    }
     pub(super) fn media_element_receiver(&self, object: u32) -> bool {
         node_index(object).is_some_and(|node| {
             self.state
@@ -821,3 +851,7 @@ mod pause_tests;
 #[cfg(test)]
 #[path = "script_media_play_tests.rs"]
 mod play_tests;
+
+#[cfg(test)]
+#[path = "script_media_interface_tests.rs"]
+mod interface_tests;

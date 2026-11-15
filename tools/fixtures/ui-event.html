@@ -20,7 +20,7 @@ var method=Object.getOwnPropertyDescriptor(P,'initUIEvent');
 if(typeof method.value!=='function'||method.value.length!==1||!method.writable||!method.enumerable||!method.configurable)throw Error('Canonical UI initializer');
 var badBrands=0;try{getView.call({});}catch(error){if(error.name==='TypeError')badBrands++;}
 try{getDetail.call(new Event('base-only'));}catch(error){if(error.name==='TypeError')badBrands++;}
-if(badBrands!==2||typeof MouseEvent!=='function'||typeof CustomEvent!=='undefined'||typeof KeyboardEvent!=='undefined')throw Error('Genuine UI brands and deferred constructors');
+if(badBrands!==2||typeof MouseEvent!=='function'||typeof CustomEvent!=='function'||typeof KeyboardEvent!=='undefined')throw Error('Genuine UI brands and deferred constructors');
 var defaults=new C('defaults');if(defaults.view!==null||defaults.detail!==0||defaults.which!==0||defaults.bubbles||defaults.cancelable||defaults.composed||defaults.isTrusted)throw Error('UIEvent dictionary defaults');
 var frame=document.createElement('iframe');frame.hidden=true;document.body.appendChild(frame);
 var childWindow=frame.contentWindow,ChildC=childWindow.UIEvent,ChildP=ChildC.prototype;
