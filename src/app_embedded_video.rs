@@ -5,6 +5,7 @@ impl App {
     /// Capture this document's ordinary resource authority, independently of
     /// classic-script credential exceptions or mutable UI/worker state.
     fn attach_embedded_network_context(&self, plan: Plan, policy_scope: usize) -> Result<Plan, String> {
+        let plan = plan.with_audio_limits(self.audio_limits);
         if plan.source.url.is_none() {
             return Ok(plan);
         }
@@ -46,6 +47,9 @@ impl App {
         if let Some(player) = self.media.take() {
             self.images.remove(&player.node);
         }
+        // Source selection retires both tracks before any replacement metadata
+        // or control can arrive, including replacement with video-only IVF.
+        self.install_audio(None);
         let previous = self.embedded_video.take();
         let tasks=previous.as_ref().map(|v|v.tasks.clone())
             .or_else(||self.scripting.as_ref().and_then(|page|page.media_tasks()))
@@ -197,14 +201,20 @@ impl App {
         if let Some(worker) = &self.embedded_video_worker {
             worker.cancel();
         }
+        let mut clear_audio = false;
         if let Some(v) = &mut self.embedded_video {
+            clear_audio = v.retired.load(Ordering::Relaxed);
             v.script_play_intent=None;
             if v.plan.take().is_some() {
+                clear_audio = true;
                 v.aborted = true;
                 v.network = 1;
                 v.enqueue_events(["abort"]);
             }
         }
+        // A decoded live source survives native Stop/suspend for replay;
+        // their existing stop_audio/suspend_audio resets or pauses the owner.
+        if clear_audio { self.install_audio(None); }
     }
     pub(in crate::app) fn prepare_embedded_video(&mut self) {
         if self.media.is_some() || self.audio.is_some() {
@@ -309,6 +319,13 @@ impl App {
             s.frame_ready=p.error.is_none()&&p.displayed==p.clip.index_at(p.position(now));
             if p.error.is_some() {s.error_code=Some(if p.decoder_enabled {3}else{1});}
             s.playing = p.playing();
+            if p.sync.is_some() {
+                // A prior playing acknowledgement cannot satisfy a new play()
+                // while a later physical command or sample is still pending.
+                s.playing&=p.pending.is_none()&&p.displayed==p.clip.index_at(s.position)
+                    &&self.audio_sync_state().is_some_and(|audio|
+                    !audio.pending&&audio.error.is_none()&&audio.playing&&audio.position==s.position);
+            }
             s.paused = p.paused;
             s.ended = p.ended_reported;
             s.seeking = p.seeking;
@@ -342,6 +359,7 @@ impl App {
         if crate::embedded_video::authored_node(&self.document) != Some(v.node) {
             v.aborted = true;
             v.enqueue_events(["abort"]);
+            self.install_audio(None);
             return true;
         }
         let node = v.node;
@@ -353,7 +371,10 @@ impl App {
                 // positive start enters the same real seek/decode path, and
                 // initial data-ready events wait for its requested bitmap.
                 let start=self.scripting.as_mut().and_then(|page|page.take_media_default_start(&source));
-                self.install_media_with_readiness(Some(asset),Some(node),true,start.is_some());
+                let crate::embedded_video::Asset { video, audio } = asset;
+                self.install_media_with_readiness(Some(video),Some(node),true,start.is_some());
+                self.install_audio_for_source(audio, Some(source.clone()));
+                self.install_media_sync();
                 if let Some(seconds)=start {
                     let duration=self.media.as_ref().unwrap().clip.duration;
                     let target=Duration::try_from_secs_f64(seconds.min(duration.as_secs_f64()))
@@ -372,6 +393,7 @@ impl App {
                 self.reflow();
             }
             Err(error) => {
+                self.install_audio(None);
                 self.events.push(format!("VIDEO node {node}: {error}"));
                 let v = self.embedded_video.as_mut().unwrap();
                 v.script_play_intent=None;
@@ -383,6 +405,9 @@ impl App {
         true
     }
     pub(in crate::app) fn fail_media_queue(&mut self, problem:String) {
+        // This source is terminal/aborted, unlike native Stop on a live clip.
+        // Retire its PCM ownership through the existing worker close path.
+        if self.media.as_ref().is_some_and(|p|p.sync.is_some()) {self.install_audio(None);}
         self.events.push(format!("VIDEO: {problem}"));
         // Preserve owned batch and pending rejection effects before any FIFO
         // entry is removed. This path never dispatches JS or checkpoints.
@@ -418,12 +443,8 @@ impl App {
             match control {
                 crate::media_tasks::Control::Pause {issued,position}=>{
                     if let Some(v)=&mut self.embedded_video {v.script_play_intent=None;}
-                    if let Some(player)=self.media.as_mut().filter(|p|p.embedded&&p.node==scope.node&&p.sync.is_none()) {
-                        player.clock.pause(issued);player.paused=true;player.dom_playback_started=false;
-                        player.script_play_waiting=false;player.record_only("pause");
-                        if player.seek_resume.is_some() {player.seek_resume=Some(false);}
-                        debug_assert_eq!(player.clock.position(issued),position);
-                        if player.pending.is_none() {player.deadline=None;}
+                    if self.media.as_ref().is_some_and(|p|p.embedded&&p.node==scope.node) {
+                        self.script_media_pause_physical(issued,position);
                     }
                 }
                 crate::media_tasks::Control::Play {issued,notify_queued}=>{
@@ -434,7 +455,7 @@ impl App {
                     }
                 }
                 crate::media_tasks::Control::Seek {seconds}=>{
-                    let Some(duration)=self.media.as_ref().filter(|p|p.embedded&&p.node==scope.node&&p.sync.is_none()).map(|p|p.clip.duration) else {
+                    let Some(duration)=self.media.as_ref().filter(|p|p.embedded&&p.node==scope.node).map(|p|p.clip.duration) else {
                         self.fail_media_queue("Media seek has no bound decoded player.".into());break;
                     };
                     if !seconds.is_finite() {self.fail_media_queue("Media seek position must be finite.".into());break;}
@@ -531,8 +552,134 @@ impl App {
 }
 
 #[cfg(test)]
+#[path = "app_authored_av_tests.rs"]
+mod av_payload_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
+    // Include inside app_embedded_video::tests. This is an App/controller seam
+    // witness: test-only composition installs a real demuxed local asset into the
+    // existing bound VIDEO. It does not prove or enable typed source admission.
+    mod sampled_controls_tests {
+        use super::*;
+        fn sampled() -> App {
+            let mut app=open("authored-video.html");app.wait_for_load();
+            let asset=crate::matroska::load(include_bytes!("../tools/fixtures/scene-av.mkv").to_vec(),
+                media::Limits::default(),crate::audio::Limits::default(),&||Ok(())).unwrap();
+            let node=app.media.as_ref().unwrap().node;
+            let source=app.embedded_video.as_ref().unwrap().retired.clone();
+            app.install_media(Some(asset.video),Some(node),true);
+            app.install_audio_for_source(Some(asset.audio),Some(source));app.install_media_sync();
+            app.audio_worker=Some(crate::audio_output::Worker::mock_for_app(app.wake.clone()).unwrap());
+            app.flush_embedded_video();activate_media_document(&mut app);
+            eval(&mut app,"mediaEvents=[];");app
+        }
+        fn ack_audio(app:&mut App) {
+            let until=Instant::now()+Duration::from_secs(5);
+            while app.audio_sync_state().unwrap().pending {
+                assert!(Instant::now()<until,"actual PCM worker acknowledgement timed out: {}",app.audio_report());
+                app.poll_audio();std::thread::sleep(Duration::from_millis(1));
+            }
+        }
+        #[test]
+        fn authored_sampled_seek_play_pause_preserves_real_target_without_resume() {
+            let mut app=sampled();
+            eval(&mut app,"var fulfilled=0,aborted=0;video.currentTime=2.2;var p=video.play();p.then(function(){fulfilled++;},function(e){if(e.name!=='AbortError')throw 'reason';aborted++;});video.pause();");
+            app.apply_media_pause();
+            let audio=app.audio_sync_state().unwrap();assert!(audio.pending);assert!(!audio.wants_play);
+            assert_eq!(audio.desired,Duration::from_millis(2200));
+            assert!(app.media.as_ref().unwrap().seeking);assert!(!app.media.as_ref().unwrap().clock.playing());
+            ack_audio(&mut app);app.poll_media_sync();
+            assert_eq!(app.media.as_ref().unwrap().pending,Some(4));
+            let held=take_decoded_frame(&app);assert!(held.result.is_ok());
+            app.flush_embedded_video();
+            eval(&mut app,"if(fulfilled!==0||aborted!==1||!video.paused||!video.seeking||mediaEvents.indexOf('playing')!==-1)throw 'early resume/settlement';");
+            assert!(app.accept_media_frame(held));app.poll_media_sync();app.flush_embedded_video();
+            assert_reference_frame(&app,4);
+            let audio=app.audio_sync_state().unwrap();assert!(!audio.pending&&!audio.playing&&!audio.wants_play);
+            assert_eq!(audio.position,Duration::from_millis(2200));
+            assert_eq!(app.audio_worker.as_ref().unwrap().ownership(),(false,0,false));
+            eval(&mut app,"if(video.currentTime!==2.2||video.seeking||!video.paused||fulfilled!==0||aborted!==1)throw 'final target';");
+        }
+        #[test]
+        fn authored_sampled_play_waits_for_bitmap_and_ack_then_native_pause_uses_page() {
+            let mut app=sampled();
+            eval(&mut app,"var fulfilled=0,rejected=0;video.currentTime=0.7;video.play().then(function(){fulfilled++;},function(){rejected++;});");
+            app.apply_media_pause();ack_audio(&mut app);app.poll_media_sync();
+            assert_eq!(app.media.as_ref().unwrap().pending,Some(1));
+            let held=take_decoded_frame(&app);assert!(held.result.is_ok());
+            app.flush_embedded_video();
+            assert!(!app.audio_sync_state().unwrap().wants_play);
+            eval(&mut app,"if(fulfilled!==0||rejected!==0||!video.seeking||video.paused)throw 'frame pending';");
+            assert!(app.accept_media_frame(held));app.poll_media_sync();
+            assert!(app.audio_sync_state().unwrap().pending);
+            assert!(!app.embedded_video_snapshot().unwrap().playing);
+            app.flush_embedded_video();eval(&mut app,"if(fulfilled!==0||rejected!==0)throw 'before sink acknowledgement';");
+            ack_audio(&mut app);app.poll_media_sync();app.flush_embedded_video();
+            assert_reference_frame(&app,1);
+            eval(&mut app,"if(fulfilled!==1||rejected!==0||video.seeking||video.paused||mediaEvents.filter(function(x){return x==='playing';}).length!==1)throw 'ack readiness';");
+            assert!(!app.media.as_ref().unwrap().clock.playing());
+            let position=app.media.as_ref().unwrap().position(Instant::now());
+            app.poll_media_timer_at(Instant::now()+Duration::from_secs(30));
+            assert_eq!(app.embedded_video_snapshot().unwrap().position,position);
+            // Native Pause must capture the same real Page/FIFO pair, including a
+            // pending Promise if one exists; it cannot bypass into a stale Toggle.
+            app.input_media_action("Pause").unwrap();ack_audio(&mut app);app.poll_media_sync();app.flush_embedded_video();
+            eval(&mut app,"if(!video.paused||fulfilled!==1||rejected!==0||mediaEvents.filter(function(x){return x==='pause';}).length!==1)throw 'native pause';");
+            assert!(!app.audio_sync_state().unwrap().playing);
+        }
+        #[test]
+        fn authored_sampled_pause_then_play_cannot_reuse_old_playing_ack() {
+            let mut app=sampled();
+            eval(&mut app,"var first=0,second=0;video.play().then(function(){first++;});");
+            app.apply_media_pause();ack_audio(&mut app);app.poll_media_sync();app.flush_embedded_video();
+            eval(&mut app,"if(first!==1)throw 'first start';video.pause();");app.apply_media_pause();
+            // Deliberately do not accept the Pause acknowledgement. The stored sync
+            // sample is still the old playing state; snapshot readiness must hide it.
+            assert!(app.audio_sync_state().unwrap().pending);
+            assert!(!app.embedded_video_snapshot().unwrap().playing);
+            app.flush_embedded_video();
+            eval(&mut app,"video.play().then(function(){second++;},function(){throw 'second abort';});if(second!==0)throw 'stale playing acknowledgement';");
+            app.apply_media_pause();assert!(!app.embedded_video_snapshot().unwrap().playing);
+            ack_audio(&mut app);app.poll_media_sync();app.flush_embedded_video();
+            eval(&mut app,"if(first!==1||second!==1||video.paused)throw 'second actual acknowledgement';");
+            assert!(!app.media.as_ref().unwrap().clock.playing());
+        }
+        #[test]
+        fn authored_sampled_unadmitted_physical_play_rejects_pending_promise() {
+            let mut app=sampled();app.install_audio(None);
+            eval(&mut app,"var fulfilled=0,rejected=0;video.play().then(function(){fulfilled++;},function(e){if(e.name!=='AbortError')throw 'reason';rejected++;});");
+            app.apply_media_pause();app.flush_embedded_video();
+            // Readiness observation captures the UA's physical Pause control. Its
+            // source-bound task must wait for the next genuine FIFO control pass.
+            app.apply_media_pause();app.flush_embedded_video();
+            assert!(app.media.as_ref().unwrap().error.is_some());
+            eval(&mut app,"if(fulfilled!==0||rejected!==1||!video.paused||mediaEvents.indexOf('playing')!==-1)throw 'unadmitted control hung';");
+            for _ in 0..3 {app.poll_media_sync();app.flush_embedded_video();}
+            eval(&mut app,"if(fulfilled!==0||rejected!==1)throw 'duplicate settlement';");
+            assert!(!app.media.as_ref().unwrap().clock.playing());
+        }
+        #[test]
+        fn authored_sampled_actual_async_pcm_write_fault_aborts_without_playing() {
+            let mut app=sampled();
+            app.audio_worker=Some(crate::audio_output::Worker::mock_for_app_write_failure(app.wake.clone()).unwrap());
+            eval(&mut app,"var fulfilled=0,rejected=0;video.play().then(function(){fulfilled++;},function(e){if(e.name!=='AbortError')throw 'reason';rejected++;});");
+            app.apply_media_pause();ack_audio(&mut app);
+            assert!(app.audio_sync_state().unwrap().error.is_some());
+            app.poll_media_sync();app.flush_embedded_video();
+            app.apply_media_pause();app.flush_embedded_video();
+            eval(&mut app,"if(fulfilled!==0||rejected!==1||!video.paused||mediaEvents.indexOf('playing')!==-1)throw 'actual PCM fault settlement';");
+            for _ in 0..3 {app.poll_audio();app.poll_media_sync();app.flush_embedded_video();}
+            assert!(!app.audio_sync_state().unwrap().wants_play);
+            assert!(app.audio_sync_state().unwrap().error.is_some());
+            assert_eq!(app.media.as_ref().unwrap().position(Instant::now()),Duration::ZERO);
+            assert!(!app.media.as_ref().unwrap().clock.playing());
+            eval(&mut app,"if(fulfilled!==0||rejected!==1)throw 'fault retried or settled twice';");
+        }
+
+    }
+
     #[test]
     fn authored_video_javascript_load_restarts_same_source_and_rejects_old_completion() {
         let mut app=open("authored-video.html");app.wait_for_load();let node=app.media.as_ref().unwrap().node;let first=app.images[&node].clone();let retired=app.embedded_video.as_ref().unwrap().retired.clone();
@@ -540,7 +687,7 @@ mod tests {
         eval(&mut app,"var reloadAttr=video.getAttributeNode('src'),reloadRaw=reloadAttr.value;mediaEvents=[];if(video.load()!==undefined||video.currentTime!==0||!video.paused||video.readyState!==0||video.seeking||!isNaN(video.duration)||video.getAttributeNode('src')!==reloadAttr||reloadAttr.value!==reloadRaw)throw 'load reset/identity';");
         assert!(retired.load(Ordering::Relaxed));app.wait_for_load();assert_eq!(app.images[&node].pixels,first.pixels);assert!(!app.media.as_ref().unwrap().playing());assert_eq!(app.media.as_ref().unwrap().position(Instant::now()),Duration::ZERO);
         eval(&mut app,"if(mediaEvents.slice(0,4).join(',')!=='abort,emptied,timeupdate,loadstart'||video.readyState!==4||video.duration!==3||video.getAttributeNode('src')!==reloadAttr||reloadAttr.value!==reloadRaw)throw 'real reload events '+mediaEvents.join(',')+' ready='+video.readyState;video.load();");app.process_media_selection();let stale=app.embedded_video.as_ref().unwrap().plan.clone().unwrap();
-        eval(&mut app,"video.load();");app.process_media_selection();let asset=media::Clip::load(include_bytes!("../tools/fixtures/scene-intra.ivf").to_vec(),media::Limits::default(),&||Ok(())).unwrap();assert!(!app.accept_embedded_video(Completion {plan:stale,result:Ok(asset)}));assert!(app.media.is_none());app.wait_for_load();assert_eq!(app.images[&node].pixels,first.pixels);
+        eval(&mut app,"video.load();");app.process_media_selection();let asset=media::Clip::load(include_bytes!("../tools/fixtures/scene-intra.ivf").to_vec(),media::Limits::default(),&||Ok(())).unwrap();assert!(!app.accept_embedded_video(Completion {plan:stale,result:Ok(asset.into())}));assert!(app.media.is_none());app.wait_for_load();assert_eq!(app.images[&node].pixels,first.pixels);
     }
     fn open(name: &str) -> App {
         let mut app = App::new();
@@ -785,7 +932,7 @@ mod tests {
         .unwrap();
         assert!(!app.accept_embedded_video(Completion {
             plan,
-            result: Ok(asset)
+            result: Ok(asset.into())
         }));
         assert!(app.media.is_none() && app.embedded_video.is_none());
         let mut cancelled = open("authored-video.html");
@@ -849,7 +996,7 @@ mod tests {
         .unwrap();
         assert!(!app.accept_embedded_video(Completion {
             plan: stale,
-            result: Ok(asset)
+            result: Ok(asset.into())
         }));
         app.wait_for_load();
         assert!(app.media.is_none());

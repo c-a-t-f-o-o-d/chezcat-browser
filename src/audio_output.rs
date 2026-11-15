@@ -843,6 +843,9 @@ mod tests {
         pub(crate) fn mock_for_app(wake: crate::loader::Wake) -> Result<Self, String> {
             Self::with_factory(wake, Mock::default)
         }
+        pub(crate) fn mock_for_app_write_failure(wake: crate::loader::Wake) -> Result<Self, String> {
+            Self::with_factory(wake, || Mock { write_error: true, ..Mock::default() })
+        }
     }
     #[derive(Default)]
     struct Mock {

@@ -67,7 +67,7 @@ time, a fresh process, HTTP200, a title or zero script errors is insufficient.
 
 ## F3 — script-controlled supported local video
 
-Outcome: the existing bound authored IVF/VP8-intra player responds to real
+Outcome: the existing bound authored VP8 player responds to real
 play/pause/load/currentTime operations with correct promises, state, task/event
 order, real decoded frames and measured media time.
 
@@ -207,7 +207,7 @@ and does not open the audio device.
 Semantic basis: [RFC6386](https://www.rfc-editor.org/rfc/rfc6386.html), especially
 sections9–10 and16–18. Viewing-format conversion is explicit under section5.
 Container, audio and network contracts remain separate: no new WebM/audio codec,
-authored element audio, range streaming, MSE, or public-service acceptance.
+network element audio, range streaming, MSE, or public-service acceptance.
 
 ## C1 — a CSS image path through the shared renderer
 
@@ -248,7 +248,7 @@ Semantic reference: [CSS Backgrounds and Borders](https://www.w3.org/TR/css-back
 ## F6 — staged authored page and media integration
 
 The service objective remains actual accessible non-DRM playback with readable
-controls and real decoded output, eventually synchronized audio. Authored fixtures
+controls and real decoded video/audio output. Authored fixtures
 and interface prerequisites establish finite progress; they do not establish
 YouTube or other public-service acceptance.
 
@@ -295,10 +295,32 @@ cleanup once; failed native storage remains truthfully owned until safe release.
 Standalone unfenced behavior is preserved. Mock-backend ownership and genuine
 App snapshot tests have a different scope from coordinated WinMM acceptance.
 
-These prerequisites do not yet enable a Matroska source in an authored VIDEO or
-claim synchronized JavaScript controls. The typed source, physical FIFO controls,
-default/explicit seeks, source teardown, real PCM clock and decoded frame/EOF
-acceptance must be integrated together before that capability is advertised.
+Finite local authored A/V: the bound VIDEO also accepts the existing supported
+local Matroska VP8/PCM16 profile. Its typed source installs both decoded tracks
+and the source-bound PCM owner before default/explicit seek or retained Play.
+Input bytes obey both host limits; local-root/CSP and cancellation checks remain.
+HTTP(S) element media remains the separately validated IVF-only transaction.
+Muted Matroska, autoplay, loop, poster and multiple players remain unsupported.
+
+JavaScript load(), pause(), currentTime and play() share the existing source FIFO
+and native Pause capture. PCM time advances only through accepted sample
+observations. Play fulfillment waits for an actual playing acknowledgement and
+its selected bitmap; seeked follows the real seek acknowledgement and requested
+frame. Pause projects the official observed position synchronously, then accepts
+the genuine later device Pause position without seeking back to an old sample.
+Native Stop retains the live decoded source for replay; load/source replacement
+and navigation retire its owned work. Removing src after selection retains the
+selected resource until explicit load; removing the loaded VIDEO node remains
+blocked by the existing structural guard.
+
+Original Plan/App tests cover actual demuxed tracks, small limits/cancellation,
+source replacement and late completions, pending seek/play/pause interleavings,
+current-ack readiness, native Pause and actual worker error paths. The routine
+local authored-A/V journey selects paused PCM positions and independent decoded
+frames, checks EOF selection without claiming drain, switches the same element
+to IVF and back, and verifies navigation teardown. It keeps audio output closed.
+Advancing authored-A/V device playback and physical audibility need separate
+explicit evidence; these checks do not complete F6 service acceptance.
 
 
 Every later feature records semantic references, original and selected conformance

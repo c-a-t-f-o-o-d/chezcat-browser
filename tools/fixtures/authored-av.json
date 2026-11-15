@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "scope": "Original local authored A/V regression. Routine journey selects paused PCM positions and decoded frames without opening an audio device.",
+  "files": {
+    "authored-av.html": {
+      "bytes": 4556,
+      "sha256": "775e474cfe3811ce177dc519a58260fe5ff6098a6211354712468cacf451b5fb"
+    },
+    "authored-av-next.html": {
+      "bytes": 235,
+      "sha256": "b9838eb4eeacdd08004fe1e72df419cf627fd2f91287fe9ecebe44d2769c28a7"
+    },
+    "scene-inter-av.json": {
+      "bytes": 2387,
+      "sha256": "479be38a1fd0754035112df996507adad4db8895c54108d5c0ef1a15992370c0"
+    },
+    "scene-inter-av.mkv": {
+      "bytes": 582844,
+      "sha256": "0f2a3fdc1914e71195b79a920e784fa8f7891d64efc656653d312c0108719624"
+    },
+    "scene-inter-centered.rgba": {
+      "bytes": 294912,
+      "sha256": "b38ff672cbe99d281ea8ad278f505c1a72332a43af1b0dba84aefdf0192316ae"
+    },
+    "scene-inter-display.json": {
+      "bytes": 1889,
+      "sha256": "cacba5adb97b8bedbbcb094034f0abc42f0c200703fd88b928f8e4fb3dc5eb2f"
+    },
+    "scene-inter.ivf": {
+      "bytes": 6328,
+      "sha256": "1b8359669cea5b8eae5dc6c1887cba29160daa2c8b5fe7588f4b2025e00209d3"
+    },
+    "scene-inter.json": {
+      "bytes": 10282,
+      "sha256": "625285d261085cd04e13b0faf9a9ca15ef8ec48f420d4685b63fac546a21a4b3"
+    }
+  }
+}

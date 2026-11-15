@@ -1,4 +1,5 @@
-//! Parser-authored IVF video source loading with separate local/network authority.
+//! Authored IVF video and local Matroska VP8/PCM source loading.
+//! Network resources remain the separately validated IVF-only slice.
 //! Network plans require an immutable document-origin resource context before IO.
 use crate::{
     html::{Document, Namespace, NodeKind},
@@ -11,12 +12,25 @@ use std::sync::{
 };
 use std::time::{Duration, Instant};
 
+pub struct Asset {
+    pub video: media::Asset,
+    pub audio: Option<Arc<crate::audio::Clip>>,
+}
+impl From<media::Asset> for Asset {
+    fn from(video: media::Asset) -> Self { Self { video, audio: None } }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SourceKind { Ivf, LocalMatroska }
+
 pub struct Plan {
     pub retired: Arc<AtomicBool>,
     pub node: usize,
     pub raw: String,
     pub source: Location,
     limits: media::Limits,
+    audio_limits: Option<crate::audio::Limits>,
+    kind: SourceKind,
     document_origin: Option<crate::url::HttpUrl>,
     pub(crate) cors_mode: Option<crate::http::MediaCredentials>,
     network: Option<crate::network_media::Context>,
@@ -118,12 +132,18 @@ impl Plan {
             source
         };
         policy.allows_media(policy_scope, &source)?;
-        if source.url.is_none()
-            && !source.path.as_ref().unwrap().extension()
-                .and_then(|s| s.to_str())
-                .is_some_and(|s| s.eq_ignore_ascii_case("ivf"))
-        {
-            return Err("Local embedded video decodes original IVF/VP8-intra video only; other containers and element audio are not enabled.".into());
+        let kind = if source.url.is_some() {
+            // A URL suffix never opts network bytes into a different decoder.
+            // Context still validates exactly video/x-ivf before returning data.
+            SourceKind::Ivf
+        } else {
+            let extension = source.path.as_ref().unwrap().extension().and_then(|value| value.to_str()).unwrap_or("");
+            if extension.eq_ignore_ascii_case("ivf") { SourceKind::Ivf }
+            else if extension.eq_ignore_ascii_case("mkv") { SourceKind::LocalMatroska }
+            else { return Err("Local authored video requires the supported IVF or Matroska VP8/PCM16 profile.".into()); }
+        };
+        if kind == SourceKind::LocalMatroska && doc.attr(node, "muted").is_some() {
+            return Err("Authored PCM muting is not implemented; a muted Matroska source was not loaded.".into());
         }
         Ok(Self {
             retired,
@@ -131,10 +151,18 @@ impl Plan {
             raw: raw.into(),
             source,
             limits,
+            audio_limits: None,
+            kind,
             document_origin: location.url.clone(),
             cors_mode,
             network: None,
         })
+    }
+    /// Capture the owning App's audio policy before local muxed IO. Plain
+    /// video plans need no audio authority and retain the existing constructors.
+    pub(crate) fn with_audio_limits(mut self, limits: crate::audio::Limits) -> Self {
+        self.audio_limits = Some(limits);
+        self
     }
     /// Planning validates source selection but grants no network authority.
     /// The owning App supplies this immutable context before worker submission.
@@ -165,7 +193,7 @@ impl Plan {
         self.network = Some(context);
         Ok(self)
     }
-    fn load(&self, cancel: &AtomicBool) -> Result<media::Asset, String> {
+    fn load(&self, cancel: &AtomicBool) -> Result<Asset, String> {
         let check = || {
             if cancel.load(Ordering::Relaxed) || self.retired.load(Ordering::Relaxed) {
                 Err("Embedded video source cancelled.".into())
@@ -174,6 +202,11 @@ impl Plan {
             }
         };
         check()?;
+        let audio_limits = if self.kind == SourceKind::LocalMatroska {
+            if self.source.url.is_some() { return Err("Matroska element audio requires a local source.".into()); }
+            Some(self.audio_limits.ok_or("Local Matroska requires its owning App audio limits before loading.")?)
+        } else { None };
+        let input_limit = audio_limits.map_or(self.limits.input_bytes, |limits| self.limits.input_bytes.min(limits.input_bytes));
         let bytes = if let Some(source) = &self.source.url {
             self.network.as_ref()
                 .ok_or("The selected network video has no owning resource context.")?
@@ -181,12 +214,19 @@ impl Plan {
         } else {
             crate::loader::read_local_media_checked(
                 self.source.path.as_ref().ok_or("Missing local video path.")?,
-                self.limits.input_bytes,
+                input_limit,
                 &check,
             )?
         };
         check()?;
-        media::Clip::load(bytes, self.limits, &check)
+        let asset = if let Some(audio_limits) = audio_limits {
+            let asset = crate::matroska::load(bytes, self.limits, audio_limits, &check)?;
+            Asset { video: asset.video, audio: Some(asset.audio) }
+        } else {
+            Asset::from(media::Clip::load(bytes, self.limits, &check)?)
+        };
+        check()?;
+        Ok(asset)
     }
 }
 
@@ -349,7 +389,7 @@ struct Job {
 }
 pub struct Completion {
     pub plan: Arc<Plan>,
-    pub result: Result<media::Asset, String>,
+    pub result: Result<Asset, String>,
 }
 struct Shared {
     queued: Option<Job>,
@@ -445,6 +485,10 @@ impl Drop for Worker {
 }
 
 #[cfg(test)]
+#[path = "embedded_av_tests.rs"]
+mod av_payload_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     fn location() -> Location {
@@ -529,7 +573,7 @@ mod tests {
             "../../Cargo.toml",
             "https://example.test/clip.ivf",
             "data:video/x-ivf,not-a-file",
-            "scene-av.mkv",
+            "original-tone.wav",
         ] {
             let d = crate::html::parse(&format!("<video src='{source}' controls></video>"));
             let n = authored_node(&d).unwrap();
@@ -743,6 +787,8 @@ mod tests {
         };
         assert!(Arc::ptr_eq(&result.plan, &next));
         let asset = result.result.unwrap();
+        assert!(asset.audio.is_none());
+        let asset = asset.video;
         assert_eq!(
             (
                 asset.clip.width,

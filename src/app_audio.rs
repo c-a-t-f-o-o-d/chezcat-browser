@@ -44,6 +44,10 @@ pub(super) struct Player {
 #[path = "app_audio_retirement_tests.rs"]
 mod audio_retirement_tests;
 
+#[cfg(test)]
+#[path = "app_audio_intent_tests.rs"]
+mod audio_intent_tests;
+
 pub(super) struct SyncState {pub position:Duration,pub desired:Duration,pub pending:bool,pub playing:bool,pub wants_play:bool,pub drained:bool,pub error:Option<String>}
 
 #[cfg(test)]
@@ -209,6 +213,35 @@ impl App {
     }
     pub(super) fn audio_sync_seek(&mut self,position:Duration) {
         if let Some(p)=&mut self.audio {p.suspended=false;let frame=p.clip.frame_at(position);self.submit_audio(Action::Seek {frame,resume:false});}
+    }
+    /// Accepted/already-satisfied desired state, not a device acknowledgement.
+    pub(super) fn audio_sync_play(&mut self) -> bool {
+        if self.retire_audio_source() {return false;}
+        let Some(player) = &mut self.audio else {return false;};
+        if !player.enabled {return false;}
+        let wants_play = if player.pending {player.desired_playing} else {player.playing};
+        if wants_play {return true;}
+        let generation = player.generation;
+        let from = player.desired_frame.unwrap_or(player.frame);
+        player.suspended = false;
+        self.submit_audio(Action::Play {from});
+        self.audio.as_ref().is_some_and(|player| player.enabled && player.source_alive()
+            && player.generation > generation && player.pending && player.desired_playing)
+    }
+    /// A pending real seek keeps its target through submit_audio's existing
+    /// desired-frame rewrite. Pause never seeks to an older observed sample.
+    pub(super) fn audio_sync_pause(&mut self) -> bool {
+        if self.retire_audio_source() {return false;}
+        let Some(player) = &mut self.audio else {return false;};
+        if !player.enabled {return false;}
+        let wants_play = if player.pending {player.desired_playing} else {player.playing};
+        if !wants_play {return true;}
+        let generation = player.generation;
+        let from = player.desired_frame.unwrap_or(player.frame);
+        player.suspended = false;
+        self.submit_audio(Action::Pause {from});
+        self.audio.as_ref().is_some_and(|player| player.enabled && player.source_alive()
+            && player.generation > generation && player.pending && !player.desired_playing)
     }
     pub(super) fn install_audio(&mut self, clip: Option<Arc<Clip>>) {
         self.install_audio_for_source(clip, None);
@@ -538,7 +571,7 @@ impl App {
         let Some(player) = self.audio.as_ref().filter(|player|player.source_alive()) else {
             return format!("Local audio: none\n{owner}Last audio output notice: {notice}\n");
         };
-        let scope=if self.media.is_some(){"Matroska PCM16 track with shared video clock"}else{"standalone integer PCM WAVE"};
-        format!("Local audio: {scope}, native viewer lifecycle (no HTMLMediaElement)\nAudio playing={} ended={} pending={} time_ms={} duration_ms={} frame={} frames={} generation={} error={:?}\nAudio device opened={} queued={} submitted={} retired={} position_unit={:?} retained_buffers={}\n{owner}Audio lifecycle dropped={} {}\nAudio clock: {}; device acceptance/completion does not prove physical audibility; A/V evidence is recorded separately.\nLast audio output notice: {notice}\n",player.playing,player.ended,player.pending,player.clip.time_at(player.frame).as_millis(),player.clip.duration.as_millis(),player.frame,player.clip.frames,player.generation,player.error,player.opened,player.queued,player.submitted,player.retired,player.unit,player.retained,player.dropped,player.events.iter().copied().collect::<Vec<_>>().join(","),if player.opened{"reported device position and returned PCM buffers"}else{"selected metadata sample offset; device not opened"})
+        let scope=if player.source_retired.is_some()&&self.embedded_video.is_some(){"authored local Matroska PCM16 track, script and native controls with acknowledged shared video clock"}else if self.media.is_some(){"Matroska PCM16 track with shared video clock, native viewer lifecycle (no HTMLMediaElement)"}else{"standalone integer PCM WAVE, native viewer lifecycle (no HTMLMediaElement)"};
+        format!("Local audio: {scope}\nAudio playing={} ended={} pending={} time_ms={} duration_ms={} frame={} frames={} generation={} error={:?}\nAudio device opened={} queued={} submitted={} retired={} position_unit={:?} retained_buffers={}\n{owner}Audio lifecycle dropped={} {}\nAudio clock: {}; device acceptance/completion does not prove physical audibility; A/V evidence is recorded separately.\nLast audio output notice: {notice}\n",player.playing,player.ended,player.pending,player.clip.time_at(player.frame).as_millis(),player.clip.duration.as_millis(),player.frame,player.clip.frames,player.generation,player.error,player.opened,player.queued,player.submitted,player.retired,player.unit,player.retained,player.dropped,player.events.iter().copied().collect::<Vec<_>>().join(","),if player.opened{"reported device position and returned PCM buffers"}else{"selected metadata sample offset; device not opened"})
     }
 }

@@ -1,0 +1,48 @@
+<!doctype html><html><head><meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="media-src 'self'">
+<title>Original authored A/V paused journey</title>
+<style>body{margin:12px}h1{font-size:18px;margin:0 0 6px}video{display:block;width:480px;height:360px;object-fit:none;object-position:left top;image-rendering:crisp-edges}p{margin:4px 0;font-size:12px}</style>
+</head><body><h1>Original authored A/V source control</h1>
+<button type="button" id="select-ivf" name="select-ivf">Select video-only IVF</button>
+<button type="button" id="select-mkv" name="select-mkv">Select multiplexed MKV</button>
+<button type="button" id="seek" name="seek">Seek paused to 1.25 seconds</button>
+<button type="button" id="select-eof" name="select-eof">Select paused timeline end</button>
+<a href="authored-av-next.html">Leave</a>
+<video id="player" src="scene-inter-av.mkv" controls width="480" height="360">Original video fallback</video>
+<p id="state">Source pending</p><p id="seek-state">Seek not requested</p>
+<script>
+var video=document.getElementById('player'),initialNode=video,mode='mkv',errors=0,metadata=0,selected=0,events=[],playEvents=0,playingEvents=0,endedEvents=0,seekActive=false,seekOrder=[],seekDone=0,seekTarget=0;
+function render(){
+ document.getElementById('state').textContent='mode='+mode+' selected='+selected+' errors='+errors+' metadata='+metadata+' ready='+video.readyState+' network='+video.networkState+' paused='+(video.paused?1:0)+' ended='+(video.ended?1:0)+' current_ms='+Math.floor(video.currentTime*1000)+' duration_ms='+Math.floor(video.duration*1000)+' raw='+video.getAttribute('src')+' play_events='+playEvents+' playing_events='+playingEvents+' ended_events='+endedEvents+' events='+events.join(',');
+ document.getElementById('seek-state').textContent='seek_done='+seekDone+' seek_target_ms='+Math.floor(seekTarget*1000)+' seek_order='+seekOrder.join(',');
+ document.title='Authored '+mode+' selected '+selected;
+}
+function selectSource(e,next,raw){
+ if(!e.isTrusted||video!==initialNode)throw Error('Source input was not trusted or changed the video element');
+ var attr=video.getAttributeNode('src');mode=next;errors=0;metadata=0;events=[];selected++;playEvents=0;playingEvents=0;endedEvents=0;seekActive=false;seekOrder=[];seekDone=0;seekTarget=0;
+ video.src=raw;video.load();
+ if(video.getAttributeNode('src')!==attr||attr.value!==raw||video.readyState!==0||!video.paused)throw Error('Real source/load reset or Attr identity');
+ render();
+}
+document.getElementById('select-ivf').onclick=function(e){selectSource(e,'ivf','scene-inter.ivf');};
+document.getElementById('select-mkv').onclick=function(e){selectSource(e,'mkv','scene-inter-av.mkv');};
+function seek(e,target){
+ if(!e.isTrusted||!video.paused||video.readyState<2)throw Error('Paused media seek input precondition');
+ seekTarget=target;seekActive=true;seekOrder=[];seekDone=0;video.currentTime=target;
+ if(video.currentTime!==target||!video.seeking||!video.paused)throw Error('Genuine currentTime request projection');render();
+}
+document.getElementById('seek').onclick=function(e){seek(e,1.25);};
+document.getElementById('select-eof').onclick=function(e){if(mode!=='mkv'||video.duration!==3)throw Error('Real MKV EOF metadata');seek(e,video.duration);};
+function record(e){
+ if(e.target!==video||video!==initialNode||!e.isTrusted||e.bubbles||e.cancelable)throw Error('Media event identity');
+ events.push(e.type);if(e.type==='error')errors++;
+ if(e.type==='loadedmetadata'){metadata++;if(video.videoWidth!==64||video.videoHeight!==48||video.duration!==3)throw Error('Actual original source metadata');}
+ if(e.type==='play')playEvents++;if(e.type==='playing')playingEvents++;if(e.type==='ended')endedEvents++;
+ if(mode==='mkv'&&(e.type==='play'||e.type==='playing'||e.type==='ended'))throw Error('This paused-only MKV journey must not play or claim drained end');
+ if(seekActive&&(e.type==='seeking'||e.type==='timeupdate'||e.type==='seeked')){
+  seekOrder.push(e.type);if(e.type==='seeked'){seekDone++;seekActive=false;if(video.seeking||!video.paused||video.currentTime!==seekTarget)throw Error('Actual paused seek completion');}
+ }render();
+}
+for(var name of ['loadstart','durationchange','loadedmetadata','loadeddata','canplay','canplaythrough','play','playing','pause','seeking','timeupdate','seeked','ended','abort','emptied','error'])video.addEventListener(name,record);
+if(typeof video.play!=='function'||typeof video.pause!=='function'||video.canPlayType!==undefined)throw Error('Existing real method scope');render();
+</script></body></html>

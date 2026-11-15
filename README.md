@@ -24,12 +24,13 @@ and licensing obligations; see [third-party notices](THIRD_PARTY_NOTICES.md).
   Visible fixed-canvas version-zero I/P video supports single-vector interframes
   and dependency-aware seeking; SPLITMV and hidden frames remain unsupported.
   One authored HTML video supports native controls, source replacement and real
-  JavaScript load(), issue-time pause(), currentTime seeking and play() with
-  genuine pending promises, measured playback time and decoded frames. Supported
-  video can also load through bounded complete HTTP(S) transactions, including
-  explicit authored crossorigin anonymous/use-credentials modes with real CORS
-  checks. Unmarked foreign sources, dynamic crossOrigin controls, element audio
-  and multiple players remain unsupported.
+  JavaScript load(), pause(), currentTime seeking and play() with pending promises
+  tied to decoded output. Local supported Matroska adds source-bound PCM and
+  acknowledged sample time; routine checks keep audio output closed. Network
+  element video remains IVF-only through bounded complete HTTP(S) transactions,
+  including authored crossorigin anonymous/use-credentials modes with real CORS
+  checks. Network element audio, unmarked foreign sources, dynamic crossOrigin
+  controls, muted Matroska and multiple players remain unsupported.
 - Replaceable main-window animation operations that schedule and cancel real
   callbacks. Child-frame schedulers are unsupported.
 - Original local regression fixtures and App/input/offscreen interaction tests.

@@ -488,42 +488,72 @@ impl App {
     /// Only an acknowledged PCM sample position chooses video presentation.
     /// The video Instant clock is never started in this mode.
     pub(super) fn poll_media_sync(&mut self)->bool {
-        if !self.synchronized_media(){return false;}
-        let Some(audio)=self.audio_sync_state() else{return false;};
+        let controls=self.apply_media_pause();
+        if !self.synchronized_media()||self.embedded_video_retired(){return controls;}
+        let Some(audio)=self.audio_sync_state() else{return controls;};
         let player=self.media.as_mut().unwrap();
-        if player.suspended{return false;}
+        if player.suspended{return controls;}
         if let Some(error)=audio.error {
             let error=format!("Shared PCM output: {error}");
             let changed=player.error.as_ref()!=Some(&error);
             if changed {player.error=Some(error);player.invalidate();player.event("error");if let Some(w)=&self.media_worker{w.cancel();}}
-            player.seeking=false;let sync=player.sync.as_mut().unwrap();sync.playing=false;sync.resume_after_seek=false;return changed;
+            player.seeking=false;let sync=player.sync.as_mut().unwrap();sync.playing=false;sync.resume_after_seek=false;return changed|controls;
         }
         if player.error.is_some() {
             let sync=player.sync.as_mut().unwrap();sync.playing=false;sync.resume_after_seek=false;
-            if audio.wants_play {self.activate_audio(Control::Toggle);return true;}
-            return false;
+            if audio.wants_play {self.audio_sync_pause();return true;}
+            return controls;
         }
-        if audio.pending{return false;}
+        if audio.pending{return controls;}
         let sync=player.sync.as_mut().unwrap();
-        let mut changed=sync.position!=audio.position||sync.playing!=audio.playing||sync.drained!=audio.drained;
+        let mut changed=controls||sync.position!=audio.position||sync.playing!=audio.playing||sync.drained!=audio.drained;
         sync.position=audio.position;sync.playing=audio.playing;sync.drained=audio.drained;
-        self.media_request_frame(Instant::now());
+        // The control pass above owns this boundary. No nested drain may pair
+        // this acknowledged sample with a later control's seek generation.
+        self.media_request_frame_physical(Instant::now());
         let player=self.media.as_mut().unwrap();
+        let mut resume=false;
         if player.seeking&&player.pending.is_none()&&player.displayed==player.clip.index_at(audio.position)&&player.error.is_none() {
-            player.seeking=false;player.event("seeked");changed=true;
-            let resume=std::mem::take(&mut player.sync.as_mut().unwrap().resume_after_seek);
-            // EOF selection is not a request to replay from zero.
-            if resume&&audio.position<player.clip.duration {self.activate_audio(Control::Toggle);}
+            player.seeking=false;
+            if player.embedded {player.event("timeupdate");}
+            player.event("seeked");changed=true;
+            let intent=std::mem::take(&mut player.sync.as_mut().unwrap().resume_after_seek);
+            // EOF selection is not a request to replay from zero. Notification
+            // failure also cannot start the PCM sink after the player stopped.
+            resume=intent&&(!player.embedded||!player.paused)&&player.error.is_none()
+                &&player.decoder_enabled&&audio.position<player.clip.duration;
         }
+        if player.embedded&&!player.paused&&!player.seeking&&player.error.is_none()
+            &&audio.playing&&player.displayed==player.clip.index_at(audio.position)&&!player.dom_playback_started {
+            player.dom_playback_started=true;
+            if player.script_play_waiting {player.record_only("playing");}else{player.event("playing");}
+            changed=true;
+        }
+        if resume&&!self.audio_sync_play() {self.fail_media_sync_command("Play after seek");changed=true;}
         self.finish_media_tick(Instant::now());changed
+    }
+    fn fail_media_sync_command(&mut self,operation:&str) {
+        let problem=self.audio_sync_state().and_then(|s|s.error)
+            .unwrap_or_else(||format!("Shared PCM {operation} command was not admitted."));
+        if let Some(worker)=&self.media_worker {worker.cancel();}
+        if let Some(player)=self.media.as_mut().filter(|p|p.sync.is_some()) {
+            player.invalidate();player.error=Some(problem);player.seeking=false;
+            let sync=player.sync.as_mut().unwrap();sync.playing=false;sync.resume_after_seek=false;
+            player.event("error");
+        }
+        // The existing native cleanup retains owned device buffers until a
+        // genuine Pause/reset succeeds; no output-close or progress is guessed.
+        self.suspend_audio();
     }
     fn synchronized_seek(&mut self,position:Duration,resume:bool) {
         if let Some(w)=&self.media_worker{w.cancel();}
         let Some(p)=&mut self.media else{return;};
         p.invalidate();
-        if !p.decoder_enabled {p.seeking=false;if let Some(s)=&mut p.sync{s.playing=false;s.resume_after_seek=false;}self.suspend_audio();return;}
+        if !p.decoder_enabled {p.seeking=false;if let Some(s)=&mut p.sync{s.playing=false;s.resume_after_seek=false;}p.event("error");self.suspend_audio();return;}
         p.suspended=false;p.error=None;p.ended_reported=false;
-        p.seeking=true;p.event("seeking");let sync=p.sync.as_mut().unwrap();sync.resume_after_seek=resume;sync.drained=false;sync.playing=false;
+        p.seeking=true;p.event("seeking");
+        if !p.decoder_enabled||p.error.is_some() {p.seeking=false;self.suspend_audio();return;}
+        let sync=p.sync.as_mut().unwrap();sync.resume_after_seek=resume;sync.drained=false;sync.playing=false;
         self.audio_sync_seek(position);
         self.finish_media_tick(Instant::now());
     }
@@ -531,13 +561,30 @@ impl App {
         let Some(audio)=self.audio_sync_state()else{return;};
         match control {
             Control::Stop=>self.stop_media(),
-            Control::Seek(x)=>{let(start,width)=self.media_track();let p=self.media.as_ref().unwrap();let resume=audio.wants_play||p.sync.as_ref().unwrap().resume_after_seek;let position=p.clip.duration.mul_f64(f64::from((x-start).clamp(0,width))/f64::from(width));self.synchronized_seek(position,resume);}
+            Control::Seek(x)=>{
+                let(start,width)=self.media_track();let p=self.media.as_ref().unwrap();
+                let resume=if p.embedded {!p.paused}else{audio.wants_play||p.sync.as_ref().unwrap().resume_after_seek};
+                let position=p.clip.duration.mul_f64(f64::from((x-start).clamp(0,width))/f64::from(width));
+                self.synchronized_seek(position,resume);
+            }
             Control::Toggle=>{
+                if self.media.as_ref().is_some_and(|p|p.embedded) {
+                    let p=self.media.as_ref().unwrap();let pause=!p.paused;let position=p.position(Instant::now());
+                    if pause {
+                        self.script_media_pause_physical(Instant::now(),position);
+                        if let Some(p)=&mut self.media {p.event("pause");}
+                    } else {
+                        if let Some(p)=&mut self.media {p.event("play");}
+                        self.script_media_play_physical(Instant::now(),false);
+                    }
+                    return;
+                }
                 let p=self.media.as_mut().unwrap();p.suspended=false;
                 if p.seeking {let s=p.sync.as_mut().unwrap();s.resume_after_seek=!s.resume_after_seek;return;}
                 if !audio.wants_play&&(audio.desired>=p.clip.duration||p.error.is_some()) {let position=if audio.desired>=p.clip.duration{Duration::ZERO}else{audio.desired};self.synchronized_seek(position,true);return;}
                 if audio.wants_play {if let Some(w)=&self.media_worker{w.cancel();}p.invalidate();}
-                self.activate_audio(Control::Toggle);
+                let accepted=if audio.wants_play {self.audio_sync_pause()}else{self.audio_sync_play()};
+                if !accepted {self.fail_media_sync_command("native playback");}
             }
         }
     }
@@ -590,6 +637,19 @@ impl App {
     // play/waiting/PlayingBatch notifications and their Promise identities.
     pub(in crate::app) fn script_media_play_physical(&mut self,issued:Instant,notify_queued:bool)->bool {
         let now=Instant::now();
+        if self.media.as_ref().is_some_and(|p|p.embedded&&p.sync.is_some()) {
+            let target={
+                let p=self.media.as_mut().unwrap();
+                if !p.decoder_enabled||p.error.is_some() {p.script_play_waiting=false;return false;}
+                p.script_play_waiting=true;p.paused=false;p.suspended=false;p.record_only("play");
+                if p.seeking {p.sync.as_mut().unwrap().resume_after_seek=true;return true;}
+                if p.position(now)>=p.clip.duration||p.ended_reported {Some(Duration::ZERO)}
+                else if p.initial_data_pending {Some(p.position(now))}else{None}
+            };
+            if let Some(target)=target {self.synchronized_seek(target,true);return true;}
+            if !self.audio_sync_play() {self.fail_media_sync_command("Play");return false;}
+            return true;
+        }
         let rewind={
             let Some(player)=self.media.as_mut().filter(|p|p.embedded&&p.sync.is_none()) else {return false;};
             if !player.decoder_enabled||player.error.is_some() {player.script_play_waiting=false;return false;}
@@ -620,6 +680,24 @@ impl App {
         player.ended_reported=false;
         player.clock.play(if notify_queued {issued}else{ready});
         if !player.dom_playback_started {player.dom_playback_started=true;player.record_only("playing");}
+        true
+    }
+    // Page already committed the official-position projection and owns its
+    // grouped notifications. PCM Pause reports its real later acknowledgement;
+    // it never seeks the device back to the earlier JS-observed sample.
+    pub(in crate::app) fn script_media_pause_physical(&mut self,issued:Instant,position:Duration)->bool {
+        let Some(player)=self.media.as_mut().filter(|p|p.embedded) else {return false;};
+        player.paused=true;player.dom_playback_started=false;
+        player.script_play_waiting=false;player.record_only("pause");
+        if let Some(sync)=&mut player.sync {
+            sync.resume_after_seek=false;
+            if !self.audio_sync_pause() {self.fail_media_sync_command("Pause");return false;}
+            return true;
+        }
+        player.clock.pause(issued);
+        if player.seek_resume.is_some() {player.seek_resume=Some(false);}
+        debug_assert_eq!(player.clock.position(issued),position);
+        if player.pending.is_none() {player.deadline=None;}
         true
     }
     pub(super) fn suspend_media(&mut self) {
@@ -797,6 +875,11 @@ impl App {
         self.finish_media_tick(now);
     }
     pub(in crate::app) fn media_seek_physical(&mut self, position: Duration, now: Instant) {
+        if self.synchronized_media() {
+            let resume=self.media.as_ref().is_some_and(|p|!p.paused);
+            self.synchronized_seek(position,resume);
+            return;
+        }
         if let Some(worker) = &self.media_worker {
             worker.cancel();
         }
@@ -844,11 +927,35 @@ impl App {
         }
         self.flush_embedded_video();
     }
+    // Both clock kinds use Page's original source-bound Pause task/Promise
+    // capture. true means this native action was handled, including a refusal.
+    fn capture_authored_native_pause(&mut self)->bool {
+        if !self.media.as_ref().is_some_and(|p|p.embedded)||!self.scripts_enabled
+            ||!self.document.scripting_enabled
+            ||!self.scripting.as_ref().is_some_and(|page|page.native_media_pause_enabled()) {return false;}
+        let snapshot=self.embedded_video_snapshot();
+        let mut captured_or_aborted=false;
+        let fault=if let Some(page)=&mut self.scripting {
+            page.set_embedded_video(snapshot);
+            captured_or_aborted=page.pending_media_play_count()==0;
+            page.take_media_play_fault()
+        } else {None};
+        if captured_or_aborted {if let Some(player)=&mut self.media {player.script_play_waiting=false;}}
+        if let Some(problem)=fault {self.fail_media_queue(problem);return true;}
+        let result=self.scripting.as_mut().unwrap()
+            .request_native_media_pause(&mut self.document,&mut self.forms);
+        if let Err(problem)=result {self.fail_media_queue(problem);return true;}
+        self.apply_media_pause();self.flush_embedded_video();true
+    }
     fn media_activate(&mut self, control: Control) {
         // Earlier script controls take effect before the native default. Their
         // notifications remain in the same FIFO ahead of this native action.
         self.apply_media_pause();
-        if self.synchronized_media(){self.synchronized_activate(control);return;}
+        if self.synchronized_media(){
+            if matches!(control,Control::Toggle)&&self.media.as_ref().is_some_and(|p|p.embedded&&!p.paused)
+                &&self.capture_authored_native_pause() {return;}
+            self.synchronized_activate(control);return;
+        }
         if self.audio.is_some() {
             self.activate_audio(control);
             return;
@@ -870,23 +977,7 @@ impl App {
                     .as_ref()
                     .is_some_and(|player| if player.embedded {!player.paused} else {player.clock.playing()})
                 {
-                    if self.media.as_ref().is_some_and(|p|p.embedded) && self.scripts_enabled
-                        && self.document.scripting_enabled
-                        && self.scripting.as_ref().is_some_and(|page|page.native_media_pause_enabled()) {
-                        let snapshot=self.embedded_video_snapshot();
-                        let mut captured_or_aborted=false;
-                        let fault=if let Some(page)=&mut self.scripting {
-                            page.set_embedded_video(snapshot);
-                            captured_or_aborted=page.pending_media_play_count()==0;
-                            page.take_media_play_fault()
-                        } else {None};
-                        if captured_or_aborted {if let Some(player)=&mut self.media {player.script_play_waiting=false;}}
-                        if let Some(problem)=fault {self.fail_media_queue(problem);return;}
-                        let result=self.scripting.as_mut().unwrap()
-                            .request_native_media_pause(&mut self.document,&mut self.forms);
-                        if let Err(problem)=result {self.fail_media_queue(problem);return;}
-                        self.apply_media_pause();self.flush_embedded_video();return;
-                    }
+                    if self.capture_authored_native_pause() {return;}
                     if let Some(worker) = &self.media_worker {
                         worker.cancel();
                     }
@@ -1106,7 +1197,7 @@ impl App {
             }
             _ => None,
         });
-        let scope=if player.embedded{"authored HTML video, IVF/VP8 intra, script load/play/pause/currentTime and native controls; no element audio/MSE"}else if player.sync.is_some(){"local Matroska VP8 intra + PCM16, device-sample clock; native viewer events (no HTMLMediaElement)"}else{"standalone IVF/VP8 intra, video only; native viewer events (no HTMLMediaElement)"};
+        let scope=if player.embedded&&player.sync.is_some(){"authored local Matroska VP8/PCM16, acknowledged sample clock, script load/play/pause/currentTime and native controls; no streaming/MSE"}else if player.embedded{"authored HTML video, IVF/VP8, script load/play/pause/currentTime and native controls; video only, no MSE"}else if player.sync.is_some(){"local Matroska VP8/PCM16, device-sample clock; native viewer events (no HTMLMediaElement)"}else{"standalone IVF/VP8, video only; native viewer events (no HTMLMediaElement)"};
         element+&format!("Local video: {scope}\nMedia playing={} ended={} time_ms={} duration_ms={} frame={} frames={} pending={:?} canvas={}x{} generation={} error={:?}\nMedia timeline_eof={}\nMedia lifecycle dropped={} {}\nMedia rendered rect={rect:?}\n",player.playing(),player.ended_reported,player.position(Instant::now()).as_millis(),player.clip.duration.as_millis(),player.displayed,player.clip.frame_count(),player.pending,player.clip.width,player.clip.height,player.generation,player.error,player.position(Instant::now())>=player.clip.duration,player.dropped,player.events.iter().copied().collect::<Vec<_>>().join(","))
     }
     pub(super) fn input_media_action(&mut self, action: &str) -> Result<(i32, i32), String> {
