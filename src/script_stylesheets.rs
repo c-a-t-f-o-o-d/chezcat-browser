@@ -3,6 +3,8 @@
 //! or load event is invented when a request is blocked or canceled.
 use super::*;
 use std::collections::VecDeque;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 const MAX_STYLESHEET_REQUESTS: usize = crate::loader::MAX_STYLESHEETS;
 
@@ -11,6 +13,9 @@ pub struct DynamicStylesheet {
     pub limits: crate::css::StylesheetLimits,
     pub node: usize,
     pub generation: u64,
+    /// Immutable request mode and source lifetime, shared with the HTTP worker.
+    pub same_origin_only: bool,
+    pub cancel: Arc<AtomicBool>,
     pub target: crate::navigation::Location,
     pub origin: crate::navigation::Location,
     pub nonce: Option<String>,
@@ -30,6 +35,7 @@ struct SheetKey {
 struct SheetEntry {
     key: Option<SheetKey>,
     generation: u64,
+    cancel: Arc<AtomicBool>,
 }
 
 #[derive(Default)]
@@ -79,14 +85,18 @@ impl Page {
         self.state.stylesheets.pending.clear();
         self.state.stylesheets.in_flight = 0;
         for entry in self.state.stylesheets.entries.values_mut() {
-            entry.generation += 1;
+            entry.cancel.store(true, Ordering::Release);
+            entry.generation = entry.generation.saturating_add(1);
         }
     }
 
     /// Generation ownership remains meaningful after an author load callback.
     pub fn owns_dynamic_stylesheet(&self, request: &DynamicStylesheet) -> bool {
         self.state.stylesheets.entries.get(&request.node)
-            .is_some_and(|entry| entry.key.is_some() && entry.generation == request.generation)
+            .is_some_and(|entry| entry.key.is_some()
+                && entry.generation == request.generation
+                && Arc::ptr_eq(&entry.cancel, &request.cancel)
+                && !request.cancel.load(Ordering::Acquire))
     }
 
     pub fn accepts_dynamic_stylesheet(&self, doc: &Document, request: &DynamicStylesheet) -> bool {
@@ -276,9 +286,14 @@ impl Bridge<'_> {
         if entry.key == key {
             return Ok(());
         }
-        entry.generation += 1;
+        // Retire the exact old source before a worker can follow another hop.
+        // Token identity also keeps ownership exact if the counter saturates.
+        entry.cancel.store(true, Ordering::Release);
+        entry.cancel = Arc::new(AtomicBool::new(false));
+        entry.generation = entry.generation.saturating_add(1);
         entry.key = key.clone();
         let generation = entry.generation;
+        let cancel = entry.cancel.clone();
         self.state.stylesheets.removed.insert(node);
         if let Some(geometry) = &mut self.state.geometry {
             geometry.set_stylesheet(node, None);
@@ -308,6 +323,7 @@ impl Bridge<'_> {
             .as_ref()
             .map(|location| location.source.clone())
             .unwrap_or_else(crate::navigation::Location::home);
+        let same_origin_only = key.crossorigin.is_some();
         let prepare = (|| {
             if key
                 .integrity
@@ -324,15 +340,9 @@ impl Bridge<'_> {
                 .url
                 .as_ref()
                 .ok_or("Dynamic stylesheets currently require HTTP or HTTPS URLs.")?;
-            if origin
-                .url
-                .as_ref()
-                .is_none_or(|origin| !origin.same_origin(url))
-            {
-                return Err(
-                    "Dynamic stylesheets must have the document's scheme, host and port.".into(),
-                );
-            }
+            let origin_url = origin.url.as_ref()
+                .ok_or("Local pages do not automatically fetch network stylesheets.")?;
+            crate::http::check_stylesheet_request(origin_url, url, same_origin_only)?;
             self.state
                 .dynamic
                 .policy
@@ -347,6 +357,8 @@ impl Bridge<'_> {
             limits: self.doc.stylesheet_limits,
             node,
             generation,
+            same_origin_only,
+            cancel,
             target,
             origin,
             nonce: key.nonce,
@@ -355,5 +367,65 @@ impl Bridge<'_> {
         });
         self.state.stylesheets.in_flight += 1;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod source_lifetime_tests {
+    use super::*;
+    fn start()->(Document,Forms,Page) {
+        let mut doc=crate::html::parse("<html><head></head><body><div id=target>Original target</div></body></html>");doc.scripting_enabled=true;
+        let mut forms=Forms::new(&doc);let mut page=Page::for_test();
+        let origin=crate::navigation::address("https://original.test/page",&crate::navigation::Location::home()).unwrap();
+        page.set_location(&origin);page.set_resource_base(&origin);
+        let result=page.start(&mut doc,&mut forms,&[Script{node:0,label:"Original stylesheet lifetime".into(),source:"var loads=0,errors=0,sheet=document.createElement('link');sheet.rel='stylesheet';sheet.href='/one.css';sheet.onload=function(){loads++;};sheet.onerror=function(){errors++;};document.head.appendChild(sheet);".into()}]);
+        assert_eq!(result.errors,0,"{}",page.report());(doc,forms,page)
+    }
+    fn eval(doc:&mut Document,forms:&mut Forms,page:&mut Page,source:&str) {
+        let out=page.console_eval(doc,forms,source);assert_eq!(out.errors,0,"{}",page.report());
+    }
+    #[test]
+    fn stylesheet_source_mutations_retire_exact_request_and_snapshot_crossorigin_mode() {
+        for (mutation,marked) in [("sheet.href='/two.css';",false),("sheet.nonce='fresh';",false),("sheet.crossOrigin='anonymous';",true)] {
+            let (mut doc,mut forms,mut page)=start();
+            let old=page.take_dynamic_stylesheets().pop_front().unwrap();assert!(!old.same_origin_only);
+            eval(&mut doc,&mut forms,&mut page,mutation);
+            let next=page.take_dynamic_stylesheets().pop_front().unwrap();
+            assert!(old.cancel.load(Ordering::Acquire));assert!(!next.cancel.load(Ordering::Acquire));
+            assert!(!page.owns_dynamic_stylesheet(&old));assert!(page.owns_dynamic_stylesheet(&next));
+            assert_eq!(next.same_origin_only,marked);assert!(!old.same_origin_only,"prepared request mode changed");
+            assert_eq!(page.state.stylesheets.in_flight,2);
+            let mut styles=HashMap::new();
+            let stale=page.complete_dynamic_stylesheet(&mut doc,&mut forms,&mut styles,&old,Ok("#target{width:999px}".into()));
+            assert_eq!(stale.errors,0);assert!(styles.is_empty());assert_eq!(page.state.stylesheets.in_flight,1);
+            let current=page.complete_dynamic_stylesheet(&mut doc,&mut forms,&mut styles,&next,Ok("#target{width:73px}".into()));
+            assert_eq!(current.errors,0);assert_eq!(styles.get(&next.node).map(String::as_str),Some("#target{width:73px}"));
+            assert_eq!(page.state.stylesheets.in_flight,0);
+            eval(&mut doc,&mut forms,&mut page,"if(loads!==1||errors!==0)throw 'stale stylesheet events';");
+        }
+    }
+    #[test]
+    fn stylesheet_disable_detach_and_stop_retire_active_source_without_phantom_tasks() {
+        for action in ["sheet.disabled=true;","document.head.removeChild(sheet);","stop"] {
+            let(mut doc,mut forms,mut page)=start();let old=page.take_dynamic_stylesheets().pop_front().unwrap();
+            if action=="stop" {page.clear_host_requests();} else {eval(&mut doc,&mut forms,&mut page,action);}
+            assert!(old.cancel.load(Ordering::Acquire));assert!(!page.owns_dynamic_stylesheet(&old));assert!(page.take_dynamic_stylesheets().is_empty());
+            // App consumes the actual cascade-removal notification separately
+            // from the worker completion; a standalone Page must do so too.
+            let removed=page.take_stylesheet_removals();assert_eq!(removed.len(),1);assert!(removed.contains(&old.node));
+            let mut styles=HashMap::new();let out=page.complete_dynamic_stylesheet(&mut doc,&mut forms,&mut styles,&old,Ok("#target{width:999px}".into()));
+            assert_eq!(out.errors,0);assert!(styles.is_empty());assert_eq!(page.state.stylesheets.in_flight,0);assert!(!page.has_host_tasks());
+            eval(&mut doc,&mut forms,&mut page,"if(loads!==0||errors!==0)throw 'retired stylesheet event';");
+        }
+    }
+    #[test]
+    fn stylesheet_source_token_preserves_ownership_when_generation_counter_saturates() {
+        let(mut doc,mut forms,mut page)=start();let old=page.take_dynamic_stylesheets().pop_front().unwrap();
+        page.state.stylesheets.entries.get_mut(&old.node).unwrap().generation=u64::MAX;
+        eval(&mut doc,&mut forms,&mut page,"sheet.href='/two.css';");
+        let first=page.take_dynamic_stylesheets().pop_front().unwrap();assert_eq!(first.generation,u64::MAX);
+        eval(&mut doc,&mut forms,&mut page,"sheet.href='/three.css';");
+        let second=page.take_dynamic_stylesheets().pop_front().unwrap();assert_eq!(second.generation,u64::MAX);
+        assert!(first.cancel.load(Ordering::Acquire));assert!(!page.owns_dynamic_stylesheet(&first));assert!(page.owns_dynamic_stylesheet(&second));
     }
 }

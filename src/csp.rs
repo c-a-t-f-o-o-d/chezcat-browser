@@ -29,8 +29,8 @@ pub struct PolicySet {
     blocked_from: Option<usize>,
     diagnostics: Vec<String>,
     // Full cross-origin embedder isolation is outside this subset. An enforced
-    // restrictive policy conservatively retains exact-origin script loading.
-    restrict_cross_origin_scripts: bool,
+    // restrictive policy conservatively retains exact-origin script and stylesheet loading.
+    restrict_cross_origin_resources: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -139,8 +139,8 @@ impl PolicySet {
     pub fn add_embedder_header(&mut self, value: &str) {
         let token = value.split(';').next().unwrap_or("").trim();
         if matches!(token, "require-corp" | "credentialless") {
-            self.restrict_cross_origin_scripts = true;
-            self.note("Cross-Origin-Embedder-Policy: restrictive policy present; cross-origin scripts are conservatively declined because full embedder-policy isolation is not implemented.".into());
+            self.restrict_cross_origin_resources = true;
+            self.note("Cross-Origin-Embedder-Policy: restrictive policy present; cross-origin scripts and stylesheets are conservatively declined because full embedder-policy isolation is not implemented.".into());
         }
     }
 
@@ -227,7 +227,7 @@ impl PolicySet {
         nonce: Option<&str>,
         target: &Location,
     ) -> Result<(), String> {
-        if self.restrict_cross_origin_scripts
+        if self.restrict_cross_origin_resources
             && self
                 .origin
                 .as_ref()
@@ -337,6 +337,14 @@ impl PolicySet {
         nonce: Option<&str>,
         target: &Location,
     ) -> Result<(), String> {
+        if self.restrict_cross_origin_resources
+            && self.origin.as_ref().is_none_or(|origin| match (&origin.url, &target.url) {
+                (Some(origin), Some(target)) => !origin.same_origin(target),
+                _ => origin != target,
+            })
+        {
+            return Err("Cross-Origin-Embedder-Policy requires the document's exact origin for stylesheets in this build.".into());
+        }
         for policy in self.active(node)? {
             if let Some(list) = policy
                 .style_elements
@@ -822,6 +830,24 @@ mod tests {
         p.add_embedder_header("require-corp");
         p.add_embedder_header("unsafe-none");
         assert!(p.allows_external(1, None, &other).is_err());
+    }
+
+    #[test]
+    fn restrictive_embedder_headers_decline_foreign_styles_even_with_nonce() {
+        let same = location("https://example.test/screen.css");
+        let foreign = location("https://cdn.test/screen.css");
+        for header in ["require-corp", "credentialless", "require-corp; report-to=endpoint"] {
+            let mut p = policy("style-src 'nonce-Allowed'");
+            assert!(p.allows_external_style(1, Some("Allowed"), &foreign).is_ok());
+            p.add_embedder_header(header);
+            assert!(p.allows_external_style(1, Some("Allowed"), &same).is_ok());
+            assert!(p.allows_external_style(1, Some("Allowed"), &foreign).unwrap_err().contains("Embedder"));
+            p.add_embedder_header("unsafe-none");
+            assert!(p.allows_external_style(1, Some("Allowed"), &foreign).is_err());
+        }
+        let mut p = policy("style-src https:");
+        p.add_embedder_header("unsafe-none");
+        assert!(p.allows_external_style(1, None, &foreign).is_ok());
     }
 
     #[test]

@@ -1,0 +1,5 @@
+html,body { margin:0; padding:0; }
+#same { display:block; width:64px; height:18px; margin:0; padding:0; background-color:#1a7b3c; }
+#target { display:block; width:26px; height:14px; margin:0; padding:0; background-color:#bb3311; }
+#tail { display:block; width:5px; height:5px; margin:0; padding:0; background-color:#df9b12; }
+#control { display:block; width:4px; height:4px; margin:6px 0 0; padding:0; }

@@ -6,6 +6,11 @@ Development priority is shared TLS/trust/data coverage, everyday resource/render
 interaction usability, then finite tabs, link context and new windows. Further
 F6/YouTube work is deferred; completed finite media/interface slices remain.
 
+- Load ordinary unmarked cross-origin stylesheets through the shared
+  HTTP/CSS path with per-hop policy, cookie, MIME/CORP/COEP, safe cache reuse and
+  source cancellation, including rejected-body accounting and original local
+  request/pixel/lifecycle regressions. General stylesheet CORS, imports and CSSOM
+  rules remain unsupported; broader page usability is still in progress.
 - Expand browser-owned trust data to a pinned, conservative 98-authority Mozilla
   NSS subset with retained MPL notices, offline reproducibility and a reviewed
   verifier-source hash gate. Share a 1024-root capacity across PEM/store/TLS

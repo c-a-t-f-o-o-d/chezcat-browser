@@ -69,18 +69,125 @@ legacy redirects, actual failed-hop/phase evidence, body bounds/prevalidation,
 status/marker separation and metadata handling. Full normal integration,
 release/CLI execution and coordinated public-host outcomes remain separate gates.
 
-Next, perform a meaningful coordinated recheck of shared trust/data authority
-through ordinary document, redirect and subresource paths, retaining original
-TLS/X.509/App fixtures. Distinguish anchor/path coverage from parser refusal,
-protocol/timeout and intentional host-policy denial. Preserve certificate
-validation, origins, CSP, cookies, cancellation and checked bounds; no challenge
-interaction is authorized by this contract. These data/native/tool results
-establish no new live compatibility, HTTP access or page-usability outcome.
+Coordinated document checks distinguish improvements in trusted-path coverage
+from remaining chain/parser failures, timeouts and intentional admission refusals.
+Continue resource-specific investigation with the original TLS/X.509/App fixtures.
+Preserve certificate validation, origins, CSP, cookies, cancellation and checked
+bounds. Document responses do not establish page usability, challenge clearance or
+general TLS compatibility; no challenge interaction is authorized here.
 
 Proceed to demonstrated everyday resource/render/input gaps after that recheck,
 then finite tabs, link contexts and windows; perfect TLS coverage is not a
 prerequisite for all later page work. Completed media slices remain supported;
 further F6/YouTube work is deferred.
+
+## B1 — ordinary unmarked external stylesheets
+
+Status: in progress for broader page usability. The bounded stylesheet path and
+original native/App regressions are implemented; normal verification is required
+for every integration checkpoint.
+
+Load parser-authored and genuinely inserted unmarked LINK stylesheets over
+HTTP(S), including legitimate foreign origins and redirects, using the existing
+HTTP client and CSS renderer. Apply original request blocking, element nonce/CSP,
+mixed-content and cancellation checks before each destination. Restrictive COEP
+and response CORP remain enforced. Include credentials only through the existing
+cookie host/path/Secure/SameSite rules and retain eligible response cookie effects
+even when CSS publication is refused. Scripts, images, fonts and local-file
+resources gain no new network permission.
+
+Charge complete decoded response bodies even after policy or post-read refusal;
+redirects share the request byte allowance. Require complete bounded responses
+and unambiguous text/css for foreign sheets;
+retain foreign taint across redirects returning to the document origin. Preserve
+final-response CSS URL provenance. Cache reuse must reauthorize all redirect
+destinations for the consuming element's mode/nonce/CSP, and nonempty integrity
+declines before network or reuse while verification is unsupported. Any present
+crossorigin attribute keeps the current same-origin subset; this does not claim
+general stylesheet CORS. CSS imports and CSSOM rule/source access remain absent.
+
+Dynamic source/mode/nonce changes, disabling, removal, Stop and navigation retire
+the exact old request. Stale completion cannot paint or deliver author load/error
+events, and accepted/retired work settles its real loading counts. Keep source,
+decode, aggregate CSS and worker bounds and existing recovery behavior.
+
+Acceptance: original owned two-origin parser/dynamic and redirected requests;
+applied geometry and independently checked pixels; final CSS base and safe reuse;
+pre-contact CSP/request/mode/mixed-content/integrity refusals; wrong/missing/
+ambiguous MIME, CORP/COEP and incomplete response negatives; cookie/redirect
+isolation; held-request replacement/Stop/navigation and capacity recovery.
+Ordinary source/rule reads remain unavailable after foreign CSS applies. Neither
+HTTP200 nor one fixture establishes complete CSS or public-page compatibility.
+
+## B2 — finite tabs, link context and new windows
+
+Status: planned after the first meaningful B1 milestone. Provide new/switch/close
+tabs and link actions for new tabs or ChezCat windows, including supported middle/
+Ctrl-click and keyboard actions. Keep independent page/history/scroll/loading and
+address/title state with deliberate shared profile/cookies. Acceptance must prove
+current-page preservation, tab-scoped Back/Forward, focus transfer, bounded inactive
+work and no worker/script/media completion crossing a closed or different owner.
+
+## A1 — About and running-build identity
+
+Status: planned for a suitable validated UI checkpoint. Show the exact embedded
+product SemVer including prerelease, source/build identity where recorded, and
+development versus published-build status without requiring Git at runtime. Keep
+product and license versions separate; expose exact LICENSE/scope/third-party
+notices offline. Copy build information excludes personal paths/profile/history;
+a locally displayed executable location is not automatically copied or sent.
+Acceptance includes real keyboard/copy behavior and agreement with the running
+packaged/development executable. Integrate update controls only as delivered.
+
+## I1 — one Windows installation package
+
+Status: planned after the first B1/B2 milestones. Prefer one per-user x64 MSI,
+retaining the portable ZIP and complete exact validated runtime payload, trust
+provenance, assets/pages and license/notices. Use standard Windows installation,
+shortcuts and uninstall registration, without a privileged updater service or
+developer-tool requirement. Keep profiles/settings/bookmarks/custom trust and
+acceptance receipts outside replaced program files; do not overwrite a running
+executable or change browser/OS trust defaults.
+
+Choose and test monotonic MSI numeric versions, full SemVer and prerelease/channel
+identity before publication. Isolated acceptance covers fresh install/launch,
+upgrade, supported repair/reinstall, cancel/failure recovery, uninstall and data
+preservation. Report code-signing status honestly; no protection-disabling or
+self-signed consumer-trust shortcut is part of installation.
+
+## U1 — opt-in published-release discovery
+
+Status: planned with delivery work. Provide a persisted Check for updates on
+startup toggle, default OFF, and a manual Check for updates now action. Enabled
+work is asynchronous, bounded, rate-limited and cancellable, never startup-
+blocking. OFF makes no unsolicited update request. Keep useful checking/current/
+available/offline/error states, version/notes and a safe official release action.
+
+Use authenticated HTTPS separate from page navigation, without page cookies,
+accounts, device identifiers, telemetry or history. Disclose ordinary connection
+metadata sent to the official release host. Discover actual published milestone
+releases, excluding drafts, branch builds and Actions artifacts. Compare full
+versions and alpha/stable channels deliberately, with no silent stable-to-alpha
+enrolment or downgrade; latest-stable-only discovery is insufficient for alpha.
+Original local fixtures prove persistence, zero-contact OFF, eligible versions,
+malformed/oversized data, cancellation/TLS/offline/rate-limit handling and honest
+failure states. Routine CI does not poll live releases.
+
+## U2 — explicitly approved authenticated upgrade
+
+Status: planned after I1 and an implemented authenticity/recovery mechanism.
+Checking does not approve download, install, termination, restart or new terms.
+Before execution verify product/architecture/channel/version, complete hash and
+authenticated publisher/signature or an explicitly designed authenticated manifest;
+a nearby checksum alone is not publisher authentication. Reuse the chosen package
+mechanism, stage outside active files, preserve data and require explicit restart
+and changed-terms acceptance. Silent unattended installation is separate scope.
+
+Original isolated acceptance covers wrong/truncated/replayed/downgrade/unauthentic
+packages, cancellation, failed/interrupted upgrade and actual recoverable success.
+Until this passes, U1 may open the official download page but does not claim a
+self-updater. An authenticity blocker affects U2 execution, not ordinary browsing
+development or release discovery.
 
 ## F1 — replaceable animation-frame operations
 

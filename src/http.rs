@@ -25,6 +25,17 @@ mod network_tests;
 mod media_cors;
 pub(crate) use media_cors::Credentials as MediaCredentials;
 
+#[path = "http_stylesheet.rs"]
+mod stylesheet;
+pub(crate) use stylesheet::{check_request as check_stylesheet_request, StylesheetFailure, StylesheetResponse};
+
+// Only these two resource modes need additional redirect/credential state.
+// Other callers retain the existing transport and exact-origin arguments.
+enum ResourceFetch<'origin, 'state> {
+    Media(media_cors::Config<'origin>),
+    Stylesheet(&'state mut stylesheet::State<'origin>),
+}
+
 const MAX_BODY_BYTES: usize = 512 * 1024 * 1024;
 pub const MAX_FORM_BYTES: usize = 128 * 1024;
 pub const USER_AGENT: &str = concat!("ChezCat/", env!("CARGO_PKG_VERSION"));
@@ -179,7 +190,7 @@ fn fetch_in_pool(
     document: bool,
     classic_origin: Option<&HttpUrl>,
     resource_guard: Option<&ResourceFilter<'_>>,
-    media: Option<media_cors::Config<'_>>,
+    resource: Option<ResourceFetch<'_, '_>>,
 ) -> Result<Response, String> {
     let cancel = pool.cancel;
     if limit > MAX_BODY_BYTES {
@@ -198,7 +209,11 @@ fn fetch_in_pool(
         pool.cookie_origin.as_ref(),
         pool.cookie_context,
     );
-    let mut media = media.map(media_cors::State::new).transpose()?;
+    let (mut media, mut stylesheet) = match resource {
+        Some(ResourceFetch::Media(config)) => (Some(media_cors::State::new(config)?), None),
+        Some(ResourceFetch::Stylesheet(state)) => (None, Some(state)),
+        None => (None, None),
+    };
     // Once a classic-script redirect leaves its document origin, credentials
     // remain omitted for the rest of the chain, even when it returns.
     let mut resource_credentials = true;
@@ -211,7 +226,7 @@ fn fetch_in_pool(
     let result = (|| {
         for redirects in 0..=MAX_REDIRECTS {
             check(cancel, deadline)?;
-            if same_origin.is_some() || classic_origin.is_some() || script_origin.is_some() || media.is_some() {
+            if same_origin.is_some() || classic_origin.is_some() || script_origin.is_some() || media.is_some() || stylesheet.is_some() {
                 // Check every automatic destination before DNS, connecting
                 // or sending bytes, including a permitted URL's redirect.
                 // User-initiated document navigation remains unrestricted.
@@ -234,6 +249,12 @@ fn fetch_in_pool(
                     return Err(error);
                 }
                 resource_credentials &= current.same_origin(origin);
+            }
+            if let Some(stylesheet) = stylesheet.as_deref_mut() {
+                if let Err(error) = stylesheet.prepare(&current) {
+                    pool.network.blocked(&current.display(), kind, &error);
+                    return Err(error);
+                }
             }
             if let Some(guard) = resource_guard {
                 if let Err(error) = guard(&current) {
@@ -274,6 +295,8 @@ fn fetch_in_pool(
             events.push(format!("{} {address}", outgoing.method()));
             let cookie_same_site = if let Some(media) = &media {
                 media.same_site(&current)
+            } else if let Some(stylesheet) = stylesheet.as_deref() {
+                stylesheet.same_site(&current)
             } else if document {
                 document_cookie_context.is_same_site(&current)
             } else {
@@ -304,16 +327,19 @@ fn fetch_in_pool(
                     outgoing.body().len()
                 ));
             }
+            let response_limit = stylesheet.as_deref()
+                .map_or(limit, |stylesheet| limit.min(stylesheet.remaining_bytes()));
             let (message, protocol) = pool.exchange(
                 &current,
                 &outgoing,
                 &request,
-                limit,
+                response_limit,
                 deadline,
                 retain,
                 &mut events,
                 kind,
                 document,
+                stylesheet.as_deref_mut(),
             )?;
             events.push(
                 if is_redirect(message.status) && header(&message.headers, "location").is_some() {
@@ -339,7 +365,7 @@ fn fetch_in_pool(
                 .map(|(_, value)| value);
             let mut accepted = 0;
             let mut declined = 0;
-            let can_store_cookies = media.as_ref().map_or_else(|| document
+            let can_store_cookies = stylesheet.is_some() || media.as_ref().map_or_else(|| document
                 || resource_credentials
                     && same_origin
                         .or(classic_origin)
@@ -350,7 +376,7 @@ fn fetch_in_pool(
                     && pool
                         .cookies
                         .as_ref()
-                        .is_some_and(|cookies| (if media.is_some() {
+                        .is_some_and(|cookies| (if media.is_some() || stylesheet.is_some() {
                             cookies.set_http_subresource(&current, value, cookie_same_site)
                         } else { cookies.set_http(&current, value) }).is_ok())
                 {
@@ -366,6 +392,9 @@ fn fetch_in_pool(
             // A denied response never becomes usable media, but is not rolled
             // back into an invented transaction over the cookie store.
             if let Some(media) = &media { media.check_response(&message.headers)?; }
+            if let Some(stylesheet) = stylesheet.as_deref() {
+                stylesheet.check_response(&current, &message.headers)?;
+            }
             if is_redirect(message.status) {
                 if let Some(location) = unique_header(&message.headers, "location")? {
                     if redirects == MAX_REDIRECTS {
@@ -393,6 +422,7 @@ fn fetch_in_pool(
                     // one registrable domain are not a cross-site hop.
                     document_cookie_context.redirect(&current, &next);
                     if let Some(media) = &mut media { media.redirect(&current, &next); }
+                    if let Some(stylesheet) = stylesheet.as_deref_mut() { stylesheet.redirect(&current, &next); }
                     current = next;
                     continue;
                 }
@@ -810,6 +840,25 @@ impl<'a> Pool<'a> {
         )
     }
 
+    /// Ordinary stylesheet GET: include credentials with real SameSite context.
+    /// Marked CORS requests retain exact-origin support in this finite slice.
+    /// The per-element guard and Pool filter run before DNS on every hop.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn fetch_stylesheet(
+        &self, url: &HttpUrl, limit: usize, origin: &HttpUrl,
+        mode: FetchMode, same_origin_only: bool, guard: &ResourceFilter<'_>,
+    ) -> Result<StylesheetResponse, StylesheetFailure> {
+        let mut stylesheet = stylesheet::State::new(origin, same_origin_only, limit);
+        let response = fetch_in_pool(self, url, &Request::Get, limit, None, mode,
+            true, "CSS", false, None, Some(guard),
+            Some(ResourceFetch::Stylesheet(&mut stylesheet)))
+            .map_err(|message| stylesheet.failure(message))?;
+        if self.cancel.load(Ordering::Acquire) {
+            return Err(stylesheet.failure(failure_with_activity("HTTP request cancelled.".into(), &response.events)));
+        }
+        stylesheet.finish(response)
+    }
+
     /// Explicit CORS-mode media GET only. Same-origin/basic requests retain
     /// ordinary credential semantics; foreign/redirected responses require the
     /// actual CORS response checks and immutable per-element guard at every hop.
@@ -818,7 +867,7 @@ impl<'a> Pool<'a> {
         credentials: MediaCredentials, mode: FetchMode, guard: &ResourceFilter<'_>,
     ) -> Result<Response, String> {
         fetch_in_pool(self, url, &Request::Get, limit, None, mode, true, "media", false,
-            None, Some(guard), Some(media_cors::Config { origin, credentials }))
+            None, Some(guard), Some(ResourceFetch::Media(media_cors::Config { origin, credentials })))
     }
 
     /// Classic script inclusion only: same-origin HTTP(S), or HTTPS from an
@@ -1000,6 +1049,7 @@ impl<'a> Pool<'a> {
         events: &mut Vec<String>,
         kind: &'static str,
         document: bool,
+        mut stylesheet: Option<&mut stylesheet::State<'_>>,
     ) -> Result<(Message, Option<&'static str>), String> {
         for attempt in 0..2 {
             let trace = self.network.begin(outgoing.method(), &url.display(), kind);
@@ -1061,16 +1111,22 @@ impl<'a> Pool<'a> {
                             ""
                         },
                     );
-                    if retain && message.reusable && connection.stream.reusable() {
-                        check(self.cancel, deadline)?;
-                        lease.retain()?;
-                    } else {
-                        // Completed framed data remains valid if the peer has
-                        // already closed before our closing alert is delivered.
-                        if let Err(error) = connection.stream.close() {
-                            events.push(format!("TLS closing alert could not be sent: {error}"));
+                    // The complete decoded body must remain charged even if
+                    // cancellation/deadline or retention rejects the handoff.
+                    complete_response(stylesheet.as_deref_mut(), message.body.len(), || {
+                        let connection = lease.connection.as_mut().unwrap();
+                        if retain && message.reusable && connection.stream.reusable() {
+                            check(self.cancel, deadline)?;
+                            lease.retain()?;
+                        } else {
+                            // Completed framed data remains valid if the peer has
+                            // already closed before our closing alert is delivered.
+                            if let Err(error) = connection.stream.close() {
+                                events.push(format!("TLS closing alert could not be sent: {error}"));
+                            }
                         }
-                    }
+                        Ok(())
+                    })?;
                     return Ok((message, protocol));
                 }
                 Err(error) => {
@@ -1095,6 +1151,17 @@ impl<'a> Pool<'a> {
         }
         Err("HTTP connection retry limit reached.".into())
     }
+}
+
+/// Preserve known stylesheet body accounting before the existing post-read
+/// handoff. Other resources run that same handoff without a stylesheet observer.
+fn complete_response(
+    stylesheet: Option<&mut stylesheet::State<'_>>,
+    bytes: usize,
+    handoff: impl FnOnce() -> Result<(), String>,
+) -> Result<(), String> {
+    if let Some(stylesheet) = stylesheet { stylesheet.received(bytes)?; }
+    handoff()
 }
 
 impl Lease<'_, '_> {

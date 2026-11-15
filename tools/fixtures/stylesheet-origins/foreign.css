@@ -1,0 +1,3 @@
+/* Original external stylesheet; the final selectors independently alter both geometry and paint. */
+#target { width:91px; height:27px; background-color:#2356a9; }
+#tail { width:11px; height:9px; background-color:#bc19d7; }

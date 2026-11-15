@@ -1,0 +1,24 @@
+{
+  "method": "Original HTML/CSS fixture without external assets; original independently specified RGB image control in the runner.",
+  "files": {
+    "page.html": {
+      "bytes": 411,
+      "sha256": "fc2157bbc567dd3812c7c1b1d83a1578fd95a09e925cd77fae59f6fef47dd02f"
+    },
+    "same.css": {
+      "bytes": 404,
+      "sha256": "a0ebd943b8e82b226224e9315ac02cb9d4fb494b7b9a2f9c361e0f9fdc590702"
+    },
+    "foreign.css": {
+      "bytes": 224,
+      "sha256": "bf1b2e385284b621040531645e307d17d5c56d8de4276262135f4a511c60ded8"
+    }
+  },
+  "response_substitution": "Only owned loopback origin strings and finite original LINK/script cases.",
+  "reference_control": {
+    "width": 4,
+    "height": 4,
+    "format": "P6 RGB8",
+    "pixels": "48 fixed original RGB component bytes in runner REFERENCE."
+  }
+}
