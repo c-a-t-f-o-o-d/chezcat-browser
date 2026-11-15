@@ -1,68 +1,83 @@
-# Development and release process
+# Development and releases
 
-The source preview stays at historical 0.78 / Cargo0.78.0. Ordinary commits no
-longer bump the product version. Work on short-lived feat/fix/security/docs
-branches and integrate through PRs. One maintainer may self-review with that fact
-recorded; do not configure an impossible second-human approval requirement.
-Use release/0.x only for an actually maintained parallel line.
+Use tested main and short-lived feat/, fix/, docs/ and security branches, with
+PR integration and recorded checks. Solo maintainer/agent review is identified
+honestly; no nonexistent second reviewer is required. Keep one primary finite
+feature contract active. release/ branches serve genuinely maintained parallel
+lines only. Never import raw pre-transition private ancestry or recovery refs.
 
-The proposed first public alpha is the next unused minor: **0.79.0-alpha.1**,
-subject to review. It is not created by this preview. Keep all historical numbers;
-CSAPUL1.0 does not mean browser1.0. During0.x development, minor versions may
-change the declared CLI/profile/config/export contract; patch releases preserve
-that minor's stated contract except documented security necessities. Alpha/RC
-interfaces remain explicitly unstable. Breaking persisted-data changes require
-migration/recovery tests and release notes.
+Ordinary commits keep the planned product version. Choose a release version once
+when a feature contract is complete. Preserve historical numbers: imported0.78
+is not browser1.0 because CSAPUL is1.0. The intended first animation milestone is
+0.79.0-alpha.1 if unused. During0.x, minor releases can change a stated interface;
+patch releases preserve its contract except documented security necessities.
+Alpha/RC contracts remain unstable. Persisted-data changes need migration and
+recovery tests. See FEATURE_CONTRACTS.md and CAPABILITIES.md.
 
-For future releases, Cargo/UI/help/User-Agent/product strings use the full agreed
-SemVer value; Windows numeric fields map MAJOR,MINOR,PATCH,0. Prerelease labels stay
-in string metadata and the release tag. Each numeric component must fit the
-Windows representation. The legacy0.78 resource strings remain0.78; do not rewrite
-old checkpoints to manufacture consistency with a new policy.
+Cargo, UI/help/User-Agent and Windows string metadata use the full release
+SemVer. Windows numeric fields map MAJOR,MINOR,PATCH,0 (each within16bits), with
+prerelease labels in strings and tag. Historical0.78 strings are not rewritten.
+Build SHA, clean state, compiler/target and payload hashes identify a build; they
+do not assert reproducibility across SDK/linker installations or certify safety.
 
-Build identity is separate: Git SHA, clean/dirty state, compiler/target and source/
-executable hashes. tools/verify_offline.py creates a build-info JSON. A commit or
-version bump does not authorize publication or certify program safety.
+## Contribution and routine verification
 
-## Routine gates
+Routine hosted Windows CI runs on this maintainer's branch/main pushes. It does
+not automatically execute arbitrary external PR code. Before a substantive
+external evaluation dispatch, privately retain the exact C2 assent, agreement
+digest, immutable submission SHA, rights holder/authority and date. The controlled
+dispatch requires that SHA and an opaque record reference; neither the input nor
+a green run proves assent. Updated content needs an appropriate updated record.
+Before maintained product/test inclusion, obtain the executed assignment and
+countersigned Schedule A for the exact accepted scope. Never publish signatures
+or identity records. Owner-controlled work requires no fictional outside signature.
+Independent platform and limited original bug-reproducer rights remain separate.
 
-The proposed offline PR/main workflow uses GitHub-hosted Windows runners, pinned
-actions, read-only repository permissions, no contribution secrets, no
-pull_request_target and no personal-desktop runner. Run normal Windows tests,
-optimized build, PE/resource checks and all eleven local App/input journeys.
-Public sites, human challenges, physical audio and desktop presentation are opt-in.
-Use focused tests while editing; a serial retry cannot erase a failed normal run.
-CodeQL's standard free CLI open-source basis is not assumed for custom CSAPUL;
-verify any paid/hosted entitlement before adding it.
+All build/test jobs have read-only permissions, pinned actions and hosted runners;
+no secrets, privileged pull_request_target checkout or personal-desktop runner
+evaluates public submissions. No source shared cache or downstream release promotion
+is used for external evaluation. CodeQL eligibility for CSAPUL is not assumed.
 
-## Reviewed release
+Use focused tests while editing. Before integration, pass tools/verify_offline.py:
+normal Windows tests, optimized build, PE/resources/version/import inspection,
+identity/packaging controls and required local App/input journeys. Preserve normal
+failures and diagnostic serial retries separately. Routine CI stays offline;
+public sites, physical desktop presentation and audio-device checks are separate.
 
-1. Approve exact project license, covered history/material, third-party notices,
-   privacy/security disposition, contribution policy and reporting channel.
-2. Finish one feature contract, choose a release version once, update resources
-   and all version strings, and pass the final gates on a clean public lineage.
-3. Recheck public main, create the exact reviewed tag, and build that clean source.
-   Never merge unsanitized private ancestry or recovery refs into product history.
-4. The tag workflow is disabled until ENABLE_CHEZCAT_RELEASES is explicitly set
-   true and the release environment is configured for owner approval (self-review
-   allowed). APPROVED_LICENSE_SHA256 must match the operative LICENSE. Its jobs
-   create local runtime/source assets, checksums and build identity only. They
-   upload no binaries, source ZIPs or attestations; a tag is not artifact approval.
-5. The maintainer prepares a retained local build and reviews its exact artifacts
-   before approving their upload as
-   release assets. Executables never enter source history. Re-fetch before the
-   first import and use only a normal fast-forward update of approved refs.
+## Exact tagged delivery
 
-The packager refuses an absent/draft/mismatched license and dirty source. Hosted
-workflows, attestation and publication are not validated merely by local tests.
-Historical CI signatures do not authenticate rewritten hashes. Keep raw captures,
-profiles, operational notes and sensitive audit findings outside product history.
+1. Complete the finite feature and review actual trust-boundary changes. Update
+   version/resources, release notes and accompanying license/scope deliberately.
+   CSAPUL1.0 LICENSE bytes remain pinned at SHA256
+   632232a42c046628de0fd8c497e89f02055e1e919860bfa9fcd8fe3b5eb06d65.
+2. Validate the exact clean final commit, including the actual merge identity.
+   Re-fetch main; use only explicit non-force branch updates preserving others' work.
+3. Create a new unused immutable v<fullCargoVersion> tag on that public source.
+   Never move/reuse it for corrected source. A source change after failure requires
+   a new prerelease version/tag; a no-source-change service rerun is recorded.
+4. release.yml checks out that exact tag, validates it and the adopted license,
+   runs offline gates, packages runtime/source ZIPs and checksums, checks payloads
+   and exercises the extracted runtime. Only its explicit release payloads and
+   public-safe provenance record are retained as Actions artifacts.
+5. The separate publication job has contents:write, executes no project code,
+   rechecks transferred hashes and remote tag, creates the actual release with
+   verified existing tag, uploads explicit assets, then downloads/checks their
+   bytes. Ordinary jobs retain contents:read; repository-wide defaults stay read.
 
-References: [SemVer](https://semver.org/),
-[GitHub workflow security](https://docs.github.com/en/actions/reference/security/secure-use),
-[artifact provenance](https://docs.github.com/en/actions/how-tos/secure-your-work/use-artifact-attestations/use-artifact-attestations).
+Runtime ZIP includes executable, pages/assets/trust, applicable notices/data,
+LICENSE and scope/history, product docs and exact build identity. Source ZIP is
+separate and contains buildable source/resources/fixtures, never app binaries or
+private operations. Verify LICENSE working/blob/ZIP digests, source/tag agreement,
+complete payload and an extracted offline journey. Do not recursively archive a
+development workspace. Missing/draft/mismatched license or dirty/stale proof fails
+closed. The packager does not publish; release workflow performs actual delivery.
 
-A hosted runner's local ZIPs disappear when its job ends. Actions artifacts and
-Sigstore/GitHub attestations are publication too, so this workflow deliberately
-performs neither. Prepare retained review files locally; any later artifact upload
-or attestation job needs approval of those exact hashes and separate validation.
+Release notes state supported behavior and deferred features, exact source/tag,
+downloadable assets and SHA256SUMS. publication.json describes actual checks and
+compiler/payload identities; it is not a signed attestation. Claim hosted CI,
+attestations, device tests or reproduction only when they actually ran. An actual
+unresolved exposed high/critical runtime defect blocks the affected binary release;
+absent exhaustive certification is not a substitute for concrete risk disposition.
+
+Later license changes need an explicit revision and release/scope record. Never
+silently replace the exact license attached to an existing immutable release.

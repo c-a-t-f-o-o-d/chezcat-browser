@@ -35,3 +35,7 @@
 results/** -text
 tools/reference/test262/** -text
 SOURCE_REVISION export-subst
+
+LICENSE text eol=lf
+LICENSE_SCOPE.md text eol=lf
+licensing/** text eol=lf

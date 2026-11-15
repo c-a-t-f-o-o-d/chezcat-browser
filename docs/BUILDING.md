@@ -39,7 +39,8 @@ reference scripts may optionally require Node, Pillow, OpenSSL or other tools;
 those are not production dependencies and are not required by verify_offline.py.
 
 A runtime bundle needs ChezCat.exe, pages/, assets/, trust/, notices/, relevant
-data notices and approved licensing/build metadata. A source ZIP is not a ready
+data notices, LICENSE, LICENSE_SCOPE.md, licensing/COVERED_HISTORY.txt and exact
+build metadata. A source ZIP is not a ready
 Windows runtime bundle. The release packager deliberately refuses an absent,
 unapproved/draft or hash-mismatched project license. Do not package a development
 workspace recursively. Build identity includes Git commit, clean/dirty status,

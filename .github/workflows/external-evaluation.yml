@@ -1,0 +1,74 @@
+name: Recorded external submission evaluation
+on:
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Public PR number offered for evaluation
+        required: true
+        type: string
+      submission_sha:
+        description: Exact 40-character PR-head SHA already covered by the private C2 record
+        required: true
+        type: string
+      private_record_ref:
+        description: Opaque reference to the preexisting private C2 assent and authority record; no personal details
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  evaluate:
+    if: github.repository == 'c-a-t-f-o-o-d/chezcat-browser' && github.actor == 'c-a-t-f-o-o-d' && github.ref == 'refs/heads/main'
+    runs-on: windows-2025
+    timeout-minutes: 35
+    permissions:
+      contents: read
+    env:
+      PR_NUMBER: ${{ inputs.pr_number }}
+      SUBMISSION_SHA: ${{ inputs.submission_sha }}
+      PRIVATE_RECORD_REF: ${{ inputs.private_record_ref }}
+      AGREEMENT_SHA256: d3bedf72b253e85cc70037d9a953599462761314c3790778f3783b0a1cd1d8ad
+    steps:
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # existing verified v6 pin
+        with:
+          python-version: '3.14.8'
+      - name: Validate dispatch identifiers before fetching proposed code
+        shell: python
+        run: |
+          import os, re
+          assert re.fullmatch('[1-9][0-9]*', os.environ['PR_NUMBER'])
+          assert re.fullmatch('[0-9a-f]{40}', os.environ['SUBMISSION_SHA'])
+          assert re.fullmatch('[A-Za-z0-9][A-Za-z0-9._:-]{0,127}', os.environ['PRIVATE_RECORD_REF'])
+      - name: Read trusted main's published agreement
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # existing verified v6 pin
+        with:
+          ref: main
+          path: policy
+          persist-credentials: false
+      - name: Bind evaluation to the actual published C2 agreement text
+        shell: python
+        run: |
+          import hashlib, os
+          from pathlib import Path
+          assert hashlib.sha256(Path('policy/licensing/CONTRIBUTOR_AGREEMENT.md').read_bytes()).hexdigest() == os.environ['AGREEMENT_SHA256']
+      - name: Fetch the public PR head without persisted credentials
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # existing verified v6 pin
+        with:
+          repository: c-a-t-f-o-o-d/chezcat-browser
+          ref: refs/pull/${{ inputs.pr_number }}/head
+          path: submission
+          persist-credentials: false
+      - name: Refuse any PR update beyond the recorded immutable submission
+        shell: python
+        run: |
+          import os, subprocess
+          actual = subprocess.check_output(['git', '-C', 'submission', 'rev-parse', 'HEAD'], text=True).strip()
+          assert actual == os.environ['SUBMISSION_SHA'], 'PR changed; obtain appropriate updated C2 record and redispatch'
+          print('Evaluating exact public submission ' + actual + '; private record reference ' + os.environ['PRIVATE_RECORD_REF'])
+      - name: Install pinned Rust
+        run: rustup toolchain install 1.99.1 --profile minimal --component clippy --no-self-update
+      - name: Evaluate on a managed runner without secrets or write permissions
+        working-directory: submission
+        run: python tools/verify_offline.py
+      # No merge, assignment, artifact promotion, release, privileged follow-on job,
+      # cache shared with release jobs, private assent upload or personal runner.

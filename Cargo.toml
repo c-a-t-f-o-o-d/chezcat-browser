@@ -3,6 +3,8 @@ name = "chezcat"
 version = "0.78.0"
 edition = "2021"
 publish = false
+license-file = "LICENSE"
+repository = "https://github.com/c-a-t-f-o-o-d/chezcat-browser"
 description = "A small independently written browser experiment."
 
 # Intentionally no third-party crates or features. The original build script links our Windows icon resources.

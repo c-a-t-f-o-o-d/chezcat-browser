@@ -1,10 +1,12 @@
 # Changes
 
-## Publication preview
+## Source import
 
-Product runtime remains0.78. History hygiene, product documentation, offline CI
-and release tooling are preparation changes, not a fabricated new browser release.
-The proposed0.79.0-alpha.1 requires separate scope/version/publication approval.
+The authentic filtered engineering history and existing public initialization are
+retained. CSAPUL1.0 and its finite release/history scope are adopted in a new
+present-day commit. Product runtime remains0.78; no binary release is implied by
+the import. The first animation milestone will select an unused coherent alpha
+version after its contract and release gates pass.
 
 ## 0.78
 

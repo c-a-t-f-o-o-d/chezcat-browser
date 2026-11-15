@@ -12,8 +12,14 @@ import verify_offline
 
 ROOT=Path(__file__).resolve().parents[1]
 MAX_BYTES=512*1024*1024
-MANDATORY={'README.md','LICENSE','THIRD_PARTY_NOTICES.md','assets/chezcat.ico','assets/chezcat-icon.png'}
-PREFIXES=('pages/','trust/','notices/','data/public_suffix/')
+MANDATORY={'README.md','LICENSE','LICENSE_SCOPE.md','THIRD_PARTY_NOTICES.md',
+ 'CONTRIBUTING.md','CONTRIBUTORS.md','SECURITY.md','CHANGELOG.md','HISTORY_IMPORT.md',
+ 'ENDORSED_BUILDS.md','Run.cmd','assets/chezcat.ico','assets/chezcat-icon.png',
+ 'licensing/COVERED_HISTORY.txt','licensing/CONTRIBUTOR_AGREEMENT.md',
+ 'docs/CAPABILITIES.md','docs/BUILDING.md','docs/ARCHITECTURE.md','docs/ROADMAP.md',
+ 'docs/FEATURE_CONTRACTS.md','docs/RELEASING.md','docs/BRANDING.md',
+ 'docs/ENDORSEMENT_POLICY.md'}
+PREFIXES=('pages/','trust/','notices/','data/public_suffix/','docs/','licensing/')
 def sha(data):return hashlib.sha256(data).hexdigest()
 def git(*args):
     top=Path(subprocess.check_output(['git','rev-parse','--show-toplevel'],cwd=ROOT,text=True).strip()).resolve()
@@ -31,6 +37,37 @@ def tree(commit):
 def blob(oid):
     if int(git('cat-file','-s',oid))>MAX_BYTES:raise ValueError('Artifact input exceeds the finite byte allowance.')
     return git('cat-file','blob',oid)
+
+def runtime_names(entries):
+    selected={name for name in entries if name in MANDATORY or name.startswith(PREFIXES)}
+    if not MANDATORY.issubset(selected):raise ValueError('Mandatory tracked runtime inputs are missing.')
+    for name in selected:
+        mode,kind,_=entries[name]
+        if mode not in [b'100644',b'100755'] or kind!=b'blob':raise ValueError('Runtime inputs must be tracked regular files.')
+    return selected
+
+def approve_scope(entries,approved,commit):
+    data={}
+    for name in ['LICENSE_SCOPE.md','licensing/COVERED_HISTORY.txt']:
+        if name not in entries or entries[name][0] not in [b'100644',b'100755'] or entries[name][1]!=b'blob':
+            raise ValueError('Committed license scope and covered history are required.')
+        data[name]=blob(entries[name][2])
+        if len(data[name])>1024*1024:raise ValueError('License scope/history exceeds its finite byte allowance.')
+    scope=data['LICENSE_SCOPE.md'].decode('utf-8')
+    digests=set(re.findall(r'(?<![0-9a-f])[0-9a-f]{64}(?![0-9a-f])',scope))
+    if digests!={approved} or 'licensing/COVERED_HISTORY.txt' not in scope:
+        raise ValueError('Committed license scope must identify the exact approved LICENSE digest and covered-history file.')
+    history=[]
+    for line in data['licensing/COVERED_HISTORY.txt'].decode('utf-8').splitlines():
+        line=line.strip()
+        if not line or line.startswith('#'):continue
+        if not re.fullmatch('[0-9a-f]{40}',line):raise ValueError('Covered history must be a finite list of exact commit IDs.')
+        history.append(line)
+    if not history or len(history)>100000 or len(history)!=len(set(history)):
+        raise ValueError('Covered history must be nonempty, finite and contain no duplicate revisions.')
+    reachable=set(git('rev-list',commit).decode('ascii').splitlines())
+    if not set(history).issubset(reachable):raise ValueError('Covered history contains a revision outside the selected source ancestry.')
+    return data
 def approve_license(approved,tag,commit=None):
     local=ROOT/'LICENSE'
     if not local.is_file():raise ValueError('No operative LICENSE: distribution is not approved.')
@@ -43,6 +80,7 @@ def approve_license(approved,tag,commit=None):
     if blob(entries['LICENSE'][2])!=data:raise ValueError('Approved license must match exact committed bytes.')
     version=re.search(rb'^version\s*=\s*"([^"]+)"',blob(entries['Cargo.toml'][2]),re.M)[1].decode()
     if tag!='v'+version or not re.fullmatch(r'v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?',tag or ''):raise ValueError('Tag must match exact Cargo version.')
+    approve_scope(entries,approved,commit)
     return entries
 
 def report_path(name):
@@ -67,13 +105,10 @@ def runtime_files(approved,tag,commit=None):
     commit=commit or git('rev-parse','HEAD').decode().strip()
     verified(commit)
     selected=[]
-    for name,(mode,kind,oid) in entries.items():
-        if name not in MANDATORY and not name.startswith(PREFIXES):continue
-        if mode not in [b'100644',b'100755'] or kind!=b'blob':raise ValueError('Runtime inputs must be tracked regular files.')
+    for name in runtime_names(entries):
         path=ROOT/name
         if path.is_symlink() or not path.resolve().is_relative_to(ROOT.resolve()):raise ValueError('Runtime input escaped the source root.')
         selected.append(path)
-    if not MANDATORY.issubset({p.relative_to(ROOT).as_posix() for p in selected}):raise ValueError('Mandatory tracked runtime inputs are missing.')
     if not (ROOT/'ChezCat.exe').is_file():raise ValueError('Build the exact executable first.')
     return sorted([ROOT/'ChezCat.exe',*selected])
 

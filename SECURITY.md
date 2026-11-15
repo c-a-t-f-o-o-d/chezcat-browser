@@ -1,19 +1,15 @@
 # Security policy
 
-ChezCat is experimental, with incomplete web-platform and security coverage.
-Its browser, renderer and interpreter share a process; it is not an OS-sandboxed
-renderer. Original cryptographic/codec/FFI implementations and green tests are not
-an independent security certification. Use the capability/build documentation to
-understand the exact supported boundaries.
+ChezCat is experimental. Source visibility, test results and a contributor review do not constitute a security certification. No continued support or response-time guarantee is made by the license.
 
-No private reporting route is currently advertised. GitHub private vulnerability
-reporting was checked for this repository on2026-11-14 and was disabled. The
-maintainer must configure and verify a monitored private route before inviting
-sensitive reports. Do not put credentials, browsing sessions or exploit details
-in public issues. Ordinary non-sensitive bug descriptions can follow CONTRIBUTING.
+Sensitive reports: use [GitHub’s Report a vulnerability facility](https://github.com/c-a-t-f-o-o-d/chezcat-browser/security/advisories/new) in the official repository. Private vulnerability reporting was enabled and verified on 2026-11-14. Report the affected revision, environment, impact and a minimal authorized reproduction. Do not include unrelated credentials or third-party personal data.
 
-A preferred reporting procedure is not a gag clause or a restriction on rights
-available under applicable law. The project makes no claim to complete security,
-TLS/crypto audit, full CSP enforcement or safe hostile-site isolation. High/critical
-exposed defects block binary release pending disposition and regression evidence.
-No supported stable release or response-time guarantee is asserted by this preview.
+Ordinary bugs and suggestions: use public issues.
+
+If the private facility is unavailable: do not post exploit details or secrets publicly. Open a non-sensitive issue asking the maintainer to establish a private reporting route. No personal email address or confidential channel is invented by this document. Licensing and contractual notices use legal@bitmadd.com; its designation does not replace the chosen private vulnerability-reporting workflow. Do not assume this mailbox is a tested confidential security-upload facility.
+
+Private-first reporting is requested to facilitate coordinated remediation; it is not an indefinite publication ban, a demand for favorable reviews, or a waiver of independent rights under law. Reviewers may publish reasonably necessary attributed excerpts under the license. They must obtain permission for testing systems they do not control. This document does not grant access to third-party systems or promise a comprehensive legal safe harbor.
+
+Organizations considering deployment must assess the experimental browser for their own environment, threat model and data; licensing permission is not a suitability or security assurance.
+
+A report may be used to fix the project, but sensitive details and personal information must be handled under applicable confidentiality and privacy duties. No bounty, monetary reward, support commitment or code assignment arises merely from filing a report.
