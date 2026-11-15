@@ -1,6 +1,10 @@
 //! A bounded CSS subset for block, inline and basic flex layout.
 use std::collections::HashMap;
 
+#[path="css_media.rs"]
+mod media;
+pub use media::{Hover, MediaEnvironment};
+
 use crate::html::{Document, NodeKind};
 
 const MAX_DECLARATIONS: usize = 4096;
@@ -22,16 +26,14 @@ impl StylesheetLimits {
         if source.len()>self.sheet_bytes || bytes>self.document_bytes {
             return Err(format!("Complete stylesheet refused: {} decoded UTF-8 bytes; allowances {} per sheet / {} per document.",source.len(),self.sheet_bytes,self.document_bytes));
         }
-        let mut rules=usage.rules;
-        let mut exhausted=false;
+        let remaining=self.rules.checked_sub(usage.rules).ok_or("Stylesheet rule accounting overflow.")?;
         let mut declarations_exhausted=false;
-        sheet_blocks(source,|_,body| {
+        let count=media::walk(source,remaining,None,|_,body,_| {
             if parse_declarations_bounded(body,MAX_DECLARATIONS+1).len()>MAX_DECLARATIONS {declarations_exhausted=true;return false;}
-            match rules.checked_add(1) {Some(next) if next<=self.rules=>rules=next,_=>exhausted=true}
-            !exhausted
-        });
+            true
+        })?;
         if declarations_exhausted {return Err(format!("Complete stylesheet refused: per-block declaration allowance {MAX_DECLARATIONS} reached."));}
-        if exhausted {return Err(format!("Complete stylesheet refused: document parser block allowance {} reached.",self.rules));}
+        let rules=usage.rules.checked_add(count).ok_or("Stylesheet rule accounting overflow.")?;
         Ok(StylesheetUsage{bytes,rules})
     }
 }
@@ -637,6 +639,15 @@ pub fn compute_with_state(
     external: &HashMap<usize, String>,
     checked: Option<&dyn Fn(usize) -> Option<bool>>,
 ) -> Vec<Style> {
+    compute_with_environment(doc,external,checked,doc.media_environment)
+}
+
+pub(crate) fn compute_with_environment(
+    doc: &Document,
+    external: &HashMap<usize,String>,
+    checked: Option<&dyn Fn(usize)->Option<bool>>,
+    environment: Option<MediaEnvironment>,
+) -> Vec<Style> {
     let mut parents = vec![None; doc.nodes.len()];
     let mut previous_elements = vec![None; doc.nodes.len()];
     for (parent, node) in doc.nodes.iter().enumerate() {
@@ -696,7 +707,7 @@ pub fn compute_with_state(
     let mut rules = Vec::new();
     for (owner, source) in accepted_stylesheets(doc, external).0 {
         let first = rules.len();
-        parse_sheet(&source, &mut rules);
+        let _=parse_sheet_with_media(&source,&mut rules,environment,doc.stylesheet_limits.rules);
         for rule in &mut rules[first..] {
             for declaration in &mut rule.declarations {
                 declaration.stylesheet = Some(owner);
@@ -1052,21 +1063,29 @@ fn without_comments(source: &str) -> String {
     String::from_utf8(output).unwrap_or_default()
 }
 
-fn parse_sheet(source: &str, rules: &mut Vec<Rule>) {
-    sheet_blocks(source, |prelude, body| {
-        if !prelude.trim_start().starts_with('@') {
-            if let Some(selectors) = parse_selector_list(prelude) {
-                let declarations = parse_declarations(body);
+#[cfg(test)]
+fn parse_sheet(source:&str,rules:&mut Vec<Rule>) {
+    let _=parse_sheet_with_media(source,rules,None,StylesheetLimits::default().rules);
+}
+
+fn parse_sheet_with_media(source:&str,rules:&mut Vec<Rule>,environment:Option<MediaEnvironment>,maximum_blocks:usize)->Result<(),String> {
+    let first=rules.len();
+    let mut allocation_failed=false;
+    let result=media::walk(source,maximum_blocks,environment,|prelude,body,active| {
+        if active && !prelude.trim_start().starts_with('@') {
+            if let Some(selectors)=parse_selector_list(prelude) {
+                let declarations=parse_declarations(body);
                 if !selectors.is_empty() && !declarations.is_empty() {
-                    rules.push(Rule {
-                        selectors,
-                        declarations,
-                    });
+                    if rules.try_reserve(1).is_err() {allocation_failed=true;return false;}
+                    rules.push(Rule{selectors,declarations});
                 }
             }
         }
         true
     });
+    if let Err(error)=result {rules.truncate(first);return Err(error);}
+    if allocation_failed {rules.truncate(first);return Err("Stylesheet rule allocation failed.".into());}
+    Ok(())
 }
 
 #[derive(Clone, Debug)]
@@ -4126,3 +4145,7 @@ mod tests {
         assert!(styles[live].bold);
     }
 }
+
+#[cfg(test)]
+#[path="css_media_tests.rs"]
+mod media_tests;

@@ -1,7 +1,7 @@
 # Finite development roadmap
 
-The active workstreams are **T1: TLS/trust compatibility** and the first
-**B1: ordinary stylesheet-loading** slice.
+The active workstreams are **T1: TLS/trust compatibility** and
+**B1: ordinary resources and viewport rendering**.
 The explicit CSAPUL 1.1 acceptance milestone is published as
 [0.80.0-alpha.1](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.80.0-alpha.1).
 New completed milestones follow the exact-source build, package and download
@@ -19,7 +19,7 @@ supported within their recorded limits.
 | ID | Status | Current outcome | Remaining scope |
 | --- | --- | --- | --- |
 | T1 | In progress: remaining interoperability gaps | Guarded document diagnostics, a pinned conservative Mozilla NSS 98-authority selection, reviewed offline generation, shared 1024-root policy and bounded per-hop redirect clocks; coordinated document checks distinguish improved path coverage from later failures | Remaining chain/parser/protocol/timeout/admission and resource-specific failures; no broad TLS or usable-site completion claim |
-| B1 | In progress: ordinary external stylesheet slice | Shared unmarked cross-origin HTTP(S) stylesheet loading and original request-to-pixel/lifecycle regressions; normal verification remains required for each checkpoint | Preserve request/CSP/cookie/MIME/CORP/COEP/cache/cancellation boundaries; broader script/font/image/layout/input gaps remain |
+| B1 | In progress: stylesheets and finite viewport media rules | Shared unmarked cross-origin HTTP(S) stylesheet loading; host-context media rules with real resize/zoom geometry and pixels, source ownership and complete-sheet admission | Original executable width/zoom and dynamic-link cases passed; normal verification remains required for each checkpoint; retain request/security/lifecycle boundaries and explicit query/font gaps while addressing broader resource/render/input usability |
 | B2 | Planned after first page-usability milestone | No new tab or window capability is claimed | Finite tabs, link-context and new-window behavior with real page/history/worker/focus ownership |
 | A1 | Planned at a suitable UI checkpoint | No About/build-copy view is claimed | Exact embedded product/source/build identity, offline license/notices and privacy-safe copy without runtime Git |
 | I1 | Planned after first B1/B2 milestones | Portable runtime ZIP remains the distribution baseline | One per-user x64 MSI with complete exact payload, shortcuts/uninstall, deliberate upgrade version mapping and isolated data-preservation/recovery tests |
@@ -37,10 +37,12 @@ supported within their recorded limits.
 | F6 controls reflection | Complete for the original model/App slice | Real Boolean controls reflection, including unbound Media nodes; native bar paint/hits/focus with preserved source, clock, frame and Promise lifetime | Full normal verification is required for integration; VIDEO dimensions, Element.toggleAttribute and NamedNodeMap mutation remain separate source gaps |
 | F6 | Deferred for browser foundations | Authored synchronized A/V, genuine Media/Video interfaces and finite Event/UIEvent/MouseEvent/CustomEvent construction are implemented prerequisites; Event/UIEvent/CustomEvent dispatch and cancellation work | Actual ordinary non-DRM YouTube playback is unproved; Mouse dispatch/native pointer payloads, KeyboardEvent construction and broader page/player APIs remain unsupported |
 
-Every implementation checkpoint requires normal verification. The next B1 slice
-addresses demonstrated stylesheet refusal before fetching, using original local
-request, geometry/pixel and lifecycle checks. It is not complete until its normal
-integration and bounded behavior acceptance pass. Distinguish remaining trust/path,
+Every implementation checkpoint requires normal verification. B1 now includes
+the bounded stylesheet path and a finite viewport-media slice, with original
+local request, source-order, geometry/pixel and lifetime checks. Require actual
+offscreen width/zoom and dynamic-stylesheet acceptance before treating that
+rendering checkpoint as integrated; broader page usability remains in progress.
+Distinguish remaining trust/path,
 parser, timeout and intentional admission failures from page rendering. Continue
 meaningful page usability, then finite tabs/windows; perfect TLS or every-page
 coverage is not a prerequisite. Installer/update work remains planned.

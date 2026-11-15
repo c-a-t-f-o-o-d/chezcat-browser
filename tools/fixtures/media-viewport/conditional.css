@@ -1,0 +1,13 @@
+@media screen and (max-width:1023px) {
+  #target { width:96px; }
+}
+@media screen and (min-width:1024px) and (hover:hover) {
+  #navigation { display:none; }
+  #target { width:32px; background-color:#008844; }
+}
+@media print {
+  #target { display:none; }
+}
+@media screen and (unknown-original-feature:1) {
+  #after { height:300px; }
+}

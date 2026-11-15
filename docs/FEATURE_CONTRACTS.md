@@ -131,6 +131,55 @@ isolation; held-request replacement/Stop/navigation and capacity recovery.
 Ordinary source/rule reads remain unavailable after foreign CSS applies. Neither
 HTTP200 nor one fixture establishes complete CSS or public-page compatibility.
 
+### B1a — finite viewport media rules
+
+Status: bounded source behavior and original native/App checks are implemented.
+Executable offscreen behavior and full normal verification remain integration
+requirements; broader B1 page usability remains in progress.
+
+Evaluate ordinary rules nested within matching @media groups at their original
+cascade position. Support screen/all media types, nonmatching print, comma
+alternatives, media-type only/not, conjunctions, exact/min/max pixel width and
+height, and hover:hover/none. Unknown media types do not match and may be
+negated; unknown features/values and malformed or unsupported alternatives do
+not grant rules even under negation. Relative query units, boolean features,
+MQ4 range/or grammar and feature-only negation remain outside this profile.
+No matchMedia or general conditional-rule/CSSOM interface is created.
+
+Use one host-only per-Document context: unrounded finite CSS-pixel viewport
+dimensions, including the reserved scrollbar, and an explicit primary-input
+profile. The Windows App currently selects its desktop mouse profile; this is
+not touchscreen/primary-device auto-detection. Capture that context before
+initial document staging and critical resource/font work; refresh it before
+App reflow on resize or zoom, including source/resource report views. Inspector
+and forced geometry use the actual document context. Standalone layout may use
+its known dimensions with unknown hover; unsupported child contexts do not
+inherit an invented parent viewport or pointing capability.
+
+Retain each declaration's real stylesheet owner and final-response URL base.
+Nested groups preserve order; inactive or unknown-feature groups cannot bypass
+complete-source admission. Count containers and descendant blocks before
+publication, with the existing generous source/document/rule/declaration/work
+bounds and an on-demand checked iterative stack. A refusal or allocation error
+must not publish a sheet prefix. Existing cancellation/resource policy and
+foreign CSSOM restrictions remain unchanged.
+
+Conditional font-face discovery stays unsupported and is never flattened into
+requests. Initial top-level font faces use the same environment-aware computed
+families as layout; new dynamic or resize-triggered font fetching is not added.
+Style/link media attributes keep their empty/all/screen subset. CSS imports,
+other conditional at-rules and wider layout support remain separate gaps.
+
+Acceptance: original matching/nonmatching and fractional-threshold controls;
+print/unknown/negated/malformed conditions; nested source order and stylesheet
+ownership; inactive descendant admission, whole-sheet refusal and recovery;
+initial font-use selection without activating nested faces; actual App geometry,
+background pixels and link hit ownership across full-width thresholds and zoom,
+with source/document lifetime retained. The executable offscreen sequence also
+checks owned requests, paired source/layout/pixels and dynamic stylesheet
+application. These proofs establish the finite local rendering behavior, not
+physical desktop presentation or complete public-page compatibility.
+
 ## B2 — finite tabs, link context and new windows
 
 Status: planned after the first meaningful B1 milestone. Provide new/switch/close

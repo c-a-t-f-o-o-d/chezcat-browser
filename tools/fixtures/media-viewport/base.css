@@ -1,0 +1,7 @@
+html,body { margin:0; padding:0; }
+#base { display:block; width:64px; height:16px; margin:0; padding:0; background-color:#1a7b3c; }
+#navigation,#navigation ul { margin:0; padding:0; }
+#navigation li { display:block; height:24px; margin:0; padding:0; }
+#target { display:block; width:160px; height:32px; margin:0; padding:0; background-color:#aa2200; }
+#after { display:block; width:48px; height:8px; margin:0; padding:0; background-color:#224488; }
+#control { display:block; width:4px; height:4px; margin:8px 0 0; padding:0; }

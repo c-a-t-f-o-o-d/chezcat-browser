@@ -294,7 +294,8 @@ pub struct App {
 impl App {
     pub fn new() -> Self {
         let location = Location::home();
-        let document = html::parse(START);
+        let mut document = html::parse(START);
+        document.media_environment=Some(crate::css::MediaEnvironment::desktop_viewport(1080,760-BAR_HEIGHT-bookmarks_bar::HEIGHT-FOOT_HEIGHT,1.0));
         let page = layout::build_viewport(
             &document,
             1068,
@@ -545,6 +546,9 @@ impl App {
             self.reload();
         }
     }
+    fn css_media_environment(&self)->crate::css::MediaEnvironment {
+        crate::css::MediaEnvironment::desktop_viewport(self.width,self.viewport_height(),self.zoom)
+    }
     fn load_options(&self) -> loader::LoadOptions {
         loader::LoadOptions {
             media_limits: self.media_limits,
@@ -563,6 +567,7 @@ impl App {
                 .round()
                 .max(1.0) as u32,
             density_milli: (self.zoom * 1000.0).round().max(1.0) as u32,
+            media_environment: Some(self.css_media_environment()),
             cookie_origin: self.location.url.clone(),
             cookie_same_site: None,
             script_origin: None,
@@ -1586,6 +1591,9 @@ impl App {
         }
     }
     fn reflow(&mut self) {
+        let environment=Some(self.css_media_environment());
+        self.document.media_environment=environment;
+        if let Some(report)=&mut self.alternate {report.media_environment=environment;}
         self.inspector.invalidate();
         self.select_popup = None;
         self.page = if let Some(doc) = &self.alternate {
@@ -5526,3 +5534,7 @@ mod tests {
         assert_eq!(app.selected_text(), "together");
     }
 }
+
+#[cfg(test)]
+#[path="app_media_query_tests.rs"]
+mod media_query_tests;

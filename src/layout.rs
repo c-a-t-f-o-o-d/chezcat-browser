@@ -650,11 +650,14 @@ pub fn build_viewport_with_fonts(
     } else {
         1.0
     };
-    let styles = if checked.is_some() {
-        css::compute_with_state(doc, external_styles, checked)
-    } else {
-        css::compute(doc, external_styles)
-    };
+    // Standalone layout knows its viewport but has no primary-input policy.
+    // A real App/loader Document supplies its full media viewport explicitly.
+    let environment=doc.media_environment.or_else(|| {
+        let mut env=css::MediaEnvironment::desktop_viewport(width,height,zoom);
+        env.hover=css::Hover::Unknown;
+        Some(env)
+    });
+    let styles=css::compute_with_environment(doc,external_styles,checked,environment);
     let mut page = Layout {
         runs: Vec::new(),
         items: Vec::new(),
