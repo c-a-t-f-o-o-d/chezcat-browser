@@ -282,8 +282,9 @@ visible results have paired document/layout/canvas pixels and zero current
 interpreter errors. That child check uses an owned loopback web origin; child
 contexts for local files remain unavailable.
 
-MouseEvent, KeyboardEvent and CustomEvent constructors, their immediate
-specialized prototypes and native-input immediate prototypes remain unsupported.
+KeyboardEvent and CustomEvent constructors, their immediate specialized
+prototypes and native-input immediate prototypes remain unsupported. Synthetic
+Mouse dispatch/default activation and native pointer payloads remain unsupported.
 Changing native host prototypes, arbitrary native subclassing/newTarget and
 shadow-DOM retargeting are also unsupported. These finite interfaces establish
 no full Event-family, web-platform or public-service conformance.
@@ -333,6 +334,52 @@ reentry, exceptions, policy refusal and later-job recovery. Existing App journey
 separately exercise same-origin child owners; they do not simulate a cross-origin
 parent navigation. Child navigation, mutation, has/key enumeration and broader
 Window APIs retain their existing separate support limits.
+
+MouseEvent prerequisite: new MouseEvent(type, init) and the main document's
+legacy MouseEvent/MouseEvents factory have genuine owner-realm Mouse→UI→Event
+constructor/prototype chains. Readonly branded getters, initMouseEvent,
+getModifierState and the own unforgeable isTrusted accessor reuse real event
+records, owner clocks and atomic unpublished-result setup/rollback. Ordinary
+shadows and prototype overrides remain observable without changing stored slots.
+
+The constructor gets/converts inherited EventInit, UIEventInit, EventModifierInit
+and MouseEventInit members in the specified inherited/alphabetic order. Detail,
+button/buttons and coordinates convert before the next Get. Missing/undefined
+members retain defaults. Screen/client doubles preserve fractions, signed zero
+and finite values beyond legacy LONG range; nonfinite/Symbol values refuse before
+later Gets. Button/buttons use signed/unsigned short normalization. View and
+relatedTarget require genuine nullable Window/EventTarget references with explicit
+owner-origin checks. No duck object acquires native capability.
+
+Four existing modifier booleans and ten additional stored flags supply all fourteen
+exact-case getModifierState names; unknown names return false. The selected
+nonnormative supplemental which profile uses normalized button+1 after construction
+or legacy initialization, while a fresh uninitialized factory remains0. The optional
+which-init dictionary member is ignored. This is a stated finite compatibility
+choice, not universal browser behavior for every button/event type.
+
+Legacy initMouseEvent retains positional LONG coordinate conversions, then stores
+their values as doubles. It resets its named fields/four modifiers while preserving
+constructor-only buttons/extra modifier flags and layer slots. Base/UI initializers
+preserve Mouse state. Main page/offset aliases use actual current owner scroll;
+immutable initial child contexts retain their actual zero-scroll state. Undispatched
+layer slots begin0; target-relative dispatched geometry is not claimed.
+
+Original model tests cover real roots/descriptors/brands, exact conversions,
+reentry/throw identity, real owner clocks, fresh/cached/saved foreign denial,
+small-profile/store/ID/work refusal and recovery. The fifth owned-HTTP App/input
+case uses two trusted base inputs to inspect real Mouse objects, modifiers, child
+owners and legacy reinitialization. It requires synthetic Mouse dispatch to refuse
+before delivery/activation or target-state mutation. Earlier guard/Custom/base/UI
+cases remain. Native click is not relabeled from its type string; native keyboard
+retains genuine UI ancestry and rejects Mouse-only operations. PointerLock,
+region/sourceCapabilities, Pointer/Keyboard/Custom constructors and arbitrary
+native subclassing/prototype mutation remain outside this finite slice.
+
+Semantic references: [MouseEvent core](https://www.w3.org/TR/pointerevents4/#mouseevent-interface),
+[CSSOM coordinates](https://drafts.csswg.org/cssom-view/#extensions-to-the-mouseevent-interface),
+[modifier initialization](https://w3c.github.io/uievents/#event-modifier-initializers)
+and [supplemental UI fields](https://w3c.github.io/uievents/#legacy-uievent-supplemental-interface).
 
 Semantic references: [UIEvent](https://w3c.github.io/uievents/#interface-uievent),
 [UIEventInit](https://w3c.github.io/uievents/#dictdef-uieventinit) and

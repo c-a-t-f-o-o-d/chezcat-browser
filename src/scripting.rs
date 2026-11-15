@@ -829,6 +829,7 @@ impl Page {
         runtime.define_event_target_interface(WINDOW).expect("fixed EventTarget interface");
         runtime.define_event_interface(WINDOW).expect("fixed Event interface");
         runtime.define_ui_event_interface(WINDOW).expect("fixed UIEvent interface");
+        runtime.define_mouse_event_interface(WINDOW).expect("fixed MouseEvent interface");
         runtime.define_node_interfaces(WINDOW,dom_tree::NODE_CONSTANTS,Some((IMAGE_FACTORY,"Image"))).expect("fixed Node interfaces");
         Self { runtime, state }
     }
@@ -2356,7 +2357,7 @@ impl Host for Bridge<'_> {
         if let Some(window)=self.event_owner(object) {
             // Subclass immediate prototypes stay opaque; this is their genuine
             // implemented Event ancestry, as with the existing Node suffixes.
-            return Some(crate::javascript::NativeAncestry {window,constructor:Some((window,if self.ui_receiver(object) {"UIEvent"}else{"Event"}))});
+            return Some(crate::javascript::NativeAncestry {window,constructor:Some((window,if self.mouse_receiver(object) {"MouseEvent"}else if self.ui_receiver(object) {"UIEvent"}else{"Event"}))});
         }
         if let Some(window)=self.standalone_target_owner(object) {
             return Some(crate::javascript::NativeAncestry {window,constructor:Some((window,"EventTarget"))});
@@ -2492,7 +2493,8 @@ impl Host for Bridge<'_> {
     }
 
     fn argument_conversions(&self, object: u32, method: &str) -> &'static [(usize, bool)] {
-        if matches!(method,"Event"|"UIEvent")&&self.event_target_interface(object) {return &[(0,true)];}
+        if matches!(method,"Event"|"UIEvent"|"MouseEvent")&&self.event_target_interface(object) {return &[(0,true)];}
+        if method=="getModifierState"&&self.mouse_receiver(object) {return &[(0,true)];}
         if object==WINDOW && method=="cancelAnimationFrame" {return &[(0,false)];}
         if object == HISTORY && method == "replaceState" { return &[(1, true), (2, true)]; }
         if self.named_map_receiver(object) {
@@ -2589,7 +2591,7 @@ impl Host for Bridge<'_> {
     }
 
     fn unpublished_base_event_owner(&self,object:u32,method:&str,result:u32)->Option<u32> {
-        if !(object==DOCUMENT&&method=="createEvent"||self.event_target_interface(object)&&matches!(method,"Event"|"UIEvent")) {
+        if !(object==DOCUMENT&&method=="createEvent"||self.event_target_interface(object)&&matches!(method,"Event"|"UIEvent"|"MouseEvent")) {
             return None;
         }
         if self.state.created_events.last().is_none_or(|event|event.handle!=result) {return None;}
@@ -2628,7 +2630,8 @@ impl Host for Bridge<'_> {
     }
 
     fn required_arguments(&self, object: u32, method: &str) -> usize {
-        if matches!(method,"Event"|"UIEvent")&&self.event_target_interface(object) {return 1;}
+        if matches!(method,"Event"|"UIEvent"|"MouseEvent")&&self.event_target_interface(object) {return 1;}
+        if method=="getModifierState"&&self.mouse_receiver(object) {return 1;}
         if object==WINDOW && matches!(method,"requestAnimationFrame"|"cancelAnimationFrame") {return 1;}
         if method=="dispatchEvent"&&self.dispatch_receiver(object){return 1;}
         if object==DOCUMENT && matches!(method,"createAttributeNS"|"createElementNS") {return 2;}
@@ -2692,7 +2695,7 @@ impl Host for Bridge<'_> {
         method: &str,
         args: &[Value],
     ) -> Result<(), (&'static str, String)> {
-        if matches!(method,"Event"|"UIEvent")&&self.event_target_interface(object) {
+        if matches!(method,"Event"|"UIEvent"|"MouseEvent")&&self.event_target_interface(object) {
             if !self.state.enabled||!self.doc.scripting_enabled {return Err(("InvalidStateError","Event construction is disabled.".into()));}
             if args.get(1).is_some_and(|value|!matches!(value,Value::Undefined|Value::Null|Value::Object(_)|Value::Function(_)|Value::Host(_))) {
                 return Err(("TypeError",format!("{method}Init requires an object, null or undefined.")));
@@ -2704,6 +2707,9 @@ impl Host for Bridge<'_> {
         }
         if method.starts_with("\0UIEvent.")&&!self.ui_receiver(object) {
             return Err(("TypeError","UIEvent operation requires a genuine UIEvent.".into()));
+        }
+        if method.starts_with("\0MouseEvent.")&&!self.mouse_receiver(object) {
+            return Err(("TypeError","MouseEvent operation requires a genuine MouseEvent.".into()));
         }
         if method=="pause" && self.media_element_receiver(object) && (!self.state.enabled || !self.doc.scripting_enabled) {return Err(("InvalidStateError","Scripting is disabled.".into()));}
         if object==WINDOW && method=="requestAnimationFrame" && !matches!(args.first(),Some(Value::Function(_))) {return Err(("TypeError","requestAnimationFrame requires a callable callback.".into()));}
@@ -2953,6 +2959,9 @@ impl Host for Bridge<'_> {
     }
 
     fn accepts_receiver(&self, object: u32, method: &str, receiver: u32) -> bool {
+        if self.event_target_interface(object)&&(method.starts_with("\0MouseEvent.")||matches!(method,"initMouseEvent"|"getModifierState")) {
+            return self.mouse_receiver(receiver);
+        }
         if self.event_target_interface(object)&&(method.starts_with("\0UIEvent.")||method=="initUIEvent") {
             return self.ui_receiver(receiver);
         }
@@ -3181,6 +3190,12 @@ impl Host for Bridge<'_> {
     ) -> Option<(usize, &'static [&'static str])> {
         if method=="Event"&&self.event_target_interface(object) {return Some((1,&["bubbles","cancelable","composed"]));}
         if method=="UIEvent"&&self.event_target_interface(object) {return Some((1,&["bubbles","cancelable","composed","detail","view"]));}
+        if method=="MouseEvent"&&self.event_target_interface(object) {return Some((1,&[
+            "bubbles","cancelable","composed","detail","view",
+            "altKey","ctrlKey","metaKey","modifierAltGraph","modifierCapsLock","modifierFn","modifierFnLock",
+            "modifierHyper","modifierNumLock","modifierScrollLock","modifierSuper","modifierSymbol","modifierSymbolLock","shiftKey",
+            "button","buttons","clientX","clientY","relatedTarget","screenX","screenY",
+        ]));}
         match method {
             "addEventListener" => Some((2, &["capture", "once", "passive", "signal"])),
             "removeEventListener" => Some((2, &["capture"])),
@@ -3189,11 +3204,20 @@ impl Host for Bridge<'_> {
     }
 
     fn dictionary_member_conversion(&self,object:u32,method:&str,member:&str)->Option<bool>{
-        (method=="UIEvent"&&member=="detail"&&self.event_target_interface(object)).then_some(false)
+        (self.event_target_interface(object)&&(matches!(method,"UIEvent"|"MouseEvent")&&member=="detail"
+            || method=="MouseEvent"&&matches!(member,"button"|"buttons"|"clientX"|"clientY"|"screenX"|"screenY"))).then_some(false)
     }
     fn validate_dictionary_member(&self,object:u32,method:&str,member:&str,value:&Value)->Result<(),(&'static str,String)>{
-        if method=="UIEvent"&&member=="view"&&self.event_target_interface(object) {
+        if matches!(method,"UIEvent"|"MouseEvent")&&member=="view"&&self.event_target_interface(object) {
             self.ui_view_argument(object,Some(value))?;
+        }
+        if method=="MouseEvent"&&self.event_target_interface(object) {
+            if member=="relatedTarget" {self.mouse_target_argument(object,Some(value))?;}
+            if matches!(member,"screenX"|"screenY"|"clientX"|"clientY")
+                && !matches!(value,Value::Undefined)
+                && !matches!(value,Value::Number(number) if number.is_finite()) {
+                return Err(("TypeError","MouseEvent coordinates require finite doubles.".into()));
+            }
         }
         Ok(())
     }
@@ -3206,6 +3230,7 @@ impl Host for Bridge<'_> {
     ) -> Result<Value, String> {
         if method=="Event"&&self.event_target_interface(object) {return self.construct_base_event(object,args,fields);}
         if method=="UIEvent"&&self.event_target_interface(object) {return self.construct_ui_event(object,args,fields);}
+        if method=="MouseEvent"&&self.event_target_interface(object) {return self.construct_mouse_event(object,args,fields);}
         if matches!(method, "addEventListener" | "removeEventListener") {
             self.state.work(1)?;
             self.event_listener(object, method, args, fields)
@@ -4122,6 +4147,7 @@ impl Host for Bridge<'_> {
     }
 
     fn call(&mut self, object: u32, method: &str, args: &[Value]) -> Result<Value, String> {
+        if let Some(property)=method.strip_prefix("\0MouseEvent.get.") {return self.get(object,property);}
         if let Some(property)=method.strip_prefix("\0UIEvent.get.") {return self.get(object,property);}
         if let Some(property)=method.strip_prefix("\0Event.get.") {return self.get(object,property);}
         if let Some(property)=method.strip_prefix("\0Event.set.") {

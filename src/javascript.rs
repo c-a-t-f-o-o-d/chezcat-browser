@@ -8188,7 +8188,7 @@ impl Runtime {
                 for &name in names {
                     let reference = Reference::Property(self.copy_value(value)?, name.into());
                     let mut member=self.read_reference(&reference, host)?;
-                    if let Some(string_hint)=host.dictionary_member_conversion(object,method,name) {
+                    if let Some(string_hint)=host.dictionary_member_conversion(object,method,name).filter(|_|!matches!(member,Value::Undefined)) {
                         let primitive=self.primitive_with_hint(member,string_hint,host)?;
                         self.work(primitive.bytes())?;
                         member=self.checked_value(if string_hint {Value::String(primitive.script_text()?)}

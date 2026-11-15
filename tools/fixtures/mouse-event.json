@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "scope": "Original finite MouseEvent constructor/slots/legacy initialization and child owner fixture; synthetic Mouse dispatch is unsupported.",
+  "compatibility_profile": {
+    "which": "This finite supplemental profile reports button+1 after construction/initialization and zero for an uninitialized factory. It is not a universal browser or event-type behavior claim."
+  },
+  "provenance": {
+    "method": "Original HTML/CSS/JavaScript fixture without external assets",
+    "external_assets": []
+  },
+  "files": {
+    "mouse-event.html": {
+      "bytes": 9471,
+      "sha256": "887ec67d4d5576308015a8b550bf41cbc979e2c3e67739ad3cf933e74275be1d"
+    }
+  }
+}
