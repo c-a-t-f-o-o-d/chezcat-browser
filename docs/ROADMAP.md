@@ -1,6 +1,7 @@
 # Finite development roadmap
 
-The active workstream is **T1: TLS/trust and ordinary-resource compatibility**.
+The active workstreams are **T1: TLS/trust compatibility** and the first
+**B1: ordinary stylesheet-loading** slice.
 The explicit CSAPUL 1.1 acceptance milestone is published as
 [0.80.0-alpha.1](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.80.0-alpha.1).
 New completed milestones follow the exact-source build, package and download
@@ -9,14 +10,21 @@ implemented slices, not complete web-platform or public-service support.
 
 Current development order is shared TLS/trust and data coverage, everyday
 resource/render/interaction usability, then finite tabs, link context and new
-windows. Further F6/YouTube integration is deferred; completed finite media and
-interface slices remain supported within their recorded limits.
+windows. Add the small About/build-identity view at a suitable UI checkpoint.
+One per-user Windows installer and staged update support follow the first page-
+usability/tabs milestones, before optional media expansion. Further F6/YouTube
+integration is deferred; completed finite media and interface slices remain
+supported within their recorded limits.
 
 | ID | Status | Current outcome | Remaining scope |
 | --- | --- | --- | --- |
-| T1 | In progress: bounded diagnostics and trust-data subset | Original guarded document diagnostics plus a pinned Mozilla NSS 98-authority selection, reviewed offline generation and a shared 1024-root policy; native selected-root and strict signed-path/tool checks passed | Meaningful coordinated document/redirect/resource recheck and demonstrated remaining anchor/parser/protocol/admission gaps; no broad TLS or live-service completion claim |
-| B1 | Queued after the T1 recheck | Existing resource, renderer and input paths are partial foundations | Address demonstrated everyday stylesheet/script/font/image, layout and interaction failures with real request-to-pixel/input proof |
-| B2 | Queued after page usability | No new tab or window capability is claimed | Define finite tabs, link-context and new-window behavior with real context/lifetime ownership |
+| T1 | In progress: remaining interoperability gaps | Guarded document diagnostics, a pinned conservative Mozilla NSS 98-authority selection, reviewed offline generation and shared 1024-root policy; coordinated document checks distinguish improved path coverage from later failures | Remaining chain/parser/protocol/timeout/admission and resource-specific failures; no broad TLS or usable-site completion claim |
+| B1 | In progress: ordinary external stylesheet slice | Shared unmarked cross-origin HTTP(S) stylesheet loading and original request-to-pixel/lifecycle regressions; normal verification remains required for each checkpoint | Preserve request/CSP/cookie/MIME/CORP/COEP/cache/cancellation boundaries; broader script/font/image/layout/input gaps remain |
+| B2 | Planned after first page-usability milestone | No new tab or window capability is claimed | Finite tabs, link-context and new-window behavior with real page/history/worker/focus ownership |
+| A1 | Planned at a suitable UI checkpoint | No About/build-copy view is claimed | Exact embedded product/source/build identity, offline license/notices and privacy-safe copy without runtime Git |
+| I1 | Planned after first B1/B2 milestones | Portable runtime ZIP remains the distribution baseline | One per-user x64 MSI with complete exact payload, shortcuts/uninstall, deliberate upgrade version mapping and isolated data-preservation/recovery tests |
+| U1 | Planned with delivery work | No automatic or manual release discovery is claimed | Real published-milestone discovery, startup opt-in default OFF, manual check, bounded async work and deliberate prerelease channels |
+| U2 | Planned after installer/authenticity prerequisites | No automatic download/install/restart is claimed | Separate explicit approval, authenticated package identity, staged installer/recovery and changed-terms acceptance |
 | L1 | Complete | Full offline native license text and explicit acceptance; personal/organization source and headless acceptance; strict external receipts, decline and changed-terms checks | No identity or organizational-authority verification; exact release packaging remains a separate gate |
 | F1 | Complete for the main Window | Replaceable animation operations with real scheduling, cancellation, owner and work rules | Child-frame schedulers |
 | F2 | Complete for the original local journey | Address/search intent, result/destination/one-Back/different-query input and startup redirect/replacement handling | Live behavior remains response/session-dependent; no every-response Google promise |
@@ -29,12 +37,13 @@ interface slices remain supported within their recorded limits.
 | F6 controls reflection | Complete for the original model/App slice | Real Boolean controls reflection, including unbound Media nodes; native bar paint/hits/focus with preserved source, clock, frame and Promise lifetime | Full normal verification is required for integration; VIDEO dimensions, Element.toggleAttribute and NamedNodeMap mutation remain separate source gaps |
 | F6 | Deferred for browser foundations | Authored synchronized A/V, genuine Media/Video interfaces and finite Event/UIEvent/MouseEvent/CustomEvent construction are implemented prerequisites; Event/UIEvent/CustomEvent dispatch and cancellation work | Actual ordinary non-DRM YouTube playback is unproved; Mouse dispatch/native pointer payloads, KeyboardEvent construction and broader page/player APIs remain unsupported |
 
-Every implementation checkpoint requires normal verification. Next, perform a
-meaningful coordinated recheck of the updated trust data through ordinary
-document, redirect and resource paths, separating anchor/path failures from
-parser, protocol/timeout and intentional admission refusals. Then address
-demonstrated B1 resource/render/input failures before finite tabs/window work;
-remaining TLS gaps do not require perfect coverage before useful page progress.
+Every implementation checkpoint requires normal verification. The next B1 slice
+addresses demonstrated stylesheet refusal before fetching, using original local
+request, geometry/pixel and lifecycle checks. It is not complete until its normal
+integration and bounded behavior acceptance pass. Distinguish remaining trust/path,
+parser, timeout and intentional admission failures from page rendering. Continue
+meaningful page usability, then finite tabs/windows; perfect TLS or every-page
+coverage is not a prerequisite. Installer/update work remains planned.
 VIDEO dimensions, Element.toggleAttribute, NamedNodeMap mutation and remaining
 media/player work stay recorded gaps outside the active queue. Service playback
 remains unproved by local media evidence.

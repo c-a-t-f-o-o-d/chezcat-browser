@@ -151,7 +151,7 @@ impl ResourceKey {
 }
 #[derive(Clone)]
 enum ResourceOutcome {
-    Css(String, Location),
+    Css(String, Location, Vec<crate::url::HttpUrl>),
     Image(Arc<Bitmap>, Option<Arc<Animation>>),
     Failed(String),
 }
@@ -995,7 +995,7 @@ fn load_request_progressively(
         "LOAD TIMING: document/parse {} ms; resources {} ms; total {} ms. {} resource attempts; {} reused references ({} earlier failures). Reuse ends with this document load.",
         stats.document_ready.as_millis(), total.saturating_sub(stats.document_ready).as_millis(), total.as_millis(), stats.attempts, stats.reused, stats.reused_failures
     ));
-    events.push("Classic JavaScript uses a bounded subset after document parsing. Session cookies stay in memory with host-only/Domain scope and bundled public-suffix boundaries. No HTTP authentication, referrer header, frames, CSS imports, speculative requests or telemetry. Stylesheets, images, fonts and script navigation retain the document origin. Classic scripts without crossorigin may also include HTTPS sources from HTTPS documents, with CSP and request checks at each redirect and no cross-origin credentials. Crossorigin-marked scripts currently require the document origin at every hop.".to_owned());
+    events.push("Classic JavaScript uses a bounded subset after document parsing. Session cookies stay in memory with host-only/Domain scope and bundled public-suffix boundaries. No HTTP authentication, referrer header, frames, CSS imports, speculative requests or telemetry. Unmarked HTTP(S) stylesheets may cross origins with CSP, mixed-content, cookie, MIME and response-policy checks; marked stylesheets retain the exact-origin subset. Images, fonts and script navigation retain the document origin. Classic scripts without crossorigin may also include HTTPS sources from HTTPS documents, with CSP and request checks at each redirect and no cross-origin credentials. Crossorigin-marked scripts currently require the document origin at every hop.".to_owned());
     Ok(LoadEnd {
         download: false,
         events,
@@ -1081,7 +1081,7 @@ fn load_critical_resources(
     loaded.document.scripting_enabled=loaded.scripting_blocked.is_none();
     let inert = inert_nodes(&loaded.document, loaded.scripting_blocked.is_none());
     let script_inert = inert_nodes(&loaded.document, true);
-    let mut cache = HashMap::<ResourceKey, ResourceOutcome>::new();
+    let mut cache = HashMap::<(ResourceKey, bool, Option<String>), ResourceOutcome>::new();
     let mut style_bases = HashMap::<usize, Location>::new();
     let mut css_usage=css::StylesheetUsage::default();
     let mut script_bytes = 0usize;
@@ -1124,6 +1124,7 @@ fn load_critical_resources(
             target.chars().take(220).collect()
         };
         let mut attempted_key = None;
+        let mut stylesheet_hops = Vec::new();
         let mut was_reused = false;
         let trace_address = reference
             .and_then(|target| navigation::resolve(target, &loaded.base).ok())
@@ -1179,14 +1180,18 @@ fn load_critical_resources(
                 }) {
                     return Err("Alternate stylesheets are not enabled.".to_owned());
                 }
+                if loaded.document.attr(node, "integrity")
+                    .is_some_and(|value| !value.trim().is_empty())
+                {
+                    return Err("Subresource Integrity is not implemented; the declared-integrity stylesheet was not fetched.".to_owned());
+                }
                 if css_usage.bytes >= stylesheet_limits.document_bytes {
                     return Err("Stylesheet document byte allowance is full.".to_owned());
                 }
             }
             let resolved = navigation::resolve(target, &loaded.base)?;
-            let same_origin_only = kind == "SCRIPT"
-                && loaded.document.attr(node, "crossorigin").is_some();
-            if same_origin_only {
+            let same_origin_only = loaded.document.attr(node, "crossorigin").is_some();
+            if kind == "SCRIPT" && same_origin_only {
                 let origin = loaded.location.url.as_ref()
                     .ok_or("CORS-mode scripts require an HTTP(S) document origin.")?;
                 let target = resolved.url.as_ref()
@@ -1204,11 +1209,29 @@ fn load_critical_resources(
             }
             if let Some(url) = &resolved.url {
                 pool.check_resource(url)?;
+                if kind == "CSS" {
+                    let origin = loaded.location.url.as_ref().ok_or("Local pages do not automatically fetch network resources. Follow a web link explicitly first.")?;
+                    http::check_stylesheet_request(origin, url, same_origin_only)?;
+                }
             }
             let key = (kind == "CSS")
                 .then(|| ResourceKey::new(kind, &resolved))
-                .flatten();
+                .flatten()
+                .map(|key| (key, same_origin_only, csp::nonce(&loaded.document, node).map(str::to_owned)));
             if let Some(outcome) = key.as_ref().and_then(|key| cache.get(key)).cloned() {
+                // A cached redirect chain belongs to this element's complete
+                // authorization, not just its URL or a previous owner's nonce.
+                if let ResourceOutcome::Css(_, _, hops) = &outcome {
+                    for target in hops {
+                        check_cancel(cancel)?;
+                        let origin = loaded.location.url.as_ref().ok_or("Cached network stylesheet has no document origin.")?;
+                        http::check_stylesheet_request(origin, target, same_origin_only)?;
+                        pool.check_resource(target)?;
+                        loaded.csp.allows_external_style(node, csp::nonce(&loaded.document, node), &Location {
+                            url: Some(target.clone()), path: None, root: None, fragment: String::new(),
+                        })?;
+                    }
+                }
                 was_reused = true;
                 if let Some(address) = &trace_address {
                     pool.network_trace().reused(
@@ -1219,7 +1242,7 @@ fn load_critical_resources(
                 }
                 stats.reused += 1;
                 return match outcome {
-                    ResourceOutcome::Css(source, base) => {
+                    ResourceOutcome::Css(source, base, _) => {
                         css_usage=stylesheet_limits.accept(&source,css_usage)?;
                         loaded.styles.insert(node, source);
                         style_bases.insert(node, base);
@@ -1245,8 +1268,8 @@ fn load_critical_resources(
                 let origin = loaded.location.url.as_ref().ok_or("Local pages do not automatically fetch network resources. Follow a web link explicitly first.")?;
                 if kind == "SCRIPT" {
                     http::check_classic_script_origin(origin, url)?;
-                } else if !origin.same_origin(url) {
-                    return Err("Automatic resources must have the document's scheme, host and port in this build.".to_owned());
+                } else {
+                    http::check_stylesheet_request(origin, url, same_origin_only)?;
                 }
                 let remaining = stats.remaining_bytes();
                 if remaining == 0 {
@@ -1276,9 +1299,22 @@ fn load_critical_resources(
                 let response = if kind == "SCRIPT" {
                     pool.fetch_classic_script(url, limit.min(remaining), origin, mode, same_origin_only, &guard)?
                 } else {
-                    pool.fetch_kind_checked(url, limit.min(remaining), origin, mode, kind, &guard)?
+                    let fetched = match pool.fetch_stylesheet(url, limit.min(remaining), origin, mode, same_origin_only, &guard) {
+                        Ok(fetched) => {
+                            stats.network_bytes = stats.network_bytes.saturating_add(fetched.received_bytes);
+                            fetched
+                        }
+                        Err(failure) => {
+                            // Rejected complete bodies still consumed the page
+                            // allowance, including CORP/MIME and redirect failures.
+                            stats.network_bytes = stats.network_bytes.saturating_add(failure.received_bytes);
+                            return Err(failure.message);
+                        }
+                    };
+                    stylesheet_hops = fetched.hops;
+                    fetched.response
                 };
-                stats.network_bytes += response.body.len();
+                if kind == "SCRIPT" { stats.network_bytes += response.body.len(); }
                 let final_location = Location {
                     url: Some(response.url.clone()),
                     path: None,
@@ -1366,7 +1402,7 @@ fn load_critical_resources(
             let outcome = match &result {
                 Err(error) => ResourceOutcome::Failed(error.clone()),
                 Ok(_) => {
-                    ResourceOutcome::Css(loaded.styles[&node].clone(), style_bases[&node].clone())
+                    ResourceOutcome::Css(loaded.styles[&node].clone(), style_bases[&node].clone(), stylesheet_hops)
                 }
             };
             cache.insert(key, outcome);
@@ -2878,6 +2914,9 @@ mod tests {
                     let (mut status, mut mime, mut extra) =
                         (200, "text/html;charset=utf-8", String::new());
                     let body = match path.as_str() {
+                        "/stylesheet-budget-mime" => "x".repeat(60),
+                        "/stylesheet-budget-corp" => { mime="text/css"; extra="Cross-Origin-Resource-Policy: same-origin\r\n".into(); "x".repeat(60) },
+                        "/stylesheet-budget-good" => { mime="text/css"; "#budget{width:73px}".into() },
                         "/font-page" => "<link rel=stylesheet href=/font-redirect.css><link rel=stylesheet href=/font-redirect.css><p style='font-family:Page'>AV</p><p style='font-family:Other'>A</p>".into(),
                         "/image-csp-none" => { extra="Content-Security-Policy: img-src 'none'\r\n".into(); "<img src=/image-csp-forbidden.ppm>".into() },
                         "/image-csp-default" => { extra="Content-Security-Policy: default-src 'none'\r\n".into(); "<img src=/image-csp-forbidden.ppm>".into() },
@@ -3006,6 +3045,29 @@ mod tests {
         assert!(response.starts_with("HTTP/1.1 200 Test\r\n"), "{response}");
         assert!(response.contains("Fresh page"), "{response}");
         assert_eq!(site.requests.lock().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn stylesheet_rejected_complete_bodies_exhaust_the_real_page_budget_before_next_contact() {
+        let own=Site::new();let foreign=Site::new();let folder=Folder::new();
+        let mime=navigation::resolve("/stylesheet-budget-mime",&own.location).unwrap();
+        let corp=navigation::resolve("/stylesheet-budget-corp",&foreign.location).unwrap();
+        let good=navigation::resolve("/stylesheet-budget-good",&own.location).unwrap();
+        let page=folder.page(&format!("<link rel=stylesheet href='{}'><link rel=stylesheet href='{}'><link rel=stylesheet href='{}'><div id=budget>Original budget target</div>",mime.display(),corp.display(),good.display()));
+        let mut loaded=local(&page).unwrap();
+        // Select the real HTTP subresource path over the parsed original page.
+        // Precharge the normal page budget instead of allocating 256MiB in a test.
+        loaded.location=own.location.clone();loaded.base=own.location.clone();loaded.events.clear();
+        let cancel=AtomicBool::new(false);let trust=trust::Store::unconfigured();let pool=http::Pool::new(&cancel,&trust);
+        let mut stats=LoadStats::new(Instant::now());let normal_budget=stats.remaining_bytes();stats.network_bytes=normal_budget-120;
+        let options=LoadOptions::default();
+        load_critical_resources(&mut loaded,&mut stats,&cancel,&|_|{},&pool,http::FetchMode::Normal,options.script_capacity,options.stylesheet_limits).unwrap();
+        assert_eq!(stats.network_bytes,normal_budget);assert_eq!(stats.remaining_bytes(),0);assert!(loaded.styles.is_empty());
+        let paths=|site:&Site|site.requests.lock().unwrap().iter().map(|request|request.split_ascii_whitespace().nth(1).unwrap().to_owned()).collect::<Vec<_>>();
+        assert_eq!(paths(&own),["/stylesheet-budget-mime"]);assert_eq!(paths(&foreign),["/stylesheet-budget-corp"]);
+        assert!(loaded.events.iter().any(|event|event.contains("Content-Type")),"{:?}",loaded.events);
+        assert!(loaded.events.iter().any(|event|event.contains("Cross-Origin-Resource-Policy")),"{:?}",loaded.events);
+        assert!(loaded.events.iter().any(|event|event.contains("Page resource download budget is full")),"{:?}",loaded.events);
     }
 
     #[test]

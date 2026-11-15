@@ -19,7 +19,7 @@ JOURNEYS=[['check_input_harness.py'],['check_input_harness.py','--event-namespac
  ['check_source_replacement_harness.py'],['check_animation_harness.py'],['check_license_acceptance.py'],
  ['check_navigation_harness.py'],['check_network_media_harness.py'],
  ['check_network_media_tls_harness.py'],['check_interframe_harness.py'],['check_background_harness.py'],
- ['check_authored_av_harness.py'],['check_network_authored_av_harness.py']]
+ ['check_authored_av_harness.py'],['check_network_authored_av_harness.py'],['check_stylesheet_origin_harness.py']]
 
 def committed_source_identity(commit,root=None):
     """Read immutable input blobs, including edits hidden by index flags."""

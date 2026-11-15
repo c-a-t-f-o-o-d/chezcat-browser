@@ -70,11 +70,15 @@ impl Worker {
                 let result = fetch(&job, &trust, cookies.clone(), &mut events);
                 let wake = {
                     let mut guard = shared.0.lock().unwrap();
-                    guard.active = None;
+                    // Source retirement still owes one completion to the
+                    // document counters. Bulk Stop/navigation takes active
+                    // ownership away and resets those counters instead.
+                    let publish = guard.active.take()
+                        .is_some_and(|active| Arc::ptr_eq(&active, &job.cancel));
                     if guard.stopping {
                         return;
                     }
-                    if !job.cancel.load(Ordering::Relaxed) {
+                    if publish {
                         guard.completed.push_back(Completion {
                             epoch: job.epoch,
                             request: job.request,
@@ -119,8 +123,8 @@ impl Worker {
 
     pub(super) fn cancel(&self) {
         let mut state = self.state.0.lock().unwrap();
-        if let Some(cancel) = &state.active {
-            cancel.store(true, Ordering::Relaxed);
+        if let Some(cancel) = state.active.take() {
+            cancel.store(true, Ordering::Release);
         }
         state.queue.clear();
         state.completed.clear();
@@ -156,9 +160,7 @@ fn fetch(
         .url
         .as_ref()
         .ok_or("Dynamic stylesheet has no HTTP document origin.")?;
-    if !origin.same_origin(url) {
-        return Err("Cross-origin dynamic stylesheet request blocked.".into());
-    }
+    crate::http::check_stylesheet_request(origin, url, job.request.same_origin_only)?;
     let filter = |target: &crate::url::HttpUrl| {
         job.blocking.check(target)?;
         job.request.policy.allows_external_style(
@@ -176,13 +178,14 @@ fn fetch(
         .with_cookie_session(cookies, Some(origin.clone()))
         .with_network_trace(job.network.clone())
         .with_resource_filter(&filter);
-    let response = pool.fetch_kind(
+    let response = pool.fetch_stylesheet(
         url,
         job.request.limits.sheet_bytes,
-        Some(origin),
+        origin,
         crate::http::FetchMode::Normal,
-        "STYLESHEET",
-    )?;
+        job.request.same_origin_only,
+        &filter,
+    ).map_err(|failure| failure.message)?.response;
     let content_type = response.header("content-type").unwrap_or("").to_owned();
     events.extend(response.events);
     if !(200..300).contains(&response.status) {
@@ -276,7 +279,7 @@ impl App {
                     &self.profile.data().settings.blocking,
                 )),
                 network: self.network.clone(),
-                cancel: Arc::new(AtomicBool::new(false)),
+                cancel: request.cancel.clone(),
             };
             match self.dynamic_stylesheets.as_ref().unwrap().submit(job) {
                 Ok(()) => self.pending_stylesheets += 1,
@@ -432,6 +435,13 @@ mod tests {
                                 "#target{display:block;width:123px;height:22px;color:#123456}".to_owned()
                             }
                             "/next.css" => { mime="text/css"; "#target{display:block;width:77px;height:19px}".to_owned() }
+                            "/cross-ordinary" => format!("<html><head><title>Waiting</title></head><body><div id=target>Foreign target</div><script>var sheet=document.createElement('link');sheet.rel='stylesheet';sheet.href='http://localhost:{}/foreign/theme.css';sheet.onload=function(){{if(document.getElementById('target').clientWidth!==147)throw 'foreign CSS geometry';if(('sheet' in sheet)||('cssRules' in sheet)||('styleSheets' in document)||document.styleSheets!==undefined)throw 'foreign CSS source exposed';document.title='Foreign stylesheet applied';}};sheet.onerror=function(){{throw 'ordinary foreign stylesheet refused';}};document.head.appendChild(sheet);</script></body></html>",address.port()),
+                            "/foreign/theme.css" => {mime="text/css";"#target{display:block;width:147px;height:23px;background-color:#4521cd}".into()}
+                            "/held-redirect.css" => {
+                                let _=held.1.wait_timeout_while(held.0.lock().unwrap(),Duration::from_secs(4),|open|!*open).unwrap();
+                                status="302 Found";headers=format!("Location: http://localhost:{}/retired-target.css\r\n",address.port());String::new()
+                            }
+                            "/retired-target.css" => {mime="text/css";"#target{width:999px}".into()}
                             "/base-redirect.css" => {
                                 status="302 Found"; headers="Location: /assets/theme.css\r\n".into(); String::new()
                             }
@@ -472,7 +482,7 @@ document.head.appendChild(sheet);
                                 if path == "/blocked" {
                                     headers="Content-Security-Policy: script-src 'unsafe-inline'; style-src 'none'\r\n".into();
                                 }
-                                format!("<head><title>Waiting</title></head><body><script>var sheet=document.createElement('link');sheet.rel='stylesheet';sheet.href='{href}';{}sheet.onload=function(){{document.title='UNEXPECTED load';}};sheet.onerror=function(){{document.title='Refused';}};document.head.appendChild(sheet);</script></body>", if path == "/integrity" { "sheet.integrity='sha256-unverified';" } else { "" })
+                                format!("<head><title>Waiting</title></head><body><script>var sheet=document.createElement('link');sheet.rel='stylesheet';sheet.href='{href}';{}sheet.onload=function(){{document.title='UNEXPECTED load';}};sheet.onerror=function(){{document.title='Refused';}};document.head.appendChild(sheet);</script></body>", if path == "/integrity" { "sheet.integrity='sha256-unverified';" } else if matches!(path.as_str(), "/cross" | "/redirect") { "sheet.crossOrigin='anonymous';" } else { "" })
                             }
                             _ => {
                                 let href = if path == "/held" { "/held.css" } else { "/sheet.css" };
@@ -588,7 +598,7 @@ document.head.appendChild(sheet);
     }
 
     #[test]
-    fn dynamic_stylesheet_enforces_csp_origin_mime_integrity_and_redirect_origin() {
+    fn dynamic_stylesheet_enforces_csp_crossorigin_mode_mime_integrity_and_redirect_origin() {
         for path in ["/blocked", "/cross", "/mime", "/redirect", "/integrity"] {
             let site = Site::new();
             let mut app = open(&site, path);
@@ -898,6 +908,52 @@ ORIGINAL_TRIGGER
     #[test]
     fn dynamic_script_load_handler_background_precedes_window_load_after_real_decode() {
         assert_callback_background_guard("/script-background",Some("/background-callback.js"));
+    }
+
+    #[test]
+    fn ordinary_foreign_dynamic_stylesheet_applies_real_geometry_pixels_and_final_base() {
+        let site=Site::new();let mut app=open(&site,"/cross-ordinary");wait(&mut app,|app|!app.is_loading());
+        assert_eq!(app.document.title,"Foreign stylesheet applied","{}\n{:?}",app.scripting.as_ref().unwrap().report(),app.events);
+        assert_eq!(app.scripting.as_ref().unwrap().error_count(),0);assert_eq!(app.pending_stylesheets,0);assert!(!app.scripting.as_ref().unwrap().has_host_tasks());
+        assert_eq!(*site.requests.lock().unwrap(),["/cross-ordinary","/foreign/theme.css"]);
+        let node=*app.styles.keys().next().unwrap();let expected=navigation::address(&format!("http://localhost:{}/foreign/theme.css",site.address.port()),&Location::home()).unwrap();assert_base(&app,node,&expected);
+        assert!(app.draw().pixels.contains(&0x4521cd));
+        // LINK reserves its native sheet getter, which explicitly declines.
+        // cssRules is an absent ordinary expando instead: consume its value
+        // and require undefined rather than inventing a native CSSOM getter.
+        let retained=app.styles[&node].clone();
+        let source="var sheetReadCompleted=false;var foreignSheetRead=sheet.sheet;sheetReadCompleted=true;";
+        let outcome=app.scripting.as_mut().unwrap().console_eval(&mut app.document,&mut app.forms,source);
+        assert_eq!(outcome.errors,1,"probe {source:?}: {}",app.scripting.as_ref().unwrap().report());
+        assert!(app.scripting.as_ref().unwrap().report().contains("Element property \"sheet\" is not supported."));
+        assert_eq!(app.styles[&node],retained);assert_base(&app,node,&expected);
+        eval(&mut app,"var foreignRuleRead=sheet.cssRules;if(sheetReadCompleted||foreignSheetRead!==undefined||foreignRuleRead!==undefined||document.styleSheets!==undefined)throw 'foreign stylesheet source/rules exposed';");
+        assert_eq!(app.scripting.as_ref().unwrap().error_count(),1,"only the explicit unsupported native sheet read is expected");
+        assert_eq!(app.styles[&node],retained);assert_base(&app,node,&expected);
+        assert!(app.draw().pixels.contains(&0x4521cd));assert_eq!(app.pending_stylesheets,0);
+    }
+    #[test]
+    fn dynamic_stylesheet_href_retirement_cancels_before_redirect_and_accounts_both_sources() {
+        let site=Site::new();let mut app=open(&site,"/home");wait(&mut app,|app|!app.is_loading());
+        eval(&mut app,"var replacementLoads=0,replacementErrors=0;sheet.onload=function(){replacementLoads++;};sheet.onerror=function(){replacementErrors++;};sheet.href='/held-redirect.css';");
+        wait(&mut app,|_|site.requests.lock().unwrap().iter().any(|path|path=="/held-redirect.css"));
+        let old_cancel=app.dynamic_stylesheets.as_ref().unwrap().state.0.lock().unwrap().active.as_ref().unwrap().clone();
+        eval(&mut app,"sheet.href='/next.css';");assert!(old_cancel.load(Ordering::Acquire));
+        site.release();wait(&mut app,|app|!app.is_loading());
+        assert!(!site.requests.lock().unwrap().iter().any(|path|path=="/retired-target.css"));
+        assert_eq!(app.pending_stylesheets,0);assert!(!app.scripting.as_ref().unwrap().has_host_tasks());
+        let node=*app.styles.keys().next().unwrap();assert_base(&app,node,&site.location("/next.css"));
+        eval(&mut app,"if(replacementLoads!==1||replacementErrors!==0||document.getElementById('target').clientWidth!==77)throw 'retired stylesheet task/event/geometry';");
+    }
+    #[test]
+    fn dynamic_stylesheet_stop_discards_old_worker_ownership_before_new_job() {
+        let site=Site::new();let mut app=open(&site,"/held");
+        wait(&mut app,|_|site.requests.lock().unwrap().iter().any(|path|path=="/held.css"));
+        app.stop_loading();assert_eq!(app.pending_stylesheets,0);
+        eval(&mut app,"var afterStopLoads=0;window.onload=null;sheet.onload=function(){afterStopLoads++;};sheet.onerror=function(){throw 'new stylesheet after Stop';};sheet.href='/next.css';");
+        site.release();wait(&mut app,|app|!app.is_loading());
+        assert_eq!(app.pending_stylesheets,0);assert!(!app.scripting.as_ref().unwrap().has_host_tasks());
+        eval(&mut app,"if(afterStopLoads!==1||document.getElementById('target').clientWidth!==77)throw 'post-Stop stylesheet accounting';");
     }
 
 }
