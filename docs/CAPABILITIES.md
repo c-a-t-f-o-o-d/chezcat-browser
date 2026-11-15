@@ -13,7 +13,7 @@ or public-service acceptance; completed local media evidence remains valid.
 | --- | --- | --- | --- |
 | License acceptance | Full offline native terms and explicit personal/organization acceptance; source/headless commands, strict minimal external receipts, same-text reuse and changed-terms/decline/write-failure refusal before browsing | Records a local choice, not verified identity or organizational authority; no account service is required | src/license_acceptance.rs, src/platform_license.rs, tools/accept_license.py, tools/check_license_acceptance.py; docs/LICENSE_ACCEPTANCE.md |
 | Navigation/search/history | HTTP(S)/files, query encoding, Google/Bing/DuckDuckGo/None setting, local result/destination/one-Back/second-query journeys; request-time bridge replacement with bounded native activation | Live behavior remains response/session-dependent | src/navigation.rs, src/search.rs, src/app_session_history.rs, src/script_navigation.rs; check_input_harness.py, check_address_search.py, check_navigation_harness.py |
-| HTTP/TLS/resources | Original transport, explicit local PEM trust selection, certificate validation, redirects, decompression, workers and measured timings | Remaining: shared trust/data and ordinary-resource coverage, with demonstrated certificate/chain gaps; bounded document diagnostics are a prerequisite, not a completed trust expansion. No OS trust-store lookup, root auto-update, revocation/CT or full browser-security claim; media remains bounded complete transfers with explicit CORS modes | src/http.rs, src/trust.rs, src/tls.rs, src/x509.rs, src/loader.rs; native loopback/negative tests |
+| HTTP/TLS/resources | Original transport and certificate validation; explicit local PEM stores with shared 1024-root capacity; a pinned conservative 98-authority Mozilla NSS selection, offline generation/source-identity gates and native CA/time/self-signature checks; redirects, decompression, workers and measured timings | Shared ordinary-document/resource recheck and demonstrated anchor/parser/protocol/admission gaps remain. The data subset is not full Firefox policy or broad TLS compatibility; no OS trust-store lookup, root auto-update, revocation/CT or security-certification claim. Media remains bounded complete transfers with explicit CORS modes | src/http.rs, src/trust.rs, src/tls.rs, src/x509.rs, src/loader.rs; tools/generate_trust.py, trust/mozilla/selection.json; native signed-path/negative and data-tool tests |
 | Privacy/storage/files | Memory-only cookies, scoped profiles/bookmarks, optional history, staged downloads and local roots | No site storage/service workers/persistent cookies; local files are not encrypted vaults | src/cookies.rs, src/profile.rs, src/history.rs, src/downloads.rs |
 | DOM/interfaces | Real mutation/Attr identity, selectors/collections, base Node/Element ancestry, distinct Image and genuine realm-scoped DOMException | Specialized prototypes/constructors, wider child contexts and DOM APIs missing | src/script_dom_tree.rs, src/script_attr.rs, src/host_objects.rs, src/dom_exception.rs; local namespace/Attr journey and exception originals |
 | JavaScript/realms | Original language/built-ins/promises/jobs, owner-isolated intrinsic roots and replaceable real main-Window animation operations | UTF-16 code units, modules, fetch/XHR and many interfaces incomplete | src/javascript.rs, src/intrinsic_realms.rs, src/promises.rs, src/scripting.rs; normal suite, frozen references and check_animation_harness.py |
@@ -32,11 +32,23 @@ or public-service acceptance; completed local media evidence remains valid.
 | Evidence type | What it establishes | What it does not establish |
 | --- | --- | --- |
 | Original model/unit tests | Specific conversions, brands, owners, queues, failure and retirement rules | Full standards conformance or visible application behavior |
-| Document-only diagnostics | Original transport response, trust selection, guarded destinations and measured native phases for the actual attempt | Page JavaScript/subresources, readability, interaction, challenge clearance or completed trust-data expansion |
+| Trust-data and native certificate checks | Exact reviewed data reproduction, source/policy pins, all selected anchors' supported forms/CA/time/self-signatures, retained identities and original signed-path refusals | Complete Firefox policy, revocation/CT, general TLS interoperability or a public website's actual behavior |
+| Document-only diagnostics | Original transport response, trust selection, guarded destinations and measured native phases for the actual attempt | Page JavaScript/subresources, readability, interaction, challenge clearance or an audit of the complete trust selection |
 | Actual App/input/offscreen journeys | Real application input, script state/events, source/layout/canvas identity, decoded pixels and finite HTTP/TLS response checks | Physical desktop presentation, speaker output or public-service compatibility |
 | Hosted offline CI | The recorded commit's build, normal checks and local fixture journeys on its runner | A later commit, release payload, hardware output or live service |
 | Explicit opt-in WinMM checks | Device acknowledgements, PCM sample advancement, pause/seek/drain/replay and video alignment for the selected profile | Physical audibility, arbitrary devices or routine no-device CI |
 | Physical desktop / live service | Requires separate, explicit evidence for the actual session and outcome | Not inferred from source inspection, HTTP status, titles or offscreen pixels |
+
+The default trust bundle selects 98 authorities from pinned Mozilla NSS 2.94
+data with separate MPL notices. Four leaf-issuance cutoffs, one externally imposed
+name restriction, ten unsupported forms and 54 non-server-auth entries are
+excluded entirely. Original native checks validate every selected anchor and
+retain prior exact identities; offline tool tests exercise deterministic
+selection, strict refusal and verifier-source pins. Custom PEM replacement stays
+strict, and identity, expiry, signatures and constraints are unchanged. Normal
+verification remains required for integration. A coordinated browser recheck
+must establish actual request/resource behavior; these checks alone establish
+no newly usable public service. See [trust scope and refresh](../trust/README.md).
 
 The finite CustomEvent interface journey uses two trusted base-input clicks to
 construct and deliver real untrusted notifications, retaining any detail

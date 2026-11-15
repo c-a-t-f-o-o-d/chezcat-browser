@@ -85,6 +85,15 @@ class Guards(unittest.TestCase):
                 incomplete=dict(entries);del incomplete[name]
                 with self.assertRaisesRegex(ValueError,'Mandatory tracked runtime inputs'):
                     package.runtime_names(incomplete)
+    def test_mozilla_trust_provenance_and_notices_are_mandatory(self):
+        _,commit=self.fixture();entries=package.tree(commit)
+        for name in ['trust/roots.pem','trust/mozilla/certdata.txt','trust/mozilla/LICENSE-MPL-2.0.txt',
+                     'trust/mozilla/PROVENANCE.json','trust/mozilla/policy.json','trust/mozilla/selection.json']:
+            with self.subTest(missing=name):
+                incomplete=dict(entries);del incomplete[name]
+                with self.assertRaisesRegex(ValueError,'Mandatory tracked runtime inputs'):
+                    package.runtime_names(incomplete)
+
     def test_missing_containing_scope_is_rejected(self):
         files,_=self.fixture(omit_scope=True)
         with self.assertRaisesRegex(ValueError,'containing-revision license scope'):

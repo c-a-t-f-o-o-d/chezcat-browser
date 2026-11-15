@@ -6,6 +6,12 @@ Development priority is shared TLS/trust/data coverage, everyday resource/render
 interaction usability, then finite tabs, link context and new windows. Further
 F6/YouTube work is deferred; completed finite media/interface slices remain.
 
+- Expand browser-owned trust data to a pinned, conservative 98-authority Mozilla
+  NSS subset with retained MPL notices, offline reproducibility and a reviewed
+  verifier-source hash gate. Share a 1024-root capacity across PEM/store/TLS
+  entry points while preserving certificate, identity and path validation;
+  restricted and unsupported authorities remain excluded. No OS trust lookup,
+  automatic refresh, revocation/CT or live-service outcome is implied.
 - Add optional exact-host document diagnostics checked before DNS on every hop,
   with retained two-MiB body bounds, actual destinations/measured phases and
   escaped status/error metadata. Possible body markers are observations;

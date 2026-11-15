@@ -39,6 +39,25 @@ class Controls(unittest.TestCase):
                 else:
                     self.assertEqual(final['runs'][-1]['name'], 'normal')
 
+    def test_trust_data_stages_publish_only_fixed_names_and_states(self):
+        secret='CONTROLLED_PRIVATE_TRUST_REASON'
+        with tempfile.TemporaryDirectory(prefix='public-trust-stage-') as temporary:
+            root=Path(temporary)
+            location='results/verification/offline/20261115T000000.000000Z-23456789/verification.json'
+            target=root/location;target.parent.mkdir(parents=True)
+            pointer=root/'results/verification/latest-offline.json'
+            pointer.write_bytes(json.dumps({'report':location}).encode())
+            target.write_bytes(json.dumps({'passed':False,'source_commit':'1'*40,'runs':[
+                {'name':'trust-data','state':'completed','error':secret},
+                {'name':'trust-data-controls','state':'failed','error':secret},
+                {'name':secret,'state':'completed'},
+                {'name':'trust-data','state':secret}]}).encode())
+            with patch.object(public.subprocess,'check_output',return_value=b'1'*40+b'\n'), patch.object(public,'find_native',return_value=None), patch.object(public,'public_basenames',return_value=set()):
+                result=public.summary(root)
+            self.assertEqual(result['stages'],[{'name':'trust-data','state':'completed'},{'name':'trust-data-controls','state':'failed'}])
+            self.assertFalse(result['passed'])
+            self.assertNotIn(secret,json.dumps(result))
+
     def test_hostile_strings_unknown_identifiers_and_metadata_never_project(self):
         secret = 'https://private.invalid/path?token=CONTROLLED_SECRET'
         manifest = {'schema_version': 1, 'state': 'not_passed', 'error': secret,

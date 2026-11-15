@@ -21,7 +21,10 @@ and licensing obligations; see [third-party notices](THIRD_PARTY_NOTICES.md).
   headless commands, personal/organization scopes and minimal external receipts.
   Decline or invalid acceptance blocks browsing and source builds.
 - HTTP(S), original TLS/certificate handling, memory-only session cookies,
-  redirects and supported CSP/resource policies.
+  redirects and supported CSP/resource policies. Browser-owned trust data includes
+  a conservative 98-authority Mozilla NSS subset, with pinned provenance,
+  offline generation and explicit custom-store replacement; see
+  [HTTPS trust](trust/README.md). This data update adds no external TLS engine.
 - Address-bar search with Google by default, Bing, DuckDuckGo and None; explicit
   URL/file intent is kept separate from search and navigation errors.
 - HTML/DOM, a bounded JavaScript subset, events, CSS layout and software painting.
@@ -58,9 +61,11 @@ These are scoped foundations, not complete standards support. The
 [capability matrix](docs/CAPABILITIES.md) separates implementation from evidence.
 Google Search, Images and Maps are not fully supported. YouTube page compatibility
 is limited, and playback is unsupported. Further F6/YouTube work is deferred.
-The next priorities are shared TLS/trust/data coverage, everyday resource,
-rendering and interaction usability, then finite tabs, link context and new
-windows. Those priorities do not describe new implemented capabilities.
+Next, recheck shared TLS/trust/data behavior through ordinary document and
+resource paths, then improve everyday rendering and interaction usability before
+finite tabs, link context and new windows. Remaining TLS gaps stay explicit;
+perfect TLS coverage is not required before useful page-usability work. The
+trust-data subset does not establish new live-service compatibility.
 
 ## Build
 

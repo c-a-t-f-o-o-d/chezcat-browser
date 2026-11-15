@@ -1,101 +1,97 @@
 # Explicit HTTPS trust
 
-The browser reads `trust/roots.pem` beside the executable once at startup.
-This file contains public certificate **data**, not a TLS or certificate-library
-implementation. The browser's original X.509, RSA and ECDSA code validates the chain.
-There is no operating-system trust-store lookup, authority discovery, download,
-automatic root update, or certificate-error bypass.
+ChezCat reads `trust/roots.pem` beside the executable once at startup. The file
+contains certificate data; the browser's original Rust TLS, X.509, RSA and ECDSA
+code validates each chosen path. It does not use the operating-system root
+store, discover authorities, download updates or bypass certificate errors.
 
-The default file contains these eight self-signed authorities:
+## Default data and selection
 
-| Certificate | Public key | DER SHA-256 | Expires (UTC) |
-| --- | ---: | --- | --- |
-| ISRG Root X1 | RSA 4096 | `96bcec06264976f37460779acf28c5a7cfe8a3c0aae11a8ffcee05c0bddf08c6` | 2035-06-04 11:04:38 |
-| DigiCert Global Root G2 | RSA 2048 | `cb3ccbb76031e5e0138f8dd39a23f9de47ffc35e43c1144cea27d46a5ab1cb5f` | 2038-01-15 12:00:00 |
-| Amazon Root CA 1 | RSA 2048 | `8ecde6884f3d87b1125ba31ac3fcb13d7016de7f57cc904fe1cb97c6ae98196e` | 2038-01-17 00:00:00 |
-| ISRG Root X2 | ECDSA P-384 | `69729b8e15a86efc177a57afb7171dfc64add28c2fca8cf1507e34453ccb1470` | 2040-09-17 16:00:00 |
-| GTS Root R1 | RSA 4096 | `d947432abde7b7fa90fc2e6b59101b1280e0e1c7e4e40fa3c6887fff57a7f4cf` | 2036-06-22 00:00:00 |
-| GTS Root R3 | ECDSA P-384 | `34d8a73ee208d9bcdb0d956520934b4e40e69482596e8b6f73c8426b010a6f48` | 2036-06-22 00:00:00 |
-| GTS Root R4 | ECDSA P-384 | `349dfa4058c5e263123b398ae795573c4e1313c83fe68f93556cd5e8031b3c7d` | 2036-06-22 00:00:00 |
-| DigiCert Global Root G3 | ECDSA P-384 | `31ad6648f8104138c738f39ea4320133393e3a18cc02296ef97c2ac9ef6731d0` | 2038-01-15 12:00:00 |
+The default contains 98 self-signed authorities selected from Mozilla NSS
+built-ins 2.94, revision `8c60e757c30b1b239bae46532b4f6d4ebb1e1cad`
+(2026-11-13 UTC). [mozilla/PROVENANCE.json](mozilla/PROVENANCE.json) pins the
+upstream revision, source hashes, external-constraint references and license.
+The unchanged [certdata.txt](mozilla/certdata.txt) snapshot retains upstream
+notices; its MPL-2.0 terms and [license](mozilla/LICENSE-MPL-2.0.txt) remain
+separate from the original browser's license.
 
-Expiry means the certificate's `notAfter`, not a browser root program's trust-retirement date.
-The GTS entries are the self-signed **with digitalSignature** variants; other
-certificates with the same CA names can have different DER fingerprints.
+The original offline [generator](../tools/generate_trust.py) joins certificates
+to their exact NSS trust objects. It selects server-auth trusted delegators only
+after an explicit original-verifier capability review and the recorded
+[policy](mozilla/policy.json). Of 113 server-auth authorities, 103 have supported
+certificate forms. Four with unimplemented leaf-issuance distrust cutoffs and
+one with an externally imposed `.tr` name restriction are excluded entirely.
+Ten unsupported authorities and 54 other certificates are also excluded. No
+restricted authority is promoted to unrestricted trust. The exact included and
+excluded DER SHA-256 identities and reasons are in
+[selection.json](mozilla/selection.json); names alone never establish trust.
 
-The first three self-signatures use RSA PKCS1 v1.5/SHA-256. GTS Root R1 uses
-RSA PKCS1 v1.5/SHA-384; the P-384 roots use ECDSA/SHA-384. A supported path may
-mix RSA and EC keys, because each certificate is verified with its issuer's key.
+This conservative subset does not reproduce the complete Firefox trust policy.
+It does not implement OneCRL, OCSP/CRL fetching, revocation or certificate
+transparency. A successful certificate result implies none of those checks and
+does not establish page usability or broad public-web compatibility.
 
-The certificate data was selected from the development operating system's
-public certificate bundle and matched by exact DER SHA-256 against each issuer's
-published fingerprint. Issuer references:
+The native regression checks pin the exact generated PEM and validate every
+selected root's supported format, CA constraints, validity and self-signature.
+They also preserve all eight previously bundled DER identities and their key
+forms independently of bundle order. The earlier exact G3 provenance remains in
+[digicert-global-root-g3-provenance.json](digicert-global-root-g3-provenance.json).
+These data checks do not supply an absent peer chain or establish service access.
 
-- [ISRG certificate policy, root fingerprints](https://letsencrypt.org/documents/isrg-cp-v3.3/)
-- [Let's Encrypt certificates and chains](https://letsencrypt.org/certificates/)
-- [DigiCert trusted root certificates](https://knowledge.digicert.com/general-information/digicert-trusted-root-authority-certificates)
-- [Amazon Trust Services repository](https://www.amazontrust.com/repository/)
-- [Google Trust Services repository](https://pki.goog/repository/)
-- [GTS CPS 5.22, exact certificate variants and fingerprints](https://pki.goog/repo/cps/5.22/GTS-CPS.html)
+## Explicit custom stores and verifier bounds
 
-To choose your own authorities, edit this PEM file and restart, or launch:
+To replace the process's default authorities, edit the local file and restart,
+or launch:
 
 ```powershell
 .\ChezCat.exe --trust-file C:\path\my-roots.pem https://example.org/
 ```
 
-`--trust-file` **replaces** the default authorities for that process. It does not
-merge them or install anything into Windows. Trust files must be regular files,
-at most 2 MiB, and contain 1–128 PEM certificates. Exact duplicate certificates
-are deduplicated. The current verifier supports v3 certificates with RSA
-2048–4096-bit `rsaEncryption` keys or named P-256/P-384 EC keys in uncompressed
-form. Certificate signatures can use RSA PKCS1 v1.5, RSA-PSS or ECDSA with
-SHA-256/384/512. Unsupported certificates in a custom file cause validation to
-fail rather than being silently discarded.
+`--trust-file` replaces the default; it does not merge stores or change Windows.
+The file must be a regular file of at most 2 MiB, containing 1–1024 PEM
+certificate blocks before exact-DER deduplication. The reusable PEM decoder
+retains its separate 12 MiB input bound, each DER certificate is at most 64 KiB,
+the presented server chain has at most eight certificates, and at most eight
+matching root candidates undergo signature validation. Storage grows with input;
+the root limit does not preallocate a maximum-sized store.
 
-Authority names alone do not confer trust. A validated ordered prefix must end
-at the exact trusted certificate, or its last certificate must be signed by an
-eligible stored root. The verifier tries stored roots at each validated prefix,
-so an unnecessary supported cross-sign after that point does not force an
-otherwise valid path toward a different authority. It still parses every
-supplied certificate and rejects duplicates before selecting the path.
-The root's constraints, validity and self-signature are also checked. These are
-an initial set chosen for this build; they are not a complete public-web root
-program. A trusted issuer does not make every possible server configuration
-compatible with this browser's limited TLS and certificate algorithms.
+The verifier supports v3 certificates with RSA 2048–4096-bit `rsaEncryption`
+keys or named P-256/P-384 EC keys in uncompressed form. Certificate signatures
+may use RSA PKCS1 v1.5, RSA-PSS or ECDSA with SHA-256/384/512. Every custom root
+is parsed before path selection; unsupported entries are rejected when the
+HTTPS path is validated, never silently discarded by default-data filtering.
+An unreadable or malformed explicit PEM file stops startup. An unavailable
+default leaves local pages and HTTP usable while HTTPS reports the trust error.
 
-Ctrl+I shows the selected file and its SHA-256, and the leaf/root DER fingerprints
-for successful HTTPS requests, plus the selected path and unused suffix lengths.
-The last failed navigation is listed separately from the retained page. File
-changes take effect only after restart.
-An unavailable default file leaves local pages and HTTP working; HTTPS reports
-the trust configuration error. An unreadable or malformed explicit PEM file
-stops startup. Certificate-policy errors are reported when validating an HTTPS
-connection.
+The validated ordered prefix must reach an exact stored authority or a last
+certificate signed by an eligible stored root. Extra supported cross-signs do
+not force a valid prefix toward another root. All supplied peer certificates
+are parsed and duplicate peer certificates rejected. Selected roots retain
+their CA, time, usage and self-signature checks; SAN identity, signature and
+constraint checks are unchanged. TLS 1.2/1.3 support remains a bounded subset.
 
-`tools/https-demo/demo-roots.pem` is a separate bundle of two publicly shipped
-**test** authorities: the original RSA root from `ca.pem` and the P-384 root
-from `ec-ca.pem`. `Run-Https-Browser.cmd` selects this combined file only for the
-local demo process. The default demo server has a P-256 identity; its optional
-RSA and P-384 identities use the same bundle. The original `ca.pem` remains
-valid for the older RSA fixtures. None of these test roots is included in
-`trust/roots.pem` or installed into Windows. Do not add them to ordinary trust.
+Ctrl+I reports the selected file and PEM SHA-256, successful leaf/root DER
+fingerprints, selected prefix and unused suffix lengths. Failed navigation is
+reported separately from the retained page. Store changes take effect after
+restart.
 
-Revocation, OCSP/CRL fetching and certificate transparency are not implemented.
-No revocation or CT status is implied by the status bar's certificate result.
+## Reviewed offline refresh
 
-## 0.51 explicit addition
+Root data is refreshed explicitly, not by the running browser. Pin a reviewed
+Mozilla source revision and hashes, retain its notices, and review the associated
+external constraints. Re-audit all server-auth authorities against the exact
+original verifier inputs; new unsupported fields, unknown trust states or
+unreviewed authorities must fail generation. Update the reviewed policy instead
+of dropping restrictions or silently accepting unsupported certificate forms.
 
-The G3 DER fingerprint was checked against DigiCert's published root list on
-2026-11-12. Its subject-name DER SHA-256 exactly matches the last issuer-name
-hash in the user's failing www.bing.com path. The first seven certificates are
-unchanged. See `digicert-global-root-g3-provenance.json` for fingerprints and the
-source of these certificate data. OpenSSL independently verified its self-signature.
+After review, `python tools/generate_trust.py --generate` writes the deterministic
+bundle and selection manifest; `python tools/generate_trust.py` checks their
+exact committed bytes without downloading or installing anything. Refresh the
+native bundle-identity expectation and run all-root CA/signature/time checks,
+the retained identity/isolation negatives, signed X.509/TLS fixtures and the
+normal offline verification gate. Live website behavior requires its separately
+coordinated local check; a data refresh alone proves no live outcome.
 
-This is an explicit addition to the bundled trust policy, not automatic trust
-of certificates sent by a server. It can validate only a correctly signed path
-satisfying the existing hostname, time, constraints and algorithm checks. The
-reported peer DER files were not supplied, so the full Bing path still needs a
-fresh capture. Certificate validation, revocation/CT limitations and custom
-`--trust-file` replacement semantics remain unchanged. Restart the browser to
-load the updated bundle; the activity report should list eight roots.
+`tools/https-demo/demo-roots.pem` remains a separate original test-authority
+bundle selected only by local demo/test processes. Its RSA and P-384 roots are
+not part of the default store and must not be added to ordinary trust.

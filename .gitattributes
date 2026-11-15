@@ -42,3 +42,6 @@ SOURCE_REVISION export-subst
 LICENSE text eol=lf
 LICENSE_SCOPE.md text eol=lf
 licensing/** text eol=lf
+
+# Generated PEM retains a separator after every certificate block.
+trust/roots.pem whitespace=-blank-at-eof

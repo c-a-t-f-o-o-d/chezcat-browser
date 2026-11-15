@@ -22,7 +22,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 pub const MAX_CERT_BYTES: usize = 64 * 1024;
 pub const MAX_CHAIN: usize = 8;
-pub const MAX_ROOTS: usize = 128;
+pub const MAX_ROOTS: usize = 1024;
 const MAX_PEM_BYTES: usize = 12 * 1024 * 1024;
 const MAX_EXTENSIONS: usize = 64;
 const MAX_SAN_NAMES: usize = 256;
@@ -142,7 +142,7 @@ pub fn verify_server(
         return Err("A server chain must contain 1 to 8 certificates.".into());
     }
     if roots.is_empty() || roots.len() > MAX_ROOTS {
-        return Err("Supply 1 to 128 explicit trusted root certificates.".into());
+        return Err(format!("Supply 1 to {MAX_ROOTS} explicit trusted root certificates."));
     }
     let now = system_seconds(now)?;
     let chain: Vec<_> = chain
@@ -1319,7 +1319,7 @@ pub fn parse_pem_certificates(input: &[u8]) -> Result<Vec<Vec<u8>>, String> {
                 return Err("Nested PEM certificate blocks are invalid.".into());
             }
             if certificates.len() == MAX_ROOTS {
-                return Err("The PEM bundle has more than 128 certificates.".into());
+                return Err(format!("The PEM bundle has more than {MAX_ROOTS} certificates."));
             }
             encoded = Some(Vec::new());
         } else if line == b"-----END CERTIFICATE-----" {
@@ -1521,7 +1521,16 @@ mod tests {
 
     #[test]
     fn shipped_public_anchors_have_valid_signatures_and_ca_constraints() {
-        let roots = parse_pem_certificates(include_bytes!("../trust/roots.pem")).unwrap();
+        let bundle = include_bytes!("../trust/roots.pem");
+        assert_eq!(fingerprint(&sha256(bundle)),
+            "C6:A0:19:9F:E8:D8:06:AA:54:82:FB:19:91:0B:3C:F7:C3:68:67:73:9E:E5:E6:D0:22:5E:67:F8:6D:31:AE:8F");
+        let roots = parse_pem_certificates(bundle).unwrap();
+        assert_eq!(roots.len(), 98);
+        let parsed: Vec<_> = roots.iter().map(|der| parse_certificate(der).unwrap()).collect();
+        for root in &parsed {
+            // Every selected root, with no unsupported/time/signature filtering.
+            check_anchor(root, 0, 1_794_700_800).unwrap(); // 2026-11-15 UTC
+        }
         let expected = [
             ("96:BC:EC:06:26:49:76:F3:74:60:77:9A:CF:28:C5:A7:CF:E8:A3:C0:AA:E1:1A:8F:FC:EE:05:C0:BD:DF:08:C6", 512, "RSA"),
             ("CB:3C:CB:B7:60:31:E5:E0:13:8F:8D:D3:9A:23:F9:DE:47:FF:C3:5E:43:C1:14:4C:EA:27:D4:6A:5A:B1:CB:5F", 256, "RSA"),
@@ -1532,9 +1541,10 @@ mod tests {
             ("34:9D:FA:40:58:C5:E2:63:12:3B:39:8A:E7:95:57:3C:4E:13:13:C8:3F:E6:8F:93:55:6C:D5:E8:03:1B:3C:7D", 97, "ECDSA P-384"),
             ("31:AD:66:48:F8:10:41:38:C7:38:F3:9E:A4:32:01:33:39:3E:3A:18:CC:02:29:6E:F9:7C:2A:C9:EF:67:31:D0", 97, "ECDSA P-384"),
         ];
-        assert_eq!(roots.len(), expected.len());
-        for (der, (expected_fingerprint, key_bytes, key_kind)) in roots.iter().zip(expected) {
-            let root = parse_certificate(der).unwrap();
+        // Preserve all eight prior exact identities independently of bundle order.
+        for (expected_fingerprint, key_bytes, key_kind) in expected {
+            let root = parsed.iter().find(|root| fingerprint(&root.fingerprint) == expected_fingerprint)
+                .expect("A prior exact public anchor must remain in the expanded bundle");
             assert_eq!(fingerprint(&root.fingerprint), expected_fingerprint);
             assert_eq!(root.key.description(), key_kind);
             let actual_bytes = match root.key {
@@ -1558,7 +1568,10 @@ mod tests {
     fn bundled_g3_identity_matches_the_published_root_and_reported_issuer() {
         // This verifies bundled root DATA, not the absent Bing peer DER chain.
         let roots = parse_pem_certificates(include_bytes!("../trust/roots.pem")).unwrap();
-        let root = parse_certificate(roots.last().unwrap()).unwrap();
+        let der = roots.iter().find(|der| fingerprint(&sha256(der)) ==
+            "31:AD:66:48:F8:10:41:38:C7:38:F3:9E:A4:32:01:33:39:3E:3A:18:CC:02:29:6E:F9:7C:2A:C9:EF:67:31:D0")
+            .expect("The exact DigiCert Global Root G3 must remain bundled");
+        let root = parse_certificate(der).unwrap();
         assert_eq!(fingerprint(&root.fingerprint),
             "31:AD:66:48:F8:10:41:38:C7:38:F3:9E:A4:32:01:33:39:3E:3A:18:CC:02:29:6E:F9:7C:2A:C9:EF:67:31:D0");
         assert_eq!(fingerprint(&sha256(root.subject)),
