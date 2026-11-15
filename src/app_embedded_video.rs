@@ -1356,4 +1356,5 @@ mod tests {
     }
     include!("app_network_media_tests.rs");
     include!("app_cors_media_tests.rs");
+    include!("app_interframe_tests.rs");
 }

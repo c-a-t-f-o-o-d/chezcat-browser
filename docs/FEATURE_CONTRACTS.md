@@ -175,13 +175,39 @@ Prove real pixels, dependency-aware seeks, EOF/replay and the existing acknowled
 PCM sample-clock synchronization. WebM/Opus/Vorbis, hidden video frames, MSE and
 general service playback remain separate.
 
-State prerequisite: retain real post-filter YUV through immutable reference
-ownership, normalize visible-edge padding and publish a candidate only after the
-final cancellation check. One requested bitmap owns a fresh decoder sequence and
-shared adjustable work/packet allowances. Small profiles verify refusal and fresh
-request recovery; normal defaults grow on demand. This prerequisite preserves
-existing keyframe behavior and still explicitly declines interframes. It does not
-complete F5 or advertise dependent-frame playback.
+Implemented finite profile: visible fixed-canvas version-zero I/P frames with
+intra macroblocks and ZERO/NEAREST/NEAR/NEW single16x16 motion vectors; LAST,
+GOLDEN and ALT references; format-defined reference copy/refresh order; real
+coefficient/mode/MV probability updates, segment-map retention and loop filtering.
+SPLITMV, hidden frames and nonzero-version interframes explicitly decline.
+Existing keyframe versions remain supported; this is not complete VP8 conformance.
+
+Retain real post-filter YUV through immutable reference ownership, normalize
+visible-edge padding and publish candidate state only after the final cancellation
+check. One requested bitmap owns a fresh key-to-target decoder sequence with shared
+adjustable work/packet allowances, including work spent on failure. Small profiles
+verify refusal and fresh-request recovery; normal defaults grow on demand.
+
+Original authored64x48/8fps/24frame two-GOP inputs have independent native-decoded
+YUV, default RGBA and a separate explicit centered-bilinear BT.601 display oracle.
+The new display profile requires mean RGB error<0.5 and maximum channel error2;
+it does not replace or loosen existing reference checks. Original bit-packet tests
+exercise entropy rollback, segment disable/reenable, reference copy/refresh,
+malformed/truncated input and final-cancellation atomicity. Real App tests hold
+decoded results across newer seeks, source changes, native Stop and navigation.
+
+The executable journey checks actual script/native controls and promises, all24
+independent frames in nonsequential/backward IVF and Matroska seeks, EOF/replay,
+source lifecycle and complete loopback HTTP(S) video. Existing Matroska PCM16
+selected offsets and an explicit WinMM device journey cover their distinct scopes:
+only the latter verifies acknowledged advancement and completed drain. Physical
+audibility and service compatibility remain unproved. Routine CI remains offline
+and does not open the audio device.
+
+Semantic basis: [RFC6386](https://www.rfc-editor.org/rfc/rfc6386.html), especially
+sections9–10 and16–18. Viewing-format conversion is explicit under section5.
+Container, audio and network contracts remain separate: no new WebM/audio codec,
+authored element audio, range streaming, MSE, or public-service acceptance.
 
 Every later feature records semantic references, original and selected conformance
 tests, security review, native/device/live checks still pending and exact final

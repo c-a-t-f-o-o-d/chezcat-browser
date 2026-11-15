@@ -13,6 +13,7 @@ actual notices below; source visibility alone does not establish exclusive title
 | Windows APIs/static CRT | APIs/toolchain are dependencies; verify applicable current Microsoft redistribution terms before binary release |
 | Bundled public trust certificates | Retain fingerprints/provenance; redistribution basis and current trust-data policy require review |
 | Original local fixtures and generated artwork | Retain generator/provenance records. Generated output does not prove exclusive copyright; individual asset and reference provenance still requires confirmation |
+| Original VP8 I/P and PCM fixtures | tools/make_interframe_fixture.py authors scene/sample inputs; FFmpeg/libvpx are development encoding/reference tools only and are not redistributed. Preserve tools/fixtures/scene-inter-PROVENANCE.md and static payload/reference identities |
 
 The original icon source retains C2PA/service provenance metadata, including an
 embedded service badge; normalized runtime icon files do not carry that metadata.

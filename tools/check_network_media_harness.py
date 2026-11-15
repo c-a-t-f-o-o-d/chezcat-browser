@@ -34,20 +34,21 @@ def require(value, message):
         raise ValueError(message)
 
 
-def fixture_payloads():
+def fixture_payloads(fixture_stem=None):
+    fixture_stem=Path(fixture_stem) if fixture_stem is not None else FIXTURE_ROOT/'scene-intra'
     return {
         '/authored-video.html': ('text/html; charset=utf-8',
             (FIXTURE_ROOT / 'authored-video.html').read_bytes()),
         '/scene-intra.ivf': ('video/x-ivf',
-            (FIXTURE_ROOT / 'scene-intra.ivf').read_bytes()),
+            fixture_stem.with_suffix('.ivf').read_bytes()),
         '/authored-video-next.html': ('text/html; charset=utf-8',
             (FIXTURE_ROOT / 'authored-video-next.html').read_bytes()),
     }
 
 
-def run_case(transport, folder):
+def run_case(transport, folder, fixture_stem=None, display_profile=None):
     folder.mkdir()
-    payloads = fixture_payloads()
+    payloads = fixture_payloads(fixture_stem)
     records = []
     lock = threading.Lock()
 
@@ -116,7 +117,7 @@ def run_case(transport, folder):
     try:
         with child_log.open('w', encoding='utf-8', newline='\n') as output:
             with contextlib.redirect_stdout(output):
-                status = authored.main(source=source, trust_file=trust_file)
+                status = authored.main(source=source, trust_file=trust_file, fixture_stem=fixture_stem, display_profile=display_profile)
     finally:
         server.shutdown()
         server.server_close()

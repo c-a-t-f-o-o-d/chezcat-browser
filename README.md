@@ -4,7 +4,7 @@ An experimental Windows x64 browser with an original Rust engine: networking,
 JavaScript, DOM, layout, rendering and selected media decoding. It does not embed
 Chromium, Gecko, WebKit or an external JavaScript/codec runtime.
 
-The current milestone is **0.80.0-alpha.1**, preserving the completed animation milestone. This is an experimental browser, without a
+The development candidate is **0.80.0-alpha.1**, preserving the completed animation milestone. This is an experimental browser, without a
 security certification. Web-platform support is partial. The renderer and interpreter run
 in the browser process with worker threads, without an OS renderer sandbox.
 
@@ -20,7 +20,9 @@ and licensing obligations; see [third-party notices](THIRD_PARTY_NOTICES.md).
   URL/file intent is kept separate from search and navigation errors.
 - HTML/DOM, a bounded JavaScript subset, events, CSS layout and software painting.
 - Settings, bookmarks, optional browser history, downloads and local diagnostics.
-- Selected local IVF/VP8-intra video, PCM audio and constrained Matroska A/V.
+- Selected local IVF/VP8 video, PCM audio and constrained Matroska A/V.
+  Visible fixed-canvas version-zero I/P video supports single-vector interframes
+  and dependency-aware seeking; SPLITMV and hidden frames remain unsupported.
   One authored HTML video supports native controls, source replacement and real
   JavaScript load(), issue-time pause(), currentTime seeking and play() with
   genuine pending promises, measured playback time and decoded frames. Supported

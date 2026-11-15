@@ -381,6 +381,7 @@ mod tests {
         assert!(app.media.as_ref().unwrap().error.is_some());assert!(!app.media_control_state().unwrap().playing);assert!(!app.media.as_ref().unwrap().sync.as_ref().unwrap().resume_after_seek);
         assert!(!app.audio_sync_state().unwrap().wants_play);assert!(!app.poll_media_sync());
     }
+    include!("app_interframe_av_tests.rs");
 }
 impl Embedded {
     fn task_scope(&self) -> MediaScope { MediaScope {node:self.node,retired:self.retired.clone()} }

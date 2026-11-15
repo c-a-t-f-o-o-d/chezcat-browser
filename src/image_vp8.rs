@@ -10,6 +10,10 @@ use std::sync::Arc;
 #[path = "image_vp8_tables.rs"]
 mod tables;
 use tables::{AC_QUANT, BMODE_PROBS, COEFF_DEFAULTS, COEFF_UPDATES, DC_QUANT};
+#[path="image_vp8_motion.rs"]
+mod motion;
+#[path="image_vp8_inter.rs"]
+mod inter;
 
 const MAX_BOOLEAN_WORK: usize = 128 * 1024 * 1024;
 const ZIGZAG: [usize; 16] = [0, 1, 4, 8, 5, 2, 3, 6, 9, 12, 13, 10, 7, 11, 14, 15];
@@ -209,6 +213,7 @@ impl<'a> Bool<'a> {
 }
 
 struct Header {
+    keyframe: bool,
     segments: bool,
     segment_map: bool,
     absolute: bool,
@@ -230,27 +235,34 @@ struct Header {
 }
 impl Header {
     fn read(bits: &mut Bool<'_>) -> ImageResult<Self> {
-        if bits.bit(128)? {
-            return Err("VP8 reserved color space is unsupported.".into());
+        let mut h=Self::read_common(bits,None)?;
+        h.refresh_entropy=bits.bit(128)?;
+        h.read_tokens(bits)?;
+        Ok(h)
+    }
+    fn read_common(bits:&mut Bool<'_>,previous:Option<&Persistent>)->ImageResult<Self> {
+        if previous.is_none() {
+            if bits.bit(128)? {return Err("VP8 reserved color space is unsupported.".into());}
+            bits.bit(128)?;
         }
-        bits.bit(128)?; // Clamping hint; output is clamped in either case.
         let mut h = Self {
+            keyframe: previous.is_none(),
             segments: bits.bit(128)?,
             segment_map: false,
-            absolute: false,
-            quant: [0; 4],
-            filter: [0; 4],
-            segment_probs: [255; 3],
+            absolute: previous.is_some_and(|p|p.absolute),
+            quant: previous.map_or([0;4],|p|p.quant),
+            filter: previous.map_or([0;4],|p|p.filter),
+            segment_probs: previous.map_or([255;3],|p|p.segment_probs),
             simple: false,
             filter_level: 0,
             sharpness: 0,
             filter_adjust: false,
-            reference_delta: [0; 4],
-            mode_delta: [0; 4],
+            reference_delta: previous.map_or([0;4],|p|p.reference_delta),
+            mode_delta: previous.map_or([0;4],|p|p.mode_delta),
             partitions: 1,
             base_quant: 0,
             quant_delta: [0; 5],
-            probabilities: COEFF_DEFAULTS,
+            probabilities: previous.map_or(COEFF_DEFAULTS,|p|p.probabilities),
             refresh_entropy: false,
             skip_probability: None,
         };
@@ -268,6 +280,7 @@ impl Header {
                 }
             }
             if h.segment_map {
+                h.segment_probs=[255;3];
                 for p in &mut h.segment_probs {
                     if bits.bit(128)? {
                         *p = bits.literal(8)? as u8;
@@ -291,16 +304,18 @@ impl Header {
         for d in &mut h.quant_delta {
             *d = bits.optional_signed(4)?;
         }
-        h.refresh_entropy=bits.bit(128)?;
-        for (p, update) in h.probabilities.iter_mut().zip(COEFF_UPDATES) {
+        Ok(h)
+    }
+    fn read_tokens(&mut self,bits:&mut Bool<'_>)->ImageResult<()> {
+        for (p, update) in self.probabilities.iter_mut().zip(COEFF_UPDATES) {
             if bits.bit(update)? {
                 *p = bits.literal(8)? as u8;
             }
         }
         if bits.bit(128)? {
-            h.skip_probability = Some(bits.literal(8)? as u8);
+            self.skip_probability = Some(bits.literal(8)? as u8);
         }
-        Ok(h)
+        Ok(())
     }
     fn quantizers(&self, segment: usize) -> [[i32; 2]; 3] {
         let base = if !self.segments {
@@ -319,7 +334,8 @@ impl Header {
             [dc(uvdc).min(132), ac(uvac)],
         ]
     }
-    fn level(&self, segment: usize, subblocks: bool) -> i32 {
+    fn level(&self, block:&Macroblock) -> i32 {
+        let segment=block.segment;
         let mut level = if !self.segments {
             self.filter_level
         } else if self.absolute {
@@ -328,10 +344,9 @@ impl Header {
             self.filter_level + self.filter[segment]
         };
         if self.filter_adjust {
-            level += self.reference_delta[0];
-            if subblocks {
-                level += self.mode_delta[0];
-            }
+            level += self.reference_delta[usize::from(block.reference)];
+            if block.reference!=0 {level+=self.mode_delta[if block.inter_mode==0 {1}else{2}];}
+            else if block.luma==4 {level+=self.mode_delta[0];}
         }
         level.clamp(0, 63)
     }
@@ -339,6 +354,9 @@ impl Header {
 
 #[derive(Clone, Copy, Default)]
 struct Macroblock {
+    reference:u8,
+    mv:motion::Mv,
+    inter_mode:u8,
     segment: usize,
     skip: bool,
     luma: u8,
@@ -737,7 +755,7 @@ fn filtering(
     }
     for (index, block) in blocks.iter().enumerate() {
         (work.check)()?;
-        let level = header.level(block.segment, block.luma == 4);
+        let level = header.level(block);
         if level == 0 {
             continue;
         }
@@ -749,11 +767,8 @@ fn filtering(
         let cfg = Filter {
             level,
             interior: interior.max(1),
-            variance: if level >= 40 {
-                2
-            } else {
-                i32::from(level >= 15)
-            },
+            variance: if header.keyframe {if level>=40 {2}else{i32::from(level>=15)}}
+                else if level>=40 {3}else if level>=20 {2}else{i32::from(level>=15)},
             simple: header.simple,
         };
         let mx = index % columns;
@@ -831,6 +846,7 @@ struct Persistent {
     probabilities:[u8;1056],
     absolute:bool,quant:[i32;4],filter:[i32;4],segment_probs:[u8;3],
     segment_map:Vec<u8>,reference_delta:[i32;4],mode_delta:[i32;4],
+    ymode:[u8;4],uvmode:[u8;3],mv_prob:[[u8;19];2],
 }
 struct VideoState { references:[Arc<YuvFrame>;3], persistent:Persistent }
 struct Decoded {bitmap:Bitmap,planes:[Plane;3],header:Header,records:Vec<Macroblock>}
@@ -848,7 +864,9 @@ impl VideoDecoder {
         check()?;
         work.step()?;
         if data.first().is_some_and(|tag|tag&1!=0) {
-            return Err("VP8 video interframe reconstruction is not implemented in this prerequisite.".into());
+            let previous=self.state.as_ref().ok_or("VP8 interframes require an earlier decoded keyframe.")?;
+            let (bitmap,candidate)=inter::decode(data,previous,&work,self.maximum_pixels)?;
+            check()?;self.state=Some(candidate);return Ok(bitmap);
         }
         let mut decoded=decode_keyframe(data,&work,self.maximum_pixels)?;
         for (index,plane) in decoded.planes.iter_mut().enumerate() {
@@ -863,6 +881,7 @@ impl VideoDecoder {
             probabilities:if header.refresh_entropy {header.probabilities}else{COEFF_DEFAULTS},
             absolute:header.absolute,quant:header.quant,filter:header.filter,segment_probs:header.segment_probs,
             segment_map,reference_delta:header.reference_delta,mode_delta:header.mode_delta,
+            ymode:[112,86,140,37],uvmode:[162,101,204],mv_prob:motion::MV_DEFAULTS,
         };
         let frame=Arc::new(YuvFrame {width:decoded.bitmap.width,height:decoded.bitmap.height,planes:decoded.planes});
         let candidate=VideoState {references:[frame.clone(),frame.clone(),frame],persistent};
@@ -949,54 +968,7 @@ fn decode_keyframe(data:&[u8],work:&Work<'_>,maximum_pixels:usize)->ImageResult<
                 &mut modes[mx * 4..mx * 4 + 4],
                 &mut left_modes,
             )?;
-            let quant = header.quantizers(block.segment);
-            let y2 = block.luma != 4;
-            let mut residue = [[0i32; 16]; 24];
-            if block.skip {
-                left[..8].fill(0);
-                context[mx][..8].fill(0);
-                if y2 {
-                    left[8] = 0;
-                    context[mx][8] = 0;
-                }
-            } else {
-                let reader = &mut tokens[my % header.partitions];
-                let mut dc = [0; 16];
-                if y2 {
-                    let (coeff, nz) = coefficients(
-                        reader,
-                        &header.probabilities,
-                        1,
-                        usize::from(left[8] + context[mx][8]),
-                        quant[1],
-                    )?;
-                    left[8] = u8::from(nz);
-                    context[mx][8] = u8::from(nz);
-                    block.residual |= nz;
-                    dc = inverse(coeff, true);
-                }
-                for (n, coeff) in residue.iter_mut().enumerate() {
-                    let (kind, base, row, col, q) = if n < 16 {
-                        (if y2 { 0 } else { 3 }, 0, n / 4, n % 4, quant[0])
-                    } else {
-                        (2, if n < 20 { 4 } else { 6 }, (n % 4) / 2, n % 2, quant[2])
-                    };
-                    let (mut value, nz) = coefficients(
-                        reader,
-                        &header.probabilities,
-                        kind,
-                        usize::from(left[base + row] + context[mx][base + col]),
-                        q,
-                    )?;
-                    left[base + row] = u8::from(nz);
-                    context[mx][base + col] = u8::from(nz);
-                    block.residual |= nz;
-                    if y2 && n < 16 {
-                        value[0] = dc[n];
-                    }
-                    *coeff = value;
-                }
-            }
+            let residue=residuals(&mut block,&header,&mut tokens[my%header.partitions],&mut left,&mut context[mx])?;
             if block.luma != 4 {
                 planes[0].predict(mx * 16, my * 16, 16, block.luma);
             }
@@ -1022,6 +994,63 @@ fn decode_keyframe(data:&[u8],work:&Work<'_>,maximum_pixels:usize)->ImageResult<
         }
     }
     filtering(&mut planes, &records, &header, columns, work)?;
+    let bitmap=render(&planes,width,height,pixels,work)?;
+    Ok(Decoded {bitmap,planes,header,records})
+}
+
+fn residuals(block:&mut Macroblock,header:&Header,reader:&mut Bool<'_>,left:&mut[u8;9],context:&mut[u8;9])->ImageResult<[[i32;16];24]> {
+    let quant = header.quantizers(block.segment);
+    let y2 = block.luma != 4;
+    let mut residue = [[0i32; 16]; 24];
+    if block.skip {
+        left[..8].fill(0);
+        context[..8].fill(0);
+        if y2 {
+            left[8] = 0;
+            context[8] = 0;
+        }
+    } else {
+        let mut dc = [0; 16];
+        if y2 {
+            let (coeff, nz) = coefficients(
+                reader,
+                &header.probabilities,
+                1,
+                usize::from(left[8] + context[8]),
+                quant[1],
+            )?;
+            left[8] = u8::from(nz);
+            context[8] = u8::from(nz);
+            block.residual |= nz;
+            dc = inverse(coeff, true);
+        }
+        for (n, coeff) in residue.iter_mut().enumerate() {
+            let (kind, base, row, col, q) = if n < 16 {
+                (if y2 { 0 } else { 3 }, 0, n / 4, n % 4, quant[0])
+            } else {
+                (2, if n < 20 { 4 } else { 6 }, (n % 4) / 2, n % 2, quant[2])
+            };
+            let (mut value, nz) = coefficients(
+                reader,
+                &header.probabilities,
+                kind,
+                usize::from(left[base + row] + context[base + col]),
+                q,
+            )?;
+            left[base + row] = u8::from(nz);
+            context[base + col] = u8::from(nz);
+            block.residual |= nz;
+            if y2 && n < 16 {
+                value[0] = dc[n];
+            }
+            *coeff = value;
+        }
+    }
+    Ok(residue)
+}
+
+fn render(planes:&[Plane;3],width:usize,height:usize,pixels:usize,work:&Work<'_>)->ImageResult<Bitmap> {
+    let check=work.check;
     let mut output = reserved(pixels)?;
     for y in 0..height {
         check()?;
@@ -1044,5 +1073,5 @@ fn decode_keyframe(data:&[u8],work:&Work<'_>,maximum_pixels:usize)->ImageResult<
         height,
         pixels: output,
     };
-    Ok(Decoded {bitmap,planes,header,records})
+    Ok(bitmap)
 }

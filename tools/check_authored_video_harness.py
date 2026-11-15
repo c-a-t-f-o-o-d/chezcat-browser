@@ -17,7 +17,33 @@ import capture_tests
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def main(source=None, trust_file=None):
+def frame_at(clip, milliseconds):
+    """Independent timestamp selection; never use the player's frame report."""
+    return max(index for index, frame in enumerate(clip['frames'])
+        if frame['timestamp'] * clip['scale'] * 1000 <= milliseconds * clip['rate'])
+
+
+def fixture_reference(stem, display_profile=None):
+    stem = Path(stem)
+    clip = json.loads(stem.with_suffix('.json').read_text(encoding='utf-8'))
+    original = stem.with_suffix('.rgba').read_bytes()
+    if hashlib.sha256(original).hexdigest() != clip['reference_rgba_sha256']:
+        raise ValueError('Original independent reference identity mismatch.')
+    if display_profile is None:
+        return clip, original, clip['reference_rgba_sha256'], None
+    profile_path = Path(display_profile)
+    profile = json.loads(profile_path.read_text(encoding='utf-8'))
+    if (profile['retained_default_rgba_sha256'] != clip['reference_rgba_sha256']
+        or profile['input_yuv_sha256'] != capture_tests.sha256(stem.with_suffix('.yuv'))
+        or Path(profile['reference_rgba']).name != profile['reference_rgba']):
+        raise ValueError('Explicit presentation profile/input identity mismatch.')
+    reference = (stem.parent / profile['reference_rgba']).read_bytes()
+    if hashlib.sha256(reference).hexdigest() != profile['reference_rgba_sha256']:
+        raise ValueError('Explicit independent display reference identity mismatch.')
+    return clip, reference, profile['reference_rgba_sha256'], profile
+
+
+def main(source=None, trust_file=None, fixture_stem=None, display_profile=None):
     folder = ROOT / 'results/verification/autonomy' / (datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S.%fZ') + '-authored-video-journey-' + uuid.uuid4().hex[:8])
     folder.mkdir(parents=True)
     script = folder / 'authored.tsv'
@@ -31,10 +57,13 @@ def main(source=None, trust_file=None):
     row = capture_tests.execute(command, folder / 'command.log', ROOT, 120)
     checks = {'process_completed': row['state'] == 'completed' and row['exit_code'] == 0}
     stages = {}
-    reference = (ROOT / 'tools/fixtures/scene-intra.rgba').read_bytes()
-    clip = json.loads((ROOT / 'tools/fixtures/scene-intra.json').read_text(encoding='utf-8'))
-    checks['independent_reference_identity'] = hashlib.sha256(reference).hexdigest() == clip['reference_rgba_sha256']
-    checks['original_clip_identity'] = capture_tests.sha256(ROOT / 'tools/fixtures/scene-intra.ivf') == clip['ivf_sha256']
+    fixture_stem = Path(fixture_stem) if fixture_stem is not None else ROOT / 'tools/fixtures/scene-intra'
+    clip, reference, reference_sha256, profile = fixture_reference(fixture_stem, display_profile)
+    last_frame = len(clip['frames']) - 1
+    script_seek_frame = frame_at(clip, 1250)
+    native_seek_frame = frame_at(clip, 2200)
+    checks['independent_reference_identity'] = hashlib.sha256(reference).hexdigest() == reference_sha256
+    checks['original_clip_identity'] = capture_tests.sha256(fixture_stem.with_suffix('.ivf')) == clip['ivf_sha256']
     for name in ['metadata', 'paused', 'frozen', 'reloaded', 'js-issued', 'js-settled', 'js-frozen', 'js-seek-settled', 'js-seek-frozen', 'js-playing', 'js-play-paused', 'js-play-frozen', 'seeked', 'ended', 'replay', 'stopped', 'navigated']:
         file = next(out.glob('*-' + name + '.activity.txt'), None)
         if file is None:
@@ -92,7 +121,7 @@ def main(source=None, trust_file=None):
                 # A moving snapshot can straddle a timer/decode boundary. Check
                 # an actually advanced original frame, never a future timestamp,
                 # allowing at most the immediately preceding presentation frame.
-                checks['js_play_presented_frame_matches_original_timeline'] = (2 < state['frame'] <= target
+                checks['js_play_presented_frame_matches_original_timeline'] = (script_seek_frame < state['frame'] <= target
                     and target - state['frame'] <= 1)
         if name in ['js-seek-settled', 'js-seek-frozen']:
 
@@ -109,7 +138,7 @@ def main(source=None, trust_file=None):
                 and events.count('seeking') == 1 and events.count('seeked') == 1
                 and events[-2:] == ['timeupdate', 'seeked'] and all(event in ['seeking', 'timeupdate', 'seeked'] for event in events))
             checks[name + '_real_paused_target'] = (not state['playing'] and not state['ended']
-                and state['time_ms'] == 1250 and state['frame'] == 2
+                and state['time_ms'] == 1250 and state['frame'] == script_seek_frame
                 and re.search(r'HTML video binding[^\n]*\bpaused=true\b', text) is not None
                 and re.search(r'HTML video binding[^\n]*\bseeking=false\b', text) is not None)
         if name in ['js-settled', 'js-frozen', 'js-seek-settled', 'js-seek-frozen', 'js-play-paused', 'js-play-frozen']:
@@ -149,12 +178,23 @@ def main(source=None, trust_file=None):
         stages[name] = state
     if all(name in stages for name in ['metadata', 'paused', 'frozen', 'seeked', 'ended', 'replay', 'stopped']):
         p, a, b, s, e, r, t = (stages[name] for name in ['metadata', 'paused', 'frozen', 'seeked', 'ended', 'replay', 'stopped'])
+        replay_frame_valid = r['frame'] == 0
+        if fixture_stem.resolve() != (ROOT / 'tools/fixtures/scene-intra').resolve():
+            # A faster fixture can advance during normal harness settling.
+            # Prove replay is in the first GOP with a real time-derived frame;
+            # keep the original fixture's exact frame-zero assertion intact.
+            keys = clip.get('keyframe_indices', [0])
+            boundary = (clip['frames'][keys[1]]['timestamp'] * clip['scale'] * 1000 / clip['rate']
+                if len(keys) > 1 else r['duration_ms'])
+            target = frame_at(clip, r['time_ms'])
+            replay_frame_valid = (r['time_ms'] < boundary and 0 <= r['frame'] <= target
+                and target - r['frame'] <= 1)
         checks.update(initial_real_metadata=p['frame'] == 0 and p['time_ms'] == 0 and not p['playing'],
-                      real_playback_advanced=0 < a['frame'] < 5 and not a['playing'],
+                      real_playback_advanced=0 < a['frame'] < last_frame and not a['playing'],
                       pause_froze_time_and_pixels=a['time_ms'] == b['time_ms'] and a['frame_sample_sha256'] == b['frame_sample_sha256'],
-                      seek_settled_actual_frame=s['frame'] == 4 and 2150 < s['time_ms'] < 2250 and not s['playing'],
-                      end_requires_actual_final_frame=e['frame'] == 5 and e['time_ms'] == 3000 and e['ended'] and not e['playing'] and e['events'].count('ended') == 1,
-                      real_replay=r['playing'] and not r['ended'] and r['frame'] == 0 and r['time_ms'] < r['duration_ms'],
+                      seek_settled_actual_frame=s['frame'] == native_seek_frame and 2150 < s['time_ms'] < 2250 and not s['playing'],
+                      end_requires_actual_final_frame=e['frame'] == last_frame and e['time_ms'] == 3000 and e['ended'] and not e['playing'] and e['events'].count('ended') == 1,
+                      real_replay=r['playing'] and not r['ended'] and replay_frame_valid and r['time_ms'] < r['duration_ms'],
                       actual_stop_restored_first_frame=not t['playing'] and not t['ended'] and t['time_ms'] == 0 and t['frame_sample_sha256'] == p['frame_sample_sha256'])
     checks['js_pause_all_snapshots_present'] = all(name in stages for name in ['js-issued', 'js-settled', 'js-frozen'])
     if checks['js_pause_all_snapshots_present']:
