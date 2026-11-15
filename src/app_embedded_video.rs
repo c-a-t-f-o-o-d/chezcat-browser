@@ -166,6 +166,7 @@ impl App {
     pub(in crate::app) fn cancel_embedded_video(&mut self) {
         if let Some(page) = &mut self.scripting {
             page.cancel_media_selection();
+            page.cancel_media_pause();
         }
         if let Some(worker) = &self.embedded_video_worker {
             worker.cancel();
@@ -245,6 +246,7 @@ impl App {
             position: Duration::ZERO,
             observed: now,
             playing: false,
+            paused: true,
             ended: false,
             seeking: false,
             ready: 0,
@@ -260,6 +262,7 @@ impl App {
             s.duration = Some(p.clip.duration);
             s.position = p.position(now);
             s.playing = p.playing();
+            s.paused = p.paused;
             s.ended = p.ended_reported;
             s.seeking = p.seeking;
             s.ready = if p.error.is_some() || p.seeking && p.pending.is_some() {
@@ -310,8 +313,25 @@ impl App {
         }
         true
     }
+    pub(in crate::app) fn apply_media_pause(&mut self) -> bool {
+        let Some(request)=self.scripting.as_ref().and_then(|p|p.media_pause()).filter(|p|!p.applied).cloned() else {return false;};
+        let valid=!request.retired.load(Ordering::Relaxed) && self.embedded_video.as_ref().is_some_and(|v|v.node==request.node&&Arc::ptr_eq(&v.retired,&request.retired));
+        if valid {
+            if let Some(player)=self.media.as_mut().filter(|p|p.embedded&&p.node==request.node&&p.sync.is_none()) {
+                player.clock.pause(request.issued);
+                player.paused=true;player.dom_playback_started=false;
+                // Keep pending decode/seek/generation/source intact. The snapshot
+                // issue time was sampled from this clock before any later tick.
+                debug_assert_eq!(player.clock.position(request.issued),request.position);
+                if player.pending.is_none() {player.deadline=None;}
+            }
+            self.scripting.as_mut().unwrap().mark_media_pause_applied();
+        } else {self.scripting.as_mut().unwrap().cancel_media_pause();}
+        valid
+    }
     pub(in crate::app) fn flush_embedded_video(&mut self) -> bool {
-        let processed = self.process_media_selection();
+        let paused=self.apply_media_pause();
+        let processed = self.process_media_selection() | paused;
         if self.embedded_video_retired() {
             return false;
         }
@@ -345,6 +365,15 @@ impl App {
                     self.reflow();
                 }
                 changed = true;
+            }
+        }
+        if let Some(request)=self.scripting.as_mut().and_then(|p|p.take_media_pause_task()) {
+            if !request.retired.load(Ordering::Relaxed) && !self.script_jobs_paused() {
+                if let Some(page)=&mut self.scripting {
+                    let outcome=page.dispatch_media_task(&mut self.document,&mut self.forms,node,crate::scripting::MediaTask::Pause);
+                    if outcome.layout_changed {self.reflow();}
+                    changed=true;
+                }
             }
         }
         if finish && !resource.load(Ordering::Relaxed) {
@@ -728,5 +757,135 @@ mod tests {
         );
         assert_eq!(canvas.pixels, before);
         assert!(app.images.contains_key(&node));
+    }
+
+    #[test]
+    fn script_pause_freezes_issue_time_before_a_later_native_timer_tick() {
+        let mut app = open("authored-video.html");
+        app.wait_for_load();
+        app.input_media_action("Play").unwrap();
+        app.media_seek(Duration::from_millis(700), Instant::now());
+        app.flush_embedded_video();
+        let player = app.media.as_ref().unwrap();
+        let clip = player.clip.clone();
+        let generation = player.generation;
+        let pending = player.pending;
+        let source = app.embedded_video.as_ref().unwrap().retired.clone();
+        eval(&mut app, "video.pause();var pausedIssue=video.currentTime;if(!video.paused||video.currentTime!==pausedIssue)throw 'sync pause';");
+        let request = app.scripting.as_ref().unwrap().media_pause().unwrap().clone();
+        // A native media timer can be arbitrarily delayed. The issue-time
+        // command must win BEFORE tick can clear the old clock anchor at EOF.
+        app.poll_media_timer_at(request.issued + Duration::from_secs(4));
+        let player = app.media.as_ref().unwrap();
+        assert_eq!(player.clock.position(Instant::now()), request.position);
+        assert!(!player.playing() && player.paused);
+        assert!(Arc::ptr_eq(&player.clip, &clip));
+        assert_eq!(player.generation, generation);
+        assert_eq!(player.pending, pending);
+        assert!(Arc::ptr_eq(&app.embedded_video.as_ref().unwrap().retired, &source));
+        settle(&mut app);
+        assert_eq!(app.media.as_ref().unwrap().displayed, 1);
+        assert_eq!(app.embedded_video_snapshot().unwrap().position, request.position);
+        eval(&mut app, "if(!video.paused||video.currentTime!==pausedIssue||video.seeking)throw 'settled pause';");
+    }
+
+    #[test]
+    fn script_pause_survives_producer_fatal_error_before_snapshot_boundary() {
+        let mut app = open("authored-video.html");
+        app.wait_for_load();
+        app.input_media_action("Play").unwrap();
+        let result = app.scripting.as_mut().unwrap().console_eval(&mut app.document,
+            &mut app.forms, "var stalePauseJob=0;video.pause();queueMicrotask(function(){stalePauseJob++;});document.body.scrollWidth;");
+        assert_eq!(result.errors, 1);
+        let request = app.scripting.as_ref().unwrap().media_pause().unwrap().clone();
+        app.show_script_errors();
+        assert_eq!(app.media.as_ref().unwrap().clock.position(Instant::now()), request.position);
+        assert!(!app.media.as_ref().unwrap().playing());
+        app.flush_embedded_video();
+        eval(&mut app, "if(stalePauseJob!==0||!video.paused)throw 'fatal producer cleanup';");
+    }
+
+    fn assert_reference_frame(app: &App, index: usize) {
+        let node = app.media.as_ref().unwrap().node;
+        let bitmap = &app.images[&node];
+        assert_eq!((bitmap.width, bitmap.height), (64, 48));
+        let reference = include_bytes!("../tools/fixtures/scene-intra.rgba");
+        let expected = &reference[index*64*48*4..(index+1)*64*48*4];
+        assert_eq!(bitmap.pixels.len(), 64*48);
+        let (mut error, mut maximum) = (0u64, 0u32);
+        for (pixel, rgba) in bitmap.pixels.iter().zip(expected.chunks_exact(4)) {
+            for (actual, expected) in [((pixel>>16)&255,rgba[0]),((pixel>>8)&255,rgba[1]),(pixel&255,rgba[2])] {
+                let delta=actual.abs_diff(u32::from(expected));
+                error+=u64::from(delta);maximum=maximum.max(delta);
+            }
+            assert_eq!(pixel>>24,255);
+        }
+        // The established original decoder/reference use different chroma
+        // upsampling. Retain both existing mean and edge-error bounds.
+        assert!(error < 64*48*3*4 && maximum <= 80, "frame {index}: error={error}, max={maximum}");
+    }
+
+    #[test]
+    fn script_pause_preserves_real_pending_seek_at_eof_and_non_eof() {
+        for (was_playing, target, index) in [(true,3000,5),(true,2200,4),(false,2200,4)] {
+            let mut app = open("authored-video.html");
+            app.wait_for_load();
+            if was_playing {app.input_media_action("Play").unwrap();}
+            app.media_seek(Duration::from_millis(target), Instant::now());
+            app.flush_embedded_video();
+            let player = app.media.as_ref().unwrap();
+            assert!(player.seeking);
+            assert_eq!(player.pending, Some(index));
+            assert_eq!(player.paused, !was_playing);
+            if target==3000 {assert!(!player.clock.playing());}
+            let generation = player.generation;
+            let clip = player.clip.clone();
+            let source = app.embedded_video.as_ref().unwrap().retired.clone();
+            // Hold a genuine original worker result. Decoding may complete at
+            // any speed; App has not accepted/published this requested frame.
+            let deadline=Instant::now()+Duration::from_secs(5);
+            let completion=loop {
+                if let Some(done)=app.media_worker.as_ref().unwrap().take() {break done;}
+                assert!(Instant::now()<deadline,"real decode did not finish");
+                std::thread::sleep(Duration::from_millis(1));
+            };
+            eval(&mut app,"video.pause();if(!video.paused||!video.seeking)throw 'pause preserves seek';");
+            app.apply_media_pause();
+            let player=app.media.as_ref().unwrap();
+            assert!(player.seeking && player.paused && !player.playing());
+            assert_eq!(player.pending,Some(index));
+            assert_eq!(player.generation,generation);
+            assert!(Arc::ptr_eq(&player.clip,&clip));
+            assert!(Arc::ptr_eq(&app.embedded_video.as_ref().unwrap().retired,&source));
+            assert!(!source.load(Ordering::Relaxed));
+            assert!(app.accept_media_frame(completion));
+            // The requested bitmap is installed before seeking is cleared and
+            // any queued seeked handler can run.
+            assert_eq!(app.media.as_ref().unwrap().displayed,index);
+            assert!(!app.media.as_ref().unwrap().seeking);
+            assert_reference_frame(&app,index);
+            app.flush_embedded_video();
+            eval(&mut app,"if(!video.paused||video.seeking||mediaEvents.indexOf('seeked')<0)throw 'real seek completion';");
+            assert!(!app.media.as_ref().unwrap().playing());
+        }
+    }
+
+    #[test]
+    fn script_pause_in_keydown_precedes_native_arrow_seek_default() {
+        let mut app=open("authored-video.html");
+        app.wait_for_load();
+        app.input_media_action("Play").unwrap();
+        app.media_seek(Duration::from_millis(700),Instant::now());
+        app.flush_embedded_video();
+        eval(&mut app,"document.addEventListener('keydown',function(){video.pause();});");
+        app.focus=Focus::Page;
+        app.media.as_mut().unwrap().controls_focused=true;
+        app.key(0x27,false,false,false);
+        settle(&mut app);
+        assert_eq!(app.media.as_ref().unwrap().clock.position(Instant::now()),Duration::from_secs(3));
+        assert!(app.media.as_ref().unwrap().paused);
+        assert!(!app.media.as_ref().unwrap().playing());
+        assert_eq!(app.media.as_ref().unwrap().displayed,5);
+        assert_reference_frame(&app,5);
     }
 }

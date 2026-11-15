@@ -79,6 +79,16 @@ controls, same-frame/EOF, rapid replacement, callback reload/navigation and stal
 completion cancellation; independent frame pixels. Keep unsupported formats,
 element audio, multiple players, network and MSE explicit until separately agreed.
 
+Pause sub-contract: stable genuine length0 pause freezes the measured position
+synchronously and applies to the real clock at issue time before advancement or
+snapshot replacement. Loading/seek/frame work and raw source Attr identity survive.
+One started timeupdate/pause task shares its allowance and listener checkpoints;
+source retirement before start cancels it, while same-document load inside the
+started task preserves its tail. Ordinary errors continue; fatal jobs stop the
+unfinished tail. Admission failure leaves state unchanged. Existing native
+controls, standalone playback and source-replacement coverage remain required.
+Full F3 additionally requires the seeking/play-promise acceptance above.
+
 ## F4 — network media transaction
 
 Outcome: one original supported clip plays from controlled HTTP(S) origins using

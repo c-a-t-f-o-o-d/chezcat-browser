@@ -294,6 +294,7 @@ impl App {
     }
 
     pub(super) fn process_script_requests(&mut self) -> bool {
+        self.apply_media_pause();
         if self.script_jobs_paused() {
             return false;
         }

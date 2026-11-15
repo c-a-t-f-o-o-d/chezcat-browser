@@ -18,14 +18,17 @@ def main():
     folder = ROOT / 'results/verification/autonomy' / (datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S.%fZ') + '-authored-video-journey-' + uuid.uuid4().hex[:8])
     folder.mkdir(parents=True)
     script = folder / 'authored.tsv'
-    script.write_text('snapshot\tmetadata\nmedia\tPlay\nwait\t650\nmedia\tPause\nsnapshot\tpaused\nwait\t500\nsnapshot\tfrozen\nclick\treload\nsnapshot\treloaded\nmedia\tSeek:2200\nsnapshot\tseeked\nmedia\tPlay\nwait\t1200\nsnapshot\tended\nmedia\tPlay\nsnapshot\treplay\nmedia\tStop\nsnapshot\tstopped\nlink\tLeave\nsnapshot\tnavigated\n', encoding='utf-8', newline='\n')
+    script.write_text('snapshot\tmetadata\nmedia\tPlay\nwait\t650\nmedia\tPause\nsnapshot\tpaused\nwait\t500\nsnapshot\tfrozen\nclick\treload\nsnapshot\treloaded\nmedia\tPlay\nwait\t650\nclick\tjs-pause\nsnapshot\tjs-issued\nwait\t1000\nsnapshot\tjs-settled\nwait\t750\nsnapshot\tjs-frozen\nmedia\tSeek:2200\nsnapshot\tseeked\nmedia\tPlay\nwait\t1200\nsnapshot\tended\nmedia\tPlay\nsnapshot\treplay\nmedia\tStop\nsnapshot\tstopped\nlink\tLeave\nsnapshot\tnavigated\n', encoding='utf-8', newline='\n')
     before = capture_tests.source_identity(ROOT)
     out = folder / 'journey'
     row = capture_tests.execute([str(ROOT / 'ChezCat.exe'), str(ROOT / 'tools/fixtures/authored-video.html'), '--dev-input-script', str(script), '--dev-input-output', str(out), '--javascript', '--no-profile'], folder / 'command.log', ROOT, 120)
     checks = {'process_completed': row['state'] == 'completed' and row['exit_code'] == 0}
     stages = {}
     reference = (ROOT / 'tools/fixtures/scene-intra.rgba').read_bytes()
-    for name in ['metadata', 'paused', 'frozen', 'reloaded', 'seeked', 'ended', 'replay', 'stopped', 'navigated']:
+    clip = json.loads((ROOT / 'tools/fixtures/scene-intra.json').read_text(encoding='utf-8'))
+    checks['independent_reference_identity'] = hashlib.sha256(reference).hexdigest() == clip['reference_rgba_sha256']
+    checks['original_clip_identity'] = capture_tests.sha256(ROOT / 'tools/fixtures/scene-intra.ivf') == clip['ivf_sha256']
+    for name in ['metadata', 'paused', 'frozen', 'reloaded', 'js-issued', 'js-settled', 'js-frozen', 'seeked', 'ended', 'replay', 'stopped', 'navigated']:
         file = next(out.glob('*-' + name + '.activity.txt'), None)
         if file is None:
             checks[name + '_snapshot'] = False
@@ -46,6 +49,28 @@ def main():
             continue
         state = dict(playing=match[1] == 'true', ended=match[2] == 'true', time_ms=int(match[3]), duration_ms=int(match[4]), frame=int(match[5]), error=match[11], pending=match[7])
         state['events'] = re.search(r'Media lifecycle dropped=\d+ (.*)', text)[1].split(',')
+        state['generation'] = int(match[10])
+        state['node'] = int(binding[1]) if binding else None
+        reference_frame = state['frame']
+        if name.startswith('js-'):
+            layout = file.with_name(file.name.replace('.activity.txt', '.layout.txt')).read_text(encoding='utf-8')
+            visible = ' '.join(re.findall(r'text="([^"\n]*)"', layout))
+            observed = dict(re.findall(r'\b(js_pause_sync|js_pause_microtask|js_pause_ms|js_pause_events)=(\d+)', visible))
+            state['js_pause'] = observed
+            checks[name + '_genuine_js_pause_observed'] = (observed.get('js_pause_sync') == '1'
+                and observed.get('js_pause_microtask') == '1' and observed.get('js_pause_events') == '1'
+                and 'js_pause_ms' in observed and abs(int(observed['js_pause_ms']) - state['time_ms']) <= 1)
+            checks[name + '_paused_before_end'] = (not state['playing'] and not state['ended']
+                and 0 < state['time_ms'] < state['duration_ms']
+                and re.search(r'HTML video binding[^\n]*\bpaused=true\b', text) is not None)
+            if name in ['js-settled', 'js-frozen']:
+                # Derive the target from original timestamp/timebase metadata,
+                # independently of the player's displayed frame report.
+                expected_frame = max(index for index, frame in enumerate(clip['frames'])
+                    if frame['timestamp'] * clip['scale'] * 1000 <= state['time_ms'] * clip['rate'])
+                state['expected_frame_from_frozen_time'] = expected_frame
+                checks[name + '_frame_matches_frozen_time'] = state['frame'] == expected_frame
+                reference_frame = expected_frame
         if name == 'reloaded':
             checks['reload_preserved_raw_attr_identity'] = all(('text="' + word + '"') in file.with_name(file.name.replace('.activity.txt', '.layout.txt')).read_text(encoding='utf-8') for word in ['Raw','source','retained','after','load'])
             checks['reload_reset_real_player'] = not state['playing'] and state['time_ms'] == 0 and state['frame'] == 0
@@ -62,12 +87,16 @@ def main():
                     dx, dy = int((sx + .5) * w / 64), int((sy + .5) * h / 48)
                     offset = ((y + dy) * width + x + dx) * 3
                     samples.extend(pixels[offset:offset + 3])
-                    offset = ((state['frame'] * 48 + sy) * 64 + sx) * 4
+                    offset = ((reference_frame * 48 + sy) * 64 + sx) * 4
                     expected.extend(reference[offset:offset + 3])
         state['reference_mean_rgb_error'] = sum(abs(a-b) for a, b in zip(samples, expected)) / len(expected) if expected else None
         state['frame_sample_sha256'] = hashlib.sha256(samples).hexdigest()
         checks[name + '_independent_decoded_pixels'] = bool(expected) and len(samples) == len(expected) and state['reference_mean_rgb_error'] < 6
-        checks[name + '_no_pending_or_decode_error'] = state['error'] == 'None' and state['pending'] == 'None'
+        if name == 'js-issued':
+            # A previously submitted decode may legitimately finish after pause.
+            checks[name + '_no_decode_error'] = state['error'] == 'None'
+        else:
+            checks[name + '_no_pending_or_decode_error'] = state['error'] == 'None' and state['pending'] == 'None'
         stages[name] = state
     if all(name in stages for name in ['metadata', 'paused', 'frozen', 'seeked', 'ended', 'replay', 'stopped']):
         p, a, b, s, e, r, t = (stages[name] for name in ['metadata', 'paused', 'frozen', 'seeked', 'ended', 'replay', 'stopped'])
@@ -78,6 +107,14 @@ def main():
                       end_requires_actual_final_frame=e['frame'] == 5 and e['time_ms'] == 3000 and e['ended'] and not e['playing'] and e['events'].count('ended') == 1,
                       real_replay=r['playing'] and not r['ended'] and r['frame'] == 0 and r['time_ms'] < r['duration_ms'],
                       actual_stop_restored_first_frame=not t['playing'] and not t['ended'] and t['time_ms'] == 0 and t['frame_sample_sha256'] == p['frame_sample_sha256'])
+    checks['js_pause_all_snapshots_present'] = all(name in stages for name in ['js-issued', 'js-settled', 'js-frozen'])
+    if checks['js_pause_all_snapshots_present']:
+        issued, settled, frozen = (stages[name] for name in ['js-issued', 'js-settled', 'js-frozen'])
+        checks['js_pause_froze_real_clock_at_issue'] = issued['time_ms'] == settled['time_ms'] == frozen['time_ms']
+        checks['js_pause_preserved_source_generation'] = (issued['node'] == settled['node'] == frozen['node']
+            and issued['generation'] == settled['generation'] == frozen['generation'])
+        checks['js_pause_settled_pixels_remain_frozen'] = (settled['frame'] == frozen['frame']
+            and settled['frame_sample_sha256'] == frozen['frame_sample_sha256'])
     checks['source_unchanged'] = before == capture_tests.source_identity(ROOT)
     capture_tests.write_json(folder / 'manifest.json', {'scope': __doc__, 'executable_sha256': capture_tests.sha256(ROOT / 'ChezCat.exe'), 'source_before': before, 'source_after': capture_tests.source_identity(ROOT), 'run': row, 'checks': checks, 'stages': stages})
     print(json.dumps(checks, indent=2))

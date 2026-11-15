@@ -26,7 +26,7 @@ impl Page {
     }
 
     pub fn has_host_tasks(&self) -> bool {
-        self.has_media_selection() || self.state.navigation.is_some()
+        self.media_pause().is_some() || self.has_media_selection() || self.state.navigation.is_some()
             || self.state.history.pending.is_some()
             || !self.state.dynamic.pending.is_empty()
             || !self.state.stylesheets.pending.is_empty()

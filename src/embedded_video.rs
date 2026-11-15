@@ -152,6 +152,7 @@ pub struct Snapshot {
     pub position: Duration,
     pub observed: Instant,
     pub playing: bool,
+    pub paused: bool,
     pub ended: bool,
     pub seeking: bool,
     pub ready: u8,
@@ -169,10 +170,13 @@ pub struct Selection {
 }
 impl Snapshot {
     pub fn position(&self) -> Duration {
+        self.position_at(Instant::now())
+    }
+    pub fn position_at(&self, now: Instant) -> Duration {
         self.duration.map_or(self.position, |duration| {
             if self.playing {
                 self.position
-                    .saturating_add(self.observed.elapsed())
+                    .saturating_add(now.saturating_duration_since(self.observed))
                     .min(duration)
             } else {
                 self.position

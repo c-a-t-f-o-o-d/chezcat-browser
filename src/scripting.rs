@@ -69,7 +69,7 @@ use script_stylesheets::StylesheetState;
 mod script_images;
 #[path = "script_media.rs"]
 mod script_media;
-pub(crate) use script_media::event_name as media_event_name;
+pub(crate) use script_media::{event_name as media_event_name, MediaTask};
 pub use script_images::DynamicImage;
 pub(crate) use script_images::MAX_IMAGE_REQUESTS;
 use script_images::ImagesState;
@@ -2500,7 +2500,7 @@ impl Host for Bridge<'_> {
     }
 
     fn method_length(&self, object:u32, method:&str) -> Option<usize> {
-        if method=="load" && self.media_element_receiver(object) {return Some(0);}
+        if matches!(method,"load"|"pause") && self.media_element_receiver(object) {return Some(0);}
         if method=="dispatchEvent"&&self.dispatch_receiver(object){return Some(1);}
         if object==DOCUMENT && matches!(method,"createAttributeNS"|"createElementNS") {return Some(2);}
         if object==DOCUMENT && method=="createAttribute" || self.attr_element_receiver(object)&&matches!(method,"setAttributeNode"|"setAttributeNodeNS") {return Some(1);}
@@ -2612,6 +2612,7 @@ impl Host for Bridge<'_> {
         method: &str,
         args: &[Value],
     ) -> Result<(), (&'static str, String)> {
+        if method=="pause" && self.media_element_receiver(object) && (!self.state.enabled || !self.doc.scripting_enabled) {return Err(("InvalidStateError","Scripting is disabled.".into()));}
         if object==WINDOW && method=="requestAnimationFrame" && !matches!(args.first(),Some(Value::Function(_))) {return Err(("TypeError","requestAnimationFrame requires a callable callback.".into()));}
         if self.event_target_interface(object) && matches!(method,"Node"|"Element"|"HTMLElement") {return Err(("TypeError","Illegal constructor for this native interface.".into()));}
         if method=="dispatchEvent"{return self.validate_dispatch(object,args);}
@@ -2791,7 +2792,7 @@ impl Host for Bridge<'_> {
     }
 
     fn method(&self, object: u32, property: &str) -> Option<&'static str> {
-        if property=="load" && self.media_element_receiver(object) {return Some("load");}
+        if self.media_element_receiver(object) {match property {"load"=>return Some("load"),"pause"=>return Some("pause"),_=>{}}}
         if matches!(property,"addEventListener"|"removeEventListener"|"dispatchEvent") && self.form_named_control(object,property) {return None;}
         if self.node_event_method(object,property) {return None;}
         if property=="dispatchEvent"&&self.dispatch_receiver(object)&&!self.form_named_control(object,property){return Some("dispatchEvent");}
@@ -2850,7 +2851,7 @@ impl Host for Bridge<'_> {
     }
 
     fn accepts_receiver(&self, object: u32, method: &str, receiver: u32) -> bool {
-        if method=="load" && self.media_element_receiver(object) {return self.media_element_receiver(receiver);}
+        if matches!(method,"load"|"pause") && self.media_element_receiver(object) {return self.media_element_receiver(receiver);}
         if matches!(method,"dispatchEvent"|"addEventListener"|"removeEventListener") {
             return (self.event_target_interface(object)||self.dispatch_receiver(object)) && self.dispatch_receiver(receiver);
         }
@@ -3956,6 +3957,7 @@ impl Host for Bridge<'_> {
     }
 
     fn call(&mut self, object: u32, method: &str, args: &[Value]) -> Result<Value, String> {
+        if method=="pause" && self.media_element_receiver(object) {return self.pause_media(node_index(object).unwrap());}
         if method=="load" && self.media_element_receiver(object) {
             self.state.work(1)?;
             self.commit_media_source_change(node_index(object).unwrap())?;

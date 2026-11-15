@@ -688,6 +688,7 @@ impl App {
             && self.inspector.network_visible()
     }
     pub fn poll_load(&mut self) -> bool {
+        let pause_changed=if self.scripting.as_ref().is_some_and(|p|p.media_pause().is_some()) {self.flush_embedded_video()} else {false};
         self.inspector.invalidate();
         let script_changed = self.poll_dynamic_scripts()
             | self.process_script_requests()
@@ -696,7 +697,7 @@ impl App {
             | self.poll_dynamic_images()
             | self.process_image_requests();
         let revision = self.network.revision();
-        let mut changed = script_changed | self.process_media_selection() | self.poll_embedded_video() | self.poll_media() | self.poll_audio() | self.poll_media_sync() | self.poll_downloads()
+        let mut changed = pause_changed | script_changed | self.process_media_selection() | self.poll_embedded_video() | self.poll_media() | self.poll_audio() | self.poll_media_sync() | self.poll_downloads()
             || revision != self.last_network_revision
             || self.network_needs_tick();
         changed |= self.flush_embedded_video();
@@ -1536,6 +1537,9 @@ impl App {
         };
     }
     fn show_script_errors(&mut self) {
+        // Committed media effects survive a producer error. Apply their issue
+        // time before selection or a fresh snapshot can replace the projection.
+        self.apply_media_pause();
         self.process_media_selection();
         self.apply_history_replacement();
         let script_errors = self.scripting.as_ref().map_or(0, |page| page.error_count());

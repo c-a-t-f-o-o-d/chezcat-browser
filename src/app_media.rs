@@ -35,6 +35,7 @@ pub(super) struct Player {
     controls_focused:bool,
     dom_events:VecDeque<&'static str>,
     dom_playback_started:bool,
+    paused:bool,
     sync:Option<Synchronized>,
     clip: Arc<media::Clip>,
     pub(super) node: usize,
@@ -379,6 +380,10 @@ impl Player {
     fn playing(&self)->bool {self.sync.as_ref().map_or_else(||self.clock.playing(),|s|s.playing)}
     fn drained(&self)->bool {self.sync.as_ref().map_or(self.clock.ended,|s|s.drained)}
     fn event(&mut self, event: &'static str) {
+        if event=="play" {self.paused=false;}
+        if matches!(event,"pause"|"stop"|"cancel"|"error"|"ended") {self.paused=true;}
+        if matches!(event,"stop"|"cancel") {self.dom_playback_started=false;}
+
         if self.embedded && crate::scripting::media_event_name(event) && (self.decoder_enabled||event=="error") {
             if event=="ended" {
                 if self.dom_playback_started {self.queue_dom_event("timeupdate");self.queue_dom_event("pause");self.queue_dom_event("ended");self.dom_playback_started=false;}
@@ -482,7 +487,7 @@ impl App {
         let Some(node)=node.filter(|&node|self.document.nodes.get(node).is_some_and(|item|item.namespace==crate::html::Namespace::Html&&matches!(&item.kind,crate::html::NodeKind::Element {tag,..} if tag==if embedded{"video"}else{"img"}))) else{return;};
         self.images.insert(node, asset.first.clone());
         let mut player = Player {
-            embedded,controls_focused:false,dom_events:VecDeque::new(),dom_playback_started:false,
+            embedded,controls_focused:false,dom_events:VecDeque::new(),dom_playback_started:false,paused:true,
             sync:None,
             clock: Clock::new(asset.clip.duration),
             clip: asset.clip,
@@ -528,6 +533,7 @@ impl App {
         self.flush_embedded_video();
     }
     fn media_request_frame(&mut self, now: Instant) {
+        self.apply_media_pause();
         if self.embedded_video_retired(){return;}
         // Every request route (timer, completion and controller) observes the
         // PCM acknowledgement gate. Old cached time cannot enter a new seek.
@@ -590,10 +596,19 @@ impl App {
             .submit_for_source(player.clip.clone(), player.generation, index,self.embedded_video.as_ref().filter(|_|player.embedded).map(|v|v.retired.clone()));
     }
     pub(super) fn poll_media(&mut self) -> bool {
-        if self.embedded_video_retired(){return false;}
+        let paused = self.apply_media_pause();
+        if self.embedded_video_retired(){return paused;}
         let Some(completion) = self.media_worker.as_ref().and_then(|worker| worker.take()) else {
-            return false;
+            return paused;
         };
+        self.accept_media_frame(completion) | paused
+    }
+    // Real worker completions share one acceptance path. Source/generation/index
+    // checks precede any publication; tests can retain a genuine decoded result
+    // while exercising a committed control without a timing race.
+    fn accept_media_frame(&mut self, completion: media::Completion) -> bool {
+        self.apply_media_pause();
+        if self.embedded_video_retired(){return false;}
         let Some(player) = &mut self.media else {
             return false;
         };
@@ -630,8 +645,9 @@ impl App {
         self.media.as_ref().and_then(|player| player.deadline)
     }
     pub(super) fn poll_media_timer_at(&mut self, now: Instant) -> bool {
+        let paused = self.apply_media_pause();
         if !self.next_media_timer().is_some_and(|due| due <= now) {
-            return false;
+            return paused;
         }
         self.poll_media_sync();
         if let Some(player) = &mut self.media {
@@ -661,6 +677,7 @@ impl App {
         }
     }
     fn media_seek(&mut self, position: Duration, now: Instant) {
+        self.apply_media_pause();
         if let Some(worker) = &self.media_worker {
             worker.cancel();
         }
@@ -706,6 +723,7 @@ impl App {
         self.flush_embedded_video();
     }
     fn media_activate(&mut self, control: Control) {
+        if self.scripting.as_ref().is_some_and(|p|p.media_pause().is_some()) {self.flush_embedded_video();}
         if self.synchronized_media(){self.synchronized_activate(control);return;}
         if self.audio.is_some() {
             self.activate_audio(control);
@@ -726,7 +744,7 @@ impl App {
                 if self
                     .media
                     .as_ref()
-                    .is_some_and(|player| player.clock.playing())
+                    .is_some_and(|player| if player.embedded {!player.paused} else {player.clock.playing()})
                 {
                     if let Some(worker) = &self.media_worker {
                         worker.cancel();
@@ -781,7 +799,7 @@ impl App {
             return Some(state);
         }
         self.media.as_ref().map(|player| ControlState {
-            playing: player.clock.playing(),
+            playing: if player.embedded {!player.paused} else {player.clock.playing()},
             ended: player.ended_reported,
             position: player.clock.position(Instant::now()),
             duration: player.clip.duration,
@@ -843,6 +861,7 @@ impl App {
         }
     }
     pub(super) fn media_key(&mut self, key: u32) -> bool {
+        self.apply_media_pause();
         if self.media.as_ref().is_some_and(|p|p.embedded&&!p.controls_focused){return false;}
         if self.focus != Focus::Page || !self.media_visible() {
             return false;
@@ -922,7 +941,7 @@ impl App {
         );
     }
     pub(super) fn media_report(&self) -> String {
-        let element=self.embedded_video_snapshot().map_or_else(String::new,|s|format!("HTML video binding node={} ready_state={} network_state={} width={} height={} paused={} ended={} seeking={} current_ms={} duration_ms={:?} source_pending={} error={:?}\n",s.node,s.ready,s.network,s.width,s.height,!s.playing,s.ended,s.seeking,s.position().as_millis(),s.duration.map(|d|d.as_millis()),self.embedded_video_loading(),self.embedded_video.as_ref().and_then(|v|v.error.as_deref())));
+        let element=self.embedded_video_snapshot().map_or_else(String::new,|s|format!("HTML video binding node={} ready_state={} network_state={} width={} height={} paused={} ended={} seeking={} current_ms={} duration_ms={:?} source_pending={} error={:?}\n",s.node,s.ready,s.network,s.width,s.height,s.paused,s.ended,s.seeking,s.position().as_millis(),s.duration.map(|d|d.as_millis()),self.embedded_video_loading(),self.embedded_video.as_ref().and_then(|v|v.error.as_deref())));
         let Some(player) = &self.media else {
             return element+"Local video: none\n";
         };

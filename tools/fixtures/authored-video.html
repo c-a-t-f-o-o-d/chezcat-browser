@@ -5,14 +5,31 @@
 </head><body>
 <h1>Authored video element</h1>
 <button id="reload" name="reload" type="button">Reload the same video with JavaScript</button>
+<button id="js-pause" name="js-pause" type="button">Pause with JavaScript</button>
 <video id="authored-video" src="scene-intra.ivf" controls width="480" height="360" onloadedmetadata="window.inlineMetadata=event.target.videoWidth;">Fallback must not appear.</video>
 <p id="media-state">Source pending</p><p id="media-position">Position pending</p>
-<p id="reload-state">Not reloaded</p>
+<p id="reload-state">Not reloaded</p><p id="js-pause-state">JavaScript pause not requested</p>
 <input name="other" value="Other page input"><a href="authored-video-next.html">Leave video</a>
 <script>
 var video=document.getElementById('authored-video'),mediaEvents=[],initialMediaState=video.readyState,mediaWindowLoaded=false;
 if(video.nodeName!=='VIDEO'||video.readyState!==0||video.videoWidth!==0||!isNaN(video.duration)||!video.paused||video.ended||!video.controls)throw Error('pending video state');
 if(video.play!==undefined||video.canPlayType!==undefined)throw Error('unsupported media method advertised');
+var jsPauseActive=false,jsPauseTime=0,jsPauseSync=0,jsPauseMicrotask=0,jsPauseEvents=0;
+function renderJsPause(){
+ document.getElementById('js-pause-state').textContent='JavaScript pause observed js_pause_sync='+jsPauseSync+' js_pause_microtask='+jsPauseMicrotask+' js_pause_ms='+Math.floor(jsPauseTime*1000)+' js_pause_events='+jsPauseEvents;
+}
+document.getElementById('js-pause').onclick=function(e){
+ if(!e.isTrusted||video.paused||video.ended||video.currentTime<=0)throw Error('JS pause requires real playing input');
+ var attr=video.getAttributeNode('src'),raw=attr.value,before=video.currentTime;
+ var result=video.pause(),frozen=video.currentTime;
+ if(result!==undefined||!video.paused||video.ended||frozen<before||frozen>=video.duration||video.currentTime!==frozen)throw Error('JS pause synchronous measured state');
+ if(video.getAttributeNode('src')!==attr||attr.value!==raw)throw Error('JS pause changed raw source');
+ jsPauseTime=frozen;jsPauseSync=1;jsPauseMicrotask=0;jsPauseEvents=0;jsPauseActive=true;renderJsPause();
+ Promise.resolve().then(function(){
+  if(!video.paused||video.currentTime!==frozen||video.getAttributeNode('src')!==attr||attr.value!==raw)throw Error('JS pause microtask state changed');
+  jsPauseMicrotask=1;renderJsPause();
+ });
+};
 document.getElementById('reload').onclick=function(){
  var attr=video.getAttributeNode('src'),raw=attr.value;
  if(video.load({toString:function(){throw Error('ignored load argument');}})!==undefined||video.readyState!==0||video.currentTime!==0||!video.paused||!isNaN(video.duration))throw Error('synchronous load reset');
@@ -22,6 +39,12 @@ document.getElementById('reload').onclick=function(){
 function recordMedia(e){
  if(e.target!==video||!e.isTrusted||e.cancelable||e.bubbles)throw Error('native media event identity');
  mediaEvents.push(e.type);
+ if(e.type==='play'||e.type==='seeking'||e.type==='loadstart')jsPauseActive=false;
+ if(e.type==='pause'&&jsPauseActive){
+  jsPauseEvents++;
+  if(jsPauseEvents!==1||!video.paused||video.currentTime!==jsPauseTime)throw Error('JS pause task state or count');
+  renderJsPause();
+ }
  if(e.type==='loadedmetadata'){
   if(video.videoWidth!==64||video.videoHeight!==48||video.duration!==3||video.readyState<2||video.networkState!==1)throw Error('measured video metadata');
   document.getElementById('media-state').textContent='Metadata ready';

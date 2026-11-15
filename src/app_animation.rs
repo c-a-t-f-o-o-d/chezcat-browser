@@ -196,6 +196,7 @@ impl App {
     }
 
     pub fn poll_page_timer(&mut self) -> bool {
+        let pause_changed=if self.scripting.as_ref().is_some_and(|p|p.media_pause().is_some()) {self.flush_embedded_video()} else {false};
         let scripts = self
             .next_script_timer()
             .is_some_and(|due| due <= Instant::now())
@@ -203,7 +204,7 @@ impl App {
         let images = self.poll_image_frames_at(Instant::now());
         let media=self.poll_media_timer_at(Instant::now());
         let audio=self.poll_audio_timer_at(Instant::now());
-        scripts || images || media || audio
+        pause_changed || scripts || images || media || audio
     }
 }
 

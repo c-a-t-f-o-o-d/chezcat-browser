@@ -84,6 +84,7 @@ pub struct HostCapacities {
     pub created_events: usize,
     pub event_targets: usize,
     pub animation_frames: usize,
+    pub media_tasks: usize,
     pub attribute_identities: usize,
 }
 
@@ -91,13 +92,13 @@ pub struct HostCapacities {
 pub const REGRESSION_HOST: HostCapacities = HostCapacities {
     string_bytes: 32 * 1024, extra_nodes: 256, retained_bytes: 1024 * 1024,
     listeners: 64, event_type_bytes: 256, timers: 64, timer_arguments: 30,
-    timer_bytes: 256 * 1024, timer_callbacks: 4096, created_events: 256, event_targets: 256, animation_frames: 64, attribute_identities: 256,
+    timer_bytes: 256 * 1024, timer_callbacks: 4096, created_events: 256, event_targets: 256, animation_frames: 64, media_tasks: 64, attribute_identities: 256,
 };
 pub const BROWSER_HOST: HostCapacities = HostCapacities {
     string_bytes: BROWSER_CAPACITIES.string_bytes, extra_nodes: 16_384,
     retained_bytes: 64 * 1024 * 1024, listeners: 4096, event_type_bytes: 16 * 1024,
     timers: 1024, timer_arguments: BROWSER_CAPACITIES.arguments,
-    timer_bytes: 32 * 1024 * 1024, timer_callbacks: 65_536, created_events: 65_536, event_targets: 65_536, animation_frames: 65_536, attribute_identities: 65_536,
+    timer_bytes: 32 * 1024 * 1024, timer_callbacks: 65_536, created_events: 65_536, event_targets: 65_536, animation_frames: 65_536, media_tasks: 65_536, attribute_identities: 65_536,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
