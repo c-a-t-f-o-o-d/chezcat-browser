@@ -92,6 +92,8 @@ def main():
     for label,argv in [('license-acceptance',[sys.executable,'tools/accept_license.py','--check']),
        ('publication-boundary',[sys.executable,'tools/check_publication.py']),
        ('publication-controls',[sys.executable,'tools/check_publication_controls.py']),
+       ('trust-data',[sys.executable,'tools/generate_trust.py']),
+       ('trust-data-controls',[sys.executable,'tools/check_trust_data.py']),
        ('artifact-guards',[sys.executable,'tools/check_release_bundle.py']),
        ('version-parser-controls',[sys.executable,'tools/check_product_version.py']),
        ('capture-controls',[sys.executable,'tools/check_capture_tests.py','--output',str(folder/'capture-controls.json')]),

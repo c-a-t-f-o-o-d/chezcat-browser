@@ -20,7 +20,9 @@ MANDATORY={'README.md','LICENSE','LICENSE_SCOPE.md','THIRD_PARTY_NOTICES.md',
  'docs/LICENSE_ACCEPTANCE.md','docs/CONTRIBUTOR_PRIVACY.md',
  'docs/CAPABILITIES.md','docs/BUILDING.md','docs/ARCHITECTURE.md','docs/ROADMAP.md',
  'docs/FEATURE_CONTRACTS.md','docs/RELEASING.md','docs/BRANDING.md',
- 'docs/ENDORSEMENT_POLICY.md'}
+ 'docs/ENDORSEMENT_POLICY.md',
+ 'trust/roots.pem','trust/mozilla/certdata.txt','trust/mozilla/LICENSE-MPL-2.0.txt',
+ 'trust/mozilla/PROVENANCE.json','trust/mozilla/policy.json','trust/mozilla/selection.json'}
 PREFIXES=('pages/','trust/','notices/','data/public_suffix/','docs/','licensing/')
 def sha(data):return hashlib.sha256(data).hexdigest()
 def git(*args):

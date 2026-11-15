@@ -1,10 +1,11 @@
 # Finite development roadmap
 
-The current milestone is **0.80.0-alpha.1: explicit CSAPUL 1.1 acceptance**.
-Its implemented offline acceptance and execution gates are complete; publication
-still requires the exact release build and package checks in the
-[release process](RELEASING.md). Status below describes finite implemented slices,
-not complete web-platform or public-service support.
+The active workstream is **T1: TLS/trust and ordinary-resource compatibility**.
+The explicit CSAPUL 1.1 acceptance milestone is published as
+[0.80.0-alpha.1](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.80.0-alpha.1).
+New completed milestones follow the exact-source build, package and download
+checks in the [release process](RELEASING.md). Status below describes finite
+implemented slices, not complete web-platform or public-service support.
 
 Current development order is shared TLS/trust and data coverage, everyday
 resource/render/interaction usability, then finite tabs, link context and new
@@ -13,8 +14,8 @@ interface slices remain supported within their recorded limits.
 
 | ID | Status | Current outcome | Remaining scope |
 | --- | --- | --- | --- |
-| T1 | In progress: bounded diagnostic prerequisite | Original document diagnostics with optional exact-host checks before DNS on every hop, actual destinations/phases and escaped status/error observations | Trust-data expansion and ordinary document/resource coverage remain planned; preserve validation and verify actual outcomes separately |
-| B1 | Queued after T1 | Existing resource, renderer and input paths are partial foundations | Address demonstrated everyday stylesheet/script/font/image, layout and interaction failures with real request-to-pixel/input proof |
+| T1 | In progress: bounded diagnostics and trust-data subset | Original guarded document diagnostics plus a pinned Mozilla NSS 98-authority selection, reviewed offline generation and a shared 1024-root policy; native selected-root and strict signed-path/tool checks passed | Meaningful coordinated document/redirect/resource recheck and demonstrated remaining anchor/parser/protocol/admission gaps; no broad TLS or live-service completion claim |
+| B1 | Queued after the T1 recheck | Existing resource, renderer and input paths are partial foundations | Address demonstrated everyday stylesheet/script/font/image, layout and interaction failures with real request-to-pixel/input proof |
 | B2 | Queued after page usability | No new tab or window capability is claimed | Define finite tabs, link-context and new-window behavior with real context/lifetime ownership |
 | L1 | Complete | Full offline native license text and explicit acceptance; personal/organization source and headless acceptance; strict external receipts, decline and changed-terms checks | No identity or organizational-authority verification; exact release packaging remains a separate gate |
 | F1 | Complete for the main Window | Replaceable animation operations with real scheduling, cancellation, owner and work rules | Child-frame schedulers |
@@ -28,11 +29,15 @@ interface slices remain supported within their recorded limits.
 | F6 controls reflection | Complete for the original model/App slice | Real Boolean controls reflection, including unbound Media nodes; native bar paint/hits/focus with preserved source, clock, frame and Promise lifetime | Full normal verification is required for integration; VIDEO dimensions, Element.toggleAttribute and NamedNodeMap mutation remain separate source gaps |
 | F6 | Deferred for browser foundations | Authored synchronized A/V, genuine Media/Video interfaces and finite Event/UIEvent/MouseEvent/CustomEvent construction are implemented prerequisites; Event/UIEvent/CustomEvent dispatch and cancellation work | Actual ordinary non-DRM YouTube playback is unproved; Mouse dispatch/native pointer payloads, KeyboardEvent construction and broader page/player APIs remain unsupported |
 
-Next, establish the shared TLS/trust/data coverage baseline, then improve
-ordinary resource loading, rendering and interaction before finite tabs/window
-work. VIDEO dimensions, Element.toggleAttribute, NamedNodeMap mutation and
-remaining media/player work stay recorded gaps outside the active queue.
-Service playback remains unproved by local media evidence.
+Every implementation checkpoint requires normal verification. Next, perform a
+meaningful coordinated recheck of the updated trust data through ordinary
+document, redirect and resource paths, separating anchor/path failures from
+parser, protocol/timeout and intentional admission refusals. Then address
+demonstrated B1 resource/render/input failures before finite tabs/window work;
+remaining TLS gaps do not require perfect coverage before useful page progress.
+VIDEO dimensions, Element.toggleAttribute, NamedNodeMap mutation and remaining
+media/player work stay recorded gaps outside the active queue. Service playback
+remains unproved by local media evidence.
 
 Wider Unicode, CSS, storage, frames and accessibility remain gaps. Complete Maps,
 every codec and perfect site screenshots are not prerequisites for useful staged

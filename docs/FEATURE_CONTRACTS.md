@@ -7,10 +7,42 @@ public release by themselves.
 
 ## T1 — shared TLS/trust and data coverage baseline
 
-Status: in progress for a bounded diagnostic prerequisite. Original TLS 1.2/1.3,
-X.509 validation and explicit browser-owned PEM trust selection remain unchanged.
-Trust-data expansion and broader document/resource coverage are still planned.
-There is no OS trust-store lookup, automatic root update, revocation or CT claim.
+Status: in progress for bounded diagnostics, a reviewed Mozilla-derived trust
+subset and ordinary document/resource coverage. Original TLS 1.2/1.3 and X.509
+cryptographic, identity and path rules remain. Configured trust authority expands
+to the explicitly selected data, with a shared bounded root capacity.
+
+The default contains 98 selected authorities from Mozilla NSS built-ins 2.94,
+revision 8c60e757c30b1b239bae46532b4f6d4ebb1e1cad. Retain the exact source,
+provenance, policy/selection manifests and separate MPL notices. Selection joins
+exact certificate/trust identities and requires explicit original-verifier
+capability review. Exclude four unimplemented leaf-issuance cutoffs, the Kamu
+authority's externally imposed .tr constraint, ten unsupported authorities and
+54 non-server-auth entries; never promote a restricted authority to unrestricted
+trust. This is a conservative data subset, not the full Firefox trust policy.
+
+PEM parsing, the custom store, TLS admission and path validation share a
+1024-root bound. Retain the two-MiB regular-file input limit, twelve-MiB reusable
+PEM decoder limit, 64-KiB certificate bound, eight-certificate presented chain
+and eight matching root candidates. Growth follows actual input. Custom stores
+replace the default and deduplicate exact certificates; unsupported custom
+entries remain fail-closed, rather than receiving default-data filtering.
+Hostname/SAN, validity, signatures, CA/usage/path and critical-constraint checks
+are unchanged. There is no OS trust-store lookup, automatic root update,
+revocation or CT implementation implied by this subset.
+
+Refresh is an explicit reviewed offline operation. Pin source and restriction
+hashes, re-audit candidates with the exact original native verifier, and update
+the reviewed policy before generation. The generator refuses changed verifier
+inputs, unreviewed authorities or unknown selection data; its default mode
+checks exact committed output without downloading or installing anything.
+Native regressions pin the full 98-root PEM, check every selected root's CA,
+time and self-signature, preserve the prior eight identities independently of
+order, and retain G3 identity, wrong-SAN and signed-path negatives. Original
+custom-store/TLS tests verify admission above the old raw count, exact dedup,
+real signed-path validation and refusal before writes; data-tool tests cover
+reproducibility, source gates and strict negative cases. These native/tool checks
+passed; full normal verification remains required for an implementation checkpoint.
 
 `--diagnose URL --report FILE` uses the real HTTP/TLS client for document GETs,
 without an App profile, page scripts, subresources or form submission. At most
@@ -37,13 +69,18 @@ legacy redirects, actual failed-hop/phase evidence, body bounds/prevalidation,
 status/marker separation and metadata handling. Full normal integration,
 release/CLI execution and coordinated public-host outcomes remain separate gates.
 
-Next, verify shared trust/data authority through ordinary document, redirect and
-subresource paths with original TLS/X.509/App fixtures. Preserve identity and
-certificate validation, origins, CSP, cookies, cancellation and checked bounds.
-Everyday resource/render/input usability follows, then finite tabs, link contexts
-and windows. Completed media slices remain supported; further F6/YouTube work is
-deferred. This diagnostic prerequisite establishes no trust expansion or live
-compatibility outcome.
+Next, perform a meaningful coordinated recheck of shared trust/data authority
+through ordinary document, redirect and subresource paths, retaining original
+TLS/X.509/App fixtures. Distinguish anchor/path coverage from parser refusal,
+protocol/timeout and intentional host-policy denial. Preserve certificate
+validation, origins, CSP, cookies, cancellation and checked bounds; no challenge
+interaction is authorized by this contract. These data/native/tool results
+establish no new live compatibility, HTTP access or page-usability outcome.
+
+Proceed to demonstrated everyday resource/render/input gaps after that recheck,
+then finite tabs, link contexts and windows; perfect TLS coverage is not a
+prerequisite for all later page work. Completed media slices remain supported;
+further F6/YouTube work is deferred.
 
 ## F1 — replaceable animation-frame operations
 

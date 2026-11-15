@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "policy_source": "Mozilla NSS certdata, plus externally imposed NSS name constraints",
+  "nss_repository": "https://github.com/mozilla/nss",
+  "nss_commit": "8c60e757c30b1b239bae46532b4f6d4ebb1e1cad",
+  "nss_commit_date_utc": "2026-11-13T23:31:24Z",
+  "nss_builtins_version": "2.94",
+  "certdata_url": "https://raw.githubusercontent.com/mozilla/nss/8c60e757c30b1b239bae46532b4f6d4ebb1e1cad/lib/ckfw/builtins/certdata.txt",
+  "certdata_sha256": "6d177e33ab54b338edfee24dc3868585833636716a320a725137ab4a15927292",
+  "constraints_source_url": "https://raw.githubusercontent.com/mozilla/nss/8c60e757c30b1b239bae46532b4f6d4ebb1e1cad/lib/certdb/genname.c",
+  "constraints_source_sha256": "1fd0bff1c9cfd59a3ebadbcf5bd60fa5555e29ba68a0190eda0bcf401b80e75d",
+  "firefox_constraints_source_url": "https://raw.githubusercontent.com/mozilla-firefox/firefox/5866b3015de8fc803012d8ab800d8c38df1ea5e8/security/nss/lib/certdb/genname.c",
+  "firefox_constraints_source_sha256": "1fd0bff1c9cfd59a3ebadbcf5bd60fa5555e29ba68a0190eda0bcf401b80e75d",
+  "license": "MPL-2.0; upstream certdata notices preserved verbatim",
+  "license_source_url": "https://raw.githubusercontent.com/mozilla/nss/8c60e757c30b1b239bae46532b4f6d4ebb1e1cad/COPYING",
+  "license_source_sha256": "a20c1a32d1f8102432360b42e932869f7c11c7cdbacf9cac554c422132af47f4",
+  "references": [
+    "https://www.mozilla.org/en-US/about/governance/policies/security-group/certs/policy/",
+    "https://firefox-source-docs.mozilla.org/security/nss/runbooks/rootstore.html",
+    "https://wiki.mozilla.org/CA/Additional_Trust_Changes",
+    "https://curl.se/docs/caextract.html"
+  ],
+  "limitation": "A Mozilla-derived data subset is not the entire Firefox policy. No automatic refresh, OneCRL, revocation or CT implementation is claimed."
+}

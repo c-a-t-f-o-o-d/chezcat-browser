@@ -761,10 +761,10 @@ impl<S: Read + Write, C: Fn() -> Result<(), String>> TlsStream<S, C> {
         check: C,
     ) -> Result<Self, String> {
         check()?;
-        if roots.is_empty() || roots.len() > 128 {
-            return Err(
-                "TLS requires between 1 and 128 explicit trusted root certificates.".into(),
-            );
+        if roots.is_empty() || roots.len() > x509::MAX_ROOTS {
+            return Err(format!(
+                "TLS requires between 1 and {} explicit trusted root certificates.", x509::MAX_ROOTS
+            ));
         }
         let verified_name = dns_name(hostname)?.unwrap_or(hostname);
         let mut client_random = [0; 32];
@@ -1340,6 +1340,28 @@ mod tests {
             Ok(())
         }
     }
+
+    #[test]
+    fn tls_root_capacity_matches_native_store_without_skipping_handshake() {
+        let root = x509::parse_pem_certificates(include_bytes!("../tools/https-demo/ca.pem")).unwrap().remove(0);
+        let roots = vec![root.clone(); 129];
+        let now = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_794_182_400);
+        let mut io = MemoryIo::new(Vec::new());
+        let error = TlsStream::connect(&mut io, "localhost", &roots, now, [0x31; 64], permitted)
+            .err().expect("An empty peer must not complete a TLS handshake");
+        assert!(error.contains("TLS handshake before ServerHello:"), "{error}");
+        assert!(io.written.starts_with(&[22, 3, 1]));
+        assert_eq!(io.written[5], 1); // A real ClientHello, not a claimed connection.
+        for count in [0, x509::MAX_ROOTS + 1] {
+            let roots = vec![root.clone(); count];
+            let mut io = MemoryIo::new(Vec::new());
+            let error = TlsStream::connect(&mut io, "localhost", &roots, now, [0x31; 64], permitted)
+                .err().expect("Out-of-policy root count must fail");
+            assert!(error.contains(&format!("1 and {}", x509::MAX_ROOTS)), "{error}");
+            assert!(io.written.is_empty(), "Refused root counts must write no ClientHello");
+        }
+    }
+
 
     fn plain_record(kind: u8, payload: &[u8]) -> Vec<u8> {
         let mut record = vec![kind, 3, 3];

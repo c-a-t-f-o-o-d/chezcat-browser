@@ -16,7 +16,7 @@ NAME_SCOPE = ('Only test function basenames declared beside #[test] in committed
 STATES = {'running', 'completed', 'failed', 'timeout', 'launch_error', 'interrupted', 'output_limit'}
 NATIVE_STATES = {'running', 'passed', 'not_passed', 'interrupted', 'error'}
 STAGES = {'license-acceptance', 'publication-boundary', 'publication-controls', 'artifact-guards',
-          'version-parser-controls', 'capture-controls', 'normal', 'release', 'pe'}
+          'version-parser-controls', 'capture-controls', 'trust-data', 'trust-data-controls', 'normal', 'release', 'pe'}
 RUN_NAME = r'\d{8}T\d{6}\.\d{6}Z-[0-9a-f]{8}'
 IDENTIFIER = re.compile(r'[A-Za-z_][A-Za-z_0-9]*(?:::[A-Za-z_][A-Za-z_0-9]*)*\Z')
 
