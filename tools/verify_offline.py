@@ -16,7 +16,7 @@ JOURNEYS=[['check_input_harness.py'],['check_input_harness.py','--event-namespac
  ['check_input_harness.py','--attribute-nodes'],['check_address_search.py'],
  ['check_stylesheet_harness.py'],['check_dispatch_harness.py'],['check_video_harness.py'],
  ['check_audio_harness.py'],['check_av_harness.py'],['check_authored_video_harness.py'],
- ['check_source_replacement_harness.py']]
+ ['check_source_replacement_harness.py'],['check_animation_harness.py']]
 
 def committed_source_identity(commit,root=None):
     """Read immutable input blobs, including edits hidden by index flags."""
@@ -86,6 +86,7 @@ def main():
         row=capture_tests.execute(argv,folder/(label+'.log'),ROOT,timeout)
         row={'name':label,**row};print(label+': '+row['state'],flush=True);return row
     for label,argv in [('artifact-guards',[sys.executable,'tools/check_release_bundle.py']),
+       ('version-parser-controls',[sys.executable,'tools/check_product_version.py']),
        ('capture-controls',[sys.executable,'tools/check_capture_tests.py','--output',str(folder/'capture-controls.json')]),
        ('normal',[sys.executable,'tools/capture_tests.py','--toolchain','1.99.1']),
        ('release',['rustup','run','1.99.1','cmd.exe','/d','/c','Build.cmd']),
@@ -109,11 +110,11 @@ def main():
         valid=(manifest.get('executable_sha256',manifest.get('exe_sha256'))==expected_exe and manifest['source_before']==before and manifest['source_after']==before and all(manifest['checks'].values()))
         journey_records.append({'valid':valid,'manifest':str((path/'manifest.json').relative_to(ROOT)), 'sha256':capture_tests.sha256(path/'manifest.json')})
     after=capture_tests.source_identity(ROOT);final_commit,final_dirty=git_state()
-    passed=(before==after and final_commit==initial_commit and final_dirty is not True and capture_tests.sha256(ROOT/'ChezCat.exe')==expected_exe and len(journey_records)==11 and all(r['valid'] for r in journey_records) and all(r['state']=='completed' and r['exit_code']==0 for r in runs))
+    passed=(before==after and final_commit==initial_commit and final_dirty is not True and capture_tests.sha256(ROOT/'ChezCat.exe')==expected_exe and len(journey_records)==len(JOURNEYS) and all(r['valid'] for r in journey_records) and all(r['state']=='completed' and r['exit_code']==0 for r in runs))
     identity=build_identity(after);capture_tests.write_json(folder/'build-info.json',identity)
     report={'passed':passed,'runs':runs,'journeys':journey_records,'source_before':before,'source_after':after,
        'executable_sha256':identity['executable_sha256'],'source_commit':identity['source_commit'],
-       'scope':'Normal suite, release, PE and eleven fixed local App/input journeys. No public service/audio device/native desktop claim.'}
+       'scope':f'Normal suite, release, PE and {len(JOURNEYS)} fixed local App/input journeys. No public service/audio device/native desktop claim.'}
     capture_tests.write_json(folder/'verification.json',report)
     (ROOT/'results/verification/latest-offline.json').write_text(json.dumps({'report':str((folder/'verification.json').relative_to(ROOT)),'build_info':str((folder/'build-info.json').relative_to(ROOT))},indent=2)+'\n',encoding='utf-8')
     print('Report: '+str(folder/'verification.json'));return 0 if passed else 1

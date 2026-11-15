@@ -6,7 +6,7 @@ to implement everything before the next useful milestone.
 
 | Order / ID | Observable outcome | Minimum dependencies and deferred scope |
 | --- | --- | --- |
-| F1 | Finish the saved animation-frame/interface compatibility slice with real semantics | Real scheduler/owner rules; legacy CustomEvent as separately scoped dependency. WIP is not part of this 0.78 source |
+| F1 | Completed F1 main-Window animation operation contract | Real queue/owner/work rules and local wrapper journey; child schedulers and legacy CustomEvent remain separate |
 | F2 | Defined ordinary navigation/search/history journey remains correct across redirects/replacements | Local inputs/results/destination/one-Back/second query, provider/None privacy. Live checks opt-in and service-specific; no every-response Google promise |
 | F3 | JavaScript controls the supported local video with actual pause/load/seek/play promises and events | Existing player/Promise jobs, official playback positions, retirement and task order; no fake canPlayType/readiness |
 | F4 | Policy-correct HTTP(S) media source transaction with real playback | Bounded fetch/redirect/range/credentials/CORS/CSP/MIME/cancellation, original loopback fixtures; not arbitrary streaming |

@@ -30,3 +30,13 @@ Licensing and contractual notices: legal@bitmadd.com. Contact designation is not
 a delivery-test claim or a confidential vulnerability-upload route. A replacement
 contact may be published prospectively through an authenticated official channel
 under LICENSE section 15.2 without silently changing release-specific rights.
+
+## Publication record
+
+The first adoption commit is
+`c1138ff61722a027ea9836cb04acd45b0341c75e`. The initial licensed source import is
+`09a92a38e61824183309bd62e1160c6775797cf9`, preserving the existing public
+initialization. These are actual public source identities, not a self-reference
+to this containing revision. The exact unchanged license above accompanies the
+0.79.0-alpha.1 milestone; the immutable tag/build record identifies its final
+source. Existing historical designations and independently held rights survive.

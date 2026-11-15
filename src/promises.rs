@@ -1334,7 +1334,7 @@ impl Runtime {
     /// allowance. Ordinary callback errors and unhandled rejections are bounded
     /// diagnostics; resource/capability failures cancel pending work and return.
     pub fn microtask_checkpoint(&mut self, host: &mut dyn Host) -> Result<Vec<String>, String> {
-        if self.promises.draining || self.call_depth != 0 || self.eval_depth != 0 {
+        if self.job_failed_fatally || self.promises.draining || self.call_depth != 0 || self.eval_depth != 0 {
             return Ok(Vec::new());
         }
         self.promises.draining = true;
@@ -1375,7 +1375,11 @@ impl Runtime {
                     }
                 }
             }
-            for object in &mut self.objects {
+            // This scan runs after every host callback, including an empty
+            // animation callback. It shares that job's work/deadline allowance.
+            for index in 0..self.objects.len() {
+                self.step()?;
+                let object = &mut self.objects[index];
                 if let Some(data) = &mut object.promise {
                     if let State::Rejected(value) = &data.state {
                         if !data.handled && !data.reported {
@@ -1395,6 +1399,7 @@ impl Runtime {
         self.promises.draining = false;
         if let Err(error) = &result { self.record_stage_fault("microtask", error); }
         if result.is_err() {
+            self.job_failed_fatally = true;
             self.cancel_microtasks();
         }
         self.collect_environments();

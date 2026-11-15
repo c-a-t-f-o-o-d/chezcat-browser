@@ -4,7 +4,7 @@ An experimental Windows x64 browser with an original Rust engine: networking,
 JavaScript, DOM, layout, rendering and selected media decoding. It does not embed
 Chromium, Gecko, WebKit or an external JavaScript/codec runtime.
 
-The imported baseline is **0.78**. This is an experimental browser, without a
+The current milestone is **0.79.0-alpha.1**, built on the imported0.78 baseline. This is an experimental browser, without a
 security certification. Web-platform support is partial. The renderer and interpreter run
 in the browser process with worker threads, without an OS renderer sandbox.
 
@@ -23,6 +23,10 @@ and licensing obligations; see [third-party notices](THIRD_PARTY_NOTICES.md).
 - Selected local IVF/VP8-intra video, PCM audio and constrained Matroska A/V.
   One authored HTML video supports native controls, source replacement and real
   JavaScript load(). Script play/pause/seek and network media remain incomplete.
+- Replaceable main-Window animation-frame operations, with real saved-native
+  callbacks/cancellation, shared measured frame timestamps and deferred next frames.
+- Replaceable main-Window animation-frame operations, with real saved-native
+  callbacks/cancellation, shared measured frame timestamps and deferred next frames.
 - Original local regression fixtures and App/input/offscreen interaction tests.
 
 These are scoped foundations, not complete standards support. The

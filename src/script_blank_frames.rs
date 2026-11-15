@@ -359,6 +359,32 @@ mod tests {
     }
 
     const CREATE: &str = "var f=document.createElement('iframe');f.hidden=true;document.body.appendChild(f);var w=f.contentWindow;";
+
+    #[test]
+    fn animation_saved_natives_keep_supported_targets_and_foreign_origin_checks() {
+        let source=format!("{CREATE}{}",r#"
+var frame=requestAnimationFrame,cancel=cancelAnimationFrame,effects=0,refused=0;
+var callback=function(){},pending=frame(callback),argument={valueOf:function(){effects++;return pending;}};
+for(var action of [function(){frame.call(w,callback);},function(){frame.apply(w,[callback]);},function(){frame.bind(w)(callback);},function(){cancel.call(w,argument);},function(){cancel.apply(w,[argument]);},function(){cancel.bind(w)(argument);}]){
+ try{action();}catch(e){if(e.name!=='NotSupportedError')throw e;refused++;}
+}
+if(refused!==6||effects!==0||typeof w.requestAnimationFrame!=='undefined'||typeof w.cancelAnimationFrame!=='undefined')throw 'child target boundary';
+var foreign=w.Function('fn','arg','return fn.call(undefined,arg);');
+var same=foreign(frame,callback);foreign(cancel,{valueOf:function(){effects++;return same;}});
+if(effects!==1)throw 'same origin owner fallback';
+var boundForeign=foreign.bind(null,cancel);effects=0;
+"#);
+        let(mut doc,mut forms,mut page,outcome)=start(&source,&crate::csp::PolicySet::default());
+        assert_eq!(outcome.errors,0,"{}",page.report());assert_eq!(page.state.animation_frames.len(),1);
+        let pending=page.state.animation_frames.front().unwrap().id;let next=page.state.next_animation_frame;
+        page.set_location(&crate::navigation::Location {url:Some(crate::url::parse("https://other.test/").unwrap().0),path:None,root:None,fragment:String::new()});
+        for action in ["foreign(cancel,argument);","foreign.apply(null,[cancel,argument]);","boundForeign(argument);"] {
+            let outcome=page.console_eval(&mut doc,&mut forms,action);assert_eq!(outcome.errors,1,"{action}: {}",page.report());
+            let outcome=page.console_eval(&mut doc,&mut forms,"if(effects!==0)throw 'forbidden conversion';");assert_eq!(outcome.errors,0,"{}",page.report());
+            assert_eq!(page.state.animation_frames.len(),1);assert_eq!(page.state.animation_frames.front().unwrap().id,pending);assert_eq!(page.state.next_animation_frame,next);
+        }
+    }
+
     #[test]
     fn base_node_interfaces_keep_owner_suffixes_and_foreign_polyfills_guarded() {
         let source=format!("{CREATE}{}",r#"

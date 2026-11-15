@@ -452,6 +452,12 @@ pub trait Host {
     fn accepts_receiver(&self, object: u32, _method: &str, receiver: u32) -> bool {
         object == receiver
     }
+
+    /// Selected Web IDL global operations resolve null/undefined to their
+    /// native realm's global, without accepting arbitrary receivers. None
+    /// preserves the existing receiver policy of every other host operation.
+    fn global_operation_receiver(&self, _object: u32, _method: &str, _receiver: &Value)
+        -> Option<Result<u32, (&'static str, String)>> { None }
     /// A bounded, read-only indexed host collection can request the ordinary
     /// callback loop without gaining access to the runtime or resetting jobs.
     fn indexed_for_each(&self, _object: u32, _method: &str) -> bool {
@@ -3241,6 +3247,7 @@ pub struct Runtime {
     // Preserve the invoking Script realm through native call/apply/bind
     // forwarding. A real Script callee starts its own authority context.
     native_access_caller: Option<Option<u32>>,
+    job_failed_fatally: bool,
     diagnostics: runtime_diagnostics::Data,
     failed_window_realms: HashSet<u32>,
     deferred_intrinsics: u8,
@@ -3378,6 +3385,7 @@ impl Runtime {
             native_constructor_prototypes:BTreeMap::new(),
             native_expando_owners:BTreeMap::new(),
             native_access_caller: None,
+            job_failed_fatally: false,
             diagnostics: runtime_diagnostics::Data::default(),
             failed_window_realms: HashSet::new(),
             deferred_intrinsics: (if defer_families { 7 } else { 0 }) | 8,
@@ -3605,6 +3613,7 @@ impl Runtime {
     }
 
     pub fn begin_job(&mut self) {
+        self.job_failed_fatally = false;
         self.work_attribution.begin_job(self.limits.copy_bytes);
         self.steps = self.limits.steps;
         self.job_deadline = Instant::now() + Duration::from_secs(self.limits.job_seconds);
@@ -3675,6 +3684,7 @@ impl Runtime {
             .as_ref()
             .is_err_and(|error| error.exception.is_none())
         {
+            self.job_failed_fatally = true;
             self.cancel_microtasks();
         }
         if let Ok(value) = &result { self.pin_exported_value(value); }
@@ -3843,6 +3853,7 @@ impl Runtime {
             .as_ref()
             .is_err_and(|error| error.exception.is_none())
         {
+            self.job_failed_fatally = true;
             self.cancel_microtasks();
         }
         if let Ok(value) = &result { self.pin_exported_value(value); }
@@ -3862,16 +3873,18 @@ impl Runtime {
         for value in args { self.pin_exported_value(value); }
         let result = self.call_value(function, args, this, host);
         self.record_entry_result(true, &result);
-        if result
-            .as_ref()
-            .is_err_and(|error| error.exception.is_none())
-        {
+        if result.as_ref().is_err_and(|error| error.exception.is_none()) {
+            self.job_failed_fatally = true;
             self.cancel_microtasks();
         }
         if let Ok(value) = &result { self.pin_exported_value(value); }
         self.collect_environments();
         result.map_err(|error| self.display_fault(error))
     }
+
+    /// Typed fatal state until the host begins a new job. Ordinary callback
+    /// exceptions do not set it, and error formatting cannot change it.
+    pub(crate) fn invocation_failed_fatally(&self) -> bool { self.job_failed_fatally }
 
     fn register_program(&mut self, source: &str, handler: bool) -> Result<Rc<Program>, Fault> {
         self.register_program_context(source, handler, false)
@@ -8438,6 +8451,11 @@ impl Runtime {
                 }
                 let (mut object, method, receiver_required) =
                     (*object, *method, *receiver_required);
+                if let Some(receiver) = host.global_operation_receiver(object, method, &this) {
+                    self.validate_native_access(object, host)?;
+                    if let Value::Host(handle) = &this { self.validate_native_access(*handle, host)?; }
+                    object = receiver.map_err(|(kind, message)| Fault::exception(kind, message))?;
+                }
                 if receiver_required {
                     match this {
                         Value::Host(receiver)

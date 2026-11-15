@@ -14,6 +14,7 @@ from pathlib import Path
 import re
 import struct
 import sys
+import tomllib
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -209,21 +210,38 @@ def version_info(data):
             "product_version": split(fixed[4], fixed[5]), "strings": strings}
 
 
-def package_version():
-    text = (PROJECT_ROOT / "Cargo.toml").read_text(encoding="utf-8")
-    package = re.search(r"(?ms)^\[package\][ \t]*\n(.*?)(?=^\[|\Z)", text)
-    require(package is not None, "Cargo.toml has no [package] table")
-    version = re.search(r'^version\s*=\s*"([0-9]+\.[0-9]+\.[0-9]+)"\s*(?:#.*)?$',
-                        package.group(1), re.MULTILINE)
-    require(version is not None, "Expected a numeric major.minor.patch package version")
-    text = version.group(1)
-    parts = tuple(int(part) for part in text.split(".")) + (0,)
-    require(all(part <= 65535 for part in parts), "Version components exceed Windows limits")
-    # Cargo requires three components; ChezCat releases are presented as 0.42,
-    # 0.43, etc. Preserve older nonzero patch versions when inspecting history.
-    display = ".".join(str(part) for part in parts[:2]) if parts[2] == 0 else text
+def parse_package_version(version):
+    """Keep full SemVer text; map only its numeric core to Windows words.
+
+    The current historical 0.78.0 build retains its recorded 0.78 display.
+    New milestones, including stable zero-patch versions, keep all components.
+    Build metadata is inspected faithfully here; release-tag policy remains
+    separate and currently excludes '+' metadata.
+    """
+    require(isinstance(version, str), "Expected a string package version")
+    match = re.fullmatch(
+        r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)"
+        r"(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?"
+        r"(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?", version)
+    require(match is not None, "Expected a valid major.minor.patch SemVer package version")
+    core = match.group(1, 2, 3)
+    # Check decimal text first, avoiding oversized integer conversions.
+    require(all(len(part) < 5 or (len(part) == 5 and part <= "65535")
+                for part in core), "Version components exceed Windows limits")
+    prerelease = match.group(4)
+    require(prerelease is None or all(not part.isdecimal() or part == "0"
+                or not part.startswith("0") for part in prerelease.split(".")),
+            "Numeric prerelease identifiers must not have leading zeroes")
+    parts = tuple(int(part) for part in core) + (0,)
+    display = "0.78" if version == "0.78.0" else version
     return display, parts
 
+
+def package_version():
+    manifest = tomllib.loads((PROJECT_ROOT / "Cargo.toml").read_text(encoding="utf-8"))
+    package = manifest.get("package")
+    require(isinstance(package, dict), "Cargo.toml has no [package] table")
+    return parse_package_version(package.get("version"))
 
 def check(exe, baseline_exe, report):
     string_version, expected = package_version()

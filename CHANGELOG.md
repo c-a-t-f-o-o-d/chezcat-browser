@@ -1,5 +1,20 @@
 # Changes
 
+## 0.79.0-alpha.1
+
+Main-Window requestAnimationFrame/cancelAnimationFrame are ordinary replaceable,
+deletable and restorable operations. Saved natives retain real scheduling and
+IDL conversion, receiver/realm, callback-this, microtask and cancellation behavior.
+The checked queue grows on demand, preserves next-frame deferral and shares job
+work with checkpoint scans. Ordinary exceptions continue; fatal work retires
+callbacks and recovers at a new job. The original executable wrapper journey
+checks actual text/pixels, cancellation, later frames and navigation.
+
+Full SemVer strings and Windows numeric0,79,0,0 identify this experimental alpha.
+Selected local media and ordinary navigation remain partial; no new Google/
+YouTube, physical-desktop, audio-device or security-certification claim is made.
+The tagged release record identifies actual build, assets and verification.
+
 ## Source import
 
 The authentic filtered engineering history and existing public initialization are

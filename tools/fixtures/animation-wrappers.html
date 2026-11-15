@@ -1,0 +1,46 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'">
+<title>Original animation wrapper fixture</title>
+<style>body{margin:20px;font-size:18px}#sample{width:60px;height:24px;background:#112233}button{margin:8px}</style>
+<h1>Original animation wrapper fixture</h1>
+<p id="out">Waiting for real frame callbacks</p>
+<div id="sample"></div>
+<button name="run" type="button">Run wrapped frames</button>
+<button name="pending" type="button">Start pending frames</button>
+<script>
+var nativeFrame=requestAnimationFrame,nativeCancel=cancelAnimationFrame;
+document.getElementsByName('run').item(0).onclick=function(){
+ var trace='',stamp=-1,firstBatchFinished=false;
+ for(var name of ['requestAnimationFrame','cancelAnimationFrame']){
+  var descriptor=Object.getOwnPropertyDescriptor(window,name);
+  if(!descriptor.writable||!descriptor.enumerable||!descriptor.configurable||descriptor.value.length!==1)throw 'initial operation descriptor';
+ }
+ window.requestAnimationFrame=function(callback){trace+='w';return nativeFrame.call(null,function(t){trace+='f';callback(t);});};
+ window.cancelAnimationFrame=function(id){trace+='c';return nativeCancel.call(undefined,{valueOf:function(){trace+='v';return id+4294967296;}});};
+ var cancelled=requestAnimationFrame(function(){throw 'cancelled frame ran';});
+ cancelAnimationFrame(cancelled);
+ requestAnimationFrame(function(t){
+  trace+='a';stamp=t;
+  Promise.resolve().then(function(){
+   trace+='m';nativeFrame(function(next){
+    if(!firstBatchFinished||next<=stamp)throw 'next-frame deferral';trace+='r';
+    document.getElementById('sample').setAttribute('style','width:180px;height:24px;background:#22aa44');
+    if(document.getElementById('sample').clientWidth!==180||trace!=='wcvwfamdr')throw 'real frame result';
+    document.getElementById('out').textContent='Animation wrapper complete';
+    document.title='Animation wrapper complete '+trace;
+   });
+  });
+ });
+ nativeFrame(function(t){'use strict';if(this!==undefined||t!==stamp)throw 'strict callback or shared timestamp';trace+='d';firstBatchFinished=true;});
+ delete window.requestAnimationFrame;delete window.cancelAnimationFrame;
+ if(typeof requestAnimationFrame!=='undefined'||typeof cancelAnimationFrame!=='undefined'||'requestAnimationFrame' in window||'cancelAnimationFrame' in window)throw 'hidden restoration';
+ Object.assign(window,{requestAnimationFrame:nativeFrame,cancelAnimationFrame:nativeCancel});
+ if(window.requestAnimationFrame!==requestAnimationFrame||self.cancelAnimationFrame!==nativeCancel)throw 'restored aliases';
+};
+document.getElementsByName('pending').item(0).onclick=function(){
+ var visits=0;
+ function again(){visits++;document.title='Pending original frame '+visits;nativeFrame(again);}
+ nativeFrame(again);
+};
+</script>

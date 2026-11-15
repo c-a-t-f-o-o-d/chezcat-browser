@@ -20,8 +20,23 @@ Acceptance: descriptors and aliases; getter-before-argument evaluation; no hidde
 native restoration after deletion; real wrapped callback/cancellation/microtasks;
 small-profile failure/recovery and generous default; saved call/apply/bound owner
 controls; disabled scripting; normal suite/build/PE and a real local page journey.
-Saved pre-transition WIP is unvalidated and must be applied to clean history as a
-new feature branch, never by merging raw private ancestry.
+Completed for the0.79.0-alpha.1 milestone on the clean lineage. Original source
+changes were recovered without private ancestry or process documents. Acceptance
+is exercised by src/script_timer_global_tests.rs, src/script_blank_frames.rs,
+src/app_script_tests.rs and tools/check_animation_harness.py with original
+animation-global-properties.js/animation-wrappers.html fixtures.
+
+Saved/unbound/null/undefined calls use the native owner global; incompatible
+receivers fail before IDL conversion and unsupported child targets explicitly
+decline. Strict/sloppy/bound/arrow callbacks preserve their real realm semantics.
+The queue grows fallibly on demand up to the adjustable normal65,536 policy; small
+profiles test refusal/atomicity, full-u32 ID exhaustion and fresh-job recovery.
+Frame and Promise-checkpoint traversal shares measured work/deadline limits.
+Ordinary exceptions report and continue; fatal jobs discard stale work, remain
+inert until begin_job and do not produce a second checkpoint error. A normal
+4,096-callback drain and actual rendered wrapper journey cover useful capacity
+and behavior. No child scheduler, legacy event factory or live-site acceptance
+is added by this contract.
 
 ## F2 — navigation, providers and session history
 

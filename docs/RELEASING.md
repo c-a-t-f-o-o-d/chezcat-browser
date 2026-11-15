@@ -8,8 +8,8 @@ lines only. Never import raw pre-transition private ancestry or recovery refs.
 
 Ordinary commits keep the planned product version. Choose a release version once
 when a feature contract is complete. Preserve historical numbers: imported0.78
-is not browser1.0 because CSAPUL is1.0. The intended first animation milestone is
-0.79.0-alpha.1 if unused. During0.x, minor releases can change a stated interface;
+is not browser1.0 because CSAPUL is1.0. The selected first animation milestone is
+0.79.0-alpha.1; verify the actual tag/release before claiming it published. During0.x, minor releases can change a stated interface;
 patch releases preserve its contract except documented security necessities.
 Alpha/RC contracts remain unstable. Persisted-data changes need migration and
 recovery tests. See FEATURE_CONTRACTS.md and CAPABILITIES.md.

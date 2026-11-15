@@ -15,14 +15,15 @@ python tools/verify_offline.py
 ```
 
 The final command runs the normal Windows suite, optimized build, PE checks and
-all eleven local interaction journeys with bounded child-process cleanup. Its
+all twelve local interaction journeys with bounded child-process cleanup. Its
 JSON report records the source input map and executable hashes. A serial diagnostic
 retry never erases a normal failure. Results and build outputs are ignored files.
 Loopback fixture HTTP servers are local tests, not public-service probes.
 
 The journeys cover form/query/destination/Back/second-input behavior against local
 pages, provider persistence/None, CSS resources, native interfaces/events, real
-video frames, audio metadata, A/V metadata and source replacement/reload. They are
+video frames, audio metadata, A/V metadata, source replacement/reload and real
+animation wrappers/cancellation/microtasks/navigation. They are
 App/input/offscreen coverage. Device audibility, physical desktop input and native
 presentation while locked are separate, unclaimed checks.
 

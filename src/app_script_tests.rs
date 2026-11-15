@@ -3,6 +3,25 @@
 
 use super::*;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Duration;
+
+#[test]
+fn animation_wrapper_lifetimes_follow_navigation_script_setting_and_wake_failure() {
+    let fixture=ScriptFixture::new();
+    let markup=r#"<title>Original frame lifetime</title><p id=out>waiting</p><script>
+var nativeFrame=requestAnimationFrame;requestAnimationFrame=function(callback){return nativeFrame.call(null,callback);};
+function again(){document.getElementById('out').textContent='frame';requestAnimationFrame(again);}requestAnimationFrame(again);
+</script>"#;
+    let destination=fixture.write("destination.html","<title>Destination</title><p id=out>destination unchanged</p>");
+    let mut app=fixture.open(markup);assert!(app.next_script_timer().is_some());
+    app.script_timer_unavailable();assert!(app.next_script_timer().is_none());
+    app.wait_for_script_timers(Duration::from_millis(30));assert_eq!(text(&app,"out"),"waiting");
+    let mut app=fixture.open(markup);app.set_javascript_enabled(false);assert!(app.next_script_timer().is_none());assert!(app.scripting.is_none());
+    app.wait_for_script_timers(Duration::from_millis(30));assert_eq!(text(&app,"out"),"waiting");
+    app.set_javascript_enabled(true);assert!(app.next_script_timer().is_some());
+    app.open(&destination);assert!(app.next_script_timer().is_none());app.wait_for_script_timers(Duration::from_millis(40));
+    assert_eq!(text(&app,"out"),"destination unchanged");assert_eq!(app.document.title,"Destination");
+}
 
 struct ScriptFixture(PathBuf);
 

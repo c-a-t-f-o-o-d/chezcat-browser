@@ -7,7 +7,7 @@
 //! Classic scripts run once, in source order, after parsing. Event jobs share
 //! both interpreter and host-work limits; dispatch never resets those limits.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::time::{Duration, Instant};
 
 use crate::forms::{self, Forms, Kind};
@@ -117,6 +117,7 @@ const MAX_HANDLER_BYTES: usize = 8192;
 const MAX_TIMERS: usize = 64;
 #[cfg(test)]
 const MAX_TIMER_CALLBACKS: usize = 4096;
+#[cfg(test)]
 const MAX_ANIMATION_FRAMES: usize = 64;
 const FRAME_INTERVAL: Duration = Duration::from_millis(16);
 pub const MAX_CONSOLE_SOURCE: usize = 8192;
@@ -328,7 +329,7 @@ struct State {
     declined_beacons: usize,
     eval_allowed: bool,
     timers: Vec<Timer>,
-    animation_frames: Vec<AnimationFrame>,
+    animation_frames: VecDeque<AnimationFrame>,
     next_animation_frame: u32,
     animation_due: Option<Instant>,
     animation_callbacks: u64,
@@ -397,7 +398,7 @@ impl State {
             declined_beacons: 0,
             eval_allowed: false,
             timers: Vec::new(),
-            animation_frames: Vec::new(),
+            animation_frames: VecDeque::new(),
             next_animation_frame: 0,
             animation_due: None,
             animation_callbacks: 0,
@@ -557,34 +558,31 @@ impl State {
         let Some(callback @ Value::Function(_)) = arguments.first() else {
             return Err("requestAnimationFrame requires a function callback.".into());
         };
-        if self.animation_frames.len() >= MAX_ANIMATION_FRAMES {
-            return Err(
-                "Animation frame limit reached (64 pending callbacks per document).".into(),
-            );
+        if self.animation_frames.len() >= self.limits.host.animation_frames {
+            return Err(format!("Animation frame limit reached ({} pending callbacks per document).",self.limits.host.animation_frames));
         }
         let id = self
             .next_animation_frame
             .checked_add(1)
-            .filter(|id| *id <= i32::MAX as u32)
             .ok_or("Animation frame identifier limit reached.")?;
-        self.next_animation_frame = id;
-        self.animation_frames.push(AnimationFrame {
+        self.work(1)?;
+        self.animation_frames.try_reserve(1).map_err(|_|"Could not reserve animation frame callback storage.")?;
+        self.animation_frames.push_back(AnimationFrame {
             id,
             callback: callback.clone(),
         });
+        self.next_animation_frame = id;
         self.animation_due
             .get_or_insert_with(|| Instant::now() + FRAME_INTERVAL);
         Ok(Value::Number(f64::from(id)))
     }
 
     fn cancel_animation_frame(&mut self, arguments: &[Value]) -> Result<Value, String> {
-        let value = arguments.first().unwrap_or(&Value::Undefined);
-        if let Value::String(text) = value {
-            self.copies(text.len().saturating_mul(3))?;
-        }
-        let id = timer_integer(value)?;
+        let number=arguments.first().ok_or("cancelAnimationFrame requires an identifier.")?.to_number();
+        let id=if number.is_finite() {number.trunc().rem_euclid(4_294_967_296.0) as u32} else {0};
+        self.work(self.animation_frames.len().checked_add(1).ok_or("Animation cancellation work overflow.")?)?;
         self.animation_frames
-            .retain(|frame| id <= 0 || frame.id != id as u32);
+            .retain(|frame| frame.id != id);
         if self.animation_frames.is_empty() {
             self.animation_due = None;
         }
@@ -734,15 +732,15 @@ impl Page {
             "removeEventListener",
             "dispatchEvent",
         ] {
-            if matches!(name, "setTimeout" | "clearTimeout") {
+            if matches!(name, "setTimeout" | "clearTimeout" | "requestAnimationFrame" | "cancelAnimationFrame") {
                 runtime
                     .define_global_operation(
                         name,
                         WINDOW,
                         name,
-                        usize::from(name == "setTimeout"),
+                        usize::from(name != "clearTimeout"),
                     )
-                    .expect("fixed replaceable timer operation");
+                    .expect("fixed replaceable browser operation");
             } else {
                 let function = runtime
                     .define_host_function(name, WINDOW, name)
@@ -968,31 +966,27 @@ impl Page {
         self.begin_job();
         let before = self.state.errors;
         let timestamp = self.state.clock_ms(now);
-        let handles: Vec<u32> = self
-            .state
-            .animation_frames
-            .iter()
-            .map(|frame| frame.id)
-            .collect();
-        // Snapshot handles, not callbacks: an earlier callback may cancel a
-        // later one. New requests always wait for a later frame. Every callback
-        // in this frame sees the same timestamp and shares one work budget.
+        // IDs are monotonic and the queue preserves registration order. The
+        // cutoff is a snapshot without allocation: cancellation still removes
+        // live entries, and newer callbacks always wait for the next frame.
+        let cutoff = self.state.animation_frames.back().map(|frame| frame.id);
+        let batch_work = self.state.animation_frames.len().checked_add(1);
         self.state.animation_due = None;
-        for id in handles {
-            let Some(index) = self
-                .state
-                .animation_frames
-                .iter()
-                .position(|frame| frame.id == id)
-            else {
-                continue;
-            };
-            let frame = self.state.animation_frames.remove(index);
+        if let Err(error) = batch_work.ok_or_else(|| "Animation frame work overflow.".to_owned()).and_then(|work| self.state.work(work)) {
+            self.state.animation_frames.clear();
+            self.runtime.cancel_microtasks();
+            self.cancel_media_selection();
+            self.state.error("requestAnimationFrame", &error);
+            return Outcome { errors: self.state.errors.saturating_sub(before), ..Outcome::default() };
+        }
+        while self.state.animation_frames.front().is_some_and(|frame| cutoff.is_some_and(|last| frame.id <= last)) {
+            let frame = self.state.animation_frames.pop_front().unwrap();
+            let id = frame.id;
             self.state.animation_callbacks = self.state.animation_callbacks.saturating_add(1);
             if let Err(error) = self.runtime.invoke(
                 frame.callback,
                 &[Value::Number(timestamp)],
-                Value::Host(WINDOW),
+                Value::Undefined,
                 &mut Bridge {
                     doc,
                     forms,
@@ -1001,8 +995,16 @@ impl Page {
             ) {
                 self.state
                     .error(&format!("requestAnimationFrame callback {id}"), &error);
+                if self.runtime.invocation_failed_fatally() {
+                    self.state.animation_frames.clear();
+                    self.cancel_media_selection();
+                    break;
+                }
             }
-            self.microtask_checkpoint(doc, forms);
+            if !self.microtask_checkpoint(doc, forms) {
+                self.state.animation_frames.clear();
+                break;
+            }
         }
         if self.state.animation_frames.is_empty() {
             self.state.animation_due = None;
@@ -2383,6 +2385,7 @@ impl Host for Bridge<'_> {
     }
 
     fn argument_conversions(&self, object: u32, method: &str) -> &'static [(usize, bool)] {
+        if object==WINDOW && method=="cancelAnimationFrame" {return &[(0,false)];}
         if object == HISTORY && method == "replaceState" { return &[(1, true), (2, true)]; }
         if self.named_map_receiver(object) {
             return match method { "item" => &[(0, false)], "getNamedItem" => &[(0, true)], "getNamedItemNS" => &[(0, true), (1, true)], _ => &[] };
@@ -2481,6 +2484,7 @@ impl Host for Bridge<'_> {
 
     fn validate_argument_prefix(&self, object: u32, method: &str, next_index: usize, args: &[Value])
         -> Result<(), (&'static str, String)> {
+        if object==WINDOW && method=="cancelAnimationFrame" && (!self.state.enabled || !self.doc.scripting_enabled) {return Err(("SecurityError","Animation capability is unavailable while scripting is disabled.".into()));}
         self.validate_event_prefix(object, method, next_index, args)
     }
     fn native_reference_arguments(&self,object:u32,method:&str)->&'static [usize] {
@@ -2500,6 +2504,7 @@ impl Host for Bridge<'_> {
     }
 
     fn required_arguments(&self, object: u32, method: &str) -> usize {
+        if object==WINDOW && matches!(method,"requestAnimationFrame"|"cancelAnimationFrame") {return 1;}
         if method=="dispatchEvent"&&self.dispatch_receiver(object){return 1;}
         if object==DOCUMENT && matches!(method,"createAttributeNS"|"createElementNS") {return 2;}
         if object==DOCUMENT && method=="createAttribute" || self.attr_element_receiver(object)&&matches!(method,"setAttributeNode"|"setAttributeNodeNS") {return 1;}
@@ -2561,6 +2566,7 @@ impl Host for Bridge<'_> {
         method: &str,
         args: &[Value],
     ) -> Result<(), (&'static str, String)> {
+        if object==WINDOW && method=="requestAnimationFrame" && !matches!(args.first(),Some(Value::Function(_))) {return Err(("TypeError","requestAnimationFrame requires a callable callback.".into()));}
         if self.event_target_interface(object) && matches!(method,"Node"|"Element"|"HTMLElement") {return Err(("TypeError","Illegal constructor for this native interface.".into()));}
         if method=="dispatchEvent"{return self.validate_dispatch(object,args);}
         if object == HISTORY && method == "replaceState" {
@@ -2861,6 +2867,17 @@ impl Host for Bridge<'_> {
         object == receiver
     }
 
+    fn global_operation_receiver(&self, object: u32, method: &str, receiver: &Value)
+        -> Option<Result<u32, (&'static str, String)>> {
+        if object != WINDOW || !matches!(method, "requestAnimationFrame" | "cancelAnimationFrame") { return None; }
+        Some(match receiver {
+            Value::Null | Value::Undefined | Value::Host(WINDOW) => Ok(WINDOW),
+            Value::Host(handle) if self.frame_context(*handle).is_some() =>
+                Err(("NotSupportedError", "Animation frame scheduling for a child Window is not implemented.".into())),
+            _ => Err(("TypeError", "Animation frame operation requires a Window receiver.".into())),
+        })
+    }
+
     fn indexed_for_each(&self, object: u32, method: &str) -> bool {
         node_list_index(object).is_some() && method == "forEach"
     }
@@ -3089,8 +3106,6 @@ impl Host for Bridge<'_> {
                 | "history"
                 | "addEventListener"
                 | "removeEventListener"
-                | "requestAnimationFrame"
-                | "cancelAnimationFrame"
                 | "performance"
                 | "Image"
         ) || handler_event(property).is_some_and(|event| event != "error")
@@ -3266,8 +3281,6 @@ impl Host for Bridge<'_> {
                     | "history"
                     | "addEventListener"
                     | "removeEventListener"
-                    | "requestAnimationFrame"
-                    | "cancelAnimationFrame"
                     | "performance"
                     | "Image"
             ));
@@ -4025,7 +4038,7 @@ impl Host for Bridge<'_> {
             };
         }
         if object == WINDOW {
-            if matches!(method, "setTimeout" | "clearTimeout")
+            if matches!(method, "setTimeout" | "clearTimeout" | "requestAnimationFrame" | "cancelAnimationFrame")
                 && (!self.state.enabled || !self.doc.scripting_enabled)
             {
                 return Err("Timer capability is unavailable while scripting is disabled.".into());
