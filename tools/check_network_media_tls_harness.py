@@ -54,9 +54,12 @@ def run_case(name,folder):
                 with lock: state['tls_failures']+=1
                 raise
 
-    address='127.0.0.2' if name=='identity' else '127.0.0.1'
+    address='127.0.0.1'
     host=address if name=='identity' else 'localhost'
-    tls=context(FIXTURES/'server-p256-chain.pem',FIXTURES/'server-p256-key.pem','1.3')
+    wrong_san=ROOT/'tools/fixtures/media-tls-wrong-san'
+    certificate=wrong_san/'wrong-san-chain.pem' if name=='identity' else FIXTURES/'server-p256-chain.pem'
+    key=wrong_san/'wrong-san-key.pem' if name=='identity' else FIXTURES/'server-p256-key.pem'
+    tls=context(certificate,key,'1.3')
     secure=MediaServer((address,0),MediaHandler,tls)
     source=f'https://{host}:{secure.server_port}/scene-intra.ivf'
     page=("<!doctype html><html><head><meta http-equiv=\"Content-Security-Policy\" content=\"media-src *\">"
@@ -88,7 +91,7 @@ def run_case(name,folder):
     for worker in workers: worker.start()
     script=folder/'input.tsv';script.write_text('snapshot\trejected\n',encoding='utf-8',newline='\n')
     output=folder/'app'
-    trust_file=FIXTURES/'demo-roots.pem' if name=='identity' else ROOT/'trust/roots.pem'
+    trust_file=wrong_san/'root.pem' if name=='identity' else ROOT/'trust/roots.pem'
     url=f'http://127.0.0.1:{plain.server_port}/page'
     try:
         row=capture_tests.execute([str(ROOT/'ChezCat.exe'),url,'--trust-file',str(trust_file),
@@ -117,7 +120,7 @@ def run_case(name,folder):
         'owned_servers_stopped':all(not worker.is_alive() for worker in workers)}
     result={'passed':all(checks.values()),'checks':checks,'run':row,'source_document':url,
         'media_source':source,'trust_file_sha256':capture_tests.sha256(trust_file),
-        'certificate_sha256':capture_tests.sha256(FIXTURES/'server-p256-chain.pem'),
+        'certificate_sha256':capture_tests.sha256(certificate),
         'fixture_page_sha256':hashlib.sha256(page).hexdigest(),'server':recorded,'scope':__doc__}
     capture_tests.write_json(folder/'manifest.json',result)
     return result
