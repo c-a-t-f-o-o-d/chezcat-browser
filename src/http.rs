@@ -21,6 +21,10 @@ use network_trace::PhaseKind;
 #[path = "http_network_tests.rs"]
 mod network_tests;
 
+#[cfg(test)]
+#[path = "http_deadline_tests.rs"]
+mod deadline_tests;
+
 #[path = "http_media_cors.rs"]
 mod media_cors;
 pub(crate) use media_cors::Credentials as MediaCredentials;
@@ -49,6 +53,8 @@ const MAX_REDIRECTS: usize = 5;
 const MAX_CONTENT_CODINGS: usize = 4;
 const MAX_EMPTY_CODINGS: usize = 32;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
+// One initial exchange plus at most five redirects; retries do not add time.
+const OVERALL_TIMEOUT: Duration = Duration::from_secs(20 * (MAX_REDIRECTS as u64 + 1));
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
 const POLL_TIMEOUT: Duration = Duration::from_millis(200);
 const MAX_CONNECTIONS: usize = 3;
@@ -199,7 +205,9 @@ fn fetch_in_pool(
     if initial.body().len() > MAX_FORM_BYTES {
         return Err("HTTP form request body exceeds 128 KiB.".into());
     }
-    let deadline = Instant::now() + REQUEST_TIMEOUT;
+    let overall_deadline = Instant::now()
+        .checked_add(pool.overall_timeout)
+        .ok_or("HTTP overall deadline is out of range.")?;
     let mut current = url.clone();
     let mut outgoing = initial.clone();
     let mut fragment = None;
@@ -225,6 +233,13 @@ fn fetch_in_pool(
 
     let result = (|| {
         for redirects in 0..=MAX_REDIRECTS {
+            check(cancel, overall_deadline)?;
+            // Renew only for the next admitted redirect hop. Pool checkout and
+            // the existing stale-GET retry share this same clipped deadline.
+            let deadline = Instant::now()
+                .checked_add(pool.hop_timeout)
+                .ok_or("HTTP hop deadline is out of range.")?
+                .min(overall_deadline);
             check(cancel, deadline)?;
             if same_origin.is_some() || classic_origin.is_some() || script_origin.is_some() || media.is_some() || stylesheet.is_some() {
                 // Check every automatic destination before DNS, connecting
@@ -654,6 +669,8 @@ pub struct Pool<'a> {
     cookie_context: Option<bool>,
     document_origin: Option<HttpUrl>,
     document_filter: Option<&'a ResourceFilter<'a>>,
+    hop_timeout: Duration,
+    overall_timeout: Duration,
 }
 
 type ResourceFilter<'a> = dyn Fn(&HttpUrl) -> Result<(), String> + Sync + 'a;
@@ -695,6 +712,8 @@ impl<'a> Pool<'a> {
             cookie_context: None,
             document_origin: None,
             document_filter: None,
+            hop_timeout: REQUEST_TIMEOUT,
+            overall_timeout: OVERALL_TIMEOUT,
         }
     }
 

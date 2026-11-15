@@ -6,6 +6,10 @@ Development priority is shared TLS/trust/data coverage, everyday resource/render
 interaction usability, then finite tabs, link context and new windows. Further
 F6/YouTube work is deferred; completed finite media/interface slices remain.
 
+- Give each admitted HTTP redirect hop its full bounded allowance, clipped by
+  one overall deadline, so earlier redirects do not consume all time available
+  to a later valid handshake. Keep cancellation, same-hop retry, redirect and
+  security/body bounds, with original short-profile transport regressions.
 - Load ordinary unmarked cross-origin stylesheets through the shared
   HTTP/CSS path with per-hop policy, cookie, MIME/CORP/COEP, safe cache reuse and
   source cancellation, including rejected-body accounting and original local
