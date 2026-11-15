@@ -73,8 +73,14 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Install pinned Rust
         run: rustup toolchain install 1.99.1 --profile minimal --component clippy --no-self-update
+      - name: Public summary safety controls
+        run: python tools/check_public_ci_summary.py
       - name: Normal suite, optimized build, PE and all local journeys
+        id: normal
         run: python tools/verify_offline.py
+      - name: Public-safe native failure summary
+        if: failure() && steps.normal.outcome == 'failure'
+        run: python tools/public_ci_summary.py --output results/verification/release-failure-summary.json --print
       - name: Package this exact tagged source and executable
         shell: pwsh
         run: |
