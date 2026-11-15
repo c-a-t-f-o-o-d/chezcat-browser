@@ -3,6 +3,89 @@
 use super::*;
 use crate::media_tasks::{Control, Scope};
 
+// These are explicit Page observations, not an audio-device acknowledgement
+// emulator. Actual App/worker acceptance and matching pixels have separate tests.
+fn sampled_page() -> (Document,Forms,Page,usize) {
+    let (doc,forms,mut p,node)=page(false);
+    p.state.embedded_video.as_mut().unwrap().clock=crate::embedded_video::ClockKind::AcknowledgedPcm;
+    p.notify_user_activation();
+    (doc,forms,p,node)
+}
+
+#[test]
+fn native_media_play_sampled_clock_waits_for_ack_and_frame_once() {
+    let(mut doc,mut forms,mut p,_)=sampled_page();
+    eval(&mut p,&mut doc,&mut forms,r#"
+var order='';for(var name of ['play','waiting','playing'])video.addEventListener(name,function(e){order+=e.type+';';});
+var a=video.play(),b=video.play();a.then(function(){order+='a;';},function(){throw 'a rejection';});b.then(function(){order+='b;';},function(){throw 'b rejection';});
+if(video.paused||video.readyState!==4||order!=='')throw 'honest admission';
+"#);
+    assert_eq!(p.pending_media_play_count(),2);
+    let owner=scope(&p);assert!(matches!(acknowledge(&p,&owner).as_slice(),[Control::Play {notify_queued:false,..}]));
+    assert_eq!(dispatch_ok(&mut p,&mut doc,&mut forms),1);
+    let mut s=p.state.embedded_video.as_ref().unwrap().clone();
+    p.set_embedded_video(Some(s.clone()));assert_eq!(p.pending_media_play_count(),2);
+    s.playing=true;s.frame_ready=false;p.set_embedded_video(Some(s.clone()));assert_eq!(p.pending_media_play_count(),2);
+    s.frame_ready=true;s.seeking=true;p.set_embedded_video(Some(s.clone()));assert_eq!(p.pending_media_play_count(),2);
+    s.seeking=false;p.set_embedded_video(Some(s.clone()));assert_eq!(p.pending_media_play_count(),0);
+    p.set_embedded_video(Some(s));assert_eq!(dispatch_ok(&mut p,&mut doc,&mut forms),1);
+    eval(&mut p,&mut doc,&mut forms,"if(order!=='play;playing;a;b;')throw 'sample gate '+order;");
+    assert!(!p.has_media_tasks());assert_eq!(p.state.media_play.retained_count(),0);
+}
+
+#[test]
+fn native_media_play_sampled_clock_pause_before_ack_aborts_without_playing() {
+    let(mut doc,mut forms,mut p,_)=sampled_page();
+    eval(&mut p,&mut doc,&mut forms,r#"
+var order='';for(var name of ['play','waiting','playing','timeupdate','pause'])video.addEventListener(name,function(e){order+=e.type+';';});
+var a=video.play();a.then(function(){throw 'unacknowledged fulfillment';},function(e){if(e.name!=='AbortError')throw 'reason';order+='abort;';});video.pause();
+if(!video.paused||video.readyState!==4||order!=='')throw 'pause projection';
+"#);
+    let owner=scope(&p);assert!(matches!(acknowledge(&p,&owner).as_slice(),[Control::Play {..},Control::Pause {..}]));
+    assert_eq!(p.pending_media_play_count(),0);
+    // A late physical sample while logical pause remains true cannot create a
+    // new playing batch or rewrite the already captured AbortError.
+    let mut s=p.state.embedded_video.as_ref().unwrap().clone();s.playing=true;
+    p.set_embedded_video(Some(s));assert_eq!(dispatch_ok(&mut p,&mut doc,&mut forms),2);
+    eval(&mut p,&mut doc,&mut forms,"if(order!=='play;timeupdate;pause;abort;')throw 'pause/ack '+order;");
+    assert_eq!(p.state.media_play.retained_count(),0);assert!(!p.has_media_tasks());
+}
+
+#[test]
+fn native_media_play_sampled_clock_load_aborts_before_new_source_ack() {
+    let(mut doc,mut forms,mut p,_)=sampled_page();let old=scope(&p);
+    eval(&mut p,&mut doc,&mut forms,r#"
+var settled='',playing=0;video.addEventListener('playing',function(){playing++;});
+var a=video.play();a.then(function(){throw 'old source fulfilled';},function(e){if(e.name!=='AbortError')throw 'reason';settled='aborted';});video.load();
+"#);
+    assert!(old.retired.load(Ordering::Relaxed));assert!(p.take_media_selection().is_some());
+    eval(&mut p,&mut doc,&mut forms,"if(settled!=='aborted'||playing!==0)throw 'load rejection';");
+    let mut fresh=p.state.embedded_video.as_ref().unwrap().clone();
+    assert!(!Arc::ptr_eq(&fresh.retired,&old.retired));
+    fresh.clock=crate::embedded_video::ClockKind::AcknowledgedPcm;
+    fresh.width=64;fresh.height=48;
+    fresh.duration=Some(Duration::from_secs(3));fresh.ready=4;fresh.network=1;
+    fresh.frame_ready=true;fresh.playing=true;fresh.paused=false;fresh.load_pending=false;
+    p.set_embedded_video(Some(fresh.clone()));p.set_embedded_video(Some(fresh));
+    dispatch_ok(&mut p,&mut doc,&mut forms);
+    eval(&mut p,&mut doc,&mut forms,"if(settled!=='aborted'||playing!==0)throw 'new source rewrote old outcome';");
+    assert_eq!(p.state.media_play.retained_count(),0);assert_eq!(p.pending_media_play_count(),0);
+}
+
+#[test]
+fn native_media_play_sampled_clock_ack_capture_stays_fulfilled_before_pause() {
+    let(mut doc,mut forms,mut p,_)=sampled_page();
+    eval(&mut p,&mut doc,&mut forms,"var order='';video.addEventListener('playing',function(){order+='playing;';});var a=video.play();a.then(function(){order+='fulfilled;';},function(){throw 'captured outcome';});");
+    let owner=scope(&p);acknowledge(&p,&owner);dispatch_ok(&mut p,&mut doc,&mut forms);
+    let mut s=p.state.embedded_video.as_ref().unwrap().clone();s.playing=true;
+    p.set_embedded_video(Some(s));assert_eq!(p.pending_media_play_count(),0);
+    eval(&mut p,&mut doc,&mut forms,"video.pause();if(order!=='')throw 'synchronous settlement';");
+    assert!(matches!(acknowledge(&p,&owner).as_slice(),[Control::Pause {..}]));
+    assert_eq!(dispatch_ok(&mut p,&mut doc,&mut forms),2);
+    eval(&mut p,&mut doc,&mut forms,"if(order!=='playing;fulfilled;')throw 'captured ack '+order;");
+    assert_eq!(p.state.media_play.retained_count(),0);
+}
+
 fn page(loading: bool) -> (Document, Forms, Page, usize) {
     let limits=crate::javascript::limits::BROWSER;
     let mut doc=crate::html::parse("<html><body><video id='v' src='scene-intra.ivf'></video><video id='unbound'></video></body></html>");
@@ -18,6 +101,7 @@ fn page(loading: bool) -> (Document, Forms, Page, usize) {
         width:if loading{0}else{64},height:if loading{0}else{48},
         duration:if loading{None}else{Some(Duration::from_secs(3))},
         position:Duration::ZERO,observed:Instant::now(),playing:false,paused:true,
+        clock:crate::embedded_video::ClockKind::WallTime,
         load_pending:loading,frame_ready:!loading,error_code:None,ended:false,seeking:false,
         ready:if loading{0}else{4},network:if loading{2}else{1},
     }));

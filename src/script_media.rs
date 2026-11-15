@@ -87,6 +87,7 @@ mod tests {
             duration: Some(Duration::from_secs(3)),
             position: Duration::ZERO,
             observed: Instant::now(),
+            clock: crate::embedded_video::ClockKind::WallTime,
             playing: false,
             paused: true,
             load_pending: false,
@@ -646,8 +647,10 @@ impl Bridge<'_> {
             let mut queue=snapshot.tasks.lock().map_err(|_|Failure::Fatal("Media task queue is unavailable.".into()))?;
             queue.set_limit(limit);
             let at_end=snapshot.ended||snapshot.duration.is_some_and(|duration|snapshot.position_at(Instant::now())>=duration);
-            let ready=snapshot.ready>=3&&snapshot.frame_ready&&!snapshot.seeking&&!at_end&&snapshot.error_code.is_none();
-            let count=if snapshot.paused||at_end {2}else if ready {1}else{0};
+            let data_ready=snapshot.ready>=3&&snapshot.frame_ready&&!snapshot.seeking&&!at_end&&snapshot.error_code.is_none();
+            let ready=data_ready&&(snapshot.clock==crate::embedded_video::ClockKind::WallTime||snapshot.playing);
+            let count=if snapshot.paused&&!at_end&&data_ready&&!ready {1}
+                else if snapshot.paused||at_end {2}else if ready {1}else{0};
             if count!=0 {queue.reserve_entries(count).map_err(Failure::Fatal)?;}
         }
         if snapshot.network==0 {self.commit_media_source_change(node).map_err(Failure::Fatal)?;}
@@ -659,18 +662,22 @@ impl Bridge<'_> {
         // The measured position can reach the end before the next timer tick
         // reports ended. Internal Play still seeks back before resolving.
         let ended=snapshot.ended||snapshot.duration.is_some_and(|duration|snapshot.position_at(issued)>=duration);
-        let ready=snapshot.ready>=3&&snapshot.frame_ready&&!snapshot.seeking&&!ended&&snapshot.error_code.is_none();
+        let data_ready=snapshot.ready>=3&&snapshot.frame_ready&&!snapshot.seeking&&!ended&&snapshot.error_code.is_none();
+        // A decoded frame is not an acknowledged start of the PCM sink. Leave
+        // these Promises pending for observe_media_snapshot, without changing
+        // readyState/frame availability or manufacturing a playing sample.
+        let ready=data_ready&&(snapshot.clock==crate::embedded_video::ClockKind::WallTime||snapshot.playing);
         let actual_playing=snapshot.playing;
         self.state.media_play.push_pending(scope.clone(),promise,limit).map_err(Failure::Fatal)?;
         let result=if was_paused&&ready {
             self.state.media_play.capture_pending_with_prefix(&scope,BatchKind::Playing,
                 Some(crate::media_tasks::Control::Play {issued,notify_queued:true}),Some(MediaTask::Single("play")),&tasks,limit).map(|_|())
         } else if was_paused {
-            tasks.lock().map_err(|_|"Media task queue is unavailable.".to_owned()).and_then(|mut queue|
-                queue.enqueue_many(scope.clone(),&[
-                    (Some(crate::media_tasks::Control::Play {issued,notify_queued:false}),Some(MediaTask::Single("play"))),
-                    (None,Some(MediaTask::Single("waiting"))),
-                ]))
+            tasks.lock().map_err(|_|"Media task queue is unavailable.".to_owned()).and_then(|mut queue| {
+                let play=(Some(crate::media_tasks::Control::Play {issued,notify_queued:false}),Some(MediaTask::Single("play")));
+                if data_ready {queue.enqueue_many(scope.clone(),&[play])}
+                else {queue.enqueue_many(scope.clone(),&[play,(None,Some(MediaTask::Single("waiting")))])}
+            })
         } else if ended {
             // Already-unpaused playback needs the rewind control, but no
             // second play event. Readiness owns the eventual playing batch.

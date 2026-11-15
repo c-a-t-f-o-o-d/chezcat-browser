@@ -214,6 +214,12 @@ pub fn authored_node(doc: &Document) -> Option<usize> {
     None
 }
 
+/// Position authority is explicit: only video-only playback uses Instant time.
+/// PCM snapshots contain the owner's acknowledged sample position, even when
+/// playback is logically active and the next device acknowledgement stalls.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ClockKind { WallTime, AcknowledgedPcm }
+
 #[derive(Clone)]
 pub struct Snapshot {
     pub tasks: crate::media_tasks::Shared,
@@ -225,6 +231,7 @@ pub struct Snapshot {
     pub duration: Option<Duration>,
     pub position: Duration,
     pub observed: Instant,
+    pub clock: ClockKind,
     pub playing: bool,
     pub paused: bool,
     pub load_pending: bool,
@@ -251,7 +258,7 @@ impl Snapshot {
     }
     pub fn position_at(&self, now: Instant) -> Duration {
         self.duration.map_or(self.position, |duration| {
-            if self.playing {
+            if self.playing && self.clock == ClockKind::WallTime {
                 self.position
                     .saturating_add(now.saturating_duration_since(self.observed))
                     .min(duration)
@@ -259,6 +266,80 @@ impl Snapshot {
                 self.position
             }
         })
+    }
+}
+
+#[cfg(test)]
+mod clock_tests {
+    use super::*;
+
+    // Supplied acknowledged positions are pure snapshot inputs. These controls
+    // do not open a device, simulate a hardware clock or enable authored MKV.
+    fn snapshot(clock: ClockKind) -> Snapshot {
+        Snapshot {
+            tasks: crate::media_tasks::shared(4), retired: Arc::new(AtomicBool::new(false)),
+            node: 0, current_src: String::new(), width: 64, height: 48,
+            duration: Some(Duration::from_secs(3)), position: Duration::from_millis(200),
+            observed: Instant::now(), clock, playing: true, paused: false,
+            load_pending: false, frame_ready: true, error_code: None,
+            ended: false, seeking: false, ready: 4, network: 1,
+        }
+    }
+
+    #[test]
+    fn authored_snapshot_wall_clock_preserves_elapsed_duration_and_nonplaying_behavior() {
+        let mut value=snapshot(ClockKind::WallTime);let observed=value.observed;
+        assert_eq!(value.position_at(observed+Duration::from_millis(650)),Duration::from_millis(850));
+        value.position=Duration::from_millis(2850);
+        assert_eq!(value.position_at(observed+Duration::from_millis(650)),Duration::from_secs(3));
+        value.position=Duration::from_millis(200);value.observed=observed+Duration::from_secs(1);
+        assert_eq!(value.position_at(observed),Duration::from_millis(200));
+        value.playing=false;value.paused=true;
+        assert_eq!(value.position_at(observed+Duration::from_secs(30)),Duration::from_millis(200));
+        value.playing=true;value.paused=false;value.duration=None;
+        assert_eq!(value.position_at(observed+Duration::from_secs(30)),Duration::from_millis(200));
+    }
+
+    #[test]
+    fn authored_snapshot_acknowledged_pcm_stalls_until_position_is_replaced_by_an_ack() {
+        let mut stalled=snapshot(ClockKind::AcknowledgedPcm);stalled.position=Duration::from_millis(625);
+        assert!(stalled.playing);
+        assert_eq!(stalled.position_at(stalled.observed+Duration::from_secs(30)),Duration::from_millis(625));
+        assert_eq!(stalled.position_at(stalled.observed+Duration::from_secs(3600)),Duration::from_millis(625));
+        let mut acknowledged=stalled.clone();acknowledged.position=Duration::from_millis(875);
+        acknowledged.observed=stalled.observed+Duration::from_secs(3);
+        assert_eq!(acknowledged.position_at(acknowledged.observed+Duration::from_secs(30)),Duration::from_millis(875));
+        assert_eq!(acknowledged.position_at(stalled.observed),Duration::from_millis(875));
+        assert_eq!(acknowledged.position(),Duration::from_millis(875));
+        assert_eq!(stalled.position_at(acknowledged.observed),Duration::from_millis(625));
+    }
+
+    #[test]
+    fn authored_snapshot_acknowledged_pcm_pause_seek_and_eof_do_not_project_wall_time() {
+        let mut value=snapshot(ClockKind::AcknowledgedPcm);let later=value.observed+Duration::from_secs(30);
+        value.position=Duration::from_millis(875);value.playing=false;value.paused=true;
+        assert_eq!(value.position_at(later),Duration::from_millis(875));
+        // Seeking still exposes the last acknowledged position until its real
+        // replacement arrives; logical intent/readiness cannot fabricate time.
+        value.playing=true;value.paused=false;value.seeking=true;value.frame_ready=false;value.ready=1;
+        assert_eq!(value.position_at(later),Duration::from_millis(875));
+        value.position=Duration::from_millis(2200);value.playing=false;value.paused=true;
+        value.seeking=false;value.frame_ready=true;value.ready=4;
+        assert_eq!(value.position_at(later),Duration::from_millis(2200));
+        value.position=Duration::from_secs(3);value.ended=true;
+        assert_eq!(value.position_at(later),Duration::from_secs(3));
+    }
+
+    #[test]
+    fn authored_snapshot_overflow_saturates_only_the_existing_wall_clock_projection() {
+        let mut wall=snapshot(ClockKind::WallTime);
+        wall.duration=Some(Duration::MAX);wall.position=Duration::MAX.saturating_sub(Duration::from_nanos(1));
+        let later=wall.observed+Duration::from_nanos(2);
+        assert_eq!(wall.position_at(later),Duration::MAX);
+        let mut pcm=wall.clone();pcm.clock=ClockKind::AcknowledgedPcm;
+        assert_eq!(pcm.position_at(later),Duration::MAX.saturating_sub(Duration::from_nanos(1)));
+        pcm.duration=None;
+        assert_eq!(pcm.position_at(later),Duration::MAX.saturating_sub(Duration::from_nanos(1)));
     }
 }
 

@@ -281,6 +281,7 @@ impl App {
             duration: None,
             position: Duration::ZERO,
             observed: now,
+            clock: crate::embedded_video::ClockKind::WallTime,
             playing: false,
             paused: v.script_play_intent.is_none(),
             load_pending: v.plan.is_some()&&!v.aborted,
@@ -300,6 +301,11 @@ impl App {
             s.height = p.clip.height as u32;
             s.duration = Some(p.clip.duration);
             s.position = p.position(now);
+            s.clock = if p.sync.is_some() {
+                crate::embedded_video::ClockKind::AcknowledgedPcm
+            } else {
+                crate::embedded_video::ClockKind::WallTime
+            };
             s.frame_ready=p.error.is_none()&&p.displayed==p.clip.index_at(p.position(now));
             if p.error.is_some() {s.error_code=Some(if p.decoder_enabled {3}else{1});}
             s.playing = p.playing();

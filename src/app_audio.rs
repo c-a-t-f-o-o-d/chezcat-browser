@@ -8,10 +8,12 @@ use crate::audio::Clip;
 use crate::audio_output::{Action, Worker};
 use std::collections::VecDeque;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 pub(super) struct Player {
     clip: Arc<Clip>,
+    source_retired: Option<Arc<AtomicBool>>,
     frame: u64,
     playing: bool,
     ended: bool,
@@ -37,6 +39,10 @@ pub(super) struct Player {
     events: VecDeque<&'static str>,
     dropped: u64,
 }
+
+#[cfg(test)]
+#[path = "app_audio_retirement_tests.rs"]
+mod audio_retirement_tests;
 
 pub(super) struct SyncState {pub position:Duration,pub desired:Duration,pub pending:bool,pub playing:bool,pub wants_play:bool,pub drained:bool,pub error:Option<String>}
 
@@ -188,6 +194,7 @@ mod sync_fault_tests {
     }
 }
 impl Player {
+    fn source_alive(&self) -> bool {self.source_retired.as_ref().is_none_or(|source|!source.load(Ordering::Relaxed))}
     fn event(&mut self, name: &'static str) {
         if self.events.len() == 128 {
             self.events.pop_front();
@@ -198,12 +205,18 @@ impl Player {
 }
 impl App {
     pub(super) fn audio_sync_state(&self)->Option<SyncState> {
-        self.audio.as_ref().map(|p|SyncState {position:p.clip.time_at(p.frame),desired:p.clip.time_at(p.desired_frame.unwrap_or(p.frame)),pending:p.pending,playing:p.playing,wants_play:if p.pending {p.desired_playing}else{p.playing},drained:p.ended&&p.frame==p.clip.frames&&p.submitted>0&&p.retired==p.submitted&&p.queued==0,error:p.error.clone()})
+        self.audio.as_ref().filter(|p|p.source_alive()).map(|p|SyncState {position:p.clip.time_at(p.frame),desired:p.clip.time_at(p.desired_frame.unwrap_or(p.frame)),pending:p.pending,playing:p.playing,wants_play:if p.pending {p.desired_playing}else{p.playing},drained:p.ended&&p.frame==p.clip.frames&&p.submitted>0&&p.retired==p.submitted&&p.queued==0,error:p.error.clone()})
     }
     pub(super) fn audio_sync_seek(&mut self,position:Duration) {
         if let Some(p)=&mut self.audio {p.suspended=false;let frame=p.clip.frame_at(position);self.submit_audio(Action::Seek {frame,resume:false});}
     }
     pub(super) fn install_audio(&mut self, clip: Option<Arc<Clip>>) {
+        self.install_audio_for_source(clip, None);
+    }
+    pub(super) fn install_audio_for_source(&mut self, clip: Option<Arc<Clip>>, source_retired: Option<Arc<AtomicBool>>) {
+        // A late retired candidate cannot tear down the current live owner.
+        // None is an explicit teardown command and remains authoritative.
+        if clip.is_some() && source_retired.as_ref().is_some_and(|source|source.load(Ordering::Relaxed)) {return;}
         if let Some(worker) = &self.audio_worker {
             worker.clear();
         }
@@ -213,6 +226,7 @@ impl App {
         };
         let mut player = Player {
             clip,
+            source_retired,
             frame: 0,
             playing: false,
             ended: false,
@@ -241,7 +255,16 @@ impl App {
         player.event("loadedmetadata");
         self.audio = Some(player);
     }
+    fn retire_audio_source(&mut self) -> bool {
+        if self.audio.as_ref().is_none_or(Player::source_alive) {return false;}
+        // The binding is no longer observable, but the real native owner keeps
+        // all headers/PCM until its existing safe reset/unprepare path completes.
+        self.audio = None;
+        if let Some(worker) = &self.audio_worker {worker.clear();}
+        true
+    }
     fn submit_audio(&mut self, action: Action) {
+        if self.retire_audio_source() {return;}
         let Some(player) = &mut self.audio else {
             return;
         };
@@ -302,10 +325,12 @@ impl App {
             player.event("seeking");
         }
         player.deadline = (!player.suspended).then_some(Instant::now() + Duration::from_millis(20));
-        self.audio_worker
-            .as_ref()
-            .unwrap()
-            .submit(player.clip.clone(), generation, action);
+        let worker = self.audio_worker.as_ref().unwrap();
+        if let Some(source) = &player.source_retired {
+            worker.submit_for_source(player.clip.clone(), generation, action, Some(source.clone()));
+        } else {
+            worker.submit(player.clip.clone(), generation, action);
+        }
     }
     pub(super) fn suspend_audio(&mut self) {
         if let Some(player) = &mut self.audio {
@@ -383,7 +408,7 @@ impl App {
         self.submit_audio(Action::Seek { frame, resume });
     }
     pub(super) fn audio_control_state(&self) -> Option<ControlState> {
-        self.audio.as_ref().map(|player| ControlState {
+        self.audio.as_ref().filter(|player|player.source_alive()).map(|player| ControlState {
             playing: if player.pending {
                 player.desired_playing
             } else {
@@ -411,9 +436,10 @@ impl App {
         }
     }
     pub(super) fn next_audio_timer(&self) -> Option<Instant> {
-        self.audio.as_ref().and_then(|player| player.deadline)
+        self.audio.as_ref().filter(|player|player.source_alive()).and_then(|player| player.deadline)
     }
     pub(super) fn poll_audio_timer_at(&mut self, now: Instant) -> bool {
+        if self.retire_audio_source() {return true;}
         let Some(player) = &mut self.audio else {
             return false;
         };
@@ -425,6 +451,7 @@ impl App {
         true
     }
     pub(super) fn poll_audio(&mut self) -> bool {
+        if self.retire_audio_source() {return true;}
         let Some(worker) = &self.audio_worker else {
             return false;
         };
@@ -438,11 +465,15 @@ impl App {
         let Some(snapshot) = snapshot else {
             return changed;
         };
+        self.accept_audio_snapshot(snapshot) || changed
+    }
+    fn accept_audio_snapshot(&mut self, snapshot: crate::audio_output::Snapshot) -> bool {
         let Some(player) = &mut self.audio else {
-            return changed;
+            return false;
         };
-        if snapshot.generation != player.generation || !Arc::ptr_eq(&snapshot.clip, &player.clip) {
-            return changed;
+        if snapshot.generation != player.generation || !Arc::ptr_eq(&snapshot.clip, &player.clip)
+            || !snapshot.matches_source(player.source_retired.as_ref()) {
+            return false;
         }
         let (was_playing, was_opened) = (player.playing, player.opened);
         player.pending = false;
@@ -504,7 +535,7 @@ impl App {
         let owner =
             format!("Audio owner opened={opened} retained_buffers={retained} busy={busy}\n");
         let notice = self.audio_notice.as_deref().unwrap_or("none");
-        let Some(player) = &self.audio else {
+        let Some(player) = self.audio.as_ref().filter(|player|player.source_alive()) else {
             return format!("Local audio: none\n{owner}Last audio output notice: {notice}\n");
         };
         let scope=if self.media.is_some(){"Matroska PCM16 track with shared video clock"}else{"standalone integer PCM WAVE"};

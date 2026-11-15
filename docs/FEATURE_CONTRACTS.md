@@ -279,6 +279,28 @@ no service request or physical-desktop claim.
 
 Semantic reference: [DOM CustomEvent and legacy initialization](https://dom.spec.whatwg.org/#interface-customevent).
 
+PCM integration prerequisites: a snapshot explicitly distinguishes video wall
+time from acknowledged PCM time. Sample-backed positions remain at the actual
+observation until another acknowledgement; decoded readiness alone cannot resolve
+play promises before a playing acknowledgement. Pause/load/late observations and
+duplicate requests retain the existing source-scoped promise rules. These Page
+and snapshot tests establish model behavior, not physical output.
+
+The audio owner accepts an optional source-retirement token in addition to clip
+and generation identity. It checks retirement before native operations, refill
+and publication, retains prepared/queued headers through safe reset/unprepare,
+and rejects late sources before replacing a current owner. Paused fenced owners
+observe retirement without idle retries. A one-shot App teardown clear may retry
+cleanup once; failed native storage remains truthfully owned until safe release.
+Standalone unfenced behavior is preserved. Mock-backend ownership and genuine
+App snapshot tests have a different scope from coordinated WinMM acceptance.
+
+These prerequisites do not yet enable a Matroska source in an authored VIDEO or
+claim synchronized JavaScript controls. The typed source, physical FIFO controls,
+default/explicit seeks, source teardown, real PCM clock and decoded frame/EOF
+acceptance must be integrated together before that capability is advertised.
+
+
 Every later feature records semantic references, original and selected conformance
 tests, security review, native/device/live checks still pending and exact final
 source/executable identity. Release notes describe only proven behavior.
