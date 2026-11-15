@@ -38,8 +38,10 @@ and licensing obligations; see [third-party notices](THIRD_PARTY_NOTICES.md).
   JavaScript load(), pause(), currentTime seeking and play() with pending promises
   tied to decoded output. Owner-realm HTMLMediaElement/HTMLVideoElement interfaces
   expose those existing controls and real state through canonical prototypes;
-  illegal construction and unbound-player refusals do not create extra players.
-  controls mutation and VIDEO width/height IDL reflection remain unsupported.
+  illegal construction and unbound playback refusals do not create extra players.
+  Boolean controls reflect actual attributes even on unbound elements. Changing
+  the bound video's native bar preserves source, clock, frames and play promises.
+  VIDEO width/height IDL reflection remains unsupported.
   Supported Matroska adds source-bound PCM and
   acknowledged sample time. Complete HTTP(S) transfers admit explicit IVF or
   Matroska MIME and preserve authored crossorigin/credential checks. Routine
@@ -55,7 +57,10 @@ and licensing obligations; see [third-party notices](THIRD_PARTY_NOTICES.md).
 These are scoped foundations, not complete standards support. The
 [capability matrix](docs/CAPABILITIES.md) separates implementation from evidence.
 Google Search, Images and Maps are not fully supported. YouTube page compatibility
-is limited, and playback is unsupported.
+is limited, and playback is unsupported. Further F6/YouTube work is deferred.
+The next priorities are shared TLS/trust/data coverage, everyday resource,
+rendering and interaction usability, then finite tabs, link context and new
+windows. Those priorities do not describe new implemented capabilities.
 
 ## Build
 

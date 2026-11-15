@@ -41,7 +41,7 @@ impl Runtime {
                     ("src","\0Media.get.src",Some("\0Media.set.src")),
                     ("currentTime","\0Media.get.currentTime",Some("\0Media.set.currentTime")),
                     ("currentSrc","\0Media.get.currentSrc",None),
-                    ("controls","\0Media.get.controls",None),
+                    ("controls","\0Media.get.controls",Some("\0Media.set.controls")),
                     ("duration","\0Media.get.duration",None),
                     ("paused","\0Media.get.paused",None),
                     ("ended","\0Media.get.ended",None),

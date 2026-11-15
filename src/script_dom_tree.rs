@@ -442,6 +442,7 @@ impl Bridge<'_> {
     }
 
     pub(super) fn dom_has(&mut self, object: u32, property: &str) -> Result<Option<bool>, String> {
+        if property=="controls"&&self.media_interface_receiver(object) {self.node(object)?;return Ok(Some(true));}
         if self.media_element_receiver(object) {if let Some(value)=self.media_element_has(object,property)? {return Ok(Some(value));}}
         let Some(node) = node_index(object) else {
             return Ok(None);
@@ -526,6 +527,7 @@ impl Bridge<'_> {
     }
 
     pub(super) fn dom_get(&mut self, object: u32, property: &str) -> Result<Option<Value>, String> {
+        if property=="controls"&&self.media_interface_receiver(object) {return self.media_element_get(object,property);}
         if self.media_element_receiver(object) {if let Some(value)=self.media_element_get(object,property)? {return Ok(Some(value));}}
         if node_index(object).is_none() {
             return Ok(None);

@@ -1620,6 +1620,7 @@ impl App {
             )
         };
         self.sync_background_images();
+        self.sync_media_controls();
         self.observe_layout();
         self.rebuild_link_colors();
         if self.alternate.is_none() {

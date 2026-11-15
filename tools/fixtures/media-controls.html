@@ -1,0 +1,58 @@
+<!doctype html><html><head><meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="media-src 'self'">
+<title>Original media controls waiting</title>
+<style>body{margin:12px;font-size:14px}h1{font-size:22px;margin:8px 0}button{margin:4px}video{display:block;width:400px;height:300px;object-fit:contain}p{max-width:760px;margin:6px 0}</style>
+</head><body><h1>Real media controls reflection</h1>
+<button id="play-hide" name="play-hide" type="button">Play and hide native controls</button>
+<button id="pause" name="pause" type="button">Pause the same source</button>
+<button id="show" name="show" type="button">Restore native controls</button>
+<video id="video" src="scene-intra.ivf" controls width="400" height="300"></video>
+<p id="result">Waiting for decoded metadata.</p><p id="state">Controls reflection pending.</p>
+<script>
+var video=document.getElementById('video'),MP=HTMLMediaElement.prototype;
+var setControls=Object.getOwnPropertyDescriptor(MP,'controls').set,getControls=Object.getOwnPropertyDescriptor(MP,'controls').get;
+var nativePlay=MP.play,nativePause=MP.pause,sourceAttr=video.getAttributeNode('src'),sourceRaw=sourceAttr.value;
+var selected='',duration=0,hidden=0,shown=0,coercions=0,shadowReads=0,shadowWrites=0,boolChecked=0,playSync=0,fulfilled=0,rejected=0,playingEvents=0,order=[],paused=0,metadataEvents=0;
+if(typeof setControls!=='function'||setControls.length!==1||typeof getControls!=='function'||!getControls.call(video)||!video.hasAttribute('controls'))throw Error('Real initial controls reflection');
+function sameSource(){
+ if(video.getAttributeNode('src')!==sourceAttr||sourceAttr.value!==sourceRaw||selected&&video.currentSrc!==selected||duration&&video.duration!==duration)throw Error('Controls reflection changed the selected source or raw Attr');
+}
+function render(){
+ document.getElementById('state').textContent='controls_hidden='+hidden+' controls_shown='+shown+' controls_boolean='+boolChecked+' controls_coercions='+coercions+' controls_shadow_reads='+shadowReads+' controls_shadow_writes='+shadowWrites+' controls_play_sync='+playSync+' controls_play_fulfilled='+fulfilled+' controls_play_rejected='+rejected+' controls_playing_events='+playingEvents+' controls_order='+order.join(',')+' controls_script_paused='+paused+' controls_metadata='+metadataEvents;
+}
+video.addEventListener('loadedmetadata',function(event){
+ if(event.target!==video||!event.isTrusted||video.videoWidth!==64||video.videoHeight!==48||video.duration!==3)throw Error('Real original metadata');
+ metadataEvents++;if(metadataEvents!==1)throw Error('Controls reflection must not reload metadata');selected=video.currentSrc;duration=video.duration;sameSource();document.getElementById('result').textContent='Original decoded source ready.';render();
+});
+video.addEventListener('playing',function(event){
+ if(!playSync||paused)return;
+ if(event.target!==video||!event.isTrusted||video.paused||playingEvents||order.join(',')!=='sync')throw Error('Real playing event before Promise fulfillment');
+ playingEvents++;order.push('playing');sameSource();render();
+});
+document.getElementById('play-hide').onclick=function(input){
+ if(!input.isTrusted||!video.paused||video.readyState!==4||hidden||shown)throw Error('Play/hide requires one actual ready trusted input');
+ sameSource();var attr=video.getAttributeNode('controls');
+ Object.defineProperty(video,'controls',{configurable:true,get:function(){shadowReads++;return 'own-controls';},set:function(){shadowWrites++;}});
+ var object={valueOf:function(){coercions++;throw Error('Boolean object coerced');},toString:function(){coercions++;throw Error('Boolean object stringified');}};
+ if(setControls.call(video,object)!==undefined||!getControls.call(video)||video.getAttributeNode('controls')!==attr||coercions||shadowWrites)throw Error('Canonical Boolean setter preserves actual presence and Attr identity');
+ if(video.controls!=='own-controls'||shadowReads!==1)throw Error('Own controls accessor must remain real');boolChecked=1;
+ var promise=nativePlay.call(video);playSync=1;order.push('sync');
+ if(Object.getPrototypeOf(promise)!==Promise.prototype||video.paused||fulfilled||rejected)throw Error('Actual pending play Promise');
+ if(setControls.call(video,false)!==undefined||getControls.call(video)||video.hasAttribute('controls')||shadowWrites||coercions||video.controls!=='own-controls'||attr.ownerElement!==null)throw Error('Canonical controls removal bypasses own shadow');
+ delete video.controls;hidden=1;sameSource();document.getElementById('result').textContent='Same source playing with native controls hidden.';render();
+ promise.then(function(value){
+  if(value!==undefined||fulfilled||rejected||playingEvents!==1||order.join(',')!=='sync,playing'||video.paused||getControls.call(video))throw Error('Play Promise must survive controls removal and actual readiness');
+  fulfilled++;order.push('then');sameSource();render();
+ },function(){rejected++;render();throw Error('Controls removal rejected play');});
+};
+document.getElementById('pause').onclick=function(input){
+ if(!input.isTrusted||!hidden||shown||video.paused||fulfilled!==1||playingEvents!==1)throw Error('Pause requires actual hidden playback');
+ sameSource();nativePause.call(video);if(!video.paused||getControls.call(video))throw Error('Hidden source real pause');paused=1;document.getElementById('result').textContent='Same decoded source paused with native controls hidden.';render();
+};
+document.getElementById('show').onclick=function(input){
+ if(!input.isTrusted||!hidden||shown||!paused||!video.paused||getControls.call(video))throw Error('Show requires the same actually paused hidden source');
+ var time=video.currentTime;video.controls=true;
+ if(!getControls.call(video)||!video.hasAttribute('controls')||!video.paused||video.currentTime!==time||fulfilled!==1||rejected||coercions)throw Error('Restoring controls must preserve actual pause/time/Promise');
+ shown=1;sameSource();document.getElementById('result').textContent='Native controls restored on the same paused source.';render();
+};
+</script></body></html>
