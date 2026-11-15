@@ -17,6 +17,7 @@ pub(super) struct DomState {
     pub(super) connected: Vec<bool>,
     pub(super) pending_focus: Option<usize>,
     pub(super) collections: Vec<dom_collections::TagCollection>,
+    pub(super) child_lists: HashMap<usize, u32>,
     pub(super) fragment_scripts: HashSet<usize>,
     force_async: HashSet<usize>,
 }
@@ -238,6 +239,14 @@ impl Bridge<'_> {
                 || self.state.detached_nodes.contains(&node)
                 || self.state.detached_images.contains(&node)
                 || self.state.dom.created.contains(&node) { return true; }
+        // A script raw-text child is a retained Text node, not executable
+        // markup. Exposing that identity never marks its subtree query-active
+        // or changes the guarded script insertion/content mutation policies.
+        if matches!(self.doc.nodes[node].kind, NodeKind::Text(_))
+            && self.state.dom.connected.get(node)==Some(&true)
+            && self.state.tree.parents.get(node).copied().flatten().is_some_and(|parent| tag(self.doc,parent)=="script") {
+            return true;
+        }
         if !self.state.dirty || self.state.dom.connected.get(node) != Some(&true) { return false; }
         // Mutation commits current parents/connection state before rebuilding
         // lookup caches. A reinserted parsed subtree remains a genuine Node in
@@ -314,6 +323,7 @@ impl Bridge<'_> {
     }
 
     pub(super) fn dom_readonly(&self, object: u32, property: &str) -> bool {
+        if property=="childNodes" {return object==DOCUMENT || node_index(object).is_some_and(|node|self.dom_accessible(node));}
         if property == "attributes" { return self.class_list_element_receiver(object); }
         if matches!(property,"localName"|"prefix"|"namespaceURI") {
             return self.attr_element_receiver(object) && node_index(object).is_some_and(|node|
@@ -442,6 +452,7 @@ impl Bridge<'_> {
     }
 
     pub(super) fn dom_has(&mut self, object: u32, property: &str) -> Result<Option<bool>, String> {
+        if property=="childNodes" && node_index(object).is_some() {self.dom_node(object)?;return Ok(Some(true));}
         if property=="controls"&&self.media_interface_receiver(object) {self.node(object)?;return Ok(Some(true));}
         if self.media_element_receiver(object) {if let Some(value)=self.media_element_has(object,property)? {return Ok(Some(value));}}
         let Some(node) = node_index(object) else {
@@ -527,6 +538,7 @@ impl Bridge<'_> {
     }
 
     pub(super) fn dom_get(&mut self, object: u32, property: &str) -> Result<Option<Value>, String> {
+        if property=="childNodes" && node_index(object).is_some() {return self.create_child_list(object).map(Some);}
         if property=="controls"&&self.media_interface_receiver(object) {return self.media_element_get(object,property);}
         if self.media_element_receiver(object) {if let Some(value)=self.media_element_get(object,property)? {return Ok(Some(value));}}
         if node_index(object).is_none() {

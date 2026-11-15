@@ -6,21 +6,54 @@ use super::*;
 pub(super) enum NodeList {
     Snapshot(Vec<usize>),
     Name(String),
+    // A live SameObject list over this real node's immediate children.
+    Children(usize),
 }
 
 pub(super) fn node_list_index(handle: u32) -> Option<usize> {
-    (NODE_LIST_BASE..NODE_LIST_BASE + MAX_NODE_LISTS as u32)
+    (NODE_LIST_BASE..NODE_LIST_BASE + NODE_LIST_HANDLES as u32)
         .contains(&handle)
         .then(|| (handle - NODE_LIST_BASE) as usize)
 }
 
 impl Bridge<'_> {
+    pub(super) fn node_list_receiver(&self, handle: u32) -> bool {
+        node_list_index(handle).is_some_and(|index| index < self.state.node_lists.len())
+    }
+
+    fn reserve_node_list(&mut self, operation: &str) -> Result<u32, String> {
+        let length = self.state.node_lists.len();
+        if length >= self.state.limits.host.node_lists {
+            return Err(format!("DOM NodeList {operation} limit reached ({} per document).", self.state.limits.host.node_lists));
+        }
+        if length >= NODE_LIST_HANDLES { return Err("DOM NodeList identity space exhausted.".into()); }
+        let index = u32::try_from(length).map_err(|_| "DOM NodeList identity overflow.")?;
+        let handle = NODE_LIST_BASE.checked_add(index).ok_or("DOM NodeList identity overflow.")?;
+        self.state.node_lists.try_reserve(1).map_err(|_| "DOM NodeList storage reservation failed.")?;
+        Ok(handle)
+    }
+
+    pub(super) fn create_child_list(&mut self, object: u32) -> Result<Value, String> {
+        let root = if object == DOCUMENT { 0 } else { self.dom_node(object)? };
+        // The parser retains template input in an inert AST subtree, not a
+        // DocumentFragment-backed template contents tree. Do not mislabel it.
+        if tag(self.doc, root) == "template" {
+            return Err("Template childNodes requires the unimplemented template contents tree.".into());
+        }
+        self.state.work(1)?;
+        if let Some(&handle) = self.state.dom.child_lists.get(&root) { return Ok(Value::Host(handle)); }
+        let handle = self.reserve_node_list("identity")?;
+        self.state.dom.child_lists.try_reserve(1).map_err(|_| "DOM childNodes identity reservation failed.")?;
+        self.state.replace_bytes(0, std::mem::size_of::<usize>() + std::mem::size_of::<u32>())?;
+        self.state.node_lists.push(NodeList::Children(root));
+        self.state.dom.child_lists.insert(root, handle);
+        Ok(Value::Host(handle))
+    }
+
     pub(super) fn create_name_list(&mut self, value: &Value) -> Result<Value,String> {
         let name = self.text(value)?;
-        if self.state.node_lists.len() >= MAX_NODE_LISTS { return Err("DOM NodeList identity limit reached (128 per document).".into()); }
-        self.state.node_lists.try_reserve(1).map_err(|_|"DOM NodeList storage reservation failed.")?;
+        let handle = self.reserve_node_list("identity")?;
         self.state.replace_bytes(0,name.len())?;
-        let handle = NODE_LIST_BASE + self.state.node_lists.len() as u32;
         self.state.node_lists.push(NodeList::Name(name));
         Ok(Value::Host(handle))
     }
@@ -52,6 +85,19 @@ impl Bridge<'_> {
             .node_lists
             .get(index)
             .ok_or("Invalid NodeList handle.")?;
+        if let NodeList::Children(root) = list {
+            let root = *root;
+            if property != "length" && collection_index(property).is_none() { return Ok(Value::Undefined); }
+            // A replacement may have appended a new Text since this SameObject
+            // list was obtained. Publish current topology/owner metadata before
+            // returning its handle, including before cross-realm native access.
+            self.state.rebuild(self.doc)?;
+            self.state.work(1)?;
+            let children = &self.doc.nodes.get(root).ok_or("Invalid childNodes owner.")?.children;
+            if property == "length" { return Ok(Value::Number(children.len() as f64)); }
+            return Ok(collection_index(property).and_then(|index| children.get(index))
+                .map_or(Value::Undefined, |&node| Value::Host(node_handle(node))));
+        }
         if matches!(list,NodeList::Name(_)) {
             if property != "length" && collection_index(property).is_none() { return Ok(Value::Undefined); }
             let nodes = self.name_list_nodes(index)?;
@@ -71,8 +117,11 @@ impl Bridge<'_> {
         let Value::Number(length) = self.node_list_get(handle,"length")? else { unreachable!() };
         let length = length as usize;
         self.state.work(length)?;
-        self.state.copies(length.saturating_mul(4))?;
-        Ok((0..length).map(|index| index.to_string()).collect())
+        self.state.copies(length.checked_mul(20).ok_or("NodeList key accounting overflow.")?)?;
+        let mut keys = Vec::new();
+        keys.try_reserve_exact(length).map_err(|_| "NodeList enumeration reservation failed.")?;
+        for index in 0..length { keys.push(index.to_string()); }
+        Ok(keys)
     }
 
     pub(super) fn query_candidates(&mut self, root: usize) -> Result<Vec<usize>, String> {
@@ -131,6 +180,11 @@ impl Bridge<'_> {
             }
             _ => self.query_candidates(root)?,
         };
+        // Reserve the optional snapshot identity before the checked-state
+        // closure borrows Forms; no callback or publication occurs here.
+        let snapshot_handle = if method == "querySelectorAll" {
+            Some(self.reserve_node_list("snapshot")?)
+        } else { None };
         let checked = |node| {
             self.forms
                 .controls
@@ -138,10 +192,7 @@ impl Bridge<'_> {
                 .filter(|control| matches!(control.kind, Kind::Checkbox | Kind::Radio))
                 .map(|control| control.checked)
         };
-        if method == "querySelectorAll" {
-            if self.state.node_lists.len() >= MAX_NODE_LISTS {
-                return Err("DOM NodeList snapshot limit reached (128 per document).".into());
-            }
+        if let Some(handle) = snapshot_handle {
             let nodes = crate::css::query_all(
                 self.doc,
                 source,
@@ -149,15 +200,13 @@ impl Bridge<'_> {
                 Some(&checked),
                 &mut self.state.host_work,
             )?;
-            let references = self.state.node_list_references.saturating_add(nodes.len());
-            if references > MAX_NODE_LIST_REFERENCES {
-                return Err(
-                    "DOM NodeList retained-reference limit reached (16384 per document).".into(),
-                );
+            let references = self.state.node_list_references.checked_add(nodes.len())
+                .ok_or("DOM NodeList retained-reference accounting overflow.")?;
+            if references > self.state.limits.host.node_list_references {
+                return Err(format!("DOM NodeList retained-reference limit reached ({} per document).", self.state.limits.host.node_list_references));
             }
             self.state.work(nodes.len())?;
             self.state.node_list_references = references;
-            let handle = NODE_LIST_BASE + self.state.node_lists.len() as u32;
             self.state.node_lists.push(NodeList::Snapshot(nodes));
             Ok(Value::Host(handle))
         } else {

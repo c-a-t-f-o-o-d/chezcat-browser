@@ -94,8 +94,13 @@ const PERFORMANCE: u32 = 9;
 const IMAGE_FACTORY: u32 = 10;
 const HISTORY: u32 = 11;
 const PERFORMANCE_TIMING:u32=12;
-const NODE_LIST_BASE: u32 = 32;
+// Disjoint from nodes, events, class lists, Attrs, standalone targets and maps.
+// The range is representational; policy and actual use bound allocation.
+const NODE_LIST_BASE: u32 = 0x8300_0000;
+const NODE_LIST_HANDLES: usize = 0x0100_0000;
+#[cfg(test)]
 const MAX_NODE_LISTS: usize = 128;
+#[cfg(test)]
 const MAX_NODE_LIST_REFERENCES: usize = 16_384;
 const NODE_BASE: u32 = 1024;
 const STYLE_BASE: u32 = 1_000_000;
@@ -2085,8 +2090,9 @@ impl Bridge<'_> {
         // Complete validation before touching any node. Control models and
         // already-loaded script/style/image resources must never become stale.
         let mut descendants = Vec::new();
-        let mut stack = self.doc.nodes[node].children.clone();
-        let mut old_bytes = 0usize;
+        let mut stack = Vec::new();
+        stack.try_reserve(self.doc.nodes[node].children.len()).map_err(|_| "textContent traversal reservation failed.")?;
+        stack.extend(self.doc.nodes[node].children.iter().copied());
         while let Some(child) = stack.pop() {
             self.state.work(1)?;
             if let NodeKind::Element { tag, .. } = &self.doc.nodes[child].kind {
@@ -2094,16 +2100,12 @@ impl Bridge<'_> {
                     return Err("textContent cannot remove controls, resources, scripts or structural elements.".into());
                 }
             }
-            old_bytes = old_bytes.saturating_add(node_bytes(&self.doc.nodes[child]));
+            descendants.try_reserve(1).map_err(|_| "textContent retained-node reservation failed.")?;
             descendants.push(child);
+            stack.try_reserve(self.doc.nodes[child].children.len()).map_err(|_| "textContent traversal reservation failed.")?;
             stack.extend(self.doc.nodes[child].children.iter().copied());
         }
-        let reuse = if let [child] = self.doc.nodes[node].children.as_slice() {
-            matches!(self.doc.nodes[*child].kind, NodeKind::Text(_)).then_some(*child)
-        } else {
-            None
-        };
-        if reuse.is_none() && !text.is_empty() && self.doc.nodes.len().saturating_add(self.state.blank_frame_nodes) >= self.state.node_limit {
+        if !text.is_empty() && self.doc.nodes.len().saturating_add(self.state.blank_frame_nodes) >= self.state.node_limit {
             return Err("DOM appended-node limit reached (256 per document).".into());
         }
         let mut captions = Vec::new();
@@ -2112,31 +2114,37 @@ impl Bridge<'_> {
             self.state.work(1)?;
             if tag(self.doc, index) == "button" {
                 self.state.work(self.doc.nodes.len())?;
+                captions.try_reserve(1).map_err(|_| "textContent caption reservation failed.")?;
                 captions.push(index);
             }
             current = self.state.tree.parents.get(index).copied().flatten();
         }
         // Detached nodes remain real objects for saved handles/NodeLists. Their
         // contents remain charged to the document budget until realm teardown.
-        self.state
-            .replace_bytes(if reuse.is_some() { old_bytes } else { 0 }, text.len())?;
-        if let Some(child) = reuse {
-            self.doc.nodes[child].kind = NodeKind::Text(text);
-        } else {
-            self.state.detached_nodes.extend(descendants);
-            self.doc.nodes[node].children.clear();
-            if !text.is_empty() {
-                let child = self.doc.nodes.len();
-                self.doc.nodes.push(Node {
-                    kind: NodeKind::Text(text),
-                    children: Vec::new(),
-                    namespace: crate::html::Namespace::None,
-                });
-                self.doc.nodes[node].children.push(child);
-                if self.state.detached_nodes.contains(&node) {
-                    self.state.detached_nodes.insert(child);
-                }
-            }
+        // Element textContent replaces all children. Saved Text objects keep
+        // their old data and identity; a nonempty replacement creates a new
+        // Text, while the empty string creates no child at all.
+        let detached_parent = self.state.detached_nodes.contains(&node);
+        let retained_count = descendants.len().checked_add(usize::from(detached_parent && !text.is_empty()))
+            .ok_or("textContent retained-node accounting overflow.")?;
+        self.state.detached_nodes.try_reserve(retained_count).map_err(|_| "textContent detached-node reservation failed.")?;
+        if !text.is_empty() {
+            self.doc.nodes.try_reserve(1).map_err(|_| "textContent node reservation failed.")?;
+            let needed = 1usize.saturating_sub(self.doc.nodes[node].children.capacity());
+            self.doc.nodes[node].children.try_reserve(needed).map_err(|_| "textContent child reservation failed.")?;
+        }
+        self.state.replace_bytes(0, text.len())?;
+        self.state.detached_nodes.extend(descendants);
+        self.doc.nodes[node].children.clear();
+        if !text.is_empty() {
+            let child = self.doc.nodes.len();
+            self.doc.nodes.push(Node {
+                kind: NodeKind::Text(text),
+                children: Vec::new(),
+                namespace: crate::html::Namespace::None,
+            });
+            self.doc.nodes[node].children.push(child);
+            if detached_parent { self.state.detached_nodes.insert(child); }
         }
         // Updating a span inside a button must update the native caption too.
         for index in captions {
@@ -2144,7 +2152,7 @@ impl Bridge<'_> {
                 control.caption = forms::caption(self.doc, index, control.kind);
             }
         }
-        self.state.dirty |= reuse.is_none();
+        self.state.dirty = true;
         self.state.dom_committed();
         if self.state.tree.active.get(node).copied().unwrap_or(false) {
             self.state.layout_changed();
@@ -2438,7 +2446,7 @@ impl Host for Bridge<'_> {
         if self.event_target_interface(object) {return Some(object);}
         if let Some(owner)=self.standalone_target_owner(object) {return Some(owner);}
         if let Some(window)=self.frame_instance_window(object) {return Some(window);}
-        if self.namespace_receiver(object) {return Some(WINDOW);}
+        if self.namespace_receiver(object) || self.node_list_receiver(object) {return Some(WINDOW);}
         self.location_instance_owner(object).or_else(||(matches!(object,DOCUMENT|PERFORMANCE|PERFORMANCE_TIMING|HISTORY) || self.named_map_receiver(object) || self.attr_receiver(object) || self.media_element_receiver(object)).then_some(WINDOW))
     }
     fn bounding_rect_snapshot(&mut self, object: u32) -> Option<Result<[f64; 4], String>> {
@@ -2598,6 +2606,7 @@ impl Host for Bridge<'_> {
     }
 
     fn native_method_owner(&self, object:u32, method:&str) -> Option<u32> {
+        if self.node_list_receiver(object) && matches!(method,"item"|"forEach") {return Some(WINDOW);}
         if self.event_target_interface(object)&&(method.starts_with("\0CustomEvent.")||method=="initCustomEvent") {return Some(object);}
         if self.event_target_interface(object)&&method.starts_with("\0Media.")
             || self.event_target_interface(object)&&method.starts_with("\0Video.") {return Some(object);}
@@ -3052,7 +3061,7 @@ impl Host for Bridge<'_> {
             return element(receiver);
         }
         if node_list_index(object).is_some() {
-            return node_list_index(receiver).is_some();
+            return self.node_list_receiver(object) && self.node_list_receiver(receiver);
         }
         object == receiver
     }
@@ -3518,6 +3527,7 @@ impl Host for Bridge<'_> {
                 "title"
                     | "cookie"
                     | "contentType"
+                    | "childNodes"
                     | "body"
                     | "head"
                     | "images"
@@ -3807,6 +3817,7 @@ impl Host for Bridge<'_> {
                 "compatMode" => Ok(Value::String("CSS1Compat".into())),
                 "prerendering" => Ok(Value::Bool(false)),
                 "images" => Ok(Value::Host(DOCUMENT_IMAGES)),
+                "childNodes" => self.create_child_list(DOCUMENT),
                 "parentElement" | "parentNode" | "ownerDocument" => Ok(Value::Null),
                 _ => self.named_document_property(property),
             };
@@ -4778,6 +4789,10 @@ fn validate_style(style: &str, string_limit: usize) -> Result<(), String> {
 mod compatibility_tests;
 
 #[cfg(test)]
+#[path = "script_child_nodes_tests.rs"]
+mod script_child_nodes_tests;
+
+#[cfg(test)]
 #[path = "script_background_style_tests.rs"]
 mod background_style_tests;
 
@@ -4795,6 +4810,10 @@ mod tests {
         scripts: &[&str],
         location: Option<&crate::navigation::Location>,
     ) -> (Document, Forms, Page, Outcome) {
+        setup_with_limits(source,scripts,location,crate::javascript::limits::CAPACITY_REGRESSION)
+    }
+
+    fn setup_with_limits(source:&str,scripts:&[&str],location:Option<&crate::navigation::Location>,limits:crate::javascript::limits::Limits) -> (Document,Forms,Page,Outcome) {
         let mut doc = html::parse(source);
         doc.scripting_enabled = true;
         let mut forms = Forms::new(&doc);
@@ -4807,7 +4826,7 @@ mod tests {
                 label: format!("test script {node}"),
             })
             .collect();
-        let mut page = Page::for_test();
+        let mut page = Page::with_limits(limits);
         if let Some(location) = location {
             page.set_location(location);
         }
@@ -6103,13 +6122,15 @@ window.addEventListener('load',()=>{order+='-load';});"#],
     }
 
     #[test]
-    fn text_replacement_is_atomic_reachable_and_reuses_stable_nodes() {
-        let (doc, forms, page, result) = setup(
+    fn text_replacement_is_atomic_reachable_and_preserves_superseded_text_identities() {
+        let (doc, forms, page, result) = setup_with_limits(
             "<body><div id=unsafe><span>Keep</span><input id=edit value=original></div><div id=safe><span id=removed>Old</span></div><p id=result></p><p id=loop>0</p></body>",
             &[
                 "document.getElementById('unsafe').textContent='must not replace';",
-                "document.getElementById('safe').textContent='new'; document.getElementById('result').textContent=String(document.getElementById('removed') === null); var i=0; while(i<1000){document.getElementById('loop').textContent=String(i); i++;}",
+                "var safe=document.getElementById('safe'),removed=document.getElementById('removed');safe.textContent='new'; document.getElementById('result').textContent=String(document.getElementById('removed') === null);if(removed.parentNode!==null||removed.textContent!=='Old')throw 'saved removed subtree';var loop=document.getElementById('loop'),children=loop.childNodes,original=children[0],previous=original;var i=0;while(i<1000){var oldData=previous.data;loop.textContent=String(i);var current=children[0];if(current===previous||previous.data!==oldData||previous.parentNode!==null||previous.isConnected)throw 'saved replaced Text';previous=current;i++;}if(original.data!=='0'||original.parentNode!==null||original.isConnected||children.length!==1)throw 'original Text retention';",
             ],
+            None,
+            crate::javascript::limits::BROWSER,
         );
         assert_eq!(result.errors, 1, "{}", page.report());
         assert_eq!(text(&doc, id(&doc, "unsafe")), "Keep");
@@ -6118,7 +6139,11 @@ window.addEventListener('load',()=>{order+='-load';});"#],
         assert_eq!(text(&doc, id(&doc, "result")), "true");
         assert_eq!(text(&doc, id(&doc, "loop")), "999");
         let before = html::parse("<body><div id=unsafe><span>Keep</span><input id=edit value=original></div><div id=safe><span id=removed>Old</span></div><p id=result></p><p id=loop>0</p></body>").nodes.len();
-        assert_eq!(doc.nodes.len(), before + 2);
+        assert_eq!(doc.nodes.len(), before + 1002, "Safe/result replacements and all 1000 loop replacements create fresh Text");
+        assert_eq!(page.state.detached_nodes.len(),1002,"Removed safe subtree and superseded loop Texts remain retained");
+        assert!(page.state.retained>=2897,"Every new payload remains charged after old Text becomes detached");
+        assert!(page.state.retained<=page.state.retained_limit);
+        assert!(doc.nodes.len()<=page.state.node_limit);
     }
 
     #[test]
