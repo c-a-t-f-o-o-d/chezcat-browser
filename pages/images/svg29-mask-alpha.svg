@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="320" height="200" viewBox="0 0 320 200">
+  <defs>
+    <linearGradient id="veil" x1="0" x2="1">
+      <stop stop-color="black" stop-opacity=".15"/>
+      <stop offset="1" stop-color="black"/>
+    </linearGradient>
+    <mask id="alpha" mask-type="alpha" maskContentUnits="objectBoundingBox" x="0" y="0" width="1" height="1">
+      <rect width="1" height="1" fill="url(#veil)"/>
+      <circle cx=".3" cy=".5" r=".28" fill="black"/>
+    </mask>
+    <clipPath id="card"><rect x="8" y="8" width="304" height="184" rx="24"/></clipPath>
+  </defs>
+  <g clip-path="url(#card)">
+    <rect width="320" height="200" fill="#e6f3ed"/>
+    <path d="M8 152L152 8H200L16 192H8ZM88 192L272 8H312V16L136 192ZM208 192L312 88V136L256 192Z" fill="#ccdfd6"/>
+    <g mask="url(#alpha)">
+      <rect x="24" y="32" width="272" height="136" rx="18" fill="#2b6b75"/>
+      <path d="M28 168L124 32H180L84 168Z" fill="#9adfc0"/>
+      <circle cx="244" cy="100" r="40" fill="#e8b67f"/>
+      <circle cx="244" cy="100" r="20" fill="#173a49"/>
+    </g>
+  </g>
+</svg>

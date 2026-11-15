@@ -1,0 +1,5 @@
+# Include the compiler C runtime in Windows MSVC binaries. No separate
+# Visual C++ redistributable is required by the delivered executable.
+# This does not change the release optimization settings or any safety guard.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]

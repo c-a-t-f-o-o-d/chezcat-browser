@@ -1,0 +1,27 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>ChezCat 0.40 fixture pending</title>
+<style>body{margin:24px;font-family:sans-serif;font-size:18px;background:#f7f8fa;color:#182238}h1{font-size:28px}pre{font-size:16px;color:#145d32;white-space:pre-wrap}p{max-width:800px}</style>
+</head><body><h1 id="heading">ChezCat 0.40 compatibility fixture</h1>
+<p>This original local fixture checks the new language capabilities through the page runtime. It does not contact Google, Bing or any other website.</p>
+<pre id="results">JavaScript has not finished.</pre>
+<script>
+var results=[];
+function expect(ok,label){if(!ok)throw Error(label);results.push('PASS: '+label);}
+function key(first='Ent',last='er',read=()=>first){var first='body';return read()+last;}
+expect(key()==='Enter'&&key.length===0,'default parameters and initializer closures');
+var {parts:[first,...tail],enabled=true,...rest}={parts:['Ent','e','r'],extra:7};
+expect(first+tail.join('')==='Enter'&&enabled&&rest.extra===7,'nested destructuring and object rest');
+var token=Symbol('key'),reads=0,source={get value(){reads++;return key();},[token]:5};
+var copy={...null,...source,extra:9};
+expect(copy.value==='Enter'&&copy[token]===5&&reads===1&&Object.getOwnPropertyDescriptor(copy,'value').writable,'object spread with getters and Symbol keys');
+var match=/^(?<first>Ent)(?<last>er)\k<last>$/.exec('Enterer');
+expect(match.groups.first+match.groups.last==='Enter'&&'Enter'.replace(/(?<word>Enter)/,'[$<word>]')==='[Enter]','named RegExp groups, references and replacements');
+var stamp=new Date(Date.UTC(2024,1,29,12,34,56,789));
+expect(stamp.toISOString()==='2024-02-29T12:34:56.789Z'&&Date.parse(stamp.toISOString())===stamp.getTime()&&Number.isInteger(Date.now())&&Number.isFinite(new Date().getTime()),'UTC Date operations and explicit page clock');
+Promise.resolve({value:copy.value,date:stamp}).then(function(packet){
+expect(JSON.parse(JSON.stringify(packet)).date===stamp.toISOString(),'existing Promise checkpoints and JSON Date callbacks');
+document.getElementById('results').textContent=results.join('\n');
+document.getElementById('heading').textContent='All six local checks passed';
+document.title='ChezCat 0.40 fixture passed';
+});
+</script></body></html>

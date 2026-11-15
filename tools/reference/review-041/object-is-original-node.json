@@ -1,0 +1,64 @@
+{
+  "cases": [
+    {
+      "id": "object-is-same-value-specials",
+      "source": "for(let pair of [[NaN,NaN],[0,-0],[-0,-0],[0,0],[undefined,undefined],[undefined,null],[1,'1'],[false,0],['x','x']])test.record(Object.is(pair[0],pair[1]));test.record(Object.is());test.record(Object.is(undefined));'ok';",
+      "source_sha256": "d1bb0cda2825fba22530101e5d1f80b4a26afbecb85be04972930ffb6e483385",
+      "reference": {
+        "ok": true,
+        "records": [
+          "boolean:true",
+          "boolean:false",
+          "boolean:true",
+          "boolean:true",
+          "boolean:true",
+          "boolean:false",
+          "boolean:false",
+          "boolean:false",
+          "boolean:true",
+          "boolean:true",
+          "boolean:true"
+        ],
+        "error": null,
+        "value": "string:6f6b"
+      }
+    },
+    {
+      "id": "object-is-identity-and-no-conversion",
+      "source": "let o={valueOf(){throw 'coercion';},toString(){throw 'coercion';}},f=function(){},s=Symbol('s');test.record(Object.is(o,o));test.record(Object.is(o,{}));test.record(Object.is(o,1));test.record(Object.is(f,f));test.record(Object.is(s,s));test.record(Object.is(s,Symbol('s')));'ok';",
+      "source_sha256": "17c33435eeca85eaf6fc88dc8dd7e344497cf5f56473806ef17e1addbc9b5c9b",
+      "reference": {
+        "ok": true,
+        "records": [
+          "boolean:true",
+          "boolean:false",
+          "boolean:false",
+          "boolean:true",
+          "boolean:true",
+          "boolean:false"
+        ],
+        "error": null,
+        "value": "string:6f6b"
+      }
+    },
+    {
+      "id": "object-is-builtin-descriptor",
+      "source": "let d=Object.getOwnPropertyDescriptor(Object,'is');test.record(Object.is.name);test.record(Object.is.length);test.record(d.enumerable);test.record(d.writable);test.record(d.configurable);test.record(Object.is.call(null,NaN,NaN));'ok';",
+      "source_sha256": "7ed44daebacc9fa93978482324579996ec5f6761c02312f8b9b4ab225d9af2ae",
+      "reference": {
+        "ok": true,
+        "records": [
+          "string:6973",
+          "number:4000000000000000",
+          "boolean:false",
+          "boolean:true",
+          "boolean:true",
+          "boolean:true"
+        ],
+        "error": null,
+        "value": "string:6f6b"
+      }
+    }
+  ],
+  "helper_sha256": "a4baebca7391c14523f116343a0bbcde7eb922a1efed75e5a825347c0cb90470"
+}

@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <title>Text and accents &copy; ChezCat</title>
+  <style>
+    body { margin: 28px; color: #203040; background: #f4f7fa; font-size: 18px; }
+    h1 { color: #245080; font-size: 28px; }
+    h2 { color: #245080; font-size: 20px; margin-top: 24px; }
+    p { margin-bottom: 14px; }
+    pre { background: #ffffff; padding: 14px; font-size: 18px; }
+    a { color: #245080; }
+  </style>
+</head>
+<body>
+  <h1>Im&aacute;genes &amp; B&uacute;squeda</h1>
+  <p>Page fonts, Unicode text and HTML character references.</p>
+  <p><a href="start.html">Back to start</a></p>
+
+  <h2>Everyday text</h2>
+  <p>Espa&ntilde;ol: &iexcl;Hola! &iquest;C&oacute;mo est&aacute;s? Ni&ntilde;o, ping&uuml;ino, canci&oacute;n.</p>
+  <p>Fran&ccedil;ais: caf&eacute;, cr&egrave;me br&ucirc;l&eacute;e, No&euml;l, &oelig;uvre.</p>
+  <p>Deutsch: Stra&szlig;e, gr&uuml;&szlig;en, &Auml;pfel. Portugu&ecirc;s: a&ccedil;&atilde;o, p&atilde;o.</p>
+
+  <h2>Accents stay inside one character cell</h2>
+  <pre>&Agrave; &Aacute; &Acirc; &Atilde; &Auml; &Aring; &AElig; &Ccedil; &Egrave; &Eacute; &Ecirc; &Euml; &Igrave; &Iacute; &Icirc; &Iuml;
+&agrave; &aacute; &acirc; &atilde; &auml; &aring; &aelig; &ccedil; &egrave; &eacute; &ecirc; &euml; &igrave; &iacute; &icirc; &iuml;
+&ETH; &Ntilde; &Ograve; &Oacute; &Ocirc; &Otilde; &Ouml; &Oslash; &Ugrave; &Uacute; &Ucirc; &Uuml; &Yacute; &THORN; &szlig; &Yuml;
+&eth; &ntilde; &ograve; &oacute; &ocirc; &otilde; &ouml; &oslash; &ugrave; &uacute; &ucirc; &uuml; &yacute; &thorn; &yuml; &oelig;</pre>
+
+  <h2>Symbols and punctuation</h2>
+  <p>&copy; 2026 &reg; &trade; &euro; &pound; &yen; &cent; &deg; &plusmn; &times; &divide; &frac14; &frac12; &frac34;</p>
+  <p>&ldquo;Double quotes&rdquo; &lsquo;single quotes&rsquo; &laquo;guillemets&raquo; &ndash; dash &mdash; longer dash &hellip; &bull; bullet</p>
+  <p>Numeric HTML compatibility: &#128; &#145;hello&#146; &#150; &#153;.</p>
+  <p>Nonbreaking spaces: 10&nbsp;km and &copy;&nbsp;2026. Unsupported named reference: &unknownEntity;.</p>
+
+  <h2>Textarea parsing</h2><p>Multi-line editing is not implemented yet. This control shows an unavailable placeholder; Ctrl+U lets you inspect its literal source. The parser retains its contents as text, including the angle brackets.</p>
+  <textarea name="example" rows="3" cols="52">
+Im&aacute;genes &amp; B&uacute;squeda
+<b>These angle brackets remain literal text.</b>
+&copy; ChezCat</textarea>
+</body>
+</html>

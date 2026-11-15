@@ -1,0 +1,18 @@
+[package]
+name = "chezcat"
+version = "0.79.0-alpha.2"
+edition = "2021"
+publish = false
+license-file = "LICENSE"
+repository = "https://github.com/c-a-t-f-o-o-d/chezcat-browser"
+description = "A small independently written browser experiment."
+
+# Intentionally no third-party crates or features. The original build script links our Windows icon resources.
+[dependencies]
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"
+

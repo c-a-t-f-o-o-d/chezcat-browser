@@ -1,0 +1,2924 @@
+use super::*;
+
+#[test]
+fn base_node_interfaces_link_real_ancestry_and_author_element_polyfills() {
+    let(doc,_,page,outcome)=page("<html><body><div id='base'>Text</div><svg id='vector'></svg></body></html>",&[r#"
+var d=document.getElementById('base');d.beforeInterfaceRead=1;
+if(Object.getPrototypeOf(HTMLElement)!==Element||Object.getPrototypeOf(Element)!==Node||Object.getPrototypeOf(Node)!==EventTarget||Object.getPrototypeOf(HTMLElement.prototype)!==Element.prototype||Object.getPrototypeOf(Element.prototype)!==Node.prototype||Object.getPrototypeOf(Node.prototype)!==EventTarget.prototype)throw 'interface chain';
+var text=d.firstChild,attr=document.createAttribute('title'),img=new Image(),svg=document.getElementById('vector');
+if(!(d instanceof HTMLElement)||!(d instanceof Element)||!(d instanceof Node)||!(d instanceof EventTarget)||!(document instanceof Node)||!(text instanceof Node)||!(attr instanceof Node)||text instanceof Element||attr instanceof HTMLElement||document instanceof Element)throw 'node brands';
+if(!Element.prototype.isPrototypeOf(d)||!Node.prototype.isPrototypeOf(text)||!Node.prototype.isPrototypeOf(attr)||!Node.prototype.isPrototypeOf(document)||Element.prototype.isPrototypeOf(text)||!EventTarget.prototype.isPrototypeOf(d))throw 'known suffix inspection';
+if(!(svg instanceof Element)||svg instanceof HTMLElement||!(img instanceof Image)||!(img instanceof HTMLElement)||!(img instanceof Node)||d instanceof Image||Object.getPrototypeOf(Image.prototype)!==HTMLElement.prototype)throw 'element/image ancestry';
+if(Node.ELEMENT_NODE!==1||Node.DOCUMENT_POSITION_IMPLEMENTATION_SPECIFIC!==32||Element.TEXT_NODE!==3||HTMLElement.DOCUMENT_NODE!==9||Node.prototype.ATTRIBUTE_NODE!==2)throw 'constants';
+var constant=Object.getOwnPropertyDescriptor(Node,'ELEMENT_NODE'),prototype=Object.getOwnPropertyDescriptor(Element,'prototype'),global=Object.getOwnPropertyDescriptor(window,'Element');
+if(constant.writable||constant.configurable||!constant.enumerable||prototype.writable||prototype.configurable||global.enumerable||!global.writable||!global.configurable)throw 'descriptors';
+var conversions=0,illegal=0;for(var C of [Node,Element,HTMLElement]){try{new C({toString:function(){conversions++;}});}catch(e){if(e instanceof TypeError)illegal++;else throw e;}try{C();}catch(e){if(e instanceof TypeError)illegal++;else throw e;}}if(illegal!==6||conversions!==0)throw 'illegal constructors';
+if(d.beforeInterfaceRead!==1||typeof d.animate!=='undefined'||'animate' in d)throw 'initial absence';
+var reads=0,calls='',polyfill=function(a,b){if(this!==d)throw 'polyfill receiver';calls+=a+b;this.setAttribute('data-polyfill',calls);return this;};
+Object.defineProperty(Element.prototype,'animate',{configurable:true,get:function(){reads++;return polyfill;}});
+if(!('animate' in d)||reads!==0||d.animate('A','B')!==d||d['animate']?.('C','D')!==d||reads!==2||d.getAttribute('data-polyfill')!=='ABCD')throw 'polyfill inheritance';
+Object.defineProperty(Element.prototype,'nodeType',{configurable:true,get:function(){throw 'native shadow';}});if(d.nodeType!==1)throw 'native precedence';delete Element.prototype.nodeType;
+delete Element.prototype.animate;if(typeof d.animate!=='undefined'||'animate' in d)throw 'polyfill deletion';
+var oldElement=Element,oldNode=Node;Element=17;delete window.Node;if(!(d instanceof oldElement)||!(text instanceof oldNode)||typeof Node!=='undefined')throw 'canonical anchors';
+document.title='base-node-interfaces-ok';
+"#]);assert_eq!(outcome.errors,0,"{}",page.report());assert_eq!(doc.title,"base-node-interfaces-ok");
+}
+
+#[test]
+fn node_event_methods_are_canonical_and_text_attr_paths_are_real() {
+    let(doc,_,page,outcome)=page("<html><body><div id='base'>Text</div></body></html>",&[r#"
+var d=document.getElementById('base'),text=d.firstChild,attr=document.createAttribute('title'),event=document.createEvent('Event'),log='';d.setAttributeNode(attr);
+if(d.addEventListener!==EventTarget.prototype.addEventListener||text.dispatchEvent!==d.dispatchEvent||attr.removeEventListener!==document.removeEventListener||document.addEventListener!==d.addEventListener)throw 'canonical node methods';
+text.addEventListener('x',function(e){if(this!==text||e.target!==text||e.eventPhase!==2)throw 'text target';log+='T';});d.addEventListener('x',function(e){if(e.target!==text||e.currentTarget!==d||e.eventPhase!==3)throw 'text parent';log+='D';});
+event.initEvent('x',true,false);text.dispatchEvent(event);if(log!=='TD')throw 'text propagation';
+attr.addEventListener('x',function(e){if(this!==attr||e.target!==attr||e.eventPhase!==2)throw 'attr target';log+='A';});attr.dispatchEvent(event);if(log!=='TDA'||event.target!==attr)throw 'Attr has no parent path';
+var original=EventTarget.prototype.dispatchEvent,wrapped=0;EventTarget.prototype.dispatchEvent=function(e){wrapped++;return original.call(this,e);};attr.dispatchEvent(event);if(log!=='TDAA'||wrapped!==1)throw 'prototype override';
+delete EventTarget.prototype.dispatchEvent;if('dispatchEvent' in d||'dispatchEvent' in text||'dispatchEvent' in attr||'dispatchEvent' in document||typeof d.dispatchEvent!=='undefined')throw 'removed prototype method';EventTarget.prototype.dispatchEvent=original;
+d.dispatchEvent=function(){return 'own';};if(d.dispatchEvent(event)!=='own')throw 'own method';delete d.dispatchEvent;if(d.dispatchEvent!==original)throw 'own deletion';
+document.title='node-event-methods-ok';
+"#]);assert_eq!(outcome.errors,0,"{}",page.report());assert_eq!(doc.title,"node-event-methods-ok");
+}
+
+#[test]
+fn node_interface_suffix_keeps_concrete_tags_and_named_forms_truthful() {
+    let(mut doc,mut forms,mut page,outcome)=page("<html><body><div id='base'></div><form id='f'><input name='addEventListener'><input name='removeEventListener'><input name='dispatchEvent'></form></body></html>",&[r#"
+var d=document.getElementById('base'),f=document.getElementById('f');
+if(f.addEventListener.getAttribute('name')!=='addEventListener'||f.removeEventListener.getAttribute('name')!=='removeEventListener'||f.dispatchEvent.getAttribute('name')!=='dispatchEvent')throw 'named form precedence';
+var seen=0,e=document.createEvent('Event');e.initEvent('x',false,false);EventTarget.prototype.addEventListener.call(f,'x',function(){seen++;});EventTarget.prototype.dispatchEvent.call(f,e);if(seen!==1)throw 'borrowed form delivery';
+if(Node.prototype[Symbol.toStringTag]!=='Node'||Element.prototype[Symbol.toStringTag]!=='Element'||HTMLElement.prototype[Symbol.toStringTag]!=='HTMLElement')throw 'prototype tags';
+Object.defineProperty(d,Symbol.toStringTag,{value:'OwnAuthorTag',configurable:true});if(d[Symbol.toStringTag]!=='OwnAuthorTag')throw 'own symbol';delete d[Symbol.toStringTag];
+"#]);assert_eq!(outcome.errors,0,"{}",page.report());
+    for source in ["d[Symbol.toStringTag];","Object.getPrototypeOf(d);","d.constructor;"] {let out=page.console_eval(&mut doc,&mut forms,source);assert_eq!(out.errors,1,"{source}: {}",page.report());}
+}
+
+fn shared_probe(source: &str) -> (Document,Forms,Page,Outcome) {
+    page("<div id=p title=present></div>",&[source])
+}
+
+#[test]
+fn detached_style_type_uses_real_attribute_identity_domstring_and_metadata_routes(){
+    let (mut doc,mut forms,mut page,outcome)=page("<html><body><p id=p>Existing page</p></body></html>",&[r#"
+var detachedStyle=document.createElement('style'),conversions='';
+if(!('type' in detachedStyle)||detachedStyle.type!==''||detachedStyle.getAttribute('type')!==null||detachedStyle.isConnected)throw 'initial type';
+detachedStyle.setAttribute('type','text/css');var styleTypeAttr=detachedStyle.getAttributeNode('type');
+detachedStyle.type={toString:function(){conversions+='idl;';return '  TEXT/CSS  ';}};
+if(detachedStyle.type!=='  TEXT/CSS  '||styleTypeAttr.value!==detachedStyle.type||detachedStyle.getAttributeNode('type')!==styleTypeAttr)throw 'raw reflection';
+detachedStyle.setAttribute('TYPE',{toString:function(){conversions+='attribute;';return 'application/metadata';}});
+if(detachedStyle.type!=='application/metadata'||conversions!=='idl;attribute;')throw 'attribute parity';
+styleTypeAttr.value='text/css; charset=utf-8';if(detachedStyle.type!==styleTypeAttr.value)throw 'attached Attr';
+var replacementType=document.createAttribute('type');replacementType.value='replacement';if(detachedStyle.setAttributeNode(replacementType)!==styleTypeAttr||styleTypeAttr.ownerElement!==null||detachedStyle.type!=='replacement')throw 'adopted Attr';
+detachedStyle.setAttributeNS('urn:metadata','type','inert');if(detachedStyle.type!=='replacement')throw 'namespace decoy';
+detachedStyle.type=null;if(detachedStyle.type!=='null'||replacementType.value!=='null')throw 'DOMString null';
+detachedStyle.removeAttribute('type');if(detachedStyle.type!==''||!('type' in detachedStyle)||replacementType.ownerElement!==null)throw 'removal';
+detachedStyle.type='text/css';var symbol=Symbol('type'),caught=0;
+for(var operation of [function(){detachedStyle.type=symbol;},function(){detachedStyle.setAttribute('type',symbol);},function(){detachedStyle.getAttributeNode('type').value=symbol;}]){try{operation();}catch(e){if(e instanceof TypeError)caught++;else throw e;}}
+if(caught!==3||detachedStyle.type!=='text/css')throw 'symbol rollback';
+var thrown=false;try{detachedStyle.type={toString:function(){throw 17;}};}catch(e){thrown=e===17;}if(!thrown||detachedStyle.type!=='text/css')throw 'throwing conversion';
+document.title='detached-style-type-ok';
+"#]);assert_eq!(outcome.errors,0,"{}",page.report());assert_eq!(doc.title,"detached-style-type-ok");assert!(!page.has_host_tasks());assert!(page.take_dynamic_stylesheets().is_empty());
+    let style=doc.nodes.iter().position(|n|matches!(&n.kind,NodeKind::Element {tag,..} if tag=="style")).unwrap();let nodes=doc.nodes.len();let commits=page.state.dom_commits;
+    for source in ["document.body.appendChild(detachedStyle);","detachedStyle.textContent='body{display:none}';","detachedStyle.innerHTML='body{display:none}';"]{
+        let out=page.console_eval(&mut doc,&mut forms,source);assert_eq!(out.errors,1,"{source}: {}",page.report());assert_eq!(doc.nodes.len(),nodes);assert_eq!(page.state.dom_commits,commits);assert!(doc.nodes[style].children.is_empty());assert!(!page.has_host_tasks());
+    }
+}
+
+#[test]
+fn detached_style_type_limits_and_foreign_owner_fail_before_effects(){
+    let (mut doc,mut forms,mut page,outcome)=page("<html><body></body></html>",&["var detachedStyle=document.createElement('style');detachedStyle.type='text/css';var observedType=detachedStyle.getAttributeNode('type');"]);assert_eq!(outcome.errors,0,"{}",page.report());
+    let node=doc.nodes.iter().position(|n|matches!(&n.kind,NodeKind::Element {tag,..} if tag=="style")).unwrap();let commits=page.state.dom_commits;let retained_limit=page.state.retained_limit;page.state.retained_limit=page.state.retained;
+    let out=page.console_eval(&mut doc,&mut forms,"detachedStyle.type='a-much-longer-type-value';");assert_eq!(out.errors,1,"{}",page.report());assert_eq!(doc.attr(node,"type"),Some("text/css"));assert_eq!(page.state.dom_commits,commits);page.state.retained_limit=retained_limit;
+    let limit=page.state.limits.host.string_bytes;page.state.limits.host.string_bytes=2;assert!(Bridge {doc:&mut doc,forms:&mut forms,state:&mut page.state}.get(node_handle(node),"type").is_err());page.state.limits.host.string_bytes=limit;page.begin_job();page.state.copy_work=0;assert!(Bridge {doc:&mut doc,forms:&mut forms,state:&mut page.state}.get(node_handle(node),"type").is_err());page.begin_job();
+    let out=page.console_eval(&mut doc,&mut forms,"if(detachedStyle.type!=='text/css'||observedType.value!=='text/css')throw 'recovered reflection';var f=document.createElement('iframe');f.hidden=true;document.body.appendChild(f);var readType=f.contentWindow.Function('s','return s.type;'),hasType=f.contentWindow.Function('s','return \"type\" in s;'),writeType=f.contentWindow.Function('s','v','s.type=v;'),readTypeAttr=f.contentWindow.Function('a','return a.value;'),hasTypeAttr=f.contentWindow.Function('a','return \"value\" in a;'),writeTypeAttr=f.contentWindow.Function('a','v','a.value=v;'),styleConversions=0;if(readType(detachedStyle)!=='text/css'||!hasType(detachedStyle)||readTypeAttr(observedType)!=='text/css'||!hasTypeAttr(observedType))throw 'same origin';");assert_eq!(out.errors,0,"{}",page.report());
+    page.set_location(&crate::navigation::address("https://different.test/",&crate::navigation::Location::home()).unwrap());
+    for source in ["readType(detachedStyle);","hasType(detachedStyle);","writeType(detachedStyle,{toString:function(){styleConversions++;return 'changed';}});","writeTypeAttr(observedType,{toString:function(){styleConversions++;return 'changed';}});","readTypeAttr(observedType);","hasTypeAttr(observedType);"]{let out=page.console_eval(&mut doc,&mut forms,source);assert_eq!(out.errors,1,"{}",page.report());assert!(page.report().contains("same-origin"));assert_eq!(doc.attr(node,"type"),Some("text/css"));assert!(!page.has_host_tasks());}
+    let out=page.console_eval(&mut doc,&mut forms,"if(styleConversions!==0)throw 'foreign coercion';");assert_eq!(out.errors,0,"{}",page.report());
+}
+
+#[test]
+fn parsed_link_href_reflects_real_url_without_resource_or_mutation_authority(){
+    let (mut doc,mut forms,mut page,outcome)=page("<link id=relative rel=stylesheet href='../original.css?q=1#section'><link id=absolute href='https://other.test/read-only.css'><link id=missing><link id=empty href=''><link id=invalid href='http://[broken'>",&[]);assert_eq!(outcome.errors,0);
+    page.set_resource_base(&crate::navigation::address("https://base.test/assets/index.html",&crate::navigation::Location::home()).unwrap());
+    let commits=page.state.dom_commits;
+    let out=page.console_eval(&mut doc,&mut forms,r#"
+var relative=document.getElementById('relative'),missing=document.getElementById('missing'),empty=document.getElementById('empty');
+if(!('href' in relative)||!('href' in missing)||document.querySelectorAll('link[rel~="stylesheet"]')[0]!==relative||relative.href!=='https://base.test/original.css?q=1#section'||relative.getAttribute('href')!=='../original.css?q=1#section')throw 'real stylesheet URL';
+if(document.getElementById('absolute').href!=='https://other.test/read-only.css'||missing.href!==''||empty.href!=='https://base.test/assets/index.html'||document.getElementById('invalid').href!=='http://[broken')throw 'URL reflection states';
+"#);assert_eq!(out.errors,0,"{}",page.report());assert_eq!(page.state.dom_commits,commits);assert!(page.take_dynamic_stylesheets().is_empty());assert!(!page.has_host_tasks());
+    for operation in ["relative.href='/must-not-fetch.css';","relative.setAttribute('href','/must-not-fetch.css');","relative.removeAttribute('href');","relative.parentNode.removeChild(relative);"]{
+        let out=page.console_eval(&mut doc,&mut forms,operation);assert_eq!(out.errors,1,"{operation}: {}",page.report());assert_eq!(page.state.dom_commits,commits);assert!(!page.has_host_tasks());
+    }
+    page.set_resource_base(&crate::navigation::address("https://base.test/new/",&crate::navigation::Location::home()).unwrap());
+    let out=page.console_eval(&mut doc,&mut forms,"if(relative.href!=='https://base.test/original.css?q=1#section'||empty.href!=='https://base.test/new/')throw 'live base';missing.setAttributeNS('urn:metadata','href','/inert.css');if(missing.href!=='')throw 'namespace metadata';var created=document.createElement('link');created.href='';if(created.href!=='https://base.test/new/')throw 'created empty';");assert_eq!(out.errors,0,"{}",page.report());assert!(!page.has_host_tasks());
+}
+
+#[test]
+fn parsed_link_href_limits_local_selection_and_foreign_callers_preserve_boundaries(){
+    let (mut doc,mut forms,mut page,outcome)=page("<html><body><link id=sheet href='missing-selected.css'></body></html>",&[]);assert_eq!(outcome.errors,0);
+    let node=doc.nodes.iter().position(|n|matches!(&n.kind,NodeKind::Element {tag,..} if tag=="link")).unwrap();let commits=page.state.dom_commits;
+    let local=crate::navigation::explicit(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tools/fixtures/authored-video.html")).unwrap();page.set_resource_base(&local);
+    let value=Bridge {doc:&mut doc,forms:&mut forms,state:&mut page.state}.get(node_handle(node),"href").unwrap();assert!(matches!(value,Value::String(s) if s.ends_with("/missing-selected.css")&&s.starts_with("file:///")));
+    let original=page.state.limits.host.string_bytes;page.state.limits.host.string_bytes=4;
+    assert!(Bridge {doc:&mut doc,forms:&mut forms,state:&mut page.state}.get(node_handle(node),"href").is_err());page.state.limits.host.string_bytes=original;page.begin_job();page.state.copy_work=0;
+    assert!(Bridge {doc:&mut doc,forms:&mut forms,state:&mut page.state}.get(node_handle(node),"href").is_err());assert_eq!(page.state.dom_commits,commits);page.begin_job();
+    page.set_resource_base(&crate::navigation::address("https://www.google.com/assets/",&crate::navigation::Location::home()).unwrap());
+    let out=page.console_eval(&mut doc,&mut forms,"var sheet=document.getElementById('sheet'),f=document.createElement('iframe');f.hidden=true;document.body.appendChild(f);var readHref=f.contentWindow.Function('l','return l.href;'),hasHref=f.contentWindow.Function('l','return \"href\" in l;');if(readHref(sheet)!=='https://www.google.com/assets/missing-selected.css'||!hasHref(sheet))throw 'same origin reader';");assert_eq!(out.errors,0,"{}",page.report());
+    page.set_location(&crate::navigation::address("https://different.test/",&crate::navigation::Location::home()).unwrap());
+    for operation in ["readHref(sheet);","hasHref(sheet);"]{let out=page.console_eval(&mut doc,&mut forms,operation);assert_eq!(out.errors,1,"{}",page.report());assert!(page.report().contains("same-origin"));assert!(!page.has_host_tasks());}
+}
+
+#[test]
+fn parsed_script_source_reflects_actual_attribute_and_resource_base_without_requests() {
+    let (mut doc,mut forms,mut page,outcome)=page("<script id=relative src='../original.js?q=1#section'></script><script id=absolute src='https://other.test/read-only.js'></script><script id=missing></script><script id=empty src=''></script><script id=invalid src='http://[broken'></script>",&[]);
+    assert_eq!(outcome.errors,0);
+    let base=crate::navigation::address("https://base.test/assets/index.html",&crate::navigation::Location::home()).unwrap();page.set_resource_base(&base);
+    let source=r#"
+var relative=document.getElementById('relative'),absolute=document.getElementById('absolute'),missing=document.getElementById('missing'),empty=document.getElementById('empty'),invalid=document.getElementById('invalid');
+if(!('src' in relative)||!('src' in missing)||relative.src!=='https://base.test/original.js?q=1#section'||relative.getAttribute('src')!=='../original.js?q=1#section')throw 'relative reflection';
+if(absolute.src!=='https://other.test/read-only.js'||missing.src!==''||empty.src!=='https://base.test/assets/index.html'||invalid.src!=='http://[broken')throw 'missing empty absolute invalid';
+missing.setAttributeNS('urn:original','src','https://metadata.test/never.js');
+if(missing.src!==''||missing.getAttributeNS('urn:original','src')!=='https://metadata.test/never.js')throw 'namespace metadata';
+relative.setAttributeNS('urn:original','src','/never.js');if(relative.src!=='https://base.test/original.js?q=1#section')throw 'namespaced override';
+document.title='parsed-src-ok';
+"#;
+    let outcome=page.console_eval(&mut doc,&mut forms,source);assert_eq!(outcome.errors,0,"{}",page.report());assert_eq!(doc.title,"parsed-src-ok");assert!(page.take_dynamic_scripts().is_empty());assert!(!page.has_host_tasks());
+    page.set_resource_base(&crate::navigation::address("https://base.test/new/",&crate::navigation::Location::home()).unwrap());
+    let outcome=page.console_eval(&mut doc,&mut forms,"if(relative.src!=='https://base.test/original.js?q=1#section'||empty.src!=='https://base.test/new/')throw 'current base';");assert_eq!(outcome.errors,0,"{}",page.report());
+}
+
+#[test]
+fn parsed_script_source_read_does_not_enable_loaded_script_mutation_or_foreign_aliases() {
+    let (mut doc,mut forms,mut page,outcome)=page("<html><body><script id=parsed src='/original.js'></script><svg><script id=foreign src='/foreign.js'></script></svg></body></html>",&["var parsed=document.getElementById('parsed');if(parsed.src!=='https://www.google.com/original.js')throw 'read';"]);assert_eq!(outcome.errors,0,"{}",page.report());
+    let node=doc.nodes.iter().enumerate().find_map(|(n,_)|(doc.attr(n,"id")==Some("parsed")).then_some(n)).unwrap();let commits=page.state.dom_commits;let retained=page.state.retained;
+    for operation in ["parsed.src='/must-not-fetch.js';","parsed.setAttribute('src','/must-not-fetch.js');","parsed.removeAttribute('src');","parsed.text='throw 17;';"] {
+        let outcome=page.console_eval(&mut doc,&mut forms,operation);assert_eq!(outcome.errors,1,"{operation}: {}",page.report());assert_eq!(doc.attr(node,"src"),Some("/original.js"));assert_eq!(page.state.dom_commits,commits);assert_eq!(page.state.retained,retained);assert!(page.take_dynamic_scripts().is_empty());assert!(!page.has_host_tasks());
+    }
+    let foreign=doc.nodes.iter().enumerate().find_map(|(n,_)|(doc.attr(n,"id")==Some("foreign")).then_some(n)).unwrap();assert_eq!(doc.nodes[foreign].namespace,crate::html::Namespace::UnknownForeign);
+    let mut bridge=Bridge {doc:&mut doc,forms:&mut forms,state:&mut page.state};assert!(bridge.get(node_handle(foreign),"src").is_err());assert!(!matches!(bridge.has(node_handle(foreign),"src"),Ok(true)));
+}
+
+#[test]
+fn parsed_script_source_small_copy_and_result_profiles_recover_without_mutation() {
+    let (mut doc,mut forms,mut page,outcome)=page("<script id=parsed src='/original.js'></script>",&[]);assert_eq!(outcome.errors,0);let node=doc.nodes.iter().position(|n|matches!(&n.kind,NodeKind::Element {tag,..} if tag=="script")).unwrap();let commits=page.state.dom_commits;
+    let original=page.state.limits.host.string_bytes;page.state.limits.host.string_bytes=4;
+    assert!(Bridge {doc:&mut doc,forms:&mut forms,state:&mut page.state}.get(node_handle(node),"src").is_err());assert_eq!(page.state.dom_commits,commits);
+    page.state.limits.host.string_bytes=original;page.begin_job();page.state.copy_work=0;
+    assert!(Bridge {doc:&mut doc,forms:&mut forms,state:&mut page.state}.get(node_handle(node),"src").is_err());assert_eq!(page.state.dom_commits,commits);
+    page.begin_job();let value=Bridge {doc:&mut doc,forms:&mut forms,state:&mut page.state}.get(node_handle(node),"src").unwrap();assert!(matches!(value,Value::String(s) if s=="https://www.google.com/original.js"));assert!(!page.has_host_tasks());
+}
+
+#[test]
+fn attribute_metadata_nonce_updates_real_attr_without_rerunning_a_parsed_script() {
+    let (mut doc,mut forms,mut page,outcome)=page("<script id=script nonce=original></script>",&["var count=1,script=document.getElementById('script'),nonce=script.getAttributeNode('nonce');script.setAttribute('nonce','changed');if(nonce.value!=='changed'||script.getAttribute('nonce')!=='changed')throw 'metadata';"]);
+    assert_eq!(outcome.errors,0,"{}",page.report());
+    assert!(page.take_dynamic_scripts().is_empty());
+    let outcome=page.console_eval(&mut doc,&mut forms,"if(count!==1||script.getAttribute('nonce')!=='changed')throw 'parsed script rerun';");assert_eq!(outcome.errors,0,"{}",page.report());
+}
+
+#[test]
+fn attribute_nodes_shorter_payload_and_prefix_transfers_fit_the_exact_final_retention() {
+    for (markup,setup) in [
+        ("<div id=p title='a much longer original payload'></div>","var p=document.getElementById('p'),old=p.getAttributeNode('title'),incoming=document.createAttribute('title');incoming.value='x';"),
+        ("<div id=p></div>","var p=document.getElementById('p');p.setAttributeNS('urn:original','veryLongPrefix:token','long original value');var old=p.getAttributeNodeNS('urn:original','token'),incoming=document.createAttributeNS('urn:original','p:token');incoming.value='x';"),
+    ] {
+        let (mut doc,mut forms,mut page,outcome)=page(markup,&[setup]);assert_eq!(outcome.errors,0,"{}",page.report());
+        let retained=page.state.retained;page.state.retained_limit=retained;
+        let outcome=page.console_eval(&mut doc,&mut forms,"if(p.setAttributeNodeNS(incoming)!==old||incoming.ownerElement!==p||old.ownerElement!==null||incoming.value!=='x')throw 'exact-limit transfer';");
+        assert_eq!(outcome.errors,0,"{}",page.report());assert!(page.state.retained<=retained);
+    }
+}
+
+#[test]
+fn attribute_nodes_small_work_retention_and_identity_failures_are_atomic_and_recover() {
+    for mode in 0..3 {
+        let (mut doc,mut forms,mut page,outcome)=page("<div id=p title=old></div>",&["var incoming=document.createAttribute('title');incoming.value='replacement payload';"]);
+        assert_eq!(outcome.errors,0);
+        let node=doc.nodes.iter().enumerate().find_map(|(n,_)|(doc.attr(n,"id")==Some("p")).then_some(n)).unwrap();
+        let incoming=script_attr::ATTR_BASE;
+        let retained=page.state.retained;let identities=page.state.attributes.len();let limit=page.state.retained_limit;let identity_limit=page.state.limits.host.attribute_identities;
+        match mode {0=>page.state.host_work=0,1=>page.state.retained_limit=retained,_=>page.state.limits.host.attribute_identities=identities}
+        let error=Bridge{doc:&mut doc,forms:&mut forms,state:&mut page.state}.call(node_handle(node),"setAttributeNode",&[Value::Host(incoming)]).unwrap_err();
+        assert!(!error.is_empty());assert_eq!(doc.attr(node,"title"),Some("old"));assert_eq!(page.state.attributes.len(),identities);assert_eq!(page.state.attributes[0].owner,None);assert_eq!(page.state.attributes[0].value,"replacement payload");assert_eq!(page.state.retained,retained);
+        page.state.retained_limit=limit;page.state.limits.host.attribute_identities=identity_limit;page.begin_job();
+        let outcome=page.console_eval(&mut doc,&mut forms,"var removed=document.getElementById('p').setAttributeNode(incoming);if(removed.value!=='old'||removed.ownerElement!==null||incoming.ownerElement!==document.getElementById('p'))throw 'recovery';");
+        assert_eq!(outcome.errors,0,"{}",page.report());assert_eq!(doc.attr(node,"title"),Some("replacement payload"));
+    }
+}
+
+#[test]
+fn attribute_nodes_existing_identity_moves_payload_without_double_retention_and_refuses_active_resource_adoption() {
+    let (mut doc,mut forms,mut page,outcome)=page("<div id=p title=old></div>",&["var p=document.getElementById('p'),old=p.getAttributeNode('title'),incoming=document.createAttribute('title');incoming.value='replacement payload';"]);
+    assert_eq!(outcome.errors,0);let retained=page.state.retained;
+    let outcome=page.console_eval(&mut doc,&mut forms,"if(p.setAttributeNode(incoming)!==old)throw 'returned node';");assert_eq!(outcome.errors,0,"{}",page.report());assert_eq!(page.state.retained,retained);
+    for tag in ["script","link"] {
+        let source=format!("var resource=document.createElement('{tag}');var attr=document.createAttribute('{}');attr.value='/must-not-fetch';",if tag=="script"{"src"}else{"href"});
+        let (mut doc,mut forms,mut page,outcome)=self::page("<div>Test</div>",&[&source]);assert_eq!(outcome.errors,0,"{}",page.report());
+        let resource=page.state.dom.created.iter().copied().find(|&n|super::tag(&doc,n)==tag).unwrap();
+        let retained=page.state.retained;let commits=page.state.dom_commits;
+        assert!(Bridge{doc:&mut doc,forms:&mut forms,state:&mut page.state}.call(node_handle(resource),"setAttributeNode",&[Value::Host(script_attr::ATTR_BASE)]).unwrap_err().contains("active script/stylesheet"));
+        assert_eq!(page.state.retained,retained);assert_eq!(page.state.dom_commits,commits);assert!(doc.attr(resource,if tag=="script"{"src"}else{"href"}).is_none());assert_eq!(page.state.attributes[0].owner,None);
+    }
+}
+
+#[test]
+fn attribute_nodes_create_attach_replace_and_move_real_identities_in_list_order() {
+    let (_,_,page,outcome)=page("<div id=p title=old data-tail=tail></div><div id=q></div>",&[r#"
+var p=document.getElementById('p'),q=document.getElementById('q'),map=p.attributes,old=p.getAttributeNode('title'),saved=old;
+if(document.createAttribute.length!==1||document.createAttributeNS.length!==2||p.setAttributeNode.length!==1||p.setAttributeNodeNS.length!==1)throw 'arity';
+var incoming=document.createAttribute('TITLE');incoming.value='new';
+if(incoming.name!=='title'||incoming.ownerElement!==null||incoming.ownerDocument!==document||incoming.value!=='new')throw 'factory';
+if(p.setAttributeNode(incoming)!==old||old!==saved||incoming.ownerElement!==p||old.ownerElement!==null||old.value!=='old'||p.title!=='new'||map.getNamedItem('title')!==incoming||map.item(1)!==incoming)throw 'replacement identity/order';
+old.value='saved';if(p.title!=='new')throw 'detached saved reference';
+if(p.setAttributeNode(incoming)!==incoming||map.item(1)!==incoming)throw 'same node';
+if(p.removeAttributeNode(incoming)!==incoming||incoming.ownerElement!==null||incoming.value!=='new')throw 'remove';
+if(q.setAttributeNode(incoming)!==null||q.getAttributeNode('title')!==incoming||incoming.ownerElement!==q)throw 'move after removal';
+if(p.setAttributeNode(old)!==null||p.title!=='saved'||p.attributes.item(p.attributes.length-1)!==old)throw 'append/order';
+var a=document.createAttributeNS('urn:original','one:token');a.value='first';p.setAttributeNodeNS(a);
+var b=document.createAttributeNS('urn:original','two:token');b.value='second';
+if(p.setAttributeNode(b)!==a||a.ownerElement!==null||a.name!=='one:token'||a.value!=='first'||b.ownerElement!==p||b.prefix!=='two'||p.getAttributeNodeNS('urn:original','token')!==b||p.getAttribute('one:token')!==null||p.getAttribute('two:token')!=='second')throw 'expanded replacement';
+var upper=document.createAttributeNS(null,'ID');upper.value='inert-case';p.setAttributeNodeNS(upper);if(p.id!=='p'||p.getAttributeNS(null,'ID')!=='inert-case')throw 'case namespace';
+var namespaced=document.createAttributeNS('urn:no-permission','n:src');namespaced.value='https://forbidden.test/';p.setAttributeNode(namespaced);if(p.getAttributeNS('urn:no-permission','src')!=='https://forbidden.test/')throw 'inert namespace';
+"#]);
+    assert_eq!(outcome.errors,0,"{}",page.report());
+}
+
+#[test]
+fn attribute_nodes_named_exceptions_conversions_and_independent_promise_tail() {
+    let (_,_,page,outcome)=page("<div id=p title=old></div><div id=q></div>",&[r#"
+var p=document.getElementById('p'),q=document.getElementById('q'),a=p.getAttributeNode('title'),calls=0;
+function error(name,fn){var caught=false;try{fn();}catch(e){caught=e.name===name;}if(!caught)throw name;}
+var duck={name:'title',value:'fake',toString:function(){calls++;return 'title';}};
+error('TypeError',function(){p.setAttributeNode(duck);});error('TypeError',function(){p.setAttributeNode();});
+error('TypeError',function(){p.setAttributeNode.call({},a);});error('InUseAttributeError',function(){q.setAttributeNode(a);});
+if(calls!==0||a.ownerElement!==p||p.title!=='old'||q.hasAttribute('title'))throw 'invalid argument effects';
+error('InvalidCharacterError',function(){document.createAttribute('bad name');});error('NamespaceError',function(){document.createAttributeNS(null,'p:x');});
+var order='',ns={toString:function(){order+='N';return 'urn:original';}},name={toString:function(){order+='Q';return 'a:token';}};
+var b=document.createAttributeNS(ns,name);if(order!=='NQ'||b.namespaceURI!=='urn:original'||b.prefix!=='a'||b.localName!=='token'||b.value!=='')throw 'factory conversions';
+var marker={},caught=false;try{document.createAttribute({toString:function(){throw marker;}});}catch(e){caught=e===marker;}if(!caught)throw 'factory throw identity';
+error('TypeError',function(){document.createAttribute(Symbol());});
+var log='';Promise.resolve().then(function(){try{q.setAttributeNode(a);}catch(e){if(e.name!=='InUseAttributeError')throw e;log+='caught';}}).finally(function(){log+='-finally';});
+Promise.resolve().then(function(){log+='-tail';});window.addEventListener('load',function(){if(log.indexOf('caught')<0||log.indexOf('finally')<0||log.indexOf('tail')<0)throw 'promise continuation';});
+"#]);
+    assert_eq!(outcome.errors,0,"{}",page.report());
+}
+
+#[test]
+fn html_direction_language_and_alignment_reflect_native_attributes_and_keep_conversion_atomic() {
+    let (doc,_,page,outcome)=page("<div id=p dir=RtL lang=EN align=LeFt>Text</div><span id=s></span>",&[r#"
+var p=document.getElementById('p'),s=document.getElementById('s');
+if(p.dir!=='rtl'||p.lang!=='EN'||p.align!=='LeFt'||!('dir' in p)||!('lang' in p)||!('align' in p))throw 'initial reflection';
+var attr=p.getAttributeNode('align'),calls=0;p.align={toString:function(){calls++;return 'right';}};
+if(calls!==1||p.align!=='right'||attr.value!=='right'||p.getAttribute('align')!=='right')throw 'native attribute identity';
+p.dir='AUTO';if(p.dir!=='auto'||p.getAttribute('dir')!=='AUTO')throw 'known direction value';
+p.dir='invalid';if(p.dir!==''||p.getAttribute('dir')!=='invalid')throw 'invalid direction';
+p.dir=null;if(p.dir!==''||p.getAttribute('dir')!=='null')throw 'DOMString conversion';
+p.lang=17;if(p.lang!=='17'||p.getAttribute('lang')!=='17')throw 'language string';
+var marker={},caught=false;try{p.align={toString:function(){throw marker;}};}catch(x){caught=x===marker;}if(!caught||p.align!=='right')throw 'conversion rollback';
+caught=false;try{p.align=Symbol();}catch(x){caught=x.name==='TypeError';}if(!caught||p.align!=='right')throw 'symbol';
+p.removeAttribute('dir');p.removeAttribute('lang');if(p.dir!==''||p.lang!=='')throw 'absence';
+if('align' in s||s.align!==undefined)throw 'unrelated interface';
+var t=document.createTextNode('t');if('dir' in t||t.dir!==undefined)throw 'text brand';
+"#]);
+    assert_eq!(outcome.errors,0,"{}",page.report());
+    let node=doc.nodes.iter().enumerate().find_map(|(n,_)|(doc.attr(n,"id")==Some("p")).then_some(n)).unwrap();
+    assert_eq!(crate::css::compute(&doc,&HashMap::new())[node].align,crate::css::Align::Right);
+}
+
+#[test]
+fn html_use_map_reflects_raw_attribute_identity_conversion_and_unrelated_interfaces() {
+    let(_,_,page,outcome)=page("<img id=pic usemap='#Raw Map'><input id=entry usemap='#Input'><span id=other></span>",&[r#"
+var pic=document.getElementById('pic'),entry=document.getElementById('entry'),other=document.getElementById('other'),attr=pic.getAttributeNode('usemap'),calls=0;
+if(pic.useMap!=='#Raw Map'||entry.useMap!=='#Input'||!('useMap' in pic)||!('useMap' in entry)||'useMap' in other||other.useMap!==undefined)throw 'interfaces/raw read';
+pic.useMap={toString:function(){calls++;return 'https://example.invalid/maps#Raw';}};
+if(calls!==1||pic.useMap!=='https://example.invalid/maps#Raw'||attr!==pic.getAttributeNode('usemap')||attr.value!==pic.useMap)throw 'real string reflection';
+pic.setAttribute('usemap','#Changed');if(pic.useMap!=='#Changed'||attr.value!=='#Changed')throw 'attribute path';pic.removeAttribute('usemap');if(pic.useMap!==''||attr.ownerElement!==null||attr.value!=='#Changed')throw 'remove identity';
+pic.useMap=null;if(pic.useMap!=='null')throw 'DOMString';var marker={},caught=false;try{pic.useMap={toString:function(){throw marker;}};}catch(e){caught=e===marker;}if(!caught||pic.useMap!=='null')throw 'abrupt conversion';caught=false;try{pic.useMap=Symbol();}catch(e){caught=e.name==='TypeError';}if(!caught||pic.useMap!=='null')throw 'symbol';
+var detached=new Image();if(detached.useMap!=='')throw 'default';detached.useMap='#Detached';if(detached.getAttribute('usemap')!=='#Detached'||detached.useMap!=='#Detached')throw 'detached reflection';entry.useMap=17;if(entry.useMap!=='17'||entry.getAttribute('usemap')!=='17')throw 'input string';
+"#]);assert_eq!(outcome.errors,0,"{}",page.report());
+}
+
+#[test]
+fn html_use_map_retained_and_copy_failures_preserve_native_attribute() {
+    let(mut doc,mut forms,mut page,outcome)=page("<img id=pic usemap='#old'>",&["var pic=document.getElementById('pic');var saved=pic.getAttributeNode('usemap');"]);assert_eq!(outcome.errors,0,"{}",page.report());let node=(0..doc.nodes.len()).find(|&node|doc.attr(node,"id")==Some("pic")).unwrap();let before=page.state.retained;let limit=page.state.retained_limit;page.state.retained_limit=before;
+    let mut bridge=Bridge{doc:&mut doc,forms:&mut forms,state:&mut page.state};assert!(bridge.dom_set(node_handle(node),"useMap",&Value::String("#a-longer-name".into())).is_err());assert_eq!(bridge.doc.attr(node,"usemap"),Some("#old"));assert_eq!(bridge.state.retained,before);bridge.state.retained_limit=limit;let copies=bridge.state.copy_work;bridge.state.copy_work=0;assert!(bridge.dom_get(node_handle(node),"useMap").is_err());assert_eq!(bridge.doc.attr(node,"usemap"),Some("#old"));bridge.state.copy_work=copies;
+    let outcome=page.console_eval(&mut doc,&mut forms,"if(saved!==pic.getAttributeNode('usemap')||saved.value!=='#old'||pic.useMap!=='#old')throw 'failed mutation';pic.useMap='#new';if(saved.value!=='#new')throw 'recovery';");assert_eq!(outcome.errors,0,"{}",page.report());
+}
+
+#[test]
+fn replace_child_returns_removed_identity_and_preserves_detached_references_and_collections() {
+    let (_,_,page,outcome)=page("<div id=p><span id=old title=kept><b id=inside>old</b></span><em id=tail>tail</em></div><div id=q><i id=incoming>new</i></div>", &[r#"
+var p=document.getElementById('p'),q=document.getElementById('q'),old=document.getElementById('old'),inside=document.getElementById('inside'),tail=document.getElementById('tail'),incoming=document.getElementById('incoming');
+var attr=old.getAttributeNode('title'),marker={value:13};old.marker=marker;
+var live=p.getElementsByTagName('span'),snapshot=p.querySelectorAll('span');
+if(typeof p.replaceChild!=='function'||p.replaceChild.length!==2||!('replaceChild' in p))throw 'method binding';
+if(p.replaceChild(incoming,old)!==old||p.firstChild!==incoming||incoming.nextSibling!==tail||tail.previousSibling!==incoming||p.lastChild!==tail||q.firstChild!==null)throw 'replacement order';
+if(old.parentNode!==null||old.isConnected||inside.parentNode!==old||inside.isConnected||old.ownerDocument!==document||attr.ownerElement!==old||attr.value!=='kept'||old.marker!==marker)throw 'detached identities';
+if(live.length!==0||snapshot.length!==1||snapshot.item(0)!==old||document.getElementById('old')!==null)throw 'live/static lookup';
+if(p.replaceChild(incoming,incoming)!==incoming||p.firstChild!==incoming||incoming.nextSibling!==tail)throw 'same node';
+var text=document.createTextNode('replacement text');if(p.replaceChild(text,tail)!==tail||text.parentNode!==p||text.previousSibling!==incoming||p.lastChild!==text||tail.parentNode!==null)throw 'text replacement';
+"#]);
+    assert_eq!(outcome.errors,0,"{}",page.report());
+}
+
+#[test]
+fn replace_child_moves_either_sibling_and_extracts_an_incoming_descendant_from_removed_subtree() {
+    let (_,_,page,outcome)=page("<div id=p><i id=a></i><i id=b></i><i id=c></i><i id=d></i></div><div id=r><div id=old><section id=inside><span id=incoming>new</span><b id=stay>stay</b></section></div><em id=tail>tail</em></div>", &[r#"
+var p=document.getElementById('p'),a=document.getElementById('a'),b=document.getElementById('b'),c=document.getElementById('c'),d=document.getElementById('d');
+if(p.replaceChild(a,c)!==c||p.firstChild!==b||b.nextSibling!==a||a.nextSibling!==d||c.parentNode!==null)throw 'preceding sibling';
+if(p.replaceChild(d,b)!==b||p.firstChild!==d||d.nextSibling!==a||p.lastChild!==a||a.previousSibling!==d||b.parentNode!==null)throw 'following sibling';
+var r=document.getElementById('r'),old=document.getElementById('old'),inside=document.getElementById('inside'),incoming=document.getElementById('incoming'),stay=document.getElementById('stay'),tail=document.getElementById('tail');
+if(r.replaceChild(incoming,old)!==old||r.firstChild!==incoming||incoming.nextSibling!==tail||incoming.parentNode!==r||!incoming.isConnected)throw 'incoming descendant';
+if(old.parentNode!==null||old.isConnected||inside.parentNode!==old||inside.firstChild!==stay||stay.parentNode!==inside||stay.isConnected||old.getElementsByTagName('span').length!==0)throw 'outgoing descendants';
+var detached=document.createElement('div'),first=document.createElement('b'),second=document.createElement('i');detached.appendChild(first);if(detached.replaceChild(second,first)!==first||second.parentNode!==detached||second.isConnected||first.parentNode!==null)throw 'detached parent';
+"#]);
+    assert_eq!(outcome.errors,0,"{}",page.report());
+}
+
+#[test]
+fn replace_child_named_errors_keep_order_and_promise_tail_without_coercing_non_nodes() {
+    let (doc,_,page,outcome)=page("<div id=p title=attribute><span id=old></span></div>", &[r#"
+var p=document.getElementById('p'),old=document.getElementById('old'),orphan=document.createElement('i'),text=document.createTextNode('text'),attr=p.getAttributeNode('title'),coercions=0;
+function check(name,call){var caught='';try{call();}catch(e){caught=e.name;}if(caught!==name)throw 'wrong exception '+caught+' expected '+name;}
+check('TypeError',function(){p.replaceChild();});check('TypeError',function(){p.replaceChild(orphan);});
+check('TypeError',function(){p.replaceChild({toString:function(){coercions++;return 'node';}},old);});
+check('TypeError',function(){p.replaceChild(p,null);});check('TypeError',function(){p.replaceChild.call({},orphan,old);});
+check('HierarchyRequestError',function(){text.replaceChild(orphan,old);});
+check('HierarchyRequestError',function(){p.replaceChild(p,orphan);});
+check('HierarchyRequestError',function(){p.replaceChild(document,old);});check('HierarchyRequestError',function(){p.replaceChild(attr,old);});
+check('NotFoundError',function(){p.replaceChild(attr,orphan);});check('HierarchyRequestError',function(){p.replaceChild(document,orphan);});
+var detached=document.createElement('div'),detachedOld=document.createElement('b');detached.appendChild(detachedOld);
+check('NotFoundError',function(){detached.replaceChild(document,orphan);});check('HierarchyRequestError',function(){detached.replaceChild(document,detachedOld);});
+check('NotFoundError',function(){p.replaceChild(orphan,orphan);});check('NotFoundError',function(){p.replaceChild(orphan,attr);});
+if(coercions||p.firstChild!==old||old.parentNode!==p||orphan.parentNode!==null)throw 'exception side effects';
+var log='';Promise.resolve().then(function(){try{p.replaceChild(orphan,orphan);}catch(e){log+=e.name;}finally{log+=':finally';}});Promise.resolve().then(function(){log+=':tail';document.title=log;});
+"#]);
+    assert_eq!(outcome.errors,0,"{}",page.report());
+    assert_eq!(doc.title,"NotFoundError:finally:tail");
+}
+
+#[test]
+fn replace_child_rejects_unsupported_native_subtrees_before_editing_either_parent() {
+    for (old,new) in [("<span id=old>old</span>","<section id=incoming><input id=field value=original></section>"),
+        ("<span id=old><input id=field value=original></span>","<section id=incoming>new</section>")] {
+        let html=format!("<div id=p>{old}</div><div id=q>{new}</div>");
+        let (mut doc,mut forms,mut page,outcome)=page(&html,&["document.getElementById('field').value='edited';"]);
+        assert_eq!(outcome.errors,0,"{}",page.report());
+        let node=|id:&str|doc.nodes.iter().enumerate().find_map(|(node,_)|(doc.attr(node,"id")==Some(id)).then_some(node)).unwrap();
+        let (parent,source,old,incoming)=(node("p"),node("q"),node("old"),node("incoming"));
+        let before=(doc.nodes[parent].children.clone(),doc.nodes[source].children.clone());
+        {
+            let mut bridge=Bridge{doc:&mut doc,forms:&mut forms,state:&mut page.state};
+            assert!(bridge.call(node_handle(parent),"replaceChild",&[Value::Host(node_handle(incoming)),Value::Host(node_handle(old))]).is_err());
+        }
+        assert_eq!((doc.nodes[parent].children.clone(),doc.nodes[source].children.clone()),before);
+        let result=page.console_eval(&mut doc,&mut forms,"if(document.getElementById('field').value!=='edited'||document.getElementById('old').parentNode!==document.getElementById('p')||document.getElementById('incoming').parentNode!==document.getElementById('q'))throw 'partial replacement';");
+        assert_eq!(result.errors,0,"{}",page.report());
+    }
+}
+
+#[test]
+fn replace_child_work_exhaustion_is_atomic_and_next_job_recovers() {
+    let mut failures=0;
+    let mut successes=0;
+    for allowance in [0,1,4,16,64,256] {
+        let (mut doc,mut forms,mut page,outcome)=page("<div id=p><span id=old>old</span></div><div id=q><section id=incoming>new</section></div>",&[]);
+        assert_eq!(outcome.errors,0);
+        let node=|id:&str|doc.nodes.iter().enumerate().find_map(|(node,_)|(doc.attr(node,"id")==Some(id)).then_some(node)).unwrap();
+        let (parent,source,old,incoming)=(node("p"),node("q"),node("old"),node("incoming"));
+        let before=(doc.nodes[parent].children.clone(),doc.nodes[source].children.clone());
+        let commits=page.state.dom_commits;
+        page.state.host_work=allowance;
+        let result=Bridge{doc:&mut doc,forms:&mut forms,state:&mut page.state}.call(node_handle(parent),"replaceChild",&[Value::Host(node_handle(incoming)),Value::Host(node_handle(old))]);
+        if result.is_err() {
+            failures+=1;
+            assert_eq!((doc.nodes[parent].children.clone(),doc.nodes[source].children.clone()),before);
+            assert_eq!(page.state.tree.parents[old],Some(parent));
+            assert_eq!(page.state.tree.parents[incoming],Some(source));
+            assert_eq!(page.state.dom_commits,commits);
+            page.begin_job();
+            let result=page.console_eval(&mut doc,&mut forms,"document.getElementById('p').replaceChild(document.getElementById('incoming'),document.getElementById('old'));");
+            assert_eq!(result.errors,0,"{}",page.report());
+        } else { successes+=1; }
+        assert_eq!(doc.nodes[parent].children,[incoming]);
+        assert!(doc.nodes[source].children.is_empty());
+    }
+    assert!(failures>0&&successes>0,"Exercise small failure profiles and ordinary completion separately");
+}
+
+
+#[test]
+fn shared_lookup_exception_element_absence_and_accessor_controls() {
+    let (_,_,page,outcome)=shared_probe(r#"
+var p=document.getElementById('p'),calls=0;
+if('offlineMissing' in p||typeof p.offlineMissing!=='undefined'||Object.getOwnPropertyDescriptor(p,'offlineMissing')!==undefined)throw 'absence';
+p.offlineMissing?.(calls++);if(calls!==0)throw 'optional call';
+Object.defineProperty(p,'probe',{get:function(){calls++;if(this!==p)throw 'receiver';return 17;}});
+if(p.probe!==17||calls!==1||Object.getOwnPropertyDescriptor(p,'probe').get===undefined)throw 'accessor';
+var marker={},same=false;try{Object.defineProperty(p,'failure',{get:function(){throw marker;}});p.failure;}catch(e){same=e===marker;}finally{calls++;}
+if(!same||calls!==2)throw 'identity/finally';
+"#);
+    assert_eq!(outcome.errors,0,"{}",page.report());
+}
+
+#[test]
+fn shared_lookup_exception_attr_absence_and_inherited_descriptor() {
+    let (_,_,page,outcome)=shared_probe(r#"
+var attr=document.getElementById('p').getAttributeNode('title'),calls=0;
+if('offlineMissing' in attr||typeof attr.offlineMissing!=='undefined'||Object.getOwnPropertyDescriptor(attr,'offlineMissing')!==undefined)throw 'absence';
+attr.offlineMissing?.(calls++);if(calls!==0||attr.name!=='title'||Object.hasOwn(attr,'name')||Object.getOwnPropertyDescriptor(attr,'name')!==undefined)throw 'Attr contract';
+"#);
+    assert_eq!(outcome.errors,0,"{}",page.report());
+}
+
+#[test]
+fn shared_lookup_exception_created_event_absence_and_inherited_descriptor() {
+    let (_,_,page,outcome)=shared_probe(r#"
+var event=document.createEvent('Event'),calls=0;
+if('offlineMissing' in event||typeof event.offlineMissing!=='undefined'||Object.getOwnPropertyDescriptor(event,'offlineMissing')!==undefined)throw 'absence';
+event.offlineMissing?.(calls++);if(calls!==0||event.type!==''||event.isTrusted||Object.hasOwn(event,'type')||Object.getOwnPropertyDescriptor(event,'type')!==undefined)throw 'Event contract';
+"#);
+    assert_eq!(outcome.errors,0,"{}",page.report());
+}
+
+#[test]
+fn shared_lookup_exception_native_tail_preserves_inherited_accessor_receiver_and_calls() {
+    let (mut doc,mut forms,mut page,outcome)=shared_probe(r#"
+var attr=document.getElementById('p').getAttributeNode('title'),event=document.createEvent('Event'),calls=0,marker={};
+Object.defineProperty(Object.prototype,'offlineInherited',{configurable:true,get:function(){if(this!==attr&&this!==event)throw 'receiver';calls++;return 25;}});
+Object.prototype.offlineCall=function(){return this;};
+Object.defineProperty(Object.prototype,'offlineThrows',{get:function(){throw marker;}});
+for(var item of [attr,event]){
+ if(!('offlineInherited' in item)||Object.hasOwn(item,'offlineInherited')||item.offlineInherited!==25||item.offlineCall()!==item||item.offlineCall?.()!==item)throw 'prototype';
+ var same=false;try{item.offlineThrows;}catch(e){same=e===marker;}if(!same)throw 'thrown identity';
+}
+if(calls!==2||!('normalize' in attr)||typeof attr.normalize!=='function')throw 'presence without accessor execution';
+"#);
+    assert_eq!(outcome.errors,0,"{}",page.report());
+    let mut bridge=Bridge{doc:&mut doc,forms:&mut forms,state:&mut page.state};
+    let Value::Host(event)=bridge.call(DOCUMENT,"createEvent",&[Value::String("Event".into())]).unwrap() else {panic!("native Event")};
+    assert!(bridge.own_data(event,"isTrusted").is_err(),"Do not invent a data descriptor for the unforgeable accessor");
+}
+
+#[test]
+fn shared_lookup_exception_dom_failure_rejects_normally_without_cancelling_tail() {
+    let (doc,_,page,outcome)=shared_probe(r#"
+var p=document.getElementById('p'),orphan=document.createElement('span'),log='';
+Promise.resolve().then(function(){try{p.removeChild(orphan);}catch(e){log+=e.name;}finally{log+=':finally';}});
+Promise.resolve().then(function(){log+=':tail';document.title=log;});
+"#);
+    assert_eq!(outcome.errors,0,"{}",page.report());
+    assert_eq!(doc.title,"NotFoundError:finally:tail");
+}
+
+#[test]
+fn shared_lookup_exception_invalid_attribute_name_is_catchable_without_mutation() {
+    let (_,_,page,outcome)=shared_probe(r#"
+var p=document.getElementById('p'),name='',finallyRan=false;
+try{p.setAttribute('data bad','x');}catch(e){name=e.name;}finally{finallyRan=true;}
+if(name!=='InvalidCharacterError'||!finallyRan||p.getAttribute('title')!=='present'||p.hasAttribute('data bad'))throw 'attribute error contract';
+"#);
+    assert_eq!(outcome.errors,0,"{}",page.report());
+}
+
+#[test]
+fn name_namespace_attribute_values_are_exact_live_and_do_not_allocate_attr_identities() {
+    let (mut doc,mut forms,mut page,outcome)=page("<div id=p title=old x:y=colon xmlns:x=raw null=n undefined=u></div>",&[r#"
+var p=document.getElementById('p'),get=p.getAttributeNS;
+if(get.length!==2||get!==p.getAttributeNS||get.call(p,null,'title')!=='old')throw 'metadata/receiver';
+if(p.getAttributeNS('', 'title')!=='old'||p.getAttributeNS(undefined,'title')!=='old'||p.getAttributeNS(null,'TITLE')!==null)throw 'nullable/exact name';
+if(p.getAttributeNS('http://www.w3.org/1999/xhtml','title')!==null||p.getAttributeNS(null,'missing')!==null||p.getAttributeNS(null,'bad name')!==null)throw 'namespace/miss';
+if(p.getAttributeNS(null,'x:y')!=='colon'||p.getAttributeNS(null,'y')!==null||p.getAttributeNS('urn:x','y')!==null)throw 'raw colon';
+if(p.getAttributeNS(null,'xmlns:x')!=='raw'||p.getAttributeNS('http://www.w3.org/2000/xmlns/','x')!==null)throw 'raw xmlns';
+if(p.getAttributeNS(null,null)!=='n'||p.getAttributeNS(null,undefined)!=='u')throw 'local DOMString';
+p.setAttribute('title','new');if(get.call(p,null,'title')!=='new')throw 'live value';document.title='namespace-values-ok';
+"#]);
+    assert_eq!(outcome.errors,0,"{}",page.report());
+    assert_eq!(doc.title,"namespace-values-ok");
+    assert!(page.state.attributes.is_empty());
+    let node=(0..doc.nodes.len()).find(|&n|doc.attr(n,"id")==Some("p")).unwrap();
+    doc.nodes[node].namespace=crate::html::Namespace::UnknownForeign;
+    let mut bridge=Bridge{doc:&mut doc,forms:&mut forms,state:&mut page.state};
+    assert!(bridge.call(node_handle(node),"getAttributeNS",&[Value::Null,Value::String("title".into())]).unwrap_err().contains("foreign"));
+    bridge.doc.nodes[node].namespace=crate::html::Namespace::Html;
+    let retained=bridge.state.retained;
+    bridge.state.host_work=0;
+    assert!(bridge.call(node_handle(node),"getAttributeNS",&[Value::Null,Value::String("title".into())]).is_err());
+    bridge.state.host_work=bridge.state.limits.host_work;
+    bridge.state.limits.host.string_bytes=1;
+    assert!(bridge.call(node_handle(node),"getAttributeNS",&[Value::Null,Value::String("title".into())]).is_err());
+    assert!(bridge.state.attributes.is_empty());
+    assert_eq!(bridge.state.retained,retained);
+    assert_eq!(bridge.doc.attr(node,"title"),Some("new"));
+}
+
+#[test]
+fn name_namespace_attribute_value_conversion_is_ordered_nullable_and_reentrant() {
+    let (_,_,page,outcome)=page("<div id=p title=old></div>",&[r#"
+var p=document.getElementById('p'),log='',marker={};
+var ns={toString:function(){log+='N';return '';}};
+var name={toString:function(){log+='L';p.setAttribute('title','current');return 'title';}};
+if(p.getAttributeNS(ns,name)!=='current'||log!=='NL')throw 'ordered live conversion';
+log='';if(p.getAttributeNS({toString:function(){log+='N';return null;}},name)!==null||log!=='NL')throw 'object null string';
+log='';var count=0;try{p.getAttributeNS(ns);}catch(e){if(e.name==='TypeError')count++;}
+try{p.getAttributeNS(Symbol(),name);}catch(e){if(e.name==='TypeError')count++;}
+if(log!=='')throw 'arity/namespace before name';
+try{p.getAttributeNS('urn:x',Symbol());}catch(e){if(e.name==='TypeError')count++;}
+var same=false;try{p.getAttributeNS(null,{toString:function(){throw marker;}});}catch(e){same=e===marker;}if(!same)throw 'throw identity';
+for(var bad of [{},window,document,p.style,p.dataset,document.createTextNode('x')])try{p.getAttributeNS.call(bad,ns,name);}catch(e){if(e.name==='TypeError')count++;}
+if(count!==9||log!==''||p.getAttribute('title')!=='current')throw 'brand/coercion';
+"#]);
+    assert_eq!(outcome.errors,0,"{}",page.report());
+}
+
+#[test]
+fn name_namespace_live_name_nodelists_keep_tree_order_methods_and_static_snapshots() {
+    let (_,_,page,outcome)=page("<div id=root><span id=a name=probe></span><span id=b name=probe></span><span name=Probe></span><span name=''></span><span></span><i id=probe></i></div><div id=outside><span id=c name=probe></span></div><svg name=probe></svg>",&[r#"
+var get=document.getElementsByName,root=document.getElementById('root'),outside=document.getElementById('outside');
+var a=document.getElementById('a'),b=document.getElementById('b'),c=document.getElementById('c');
+var list=get.call(document,'probe'),snapshot=document.querySelectorAll('span[name=probe]');
+if(get.length!==1||get!==document.getElementsByName||list.length!==3||list[0]!==a||list[1]!==b||list[2]!==c)throw 'initial order';
+if(list.item(1)!==b||list.item(99)!==null||list[99]!==undefined||list.namedItem!==undefined||list.a!==undefined||'namedItem' in list)throw 'NodeList surface';
+if(document.getElementsByName('').length!==1||document.getElementsByName('Probe').length!==1||document.getElementsByName('PROBE').length!==0)throw 'exact name';
+if(Object.keys(list).join(',')!=='0,1,2'||Object.getOwnPropertyNames(list).join(',')!=='0,1,2')throw 'indices';
+outside.appendChild(b);if(list[1]!==c||list[2]!==b||snapshot[1]!==b||snapshot.length!==3)throw 'move/live versus snapshot';
+root.removeChild(a);if(list.length!==2||list[0]!==c||list[1]!==b||snapshot[0]!==a)throw 'remove';
+var hits=0,context={};list.forEach(function(node,index,owner){if(this!==context||owner!==list||index!==0||node!==c)throw 'callback';hits++;outside.removeChild(c);outside.removeChild(b);},context);
+if(hits!==1||list.length!==0||Object.keys(list).length!==0)throw 'removed live indices must skip';
+root.appendChild(a);if(list.length!==1||list[0]!==a||Array.prototype.slice.call(list)[0]!==a)throw 'reinsert/arraylike';
+"#]);
+    assert_eq!(outcome.errors,0,"{}",page.report());
+}
+
+#[test]
+fn name_namespace_name_list_conversion_brand_and_retention_failures_are_atomic() {
+    let (mut doc,mut forms,mut page,outcome)=page("<span name=null></span><span name=undefined></span>",&[r#"
+if(document.getElementsByName(null).length!==1||document.getElementsByName(undefined).length!==1)throw 'DOMString';
+var converted=0,arg={toString:function(){converted++;return 'null';}},get=document.getElementsByName,count=0;
+for(var bad of [{},window,document.body,document.createTextNode('x')])try{get.call(bad,arg);}catch(e){if(e.name==='TypeError')count++;}
+try{get();}catch(e){if(e.name==='TypeError')count++;}try{get(Symbol());}catch(e){if(e.name==='TypeError')count++;}
+if(count!==6||converted!==0||document.getElementsByName(arg).length!==1||converted!==1)throw 'brand/arity/conversion';
+"#]);
+    assert_eq!(outcome.errors,0,"{}",page.report());
+    assert_eq!(page.state.node_list_references,0);
+    let before=(page.state.node_lists.len(),page.state.retained);
+    page.state.retained_limit=page.state.retained;
+    let mut bridge=Bridge{doc:&mut doc,forms:&mut forms,state:&mut page.state};
+    assert!(bridge.call(DOCUMENT,"getElementsByName",&[Value::String("unretained".into())]).is_err());
+    assert_eq!(before,(bridge.state.node_lists.len(),bridge.state.retained));
+}
+
+#[test]
+fn native_element_expandos_are_real_ordinary_properties_with_native_accessor_receivers() {
+    let (doc,_,page,outcome)=page("<div id=p></div><form id=f><input id=field name=customProbe></form>",&[r#"
+var p=document.getElementById('p');if(p.customProbe!==undefined||'customProbe' in p||Object.hasOwn(p,'customProbe'))throw 'real absent key';
+p.one=1;p.only=2;p.ariana=3;p.onCustomProbe=4;p.srcdoc={ordinary:true};
+if(p.one!==1||p.only!==2||p.ariana!==3||p.onCustomProbe!==4||p.srcdoc.ordinary!==true||p.getAttribute('srcdoc')!==null)throw 'arbitrary keys/tag-specific native metadata';
+delete p.one;delete p.only;delete p.ariana;delete p.onCustomProbe;delete p.srcdoc;
+p.customProbe=17;if(p.customProbe!==17||!('customProbe' in p)||!Object.hasOwn(p,'customProbe'))throw 'stored key';
+Object.defineProperty(p,'hiddenProbe',{value:9,writable:true,configurable:true});
+var seen=null;Object.defineProperty(p,'accessorProbe',{get:function(){seen=this;return this.customProbe+1;},set:function(v){seen=this;this.customProbe=v;},enumerable:true,configurable:true});
+if(p.accessorProbe!==18||seen!==p)throw 'getter receiver';p.accessorProbe=30;if(p.customProbe!==30||seen!==p)throw 'setter receiver';
+var d=Object.getOwnPropertyDescriptor(p,'accessorProbe');if(typeof d.get!=='function'||!d.enumerable||!d.configurable)throw 'descriptor';
+if(Object.keys(p).join(',')!=='customProbe,accessorProbe'||Object.getOwnPropertyNames(p).join(',')!=='customProbe,hiddenProbe,accessorProbe')throw 'own keys/flags';
+var key=Symbol('own');p[key]=p;var symbols=Object.getOwnPropertySymbols(p);if(symbols.length!==1||symbols[0]!==key||p[key]!==p)throw 'symbols';
+var copy=Object.assign({},p);if(copy.customProbe!==30||copy.accessorProbe!==31||copy[key]!==p||Object.hasOwn(copy,'hiddenProbe'))throw 'copy real own values';
+if(!delete p.customProbe||Object.hasOwn(p,'customProbe')||p.customProbe!==undefined)throw 'deletion';
+Object.defineProperties(p,{methodProbe:{value:function(){return this===p;},enumerable:true}});if(!p.methodProbe()||p.methodProbe?.()!==true)throw 'ordinary method this';
+if(p.id!=='p'||p.localName!=='div'||Object.hasOwn(p,'id')||document.getElementById('f').customProbe!==document.getElementById('field'))throw 'native namespace/named boundary';
+document.title='element-expando-ok';
+"#]);
+    assert_eq!(outcome.errors,0,"{}",page.report());
+    assert_eq!(doc.title,"element-expando-ok");
+}
+
+#[test]
+fn native_element_expandos_first_descriptor_symbol_and_inspection_paths_agree() {
+    let (doc,_,page,outcome)=page("<div id=a></div><span id=b></span><p id=c></p><img id=i>",&[r#"
+var a=document.getElementById('a'),b=document.getElementById('b'),c=document.getElementById('c');
+Object.defineProperty(a,'firstProbe',{value:1,enumerable:true,configurable:true});
+var key=Symbol('first');Object.defineProperty(b,key,{value:2,enumerable:true,configurable:true});
+if(Object.keys(c).length||Object.getOwnPropertyNames(c).length||Object.getOwnPropertySymbols(c).length)throw 'empty own inspection';
+Object.defineProperties(c,{});Object.assign(c,{assignedProbe:3});
+if(a.firstProbe!==1||Object.getOwnPropertyDescriptor(a,'firstProbe').value!==1||b[key]!==2||c.assignedProbe!==3)throw 'first operation paths';
+var i=document.getElementById('i');Image.prototype.imageProbe=7;if(i.imageProbe!==7||Object.hasOwn(i,'imageProbe'))throw 'canonical prototype inheritance';delete Image.prototype.imageProbe;
+document.title='element-expando-first-ok';
+"#]);
+    assert_eq!(outcome.errors,0,"{}",page.report());
+    assert_eq!(doc.title,"element-expando-first-ok");
+}
+
+#[test]
+fn native_element_expandos_preserve_unsupported_native_and_enumeration_boundaries() {
+    let (mut doc,mut forms,mut page,outcome)=page("<div id=p></div><iframe id=inert srcdoc=x></iframe>",&["var p=document.getElementById('p');p.customProbe=1;"]);
+    assert_eq!(outcome.errors,0,"{}",page.report());
+    for operation in ["p.getBoxQuads;","Object.defineProperty(p,'innerHTML',{value:'x'});","Object.defineProperty(document.createElement('input'),'files',{value:[]});","Object.defineProperty(document.createElement('blockquote'),'cite',{value:'https://example.test/'});","Object.defineProperty(document.createElement('meta'),'content',{value:'x'});","Object.defineProperty(document.createElement('link'),'as',{value:'script'});","Object.setPrototypeOf(p,Array.prototype);","for(var key in p){};"] {
+        let outcome=page.console_eval(&mut doc,&mut forms,operation);
+        assert_eq!(outcome.errors,1,"{operation}: {}",page.report());
+    }
+    let outcome=page.console_eval(&mut doc,&mut forms,"if(p.id!=='p'||p.customProbe!==1)throw 'recovery';");
+    assert_eq!(outcome.errors,0,"{}",page.report());
+    let inert=(0..doc.nodes.len()).find(|&node|doc.attr(node,"id")==Some("inert")).unwrap();
+    let bridge=Bridge {doc:&mut doc,forms:&mut forms,state:&mut page.state};
+    assert!(bridge.expando_owner(node_handle(inert)).is_none());
+}
+
+#[test]
+fn html_element_names_have_real_namespace_and_null_prefix_independent_of_raw_xmlns() {
+    let (mut doc,mut forms,mut page,outcome)=page("<DIV id=p xmlns='urn:raw'></DIV>",&[r#"
+var p=document.getElementById('p');if(p.localName!=='div'||p.tagName!=='DIV'||p.prefix!==null||p.namespaceURI!=='http://www.w3.org/1999/xhtml')throw 'parsed names';
+var colon=document.createElement('X:Y');if(colon.localName!=='x:y'||colon.prefix!==null||colon.namespaceURI!==p.namespaceURI)throw 'raw HTML colon';
+var attr=p.getAttributeNode('id');if(attr.localName!=='id'||attr.namespaceURI!==null||attr.prefix!==null)throw 'attribute distinct namespace';
+p.localName='changed';p.prefix='x';p.namespaceURI='urn:other';if(p.localName!=='div'||p.prefix!==null||p.namespaceURI!=='http://www.w3.org/1999/xhtml')throw 'readonly';
+var t=document.createTextNode('x');if('localName' in t||t.localName!==undefined||t.prefix!==undefined||document.localName!==undefined)throw 'Element brand';document.title='element-names-ok';
+"#]);
+    assert_eq!(outcome.errors,0,"{}",page.report());
+    assert_eq!(doc.title,"element-names-ok");
+    let node=(0..doc.nodes.len()).find(|&n|doc.attr(n,"id")==Some("p")).unwrap();
+    doc.nodes[node].namespace=crate::html::Namespace::UnknownForeign;
+    let mut bridge=Bridge {doc:&mut doc,forms:&mut forms,state:&mut page.state};
+    assert!(bridge.get(node_handle(node),"localName").unwrap_err().contains("namespace"));
+}
+
+#[test]
+fn detached_never_published_srcdoc_reflects_domstring_and_real_attr_identity() {
+    let (doc,_,page,outcome)=page("<p>ordinary</p>",&[r#"
+var f=document.createElement('iframe');if(f.srcdoc!==''||!('srcdoc' in f)||f.hasAttribute('srcdoc')||f.contentWindow!==null)throw 'default';
+var calls=0;f.srcdoc={toString:function(){calls++;return '<p>actual raw source</p>';}};
+if(calls!==1||f.srcdoc!=='<p>actual raw source</p>'||f.getAttribute('srcdoc')!==f.srcdoc||f.contentWindow!==null)throw 'real reflection/no execution';
+var attr=f.getAttributeNode('srcdoc');f.srcdoc=null;if(f.srcdoc!=='null'||attr.value!=='null')throw 'DOMString null';
+f.srcdoc=undefined;if(f.srcdoc!=='undefined'||f.getAttributeNode('srcdoc')!==attr)throw 'undefined/identity';
+var caught=false;try{f.srcdoc=Symbol();}catch(e){caught=e.name==='TypeError';}if(!caught||f.srcdoc!=='undefined')throw 'Symbol atomic';
+var marker={},same=false;try{f.srcdoc={toString:function(){throw marker;}};}catch(e){same=e===marker;}if(!same||f.srcdoc!=='undefined')throw 'throw identity';
+f.removeAttribute('srcdoc');if(f.srcdoc!==''||attr.ownerElement!==null||attr.value!=='undefined')throw 'raw removal/detach';
+for(var e of [document.createElement('div'),document.createTextNode('x')])if('srcdoc' in e||e.srcdoc!==undefined)throw 'brand';
+document.title='srcdoc-reflection-ok';
+"#]);
+    assert_eq!(outcome.errors,0,"{}",page.report());
+    assert_eq!(doc.title,"srcdoc-reflection-ok");
+    assert!(page.state.blank_frames.is_empty());
+}
+
+#[test]
+fn node_normalize_merges_real_text_runs_preserving_first_nonempty_and_detached_data() {
+    let (doc,_,page,outcome)=page("<main id=root></main>",&[r#"
+var root=document.getElementById('root'),p=document.createElement('div');root.appendChild(p);
+var empty=document.createTextNode(''),a=document.createTextNode('a'),middle=document.createTextNode(''),b=document.createTextNode('b'),end=document.createTextNode('');
+for(var n of [empty,a,middle,b,end])p.appendChild(n);
+var separator=document.createElement('span'),x=document.createTextNode('x'),y=document.createTextNode('y');separator.appendChild(x);separator.appendChild(y);p.appendChild(separator);
+var z=document.createTextNode('z');p.appendChild(z);
+empty.normalize();a.normalize();if(p.firstChild!==empty||a.data!=='a'||b.parentNode!==p)throw 'Text receiver excludes itself';
+var called=0;if(p.normalize({toString:function(){called++;throw 'ignored';}})!==undefined||called||p.normalize.length!==0||p.normalize!==p.normalize)throw 'metadata/ignored args';
+if(p.firstChild!==a||a.data!=='ab'||a.nextSibling!==separator||separator.nextSibling!==z||x.data!=='xy'||separator.firstChild!==x||x.nextSibling!==null)throw 'nested runs/identity';
+for(var n of [empty,middle,b,end,y])if(n.parentNode!==null||n.isConnected)throw 'detached';if(b.data!=='b'||y.data!=='y'||!a.isConnected)throw 'saved data/connection';
+var attr=root.getAttributeNode('id');attr.normalize();p.normalize();if(a.data!=='ab'||p.firstChild!==a)throw 'idempotent/Attr';
+root.appendChild(b);if(b.parentNode!==root||b.data!=='b')throw 'removed identity reusable';
+var rejected=0;for(var bad of [{},window,p.style,p.classList])try{p.normalize.call(bad);}catch(e){if(e.name==='TypeError')rejected++;}if(rejected!==4)throw 'genuine Node brand';
+document.normalize();document.title='normalize-ok';
+"#]);
+    assert_eq!(outcome.errors,0,"{}",page.report());
+    assert_eq!(doc.title,"normalize-ok");
+}
+
+#[test]
+fn node_normalize_quota_and_late_resource_guard_failures_leave_all_text_unchanged() {
+    let (mut doc,mut forms,mut page,outcome)=page("<title id=t>x</title><div id=p></div>",&[r#"
+var p=document.getElementById('p');p.appendChild(document.createTextNode('left'));p.appendChild(document.createTextNode('right'));
+"#]);
+    assert_eq!(outcome.errors,0,"{}",page.report());
+    let p=(0..doc.nodes.len()).find(|&n|doc.attr(n,"id")==Some("p")).unwrap();
+    let t=(0..doc.nodes.len()).find(|&n|doc.attr(n,"id")==Some("t")).unwrap();
+    let original=doc.nodes[p].children.clone();
+    let original_retained=page.state.retained;
+    page.begin_job();
+    let mut bridge=Bridge {doc:&mut doc,forms:&mut forms,state:&mut page.state};
+    for failure in 0..3 {
+        bridge.state.retained_limit=if failure==0 {original_retained} else {bridge.state.limits.host.retained_bytes};
+        bridge.state.copy_work=if failure==1 {0} else {bridge.state.limits.copy_bytes};
+        bridge.state.host_work=if failure==2 {0} else {bridge.state.limits.host_work};
+        assert!(bridge.normalize_node(node_handle(p)).is_err());
+        assert_eq!(bridge.doc.nodes[p].children,original);
+        assert!(matches!(&bridge.doc.nodes[original[0]].kind,NodeKind::Text(text) if text=="left"));
+        assert_eq!(bridge.state.retained,original_retained);
+    }
+    bridge.state.copy_work=bridge.state.limits.copy_bytes;
+    bridge.state.host_work=bridge.state.limits.host_work;
+    let Value::Host(empty)=bridge.call(DOCUMENT,"createTextNode",&[Value::String(String::new())]).unwrap() else {unreachable!()};
+    let empty=node_index(empty).unwrap();
+    bridge.doc.nodes[t].children.push(empty);
+    bridge.state.detached_nodes.remove(&empty);
+    bridge.state.dirty=true;
+    let error=bridge.normalize_node(DOCUMENT).unwrap_err();
+    assert!(error.contains("native control contents or inert resource"),"{error}");
+    assert_eq!(bridge.doc.nodes[p].children,original);
+    assert_eq!(bridge.doc.nodes[t].children.len(),2);
+    bridge.doc.nodes[t].children.pop();bridge.state.detached_nodes.insert(empty);bridge.state.dirty=true;
+    bridge.normalize_node(node_handle(p)).unwrap();
+    assert_eq!(bridge.doc.nodes[p].children,[original[0]]);
+    assert!(matches!(&bridge.doc.nodes[original[0]].kind,NodeKind::Text(text) if text=="leftright"));
+    assert!(matches!(&bridge.doc.nodes[original[1]].kind,NodeKind::Text(text) if text=="right"));
+}
+
+#[test]
+fn class_list_add_uses_ordered_boolean_free_domstring_tokens_and_atomic_validation() {
+    let (doc,_,page,outcome)=page("<div id=p class=' a a B '></div>",&[r#"
+var p=document.getElementById('p'),l=p.classList,a=p.getAttributeNode('class');
+if(l.add.length!==0||l.add('b','a','b')!==undefined||l.value!=='a B b'||a.value!=='a B b'||p.getAttributeNode('class')!==a)throw 'ordered set/Attr';
+p.className=' x  x ';l.add();if(l.value!=='x')throw 'zero argument normalize';
+var log='',caught=false;try{l.add('',{toString:function(){log+='b';p.className='side effect';return 'q';}});}catch(e){caught=e.name==='SyntaxError';}if(!caught||log!=='b'||l.value!=='side effect')throw 'all conversions before validation';
+caught=false;try{l.add('',Symbol());}catch(e){caught=e.name==='TypeError';}if(!caught||l.value!=='side effect')throw 'Symbol before validation';
+caught=false;try{l.add('bad token','');}catch(e){caught=e.name==='InvalidCharacterError';}if(!caught)throw 'validation order';
+l.add({toString:function(){p.className='q';return 'r';}},'q');if(l.value!=='q r')throw 'current post-conversion class';
+var empty=document.createElement('div');empty.classList.add();if(empty.hasAttribute('class'))throw 'absent empty set';
+document.title='class-add-ok';
+"#]);
+    assert_eq!(outcome.errors,0,"{}",page.report());
+    assert_eq!(doc.title,"class-add-ok");
+}
+
+#[test]
+fn iframe_own_inspection_reports_real_absence_without_accessor_or_mutation_authority() {
+    let (mut doc,mut forms,mut page,outcome)=page("<iframe id=old srcdoc='authored'></iframe>",&[r#"
+var f=document.createElement('iframe');f.id='f';
+for(var key of ['id','srcdoc','contentWindow','normalize','hasAttributes'])if(Object.hasOwn(f,key)||Object.getOwnPropertyDescriptor(f,key)!==undefined)throw 'inherited IDL';
+if(Object.keys(f).length||Object.getOwnPropertyNames(f).length||f.getAttribute('srcdoc')!==null||f.getAttribute('id')!=='f')throw 'actual own keys/attribute';document.title='iframe-own-ok';
+"#]);
+    assert_eq!(outcome.errors,0,"{}",page.report());
+    assert_eq!(doc.title,"iframe-own-ok");
+    let node=(0..doc.nodes.len()).find(|&n|doc.attr(n,"id")==Some("f")).unwrap();
+    let inert=(0..doc.nodes.len()).find(|&n|doc.attr(n,"id")==Some("old")).unwrap();
+    let mut bridge=Bridge {doc:&mut doc,forms:&mut forms,state:&mut page.state};
+    bridge.set(node_handle(node),"srcdoc",Value::String("reflected".into())).unwrap();
+    bridge.call(node_handle(node),"setAttribute",&[Value::String("srcdoc".into()),Value::String("changed".into())]).unwrap();
+    assert!(bridge.inherited_keys(node_handle(node)).is_err());
+    assert!(bridge.own_data(node_handle(inert),"srcdoc").is_err());
+    assert!(bridge.own_keys(node_handle(inert)).is_err());
+    assert!(bridge.state.blank_frames.is_empty());
+    assert_eq!(bridge.doc.attr(node,"srcdoc"),Some("changed"));
+    assert_eq!(bridge.doc.attr(inert,"srcdoc"),Some("authored"));
+}
+
+#[test]
+fn element_has_attributes_reports_actual_presence_and_borrows_only_element_receivers() {
+    let (doc,_,page,outcome)=page("<p id=p data-x=''></p>",&[r#"
+var p=document.getElementById('p'),f=p.hasAttributes,e=document.createElement('div');
+if(f.length!==0||f!==p.hasAttributes||!p.hasAttributes()||e.hasAttributes())throw 'actual/default presence';
+e.className='';if(!f.call(e))throw 'empty value still present';e.removeAttribute('class');if(f.call(e))throw 'removal';
+var called=0;e.hasAttributes({toString:function(){called++;throw 'not converted';}});if(called)throw 'ignored args';
+var rejected=0;for(var bad of [{},window,document,p.style,document.createTextNode('x')])try{f.call(bad);}catch(x){if(x.name==='TypeError')rejected++;}if(rejected!==5)throw 'brand';
+document.title='has-attributes-ok';
+"#]);
+    assert_eq!(outcome.errors,0,"{}",page.report());
+    assert_eq!(doc.title,"has-attributes-ok");
+}
+
+#[test]
+fn native_instanceof_uses_realm_roots_and_original_mutable_image_prototype() {
+    let (doc,_,page,outcome)=page("<p id=p></p><img id=i>",&[r#"
+var values=[document,navigator,document.getElementById('p'),document.createTextNode('t'),document.getElementsByClassName('x'),document.getElementById('p').classList,document.getElementById('p').style];
+function C(){};for(var x of values){if(x instanceof Array||!(x instanceof Object)||x instanceof C)throw 'real native ancestry';}
+C.prototype=Object.prototype;for(var x of values)if(!(x instanceof C))throw 'prototype identity not constructor name';
+var OriginalImage=Image,img=new Image(),parsed=document.getElementById('i');
+function Alias(){};Alias.prototype=OriginalImage.prototype;
+if(!(img instanceof Alias)||!(parsed instanceof Alias)||!(img instanceof OriginalImage)||img instanceof Array)throw 'image canonical anchor';
+{let Image=function Replacement(){};if(img instanceof Image||!(img instanceof OriginalImage))throw 'shadowed name';}
+Object.setPrototypeOf(OriginalImage.prototype,Array.prototype);
+if(!(img instanceof Array)||!(parsed instanceof Array)||Array.isArray(img))throw 'actual changed image ancestry';
+Object.setPrototypeOf(OriginalImage.prototype,Object.prototype);document.title='native-instanceof-ok';
+"#]);
+    assert_eq!(outcome.errors,0,"{}",page.report());
+    assert_eq!(doc.title,"native-instanceof-ok");
+}
+
+#[test]
+fn host_array_slice_captures_length_but_reads_live_indices_and_keeps_dom_identity() {
+    let (doc,_,page,outcome)=page("<main><p id=a class=probe></p><p id=b class=probe></p><p id=c class=probe></p></main>",&[r#"
+var live=document.getElementsByClassName('probe'),a=document.getElementById('a'),b=document.getElementById('b'),c=document.getElementById('c');
+var snapshot=Array.prototype.slice.call(live);if(!Array.isArray(snapshot)||Object.getPrototypeOf(snapshot)!==Array.prototype||snapshot.length!==3||snapshot[0]!==a||snapshot[2]!==c)throw 'ordinary snapshot/identity';
+var log='',shorter=Array.prototype.slice.call(live,{valueOf:function(){log+='s';a.className='gone';return 0;}},{valueOf:function(){log+='e';return undefined;}});
+if(log!=='se'||shorter.length!==0)throw 'explicit end NaN';
+a.className='probe';var holes=Array.prototype.slice.call(live,{valueOf:function(){a.className='gone';return 0;}});
+if(holes.length!==3||holes[0]!==b||holes[1]!==c||2 in holes||Object.prototype.hasOwnProperty.call(holes,'2'))throw 'captured length/live holes';
+if(snapshot.length!==3||snapshot[0]!==a||snapshot[1]!==b)throw 'snapshot stays static';
+var tail=Array.prototype.slice.call(live,-1,undefined);if(tail.length!==1||tail[0]!==c)throw 'negative/defaultend';
+if(Array.prototype.slice.call(live,Infinity).length||Array.prototype.slice.call(live,-Infinity,1)[0]!==b)throw 'infinite bounds';
+var marker={},same=false;try{Array.prototype.slice.call(live,{valueOf:function(){throw marker;}});}catch(e){same=e===marker;}if(!same)throw 'throw identity';
+var caught=false;try{Array.prototype.slice.call(live,Symbol());}catch(e){caught=e.name==='TypeError';}if(!caught)throw 'Symbol';document.title='host-slice-ok';
+"#]);
+    assert_eq!(outcome.errors,0,"{}",page.report());
+    assert_eq!(doc.title,"host-slice-ok");
+}
+
+#[test]
+fn detached_scroll_dimensions_are_exact_and_connected_measurements_remain_explicit() {
+    let (mut doc,mut forms,mut page,outcome)=page("<main><p id=p>rendered</p></main>",&[r#"
+var e=document.createElement('div');e.style.width='123px';e.style.height='45px';
+if(e.scrollWidth!==0||e.scrollHeight!==0||!('scrollWidth' in e))throw 'detached no box';
+e.scrollWidth=9;if(e.scrollWidth!==0)throw 'readonly';document.title='detached-scroll-ok';
+"#]);
+    assert_eq!(outcome.errors,0,"{}",page.report());
+    assert_eq!(doc.title,"detached-scroll-ok");
+    let node=(0..doc.nodes.len()).find(|&n|doc.attr(n,"id")==Some("p")).unwrap();
+    let mut bridge=Bridge {doc:&mut doc,forms:&mut forms,state:&mut page.state};
+    let error=bridge.get(node_handle(node),"scrollWidth").unwrap_err();
+    assert!(error.contains("measured scrolling-area")&&error.contains("connected=true"),"{error}");
+}
+
+#[test]
+fn class_name_collection_method_preserves_form_named_control_precedence() {
+    let (doc,_,page,outcome)=page("<form id=f><input id=field name=getElementsByClassName class=probe></form>",&[r#"
+var f=document.getElementById('f'),field=document.getElementById('field');
+if(f.getElementsByClassName!==field||!('getElementsByClassName' in f))throw 'named precedence';
+var method=document.createElement('div').getElementsByClassName;
+if(method.call(f,'probe')[0]!==field)throw 'borrow genuine Element method';
+var caught=false;try{f.getElementsByClassName('probe');}catch(e){caught=e.name==='TypeError';}if(!caught)throw 'named field is not callable';document.title='class-collection-form-ok';
+"#]);
+    assert_eq!(outcome.errors,0,"{}",page.report());
+    assert_eq!(doc.title,"class-collection-form-ok");
+}
+
+#[test]
+fn class_name_collections_match_all_ascii_tokens_in_live_descendant_order() {
+    let (doc,_,page,outcome)=page("<main><section id=s class='a b'><p id=p class='a b'></p><div><b id=b class='b a'></b></div><i id=c class='a B'></i></section><p id=outside class='a b'></p></main>",&[r#"
+var s=document.getElementById('s'),p=document.getElementById('p'),b=document.getElementById('b'),c=document.getElementById('c');
+var all=document.getElementsByClassName(' a\t b a\n'),inside=s.getElementsByClassName('b a');
+if(document.compatMode!=='CSS1Compat'||all.length!==4||all[0]!==s||all[1]!==p||all[2]!==b||all[3]!==document.getElementById('outside'))throw 'standards order';
+if(inside.length!==2||inside[0]!==p||inside[1]!==b||inside.namedItem('b')!==b||inside.item(2)!==null)throw 'scope/root exclusion';
+if(document.getElementsByClassName('').length||document.getElementsByClassName(' \t\n\r\f ').length)throw 'empty tokens';
+if(s.getElementsByClassName('B').length!==1||s.getElementsByClassName('B')[0]!==c)throw 'case';
+var unicode=document.createElement('span');unicode.className='a\u00a0b';s.appendChild(unicode);
+if(s.getElementsByClassName('a\u00a0b')[0]!==unicode||inside.length!==2)throw 'ASCII whitespace only';
+unicode.className='a\u000bb';if(s.getElementsByClassName('a\u000bb')[0]!==unicode)throw 'vertical tab is token content';
+p.className='changed';if(inside.length!==1||inside[0]!==b)throw 'live class mutation';
+c.className='a b';if(inside.length!==2||inside[1]!==c)throw 'live case change';
+var fresh=document.createElement('em');fresh.className='b a';s.insertBefore(fresh,b.parentNode);if(inside[0]!==fresh||inside.length!==3)throw 'live insertion/order';
+s.removeChild(fresh);if(inside.length!==2||all.length!==4)throw 'live removal';
+var detached=s.getElementsByClassName('a b');s.parentNode.removeChild(s);if(detached.length!==2||all.length!==1)throw 'detached retained scope';
+if(Object.keys(detached).join(',')!=='0,1')throw 'indexed enumeration';document.title='class-collection-ok';
+"#]);
+    assert_eq!(outcome.errors,0,"{}",page.report());
+    assert_eq!(doc.title,"class-collection-ok");
+}
+
+#[test]
+fn class_name_collection_conversion_metadata_and_interface_brands_are_real() {
+    let (doc,_,page,outcome)=page("<p id=p class='null undefined a'></p><div id=d class=a></div>",&[r#"
+var p=document.getElementById('p'),d=document.getElementById('d'),docMethod=document.getElementsByClassName,elementMethod=p.getElementsByClassName;
+if(docMethod.length!==1||elementMethod.length!==1||docMethod!==document.getElementsByClassName)throw 'metadata';
+if(docMethod.call(document,null)[0]!==p||docMethod.call(document,undefined)[0]!==p)throw 'DOMString';
+var called=0,classes={toString:function(){called++;p.className='new';return 'new';}};if(docMethod.call(document,classes)[0]!==p||called!==1)throw 'conversion/current DOM';
+var bad=0,arg={toString:function(){bad++;return 'a';}},caught=0;
+try{docMethod.call(document);}catch(e){if(e.name==='TypeError')caught++;}
+try{docMethod.call(document,Symbol());}catch(e){if(e.name==='TypeError')caught++;}
+for(var receiver of [{},window,p,p.style,document.createTextNode('x')])try{docMethod.call(receiver,arg);}catch(e){if(e.name==='TypeError')caught++;}
+for(var receiver of [{},window,document,p.style,document.createTextNode('x')])try{elementMethod.call(receiver,arg);}catch(e){if(e.name==='TypeError')caught++;}
+if(caught!==12||bad)throw 'brand/arity before conversion';
+if(elementMethod.call(d,'a').length!==0)throw 'borrow excludes root';
+var marker={},same=false;try{docMethod.call(document,{toString:function(){throw marker;}});}catch(e){same=e===marker;}if(!same)throw 'throw identity';
+document.title='class-collection-conversion-ok';
+"#]);
+    assert_eq!(outcome.errors,0,"{}",page.report());
+    assert_eq!(doc.title,"class-collection-conversion-ok");
+}
+
+#[test]
+fn class_name_collection_accounting_failures_keep_existing_storage_and_dom() {
+    let (mut doc,mut forms,mut page,_) = page("<p class='a b'></p>",&[]);
+    page.begin_job();
+    let mut bridge=Bridge {doc:&mut doc,forms:&mut forms,state:&mut page.state};
+    let before=bridge.state.retained;
+    bridge.state.retained_limit=before;
+    assert!(bridge.create_class_collection(DOCUMENT,&Value::String("a b".into())).is_err());
+    assert_eq!(bridge.state.retained,before);
+    assert!(bridge.state.dom.collections.is_empty());
+    bridge.state.retained_limit=before+100;
+    bridge.state.copy_work=0;
+    assert!(bridge.create_class_collection(DOCUMENT,&Value::String("a".into())).is_err());
+    assert!(bridge.state.dom.collections.is_empty());
+    bridge.state.copy_work=bridge.state.limits.copy_bytes;
+    let list=bridge.create_class_collection(DOCUMENT,&Value::String("a".into())).unwrap();
+    let Value::Host(list)=list else {unreachable!()};
+    bridge.state.host_work=0;
+    assert!(bridge.get(list,"length").is_err());
+    assert_eq!(bridge.state.dom.collections.len(),1);
+    assert!(bridge.doc.nodes.iter().any(|node|matches!(&node.kind,NodeKind::Element {attrs,..} if attrs.iter().any(|attr|attr.name.html_is("class")&&attr.value=="a b"))));
+}
+
+#[test]
+fn token_attribute_queries_use_real_attributes_snapshots_namespaces_and_dynamic_matching() {
+    let (doc,_,page,outcome)=page("<html><head><link id=sheet rel='preload StyleSheet' href='/original.css'></head><body><div id=word data-words='cold Ready'><span id=child></span></div><p id=metadata></p></body></html>",&[r#"
+var sheet=document.getElementById('sheet'),word=document.getElementById('word'),child=document.getElementById('child'),metadata=document.getElementById('metadata');
+var styles=document.querySelectorAll('link[rel~="stylesheet"]');if(styles.length!==1||styles[0]!==sheet||document.querySelector('link[rel~=stylesheet s]')!==null||document.querySelector('link[rel~=StyleSheet s]')!==sheet)throw 'actual rel words';
+if(word.matches('[data-words~=ready]')||!word.matches('[data-words~=ready i]')||child.closest('[data-words~=ready i]')!==word||document.querySelector('[data-words~=""]')!==null||document.querySelector('[data-words~="cold Ready"]')!==null)throw 'case word empty';
+var saved=document.querySelectorAll('[data-words~=ready i]');word.setAttribute('data-words','cold disabled');if(saved.length!==1||saved[0]!==word||document.querySelector('[data-words~=ready i]')!==null||child.closest('[data-words~=ready i]')!==null)throw 'snapshot and current mutation';
+metadata.setAttributeNS('urn:original','rel','stylesheet');if(metadata.getAttributeNS('urn:original','rel')!=='stylesheet'||metadata.matches('[rel~=stylesheet]'))throw 'namespace decoy';
+word.setAttribute('data-words','left\u000bready');if(word.matches('[data-words~=ready]'))throw 'VT is not CSS whitespace';word.setAttribute('data-words','left\u00a0ready');if(word.matches('[data-words~=ready]')||!word.matches('[data-words~="left\u00a0ready"]'))throw 'NBSP token';
+word.setAttribute('data-words','left\tready\nlast\fend\rtrail');if(!word.matches('[data-words~=ready]')||!word.matches('[data-words~=end]')||!word.matches('[data-words~=trail]'))throw 'ASCII separators';document.title='token-query-ok';
+"#]);assert_eq!(outcome.errors,0,"{}",page.report());assert_eq!(doc.title,"token-query-ok");
+}
+
+#[test]
+fn unavailable_animation_feature_reads_are_absent_without_advertising_or_running_animation() {
+    let (mut doc,mut forms,mut page,outcome)=page("<html><body><div id=d></div><form id=f><input name=animate id=control></form><video id=video></video><x-custom id=custom></x-custom><svg id=foreign></svg></body></html>",&[r#"
+var d=document.getElementById('d'),created=document.createElement('span'),calls=0;
+for(var element of [document.documentElement,document.body,d,created]){
+ if(element.animate!==undefined||typeof element.animate!=='undefined'||'animate' in element)throw 'absent animation';
+ if(element.animate)calls++;
+ var caught=false;try{element.animate([]);}catch(e){caught=e instanceof TypeError;}if(!caught)throw 'missing method call';
+}
+if(calls!==0||document.getElementById('f').animate!==document.getElementById('control'))throw 'feature or form named property';
+Object.prototype.animate=17;if(d.animate!==17||!('animate' in d))throw 'ordinary inherited animation key';delete Object.prototype.animate;if(d.animate!==undefined||'animate' in d)throw 'tail deletion';
+document.title='animation-absence-ok';
+"#]);assert_eq!(outcome.errors,0,"{}",page.report());assert_eq!(doc.title,"animation-absence-ok");
+    let commits=page.state.dom_commits;let nodes=doc.nodes.len();
+    for operation in ["d.animate=function(){return 17;};","Object.defineProperty(d,'animate',{value:function(){return 17;}});","d.getAnimations;"] {
+        let outcome=page.console_eval(&mut doc,&mut forms,operation);assert_eq!(outcome.errors,1,"{operation}: {}",page.report());assert_eq!(page.state.dom_commits,commits);assert_eq!(doc.nodes.len(),nodes);assert!(!page.has_host_tasks());
+    }
+    let mut bridge=Bridge {doc:&mut doc,forms:&mut forms,state:&mut page.state};
+    for id in ["foreign","video","custom"] {let node=bridge.doc.nodes.iter().enumerate().find_map(|(n,_)|(bridge.doc.attr(n,"id")==Some(id)).then_some(n)).unwrap();assert!(bridge.get(node_handle(node),"animate").is_err(),"{id} must retain its unsupported boundary");}
+}
+
+#[test]
+fn real_element_instances_have_no_constructor_prototype_or_legacy_capture_methods() {
+    let (doc,_,page,outcome)=page("<html><body><div id=d></div><form id=f><input id=fp name=prototype><input id=fc name=setCapture></form></body></html>",&[r#"
+var d=document.getElementById('d');
+for(var name of ['prototype','setCapture','releaseCapture'])if(d[name]!==undefined||name in d)throw 'instance absence';
+if(document.releaseCapture!==undefined)throw 'Document capture absence';
+var f=document.getElementById('f');if(f.prototype!==document.getElementById('fp')||f.setCapture!==document.getElementById('fc'))throw 'form named properties';
+document.title='element-absence-ok';
+"#]);
+    assert_eq!(outcome.errors,0,"{}",page.report());
+    assert_eq!(doc.title,"element-absence-ok");
+}
+
+#[test]
+fn class_list_is_live_ordered_case_sensitive_and_mutates_the_actual_attribute() {
+    let (doc,_,page,outcome) = page("<p id=p class=' a  b a A&#9;c '></p>", &[r#"
+var p=document.getElementById('p'),l=p.classList,a=p.getAttributeNode('class');
+if(l!==p.classList||l.length!==4||l[0]!=='a'||l[3]!=='c'||l[4]!==undefined||l.item(4294967296)!=='a'||l.item(-1)!==null)throw 'live identity/index';
+if(l.remove.length!==0||l.contains.length!==1||l.item.length!==1||l.remove!==l.remove)throw 'method metadata';
+if(!l.contains('A')||l.contains('missing')||l.contains('')||l.contains('a b'))throw 'contains';
+if(Object.keys(l).join(',')!=='0,1,2,3'||Object.prototype.hasOwnProperty.call(l,'length'))throw 'own indices';
+if(!l.hasOwnProperty('0')||!l.propertyIsEnumerable('0')||l.hasOwnProperty('value'))throw 'ordinary inherited methods';
+Object.prototype.customClassProbe=17;if(l.customClassProbe!==17)throw 'ordinary inherited property';delete Object.prototype.customClassProbe;
+if(l.remove('a','c')!==undefined||p.className!=='b A'||a.value!=='b A'||p.getAttributeNode('class')!==a)throw 'real removal/Attr';
+p.setAttribute('class','  x x Y  ');if(l.length!==2||l[1]!=='Y'||String(l)!=='  x x Y  ')throw 'raw edit';
+l.remove();if(l.value!=='x Y')throw 'zero argument normalize';
+l.value=' \u00a0 \u000b z';if(l.length!==3||!l.contains('\u00a0')||!l.contains('\u000b'))throw 'ASCII only';
+p.classList={toString:function(){return 'forwarded';}};if(l.value!=='forwarded'||a.value!=='forwarded')throw 'PutForwards';
+var fresh=document.createElement('div'),f=fresh.classList;f.remove('missing');if(fresh.hasAttribute('class'))throw 'absent stays absent';
+fresh.className='x';f.remove('x');if(f.value!==''||!fresh.hasAttribute('class'))throw 'empty stays present';
+if('classList' in document.createTextNode('text')||'classList' in document)throw 'brand';
+Promise.resolve(l).then(function(v){if(v!==l)throw 'Promise identity';document.title='class-list-ok';});
+"#]);
+    assert_eq!(outcome.errors,0,"{}",page.report());
+    assert_eq!(doc.title,"class-list-ok");
+}
+
+#[test]
+fn class_list_removal_converts_all_arguments_before_validation_and_observes_callbacks() {
+    let (doc,_,page,outcome) = page("<p id=p class='old'></p><b id=b class='b c'></b>", &[r#"
+var p=document.getElementById('p'),l=p.classList,log='',caught=false;
+try{l.remove('',{toString:function(){log+='b';p.className='after';return 'x';}});}catch(e){caught=e.name==='SyntaxError';}
+if(!caught||log!=='b'||p.className!=='after')throw 'all conversions before validation';
+caught=false;try{l.remove('',Symbol());}catch(e){caught=e.name==='TypeError';}if(!caught||p.className!=='after')throw 'conversion precedence';
+caught=false;try{l.remove(' ', '');}catch(e){caught=e.name==='InvalidCharacterError';}if(!caught)throw 'validation order';
+log='';l.remove({toString:function(){log+='a';p.className='a b c';return 'a';}},{toString:function(){log+='b';return 'b';}});
+if(log!=='ab'||p.className!=='c')throw 'current post-conversion class';
+var marker={};caught=false;try{l.remove({toString:function(){p.className='side effect';throw marker;}});}catch(e){caught=e===marker;}if(!caught||p.className!=='side effect')throw 'exception identity';
+var n=0;for(var bad of [{},window,document,p,p.style,document.createTextNode('t')]){caught=false;try{l.remove.call(bad,{toString:function(){n++;return 'x';}});}catch(e){caught=e.name==='TypeError';}if(!caught)throw 'wrong receiver';}
+if(n)throw 'brand before conversion';var b=document.getElementById('b');l.remove.call(b.classList,'b');if(b.className!=='c'||p.className!=='side effect')throw 'borrow';
+document.title='class-list-conversion-ok';
+"#]);
+    assert_eq!(outcome.errors,0,"{}",page.report());
+    assert_eq!(doc.title,"class-list-conversion-ok");
+}
+
+#[test]
+fn class_list_copy_work_and_invalid_namespace_failures_preserve_attribute() {
+    let (mut doc,mut forms,mut page,outcome) = page("<p id=p class='a b'></p>",&[]);
+    assert_eq!(outcome.errors,0,"{}",page.report());
+    let node = (0..doc.nodes.len()).find(|&n|doc.attr(n,"id")==Some("p")).unwrap();
+    let handle = script_class_list::handle(node_handle(node));
+    page.begin_job();
+    let mut bridge = Bridge {doc:&mut doc,forms:&mut forms,state:&mut page.state};
+    bridge.state.copy_work = 0;
+    assert!(bridge.call(handle,"remove",&[Value::String("a".into())]).is_err());
+    assert_eq!(bridge.doc.attr(node,"class"),Some("a b"));
+    bridge.state.copy_work = bridge.state.limits.copy_bytes;
+    bridge.state.host_work = 0;
+    assert!(bridge.call(handle,"remove",&[Value::String("a".into())]).is_err());
+    assert_eq!(bridge.doc.attr(node,"class"),Some("a b"));
+    bridge.state.host_work = bridge.state.limits.host_work;
+    bridge.doc.nodes[node].namespace = crate::html::Namespace::UnknownForeign;
+    assert!(bridge.get(handle,"value").unwrap_err().contains("namespace"));
+    assert!(!bridge.accepts_receiver(handle,"remove",node_handle(node)));
+    assert_eq!(bridge.doc.attr(node,"class"),Some("a b"));
+    assert!(!bridge.class_list_receiver(handle));
+}
+
+#[test]
+fn class_list_put_forwards_conversion_is_limited_to_real_html_elements() {
+    let (mut doc,mut forms,mut page,outcome) = page("<p id=p></p><svg><g id=f></g></svg>",&[]);
+    assert_eq!(outcome.errors,0,"{}",page.report());
+    let html = (0..doc.nodes.len()).find(|&n|doc.attr(n,"id")==Some("p")).unwrap();
+    let foreign = (0..doc.nodes.len()).find(|&n|doc.attr(n,"id")==Some("f")).unwrap();
+    let mut bridge = Bridge {doc:&mut doc,forms:&mut forms,state:&mut page.state};
+    assert!(bridge.string_setter(node_handle(html),"classList"));
+    assert!(!bridge.string_setter(node_handle(foreign),"classList"));
+    assert!(!bridge.string_setter(DOCUMENT,"classList"));
+    let text = bridge.call(DOCUMENT,"createTextNode",&[Value::String("text".into())]).unwrap();
+    let Value::Host(text) = text else {unreachable!()};
+    assert!(!bridge.string_setter(text,"classList"));
+    assert!(!bridge.class_list_receiver(script_class_list::handle(text)));
+}
+
+#[test]
+fn class_list_handle_band_never_collides_with_last_event_identity() {
+    let (mut doc,mut forms,mut page,_) = page("<p id=p></p>",&[]);
+    page.state.next_event = script_class_list::BASE-1;
+    let mut bridge = Bridge {doc:&mut doc,forms:&mut forms,state:&mut page.state};
+    let last = bridge.create_event(&[Value::String("Event".into())]).unwrap();
+    assert!(matches!(last,Value::Host(handle) if handle==script_class_list::BASE-1));
+    assert_eq!(bridge.state.next_event,script_class_list::BASE);
+    assert!(bridge.create_event(&[Value::String("Event".into())]).is_err());
+    assert_eq!(bridge.state.created_events.len(),1);
+    assert_eq!(bridge.state.next_event,script_class_list::BASE);
+    assert!(!page.dispatch_to(&mut doc,&mut forms,WINDOW,"load",false,false));
+    assert_eq!(page.state.next_event,script_class_list::BASE);
+    assert!(page.state.event.is_none());
+}
+
+#[test]
+fn remove_attribute_ns_matches_exact_local_names_and_preserves_detached_attr_values() {
+    let (doc,_,page,outcome) = page("<p id=p title=old x:y=colon xmlns:x=raw></p>", &[r#"
+var p=document.getElementById('p'),a=p.getAttributeNode('title'),c=p.getAttributeNode('x:y');
+if(p.removeAttributeNS.length!==2||p.removeAttributeNS!==p.removeAttributeNS)throw 'metadata';
+p.removeAttributeNS(null,'TITLE');p.removeAttributeNS('urn:x','title');if(a.ownerElement!==p||a.value!=='old')throw 'exact namespace/name';
+if(p.removeAttributeNS('', 'title')!==undefined||a.ownerElement!==null||a.value!=='old'||p.hasAttribute('title'))throw 'remove/Attr';
+p.removeAttributeNS(undefined,'y');if(c.ownerElement!==p)throw 'raw colon';
+p.removeAttributeNS(null,'x:y');if(c.ownerElement!==null||c.value!=='colon')throw 'raw colon removal';
+p.removeAttributeNS('http://www.w3.org/2000/xmlns/','x');if(!p.hasAttribute('xmlns:x'))throw 'raw xmlns';
+p.removeAttributeNS(null,'xmlns:x');if(p.hasAttribute('xmlns:x'))throw 'unqualified xmlns';
+p.removeAttributeNS(null,'bad name');p.removeAttributeNS(null,'');document.title='remove-ns-ok';
+"#]);
+    assert_eq!(outcome.errors,0,"{}",page.report());
+    assert_eq!(doc.title,"remove-ns-ok");
+}
+
+#[test]
+fn remove_attribute_ns_conversion_order_and_brands_keep_existing_mutation_policy() {
+    let (doc,_,script_page,outcome) = page("<p id=p title=old></p>", &[r#"
+var p=document.getElementById('p'),log='',name={toString:function(){log+='L';p.setAttribute('title','current');return 'title';}};
+var ns={toString:function(){log+='N';return '';}};p.removeAttributeNS(ns,name);if(log!=='NL'||p.hasAttribute('title'))throw 'conversion order/reentrant';
+p.setAttribute('title','keep');log='';p.removeAttributeNS({toString:function(){log+='N';return null;}},name);if(log!=='NL'||p.getAttribute('title')!=='current')throw 'object null becomes string';
+var calls=0,arg={toString:function(){calls++;return '';}};var caught=0;
+try{p.removeAttributeNS(arg);}catch(e){if(e.name==='TypeError')caught++;}
+for(var bad of [{},window,document,p.style,document.createTextNode('x')])try{p.removeAttributeNS.call(bad,arg,arg);}catch(e){if(e.name==='TypeError')caught++;}
+if(calls||caught!==6)throw 'brand/arity before coercion';
+var marker={},same=false;try{p.removeAttributeNS(null,{toString:function(){throw marker;}});}catch(e){same=e===marker;}if(!same||p.getAttribute('title')!=='current')throw 'exception identity';
+document.title='remove-ns-conversion-ok';
+"#]);
+    assert_eq!(outcome.errors,0,"{}",script_page.report());
+    assert_eq!(doc.title,"remove-ns-conversion-ok");
+    let (mut doc,mut forms,mut page,_) = page("<img id=i src='https://example.test/a.png'>",&[]);
+    let node = (0..doc.nodes.len()).find(|&n|doc.attr(n,"id")==Some("i")).unwrap();
+    let mut bridge = Bridge {doc:&mut doc,forms:&mut forms,state:&mut page.state};
+    bridge.remove_attribute_ns(node_handle(node),&[Value::Null,Value::String("src".into())]).unwrap();
+    assert_eq!(bridge.doc.attr(node,"src"),None);
+    assert!(bridge.state.images.entries.contains_key(&node));
+    let (changed, removed, pending) = page.take_image_changes();
+    assert!(changed.contains(&node) && removed.contains(&node));
+    assert!(pending.is_empty());
+}
+
+#[test]
+fn html_image_is_map_reflects_boolean_presence_without_coercion_and_keeps_attr_identity() {
+    let (doc, _, page, outcome) = page("<img id=i ismap='false'>", &[r#"
+var i=document.getElementById('i');if(i.isMap!==true||!('isMap' in i))throw 'presence';
+var a=i.getAttributeNode('ismap');i.isMap=true;if(i.getAttribute('ismap')!==''||a.value!==''||i.getAttributeNode('ismap')!==a)throw 'canonical/identity';
+var calls=0;i.isMap={toString:function(){calls++;throw 'string';},valueOf:function(){calls++;throw 'number';}};
+if(calls||!i.isMap)throw 'no conversion hooks';i.isMap=Symbol();if(!i.isMap)throw 'truthy Symbol';
+for(var v of [false,0,-0,NaN,'',null,undefined]){i.isMap=true;i.isMap=v;if(i.isMap!==false||i.hasAttribute('ismap'))throw 'falsy removal';}
+if(a.ownerElement!==null||a.value!=='')throw 'detached attr';
+for(var e of [document.createElement('img'),new Image()]){
+ if(e.isMap!==false||e.hasAttribute('ismap'))throw 'created default';
+ e.isMap='false';if(!e.isMap||e.getAttribute('ismap')!=='')throw 'truthy string';
+ e.removeAttribute('ismap');if(e.isMap)throw 'raw remove';
+ e.setAttribute('ismap','anything');if(!e.isMap)throw 'raw set';
+}
+for(var e of [document.createElement('input'),document.createElement('embed'),document.createElement('iframe'),document.createElement('div'),document.createTextNode('text')])if('isMap' in e||e.isMap!==undefined)throw 'wrong brand';
+if('isMap' in document)throw 'Document brand';document.title='image-map-ok';
+"#]);
+    assert_eq!(outcome.errors,0,"{}",page.report());
+    assert_eq!(doc.title,"image-map-ok");
+}
+
+#[test]
+fn html_image_is_map_failures_leave_real_attribute_unchanged() {
+    let (mut doc, mut forms, mut page, outcome) = page("<img id=i ismap=old>", &[]);
+    assert_eq!(outcome.errors,0,"{}",page.report());
+    let node = (0..doc.nodes.len()).find(|&n|doc.attr(n,"id")==Some("i")).unwrap();
+    page.begin_job();
+    let mut bridge = Bridge { doc:&mut doc, forms:&mut forms, state:&mut page.state };
+    bridge.state.host_work = 0;
+    assert!(bridge.set(node_handle(node),"isMap",Value::Bool(false)).is_err());
+    assert_eq!(bridge.doc.attr(node,"ismap"),Some("old"));
+    bridge.state.host_work = bridge.state.limits.host_work;
+    bridge.state.copy_work = 0;
+    assert!(bridge.set(node_handle(node),"isMap",Value::Bool(true)).is_err());
+    assert_eq!(bridge.doc.attr(node,"ismap"),Some("old"));
+    bridge.state.copy_work = bridge.state.limits.copy_bytes;
+    bridge.set(node_handle(node),"isMap",Value::Bool(false)).unwrap();
+    bridge.state.retained_limit = bridge.state.retained;
+    assert!(bridge.set(node_handle(node),"isMap",Value::Bool(true)).is_err());
+    assert_eq!(bridge.doc.attr(node,"ismap"),None);
+    bridge.doc.nodes[node].namespace = crate::html::Namespace::UnknownForeign;
+    assert!(bridge.get(node_handle(node),"isMap").unwrap_err().contains("namespace"));
+}
+
+#[test]
+fn html_border_reflects_real_strings_and_legacy_null_only_on_its_brands() {
+    let (doc, _, page, outcome) = page("<img id=i border=' 05px '><table id=t border=' 05px '></table><p id=p>ordinary</p>", &[r#"
+if(document.getElementById('i').border!==' 05px '||document.getElementById('t').border!==' 05px ')throw 'raw reflection';
+for(var tag of ['img','object','table']){
+ var e=document.createElement(tag);if(e.border!==''||!('border' in e)||e.hasAttribute('border'))throw 'empty default';
+ e.border=null;if(e.getAttribute('border')!==(tag==='table'?'null':''))throw 'original null';
+ var attr=e.getAttributeNode('border');e.border=undefined;if(e.border!=='undefined'||attr.value!=='undefined')throw 'undefined';
+ e.border={toString:function(){return null;}};if(e.border!=='null')throw 'object-produced null';
+ e.setAttribute('border',null);if(e.border!=='null')throw 'raw setter conversion';
+ var log='';e.border={toString:function(){log+='s';return 'raw';},valueOf:function(){log+='v';return 1;}};if(log!=='s'||e.border!=='raw'||attr.value!=='raw'||e.getAttributeNode('border')!==attr)throw 'coercion/identity';
+ var caught=false;try{e.border=Symbol();}catch(x){caught=x.name==='TypeError';}if(!caught||e.border!=='raw')throw 'Symbol atomic';
+ var marker={},caught=false;try{e.border={toString:function(){throw marker;}};}catch(x){caught=x===marker;}if(!caught||e.border!=='raw')throw 'throw atomic';
+ e.removeAttribute('border');if(e.border!==''||attr.ownerElement!==null||attr.value!=='raw')throw 'detach';
+}
+for(var e of [document.createElement('input'),document.createElement('embed'),document.createElement('iframe'),document.createElement('div'),document.createTextNode('text')]){if('border' in e||e.border!==undefined)throw 'wrong brand';}
+if('border' in document)throw 'Document brand';document.title='border-ok';
+"#]);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    assert_eq!(doc.title, "border-ok");
+}
+
+#[test]
+fn html_border_budget_and_unknown_namespace_failures_preserve_existing_attributes() {
+    let (mut doc, mut forms, mut page, outcome) = page("<p>ordinary</p>", &["var image=document.createElement('img');image.border='old';"]);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    let node = doc.nodes.iter().position(|node| matches!(&node.kind, NodeKind::Element { tag, .. } if tag == "img")).unwrap();
+    page.begin_job();
+    page.state.retained_limit = page.state.retained;
+    let mut bridge = Bridge { doc: &mut doc, forms: &mut forms, state: &mut page.state };
+    assert!(bridge.set(node_handle(node), "border", Value::String("longer".into())).is_err());
+    assert_eq!(bridge.doc.attr(node, "border"), Some("old"));
+    bridge.state.copy_work = 0;
+    assert!(bridge.get(node_handle(node), "border").is_err());
+    assert_eq!(bridge.doc.attr(node, "border"), Some("old"));
+    bridge.state.copy_work = bridge.state.limits.copy_bytes;
+    bridge.doc.nodes[node].namespace = crate::html::Namespace::UnknownForeign;
+    assert!(bridge.get(node_handle(node), "border").unwrap_err().contains("namespace"));
+}
+
+#[test]
+fn html_spacing_reflects_unsigned_attributes_on_real_brands_and_keeps_attr_identity() {
+    let (doc, _, page, outcome) = page("<p id=p>ordinary</p>", &[r#"
+for(var tag of ['img','input','object','embed','marquee']){
+ var e=document.createElement(tag);if(e.vspace!==0||e.hspace!==0||!('vspace' in e)||e.hasAttribute('vspace'))throw 'default/brand';
+ e.setAttribute('vspace',' +12px');var a=e.getAttributeNode('vspace');if(e.vspace!==12||a.value!==' +12px')throw 'attribute parser';
+ for(var pair of [[1.9,'1'],[-1,'0'],[-4294967295,'1'],[4294967303,'7'],[NaN,'0'],[Infinity,'0']]){
+  e.vspace=pair[0];if(e.getAttribute('vspace')!==pair[1]||a.value!==pair[1]||e.getAttributeNode('vspace')!==a)throw 'unsigned reflection';
+ }
+ e.vspace=2147483647;if(e.vspace!==2147483647)throw 'max';
+ for(var text of ['-1','2147483648','garbage']){e.setAttribute('vspace',text);if(e.vspace!==0)throw 'invalid attribute';}
+ e.vspace='12px';if(e.getAttribute('vspace')!=='0')throw 'number conversion';
+ var calls=0;e.hspace={valueOf:function(){calls++;return 17;}};if(calls!==1||e.hspace!==17||e.getAttribute('hspace')!=='17')throw 'ordered numeric conversion';
+ var caught=false;try{e.hspace=Symbol();}catch(x){caught=x.name==='TypeError';}if(!caught||e.hspace!==17)throw 'Symbol atomic';
+ e.removeAttribute('vspace');if(e.vspace!==0||a.ownerElement!==null||a.value!=='0')throw 'removal';
+}
+for(var e of [document.createElement('div'),document.createElement('iframe'),document.createTextNode('text')]){
+ if('vspace' in e||e.vspace!==undefined)throw 'wrong brand';
+}
+if('vspace' in document)throw 'Document brand';document.title='spacing-ok';
+"#]);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    assert_eq!(doc.title, "spacing-ok");
+}
+
+#[test]
+fn html_spacing_work_and_retention_failures_do_not_mutate_the_attribute() {
+    let (mut doc, mut forms, mut page, outcome) = page("<p>ordinary</p>", &["var image=document.createElement('img');image.vspace=7;"]);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    let node = doc.nodes.iter().position(|node| matches!(&node.kind, NodeKind::Element { tag, .. } if tag == "img")).unwrap();
+    page.begin_job();
+    page.state.retained_limit = page.state.retained;
+    let mut bridge = Bridge { doc: &mut doc, forms: &mut forms, state: &mut page.state };
+    assert!(bridge.set(node_handle(node), "vspace", Value::Number(1000.0)).is_err());
+    assert_eq!(bridge.doc.attr(node, "vspace"), Some("7"));
+    bridge.state.host_work = 0;
+    assert!(bridge.get(node_handle(node), "vspace").is_err());
+    assert_eq!(bridge.doc.attr(node, "vspace"), Some("7"));
+}
+
+#[test]
+fn attr_namespace_lookup_keeps_exact_local_names_raw_colons_and_stable_identity() {
+    let (doc, _, page, outcome) = page("<p id=p TITLE=old x:y=colon xmlns='urn:raw' xmlns:x='urn:x' null=n undefined=u></p>", &[r#"
+var p=document.getElementById('p'),a=p.getAttributeNode('TITLE');
+if(p.getAttributeNodeNS(null,'title')!==a||p.getAttributeNodeNS(undefined,'title')!==a||p.getAttributeNodeNS('','title')!==a||p.getAttributeNodeNS(null,'TITLE')!==null)throw 'namespace/case/identity';
+if(p.getAttributeNodeNS('urn:x','title')!==null||p.getAttributeNodeNS('http://www.w3.org/1999/xhtml','title')!==null)throw 'unqualified attrs';
+var colon=p.getAttributeNodeNS(null,'x:y');if(colon!==p.getAttributeNode('x:y')||colon.localName!=='x:y'||colon.prefix!==null||colon.namespaceURI!==null||p.getAttributeNodeNS(null,'y')!==null||p.getAttributeNodeNS('urn:x','y')!==null)throw 'raw colon';
+if(p.getAttributeNodeNS(null,'xmlns').namespaceURI!==null||p.getAttributeNodeNS('http://www.w3.org/2000/xmlns/','x')!==null||p.getAttributeNodeNS(null,'xmlns:x').localName!=='xmlns:x')throw 'raw xmlns';
+if(p.getAttributeNodeNS(null,null).value!=='n'||p.getAttributeNodeNS(undefined,undefined).value!=='u'||p.getAttributeNodeNS(null,'bad name')!==null||p.getAttributeNodeNS(null,'')!==null)throw 'local DOMString/query syntax';
+p.setAttribute('title','live');if(p.getAttributeNodeNS(null,'title')!==a||a.value!=='live')throw 'live attr';
+p.removeAttributeNode(a);p.setAttribute('title','fresh');if(p.getAttributeNodeNS(null,'title')===a||a.value!=='live'||a.ownerElement!==null)throw 'detach/readd';
+var get=p.getAttributeNodeNS;if(get!==p.getAttributeNodeNS||get.call(p,null,'title').value!=='fresh')throw 'method borrowing';
+document.title='attr-namespace-lookup-ok';
+"#]);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    assert_eq!(doc.title, "attr-namespace-lookup-ok");
+}
+
+#[test]
+fn attr_namespace_conversion_order_nullability_failures_and_reentrancy_are_real() {
+    let (doc, _, page, outcome) = page("<p id=p title=old></p>", &[r#"
+var p=document.getElementById('p'),log='',marker={},old=p.getAttributeNode('title');
+var ns={toString:function(){log+='N';return '';},valueOf:function(){throw 'wrong hint';}},name={toString:function(){log+='L';return 'title';},valueOf:function(){throw 'wrong hint';}};
+if(p.getAttributeNodeNS(ns,name)!==old||log!=='NL')throw 'ordered once conversion';
+log='';if(p.getAttributeNodeNS({toString:function(){log+='N';return null;}},name)!==null||log!=='NL')throw 'object-produced null';
+log='';if(p.getAttributeNodeNS({toString:function(){log+='N';return undefined;}},name)!==null||log!=='NL')throw 'object-produced undefined';
+log='';var rejected=0;try{p.getAttributeNodeNS(ns);}catch(e){if(e.name==='TypeError')rejected++;}if(log!=='')throw 'arity before conversion';
+try{p.getAttributeNodeNS(Symbol(),name);}catch(e){if(e.name==='TypeError')rejected++;}if(log!=='')throw 'namespace Symbol first';
+try{p.getAttributeNodeNS('urn:x',Symbol());}catch(e){if(e.name==='TypeError')rejected++;}
+var caught=false;try{p.getAttributeNodeNS({toString:function(){throw marker;}},name);}catch(e){caught=e===marker;}if(!caught||log!=='')throw 'namespace throw identity';
+caught=false;try{p.getAttributeNodeNS(null,{toString:function(){throw marker;}});}catch(e){caught=e===marker;}if(!caught||old.value!=='old')throw 'name throw identity';
+var fresh=p.getAttributeNodeNS(null,{toString:function(){p.removeAttribute('title');p.setAttribute('title','after');return 'title';}});
+if(fresh===old||fresh.value!=='after'||old.ownerElement!==null||old.value!=='old'||rejected!==3)throw 'post-coercion lookup';
+var calls=0,arg={toString:function(){calls++;return 'title';}};
+for(var bad of [{},window,document,p.style,p.dataset,document.createTextNode('x')]){try{p.getAttributeNodeNS.call(bad,arg,arg);}catch(e){if(e.name==='TypeError')rejected++;}}
+if(calls!==0||rejected!==9)throw 'brand before arguments';
+document.title='attr-namespace-conversion-ok';
+"#]);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    assert_eq!(doc.title, "attr-namespace-conversion-ok");
+}
+
+#[test]
+fn attr_namespace_misses_do_not_consume_identity_capacity_or_retained_bytes() {
+    let (mut doc, mut forms, mut page, outcome) = page("<p id=p title=old></p>", &[]);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    let p = (0..doc.nodes.len()).find(|&n| doc.attr(n, "id") == Some("p")).unwrap();
+    let mut bridge = Bridge { doc: &mut doc, forms: &mut forms, state: &mut page.state };
+    for i in 0..256 {
+        let name = format!("data-{i}");
+        bridge.call(node_handle(p), "setAttribute", &[Value::String(name.clone()), Value::String("v".into())]).unwrap();
+        bridge.call(node_handle(p), "getAttributeNode", &[Value::String(name)]).unwrap();
+    }
+    let before = bridge.state.retained;
+    for (namespace, name) in [(Value::Null, "missing"), (Value::Null, "TITLE"), (Value::String("urn:x".into()), "title")] {
+        assert!(matches!(bridge.call(node_handle(p), "getAttributeNodeNS", &[namespace, Value::String(name.into())]).unwrap(), Value::Null));
+    }
+    assert_eq!(bridge.state.attributes.len(), 256);
+    assert_eq!(bridge.state.retained, before);
+    let existing = bridge.call(node_handle(p), "getAttributeNodeNS", &[Value::Null, Value::String("data-0".into())]).unwrap();
+    assert!(matches!(existing, Value::Host(handle) if script_attr::index(handle) == Some(0)));
+    assert!(bridge.call(node_handle(p), "getAttributeNodeNS", &[Value::Null, Value::String("title".into())]).unwrap_err().contains("256"));
+    assert_eq!(bridge.state.retained, before);
+}
+
+#[test]
+fn attr_namespace_foreign_context_and_failed_new_record_keep_existing_boundaries() {
+    let (mut doc, mut forms, mut page, outcome) = page("<p id=p title=old></p><svg><g id=f title=unknown></g></svg><template><i id=inert></i></template>", &[]);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    let find = |id: &str| (0..doc.nodes.len()).find(|&n| doc.attr(n, "id") == Some(id)).unwrap();
+    let p = find("p"); let foreign = find("f"); let inert = find("inert");
+    let invalid = [node_handle(0), node_handle(doc.nodes.len()+99), node_handle(inert)];
+    let mut bridge = Bridge { doc: &mut doc, forms: &mut forms, state: &mut page.state };
+    for handle in invalid {
+        assert!(!bridge.accepts_receiver(node_handle(p), "getAttributeNodeNS", handle));
+        assert!(bridge.method(handle, "getAttributeNodeNS").is_none());
+    }
+    for namespace in [Value::Null, Value::String("urn:x".into())] {
+        assert!(bridge.call(node_handle(foreign), "getAttributeNodeNS", &[namespace, Value::String("title".into())]).unwrap_err().contains("foreign"));
+    }
+    let before = bridge.state.retained;
+    bridge.state.retained_limit = before;
+    assert!(bridge.call(node_handle(p), "getAttributeNodeNS", &[Value::Null, Value::String("title".into())]).is_err());
+    assert!(bridge.state.attributes.is_empty());
+    assert_eq!(bridge.state.retained, before);
+}
+
+#[test]
+fn set_attribute_ns_preserves_expanded_identity_qname_order_and_detached_metadata() {
+    let (doc, _, page, outcome) = page("<p id=p p:x=raw></p>", &[r#"
+var p=document.getElementById('p'),raw=p.getAttributeNode('p:x');
+p.setAttributeNS('urn:a','p:x','one');p.setAttributeNS('urn:b','p:x','two');
+var a=p.getAttributeNodeNS('urn:a','x'),b=p.getAttributeNodeNS('urn:b','x');
+if(a===raw||a===b||a.name!=='p:x'||a.localName!=='x'||a.prefix!=='p'||a.namespaceURI!=='urn:a'||a.ownerElement!==p)throw 'real namespace records';
+if(p.getAttribute('p:x')!=='raw'||p.getAttributeNS(null,'p:x')!=='raw'||p.getAttributeNS('urn:a','x')!=='one'||p.getAttributeNS('urn:a','X')!==null)throw 'distinct lookup';
+if(a.compareDocumentPosition(b)!==36||b.compareDocumentPosition(a)!==34)throw 'same QName order';
+p.setAttributeNS('urn:a','q:x','new');
+if(p.getAttributeNodeNS('urn:a','x')!==a||a.name!=='p:x'||a.prefix!=='p'||a.value!=='new'||a.compareDocumentPosition(b)!==36)throw 'replace value only';
+p.setAttribute('p:x','plain-update');if(raw.value!=='plain-update'||a.value!=='new')throw 'QName first match';
+a.value='exact-a';if(a.value!=='exact-a'||raw.value!=='plain-update'||b.value!=='two')throw 'Attr exact setter';
+p.removeAttribute('p:x');if(raw.ownerElement!==null||raw.value!=='plain-update'||p.getAttributeNode('p:x')!==a)throw 'raw detach first';
+if(p.removeAttributeNode(b)!==b||b.ownerElement!==null||b.value!=='two'||b.namespaceURI!=='urn:b'||b.prefix!=='p'||a.ownerElement!==p)throw 'remove exact node';
+p.removeAttributeNS('urn:a','x');if(a.ownerElement!==null||a.value!=='exact-a'||a.name!=='p:x'||a.localName!=='x'||a.namespaceURI!=='urn:a')throw 'NS detach metadata';
+a.value='detached';p.setAttributeNS('urn:a','z:x','fresh');var fresh=p.getAttributeNodeNS('urn:a','x');
+if(fresh===a||fresh.name!=='z:x'||fresh.value!=='fresh'||a.value!=='detached'||p.getAttributeNS(null,'p:x')!==null)throw 'readd new identity';
+document.title='set-namespace-identity-ok';
+"#]);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    assert_eq!(doc.title, "set-namespace-identity-ok");
+}
+
+#[test]
+fn set_attribute_ns_validates_after_conversions_and_preserves_abrupt_identity() {
+    let (doc, _, page, outcome) = page("<p id=p title=old></p>", &[r#"
+var p=document.getElementById('p'),log='',marker={},set=p.setAttributeNS;
+if(set.length!==3||set!==p.setAttributeNS||typeof set!=='function')throw 'native method';
+var ns={toString:function(){log+='N';return 'urn:a';}},name={toString:function(){log+='Q';return 'a:key';}},value={toString:function(){log+='V';return 'live';}};
+if(set.call(p,ns,name,value)!==undefined||log!=='NQV'||p.getAttributeNS('urn:a','key')!=='live')throw 'ordered conversions';
+log='';var rejected=0;try{p.setAttributeNS(ns,name);}catch(e){if(e.name==='TypeError')rejected++;}
+for(var bad of [{},window,document,p.style,p.dataset,document.createTextNode('x')]){try{set.call(bad,ns,name,value);}catch(e){if(e.name==='TypeError')rejected++;}}
+if(log!==''||rejected!==7)throw 'arity/receiver before conversion';
+for(var args of [[Symbol(),name,value],['urn:a',Symbol(),value],['urn:a','a:key',Symbol()]]){try{set.apply(p,args);}catch(e){if(e.name==='TypeError')rejected++;}}
+if(log!==''||rejected!==10)throw 'Symbol ordered failure';
+for(var index of [0,1,2]){var args=['urn:a','a:key','next'];args[index]={toString:function(){throw marker;}};var caught=false;try{set.apply(p,args);}catch(e){caught=e===marker;}if(!caught||p.getAttributeNS('urn:a','key')!=='live')throw 'throw identity/atomicity';}
+log='';try{p.setAttributeNS(ns,{toString:function(){log+='Q';return 'bad name';}},value);}catch(e){if(e.name==='InvalidCharacterError')rejected++;}
+if(log!=='NQV'||rejected!==11)throw 'all conversions before validation';
+var old=p.getAttributeNodeNS('urn:a','key');
+p.setAttributeNS('urn:a','incoming:key',{toString:function(){p.removeAttributeNS('urn:a','key');p.setAttributeNS('urn:a','during:key','middle');return 'after';}});
+var fresh=p.getAttributeNodeNS('urn:a','key');if(fresh===old||old.ownerElement!==null||old.value!=='live'||fresh.name!=='during:key'||fresh.value!=='after')throw 'reentrant current target';
+var order='';Promise.resolve().then(function(){try{p.setAttributeNS(null,'p:title','bad');}catch(e){order=e.name;}});Promise.resolve().then(function(){if(order!=='NamespaceError'||p.getAttribute('title')!=='old')throw 'catchable namespace error';document.title='set-namespace-conversions-ok';});
+"#]);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    assert_eq!(doc.title, "set-namespace-conversions-ok");
+}
+
+#[test]
+fn set_attribute_ns_xml_combinations_case_and_null_namespace_are_distinct() {
+    let (doc, _, page, outcome) = page("<p id=p></p>", &[r#"
+var p=document.getElementById('p'),xml='http://www.w3.org/XML/1998/namespace',xmlns='http://www.w3.org/2000/xmlns/';
+for(var row of [[null,'p:x','NamespaceError'],['','p:x','NamespaceError'],['urn:a','xml:x','NamespaceError'],[null,'xmlns','NamespaceError'],['urn:a','xmlns:x','NamespaceError'],[xmlns,'x','NamespaceError'],[xmlns,'p:x','NamespaceError'],['urn:a','bad name','InvalidCharacterError'],['urn:a',':x','InvalidCharacterError'],['urn:a','x:','InvalidCharacterError'],['urn:a','p:x/y','InvalidCharacterError'],['urn:a','x=bad','InvalidCharacterError']]){
+ var observed='';try{p.setAttributeNS(row[0],row[1],'no');}catch(e){observed=e.name;}if(observed!==row[2])throw row[1]+':'+observed;
+}
+p.setAttributeNS(xml,'xml:lang','en');p.setAttributeNS(xml,'other:free','yes');p.setAttributeNS(xmlns,'xmlns','urn:default');p.setAttributeNS(xmlns,'xmlns:p','urn:p');
+if(p.getAttributeNS(xml,'lang')!=='en'||p.getAttributeNS(xml,'free')!=='yes'||p.getAttributeNodeNS(xmlns,'xmlns').prefix!==null||p.getAttributeNS(xmlns,'p')!=='urn:p')throw 'valid XML combinations';
+if(p.namespaceURI!=='http://www.w3.org/1999/xhtml'||!p.isDefaultNamespace('http://www.w3.org/1999/xhtml'))throw 'no invented parser namespace';
+p.setAttributeNS(null,'title','one');var title=p.getAttributeNode('title');p.setAttributeNS(undefined,'title','two');p.setAttributeNS('','title','three');
+if(title.value!=='three'||p.getAttributeNodeNS(null,'title')!==title||title.prefix!==null||title.namespaceURI!==null)throw 'null normalization';
+p.setAttributeNS(null,'TITLE','upper');var upper=p.getAttributeNodeNS(null,'TITLE');
+if(upper.name!=='TITLE'||upper.localName!=='TITLE'||p.getAttribute('TITLE')!=='three'||p.getAttributeNS(null,'TITLE')!=='upper')throw 'case preserved';
+p.removeAttributeNS(null,'TITLE');if(upper.ownerElement!==null||upper.value!=='upper'||title.ownerElement!==p||p.getAttribute('title')!=='three')throw 'exact case removal';
+p.setAttributeNS('urn:case','p:Key','case');if(p.getAttributeNS('urn:case','key')!==null||p.getAttributeNS('URN:case','Key')!==null||p.getAttributeNS('urn:case','Key')!=='case')throw 'case-sensitive expanded name';
+p.setAttributeNS('urn:a','1prefix:x:y','colons');p.setAttributeNS('urn:a','1local','digit');
+if(p.getAttributeNS('urn:a','x:y')!=='colons'||p.getAttributeNodeNS('urn:a','x:y').prefix!=='1prefix'||p.getAttributeNS('urn:a','1local')!=='digit')throw 'current DOM name validation';
+document.title='set-namespace-validation-ok';
+"#]);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    assert_eq!(doc.title, "set-namespace-validation-ok");
+}
+
+#[test]
+fn set_attribute_ns_metadata_cannot_acquire_html_resource_form_or_csp_effects() {
+    let (doc, forms, mut page, outcome) = page("<html><body><img id=picture><input id=control value=original><p id=p>Text</p></body></html>", &[r#"
+var p=document.createElement('div');p.setAttributeNS('urn:a','id','meta');p.setAttribute('id','updated');
+if(p.id!==''||p.getAttribute('id')!=='updated')throw 'raw QName not HTML id';p.id='real';if(p.getAttributeNS(null,'id')!=='real'||p.getAttributeNS('urn:a','id')!=='updated')throw 'IDL exact null namespace';
+p.setAttributeNS(null,'ID','UPPER');if(p.id!=='real')throw 'uppercase not reflected';
+p.setAttributeNS('urn:a','class','meta');p.className='real';if(p.className!=='real'||p.getAttributeNS('urn:a','class')!=='meta')throw 'class reflection';
+p.setAttributeNS('urn:a','data-mode','meta');if(p.dataset.mode!==undefined||Object.keys(p.dataset).length!==0)throw 'dataset excludes namespaces';p.dataset.mode='real';if(p.getAttributeNS('urn:a','data-mode')!=='meta'||p.dataset.mode!=='real')throw 'dataset null write';
+var img=document.getElementById('picture');img.setAttributeNS('urn:a','src','/never-one');img.setAttribute('src','/never-two');var source=img.getAttributeNodeNS('urn:a','src');source.value='/never-three';
+if(img.src!==''||!img.complete||img.currentSrc!==''||img.getAttribute('src')!=='/never-three')throw 'image metadata';img.removeAttributeNode(source);if(source.value!=='/never-three'||source.ownerElement!==null)throw 'resource metadata detach';
+var link=document.createElement('link');link.setAttributeNS('urn:a','href','/never-sheet');link.setAttribute('href','/still-never');link.rel='stylesheet';document.body.appendChild(link);if(link.href!=='')throw 'link metadata';
+var script=document.createElement('script');script.setAttributeNS('urn:a','src','/never-script');script.setAttribute('src','/still-never-script');script.setAttributeNS('urn:a','nonce','meta');document.body.appendChild(script);if(script.src!=='')throw 'script metadata';
+var control=document.getElementById('control');control.setAttributeNS('urn:a','value','metadata');control.setAttributeNS('urn:a','disabled','');if(control.value!=='original'||control.disabled)throw 'form metadata';
+document.getElementById('p').setAttributeNS('urn:a','style','display:none; background:url(/never-style)');
+document.title='set-namespace-policy-ok';
+"#]);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    assert_eq!(doc.title, "set-namespace-policy-ok");
+    assert!(page.take_dynamic_scripts().is_empty());
+    assert!(page.take_dynamic_stylesheets().is_empty());
+    assert_eq!(page.state.declined_images, 0);
+    let p = (0..doc.nodes.len()).find(|&n| doc.attr(n, "id") == Some("p")).unwrap();
+    assert_eq!(doc.attr(p, "style"), None);
+    let control = (0..doc.nodes.len()).find(|&n| doc.attr(n, "id") == Some("control")).unwrap();
+    assert!(!forms.controls[&control].disabled);
+    let script = doc.nodes.iter().position(|n| matches!(&n.kind, NodeKind::Element { tag, .. } if tag=="script")).unwrap();
+    assert_eq!(crate::csp::nonce(&doc, script), None);
+}
+
+#[test]
+fn set_attribute_ns_budget_failures_preserve_records_identity_and_detached_values() {
+    let (mut doc, mut forms, mut page, outcome) = page("<p id=p></p>", &["var p=document.getElementById('p');p.setAttributeNS('urn:a','p:title','old');var retained=p.getAttributeNodeNS('urn:a','title');"]);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    let node = (0..doc.nodes.len()).find(|&n| doc.attr(n, "id") == Some("p")).unwrap();
+    page.begin_job();
+    let mut bridge = Bridge { doc: &mut doc, forms: &mut forms, state: &mut page.state };
+    let args = [Value::String("urn:a".into()), Value::String("q:title".into()), Value::String("longer".into())];
+    let before = bridge.state.retained;
+    bridge.state.retained_limit = before;
+    assert!(bridge.call(node_handle(node), "setAttributeNS", &args).is_err());
+    assert_eq!(bridge.state.retained, before);
+    let NodeKind::Element { attrs, .. } = &bridge.doc.nodes[node].kind else { unreachable!() };
+    assert_eq!(attrs.len(), 2); assert_eq!(attrs[1].name.qualified, "p:title"); assert_eq!(attrs[1].value, "old");
+    let Value::Host(handle) = bridge.call(node_handle(node), "getAttributeNodeNS", &[Value::String("urn:a".into()), Value::String("title".into())]).unwrap() else { panic!("missing retained Attr") };
+    assert!(matches!(bridge.get(handle, "value").unwrap(), Value::String(value) if value=="old"));
+    bridge.state.retained_limit = before + 100;
+    bridge.state.copy_work = 0;
+    assert!(bridge.call(node_handle(node), "setAttributeNS", &args).is_err());
+    assert_eq!(bridge.state.retained, before);
+    bridge.state.copy_work = bridge.state.limits.copy_bytes;
+    bridge.state.host_work = 0;
+    assert!(bridge.call(node_handle(node), "removeAttributeNS", &args[..2]).is_err());
+    assert_eq!(bridge.state.attributes[0].owner, Some(node));
+    bridge.state.host_work = bridge.state.limits.host_work;
+    bridge.doc.nodes[node].namespace = crate::html::Namespace::UnknownForeign;
+    assert!(bridge.call(node_handle(node), "setAttributeNS", &args).unwrap_err().contains("foreign"));
+    assert_eq!(bridge.state.retained, before);
+}
+
+#[test]
+fn named_map_is_same_object_live_ordered_and_returns_stable_namespace_attrs() {
+    let (doc, _, page, outcome) = page("<html><body><p id=p title=old></p><p id=q></p></body></html>", &[r#"
+var p=document.getElementById('p'),q=document.getElementById('q'),map=p.attributes;
+if(map!==p.attributes||map===q.attributes||map.length!==2||map[0].name!=='id'||map[1].name!=='title')throw 'same object/order';
+var title=map.item(1);if(title!==p.getAttributeNode('TITLE')||map.getNamedItem('TITLE')!==title||map.getNamedItemNS(null,'title')!==title||map.getNamedItemNS(null,'TITLE')!==null)throw 'shared identities/names';
+p.setAttributeNS('urn:a','p:key','one');p.setAttributeNS('urn:b','p:key','two');
+var a=map[2],b=map.item(3);if(map.length!==4||map.getNamedItem('p:key')!==a||map.getNamedItemNS('urn:b','key')!==b)throw 'namespace/order';
+p.setAttributeNS('urn:a','q:key','new');if(map[2]!==a||a.name!=='p:key'||a.value!=='new'||map.length!==4)throw 'replace';
+p.removeAttribute('title');if(map.length!==3||map[1]!==a||title.ownerElement!==null||title.value!=='old')throw 'live removal';
+p.setAttribute('title','fresh');if(map[3]===title||map[3].name!=='title'||map[3].value!=='fresh')throw 'append after remove';
+if(map[99]!==undefined||map.item(99)!==null||map.getNamedItem('absent')!==null||map.getNamedItemNS('urn:missing','key')!==null||'99' in map)throw 'missing distinction';
+var get=map.getNamedItem;if(get!==map.getNamedItem||get.call(q.attributes,'id')!==q.getAttributeNode('id'))throw 'borrowed current receiver';
+document.body.removeChild(p);if(map!==p.attributes||map.length!==4||map[1]!==a||a.ownerElement!==p)throw 'detached owner map';
+document.title='named-map-live-ok';
+"#]);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    assert_eq!(doc.title, "named-map-live-ok");
+}
+
+#[test]
+fn named_map_conversion_order_reentrancy_and_brands_use_the_existing_native_path() {
+    let (doc, _, page, outcome) = page("<p id=p title=old></p>", &[r#"
+var p=document.getElementById('p'),map=p.attributes,log='',marker={};
+if(map.item.length!==1||map.getNamedItem.length!==1||map.getNamedItemNS.length!==2)throw 'lengths';
+var ns={toString:function(){log+='N';return '';}};var local={toString:function(){log+='L';return 'title';}};
+if(map.getNamedItemNS(ns,local)!==p.getAttributeNode('title')||log!=='NL')throw 'ordered DOMString';
+var calls=0,index={valueOf:function(){calls++;return 4294967297;},toString:function(){throw 'wrong hint';}};
+if(map.item(index)!==map[1]||calls!==1||map.item(NaN)!==map[0]||map.item(Infinity)!==map[0]||map.item(-1)!==null)throw 'unsigned long';
+var rejected=0;log='';try{map.getNamedItemNS(ns);}catch(e){if(e.name==='TypeError')rejected++;}
+try{map.item();}catch(e){if(e.name==='TypeError')rejected++;}try{map.getNamedItem();}catch(e){if(e.name==='TypeError')rejected++;}
+for(var bad of [{},window,document,p,p.style,p.dataset,document.createTextNode('x')]){try{map.getNamedItemNS.call(bad,ns,local);}catch(e){if(e.name==='TypeError')rejected++;}}
+if(log!==''||rejected!==10)throw 'brand/arity before conversion';
+try{map.getNamedItem(Symbol());}catch(e){if(e.name==='TypeError')rejected++;}try{map.item(Symbol());}catch(e){if(e.name==='TypeError')rejected++;}
+var caught=false;try{map.getNamedItem({toString:function(){throw marker;}});}catch(e){caught=e===marker;}if(!caught||rejected!==12)throw 'abrupt completion';
+var old=map[1],fresh=map.getNamedItem({toString:function(){p.removeAttribute('title');p.setAttribute('title','after');return 'TITLE';}});
+if(fresh===old||fresh!==map[1]||fresh.value!=='after'||old.ownerElement!==null||old.value!=='old')throw 'lookup after conversion';
+document.title='named-map-conversion-ok';
+"#]);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    assert_eq!(doc.title, "named-map-conversion-ok");
+}
+
+#[test]
+fn named_map_index_descriptors_readonly_fields_and_missing_properties_are_honest() {
+    let (doc, _, page, outcome) = page("<p id=p title=old></p>", &[r#"
+var p=document.getElementById('p'),map=p.attributes,calls=0,rhs={toString:function(){calls++;return 'bad';}};
+map.length=rhs;map[0]=rhs;p.attributes=rhs;if(calls!==0||map.length!==2||map[0].value!=='p'||p.attributes!==map)throw 'readonly no conversion';
+var rejected=0;try{(function(){'use strict';map.length=3;})();}catch(e){if(e.name==='TypeError')rejected++;}
+try{(function(){'use strict';p.attributes={};})();}catch(e){if(e.name==='TypeError')rejected++;}if(rejected!==2)throw 'strict readonly';
+var d=Object.getOwnPropertyDescriptor(map,'0');if(d.value!==map[0]||d.writable||!d.enumerable||!d.configurable||!Object.hasOwn(map,'0'))throw 'index descriptor';
+if(Object.hasOwn(map,'length')||Object.getOwnPropertyDescriptor(map,'item')!==undefined||Object.getOwnPropertyDescriptor(map,'99')!==undefined)throw 'inherited/missing descriptors';
+if(delete map[0]||!delete map[99]||map.length!==2||map[0].value!=='p')throw 'indexed deletion';
+if(map.offlineAbsent!==undefined||'offlineAbsent' in map||typeof map.toString!=='function'||!('toString' in map))throw 'absence/prototype';
+Object.defineProperty(Object.prototype,'mapProbe',{configurable:true,get:function(){if(this!==map)throw 'wrong inherited receiver';return 42;}});
+if(map.mapProbe!==42||!('mapProbe' in map)||Object.hasOwn(map,'mapProbe'))throw 'read-only owner prototype tail';delete Object.prototype.mapProbe;
+document.title='named-map-descriptors-ok';
+"#]);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    assert_eq!(doc.title, "named-map-descriptors-ok");
+}
+
+#[test]
+fn named_map_laziness_quota_rollback_and_unsupported_surfaces_preserve_real_entries() {
+    let (mut doc, mut forms, mut page, outcome) = page("<p id=p title=old></p>", &[]);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    let node = (0..doc.nodes.len()).find(|&n| doc.attr(n, "id") == Some("p")).unwrap();
+    let object = node_handle(node);
+    let mut bridge = Bridge { doc: &mut doc, forms: &mut forms, state: &mut page.state };
+    let Value::Host(map) = bridge.get(object, "attributes").unwrap() else { panic!("missing map") };
+    let before = bridge.state.retained;
+    for _ in 0..4 { assert!(bridge.has(map, "0").unwrap()); assert!(matches!(bridge.get(map, "length").unwrap(), Value::Number(2.0))); }
+    assert!(bridge.state.attributes.is_empty()); assert_eq!(bridge.state.retained, before);
+    bridge.state.retained_limit = before;
+    assert!(bridge.get(map, "0").is_err()); assert!(bridge.state.attributes.is_empty()); assert_eq!(bridge.state.retained, before);
+    bridge.state.retained_limit = before + 100;
+    bridge.state.copy_work = 0;
+    assert!(bridge.get(map, "1").is_err()); assert!(bridge.state.attributes.is_empty());
+    bridge.state.copy_work = bridge.state.limits.copy_bytes;
+    let value = bridge.get(map, "1").unwrap();
+    assert!(matches!(value, Value::Host(handle) if script_attr::index(handle)==Some(0)));
+    assert_eq!(bridge.state.attributes.len(), 1);
+    assert!(bridge.own_keys(map).unwrap_err().contains("enumeration"));
+    assert!(bridge.get(map, "title").unwrap_err().contains("named-property"));
+    for name in ["setNamedItem", "setNamedItemNS", "removeNamedItem", "removeNamedItemNS"] {
+        assert!(bridge.method(map, name).is_none()); assert!(bridge.get(map, name).unwrap_err().contains("not implemented"));
+    }
+    bridge.doc.nodes[node].namespace = crate::html::Namespace::UnknownForeign;
+    assert!(!bridge.named_map_receiver(map)); assert!(bridge.get(object, "attributes").is_err()); assert!(bridge.get(map, "0").is_err());
+    assert!(!bridge.accepts_receiver(map, "item", map));
+    let invalid = script_named_map::handle(node_handle(bridge.doc.nodes.len() + 1));
+    assert!(!bridge.named_map_receiver(invalid)); assert!(bridge.get(invalid, "length").is_err());
+}
+
+#[test]
+fn named_map_unsupported_descriptor_definition_never_claims_or_publishes_mutation() {
+    let (mut doc, mut forms, mut page, outcome) = page("<p id=p title=old></p>", &["var p=document.getElementById('p'),map=p.attributes;"]);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    let outcome = page.console_eval(&mut doc, &mut forms, "Object.defineProperty(map,'0',{value:17,writable:true,enumerable:true,configurable:true});document.title='fabricated success';");
+    assert_eq!(outcome.errors, 1);
+    assert!(page.report().contains("Native host object prototypes and descriptors are not implemented"));
+    assert_ne!(doc.title, "fabricated success");
+    let outcome = page.console_eval(&mut doc, &mut forms, "if(map[0].value!=='p'||map.length!==2||map!==p.attributes)throw 'failed definition changed map';document.title='map-definition-refused';");
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    assert_eq!(doc.title, "map-definition-refused");
+}
+
+#[test]
+fn named_map_normal_browser_materializes_more_than_historical_attr_capacity() {
+    let mut markup = String::from("<p");
+    for i in 0..600 { markup.push_str(&format!(" data-{i}='{i}'")); }
+    markup.push_str(">Text</p>");
+    let mut doc = crate::html::parse(&markup);
+    doc.scripting_enabled = true;
+    let mut forms = Forms::new(&doc);
+    let mut page = Page::new();
+    let source = "var p=document.querySelector('p'),m=p.attributes;for(var i=0;i<600;i++){var a=m.item(i);if(a!==m[i]||a.value!==String(i)||a.ownerElement!==p)throw 'live index capacity';}if(m.length!==600||m[600]!==undefined||m.item(600)!==null)throw 'length';document.title='named-map-capacity-ok';";
+    let outcome = page.start(&mut doc, &mut forms, &[Script { node: 0, label: "original generous map fixture".into(), source: source.into() }]);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    assert_eq!(doc.title, "named-map-capacity-ok");
+    assert_eq!(page.state.attributes.len(), 600);
+    assert_eq!(page.state.limits.host.attribute_identities, 65_536);
+}
+
+#[test]
+fn tab_index_getter_uses_tag_defaults_and_physical_summary_parent() {
+    let (doc, _, page, outcome) = page("<html><body><input id=hidden type=hidden><input id=disabled disabled><a id=a>No href</a><div id=d></div><details><i>lead</i><summary id=first>First</summary><summary id=second>Second</summary></details><summary id=outside>Outside</summary></body></html>", &[r#"
+for(var id of ['hidden','disabled','a']){if(document.getElementById(id).tabIndex!==0)throw 'default historical zero';}
+for(var id of ['d','second','outside']){if(document.getElementById(id).tabIndex!==-1)throw 'default minus one';}
+if(document.getElementById('first').tabIndex!==0||'tabIndex' in document||'tabIndex' in document.createTextNode('x'))throw 'interface/default';
+for(var name of ['a','area','button','frame','iframe','input','object','select','textarea']){var n=document.createElement(name);if(!('tabIndex' in n)||n.tabIndex!==0)throw 'detached tag default';}
+var details=document.createElement('details'),first=document.createElement('summary'),second=document.createElement('summary');
+details.appendChild(first);details.appendChild(second);if(first.tabIndex!==0||second.tabIndex!==-1)throw 'detached summary order';details.removeChild(first);if(first.tabIndex!==-1||second.tabIndex!==0)throw 'summary mutation';
+document.title='tab-index-defaults-ok';
+"#]);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    assert_eq!(doc.title, "tab-index-defaults-ok");
+}
+
+#[test]
+fn tab_index_getter_and_native_control_order_share_the_authored_integer_parser() {
+    for (text, expected) in [(" +12junk", Some(12)), ("1e3", Some(1)), ("0x10", Some(0)),
+        ("-0", Some(0)), ("2147483647", Some(i32::MAX)), ("-2147483648", Some(i32::MIN)),
+        ("2147483648", None), ("-2147483649", None), ("+", None), ("\u{a0}2", None), ("\x0b2", None)] {
+        let markup = format!("<input id=c tabindex='{text}'><div id=d tabindex='{text}'></div>");
+        let source = format!("if(document.getElementById('c').tabIndex!=={}||document.getElementById('d').tabIndex!=={})throw 'integer prefix';", expected.unwrap_or(0), expected.unwrap_or(-1));
+        let (doc, forms, page, outcome) = page(&markup, &[&source]);
+        assert_eq!(outcome.errors, 0, "{text:?}: {}", page.report());
+        let control = (0..doc.nodes.len()).find(|&n| doc.attr(n, "id") == Some("c")).unwrap();
+        assert_eq!(forms.controls[&control].tab_index, expected.unwrap_or(0));
+    }
+}
+
+#[test]
+fn tab_index_summary_context_keeps_foreign_provenance_after_moves() {
+    let (mut doc, mut forms, mut page, outcome) = page("<html><body><svg><details id=fd></details><summary id=fs></summary></svg></body></html>", &[r#"
+var foreign=document.getElementById('fd'),s=document.createElement('summary');s.id='known-parent';foreign.appendChild(s);
+var d=document.createElement('details'),bad=document.getElementById('fs'),x=document.createElement('summary');x.id='known-sibling';d.appendChild(bad);d.appendChild(x);
+"#]);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    let nodes: Vec<_> = ["known-parent", "known-sibling"].iter().map(|id| (0..doc.nodes.len()).find(|&n| doc.attr(n, "id") == Some(*id)).unwrap()).collect();
+    {
+        let mut bridge = Bridge { doc: &mut doc, forms: &mut forms, state: &mut page.state };
+        for node in nodes {
+            assert!(bridge.get(node_handle(node), "tabIndex").unwrap_err().contains("unknown"));
+        }
+    }
+    let outcome = page.console_eval(&mut doc, &mut forms, "d.removeChild(bad);if(x.tabIndex!==0)throw 'known summary after removal';");
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+}
+
+#[test]
+fn tab_index_and_zero_offset_reads_keep_invalid_foreign_write_and_work_boundaries() {
+    let (mut doc, mut forms, mut page, outcome) = page("<html><body><span id=connected>Text</span><svg><g id=foreign></g></svg><template><i id=inert></i></template></body></html>", &[r#"
+var detached=document.createElement('input');if(detached.offsetLeft!==0||detached.offsetTop!==0||document.body.offsetLeft!==0||document.body.offsetTop!==0)throw 'defined zero offsets';
+var effects=0,rhs={valueOf:function(){effects++;return 2;},toString:function(){effects++;return '2';}};
+if((detached.offsetLeft=rhs)!==rhs||detached.offsetLeft!==0||effects!==0)throw 'readonly offset';
+var caught=false;try{(function(){'use strict';detached.offsetTop=7;})();}catch(e){caught=e.name==='TypeError';}if(!caught||detached.offsetTop!==0)throw 'strict offset';
+"#]);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    let find = |id: &str| (0..doc.nodes.len()).find(|&n| doc.attr(n, "id") == Some(id)).unwrap();
+    let connected = find("connected"); let foreign = find("foreign"); let inert = find("inert");
+    let invalid = [node_handle(0), node_handle(doc.nodes.len()+99), node_handle(inert), node_handle(foreign)];
+    let mut bridge = Bridge { doc: &mut doc, forms: &mut forms, state: &mut page.state };
+    for handle in invalid {
+        for property in ["tabIndex", "offsetLeft", "offsetTop"] {
+            assert!(bridge.get(handle, property).is_err());
+            assert!(bridge.has(handle, property).is_err());
+            assert!(!bridge.readonly_property(handle, property));
+        }
+    }
+    let diagnostic = bridge.get(node_handle(connected), "offsetLeft").unwrap_err();
+    assert!(diagnostic.contains("class=span; connected=true; created=false; geometry-attached=false"), "{diagnostic}");
+    assert!(diagnostic.len() < 300);
+    assert!(bridge.set(node_handle(connected), "tabIndex", Value::Number(3.0)).is_err());
+    assert_eq!(bridge.doc.attr(connected, "tabindex"), None);
+    bridge.state.copy_work = 0;
+    assert!(bridge.get(node_handle(connected), "tabIndex").is_err());
+    bridge.state.host_work = 0;
+    assert!(bridge.get(node_handle(connected), "offsetTop").is_err());
+}
+
+#[test]
+fn attr_identity_ownership_detach_and_live_values_follow_existing_mutations() {
+    let (doc, _, page, outcome) = page("<div id=p title=old data-x=one style='color:red'></div><div id=q></div>", &[r#"
+var p=document.getElementById('p'),q=document.getElementById('q'),a=p.getAttributeNode('TITLE'),x=p.getAttributeNode('data-x'),s=p.getAttributeNode('style');
+if(a!==p.getAttributeNode('title')||p.getAttributeNode('missing')!==null)throw 'identity/absence';
+if(a.name!=='title'||a.localName!=='title'||a.nodeName!=='title'||a.value!=='old'||a.nodeType!==2||a.ATTRIBUTE_NODE!==2||a.ownerElement!==p||a.ownerDocument!==document||a.namespaceURI!==null||a.prefix!==null||!a.specified||a.isConnected)throw 'metadata';
+if(a.parentNode!==null||a.firstChild!==null||a.lastChild!==null||a.nextSibling!==null||a.previousSibling!==null||a.parentElement!==null)throw 'Attr topology';
+if(!a.isDefaultNamespace('http://www.w3.org/1999/xhtml')||a.isDefaultNamespace(null))throw 'attached namespace';
+p.setAttribute('title','new');p.dataset.x='two';p.style.color='blue';
+if(a.value!=='new'||a.nodeValue!=='new'||a.textContent!=='new'||x.value!=='two'||s.value.indexOf('blue')<0||a!==p.getAttributeNode('title'))throw 'live mutations';
+var wrong=false;try{q.removeAttributeNode(a);}catch(e){wrong=e.name==='NotFoundError';}if(!wrong||a.ownerElement!==p)throw 'wrong owner';
+var remove=q.removeAttributeNode;if(remove.call(p,a)!==a||a.ownerElement!==null||a.value!=='new'||p.hasAttribute('title')||p.getAttributeNode('title')!==null)throw 'detach';
+if(!a.isDefaultNamespace(null)||a.isDefaultNamespace('http://www.w3.org/1999/xhtml'))throw 'detached namespace';
+p.setAttribute('title','fresh');if(p.getAttributeNode('title')===a||a.value!=='new')throw 'readd identity';
+var missing=false;try{p.removeAttributeNode(a);}catch(e){missing=e.name==='NotFoundError';}if(!missing)throw 'detached removal';
+p.removeAttribute('data-x');p.setAttribute('data-x','three');if(x.ownerElement!==null||x.value!=='two'||p.getAttributeNode('data-x')===x)throw 'string removal lifecycle';
+document.title='attr-lifecycle-ok';
+"#]);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    assert_eq!(doc.title, "attr-lifecycle-ok");
+}
+
+#[test]
+fn attr_value_aliases_coerce_once_preserve_nullability_and_do_not_forge_brands() {
+    let (doc, _, page, outcome) = page("<p id=p title=old></p>", &[r#"
+var p=document.getElementById('p'),a=p.getAttributeNode('title'),calls=0;
+var value={toString:function(){calls++;return 'once';},valueOf:function(){throw 'wrong hint';}};
+a.value=value;if(calls!==1||a.value!=='once'||p.getAttribute('title')!=='once')throw 'attached value';
+a.nodeValue=null;if(a.value!=='')throw 'nullable nodeValue';a.textContent=undefined;if(a.value!=='')throw 'nullable textContent';
+a.value=null;if(a.value!=='null')throw 'ordinary value';a.nodeValue={toString:function(){return null;}};if(a.value!=='null')throw 'object-produced null';
+var marker={},caught=false;try{a.value={toString:function(){throw marker;}};}catch(e){caught=e===marker;}if(!caught||a.value!=='null')throw 'failed value';
+var rejected=0;try{a.value=Symbol();}catch(e){if(e.name==='TypeError')rejected++;}
+for(var v of [null,{},p,p.style,document,document.createTextNode('x')]){try{p.removeAttributeNode(v);}catch(e){if(e.name==='TypeError')rejected++;}}
+try{p.getAttributeNode();}catch(e){if(e.name==='TypeError')rejected++;}
+try{p.removeAttributeNode();}catch(e){if(e.name==='TypeError')rejected++;}
+var effect=0;for(var v of [{},window,p.style]){try{p.getAttributeNode.call(v,{toString:function(){effect++;return 'title';}});}catch(e){if(e.name==='TypeError')rejected++;}}
+if(rejected!==12||effect!==0||a.ownerElement!==p)throw 'brand/arity/order';
+var rhs={toString:function(){throw 'readonly coercion';}},result=(a.name=rhs);if(result!==rhs||a.name!=='title')throw 'readonly result';
+caught=false;try{(function(){'use strict';a.ownerElement=p;})();}catch(e){caught=e.name==='TypeError';}if(!caught)throw 'strict readonly';
+p.removeAttributeNode(a);a.value=value;if(a.value!=='once'||calls!==2||p.hasAttribute('title'))throw 'detached write';
+document.title='attr-conversion-ok';
+"#]);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    assert_eq!(doc.title, "attr-conversion-ok");
+}
+
+#[test]
+fn attr_removal_and_setters_keep_resource_control_and_inert_policy() {
+    let (mut doc, mut forms, mut page, outcome) = page("<body><input id=p value=initial onclick='return false'><img id=image src='https://example.test/x.png' srcset='responsive.png 1x'><a id=link href='https://example.test/'>link</a><template><i id=inert title=x></i></template></body>", &[]);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    let nodes: Vec<_> = ["p", "image", "link", "inert"].iter().map(|id| (0..doc.nodes.len()).find(|&n| doc.attr(n, "id") == Some(*id)).unwrap()).collect();
+    let mut bridge = Bridge { doc: &mut doc, forms: &mut forms, state: &mut page.state };
+    for (node, name) in [(nodes[0], "value"), (nodes[0], "onclick"), (nodes[1], "src"), (nodes[2], "href")] {
+        let value = bridge.call(node_handle(node), "getAttributeNode", &[Value::String(name.into())]).unwrap();
+        let Value::Host(handle) = value else { panic!("expected real Attr") };
+        let original = bridge.doc.attr(node, name).unwrap().to_owned();
+        let before = bridge.state.retained;
+        assert!(bridge.call(node_handle(node), "removeAttributeNode", &[Value::Host(handle)]).is_err());
+        assert!(bridge.set(handle, "value", Value::String("changed".into())).is_err());
+        assert_eq!(bridge.doc.attr(node, name), Some(original.as_str()));
+        assert_eq!(bridge.state.retained, before);
+        assert_eq!(bridge.state.attributes[script_attr::index(handle).unwrap()].owner, Some(node));
+    }
+    assert!(bridge.call(node_handle(nodes[3]), "getAttributeNode", &[Value::String("title".into())]).is_err());
+}
+
+#[test]
+fn attr_identity_limit_and_failed_materialization_are_atomic_and_keep_live_identity() {
+    let (mut doc, mut forms, mut page, outcome) = page("<p id=p title=old></p>", &[]);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    let p = (0..doc.nodes.len()).find(|&n| doc.attr(n, "id") == Some("p")).unwrap();
+    let mut bridge = Bridge { doc: &mut doc, forms: &mut forms, state: &mut page.state };
+    let before = bridge.state.retained;
+    bridge.state.retained_limit = before;
+    assert!(bridge.call(node_handle(p), "getAttributeNode", &[Value::String("title".into())]).is_err());
+    assert_eq!(bridge.state.retained, before);
+    assert!(bridge.state.attributes.is_empty());
+    bridge.state.retained_limit = before + MAX_EXTRA_BYTES;
+    for i in 0..256 {
+        let name = format!("data-{i}");
+        bridge.call(node_handle(p), "setAttribute", &[Value::String(name.clone()), Value::String("x".into())]).unwrap();
+        let value = bridge.call(node_handle(p), "getAttributeNode", &[Value::String(name)]).unwrap();
+        assert!(matches!(value, Value::Host(handle) if script_attr::index(handle) == Some(i)));
+    }
+    let retained = bridge.state.retained;
+    assert!(bridge.call(node_handle(p), "getAttributeNode", &[Value::String("title".into())]).unwrap_err().contains("256"));
+    assert_eq!(bridge.state.attributes.len(), 256);
+    assert_eq!(bridge.state.retained, retained);
+    let existing = bridge.call(node_handle(p), "getAttributeNode", &[Value::String("data-0".into())]).unwrap();
+    assert!(matches!(existing, Value::Host(handle) if script_attr::index(handle) == Some(0)));
+}
+
+#[test]
+fn attr_detach_retains_exact_value_bytes_and_budget_failures_publish_no_partial_change() {
+    let (mut doc, mut forms, mut page, outcome) = page("<p id=p title=original></p>", &[]);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    let p = (0..doc.nodes.len()).find(|&n| doc.attr(n, "id") == Some("p")).unwrap();
+    let mut bridge = Bridge { doc: &mut doc, forms: &mut forms, state: &mut page.state };
+    let value = bridge.call(node_handle(p), "getAttributeNode", &[Value::String("title".into())]).unwrap();
+    let Value::Host(attr) = value else { panic!("expected Attr") };
+    let before = bridge.state.retained;
+    bridge.state.host_work = 0;
+    assert!(bridge.call(node_handle(p), "removeAttributeNode", &[Value::Host(attr)]).is_err());
+    assert_eq!(bridge.doc.attr(p, "title"), Some("original"));
+    assert_eq!(bridge.state.attributes[script_attr::index(attr).unwrap()].owner, Some(p));
+    assert_eq!(bridge.state.retained, before);
+    bridge.state.host_work = bridge.state.limits.host_work;
+    bridge.state.copy_work = 0;
+    assert!(bridge.call(node_handle(p), "removeAttributeNode", &[Value::Host(attr)]).is_err());
+    assert_eq!(bridge.doc.attr(p, "title"), Some("original"));
+    assert_eq!(bridge.state.retained, before);
+    bridge.state.copy_work = bridge.state.limits.copy_bytes;
+    bridge.call(node_handle(p), "removeAttributeNode", &[Value::Host(attr)]).unwrap();
+    assert_eq!(bridge.state.retained, before - "title".len());
+    assert_eq!(bridge.state.attributes[script_attr::index(attr).unwrap()].value, "original");
+    bridge.set(attr, "value", Value::String("longer-value".into())).unwrap();
+    assert_eq!(bridge.state.retained, before - "title".len() - "original".len() + "longer-value".len());
+    for invalid in [768 + 1, NODE_BASE - 1, script_attr::ATTR_BASE + 1, script_attr::ATTR_BASE + 65_535] {
+        assert!(bridge.get(invalid, "value").is_err());
+        assert!(bridge.has(invalid, "value").is_err());
+        assert!(!bridge.readonly_property(invalid, "name"));
+        assert!(bridge.set(invalid, "value", Value::String("x".into())).is_err());
+    }
+}
+
+#[test]
+fn attr_borrowed_methods_reject_invalid_inert_and_non_element_receivers_before_coercion() {
+    let (mut doc, mut forms, mut page, outcome) = page("<p id=p title=old></p><template><i id=inert title=x></i></template>", &[]);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    let inert = (0..doc.nodes.len()).find(|&n| doc.attr(n, "id") == Some("inert")).unwrap();
+    for handle in [node_handle(0), node_handle(inert), node_handle(doc.nodes.len()+99)] {
+        page.runtime.define_global("invalidAttrReceiver", Value::Host(handle)).unwrap();
+        let outcome = page.console_eval(&mut doc, &mut forms, "var calls=0,p=document.getElementById('p'),arg={toString:function(){calls++;return 'title';}},rejected=0;try{p.getAttributeNode.call(invalidAttrReceiver,arg);}catch(e){if(e.name==='TypeError')rejected++;}try{p.removeAttributeNode.call(invalidAttrReceiver,arg);}catch(e){if(e.name==='TypeError')rejected++;}if(calls!==0||rejected!==2)throw 'invalid native brand';");
+        assert_eq!(outcome.errors, 0, "{}", page.report());
+    }
+    assert!(page.state.attributes.is_empty());
+}
+
+#[test]
+fn attr_coercion_reentrancy_and_promise_resolution_preserve_original_identity() {
+    let (doc, _, page, outcome) = page("<p id=p title=old></p>", &[r#"
+var p=document.getElementById('p'),a=p.getAttributeNode('title'),effects=0;
+a.value={toString:function(){effects++;p.removeAttributeNode(a);p.setAttribute('title','replacement');return 'detached-value';}};
+var fresh=p.getAttributeNode('title');
+if(effects!==1||a.ownerElement!==null||a.value!=='detached-value'||fresh===a||fresh.value!=='replacement'||fresh.ownerElement!==p)throw 'reentrant owner snapshot';
+var name={toString:function(){effects++;p.removeAttribute('title');p.setAttribute('title','after');return 'TITLE';}};
+var after=p.getAttributeNode(name);if(effects!==2||after===fresh||fresh.ownerElement!==null||fresh.value!=='replacement'||after.value!=='after')throw 'lookup conversion order';
+Promise.resolve(a).then(function(value){if(value!==a||value.value!=='detached-value'||value.ownerElement!==null)throw 'Promise Attr identity';document.title='attr-reentrancy-ok';});
+"#]);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    assert_eq!(doc.title, "attr-reentrancy-ok");
+}
+
+#[test]
+fn default_namespace_tracks_real_html_nodes_and_physical_text_parents() {
+    let (doc, _, page, outcome) = page("<html><body><div id=p xmlns='urn:other'>text</div><b id=empty xmlns=''></b></body></html>", &[r#"
+var uri='http://www.w3.org/1999/xhtml',p=document.getElementById('p'),t=document.createTextNode('x');
+var e=document.createElement('svg'),image=new Image(),nodes=[document,p,p.firstChild,e,image];
+for(var n of nodes){if(!('isDefaultNamespace' in n)||!n.isDefaultNamespace(uri)||n.isDefaultNamespace(null)||n.isDefaultNamespace(undefined)||n.isDefaultNamespace('')||n.isDefaultNamespace('urn:other'))throw 'HTML namespace';}
+if(!t.isDefaultNamespace(null)||!t.isDefaultNamespace(undefined)||!t.isDefaultNamespace('')||t.isDefaultNamespace(uri))throw 'unparented text';
+e.appendChild(t);if(!t.isDefaultNamespace(uri)||t.isDefaultNamespace(null))throw 'detached parent';
+e.removeChild(t);if(!t.isDefaultNamespace(null)||t.isDefaultNamespace(uri))throw 'removed text';
+if(!document.getElementById('empty').isDefaultNamespace(uri))throw 'xmlns attribute';
+var check=p.isDefaultNamespace;
+if(!check.call(document,uri)||!check.call(t,null)||!document.isDefaultNamespace.call(p,uri))throw 'Node borrowing';
+document.title='namespace-topology-ok';
+"#]);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    assert_eq!(doc.title, "namespace-topology-ok");
+}
+
+#[test]
+fn default_namespace_nullable_conversion_and_receiver_failures_preserve_effect_order() {
+    let (doc, _, page, outcome) = page("<p id=p>coercion</p>", &[r#"
+var p=document.getElementById('p'),t=document.createTextNode('x'),calls='',marker={};
+var uri={toString:function(){calls+='s';return 'http://www.w3.org/1999/xhtml';},valueOf:function(){throw 'wrong hint';}};
+if(!p.isDefaultNamespace(uri)||calls!=='s')throw 'once/string hint';
+if(t.isDefaultNamespace({toString:function(){return null;}})||t.isDefaultNamespace({toString:function(){return undefined;}}))throw 'post-coercion nullability';
+if(t.isDefaultNamespace('null')||t.isDefaultNamespace('undefined'))throw 'literal nullability';
+try{p.isDefaultNamespace({toString:function(){throw marker;}});throw 'missing throw';}catch(e){if(e!==marker)throw e;}
+var failures=0;try{p.isDefaultNamespace();}catch(e){if(e.name==='TypeError')failures++;}
+for(var v of [Symbol('x'),Object(Symbol('y'))]){try{p.isDefaultNamespace(v);}catch(e){if(e.name==='TypeError')failures++;}}
+var arg={toString:function(){calls+='BAD';return '';}};
+for(var bad of [{},window,p.style,p.dataset,document.querySelectorAll('p')]){try{p.isDefaultNamespace.call(bad,arg);}catch(e){if(e.name==='TypeError')failures++;}}
+if(failures!==8||calls!=='s')throw 'brand/arity/Symbol';
+if(document.createTextNode(null).data!=='null')throw 'ordinary string conversion changed';
+document.title='namespace-coercion-ok';
+"#]);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    assert_eq!(doc.title, "namespace-coercion-ok");
+}
+
+#[test]
+fn default_namespace_foreign_provenance_survives_moves_and_rejects_unknown_context() {
+    let (mut doc, mut forms, mut page, outcome) = page("<html><body><div id=out></div><svg><g id=foreign><i id=inside>f</i></g></svg><p id=html>h</p></body></html>", &[r#"
+var g=document.getElementById('foreign'),i=document.getElementById('inside'),out=document.getElementById('out'),uri='http://www.w3.org/1999/xhtml';
+"#]);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    let foreign = (0..doc.nodes.len()).find(|&n| doc.attr(n, "id") == Some("foreign")).unwrap();
+    let inside = (0..doc.nodes.len()).find(|&n| doc.attr(n, "id") == Some("inside")).unwrap();
+    let text = doc.nodes[inside].children[0];
+    for action in ["", "out.appendChild(g);", "out.removeChild(g);"] {
+        if !action.is_empty() {
+            let outcome = page.console_eval(&mut doc, &mut forms, action);
+            assert_eq!(outcome.errors, 0, "{}", page.report());
+        }
+        let mut bridge = Bridge { doc: &mut doc, forms: &mut forms, state: &mut page.state };
+        for node in [foreign, inside, text] {
+            let error = bridge.call(node_handle(node), "isDefaultNamespace", &[Value::Null]).unwrap_err();
+            assert!(error.contains("unsupported foreign parser context"), "{error}");
+        }
+    }
+    let outcome = page.console_eval(&mut doc, &mut forms, "if(!document.getElementById('html').isDefaultNamespace(uri))throw 'ordinary HTML after foreign';var created=document.createElement('svg');g.appendChild(created);if(!created.isDefaultNamespace(uri))throw 'creation provenance';document.title='namespace-provenance-ok';");
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    assert_eq!(doc.title, "namespace-provenance-ok");
+}
+
+#[test]
+fn default_namespace_uses_actual_document_root_and_retains_invalid_handle_and_work_bounds() {
+    for (markup, expected) in [("", true), ("text", true), ("<object>inert</object>", false)] {
+        let source = format!("if(document.isDefaultNamespace(null)!=={expected})throw 'document root';");
+        let (_, _, page, outcome) = page(markup, &[&source]);
+        assert_eq!(outcome.errors, 0, "{}", page.report());
+    }
+    let (mut doc, mut forms, mut page, outcome) = page("<p>ok</p><template><i id=inert>x</i></template>", &[]);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    let inert = (0..doc.nodes.len()).find(|&n| doc.attr(n, "id") == Some("inert")).unwrap();
+    let invalid = [node_handle(0), node_handle(doc.nodes.len() + 99), node_handle(inert), WINDOW, STYLE_BASE];
+    let mut bridge = Bridge { doc: &mut doc, forms: &mut forms, state: &mut page.state };
+    for handle in invalid {
+        assert!(bridge.method(handle, "isDefaultNamespace").is_none());
+        assert!(!bridge.accepts_receiver(DOCUMENT, "isDefaultNamespace", handle));
+        assert!(bridge.call(handle, "isDefaultNamespace", &[Value::Null]).is_err());
+    }
+    bridge.state.host_work = 0;
+    assert!(bridge.call(DOCUMENT, "isDefaultNamespace", &[Value::Null]).is_err());
+}
+
+fn page(markup: &str, scripts: &[&str]) -> (Document, Forms, Page, Outcome) {
+    let mut doc = crate::html::parse(markup);
+    doc.scripting_enabled = true;
+    let mut forms = Forms::new(&doc);
+    let scripts: Vec<_> = scripts
+        .iter()
+        .enumerate()
+        .map(|(node, source)| Script {
+            node,
+            source: (*source).into(),
+            label: format!("compat script {node}"),
+        })
+        .collect();
+    let mut page = Page::for_test();
+    page.set_location(
+        &crate::navigation::address(
+            "https://www.google.com/search?q=test",
+            &crate::navigation::Location::home(),
+        )
+        .unwrap(),
+    );
+    let outcome = page.start(&mut doc, &mut forms, &scripts);
+    (doc, forms, page, outcome)
+}
+
+#[test]
+fn page_date_clock_is_integral_utc_and_preserves_monotonic_performance_origin() {
+    let before = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as f64;
+    let (doc, _, page, outcome) = page(
+        "<p>UTC clock</p>",
+        &[r#"
+var now=Date.now(),current=new Date(),mono=performance.now();
+if(!Number.isInteger(now)||!Number.isInteger(current.getTime())||!Number.isInteger(mono))throw 'clock units';
+if(Date!==window.Date||Date!==globalThis.Date)throw 'global Date';
+if(!Number.isFinite(current.getTime())||mono<0||mono>=86400000)throw 'clock origins';
+if(Date.parse(current.toISOString())!==current.getTime())throw 'UTC roundtrip';
+if(JSON.parse(JSON.stringify({when:new Date(0)})).when!=='1970-01-01T00:00:00.000Z')throw 'Date JSON';
+document.title=String(now);
+"#],
+    );
+    let after = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as f64;
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    let observed: f64 = doc.title.parse().unwrap();
+    assert!(observed >= before.min(after) && observed <= before.max(after));
+}
+
+#[test]
+fn page_date_clock_requires_active_scripting_and_charges_host_work() {
+    let (mut doc, mut forms, mut page, outcome) = page("<p>Clock capability</p>", &[]);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    page.state.host_work = 1;
+    let mut bridge = Bridge {
+        doc: &mut doc,
+        forms: &mut forms,
+        state: &mut page.state,
+    };
+    let timestamp = bridge.date_now().unwrap();
+    assert!(timestamp.is_finite() && timestamp == timestamp.trunc());
+    assert_eq!(bridge.state.host_work, 0);
+    assert!(bridge.date_now().unwrap_err().contains("DOM work limit"));
+    bridge.state.host_work = 10;
+    bridge.state.enabled = false;
+    assert!(bridge
+        .date_now()
+        .unwrap_err()
+        .contains("scripting is disabled"));
+    bridge.state.enabled = true;
+    bridge.doc.scripting_enabled = false;
+    assert!(bridge
+        .date_now()
+        .unwrap_err()
+        .contains("scripting is disabled"));
+}
+
+#[test]
+fn dataset_is_live_reflected_and_enumerable_with_stable_identity() {
+    let (doc, _, page, outcome) = page(
+        "<div id=p data-first-name='Ada' data-x--y='double' data-α='unicode'></div>",
+        &[r#"
+var p=document.getElementById('p'),d=p.dataset;
+if(d!==p.dataset || d.firstName!=='Ada' || d['x-Y']!=='double' || d['α']!=='unicode')throw 'reflection';
+if(Object.keys(d).join(',')!=='firstName,x-Y,α')throw 'attribute order';
+d.eqid=17;d.empty='';d.nil=null;d.undef=undefined;
+if(p.getAttribute('data-eqid')!=='17'|| d.nil!=='null'||d.undef!=='undefined'||!('empty' in d))throw 'conversion';
+d.object={toString(){return 'converted';}};
+if(d.object!=='converted')throw 'object ToString';
+p.setAttribute('data-first-name','Grace');if(d.firstName!=='Grace')throw 'live read';
+if(!delete d.firstName||p.hasAttribute('data-first-name')||'firstName' in d)throw 'delete';
+if(d['x-y']!==undefined||!delete d['x-y']||d['x-Y']!=='double')throw 'invalid spelling alias';
+var desc=Object.getOwnPropertyDescriptor(d,'eqid');
+if(desc.value!=='17'||!desc.enumerable||!desc.configurable||!desc.writable)throw 'descriptor';
+if(!Object.prototype.hasOwnProperty.call(d,'eqid')||!d.propertyIsEnumerable('eqid')||!('toString' in d))throw 'own or prototype';
+Object.assign(d,{lastName:'Hopper'});var clone=Object.assign({},d);
+if(clone.lastName!=='Hopper')throw 'assign';
+Object.defineProperty(d,'defined',{value:'yes'});if(p.getAttribute('data-defined')!=='yes')throw 'define';
+var keys='';for(var key in d){if(key==='eqid')delete d.empty;keys+=key+',';}
+if(keys.indexOf('empty,')!==-1)throw 'for in deletion';
+document.title='dataset passed';
+"#],
+    );
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    assert_eq!(doc.title, "dataset passed");
+}
+
+#[test]
+fn empty_element_and_style_reads_are_absent_and_keep_dataset_routing() {
+    let (doc, _, page, outcome) = page(
+        "<p id=p style='color:blue' data-='dataset-empty'>Text</p>",
+        &[r#"
+var p=document.getElementById('p'),s=p.style,n=0,key={toString(){n++;return '';}};
+if(p[key]!==undefined||s[key]!==undefined||n!==2)throw 'empty read/key conversion';
+if('' in p||'' in s)throw 'empty presence';
+if(p.dataset['']!=='dataset-empty'||p.getAttribute('data-')!=='dataset-empty')throw 'dataset routing';
+var marker={},caught=false;try{p[{toString(){throw marker;}}];}catch(e){caught=e===marker;}
+if(!caught)throw 'thrown key identity';
+if(p.getAttribute('style')!=='color:blue'||p.textContent!=='Text')throw 'native mutation';
+document.title='empty-read-ok';
+"#],
+    );
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    assert_eq!(doc.title, "empty-read-ok");
+    let node = (0..doc.nodes.len()).find(|&n| doc.attr(n, "id") == Some("p")).unwrap();
+    assert_eq!(doc.attr(node, "style"), Some("color:blue"));
+    assert_eq!(doc.attr(node, "data-"), Some("dataset-empty"));
+    assert!(page.state.timers.is_empty());
+}
+
+#[test]
+fn empty_element_expandos_round_trip_and_style_writes_remain_rejected() {
+    let (doc, _, expando_page, outcome) = page(
+        "<p id=p style='color:blue'>Text</p>",
+        &[r#"var p=document.getElementById('p');p['']=1;
+if(p['']!==1||!('' in p)||Object.keys(p)[0]!==''||p.textContent!=='Text'||p.getAttribute('style')!=='color:blue')throw 'empty expando';
+if(!delete p['']||'' in p||p['']!==undefined)throw 'empty deletion';document.title='empty-expando-ok';"#],
+    );
+    assert_eq!(outcome.errors,0,"{}",expando_page.report());
+    assert_eq!(doc.title,"empty-expando-ok");
+    for source in ["p.style['']='red';"] {
+        let (doc, _, page, outcome) = page(
+            "<p id=p style='color:blue'>Text</p>",
+            &["var p=document.getElementById('p');", source,
+              "if(p['']!==undefined||p.style['']!==undefined||p.textContent!=='Text'||p.getAttribute('style')!=='color:blue')throw 'partial effect';document.title='empty-write-rejected';"],
+        );
+        assert_eq!(outcome.errors, 1, "{}", page.report());
+        assert_eq!(doc.title, "empty-write-rejected");
+        assert!(page.report().contains("not writable") || page.report().contains("not supported"));
+    }
+}
+
+#[test]
+fn empty_host_property_reads_keep_handle_validation_and_dom_work_bounds() {
+    let (mut doc, mut forms, mut page, outcome) = page("<p id=p>Text</p>", &[]);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    let missing = doc.nodes.len() + 99;
+    let node = (0..doc.nodes.len()).find(|&n| doc.attr(n, "id") == Some("p")).unwrap();
+    let mut bridge = Bridge { doc: &mut doc, forms: &mut forms, state: &mut page.state };
+    for handle in [node_handle(missing), STYLE_BASE + missing as u32] {
+        assert!(bridge.get(handle, "").is_err());
+    }
+    bridge.state.host_work = 1;
+    assert!(matches!(bridge.get(STYLE_BASE + node as u32, "").unwrap(), Value::Undefined));
+    assert_eq!(bridge.state.host_work, 0);
+    assert!(bridge.get(STYLE_BASE + node as u32, "").unwrap_err().contains("DOM work limit"));
+}
+
+#[test]
+fn node_constants_are_readonly_on_real_document_element_text_and_detached_nodes() {
+    let (doc, _, page, outcome) = page("<p id=p>Text</p>", &[r#"
+var p=document.getElementById('p'),text=document.createTextNode('x'),detached=document.createElement('i');
+var nodes=[document,p,text,detached],pairs=[
+['ELEMENT_NODE',1],['ATTRIBUTE_NODE',2],['TEXT_NODE',3],['CDATA_SECTION_NODE',4],
+['ENTITY_REFERENCE_NODE',5],['ENTITY_NODE',6],['PROCESSING_INSTRUCTION_NODE',7],
+['COMMENT_NODE',8],['DOCUMENT_NODE',9],['DOCUMENT_TYPE_NODE',10],
+['DOCUMENT_FRAGMENT_NODE',11],['NOTATION_NODE',12],['DOCUMENT_POSITION_DISCONNECTED',1],
+['DOCUMENT_POSITION_PRECEDING',2],['DOCUMENT_POSITION_FOLLOWING',4],
+['DOCUMENT_POSITION_CONTAINS',8],['DOCUMENT_POSITION_CONTAINED_BY',16],
+['DOCUMENT_POSITION_IMPLEMENTATION_SPECIFIC',32]];
+var effects=0,coercions=0,rhs={valueOf:function(){coercions++;return 0;},toString:function(){coercions++;return '0';}};
+function strictSet(node,key){'use strict';node[key]=0;}
+for(var node of nodes){for(var pair of pairs){var key=pair[0],value=pair[1];
+if(!(key in node)||node[key]!==value)throw 'constant value/presence';
+var result=(node[key]=(effects++,rhs));if(result!==rhs||node[key]!==value)throw 'readonly value';
+var caught=false;try{strictSet(node,key);}catch(e){caught=e.name==='TypeError';}if(!caught)throw 'strict readonly';}}
+if(effects!==72||coercions!==0||p.nodeType!==p.ELEMENT_NODE||text.nodeType!==text.TEXT_NODE)throw 'conversion/type';
+if('DOCUMENT_TYPE_NODE' in window||'DOCUMENT_TYPE_NODE' in p.style||'DOCUMENT_TYPE_NODE' in document.querySelectorAll('p'))throw 'wrong receiver';
+p.id='changed';p.textContent='changed';text.data='new';if(p.id!=='changed'||p.textContent!=='changed'||text.data!=='new')throw 'ordinary writes';
+document.title='node-constants-ok';
+"#]);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    assert_eq!(doc.title, "node-constants-ok");
+}
+
+#[test]
+fn node_constants_reject_root_out_of_bounds_and_inert_node_handles() {
+    let (mut doc, mut forms, mut page, outcome) = page("<p>Visible</p><template><p id=inert>Hidden</p></template>", &[]);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    let inert = (0..doc.nodes.len()).find(|&n| doc.attr(n, "id") == Some("inert")).unwrap();
+    let invalid = [node_handle(0), node_handle(doc.nodes.len() + 99), node_handle(inert)];
+    let mut bridge = Bridge { doc: &mut doc, forms: &mut forms, state: &mut page.state };
+    for handle in invalid {
+        assert!(bridge.get(handle, "DOCUMENT_TYPE_NODE").is_err());
+        assert!(bridge.has(handle, "DOCUMENT_TYPE_NODE").is_err());
+        assert!(!bridge.readonly_property(handle, "DOCUMENT_TYPE_NODE"));
+        assert!(bridge.set(handle, "DOCUMENT_TYPE_NODE", Value::Number(0.0)).is_err());
+    }
+}
+
+#[test]
+fn event_interface_diagnostic_is_bounded_and_does_not_echo_payload_or_claim_support() {
+    for (input, class) in [("eVeNt", "base-event"), ("MouseEvents", "mouse-event"), ("KeyboardEvent", "keyboard-event"), ("PRIVATE_INTERFACE_PAYLOAD", "other")] {
+        let report = unsupported_event_interface(Some(&Value::String(input.into())));
+        assert!(report.contains(&format!("class={class}; UTF-8 bytes=Some({})", input.len())), "{report}");
+        assert!(report.contains("not supported") && report.contains("no event was created"));
+        assert!(!report.contains("PRIVATE_INTERFACE_PAYLOAD"));
+        assert!(report.len() < 256);
+    }
+    assert!(unsupported_event_interface(None).contains("class=missing"));
+    assert!(unsupported_event_interface(Some(&Value::Number(1.0))).contains("class=non-string"));
+}
+
+#[test]
+fn event_interface_diagnostic_invokes_no_coercion_or_event_lifecycle() {
+    let (mut doc, mut forms, mut page, outcome) = page("<p>Events</p>", &["var conversions=0,request={toString:function(){conversions++;return 'Event';}};"]);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    // Preserve the original unsupported-factory diagnostic baseline explicitly.
+    page.state.disable_event_factory = true;
+    let before = (page.state.next_event, page.state.event.is_some(), page.state.listeners.len());
+    let outcome = page.console_eval(&mut doc, &mut forms, "document.createEvent(request);");
+    assert_eq!(outcome.errors, 1, "{}", page.report());
+    assert!(page.report().contains("Requested interface class=non-string"));
+    assert_eq!((page.state.next_event, page.state.event.is_some(), page.state.listeners.len()), before);
+    let outcome = page.console_eval(&mut doc, &mut forms, "if(conversions!==0||'createEvent' in document||typeof document.dispatchEvent!=='function'||typeof window.dispatchEvent!=='function')throw 'factory/dispatch isolation';");
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+}
+
+#[test]
+fn dataset_validates_keys_and_keeps_native_attribute_readonly() {
+    let (doc, _, page, outcome) = page(
+        "<p id=p></p>",
+        &[r#"
+var p=document.getElementById('p'),d=p.dataset,caught='';
+try{d['bad-key']='x';}catch(e){caught+=e.name;}
+try{d['bad key']='x';}catch(e){caught+=','+e.name;}
+try{Object.defineProperty(d,'bad',{value:1,enumerable:false});}catch(e){caught+=','+e.name;}
+if(caught!=='SyntaxError,InvalidCharacterError,TypeError')throw caught;
+d['']='blank';if(p.getAttribute('data-')!=='blank')throw 'empty key';
+d.toString='shadow';if(d.toString!=='shadow'||Object.keys(d).join(',')!==',toString')throw 'override builtins';
+delete d.toString;if(typeof d.toString!=='function')throw 'prototype restored';
+p.dataset={fake:1};if(p.dataset!==d)throw 'read only dataset';
+var strictFailed=false;try{(function(){'use strict';p.dataset={};})();}catch(e){strictFailed=e.name==='TypeError';}
+if(!strictFailed)throw 'strict readonly';document.title='dataset validation passed';
+"#],
+    );
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    assert_eq!(doc.title, "dataset validation passed");
+}
+
+#[test]
+fn navigator_expandos_methods_and_descriptors_work_without_replacing_native_facts() {
+    let (doc, _, page, outcome) = page(
+        "<p>navigator</p>",
+        &[r#"
+var agent=navigator.userAgent,original=navigator.sendBeacon;
+navigator.feature={count:3};navigator.polyfill=function(a){return this===navigator&&a+this.feature.count;};
+if(navigator.polyfill(4)!==7||clientInformation.feature!==navigator.feature)throw 'expando or receiver';
+navigator.sendBeacon=function(a){return this===navigator&&a==='queued';};
+if(!navigator.sendBeacon('queued'))throw 'method override';
+if(!delete navigator.sendBeacon||navigator.sendBeacon!==original)throw 'prototype method restored';
+Object.defineProperty(navigator,'custom',{value:5,writable:true,enumerable:true,configurable:true});
+if(navigator.custom!==5||Object.keys(navigator).join(',')!=='feature,polyfill,custom')throw 'descriptor or enumeration';
+if(!delete navigator.custom||'custom' in navigator)throw 'delete';
+navigator.userAgent='fake';navigator.cookieEnabled=true;
+if(navigator.userAgent!==agent||navigator.cookieEnabled!==true)throw 'native information changed';
+if(Object.getOwnPropertyDescriptor(navigator,'userAgent')!==undefined)throw 'inherited native getter';
+var failed=false;try{(function(){'use strict';navigator.userAgent='fake';})();}catch(e){failed=e.name==='TypeError';}
+if(!failed||!delete navigator.userAgent||navigator.userAgent!==agent)throw 'protected native getter';
+document.title='navigator passed';
+"#],
+    );
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    assert_eq!(doc.title, "navigator passed");
+}
+
+#[test]
+fn image_constructor_creates_detached_nodes_without_claiming_a_load() {
+    let (doc, _, page, outcome) = page(
+        "<p>images</p>",
+        &[r#"
+var image=new Image(13,17),other=document.createElement('img'),loaded=false;
+if(image===other||!(image instanceof Image)||!(other instanceof Image)||({} instanceof Image))throw 'identity';
+if(image.tagName!=='IMG'||image.nodeType!==1||image.parentNode!==null||image.parentElement!==null||image.ownerDocument!==document||image.isConnected)throw 'detached';
+if(image.width!==13||image.height!==17||image.getAttribute('width')!=='13'||!image.complete||image.src!=='')throw 'initial dimensions';
+image.onload=function(){loaded=true;};image.onerror=function(){loaded=true;};
+image.id='detached';image.dataset.source='test';image.src='/pixel.png';
+if(image.src!=='https://www.google.com/pixel.png'||image.getAttribute('src')!=='/pixel.png'||image.complete||image.currentSrc!==''||image.naturalWidth!==0||image.naturalHeight!==0)throw 'truthful source';
+image.setAttribute('src','next.png');if(image.src!=='https://www.google.com/next.png')throw 'src reflection';
+image.width=-1;image.height=5.9;if(image.width!==4294967295||image.height!==5)throw 'unsigned long';
+image.width={valueOf(){return 18;}};if(image.width!==18)throw 'numeric conversion';
+if(document.images.length!==0||document.getElementById('detached')!==null||loaded)throw 'connected or loaded';
+document.title='image passed';
+"#],
+    );
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    assert_eq!(doc.title, "image passed");
+    assert_eq!(page.state.detached_images.len(), 2);
+    assert_eq!(page.state.declined_images, 2);
+    assert!(page
+        .report()
+        .contains("no request or load event was fabricated"));
+}
+
+#[test]
+fn google_adapted_image_and_beacon_snippets_finish_and_decline_network() {
+    let (mut doc, mut forms, mut page, outcome) = page(
+        "<div id=css></div>",
+        &[r#"
+var src='/gen_204?image=1',iesg=true,cssId='css',eid='local';
+window.addEventListener('load',function(){window.n&&window.n();if(document.images){new Image().src=src;}});
+typeof navigator.sendBeacon!=='function'&&(navigator.sendBeacon=function(a){(new Image).src=a});
+var queued=navigator.sendBeacon('/gen_204?startup=1','');if(queued!==false)throw 'fabricated queue success';
+setTimeout(function(){document.getElementById(cssId).setAttribute('style','');if(navigator.sendBeacon('/gen_204?cad=sg_trbl&ei='+eid,'')!==false)throw 'queued';document.title='beacon passed';},0);
+"#],
+    );
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    page.poll_timer_at(
+        &mut doc,
+        &mut forms,
+        Instant::now() + Duration::from_secs(1),
+    );
+    assert_eq!(page.state.errors, 0, "{}", page.report());
+    assert_eq!(doc.title, "beacon passed");
+    assert_eq!(page.state.declined_beacons, 2);
+    assert_eq!(page.state.declined_images, 1);
+    assert_eq!(page.state.timer_callbacks, 1);
+}
+
+#[test]
+fn element_method_values_are_stable_callable_and_check_their_receiver() {
+    let (doc, _, page, outcome) = page(
+        "<button id=b>Button</button>",
+        &[r#"
+var b=document.getElementById('b'),handler=function(){},method=b.addEventListener;
+if(typeof method!=='function'||method!==b.addEventListener)throw 'unstable method';
+b.dataset.eqid='g1';b&&b.addEventListener?b.addEventListener('click',handler):0;
+method.call(b,'click',handler);b.removeEventListener('click',handler);
+if(b.getAttribute.call(b,'data-eqid')!=='g1')throw 'extracted native getter';
+var failed=false;try{method.call({},'click',handler);}catch(e){failed=e.name==='TypeError';}
+if(!failed)throw 'receiver';document.title='native methods passed';
+"#],
+    );
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    assert_eq!(doc.title, "native methods passed");
+    assert!(page.state.listeners.is_empty());
+}
+
+#[test]
+fn beacon_rejects_invalid_urls_and_does_not_claim_cross_origin_transmission() {
+    let (doc, _, page, outcome) = page(
+        "<p>beacons</p>",
+        &[r#"
+var caught=0;try{navigator.sendBeacon();}catch(e){if(e.name==='TypeError')caught++;}
+try{navigator.sendBeacon('file:///private');}catch(e){if(e.name==='TypeError')caught++;}
+try{navigator.sendBeacon('javascript:alert(1)');}catch(e){if(e.name==='TypeError')caught++;}
+if(caught!==3)throw 'URL validation';
+var source={toString(){return 'https://other.example/report';}};
+if(navigator.sendBeacon(source,'body')!==false)throw 'cross origin sent';
+document.title='beacon validation passed';
+"#],
+    );
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    assert_eq!(doc.title, "beacon validation passed");
+    assert_eq!(page.state.declined_beacons, 1);
+}
+
+#[test]
+fn image_growth_is_bounded_and_following_classic_script_recovers() {
+    let (doc, _, page, outcome) = page(
+        "<p>node limit</p>",
+        &[
+            "for(var i=0;i<1000;i++){new Image();}",
+            "document.title='node limit recovered';",
+        ],
+    );
+    assert_eq!(outcome.errors, 1, "{}", page.report());
+    assert_eq!(doc.title, "node limit recovered");
+    assert_eq!(page.state.detached_images.len(), MAX_EXTRA_NODES);
+    assert!(page.report().contains("DOM appended-node limit reached"));
+}
+
+#[test]
+fn classic_script_failure_does_not_poison_later_scripts_or_events() {
+    let (doc, _, page, outcome) = page(
+        "<p>budgets</p>",
+        &[
+            "window.addEventListener('load',function(){document.title+=' loaded';});while(true);",
+            "document.title='following script';",
+            "document.addEventListener('DOMContentLoaded',function(){document.title+=' ready';});",
+        ],
+    );
+    assert_eq!(outcome.errors, 1, "{}", page.report());
+    assert_eq!(doc.title, "following script ready loaded");
+    assert!(page.report().contains("step limit"));
+    assert_eq!(page.state.executed, 3);
+}
+
+#[test]
+fn aggregate_startup_allowance_stops_a_chain_of_hostile_classic_scripts() {
+    let (doc, _, page, outcome) = page(
+        "<p>budgets</p>",
+        &[
+            "while(true);",
+            "while(true);",
+            "while(true);",
+            "while(true);",
+            "while(true);",
+            "document.title='should not run';",
+        ],
+    );
+    assert_ne!(doc.title, "should not run");
+    assert!(outcome.errors >= 2);
+    assert!(page.state.executed <= 4, "{}", page.report());
+    assert!(page
+        .report()
+        .contains("Aggregate startup work/time limit reached"));
+}
+
+#[test]
+fn many_parameters_work_and_parameter_bound_remains_atomic() {
+    let parameters = (0..80)
+        .map(|index| format!("p{index}"))
+        .collect::<Vec<_>>()
+        .join(",");
+    let arguments = (0..80)
+        .map(|index| index.to_string())
+        .collect::<Vec<_>>()
+        .join(",");
+    let source=format!("function large({parameters}){{return p0+p32+p79+arguments.length;}}var arrow=({parameters})=>p79;if(large({arguments})!==191||large.apply(null,[{arguments}])!==191||arrow({arguments})!==79)throw 'large args';document.title='parameters passed';");
+    let (doc, _, page, outcome) = page("<p>arguments</p>", &[&source]);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    assert_eq!(doc.title, "parameters passed");
+    let parameters = (0..257)
+        .map(|index| format!("p{index}"))
+        .collect::<Vec<_>>()
+        .join(",");
+    let source = format!("document.title='bad';function excessive({parameters}){{}};");
+    let (doc, _, page, outcome) = self::page(
+        "<p>arguments</p>",
+        &[&source, "document.title='recovered';"],
+    );
+    assert_eq!(outcome.errors, 1);
+    assert_eq!(doc.title, "recovered");
+    assert!(page
+        .report()
+        .contains("Function parameter limit reached (256)"));
+}
+
+#[test]
+fn element_methods_can_be_borrowed_and_inspection_does_not_grant_mutation() {
+    let (doc, _, page, outcome) = page(
+        "<a id=a href='/original'>A</a><a id=b href='/other' data-α='greek'>B</a><input id=c name=choice type=checkbox>",
+        &[r#"
+var a=document.getElementById('a'),b=document.getElementById('b'),c=document.getElementById('c');
+var get=a.getAttribute,set=a.setAttribute;
+if(get.call(b,'href')!=='/other'||get.call(c,'type')!=='checkbox'||!c.hasAttribute('name')||b.getAttribute('data-α')!=='greek')throw 'attribute reads';
+var conversions='';
+set.call(b,{toString(){conversions+='n';return 'data-result';}},{toString(){conversions+='v';return 'converted';}});
+if(conversions!=='nv'||b.dataset.result!=='converted'||a.hasAttribute('data-result'))throw 'conversion or receiver';
+if(document.getElementById({toString(){return 'b';}})!==b||get.call(b,'missing')!==null)throw 'argument conversion';
+var event=function(){};document.addEventListener.call(b,'click',event);a.removeEventListener.call(b,'click',event);
+var failures=0;try{get.call({},'id');}catch(e){if(e.name==='TypeError')failures++;}
+try{get.call(document,'id');}catch(e){if(e.name==='TypeError')failures++;}
+try{get.call(b);}catch(e){if(e.name==='TypeError')failures++;}
+try{set.call(b,'data-empty');}catch(e){if(e.name==='TypeError')failures++;}
+if(failures!==4)throw 'receiver or required argument';
+var premature=false;try{set.call(b,{toString(){premature=true;return 'data-empty';}});}catch(e){}
+if(premature)throw 'required arguments must be checked before conversion';
+document.title='read methods passed';
+"#,
+          "document.getElementById('b').setAttribute('href','https://other.example/');",
+          "if(document.getElementById('b').getAttribute('href')!=='/other')throw 'unsafe mutation';document.title+=' safely';"],
+    );
+    assert_eq!(outcome.errors, 1, "{}", page.report());
+    assert_eq!(doc.title, "read methods passed safely");
+    assert!(page.state.listeners.is_empty());
+    assert!(page.report().contains("Supported attributes"));
+}
+
+#[test]
+fn selector_queries_return_static_ordered_lists_and_match_ancestors() {
+    let (doc, _, page, outcome) = page(
+        "<body><section id=root class=group><p id=a class=card><span id=inner>A</span></p><p id=b class=card>B</p><input id=check type=checkbox checked></section><p id=c class=card>C</p></body>",
+        &[r#"
+var root=document.getElementById('root'),a=document.getElementById('a'),b=document.getElementById('b'),inner=document.getElementById('inner');
+var list=document.querySelectorAll('.card,#b,.card'),local=root.querySelectorAll('body .card');
+if(list.length!==3||local.length!==2||list[0]!==a||list[1]!==b||list[2].id!=='c'||list[3]!==undefined||list['01']!==undefined)throw 'ordered list';
+if(list.item(0)!==a||list.item(-1)!==null||list.item(100)!==null||list.item({valueOf(){return 1;}})!==b)throw 'item';
+if(Object.keys(list).join(',')!=='0,1,2'||!('0' in list)||'3' in list||list===document.querySelectorAll('.card'))throw 'identity or keys';
+if(Object.getOwnPropertyDescriptor(list,'0').writable||Object.getOwnPropertyDescriptor(list,'length')!==undefined)throw 'descriptors';
+if(!a.matches('section > p.card')||a.matches('#b')||inner.closest('.group')!==root||a.closest('p')!==a||a.closest('.absent')!==null)throw 'match or closest';
+if(a.matches.call(b,'#b')!==true||a.querySelectorAll.call(root,'.card').length!==2||list.item.call(local,1)!==b)throw 'borrowed query';
+var check=document.getElementById('check');check.checked=false;
+if(check.matches(':checked')||document.querySelectorAll(':checked').length!==0)throw 'checked state';
+var image=new Image();if(!image.matches('img')||image.closest('img')!==image||image.closest('body')!==null)throw 'detached match';
+var order='',receiver={mark:7};
+if(list.forEach(function(node,index,collection){if(this!==receiver||collection!==list)throw 'callback';order+=node.id+index;},receiver)!==undefined||order!=='a0b1c2')throw 'forEach';
+var caught=0;try{list.forEach(null);}catch(e){if(e.name==='TypeError')caught++;}
+try{list.forEach(function(){throw Error('stop');});}catch(e){if(e.message==='stop')caught++;}
+try{list.item();}catch(e){if(e.name==='TypeError')caught++;}
+try{root.querySelectorAll('p:unsupported');}catch(e){if(e.name==='SyntaxError')caught++;}
+try{a.closest('[');}catch(e){if(e.name==='SyntaxError')caught++;}
+try{a.matches();}catch(e){if(e.name==='TypeError')caught++;}
+try{(function(){'use strict';list[0]=b;})();}catch(e){if(e.name==='TypeError')caught++;}
+if(caught!==7||delete list[0]||!delete list[99])throw 'errors or deletion';
+for(var invalid of ['.123','#123','.-1','-1']){var syntax=false;try{a.matches(invalid);}catch(e){syntax=e.name==='SyntaxError';}if(!syntax)throw 'invalid identifier';}
+if(a.matches('.--valid'))throw 'valid identifier';
+list.length=0;if(list.length!==3)throw 'readonly length';
+if(document.querySelector({toString(){return '#b';}},'ignored')!==b)throw 'selector conversion';
+document.title='queries passed';
+"#],
+    );
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    assert_eq!(doc.title, "queries passed");
+}
+
+#[test]
+fn selector_snapshots_preserve_detached_nodes_and_keep_live_lookup_separate() {
+    let (doc, _, page, outcome) = page(
+        "<div id=root><span id=a class=card><b id=inner>old</b></span><span id=b class=card>second</span></div><p id=counter>0</p>",
+        &[r#"
+var root=document.getElementById('root'),list=root.querySelectorAll('.card'),a=list[0],inner=document.getElementById('inner');
+a.className='changed';if(list.length!==2||root.querySelectorAll('.card').length!==1)throw 'static membership';
+root.textContent='new';
+if(list[0]!==a||a.isConnected||a.id!=='a'||a.textContent!=='old'||a.parentNode!==null||inner.parentNode!==a||inner.closest('span')!==a)throw 'detached identity';
+if(document.getElementById('a')!==null||document.getElementById('inner')!==null||document.querySelectorAll('span').length!==0||root.querySelectorAll('*').length!==0)throw 'connected lookup';
+if(a.querySelector('b')!==inner||a.querySelectorAll('b')[0]!==inner)throw 'detached subtree';
+var visited='';list.forEach(function(node){visited+=node.textContent;});if(visited!=='oldsecond')throw 'snapshot contents';
+inner.textContent='retained';if(a.textContent!=='retained'||root.textContent!=='new')throw 'detached mutation';
+a.textContent='changed';if(a.textContent!=='changed'||inner.parentNode!==null||inner.textContent!=='retained'||root.textContent!=='new')throw 'detached replacement';
+var counter=document.getElementById('counter');for(var i=0;i<1000;i++)counter.textContent=String(i);
+if(counter.textContent!=='999')throw 'counter';document.title='snapshot passed';
+"#],
+    );
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    assert_eq!(doc.title, "snapshot passed");
+    assert_eq!(page.state.detached_nodes.len(), 6);
+    assert!(page.state.retained <= page.state.retained_limit);
+    let before = crate::html::parse("<div id=root><span id=a class=card><b id=inner>old</b></span><span id=b class=card>second</span></div><p id=counter>0</p>").nodes.len();
+    assert_eq!(
+        doc.nodes.len(),
+        before + 2,
+        "counter replacement must reuse its text node"
+    );
+}
+
+#[test]
+fn selector_snapshot_counts_and_retained_references_are_bounded() {
+    let (doc, _, page, outcome) = page(
+        "<p id=one>one</p>",
+        &[
+            "for(var i=0;i<129;i++)document.querySelectorAll('p');",
+            "document.title='snapshot cap recovered';",
+        ],
+    );
+    assert_eq!(outcome.errors, 1, "{}", page.report());
+    assert_eq!(doc.title, "snapshot cap recovered");
+    assert_eq!(page.state.node_lists.len(), MAX_NODE_LISTS);
+    assert!(page.report().contains("NodeList snapshot limit"));
+
+    let markup = "<div></div>".repeat(512);
+    let (mut doc, mut forms, mut page, outcome) = self::page(&markup, &[
+        "var listCount=0;function collect(){document.querySelectorAll('div');listCount++;if(listCount<40)setTimeout(collect,0);}collect();",
+    ]);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    for _ in 0..40 {
+        page.poll_timer_at(
+            &mut doc,
+            &mut forms,
+            Instant::now() + Duration::from_secs(1),
+        );
+    }
+    assert_eq!(page.state.node_list_references, MAX_NODE_LIST_REFERENCES);
+    assert_eq!(page.state.node_lists.len(), 32);
+    assert!(
+        page.report().contains("NodeList retained-reference limit"),
+        "{}",
+        page.report()
+    );
+}
+
+#[test]
+fn selector_result_and_callback_work_limits_do_not_publish_partial_success() {
+    let markup = "<div></div>".repeat(4097);
+    let (doc, _, page, outcome) = page(
+        &markup,
+        &[
+            "document.querySelectorAll('div');document.title='incorrect';",
+            "document.title='result bound recovered';",
+        ],
+    );
+    assert_eq!(outcome.errors, 1, "{}", page.report());
+    assert_eq!(doc.title, "result bound recovered");
+    assert!(page.state.node_lists.is_empty());
+    assert_eq!(page.state.node_list_references, 0);
+    assert!(page.report().contains("selector result limit"));
+    let (doc, _, page, outcome) = self::page("<p>one</p>", &[
+        "var caught=false;try{document.querySelectorAll('p').forEach(function(){while(true);});}catch(e){caught=true;}finally{caught=true;}",
+        "if(caught)throw 'budget was catchable';document.title='callback bound recovered';",
+    ]);
+    assert_eq!(outcome.errors, 1, "{}", page.report());
+    assert_eq!(doc.title, "callback bound recovered");
+    assert!(page.report().contains("step limit"));
+}
+
+#[test]
+fn detached_snapshot_ids_do_not_shadow_connected_label_targets() {
+    let markup = "<div id=host><span id=field>old</span></div><input id=field><label id=label for=field>Click</label><template><input id=field></template>";
+    let before = crate::html::parse(markup);
+    assert!(
+        crate::forms::label_targets(&before).is_empty(),
+        "first connected duplicate is not labelable"
+    );
+    let (doc, forms, page, outcome) = page(
+        markup,
+        &[r#"
+var host=document.getElementById('host'),saved=host.querySelectorAll('span');host.textContent='';
+if(saved[0].id!=='field'||saved[0].isConnected||document.getElementById('field').tagName!=='INPUT')throw 'connected IDs';
+document.title='label lookup passed';
+"#],
+    );
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    assert_eq!(doc.title, "label lookup passed");
+    let input = *forms.controls.keys().next().unwrap();
+    let label = doc
+        .nodes
+        .iter()
+        .enumerate()
+        .find(|(node, _)| doc.attr(*node, "id") == Some("label"))
+        .unwrap()
+        .0;
+    let labels = crate::forms::label_targets(&doc);
+    assert_eq!(labels.get(&label), Some(&input));
+    assert_eq!(labels.len(), 1);
+}
+
+#[test]
+fn element_only_selector_methods_are_not_exposed_on_document() {
+    let (doc, _, page, outcome) = page("<p>Element selectors</p>", &[
+        "document.matches('p');",
+        "document.closest('p');",
+        "if('matches' in document||'closest' in document)throw 'wrong interface';document.title='interfaces passed';",
+    ]);
+    assert_eq!(outcome.errors, 2, "{}", page.report());
+    assert_eq!(doc.title, "interfaces passed");
+    assert!(page.report().contains("Document method"));
+}
+
+#[test]
+fn dom_creation_insertion_text_and_saved_nodes_keep_their_identity() {
+    let (doc, _, page, outcome) = page(
+        "<html><head></head><body><div id=root><span id=a>A</span><span id=b>B</span></div><template><p id=hidden>inert</p></template></body></html>",
+        &[r#"
+var root=document.getElementById('root'),a=document.getElementById('a'),b=document.getElementById('b');
+var box=document.createElement('DIV'),text=document.createTextNode({toString(){return 'A😀';}}),last=document.createTextNode('Z');
+box.id='new';if(box.tagName!=='DIV'||box.isConnected||box.parentNode!==null)throw 'created element';
+if(box.appendChild(text)!==text||box.appendChild(last)!==last||text.nodeType!==3||text.nodeName!=='#text'||text.length!==3||text.data!=='A😀')throw 'text node';
+if(box.firstChild!==text||box.lastChild!==last||text.nextSibling!==last||last.previousSibling!==text||text.parentElement!==box||text.ownerDocument!==document)throw 'links';
+text.data='new';if(box.textContent!=='newZ')throw 'live text';
+if(root.insertBefore(box,b)!==box||document.getElementById('new')!==box||!text.isConnected||box.previousSibling!==a||box.nextSibling!==b)throw 'insert';
+var saved=root.querySelectorAll('div');
+root.insertBefore(box,box);root.appendChild(a);if(root.firstChild!==box||root.lastChild!==a)throw 'reorder';
+if(root.removeChild(box)!==box||box.isConnected||text.isConnected||box.parentNode!==null||text.parentNode!==box||document.getElementById('new')!==null||saved[0]!==box)throw 'remove identity';
+root.insertBefore(box,null);if(!box.isConnected||root.lastChild!==box||root.querySelector('#new')!==box)throw 'reinsert';
+box.removeChild(text);if(text.parentNode!==null||text.data!=='new'||text.isConnected)throw 'text removal';
+text.nodeValue=null;if(text.data!==''||box.textContent!=='Z')throw 'text null';
+if(document.getElementById('hidden')!==null||document.querySelectorAll('template,p').length!==0)throw 'inert lookup';
+document.title='DOM tree passed';
+"#],
+    );
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    assert_eq!(doc.title, "DOM tree passed");
+}
+
+#[test]
+fn named_form_controls_request_real_focus_and_keep_builtin_priorities() {
+    let (doc, forms, mut page, outcome) = page(
+        "<html><head></head><body><form id=search name=f><input id=query name=q><input name=textContent><input name=querySelector></form><input id=external name=outside form=search><form name=body></form><form name=getElementById></form><form name=other><input name=q></form><template><form name=inert><input name=q></form></template></body></html>",
+        &[r#"
+if(document.f!==document.getElementById('search')||!('f' in document)||!('q' in document.f))throw 'named form';
+if(document.f.q!==document.getElementById('query')||document.f.query!==document.f.q||document.f.outside!==document.getElementById('external'))throw 'owned controls';
+if(document.body.tagName!=='BODY'||typeof document.getElementById!=='function'||typeof document.f.querySelector!=='function'||typeof document.f.textContent!=='string')throw 'native priority';
+if(document.missing!==undefined||document.inert!==undefined||document.f.missing!==undefined||'missing' in document.f)throw 'missing or inert name';
+document.f&&document.f.q.focus();document.title='named focus passed';
+"#],
+    );
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    assert_eq!(doc.title, "named focus passed");
+    let query = forms
+        .controls
+        .keys()
+        .copied()
+        .find(|&node| doc.attr(node, "id") == Some("query"))
+        .unwrap();
+    assert_eq!(page.take_focus_request(), Some(query));
+    assert_eq!(page.take_focus_request(), None);
+}
+
+#[test]
+fn ambiguous_named_form_collections_are_explicitly_unavailable() {
+    let (doc, _, page, outcome) = page(
+        "<form name=duplicate></form><form name=duplicate></form><form name=f><input name=q><input name=q></form>",
+        &[
+            "var wrong=document.duplicate;document.title='incorrect';",
+            "document.f.q.focus();document.title='incorrect';",
+            "document.title='named ambiguity recovered';",
+        ],
+    );
+    assert_eq!(outcome.errors, 2, "{}", page.report());
+    assert_eq!(doc.title, "named ambiguity recovered");
+    assert!(page.report().contains("live HTMLCollection"));
+    assert!(page.report().contains("RadioNodeList"));
+    assert_eq!(page.state.dom.pending_focus, None);
+}
+
+#[test]
+fn created_script_properties_and_text_are_real_without_fabricated_loads() {
+    let (doc, _, page, outcome) = page(
+        "<body><div id=root></div></body>",
+        &[r#"
+var script=document.createElement('script'),fired=0;
+if(!script.async||script.defer||script.noModule||script.src!==''||script.type!=='')throw 'script defaults';
+script.src={toString(){return '/payload.js';}};script.type='text/javascript';script.nonce='nonce-1';script.charset='utf-8';
+script.async=false;script.defer=true;script.noModule=true;script.crossOrigin='anonymous';script.referrerPolicy='no-referrer';
+script.integrity='sha256-original';
+if(script.src!=='https://www.google.com/payload.js'||script.getAttribute('src')!=='/payload.js'||script.async||!script.defer||!script.noModule||script.getAttribute('nonce')!=='nonce-1'||script.getAttribute('crossorigin')!=='anonymous')throw 'reflection';
+script.setAttribute('src','next.js');script.removeAttribute('defer');if(script.src!=='https://www.google.com/next.js'||script.defer)throw 'attribute mutation';
+script.onload=function(){fired++;};script.onerror=function(){fired++;};
+var old=document.createTextNode('old');script.appendChild(old);if(script.text!=='old'||script.textContent!=='old')throw 'script text';
+script.text='new';if(old.data!=='old'||old.parentNode!==null||script.firstChild.data!=='new')throw 'retained text';
+script.textContent=null;if(script.firstChild!==null||script.text!=='')throw 'empty text';
+if(script.isConnected||script.parentNode!==null||fired||document.querySelector('script')!==null)throw 'no invented load';
+document.title='script objects passed';
+"#],
+    );
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    assert_eq!(doc.title, "script objects passed");
+}
+
+#[test]
+fn connected_created_scripts_queue_once_and_completion_keeps_native_receivers() {
+    let (mut doc, mut forms, mut page, outcome) = page(
+        "<html><head></head><body><div id=root></div></body></html>",
+        &[r#"
+var first=document.createElement('script'),second=document.createElement('script'),phases='';
+window.addEventListener('load',function(e){if(e.target===first){if(e.eventPhase!==1||e.bubbles)throw 'capture phase';phases+='capture,';}},true);
+first.src='/one.js';first.async=false;
+first.onload=function(e){if(this!==first||e.target!==first||e.currentTarget!==first||e.eventPhase!==2||e.bubbles||window.loadedValue!==17)throw 'load receiver';phases+='target';document.title=phases;};
+document.head.appendChild(first);document.head.appendChild(first);
+document.head.appendChild(second);second.src='/two.js';
+second.onerror=function(e){if(this!==second||e.target!==second||e.bubbles||this.isConnected||this.parentNode!==null)throw 'detached error receiver';document.title+=' + error';};
+document.head.removeChild(second);
+var data=document.createElement('script');data.type='application/json';data.id='data';data.text='never executed';document.getElementById('root').appendChild(data);
+if(!first.isConnected||first.parentNode!==document.head||second.isConnected||!data.isConnected||document.querySelector('script')!==first||document.getElementById('data')!==data||document.getElementById('root').textContent!=='')throw 'physical or inert tree';
+"#],
+    );
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    let mut requests = page.take_dynamic_scripts();
+    assert_eq!(
+        requests.len(),
+        2,
+        "same script must prepare once and data block never prepares"
+    );
+    let first = requests.pop_front().unwrap();
+    let second = requests.pop_front().unwrap();
+    assert!(first.error.is_none(), "{:?}", first.error);
+    assert!(second.error.is_none(), "{:?}", second.error);
+    assert_eq!(first.target.display(), "https://www.google.com/one.js");
+    assert_eq!(second.target.display(), "https://www.google.com/two.js");
+    let loaded = page.complete_dynamic_script(
+        &mut doc,
+        &mut forms,
+        &first,
+        Ok(Script {
+            node: first.node,
+            source: "window.loadedValue=17;".into(),
+            label: "original local fixture".into(),
+        }),
+    );
+    assert_eq!(loaded.errors, 0, "{}", page.report());
+    assert_eq!(doc.title, "capture,target");
+    let failed = page.complete_dynamic_script(
+        &mut doc,
+        &mut forms,
+        &second,
+        Err("fixture fetch failure".into()),
+    );
+    assert_eq!(failed.errors, 1, "{}", page.report());
+    assert_eq!(doc.title, "capture,target + error");
+    assert!(page.take_dynamic_scripts().is_empty());
+}
+
+#[test]
+fn dom_tree_rejections_preserve_existing_controls_resources_and_parent_links() {
+    let (doc, forms, page, outcome) = page(
+        "<html><head></head><body><div id=root><span id=child>old</span></div><span id=outside>outside</span><form id=form><input id=query value=original></form><img id=image src=pixel.png srcset='responsive.png 1x'></body></html>",
+        &[
+            "var root=document.getElementById('root'),child=document.getElementById('child'),outside=document.getElementById('outside');child.appendChild(root);",
+            "root.insertBefore(document.createElement('p'),outside);",
+            "document.body.removeChild(document.getElementById('form'));",
+            "document.body.appendChild(document.createElement('input'));",
+            "document.body.appendChild(document.getElementById('image'));",
+            "var text=document.createTextNode('safe');text.appendChild(document.createElement('span'));",
+            "if(root.parentNode!==document.body||child.parentNode!==root||root.textContent!=='old'||outside.parentNode!==document.body||document.getElementById('query').value!=='original'||document.images.length!==1||text.data!=='safe')throw 'partial mutation';document.title='mutation limits recovered';",
+        ],
+    );
+    assert_eq!(outcome.errors, 6, "{}", page.report());
+    assert_eq!(doc.title, "mutation limits recovered");
+    assert_eq!(forms.controls.len(), 1);
+    assert!(page.report().contains("HierarchyRequestError"));
+    assert!(page.report().contains("NotFoundError"));
+    assert!(page.report().contains("loaded resources"));
+}
+
+#[test]
+fn dom_creation_validates_arguments_and_borrowed_native_receivers() {
+    let (doc, _, page, outcome) = page(
+        "<body><div id=p></div></body>",
+        &[r#"
+var p=document.getElementById('p'),text=document.createTextNode('x'),bad=0;
+try{document.createElement('bad name');}catch(e){if(e.name==='InvalidCharacterError')bad++;}
+try{document.createElement();}catch(e){if(e.name==='TypeError')bad++;}
+try{document.createTextNode();}catch(e){if(e.name==='TypeError')bad++;}
+try{p.appendChild({});}catch(e){if(e.name==='TypeError')bad++;}
+try{p.insertBefore(text);}catch(e){if(e.name==='TypeError')bad++;}
+try{p.appendChild.call({},text);}catch(e){if(e.name==='TypeError')bad++;}
+var other=document.createElement('span');p.appendChild.call(other,text);
+if(bad!==6||text.parentNode!==other||other.firstChild!==text||p.firstChild!==null)throw 'receiver or validation';
+text.nodeType=1;if(text.nodeType!==3)throw 'readonly';document.title='DOM arguments passed';
+"#],
+    );
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    assert_eq!(doc.title, "DOM arguments passed");
+}
+
+#[test]
+fn general_dom_creation_shares_the_existing_node_growth_bound() {
+    let (doc, _, page, outcome) = page("<p>bounds</p>", &[
+        "for(var i=0;i<1000;i++){if(i%3===0)new Image();else if(i%3===1)document.createElement('div');else document.createTextNode('');}",
+        "document.title='DOM node cap recovered';",
+    ]);
+    assert_eq!(outcome.errors, 1, "{}", page.report());
+    assert_eq!(doc.title, "DOM node cap recovered");
+    assert_eq!(page.state.dom.created.len(), MAX_EXTRA_NODES);
+    assert!(page.report().contains("appended-node limit"));
+}
+
+#[test]
+fn dynamic_dom_depth_is_bounded_and_next_script_can_run() {
+    let (doc, _, page, outcome) = page("<p>depth</p>", &[
+        "var tree=document.createElement('div'),tail=tree;for(var i=0;i<150;i++){var child=document.createElement('div');tail.appendChild(child);tail=child;}",
+        "if(tree.isConnected||tail.parentNode===null)throw 'invalid detached tree';document.title='DOM depth recovered';",
+    ]);
+    assert_eq!(outcome.errors, 1, "{}", page.report());
+    assert_eq!(doc.title, "DOM depth recovered");
+    assert!(page.report().contains("tree depth limit"));
+}
+
+#[test]
+fn tag_collections_are_live_scoped_ordered_and_keep_native_member_priorities() {
+    let (doc, _, page, outcome) = page(
+        "<body><div id=root><p id=one name=alpha>A</p><p id=two>B</p></div><p id=outside>C</p><img id=image><template><p id=inert>hidden</p></template></body>",
+        &[r#"
+var root=document.getElementById('root'),one=document.getElementById('one'),two=document.getElementById('two');
+var all=document.getElementsByTagName('P'),local=root.getElementsByTagName('p'),saved=root.querySelectorAll('p');
+if(all.length!==3||local.length!==2||all[2].id!=='outside'||local.item(0)!==one||local[2]!==undefined||local.item(-1)!==null||local.item(100)!==null)throw 'initial collection';
+if(local.namedItem('alpha')!==one||local.one!==one||local.namedItem('')!==null||local.namedItem('inert')!==null||local.namedItem({toString(){return 'two';}})!==two)throw 'named collection';
+if(local.item({valueOf(){return 1;}})!==two||Object.keys(local).join(',')!=='0,1'||!('one' in local)||'2' in local)throw 'index reflection';
+if(Object.getOwnPropertyDescriptor(local,'0').writable||Object.getOwnPropertyDescriptor(local,'length')!==undefined)throw 'index descriptor';
+var child=document.createElement('p');child.id='new';root.insertBefore(child,one);
+if(local.length!==3||all.length!==4||local[0]!==child||saved.length!==2||saved[0]!==one)throw 'live insert versus snapshot';
+root.appendChild(one);if(local[2]!==one||local.namedItem('new')!==child)throw 'live order';
+child.id='renamed';if(local.namedItem('new')!==null||local.namedItem('renamed')!==child)throw 'live rename';
+child.id='length';if(local.length!==3||local.namedItem('length')!==child)throw 'length priority';
+child.id='item';if(typeof local.item!=='function'||local.namedItem('item')!==child)throw 'method priority';
+if(local.item.call(document.images,0)!==document.getElementById('image')||document.images.item.call(local,0)!==child)throw 'borrowed collection method';
+local.length=0;local[0]=null;if(local.length!==3||local[0]!==child)throw 'readonly collection';
+var bad=0;try{local.item();}catch(e){if(e.name==='TypeError')bad++;}
+try{local.namedItem();}catch(e){if(e.name==='TypeError')bad++;}
+try{root.getElementsByTagName();}catch(e){if(e.name==='TypeError')bad++;}
+try{local.item.call({},0);}catch(e){if(e.name==='TypeError')bad++;}
+if(bad!==4)throw 'collection receivers';
+root.textContent='replacement';if(local.length!==0||all.length!==1||saved[0]!==one||one.parentNode!==null)throw 'live removal';
+root.appendChild(child);if(local.length!==1||local[0]!==child||all.length!==2||root.getElementsByTagName('*').length!==1)throw 'retained live root';
+document.title='live tag collections passed';
+"#],
+    );
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    assert_eq!(doc.title, "live tag collections passed");
+}
+
+#[test]
+fn parsed_script_nonce_lookup_is_real_without_activating_inert_contents() {
+    let (mut doc, mut forms, mut page, outcome) = page(
+        "<html><head><script id=seed nonce=YWJj>original_source_only()</script><template><script id=inert nonce=bad>inert_source()</script></template></head><body><p>visible</p></body></html>",
+        &[r#"
+var scripts=document.getElementsByTagName('SCRIPT'),seed=document.querySelector('script[nonce]');
+if(scripts.length!==1||scripts[0]!==seed||seed!==document.getElementById('seed')||seed.nonce!=='YWJj'||seed.getAttribute('nonce')!=='YWJj'||!seed.isConnected)throw 'actual nonce';
+if(document.getElementsByTagName('HEAD')[0]!==document.head||document.head.getElementsByTagName('script')[0]!==seed||document.body.getElementsByTagName('script').length!==0)throw 'root scoping';
+if(seed.textContent!=='original_source_only()'||seed.text!=='original_source_only()'||document.head.textContent!==''||document.querySelectorAll('script').length!==1||document.getElementById('inert')!==null)throw 'inert source';
+var added=document.createElement('script');added.nonce=seed.nonce;added.src='/nonce-script.js';document.head.appendChild(added);
+if(scripts.length!==2||scripts[1]!==added||added.nonce!==seed.nonce)throw 'live script nonce';
+document.title='nonce lookup passed';
+"#],
+    );
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    assert_eq!(doc.title, "nonce lookup passed");
+    let requests = page.take_dynamic_scripts();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].nonce.as_deref(), Some("YWJj"));
+    let seed = (0..doc.nodes.len())
+        .find(|&node| doc.attr(node, "id") == Some("seed"))
+        .unwrap();
+    page.begin_job();
+    Bridge {
+        doc: &mut doc,
+        forms: &mut forms,
+        state: &mut page.state,
+    }
+    .queue_dynamic_script(seed)
+    .unwrap();
+    assert!(
+        page.take_dynamic_scripts().is_empty(),
+        "parsed script must never enter the dynamic queue"
+    );
+    let styles = crate::css::compute(&doc, &HashMap::new());
+    assert_eq!(styles[seed].display, crate::css::Display::None);
+}
+
+#[test]
+fn parsed_script_tree_mutation_is_rejected_without_partial_source_changes() {
+    let (doc, _, page, outcome) = page(
+        "<head><script id=seed nonce=YWJj>original()</script></head><body></body>",
+        &[
+            "var seed=document.querySelector('script[nonce]');seed.appendChild(document.createTextNode('changed()'));",
+            "document.head.removeChild(seed);",
+            "if(seed.textContent!=='original()'||seed.parentNode!==document.head||!seed.isConnected)throw 'source changed';document.title='parsed script protected';",
+        ],
+    );
+    assert_eq!(outcome.errors, 2, "{}", page.report());
+    assert_eq!(doc.title, "parsed script protected");
+}
+
+#[test]
+fn live_tag_collections_keep_retention_and_repeated_walks_bounded() {
+    let (doc, _, page, outcome) = page(
+        "<p>collection caps</p>",
+        &[
+            "for(var i=0;i<1000;i++)document.getElementsByTagName('tag'+i);",
+            "document.title='collection cap recovered';",
+        ],
+    );
+    assert_eq!(outcome.errors, 1, "{}", page.report());
+    assert_eq!(doc.title, "collection cap recovered");
+    assert_eq!(page.state.dom.collections.len(), 128);
+    assert!(page.report().contains("tag-collection limit"));
+
+    let markup = format!("<body>{}</body>", "<div>value</div>".repeat(1000));
+    let (doc, _, page, outcome) = self::page(
+        &markup,
+        &[
+            "var live=document.getElementsByTagName('div');for(var i=0;i<1000;i++)live.length;",
+            "document.title='live work recovered';",
+        ],
+    );
+    assert_eq!(outcome.errors, 1, "{}", page.report());
+    assert_eq!(doc.title, "live work recovered");
+    assert!(page.report().contains("DOM work limit"));
+}
+
+#[test]
+fn dynamic_function_callbacks_keep_document_string_compilation_policy() {
+    for (header, allowed) in [
+        ("script-src 'nonce-original-function-fixture'", false),
+        ("script-src 'nonce-original-function-fixture' 'unsafe-eval'", true),
+        ("default-src 'none'; script-src-elem 'nonce-original-function-fixture' 'unsafe-eval'", false),
+        ("script-src 'nonce-original-function-fixture' 'unsafe-eval', script-src 'nonce-original-function-fixture'", false),
+    ] {
+        let mut policy = crate::csp::PolicySet::default();
+        policy.add_header(header);
+        let mut doc = crate::html::parse("<p id=out></p>");
+        doc.scripting_enabled = true;
+        let mut forms = Forms::new(&doc);
+        let mut page = Page::for_test();
+        let location = crate::navigation::address(
+            "http://127.0.0.1:1/function-policy",
+            &crate::navigation::Location::home(),
+        ).unwrap();
+        page.set_location(&location);
+        let source = r#"
+var log='';
+function attempt(label){
+try{
+var body="document.getElementById('out').textContent+=label;";
+var compiled=label==='timer'?new Function('label',body):Function('label',body);
+compiled(label);log+=label+':allowed;';
+}catch(error){if(error.name!=='EvalError')throw error;log+=label+':blocked;';}
+document.title=log;
+}
+attempt('script');
+Promise.resolve().then(function(){attempt('promise');});
+setTimeout(function(){attempt('timer');},0);
+"#;
+        assert!(policy.allows_inline(0, Some("original-function-fixture"), source).is_ok());
+        let scripts = [Script { node: 0, label: "original Function CSP fixture".into(), source: source.into() }];
+        let outcome = page.start_with_policy(&mut doc, &mut forms, &scripts, &policy);
+        assert_eq!(outcome.errors, 0, "{header}: {}", page.report());
+        let result = if allowed { "allowed" } else { "blocked" };
+        assert_eq!(doc.title, format!("script:{result};promise:{result};"));
+        let outcome = page.poll_timer_at(&mut doc, &mut forms, Instant::now() + Duration::from_secs(1)).unwrap();
+        assert_eq!(outcome.errors, 0, "{header}: {}", page.report());
+        assert_eq!(doc.title, format!("script:{result};promise:{result};timer:{result};"));
+        let out = doc.nodes.iter().enumerate().find_map(|(id, _)| (doc.attr(id, "id") == Some("out")).then_some(id)).unwrap();
+        let text = Bridge { doc: &mut doc, forms: &mut forms, state: &mut page.state }.text_content(out).unwrap();
+        assert_eq!(text, if allowed { "scriptpromisetimer" } else { "" });
+    }
+}
+
+
+#[test]
+fn dynamic_crossorigin_mode_is_snapshotted_and_cross_origin_is_still_denied() {
+    let (_, _, mut page, outcome) = page("<html><head></head><body></body></html>", &[r#"
+var first=document.createElement('script');first.async=false;first.crossOrigin='anonymous';first.src='/one.js';
+document.head.appendChild(first);first.removeAttribute('crossorigin');
+var second=document.createElement('script');second.async=false;second.crossOrigin='use-credentials';second.src='/two.js';document.head.appendChild(second);
+var third=document.createElement('script');third.async=false;third.crossOrigin='anonymous';third.src='https://other.test/blocked.js';document.head.appendChild(third);
+"#]);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    let requests = page.take_dynamic_scripts();
+    assert_eq!(requests.len(), 3);
+    assert!(requests[0].same_origin_only && requests[0].error.is_none());
+    assert!(requests[1].same_origin_only && requests[1].error.is_none());
+    assert!(requests[2].same_origin_only);
+    assert!(requests[2].error.as_deref().unwrap().contains("CORS-mode"));
+}

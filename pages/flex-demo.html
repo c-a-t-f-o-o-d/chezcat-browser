@@ -1,0 +1,74 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Flex layout demo</title>
+<link rel="stylesheet" href="styles.css">
+<style>
+main { max-width: 960px; }
+.hero { background: #17394a; color: #eef8fc; padding: 28px; margin-bottom: 24px; }
+.hero a { color: #9fe9d2; }
+.eyebrow { color: #8ee0c8; font-weight: bold; }
+.nav { display: flex; flex-wrap: wrap; gap: 12px 24px; }
+.row { display: flex; gap: 16px; }
+.wrap { flex-wrap: wrap; }
+.tile { box-sizing: border-box; flex: 1 1 220px; min-width: 0; background: #e4edf2; padding: 18px; border: 1px solid #b9ced8; }
+.mint { background: #ccefe0; }
+.gold { background: #ffe8ad; }
+.sky { background: #d1eaf3; }
+.tile h3 { margin: 0 0 12px; }
+.tile p { margin: 0; }
+.grow { flex: 1 1 0px; min-width: 0; padding: 16px; background: #ccefe0; }
+.double { flex-grow: 2; background: #d1eaf3; }
+.stack { display: flex; flex-direction: column; gap: 12px; }
+.stack .tile { flex: 0 0 auto; }
+.sidebar { flex: 0 0 200px; }
+.content { flex: 1 1 300px; min-width: 0; }
+.align-demo { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; min-height: 130px; background: #e4edf2; padding: 16px; }
+.chip { background: #17394a; color: #eef8fc; padding: 14px; }
+.tall { padding: 28px 14px; }
+.stretch-demo { display: flex; align-items: stretch; gap: 12px; }
+.stretch-demo .tile { flex-basis: 0px; }
+.field-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.photo { display: block; width: 100%; margin: 0 0 16px; }
+code { background: #e4edf2; }
+</style>
+</head><body><main>
+<div class="hero"><p class="eyebrow">CHEZCAT / BUILD 0.28</p>
+<h1>A little more room to move.</h1>
+<p>Rows, columns and wrapping now come from our own flex layout code. Resize the window or change the zoom to watch these examples rearrange.</p>
+<div class="nav"><a href="#cards">Wrapping cards</a><a href="#sizes">Flexible sizes</a><a href="#nested">Nested layout</a><a href="#controls">Live controls</a></div></div>
+
+<div class="card" id="cards"><h2>Cards that wrap.</h2>
+<p>Each card starts at 220 pixels. Available space is shared; a narrow window moves cards onto another row.</p>
+<div class="row wrap">
+<div class="tile mint"><h3>01 / Structure</h3><p>HTML nodes become boxes and text runs.</p></div>
+<div class="tile gold"><h3>02 / Layout</h3><p>Flex items share a row, with a real gap between them.</p></div>
+<div class="tile sky"><h3>03 / Paint</h3><p>Our software renderer draws the result.</p></div>
+</div></div>
+
+<div class="card" id="sizes"><h2>One share. Two shares.</h2>
+<p>These start with a zero content basis. The second item receives twice the flexible content space.</p>
+<div class="row"><div class="grow">flex-grow: 1</div><div class="grow double">flex-grow: 2</div></div>
+<p>The labels stay selectable. Zoom should move the text and its selection area together.</p></div>
+
+<div class="card" id="nested"><h2>A column inside a row.</h2>
+<div class="row wrap">
+<div class="stack sidebar"><div class="tile mint"><h3>Explore</h3><p><a href="gallery.html">Image gallery</a></p></div><div class="tile gold"><h3>Inspect</h3><p>Ctrl+U: source<br>Ctrl+I: resources</p></div></div>
+<div class="content"><img class="photo" src="images/landscape.png" alt="Original landscape test image"><p>This image, its link neighbors and the nested column keep their own positions. On a narrow window the content wraps below the sidebar.</p></div>
+</div></div>
+
+<div class="card"><h2>Alignment and stretching.</h2>
+<p>The three boxes below use centered cross-axis alignment and space-between distribution.</p>
+<div class="align-demo"><div class="chip">Small</div><div class="chip tall">Taller</div><div class="chip">Small</div></div>
+<p>These two cards stretch to the same row height even though their text lengths differ.</p>
+<div class="stretch-demo"><div class="tile mint"><p>Short.</p></div><div class="tile sky"><p>A longer description gives this row its height. The neighboring background should stretch to match it without stretching the text.</p></div></div>
+</div>
+
+<div class="card" id="controls"><h2>Controls stay usable.</h2>
+<p>Click and type in the field, use Tab to move between controls, or follow the link. Reset restores the original value. Submission works when this page is served by either local demo server.</p>
+<form action="/form-result" method="get"><div class="field-row">
+<label for="flex-query">Query</label><input id="flex-query" name="q" value="Hello flex" size="16">
+<button type="submit">Send</button><button type="reset">Reset</button><a href="second.html">A normal link</a>
+</div></form></div>
+
+<p class="muted">This is our first flex subset. Grid, baseline alignment, writing modes and JavaScript remain outside this build.</p>
+<p><a href="start.html">Start page</a> &nbsp; <a href="http-demo.html">HTTP and compression demo</a> &nbsp; <a href="#top">Back to top</a></p>
+</main></body></html>

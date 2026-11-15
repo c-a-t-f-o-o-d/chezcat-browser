@@ -1,0 +1,77 @@
+{
+  "repository": "https://github.com/tc39/test262",
+  "revision": "48221d7c1f7745dc13e420a2e850a248c0b2afb4",
+  "files": [
+    {
+      "path": "LICENSE",
+      "url": "https://raw.githubusercontent.com/tc39/test262/48221d7c1f7745dc13e420a2e850a248c0b2afb4/LICENSE",
+      "sha256": "4dd9244dfe8197c75348c4b24ab53d29d3b1cfad143ac76b5a3d8942aa354ce0",
+      "bytes": 2213,
+      "ok": true
+    },
+    {
+      "path": "harness/sta.js",
+      "url": "https://raw.githubusercontent.com/tc39/test262/48221d7c1f7745dc13e420a2e850a248c0b2afb4/harness/sta.js",
+      "sha256": "1930c54af79455c484799f43e9a28e2b2f15c40d0917c9941ca54e26db243f35",
+      "bytes": 792,
+      "ok": true
+    },
+    {
+      "path": "harness/assert.js",
+      "url": "https://raw.githubusercontent.com/tc39/test262/48221d7c1f7745dc13e420a2e850a248c0b2afb4/harness/assert.js",
+      "sha256": "206e274ca325eb8a652e3911c3fbd090e2480d11ed7579dc17a5d17a2360ed48",
+      "bytes": 4881,
+      "ok": true
+    },
+    {
+      "path": "harness/compareArray.js",
+      "url": "https://raw.githubusercontent.com/tc39/test262/48221d7c1f7745dc13e420a2e850a248c0b2afb4/harness/compareArray.js",
+      "sha256": "3330423fe116cd96db70077d194471319ae9767ba1c8e2f73d7c133c5204509d",
+      "bytes": 243,
+      "ok": true
+    },
+    {
+      "path": "test/built-ins/Function/prototype/bind/15.3.4.5.1-4-1.js",
+      "url": "https://raw.githubusercontent.com/tc39/test262/48221d7c1f7745dc13e420a2e850a248c0b2afb4/test/built-ins/Function/prototype/bind/15.3.4.5.1-4-1.js",
+      "sha256": "4b8b95cad487496cc12651b34416cecd8ee7bf2cc59e53107413ef36cf8c973c",
+      "bytes": 530,
+      "ok": true
+    },
+    {
+      "path": "test/built-ins/Function/prototype/bind/15.3.4.5.2-4-1.js",
+      "url": "https://raw.githubusercontent.com/tc39/test262/48221d7c1f7745dc13e420a2e850a248c0b2afb4/test/built-ins/Function/prototype/bind/15.3.4.5.2-4-1.js",
+      "sha256": "fd5f36ca5d44e671908ecfd73f675eef9d7b1154f9a60de7c960e2ef60554f5c",
+      "bytes": 1071,
+      "ok": true
+    },
+    {
+      "path": "test/built-ins/Object/getOwnPropertyNames/order-after-define-property.js",
+      "url": "https://raw.githubusercontent.com/tc39/test262/48221d7c1f7745dc13e420a2e850a248c0b2afb4/test/built-ins/Object/getOwnPropertyNames/order-after-define-property.js",
+      "sha256": "05ac32fb3fc1edd145b84f72501ed7650bf94a7ec99306ca877a29dc9d9acc8d",
+      "bytes": 1267,
+      "ok": true
+    },
+    {
+      "path": "test/built-ins/Object/entries/getter-adding-key.js",
+      "url": "https://raw.githubusercontent.com/tc39/test262/48221d7c1f7745dc13e420a2e850a248c0b2afb4/test/built-ins/Object/entries/getter-adding-key.js",
+      "sha256": "54e62470198f9a1d90c41eac65dffcc97b1e405470daff51e05a737d3888f964",
+      "bytes": 957,
+      "ok": true
+    },
+    {
+      "path": "test/built-ins/String/prototype/replace/S15.5.4.11_A2_T2.js",
+      "url": "https://raw.githubusercontent.com/tc39/test262/48221d7c1f7745dc13e420a2e850a248c0b2afb4/test/built-ins/String/prototype/replace/S15.5.4.11_A2_T2.js",
+      "sha256": "ffc65e4138513e16f2fd43a9015bb2191a66df376d19807985f7cd58161c58cf",
+      "bytes": 977,
+      "ok": true
+    },
+    {
+      "path": "test/built-ins/String/prototype/replace/replaceValue-evaluation-order.js",
+      "url": "https://raw.githubusercontent.com/tc39/test262/48221d7c1f7745dc13e420a2e850a248c0b2afb4/test/built-ins/String/prototype/replace/replaceValue-evaluation-order.js",
+      "sha256": "441f90651898c5ec49946f4b1d2c63e8183f608262c79c843caf0d9f1573f3b7",
+      "bytes": 885,
+      "ok": true
+    }
+  ],
+  "scope": "Selected genuine upstream tests and harness files only. Files are stored unchanged; this is not a full Test262 runner or conformance claim."
+}

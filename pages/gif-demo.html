@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>GIF images - ChezCat</title>
+<link rel="stylesheet" href="styles.css">
+<style>
+main { max-width:960px; }
+.hero { background:#17394a; color:#eef8fc; padding:24px; }
+.hero a { color:#9fe9d2; }
+.examples { display:flex; flex-wrap:wrap; gap:20px; }
+.example { flex:1; min-width:260px; }
+.image-well { padding:16px; background:#eef8fc; border:1px solid #b4cbd7; }
+.contrast { background:#4c5564; }
+</style></head><body><main>
+<div class="hero"><p><a href="start.html">Home</a> &middot; <a href="gallery.html">Other image formats</a></p>
+<h1>GIF images, decoded here.</h1>
+<p>Palettes, transparency, interlaced rows and LZW compression use our own code.</p></div>
+<div class="card"><h2>The same pixels, two row orders</h2>
+<p>These original images should look identical. The second stores its rows in the four GIF interlace passes.</p>
+<div class="examples">
+<div class="example"><h3>Ordinary rows</h3><div class="image-well"><img src="images/gif-palette.gif" width="240" height="128" alt="Palette drawing"></div></div>
+<div class="example"><h3>Interlaced rows</h3><div class="image-well"><img src="images/gif-interlaced.gif" width="240" height="128" alt="The same interlaced drawing"></div></div>
+</div></div>
+<div class="card"><h2>Transparent pixels</h2>
+<p>The same image appears on two backgrounds. Its empty regions should show the background through them.</p>
+<div class="examples">
+<div class="example"><div class="image-well"><img src="images/gif-transparent.gif" width="160" height="128" alt="Transparent ring on a light background"></div></div>
+<div class="example"><div class="image-well contrast"><img src="images/gif-transparent.gif" width="160" height="128" alt="The same transparent ring on a dark background"></div></div>
+</div></div>
+<div class="card"><h2>Three-frame animation</h2>
+<div class="image-well"><img src="images/gif-first-frame.gif" width="192" height="96" alt="Three squares, with the first highlighted"></div>
+<p>This file contains three frames. The highlight now moves between the three squares using the file's timing, even with JavaScript disabled.</p>
+</div>
+<p><a href="start.html">Back to the start page</a></p>
+</main></body></html>

@@ -1,0 +1,180 @@
+name: Validated tagged release
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing immutable release tag, exactly v plus Cargo version
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: chezcat-milestone-publication
+  cancel-in-progress: false
+env:
+  RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  LICENSE_SHA256: 632232a42c046628de0fd8c497e89f02055e1e919860bfa9fcd8fe3b5eb06d65
+jobs:
+  build:
+    if: github.repository == 'c-a-t-f-o-o-d/chezcat-browser' && github.actor == 'c-a-t-f-o-o-d'
+    runs-on: windows-2025
+    timeout-minutes: 40
+    permissions:
+      contents: read
+    outputs:
+      source_commit: ${{ steps.identity.outputs.source_commit }}
+      publication_sha256: ${{ steps.payload.outputs.publication_sha256 }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # existing verified v6 pin
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # existing verified v6 pin
+        with:
+          python-version: '3.14.8'
+      - name: Verify immutable tag and adopted licensing inputs
+        id: identity
+        shell: python
+        run: |
+          import hashlib, os, re, subprocess, tomllib
+          from pathlib import Path
+          def git(*args): return subprocess.check_output(['git', *args], text=True).strip()
+          tag = os.environ['RELEASE_TAG']
+          assert re.fullmatch(r'v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?', tag), 'Invalid release tag'
+          commit = git('rev-parse', 'HEAD')
+          assert git('rev-parse', 'refs/tags/' + tag + '^{commit}') == commit
+          assert not git('status', '--porcelain'), 'Tagged checkout is dirty'
+          assert tag == 'v' + tomllib.loads(Path('Cargo.toml').read_text())['package']['version']
+          license_bytes = Path('LICENSE').read_bytes()
+          assert hashlib.sha256(license_bytes).hexdigest() == os.environ['LICENSE_SHA256']
+          assert not license_bytes.startswith(b'\xef\xbb\xbf') and b'\r' not in license_bytes and license_bytes.endswith(b'\n')
+          import sys
+          sys.path.insert(0, 'tools')
+          import build_release_bundle as package
+          package.approve_license(os.environ['LICENSE_SHA256'], tag, commit)
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as out:
+              out.write('source_commit=' + commit + '\n')
+      - name: Install pinned Rust
+        run: rustup toolchain install 1.99.1 --profile minimal --component clippy --no-self-update
+      - name: Normal suite, optimized build, PE and all local journeys
+        run: python tools/verify_offline.py
+      - name: Package this exact tagged source and executable
+        shell: pwsh
+        run: |
+          python tools/build_release_bundle.py --output dist/ChezCat-windows-x64.zip --tag "$env:RELEASE_TAG" --approved-license-sha256 "$env:LICENSE_SHA256"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python tools/build_release_bundle.py --source --output dist/ChezCat-source.zip --tag "$env:RELEASE_TAG" --approved-license-sha256 "$env:LICENSE_SHA256"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Check exact distribution and extracted offline application journey
+        shell: pwsh
+        env:
+          SOURCE_COMMIT: ${{ steps.identity.outputs.source_commit }}
+        run: |
+          python tools/check_distribution.py --runtime dist/ChezCat-windows-x64.zip --source dist/ChezCat-source.zip --tag "$env:RELEASE_TAG" --commit "$env:SOURCE_COMMIT" --license-sha256 "$env:LICENSE_SHA256" --output results/verification/release-distribution.json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Prepare public-safe descriptive provenance and exact checksums
+        id: payload
+        shell: python
+        env:
+          SOURCE_COMMIT: ${{ steps.identity.outputs.source_commit }}
+        run: |
+          import hashlib, json, os
+          from pathlib import Path
+          def sha(data): return hashlib.sha256(data).hexdigest()
+          # The preceding distribution gate must exit zero before this step.
+          # Never upload its raw logs, full verification maps or private records.
+          distribution = json.loads(Path('results/verification/release-distribution.json').read_text())
+          assert distribution['passed'] and all(distribution['checks'].values())
+          record = distribution['publication']
+          assert record['passed'] and record['source_commit'] == os.environ['SOURCE_COMMIT']
+          assert record['tag'] == os.environ['RELEASE_TAG'] and record['license_sha256'] == os.environ['LICENSE_SHA256']
+          assert record['license_scope'] == 'containing-source-revision' and len(record['license_scope_sha256']) == 64
+          assert record['validation']['offline_startup'] and record['validation']['original_app_input_journey']
+          pointer = json.loads(Path('results/verification/latest-offline.json').read_text())
+          info = json.loads(Path(pointer['build_info']).read_text())
+          assert info['source_commit'] == os.environ['SOURCE_COMMIT'] and info['dirty'] is False
+          record['executable_sha256'] = info['executable_sha256']
+          record['scope'] = 'Descriptive build provenance: exact tag, normal offline gate, distribution payload checks and extracted offline App/input journey. No signed attestation, live-site/device test, reproducibility or security-certification claim.'
+          Path('dist/publication.json').write_text(json.dumps(record, indent=2) + '\n', encoding='utf-8')
+          names = ['ChezCat-windows-x64.zip', 'ChezCat-source.zip', 'publication.json']
+          Path('dist/SHA256SUMS').write_text(''.join(sha((Path('dist') / name).read_bytes()) + '  ' + name + '\n' for name in names), encoding='utf-8')
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as out:
+              out.write('publication_sha256=' + sha(Path('dist/publication.json').read_bytes()) + '\n')
+      - name: Retain validated release inputs for publication job
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # existing verified v6 pin
+        with:
+          name: release-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            dist/ChezCat-windows-x64.zip
+            dist/ChezCat-source.zip
+            dist/publication.json
+            dist/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 14
+  publish:
+    needs: build
+    runs-on: windows-2025
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      # No repository checkout or project-code execution in the write-token job.
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # verified official v8.0.2
+        with:
+          name: release-${{ github.run_id }}-${{ github.run_attempt }}
+          path: dist
+          digest-mismatch: error
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # existing verified v6 pin
+        with:
+          python-version: '3.14.8'
+      - name: Recheck transferred bytes and exact remote tag, then publish and download-check assets
+        shell: python
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: c-a-t-f-o-o-d/chezcat-browser
+          SOURCE_COMMIT: ${{ needs.build.outputs.source_commit }}
+          PUBLICATION_SHA256: ${{ needs.build.outputs.publication_sha256 }}
+        run: |
+          import hashlib, json, os, re, subprocess, tempfile
+          from pathlib import Path
+          from urllib.parse import quote
+          def sha(data): return hashlib.sha256(data).hexdigest()
+          def gh(*args): return subprocess.check_output(['gh', *args], text=True)
+          tag, commit = os.environ['RELEASE_TAG'], os.environ['SOURCE_COMMIT']
+          assert re.fullmatch(r'v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?', tag)
+          assert re.fullmatch('[0-9a-f]{40}', commit)
+          expected = {}
+          for line in Path('dist/SHA256SUMS').read_text().splitlines():
+              digest, name = line.split('  ', 1)
+              assert re.fullmatch('[0-9a-f]{64}', digest) and name not in expected
+              expected[name] = digest
+          assert set(expected) == {'ChezCat-windows-x64.zip', 'ChezCat-source.zip', 'publication.json'}
+          for name, digest in expected.items(): assert sha((Path('dist') / name).read_bytes()) == digest
+          assert expected['publication.json'] == os.environ['PUBLICATION_SHA256']
+          record = json.loads(Path('dist/publication.json').read_text())
+          assert record['tag'] == tag and record['source_commit'] == commit
+          assert record['license_sha256'] == os.environ['LICENSE_SHA256'] and record['passed']
+          assert record['license_scope'] == 'containing-source-revision'
+          assert re.fullmatch('[0-9a-f]{64}', record['license_scope_sha256'])
+          assert record['validation']['offline_startup'] and record['validation']['original_app_input_journey']
+          obj = json.loads(gh('api', 'repos/' + os.environ['GH_REPO'] + '/git/ref/tags/' + quote(tag, safe='')))['object']
+          for _ in range(4):
+              if obj['type'] == 'commit': break
+              assert obj['type'] == 'tag'
+              obj = json.loads(gh('api', 'repos/' + os.environ['GH_REPO'] + '/git/tags/' + obj['sha']))['object']
+          assert obj['type'] == 'commit' and obj['sha'] == commit, 'Remote tag changed'
+          notes = Path(os.environ['RUNNER_TEMP']) / 'chezcat-release-notes.md'
+          notes.write_text('Experimental ChezCat ' + tag + '\n\nSource: ' + commit + '\n\nWindows runtime and separate source ZIP; see publication.json and SHA256SUMS. Normal offline checks, payload identity and an extracted offline App/input journey passed. Web-platform support is partial; no full Google/YouTube, physical audio/desktop, security audit or reproducibility claim. See the tagged capability, security and licensing documents.\n', encoding='utf-8')
+          assets = [str(Path('dist') / name) for name in sorted(expected)] + ['dist/SHA256SUMS']
+          args = ['release', 'create', tag, '--repo', os.environ['GH_REPO'], '--verify-tag', '--title', 'ChezCat ' + tag, '--notes-file', str(notes), '--latest=false']
+          if '-' in tag: args.append('--prerelease')
+          # No --clobber, tag creation, tag movement or replacement of an existing release.
+          subprocess.run(['gh', *args, *assets], check=True)
+          with tempfile.TemporaryDirectory(prefix='chezcat-download-check-') as temp:
+              for name in [*sorted(expected), 'SHA256SUMS']:
+                  subprocess.run(['gh', 'release', 'download', tag, '--repo', os.environ['GH_REPO'], '--pattern', name, '--dir', temp], check=True)
+                  assert (Path(temp) / name).read_bytes() == (Path('dist') / name).read_bytes(), 'Published asset differs'
+          print(gh('release', 'view', tag, '--repo', os.environ['GH_REPO'], '--json', 'url,tagName,isPrerelease'))

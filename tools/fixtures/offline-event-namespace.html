@@ -1,0 +1,109 @@
+<!-- Original local fixture. Only loopback resources; no access-check code. -->
+<p id="event-namespace-state">Fixture pending</p>
+<p id="style-type-state">Style type pending</p>
+<link id="token-sheet" rel="preload StyleSheet" href="/fixture-token.css">
+<div id="token-selector-state" data-words="cold ready">Token pending</div>
+<div id="scroll-box"><div id="scroll-content">Real clipped scroll content</div></div><p id="scroll-state">Scroll pending</p>
+<div id="geometry-state" style="width:40px;height:20px;padding:3px 5px;border:2px solid black"></div>
+<div id="fragment-fixture"><p id="fragment-old" title="retained">Old fragment</p></div>
+<p id="history-state">History pending</p>
+<p id="location-state">Location pending</p>
+<p id="namespace-create-state">Namespaced creation pending</p>
+<p id="script-source-state">Parsed script pending</p>
+<p id="timing-state">Timing pending</p>
+<p id="animation-state">Animation feature pending</p>
+<script id="parsed-source-fixture" src="/fixture-parser.js"></script>
+<script>
+var fixtureNode=document.getElementById('event-namespace-state');
+var fixtureStyle=document.createElement('style');fixtureStyle.setAttribute('type','text/css');
+var fixtureStyleAttr=fixtureStyle.getAttributeNode('type');
+if(!('type' in fixtureStyle)||fixtureStyle.type!=='text/css'||fixtureStyle.isConnected||fixtureStyle.parentNode!==null)throw Error('detached style type');
+fixtureStyle.type='  TEXT/CSS  ';if(fixtureStyleAttr.value!==fixtureStyle.type||fixtureStyle.getAttributeNode('type')!==fixtureStyleAttr)throw Error('style type raw identity');
+fixtureStyleAttr.value='text/css';fixtureStyle.setAttributeNS('urn:metadata','type','inert');if(fixtureStyle.type!=='text/css'||fixtureStyle.getAttribute('type')!=='text/css')throw Error('style namespace metadata');
+document.getElementById('style-type-state').textContent='Detached style type ready';
+var scrollBox=document.getElementById('scroll-box'),scrollContent=document.getElementById('scroll-content');
+if(scrollBox.scrollHeight!==100||scrollBox.clientHeight!==50)throw Error('loaded CSS scrolling area');
+scrollContent.style.height='140px';if(scrollBox.scrollHeight!==150||scrollBox.clientHeight!==50)throw Error('live scrolling area');
+scrollContent.style.height='90px';if(scrollBox.scrollHeight!==100)throw Error('restored scrolling area');scrollBox.scrollHeight=1;if(scrollBox.scrollHeight!==100)throw Error('readonly scrolling area');
+document.getElementById('scroll-state').textContent='Measured scroll height ready';
+var tokenTarget=document.getElementById('token-selector-state'),tokenSheet=document.getElementById('token-sheet'),tokenStyles=document.querySelectorAll('link[rel~="stylesheet"]');
+if(tokenStyles.length!==1||tokenStyles[0]!==tokenSheet||document.querySelector('link[rel~=stylesheet s]')!==null||document.querySelector('link[rel~=StyleSheet s]')!==tokenSheet||tokenTarget.clientWidth!==137||tokenTarget.clientHeight!==20)throw Error('real stylesheet token selector');
+if(!('href' in tokenSheet)||tokenStyles[0].href!==location.origin+'/fixture-token.css'||tokenStyles[0].href!==tokenStyles[0].href||tokenSheet.getAttribute('href')!=='/fixture-token.css')throw Error('real parsed stylesheet URL');
+var tokenSnapshot=document.querySelectorAll('[data-words~=ready]');tokenTarget.setAttribute('data-words','cold disabled');
+if(tokenSnapshot.length!==1||tokenSnapshot[0]!==tokenTarget||document.querySelector('[data-words~=ready]')!==null||tokenTarget.clientWidth===137)throw Error('token selector mutation snapshot');
+tokenTarget.setAttribute('data-words','cold ready');if(tokenTarget.clientWidth!==137||!tokenTarget.matches('[data-words~=ready]'))throw Error('token selector style restoration');tokenTarget.textContent='Token selector ready';
+if(document.documentElement.animate!==undefined||'animate' in document.documentElement)throw Error('unavailable native animation');
+if(document.documentElement.animate)throw Error('false animation capability');
+document.getElementById('animation-state').textContent='Unavailable animation detected';
+var fixtureTiming=performance.timing,fixtureResponseStart=fixtureTiming.responseStart;
+if(fixtureTiming!==performance.timing||fixtureTiming.navigationStart<=0||Math.floor(fixtureResponseStart)!==fixtureResponseStart||fixtureTiming.requestStart<fixtureTiming.navigationStart||fixtureResponseStart<fixtureTiming.requestStart||fixtureTiming.responseEnd<fixtureResponseStart||fixtureTiming.responseEnd>Date.now()||performance.now()+fixtureTiming.navigationStart+1<fixtureTiming.responseEnd)throw Error('real measured document timing');
+fixtureTiming.responseStart=0;performance.timing=0;if(performance.timing!==fixtureTiming||fixtureTiming.responseStart!==fixtureResponseStart)throw Error('timing readonly');
+document.getElementById('timing-state').textContent='Measured document timing ready';
+document.addEventListener('DOMContentLoaded',function(){if(performance.timing!==fixtureTiming||fixtureTiming.responseStart!==fixtureResponseStart)throw Error('stable document timing');});
+function checkParsedSource(){
+ var scripts=document.querySelectorAll('script[src]'),parsed=document.getElementById('parsed-source-fixture'),inert=document.getElementById('fragment-inert'),found=false;
+ if(scripts.length!==(inert?2:1)||window.fixtureParserLoads!==1||window.fragmentExecuted!==undefined)throw Error('parsed count/once-only execution');
+ for(var i=0;i<scripts.length;i++){var script=scripts[i];if(!('src' in script))throw Error('source member');if(script===parsed){found=true;if(script.src!==location.origin+'/fixture-parser.js'||script.getAttribute('src')!=='/fixture-parser.js')throw Error('parsed source URL');}else if(script===inert){if(script.src!==location.origin+'/fixture-inert.js')throw Error('inert source URL');}else{throw Error('unexpected script identity');}}
+ if(!found)throw Error('parsed script absent');document.getElementById('script-source-state').textContent='Parsed script URL ready';
+}
+checkParsedSource();document.addEventListener('DOMContentLoaded',checkParsedSource);
+var locationFrame=document.createElement('iframe');locationFrame.hidden=true;document.getElementById('geometry-state').appendChild(locationFrame);
+var locationChild=locationFrame.contentWindow,locationInstance=locationChild.location;
+if(locationInstance.prototype!==undefined||('prototype' in locationInstance)||location.prototype!==undefined)throw Error('fresh Location instance');
+Object.prototype.prototype=41;locationChild.eval('Object.prototype.prototype=43;');
+if(location.prototype!==41||locationInstance.prototype!==43||!('prototype' in locationInstance)||locationInstance.href!=='about:blank')throw Error('Location owner realm');
+delete Object.prototype.prototype;locationChild.eval('delete Object.prototype.prototype;');
+if(locationInstance.prototype!==undefined||('prototype' in locationInstance))throw Error('Location tail deletion');
+document.getElementById('location-state').textContent='Location instance ready';
+var namespaceElement=document.createElementNS('http://www.w3.org/1999/xhtml','span');
+if(namespaceElement.localName!=='span'||namespaceElement.prefix!==null||namespaceElement.namespaceURI!=='http://www.w3.org/1999/xhtml'||namespaceElement.ownerDocument!==document)throw Error('real namespaced creation');
+namespaceElement.textContent='Namespaced HTML ready';document.getElementById('namespace-create-state').textContent='';document.getElementById('namespace-create-state').appendChild(namespaceElement);
+if(history!==window.history||history.state!==null||history.replaceState.length!==2)throw Error('real History surface');
+var fixtureHistoryURL=location.pathname+location.search+'#fixture';
+history.replaceState(history.state,'',fixtureHistoryURL);
+if(location.href!==location.origin+fixtureHistoryURL||document.URL!==location.href)throw Error('synchronous History rewrite');
+document.getElementById('history-state').textContent='History entry ready';
+fixtureNode.setAttribute('data-sample','value');
+if(fixtureNode.getAttributeNS(null,'data-sample')!=='value'||fixtureNode.getAttributeNS('urn:fixture','data-sample')!==null)throw Error('namespace read');
+fixtureNode.setAttributeNS('urn:fixture','a:sample','first');
+var fixtureAttr=fixtureNode.getAttributeNodeNS('urn:fixture','sample');
+fixtureNode.setAttributeNS('urn:fixture','b:sample','second');
+if(fixtureAttr!==fixtureNode.getAttributeNodeNS('urn:fixture','sample')||fixtureAttr.name!=='a:sample'||fixtureAttr.value!=='second'||fixtureAttr.namespaceURI!=='urn:fixture')throw Error('namespace mutation identity');
+fixtureNode.removeAttributeNS('urn:fixture','sample');
+if(fixtureAttr.ownerElement!==null||fixtureAttr.value!=='second')throw Error('namespace detachment');
+var fixtureMap=fixtureNode.attributes;
+if(fixtureMap!==fixtureNode.attributes||fixtureMap.getNamedItem('data-sample')!==fixtureNode.getAttributeNode('data-sample')||fixtureMap.item(0)!==fixtureMap[0])throw Error('live attribute map');
+var geometryNode=document.getElementById('geometry-state'),geometryRect=geometryNode.getBoundingClientRect();
+if(!(geometryRect instanceof DOMRect)||geometryRect.width!==54||geometryRect.height!==30||geometryRect===geometryNode.getBoundingClientRect())throw Error('real renderer DOMRect');
+geometryNode.style.width='60px';
+if(geometryNode.getBoundingClientRect().width!==74||geometryRect.width!==54)throw Error('layout refresh and snapshot stability');
+var fragmentNode=document.getElementById('fragment-fixture'),fragmentOld=document.getElementById('fragment-old'),fragmentAttr=fragmentOld.getAttributeNode('title');
+fragmentNode.innerHTML='<p id="fragment-state">Fragment waiting</p><img id="fragment-image" src="/fixture-image.ppm"><script id="fragment-inert" src="/fixture-inert.js">window.fragmentExecuted=true;<\/script>';
+if(fragmentOld.parentNode!==null||fragmentOld.isConnected||fragmentAttr.ownerElement!==fragmentOld||fragmentAttr.value!=='retained'||document.getElementById('fragment-old')!==null||fragmentNode.innerHTML.indexOf('<img id="fragment-image"')<0)throw Error('fragment replacement and retained identity');
+var fragmentImage=document.getElementById('fragment-image');
+fragmentImage.onload=function(){
+ if(!fragmentImage.complete||fragmentImage.naturalWidth!==2||fragmentImage.naturalHeight!==1||fragmentImage.getBoundingClientRect().width!==2||window.fragmentExecuted!==undefined)throw Error('real fragment image completion');
+ document.getElementById('fragment-state').textContent='Fragment image loaded';
+};
+fragmentImage.onerror=function(){throw Error('loopback fragment image failed');};
+var fixtureEvent=document.createEvent('UIEvents');
+var mapImage=new Image();mapImage.useMap='#original-map';if(mapImage.useMap!=='#original-map'||mapImage.getAttribute('usemap')!=='#original-map')throw Error('image map reflection');
+fixtureEvent.initUIEvent('fixture',true,true,window,4294967297);
+if(fixtureEvent.view!==window||fixtureEvent.detail!==1||fixtureEvent.isTrusted)throw Error('UI initializer');
+var fixtureError='';try{fixtureNode.setAttribute('data bad','x');}catch(e){fixtureError=e.name;}
+if(fixtureError!=='InvalidCharacterError')throw Error('attribute exception');
+var fixtureOrder='';
+var dispatchOrder='',dispatchEventObject=document.createEvent('Event');dispatchEventObject.initEvent('original-fixture',true,true);
+fixtureNode.addEventListener('original-fixture',function(event){if(event!==dispatchEventObject||event.isTrusted||event.target!==fixtureNode||event.currentTarget!==fixtureNode||event.eventPhase!==2)throw Error('real synchronous dispatch');dispatchOrder+='listener';event.preventDefault();Promise.resolve().then(function(){dispatchOrder+='microtask';});},{once:true});
+if(fixtureNode.dispatchEvent(dispatchEventObject)!==false||dispatchOrder!=='listener'||dispatchEventObject.target!==fixtureNode||dispatchEventObject.currentTarget!==null)throw Error('dispatch return/persistent identity');dispatchOrder+='caller';
+Promise.resolve().then(function(){if(dispatchOrder!=='listenercallermicrotask')throw Error('dispatch checkpoint');});
+Promise.resolve().then(function(){try{fixtureNode.removeChild(document.createElement('span'));}catch(e){fixtureOrder=e.name;}});
+Promise.resolve().then(function(){if(fixtureOrder!=='NotFoundError')throw Error('Promise exception');fixtureNode.textContent='Event namespace ready';});
+document.addEventListener('keydown',function(event){
+ if(event.view!==window||event.detail!==0||!event.isTrusted)throw Error('native UI fields');
+ var type=event.type;
+ event.initUIEvent('unchanged',false,false,null,7);
+ if(event.type!==type||event.detail!==0||!event.isTrusted)throw Error('native initializer isolation');
+ fixtureNode.textContent='Native UI observed';
+});
+</script>

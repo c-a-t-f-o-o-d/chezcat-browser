@@ -1,0 +1,46 @@
+name: Offline Windows verification
+on:
+  push:
+    branches: [main, 'feat/**', 'fix/**', 'docs/**', 'security/**']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows:
+    if: github.repository == 'c-a-t-f-o-o-d/chezcat-browser' && github.actor == 'c-a-t-f-o-o-d'
+    runs-on: windows-2025
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.14.8'
+      - name: Install pinned Rust
+        run: rustup toolchain install 1.99.1 --profile minimal --component clippy --no-self-update
+      - name: Normal tests, release, PE and local journeys
+        run: python tools/verify_offline.py
+      - name: Prepare public-safe verification summary
+        if: always()
+        shell: python
+        run: |
+          import json
+          from pathlib import Path
+          summary = {'passed': False, 'scope': 'Normal offline verification only; no live/device/security certification claim.'}
+          pointer = Path('results/verification/latest-offline.json')
+          if pointer.is_file():
+              location = json.loads(pointer.read_text())
+              report = json.loads(Path(location['report']).read_text())
+              summary.update(passed=report.get('passed', False), source_commit=report.get('source_commit'), executable_sha256=report.get('executable_sha256'), passing_journeys=sum(bool(x.get('valid')) for x in report.get('journeys', [])))
+          output = Path('results/verification/public-summary.json')
+          output.parent.mkdir(parents=True, exist_ok=True)
+          output.write_text(json.dumps(summary, indent=2) + '\n', encoding='utf-8')
+      - name: Save public-safe summary
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: offline-verification
+          path: results/verification/public-summary.json
+          if-no-files-found: ignore
+          retention-days: 7

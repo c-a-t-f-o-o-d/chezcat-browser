@@ -1,0 +1,61 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Positioning demo</title>
+<link rel="stylesheet" href="styles.css">
+<style>
+main { max-width: 960px; padding-bottom: 250px; }
+.hero { position: relative; background: #17394a; color: #eef8fc; padding: 44px 28px 28px; }
+.hero a { color: #9fe9d2; }
+.badge { position: absolute; top: 12px; right: 16px; color: #8ee0c8; font-size: 12px; }
+.row { display: flex; flex-wrap: wrap; gap: 16px; }
+.sample { background: #ccefe0; padding: 16px; }
+.offset { position: relative; top: 12px; left: 12px; background: #ffe8ad; }
+.stage { position: relative; height: 220px; background: #e4edf2; border: 1px solid #b9ced8; margin: 22px 0; }
+.corner { position: absolute; padding: 12px; background: #17394a; color: #eef8fc; }
+.northwest { left: 16px; top: 16px; }
+.southeast { right: 16px; bottom: 16px; }
+.centerline { position: absolute; left: 16px; right: 16px; top: 90px; padding: 12px; background: #ccefe0; }
+.nest { position: relative; margin: 20px; padding: 18px; background: #d1eaf3; }
+.inner { position: relative; height: 130px; background: #ffffff; border: 1px solid #b9ced8; }
+.inner-link { position: absolute; bottom: 12px; right: 12px; padding: 10px; background: #ffe8ad; }
+.dock { position: fixed; right: 16px; bottom: 12px; width: 220px; padding: 14px; background: #17394a; border: 1px solid #477084; color: #eef8fc; }
+.dock a { color: #9fe9d2; }
+.dock p { margin: 0 0 12px; font-size: 14px; }
+.dock form { margin: 0; }
+.dock input { width: 190px; }
+.dock button { margin-top: 10px; }
+.dock input, .dock button { color: #233747; background: #ffffff; }
+.target { border: 2px solid #287a66; }
+</style></head><body><main>
+<div class="hero"><span class="badge">CHEZCAT / BUILD 0.28</span>
+<h1>Put it where it belongs.</h1>
+<p>Relative offsets, absolute placement and fixed elements now work alongside our block and flex layout.</p>
+<p><a href="start.html">Start page</a> &nbsp; <a href="jpeg-demo.html">JPEG images</a> &nbsp; <a href="flex-demo.html">Flex layout</a></p></div>
+
+<div class="card"><h2>Relative: keep the space, move the box.</h2>
+<p>The gold box moves twelve pixels right and down. Its original space still participates in the row.</p>
+<div class="row"><div class="sample">First</div><div class="sample offset">Offset</div><div class="sample">Third</div></div>
+<p>Its text and clickable content move with it.</p></div>
+
+<div class="card"><h2>Absolute: use a containing box.</h2>
+<p>These elements use the edges of the light panel. The mint bar uses both left and right offsets, so its width follows the panel.</p>
+<div class="stage"><div class="corner northwest">Top / left</div><div class="centerline">Left and right both set</div><div class="corner southeast">Bottom / right</div></div>
+<p>The positioned elements do not push each other through normal flow.</p></div>
+
+<div class="card"><h2>The nearest positioned ancestor.</h2>
+<p>The gold link belongs to the white inner box. Resize the window and click it to open the JPEG gallery.</p>
+<div class="nest"><p>Outer box</p><div class="inner"><a class="inner-link" href="jpeg-demo.html">Open images</a></div></div></div>
+
+<div class="card"><h2>Fixed: stay with the viewport.</h2>
+<p>The dark panel stays at the bottom right of the page area while you scroll. Its field, reset button and links remain usable.</p>
+<p>Change the window height as well as its width. Open and close the find bar with Ctrl+F and Esc; the fixed panel should follow the available page area.</p>
+<p>Try searching for words in the fixed panel. Finding an already visible fixed element should keep the page in place.</p></div>
+
+<div class="card target" id="target"><h2>Anchor destination.</h2>
+<p>The fixed panel's Jump link leads here. This section participates in normal document scrolling.</p>
+<p>Text selection, copy, find and fragment navigation should use the visible positions of the elements.</p>
+<p><a href="start.html">Return home</a></p></div>
+</main>
+<div class="dock" id="fixed-panel"><p>Fixed while you scroll.</p>
+<p><a href="#target">Jump</a> &nbsp; <a href="#top">Top</a></p>
+<form><input name="note" value="Edit this field" size="15"><button type="reset">Reset</button></form></div>
+</body></html>

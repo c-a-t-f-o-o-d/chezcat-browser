@@ -1,0 +1,11 @@
+ChezCat download sample
+======================
+
+This original text file is a small download you can safely inspect.
+
+Use the Download icon to see the completed file, open the Downloads folder,
+or change the folder in Settings. Clear list removes the recent-download
+record and leaves this file in place.
+
+Downloading this sample a second time should choose another available name
+instead of overwriting the first copy.
