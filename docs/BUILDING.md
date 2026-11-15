@@ -9,13 +9,37 @@ access; browser verification remains offline.
 ```powershell
 rustup toolchain install 1.99.1 --profile minimal --component clippy --no-self-update
 rustc --version
+python tools/accept_license.py --show
+python tools/accept_license.py --accept-license 34003a38eeb1db77472c307e23b5a5540c7625c50d9f0ea0dc7bacf6e5b9b749 --license-scope personal
 .\Build.cmd
 python tools/capture_tests.py --toolchain 1.99.1
 python tools/verify_offline.py
 ```
 
-The final command runs the normal Windows suite, optimized build, PE checks and
-all twelve local interaction journeys with bounded child-process cleanup. Its
+Read the complete terms before the affirmative acceptance command. The shown
+command records personal-scope acceptance; an authorized organization user chooses
+`--license-scope organization`. Source builds and tests check a valid receipt;
+they do not accept silently. To inspect the current receipt without acceptance,
+run `python tools/accept_license.py --check`.
+
+The default receipt is outside the source tree and browser profile, under the
+user's local application data in `ChezCat/License/receipt.json`. An explicit
+`--receipt-dir <absolute-external-directory>` or the
+`CHEZCAT_LICENSE_RECEIPT_DIR` environment variable selects an external location;
+selecting a directory is not consent. Keep receipts out of source, runtime ZIPs,
+logs and uploaded artifacts. Matching exact license text can reuse its receipt;
+changed text requires affirmative acceptance again. See LICENSE_ACCEPTANCE.md.
+
+The application supports `ChezCat.exe --license` without browsing or networking.
+Its affirmative CLI is `ChezCat.exe --accept-license <full-license-sha256>
+--license-scope personal|organization`, with optional
+`--license-receipt-dir <absolute-external-directory>`. The same receipt governs
+ordinary CLI, GUI, headless and automation use before browsing/network activity.
+Help and license viewing do not require acceptance.
+
+The final verification command runs the normal Windows suite, optimized build,
+PE checks and all required local interaction journeys with bounded child-process
+cleanup. Its
 JSON report records the source input map and executable hashes. A serial diagnostic
 retry never erases a normal failure. Results and build outputs are ignored files.
 Loopback fixture HTTP servers are local tests, not public-service probes.
@@ -40,9 +64,11 @@ reference scripts may optionally require Node, Pillow, OpenSSL or other tools;
 those are not production dependencies and are not required by verify_offline.py.
 
 A runtime bundle needs ChezCat.exe, pages/, assets/, trust/, notices/, relevant
-data notices, LICENSE, the containing-revision LICENSE_SCOPE.md and exact build
-metadata. No historical commit list is required or included. A source ZIP is not a ready
-Windows runtime bundle. The release packager deliberately refuses an absent,
+data notices, LICENSE, the containing-revision LICENSE_SCOPE.md, license
+acceptance/contributor privacy policies, the 1.1 change summary and exact build
+metadata. License receipts are private local state and are never runtime
+payloads. No historical commit list is required or included. A source ZIP is not a
+ready Windows runtime bundle. The release packager deliberately refuses an absent,
 unapproved/draft or hash-mismatched project license. Do not package a development
 workspace recursively. Build identity includes Git commit, clean/dirty status,
 compiler/target and file hashes; identity is not proof of security or bit-for-bit

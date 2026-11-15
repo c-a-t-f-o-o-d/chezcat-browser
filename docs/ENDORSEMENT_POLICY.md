@@ -21,7 +21,7 @@ An approval must identify at least:
 | Ownership | No implied transfer of base-project ownership or authority over future releases |
 | Signature/record | Authenticated written grant with date and final text identity |
 
-The approval should permit suspension or withdrawal for specified breaches, material misrepresentation, serious security issues or failure to meet agreed maintenance/quality obligations. Immediate suspension can be appropriate for an urgent security risk; other remediable issues should follow the stated notice/correction process. This is guidance for a separately signed approval, not an already granted unilateral power beyond its written scope.
+New approvals are discretionary as stated in LICENSE section 1.7, subject to its exceptions and applicable law. An approval issued under CSAPUL 1.1 must state any departure from that section's default: ordinary prospective withdrawal on at least 30 days' written notice after established receipt, and immediate written suspension where reasonably necessary for material breach, material misrepresentation or a serious security/misleading-endorsement risk. Identify affected rights, reason and effective time. An express separate agreement controls its own commitments. These rules do not retroactively amend older approvals or revoke compliant recipients' existing base-license grants. Expiry, correction and breach consequences remain as stated in the applicable terms.
 
 An approved branch may use a designation such as “ChezCat [Variant] — Officially Endorsed Branch,” with its maintainer and original project attribution. Approval does not give away ownership, authorize sales, waive CSAPUL generally, or cover any future revision automatically.
 

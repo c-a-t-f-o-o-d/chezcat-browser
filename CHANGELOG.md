@@ -1,5 +1,15 @@
 # Changes
 
+## 0.80.0-alpha.1 (candidate)
+
+Prospective CSAPUL 1.1 with full offline native first-run acceptance, explicit
+source/headless and organization acceptance, strict local receipts outside
+source/application/profile data, same-text reuse and renewed acceptance for new
+terms. Decline and failed receipt writes exit before browsing. Source builds check
+acceptance without silently creating it. External substantive intake remains
+reports-only until its signing/evaluation controls are verified.
+
+
 ## 0.79.0-alpha.2
 
 Replacement of the completed animation milestone on a clean public snapshot.

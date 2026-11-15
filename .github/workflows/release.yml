@@ -15,7 +15,8 @@ concurrency:
   cancel-in-progress: false
 env:
   RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
-  LICENSE_SHA256: 632232a42c046628de0fd8c497e89f02055e1e919860bfa9fcd8fe3b5eb06d65
+  LICENSE_SHA256: 34003a38eeb1db77472c307e23b5a5540c7625c50d9f0ea0dc7bacf6e5b9b749
+  AGREEMENT_SHA256: 160a0a7ee10a6fdcd1897aca16d7ef4ed9ce33a351fe0e35b660698ac7748b09
 jobs:
   build:
     if: github.repository == 'c-a-t-f-o-o-d/chezcat-browser' && github.actor == 'c-a-t-f-o-o-d'
@@ -23,6 +24,8 @@ jobs:
     timeout-minutes: 40
     permissions:
       contents: read
+    env:
+      CHEZCAT_LICENSE_RECEIPT_DIR: '${{ runner.temp }}/chezcat-license'
     outputs:
       source_commit: ${{ steps.identity.outputs.source_commit }}
       publication_sha256: ${{ steps.payload.outputs.publication_sha256 }}
@@ -50,6 +53,7 @@ jobs:
           assert tag == 'v' + tomllib.loads(Path('Cargo.toml').read_text())['package']['version']
           license_bytes = Path('LICENSE').read_bytes()
           assert hashlib.sha256(license_bytes).hexdigest() == os.environ['LICENSE_SHA256']
+          assert hashlib.sha256(Path('licensing/CONTRIBUTOR_AGREEMENT.md').read_bytes()).hexdigest() == os.environ['AGREEMENT_SHA256']
           assert not license_bytes.startswith(b'\xef\xbb\xbf') and b'\r' not in license_bytes and license_bytes.endswith(b'\n')
           import sys
           sys.path.insert(0, 'tools')
@@ -57,6 +61,13 @@ jobs:
           package.approve_license(os.environ['LICENSE_SHA256'], tag, commit)
           with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as out:
               out.write('source_commit=' + commit + '\n')
+      # This owner-only job records the owner's maintainer-run authorization.
+      # It neither supplies external contributor assent nor uploads the receipt.
+      - name: Explicit owner-authorized acceptance for this maintainer release run
+        shell: pwsh
+        run: |
+          python tools/accept_license.py --accept-license "$env:LICENSE_SHA256" --license-scope personal
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Install pinned Rust
         run: rustup toolchain install 1.99.1 --profile minimal --component clippy --no-self-update
       - name: Normal suite, optimized build, PE and all local journeys

@@ -1,4 +1,4 @@
-# Capability and dependency matrix — 0.79.0-alpha.2
+# Capability and dependency matrix — 0.80.0-alpha.1
 
 Every broad area remains partial. “Verified” below means the specified local slice,
 not complete platform conformance. Source inspection, unit tests, App harness,

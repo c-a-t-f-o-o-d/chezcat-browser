@@ -3,7 +3,25 @@
 // after changing resources/chezcat.rc or assets/chezcat.ico.
 use std::{env, path::PathBuf};
 
+#[allow(dead_code)]
+#[path = "src/crypto_hash.rs"]
+mod crypto_hash;
+#[allow(dead_code)]
+#[path = "src/license_acceptance.rs"]
+mod license_acceptance;
+
 fn main() {
+    println!("cargo:rerun-if-changed=LICENSE");
+    println!("cargo:rerun-if-changed=src/license_acceptance.rs");
+    println!("cargo:rerun-if-env-changed=CHEZCAT_LICENSE_RECEIPT_DIR");
+    println!("cargo:rerun-if-env-changed=LOCALAPPDATA");
+    let receipt = license_acceptance::directory(None, None).and_then(|path| {
+        // Receipt changes must recheck direct Cargo builds even when source is unchanged.
+        println!("cargo:rerun-if-changed={}", path.join("receipt.json").display());
+        license_acceptance::require(&path)
+    });
+    if let Err(problem) = receipt { panic!("{problem} Use python tools/accept_license.py after reviewing LICENSE; this build never accepts silently."); }
+
     for file in [
         "assets/chezcat.ico",
         "resources/chezcat.rc",

@@ -16,13 +16,13 @@ JOURNEYS=[['check_input_harness.py'],['check_input_harness.py','--event-namespac
  ['check_input_harness.py','--attribute-nodes'],['check_address_search.py'],
  ['check_stylesheet_harness.py'],['check_dispatch_harness.py'],['check_video_harness.py'],
  ['check_audio_harness.py'],['check_av_harness.py'],['check_authored_video_harness.py'],
- ['check_source_replacement_harness.py'],['check_animation_harness.py']]
+ ['check_source_replacement_harness.py'],['check_animation_harness.py'],['check_license_acceptance.py']]
 
 def committed_source_identity(commit,root=None):
     """Read immutable input blobs, including edits hidden by index flags."""
     root=root or ROOT
     def included(name):
-        return name in ['Cargo.toml','Cargo.lock','build.rs','rust-toolchain','rust-toolchain.toml','.cargo/config','.cargo/config.toml'] or name.startswith(('src/','data/','resources/','assets/','pages/','trust/','tools/fixtures/','tools/reference/'))
+        return name in ['Cargo.toml','Cargo.lock','build.rs','LICENSE','rust-toolchain','rust-toolchain.toml','.cargo/config','.cargo/config.toml'] or name.startswith(('src/','data/','resources/','assets/','pages/','trust/','tools/fixtures/','tools/reference/'))
     entries=[]
     for row in subprocess.check_output(['git','ls-tree','-rz',commit],cwd=root).split(b'\0'):
         if not row:continue
@@ -85,7 +85,8 @@ def main():
     def run(label,argv,timeout=600):
         row=capture_tests.execute(argv,folder/(label+'.log'),ROOT,timeout)
         row={'name':label,**row};print(label+': '+row['state'],flush=True);return row
-    for label,argv in [('publication-boundary',[sys.executable,'tools/check_publication.py']),
+    for label,argv in [('license-acceptance',[sys.executable,'tools/accept_license.py','--check']),
+       ('publication-boundary',[sys.executable,'tools/check_publication.py']),
        ('publication-controls',[sys.executable,'tools/check_publication_controls.py']),
        ('artifact-guards',[sys.executable,'tools/check_release_bundle.py']),
        ('version-parser-controls',[sys.executable,'tools/check_product_version.py']),
