@@ -1,0 +1,85 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="script-src 'unsafe-inline'">
+<title>Original CustomEvent waiting</title>
+<style>body{margin:20px;font-size:16px}h1{font-size:24px}p{max-width:760px}button{margin:6px}</style>
+</head><body><h1>Original real CustomEvent constructor</h1>
+<div id="parent"><button id="emit" name="emit" type="button">Construct and deliver an original notification</button></div>
+<p id="result">Waiting for two real CustomEvent constructor activations.</p>
+<p id="details">Constructor, detail, cancellation and child owner waiting.</p>
+<script>
+var C=CustomEvent,P=C.prototype,button=document.getElementById('emit'),parent=document.getElementById('parent');
+var getDetail=Object.getOwnPropertyDescriptor(P,'detail').get;
+var turns=0,constructed=0,canceled=0,notifications=0,children=0,nativeClicks=0,pathChecks=0,reinitialized=0;
+var current=null,lastPayload=null,order='',routeLog='',initConversions=0;
+if(typeof C!=='function'||C.name!=='CustomEvent'||C.length!==1||Object.getPrototypeOf(C)!==Event||Object.getPrototypeOf(P)!==Event.prototype)throw Error('Genuine CustomEvent constructor roots');
+var descriptor=Object.getOwnPropertyDescriptor(P,'detail'),initializer=Object.getOwnPropertyDescriptor(P,'initCustomEvent');
+if(typeof descriptor.get!=='function'||descriptor.get.length!==0||descriptor.set!==undefined||!descriptor.enumerable||!descriptor.configurable||typeof initializer.value!=='function'||initializer.value.length!==1||!initializer.writable||!initializer.enumerable||!initializer.configurable)throw Error('Actual CustomEvent descriptors');
+var brands=0,coercions=0,bad={toString:function(){coercions++;return 'forged';}};
+try{getDetail.call({});}catch(e){if(e.name==='TypeError')brands++;else throw e;}
+try{P.initCustomEvent.call({},bad);}catch(e){if(e.name==='TypeError')brands++;else throw e;}
+if(brands!==2||coercions)throw Error('Genuine CustomEvent brands before conversion');
+var defaults=new C('defaults');
+if(defaults.detail!==null||defaults.bubbles||defaults.cancelable||defaults.composed||defaults.isTrusted)throw Error('Actual CustomEvent defaults');
+var empty=new C('');if(!button.dispatchEvent(empty)||empty.composedPath().length)throw Error('Constructor initializes even the empty type');
+var frame=document.createElement('iframe');frame.hidden=true;document.body.appendChild(frame);
+var childWindow=frame.contentWindow,ChildC=childWindow.CustomEvent,ChildP=ChildC.prototype,ChildObject=childWindow.Object;
+if(ChildC===C||ChildP===P||Object.getPrototypeOf(ChildC)!==childWindow.Event||Object.getPrototypeOf(ChildP)!==childWindow.Event.prototype)throw Error('Real child CustomEvent roots');
+function checkPath(event,target){
+ var first=event.composedPath(),second=event.composedPath();
+ if(first===second||first[0]!==target||first[first.length-1]!==window||second[0]!==target)throw Error('Actual independent CustomEvent paths');
+ first[0]=window;if(second[0]!==target)throw Error('CustomEvent path copy isolation');pathChecks++;
+}
+// Retain the original legacy notification path as a separate real control.
+function publishOriginal(name,detail){
+ var event=document.createEvent('CustomEvent');
+ event.initCustomEvent(name,true,true,detail);
+ return document.dispatchEvent(event);
+}
+document.addEventListener('original-route',function(event){
+ if(event.isTrusted||event.target!==document||event.detail!==lastPayload||event.detail.message!=='Original detail')throw Error('legacy notification identity');
+ checkPath(event,document);notifications++;
+ event.detail.observed=true;
+ event.preventDefault();
+});
+parent.addEventListener('constructor-route',function(event){
+ if(event!==current||event.detail!==lastPayload||event.isTrusted||event.eventPhase!==1||!event.bubbles||!event.cancelable||!event.composed)throw Error('Actual constructed capture/detail state');
+ checkPath(event,button);routeLog+='capture;';
+},true);
+button.addEventListener('constructor-route',function(event){
+ if(event!==current||event.detail!==lastPayload||event.eventPhase!==2)throw Error('Actual constructed target state');
+ var stamp=event.timeStamp;
+ P.initCustomEvent.call(event,{toString:function(){initConversions++;event.preventDefault();lastPayload.during=true;return 'ignored';}},false,false,{replacement:true});
+ if(event.type!=='constructor-route'||event.detail!==lastPayload||!event.composed||event.timeStamp!==stamp||!event.defaultPrevented)throw Error('In-dispatch CustomEvent init is a real no-op after conversion');
+ checkPath(event,button);routeLog+='target;';constructed++;
+});
+parent.addEventListener('constructor-route',function(event){
+ if(event!==current||event.detail!==lastPayload||!event.detail.during||event.eventPhase!==3||!event.defaultPrevented)throw Error('Actual constructed bubble/detail mutation');
+ checkPath(event,button);routeLog+='bubble;';
+});
+button.onclick=function(input){
+ if(!input.isTrusted||!input.composed||!(input instanceof Event))throw Error('The fixture requires real App input.');
+ checkPath(input,button);nativeClicks++;turns++;
+ lastPayload={message:'Original detail',observed:false,during:false,count:turns,toString:function(){throw Error('Any detail was coerced');}};
+ order='';routeLog='';
+ var options={get bubbles(){order+='B';return true;},get cancelable(){order+='C';return true;},get composed(){order+='O';return true;},get detail(){order+='D';return lastPayload;}};
+ current=new C({toString:function(){order+='T';return 'constructor-route';}},options);
+ if(order!=='TBCOD'||current.detail!==lastPayload||Object.getPrototypeOf(current)!==P||!(current instanceof C)||!(current instanceof Event)||current instanceof UIEvent||current.isTrusted)throw Error('Real ordered constructor and any identity');
+ var trust=Object.getOwnPropertyDescriptor(current,'isTrusted');if(typeof trust.get!=='function'||!trust.enumerable||trust.configurable||trust.set!==undefined)throw Error('Actual CustomEvent unforgeable trust');
+ Object.defineProperty(current,'detail',{value:'own-shadow',configurable:true});
+ if(current.detail!=='own-shadow'||getDetail.call(current)!==lastPayload)throw Error('Actual detail slot survives ordinary shadow');delete current.detail;
+ if(button.dispatchEvent(current)!==false||routeLog!=='capture;target;bubble;'||initConversions!==turns||current.currentTarget!==null||current.eventPhase!==0||current.composedPath().length||!current.defaultPrevented)throw Error('Real CustomEvent canceled dispatch and cleanup');canceled++;
+ var stamp=current.timeStamp,replacement={reset:turns},ownInit=function(){throw Error('Own initializer intercepted canonical init');};current.initCustomEvent=ownInit;
+ P.initCustomEvent.call(current,'reset',false,false,replacement);
+ if(current.initCustomEvent!==ownInit||current.detail!==replacement||current.type!=='reset'||current.target!==null||current.defaultPrevented||!current.composed||current.timeStamp!==stamp)throw Error('Canonical initializer changes real slots through own shadow');delete current.initCustomEvent;
+ Event.prototype.initEvent.call(current,'base-reset');if(current.detail!==replacement||!current.composed)throw Error('Base initialization preserves real CustomEvent detail');reinitialized++;
+ var accepted=publishOriginal('original-route',lastPayload);
+ if(accepted||!lastPayload.observed)throw Error('Custom notification was not canceled/observed.');
+ var childPayload=ChildObject.create(ChildObject.prototype);childPayload.value=turns;
+ var child=new ChildC('child-'+turns,{detail:childPayload});
+ if(Object.getPrototypeOf(child)!==ChildP||!(child instanceof ChildC)||child instanceof C||child.detail!==childPayload||Object.getPrototypeOf(child.detail)!==ChildObject.prototype||child.detail.value!==turns||child.isTrusted)throw Error('Real child owner and any identity');children++;
+ if(constructed!==turns||canceled!==turns||notifications!==turns||children!==turns||nativeClicks!==turns||reinitialized!==turns||pathChecks!==turns*5)throw Error('Every real CustomEvent stage completes once per input');
+ document.getElementById('result').textContent='Completed '+turns+' real CustomEvent activation(s): constructed and legacy events canceled; child detail verified.';
+ document.getElementById('details').textContent='constructed='+constructed+' canceled='+canceled+' legacy='+notifications+' child='+children+' native='+nativeClicks+' path='+pathChecks+' reinitialized='+reinitialized+' order='+order+' brands='+brands;
+ document.title='Original CustomEvent activation '+turns+' passed';
+};
+</script></body></html>

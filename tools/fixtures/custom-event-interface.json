@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "scope": "Original real CustomEvent constructor/any detail, canonical initialization, dispatch/cancellation and child owner over two trusted App inputs; no service/device/desktop claim.",
+  "provenance": {
+    "method": "Original HTML/CSS/JavaScript using the retained legacy notification helper and assertions; no external assets",
+    "external_assets": []
+  },
+  "files": {
+    "custom-event-interface.html": {
+      "bytes": 8532,
+      "sha256": "8dff3ef7437f80bfe0f3b49fd5e18e381e1d609fc1e0f04f09b7ea18a2d60f5f"
+    }
+  }
+}

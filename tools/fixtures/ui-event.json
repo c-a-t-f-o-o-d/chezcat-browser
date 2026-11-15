@@ -7,8 +7,15 @@
   },
   "files": {
     "ui-event.html": {
-      "bytes": 8548,
-      "sha256": "1d503fb8e019ef3d9e32f795abb8fff86342cf33be0c4d4e50dafc7057317397"
+      "bytes": 8547,
+      "sha256": "804dd91b2bf024adf28ba69b2e997f579ea28249a0d216320765ef1177d78324"
     }
-  }
+  },
+  "revisions": [
+    {
+      "change": "The existing CustomEvent absent-global guard now requires its implemented genuine constructor; original UI/Mouse slot, dispatch, native and owner assertions are retained.",
+      "previous_html_sha256": "1d503fb8e019ef3d9e32f795abb8fff86342cf33be0c4d4e50dafc7057317397",
+      "html_sha256": "804dd91b2bf024adf28ba69b2e997f579ea28249a0d216320765ef1177d78324"
+    }
+  ]
 }

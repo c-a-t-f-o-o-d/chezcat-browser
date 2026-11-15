@@ -828,6 +828,7 @@ impl Page {
         state.native_functions.insert("Image", image);
         runtime.define_event_target_interface(WINDOW).expect("fixed EventTarget interface");
         runtime.define_event_interface(WINDOW).expect("fixed Event interface");
+        runtime.define_custom_event_interface(WINDOW).expect("fixed CustomEvent interface");
         runtime.define_ui_event_interface(WINDOW).expect("fixed UIEvent interface");
         runtime.define_mouse_event_interface(WINDOW).expect("fixed MouseEvent interface");
         runtime.define_node_interfaces(WINDOW,dom_tree::NODE_CONSTANTS,Some((IMAGE_FACTORY,"Image"))).expect("fixed Node interfaces");
@@ -2358,7 +2359,7 @@ impl Host for Bridge<'_> {
         if let Some(window)=self.event_owner(object) {
             // Subclass immediate prototypes stay opaque; this is their genuine
             // implemented Event ancestry, as with the existing Node suffixes.
-            return Some(crate::javascript::NativeAncestry {window,constructor:Some((window,if self.mouse_receiver(object) {"MouseEvent"}else if self.ui_receiver(object) {"UIEvent"}else{"Event"}))});
+            return Some(crate::javascript::NativeAncestry {window,constructor:Some((window,if self.custom_receiver(object) {"CustomEvent"}else if self.mouse_receiver(object) {"MouseEvent"}else if self.ui_receiver(object) {"UIEvent"}else{"Event"}))});
         }
         if let Some(window)=self.standalone_target_owner(object) {
             return Some(crate::javascript::NativeAncestry {window,constructor:Some((window,"EventTarget"))});
@@ -2503,7 +2504,7 @@ impl Host for Bridge<'_> {
     }
 
     fn argument_conversions(&self, object: u32, method: &str) -> &'static [(usize, bool)] {
-        if matches!(method,"Event"|"UIEvent"|"MouseEvent")&&self.event_target_interface(object) {return &[(0,true)];}
+        if matches!(method,"Event"|"UIEvent"|"MouseEvent"|"CustomEvent")&&self.event_target_interface(object) {return &[(0,true)];}
         if method=="getModifierState"&&self.mouse_receiver(object) {return &[(0,true)];}
         if object==WINDOW && method=="cancelAnimationFrame" {return &[(0,false)];}
         if object == HISTORY && method == "replaceState" { return &[(1, true), (2, true)]; }
@@ -2597,6 +2598,7 @@ impl Host for Bridge<'_> {
     }
 
     fn native_method_owner(&self, object:u32, method:&str) -> Option<u32> {
+        if self.event_target_interface(object)&&(method.starts_with("\0CustomEvent.")||method=="initCustomEvent") {return Some(object);}
         if self.event_target_interface(object)&&method.starts_with("\0Media.")
             || self.event_target_interface(object)&&method.starts_with("\0Video.") {return Some(object);}
         if self.media_element_receiver(object)&&matches!(method,"load"|"pause"|"play") {return Some(WINDOW);}
@@ -2604,7 +2606,7 @@ impl Host for Bridge<'_> {
     }
 
     fn unpublished_base_event_owner(&self,object:u32,method:&str,result:u32)->Option<u32> {
-        if !(object==DOCUMENT&&method=="createEvent"||self.event_target_interface(object)&&matches!(method,"Event"|"UIEvent"|"MouseEvent")) {
+        if !(object==DOCUMENT&&method=="createEvent"||self.event_target_interface(object)&&matches!(method,"Event"|"UIEvent"|"MouseEvent"|"CustomEvent")) {
             return None;
         }
         if self.state.created_events.last().is_none_or(|event|event.handle!=result) {return None;}
@@ -2643,7 +2645,7 @@ impl Host for Bridge<'_> {
     }
 
     fn required_arguments(&self, object: u32, method: &str) -> usize {
-        if matches!(method,"Event"|"UIEvent"|"MouseEvent")&&self.event_target_interface(object) {return 1;}
+        if matches!(method,"Event"|"UIEvent"|"MouseEvent"|"CustomEvent")&&self.event_target_interface(object) {return 1;}
         if method=="getModifierState"&&self.mouse_receiver(object) {return 1;}
         if object==WINDOW && matches!(method,"requestAnimationFrame"|"cancelAnimationFrame") {return 1;}
         if method=="dispatchEvent"&&self.dispatch_receiver(object){return 1;}
@@ -2712,7 +2714,7 @@ impl Host for Bridge<'_> {
         if matches!(method,"load"|"pause")&&self.media_interface_receiver(object)&&!self.media_element_receiver(object) {
             return Err(("NotSupportedError","This media element has no implemented player binding.".into()));
         }
-        if matches!(method,"Event"|"UIEvent"|"MouseEvent")&&self.event_target_interface(object) {
+        if matches!(method,"Event"|"UIEvent"|"MouseEvent"|"CustomEvent")&&self.event_target_interface(object) {
             if !self.state.enabled||!self.doc.scripting_enabled {return Err(("InvalidStateError","Event construction is disabled.".into()));}
             if args.get(1).is_some_and(|value|!matches!(value,Value::Undefined|Value::Null|Value::Object(_)|Value::Function(_)|Value::Host(_))) {
                 return Err(("TypeError",format!("{method}Init requires an object, null or undefined.")));
@@ -2721,6 +2723,9 @@ impl Host for Bridge<'_> {
         }
         if method.starts_with("\0Event.")&&!self.event_receiver(object) {
             return Err(("TypeError","Event operation requires a genuine Event.".into()));
+        }
+        if method.starts_with("\0CustomEvent.")&&!self.custom_receiver(object) {
+            return Err(("TypeError","CustomEvent operation requires a genuine CustomEvent.".into()));
         }
         if method.starts_with("\0UIEvent.")&&!self.ui_receiver(object) {
             return Err(("TypeError","UIEvent operation requires a genuine UIEvent.".into()));
@@ -2976,6 +2981,7 @@ impl Host for Bridge<'_> {
     }
 
     fn accepts_receiver(&self, object: u32, method: &str, receiver: u32) -> bool {
+        if self.event_target_interface(object)&&(method.starts_with("\0CustomEvent.")||method=="initCustomEvent") {return self.custom_receiver(receiver);}
         if self.event_target_interface(object)&&method.starts_with("\0Video.") {return self.video_interface_receiver(receiver);}
         if self.event_target_interface(object)&&method.starts_with("\0Media.") {return self.media_interface_receiver(receiver);}
         if self.event_target_interface(object)&&(method.starts_with("\0MouseEvent.")||matches!(method,"initMouseEvent"|"getModifierState")) {
@@ -3208,6 +3214,7 @@ impl Host for Bridge<'_> {
         method: &str,
     ) -> Option<(usize, &'static [&'static str])> {
         if method=="Event"&&self.event_target_interface(object) {return Some((1,&["bubbles","cancelable","composed"]));}
+        if method=="CustomEvent"&&self.event_target_interface(object) {return Some((1,&["bubbles","cancelable","composed","detail"]));}
         if method=="UIEvent"&&self.event_target_interface(object) {return Some((1,&["bubbles","cancelable","composed","detail","view"]));}
         if method=="MouseEvent"&&self.event_target_interface(object) {return Some((1,&[
             "bubbles","cancelable","composed","detail","view",
@@ -3248,6 +3255,7 @@ impl Host for Bridge<'_> {
         fields: Option<&[(&str, Value)]>,
     ) -> Result<Value, String> {
         if method=="Event"&&self.event_target_interface(object) {return self.construct_base_event(object,args,fields);}
+        if method=="CustomEvent"&&self.event_target_interface(object) {return self.construct_custom_event(object,args,fields);}
         if method=="UIEvent"&&self.event_target_interface(object) {return self.construct_ui_event(object,args,fields);}
         if method=="MouseEvent"&&self.event_target_interface(object) {return self.construct_mouse_event(object,args,fields);}
         if matches!(method, "addEventListener" | "removeEventListener") {
@@ -4180,6 +4188,7 @@ impl Host for Bridge<'_> {
         }
         let method=if let Some(operation)=script_media::interface_operation(method) {self.require_bound_media(object)?;operation} else {method};
         if let Some(property)=method.strip_prefix("\0MouseEvent.get.") {return self.get(object,property);}
+        if let Some(property)=method.strip_prefix("\0CustomEvent.get.") {return self.get(object,property);}
         if let Some(property)=method.strip_prefix("\0UIEvent.get.") {return self.get(object,property);}
         if let Some(property)=method.strip_prefix("\0Event.get.") {return self.get(object,property);}
         if let Some(property)=method.strip_prefix("\0Event.set.") {

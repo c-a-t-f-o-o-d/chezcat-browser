@@ -25,10 +25,11 @@ and licensing obligations; see [third-party notices](THIRD_PARTY_NOTICES.md).
 - Address-bar search with Google by default, Bing, DuckDuckGo and None; explicit
   URL/file intent is kept separate from search and navigation errors.
 - HTML/DOM, a bounded JavaScript subset, events, CSS layout and software painting.
-- Genuine Event, UIEvent and finite MouseEvent construction, owner-realm
-  prototypes and branded fields. Event/UIEvent dispatch, cancellation and paths
-  are real; Mouse dispatch/native pointer payloads, KeyboardEvent/CustomEvent
-  constructors and shadow-DOM retargeting remain unsupported.
+- Genuine Event, UIEvent, CustomEvent and finite MouseEvent construction,
+  owner-realm prototypes and branded fields. CustomEvent retains actual any
+  detail; Event/UIEvent/CustomEvent dispatch, cancellation and paths are real.
+  Mouse dispatch/native pointer payloads, KeyboardEvent construction and
+  shadow-DOM retargeting remain unsupported.
 - Settings, bookmarks, optional browser history, downloads and local diagnostics.
 - Selected local IVF/VP8 video, PCM audio and constrained Matroska A/V.
   Visible fixed-canvas version-zero I/P video supports single-vector interframes

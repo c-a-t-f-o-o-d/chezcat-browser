@@ -175,7 +175,7 @@ fn mouse_event_dispatch_boundary_and_native_keyboard_brand_remain_explicit() {
 var b=document.getElementById('button'),mouse=new MouseEvent('mouse',{clientX:2.5}),ui=new UIEvent('ui');
 var get=Object.getOwnPropertyDescriptor(MouseEvent.prototype,'clientX').get,mod=MouseEvent.prototype.getModifierState;
 var denied=false;try{b.dispatchEvent(mouse);}catch(x){denied=x.name==='NotSupportedError';}if(!denied||mouse.target!==null||mouse.currentTarget!==null||mouse.eventPhase!==0||mouse.isTrusted||mouse.composedPath().length)throw 'Mouse dispatch stays explicitly unsupported and clean';
-if(typeof KeyboardEvent!=='undefined'||typeof CustomEvent!=='undefined'||ui instanceof MouseEvent)throw 'deferred constructor and brand boundaries';
+if(typeof KeyboardEvent!=='undefined'||typeof CustomEvent!=='function'||ui instanceof MouseEvent)throw 'deferred constructor and brand boundaries';
 var keys=0;b.addEventListener('keydown',function(event){
  keys++;if(!event.isTrusted||!(event instanceof UIEvent)||!(event instanceof Event)||event instanceof MouseEvent||event.view!==window||event.detail!==0||event.which!==65)throw 'genuine keyboard UI ancestry without Mouse fabrication';
  var refused=0;try{get.call(event);}catch(x){if(x.name==='TypeError')refused++;}try{mod.call(event,'Control');}catch(x){if(x.name==='TypeError')refused++;}if(refused!==2)throw 'Mouse getters and methods reject native keyboard';

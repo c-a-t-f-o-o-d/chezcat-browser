@@ -16,11 +16,11 @@ not complete web-platform or public-service support.
 | F5 | Complete for the selected profile | Visible version-zero VP8 I/P single-vector interframes, dependency-aware seek and constrained Matroska PCM16 synchronization | SPLITMV, hidden frames, other interframe versions and wider codecs/containers |
 | C1 | Complete for one URL background layer | Stylesheet-relative resource ownership, shared cascade/load/layout/paint and original request/pixel/geometry checks on ordinary block boxes | Multiple layers, gradients and inline-fragment/replaced-element backgrounds |
 | F6 Media/Video interfaces | Complete for the original bound-player model/App slice | Genuine owner-realm Media/Video roots, stable class identity and canonical controls/accessors through own shadows; actual Promise/time/independent-pixel/lifecycle proof | controls mutation, VIDEO width/height IDL reflection, additional/child players and broader media APIs remain unsupported |
-| F6 | In progress | Authored synchronized A/V, genuine Media/Video interfaces and finite Event/UIEvent/MouseEvent construction are implemented prerequisites; Event/UIEvent dispatch and legacy CustomEvent detail/dispatch work | Actual ordinary non-DRM YouTube playback is unproved; Mouse dispatch/native pointer payloads, KeyboardEvent/CustomEvent constructors and broader page/player APIs remain unsupported |
+| F6 CustomEvent interfaces | Complete for the original constructor/notification model/App slice | Genuine owner-realm CustomEvent roots, actual any detail and atomic initialization/publication; real input-driven constructed/legacy dispatch, cancellation, path and child-owner proof | Full normal verification is required for integration; child-document factories, native CustomEvent inputs and broader event interfaces remain unsupported |
+| F6 | In progress | Authored synchronized A/V, genuine Media/Video interfaces and finite Event/UIEvent/MouseEvent/CustomEvent construction are implemented prerequisites; Event/UIEvent/CustomEvent dispatch and cancellation work | Actual ordinary non-DRM YouTube playback is unproved; Mouse dispatch/native pointer payloads, KeyboardEvent construction and broader page/player APIs remain unsupported |
 
-Next, add a genuine CustomEvent constructor/prototype over the existing detail and
-dispatch model. Further small recorded gaps are the real controls setter and
-VIDEO width/height content reflection. Define and validate each finite contract
+Next, implement the real controls setter, then VIDEO width/height content
+reflection over the existing authored player and renderer. Define and validate each finite contract
 before extending it; these are source/contract gaps, not newly observed service
 failures. Each slice needs model, App/input and lifecycle evidence before a
 separately authorized service check. Service playback is not inferred from local
