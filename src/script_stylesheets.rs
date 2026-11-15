@@ -83,6 +83,16 @@ impl Page {
         }
     }
 
+    /// Generation ownership remains meaningful after an author load callback.
+    pub fn owns_dynamic_stylesheet(&self, request: &DynamicStylesheet) -> bool {
+        self.state.stylesheets.entries.get(&request.node)
+            .is_some_and(|entry| entry.key.is_some() && entry.generation == request.generation)
+    }
+
+    pub fn accepts_dynamic_stylesheet(&self, doc: &Document, request: &DynamicStylesheet) -> bool {
+        self.state.enabled && doc.scripting_enabled && self.owns_dynamic_stylesheet(request)
+    }
+
     pub fn complete_dynamic_stylesheet(
         &mut self,
         doc: &mut Document,
@@ -97,12 +107,7 @@ impl Page {
         self.begin_job();
         let before = self.state.errors;
         self.state.stylesheets.in_flight = self.state.stylesheets.in_flight.saturating_sub(1);
-        let current = self
-            .state
-            .stylesheets
-            .entries
-            .get(&request.node)
-            .is_some_and(|entry| entry.key.is_some() && entry.generation == request.generation);
+        let current = self.owns_dynamic_stylesheet(request);
         let mut changed = false;
         if current {
             let result = result.and_then(|source| {
@@ -120,6 +125,9 @@ impl Page {
                         geometry.set_stylesheet(request.node, Some(&source));
                     }
                     styles.insert(request.node, source);
+                    // App must recompute selected backgrounds before this
+                    // callback or the load-ready check can finish window load.
+                    self.defer_backgrounds_for_layout(true);
                     changed = true;
                     "load"
                 }
@@ -129,9 +137,9 @@ impl Page {
                     "error"
                 }
             };
-            changed |= self
-                .dispatch(doc, forms, request.node, event, false)
-                .layout_changed;
+            let outcome = self.dispatch(doc, forms, request.node, event, false);
+            self.defer_backgrounds_for_layout(outcome.layout_changed);
+            changed |= outcome.layout_changed;
         }
         if self.state.dynamic.load_ready {
             changed |= self.finish_loading(doc, forms).layout_changed;

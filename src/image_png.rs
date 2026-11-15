@@ -11,9 +11,9 @@ use super::{
 use crate::compression::{self, crc32_checked};
 use std::sync::Arc;
 
-// Keep the existing shared 32 MiB inflate ceiling. RGBA16 and Adam7 count all
+// Keep this decoder's existing 32 MiB raw-data allowance. RGBA16 and Adam7 count all
 // sample/filter bytes against it before allocation; the result is RGBA8.
-const MAX_RAW_BYTES: usize = compression::MAX_OUTPUT_BYTES;
+const MAX_RAW_BYTES: usize = 32 * 1024 * 1024;
 const ADAM7: [(usize, usize, usize, usize); 7] = [
     (0, 0, 8, 8),
     (4, 0, 8, 8),

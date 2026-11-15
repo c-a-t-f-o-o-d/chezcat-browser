@@ -5,14 +5,65 @@
 </head><body>
 <h1>Authored video element</h1>
 <button id="reload" name="reload" type="button">Reload the same video with JavaScript</button>
+<button id="js-pause" name="js-pause" type="button">Pause with JavaScript</button>
+<button id="js-seek" name="js-seek" type="button">Seek with JavaScript</button>
+<button id="js-play" name="js-play" type="button">Play with JavaScript</button>
 <video id="authored-video" src="scene-intra.ivf" controls width="480" height="360" onloadedmetadata="window.inlineMetadata=event.target.videoWidth;">Fallback must not appear.</video>
 <p id="media-state">Source pending</p><p id="media-position">Position pending</p>
-<p id="reload-state">Not reloaded</p>
+<p id="reload-state">Not reloaded</p><p id="js-pause-state">JavaScript pause not requested</p>
+<p id="js-seek-state">JavaScript seek not requested</p><p id="js-play-state">JavaScript play not requested</p>
 <input name="other" value="Other page input"><a href="authored-video-next.html">Leave video</a>
 <script>
 var video=document.getElementById('authored-video'),mediaEvents=[],initialMediaState=video.readyState,mediaWindowLoaded=false;
 if(video.nodeName!=='VIDEO'||video.readyState!==0||video.videoWidth!==0||!isNaN(video.duration)||!video.paused||video.ended||!video.controls)throw Error('pending video state');
-if(video.play!==undefined||video.canPlayType!==undefined)throw Error('unsupported media method advertised');
+if(typeof video.play!=='function'||video.play.length!==0||video.play!==video.play||video.canPlayType!==undefined)throw Error('real media method identity/capability');
+var jsPauseActive=false,jsPauseTime=0,jsPauseSync=0,jsPauseMicrotask=0,jsPauseEvents=0;
+function renderJsPause(){
+ document.getElementById('js-pause-state').textContent='JavaScript pause observed js_pause_sync='+jsPauseSync+' js_pause_microtask='+jsPauseMicrotask+' js_pause_ms='+Math.floor(jsPauseTime*1000)+' js_pause_events='+jsPauseEvents;
+}
+document.getElementById('js-pause').onclick=function(e){
+ if(!e.isTrusted||video.paused||video.ended||video.currentTime<=0)throw Error('JS pause requires real playing input');
+ var attr=video.getAttributeNode('src'),raw=attr.value,before=video.currentTime;
+ var result=video.pause(),frozen=video.currentTime;
+ if(result!==undefined||!video.paused||video.ended||frozen<before||frozen>=video.duration||video.currentTime!==frozen)throw Error('JS pause synchronous measured state');
+ if(video.getAttributeNode('src')!==attr||attr.value!==raw)throw Error('JS pause changed raw source');
+ jsPauseTime=frozen;jsPauseSync=1;jsPauseMicrotask=0;jsPauseEvents=0;jsPauseActive=true;renderJsPause();
+ Promise.resolve().then(function(){
+  if(!video.paused||video.currentTime!==frozen||video.getAttributeNode('src')!==attr||attr.value!==raw)throw Error('JS pause microtask state changed');
+  jsPauseMicrotask=1;renderJsPause();
+ });
+};
+var jsSeekActive=false,jsSeekTarget=1.25,jsSeekSync=0,jsSeekComplete=0,jsSeekEvents=[],jsSeekAttr=null,jsSeekRaw='';
+function renderJsSeek(){
+ document.getElementById('js-seek-state').textContent='JavaScript seek observed js_seek_sync='+jsSeekSync+' js_seek_ms='+Math.floor(jsSeekTarget*1000)+' js_seek_complete='+jsSeekComplete+' js_seek_order='+jsSeekEvents.join(',');
+}
+document.getElementById('js-seek').onclick=function(e){
+ if(!e.isTrusted||!video.paused||video.seeking||video.ended)throw Error('JS seek requires real paused input');
+ jsSeekAttr=video.getAttributeNode('src');jsSeekRaw=jsSeekAttr.value;
+ jsSeekSync=0;jsSeekComplete=0;jsSeekEvents=[];jsSeekActive=true;
+ video.currentTime=jsSeekTarget;
+ if(video.currentTime!==jsSeekTarget||!video.seeking||!video.paused||video.ended)throw Error('JS seek synchronous official position');
+ if(video.getAttributeNode('src')!==jsSeekAttr||jsSeekAttr.value!==jsSeekRaw)throw Error('JS seek changed raw source');
+ jsSeekSync=1;renderJsSeek();
+};
+var jsPlayActive=false,jsPlaySync=0,jsPlayFulfilled=0,jsPlayEvents=0,jsPlayOrder=[],jsPlayStart=0,jsPlayAttr=null,jsPlayRaw='';
+function renderJsPlay(){
+ document.getElementById('js-play-state').textContent='JavaScript play observed js_play_sync='+jsPlaySync+' js_play_fulfilled='+jsPlayFulfilled+' js_play_events='+jsPlayEvents+' js_play_start_ms='+Math.floor(jsPlayStart*1000)+' js_play_order='+jsPlayOrder.join(',');
+}
+document.getElementById('js-play').onclick=function(e){
+ if(!e.isTrusted||!video.paused||video.seeking||video.ended)throw Error('JS play requires real paused input');
+ jsPlayAttr=video.getAttributeNode('src');jsPlayRaw=jsPlayAttr.value;jsPlayStart=video.currentTime;
+ jsPlayActive=true;jsPlaySync=0;jsPlayFulfilled=0;jsPlayEvents=0;jsPlayOrder=[];
+ var promise=video.play({toString:function(){throw Error('play argument coerced');},valueOf:function(){throw Error('play argument coerced');}});
+ if(!(promise instanceof Promise)||typeof promise.then!=='function'||video.paused||jsPlayFulfilled!==0)throw Error('JS play genuine pending Promise/synchronous state');
+ if(video.getAttributeNode('src')!==jsPlayAttr||jsPlayAttr.value!==jsPlayRaw)throw Error('JS play changed raw source');
+ jsPlaySync=1;jsPlayOrder.push('sync');renderJsPlay();
+ promise.then(function(value){
+  if(!jsPlayActive||value!==undefined||jsPlayFulfilled!==0||jsPlayEvents!==1||jsPlayOrder.join(',')!=='sync,playing'||video.paused||video.ended)throw Error('JS play fulfillment order or state');
+  if(video.getAttributeNode('src')!==jsPlayAttr||jsPlayAttr.value!==jsPlayRaw)throw Error('JS play fulfilled source identity');
+  jsPlayFulfilled=1;jsPlayOrder.push('then');renderJsPlay();
+ },function(){throw Error('JS play unexpectedly rejected');});
+};
 document.getElementById('reload').onclick=function(){
  var attr=video.getAttributeNode('src'),raw=attr.value;
  if(video.load({toString:function(){throw Error('ignored load argument');}})!==undefined||video.readyState!==0||video.currentTime!==0||!video.paused||!isNaN(video.duration))throw Error('synchronous load reset');
@@ -22,6 +73,28 @@ document.getElementById('reload').onclick=function(){
 function recordMedia(e){
  if(e.target!==video||!e.isTrusted||e.cancelable||e.bubbles)throw Error('native media event identity');
  mediaEvents.push(e.type);
+ if(jsPlayActive&&e.type==='playing'){
+  jsPlayEvents++;
+  if(jsPlayEvents!==1||jsPlayOrder.join(',')!=='sync'||video.paused||video.seeking)throw Error('JS play playing-event order or count');
+  jsPlayOrder.push('playing');renderJsPlay();
+ }
+ if(e.type==='pause'||e.type==='seeking'||e.type==='loadstart'||e.type==='ended')jsPlayActive=false;
+ if(jsSeekActive&&(e.type==='seeking'||e.type==='timeupdate'||e.type==='seeked')){
+  if(e.type==='seeking'&&jsSeekEvents.length!==0)throw Error('JS seek repeated or reordered seeking');
+  if(e.type!=='seeking'&&jsSeekEvents[0]!=='seeking')throw Error('JS seek missing seeking event');
+  if(e.type==='seeked'){
+   if(jsSeekEvents[jsSeekEvents.length-1]!=='timeupdate'||video.seeking||!video.paused||video.currentTime!==jsSeekTarget)throw Error('JS seek completion task/state');
+   if(video.getAttributeNode('src')!==jsSeekAttr||jsSeekAttr.value!==jsSeekRaw)throw Error('JS seek completion source identity');
+   jsSeekComplete=1;jsSeekActive=false;
+  }
+  jsSeekEvents.push(e.type);renderJsSeek();
+ }
+ if(e.type==='play'||e.type==='seeking'||e.type==='loadstart')jsPauseActive=false;
+ if(e.type==='pause'&&jsPauseActive){
+  jsPauseEvents++;
+  if(jsPauseEvents!==1||!video.paused||video.currentTime!==jsPauseTime)throw Error('JS pause task state or count');
+  renderJsPause();
+ }
  if(e.type==='loadedmetadata'){
   if(video.videoWidth!==64||video.videoHeight!==48||video.duration!==3||video.readyState<2||video.networkState!==1)throw Error('measured video metadata');
   document.getElementById('media-state').textContent='Metadata ready';

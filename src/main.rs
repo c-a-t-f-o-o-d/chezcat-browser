@@ -36,12 +36,15 @@ mod image_selection;
 mod javascript;
 mod jpeg;
 mod layout;
+mod license_acceptance;
 mod loader;
 mod media;
+mod media_tasks;
 mod matroska;
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 mod navigation;
 mod network_trace;
+mod network_media;
 mod paint;
 #[cfg(target_os = "windows")]
 mod platform;
@@ -69,7 +72,7 @@ fn main() {
         {
             // Automated headless checks must get an exit code, not a modal box.
             if std::env::args_os().any(|arg| {
-                arg == "--render"
+                arg == "--license" || arg == "--accept-license" || arg == "--license-ui-script" || arg == "--help" || arg == "-h" || arg == "--render"
                     || arg == "--diagnose"
                     || arg == "--activity-report"
                     || arg == "--save-source"
@@ -87,6 +90,11 @@ fn main() {
 }
 
 fn run() -> Result<(), String> {
+    let mut license_digest: Option<String> = None;
+    let mut license_scope: Option<license_acceptance::Scope> = None;
+    let mut license_directory: Option<PathBuf> = None;
+    let mut license_ui_script: Option<PathBuf> = None;
+    let mut license_ui_report: Option<PathBuf> = None;
     let mut render: Option<PathBuf> = None;
     let mut address: Option<std::ffi::OsString> = None;
     let mut width = 1080;
@@ -114,6 +122,28 @@ fn run() -> Result<(), String> {
     let mut args = std::env::args_os().skip(1);
     while let Some(arg) = args.next() {
         match arg.to_str() {
+            Some("--license") => { print!("{}", license_acceptance::LICENSE_TEXT); return Ok(()); }
+            Some("--accept-license") => {
+                if license_digest.is_some() { return Err("Pass --accept-license once.".into()); }
+                license_digest = Some(args.next().and_then(|v| v.into_string().ok()).ok_or("--accept-license requires the full shipped SHA-256")?);
+            }
+            Some("--license-scope") => {
+                if license_scope.is_some() { return Err("Pass --license-scope once.".into()); }
+                let value = args.next().and_then(|v| v.into_string().ok()).ok_or("--license-scope requires personal or organization")?;
+                license_scope = Some(license_acceptance::Scope::parse(&value)?);
+            }
+            Some("--license-receipt-dir") => {
+                if license_directory.is_some() { return Err("Pass --license-receipt-dir once.".into()); }
+                license_directory = Some(args.next().ok_or("--license-receipt-dir requires an absolute external folder")?.into());
+            }
+            Some("--license-ui-script") => {
+                if license_ui_script.is_some() { return Err("Pass --license-ui-script once.".into()); }
+                license_ui_script = Some(args.next().ok_or("--license-ui-script requires an explicit local native-input script")?.into());
+            }
+            Some("--license-ui-report") => {
+                if license_ui_report.is_some() { return Err("Pass --license-ui-report once.".into()); }
+                license_ui_report = Some(args.next().ok_or("--license-ui-report requires a new local report")?.into());
+            }
             Some("--dev-input-script") => {
                 if input_script.is_some() { return Err("Pass --dev-input-script once.".into()); }
                 input_script = Some(args.next().ok_or("--dev-input-script requires a local script path")?.into());
@@ -264,6 +294,11 @@ Bookmarks and settings are saved in %LOCALAPPDATA%/OwnBrowser/profile.txt on Win
 --javascript / --no-javascript and --images / --no-images override saved values for this session.
 --zoom 125 overrides the current page zoom. Apply in Settings deliberately saves the displayed choices.
 
+License: --license displays the exact offline terms without consent or network access.
+Before source/headless use: --accept-license FULL_SHA256 --license-scope personal|organization.
+--license-receipt-dir ABSOLUTE_EXTERNAL_FOLDER selects local receipt storage, never implies consent.
+Changed text requires renewed acceptance. Ordinary first-run startup offers offline Accept/Decline.
+
 Headless rendering:
 ChezCat.exe [file.html or https://host/path] --render output.ppm --width 1080 --height 760
 Optional: --scroll 200 --zoom 125 --source --resources --find text --no-javascript --no-images --wait-ms 500
@@ -281,9 +316,6 @@ Connection report: --diagnose https://host/path --report connection.txt
 Repeat --diagnose up to eight times, or run tools\demos\Check-Connections.cmd. Diagnostics do not load a profile.
 
 HTTP, the TLS 1.3/1.2 HTTPS subset, gzip/deflate decoding, images, layout, controls and JavaScript use our own code. Page fonts use our TrueType/WOFF1 reader and renderer; try pages/fonts.html. GET and URL-encoded POST forms work; refresh/history asks before resending POST. The bounded JavaScript subset includes typed arrays, DataView, Map/Set, text encoding, animation frames and native keyboard events. Session cookies stay in memory; host-only and validated Domain cookies use bundled public-suffix boundaries. Same-origin script navigation and external classic script insertion are supported within work, CSP and request-blocking limits. Fetch, XHR, persistent storage and HTML injection remain unavailable. Try the workshops and pages/browser-tests.html for current limits."#);
-                #[cfg(target_os = "windows")]
-                platform::show_info(help);
-                #[cfg(not(target_os = "windows"))]
                 println!("{}", help);
                 return Ok(());
             }
@@ -313,6 +345,34 @@ HTTP, the TLS 1.3/1.2 HTTPS subset, gzip/deflate decoding, images, layout, contr
     }
     if no_profile && profile_directory.is_some() {
         return Err("Choose either --no-profile or --profile-dir, not both.".into());
+    }
+    if license_ui_script.is_some() != license_ui_report.is_some() {
+        return Err("Use --license-ui-script with --license-ui-report.".into());
+    }
+    let receipt_directory = license_acceptance::directory(license_directory, profile_directory.as_deref())?;
+    if let Some(digest) = license_digest {
+        let scope = license_scope.ok_or("--accept-license requires --license-scope personal or organization.")?;
+        if address.is_some() || render.is_some() || activity_report.is_some() || save_source.is_some()
+            || input_script.is_some() || !diagnostic_urls.is_empty() || diagnostic_report.is_some() || license_ui_script.is_some() {
+            return Err("Use explicit acceptance separately from browsing, diagnosis or input/output modes.".into());
+        }
+        license_acceptance::accept(&receipt_directory, &digest, scope)?;
+        println!("Explicit local acceptance recorded: CSAPUL {}; SHA-256 {}; scope {}.", license_acceptance::LICENSE_VERSION, license_acceptance::LICENSE_SHA256, scope.text());
+        return Ok(());
+    }
+    if license_scope.is_some() { return Err("--license-scope requires an explicit --accept-license operation.".into()); }
+    let license_required = !matches!(license_acceptance::check(&receipt_directory)?, license_acceptance::State::Accepted(_));
+    if license_required || license_ui_script.is_some() {
+        let unattended = render.is_some() || activity_report.is_some() || save_source.is_some() || input_script.is_some()
+            || !diagnostic_urls.is_empty() || diagnostic_report.is_some();
+        if unattended && license_ui_script.is_none() { return license_acceptance::require(&receipt_directory); }
+        #[cfg(target_os = "windows")]
+        match platform::license_prompt(license_ui_script.as_deref(), license_ui_report.as_deref())? {
+            Some(scope) => license_acceptance::accept(&receipt_directory, license_acceptance::LICENSE_SHA256, scope)?,
+            None => return Ok(()),
+        }
+        #[cfg(not(target_os = "windows"))]
+        return license_acceptance::require(&receipt_directory);
     }
     let outputs = [
         (&render, "--render"),

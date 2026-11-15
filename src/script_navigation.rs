@@ -26,7 +26,7 @@ impl Page {
     }
 
     pub fn has_host_tasks(&self) -> bool {
-        self.has_media_selection() || self.state.navigation.is_some()
+        self.has_media_promise_effects() || self.has_media_tasks() || self.has_media_selection() || self.state.navigation.is_some()
             || self.state.history.pending.is_some()
             || !self.state.dynamic.pending.is_empty()
             || !self.state.stylesheets.pending.is_empty()
@@ -84,7 +84,11 @@ impl Bridge<'_> {
             target,
             request: crate::http::Request::Get,
             form_policy: None,
-            replace,
+            // HTML Location-object navigate: auto becomes replace only before
+            // complete loading without transient incumbent-window activation.
+            // Capture here, not when App later drains the completed JS job.
+            replace: replace || (!self.state.document_complete
+                && !self.state.incumbent_has_transient_activation(Instant::now())),
             reload,
             fragment_navigation: reference.contains('#'),
         });
@@ -222,7 +226,9 @@ mod tests {
                 request.target.display(),
                 "https://www.example.test/search?q=test"
             );
-            assert_eq!(request.replace, statement.contains("replace"));
+            // These assignments execute before complete loading. Explicit
+            // replace and unactivated auto both replace this bridge document.
+            assert!(request.replace, "{statement}");
             assert!(!request.reload);
         }
         let mut page = run("location.search='?q=next';");
@@ -242,6 +248,131 @@ mod tests {
             request.target.display(),
             "https://www.example.test/find?q=old#start"
         );
+    }
+
+    fn deferred(source: &str) -> (crate::html::Document, Forms, Page) {
+        let mut doc = crate::html::parse("<html><body><button id=b>Go</button></body></html>");
+        doc.scripting_enabled = true;
+        let mut forms = Forms::new(&doc);
+        let mut page = Page::for_test();
+        page.set_location(&crate::navigation::address(
+            "https://www.example.test/bridge", &Location::home()).unwrap());
+        page.start_before_load(&mut doc, &mut forms,
+            &[Script { node: 0, source: source.into(), label: "history fixture".into() }],
+            &crate::csp::PolicySet::default());
+        assert_eq!(page.error_count(), 0, "{}", page.report());
+        (doc, forms, page)
+    }
+
+    #[test]
+    fn automatic_history_handling_is_captured_before_complete_loading() {
+        for source in [
+            "location.assign('/destination');",
+            "document.addEventListener('DOMContentLoaded',function(){location.assign('/destination');});",
+            "window.onload=function(){if(document.readyState!=='complete')throw Error('ready');location.assign('/destination');};",
+            "window.onload=function(){Promise.resolve().then(function(){location.assign('/destination');});};",
+        ] {
+            let (mut doc, mut forms, mut page) = deferred(source);
+            page.finish_loading(&mut doc, &mut forms);
+            assert_eq!(page.error_count(), 0, "{source} {}", page.report());
+            assert!(page.state.document_complete);
+            assert!(page.take_navigation().unwrap().replace, "{source}");
+        }
+    }
+
+    #[test]
+    fn completed_document_assign_pushes_but_explicit_replace_still_replaces() {
+        for (method, replacement) in [("assign", false), ("replace", true)] {
+            let (mut doc, mut forms, mut page) = deferred(&format!(
+                "document.addEventListener('probe',function(){{location.{method}('/destination');}});"));
+            page.finish_loading(&mut doc, &mut forms);
+            page.begin_job();
+            page.dispatch_to(&mut doc, &mut forms, DOCUMENT, "probe", false, false);
+            assert_eq!(page.error_count(), 0, "{}", page.report());
+            assert_eq!(page.take_navigation().unwrap().replace, replacement);
+        }
+    }
+
+    #[test]
+    fn transient_activation_is_native_bounded_and_not_synthetic_dispatch() {
+        let handler = "document.addEventListener('keydown',function(){location.assign('/destination');});";
+        let (mut doc, mut forms, mut page) = deferred(handler);
+        page.begin_job();
+        page.keyboard(&mut doc, &mut forms, KeyboardInput {
+            down: true, key: "Enter".into(), code: "Enter".into(), ..KeyboardInput::default()
+        });
+        assert_eq!(page.error_count(), 0, "{}", page.report());
+        assert!(!page.take_navigation().unwrap().replace);
+        assert!(page.state.has_transient_activation(Instant::now()));
+        page.state.last_activation = Some(Instant::now() - TRANSIENT_ACTIVATION);
+        page.begin_job();
+        page.dispatch_to(&mut doc, &mut forms, DOCUMENT, "keydown", false, false);
+        assert!(page.take_navigation().unwrap().replace);
+        assert!(!page.state.has_transient_activation(Instant::now()));
+
+        let mut page = run("document.addEventListener('click',function(){location.assign('/destination');});var e=document.createEvent('Event');e.initEvent('click',false,false);document.dispatchEvent(e); ");
+        assert_eq!(page.error_count(), 0, "{}", page.report());
+        assert!(page.state.last_activation.is_none());
+        assert!(page.take_navigation().unwrap().replace);
+
+        let (mut doc, mut forms, mut page) = deferred(handler);
+        page.begin_job();
+        page.keyboard(&mut doc, &mut forms, KeyboardInput {
+            down: true, key: "Escape".into(), code: "Escape".into(), ..KeyboardInput::default()
+        });
+        assert!(page.state.last_activation.is_none());
+        assert!(page.take_navigation().unwrap().replace);
+    }
+
+    #[test]
+    fn saved_location_methods_use_incumbent_activation_not_owner_activation() {
+        for operation in ["loc.assign('/destination');", "loc.href='/destination';",
+            "assign.call(loc,'/destination');"] {
+            for created_after_input in [false, true] {
+                let (mut doc, mut forms, mut page) = deferred("");
+                if created_after_input {page.notify_user_activation();}
+                let result = page.console_eval(&mut doc, &mut forms, &format!(
+                    "var f=document.createElement('iframe');f.hidden=true;document.body.appendChild(f);var child=f.contentWindow.Function('loc','assign',{:?});", operation));
+                assert_eq!(result.errors, 0, "{}", page.report());
+                if !created_after_input {page.notify_user_activation();}
+                let result = page.console_eval(&mut doc, &mut forms,
+                    "child(location,location.assign);");
+                assert_eq!(result.errors, 0, "{operation} {}", page.report());
+                // Existing same-origin descendants receive native activation;
+                // a Window created after the input does not inherit it merely
+                // by calling an activated owner's saved Location operation.
+                assert_eq!(page.take_navigation().unwrap().replace, created_after_input,
+                    "{operation}; created_after_input={created_after_input}");
+                let result = page.console_eval(&mut doc, &mut forms,
+                    "location.assign('/root-activated');");
+                assert_eq!(result.errors, 0, "{}", page.report());
+                assert!(!page.take_navigation().unwrap().replace);
+            }
+        }
+    }
+
+    #[test]
+    fn activation_survives_nested_synthetic_dispatch_but_not_new_document() {
+        let (mut doc, mut forms, mut page) = deferred(
+            "document.addEventListener('click',function(){location.assign('/destination');});");
+        page.notify_user_activation();
+        let activated_at = page.state.last_activation;
+        let result = page.console_eval(&mut doc, &mut forms,
+            "var e=document.createEvent('Event');e.initEvent('click',false,false);document.dispatchEvent(e); ");
+        assert_eq!(result.errors, 0, "{}", page.report());
+        assert_eq!(page.state.last_activation, activated_at);
+        assert!(!page.take_navigation().unwrap().replace);
+        page.begin_job();
+        page.keyboard(&mut doc, &mut forms, KeyboardInput {
+            down: false, key: "Enter".into(), ..KeyboardInput::default()
+        });
+        assert_eq!(page.state.last_activation, activated_at);
+        page.start_before_load(&mut doc, &mut forms,
+            &[Script {node:0,source:"location.assign('/new-document');".into(),label:"fresh".into()}],
+            &crate::csp::PolicySet::default());
+        assert!(page.state.last_activation.is_none());
+        assert!(!page.state.document_complete);
+        assert!(page.take_navigation().unwrap().replace);
     }
 
     #[test]

@@ -1,6 +1,6 @@
 [package]
 name = "chezcat"
-version = "0.79.0-alpha.2"
+version = "0.80.0-alpha.1"
 edition = "2021"
 publish = false
 license-file = "LICENSE"

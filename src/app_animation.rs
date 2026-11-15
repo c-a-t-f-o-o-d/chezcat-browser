@@ -70,18 +70,22 @@ impl Playback {
 }
 
 impl App {
-    fn image_union_bytes(&self, excluded: usize, asset: &crate::image::DecodedImage) -> Result<usize, String> {
+    pub(super) fn image_union_bytes(&self, excluded: usize, background: bool, asset: &crate::image::DecodedImage) -> Result<usize, String> {
         let mut seen = HashSet::new();
         let mut bytes = 0usize;
         let mut count = |bitmap: &Arc<Bitmap>| -> Result<(), String> {
-            if seen.insert(Arc::as_ptr(bitmap)) {
+            let pointer = Arc::as_ptr(bitmap);
+            if !seen.contains(&pointer) {
+                seen.try_reserve(1).map_err(|_| "Cannot reserve document image accounting.")?;
+                seen.insert(pointer);
                 bytes = bytes.checked_add(bitmap.pixels.len().checked_mul(4).ok_or("Image byte count overflow.")?).ok_or("Image byte count overflow.")?;
             }
             Ok(())
         };
-        for (&node, bitmap) in &self.images { if node != excluded { count(bitmap)?; } }
+        for (&node, bitmap) in &self.images { if background || node != excluded { count(bitmap)?; } }
+        for (&node, bitmap) in &self.backgrounds { if !background || node != excluded { count(bitmap)?; } }
         for (&node, player) in &self.animations {
-            if node != excluded { for frame in &player.animation.frames { count(&frame.bitmap)?; } }
+            if background || node != excluded { for frame in &player.animation.frames { count(&frame.bitmap)?; } }
         }
         count(&asset.bitmap)?;
         if let Some(animation) = &asset.animation { for frame in &animation.frames { count(&frame.bitmap)?; } }
@@ -90,11 +94,11 @@ impl App {
 
     pub(super) fn fit_document_image(&self, node: usize, asset: &mut crate::image::DecodedImage) -> Result<(), String> {
         asset.retained_bytes()?;
-        if self.image_union_bytes(node, asset)? > loader::MAX_DECODED_IMAGE_BYTES && asset.animation.is_some() {
+        if self.image_union_bytes(node, false, asset)? > loader::MAX_DECODED_IMAGE_BYTES && asset.animation.is_some() {
             asset.animation = None;
             asset.notice = Some("Animation kept static to stay within the document's 64 MiB decoded image budget.".into());
         }
-        if self.image_union_bytes(node, asset)? > loader::MAX_DECODED_IMAGE_BYTES { return Err("Decoded image budget exceeded (64 MiB).".into()); }
+        if self.image_union_bytes(node, false, asset)? > loader::MAX_DECODED_IMAGE_BYTES { return Err("Decoded image budget exceeded (64 MiB).".into()); }
         Ok(())
     }
 
@@ -196,6 +200,7 @@ impl App {
     }
 
     pub fn poll_page_timer(&mut self) -> bool {
+        let pause_changed=if self.scripting.as_ref().is_some_and(|p|p.has_media_tasks()) {self.flush_embedded_video()} else {false};
         let scripts = self
             .next_script_timer()
             .is_some_and(|due| due <= Instant::now())
@@ -203,7 +208,7 @@ impl App {
         let images = self.poll_image_frames_at(Instant::now());
         let media=self.poll_media_timer_at(Instant::now());
         let audio=self.poll_audio_timer_at(Instant::now());
-        scripts || images || media || audio
+        pause_changed || scripts || images || media || audio
     }
 }
 

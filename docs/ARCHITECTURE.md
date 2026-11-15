@@ -6,6 +6,13 @@ parsing builds document/style state, and the JavaScript runtime invokes explicit
 branded host capabilities. Layout produces paint items for the software renderer.
 Windows APIs provide window/input/presentation and low-level audio output.
 
+A supported CSS background URL retains the winning declaration's stylesheet owner
+and final redirected base. Backgrounds reuse the image worker and resource policies
+with a separate binding slot and bitmap map, keeping replaced-image state and
+natural dimensions independent. Block decorations share normal layout, clip,
+paint and input-occlusion rules. Initial and callback-selected background work
+participates in the real App document-load checkpoint.
+
 The application is one Windows process with worker threads. There is no OS
 renderer sandbox or separate untrusted-process boundary. Rust safety does not
 prove FFI, cryptography, resource policy or availability correctness.
@@ -27,9 +34,21 @@ Local media uses original container/codec/sample code and real decoded frames or
 samples. Source retirement tokens, checked generations and worker cancellation
 prevent stale work from publishing. Native presentation/audio APIs do not replace
 decoding. The authored element currently supports one connected parser video,
-local IVF/VP8 intra, native controls, src replacement and JavaScript load().
-Standalone PCM and Matroska A/V have separate supported contracts. Network media,
-script play promises and complete HTMLMediaElement behavior are future work.
+IVF/VP8 video, native controls, src replacement and genuine JavaScript
+load/play/pause/currentTime operations. Sources retain separate in-root local-file
+authority or an immutable document-owned HTTP(S) transaction context. Network
+media uses complete bounded GET responses and the existing decoder/player,
+without ranges or a separate runtime. Missing crossorigin keeps exact-origin
+policy; explicit authored modes use dedicated CORS/credential checks, sticky
+redirect state and normal cookie protections. Dynamic crossOrigin APIs remain
+unsupported.
+Standalone PCM and Matroska A/V have separate supported contracts. The finite
+VP8 profile adds visible version-zero single-vector interframes with immutable
+YUV references and transactional entropy/filter/segment updates. Every requested
+frame replays from its preceding keyframe under shared work and packet limits;
+failed or canceled work cannot publish reference state or stale pixels. Matroska
+video follows the existing acknowledged PCM sample clock. Authored element audio,
+MSE and complete HTMLMediaElement behavior remain future work.
 
 Work, retained data, collection sizes and decoder allocations have explicit
 bounds, with generous adjustable policies where implemented. Cancellation is

@@ -13,6 +13,15 @@ use crate::app::{App, PlatformAction};
 mod inspector_window;
 #[path = "platform_keyboard.rs"]
 mod keyboard_input;
+#[path = "platform_license.rs"]
+mod license_window;
+
+pub fn license_prompt(
+    script: Option<&std::path::Path>,
+    report: Option<&std::path::Path>,
+) -> Result<Option<crate::license_acceptance::Scope>, String> {
+    license_window::run(script, report)
+}
 
 type Handle = *mut c_void;
 type WndProc = unsafe extern "system" fn(Handle, u32, usize, isize) -> isize;

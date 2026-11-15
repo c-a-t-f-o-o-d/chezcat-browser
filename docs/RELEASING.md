@@ -29,21 +29,35 @@ do not assert reproducibility across SDK/linker installations or certify safety.
 
 ## Contribution and routine verification
 
-Routine hosted Windows CI runs on this maintainer's branch/main pushes. It does
-not automatically execute arbitrary external PR code. Before a substantive
-external evaluation dispatch, privately retain the exact C2 assent, agreement
-digest, immutable submission SHA, rights holder/authority and date. The controlled
-dispatch requires that SHA and an opaque record reference; neither the input nor
-a green run proves assent. Updated content needs an appropriate updated record.
-Before maintained product/test inclusion, obtain the executed assignment and
-countersigned Schedule A for the exact accepted scope. Never publish signatures
-or identity records. Owner-controlled work requires no fictional outside signature.
-Independent platform and limited original bug-reproducer rights remain separate.
+Routine hosted Windows CI runs on this maintainer's branch/main pushes. External
+intake is currently reports-only: the external-evaluation workflow does not fetch,
+execute or evaluate substantive submissions. Ordinary issue reports and minimal
+original bug reproducers follow CONTRIBUTING.md and the published agreement.
+
+Before enabling substantive evaluation, operationally verify exact-version C2
+assent, private storage and authority records bound to the immutable submission
+and agreement digest. A dispatch input or green run does not prove assent.
+Maintained inclusion separately requires the executed assignment and countersigned
+Schedule A for the exact accepted scope. Keep signatures and identity records
+private under docs/CONTRIBUTOR_PRIVACY.md. Owner-controlled work requires no
+fictional outside signature. Independent platform and limited original
+bug-reproducer rights remain separate.
 
 All build/test jobs have read-only permissions, pinned actions and hosted runners;
 no secrets, privileged pull_request_target checkout or personal-desktop runner
 evaluates public submissions. No source shared cache or downstream release promotion
 is used for external evaluation. CodeQL eligibility for CSAPUL is not assumed.
+
+Maintainer-owned CI/release execution uses a named affirmative acceptance step
+under the repository/owner gate: `python tools/accept_license.py --accept-license
+<approved-full-license-sha256> --license-scope personal`, with
+`CHEZCAT_LICENSE_RECEIPT_DIR` pointing to a runner-temporary external directory.
+This is the owner's scoped authorization for that maintainer run, not assent by
+outside users or contributors. A directory variable alone grants no acceptance.
+Keep the receipt private and out of logs, caches and uploaded artifacts. Extracted
+runtime checks inherit and validate the same-text receipt; they have no bypass.
+Changed license text needs fresh affirmative acceptance. See BUILDING.md and
+LICENSE_ACCEPTANCE.md for local commands and organizational scope.
 
 Use focused tests while editing. Before integration, pass tools/verify_offline.py:
 normal Windows tests, optimized build, PE/resources/version/import inspection,
@@ -55,8 +69,10 @@ public sites, physical desktop presentation and audio-device checks are separate
 
 1. Complete the finite feature and review actual trust-boundary changes. Update
    version/resources, release notes and accompanying license/scope deliberately.
-   CSAPUL1.0 LICENSE bytes remain pinned at SHA256
-   632232a42c046628de0fd8c497e89f02055e1e919860bfa9fcd8fe3b5eb06d65.
+   CSAPUL1.1 LICENSE bytes for this containing revision are pinned at SHA256
+   34003a38eeb1db77472c307e23b5a5540c7625c50d9f0ea0dc7bacf6e5b9b749.
+   Existing immutable releases retain their supplied licenses and valid earlier
+   grants; never rewrite their assets or tags to adopt later terms.
 2. Validate the exact clean final commit, including the actual merge identity.
    Re-fetch main; use only explicit non-force branch updates preserving others' work.
 3. Create a new unused immutable v<fullCargoVersion> tag on that public source.
@@ -72,8 +88,10 @@ public sites, physical desktop presentation and audio-device checks are separate
    bytes. Ordinary jobs retain contents:read; repository-wide defaults stay read.
 
 Runtime ZIP includes executable, pages/assets/trust, applicable notices/data,
-LICENSE and its containing-revision scope, product docs and exact build identity. Source ZIP is
-separate and contains buildable source/resources/fixtures, never app binaries or
+LICENSE and its containing-revision scope, exact acceptance/privacy/contribution
+policies and change summary, product docs and exact build identity. Private
+acceptance receipts are excluded. Source ZIP is separate and contains buildable
+source/resources/fixtures, never app binaries or
 private operations. Verify LICENSE working/blob/ZIP digests, source/tag agreement,
 complete payload and an extracted offline journey. The committed scope has one
 exact `Scope: containing-source-revision` line and one `License-SHA256: <digest>`

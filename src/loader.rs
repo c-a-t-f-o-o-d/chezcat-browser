@@ -112,6 +112,8 @@ pub struct Loaded {
     pub document: Document,
     pub raw: String,
     pub styles: HashMap<usize, String>,
+    /// Final CSS response/local locations, keyed by external stylesheet owner.
+    pub style_bases: HashMap<usize, Location>,
     pub fonts: fonts::Book,
     pub images: HashMap<usize, Arc<Bitmap>>,
     pub image_densities: HashMap<usize, f64>,
@@ -827,6 +829,7 @@ fn load_request_progressively(
         document,
         raw,
         styles: HashMap::new(),
+        style_bases: HashMap::new(),
         fonts: fonts::Book::empty(),
         images: HashMap::new(),
         image_densities: HashMap::new(),
@@ -1371,6 +1374,7 @@ fn load_critical_resources(
         stats.record(kind, &label, was_reused, result, &mut loaded.events);
     }
     load_fonts(loaded, &style_bases, stats, cancel, progress, pool, mode)?;
+    loaded.style_bases = style_bases;
     Ok(())
 }
 
@@ -2384,10 +2388,14 @@ mod tests {
         let source=String::from_utf8(crate::compression::gzip(include_bytes!("../tools/fixtures/large-tail.css.gz"),8*1024*1024,&||Ok(())).unwrap()).unwrap();
         folder.file("large.css",&source);let page=folder.page("<link rel=stylesheet href=large.css><div id=target>Target</div>");
         let loaded=local(&page).unwrap();assert_eq!(loaded.styles.values().next().unwrap(),&source);
+        assert_eq!(loaded.style_bases.len(),loaded.styles.len());
+        assert!(loaded.style_bases.values().all(|base|base.url.is_none()
+            &&base.path.as_ref().is_some_and(|path|path.ends_with("large.css"))&&base.root.is_some()));
         let target=loaded.document.nodes.iter().enumerate().find_map(|(n,_)|(loaded.document.attr(n,"id")==Some("target")).then_some(n)).unwrap();
         assert_eq!(crate::css::compute(&loaded.document,&loaded.styles)[target].width,crate::css::Length::Px(173.0));
         let small=local_with_options(&page,LoadOptions{stylesheet_limits:css::StylesheetLimits{sheet_bytes:64*1024,document_bytes:128*1024,rules:32},..LoadOptions::default()}).unwrap();
         assert!(small.styles.is_empty());assert_eq!(crate::css::compute(&small.document,&small.styles)[target].width,crate::css::Length::Auto);
+        assert!(small.style_bases.is_empty());
     }
 
     use super::*;
@@ -3064,6 +3072,12 @@ mod tests {
     fn font_network_loading_uses_redirected_stylesheet_base_and_origin_policy() {
         let site = Site::new();
         let loaded = site.load("/font-page", http::FetchMode::FullReload, true);
+        assert_eq!(loaded.style_bases.len(), 2, "each reused external owner keeps its final base");
+        for (&node, base) in &loaded.style_bases {
+            assert!(loaded.styles.contains_key(&node));
+            assert_eq!(base.url.as_ref().unwrap().path, "/assets/font.css");
+            assert!(base.path.is_none() && base.root.is_none());
+        }
         assert_eq!(loaded.fonts.len(), 2);
         assert!(loaded
             .fonts

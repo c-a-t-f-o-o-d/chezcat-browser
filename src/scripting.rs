@@ -69,6 +69,8 @@ use script_stylesheets::StylesheetState;
 mod script_images;
 #[path = "script_media.rs"]
 mod script_media;
+#[path = "script_media_play.rs"]
+mod script_media_play;
 pub(crate) use script_media::event_name as media_event_name;
 pub use script_images::DynamicImage;
 pub(crate) use script_images::MAX_IMAGE_REQUESTS;
@@ -120,6 +122,9 @@ const MAX_TIMER_CALLBACKS: usize = 4096;
 #[cfg(test)]
 const MAX_ANIMATION_FRAMES: usize = 64;
 const FRAME_INTERVAL: Duration = Duration::from_millis(16);
+// A bounded UA policy, measured from actual qualifying native input. Script
+// dispatch and resource completion cannot create or renew transient activation.
+const TRANSIENT_ACTIVATION: Duration = Duration::from_secs(5);
 pub const MAX_CONSOLE_SOURCE: usize = 8192;
 
 /// Values supplied by the native input path, never by document code.
@@ -177,6 +182,8 @@ struct AnimationFrame {
 }
 
 struct Event {
+    composed: bool,
+    path: Vec<u32>,
     handle: u32,
     target: u32,
     current: u32,
@@ -305,6 +312,8 @@ impl LocationView {
 }
 
 struct State {
+    background_pending: bool,
+    background_tracking: bool,
     blank_frames: Vec<script_blank_frames::BlankFrame>,
     blank_frame_nodes: usize,
     geometry: Option<crate::script_geometry::Geometry>,
@@ -337,6 +346,9 @@ struct State {
     navigation_timing:Option<crate::network_trace::DocumentTiming>,
     embedded_video:Option<crate::embedded_video::Snapshot>,
     media_changes:script_media::Changes,
+    media_play:script_media_play::State,
+    media_play_notify:bool,
+    media_play_fault:Option<String>,
     pending_keyboard: Option<KeyboardInput>,
     next_timer: u32,
     timer_bytes: usize,
@@ -369,6 +381,10 @@ struct State {
     executed: usize,
     enabled: bool,
     ready: &'static str,
+    // readyState becomes complete BEFORE the load callbacks/checkpoints.
+    document_complete: bool,
+    last_activation: Option<Instant>,
+    navigation_incumbent: Option<u32>,
 }
 
 impl State {
@@ -406,6 +422,9 @@ impl State {
             navigation_timing:None,
             embedded_video:None,
             media_changes:script_media::Changes::default(),
+            media_play:script_media_play::State::default(),
+            media_play_notify:false,
+            media_play_fault:None,
             pending_keyboard: None,
             next_timer: 0,
             timer_bytes: 0,
@@ -436,7 +455,22 @@ impl State {
             executed: 0,
             enabled: false,
             ready: "loading",
+            background_pending: false,
+            background_tracking: false,
+            document_complete: false,
+            last_activation: None,
+            navigation_incumbent: Some(WINDOW),
         }
+    }
+
+    fn activation_is_live(last: Option<Instant>, now: Instant) -> bool {
+        last.is_some_and(|last| {
+            now.checked_duration_since(last).is_some_and(|age| age < TRANSIENT_ACTIVATION)
+        })
+    }
+
+    fn has_transient_activation(&self, now: Instant) -> bool {
+        Self::activation_is_live(self.last_activation, now)
     }
 
     fn dom_committed(&mut self) {
@@ -793,6 +827,8 @@ impl Page {
             .expect("fixed image constructor");
         state.native_functions.insert("Image", image);
         runtime.define_event_target_interface(WINDOW).expect("fixed EventTarget interface");
+        runtime.define_event_interface(WINDOW).expect("fixed Event interface");
+        runtime.define_ui_event_interface(WINDOW).expect("fixed UIEvent interface");
         runtime.define_node_interfaces(WINDOW,dom_tree::NODE_CONSTANTS,Some((IMAGE_FACTORY,"Image"))).expect("fixed Node interfaces");
         Self { runtime, state }
     }
@@ -809,7 +845,7 @@ impl Page {
         if let Some(t)=timing {self.state.clock_origin=t.origin();}
         self.state.navigation_timing=timing;
     }
-    pub fn set_embedded_video(&mut self,snapshot:Option<crate::embedded_video::Snapshot>){self.state.embedded_video=snapshot;}
+    pub fn set_embedded_video(&mut self,snapshot:Option<crate::embedded_video::Snapshot>){self.observe_media_snapshot(snapshot);}
 
     pub fn set_geometry(&mut self, geometry: crate::script_geometry::Geometry) {
         self.state.geometry = Some(geometry);
@@ -853,6 +889,7 @@ impl Page {
     /// One user action may cause click, input/change and submit/reset. App calls
     /// this once for that entire action, never once per listener or dispatch.
     pub fn begin_job(&mut self) {
+        self.refresh_media_official_position();
         self.runtime.begin_job();
         self.state.host_work = self.state.limits.host_work;
         self.state.copy_work = self.state.limits.copy_bytes;
@@ -1173,7 +1210,7 @@ impl Page {
                 "onkeydown",
                 "onkeyup",
                 "onerror","onloadstart","onabort","onemptied","ondurationchange","onloadedmetadata","onloadeddata",
-                "oncanplay","oncanplaythrough","onplay","onplaying","onpause","onseeking","onseeked","ontimeupdate","onended",
+                "oncanplay","oncanplaythrough","onplay","onplaying","onwaiting","onpause","onseeking","onseeked","ontimeupdate","onended",
             ] {
                 if !matches!(name,"onclick"|"oninput"|"onchange"|"onsubmit"|"onreset"|"onload"|"onkeydown"|"onkeyup")
                     && !self.state.embedded_video.as_ref().is_some_and(|video|video.node==node) {continue;}
@@ -1294,6 +1331,23 @@ impl Page {
         }
     }
 
+    pub(crate) fn set_background_pending(&mut self, pending: bool) {
+        self.state.background_tracking = true;
+        self.state.background_pending = pending;
+    }
+
+    // Real App resource callbacks can change the cascade before window load.
+    // Reserve its rescan; standalone Page callers retain their existing contract.
+    pub(super) fn defer_backgrounds_for_layout(&mut self, changed: bool) {
+        if self.state.background_tracking && changed { self.state.background_pending = true; }
+    }
+
+    pub(crate) fn finish_background_loading(&mut self, doc: &mut Document, forms: &mut Forms) -> Outcome {
+        if !self.state.background_pending && self.state.dynamic.load_ready {
+            self.finish_loading(doc, forms)
+        } else { Outcome::default() }
+    }
+
     /// The later resource-completion task fires load at most once. Stopping or
     /// replacing a load does not call this method for the abandoned document.
     pub fn finish_loading(&mut self, doc: &mut Document, forms: &mut Forms) -> Outcome {
@@ -1301,8 +1355,8 @@ impl Page {
             return Outcome::default();
         }
         self.state.dynamic.load_ready = true;
-        if self.state.dynamic.in_flight != 0 || self.state.stylesheets.in_flight != 0
-            || self.state.embedded_video.as_ref().is_some_and(|video|video.network==2)
+        if self.state.background_pending || self.state.dynamic.in_flight != 0 || self.state.stylesheets.in_flight != 0
+            || self.state.embedded_video.as_ref().is_some_and(|video|video.load_pending)
             || self.state.images.entries.values().any(|entry| entry.pending) {
             return Outcome::default();
         }
@@ -1310,11 +1364,21 @@ impl Page {
         let before = self.state.errors;
         self.state.ready = "complete";
         self.dispatch_to(doc, forms, WINDOW, "load", false, false);
+        // dispatch_to includes each callback's microtask checkpoint. A queued
+        // Location request already captured its history handling before this.
+        self.state.document_complete = true;
         Outcome {
             prevented: false,
             layout_changed: std::mem::take(&mut self.state.changed),
             errors: self.state.errors - before,
         }
+    }
+
+    /// Native document input only; browser chrome and JS dispatch never call it.
+    pub fn notify_user_activation(&mut self) {
+        let now = Instant::now();
+        self.state.last_activation = Some(now);
+        self.state.notify_blank_frame_activation(now);
     }
 
     pub fn error_count(&self) -> usize {
@@ -1350,11 +1414,14 @@ impl Page {
                 ..Outcome::default()
             };
         }
+        if input.down && input.key != "Escape" {
+            self.notify_user_activation();
+        }
         let node = input.target.or(self.state.tree.body);
         let target = node.map_or(DOCUMENT, node_handle);
         let event = if input.down { "keydown" } else { "keyup" };
         self.state.pending_keyboard = Some(input);
-        let prevented = self.dispatch_to(doc, forms, target, event, true, true);
+        let prevented = self.dispatch_composed_to(doc, forms, target, event, true, true, true);
         self.state.pending_keyboard = None;
         Outcome {
             prevented,
@@ -1393,13 +1460,14 @@ impl Page {
         if !supported {
             return Outcome::default();
         }
-        let prevented = self.dispatch_to(
+        let prevented = self.dispatch_composed_to(
             doc,
             forms,
             node_handle(target),
             event,
             cancelable,
             !matches!(event, "load" | "error"),
+            matches!(event,"click"|"input"),
         );
         Outcome {
             prevented,
@@ -1416,6 +1484,19 @@ impl Page {
         event: &str,
         cancelable: bool,
         bubbles: bool,
+    ) -> bool {
+        self.dispatch_composed_to(doc,forms,target,event,cancelable,bubbles,false)
+    }
+
+    fn dispatch_composed_to(
+        &mut self,
+        doc: &mut Document,
+        forms: &mut Forms,
+        target: u32,
+        event: &str,
+        cancelable: bool,
+        bubbles: bool,
+        composed: bool,
     ) -> bool {
         // Resource completion can reach a native event tail in the same job
         // as a fatal script. It must not revive that job or queue later work.
@@ -1439,6 +1520,8 @@ impl Page {
         let handle = self.state.next_event;
         self.state.next_event = next;
         self.state.event = Some(Event {
+            composed,
+            path: Vec::new(),
             handle,
             // HTML's Window load event uses the legacy target override:
             // target is Document while currentTarget and callback this are Window.
@@ -1469,6 +1552,7 @@ impl Page {
         if bubbles {
             visits.extend(path.iter().skip(1).map(|&node| (node, false, 3)));
         }
+        if let Some(active)=&mut self.state.event {active.path=path;}
         'visits: for (current, capture, phase) in visits {
             if self
                 .state
@@ -2209,12 +2293,11 @@ impl Bridge<'_> {
             return Err(format!("Inline style exceeds {} KiB.", self.state.limits.host.string_bytes / 1024).into());
         }
         self.state.copies(style.len())?;
-        let value = style
-            .split(';')
+        let value = crate::css::declaration_items(style)
             .filter_map(|item| item.split_once(':'))
             .filter(|(key, _)| key.trim().eq_ignore_ascii_case(name))
-            .map(|(_, value)| value.trim().split('!').next().unwrap_or("").trim())
-            .next_back()
+            .map(|(_, value)| crate::css::declaration_priority(value).0)
+            .last()
             .unwrap_or("")
             .to_owned();
         self.string(&value)
@@ -2227,7 +2310,7 @@ impl Bridge<'_> {
         value: &str,
         priority: &str,
     ) -> Result<(), String> {
-        validate_css_value(value, matches!(name, "font" | "font-family"), self.state.limits.host.string_bytes)?;
+        validate_css_value(name, value, self.state.limits.host.string_bytes)?;
         if !priority.is_empty() && !priority.eq_ignore_ascii_case("important") {
             return Err("CSS priority must be empty or important.".into());
         }
@@ -2237,7 +2320,7 @@ impl Bridge<'_> {
         }
         self.state.copies(existing.len())?;
         let mut style = String::new();
-        for item in existing.split(';').filter(|item| !item.trim().is_empty()) {
+        for item in crate::css::declaration_items(existing).filter(|item| !item.trim().is_empty()) {
             if item
                 .split_once(':')
                 .is_some_and(|(key, _)| key.trim().eq_ignore_ascii_case(name))
@@ -2264,12 +2347,17 @@ impl Bridge<'_> {
 }
 
 impl Host for Bridge<'_> {
-    fn expando_owner(&self,object:u32)->Option<u32> {self.standalone_target_owner(object).or_else(||self.element_expando_receiver(object).then_some(WINDOW))}
-    fn exposed_native_prototype(&self,object:u32)->bool {self.standalone_target_owner(object).is_some()}
-    fn native_ancestry_inspection(&self,object:u32)->bool {self.exposed_native_prototype(object)||self.namespace_receiver(object)}
+    fn expando_owner(&self,object:u32)->Option<u32> {self.ordinary_event_owner(object).or_else(||self.standalone_target_owner(object)).or_else(||self.element_expando_receiver(object).then_some(WINDOW))}
+    fn exposed_native_prototype(&self,object:u32)->bool {self.ordinary_event_owner(object).is_some()||self.standalone_target_owner(object).is_some()}
+    fn native_ancestry_inspection(&self,object:u32)->bool {self.event_receiver(object)||self.exposed_native_prototype(object)||self.namespace_receiver(object)}
     fn event_target_interface(&self,window:u32)->bool {window==WINDOW || self.frame_context(window).is_some()}
     fn node_interface_constants(&self,window:u32)->Option<&'static [(&'static str,u16)]> {self.event_target_interface(window).then_some(dom_tree::NODE_CONSTANTS)}
     fn instance_ancestry(&self, object:u32) -> Option<crate::javascript::NativeAncestry> {
+        if let Some(window)=self.event_owner(object) {
+            // Subclass immediate prototypes stay opaque; this is their genuine
+            // implemented Event ancestry, as with the existing Node suffixes.
+            return Some(crate::javascript::NativeAncestry {window,constructor:Some((window,if self.ui_receiver(object) {"UIEvent"}else{"Event"}))});
+        }
         if let Some(window)=self.standalone_target_owner(object) {
             return Some(crate::javascript::NativeAncestry {window,constructor:Some((window,"EventTarget"))});
         }
@@ -2318,6 +2406,8 @@ impl Host for Bridge<'_> {
     }
 
     fn owns_property(&self, object: u32, property: &str) -> bool {
+        if self.event_receiver(object)&&property=="composedPath" {return false;}
+        if self.ordinary_event_owner(object).is_some() {return false;}
         if self.node_event_method(object,property) {return false;}
         if self.standalone_target_owner(object).is_some() {return false;}
         if property=="prototype"&&self.location_instance_owner(object).is_some(){return false;}
@@ -2331,12 +2421,14 @@ impl Host for Bridge<'_> {
         self.location_instance_owner(object).is_some() || object == HISTORY || self.attr_receiver(object) || self.constructed_event_receiver(object) || self.named_map_receiver(object)
     }
     fn ordinary_lookup_tail_property(&self,object:u32,property:&str)->bool {
-        if self.node_event_method(object,property) {true}
+        if self.event_receiver(object)&&property=="composedPath" {true}
+        else if self.node_event_method(object,property) {true}
         else if self.location_instance_owner(object).is_some() {property=="prototype"}
         else if property=="animate" && self.element_expando_receiver(object) {true}
         else {self.ordinary_lookup_tail(object)}
     }
     fn native_access_owner(&self, object: u32) -> Option<u32> {
+        if let Some(owner)=self.event_owner(object) {return Some(owner);}
         if self.event_target_interface(object) {return Some(object);}
         if let Some(owner)=self.standalone_target_owner(object) {return Some(owner);}
         if let Some(window)=self.frame_instance_window(object) {return Some(window);}
@@ -2354,6 +2446,7 @@ impl Host for Bridge<'_> {
     }
 
     fn readonly_property(&self, object: u32, property: &str) -> bool {
+        if self.ordinary_event_owner(object).is_some() {return false;}
         if self.media_element_receiver(object) && matches!(property,"currentSrc"|"videoWidth"|"videoHeight"|"duration"|"paused"|"ended"|"seeking"|"readyState"|"networkState") {return true;}
         if object==PERFORMANCE&&property=="timing"||object==PERFORMANCE_TIMING&&self.state.navigation_timing.is_some_and(|t|t.value(property).is_some()) {return true;}
         object == WINDOW && property == "history" || object == HISTORY && matches!(property, "state" | "length")
@@ -2392,12 +2485,14 @@ impl Host for Bridge<'_> {
     fn run_native_microtask(&mut self,ticket:u64)->Result<(),String>{self.run_media_microtask(ticket)}
 
     fn number_setter(&self, object: u32, property: &str) -> bool {
+        if property=="currentTime" && self.media_element_receiver(object) {return true;}
         node_index(object).is_some_and(|node| tag(self.doc, node) == "img")
             && matches!(property, "width" | "height")
             || node_index(object).is_some_and(|node| self.html_spacing_property(node, property))
     }
 
     fn argument_conversions(&self, object: u32, method: &str) -> &'static [(usize, bool)] {
+        if matches!(method,"Event"|"UIEvent")&&self.event_target_interface(object) {return &[(0,true)];}
         if object==WINDOW && method=="cancelAnimationFrame" {return &[(0,false)];}
         if object == HISTORY && method == "replaceState" { return &[(1, true), (2, true)]; }
         if self.named_map_receiver(object) {
@@ -2408,6 +2503,7 @@ impl Host for Bridge<'_> {
         }
         if object == DOCUMENT && method == "createEvent" && self.event_factory_enabled()
             || self.event_receiver(object) && method == "initEvent"
+            || self.custom_receiver(object) && method == "initCustomEvent"
         { return &[(0, true)]; }
         if self.mouse_receiver(object) && method == "initMouseEvent" {
             return &[(0, true), (4, false), (5, false), (6, false), (7, false), (8, false), (13, false)];
@@ -2467,7 +2563,7 @@ impl Host for Bridge<'_> {
     }
 
     fn method_length(&self, object:u32, method:&str) -> Option<usize> {
-        if method=="load" && self.media_element_receiver(object) {return Some(0);}
+        if matches!(method,"load"|"pause"|"play") && self.media_element_receiver(object) {return Some(0);}
         if method=="dispatchEvent"&&self.dispatch_receiver(object){return Some(1);}
         if object==DOCUMENT && matches!(method,"createAttributeNS"|"createElementNS") {return Some(2);}
         if object==DOCUMENT && method=="createAttribute" || self.attr_element_receiver(object)&&matches!(method,"setAttributeNode"|"setAttributeNodeNS") {return Some(1);}
@@ -2477,6 +2573,7 @@ impl Host for Bridge<'_> {
         if self.named_map_receiver(object) { return match method { "item" | "getNamedItem" => Some(1), "getNamedItemNS" => Some(2), _ => None }; }
         if self.attr_element_receiver(object) && method == "setAttributeNS" { return Some(3); }
         if self.event_receiver(object) && method=="initEvent"
+            || self.custom_receiver(object) && method=="initCustomEvent"
             || self.ui_receiver(object) && method=="initUIEvent"
             || self.mouse_receiver(object) && method=="initMouseEvent" {return Some(1);}
         if object == DOCUMENT && method == "getElementsByName" { return Some(1); }
@@ -2486,6 +2583,20 @@ impl Host for Bridge<'_> {
         }
         (self.attr_element_receiver(object) && matches!(method,"getAttributeNS"|"getAttributeNodeNS"|"removeAttributeNS")).then_some(2)
     }
+
+    fn native_method_owner(&self, object:u32, method:&str) -> Option<u32> {
+        self.created_event_method(object,method).and_then(|_|self.event_owner(object))
+    }
+
+    fn unpublished_base_event_owner(&self,object:u32,method:&str,result:u32)->Option<u32> {
+        if !(object==DOCUMENT&&method=="createEvent"||self.event_target_interface(object)&&matches!(method,"Event"|"UIEvent")) {
+            return None;
+        }
+        if self.state.created_events.last().is_none_or(|event|event.handle!=result) {return None;}
+        self.ordinary_event_owner(result)
+    }
+    fn rollback_unpublished_base_event(&mut self,event:u32)->Result<(),String>{self.rollback_base_event(event)}
+    fn event_path_snapshot(&mut self,event:u32)->Result<Vec<u32>,String>{self.copy_event_path(event)}
 
     fn nullable_string_argument(&self, object: u32, method: &str, index: usize) -> bool {
         if object==DOCUMENT && matches!(method,"createAttributeNS"|"createElementNS") && index==0 {return true;}
@@ -2517,6 +2628,7 @@ impl Host for Bridge<'_> {
     }
 
     fn required_arguments(&self, object: u32, method: &str) -> usize {
+        if matches!(method,"Event"|"UIEvent")&&self.event_target_interface(object) {return 1;}
         if object==WINDOW && matches!(method,"requestAnimationFrame"|"cancelAnimationFrame") {return 1;}
         if method=="dispatchEvent"&&self.dispatch_receiver(object){return 1;}
         if object==DOCUMENT && matches!(method,"createAttributeNS"|"createElementNS") {return 2;}
@@ -2529,6 +2641,7 @@ impl Host for Bridge<'_> {
         if object == DOCUMENT && method == "getElementsByName" { return 1; }
         if object == DOCUMENT && method == "createEvent" && self.event_factory_enabled()
             || self.event_receiver(object) && method == "initEvent"
+            || self.custom_receiver(object) && method == "initCustomEvent"
             || self.ui_receiver(object) && method=="initUIEvent"
             || self.mouse_receiver(object) && method == "initMouseEvent"
         { return 1; }
@@ -2579,6 +2692,20 @@ impl Host for Bridge<'_> {
         method: &str,
         args: &[Value],
     ) -> Result<(), (&'static str, String)> {
+        if matches!(method,"Event"|"UIEvent")&&self.event_target_interface(object) {
+            if !self.state.enabled||!self.doc.scripting_enabled {return Err(("InvalidStateError","Event construction is disabled.".into()));}
+            if args.get(1).is_some_and(|value|!matches!(value,Value::Undefined|Value::Null|Value::Object(_)|Value::Function(_)|Value::Host(_))) {
+                return Err(("TypeError",format!("{method}Init requires an object, null or undefined.")));
+            }
+            return Ok(());
+        }
+        if method.starts_with("\0Event.")&&!self.event_receiver(object) {
+            return Err(("TypeError","Event operation requires a genuine Event.".into()));
+        }
+        if method.starts_with("\0UIEvent.")&&!self.ui_receiver(object) {
+            return Err(("TypeError","UIEvent operation requires a genuine UIEvent.".into()));
+        }
+        if method=="pause" && self.media_element_receiver(object) && (!self.state.enabled || !self.doc.scripting_enabled) {return Err(("InvalidStateError","Scripting is disabled.".into()));}
         if object==WINDOW && method=="requestAnimationFrame" && !matches!(args.first(),Some(Value::Function(_))) {return Err(("TypeError","requestAnimationFrame requires a callable callback.".into()));}
         if self.event_target_interface(object) && matches!(method,"Node"|"Element"|"HTMLElement") {return Err(("TypeError","Illegal constructor for this native interface.".into()));}
         if method=="dispatchEvent"{return self.validate_dispatch(object,args);}
@@ -2682,6 +2809,14 @@ impl Host for Bridge<'_> {
         property: &str,
         value: &Value,
     ) -> Result<(), (&'static str, String)> {
+        if property=="currentTime" && self.media_element_receiver(object) {
+            if !self.state.enabled || !self.doc.scripting_enabled {
+                return Err(("InvalidStateError","Scripting is disabled.".into()));
+            }
+            if !matches!(value,Value::Number(seconds) if seconds.is_finite()) {
+                return Err(("TypeError","Media time must be a finite double.".into()));
+            }
+        }
         if matches!(value, Value::Symbol(_)) {
             let text_or_index = object == DOCUMENT && property == "title"
                 || (STYLE_BASE..DATASET_BASE).contains(&object) && css_name(property).is_ok()
@@ -2730,6 +2865,7 @@ impl Host for Bridge<'_> {
     }
 
     fn resolve_member_before_call(&self, object: u32) -> bool {
+        if self.event_receiver(object) {return true;}
         if self.standalone_target_owner(object).is_some() {return true;}
         if object == HISTORY || self.attr_receiver(object) || self.constructed_event_receiver(object) || self.named_map_receiver(object) || self.media_element_receiver(object) { return true; }
         self.form_receiver(object)
@@ -2758,7 +2894,7 @@ impl Host for Bridge<'_> {
     }
 
     fn method(&self, object: u32, property: &str) -> Option<&'static str> {
-        if property=="load" && self.media_element_receiver(object) {return Some("load");}
+        if self.media_element_receiver(object) {match property {"load"=>return Some("load"),"pause"=>return Some("pause"),"play"=>return Some("play"),_=>{}}}
         if matches!(property,"addEventListener"|"removeEventListener"|"dispatchEvent") && self.form_named_control(object,property) {return None;}
         if self.node_event_method(object,property) {return None;}
         if property=="dispatchEvent"&&self.dispatch_receiver(object)&&!self.form_named_control(object,property){return Some("dispatchEvent");}
@@ -2817,7 +2953,13 @@ impl Host for Bridge<'_> {
     }
 
     fn accepts_receiver(&self, object: u32, method: &str, receiver: u32) -> bool {
-        if method=="load" && self.media_element_receiver(object) {return self.media_element_receiver(receiver);}
+        if self.event_target_interface(object)&&(method.starts_with("\0UIEvent.")||method=="initUIEvent") {
+            return self.ui_receiver(receiver);
+        }
+        if self.event_target_interface(object)&&(method.starts_with("\0Event.")||matches!(method,"initEvent"|"preventDefault"|"stopPropagation"|"stopImmediatePropagation")) {
+            return self.event_receiver(receiver);
+        }
+        if matches!(method,"load"|"pause"|"play") && self.media_element_receiver(object) {return self.media_element_receiver(receiver);}
         if matches!(method,"dispatchEvent"|"addEventListener"|"removeEventListener") {
             return (self.event_target_interface(object)||self.dispatch_receiver(object)) && self.dispatch_receiver(receiver);
         }
@@ -2834,6 +2976,7 @@ impl Host for Bridge<'_> {
         }
         if script_class_list::element(object).is_some() { return self.class_list_receiver(object) && self.class_list_receiver(receiver); }
         if method == "initMouseEvent" { return self.mouse_receiver(object) && self.mouse_receiver(receiver); }
+        if method == "initCustomEvent" { return self.custom_receiver(object) && self.custom_receiver(receiver); }
         if method=="initUIEvent" {
             return (EVENT_BASE..self.state.next_event).contains(&object) && self.ui_receiver(receiver);
         }
@@ -3033,9 +3176,11 @@ impl Host for Bridge<'_> {
     fn finish_event_dispatch(&mut self,token:usize)->bool{self.finish_synthetic_dispatch(token)}
     fn dictionary_argument(
         &self,
-        _object: u32,
+        object: u32,
         method: &str,
     ) -> Option<(usize, &'static [&'static str])> {
+        if method=="Event"&&self.event_target_interface(object) {return Some((1,&["bubbles","cancelable","composed"]));}
+        if method=="UIEvent"&&self.event_target_interface(object) {return Some((1,&["bubbles","cancelable","composed","detail","view"]));}
         match method {
             "addEventListener" => Some((2, &["capture", "once", "passive", "signal"])),
             "removeEventListener" => Some((2, &["capture"])),
@@ -3043,6 +3188,15 @@ impl Host for Bridge<'_> {
         }
     }
 
+    fn dictionary_member_conversion(&self,object:u32,method:&str,member:&str)->Option<bool>{
+        (method=="UIEvent"&&member=="detail"&&self.event_target_interface(object)).then_some(false)
+    }
+    fn validate_dictionary_member(&self,object:u32,method:&str,member:&str,value:&Value)->Result<(),(&'static str,String)>{
+        if method=="UIEvent"&&member=="view"&&self.event_target_interface(object) {
+            self.ui_view_argument(object,Some(value))?;
+        }
+        Ok(())
+    }
     fn call_with_dictionary(
         &mut self,
         object: u32,
@@ -3050,6 +3204,8 @@ impl Host for Bridge<'_> {
         args: &[Value],
         fields: Option<&[(&str, Value)]>,
     ) -> Result<Value, String> {
+        if method=="Event"&&self.event_target_interface(object) {return self.construct_base_event(object,args,fields);}
+        if method=="UIEvent"&&self.event_target_interface(object) {return self.construct_ui_event(object,args,fields);}
         if matches!(method, "addEventListener" | "removeEventListener") {
             self.state.work(1)?;
             self.event_listener(object, method, args, fields)
@@ -3412,6 +3568,15 @@ impl Host for Bridge<'_> {
         })
     }
 
+    fn get_with_caller(&mut self, caller:Option<u32>, object:u32, property:&str)->Result<Value,String> {
+        if self.is_frame_handle(object) {
+            self.state.work(1)?;
+            return self.frame_get_with_caller(caller,object,property)
+                .ok_or_else(||"Invalid blank-frame handle.".to_string())?;
+        }
+        self.get(object,property)
+    }
+
     fn get(&mut self, object: u32, property: &str) -> Result<Value, String> {
         self.state.work(1)?;
         if script_named_map::element(object).is_some() { return self.named_map_get(object, property); }
@@ -3493,15 +3658,17 @@ impl Host for Bridge<'_> {
                 .ok_or("Event handle has expired.")?;
             return Ok(match property {
                 "type" => Value::String(event.name.clone()),
-                "target" => Value::Host(event.target),
+                "target" | "srcElement" => Value::Host(event.target),
                 "currentTarget" => Value::Host(event.current),
                 "cancelable" => Value::Bool(event.cancelable),
                 "bubbles" => Value::Bool(event.bubbles),
                 "eventPhase" => Value::Number(f64::from(event.phase)),
                 "defaultPrevented" => Value::Bool(event.prevented),
+                "returnValue" => Value::Bool(!event.prevented),
                 "cancelBubble" => Value::Bool(event.stopped),
                 "timeStamp" => Value::Number(event.timestamp),
                 "isTrusted" => Value::Bool(true),
+                "composed" => Value::Bool(event.composed),
                 "view" if event.keyboard.is_some() => Value::Host(WINDOW),
                 "detail" if event.keyboard.is_some() => Value::Number(0.0),
                 name if event.keyboard.is_some() && keyboard_property(name) => {
@@ -3690,7 +3857,43 @@ impl Host for Bridge<'_> {
         }
     }
 
+    fn promise_returning_operation(&self,object:u32,method:&str)->bool {
+        method=="play"&&self.media_element_receiver(object)
+    }
+    fn validate_promise_operation(&self,object:u32,method:&str)->Result<(),crate::javascript::NativePromiseFailure> {
+        use crate::javascript::NativePromiseFailure as Failure;
+        if method!="play"||!self.media_element_receiver(object) {return Err(Failure::Fatal("Media Promise operation is unavailable.".into()));}
+        if !self.state.enabled||!self.doc.scripting_enabled {return Err(Failure::Dom("InvalidStateError","Scripting is disabled for this document."));}
+        if !self.state.has_transient_activation(Instant::now()) {return Err(Failure::Dom("NotAllowedError","Playback requires trusted input in this media element's Window."));}
+        let snapshot=self.state.embedded_video.as_ref().unwrap();
+        if snapshot.error_code==Some(4) {return Err(Failure::Dom("NotSupportedError","The selected media source is not supported."));}
+        if snapshot.error_code==Some(1) {return Err(Failure::Fatal("The media controller is stopped after a resource failure.".into()));}
+        Ok(())
+    }
+    fn call_promise_operation(&mut self,object:u32,method:&str,promise:crate::javascript::NativePromise)->Result<(),crate::javascript::NativePromiseFailure> {
+        if method!="play" {return Err(crate::javascript::NativePromiseFailure::Fatal("Unknown media Promise operation.".into()));}
+        self.play_media(node_index(object).ok_or_else(||crate::javascript::NativePromiseFailure::Fatal("Invalid media element.".into()))?,promise)
+    }
+    fn peek_native_promise_effect(&self)->Option<(crate::javascript::NativePromise,Option<(&'static str,&'static str)>)> {
+        let effect=self.state.media_play.peek_effect()?;
+        let reason=effect.rejection.map(|reason|match reason {
+            script_media_play::Rejection::Abort=>("AbortError","The play request was interrupted."),
+            script_media_play::Rejection::NotSupported=>("NotSupportedError","The selected media source is not supported."),
+        });
+        Some((effect.token,reason))
+    }
+    fn finish_native_promise_effect(&mut self) {self.state.media_play.commit_effect();}
+
+    fn native_operation_caller(&mut self, window: Option<u32>) {
+        self.state.navigation_incumbent = window;
+    }
+
     fn set(&mut self, object: u32, property: &str, value: Value) -> Result<(), String> {
+        if property=="returnValue"&&self.event_receiver(object) {return self.set_event_return_value(object,&value);}
+        if property=="currentTime" && self.media_element_receiver(object) {
+            let Value::Number(seconds)=value else {return Err("Media time requires numeric conversion.".into());};
+            return self.set_media_time(node_index(object).unwrap(),seconds);
+        }
         if property=="type"&&self.style_type_receiver(object){let node=self.node(object)?;let text=self.text(&value)?;return self.attribute(node,"type",Some(text));}
         if self.media_element_receiver(object)&&property=="src" {let node=self.node(object)?;let text=self.text(&value)?;return self.attribute(node,"src",Some(text));}
         if script_named_map::element(object).is_some() { self.named_map_get(object, "length")?; return Err("NamedNodeMap property writes are not implemented.".into()); }
@@ -3919,6 +4122,13 @@ impl Host for Bridge<'_> {
     }
 
     fn call(&mut self, object: u32, method: &str, args: &[Value]) -> Result<Value, String> {
+        if let Some(property)=method.strip_prefix("\0UIEvent.get.") {return self.get(object,property);}
+        if let Some(property)=method.strip_prefix("\0Event.get.") {return self.get(object,property);}
+        if let Some(property)=method.strip_prefix("\0Event.set.") {
+            self.set(object,property,args.first().cloned().unwrap_or(Value::Undefined))?;
+            return Ok(Value::Undefined);
+        }
+        if method=="pause" && self.media_element_receiver(object) {return self.pause_media(node_index(object).unwrap());}
         if method=="load" && self.media_element_receiver(object) {
             self.state.work(1)?;
             self.commit_media_source_change(node_index(object).unwrap())?;
@@ -4369,6 +4579,10 @@ fn css_name(name: &str) -> Result<String, String> {
             | "color"
             | "background"
             | "background-color"
+            | "background-image"
+            | "background-repeat"
+            | "background-position"
+            | "background-size"
             | "font"
             | "font-family"
             | "font-size"
@@ -4421,7 +4635,25 @@ fn css_name(name: &str) -> Result<String, String> {
     }
     Ok(css)
 }
-fn validate_css_value(value: &str, allow_font_quotes: bool, string_limit: usize) -> Result<(), String> {
+fn validate_css_value(name: &str, value: &str, string_limit: usize) -> Result<(), String> {
+    if name == "background-image" {
+        // Reuse the genuine single-image parser. Shared declaration boundaries
+        // preserve semicolons and bangs inside URL payloads. Escaped mutation
+        // values retain the bridge's explicit finite-subset refusal.
+        if value.len() > string_limit || value.chars().any(|ch| {
+            ch.is_control() && !ch.is_ascii_whitespace()
+                || ch == '\\'
+        }) {
+            return Err("Background image mutation exceeds the string bound or contains unsupported controls/escapes.".into());
+        }
+        let keyword = value.trim();
+        if keyword.is_empty() || ["none", "inherit", "initial", "unset"].iter().any(|word| keyword.eq_ignore_ascii_case(word))
+            || crate::css::background_image_url(value).is_some() {
+            return Ok(());
+        }
+        return Err("Background image mutation requires one supported URL or background-image keyword.".into());
+    }
+    let allow_font_quotes = matches!(name, "font" | "font-family");
     if value.len() > string_limit
         || value.chars().any(|ch| {
             ch.is_control() && !ch.is_ascii_whitespace()
@@ -4455,23 +4687,25 @@ fn validate_css_value(value: &str, allow_font_quotes: bool, string_limit: usize)
     Ok(())
 }
 fn validate_style(style: &str, string_limit: usize) -> Result<(), String> {
-    for item in style.split(';').filter(|item| !item.trim().is_empty()) {
+    let mut items = crate::css::declaration_items(style);
+    for item in items.by_ref().filter(|item| !item.trim().is_empty()) {
         let (name, value) = item
             .split_once(':')
             .ok_or("Style declaration needs a colon.")?;
         let name = css_name(name.trim())?;
-        validate_css_value(
-            value.trim(),
-            matches!(name.as_str(), "font" | "font-family"),
-            string_limit,
-        )?;
+        validate_css_value(&name, value.trim(), string_limit)?;
     }
+    if !items.complete() { return Err("Inline style has an unterminated string or function.".into()); }
     Ok(())
 }
 
 #[cfg(test)]
 #[path = "script_compat_tests.rs"]
 mod compatibility_tests;
+
+#[cfg(test)]
+#[path = "script_background_style_tests.rs"]
+mod background_style_tests;
 
 #[cfg(test)]
 mod tests {

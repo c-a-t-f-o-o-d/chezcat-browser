@@ -165,7 +165,18 @@ def extract_runtime(payload, folder):
             stream.write(data)
 
 
+def require_license_acceptance():
+    root = package.ROOT
+    # Check the inherited private receipt; never create consent as a side effect
+    # of extracting or testing a distribution. Do not retain its content/output.
+    receipt = subprocess.run([sys.executable, str(root / 'tools/accept_license.py'), '--check'],
+        cwd=root, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30, check=False)
+    require(receipt.returncode == 0,
+        'A valid explicitly accepted current-license receipt is required for extracted runtime checks.')
+
+
 def exercise_runtime(folder, evidence):
+    require_license_acceptance()
     root = package.ROOT
     executable = folder / 'ChezCat.exe'
     ppm = evidence / 'startup.ppm'
@@ -230,6 +241,7 @@ def main(argv=None):
         payload, static_checks = validate_archives(runtime, source, args.tag, args.commit, args.license_sha256)
         checks.update(static_checks)
         publication['license_scope_sha256'] = package.sha(payload['LICENSE_SCOPE.md'])
+        require_license_acceptance()
         evidence = output.parent / (output.stem + '-evidence-' + uuid.uuid4().hex[:8])
         evidence.mkdir()
         folder = evidence / 'ChezCat'

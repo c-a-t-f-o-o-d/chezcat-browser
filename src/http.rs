@@ -21,7 +21,11 @@ use network_trace::PhaseKind;
 #[path = "http_network_tests.rs"]
 mod network_tests;
 
-const MAX_BODY_BYTES: usize = 32 * 1024 * 1024;
+#[path = "http_media_cors.rs"]
+mod media_cors;
+pub(crate) use media_cors::Credentials as MediaCredentials;
+
+const MAX_BODY_BYTES: usize = 512 * 1024 * 1024;
 pub const MAX_FORM_BYTES: usize = 128 * 1024;
 pub const USER_AGENT: &str = concat!("ChezCat/", env!("CARGO_PKG_VERSION"));
 const MAX_HEADER_BYTES: usize = 32 * 1024;
@@ -158,6 +162,7 @@ pub fn fetch_request(
         false,
         None,
         None,
+        None,
     )
 }
 
@@ -174,10 +179,11 @@ fn fetch_in_pool(
     document: bool,
     classic_origin: Option<&HttpUrl>,
     resource_guard: Option<&ResourceFilter<'_>>,
+    media: Option<media_cors::Config<'_>>,
 ) -> Result<Response, String> {
     let cancel = pool.cancel;
     if limit > MAX_BODY_BYTES {
-        return Err("HTTP body limit cannot exceed 32 MiB.".into());
+        return Err("HTTP body limit cannot exceed 512 MiB.".into());
     }
     if initial.body().len() > MAX_FORM_BYTES {
         return Err("HTTP form request body exceeds 128 KiB.".into());
@@ -192,6 +198,7 @@ fn fetch_in_pool(
         pool.cookie_origin.as_ref(),
         pool.cookie_context,
     );
+    let mut media = media.map(media_cors::State::new).transpose()?;
     // Once a classic-script redirect leaves its document origin, credentials
     // remain omitted for the rest of the chain, even when it returns.
     let mut resource_credentials = true;
@@ -204,7 +211,7 @@ fn fetch_in_pool(
     let result = (|| {
         for redirects in 0..=MAX_REDIRECTS {
             check(cancel, deadline)?;
-            if same_origin.is_some() || classic_origin.is_some() || script_origin.is_some() {
+            if same_origin.is_some() || classic_origin.is_some() || script_origin.is_some() || media.is_some() {
                 // Check every automatic destination before DNS, connecting
                 // or sending bytes, including a permitted URL's redirect.
                 // User-initiated document navigation remains unrestricted.
@@ -234,6 +241,12 @@ fn fetch_in_pool(
                     return Err(error);
                 }
             }
+            if let Some(media) = &mut media {
+                if let Err(error) = media.prepare(&current) {
+                    pool.network.blocked(&current.display(), kind, &error);
+                    return Err(error);
+                }
+            }
             if same_origin.is_some_and(|origin| !current.same_origin(origin)) {
                 pool.network.blocked(
                     &current.display(),
@@ -251,12 +264,17 @@ fn fetch_in_pool(
                 return Err("Cross-origin script navigation or redirect was blocked.".into());
             }
             let mut request = request(&current, &outgoing, mode)?;
+            if let Some(origin) = media.as_ref().and_then(media_cors::State::request_origin) {
+                append_request_field(&mut request, "Origin", origin)?;
+            }
             let address = current.display();
             if !visited.insert((outgoing.method(), address.clone())) {
                 return Err("HTTP redirect loop detected.".into());
             }
             events.push(format!("{} {address}", outgoing.method()));
-            let cookie_same_site = if document {
+            let cookie_same_site = if let Some(media) = &media {
+                media.same_site(&current)
+            } else if document {
                 document_cookie_context.is_same_site(&current)
             } else {
                 // Resource requests have their own already-checked document
@@ -266,17 +284,15 @@ fn fetch_in_pool(
                         crate::cookies::same_site(origin, &current)
                     })
             };
-            if let Some(cookies) = pool.cookies.as_ref().filter(|_| resource_credentials) {
+            if let Some(cookies) = pool.cookies.as_ref().filter(|_| media.as_ref()
+                .map_or(resource_credentials, media_cors::State::credentials_allowed)) {
                 let value = cookies.request_header(
                     &current,
                     cookie_same_site,
                     document && !outgoing.is_post(),
                 );
                 if !value.is_empty() {
-                    request.truncate(request.len() - 2);
-                    request.push_str("Cookie: ");
-                    request.push_str(&value);
-                    request.push_str("\r\n\r\n");
+                    append_request_field(&mut request, "Cookie", &value)?;
                     events.push(
                         "Session Cookie header sent; values omitted from this report.".into(),
                     );
@@ -323,17 +339,20 @@ fn fetch_in_pool(
                 .map(|(_, value)| value);
             let mut accepted = 0;
             let mut declined = 0;
-            let can_store_cookies = document
+            let can_store_cookies = media.as_ref().map_or_else(|| document
                 || resource_credentials
                     && same_origin
                         .or(classic_origin)
-                        .is_some_and(|origin| current.same_origin(origin));
+                        .is_some_and(|origin| current.same_origin(origin)),
+                media_cors::State::credentials_allowed);
             for value in cookie_headers {
                 if can_store_cookies
                     && pool
                         .cookies
                         .as_ref()
-                        .is_some_and(|cookies| cookies.set_http(&current, value).is_ok())
+                        .is_some_and(|cookies| (if media.is_some() {
+                            cookies.set_http_subresource(&current, value, cookie_same_site)
+                        } else { cookies.set_http(&current, value) }).is_ok())
                 {
                     accepted += 1;
                 } else {
@@ -343,6 +362,10 @@ fn fetch_in_pool(
             if accepted + declined > 0 {
                 events.push(format!("Set-Cookie headers: {accepted} processed by the bounded session store; {declined} declined. Cookie values are omitted from this report."));
             }
+            // Eligible cookie effects are processed before the CORS verdict.
+            // A denied response never becomes usable media, but is not rolled
+            // back into an invented transaction over the cookie store.
+            if let Some(media) = &media { media.check_response(&message.headers)?; }
             if is_redirect(message.status) {
                 if let Some(location) = unique_header(&message.headers, "location")? {
                     if redirects == MAX_REDIRECTS {
@@ -369,6 +392,7 @@ fn fetch_in_pool(
                     // cannot restore Strict cookies. Sibling subdomains inside
                     // one registrable domain are not a cross-site hop.
                     document_cookie_context.redirect(&current, &next);
+                    if let Some(media) = &mut media { media.redirect(&current, &next); }
                     current = next;
                     continue;
                 }
@@ -408,6 +432,20 @@ fn fetch_in_pool(
         Err("HTTP redirect limit reached.".into())
     })();
     result.map_err(|error| failure_with_activity(error, &events))
+}
+
+fn append_request_field(request: &mut String, name: &str, value: &str) -> Result<(), String> {
+    let field = name.len().checked_add(2).and_then(|size| size.checked_add(value.len()))
+        .ok_or("HTTP request field length overflow.")?;
+    let extra = field.checked_add(2).ok_or("HTTP request field length overflow.")?;
+    if field > MAX_LINE_BYTES || request.len().checked_add(extra).is_none_or(|size| size > MAX_HEADER_BYTES)
+        || value.bytes().any(|byte| byte < 32 || byte == 127) || !request.ends_with("\r\n\r\n") {
+        return Err("HTTP request field exceeds its allowed framing or size.".into());
+    }
+    request.try_reserve(extra).map_err(|_| "Could not retain the HTTP request field.")?;
+    request.truncate(request.len() - 2);
+    request.push_str(name);request.push_str(": ");request.push_str(value);request.push_str("\r\n\r\n");
+    Ok(())
 }
 
 /// Deliberately narrower than general no-CORS fetching: only secure pages
@@ -716,6 +754,7 @@ impl<'a> Pool<'a> {
             false,
             None,
             None,
+            None,
         )
     }
 
@@ -737,6 +776,7 @@ impl<'a> Pool<'a> {
             true,
             kind,
             false,
+            None,
             None,
             None,
         )
@@ -766,7 +806,19 @@ impl<'a> Pool<'a> {
             false,
             None,
             Some(guard),
+            None,
         )
+    }
+
+    /// Explicit CORS-mode media GET only. Same-origin/basic requests retain
+    /// ordinary credential semantics; foreign/redirected responses require the
+    /// actual CORS response checks and immutable per-element guard at every hop.
+    pub(crate) fn fetch_cors_media(
+        &self, url: &HttpUrl, limit: usize, origin: &HttpUrl,
+        credentials: MediaCredentials, mode: FetchMode, guard: &ResourceFilter<'_>,
+    ) -> Result<Response, String> {
+        fetch_in_pool(self, url, &Request::Get, limit, None, mode, true, "media", false,
+            None, Some(guard), Some(media_cors::Config { origin, credentials }))
     }
 
     /// Classic script inclusion only: same-origin HTTP(S), or HTTPS from an
@@ -796,6 +848,7 @@ impl<'a> Pool<'a> {
             false,
             Some(origin),
             Some(guard),
+            None,
         )
     }
 
@@ -811,12 +864,13 @@ impl<'a> Pool<'a> {
             self,
             url,
             request,
-            MAX_BODY_BYTES,
+            crate::downloads::MAX_DOWNLOAD_BYTES,
             None,
             mode,
             true,
             "document",
             true,
+            None,
             None,
             None,
         )
@@ -1661,7 +1715,7 @@ fn read_response_traced<R: Read>(
 ) -> Result<Message, ResponseFailure> {
     if limit > MAX_BODY_BYTES {
         return Err(ResponseFailure::before_response(
-            "HTTP body limit cannot exceed 32 MiB.".into(),
+            "HTTP body limit cannot exceed 512 MiB.".into(),
         ));
     }
     let mut input = Input::new(TracedRead { source, trace }, limit, cancel, deadline);
@@ -2727,7 +2781,7 @@ mod tests {
             FetchMode::Normal
         )
         .unwrap_err()
-        .contains("32 MiB"));
+        .contains("512 MiB"));
     }
 
     struct PostSite {

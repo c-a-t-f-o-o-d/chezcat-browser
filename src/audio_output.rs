@@ -5,6 +5,14 @@ use std::cell::UnsafeCell;
 use std::collections::VecDeque;
 use std::ffi::c_void;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+fn source_is_retired(source: Option<&Arc<AtomicBool>>) -> bool {
+    source.is_some_and(|source| source.load(Ordering::Relaxed))
+}
+pub(crate) fn same_source(left: Option<&Arc<AtomicBool>>, right: Option<&Arc<AtomicBool>>) -> bool {
+    match (left, right) { (None, None) => true, (Some(left), Some(right)) => Arc::ptr_eq(left, right), _ => false }
+}
 
 const HEADERS: usize = 3;
 const BLOCK: usize = 4096;
@@ -259,9 +267,19 @@ struct Output<A: Api> {
     pub playing: bool,
     pub ended: bool,
     failed: bool,
+    source_retired: Option<Arc<AtomicBool>>,
+    retirement_handled: bool,
 }
 impl<A: Api> Output<A> {
-    fn open(mut api: A, clip: Arc<Clip>, frame: u64) -> Result<Self, String> {
+    #[cfg(test)]
+    fn open(api: A, clip: Arc<Clip>, frame: u64) -> Result<Self, String> {
+        Self::open_for_source(api, clip, frame, None).map_err(|fault| match fault {
+            OutputFault::Cancelled => "PCM source retired before device open.".into(),
+            OutputFault::Failure(error) => error,
+        })
+    }
+    fn open_for_source(mut api: A, clip: Arc<Clip>, frame: u64, source_retired: Option<Arc<AtomicBool>>) -> Result<Self, OutputFault> {
+        if source_is_retired(source_retired.as_ref()) {return Err(OutputFault::Cancelled);}
         let align = clip
             .channels
             .checked_mul(2)
@@ -293,6 +311,8 @@ impl<A: Api> Output<A> {
             playing: false,
             ended: false,
             failed: false,
+            source_retired,
+            retirement_handled: false,
             clip,
         };
         Ok(output)
@@ -345,12 +365,16 @@ impl<A: Api> Output<A> {
             self.queue
                 .try_reserve(1)
                 .map_err(|_| "Could not reserve a PCM queue slot.")?;
+            check().map_err(|_| OutputFault::Cancelled)?;
             result(
                 unsafe { self.api.prepare(self.handle, buffer.pointer()) },
                 "prepare",
             )?;
             // Publish ownership before Write, including the Write failure path.
             self.queue.push_back(buffer);
+            // A prepared native header must stay owned even if retirement was
+            // observed during Prepare. Cleanup resets/unprepares it safely.
+            check().map_err(|_| OutputFault::Cancelled)?;
             let buffer = self.queue.back_mut().unwrap();
             result(
                 unsafe { self.api.write(self.handle, buffer.pointer()) },
@@ -365,6 +389,7 @@ impl<A: Api> Output<A> {
                 .submitted
                 .checked_add(buffer.frames)
                 .ok_or("PCM submitted count overflow.")?;
+            check().map_err(|_| OutputFault::Cancelled)?;
         }
         Ok(())
     }
@@ -394,6 +419,7 @@ impl<A: Api> Output<A> {
         self.update_position()
     }
     fn tick(&mut self, check: &dyn Fn() -> Result<(), String>) -> Result<(), OutputFault> {
+        check().map_err(|_| OutputFault::Cancelled)?;
         if self.failed {
             return Err("PCM device remains in failed ownership state.".into());
         }
@@ -446,6 +472,7 @@ impl<A: Api> Output<A> {
         let _ = self.api.pause(self.handle);
     }
     fn close(&mut self) -> Result<(), String> {
+        if source_is_retired(self.source_retired.as_ref()) {self.retirement_handled = true;}
         if self.handle.is_null() {
             return Ok(());
         }
@@ -486,6 +513,7 @@ impl Action {
 pub struct Snapshot {
     pub clip: Arc<Clip>,
     pub generation: u64,
+    pub source_retired: Option<Arc<AtomicBool>>,
     pub frame: u64,
     pub playing: bool,
     pub ended: bool,
@@ -497,11 +525,18 @@ pub struct Snapshot {
     pub error: Option<String>,
     pub retained_buffers: usize,
 }
+impl Snapshot {
+    pub(crate) fn matches_source(&self, source: Option<&Arc<AtomicBool>>) -> bool {
+        !source_is_retired(self.source_retired.as_ref()) && !source_is_retired(source)
+            && same_source(self.source_retired.as_ref(), source)
+    }
+}
 struct Request {
     clip: Option<Arc<Clip>>,
     generation: u64,
     action: Action,
     cancel: Arc<std::sync::atomic::AtomicBool>,
+    source_retired: Option<Arc<AtomicBool>>,
 }
 struct Shared {
     request: Option<Request>,
@@ -553,13 +588,15 @@ impl Worker {
             .name("pcm-device-owner".into())
             .spawn(move || {
                 let mut output: Option<Output<A>> = None;
-                let mut context: Option<(Arc<Clip>, u64, u64)> = None;
+                let mut context: Option<(Arc<Clip>, u64, u64, Option<Arc<AtomicBool>>)> = None;
                 let mut cancel = Arc::new(AtomicBool::new(false));
                 loop {
                     let request = {
                         let mut state = background.0.lock().unwrap();
                         while state.request.is_none() && !state.stopping {
-                            if output.as_ref().is_some_and(|output| output.playing) {
+                            if output.as_ref().is_some_and(|output| output.playing)
+                                || context.as_ref().is_some_and(|(_,_,_,source)| source.is_some())
+                                || output.as_ref().is_some_and(|output| output.source_retired.is_some() && !output.retirement_handled) {
                                 let (next, timeout) = background
                                     .1
                                     .wait_timeout(state, std::time::Duration::from_millis(10))
@@ -581,11 +618,19 @@ impl Worker {
                         }
                         request
                     };
+                    let retiring = context.as_ref().is_some_and(|(_,_,_,source)| source_is_retired(source.as_ref()))
+                        || output.as_ref().is_some_and(|output| !output.retirement_handled && source_is_retired(output.source_retired.as_ref()));
+                    if request.is_none() && !retiring && !output.as_ref().is_some_and(|output| output.playing) {
+                        // Fenced paused/metadata owners poll only their token.
+                        // Do not republish snapshots or retry a failed device.
+                        continue;
+                    }
                     let mut error = None;
                     if let Some(request) = request {
                         cancel = request.cancel;
+                        let source = request.source_retired;
                         let check = || {
-                            if cancel.load(Ordering::Relaxed) {
+                            if cancel.load(Ordering::Relaxed) || source_is_retired(source.as_ref()) {
                                 Err("PCM command cancelled.".into())
                             } else {
                                 Ok(())
@@ -593,12 +638,13 @@ impl Worker {
                         };
                         if let Some(clip) = request.clip {
                             let frame = request.action.frame().min(clip.frames);
-                            context = Some((clip.clone(), request.generation, frame));
+                            context = Some((clip.clone(), request.generation, frame, source.clone()));
                             let operation = (|| {
                                 check().map_err(|_|OutputFault::Cancelled)?;
                                 if output
                                     .as_ref()
-                                    .is_some_and(|output| !Arc::ptr_eq(&output.clip, &clip))
+                                    .is_some_and(|output| !Arc::ptr_eq(&output.clip, &clip)
+                                        || !same_source(output.source_retired.as_ref(), source.as_ref()))
                                 {
                                     output.as_mut().unwrap().close()?;
                                     output = None;
@@ -608,8 +654,10 @@ impl Worker {
                                     Action::Play { .. } | Action::Seek { resume: true, .. }
                                 );
                                 if output.is_none() && needs_device {
-                                    output = Some(Output::open(factory(), clip.clone(), frame)?);
+                                    check().map_err(|_|OutputFault::Cancelled)?;
+                                    output = Some(Output::open_for_source(factory(), clip.clone(), frame, source.clone())?);
                                 }
+                                check().map_err(|_|OutputFault::Cancelled)?;
                                 if let Some(output) = &mut output {
                                     match request.action {
                                         Action::Play { from } => {
@@ -648,9 +696,10 @@ impl Worker {
                             }
                         }
                     } else if !cancel.load(Ordering::Relaxed) {
-                        if let Some(active) = &mut output {
+                        if let Some(active) = output.as_mut().filter(|output|output.playing) {
+                            let source = active.source_retired.clone();
                             if let Err(OutputFault::Failure(failure)) = active.tick(&|| {
-                                if cancel.load(Ordering::Relaxed) {
+                                if cancel.load(Ordering::Relaxed) || source_is_retired(source.as_ref()) {
                                     Err("PCM command cancelled.".into())
                                 } else {
                                     Ok(())
@@ -663,18 +712,36 @@ impl Worker {
                             }
                         }
                     }
+                    if context.as_ref().is_some_and(|(_,_,_,source)| source_is_retired(source.as_ref())) {
+                        context = None;
+                    }
+                    let mut retirement_notice = None;
+                    if output.as_ref().is_some_and(|output| !output.retirement_handled && source_is_retired(output.source_retired.as_ref())) {
+                        match output.as_mut().unwrap().close() {
+                            Ok(()) => output = None,
+                            Err(failure) => {
+                                // close marks retirement handled even on reset/
+                                // unprepare failure. Retain the native owner and
+                                // buffers; only a later explicit command retries.
+                                retirement_notice = Some(failure.clone());
+                                error = Some(failure);
+                            }
+                        }
+                    }
                     if error.is_some() {
                         if let Some(active) = &mut output {
                             active.fail();
                         }
                     }
-                    let snapshot = context.as_ref().map(|(clip, generation, frame)| {
+                    let snapshot = context.as_ref().filter(|(_,_,_,source)| !source_is_retired(source.as_ref())).map(|(clip, generation, frame, source)| {
                         let active = output
                             .as_ref()
-                            .filter(|output| Arc::ptr_eq(&output.clip, clip));
+                            .filter(|output| Arc::ptr_eq(&output.clip, clip)
+                                && same_source(output.source_retired.as_ref(), source.as_ref()));
                         Snapshot {
                             clip: clip.clone(),
                             generation: *generation,
+                            source_retired: source.clone(),
                             frame: active.map_or(*frame, Output::frame),
                             playing: active.is_some_and(|output| output.playing),
                             ended: active.is_some_and(|output| output.ended),
@@ -697,13 +764,15 @@ impl Worker {
                         if state.stopping {
                             break;
                         }
+                        if let Some(notice) = retirement_notice {state.notice = Some(notice);}
+                        if state.snapshot.as_ref().is_some_and(|snapshot|source_is_retired(snapshot.source_retired.as_ref())) {state.snapshot = None;}
                         if cancel.load(Ordering::Relaxed) {
                             continue;
                         }
                         if let Some(error) = error {
                             state.notice = Some(error);
                         }
-                        state.snapshot = snapshot;
+                        state.snapshot = snapshot.filter(|snapshot|!source_is_retired(snapshot.source_retired.as_ref()));
                         state.wake.clone()
                     };
                     wake();
@@ -714,9 +783,12 @@ impl Worker {
             .map_err(|error| format!("Could not start the PCM device worker: {error}"))?;
         Ok(Self { shared })
     }
-    fn submit_request(&self, clip: Option<Arc<Clip>>, generation: u64, action: Action) {
+    fn submit_request(&self, clip: Option<Arc<Clip>>, generation: u64, action: Action, source_retired: Option<Arc<AtomicBool>>) {
         use std::sync::atomic::{AtomicBool, Ordering};
         let mut state = self.shared.0.lock().unwrap();
+        // An already-retired late request cannot replace/cancel a newer source,
+        // even if a caller reused the same clip and numeric generation.
+        if source_is_retired(source_retired.as_ref()) {return;}
         if let Some(active) = &state.active {
             active.store(true, Ordering::Relaxed);
         }
@@ -727,18 +799,22 @@ impl Worker {
             generation,
             action,
             cancel: Arc::new(AtomicBool::new(false)),
+            source_retired,
         });
         self.shared.1.notify_one();
     }
     pub fn submit(&self, clip: Arc<Clip>, generation: u64, action: Action) {
-        self.submit_request(Some(clip), generation, action);
+        self.submit_for_source(clip, generation, action, None);
+    }
+    pub fn submit_for_source(&self, clip: Arc<Clip>, generation: u64, action: Action, source_retired: Option<Arc<AtomicBool>>) {
+        self.submit_request(Some(clip), generation, action, source_retired);
     }
     pub fn clear(&self) {
-        self.submit_request(None, 0, Action::Stop);
+        self.submit_request(None, 0, Action::Stop, None);
     }
     pub fn poll(&self) -> (Option<Snapshot>, Option<String>) {
         let mut state = self.shared.0.lock().unwrap();
-        (state.snapshot.take(), state.notice.take())
+        (state.snapshot.take().filter(|snapshot|!source_is_retired(snapshot.source_retired.as_ref())), state.notice.take())
     }
     pub fn set_wake(&self, wake: crate::loader::Wake) {
         self.shared.0.lock().unwrap().wake = wake;
@@ -766,6 +842,9 @@ mod tests {
     impl Worker {
         pub(crate) fn mock_for_app(wake: crate::loader::Wake) -> Result<Self, String> {
             Self::with_factory(wake, Mock::default)
+        }
+        pub(crate) fn mock_for_app_write_failure(wake: crate::loader::Wake) -> Result<Self, String> {
+            Self::with_factory(wake, || Mock { write_error: true, ..Mock::default() })
         }
     }
     #[derive(Default)]
@@ -1074,4 +1153,5 @@ mod tests {
             u64::from(u32::MAX) + 9
         );
     }
+    include!("audio_retirement_tests.rs");
 }

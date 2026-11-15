@@ -29,6 +29,9 @@
 *.woff2 binary
 *.bin binary
 *.ivf binary
+*.mkv binary
+*.pcm binary
+*.yuv binary
 *.rgba binary
 *.wav binary
 *.zip binary

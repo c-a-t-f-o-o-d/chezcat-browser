@@ -1,0 +1,10 @@
+html,body { margin:0; padding:0; }
+#target {
+ display:block; width:32px; height:24px; margin:0; padding:0;
+ background-color:#112233;
+ background-image:url("Pixels/CornerBG.ppm");
+ background-repeat:no-repeat;
+ background-position:0 0;
+ background-size:auto;
+}
+#control { display:block; width:4px; height:4px; margin:4px 0 0; padding:0; }

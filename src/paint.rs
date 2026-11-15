@@ -13,6 +13,10 @@ mod area;
 #[path = "paint_resample_tests.rs"]
 mod resample_tests;
 
+#[cfg(test)]
+#[path = "paint_background_tests.rs"]
+mod background_tests;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ClipRect {
     pub left: i32,
@@ -473,6 +477,97 @@ fn image_mix(samples: [u32; 4], x: u32, y: u32, background: u32) -> u32 {
         output |= (channel as u32) << shift;
     }
     output
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct BackgroundPresentation {
+    pub size: crate::css::BackgroundSize,
+    /// Horizontal and vertical repetition of the single background layer.
+    pub repeat: [bool; 2],
+    /// Alignment fraction of leftover space, followed by zoomed pixel offset.
+    pub position: [(f32, f32); 2],
+    pub scale: f32,
+    pub rendering: crate::css::ImageRendering,
+}
+
+fn background_axis(pixel: i64, start: i64, extent: u64, repeat: bool) -> Option<u64> {
+    let offset = pixel.checked_sub(start)?;
+    let extent = i64::try_from(extent).ok().filter(|extent| *extent > 0)?;
+    if repeat {
+        Some(offset.rem_euclid(extent) as u64)
+    } else {
+        (offset >= 0 && offset < extent).then_some(offset as u64)
+    }
+}
+
+impl Canvas {
+    /// Paint one background layer. `rect` is the border-box clip and `origin`
+    /// the padding-box positioning area. Work is proportional only to visible
+    /// surface pixels: no expanded bitmap, tile list or tile-count allocation.
+    pub fn background_image(
+        &mut self,
+        rect: ClipRect,
+        origin: ClipRect,
+        bitmap: &crate::image::Bitmap,
+        presentation: BackgroundPresentation,
+    ) {
+        if bitmap.width == 0 || bitmap.height == 0 || self.pixels.is_empty()
+            || bitmap.width > 16_384 || bitmap.height > 16_384
+            || !presentation.scale.is_finite() || presentation.scale <= 0.0
+            || presentation.position.iter().any(|&(fraction, offset)| !fraction.is_finite() || !offset.is_finite())
+        {
+            return;
+        }
+        let Some(count) = bitmap.width.checked_mul(bitmap.height) else { return; };
+        if count > bitmap.pixels.len() || count > crate::image::MAX_PIXELS { return; }
+        let ow = i64::from(origin.right) - i64::from(origin.left);
+        let oh = i64::from(origin.bottom) - i64::from(origin.top);
+        if ow <= 0 || oh <= 0 { return; }
+        let (sw, sh) = (bitmap.width as f64, bitmap.height as f64);
+        let (dw, dh) = match presentation.size {
+            crate::css::BackgroundSize::Auto => (sw * f64::from(presentation.scale), sh * f64::from(presentation.scale)),
+            crate::css::BackgroundSize::Contain => {
+                let factor = (ow as f64 / sw).min(oh as f64 / sh);
+                (sw * factor, sh * factor)
+            }
+            crate::css::BackgroundSize::Cover => {
+                let factor = (ow as f64 / sw).max(oh as f64 / sh);
+                (sw * factor, sh * factor)
+            }
+        };
+        if !dw.is_finite() || !dh.is_finite() || dw <= 0.0 || dh <= 0.0
+            || dw.round() > f64::from(i32::MAX) || dh.round() > f64::from(i32::MAX)
+        { return; }
+        let (width, height) = (dw.round().max(1.0) as u64, dh.round().max(1.0) as u64);
+        let x = (f64::from(origin.left) + (ow as f64 - width as f64) * f64::from(presentation.position[0].0)
+            + f64::from(presentation.position[0].1)).round();
+        let y = (f64::from(origin.top) + (oh as f64 - height as f64) * f64::from(presentation.position[1].0)
+            + f64::from(presentation.position[1].1)).round();
+        if !x.is_finite() || !y.is_finite()
+            || x < f64::from(i32::MIN) || x > f64::from(i32::MAX)
+            || y < f64::from(i32::MIN) || y > f64::from(i32::MAX)
+        { return; }
+        let (x, y) = (x as i64, y as i64);
+        let visible = rect.intersect(self.clip).intersect(ClipRect::new(0, 0, self.width as i32, self.height as i32));
+        if visible.left >= visible.right || visible.top >= visible.bottom { return; }
+        for py in visible.top as usize..visible.bottom as usize {
+            let Some(offset_y) = background_axis(py as i64, y, height, presentation.repeat[1]) else { continue; };
+            let vertical = image_axis(offset_y, height, bitmap.height, presentation.rendering);
+            for px in visible.left as usize..visible.right as usize {
+                let Some(offset_x) = background_axis(px as i64, x, width, presentation.repeat[0]) else { continue; };
+                let horizontal = image_axis(offset_x, width, bitmap.width, presentation.rendering);
+                let samples = [
+                    bitmap.pixels[vertical.first * bitmap.width + horizontal.first],
+                    bitmap.pixels[vertical.first * bitmap.width + horizontal.second],
+                    bitmap.pixels[vertical.second * bitmap.width + horizontal.first],
+                    bitmap.pixels[vertical.second * bitmap.width + horizontal.second],
+                ];
+                let Some(index) = py.checked_mul(self.width).and_then(|row| row.checked_add(px)) else { return; };
+                let Some(dst) = self.pixels.get_mut(index) else { return; };
+                *dst = image_mix(samples, horizontal.weight, vertical.weight, *dst);
+            }
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug)]

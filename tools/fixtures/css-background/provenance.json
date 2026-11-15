@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "description": "Original external stylesheet, fixed block geometry and two asymmetric 4x4 P6 pixel patterns.",
+  "authorship": "Fixture HTML, CSS, RGB patterns and generator authored for this project without external source images.",
+  "generator": "make_pixels.py",
+  "generator_dependencies": "Python standard library only",
+  "geometry": {
+    "target": {
+      "width": 32,
+      "height": 24
+    },
+    "control": {
+      "width": 4,
+      "height": 4
+    },
+    "control_margin_top": 4
+  },
+  "background": {
+    "stylesheet": "styles/theme.css",
+    "url": "Pixels/CornerBG.ppm",
+    "resolved_path": "styles/Pixels/CornerBG.ppm",
+    "repeat": "no-repeat",
+    "position": "0 0",
+    "size": "auto",
+    "backing_rgb": [
+      17,
+      34,
+      51
+    ]
+  },
+  "files": {
+    "index.html": {
+      "bytes": 892,
+      "sha256": "ac1d931b58c963293849edf714043487747bd9a99309ab6e6b3d991d56cc3079"
+    },
+    "styles/theme.css": {
+      "bytes": 339,
+      "sha256": "d247a963a8a62674547aae1226e0ce818eca7ed3daab45d8cc92d40a577ed7bc"
+    },
+    "images/control.ppm": {
+      "bytes": 59,
+      "sha256": "7dfb6779bda891ee374bf190149d55bfb110774eb6ab9d43d69dfb7a9e8fc775"
+    },
+    "styles/Pixels/CornerBG.ppm": {
+      "bytes": 59,
+      "sha256": "342f25593ef3e71caefe85ef3b6a715242b555fe110060735d2ac4eb36e89746"
+    }
+  }
+}

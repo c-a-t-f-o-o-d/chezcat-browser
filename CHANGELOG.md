@@ -1,5 +1,55 @@
 # Changes
 
+## 0.80.0-alpha.1 (candidate)
+
+Genuine UIEvent construction and owner-realm prototypes now reuse the existing
+Event/UI slots, with readonly branded fields, exact interleaved dictionary
+conversion and legacy initialization. Real dispatch/cancellation, native keyboard
+ancestry and child owners are covered by original model and executable-input
+checks. MouseEvent/KeyboardEvent/CustomEvent constructors and native immediate
+prototypes remain outside this finite slice. Primitive native reads now preserve
+their actual caller, allowing a retained child's own Window/Document/Location
+fields while retaining foreign-owner denial and callback/exception restoration.
+
+Prospective CSAPUL 1.1 with full offline native first-run acceptance, explicit
+source/headless and organization acceptance, strict local receipts outside
+source/application/profile data, same-text reuse and renewed acceptance for new
+terms. Decline and failed receipt writes exit before browsing. Source builds check
+acceptance without silently creating it. External substantive intake remains
+reports-only until its signing/evaluation controls are verified.
+
+The single authored local IVF/VP8-intra video now supports genuine script
+pause(), currentTime seeking and play() promises alongside load() and native
+controls. Pending play outcomes are source-scoped and settle once, with genuine
+DOMException rejection reasons; playing precedes fulfillment reactions. Loading
+and seek work wait for actual decoded data before advancing playback time.
+
+The optimized-executable original App/input/offscreen journey verifies a trusted
+script play click, Promise/state/event order, measured clock advancement and
+independently derived decoded-frame pixels, then script pause with frozen time
+and pixels. Existing source identity, native controls, seek, EOF/replay, Stop and
+navigation checks remain. Authored element audio, unmarked foreign media, multiple players
+and broader HTMLMediaElement conformance remain unsupported; this adds no
+live-site, physical-desktop or audio-device acceptance.
+
+Authored IVF/VP8-intra video also supports bounded complete same-origin HTTP(S)
+GET transactions through the existing TLS, cookie, CSP and request-blocking paths.
+Require final 200, one valid video/x-ivf MIME and complete framing; reject unsolicited
+partial content. Existing source tokens cancel obsolete work. The adjustable media
+input allowance uses checked growth up to the 512 MiB HTTP/decompression ceiling;
+ordinary document/download/image caller limits remain unchanged. Original HTTP
+and authenticated TLS 1.3 executable journeys verify actual controls, time and
+independent pixels. Explicit authored crossorigin anonymous/use-credentials modes
+now apply genuine CORS checks to each tainted response and redirect, preserving
+Origin and credential history. Credential-eligible cookie effects precede CORS
+visibility checks; cross-site subresource writes preserve SameSite creation and
+overwrite/deletion rules. Real App tests verify foreign playback, credentials,
+refusals and independent pixels. Executable TLS negatives verify certificate
+issuer/identity rejection before media HTTP or player installation. Dynamic
+crossOrigin APIs, opaque cross-origin loading, streaming/ranges and broader media
+conformance remain unsupported.
+
+
 ## 0.79.0-alpha.2
 
 Replacement of the completed animation milestone on a clean public snapshot.
@@ -33,8 +83,8 @@ Earlier valid release grants remain governed by their original terms.
 ## 0.78
 
 Real JavaScript load() reuses source retirement/stable selection and actual local
-video decoding without rewriting raw src/Attr identity. Script play/pause/seek and
-network playback remain incomplete.
+video decoding without rewriting raw src/Attr identity. At that checkpoint,
+script play/pause/seek and network playback remained incomplete.
 
 ## 0.77
 

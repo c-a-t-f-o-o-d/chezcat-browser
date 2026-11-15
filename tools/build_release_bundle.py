@@ -16,7 +16,8 @@ MAX_BYTES=512*1024*1024
 MANDATORY={'README.md','LICENSE','LICENSE_SCOPE.md','THIRD_PARTY_NOTICES.md',
  'CONTRIBUTING.md','CONTRIBUTORS.md','SECURITY.md','CHANGELOG.md','HISTORY_IMPORT.md',
  'ENDORSED_BUILDS.md','Run.cmd','assets/chezcat.ico','assets/chezcat-icon.png',
- 'licensing/CONTRIBUTOR_AGREEMENT.md',
+ 'licensing/CONTRIBUTOR_AGREEMENT.md','licensing/CHANGES-1.1.md',
+ 'docs/LICENSE_ACCEPTANCE.md','docs/CONTRIBUTOR_PRIVACY.md',
  'docs/CAPABILITIES.md','docs/BUILDING.md','docs/ARCHITECTURE.md','docs/ROADMAP.md',
  'docs/FEATURE_CONTRACTS.md','docs/RELEASING.md','docs/BRANDING.md',
  'docs/ENDORSEMENT_POLICY.md'}
@@ -79,6 +80,7 @@ def approve_license(approved,tag,commit=None):
     if not re.fullmatch('[0-9a-f]{64}',approved or '') or sha(data)!=approved:raise ValueError('Approved license hash is required and must match.')
     commit=commit or git('rev-parse','HEAD').decode().strip();entries=tree(commit)
     publication.check_tree(entries)
+    publication.check_receipts(commit)
     publication.check_metadata(commit)
     if 'LICENSE' not in entries or entries['LICENSE'][0] not in [b'100644',b'100755'] or entries['LICENSE'][1]!=b'blob':raise ValueError('Approved LICENSE must be a tracked regular file.')
     if blob(entries['LICENSE'][2])!=data:raise ValueError('Approved license must match exact committed bytes.')
@@ -123,7 +125,8 @@ def main():
     review=args.review_source
     if review and 'review' not in out.name.lower():raise ValueError('Unapproved review archives must be named explicitly as review material.')
     if args.source or review:
-        if not review:approve_license(args.approved_license_sha256,args.tag,commit)
+        if review:publication.check_receipts(commit)
+        else:approve_license(args.approved_license_sha256,args.tag,commit)
         out.parent.mkdir(parents=True,exist_ok=True)
         subprocess.run(['git','archive','--format=zip','--prefix=ChezCat-source/','--output',str(out),commit],cwd=ROOT,check=True)
         manifest=None

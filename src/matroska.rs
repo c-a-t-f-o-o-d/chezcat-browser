@@ -323,10 +323,8 @@ pub fn load(
                     let h = bytes
                         .get(offset..offset + 3)
                         .ok_or("Truncated SimpleBlock header.")?;
-                    if h[2] != 0x80 {
-                        return Err(
-                            "Only unlaced visible independent SimpleBlocks are implemented.".into(),
-                        );
+                    if h[2]&!0x80!=0 {
+                        return Err("Only unlaced visible non-discardable SimpleBlocks are implemented.".into());
                     }
                     let ticks = i128::from(cluster) + i128::from(i16::from_be_bytes([h[0], h[1]]));
                     let nanos = u64::try_from(ticks)
@@ -338,6 +336,9 @@ pub fn load(
                         return Err("Empty Matroska packet.".into());
                     }
                     if Some(number) == v.number {
+                        if (h[2]&0x80!=0)!=(payload[0]&1==0) {
+                            return Err("Matroska keyframe flag disagrees with the actual VP8 packet.".into());
+                        }
                         if packets.len() >= vl.frames || payload.len() > vl.frame_bytes {
                             return Err("Matroska video packet allowance exceeded.".into());
                         }
@@ -354,6 +355,7 @@ pub fn load(
                             .map_err(|_| "Could not grow Matroska video index.")?;
                         packets.push((range, Duration::from_nanos(nanos)));
                     } else if Some(number) == a.number {
+                        if h[2]!=0x80 {return Err("PCM SimpleBlocks must remain independent.".into());}
                         let align = usize::from(channels) * 2;
                         if payload.len() % align != 0
                             || u128::from(audio_frames) * 1_000_000_000
@@ -527,5 +529,31 @@ mod tests {
             assert!(vint(data, &mut 0, false).is_err());
         }
         assert!(read(FIXTURE.to_vec()).is_ok());
+    }
+
+    #[test]
+    fn matroska_dependent_vp8_and_pcm_match_original_standalone_tracks() {
+        let bytes=include_bytes!("../tools/fixtures/scene-inter-av.mkv");
+        let asset=load(bytes.to_vec(),media::Limits::default(),audio::Limits::default(),&||Ok(())).unwrap();
+        let clip=media::Clip::parse(include_bytes!("../tools/fixtures/scene-inter.ivf").to_vec(),media::Limits::default(),&||Ok(())).unwrap();
+        assert_eq!(asset.video.clip.frame_count(),24);assert_eq!(asset.video.clip.duration,Duration::from_secs(3));
+        for index in [0,7,12,17,23,2] {
+            assert_eq!(asset.video.clip.decode(index,&||Ok(())).unwrap().pixels,clip.decode(index,&||Ok(())).unwrap().pixels);
+        }
+        // The existing audio acceptance owns sample/device clock behavior; this
+        // checks the exact demuxed original PCM data independently of video.
+        assert_eq!(asset.audio.duration,Duration::from_secs(3));
+        assert_eq!((asset.audio.channels,asset.audio.sample_rate,asset.audio.frames),(2,48000,144000));
+        let pcm=include_bytes!("../tools/fixtures/scene-inter-av.pcm");let mut frame=0u64;
+        while frame<asset.audio.frames {
+            let block=asset.audio.decode(frame,asset.audio.decode_block_frames(),&||Ok(())).unwrap();
+            assert!(!block.is_empty());let start=frame as usize*4;
+            for(sample,bytes)in block.iter().zip(pcm[start..start+block.len()*2].chunks_exact(2)) {
+                assert_eq!(*sample,i16::from_le_bytes([bytes[0],bytes[1]]));
+            }
+            frame+=block.len() as u64/2;
+        }
+        for index in 0..24 {assert_eq!(asset.audio.frame_at(Duration::from_millis(index*125)),index*6000);}
+
     }
 }

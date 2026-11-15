@@ -1,0 +1,17 @@
+<!doctype html><html><head><meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="media-src 'self'">
+<title>Original default-start video fixture</title>
+<style>video{display:block;width:480px;height:360px}</style></head><body>
+<video id="authored-video" src="scene-intra.ivf" controls width="480" height="360"></video>
+<script>
+var video=document.getElementById('authored-video'),mediaEvents=[],mediaWindowLoaded=false;
+if(video.readyState!==0)throw Error('initial metadata pending');
+function recordDefault(e){
+ if(e.target!==video||!e.isTrusted||e.cancelable||e.bubbles)throw Error('event identity');
+ mediaEvents.push(e.type);
+ if(e.type==='loadedmetadata'&&(video.videoWidth!==64||video.videoHeight!==48||video.duration!==3||video.readyState<1||video.networkState!==1))throw Error('actual metadata');
+ if(e.type==='loadeddata'&&(video.readyState<2||video.seeking))throw Error('initial data before target readiness');
+}
+for(var name of ['loadstart','durationchange','loadedmetadata','loadeddata','canplay','canplaythrough','seeking','timeupdate','seeked','error'])video.addEventListener(name,recordDefault);
+window.addEventListener('load',function(){if(mediaEvents.indexOf('loadeddata')<0)throw Error('window before actual data');mediaWindowLoaded=true;});
+</script></body></html>

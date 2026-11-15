@@ -59,6 +59,7 @@ impl Runtime {
                 Builtin::Date(_) => "native-date",
                 Builtin::Url(_) => "native-url",
                 Builtin::Rect(_) => "native-rect",
+                Builtin::DomException(_) => "native-dom-exception",
                 Builtin::TextEncoding(_) => "native-text-encoding",
                 _ => "native-core",
             };
@@ -75,6 +76,7 @@ impl Runtime {
             Builtin::Date(operation) => operation.arity(),
             Builtin::Url(operation) => operation.arity(),
             Builtin::Rect(operation) => operation.arity(),
+            Builtin::DomException(operation) => operation.arity(),
             Builtin::EmptyFunction | Builtin::ThrowTypeError => 0,
             Builtin::RegExp | Builtin::ParseInt | Builtin::JsonParse => 2,
             Builtin::JsonStringify => 3,

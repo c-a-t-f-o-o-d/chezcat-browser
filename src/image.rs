@@ -26,6 +26,7 @@ mod svg;
 mod tiff;
 #[path = "image_webp.rs"]
 mod webp;
+pub(crate) use webp::VideoDecoder as Vp8VideoDecoder;
 
 #[cfg(test)]
 use crate::compression::adler32;

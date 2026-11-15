@@ -273,6 +273,7 @@ impl App {
         self.apply_history_replacement();
         self.cancel_stylesheet_requests();
         self.cancel_image_requests();
+        self.cancel_background_requests();
         if let Some(worker) = &self.dynamic_scripts {
             worker.cancel();
         }
@@ -294,6 +295,11 @@ impl App {
     }
 
     pub(super) fn process_script_requests(&mut self) -> bool {
+        self.apply_media_pause();
+        let effects=self.poll_media_promise_cleanup();
+        self.process_script_requests_after_cleanup() | effects
+    }
+    fn process_script_requests_after_cleanup(&mut self) -> bool {
         if self.script_jobs_paused() {
             return false;
         }
@@ -410,6 +416,8 @@ impl App {
         if outcome.layout_changed {
             self.reflow();
         }
+        // Finish this owned resource task before consuming its queued navigation.
+        self.resume_background_loading();
         self.validate_control_focus();
         self.sync_editors();
         self.show_script_errors();

@@ -8,13 +8,37 @@ const FRAME_STRIDE: u32 = 16;
 const MAX_BLANK_FRAMES: usize = 8;
 
 pub(super) struct BlankFrame {
+    clock_origin: Instant,
     owner: usize,
     connected: bool,
+    last_activation: Option<Instant>,
     document: Document,
     origin: crate::navigation::Location,
     serialized_origin: String,
     base: crate::navigation::Location,
     policy: crate::csp::PolicySet,
+}
+
+impl State {
+    // Native activation reaches existing same-origin descendant Windows. A new
+    // initial blank Window starts inactive, and detached/foreign frames receive
+    // no notification. Child painting/input/navigation remain unsupported.
+    pub(super) fn notify_blank_frame_activation(&mut self, now: Instant) {
+        let Some(origin) = self.location.as_ref().and_then(|view| view.source.url.as_ref()) else {return;};
+        for frame in &mut self.blank_frames {
+            if frame.connected && frame.origin.url.as_ref().is_some_and(|url| origin.same_origin(url)) {
+                frame.last_activation = Some(now);
+            }
+        }
+    }
+
+    pub(super) fn incumbent_has_transient_activation(&self, now: Instant) -> bool {
+        if self.navigation_incumbent == Some(WINDOW) {return self.has_transient_activation(now);}
+        self.navigation_incumbent.and_then(frame_handle)
+            .filter(|(_, offset)| *offset == 0)
+            .and_then(|(index, _)| self.blank_frames.get(index))
+            .is_some_and(|frame| Self::activation_is_live(frame.last_activation, now))
+    }
 }
 
 fn window(index: usize) -> u32 { FRAME_BASE + index as u32 * FRAME_STRIDE }
@@ -27,6 +51,13 @@ fn document_node(index: usize, node: usize) -> u32 {
 }
 
 impl Bridge<'_> {
+    pub(super) fn event_timestamp(&self,owner:u32,now:Instant)->Result<f64,String> {
+        if owner==WINDOW {return Ok(self.state.clock_ms(now));}
+        let(index,offset)=frame_handle(owner).ok_or("Unknown Event owner Window.")?;
+        if offset!=0 {return Err("Event owner is not a Window.".into());}
+        let frame=self.state.blank_frames.get(index).ok_or("Event owner Window is unavailable.")?;
+        Ok(now.saturating_duration_since(frame.clock_origin).as_millis() as f64)
+    }
     pub(super) fn frame_node_interface(&self,handle:u32)->Option<&'static str> {
         let(index,offset)=frame_handle(handle)?;let frame=self.state.blank_frames.get(index)?;
         if offset==1 {return Some("Node");}
@@ -169,7 +200,7 @@ impl Bridge<'_> {
         Ok(owners.into_iter().map(|owner| {
             let mut document = crate::html::parse("<html><head></head><body></body></html>");
             document.scripting_enabled = self.doc.scripting_enabled;
-            BlankFrame { owner, connected: true, document, origin: origin.clone(), serialized_origin: serialized_origin.clone(), base: base.clone(),
+            BlankFrame { clock_origin:Instant::now(),owner, connected: true, last_activation: None, document, origin: origin.clone(), serialized_origin: serialized_origin.clone(), base: base.clone(),
                 policy: self.state.dynamic.policy.clone() }
         }).collect())
     }
@@ -218,9 +249,13 @@ impl Bridge<'_> {
     }
 
     pub(super) fn frame_get(&mut self, handle: u32, property: &str) -> Option<Result<Value, String>> {
+        self.frame_get_with_caller(Some(WINDOW),handle,property)
+    }
+
+    pub(super) fn frame_get_with_caller(&mut self, caller:Option<u32>, handle:u32, property:&str)->Option<Result<Value,String>> {
         let (index, offset) = frame_handle(handle)?;
         let result = (|| {
-            self.frame_window_access(Some(WINDOW), window(index))?;
+            self.frame_window_access(caller, window(index))?;
             let frame = self.state.blank_frames.get(index).ok_or("Unknown blank-frame handle.")?;
             let value = match offset {
                 0 => match property {
@@ -338,6 +373,10 @@ impl Bridge<'_> {
             && self.frame_window_access(Some(WINDOW), window(index)).is_ok()
     }
 }
+
+#[cfg(test)]
+#[path = "script_child_native_read_tests.rs"]
+mod child_native_read_tests;
 
 #[cfg(test)]
 mod tests {

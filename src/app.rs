@@ -48,6 +48,8 @@ mod style_jobs;
 mod session_history;
 #[path = "app_images.rs"]
 mod image_jobs;
+#[path = "app_backgrounds.rs"]
+mod backgrounds;
 #[path = "app_textarea.rs"]
 mod textarea;
 
@@ -202,6 +204,12 @@ pub struct App {
     home_location: Location,
     raw: String,
     styles: HashMap<usize, String>,
+    style_bases: HashMap<usize, Location>,
+    backgrounds: HashMap<usize, std::sync::Arc<Bitmap>>,
+    background_requests: HashMap<usize, backgrounds::Request>,
+    pending_backgrounds: HashMap<usize, u64>,
+    background_generation: u64,
+    background_request_limit: u64,
     base_fonts: crate::fonts::Book,
     fonts: crate::fonts::Book,
     images: HashMap<usize, std::sync::Arc<Bitmap>>,
@@ -314,6 +322,12 @@ impl App {
             home_location: location.clone(),
             raw: START.to_owned(),
             styles: HashMap::new(),
+            style_bases: HashMap::new(),
+            backgrounds: HashMap::new(),
+            background_requests: HashMap::new(),
+            pending_backgrounds: HashMap::new(),
+            background_generation: 0,
+            background_request_limit: 65_536,
             base_fonts: crate::fonts::Book::empty(),
             fonts: crate::fonts::Book::empty(),
             images: HashMap::new(),
@@ -570,6 +584,7 @@ impl App {
             || self.dynamic_pending != 0
             || self.pending_stylesheets != 0
             || !self.pending_images.is_empty()
+            || !self.pending_backgrounds.is_empty()
             || self
                 .scripting
                 .as_ref()
@@ -684,10 +699,11 @@ impl App {
         }
     }
     pub fn network_needs_tick(&self) -> bool {
-        (self.pending.is_some() || self.dynamic_pending != 0 || self.pending_stylesheets != 0 || !self.pending_images.is_empty())
+        (self.pending.is_some() || self.dynamic_pending != 0 || self.pending_stylesheets != 0 || !self.pending_images.is_empty() || !self.pending_backgrounds.is_empty())
             && self.inspector.network_visible()
     }
     pub fn poll_load(&mut self) -> bool {
+        let pause_changed=if self.scripting.as_ref().is_some_and(|p|p.has_media_tasks()) {self.flush_embedded_video()} else {false};
         self.inspector.invalidate();
         let script_changed = self.poll_dynamic_scripts()
             | self.process_script_requests()
@@ -695,8 +711,9 @@ impl App {
             | self.process_stylesheet_requests()
             | self.poll_dynamic_images()
             | self.process_image_requests();
+        let script_changed = script_changed | self.resume_background_loading();
         let revision = self.network.revision();
-        let mut changed = script_changed | self.process_media_selection() | self.poll_embedded_video() | self.poll_media() | self.poll_audio() | self.poll_media_sync() | self.poll_downloads()
+        let mut changed = pause_changed | script_changed | self.process_media_selection() | self.poll_embedded_video() | self.poll_media() | self.poll_audio() | self.poll_media_sync() | self.poll_downloads()
             || revision != self.last_network_revision
             || self.network_needs_tick();
         changed |= self.flush_embedded_video();
@@ -802,6 +819,7 @@ impl App {
                         if page.initial_image_current(node) {
                             let outcome = page.finish_image_event(&mut self.document, &mut self.forms, node, success);
                             if outcome.layout_changed { self.reflow(); }
+                            self.resume_background_loading();
                         }
                     }
                 }
@@ -1464,6 +1482,11 @@ impl App {
         self.forms = Forms::new(&self.document);
         self.raw = loaded.raw;
         self.styles = loaded.styles;
+        self.style_bases = loaded.style_bases;
+        self.backgrounds.clear();
+        self.background_requests.clear();
+        self.pending_backgrounds.clear();
+        self.background_generation = 0;
         self.fonts = self.base_fonts.clone();
         self.fonts.extend(&loaded.fonts);
         self.images = loaded.images;
@@ -1495,6 +1518,7 @@ impl App {
         self.failed = false;
         if self.document.scripting_enabled {
             let mut page = crate::scripting::Page::new();
+            page.set_background_pending(false);
             page.set_navigation_timing(loaded.document_timing);
             page.set_embedded_video(self.embedded_video_snapshot());
             page.set_location(&self.location);
@@ -1511,14 +1535,16 @@ impl App {
                 natural_image_sizes(&self.images, &self.image_densities),
                 &self.fonts,
             ).with_limits(self.geometry_limits));
-            if images_pending || self.embedded_video.is_some() {
-                page.start_before_load(&mut self.document, &mut self.forms, &scripts, &loaded.csp);
-            } else {
-                page.start_with_policy(&mut self.document, &mut self.forms, &scripts, &loaded.csp);
-            }
+            // Startup scripts and DOMContentLoaded can select CSS images too.
+            // Commit their real resource plan before the window-load checkpoint.
+            page.start_before_load(&mut self.document, &mut self.forms, &scripts, &loaded.csp);
             self.scripting = Some(page);
         }
         self.reflow();
+        if !images_pending {
+            let outcome = self.scripting.as_mut().map(|page| page.finish_loading(&mut self.document, &mut self.forms));
+            if outcome.is_some_and(|outcome| outcome.layout_changed) { self.reflow(); }
+        }
         self.jump_fragment();
         self.show_script_errors();
         self.flush_embedded_video();
@@ -1536,6 +1562,9 @@ impl App {
         };
     }
     fn show_script_errors(&mut self) {
+        // Committed media effects survive a producer error. Apply their issue
+        // time before selection or a fresh snapshot can replace the projection.
+        self.apply_media_pause();
         self.process_media_selection();
         self.apply_history_replacement();
         let script_errors = self.scripting.as_ref().map_or(0, |page| page.error_count());
@@ -1590,6 +1619,7 @@ impl App {
                 &self.fonts,
             )
         };
+        self.sync_background_images();
         self.observe_layout();
         self.rebuild_link_colors();
         if self.alternate.is_none() {
@@ -3185,6 +3215,9 @@ impl App {
             return PlatformAction::None;
         }
         if self.view == View::Page {
+            if let Some(page) = self.scripting.as_mut() {
+                page.notify_user_activation();
+            }
             if let Some(node) = self
                 .page
                 .control_at(x, y - self.content_top() + self.scroll)
@@ -3576,6 +3609,17 @@ impl App {
                     let y = y + top - self.scroll;
                     if y < bottom && y.saturating_add(height) > top {
                         canvas.fill_rect(x, y, width, height, self.page_background_color(color));
+                    }
+                }
+                PaintItem::Background { node, x, y, width, height, border, presentation, .. } => {
+                    if self.view == View::Page {
+                        if let Some(bitmap) = self.backgrounds.get(&node) {
+                            let rect = crate::paint::ClipRect::new(x, y + top - self.scroll, width, height);
+                            let origin = crate::paint::ClipRect::new(rect.left.saturating_add(border[3]),
+                                rect.top.saturating_add(border[0]), width.saturating_sub(border[1]).saturating_sub(border[3]),
+                                height.saturating_sub(border[0]).saturating_sub(border[2]));
+                            canvas.background_image(rect, origin, bitmap, presentation);
+                        }
                     }
                 }
                 PaintItem::Image {

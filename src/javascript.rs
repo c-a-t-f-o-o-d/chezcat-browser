@@ -66,6 +66,8 @@ mod collections;
 mod date;
 #[path = "rect_api.rs"]
 mod rect_api;
+#[path = "dom_exception.rs"]
+mod dom_exception;
 #[path = "expression_parser.rs"]
 mod expression_parser;
 #[path = "expression_evaluator.rs"]
@@ -83,6 +85,8 @@ mod environment_lifetime_tests;
 mod function_constructor;
 #[path = "host_objects.rs"]
 mod host_objects;
+#[path = "event_interface.rs"]
+mod event_interface;
 #[path = "runtime_diagnostics.rs"]
 mod runtime_diagnostics;
 #[path = "string_substr.rs"]
@@ -113,6 +117,9 @@ mod primitive_conversion;
 mod primitive_wrappers;
 #[path = "promises.rs"]
 mod promises;
+pub(crate) use promises::{NativePromise, NativePromiseOutcome};
+#[path = "host_promise.rs"]
+mod host_promise;
 #[path = "prototypes.rs"]
 mod prototypes;
 #[path = "regexp.rs"]
@@ -328,7 +335,19 @@ pub struct NativeAncestry {
 /// never receives interpreter access; the runtime keeps the current job/realm.
 pub struct EventCallback {pub function:Value,pub target:u32,pub event:u32}
 
+pub(crate) enum NativePromiseFailure {
+    Dom(&'static str, &'static str),
+    Fatal(String),
+}
+
 pub trait Host {
+    fn promise_returning_operation(&self,_object:u32,_method:&str)->bool {false}
+    fn validate_promise_operation(&self,_object:u32,_method:&str)->Result<(),NativePromiseFailure> {Ok(())}
+    fn call_promise_operation(&mut self,_object:u32,_method:&str,_promise:NativePromise)->Result<(),NativePromiseFailure> {
+        Err(NativePromiseFailure::Fatal("Native Promise operation is unavailable.".into()))
+    }
+    fn peek_native_promise_effect(&self)->Option<(NativePromise,Option<(&'static str,&'static str)>)> {None}
+    fn finish_native_promise_effect(&mut self) {}
     fn synchronous_event_dispatch(&self,_object:u32,_method:&str)->bool {false}
     fn prepare_event_dispatch(&mut self)->Result<(),String> {Err("Synchronous event dispatch is not authorized by this host.".into())}
     fn begin_event_dispatch(&mut self,_object:u32,_args:&[Value])->Result<usize,String> {Err("Synchronous event dispatch is not authorized by this host.".into())}
@@ -472,6 +491,18 @@ pub trait Host {
     /// method validation. It shares the caller's argument/copy/work budgets.
     fn variadic_string_arguments(&self, _object: u32, _method: &str) -> bool { false }
     fn method_length(&self, _object: u32, _method: &str) -> Option<usize> { None }
+    /// Optional owner for a real native method whose first lookup may occur in
+    /// another supported realm. This grants no constructor/prototype capability.
+    fn native_method_owner(&self, _object:u32, _method:&str) -> Option<u32> { None }
+    /// Only fresh, still-unpublished supported Event constructor/factory results opt
+    /// into atomic ordinary-store/unforgeable installation.
+    fn unpublished_base_event_owner(&self,_object:u32,_method:&str,_result:u32)->Option<u32>{None}
+    fn rollback_unpublished_base_event(&mut self,_event:u32)->Result<(),String>{
+        Err("No unpublished Event transaction exists.".into())
+    }
+    fn event_path_snapshot(&mut self,_event:u32)->Result<Vec<u32>,String>{
+        Err("Event path access is unavailable.".into())
+    }
     /// Preserve original nullish inputs for an explicitly nullable DOMString.
     /// A null returned by object coercion still undergoes ordinary ToString.
     fn nullable_string_argument(&self, _object: u32, _method: &str, _index: usize) -> bool {
@@ -508,6 +539,11 @@ pub trait Host {
     ) -> Option<(usize, &'static [&'static str])> {
         None
     }
+    /// Optional immediate scalar conversion for an explicitly supported native
+    /// dictionary member. It runs after that Get and before the next member Get.
+    fn dictionary_member_conversion(&self,_object:u32,_method:&str,_member:&str)->Option<bool>{None}
+    fn validate_dictionary_member(&self,_object:u32,_method:&str,_member:&str,_value:&Value)
+        ->Result<(),(&'static str,String)>{Ok(())}
     fn call_with_dictionary(
         &mut self,
         object: u32,
@@ -541,7 +577,15 @@ pub trait Host {
         Err("String evaluation is not enabled by this host.".into())
     }
     fn get(&mut self, object: u32, property: &str) -> Result<Value, String>;
+    /// One primitive native read with the original script/native caller. Hosts
+    /// without caller-sensitive fields retain their original getter behavior.
+    fn get_with_caller(&mut self, _caller: Option<u32>, object: u32, property: &str) -> Result<Value, String> {
+        self.get(object, property)
+    }
     fn set(&mut self, object: u32, property: &str, value: Value) -> Result<(), String>;
+    /// Incumbent native caller, captured independently of a saved method's owner
+    /// realm. Called after coercion and immediately before a host operation.
+    fn native_operation_caller(&mut self, _window: Option<u32>) {}
     /// Reserve a native stable-state microtask before a host mutation commits.
     /// The ticket is host-owned data, never a script callback or native handle.
     fn prepare_native_microtask(&mut self,_object:u32,_member:&str,_args:&[Value],_setter:bool)->Result<Option<u64>,String>{Ok(None)}
@@ -2967,6 +3011,7 @@ enum Builtin {
     Date(date::Op),
     Url(url_api::Op),
     Rect(rect_api::Op),
+    DomException(dom_exception::Op),
     Eval,
     JsonParse,
     JsonStringify,
@@ -3069,6 +3114,7 @@ struct Object {
     date: Option<f64>,
     url: Option<url_api::Data>,
     rect: Option<rect_api::Data>,
+    dom_exception: Option<dom_exception::Data>,
     primitive: Option<primitive_wrappers::Data>,
     promise: Option<promises::Data>,
     arguments: Option<arguments::Data>,
@@ -3195,6 +3241,7 @@ pub struct Runtime {
     date_prototype: Option<usize>,
     url_roots: url_api::Roots,
     rect_roots: rect_api::Roots,
+    dom_exception_roots: dom_exception::Roots,
     string_prototype: Option<usize>,
     number_prototype: Option<usize>,
     boolean_prototype: Option<usize>,
@@ -3336,6 +3383,7 @@ impl Runtime {
             date_prototype: None,
             url_roots: url_api::Roots::default(),
             rect_roots: rect_api::Roots::default(),
+            dom_exception_roots: dom_exception::Roots::default(),
             string_prototype: None,
             number_prototype: None,
             boolean_prototype: None,
@@ -3388,7 +3436,7 @@ impl Runtime {
             job_failed_fatally: false,
             diagnostics: runtime_diagnostics::Data::default(),
             failed_window_realms: HashSet::new(),
-            deferred_intrinsics: (if defer_families { 7 } else { 0 }) | 8,
+            deferred_intrinsics: (if defer_families { 7 } else { 0 }) | 8 | 16,
             failed_intrinsics: 0,
             array_to_string_intrinsic: None,
             deferred_native_methods: Vec::new(),
@@ -3450,6 +3498,8 @@ impl Runtime {
         else { self.reserve_deferred_global_orders(intrinsic_realms::TEXT_GLOBALS)?; }
         if self.deferred_intrinsics & 8 == 0 { self.initialize_rect_api()?; }
         else { self.reserve_deferred_global_orders(intrinsic_realms::RECT_GLOBALS)?; }
+        if self.deferred_intrinsics & 16 == 0 { self.initialize_dom_exception()?; }
+        else { self.reserve_deferred_global_orders(intrinsic_realms::DOM_EXCEPTION_GLOBALS)?; }
         for (name, value) in [
             ("undefined", Value::Undefined),
             ("NaN", Value::Number(f64::NAN)),
@@ -4164,7 +4214,7 @@ impl Runtime {
         let (handle, properties) = self.browser_global.expect("bound browser global");
         self.property_name(name)?;
         if self.host_owns_global(name, host) {
-            let value = host.get(handle, name).map_err(Fault::new)?;
+            let value = self.host_get_checked(handle, name, host)?;
             self.checked_value(value)
         } else if self.global_binding(name) {
             self.binding_value(self.global_environment, name)
@@ -5309,6 +5359,7 @@ impl Runtime {
             date: None,
             url: None,
             rect: None,
+            dom_exception: None,
             primitive: None,
             promise: None,
             arguments: None,
@@ -7491,6 +7542,9 @@ impl Runtime {
             Some(Function::Native(Builtin::Rect(rect_api::Op::Constructor(mutable)))) => {
                 self.rect_construct(*mutable, args, host)
             }
+            Some(Function::Native(Builtin::DomException(dom_exception::Op::Constructor))) => {
+                self.dom_exception_construct(args,host)
+            }
             Some(Function::Native(Builtin::Promise(promises::Op::Constructor))) => {
                 self.construct_promise(args, host)
             }
@@ -8024,7 +8078,8 @@ impl Runtime {
         let args = if conversions.is_empty() && !variadic {
             args
         } else {
-            converted = Vec::with_capacity(args.len());
+            converted = Vec::new();
+            converted.try_reserve(args.len()).map_err(|_|Fault::new("Could not reserve converted native arguments."))?;
             for value in args {
                 converted.push(self.copy_value(value)?);
             }
@@ -8057,6 +8112,9 @@ impl Runtime {
         if host.synchronous_event_dispatch(object,method) {host.prepare_event_dispatch().map_err(Fault::new)?;}
         host.validate_call(object, method, args)
             .map_err(|(kind, message)| Fault::exception(kind, message))?;
+        if method==event_interface::PATH_METHOD {
+            return self.event_path_array(object,host);
+        }
         if host.synchronous_event_dispatch(object,method) {
             let token=host.begin_event_dispatch(object,args).map_err(Fault::new)?;
             let result=(|| {
@@ -8094,7 +8152,7 @@ impl Runtime {
                     "forEach requires a callable callback.",
                 ));
             }
-            let Value::Number(length) = host.get(object, "length").map_err(Fault::new)? else {
+            let Value::Number(length) = self.host_get_checked(object, "length", host)? else {
                 return Err(Fault::new("Invalid native collection length."));
             };
             if length < 0.0 || length.fract() != 0.0 || length > self.limits.heap.object_properties as f64 {
@@ -8125,17 +8183,33 @@ impl Runtime {
                 if names.len() > self.limits.capacity.arguments {
                     return Err(Fault::new(format!("Native dictionary field limit reached ({}).", self.limits.capacity.arguments)));
                 }
-                let mut values = Vec::with_capacity(names.len());
+                let mut values = Vec::new();
+                values.try_reserve(names.len()).map_err(|_|Fault::new("Could not reserve native dictionary fields."))?;
                 for &name in names {
                     let reference = Reference::Property(self.copy_value(value)?, name.into());
-                    values.push((name, self.read_reference(&reference, host)?));
+                    let mut member=self.read_reference(&reference, host)?;
+                    if let Some(string_hint)=host.dictionary_member_conversion(object,method,name) {
+                        let primitive=self.primitive_with_hint(member,string_hint,host)?;
+                        self.work(primitive.bytes())?;
+                        member=self.checked_value(if string_hint {Value::String(primitive.script_text()?)}
+                            else {Value::Number(primitive.script_number()?)})?;
+                    }
+                    host.validate_dictionary_member(object,method,name,&member)
+                        .map_err(|(kind,message)|Fault::exception(kind,message))?;
+                    values.push((name,member));
                 }
                 fields = Some(values);
             }
         }
         if let Some(fields) = &fields { for (_, value) in fields { self.pin_exported_value(value); } }
         let ticket=self.prepare_host_microtask(host,object,method,args,false)?;
+        host.native_operation_caller(self.native_access_caller
+            .unwrap_or_else(|| self.browser_global.map(|(window, _)| window)));
         let result=host.call_with_dictionary(object, method, args, fields.as_deref()).map_err(Fault::new);
+        if let Ok(value)=&result {self.finish_new_event_result(object,method,value,host)?;}
+        if self.drain_native_promise_effects(host)?!=0 {
+            self.defer_host_microtask_after_effects(ticket)?;
+        }
         self.finish_host_microtask(host,ticket)?;
         result
     }
@@ -8390,6 +8464,9 @@ impl Runtime {
             Some(Function::Native(Builtin::Rect(operation))) => {
                 return self.rect_builtin(*operation, args, this, host);
             }
+            Some(Function::Native(Builtin::DomException(operation))) => {
+                return self.dom_exception_builtin(*operation,this);
+            }
             Some(Function::Native(Builtin::Promise(operation))) => {
                 return self.promise_builtin(*operation, args, this, host);
             }
@@ -8451,6 +8528,9 @@ impl Runtime {
                 }
                 let (mut object, method, receiver_required) =
                     (*object, *method, *receiver_required);
+                if host.promise_returning_operation(object,method) {
+                    return self.call_host_promise(object,method,receiver_required,this,host);
+                }
                 if let Some(receiver) = host.global_operation_receiver(object, method, &this) {
                     self.validate_native_access(object, host)?;
                     if let Value::Host(handle) = &this { self.validate_native_access(*handle, host)?; }
@@ -8953,6 +9033,7 @@ impl Runtime {
             | Builtin::Date(_)
             | Builtin::Url(_)
             | Builtin::Rect(_)
+            | Builtin::DomException(_)
             | Builtin::Binary(_)
             | Builtin::Collection(_)
             | Builtin::Iterator(_)

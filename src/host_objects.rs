@@ -89,6 +89,13 @@ impl Runtime {
         }
         Ok(())
     }
+    /// The captured native caller remains distinct from a borrowed builtin's
+    /// owner realm. Validate it before the host performs exactly one getter.
+    pub(super) fn host_get_checked(&mut self, handle:u32, name:&str, host:&mut dyn Host)->Result<Value,Fault> {
+        let caller=self.native_access_caller.unwrap_or_else(||self.browser_global.map(|(window,_)|window));
+        self.validate_native_access(handle,host)?;
+        host.get_with_caller(caller,handle,name).map_err(Fault::new)
+    }
     pub(super) fn host_lookup_tail(&mut self,handle:u32,name:&str,host:&mut dyn Host)->Result<Option<Ordinary>,Fault> {
         if !host.ordinary_lookup_tail_property(handle,name) || host.owns_property(handle,name) { return Ok(None); }
         self.host_inherited_read_tail(handle, name, host)
@@ -120,9 +127,13 @@ impl Runtime {
         if self.host_objects.contains_key(&handle) {return Err(Fault::new("Native expando store conflicts with an existing host binding."));}
         let ancestry=host.instance_ancestry(handle).ok_or_else(||Fault::new("Native expando prototype provenance is unavailable."))?;
         if ancestry.window!=owner {return Err(Fault::new("Native expando prototype owner mismatch."));}
+        let base_event=matches!(ancestry.constructor,Some((window,"Event"|"UIEvent")) if window==owner);
         let prototype=self.native_ancestry_anchor(ancestry)?;
         let id=self.new_object(None)?;
         self.objects[id].prototype=Some(prototype);
+        if base_event {
+            self.event_unforgeable(id,owner)?;
+        }
         self.host_objects.insert(handle,id);
         self.native_expando_owners.insert(handle,owner);
         Ok(())
@@ -216,10 +227,21 @@ impl Runtime {
             );
         }
         if let Some(method) = host.method(handle, name) {
+            // An opted-in method's owner/origin remains authoritative even
+            // after its function wrapper has been cached. A prior same-origin
+            // read must not authorize a later foreign reader of this handle.
+            let method_realm = host.native_method_owner(handle,method)
+                .map(|owner|self.ensure_window_realm(owner,host)).transpose()?;
             if let Some(value) = self.host_method_values.get(&(handle, method)).cloned() {
                 return self.copy_value(&value);
             }
-            let value = self.host_method(handle, method).map_err(Fault::new)?;
+            let value = if let Some(realm) = method_realm {
+                self.with_intrinsic_realm(realm,|runtime|runtime.host_method(handle,method).map_err(Fault::new))?
+            } else if host.promise_returning_operation(handle,method) {
+                let owner=host.native_access_owner(handle).ok_or_else(||Fault::new("Promise operation owner is unavailable."))?;
+                let realm=self.ensure_window_realm(owner,host)?;
+                self.with_intrinsic_realm(realm,|runtime|runtime.host_method(handle,method).map_err(Fault::new))?
+            } else {self.host_method(handle, method).map_err(Fault::new)?};
             if let Some(length) = host.method_length(handle,method) {
                 let Value::Function(id) = value else { unreachable!() };
                 self.store_property(self.function_properties[id],"length".into(),Value::Number(length as f64),Some((false,false,true)))?;
@@ -231,7 +253,7 @@ impl Runtime {
         if let Some(tail) = self.host_lookup_tail(handle,name,host)? {
             return self.get_ordinary_property_with_receiver(tail,name,&Value::Host(handle),host);
         }
-        let value = host.get(handle, name).map_err(Fault::new)?;
+        let value = self.host_get_checked(handle, name, host)?;
         if matches!(value, Value::Undefined)
             && (host.ordinary_prototype(handle) || host.ordinary_lookup_tail_property(handle,name))
             && !host.has(handle, name).map_err(Fault::new)?
@@ -294,7 +316,12 @@ impl Runtime {
         host.validate_set(handle, &name, &value)
             .map_err(|(kind, message)| Fault::exception(kind, message))?;
         let ticket=self.prepare_host_microtask(host,handle,&name,std::slice::from_ref(&value),true)?;
+        host.native_operation_caller(self.native_access_caller
+            .unwrap_or_else(|| self.browser_global.map(|(window, _)| window)));
         let result=host.set(handle,&name,value).map_err(Fault::new);
+        if self.drain_native_promise_effects(host)?!=0 {
+            self.defer_host_microtask_after_effects(ticket)?;
+        }
         self.finish_host_microtask(host,ticket)?;
         result
     }

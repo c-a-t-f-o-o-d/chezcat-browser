@@ -13,17 +13,18 @@ import capture_tests
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def main():
+def main(source=None, reference_paths=None):
     folder = ROOT / 'results/verification/autonomy' / (datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S.%fZ') + '-source-replacement-journey-' + uuid.uuid4().hex[:8])
     folder.mkdir(parents=True)
     script = folder / 'input.tsv'
     script.write_text('snapshot\tinitial\nmedia\tPlay\nwait\t650\nmedia\tPause\nsnapshot\toldpaused\nclick\treplace\nsnapshot\treplaced\nwait\t400\nsnapshot\tfrozen\nmedia\tPlay\nwait\t650\nmedia\tPause\nsnapshot\tnewpaused\nclick\trestore\nsnapshot\trestored\nclick\tclear\nsnapshot\tempty\nclick\tmissing\nsnapshot\tmissing\nclick\treplace\nsnapshot\trecovered\nlink\tLeave\nsnapshot\tnavigated\n', encoding='utf-8', newline='\n')
     before = capture_tests.source_identity(ROOT)
     out = folder / 'journey'
-    row = capture_tests.execute([str(ROOT / 'ChezCat.exe'), str(ROOT / 'tools/fixtures/source-replacement.html'), '--dev-input-script', str(script), '--dev-input-output', str(out), '--javascript', '--no-profile'], folder / 'command.log', ROOT, 120)
+    row = capture_tests.execute([str(ROOT / 'ChezCat.exe'), str(source if source is not None else ROOT / 'tools/fixtures/source-replacement.html'), '--dev-input-script', str(script), '--dev-input-output', str(out), '--javascript', '--no-profile'], folder / 'command.log', ROOT, 120)
     checks = {'process_completed': row['state'] == 'completed' and row['exit_code'] == 0}
     stages = {}
-    references = {name: (ROOT / 'tools/fixtures' / name).read_bytes() for name in ['scene-intra.rgba', 'scene-replacement.rgba']}
+    reference_paths = reference_paths if reference_paths is not None else {name: ROOT / 'tools/fixtures' / name for name in ['scene-intra.rgba', 'scene-replacement.rgba']}
+    references = {name: Path(path).read_bytes() for name, path in reference_paths.items()}
     for name in ['initial', 'oldpaused', 'replaced', 'frozen', 'newpaused', 'restored', 'empty', 'missing', 'recovered', 'navigated']:
         file = next(out.glob('*-' + name + '.activity.txt'), None)
         if not file:

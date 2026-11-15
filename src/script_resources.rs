@@ -42,6 +42,8 @@ impl Page {
         self.clear_image_requests();
         self.state.dynamic.pending.clear();
         self.state.dynamic.in_flight = 0;
+        // Explicit host cancellation abandons the deferred document load.
+        self.state.dynamic.load_ready = false;
         self.state.navigation = None;
         self.state.dom.pending_focus = None;
     }
@@ -97,6 +99,7 @@ impl Page {
             }
         };
         let outcome = self.dispatch(doc, forms, request.node, event, false);
+        self.defer_backgrounds_for_layout(outcome.layout_changed || self.state.changed);
         let loading = if self.state.dynamic.load_ready {
             self.finish_loading(doc, forms)
         } else {

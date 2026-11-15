@@ -1,4 +1,6 @@
-//! Parser-authored local IVF video source loading. No network/codec helper.
+//! Authored IVF and supported Matroska VP8/PCM16 source loading.
+//! Network container admission uses the bounded response MIME, never its URL suffix.
+//! Network plans require an immutable document-origin resource context before IO.
 use crate::{
     html::{Document, Namespace, NodeKind},
     media,
@@ -10,12 +12,29 @@ use std::sync::{
 };
 use std::time::{Duration, Instant};
 
+pub struct Asset {
+    pub video: media::Asset,
+    pub audio: Option<Arc<crate::audio::Clip>>,
+}
+impl From<media::Asset> for Asset {
+    fn from(video: media::Asset) -> Self { Self { video, audio: None } }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SourceKind { Ivf, LocalMatroska, Network }
+
 pub struct Plan {
     pub retired: Arc<AtomicBool>,
     pub node: usize,
     pub raw: String,
     pub source: Location,
     limits: media::Limits,
+    audio_limits: Option<crate::audio::Limits>,
+    kind: SourceKind,
+    muted: bool,
+    document_origin: Option<crate::url::HttpUrl>,
+    pub(crate) cors_mode: Option<crate::http::MediaCredentials>,
+    network: Option<crate::network_media::Context>,
 }
 impl Plan {
     pub fn new(
@@ -58,35 +77,74 @@ impl Plan {
         }) {
             return Err("Embedded media plan requires its actual HTML video node.".into());
         }
-        if location.url.is_some() || location.path.is_none() {
-            return Err("Embedded video currently accepts a local document and an in-root local IVF source only.".into());
+        if location.url.is_none() && location.path.is_none() {
+            return Err("Embedded video requires a local or HTTP(S) document.".into());
+        }
+        if location.url.is_some() && (location.path.is_some() || location.root.is_some()) {
+            return Err("A network video document cannot carry local-file authority.".into());
         }
         if let Some(name) = ["loop", "poster", "autoplay", "crossorigin"]
             .into_iter()
-            .find(|name| doc.attr(node, name).is_some())
+            .find(|name| (*name != "crossorigin" || location.url.is_none())
+                && doc.attr(node, name).is_some())
         {
             return Err(format!("Authored video attribute {name:?} is not implemented in this element slice; source was not loaded."));
         }
         if raw.is_empty() {
             return Err("The selected media src is empty.".into());
         }
-        let source = crate::navigation::resolve(raw, base)?;
-        if source.url.is_some() || source.path.is_none() || source.root != location.root {
-            return Err(
-                "Embedded video source is outside the local document root or is not a local file."
-                    .into(),
-            );
-        }
+        // Enumerated attribute: missing keeps the conservative no-CORS
+        // path. Any present value except the exact ASCII-insensitive
+        // use-credentials keyword selects anonymous/same-origin credentials.
+        // Do not trim: whitespace is an invalid value with that same default.
+        let cors_mode = doc.attr(node, "crossorigin").map(|value| {
+            if value.eq_ignore_ascii_case("use-credentials") {
+                crate::http::MediaCredentials::Include
+            } else {
+                crate::http::MediaCredentials::SameOrigin
+            }
+        });
+        let source = if let Some(origin) = &location.url {
+            // Check the base before resolution: network documents must never
+            // enter local canonicalization/opening, even for a malformed base.
+            if base.url.is_none() || base.path.is_some() || base.root.is_some() {
+                return Err("A network video source requires an HTTP(S) base.".into());
+            }
+            let source = crate::navigation::resolve(raw, base)?;
+            let target = source.url.as_ref().ok_or("A network video source must use HTTP(S).")?;
+            if source.path.is_some() || source.root.is_some() {
+                return Err("A network video source cannot carry local-file authority.".into());
+            }
+            if origin.secure && !target.secure {
+                return Err("HTTPS media cannot use an unencrypted HTTP source.".into());
+            }
+            if cors_mode.is_none() && !target.same_origin(origin) {
+                return Err("Network video without crossorigin requires the document's exact HTTP(S) origin.".into());
+            }
+            source
+        } else {
+            let source = crate::navigation::resolve(raw, base)?;
+            if source.url.is_some() || source.path.is_none() || source.root != location.root {
+                return Err(
+                    "Embedded video source is outside the local document root or is not a local file."
+                        .into(),
+                );
+            }
+            source
+        };
         policy.allows_media(policy_scope, &source)?;
-        if !source
-            .path
-            .as_ref()
-            .unwrap()
-            .extension()
-            .and_then(|s| s.to_str())
-            .is_some_and(|s| s.eq_ignore_ascii_case("ivf"))
-        {
-            return Err("Embedded video currently decodes original local IVF/VP8-intra video only; other containers/audio/network are not enabled for this element slice.".into());
+        let kind = if source.url.is_some() {
+            // Network container admission is unknown until the completed
+            // response supplies one strictly validated supported MIME type.
+            SourceKind::Network
+        } else {
+            let extension = source.path.as_ref().unwrap().extension().and_then(|value| value.to_str()).unwrap_or("");
+            if extension.eq_ignore_ascii_case("ivf") { SourceKind::Ivf }
+            else if extension.eq_ignore_ascii_case("mkv") { SourceKind::LocalMatroska }
+            else { return Err("Local authored video requires the supported IVF or Matroska VP8/PCM16 profile.".into()); }
+        };
+        if kind == SourceKind::LocalMatroska && doc.attr(node, "muted").is_some() {
+            return Err("Authored PCM muting is not implemented; a muted Matroska source was not loaded.".into());
         }
         Ok(Self {
             retired,
@@ -94,9 +152,50 @@ impl Plan {
             raw: raw.into(),
             source,
             limits,
+            audio_limits: None,
+            kind,
+            muted: doc.attr(node, "muted").is_some(),
+            document_origin: location.url.clone(),
+            cors_mode,
+            network: None,
         })
     }
-    fn load(&self, cancel: &AtomicBool) -> Result<media::Asset, String> {
+    /// Capture the owning App's audio policy before local muxed IO. Plain
+    /// video plans need no audio authority and retain the existing constructors.
+    pub(crate) fn with_audio_limits(mut self, limits: crate::audio::Limits) -> Self {
+        self.audio_limits = Some(limits);
+        self
+    }
+    /// Planning validates source selection but grants no network authority.
+    /// The owning App supplies this immutable context before worker submission.
+    pub(crate) fn with_network_context(
+        mut self,
+        context: crate::network_media::Context,
+    ) -> Result<Self, String> {
+        let source = self.source.url.as_ref()
+            .ok_or("A local video plan cannot receive network authority.")?;
+        if !Arc::ptr_eq(&self.retired, &context.retired) {
+            return Err("The network media context belongs to a different source lifetime.".into());
+        }
+        let origin = self.document_origin.as_ref()
+            .ok_or("A local document cannot grant network video authority.")?;
+        if !context.origin.same_origin(origin) {
+            return Err("The network media context does not match the selecting document origin.".into());
+        }
+        if context.credentials != self.cors_mode {
+            return Err("The network media context does not match the selected crossorigin mode.".into());
+        }
+        if self.source.path.is_some() || self.source.root.is_some()
+            || origin.secure && !source.secure
+            || self.cors_mode.is_none() && !source.same_origin(origin)
+        {
+            return Err("The network media source violates its selecting document authority.".into());
+        }
+        context.policy.allows_media(context.policy_scope, &self.source)?;
+        self.network = Some(context);
+        Ok(self)
+    }
+    fn load(&self, cancel: &AtomicBool) -> Result<Asset, String> {
         let check = || {
             if cancel.load(Ordering::Relaxed) || self.retired.load(Ordering::Relaxed) {
                 Err("Embedded video source cancelled.".into())
@@ -105,15 +204,51 @@ impl Plan {
             }
         };
         check()?;
-        let bytes = crate::loader::read_local_media_checked(
-            self.source
-                .path
-                .as_ref()
-                .ok_or("Missing local video path.")?,
-            self.limits.input_bytes,
-            &check,
-        )?;
-        media::Clip::load(bytes, self.limits, &check)
+        let audio_limits = if self.kind == SourceKind::LocalMatroska {
+            if self.source.url.is_some() { return Err("Matroska element audio requires a local source.".into()); }
+            Some(self.audio_limits.ok_or("Local Matroska requires its owning App audio limits before loading.")?)
+        } else { None };
+        let input_limit = audio_limits.map_or(self.limits.input_bytes, |limits| self.limits.input_bytes.min(limits.input_bytes));
+        let asset = if let Some(source) = &self.source.url {
+            let context = self.network.as_ref()
+                .ok_or("The selected network video has no owning resource context.")?;
+            if let Some(audio_limits) = self.audio_limits {
+                let resource = context.load_resource(source, self.limits.input_bytes, cancel)?;
+                check()?;
+                match resource.format {
+                    crate::network_media::Format::Ivf => Asset::from(media::Clip::load(resource.bytes, self.limits, &check)?),
+                    crate::network_media::Format::MatroskaPcm16 => {
+                        if self.muted { return Err("Authored PCM muting is not implemented; the Matroska response was not decoded.".into()); }
+                        // The full transfer already observed the media byte cap.
+                        // The PCM policy applies additionally before demux; it
+                        // must not shrink unrelated video-only IVF transfers.
+                        if resource.bytes.len() > audio_limits.input_bytes {
+                            return Err("Muxed network media exceeds its captured audio input byte allowance.".into());
+                        }
+                        let asset = crate::matroska::load(resource.bytes, self.limits, audio_limits, &check)?;
+                        Asset { video: asset.video, audio: Some(asset.audio) }
+                    }
+                }
+            } else {
+                // Callers without captured audio authority keep the old
+                // genuine IVF-only Context API and receive no PCM payload.
+                let bytes = context.load(source, self.limits.input_bytes, cancel)?;
+                Asset::from(media::Clip::load(bytes, self.limits, &check)?)
+            }
+        } else {
+            let bytes = crate::loader::read_local_media_checked(
+                self.source.path.as_ref().ok_or("Missing local video path.")?, input_limit, &check,
+            )?;
+            check()?;
+            if let Some(audio_limits) = audio_limits {
+                let asset = crate::matroska::load(bytes, self.limits, audio_limits, &check)?;
+                Asset { video: asset.video, audio: Some(asset.audio) }
+            } else {
+                Asset::from(media::Clip::load(bytes, self.limits, &check)?)
+            }
+        };
+        check()?;
+        Ok(asset)
     }
 }
 
@@ -141,8 +276,15 @@ pub fn authored_node(doc: &Document) -> Option<usize> {
     None
 }
 
+/// Position authority is explicit: only video-only playback uses Instant time.
+/// PCM snapshots contain the owner's acknowledged sample position, even when
+/// playback is logically active and the next device acknowledgement stalls.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ClockKind { WallTime, AcknowledgedPcm }
+
 #[derive(Clone)]
 pub struct Snapshot {
+    pub tasks: crate::media_tasks::Shared,
     pub retired: Arc<AtomicBool>,
     pub node: usize,
     pub current_src: String,
@@ -151,7 +293,12 @@ pub struct Snapshot {
     pub duration: Option<Duration>,
     pub position: Duration,
     pub observed: Instant,
+    pub clock: ClockKind,
     pub playing: bool,
+    pub paused: bool,
+    pub load_pending: bool,
+    pub frame_ready: bool,
+    pub error_code: Option<u8>,
     pub ended: bool,
     pub seeking: bool,
     pub ready: u8,
@@ -169,15 +316,92 @@ pub struct Selection {
 }
 impl Snapshot {
     pub fn position(&self) -> Duration {
+        self.position_at(Instant::now())
+    }
+    pub fn position_at(&self, now: Instant) -> Duration {
         self.duration.map_or(self.position, |duration| {
-            if self.playing {
+            if self.playing && self.clock == ClockKind::WallTime {
                 self.position
-                    .saturating_add(self.observed.elapsed())
+                    .saturating_add(now.saturating_duration_since(self.observed))
                     .min(duration)
             } else {
                 self.position
             }
         })
+    }
+}
+
+#[cfg(test)]
+mod clock_tests {
+    use super::*;
+
+    // Supplied acknowledged positions are pure snapshot inputs. These controls
+    // do not open a device, simulate a hardware clock or enable authored MKV.
+    fn snapshot(clock: ClockKind) -> Snapshot {
+        Snapshot {
+            tasks: crate::media_tasks::shared(4), retired: Arc::new(AtomicBool::new(false)),
+            node: 0, current_src: String::new(), width: 64, height: 48,
+            duration: Some(Duration::from_secs(3)), position: Duration::from_millis(200),
+            observed: Instant::now(), clock, playing: true, paused: false,
+            load_pending: false, frame_ready: true, error_code: None,
+            ended: false, seeking: false, ready: 4, network: 1,
+        }
+    }
+
+    #[test]
+    fn authored_snapshot_wall_clock_preserves_elapsed_duration_and_nonplaying_behavior() {
+        let mut value=snapshot(ClockKind::WallTime);let observed=value.observed;
+        assert_eq!(value.position_at(observed+Duration::from_millis(650)),Duration::from_millis(850));
+        value.position=Duration::from_millis(2850);
+        assert_eq!(value.position_at(observed+Duration::from_millis(650)),Duration::from_secs(3));
+        value.position=Duration::from_millis(200);value.observed=observed+Duration::from_secs(1);
+        assert_eq!(value.position_at(observed),Duration::from_millis(200));
+        value.playing=false;value.paused=true;
+        assert_eq!(value.position_at(observed+Duration::from_secs(30)),Duration::from_millis(200));
+        value.playing=true;value.paused=false;value.duration=None;
+        assert_eq!(value.position_at(observed+Duration::from_secs(30)),Duration::from_millis(200));
+    }
+
+    #[test]
+    fn authored_snapshot_acknowledged_pcm_stalls_until_position_is_replaced_by_an_ack() {
+        let mut stalled=snapshot(ClockKind::AcknowledgedPcm);stalled.position=Duration::from_millis(625);
+        assert!(stalled.playing);
+        assert_eq!(stalled.position_at(stalled.observed+Duration::from_secs(30)),Duration::from_millis(625));
+        assert_eq!(stalled.position_at(stalled.observed+Duration::from_secs(3600)),Duration::from_millis(625));
+        let mut acknowledged=stalled.clone();acknowledged.position=Duration::from_millis(875);
+        acknowledged.observed=stalled.observed+Duration::from_secs(3);
+        assert_eq!(acknowledged.position_at(acknowledged.observed+Duration::from_secs(30)),Duration::from_millis(875));
+        assert_eq!(acknowledged.position_at(stalled.observed),Duration::from_millis(875));
+        assert_eq!(acknowledged.position(),Duration::from_millis(875));
+        assert_eq!(stalled.position_at(acknowledged.observed),Duration::from_millis(625));
+    }
+
+    #[test]
+    fn authored_snapshot_acknowledged_pcm_pause_seek_and_eof_do_not_project_wall_time() {
+        let mut value=snapshot(ClockKind::AcknowledgedPcm);let later=value.observed+Duration::from_secs(30);
+        value.position=Duration::from_millis(875);value.playing=false;value.paused=true;
+        assert_eq!(value.position_at(later),Duration::from_millis(875));
+        // Seeking still exposes the last acknowledged position until its real
+        // replacement arrives; logical intent/readiness cannot fabricate time.
+        value.playing=true;value.paused=false;value.seeking=true;value.frame_ready=false;value.ready=1;
+        assert_eq!(value.position_at(later),Duration::from_millis(875));
+        value.position=Duration::from_millis(2200);value.playing=false;value.paused=true;
+        value.seeking=false;value.frame_ready=true;value.ready=4;
+        assert_eq!(value.position_at(later),Duration::from_millis(2200));
+        value.position=Duration::from_secs(3);value.ended=true;
+        assert_eq!(value.position_at(later),Duration::from_secs(3));
+    }
+
+    #[test]
+    fn authored_snapshot_overflow_saturates_only_the_existing_wall_clock_projection() {
+        let mut wall=snapshot(ClockKind::WallTime);
+        wall.duration=Some(Duration::MAX);wall.position=Duration::MAX.saturating_sub(Duration::from_nanos(1));
+        let later=wall.observed+Duration::from_nanos(2);
+        assert_eq!(wall.position_at(later),Duration::MAX);
+        let mut pcm=wall.clone();pcm.clock=ClockKind::AcknowledgedPcm;
+        assert_eq!(pcm.position_at(later),Duration::MAX.saturating_sub(Duration::from_nanos(1)));
+        pcm.duration=None;
+        assert_eq!(pcm.position_at(later),Duration::MAX.saturating_sub(Duration::from_nanos(1)));
     }
 }
 
@@ -187,7 +411,7 @@ struct Job {
 }
 pub struct Completion {
     pub plan: Arc<Plan>,
-    pub result: Result<media::Asset, String>,
+    pub result: Result<Asset, String>,
 }
 struct Shared {
     queued: Option<Job>,
@@ -283,6 +507,10 @@ impl Drop for Worker {
 }
 
 #[cfg(test)]
+#[path = "embedded_av_tests.rs"]
+mod av_payload_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     fn location() -> Location {
@@ -367,7 +595,7 @@ mod tests {
             "../../Cargo.toml",
             "https://example.test/clip.ivf",
             "data:video/x-ivf,not-a-file",
-            "scene-av.mkv",
+            "original-tone.wav",
         ] {
             let d = crate::html::parse(&format!("<video src='{source}' controls></video>"));
             let n = authored_node(&d).unwrap();
@@ -405,6 +633,133 @@ mod tests {
             "<svg><video src=scene-intra.ivf></video></svg>",
         ] {
             assert!(authored_node(&crate::html::parse(html)).is_none(), "{html}");
+        }
+    }
+    #[test]
+    fn embedded_network_plan_is_exact_origin_and_context_gated_without_extension_requirement() {
+        let location = crate::navigation::address(
+            "https://media.example.test/page", &Location::home(),
+        ).unwrap();
+        let policy = crate::csp::PolicySet::new(&location);
+        let plan = |raw: &str, base: &Location, policy: &crate::csp::PolicySet| {
+            let doc = crate::html::parse("<video src=placeholder controls></video>");
+            Plan::selected(
+                authored_node(&doc).unwrap(), raw, Arc::new(AtomicBool::new(false)),
+                &doc, &location, base, policy, media::Limits::default(), usize::MAX,
+            )
+        };
+        for raw in ["clip", "/endpoint?container=ivf", "https://media.example.test:443/clip"] {
+            let selected = plan(raw, &location, &policy).unwrap();
+            assert!(selected.network.is_none());
+            assert!(selected.load(&AtomicBool::new(false)).err().unwrap()
+                .contains("no owning resource context"));
+        }
+        for raw in [
+            "https://other.example.test/clip", "http://media.example.test/clip",
+            "https://media.example.test:444/clip", "file:///C:/not-opened.ivf",
+            "data:video/x-ivf,not-a-resource",
+        ] {
+            assert!(plan(raw, &location, &policy).is_err(), "{raw}");
+        }
+        let mut local_base = Location::home();
+        local_base.path = Some(std::path::PathBuf::from("C:/must-not-be-probed/page.html"));
+        local_base.root = Some(std::path::PathBuf::from("C:/must-not-be-probed"));
+        assert!(plan("clip", &local_base, &policy).err().unwrap().contains("HTTP(S) base"));
+        let mut denied = policy.clone();
+        denied.add_header("media-src 'none'");
+        assert!(plan("clip", &location, &denied).err().unwrap().contains("media-src/default-src"));
+        let make_context = |selected: &Plan, origin, policy| crate::network_media::Context {
+            origin,
+            credentials: selected.cors_mode,
+            retired: selected.retired.clone(),
+            trust: Arc::new(crate::trust::Store::unconfigured()),
+            cookies: Arc::new(crate::cookies::Session::default()),
+            blocking: Arc::new(crate::blocking::Policy::default()),
+            policy,
+            policy_scope: usize::MAX,
+            network: crate::network_trace::Trace::default(),
+        };
+        let other = crate::url::parse("https://other.example.test/").unwrap().0;
+        let selected = plan("clip", &location, &policy).unwrap();
+        let context = make_context(&selected, other, policy.clone());
+        assert!(selected.with_network_context(context).is_err());
+        let selected = plan("clip", &location, &policy).unwrap();
+        let context = make_context(&selected, location.url.clone().unwrap(), denied);
+        assert!(selected.with_network_context(context).is_err());
+        let selected = plan("clip", &location, &policy).unwrap();
+        let mut context = make_context(&selected, location.url.clone().unwrap(), policy.clone());
+        context.retired = Arc::new(AtomicBool::new(false));
+        assert!(selected.with_network_context(context).is_err());
+        let selected = plan("clip", &location, &policy).unwrap();
+        let context = make_context(&selected, location.url.clone().unwrap(), policy);
+        assert!(selected.with_network_context(context).is_ok());
+    }
+    #[test]
+    fn embedded_network_authored_cors_mode_keeps_document_origin_and_local_boundaries() {
+        use crate::http::MediaCredentials::{Include, SameOrigin};
+        let location = crate::navigation::address(
+            "https://document.example.test/page", &Location::home(),
+        ).unwrap();
+        let policy = crate::csp::PolicySet::new(&location);
+        let selected = |attribute: &str, source: &str, policy: &crate::csp::PolicySet| {
+            let doc = crate::html::parse(&format!("<video {attribute} src='{source}'></video>"));
+            Plan::new(authored_node(&doc).unwrap(), &doc, &location, &location,
+                policy, media::Limits::default())
+        };
+        assert!(selected("", "https://foreign.example.test/clip", &policy).is_err());
+        let missing = selected("", "/clip", &policy).unwrap();
+        assert_eq!(missing.cors_mode, None);
+        for (attribute, expected) in [
+            ("crossorigin", SameOrigin), ("crossorigin=''", SameOrigin),
+            ("crossorigin='anonymous'", SameOrigin), ("crossorigin='ANONYMOUS'", SameOrigin),
+            ("crossorigin='invalid'", SameOrigin), ("crossorigin=' use-credentials'", SameOrigin),
+            ("crossorigin='use-credentials '", SameOrigin), ("crossorigin='匿名'", SameOrigin),
+            ("crossorigin='use-credentials'", Include), ("crossorigin='UsE-CrEdEnTiAlS'", Include),
+        ] {
+            let plan = selected(attribute, "https://foreign.example.test/clip", &policy).unwrap();
+            assert_eq!(plan.cors_mode, Some(expected), "{attribute}");
+            assert!(plan.document_origin.as_ref().unwrap().same_origin(location.url.as_ref().unwrap()));
+            assert!(plan.network.is_none());
+            assert!(plan.load(&AtomicBool::new(false)).err().unwrap().contains("no owning resource context"));
+            assert!(selected(attribute, "http://foreign.example.test/clip", &policy)
+                .err().unwrap().contains("unencrypted"));
+            assert!(selected(attribute, "file:///C:/not-opened.ivf", &policy).is_err());
+            let mut self_only = policy.clone(); self_only.add_header("media-src 'self'");
+            assert!(selected(attribute, "https://foreign.example.test/clip", &self_only)
+                .err().unwrap().contains("media-src/default-src"));
+        }
+        let make_context = |plan: &Plan| crate::network_media::Context {
+            origin: location.url.clone().unwrap(), credentials: plan.cors_mode,
+            retired: plan.retired.clone(),
+            trust: Arc::new(crate::trust::Store::unconfigured()),
+            cookies: Arc::new(crate::cookies::Session::default()),
+            blocking: Arc::new(crate::blocking::Policy::default()),
+            policy: policy.clone(), policy_scope: usize::MAX,
+            network: crate::network_trace::Trace::default(),
+        };
+        let foreign = "https://foreign.example.test/clip";
+        let plan = selected("crossorigin", foreign, &policy).unwrap();
+        let mut context = make_context(&plan); context.origin = plan.source.url.clone().unwrap();
+        assert!(plan.with_network_context(context).err().unwrap().contains("document origin"));
+        for mode in [None, Some(Include)] {
+            let plan = selected("crossorigin", foreign, &policy).unwrap();
+            let mut context = make_context(&plan); context.credentials = mode;
+            assert!(plan.with_network_context(context).err().unwrap().contains("crossorigin mode"));
+        }
+        let plan = selected("crossorigin", foreign, &policy).unwrap();
+        let mut context = make_context(&plan); context.retired = Arc::new(AtomicBool::new(false));
+        assert!(plan.with_network_context(context).err().unwrap().contains("source lifetime"));
+        for attribute in ["crossorigin", "crossorigin=use-credentials"] {
+            let plan = selected(attribute, foreign, &policy).unwrap();
+            let context = make_context(&plan);
+            assert!(plan.with_network_context(context).is_ok());
+        }
+        let local = super::tests::location();
+        for attribute in ["crossorigin", "crossorigin=anonymous", "crossorigin=use-credentials"] {
+            let doc = crate::html::parse(&format!("<video {attribute} src=scene-intra.ivf></video>"));
+            assert!(Plan::new(authored_node(&doc).unwrap(), &doc, &local, &local,
+                &crate::csp::PolicySet::new(&local), media::Limits::default())
+                .err().unwrap().contains("source was not loaded"));
         }
     }
     #[test]
@@ -454,6 +809,8 @@ mod tests {
         };
         assert!(Arc::ptr_eq(&result.plan, &next));
         let asset = result.result.unwrap();
+        assert!(asset.audio.is_none());
+        let asset = asset.video;
         assert_eq!(
             (
                 asset.clip.width,

@@ -1,34 +1,32 @@
-# CSAPUL 1.0 containing-revision scope
+# CSAPUL 1.1 containing-revision scope
 
 Scope: containing-source-revision
-License-SHA256: 632232a42c046628de0fd8c497e89f02055e1e919860bfa9fcd8fe3b5eb06d65
+License-SHA256: 34003a38eeb1db77472c307e23b5a5540c7625c50d9f0ea0dc7bacf6e5b9b749
 
-Designated by Adam Maddox on **2026-11-14 (America/Chicago)** for original
-material he owns or has authority to license. Official repository:
+This notice designates as a Covered Release the source revision in which Licensor,
+Adam Maddox, or an expressly authorized representative publishes it alongside the
+exact accompanying root LICENSE, ChezCat Source-Available Personal Use License
+(CSAPUL) Version 1.1. The containing Git commit, or SOURCE_REVISION in a source
+export, identifies that revision structurally. Official repository:
 https://github.com/c-a-t-f-o-o-d/chezcat-browser.
 
-The source revision containing this notice and the exact accompanying root
-LICENSE is expressly designated a Covered Release. Its containing Git commit,
-or SOURCE_REVISION in a source export, identifies that revision structurally.
-This notice does not designate every ancestor or promise terms for future work.
-A binary release must accompany this scope and license and identify its exact
-source revision, immutable tag and build. The replacement 0.79.0-alpha.2 milestone
-uses this containing-revision designation.
+A binary distribution under this designation must include this scope and LICENSE
+and identify its exact source revision, release tag and artifact/build identities.
+This notice does not designate all ancestors or supply terms for unspecified
+future releases. A separate signed adoption record may document a particular
+milestone; an unsigned form is not such a record.
 
-This public lineage begins with a present-day snapshot of the existing product.
-The history reset does not revoke, narrow or replace valid grants for previously
-designated releases: those releases remain governed by their original terms.
-Earlier grant records are retained privately; they are not an ancestry list or
-a claim that the current LICENSE appeared in earlier commits.
+Only Covered Material within LICENSE section 1.2 is covered. Independently licensed
+code, data, fonts, artwork, certificates, tests, toolchain/runtime components and
+notices retain their own rights and terms. See THIRD_PARTY_NOTICES.md and the
+per-material notices. No exclusive title is inferred from generated origin or
+presence in the repository.
 
-Every designation covers only Covered Material defined in LICENSE section 1.2.
-Scaffold/template material, upstream tests/data, certificates, fonts, artwork,
-runtime components and notices retain their independent terms and provenance.
-See THIRD_PARTY_NOTICES.md and per-material notices. No exclusive title is
-asserted merely from presence or generated origin. Prior grants, independently
-held rights, statutory rights and applicable platform permissions survive.
+Existing grants for previously designated releases, including releases carrying
+CSAPUL 1.0, remain governed by their original terms. Version 1.1 is not silently
+substituted for them and creates no automatic “or later version” choice. Existing
+published tags and assets are not changed by this designation. Prior grant records
+and any sensitive history maps remain private, not part of the source package.
 
-Licensing and contractual notices: legal@bitmadd.com. This designation does not
-claim tested mail delivery or provide a confidential vulnerability-upload route.
-An authenticated prospective replacement contact under LICENSE section 15.2
-does not silently change release-specific rights.
+Licensing and contractual notices: legal@bitmadd.com. Contact administration does
+not change substantive release-specific rights or establish an export classification.

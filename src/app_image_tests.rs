@@ -655,3 +655,128 @@ fn history_replace_state_keeps_explicit_base_and_updates_fallback_base_for_real_
         assert_eq!(app.scripting.as_ref().unwrap().error_count(), 0, "{}", app.scripting.as_ref().unwrap().report());
     }
 }
+
+// Worker-slot controls only: real loopback bytes and the normal decoder, with
+// no claim of background cascade/layout/paint or element-event acceptance.
+fn image_slot_job(app: &App, site: &Site, background: bool, generation: u64, source: &str) -> Job {
+    let origin = site.location("/start");
+    Job {
+        epoch: 19,
+        background,
+        request: DynamicImage { node: 7, generation, source: source.into(), base: origin.clone(),
+            policy: crate::csp::PolicySet::new(&origin), origin },
+        blocking: Arc::new(crate::blocking::Policy::new(&app.profile.data().settings.blocking)),
+        network: app.network.clone(), cancel: Arc::new(AtomicBool::new(false)), enabled: true,
+    }
+}
+
+fn image_slot_wait(condition: impl Fn() -> bool) {
+    let deadline = Instant::now() + Duration::from_secs(6);
+    while !condition() {
+        assert!(Instant::now() < deadline, "Owned image worker did not reach the requested state.");
+        std::thread::sleep(Duration::from_millis(2));
+    }
+}
+
+#[test]
+fn image_worker_slot_cancellation_preserves_other_active_decode_and_removes_only_queued_slot() {
+    for canceled_background in [false, true] {
+        let site = Site::new();
+        let app = App::new();
+        let worker = Worker::new(app.wake.clone(), app.trust.clone(), app.cookies.clone()).unwrap();
+        let active = image_slot_job(&app, &site, !canceled_background, 1, "/held.ppm");
+        let active_cancel = active.cancel.clone();
+        worker.submit(active).unwrap();
+        image_slot_wait(|| site.requested("/held.ppm"));
+        worker.submit(image_slot_job(&app, &site, canceled_background, 2, "/two.ppm")).unwrap();
+        worker.cancel_node(7, canceled_background);
+        assert!(!active_cancel.load(Ordering::Relaxed), "Other slot's active decode was canceled.");
+        assert!(worker.state.0.lock().unwrap().queue.is_empty());
+        site.release();
+        image_slot_wait(|| worker.state.0.lock().unwrap().completed.len() == 1);
+        let completion = worker.poll(false).unwrap();
+        assert_eq!(completion.background, !canceled_background);
+        assert_eq!((completion.epoch, completion.request.node, completion.request.generation), (19, 7, 1));
+        let asset = completion.result.as_ref().unwrap();
+        assert_eq!((asset.bitmap.width, asset.bitmap.height), (4, 2));
+        assert_eq!(asset.bitmap.pixels, [0xff0000ff; 8]);
+        let label = if completion.background { "BACKGROUND IMAGE node 7: decoded 4 x 2 pixels" }
+            else { "DYNAMIC IMAGE node 7: decoded 4 x 2 pixels" };
+        assert!(completion.events.iter().any(|event| event == label));
+        assert!(!site.requested("/two.ppm"));
+        assert!(worker.poll(false).is_none());
+    }
+}
+
+#[test]
+fn image_worker_slot_cancellation_aborts_selected_active_and_preserves_other_queued_request() {
+    for canceled_background in [false, true] {
+        let site = Site::new();
+        let app = App::new();
+        let worker = Worker::new(app.wake.clone(), app.trust.clone(), app.cookies.clone()).unwrap();
+        let active = image_slot_job(&app, &site, canceled_background, 1, "/held.ppm");
+        let active_cancel = active.cancel.clone();
+        worker.submit(active).unwrap();
+        image_slot_wait(|| site.requested("/held.ppm"));
+        worker.submit(image_slot_job(&app, &site, !canceled_background, 2, "/two.ppm")).unwrap();
+        worker.cancel_node(7, canceled_background);
+        assert!(active_cancel.load(Ordering::Relaxed));
+        {
+            let state = worker.state.0.lock().unwrap();
+            assert_eq!(state.queue.len(), 1);
+            assert_eq!(state.queue[0].background, !canceled_background);
+        }
+        site.release();
+        image_slot_wait(|| worker.state.0.lock().unwrap().completed.len() == 1);
+        let completion = worker.poll(false).unwrap();
+        assert_eq!((completion.background, completion.request.generation), (!canceled_background, 2));
+        let asset = completion.result.as_ref().unwrap();
+        assert_eq!((asset.bitmap.width, asset.bitmap.height), (1, 3));
+        assert_eq!(asset.bitmap.pixels, [0xff00ff00; 3]);
+        assert!(site.requested("/two.ppm"));
+        assert!(worker.poll(false).is_none());
+    }
+}
+
+#[test]
+fn image_worker_slot_cancellation_keeps_other_completed_pixels() {
+    for canceled_background in [false, true] {
+        let site = Site::new();
+        let app = App::new();
+        let worker = Worker::new(app.wake.clone(), app.trust.clone(), app.cookies.clone()).unwrap();
+        worker.submit(image_slot_job(&app, &site, false, 1, "/one.ppm")).unwrap();
+        worker.submit(image_slot_job(&app, &site, true, 2, "/two.ppm")).unwrap();
+        image_slot_wait(|| worker.state.0.lock().unwrap().completed.len() == 2);
+        worker.cancel_node(7, canceled_background);
+        let completion = worker.poll(false).unwrap();
+        assert_eq!(completion.background, !canceled_background);
+        let asset = completion.result.as_ref().unwrap();
+        let expected: &[u32] = if completion.background { &[0xff00ff00; 3] } else { &[0xffff0000; 2] };
+        assert_eq!(asset.bitmap.pixels.as_slice(), expected);
+        assert!(worker.poll(false).is_none());
+    }
+}
+
+#[test]
+fn image_worker_background_only_poll_leaves_element_fifo_and_pixels_intact() {
+    let site = Site::new();
+    let app = App::new();
+    let worker = Worker::new(app.wake.clone(), app.trust.clone(), app.cookies.clone()).unwrap();
+    worker.submit(image_slot_job(&app, &site, false, 1, "/one.ppm")).unwrap();
+    worker.submit(image_slot_job(&app, &site, true, 2, "/two.ppm")).unwrap();
+    worker.submit(image_slot_job(&app, &site, false, 3, "/one.ppm")).unwrap();
+    image_slot_wait(|| worker.state.0.lock().unwrap().completed.len() == 3);
+    let background = worker.poll(true).unwrap();
+    assert!(background.background);
+    assert_eq!(background.request.generation, 2);
+    assert_eq!(background.result.unwrap().bitmap.pixels, [0xff00ff00; 3]);
+    assert!(worker.poll(true).is_none(), "Paused script's element completions must remain queued.");
+    assert_eq!(worker.state.0.lock().unwrap().completed.len(), 2);
+    for generation in [1, 3] {
+        let element = worker.poll(false).unwrap();
+        assert!(!element.background);
+        assert_eq!(element.request.generation, generation);
+        assert_eq!(element.result.unwrap().bitmap.pixels, [0xffff0000; 2]);
+    }
+    assert!(worker.poll(false).is_none());
+}

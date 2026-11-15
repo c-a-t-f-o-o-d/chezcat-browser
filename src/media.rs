@@ -1,5 +1,5 @@
 //! Original local IVF demuxing and an independent video playback clock.
-//! Initial slice: visible VP8 keyframes only; no audio, interframes, WebM,
+//! Finite visible VP8 keyframes and version-zero single-MV interframes; no audio, WebM,
 //! network streaming or HTMLMediaElement capability is advertised.
 //! Header/timebase format reference: WebM project's ivfenc.c. Codec: RFC6386.
 use crate::image::Bitmap;
@@ -23,6 +23,10 @@ pub struct Limits {
     pub input_bytes: usize,
     pub frame_bytes: usize,
     pub frames: usize,
+    /// Maximum dependency packets reconstructed for one requested bitmap.
+    pub decode_frames: usize,
+    /// Shared boolean-decoder work for that complete dependency sequence.
+    pub decode_work: usize,
     pub pixels: usize,
     pub duration: Duration,
 }
@@ -32,6 +36,8 @@ impl Default for Limits {
             input_bytes: 512 * 1024 * 1024,
             frame_bytes: 32 * 1024 * 1024,
             frames: 1_000_000,
+            decode_frames: 65_536,
+            decode_work: 1_000_000_000,
             pixels: 16 * 1024 * 1024,
             duration: Duration::from_secs(7 * 24 * 3600),
         }
@@ -41,6 +47,7 @@ impl Default for Limits {
 struct Frame {
     bytes: Range<usize>,
     time: Duration,
+    key_start: usize,
 }
 pub struct Clip {
     data: Vec<u8>,
@@ -101,6 +108,24 @@ fn time(ticks: u64, scale: u32, rate: u32) -> Result<Duration, String> {
         |_| "IVF duration is outside the supported clock range.",
     )?))
 }
+// Container metadata validates visibility/canvas and an actual preceding key.
+// Partition/token validity remains with the genuine decoder, preserving real
+// lazy late-frame failures instead of inventing decoded success at indexing.
+fn packet_key(payload:&[u8],width:usize,height:usize)->Result<bool,String> {
+    if payload.len()<3 {return Err("Truncated VP8 packet header.".into());}
+    let tag=u32::from(payload[0])|(u32::from(payload[1])<<8)|(u32::from(payload[2])<<16);
+    if tag&16==0 {return Err("Hidden VP8 frames are not supported by this visible profile.".into());}
+    let key=tag&1==0;
+    let version=(tag>>1)&7;
+    if key {
+        if version>3||payload.len()<10||payload[3..6]!=[0x9d,1,0x2a]
+            ||usize::from(u16_at(payload,6)?)!=width||usize::from(u16_at(payload,8)?)!=height {
+            return Err("VP8 key dimensions/scaling or header differ from the fixed canvas.".into());
+        }
+    } else if version!=0 {return Err("This dependent-video profile supports VP8 version zero interframes only.".into());}
+    Ok(key)
+}
+
 impl Clip {
     /// Validated packet input from our local container demuxer, not a wrapper
     /// file manufactured for the IVF parser. Timestamps share the container origin.
@@ -108,15 +133,15 @@ impl Clip {
         if data.len()>limits.input_bytes||packets.is_empty()||packets.len()>limits.frames
             ||width==0||height==0||width>16383||height>16383||width.checked_mul(height).is_none_or(|n|n>limits.pixels)
             ||duration.is_zero()||duration>limits.duration {return Err("Muxed video dimensions/index/duration allowance exceeded.".into());}
-        let mut frames=Vec::new();let mut previous=None;
+        let mut frames=Vec::new();let mut previous=None;let mut previous_key=None;
         for (bytes,time) in packets {
             check()?;
             let payload=data.get(bytes.clone()).filter(|p|!p.is_empty()&&p.len()<=limits.frame_bytes).ok_or("Invalid muxed video packet range.")?;
             if time>=duration||previous.is_none()&&!time.is_zero()||previous.is_some_and(|old|time<=old) {return Err("Muxed video timestamps must start at zero and increase.".into());}
-            if payload.len()<10||payload[0]&1!=0||payload[0]&16==0||payload[3..6]!=[0x9d,1,0x2a]
-                ||usize::from(u16_at(payload,6)?)!=width||usize::from(u16_at(payload,8)?)!=height {return Err("Muxed video requires matching visible VP8 intra frames without scaling.".into());}
+            if packet_key(payload,width,height)? {previous_key=Some(frames.len());}
+            let key_start=previous_key.ok_or("Muxed dependent video must begin with a real keyframe.")?;
             frames.try_reserve(1).map_err(|_|"Could not grow muxed video index.")?;
-            previous=Some(time);frames.push(Frame {bytes,time});
+            previous=Some(time);frames.push(Frame {bytes,time,key_start});
         }
         Ok(Self {data,frames,width,height,duration,limits})
     }
@@ -133,7 +158,7 @@ impl Clip {
             return Err("Expected a version-zero 32-byte IVF header.".into());
         }
         if data.get(8..12) != Some(b"VP80") {
-            return Err("This local video slice requires IVF VP8 keyframes.".into());
+            return Err("This video slice requires IVF VP8 packets.".into());
         }
         let (width, height) = (
             usize::from(u16_at(&data, 12)?),
@@ -152,6 +177,7 @@ impl Clip {
             return Err("IVF timebase must be nonzero.".into());
         }
         let mut frames = Vec::new();
+        let mut previous_key=None;
         let mut position = 32usize;
         let mut first = None;
         let mut previous = 0u64;
@@ -176,18 +202,8 @@ impl Clip {
                 .filter(|&end| end <= data.len())
                 .ok_or("Truncated IVF frame payload.")?;
             let payload = &data[header_end..end];
-            if payload.len() < 10
-                || payload[0] & 1 != 0
-                || payload[0] & 16 == 0
-                || payload[3..6] != [0x9d, 1, 0x2a]
-            {
-                return Err("Only visible, complete intra VP8 frames are supported; interframes are not implemented.".into());
-            }
-            if usize::from(u16_at(payload, 6)?) != width
-                || usize::from(u16_at(payload, 8)?) != height
-            {
-                return Err("VP8 frame dimensions/scaling differ from the IVF canvas.".into());
-            }
+            if packet_key(payload,width,height)? {previous_key=Some(frames.len());}
+            let key_start=previous_key.ok_or("Dependent IVF video must begin with a real keyframe.")?;
             let start = *first.get_or_insert(stamp);
             if !frames.is_empty() && stamp < previous {
                 return Err("IVF presentation timestamps run backwards.".into());
@@ -205,6 +221,7 @@ impl Clip {
             frames.push(Frame {
                 bytes: header_end..end,
                 time: instant,
+                key_start,
             });
             previous = stamp;
             position = end;
@@ -250,16 +267,25 @@ impl Clip {
             .frames
             .get(index)
             .ok_or("Video frame index is unavailable.")?;
-        let bitmap = crate::image::decode_vp8_frame_checked(
-            &self.data[frame.bytes.clone()],
-            self.limits.pixels,
-            check,
-        )
-        .map_err(|error| format!("Video frame {index}: {error}"))?;
-        if bitmap.width != self.width || bitmap.height != self.height {
-            return Err("Decoded video frame has a different canvas.".into());
+        let count=index.checked_sub(frame.key_start).and_then(|count|count.checked_add(1))
+            .filter(|&count|count<=self.limits.decode_frames)
+            .ok_or("Video dependency decode-frame allowance exceeded.")?;
+        // Each request owns a fresh bounded sequence. Seeks, skipped display
+        // frames and canceled generations cannot borrow another job's state.
+        let mut decoder=crate::image::Vp8VideoDecoder::new(self.limits.pixels,self.limits.decode_work);
+        let mut target=None;
+        for current in frame.key_start..=index {
+            check()?;
+            let packet=self.frames.get(current).ok_or("Video dependency index is unavailable.")?;
+            let bitmap=decoder.decode(&self.data[packet.bytes.clone()],check)
+                .map_err(|error|format!("Video frame {current}: {error}"))?;
+            if bitmap.width!=self.width||bitmap.height!=self.height {
+                return Err("Decoded video frame has a different canvas.".into());
+            }
+            target=Some(bitmap);
         }
-        Ok(Arc::new(bitmap))
+        debug_assert!(count!=0);
+        Ok(Arc::new(target.ok_or("Video dependency sequence is empty.")?))
     }
     pub fn load(
         data: Vec<u8>,
@@ -466,6 +492,23 @@ mod tests {
         Clip::parse(SCENE.to_vec(), Limits::default(), &|| Ok(())).unwrap()
     }
     #[test]
+    fn video_decode_sequence_has_explicit_small_allowances_and_fresh_request_recovery() {
+        let normal=Limits::default();
+        assert!(normal.decode_frames>=65_536&&normal.decode_work>=1_000_000_000);
+        for (frames,work) in [(0,normal.decode_work),(normal.decode_frames,0),(normal.decode_frames,1)] {
+            let limited=Clip::parse(SCENE.to_vec(),Limits {decode_frames:frames,decode_work:work,..normal},&||Ok(())).unwrap();
+            assert!(limited.decode(2,&||Ok(())).is_err());
+        }
+        // A fresh normal job genuinely decodes the target after a prior refusal.
+        let normal=clip();let bitmap=normal.decode(2,&||Ok(())).unwrap();
+        assert_eq!((bitmap.width,bitmap.height),(normal.width,normal.height));
+        assert_eq!(bitmap.pixels,crate::image::decode_vp8_frame_checked(
+            &normal.data[normal.frames[2].bytes.clone()],normal.limits.pixels,&||Ok(())).unwrap().pixels);
+        assert!(normal.decode(normal.frame_count(),&||Ok(())).is_err());
+        assert!(normal.decode(2,&||Err("canceled sequence".into())).unwrap_err().contains("canceled sequence"));
+    }
+
+    #[test]
     fn local_video_real_container_and_keyframes_have_distinct_decoded_pixels() {
         let clip = clip();
         assert_eq!((clip.width, clip.height, clip.frame_count()), (64, 48, 6));
@@ -560,7 +603,8 @@ mod tests {
                     data[frame.bytes.start - 8..frame.bytes.start]
                         .copy_from_slice(&0u64.to_le_bytes());
                 }
-                1 => data[parsed.frames[2].bytes.start] |= 1,
+                // Later dependent frames are supported; the initial frame must still be a keyframe.
+                1 => data[parsed.frames[0].bytes.start] |= 1,
                 2 => data[parsed.frames[2].bytes.start + 7] |= 0x40,
                 _ => {
                     let frame = &parsed.frames[5];
@@ -674,5 +718,53 @@ mod tests {
         assert_eq!(clip.duration, Duration::from_secs(6));
         assert_eq!(clip.index_at(Duration::from_millis(1400)), 1);
         assert_eq!(clip.index_at(Duration::from_millis(1600)), 2);
+    }
+
+    const INTER:&[u8]=include_bytes!("../tools/fixtures/scene-inter.ivf");
+    fn inter_reference(bitmap:&Bitmap,index:usize) {
+        assert_eq!((bitmap.width,bitmap.height),(64,48));assert_eq!(bitmap.pixels.len(),64*48);
+        let all=include_bytes!("../tools/fixtures/scene-inter-centered.rgba");
+        let expected=&all[index*64*48*4..(index+1)*64*48*4];
+        let(mut error,mut maximum)=(0u64,0u32);
+        for(pixel,rgba)in bitmap.pixels.iter().zip(expected.chunks_exact(4)) {
+            assert_eq!(pixel>>24,255);
+            for(actual,want)in[((pixel>>16)&255,rgba[0]),((pixel>>8)&255,rgba[1]),(pixel&255,rgba[2])] {
+                let delta=actual.abs_diff(u32::from(want));error+=u64::from(delta);maximum=maximum.max(delta);
+            }
+        }
+        assert!(error<64*48*3/2&&maximum<=2,"frame {index}: mean={} max={maximum}",error as f64/(64*48*3) as f64);
+    }
+    #[test]
+    fn dependent_vp8_original_frames_seek_across_real_keys_and_match_independent_pixels() {
+        let clip=Clip::parse(INTER.to_vec(),Limits::default(),&||Ok(())).unwrap();
+        assert_eq!(clip.frame_count(),24);assert_eq!(clip.duration,Duration::from_secs(3));
+        for(index,frame)in clip.frames.iter().enumerate(){assert_eq!(frame.key_start,if index<12{0}else{12});}
+        // Both forward skips and backwards seeks must reconstruct dependencies.
+        for index in [0,1,7,11,12,13,23,2,14,0] {inter_reference(&clip.decode(index,&||Ok(())).unwrap(),index);}
+        assert_eq!(clip.index_at(Duration::from_millis(2200)),17);
+        assert_eq!(clip.index_at(clip.duration),23);
+        let first=clip.decode(0,&||Ok(())).unwrap();let last=clip.decode(23,&||Ok(())).unwrap();
+        assert_ne!(first.pixels,last.pixels);
+    }
+    #[test]
+    fn dependent_vp8_requires_initial_key_and_replay_budget_cancels_and_recovers() {
+        use std::cell::Cell;
+        let normal=Clip::parse(INTER.to_vec(),Limits::default(),&||Ok(())).unwrap();
+        let mut missing=INTER[..32].to_vec();missing[24..28].copy_from_slice(&23u32.to_le_bytes());
+        missing.extend_from_slice(&INTER[normal.frames[1].bytes.start-12..]);
+        assert!(Clip::parse(missing,Limits::default(),&||Ok(())).unwrap_err().contains("begin with a real keyframe"));
+        let one=Clip::parse(INTER.to_vec(),Limits {decode_frames:1,..Limits::default()},&||Ok(())).unwrap();
+        assert!(one.decode(11,&||Ok(())).unwrap_err().contains("decode-frame allowance"));
+        inter_reference(&one.decode(0,&||Ok(())).unwrap(),0);inter_reference(&one.decode(12,&||Ok(())).unwrap(),12);
+        let calls=Cell::new(0usize);normal.decode(0,&||{calls.set(calls.get()+1);Ok(())}).unwrap();
+        let stop=calls.get()+2;calls.set(0);
+        assert!(normal.decode(11,&||{calls.set(calls.get()+1);if calls.get()>=stop{Err("dependency cancellation".into())}else{Ok(())}}).unwrap_err().contains("dependency cancellation"));
+        inter_reference(&normal.decode(11,&||Ok(())).unwrap(),11);
+        assert!(normal.decode(usize::MAX,&||Ok(())).is_err());
+        let mut reset=INTER[..32].to_vec();reset[24..28].copy_from_slice(&12u32.to_le_bytes());
+        reset.extend_from_slice(&INTER[normal.frames[12].bytes.start-12..]);
+        let reset=Clip::parse(reset,Limits::default(),&||Ok(())).unwrap();
+        assert_eq!(reset.duration,Duration::from_millis(1500));
+        assert_eq!(reset.decode(1,&||Ok(())).unwrap().pixels,normal.decode(13,&||Ok(())).unwrap().pixels);
     }
 }

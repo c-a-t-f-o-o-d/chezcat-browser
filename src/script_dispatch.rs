@@ -3,6 +3,7 @@
 use super::*;
 
 pub(super) struct Dispatch {
+    path: Vec<u32>,
     event: usize,
     name: String,
     visits: Vec<(u32, bool, u8)>,
@@ -254,6 +255,26 @@ var budgetEvent=document.createEvent('Event');budgetEvent.initEvent('budget');b.
 }
 
 impl Bridge<'_> {
+    pub(super) fn copy_event_path(&mut self,handle:u32)->Result<Vec<u32>,String> {
+        let scans=self.state.created_events.len().checked_add(self.state.synthetic_dispatches.len())
+            .and_then(|n|n.checked_add(1)).ok_or("Event path lookup work overflow.")?;
+        self.state.work(scans)?;
+        let (native,frame)=if let Some(id)=self.created_event_index(handle) {
+            (false,self.state.synthetic_dispatches.iter().rposition(|frame|frame.event==id))
+        } else {
+            if !self.state.event.as_ref().is_some_and(|event|event.handle==handle) {return Err("Event has expired.".into());}
+            (true,None)
+        };
+        let length=if native {self.state.event.as_ref().unwrap().path.len()}
+            else {frame.map_or(0,|index|self.state.synthetic_dispatches[index].path.len())};
+        self.state.work(length)?;
+        let path=if native {self.state.event.as_ref().unwrap().path.as_slice()}
+            else {frame.map(|index|self.state.synthetic_dispatches[index].path.as_slice()).unwrap_or(&[])};
+        let mut result=Vec::new();
+        result.try_reserve(length).map_err(|_|"Could not reserve Event path snapshot.")?;
+        result.extend_from_slice(path);
+        Ok(result)
+    }
     pub(super) fn node_event_method(&self,object:u32,name:&str)->bool {
         !self.is_frame_handle(object) && self.namespace_receiver(object)
             && matches!(name,"addEventListener"|"removeEventListener"|"dispatchEvent")
@@ -318,10 +339,10 @@ impl Bridge<'_> {
             ));
         };
         let event = &self.state.created_events[id];
-        if event.dispatching || event.name.is_empty() {
+        if event.dispatching || !event.initialized {
             return Err((
                 "InvalidStateError",
-                "Event type is empty/uninitialized or the event is already being dispatched."
+                "Event is uninitialized or already being dispatched."
                     .into(),
             ));
         }
@@ -397,6 +418,7 @@ impl Bridge<'_> {
             .map_err(|_| "Could not grow the nested event dispatch stack.")?;
         let token = self.state.synthetic_dispatches.len();
         self.state.synthetic_dispatches.push(Dispatch {
+            path,
             event: id,
             name,
             visits,

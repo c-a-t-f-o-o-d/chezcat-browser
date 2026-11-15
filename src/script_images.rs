@@ -87,6 +87,7 @@ impl Page {
     pub fn finish_image_event(&mut self, doc: &mut Document, forms: &mut Forms, node: usize, success: bool) -> Outcome {
         self.begin_job();
         let mut outcome = self.dispatch(doc, forms, node, if success { "load" } else { "error" }, false);
+        self.defer_backgrounds_for_layout(outcome.layout_changed);
         if self.state.dynamic.load_ready {
             let loading = self.finish_loading(doc, forms);
             outcome.layout_changed |= loading.layout_changed;

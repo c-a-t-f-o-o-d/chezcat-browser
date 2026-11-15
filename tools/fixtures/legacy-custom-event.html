@@ -1,0 +1,27 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="script-src 'unsafe-inline'">
+<title>Original legacy custom notification</title></head><body>
+<h1>Original legacy custom notification</h1>
+<button id="emit" name="emit" type="button">Send the original route notification</button>
+<p id="result">Waiting for a real button activation.</p>
+<script>
+var notifications=0,lastPayload=null;
+function publishOriginal(name,detail){
+ var event=document.createEvent('CustomEvent');
+ event.initCustomEvent(name,true,true,detail);
+ return document.dispatchEvent(event);
+}
+document.addEventListener('original-route',function(event){
+ if(event.isTrusted||event.target!==document||event.detail!==lastPayload||event.detail.message!=='Original detail')throw Error('legacy notification identity');
+ notifications++;
+ event.detail.observed=true;
+ event.preventDefault();
+});
+document.getElementById('emit').onclick=function(input){
+ if(!input.isTrusted)throw Error('The fixture requires real App input.');
+ lastPayload={message:'Original detail',observed:false};
+ var accepted=publishOriginal('original-route',lastPayload);
+ if(accepted||!lastPayload.observed)throw Error('Custom notification was not canceled/observed.');
+ document.getElementById('result').textContent='Received '+notifications+' original notification(s) with the same detail object.';
+};
+</script></body></html>

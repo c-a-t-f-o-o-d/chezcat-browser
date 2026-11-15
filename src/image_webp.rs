@@ -12,6 +12,7 @@ use std::sync::Arc;
 
 #[path = "image_vp8.rs"]
 mod vp8;
+pub(crate) use vp8::VideoDecoder;
 
 pub(super) fn decode_vp8_frame(data:&[u8],maximum_pixels:usize,check:&dyn Fn()->ImageResult<()>)->ImageResult<Bitmap> {
     vp8::decode_with_pixels(data,check,maximum_pixels)
