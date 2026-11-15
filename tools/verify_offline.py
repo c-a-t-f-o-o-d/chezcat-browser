@@ -15,7 +15,7 @@ ROOT=Path(__file__).resolve().parents[1]
 JOURNEYS=[['check_input_harness.py'],['check_input_harness.py','--event-namespace'],
  ['check_input_harness.py','--attribute-nodes'],['check_address_search.py'],
  ['check_stylesheet_harness.py'],['check_dispatch_harness.py'],['check_video_harness.py'],
- ['check_audio_harness.py'],['check_av_harness.py'],['check_authored_video_harness.py'],
+ ['check_audio_harness.py'],['check_av_harness.py'],['check_authored_video_harness.py'],['check_media_interface_harness.py'],
  ['check_source_replacement_harness.py'],['check_animation_harness.py'],['check_license_acceptance.py'],
  ['check_navigation_harness.py'],['check_network_media_harness.py'],
  ['check_network_media_tls_harness.py'],['check_interframe_harness.py'],['check_background_harness.py'],

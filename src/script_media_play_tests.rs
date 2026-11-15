@@ -157,16 +157,17 @@ var ignored={toString:function(){coercions++;throw 'coerced';},valueOf:function(
 var refusal=video.play(ignored,Symbol('ignored'));
 if(!(refusal instanceof Promise)||Object.prototype.toString.call(refusal)!=='[object Promise]')throw 'real denied promise';
 refusal.catch(function(e){if(!(e instanceof DOMException)||e.name!=='NotAllowedError'||e.code!==0)throw 'denial type';denied++;});
-for(var receiver of [{},document.body,document.getElementById('unbound'),null,undefined,17]){
+for(var receiver of [{},document.body,null,undefined,17]){
  var bad;try{bad=method.call(receiver,ignored);}catch(e){synchronous++;}
  if(!(bad instanceof Promise))throw 'brand did not return Promise';
  bad.catch(function(e){if(!(e instanceof TypeError))throw 'brand reason';wrong++;});
 }
+var unsupported=0;method.call(document.getElementById('unbound'),ignored).catch(function(e){if(!(e instanceof DOMException)||e.name!=='NotSupportedError')throw 'unimplemented binding reason';unsupported++;});
 var saved=method;try{var unbound=saved(ignored);unbound.catch(function(e){if(!(e instanceof TypeError))throw 'unbound reason';wrong++;});}catch(e){synchronous++;}
 try{new method(ignored);}catch(e){if(!(e instanceof TypeError))throw e;synchronous++;}
 if(coercions!==0||synchronous!==1||!video.paused)throw 'coercion/synchronous brand effects';
 "#);
-    eval(&mut p,&mut doc,&mut forms,"if(denied!==1||wrong!==7||coercions!==0)throw 'real rejections';");
+    eval(&mut p,&mut doc,&mut forms,"if(denied!==1||wrong!==6||unsupported!==1||coercions!==0)throw 'real rejections';");
     let s=p.state.embedded_video.as_ref().unwrap();assert!(Arc::ptr_eq(&s.retired,&old.retired));
     assert_eq!((s.position,s.observed,s.playing,s.paused,s.ready,s.network),(old.position,old.observed,old.playing,old.paused,old.ready,old.network));
     assert!(!p.has_media_tasks()&&!p.has_media_selection()&&!p.has_media_promise_effects());

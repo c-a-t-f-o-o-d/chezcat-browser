@@ -15,12 +15,16 @@ not complete web-platform or public-service support.
 | F4 | Complete for bounded transfers | HTTP(S) IVF/Matroska playback with explicit MIME, redirects, credentials/CORS, cookies, CSP, TLS refusal and cancellation | Streaming/ranges, unmarked foreign media and dynamic crossOrigin controls |
 | F5 | Complete for the selected profile | Visible version-zero VP8 I/P single-vector interframes, dependency-aware seek and constrained Matroska PCM16 synchronization | SPLITMV, hidden frames, other interframe versions and wider codecs/containers |
 | C1 | Complete for one URL background layer | Stylesheet-relative resource ownership, shared cascade/load/layout/paint and original request/pixel/geometry checks on ordinary block boxes | Multiple layers, gradients and inline-fragment/replaced-element backgrounds |
-| F6 | In progress | Authored synchronized A/V and finite genuine Event/UIEvent/MouseEvent construction are implemented prerequisites; Event/UIEvent dispatch and legacy CustomEvent detail/dispatch work | Actual ordinary non-DRM YouTube playback is unproved; Mouse dispatch/native pointer payloads, KeyboardEvent/CustomEvent constructors and broader page/player APIs remain unsupported |
+| F6 Media/Video interfaces | Complete for the original bound-player model/App slice | Genuine owner-realm Media/Video roots, stable class identity and canonical controls/accessors through own shadows; actual Promise/time/independent-pixel/lifecycle proof | controls mutation, VIDEO width/height IDL reflection, additional/child players and broader media APIs remain unsupported |
+| F6 | In progress | Authored synchronized A/V, genuine Media/Video interfaces and finite Event/UIEvent/MouseEvent construction are implemented prerequisites; Event/UIEvent dispatch and legacy CustomEvent detail/dispatch work | Actual ordinary non-DRM YouTube playback is unproved; Mouse dispatch/native pointer payloads, KeyboardEvent/CustomEvent constructors and broader page/player APIs remain unsupported |
 
-Next, extend the authored-player interfaces needed by the selected page path,
-then address demonstrated event/page dependencies with original fixtures. Each
-slice needs its own model, App/input and lifecycle acceptance before a separately
-authorized service check. Service playback is not inferred from local media.
+Next, add a genuine CustomEvent constructor/prototype over the existing detail and
+dispatch model. Further small recorded gaps are the real controls setter and
+VIDEO width/height content reflection. Define and validate each finite contract
+before extending it; these are source/contract gaps, not newly observed service
+failures. Each slice needs model, App/input and lifecycle evidence before a
+separately authorized service check. Service playback is not inferred from local
+media.
 
 Wider Unicode, CSS, storage, frames and accessibility remain gaps. Complete Maps,
 every codec and perfect site screenshots are not prerequisites for useful staged

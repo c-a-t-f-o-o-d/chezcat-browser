@@ -831,6 +831,7 @@ impl Page {
         runtime.define_ui_event_interface(WINDOW).expect("fixed UIEvent interface");
         runtime.define_mouse_event_interface(WINDOW).expect("fixed MouseEvent interface");
         runtime.define_node_interfaces(WINDOW,dom_tree::NODE_CONSTANTS,Some((IMAGE_FACTORY,"Image"))).expect("fixed Node interfaces");
+        runtime.define_media_interfaces(WINDOW).expect("fixed media interfaces");
         Self { runtime, state }
     }
 
@@ -2349,7 +2350,7 @@ impl Bridge<'_> {
 
 impl Host for Bridge<'_> {
     fn expando_owner(&self,object:u32)->Option<u32> {self.ordinary_event_owner(object).or_else(||self.standalone_target_owner(object)).or_else(||self.element_expando_receiver(object).then_some(WINDOW))}
-    fn exposed_native_prototype(&self,object:u32)->bool {self.ordinary_event_owner(object).is_some()||self.standalone_target_owner(object).is_some()}
+    fn exposed_native_prototype(&self,object:u32)->bool {self.ordinary_event_owner(object).is_some()||self.standalone_target_owner(object).is_some()||self.video_interface_receiver(object)}
     fn native_ancestry_inspection(&self,object:u32)->bool {self.event_receiver(object)||self.exposed_native_prototype(object)||self.namespace_receiver(object)}
     fn event_target_interface(&self,window:u32)->bool {window==WINDOW || self.frame_context(window).is_some()}
     fn node_interface_constants(&self,window:u32)->Option<&'static [(&'static str,u16)]> {self.event_target_interface(window).then_some(dom_tree::NODE_CONSTANTS)}
@@ -2370,7 +2371,9 @@ impl Host for Bridge<'_> {
         let constructor=if let Some(node)=node {
             Some(if matches!(self.doc.nodes[node].kind,NodeKind::Element {..}) {
                 if self.doc.nodes[node].namespace==crate::html::Namespace::Html {
-                    if tag(self.doc,node)=="img" {(IMAGE_FACTORY,"Image")} else {(WINDOW,"HTMLElement")}
+                    if self.video_interface_receiver(object) {(WINDOW,"HTMLVideoElement")}
+                    else if self.media_interface_receiver(object) {(WINDOW,"HTMLMediaElement")}
+                    else if tag(self.doc,node)=="img" {(IMAGE_FACTORY,"Image")} else {(WINDOW,"HTMLElement")}
                 } else {(WINDOW,"Element")}
             } else {(WINDOW,"Node")})
         } else if object==DOCUMENT || self.attr_receiver(object) {Some((WINDOW,"Node"))} else {None};
@@ -2407,6 +2410,7 @@ impl Host for Bridge<'_> {
     }
 
     fn owns_property(&self, object: u32, property: &str) -> bool {
+        if self.video_interface_receiver(object)&&script_media::interface_member(property) {return false;}
         if self.event_receiver(object)&&property=="composedPath" {return false;}
         if self.ordinary_event_owner(object).is_some() {return false;}
         if self.node_event_method(object,property) {return false;}
@@ -2467,6 +2471,7 @@ impl Host for Bridge<'_> {
     }
 
     fn string_setter(&self, object: u32, property: &str) -> bool {
+        if self.media_interface_receiver(object)&&property=="src" {return true;}
         if property=="type"&&self.style_type_receiver(object){return true;}
         if self.media_element_receiver(object)&&property=="src"{return true;}
         property=="srcdoc" && self.class_list_element_receiver(object) && node_index(object).is_some_and(|node|self.iframe_srcdoc_property(node))
@@ -2481,12 +2486,17 @@ impl Host for Bridge<'_> {
                 && matches!(property, "src" | "alt")
             || property == "border" && node_index(object).is_some_and(|node| self.html_border_property(node))
     }
-    fn prepare_native_microtask(&mut self,object:u32,member:&str,args:&[Value],setter:bool)->Result<Option<u64>,String>{self.prepare_media_microtask(object,member,args,setter)}
+    fn prepare_native_microtask(&mut self,object:u32,member:&str,args:&[Value],setter:bool)->Result<Option<u64>,String>{
+        self.prepare_media_microtask(object,script_media::interface_operation(member).unwrap_or(member),args,setter)
+    }
+    fn native_setter_property(&self,object:u32,method:&str)->Option<&'static str>{
+        self.media_interface_receiver(object).then(||script_media::interface_setter(method)).flatten()
+    }
     fn finish_native_microtask(&mut self,ticket:u64)->bool{self.finish_media_microtask(ticket)}
     fn run_native_microtask(&mut self,ticket:u64)->Result<(),String>{self.run_media_microtask(ticket)}
 
     fn number_setter(&self, object: u32, property: &str) -> bool {
-        if property=="currentTime" && self.media_element_receiver(object) {return true;}
+        if property=="currentTime" && self.media_interface_receiver(object) {return true;}
         node_index(object).is_some_and(|node| tag(self.doc, node) == "img")
             && matches!(property, "width" | "height")
             || node_index(object).is_some_and(|node| self.html_spacing_property(node, property))
@@ -2587,6 +2597,9 @@ impl Host for Bridge<'_> {
     }
 
     fn native_method_owner(&self, object:u32, method:&str) -> Option<u32> {
+        if self.event_target_interface(object)&&method.starts_with("\0Media.")
+            || self.event_target_interface(object)&&method.starts_with("\0Video.") {return Some(object);}
+        if self.media_element_receiver(object)&&matches!(method,"load"|"pause"|"play") {return Some(WINDOW);}
         self.created_event_method(object,method).and_then(|_|self.event_owner(object))
     }
 
@@ -2695,6 +2708,10 @@ impl Host for Bridge<'_> {
         method: &str,
         args: &[Value],
     ) -> Result<(), (&'static str, String)> {
+        let method=script_media::interface_operation(method).unwrap_or(method);
+        if matches!(method,"load"|"pause")&&self.media_interface_receiver(object)&&!self.media_element_receiver(object) {
+            return Err(("NotSupportedError","This media element has no implemented player binding.".into()));
+        }
         if matches!(method,"Event"|"UIEvent"|"MouseEvent")&&self.event_target_interface(object) {
             if !self.state.enabled||!self.doc.scripting_enabled {return Err(("InvalidStateError","Event construction is disabled.".into()));}
             if args.get(1).is_some_and(|value|!matches!(value,Value::Undefined|Value::Null|Value::Object(_)|Value::Function(_)|Value::Host(_))) {
@@ -2713,7 +2730,7 @@ impl Host for Bridge<'_> {
         }
         if method=="pause" && self.media_element_receiver(object) && (!self.state.enabled || !self.doc.scripting_enabled) {return Err(("InvalidStateError","Scripting is disabled.".into()));}
         if object==WINDOW && method=="requestAnimationFrame" && !matches!(args.first(),Some(Value::Function(_))) {return Err(("TypeError","requestAnimationFrame requires a callable callback.".into()));}
-        if self.event_target_interface(object) && matches!(method,"Node"|"Element"|"HTMLElement") {return Err(("TypeError","Illegal constructor for this native interface.".into()));}
+        if self.event_target_interface(object) && matches!(method,"Node"|"Element"|"HTMLElement"|"HTMLMediaElement"|"HTMLVideoElement") {return Err(("TypeError","Illegal constructor for this native interface.".into()));}
         if method=="dispatchEvent"{return self.validate_dispatch(object,args);}
         if object == HISTORY && method == "replaceState" {
             if self.state.history.current.is_none() { self.history_target(args)?; }
@@ -2815,7 +2832,7 @@ impl Host for Bridge<'_> {
         property: &str,
         value: &Value,
     ) -> Result<(), (&'static str, String)> {
-        if property=="currentTime" && self.media_element_receiver(object) {
+        if property=="currentTime" && self.media_interface_receiver(object) {
             if !self.state.enabled || !self.doc.scripting_enabled {
                 return Err(("InvalidStateError","Scripting is disabled.".into()));
             }
@@ -2959,6 +2976,8 @@ impl Host for Bridge<'_> {
     }
 
     fn accepts_receiver(&self, object: u32, method: &str, receiver: u32) -> bool {
+        if self.event_target_interface(object)&&method.starts_with("\0Video.") {return self.video_interface_receiver(receiver);}
+        if self.event_target_interface(object)&&method.starts_with("\0Media.") {return self.media_interface_receiver(receiver);}
         if self.event_target_interface(object)&&(method.starts_with("\0MouseEvent.")||matches!(method,"initMouseEvent"|"getModifierState")) {
             return self.mouse_receiver(receiver);
         }
@@ -3883,10 +3902,15 @@ impl Host for Bridge<'_> {
     }
 
     fn promise_returning_operation(&self,object:u32,method:&str)->bool {
-        method=="play"&&self.media_element_receiver(object)
+        method=="\0Media.play"&&self.event_target_interface(object)
+            || method=="play"&&self.media_element_receiver(object)
     }
     fn validate_promise_operation(&self,object:u32,method:&str)->Result<(),crate::javascript::NativePromiseFailure> {
         use crate::javascript::NativePromiseFailure as Failure;
+        let method=script_media::interface_operation(method).unwrap_or(method);
+        if method=="play"&&self.media_interface_receiver(object)&&!self.media_element_receiver(object) {
+            return Err(Failure::Dom("NotSupportedError","This media element has no implemented player binding."));
+        }
         if method!="play"||!self.media_element_receiver(object) {return Err(Failure::Fatal("Media Promise operation is unavailable.".into()));}
         if !self.state.enabled||!self.doc.scripting_enabled {return Err(Failure::Dom("InvalidStateError","Scripting is disabled for this document."));}
         if !self.state.has_transient_activation(Instant::now()) {return Err(Failure::Dom("NotAllowedError","Playback requires trusted input in this media element's Window."));}
@@ -3896,6 +3920,7 @@ impl Host for Bridge<'_> {
         Ok(())
     }
     fn call_promise_operation(&mut self,object:u32,method:&str,promise:crate::javascript::NativePromise)->Result<(),crate::javascript::NativePromiseFailure> {
+        let method=script_media::interface_operation(method).unwrap_or(method);
         if method!="play" {return Err(crate::javascript::NativePromiseFailure::Fatal("Unknown media Promise operation.".into()));}
         self.play_media(node_index(object).ok_or_else(||crate::javascript::NativePromiseFailure::Fatal("Invalid media element.".into()))?,promise)
     }
@@ -3914,6 +3939,7 @@ impl Host for Bridge<'_> {
     }
 
     fn set(&mut self, object: u32, property: &str, value: Value) -> Result<(), String> {
+        if self.media_interface_receiver(object)&&matches!(property,"src"|"currentTime") {self.require_bound_media(object)?;}
         if property=="returnValue"&&self.event_receiver(object) {return self.set_event_return_value(object,&value);}
         if property=="currentTime" && self.media_element_receiver(object) {
             let Value::Number(seconds)=value else {return Err("Media time requires numeric conversion.".into());};
@@ -4147,6 +4173,12 @@ impl Host for Bridge<'_> {
     }
 
     fn call(&mut self, object: u32, method: &str, args: &[Value]) -> Result<Value, String> {
+        if let Some(property)=script_media::interface_getter(method) {
+            self.state.work(1)?;
+            self.require_bound_media(object)?;
+            return self.media_element_get(object,property)?.ok_or_else(||"Media interface getter is not implemented.".into());
+        }
+        let method=if let Some(operation)=script_media::interface_operation(method) {self.require_bound_media(object)?;operation} else {method};
         if let Some(property)=method.strip_prefix("\0MouseEvent.get.") {return self.get(object,property);}
         if let Some(property)=method.strip_prefix("\0UIEvent.get.") {return self.get(object,property);}
         if let Some(property)=method.strip_prefix("\0Event.get.") {return self.get(object,property);}

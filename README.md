@@ -35,7 +35,11 @@ and licensing obligations; see [third-party notices](THIRD_PARTY_NOTICES.md).
   and dependency-aware seeking; SPLITMV and hidden frames remain unsupported.
   One authored HTML video supports native controls, source replacement and real
   JavaScript load(), pause(), currentTime seeking and play() with pending promises
-  tied to decoded output. Supported Matroska adds source-bound PCM and
+  tied to decoded output. Owner-realm HTMLMediaElement/HTMLVideoElement interfaces
+  expose those existing controls and real state through canonical prototypes;
+  illegal construction and unbound-player refusals do not create extra players.
+  controls mutation and VIDEO width/height IDL reflection remain unsupported.
+  Supported Matroska adds source-bound PCM and
   acknowledged sample time. Complete HTTP(S) transfers admit explicit IVF or
   Matroska MIME and preserve authored crossorigin/credential checks. Routine
   local and controlled HTTP/TLS A/V checks keep audio output closed. Separate

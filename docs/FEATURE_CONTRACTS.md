@@ -252,6 +252,62 @@ controls and real decoded video/audio output. Authored fixtures
 and interface prerequisites establish finite progress; they do not establish
 YouTube or other public-service acceptance.
 
+Finite Media/Video interface prerequisite: genuine owner-Window
+HTMLMediaElement and HTMLVideoElement interface objects and prototypes expose
+the existing implemented player. Constructor/prototype inheritance follows
+Media to HTMLElement and Video to Media. Direct calls and construction throw
+TypeError; they are not element factories. Main-document HTML VIDEO class
+identity is independent of its selected source or Snapshot lifetime. Real VIDEO
+nodes have an ordinary expando store and actual immediate Video prototype;
+unrelated element families retain their existing immediate-prototype policy.
+AUDIO retains opaque immediate identity with genuine Media ancestry.
+
+The Media prototype exposes load(), pause(), play(), src/currentTime accessors,
+and currentSrc, controls, duration, paused, ended, seeking, readyState and
+networkState getters. The Video prototype exposes decoded videoWidth/videoHeight.
+The real NETWORK_* and HAVE_* constants are inherited from the Media prototype
+and also appear on its interface object. Canonical methods/accessors have
+ordinary Web IDL descriptors, genuine brands and owner Function/Promise/
+DOMException realms. Ordinary instance/prototype shadows remain observable;
+saved canonical operations read or change native slots independently of them.
+
+Canonical src/currentTime setters share the existing native write transaction:
+primitive conversion, validate_set, semantic source-selection reservation,
+original native incumbent, actual native write, pending-Promise effects and
+stable-task completion. A missing setter argument is Undefined and undergoes
+that attribute's conversion. Canonical load/pause/play reuse the actual control
+FIFO, issue-time position, decoded-frame/acknowledged-PCM readiness and genuine
+play Promise registry. Saved canonical holder and actual receiver origins are
+checked before coercion; existing Event/DOM borrowing policies are unchanged.
+
+Class identity alone does not add a player. Genuine unbound VIDEO/AUDIO
+load/pause calls throw a real NotSupportedError DOMException; play returns a
+genuine rejected Promise with that reason. Their state getters/setters still
+decline the missing binding explicitly. These refusals do not install an EMPTY
+player or alter another player's source, control queue or device. Child players
+and additional controllers remain unsupported. controls has the existing actual getter only; its setter, VIDEO
+width/height content reflection, canPlayType, MediaError/TimeRanges and the wider
+media API remain deferred. Existing authored A/V, transport and physical-control
+profiles are unchanged.
+
+Semantic references: [Media](https://html.spec.whatwg.org/multipage/media.html#htmlmediaelement),
+[Video](https://html.spec.whatwg.org/multipage/media.html#htmlvideoelement) and
+[Web IDL attribute setters](https://webidl.spec.whatwg.org/#dfn-attribute-setter).
+
+Seven original Page/Runtime controls cover canonical roots/descriptors/constants,
+slot reads versus ordinary shadows, real Promise reasons and pause/load queues,
+extracted setters and stable src FIFO, owner/foreign checks before effects,
+unbound-class identity/refusal, and bounded getter-work failure/recovery. Queue
+acknowledgement in these tests is a Page/App handoff, not playback evidence.
+check_media_interface_harness.py joins the required normal offline journeys.
+The matching optimized executable passed actual canonical controls despite own
+shadows, with the original clock, independent pixels, events, source lifetime,
+seek, EOF/replay, Stop and navigation checks and paired document/layout/canvas
+identity. Validation scope is the finite model/interface and App/input/offscreen
+slice; full normal verification remains a separate required integration gate.
+The broader F6 objective remains in progress. This adds no device, audibility,
+physical-desktop or public-service acceptance.
+
 Base Event prerequisite: new Event(type, init) uses a real owner-realm
 constructor and canonical prototype, branded getters/methods, phase constants
 and an own unforgeable isTrusted accessor. Required DOMString conversion and

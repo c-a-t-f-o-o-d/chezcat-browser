@@ -87,6 +87,8 @@ mod function_constructor;
 mod host_objects;
 #[path = "event_interface.rs"]
 mod event_interface;
+#[path = "media_interface.rs"]
+mod media_interface;
 #[path = "runtime_diagnostics.rs"]
 mod runtime_diagnostics;
 #[path = "string_substr.rs"]
@@ -494,6 +496,9 @@ pub trait Host {
     /// Optional owner for a real native method whose first lookup may occur in
     /// another supported realm. This grants no constructor/prototype capability.
     fn native_method_owner(&self, _object:u32, _method:&str) -> Option<u32> { None }
+    /// A genuine canonical attribute setter may reuse the native write pipeline
+    /// without performing ordinary property lookup again. Existing hosts opt out.
+    fn native_setter_property(&self,_object:u32,_method:&str)->Option<&'static str>{None}
     /// Only fresh, still-unpublished supported Event constructor/factory results opt
     /// into atomic ordinary-store/unforgeable installation.
     fn unpublished_base_event_owner(&self,_object:u32,_method:&str,_result:u32)->Option<u32>{None}
@@ -8065,6 +8070,13 @@ impl Runtime {
         host: &mut dyn Host,
     ) -> Result<Value, Fault> {
         self.validate_native_access(object, host)?;
+        if let Some(property)=host.native_setter_property(object,method) {
+            // Web IDL attribute setters receive undefined when no argument is
+            // supplied. Brand/origin validation preceded any value conversion.
+            let value=self.copy_value(args.first().unwrap_or(&Value::Undefined))?;
+            self.host_set_native(object,property,value,host)?;
+            return Ok(Value::Undefined);
+        }
         let required = host.required_arguments(object, method);
         if args.len() < required {
             return Err(Fault::exception(
@@ -8110,8 +8122,15 @@ impl Runtime {
             if let Some(Value::Host(handle))=args.get(index) {self.validate_native_access(*handle,host)?;}
         }
         if host.synchronous_event_dispatch(object,method) {host.prepare_event_dispatch().map_err(Fault::new)?;}
-        host.validate_call(object, method, args)
-            .map_err(|(kind, message)| Fault::exception(kind, message))?;
+        if let Err((kind,message))=host.validate_call(object,method,args) {
+            // Finite media controls distinguish genuine class identity from an
+            // unavailable player without forging a successful empty player.
+            if matches!(method,"\0Media.load"|"\0Media.pause")&&kind=="NotSupportedError" {
+                let exception=self.native_dom_exception(kind,&message)?;
+                return Err(Fault::thrown(exception));
+            }
+            return Err(Fault::exception(kind,message));
+        }
         if method==event_interface::PATH_METHOD {
             return self.event_path_array(object,host);
         }
@@ -8530,6 +8549,12 @@ impl Runtime {
                     (*object, *method, *receiver_required);
                 if host.promise_returning_operation(object,method) {
                     return self.call_host_promise(object,method,receiver_required,this,host);
+                }
+                // Opted-in canonical Window holders keep their origin guard
+                // before `this` replaces the holder. Legacy instance-owned
+                // methods retain their existing borrowing policy.
+                if host.native_method_owner(object,method)==Some(object) {
+                    self.validate_native_access(object,host)?;
                 }
                 if let Some(receiver) = host.global_operation_receiver(object, method, &this) {
                     self.validate_native_access(object, host)?;

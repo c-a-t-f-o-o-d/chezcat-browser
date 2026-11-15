@@ -1,0 +1,148 @@
+<!doctype html><html><head><meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="media-src 'self'">
+<title>Authored local video</title>
+<style>body{margin:20px}video{display:block;width:480px;height:360px;object-fit:contain}#media-state{font-size:18px}</style>
+</head><body>
+<h1>Real media interfaces</h1>
+<button id="reload" name="reload" type="button">Reload the same video with JavaScript</button>
+<button id="js-pause" name="js-pause" type="button">Pause with JavaScript</button>
+<button id="js-seek" name="js-seek" type="button">Seek with JavaScript</button>
+<button id="js-play" name="js-play" type="button">Play with JavaScript</button>
+<video id="authored-video" src="scene-intra.ivf" controls width="480" height="360" onloadedmetadata="window.inlineMetadata=event.target.videoWidth;">Fallback must not appear.</video>
+<p id="media-state">Source pending</p><p id="media-position">Position pending</p>
+<p id="interface-state">Canonical media controls pending</p>
+<p id="reload-state">Not reloaded</p><p id="js-pause-state">JavaScript pause not requested</p>
+<p id="js-seek-state">JavaScript seek not requested</p><p id="js-play-state">JavaScript play not requested</p>
+<input name="other" value="Other page input"><a href="authored-video-next.html">Leave video</a>
+<script>
+var video=document.getElementById('authored-video'),mediaEvents=[],initialMediaState=video.readyState,mediaWindowLoaded=false;
+
+var Media=HTMLMediaElement,Video=HTMLVideoElement,MediaP=Media.prototype,VideoP=Video.prototype;
+var nativeLoad=MediaP.load,nativePause=MediaP.pause,nativePlay=MediaP.play;
+var nativeTimeGet=Object.getOwnPropertyDescriptor(MediaP,'currentTime').get,nativeTimeSet=Object.getOwnPropertyDescriptor(MediaP,'currentTime').set;
+var nativeSrcGet=Object.getOwnPropertyDescriptor(MediaP,'src').get;
+var ifaceRoots=0,ifaceBrands=0,ifaceBrandPromise=0,ifaceChildRoots=0,ifaceLoad=0,ifacePause=0,ifaceSeek=0,ifacePlay=0,ifaceStubCalls=0;
+function renderInterfaces(){document.getElementById('interface-state').textContent='Canonical media controls iface_roots='+ifaceRoots+' iface_brands='+ifaceBrands+' iface_brand_promise='+ifaceBrandPromise+' iface_child_roots='+ifaceChildRoots+' iface_load='+ifaceLoad+' iface_pause='+ifacePause+' iface_seek='+ifaceSeek+' iface_play='+ifacePlay+' iface_stub_calls='+ifaceStubCalls;}
+if(typeof Media!=='function'||typeof Video!=='function'||Object.getPrototypeOf(Media)!==HTMLElement||Object.getPrototypeOf(Video)!==Media||Object.getPrototypeOf(MediaP)!==HTMLElement.prototype||Object.getPrototypeOf(VideoP)!==MediaP||Object.getPrototypeOf(video)!==VideoP||video.constructor!==Video||!(video instanceof Video)||!(video instanceof Media))throw Error('genuine media roots and actual VIDEO ancestry');
+for(var item of [['NETWORK_EMPTY',0],['NETWORK_IDLE',1],['NETWORK_LOADING',2],['NETWORK_NO_SOURCE',3],['HAVE_NOTHING',0],['HAVE_METADATA',1],['HAVE_CURRENT_DATA',2],['HAVE_FUTURE_DATA',3],['HAVE_ENOUGH_DATA',4]]){for(var holder of [Media,MediaP]){var desc=Object.getOwnPropertyDescriptor(holder,item[0]);if(!desc||desc.value!==item[1]||!desc.enumerable||desc.writable||desc.configurable)throw Error('real media constants');}}
+for(var method of ['load','pause','play']){var desc=Object.getOwnPropertyDescriptor(MediaP,method);if(typeof desc.value!=='function'||desc.value.length!==0||!desc.writable||!desc.enumerable||!desc.configurable||video[method]!==desc.value||Object.prototype.hasOwnProperty.call(video,method))throw Error('actual inherited Media methods');}
+for(var field of ['currentSrc','duration','paused','ended','seeking','readyState','networkState']){var desc=Object.getOwnPropertyDescriptor(MediaP,field);if(typeof desc.get!=='function'||desc.get.length!==0||desc.set!==undefined||!desc.enumerable||!desc.configurable)throw Error('real media getter descriptors');}
+for(var field of ['videoWidth','videoHeight']){var desc=Object.getOwnPropertyDescriptor(VideoP,field);if(typeof desc.get!=='function'||desc.set!==undefined||!desc.enumerable||!desc.configurable)throw Error('real video getter descriptors');}
+for(var field of ['src','currentTime']){var desc=Object.getOwnPropertyDescriptor(MediaP,field);if(typeof desc.get!=='function'||typeof desc.set!=='function'||desc.get.length!==0||desc.set.length!==1)throw Error('real supported mutable media fields');}
+var rejected=0,coerced=0,arg={valueOf:function(){coerced++;return 1;},toString:function(){coerced++;return 'unused';}};
+for(var action of [function(){Media(arg);},function(){Video(arg);},function(){new Media(arg);},function(){new Video(arg);},function(){nativePause.call({},arg);},function(){nativeTimeGet.call({});},function(){nativeTimeSet.call({},arg);}]){try{action();}catch(e){if(e.name==='TypeError')rejected++;else throw e;}}
+if(rejected!==7||coerced)throw Error('illegal constructors or wrong receiver coerced');
+ifaceBrands=1;ifaceRoots=1;
+var wrongPromise=nativePlay.call({}),wrongSync=0;if(Object.getPrototypeOf(wrongPromise)!==Promise.prototype)throw Error('wrong brand Play must return genuine Promise');
+wrongPromise.then(function(){throw Error('wrong brand Play fulfilled');},function(e){if(!(e instanceof TypeError)||ifaceBrandPromise)throw Error('wrong brand Play rejection');ifaceBrandPromise=1;renderInterfaces();});
+var childFrame=document.createElement('iframe');childFrame.hidden=true;document.body.appendChild(childFrame);var child=childFrame.contentWindow,ChildMedia=child.HTMLMediaElement,ChildVideo=child.HTMLVideoElement;
+if(ChildMedia===Media||ChildVideo===Video||Object.getPrototypeOf(ChildMedia)!==child.HTMLElement||Object.getPrototypeOf(ChildVideo)!==ChildMedia||Object.getPrototypeOf(ChildVideo.prototype)!==ChildMedia.prototype||Object.getPrototypeOf(ChildMedia.prototype)!==child.HTMLElement.prototype)throw Error('real blank child owner roots');
+ifaceChildRoots=1;renderInterfaces();
+if(video.nodeName!=='VIDEO'||video.readyState!==0||video.videoWidth!==0||!isNaN(video.duration)||!video.paused||video.ended||!video.controls)throw Error('pending video state');
+if(typeof video.play!=='function'||video.play.length!==0||video.play!==video.play||video.canPlayType!==undefined)throw Error('real media method identity/capability');
+var jsPauseActive=false,jsPauseTime=0,jsPauseSync=0,jsPauseMicrotask=0,jsPauseEvents=0;
+function renderJsPause(){
+ document.getElementById('js-pause-state').textContent='JavaScript pause observed js_pause_sync='+jsPauseSync+' js_pause_microtask='+jsPauseMicrotask+' js_pause_ms='+Math.floor(jsPauseTime*1000)+' js_pause_events='+jsPauseEvents;
+}
+document.getElementById('js-pause').onclick=function(e){
+ if(!e.isTrusted||video.paused||video.ended||video.currentTime<=0)throw Error('JS pause requires real playing input');
+ var attr=video.getAttributeNode('src'),raw=attr.value,before=video.currentTime;
+ var ownPause=function(){ifaceStubCalls++;throw Error('own pause stub was called');};video.pause=ownPause;
+ var result=nativePause.call(video),frozen=nativeTimeGet.call(video);
+ if(video.pause!==ownPause||ifaceStubCalls)throw Error('canonical pause must leave own method shadow intact');delete video.pause;ifacePause=1;renderInterfaces();
+ if(result!==undefined||!video.paused||video.ended||frozen<before||frozen>=video.duration||video.currentTime!==frozen)throw Error('JS pause synchronous measured state');
+ if(video.getAttributeNode('src')!==attr||attr.value!==raw)throw Error('JS pause changed raw source');
+ jsPauseTime=frozen;jsPauseSync=1;jsPauseMicrotask=0;jsPauseEvents=0;jsPauseActive=true;renderJsPause();
+ Promise.resolve().then(function(){
+  if(!video.paused||video.currentTime!==frozen||video.getAttributeNode('src')!==attr||attr.value!==raw)throw Error('JS pause microtask state changed');
+  jsPauseMicrotask=1;renderJsPause();
+ });
+};
+var jsSeekActive=false,jsSeekTarget=1.25,jsSeekSync=0,jsSeekComplete=0,jsSeekEvents=[],jsSeekAttr=null,jsSeekRaw='';
+function renderJsSeek(){
+ document.getElementById('js-seek-state').textContent='JavaScript seek observed js_seek_sync='+jsSeekSync+' js_seek_ms='+Math.floor(jsSeekTarget*1000)+' js_seek_complete='+jsSeekComplete+' js_seek_order='+jsSeekEvents.join(',');
+}
+document.getElementById('js-seek').onclick=function(e){
+ if(!e.isTrusted||!video.paused||video.seeking||video.ended)throw Error('JS seek requires real paused input');
+ jsSeekAttr=video.getAttributeNode('src');jsSeekRaw=jsSeekAttr.value;
+ jsSeekSync=0;jsSeekComplete=0;jsSeekEvents=[];jsSeekActive=true;
+ Object.defineProperty(video,'currentTime',{value:'own-time',writable:true,configurable:true});
+ nativeTimeSet.call(video,jsSeekTarget);
+ if(video.currentTime!=='own-time'||nativeTimeGet.call(video)!==jsSeekTarget)throw Error('canonical seek bypasses own data shadow');delete video.currentTime;ifaceSeek=1;renderInterfaces();
+ if(video.currentTime!==jsSeekTarget||!video.seeking||!video.paused||video.ended)throw Error('JS seek synchronous official position');
+ if(video.getAttributeNode('src')!==jsSeekAttr||jsSeekAttr.value!==jsSeekRaw)throw Error('JS seek changed raw source');
+ jsSeekSync=1;renderJsSeek();
+};
+var jsPlayActive=false,jsPlaySync=0,jsPlayFulfilled=0,jsPlayEvents=0,jsPlayOrder=[],jsPlayStart=0,jsPlayAttr=null,jsPlayRaw='';
+function renderJsPlay(){
+ document.getElementById('js-play-state').textContent='JavaScript play observed js_play_sync='+jsPlaySync+' js_play_fulfilled='+jsPlayFulfilled+' js_play_events='+jsPlayEvents+' js_play_start_ms='+Math.floor(jsPlayStart*1000)+' js_play_order='+jsPlayOrder.join(',');
+}
+document.getElementById('js-play').onclick=function(e){
+ if(!e.isTrusted||!video.paused||video.seeking||video.ended)throw Error('JS play requires real paused input');
+ jsPlayAttr=video.getAttributeNode('src');jsPlayRaw=jsPlayAttr.value;jsPlayStart=video.currentTime;
+ jsPlayActive=true;jsPlaySync=0;jsPlayFulfilled=0;jsPlayEvents=0;jsPlayOrder=[];
+ var ownPlay=function(){ifaceStubCalls++;throw Error('own Play stub was called');};video.play=ownPlay;
+ var promise=nativePlay.call(video,{toString:function(){throw Error('play argument coerced');},valueOf:function(){throw Error('play argument coerced');}});
+ if(video.play!==ownPlay||ifaceStubCalls)throw Error('canonical Play must leave own method shadow intact');delete video.play;ifacePlay=1;renderInterfaces();
+ if(!(promise instanceof Promise)||typeof promise.then!=='function'||video.paused||jsPlayFulfilled!==0)throw Error('JS play genuine pending Promise/synchronous state');
+ if(video.getAttributeNode('src')!==jsPlayAttr||jsPlayAttr.value!==jsPlayRaw)throw Error('JS play changed raw source');
+ jsPlaySync=1;jsPlayOrder.push('sync');renderJsPlay();
+ promise.then(function(value){
+  if(!jsPlayActive||value!==undefined||jsPlayFulfilled!==0||jsPlayEvents!==1||jsPlayOrder.join(',')!=='sync,playing'||video.paused||video.ended)throw Error('JS play fulfillment order or state');
+  if(video.getAttributeNode('src')!==jsPlayAttr||jsPlayAttr.value!==jsPlayRaw)throw Error('JS play fulfilled source identity');
+  jsPlayFulfilled=1;jsPlayOrder.push('then');renderJsPlay();
+ },function(){throw Error('JS play unexpectedly rejected');});
+};
+document.getElementById('reload').onclick=function(){
+ var attr=video.getAttributeNode('src'),raw=attr.value;
+ var ownLoad=function(){ifaceStubCalls++;throw Error('own Load stub was called');},srcReads=0,srcWrites=0;video.load=ownLoad;
+ Object.defineProperty(video,'src',{configurable:true,get:function(){srcReads++;return 'own-src';},set:function(){srcWrites++;}});
+ var loadResult=nativeLoad.call(video,{toString:function(){throw Error('ignored load argument');}});
+ if(video.load!==ownLoad||srcReads||srcWrites||ifaceStubCalls||nativeSrcGet.call(video).indexOf(raw)<0)throw Error('canonical Load must use raw source and bypass own shadows');
+ if(video.src!=='own-src'||srcReads!==1||srcWrites)throw Error('own source accessor must remain intact');delete video.src;delete video.load;ifaceLoad=1;renderInterfaces();
+ if(loadResult!==undefined||video.readyState!==0||video.currentTime!==0||!video.paused||!isNaN(video.duration))throw Error('synchronous load reset');
+ if(video.getAttributeNode('src')!==attr||attr.value!==raw)throw Error('load changed raw Attr');
+ Promise.resolve().then(function(){if(video.networkState!==2||video.getAttributeNode('src')!==attr||attr.value!==raw)throw Error('stable load selection');document.getElementById('reload-state').textContent='Raw source retained after load';});
+};
+function recordMedia(e){
+ if(e.target!==video||!e.isTrusted||e.cancelable||e.bubbles)throw Error('native media event identity');
+ mediaEvents.push(e.type);
+ if(jsPlayActive&&e.type==='playing'){
+  jsPlayEvents++;
+  if(jsPlayEvents!==1||jsPlayOrder.join(',')!=='sync'||video.paused||video.seeking)throw Error('JS play playing-event order or count');
+  jsPlayOrder.push('playing');renderJsPlay();
+ }
+ if(e.type==='pause'||e.type==='seeking'||e.type==='loadstart'||e.type==='ended')jsPlayActive=false;
+ if(jsSeekActive&&(e.type==='seeking'||e.type==='timeupdate'||e.type==='seeked')){
+  if(e.type==='seeking'&&jsSeekEvents.length!==0)throw Error('JS seek repeated or reordered seeking');
+  if(e.type!=='seeking'&&jsSeekEvents[0]!=='seeking')throw Error('JS seek missing seeking event');
+  if(e.type==='seeked'){
+   if(jsSeekEvents[jsSeekEvents.length-1]!=='timeupdate'||video.seeking||!video.paused||video.currentTime!==jsSeekTarget)throw Error('JS seek completion task/state');
+   if(video.getAttributeNode('src')!==jsSeekAttr||jsSeekAttr.value!==jsSeekRaw)throw Error('JS seek completion source identity');
+   jsSeekComplete=1;jsSeekActive=false;
+  }
+  jsSeekEvents.push(e.type);renderJsSeek();
+ }
+ if(e.type==='play'||e.type==='seeking'||e.type==='loadstart')jsPauseActive=false;
+ if(e.type==='pause'&&jsPauseActive){
+  jsPauseEvents++;
+  if(jsPauseEvents!==1||!video.paused||video.currentTime!==jsPauseTime)throw Error('JS pause task state or count');
+  renderJsPause();
+ }
+ if(e.type==='loadedmetadata'){
+  if(video.videoWidth!==64||video.videoHeight!==48||video.duration!==3||video.readyState<2||video.networkState!==1)throw Error('measured video metadata');
+  document.getElementById('media-state').textContent='Metadata ready';
+ }
+ if(e.type==='playing')document.getElementById('media-state').textContent='Video playing';
+ if(e.type==='pause')document.getElementById('media-state').textContent='Video paused';
+ if(e.type==='seeked')document.getElementById('media-state').textContent='Video seeked';
+ if(e.type==='ended'){
+  if(!video.ended||!video.paused||video.currentTime!==3)throw Error('actual video end');
+  document.getElementById('media-state').textContent='Video ended';
+ }
+ document.getElementById('media-position').textContent='Time '+(Math.round(video.currentTime*100)/100)+' seconds';
+}
+for(var name of ['loadstart','durationchange','loadedmetadata','loadeddata','canplay','canplaythrough','play','playing','pause','seeking','seeked','timeupdate','ended','abort','emptied','error'])video.addEventListener(name,recordMedia);
+window.addEventListener('load',function(){if(mediaEvents.indexOf('loadeddata')<0||initialMediaState!==0||window.inlineMetadata!==64)throw Error('load before real video data');mediaWindowLoaded=true;});
+</script>
+</body></html>
