@@ -3185,6 +3185,9 @@ impl App {
             return PlatformAction::None;
         }
         if self.view == View::Page {
+            if let Some(page) = self.scripting.as_mut() {
+                page.notify_user_activation();
+            }
             if let Some(node) = self
                 .page
                 .control_at(x, y - self.content_top() + self.scroll)

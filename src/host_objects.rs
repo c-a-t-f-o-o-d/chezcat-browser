@@ -294,6 +294,8 @@ impl Runtime {
         host.validate_set(handle, &name, &value)
             .map_err(|(kind, message)| Fault::exception(kind, message))?;
         let ticket=self.prepare_host_microtask(host,handle,&name,std::slice::from_ref(&value),true)?;
+        host.native_operation_caller(self.native_access_caller
+            .unwrap_or_else(|| self.browser_global.map(|(window, _)| window)));
         let result=host.set(handle,&name,value).map_err(Fault::new);
         self.finish_host_microtask(host,ticket)?;
         result

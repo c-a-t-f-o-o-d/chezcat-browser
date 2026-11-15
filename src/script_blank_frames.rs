@@ -10,11 +10,34 @@ const MAX_BLANK_FRAMES: usize = 8;
 pub(super) struct BlankFrame {
     owner: usize,
     connected: bool,
+    last_activation: Option<Instant>,
     document: Document,
     origin: crate::navigation::Location,
     serialized_origin: String,
     base: crate::navigation::Location,
     policy: crate::csp::PolicySet,
+}
+
+impl State {
+    // Native activation reaches existing same-origin descendant Windows. A new
+    // initial blank Window starts inactive, and detached/foreign frames receive
+    // no notification. Child painting/input/navigation remain unsupported.
+    pub(super) fn notify_blank_frame_activation(&mut self, now: Instant) {
+        let Some(origin) = self.location.as_ref().and_then(|view| view.source.url.as_ref()) else {return;};
+        for frame in &mut self.blank_frames {
+            if frame.connected && frame.origin.url.as_ref().is_some_and(|url| origin.same_origin(url)) {
+                frame.last_activation = Some(now);
+            }
+        }
+    }
+
+    pub(super) fn incumbent_has_transient_activation(&self, now: Instant) -> bool {
+        if self.navigation_incumbent == Some(WINDOW) {return self.has_transient_activation(now);}
+        self.navigation_incumbent.and_then(frame_handle)
+            .filter(|(_, offset)| *offset == 0)
+            .and_then(|(index, _)| self.blank_frames.get(index))
+            .is_some_and(|frame| Self::activation_is_live(frame.last_activation, now))
+    }
 }
 
 fn window(index: usize) -> u32 { FRAME_BASE + index as u32 * FRAME_STRIDE }
@@ -169,7 +192,7 @@ impl Bridge<'_> {
         Ok(owners.into_iter().map(|owner| {
             let mut document = crate::html::parse("<html><head></head><body></body></html>");
             document.scripting_enabled = self.doc.scripting_enabled;
-            BlankFrame { owner, connected: true, document, origin: origin.clone(), serialized_origin: serialized_origin.clone(), base: base.clone(),
+            BlankFrame { owner, connected: true, last_activation: None, document, origin: origin.clone(), serialized_origin: serialized_origin.clone(), base: base.clone(),
                 policy: self.state.dynamic.policy.clone() }
         }).collect())
     }

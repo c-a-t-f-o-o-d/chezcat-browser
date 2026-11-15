@@ -46,6 +46,21 @@ fragment intent and explicit None; no network-error-to-search fallback.
 Acceptance: original loopback forms/redirects/replacements and address fixtures;
 encoding/Unicode/punctuation; history/document identity; cancellation and cookie/
 origin boundaries; persisted settings/cancel/save conflicts and failure recovery.
+Automatic Location navigation selects replacement at request time only while
+the target document is not completely loaded and its incumbent Window lacks
+transient activation. Load-event callbacks precede complete loading even when
+readyState is complete. Preserve ordinary later navigation and trusted-input
+activation; synthetic DOM dispatch does not create activation. Original loopback
+controls cover startup/load/microtask bridges, explicit replace, HTTP redirects,
+completed-document navigation and exactly one Back followed by another query.
+
+Implementation: request-time Location handling uses separate complete-loading and
+bounded native activation state, with incumbent caller isolation and same-origin
+descendant notification. Original check_navigation_harness.py exercises all six
+bridge controls with real App input, HTTP response identities and paired pixels.
+Native tests cover expiry, synthetic dispatch, child creation timing, reserved
+keys, fragments and resource preservation. This is finite offline acceptance.
+
 Opt-in public evidence records version/hash, entry path, session and each stage.
 A challenge/denial stops that service and requires the human step once; elapsed
 time, a fresh process, HTTP200, a title or zero script errors is insufficient.

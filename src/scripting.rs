@@ -120,6 +120,9 @@ const MAX_TIMER_CALLBACKS: usize = 4096;
 #[cfg(test)]
 const MAX_ANIMATION_FRAMES: usize = 64;
 const FRAME_INTERVAL: Duration = Duration::from_millis(16);
+// A bounded UA policy, measured from actual qualifying native input. Script
+// dispatch and resource completion cannot create or renew transient activation.
+const TRANSIENT_ACTIVATION: Duration = Duration::from_secs(5);
 pub const MAX_CONSOLE_SOURCE: usize = 8192;
 
 /// Values supplied by the native input path, never by document code.
@@ -369,6 +372,10 @@ struct State {
     executed: usize,
     enabled: bool,
     ready: &'static str,
+    // readyState becomes complete BEFORE the load callbacks/checkpoints.
+    document_complete: bool,
+    last_activation: Option<Instant>,
+    navigation_incumbent: Option<u32>,
 }
 
 impl State {
@@ -436,7 +443,20 @@ impl State {
             executed: 0,
             enabled: false,
             ready: "loading",
+            document_complete: false,
+            last_activation: None,
+            navigation_incumbent: Some(WINDOW),
         }
+    }
+
+    fn activation_is_live(last: Option<Instant>, now: Instant) -> bool {
+        last.is_some_and(|last| {
+            now.checked_duration_since(last).is_some_and(|age| age < TRANSIENT_ACTIVATION)
+        })
+    }
+
+    fn has_transient_activation(&self, now: Instant) -> bool {
+        Self::activation_is_live(self.last_activation, now)
     }
 
     fn dom_committed(&mut self) {
@@ -1310,11 +1330,21 @@ impl Page {
         let before = self.state.errors;
         self.state.ready = "complete";
         self.dispatch_to(doc, forms, WINDOW, "load", false, false);
+        // dispatch_to includes each callback's microtask checkpoint. A queued
+        // Location request already captured its history handling before this.
+        self.state.document_complete = true;
         Outcome {
             prevented: false,
             layout_changed: std::mem::take(&mut self.state.changed),
             errors: self.state.errors - before,
         }
+    }
+
+    /// Native document input only; browser chrome and JS dispatch never call it.
+    pub fn notify_user_activation(&mut self) {
+        let now = Instant::now();
+        self.state.last_activation = Some(now);
+        self.state.notify_blank_frame_activation(now);
     }
 
     pub fn error_count(&self) -> usize {
@@ -1349,6 +1379,9 @@ impl Page {
                 errors: 1,
                 ..Outcome::default()
             };
+        }
+        if input.down && input.key != "Escape" {
+            self.notify_user_activation();
         }
         let node = input.target.or(self.state.tree.body);
         let target = node.map_or(DOCUMENT, node_handle);
@@ -3688,6 +3721,10 @@ impl Host for Bridge<'_> {
             "then" | "" => Ok(Value::Undefined),
             _ => Err(format!("Element property {property:?} is not supported.")),
         }
+    }
+
+    fn native_operation_caller(&mut self, window: Option<u32>) {
+        self.state.navigation_incumbent = window;
     }
 
     fn set(&mut self, object: u32, property: &str, value: Value) -> Result<(), String> {

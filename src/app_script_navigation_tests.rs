@@ -415,12 +415,19 @@ fn unchanged_hash_is_inert_and_fragment_navigation_preserves_external_requests()
     no_script_errors(&app);
     assert_eq!(app.document.title, "Hash finished", "{}", report(&app));
     assert_eq!(app.location.display(), peer.url("/hash#changed"));
-    // Only the actual #kept -> #changed transition appends an entry. Assigning
-    // each already-current hash must neither reload nor add another entry.
+    // The unactivated fragment change while scripts are still loading replaces
+    // this entry. Assigning already-current hashes remains inert.
+    assert_eq!(app.history.len(), 2);
+    assert_eq!(app.history_index, 1);
+    assert_eq!(app.history[1].location.display(), peer.url("/hash#changed"));
+    let outcome = app.scripting.as_mut().unwrap().console_eval(
+        &mut app.document, &mut app.forms, "location.hash='#later';");
+    assert_eq!(outcome.errors, 0, "{}", report(&app));
+    app.process_script_requests();
     assert_eq!(app.history.len(), 3);
     assert_eq!(app.history_index, 2);
-    assert_eq!(app.history[1].location.display(), peer.url("/hash#kept"));
-    assert_eq!(app.history[2].location.display(), peer.url("/hash#changed"));
+    assert_eq!(app.history[1].location.display(), peer.url("/hash#changed"));
+    assert_eq!(app.history[2].location.display(), peer.url("/hash#later"));
     let requests = peer.requests.lock().unwrap();
     for path in ["/hash", "/hash.js", "/after-hash.js"] {
         assert_eq!(
@@ -433,4 +440,38 @@ fn unchanged_hash_is_inert_and_fragment_navigation_preserves_external_requests()
         );
     }
     assert_eq!(requests.len(), 3, "{requests:?}");
+}
+
+#[test]
+fn native_document_activation_excludes_chrome_reserved_keys_and_keyup() {
+    for (input, replace) in [("none", true), ("chrome", true), ("pointer", false),
+        ("keydown", false), ("reserved", true), ("keyup", true), ("escape", true)] {
+        let peer = Peer::new(None);
+        let mut app = App::new();
+        app.open_address(&peer.url("/held"));
+        until(&mut app, |app| app.scripting.is_some()
+            && app.document.title == "Waiting for script");
+        // The held external script keeps this genuine document incomplete.
+        // Chrome interaction cannot give its Window transient activation.
+        app.focus = Focus::Page;
+        match input {
+            "chrome" => { app.pointer_down(10, 10, false); }
+            "pointer" => { app.pointer_down(200, app.content_top() + 80, false); }
+            "keydown" => { app.key(0x0d, false, false, false); }
+            "reserved" => { app.key(0x4c, true, false, false); }
+            "keyup" => { app.key_event(crate::scripting::KeyboardInput {
+                down: false, key: "Enter".into(), code: "Enter".into(), key_code: 0x0d,
+                ..crate::scripting::KeyboardInput::default()
+            }); }
+            "escape" => { app.key(0x1b, false, false, false); }
+            _ => {}
+        }
+        let result = app.scripting.as_mut().unwrap().console_eval(
+            &mut app.document, &mut app.forms, "location.assign('/destination');");
+        assert_eq!(result.errors, 0, "{input}: {}", report(&app));
+        let request = app.scripting.as_mut().unwrap().take_navigation().unwrap();
+        assert_eq!(request.replace, replace, "{input}");
+        app.stop_loading();
+        peer.release();
+    }
 }

@@ -542,6 +542,9 @@ pub trait Host {
     }
     fn get(&mut self, object: u32, property: &str) -> Result<Value, String>;
     fn set(&mut self, object: u32, property: &str, value: Value) -> Result<(), String>;
+    /// Incumbent native caller, captured independently of a saved method's owner
+    /// realm. Called after coercion and immediately before a host operation.
+    fn native_operation_caller(&mut self, _window: Option<u32>) {}
     /// Reserve a native stable-state microtask before a host mutation commits.
     /// The ticket is host-owned data, never a script callback or native handle.
     fn prepare_native_microtask(&mut self,_object:u32,_member:&str,_args:&[Value],_setter:bool)->Result<Option<u64>,String>{Ok(None)}
@@ -8135,6 +8138,8 @@ impl Runtime {
         }
         if let Some(fields) = &fields { for (_, value) in fields { self.pin_exported_value(value); } }
         let ticket=self.prepare_host_microtask(host,object,method,args,false)?;
+        host.native_operation_caller(self.native_access_caller
+            .unwrap_or_else(|| self.browser_global.map(|(window, _)| window)));
         let result=host.call_with_dictionary(object, method, args, fields.as_deref()).map_err(Fault::new);
         self.finish_host_microtask(host,ticket)?;
         result
