@@ -18,7 +18,7 @@ supported within their recorded limits.
 
 | ID | Status | Current outcome | Remaining scope |
 | --- | --- | --- | --- |
-| T1 | In progress: remaining interoperability gaps | Guarded document diagnostics, a pinned conservative Mozilla NSS 98-authority selection, reviewed offline generation and shared 1024-root policy; coordinated document checks distinguish improved path coverage from later failures | Remaining chain/parser/protocol/timeout/admission and resource-specific failures; no broad TLS or usable-site completion claim |
+| T1 | In progress: remaining interoperability gaps | Guarded document diagnostics, a pinned conservative Mozilla NSS 98-authority selection, reviewed offline generation, shared 1024-root policy and bounded per-hop redirect clocks; coordinated document checks distinguish improved path coverage from later failures | Remaining chain/parser/protocol/timeout/admission and resource-specific failures; no broad TLS or usable-site completion claim |
 | B1 | In progress: ordinary external stylesheet slice | Shared unmarked cross-origin HTTP(S) stylesheet loading and original request-to-pixel/lifecycle regressions; normal verification remains required for each checkpoint | Preserve request/CSP/cookie/MIME/CORP/COEP/cache/cancellation boundaries; broader script/font/image/layout/input gaps remain |
 | B2 | Planned after first page-usability milestone | No new tab or window capability is claimed | Finite tabs, link-context and new-window behavior with real page/history/worker/focus ownership |
 | A1 | Planned at a suitable UI checkpoint | No About/build-copy view is claimed | Exact embedded product/source/build identity, offline license/notices and privacy-safe copy without runtime Git |

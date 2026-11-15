@@ -44,6 +44,18 @@ real signed-path validation and refusal before writes; data-tool tests cover
 reproducibility, source gates and strict negative cases. These native/tool checks
 passed; full normal verification remains required for an implementation checkpoint.
 
+Shared HTTP redirects give the initial exchange and each next admitted hop a
+20-second allowance, clipped by one checked absolute 120-second overall deadline.
+Pool acquisition, TLS, send, framing/decode and post-read retention share that
+hop clock; a stale-GET retry does not renew it. The five-redirect limit, per-hop
+policy/cancellation, POST/cookie/CORS and byte-accounting rules are unchanged.
+Five original owned-loopback short-profile controls cover actual old-window
+exhaustion versus two/three successful renewed hops, single-hop and overall
+timeouts, cancellation and redirect/loop limits. These do not prove site access.
+Existing caller admission/wait limits and independent watchdogs still apply;
+blocking OS DNS can exceed a transport deadline, so it is not a strict process
+wall-clock guarantee.
+
 `--diagnose URL --report FILE` uses the real HTTP/TLS client for document GETs,
 without an App profile, page scripts, subresources or form submission. At most
 eight targets are accepted; all are parsed before report creation or network
