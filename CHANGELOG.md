@@ -2,6 +2,12 @@
 
 ## 0.80.0-alpha.1 (candidate)
 
+Finite genuine MouseEvent construction/prototypes now expose actual double
+coordinates, button masks, modifier flags and owner-checked interface references.
+Legacy initialization, readonly fields, ordinary overrides and failed-publication
+recovery retain real state. Synthetic Mouse dispatch/default activation and
+native pointer payloads remain explicitly unsupported.
+
 Genuine UIEvent construction and owner-realm prototypes now reuse the existing
 Event/UI slots, with readonly branded fields, exact interleaved dictionary
 conversion and legacy initialization. Real dispatch/cancellation, native keyboard

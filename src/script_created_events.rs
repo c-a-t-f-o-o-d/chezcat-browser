@@ -13,18 +13,30 @@ struct UiData {
 
 #[derive(Default)]
 struct MouseData {
-    screen_x: i32,
-    screen_y: i32,
-    client_x: i32,
-    client_y: i32,
+    screen_x: f64,
+    screen_y: f64,
+    client_x: f64,
+    client_y: f64,
+    layer_x: i32,
+    layer_y: i32,
     ctrl: bool,
     alt: bool,
     shift: bool,
     meta: bool,
     button: i16,
+    buttons: u16,
+    modifiers: u16,
     which: u32,
     related: Option<u32>,
 }
+
+const EXTRA_MODIFIERS: &[(&str,&str,u16)] = &[
+    ("modifierAltGraph","AltGraph",1),("modifierCapsLock","CapsLock",2),
+    ("modifierFn","Fn",4),("modifierFnLock","FnLock",8),
+    ("modifierHyper","Hyper",16),("modifierNumLock","NumLock",32),
+    ("modifierScrollLock","ScrollLock",64),("modifierSuper","Super",128),
+    ("modifierSymbol","Symbol",256),("modifierSymbolLock","SymbolLock",512),
+];
 
 #[cfg(test)]
 mod tests {
@@ -467,7 +479,7 @@ fn ui_property(name:&str)->bool { matches!(name,"view"|"detail"|"which") }
 
 fn mouse_property(name: &str) -> bool {
     matches!(name, "screenX" | "screenY" | "clientX" | "clientY" | "x" | "y" | "pageX" | "pageY" | "offsetX" | "offsetY"
-        | "ctrlKey" | "altKey" | "shiftKey" | "metaKey" | "button" | "buttons" | "relatedTarget")
+        | "ctrlKey" | "altKey" | "shiftKey" | "metaKey" | "button" | "buttons" | "relatedTarget" | "layerX" | "layerY")
 }
 
 impl Bridge<'_> {
@@ -476,11 +488,11 @@ impl Bridge<'_> {
             .or_else(||self.state.event.as_ref().filter(|event|event.handle==object).map(|_|WINDOW))
     }
     pub(super) fn construct_base_event(&mut self,owner:u32,args:&[Value],fields:Option<&[(&str,Value)]>)->Result<Value,String> {
-        self.construct_event_record(owner,args,fields,None)
+        self.construct_event_record(owner,args,fields,None,None)
     }
     pub(super) fn ordinary_event_owner(&self,object:u32)->Option<u32> {
         let event=&self.state.created_events[self.created_event_index(object)?];
-        (event.mouse.is_none()&&event.custom.is_none()).then_some(event.owner)
+        event.custom.is_none().then_some(event.owner)
     }
     pub(super) fn ui_view_argument(&self,owner:u32,value:Option<&Value>)->Result<Option<u32>,(&'static str,String)> {
         let Some(value)=value else {return Ok(None)};
@@ -496,9 +508,43 @@ impl Bridge<'_> {
         let field=|key|fields.and_then(|fields|fields.iter().find(|(name,_)|*name==key).map(|(_,value)|value));
         let detail=field("detail").map(timer_integer).transpose()?.unwrap_or(0);
         let view=self.ui_view_argument(owner,field("view")).map_err(|(_,message)|message)?;
-        self.construct_event_record(owner,args,fields,Some(UiData {view,detail}))
+        self.construct_event_record(owner,args,fields,Some(UiData {view,detail}),None)
     }
-    fn construct_event_record(&mut self,owner:u32,args:&[Value],fields:Option<&[(&str,Value)]>,ui:Option<UiData>)->Result<Value,String> {
+    pub(super) fn mouse_target_argument(&self,owner:u32,value:Option<&Value>)->Result<Option<u32>,(&'static str,String)> {
+        let Some(value)=value else {return Ok(None)};
+        if matches!(value,Value::Null|Value::Undefined) {return Ok(None);}
+        let Value::Host(target)=value else {return Err(("TypeError","MouseEvent relatedTarget requires a genuine EventTarget or null.".into()));};
+        let target_owner=if self.event_target_interface(*target) {Some(*target)}
+            else if let Some(window)=self.standalone_target_owner(*target) {Some(window)}
+            else if self.frame_node_interface(*target).is_some() {self.frame_instance_window(*target)}
+            else {self.dispatch_receiver(*target).then_some(WINDOW)}
+            .ok_or_else(||("TypeError","MouseEvent relatedTarget requires a genuine EventTarget or null.".into()))?;
+        if owner!=target_owner {self.frame_window_access(Some(owner),target_owner).map_err(|message|("SecurityError",message))?;}
+        Ok(Some(*target))
+    }
+    pub(super) fn construct_mouse_event(&mut self,owner:u32,args:&[Value],fields:Option<&[(&str,Value)]>)->Result<Value,String> {
+        let field=|key|fields.and_then(|fields|fields.iter().find(|(name,_)|*name==key).map(|(_,value)|value));
+        let integer=|key|field(key).map(timer_integer).transpose().map(|value|value.unwrap_or(0));
+        let coordinate=|key|match field(key) {
+            None|Some(Value::Undefined)=>Ok(0.0),
+            Some(Value::Number(value)) if value.is_finite()=>Ok(*value),
+            _=>Err("MouseEvent coordinates require converted finite doubles.".to_string()),
+        };
+        let flag=|key|field(key).is_some_and(Value::truthy);
+        let ui=UiData {detail:integer("detail")?,view:self.ui_view_argument(owner,field("view")).map_err(|(_,message)|message)?};
+        let button=integer("button")? as i16;
+        let mut modifiers=0u16;
+        for &(name,_,bit) in EXTRA_MODIFIERS {if flag(name) {modifiers|=bit;}}
+        let mouse=MouseData {screen_x:coordinate("screenX")?,screen_y:coordinate("screenY")?,
+            client_x:coordinate("clientX")?,client_y:coordinate("clientY")?,layer_x:0,layer_y:0,
+            ctrl:flag("ctrlKey"),alt:flag("altKey"),shift:flag("shiftKey"),meta:flag("metaKey"),
+            // Selected nonnormative UI Events supplemental getter behavior.
+            // The separate optional which-init dictionary extension is absent.
+            button,buttons:integer("buttons")? as u16,modifiers,which:(i32::from(button)+1) as u32,
+            related:self.mouse_target_argument(owner,field("relatedTarget")).map_err(|(_,message)|message)?};
+        self.construct_event_record(owner,args,fields,Some(ui),Some(mouse))
+    }
+    fn construct_event_record(&mut self,owner:u32,args:&[Value],fields:Option<&[(&str,Value)]>,ui:Option<UiData>,mouse:Option<MouseData>)->Result<Value,String> {
         if !self.state.enabled||!self.doc.scripting_enabled {return Err("Event construction is disabled.".into());}
         let admission=self.state.created_events.len().checked_mul(8).and_then(|n|n.checked_add(1))
             .ok_or("Event admission lookup work overflow.")?;
@@ -523,7 +569,7 @@ impl Bridge<'_> {
         let event=CreatedEvent {owner,composed:flag("composed"),handle,name,
             bubbles:flag("bubbles"),cancelable:flag("cancelable"),prevented:false,stopped:false,immediate:false,
             target:None,current:None,phase:0,dispatching:false,initialized:true,passive:false,
-            timestamp,ui,mouse:None,custom:None};
+            timestamp,ui,mouse,custom:None};
         self.state.created_events.push(event);
         self.state.retained=retained;
         self.state.next_event=next;
@@ -531,7 +577,7 @@ impl Bridge<'_> {
     }
     pub(super) fn rollback_base_event(&mut self,handle:u32)->Result<(),String> {
         let Some(event)=self.state.created_events.last() else {return Err("No unpublished Event record exists.".into());};
-        if event.handle!=handle||event.mouse.is_some()||event.custom.is_some()
+        if event.handle!=handle||event.custom.is_some()
             || event.dispatching||event.target.is_some() {return Err("Unpublished Event rollback identity mismatch.".into());}
         let retained=self.state.retained.checked_sub(event.name.len()).ok_or("Event rollback retention mismatch.")?;
         self.state.created_events.pop();
@@ -596,6 +642,7 @@ impl Bridge<'_> {
             "initCustomEvent" if self.custom_receiver(object) => Some("initCustomEvent"),
             "initUIEvent" if self.ui_receiver(object) => Some("initUIEvent"),
             "initMouseEvent" if self.mouse_receiver(object) => Some("initMouseEvent"),
+            "getModifierState" if self.mouse_receiver(object) => Some("getModifierState"),
             "preventDefault" => Some("preventDefault"),
             "stopPropagation" => Some("stopPropagation"),
             "stopImmediatePropagation" => Some("stopImmediatePropagation"),
@@ -657,15 +704,18 @@ impl Bridge<'_> {
                     let mouse = event.mouse.as_ref().unwrap();
                     match name {
                         "relatedTarget" => native(mouse.related),
-                        "screenX" => Value::Number(f64::from(mouse.screen_x)), "screenY" => Value::Number(f64::from(mouse.screen_y)),
-                        "clientX" | "x" => Value::Number(f64::from(mouse.client_x)), "clientY" | "y" => Value::Number(f64::from(mouse.client_y)),
+                        "screenX" => Value::Number(mouse.screen_x), "screenY" => Value::Number(mouse.screen_y),
+                        "clientX" | "x" => Value::Number(mouse.client_x), "clientY" | "y" => Value::Number(mouse.client_y),
+                        "layerX" => Value::Number(f64::from(mouse.layer_x)), "layerY" => Value::Number(f64::from(mouse.layer_y)),
                         // Constructed events never enter trusted dispatch here.
                         // CSSOM View: page = client + the realm Window's current
                         // scroll; undispatched offset coordinates alias page.
                         // https://drafts.csswg.org/cssom-view/#dom-mouseevent-pagex
-                        "pageX" | "offsetX" => Value::Number(f64::from(mouse.client_x)),
-                        "pageY" | "offsetY" => Value::Number(f64::from(mouse.client_y)+self.state.geometry.as_ref().map_or(0.0,|geometry|geometry.css_scroll_y())),
-                        "button" => Value::Number(f64::from(mouse.button)), "buttons" => Value::Number(0.0),
+                        "pageX" | "offsetX" => Value::Number(0.0+mouse.client_x),
+                        "pageY" | "offsetY" => Value::Number(mouse.client_y+if event.owner==WINDOW {
+                            self.state.geometry.as_ref().map_or(0.0,|geometry|geometry.css_scroll_y())
+                        } else {0.0}),
+                        "button" => Value::Number(f64::from(mouse.button)), "buttons" => Value::Number(f64::from(mouse.buttons)),
                         "ctrlKey" => Value::Bool(mouse.ctrl), "altKey" => Value::Bool(mouse.alt),
                         "shiftKey" => Value::Bool(mouse.shift), "metaKey" => Value::Bool(mouse.meta),
                         _ => unreachable!(),
@@ -689,25 +739,9 @@ impl Bridge<'_> {
         Ok(())
     }
 
-    fn mouse_interface_argument(&self, value: Option<&Value>, window_only: bool) -> Result<Option<u32>, (&'static str, String)> {
-        let Some(value) = value else { return Ok(None); };
-        if matches!(value, Value::Null | Value::Undefined) { return Ok(None); }
-        let Value::Host(handle) = value else { return Err(("TypeError", "MouseEvent requires a nullable native interface reference.".into())); };
-        if *handle == WINDOW { return Ok(Some(*handle)); }
-        if self.frame_context(*handle).is_some() {
-            self.frame_window_access(Some(WINDOW), *handle).map_err(|message| ("SecurityError", message))?;
-            return Ok(Some(*handle));
-        }
-        if !window_only && self.standalone_target_owner(*handle).is_some() {return Ok(Some(*handle));}
-        if !window_only && self.namespace_receiver(*handle) { return Ok(Some(*handle)); }
-        Err(("TypeError", if window_only { "MouseEvent view must be a Window or null." } else { "MouseEvent relatedTarget must be an EventTarget or null." }.into()))
-    }
-
     pub(super) fn validate_event_prefix(&self, object: u32, method: &str, index: usize, args: &[Value]) -> Result<(), (&'static str, String)> {
-        if method=="initUIEvent"&&self.ui_receiver(object)&&index==4 {
+        if (method=="initUIEvent"&&self.ui_receiver(object)||method=="initMouseEvent"&&self.mouse_receiver(object))&&index==4 {
             self.ui_view_argument(self.event_owner(object).unwrap_or(WINDOW),args.get(3))?;
-        } else if method=="initMouseEvent"&&self.mouse_receiver(object)&&index==4 {
-            self.mouse_interface_argument(args.get(3), true)?;
         }
         Ok(())
     }
@@ -726,8 +760,8 @@ impl Bridge<'_> {
                 return Err(("TypeError", "initMouseEvent requires a MouseEvent.".into()));
             }
             if method == "initMouseEvent" && self.mouse_receiver(object) {
-                self.mouse_interface_argument(args.get(3), true)?;
-                self.mouse_interface_argument(args.get(14), false)?;
+                self.ui_view_argument(self.event_owner(object).unwrap_or(WINDOW),args.get(3))?;
+                self.mouse_target_argument(self.event_owner(object).unwrap_or(WINDOW),args.get(14))?;
             }
             if !self.state.created_events[self.created_event_index(object).unwrap()].dispatching && matches!(args.first(), Some(Value::String(name)) if name.len() > self.state.limits.host.event_type_bytes) {
                 return Err(("QuotaExceededError", "Event type exceeds 256 UTF-8 bytes.".into()));
@@ -772,21 +806,24 @@ impl Bridge<'_> {
                     let name = self.text(args.first().ok_or("Event initializer requires a type.")?)?;
                     let number = |index| args.get(index).map(timer_integer).transpose().map(|n| n.unwrap_or(0));
                     let ui=if matches!(method,"initUIEvent"|"initMouseEvent") {
-                        let view=if method=="initUIEvent" {self.ui_view_argument(self.event_owner(object).unwrap_or(WINDOW),args.get(3))}
-                            else {self.mouse_interface_argument(args.get(3),true)}.map_err(|(_,message)|message)?;
+                        let view=self.ui_view_argument(self.event_owner(object).unwrap_or(WINDOW),args.get(3)).map_err(|(_,message)|message)?;
                         Some(UiData {view,detail:number(4)?})
                     } else {None};
                     let mouse = if method == "initMouseEvent" {
+                        let previous=self.state.created_events[id].mouse.as_ref().unwrap();
                         Some(MouseData {
-                            screen_x: number(5)?, screen_y: number(6)?, client_x: number(7)?, client_y: number(8)?,
+                            screen_x: f64::from(number(5)?), screen_y: f64::from(number(6)?),
+                            client_x: f64::from(number(7)?), client_y: f64::from(number(8)?),
+                            layer_x:previous.layer_x,layer_y:previous.layer_y,
                             ctrl: args.get(9).is_some_and(Value::truthy), alt: args.get(10).is_some_and(Value::truthy),
                             shift: args.get(11).is_some_and(Value::truthy), meta: args.get(12).is_some_and(Value::truthy),
                             button: number(13)? as i16,
+                            buttons:previous.buttons,modifiers:previous.modifiers,
                             // Legacy UI Events supplemental information. A
                             // factory-created event is initially zero; the
                             // mouse initializer supplies button + 1.
                             which: (i32::from(number(13)? as i16)+1) as u32,
-                            related: self.mouse_interface_argument(args.get(14), false).map_err(|(_, message)| message)?,
+                            related: self.mouse_target_argument(self.event_owner(object).unwrap_or(WINDOW),args.get(14)).map_err(|(_, message)| message)?,
                         })
                     } else { None };
                     let custom = if method == "initCustomEvent" {
@@ -819,6 +856,16 @@ impl Bridge<'_> {
                     if let Some(mouse) = mouse { event.mouse = Some(mouse); }
                     if let Some(custom) = custom { event.custom = Some(custom); }
                 }
+                "getModifierState" => {
+                    let mouse=self.state.created_events[id].mouse.as_ref().ok_or("getModifierState requires a MouseEvent.")?;
+                    let Some(Value::String(name))=args.first() else {return Err("getModifierState requires a converted key.".into());};
+                    let active=match name.as_str() {
+                        "Alt"=>mouse.alt,"Control"=>mouse.ctrl,"Meta"=>mouse.meta,"Shift"=>mouse.shift,
+                        _=>EXTRA_MODIFIERS.iter().any(|(_,key,bit)|*key==name.as_str()&&mouse.modifiers&*bit!=0),
+                    };
+                    self.state.work(EXTRA_MODIFIERS.len()+4)?;
+                    return Ok(Value::Bool(active));
+                }
                 "preventDefault" => { let event = &mut self.state.created_events[id]; if event.cancelable && !event.passive { event.prevented = true; } }
                 "stopPropagation" => { self.state.created_events[id].stopped = true; }
                 "stopImmediatePropagation" => { let event = &mut self.state.created_events[id]; event.stopped = true; event.immediate = true; }
@@ -840,6 +887,10 @@ mod base_interface_tests;
 #[cfg(test)]
 #[path = "script_ui_event_tests.rs"]
 mod ui_interface_tests;
+
+#[cfg(test)]
+#[path = "script_mouse_event_tests.rs"]
+mod mouse_interface_tests;
 
 #[cfg(test)]
 #[path = "script_event_opaque_path_tests.rs"]

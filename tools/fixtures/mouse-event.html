@@ -1,0 +1,72 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="script-src 'unsafe-inline'">
+<title>Original MouseEvent waiting</title>
+<style>body{margin:20px;font-size:16px}h1{font-size:24px}p{max-width:760px}button{margin:8px 0}</style>
+</head><body><h1>Original MouseEvent constructor journey</h1>
+<button id="emit" name="emit" type="button">Inspect original MouseEvent objects</button>
+<p id="result">Waiting for two real MouseEvent constructor activations.</p>
+<p id="detail">Mouse dispatch remains unsupported; no synthetic delivery is claimed.</p>
+<p>This fixture checks the finite button plus one supplemental which profile.</p>
+<script>
+var C=MouseEvent,P=C.prototype,button=document.getElementById('emit');
+var getClient=Object.getOwnPropertyDescriptor(P,'clientX').get,getView=Object.getOwnPropertyDescriptor(UIEvent.prototype,'view').get;
+var turns=0,constructed=0,doubles=0,blocked=0,nativeClicks=0,nativeBrands=0,legacy=0,children=0,order='';
+if(typeof C!=='function'||C.name!=='MouseEvent'||C.length!==1||Object.getPrototypeOf(C)!==UIEvent||Object.getPrototypeOf(P)!==UIEvent.prototype)throw Error('Canonical Mouse UI Event constructor chain');
+for(var name of ['screenX','screenY','clientX','clientY','button','buttons','relatedTarget','altKey','ctrlKey','metaKey','shiftKey']){
+ var descriptor=Object.getOwnPropertyDescriptor(P,name);
+ if(typeof descriptor.get!=='function'||descriptor.get.length!==0||descriptor.set!==undefined||!descriptor.enumerable||!descriptor.configurable)throw Error('Canonical readonly Mouse getter');
+}
+for(var name of ['initMouseEvent','getModifierState']){
+ var descriptor=Object.getOwnPropertyDescriptor(P,name);
+ if(typeof descriptor.value!=='function'||descriptor.value.length!==1||!descriptor.writable||!descriptor.enumerable||!descriptor.configurable)throw Error('Canonical Mouse method');
+}
+var badBrands=0;try{getClient.call({});}catch(error){if(error.name==='TypeError')badBrands++;}
+try{getClient.call(new UIEvent('ui-only'));}catch(error){if(error.name==='TypeError')badBrands++;}
+if(badBrands!==2||typeof KeyboardEvent!=='undefined'||typeof CustomEvent!=='undefined'||typeof PointerEvent!=='undefined')throw Error('Real Mouse brand and deferred constructors');
+var frame=document.createElement('iframe');frame.hidden=true;document.body.appendChild(frame);
+var childWindow=frame.contentWindow,ChildC=childWindow.MouseEvent,ChildP=ChildC.prototype;
+if(ChildC===C||ChildP===P||Object.getPrototypeOf(ChildC)!==childWindow.UIEvent||Object.getPrototypeOf(ChildP)!==childWindow.UIEvent.prototype)throw Error('Canonical child Mouse roots');
+var modifierNames=['Alt','Control','Meta','Shift','AltGraph','CapsLock','Fn','FnLock','Hyper','NumLock','ScrollLock','Super','Symbol','SymbolLock'];
+var extraNames=['AltGraph','CapsLock','Fn','FnLock','Hyper','NumLock','ScrollLock','Super','Symbol','SymbolLock'];
+button.onclick=function(input){
+ if(!input.isTrusted||!input.composed||!(input instanceof Event)||input instanceof C||input.target!==button||input.currentTarget!==button)throw Error('Actual trusted base Event button input');
+ nativeClicks++;turns++;order='';
+ var rejected=false;try{getClient.call(input);}catch(error){rejected=error.name==='TypeError';}if(!rejected)throw Error('Native mouse payload remains deferred');nativeBrands++;
+ var options={bubbles:true,cancelable:true,composed:true,view:window,
+  detail:{valueOf:function(){order+='D';return 2;}},
+  button:{valueOf:function(){order+='B';return 65537;}},buttons:{valueOf:function(){order+='U';return 65541;}},
+  clientX:{valueOf:function(){order+='X';return 1.5;}},clientY:-2.75,
+  get relatedTarget(){if(order!=='TDBUX')throw Error('Real numeric conversion before target Get');order+='R';return button;},
+  screenX:{valueOf:function(){order+='S';return 7.5;}},screenY:-8.25,
+  altKey:true,ctrlKey:true,metaKey:true,shiftKey:true,modifierAltGraph:true,modifierCapsLock:true,
+  modifierFn:true,modifierFnLock:true,modifierHyper:true,modifierNumLock:true,modifierScrollLock:true,
+  modifierSuper:true,modifierSymbol:true,modifierSymbolLock:true,
+  get which(){throw Error('Optional which constructor dictionary member must not be read');}
+ };
+ var event=new C({toString:function(){order+='T';return 'click';}},options);
+ if(order!=='TDBUXRS'||Object.getPrototypeOf(event)!==P||event.constructor!==C||!(event instanceof C)||!(event instanceof UIEvent)||!(event instanceof Event)||Object.prototype.toString.call(event)!=='[object MouseEvent]'||event.isTrusted||event.type!=='click'||event.view!==window||event.detail!==2||!event.bubbles||!event.cancelable||!event.composed||event.target!==null)throw Error('Genuine Mouse constructor and inherited slots');
+ if(event.screenX!==7.5||event.screenY!==-8.25||event.clientX!==1.5||event.clientY!==-2.75||event.button!==1||event.buttons!==5||event.which!==2||event.relatedTarget!==button||event.layerX!==0||event.layerY!==0)throw Error('Fractional doubles short unsigned short and finite which profile');
+ doubles++;for(var name of modifierNames)if(!event.getModifierState(name))throw Error('Actual retained modifier state');
+ if(event.getModifierState('alt')||event.getModifierState('Unknown'))throw Error('Exact modifier names');
+ var trust=Object.getOwnPropertyDescriptor(event,'isTrusted');if(typeof trust.get!=='function'||!trust.enumerable||trust.configurable||trust.set!==undefined||trust.get.call(event)||!trust.get.call(input))throw Error('Mouse family own unforgeable trust');
+ event.clientX=99;event.buttons=0;event.relatedTarget=null;if(event.clientX!==1.5||event.buttons!==5||event.relatedTarget!==button)throw Error('Readonly Mouse slots');
+ Object.defineProperty(event,'clientX',{value:'ordinary-shadow',configurable:true});if(event.clientX!=='ordinary-shadow'||getClient.call(event)!==1.5)throw Error('Ordinary shadow preserves Mouse slot');delete event.clientX;
+ rejected=false;var nativeBefore=nativeClicks;try{button.dispatchEvent(event);}catch(error){rejected=error.name==='NotSupportedError';}
+ if(!rejected||nativeClicks!==nativeBefore||event.target!==null||event.currentTarget!==null||event.eventPhase!==0||event.defaultPrevented||event.isTrusted||event.composedPath().length)throw Error('Mouse dispatch refuses before synthetic delivery or activation');blocked++;
+ var stamp=event.timeStamp;P.initMouseEvent.call(event,'legacy-mouse',false,true,null,9,11.75,-12.5,13.75,-14.5,false,false,true,false,2,null);
+ if(event.type!=='legacy-mouse'||event.view!==null||event.detail!==9||event.screenX!==11||event.screenY!==-12||event.clientX!==13||event.clientY!==-14||event.button!==2||event.which!==3||event.relatedTarget!==null||event.buttons!==5||event.ctrlKey||event.altKey||!event.shiftKey||event.metaKey||!event.composed||event.timeStamp!==stamp)throw Error('Real LONG legacy initialization preserves constructor fields');
+ for(var name of extraNames)if(!event.getModifierState(name))throw Error('Legacy initializer preserves extra modifiers');
+ if(event.getModifierState('Control')||event.getModifierState('Alt')||!event.getModifierState('Shift')||event.getModifierState('Meta'))throw Error('Legacy initializer resets its four modifier flags');legacy++;
+ var factory=document.createEvent('MouseEvents');if(Object.getPrototypeOf(factory)!==P||!(factory instanceof C)||factory.which!==0||factory.buttons!==0||factory.isTrusted)throw Error('Genuine uninitialized Mouse factory');
+ rejected=false;try{button.dispatchEvent(factory);}catch(error){rejected=error.name==='InvalidStateError';}if(!rejected)throw Error('Fresh Mouse factory remains uninitialized');
+ factory.initMouseEvent('factory-mouse',false,false,null,0,1.75,2.75,3.75,4.75,false,false,false,false,0);
+ if(factory.which!==1||factory.clientX!==3||factory.screenX!==1||factory.buttons!==0)throw Error('Real legacy factory LONG and finite which profile');
+ rejected=false;try{button.dispatchEvent(factory);}catch(error){rejected=error.name==='NotSupportedError';}if(!rejected||factory.target!==null||factory.currentTarget!==null||factory.eventPhase!==0||factory.isTrusted)throw Error('Initialized Mouse factory dispatch remains deferred');blocked++;
+ var child=new ChildC('child-mouse',{view:childWindow,relatedTarget:childWindow.document,clientX:turns+0.5,buttons:3,modifierFnLock:true});
+ if(Object.getPrototypeOf(child)!==ChildP||!(child instanceof ChildC)||child instanceof C||child.constructor!==ChildC||getClient.call(child)!==turns+0.5||getView.call(child)!==childWindow||child.relatedTarget!==childWindow.document||child.buttons!==3||!child.getModifierState('FnLock')||child.isTrusted||Object.getPrototypeOf(child.initMouseEvent)!==childWindow.Function.prototype)throw Error('Genuine child Mouse owner and borrowed getters');children++;constructed++;
+ if(constructed!==turns||doubles!==turns||blocked!==turns*2||nativeClicks!==turns||nativeBrands!==turns||legacy!==turns||children!==turns)throw Error('One complete finite Mouse proof per real activation');
+ document.getElementById('result').textContent='Completed '+turns+' real MouseEvent constructor activation(s): slots and child owner verified; synthetic dispatch refused.';
+ document.getElementById('detail').textContent='mouse='+constructed+' double='+doubles+' modifiers=14 refused='+blocked+' native='+nativeClicks+' native_brand='+nativeBrands+' legacy='+legacy+' child='+children+' which=3 order='+order+' brands='+badBrands;
+ document.title='Original MouseEvent activation '+turns+' passed';
+};
+</script></body></html>

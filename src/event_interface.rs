@@ -1,5 +1,5 @@
-//! Genuine Event and UIEvent interfaces over the embedding's existing slots.
-//! Further subclass immediate prototypes and native-input interfaces stay separate.
+//! Genuine Event/UIEvent/MouseEvent interfaces over existing native event slots.
+//! Native-input immediate prototypes and further interface families stay separate.
 use super::{Accessors, Fault, Function, Host, Ordinary, PropertyKey, Runtime, Value};
 
 pub(super) const TRUSTED_GETTER_KEY: &str = "\0Event.isTrusted.getter";
@@ -121,6 +121,56 @@ impl Runtime {
             self.native_constructor_prototypes.insert((window,"UIEvent"),prototype);
             self.put_binding(self.global_environment,"UIEvent".into(),Some(constructor),super::Declaration::Var,false)?;
             self.global_attributes.insert("UIEvent".into(),(false,true,true));
+            Ok(())
+        })();
+        self.restore_transient_marker(marker);
+        result.map_err(Fault::display)
+    }
+
+    pub fn define_mouse_event_interface(&mut self,window:u32)->Result<(),String> {
+        let marker=self.inhibit_transient_collection();
+        let result=(|| {
+            let parent=*self.native_constructor_prototypes.get(&(window,"UIEvent"))
+                .ok_or_else(||Fault::new("MouseEvent requires the canonical UIEvent interface."))?;
+            let parent_constructor=self.objects[parent].properties.get("constructor")
+                .ok_or_else(||Fault::new("Canonical UIEvent constructor is unavailable."))?.value.as_value()?.clone();
+            let Value::Function(parent_constructor)=parent_constructor else {
+                return Err(Fault::new("Canonical UIEvent constructor is invalid."));
+            };
+            let allocation=self.allocate_host_function_with_length(window,"MouseEvent",1).map_err(Fault::new)?;
+            if let Some(Function::Host {constructible,..})=self.functions.get_mut(allocation.id) {*constructible=true;}
+            let constructor=Value::Function(allocation.id);
+            self.objects[self.function_properties[allocation.id]].prototype=Some(Ordinary::Function(parent_constructor));
+            let prototype=self.new_object(None)?;
+            self.objects[prototype].prototype=Some(Ordinary::Object(parent));
+            self.store_property(prototype,"constructor".into(),constructor.clone(),Some((false,true,true)))?;
+            self.store_property(self.function_properties[allocation.id],"prototype".into(),
+                Value::Object(prototype),Some((false,false,false)))?;
+            for (name,operation) in [
+                ("screenX","\0MouseEvent.get.screenX"),("screenY","\0MouseEvent.get.screenY"),
+                ("clientX","\0MouseEvent.get.clientX"),("clientY","\0MouseEvent.get.clientY"),
+                ("x","\0MouseEvent.get.x"),("y","\0MouseEvent.get.y"),
+                ("pageX","\0MouseEvent.get.pageX"),("pageY","\0MouseEvent.get.pageY"),
+                ("offsetX","\0MouseEvent.get.offsetX"),("offsetY","\0MouseEvent.get.offsetY"),
+                ("layerX","\0MouseEvent.get.layerX"),("layerY","\0MouseEvent.get.layerY"),
+                ("ctrlKey","\0MouseEvent.get.ctrlKey"),("altKey","\0MouseEvent.get.altKey"),
+                ("shiftKey","\0MouseEvent.get.shiftKey"),("metaKey","\0MouseEvent.get.metaKey"),
+                ("button","\0MouseEvent.get.button"),("buttons","\0MouseEvent.get.buttons"),
+                ("relatedTarget","\0MouseEvent.get.relatedTarget"),
+            ] {
+                let Value::Function(get)=self.event_native_function(window,operation,&format!("get {name}"),0)?
+                    else {unreachable!()};
+                self.store_accessor_property(prototype,name.into(),Accessors {get:Some(get),set:None},(true,true))?;
+            }
+            for method in ["initMouseEvent","getModifierState"] {
+                let function=self.event_native_function(window,method,method,1)?;
+                self.store_property(prototype,method.into(),function,Some((true,true,true)))?;
+            }
+            self.store_symbol_property(prototype,self.symbol_to_string_tag.unwrap(),
+                Value::String("MouseEvent".into()),Some((false,false,true)))?;
+            self.native_constructor_prototypes.insert((window,"MouseEvent"),prototype);
+            self.put_binding(self.global_environment,"MouseEvent".into(),Some(constructor),super::Declaration::Var,false)?;
+            self.global_attributes.insert("MouseEvent".into(),(false,true,true));
             Ok(())
         })();
         self.restore_transient_marker(marker);

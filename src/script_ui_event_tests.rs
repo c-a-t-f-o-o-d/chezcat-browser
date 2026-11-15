@@ -181,14 +181,14 @@ var converted=0,type={toString:function(){converted++;return 'converted';}},opti
 }
 
 #[test]
-fn ui_event_real_opaque_mouse_and_native_keyboard_support_ui_ancestry_and_borrowing() {
+fn ui_event_real_mouse_and_native_keyboard_support_ui_ancestry_and_borrowing() {
     let (mut doc,mut forms,mut page)=fixture(r#"
 var P=UIEvent.prototype,getView=Object.getOwnPropertyDescriptor(P,'view').get,getDetail=Object.getOwnPropertyDescriptor(P,'detail').get,getWhich=Object.getOwnPropertyDescriptor(P,'which').get;
 var mouse=document.createEvent('MouseEvent');mouse.initMouseEvent('mouse',true,true,window,4,1,2,5,7,false,false,false,false,1);
 if(!(mouse instanceof UIEvent)||!(mouse instanceof Event)||!P.isPrototypeOf(mouse)||getView.call(mouse)!==window||getDetail.call(mouse)!==4||getWhich.call(mouse)!==2)throw 'actual Mouse UI ancestry and slots';
 P.initUIEvent.call(mouse,'borrowed',false,false,null,9);if(mouse.clientX!==5||mouse.clientY!==7||mouse.button!==1||mouse.which!==2||mouse.detail!==9||mouse.view!==null)throw 'borrowed UI method preserves Mouse state';
 var base=new Event('base'),custom=document.createEvent('CustomEvent');custom.initCustomEvent('custom');
-if(base instanceof UIEvent||custom instanceof UIEvent||typeof MouseEvent!=='undefined'||typeof KeyboardEvent!=='undefined')throw 'deferred classes and genuine negative brands';
+if(base instanceof UIEvent||custom instanceof UIEvent||typeof MouseEvent!=='function'||typeof KeyboardEvent!=='undefined')throw 'real Mouse and deferred classes with genuine negative brands';
 var refused=0;for(var invalid of [base,custom,{},Object.create(P),null,3]){try{getView.call(invalid);}catch(x){if(x.name==='TypeError')refused++;}}if(refused!==6)throw 'real UI getter brand';
 var b=document.getElementById('button'),native=0;
 b.addEventListener('keydown',function(e){
@@ -198,8 +198,7 @@ b.addEventListener('keydown',function(e){
 });
 var dispatchRefused=false;try{b.dispatchEvent(mouse);}catch(x){dispatchRefused=x.name==='NotSupportedError';}if(!dispatchRefused)throw 'Mouse dispatch remains explicit deferred boundary';
 "#);
-    let outcome=page.console_eval(&mut doc,&mut forms,"Object.getPrototypeOf(mouse);");
-    assert_eq!(outcome.errors,1,"Mouse immediate prototype remains explicitly opaque.");
+    evaluate(&mut page,&mut doc,&mut forms,"if(Object.getPrototypeOf(mouse)!==MouseEvent.prototype||!(mouse instanceof MouseEvent))throw 'genuine MouseEvent factory interface';");
     let node=(0..doc.nodes.len()).find(|&node|doc.attr(node,"id")==Some("button")).unwrap();
     page.begin_job();
     let outcome=page.keyboard(&mut doc,&mut forms,KeyboardInput {down:true,target:Some(node),key:"a".into(),code:"KeyA".into(),key_code:65,..KeyboardInput::default()});
