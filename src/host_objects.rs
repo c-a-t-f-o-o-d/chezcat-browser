@@ -216,10 +216,17 @@ impl Runtime {
             );
         }
         if let Some(method) = host.method(handle, name) {
+            // An opted-in method's owner/origin remains authoritative even
+            // after its function wrapper has been cached. A prior same-origin
+            // read must not authorize a later foreign reader of this handle.
+            let method_realm = host.native_method_owner(handle,method)
+                .map(|owner|self.ensure_window_realm(owner,host)).transpose()?;
             if let Some(value) = self.host_method_values.get(&(handle, method)).cloned() {
                 return self.copy_value(&value);
             }
-            let value = if host.promise_returning_operation(handle,method) {
+            let value = if let Some(realm) = method_realm {
+                self.with_intrinsic_realm(realm,|runtime|runtime.host_method(handle,method).map_err(Fault::new))?
+            } else if host.promise_returning_operation(handle,method) {
                 let owner=host.native_access_owner(handle).ok_or_else(||Fault::new("Promise operation owner is unavailable."))?;
                 let realm=self.ensure_window_realm(owner,host)?;
                 self.with_intrinsic_realm(realm,|runtime|runtime.host_method(handle,method).map_err(Fault::new))?

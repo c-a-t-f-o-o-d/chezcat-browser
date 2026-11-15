@@ -489,6 +489,9 @@ pub trait Host {
     /// method validation. It shares the caller's argument/copy/work budgets.
     fn variadic_string_arguments(&self, _object: u32, _method: &str) -> bool { false }
     fn method_length(&self, _object: u32, _method: &str) -> Option<usize> { None }
+    /// Optional owner for a real native method whose first lookup may occur in
+    /// another supported realm. This grants no constructor/prototype capability.
+    fn native_method_owner(&self, _object:u32, _method:&str) -> Option<u32> { None }
     /// Preserve original nullish inputs for an explicitly nullable DOMString.
     /// A null returned by object coercion still undergoes ordinary ToString.
     fn nullable_string_argument(&self, _object: u32, _method: &str, _index: usize) -> bool {

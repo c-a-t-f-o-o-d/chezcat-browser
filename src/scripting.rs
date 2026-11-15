@@ -2471,6 +2471,7 @@ impl Host for Bridge<'_> {
         }
         if object == DOCUMENT && method == "createEvent" && self.event_factory_enabled()
             || self.event_receiver(object) && method == "initEvent"
+            || self.custom_receiver(object) && method == "initCustomEvent"
         { return &[(0, true)]; }
         if self.mouse_receiver(object) && method == "initMouseEvent" {
             return &[(0, true), (4, false), (5, false), (6, false), (7, false), (8, false), (13, false)];
@@ -2540,6 +2541,7 @@ impl Host for Bridge<'_> {
         if self.named_map_receiver(object) { return match method { "item" | "getNamedItem" => Some(1), "getNamedItemNS" => Some(2), _ => None }; }
         if self.attr_element_receiver(object) && method == "setAttributeNS" { return Some(3); }
         if self.event_receiver(object) && method=="initEvent"
+            || self.custom_receiver(object) && method=="initCustomEvent"
             || self.ui_receiver(object) && method=="initUIEvent"
             || self.mouse_receiver(object) && method=="initMouseEvent" {return Some(1);}
         if object == DOCUMENT && method == "getElementsByName" { return Some(1); }
@@ -2548,6 +2550,12 @@ impl Host for Bridge<'_> {
             return match method {"contains"|"item"=>Some(1),"add"|"remove"|"toString"=>Some(0),_=>None};
         }
         (self.attr_element_receiver(object) && matches!(method,"getAttributeNS"|"getAttributeNodeNS"|"removeAttributeNS")).then_some(2)
+    }
+
+    fn native_method_owner(&self, object:u32, method:&str) -> Option<u32> {
+        (self.constructed_event_receiver(object)
+            && matches!(method,"initEvent"|"initCustomEvent"|"initUIEvent"|"initMouseEvent")
+            && self.created_event_method(object,method).is_some()).then_some(WINDOW)
     }
 
     fn nullable_string_argument(&self, object: u32, method: &str, index: usize) -> bool {
@@ -2592,6 +2600,7 @@ impl Host for Bridge<'_> {
         if object == DOCUMENT && method == "getElementsByName" { return 1; }
         if object == DOCUMENT && method == "createEvent" && self.event_factory_enabled()
             || self.event_receiver(object) && method == "initEvent"
+            || self.custom_receiver(object) && method == "initCustomEvent"
             || self.ui_receiver(object) && method=="initUIEvent"
             || self.mouse_receiver(object) && method == "initMouseEvent"
         { return 1; }
@@ -2906,6 +2915,7 @@ impl Host for Bridge<'_> {
         }
         if script_class_list::element(object).is_some() { return self.class_list_receiver(object) && self.class_list_receiver(receiver); }
         if method == "initMouseEvent" { return self.mouse_receiver(object) && self.mouse_receiver(receiver); }
+        if method == "initCustomEvent" { return self.custom_receiver(object) && self.custom_receiver(receiver); }
         if method=="initUIEvent" {
             return (EVENT_BASE..self.state.next_event).contains(&object) && self.ui_receiver(receiver);
         }

@@ -318,10 +318,10 @@ impl Bridge<'_> {
             ));
         };
         let event = &self.state.created_events[id];
-        if event.dispatching || event.name.is_empty() {
+        if event.dispatching || !event.initialized {
             return Err((
                 "InvalidStateError",
-                "Event type is empty/uninitialized or the event is already being dispatched."
+                "Event is uninitialized or already being dispatched."
                     .into(),
             ));
         }

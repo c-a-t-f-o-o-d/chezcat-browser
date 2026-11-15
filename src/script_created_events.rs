@@ -1,4 +1,4 @@
-//! Persistent untrusted Event/UIEvent/MouseEvent state. These records never enter the
+//! Persistent untrusted Event/CustomEvent/UIEvent/MouseEvent state. These records never enter the
 //! trusted dispatch slot. Synchronous base/UI dispatch is separate and untrusted.
 use super::*;
 
@@ -237,7 +237,7 @@ if(e.NONE!==0||e.CAPTURING_PHASE!==1||e.AT_TARGET!==2||e.BUBBLING_PHASE!==3)thro
 for(var e of [events[4],events[5]]){if(e.view!==null||e.relatedTarget!==null||e.detail!==0||e.screenX!==0||e.screenY!==0||e.clientX!==0||e.clientY!==0||e.ctrlKey||e.altKey||e.shiftKey||e.metaKey||e.button!==0||e.buttons!==0)throw 'mouse defaults';}
 if('view' in events[0]||'initMouseEvent' in events[0]||!('initMouseEvent' in events[4])||events[0]===events[1])throw 'class/identity';
 var calls=0,converted=document.createEvent({toString:function(){calls++;return 'MouseEvents';}});if(calls!==1||converted.isTrusted)throw 'factory conversion';
-var errors=0;for(var name of ['CompositionEvent','KeyboardEvent','CustomEvent','Event ','unknown']){try{document.createEvent(name);}catch(e){if(e.name==='NotSupportedError')errors++;}}
+var errors=0;for(var name of ['CompositionEvent','KeyboardEvent','CustomEvents','Event ','unknown']){try{document.createEvent(name);}catch(e){if(e.name==='NotSupportedError')errors++;}}
 try{document.createEvent();}catch(e){if(e.name==='TypeError')errors++;}try{document.createEvent(Symbol());}catch(e){if(e.name==='TypeError')errors++;}
 if(errors!==7||typeof document.dispatchEvent!=='function'||typeof window.dispatchEvent!=='function'||'dispatchEvent' in events[0])throw 'factory/target capability';
 if(document.createEvent!==document.createEvent||converted.initEvent!==converted.initEvent)throw 'method identity';
@@ -417,21 +417,38 @@ pub(super) struct CreatedEvent {
     pub(super) current: Option<u32>,
     pub(super) phase: u8,
     pub(super) dispatching: bool,
+    pub(super) initialized: bool,
     pub(super) passive: bool,
     timestamp: f64,
     ui: Option<UiData>,
     mouse: Option<MouseData>,
+    custom: Option<Value>,
 }
 
 #[derive(Clone,Copy)]
-enum Interface { Base, Ui, Mouse }
+enum Interface { Base, Custom, Ui, Mouse }
 
 fn interface(value: Option<&Value>) -> Option<Interface> {
     let Some(Value::String(name)) = value else { return None; };
-    if ["MouseEvent", "MouseEvents"].iter().any(|s| name.eq_ignore_ascii_case(s)) { Some(Interface::Mouse) }
+    if name.eq_ignore_ascii_case("CustomEvent") { Some(Interface::Custom) }
+    else if ["MouseEvent", "MouseEvents"].iter().any(|s| name.eq_ignore_ascii_case(s)) { Some(Interface::Mouse) }
     else if ["UIEvent", "UIEvents"].iter().any(|s| name.eq_ignore_ascii_case(s)) { Some(Interface::Ui) }
     else if ["Event", "Events", "HTMLEvents", "SVGEvents"].iter().any(|s| name.eq_ignore_ascii_case(s)) { Some(Interface::Base) }
     else { None }
+}
+
+fn custom_bytes(value: &Value) -> usize { if let Value::String(text) = value {text.len()} else {0} }
+fn copy_custom_value(value: &Value) -> Result<Value, String> {
+    if let Value::String(text) = value {
+        let mut copied = String::new();
+        copied.try_reserve(text.len()).map_err(|_| "Could not reserve CustomEvent detail text.")?;
+        copied.push_str(text);
+        Ok(Value::String(copied))
+    } else {
+        // Object/function/native/symbol values retain their genuine identities;
+        // Runtime already pins exported host arguments until document teardown.
+        Ok(value.clone())
+    }
 }
 
 fn constant(name: &str) -> Option<u8> {
@@ -453,6 +470,7 @@ fn mouse_property(name: &str) -> bool {
 impl Bridge<'_> {
     pub(super) fn event_native_member(&self,object:u32,name:&str)->bool {
         base_property(name) || matches!(name,"constructor"|"__proto__"|"srcElement"|"returnValue"|"composedPath"|"initEvent"|"preventDefault"|"stopPropagation"|"stopImmediatePropagation")
+            || self.custom_receiver(object) && matches!(name,"detail"|"initCustomEvent")
             || self.ui_receiver(object) && (ui_property(name) || matches!(name,"initUIEvent"|"which"|"sourceCapabilities"))
             || self.mouse_receiver(object) && (mouse_property(name) || matches!(name,"initMouseEvent"|"initUIEvent"|"which"|"x"|"y"|"offsetX"|"offsetY"|"movementX"|"movementY"|"pageX"|"pageY"|"layerX"|"layerY"|"getModifierState"|"sourceCapabilities"))
     }
@@ -483,10 +501,15 @@ impl Bridge<'_> {
             || self.state.event.as_ref().is_some_and(|event|event.handle==handle && event.keyboard.is_some())
     }
 
+    pub(super) fn custom_receiver(&self, handle:u32) -> bool {
+        self.created_event_index(handle).is_some_and(|id| self.state.created_events[id].custom.is_some())
+    }
+
     pub(super) fn created_event_method(&self, object: u32, name: &str) -> Option<&'static str> {
         if !self.event_receiver(object) { return None; }
         match name {
             "initEvent" => Some("initEvent"),
+            "initCustomEvent" if self.custom_receiver(object) => Some("initCustomEvent"),
             "initUIEvent" if self.ui_receiver(object) => Some("initUIEvent"),
             "initMouseEvent" if self.mouse_receiver(object) => Some("initMouseEvent"),
             "preventDefault" => Some("preventDefault"),
@@ -498,7 +521,8 @@ impl Bridge<'_> {
 
     pub(super) fn created_event_readonly(&self, object: u32, name: &str) -> bool {
         name != "cancelBubble" && (self.created_event_index(object).is_some_and(|id| base_property(name)
-            || self.state.created_events[id].mouse.is_some() && mouse_property(name))
+            || self.state.created_events[id].mouse.is_some() && mouse_property(name)
+            || self.state.created_events[id].custom.is_some() && name == "detail")
             || self.ui_receiver(object) && ui_property(name))
     }
 
@@ -506,6 +530,7 @@ impl Bridge<'_> {
         let id = self.created_event_index(object)?;
         Some(self.state.work(self.state.created_events.len()).map(|()| {
             base_property(name) || self.state.created_events[id].mouse.is_some() && mouse_property(name)
+                || self.state.created_events[id].custom.is_some() && name == "detail"
                 || self.state.created_events[id].ui.is_some() && ui_property(name)
                 || self.created_event_method(object, name).is_some()
         }))
@@ -519,6 +544,12 @@ impl Bridge<'_> {
                 let len = self.state.created_events[id].name.len();
                 self.state.copies(len)?;
                 return Ok(Value::String(self.state.created_events[id].name.clone()));
+            }
+            if name == "detail" && self.state.created_events[id].custom.is_some() {
+                let bytes = custom_bytes(self.state.created_events[id].custom.as_ref().unwrap());
+                if bytes > self.state.limits.host.string_bytes {return Err("CustomEvent detail exceeds the host string bound.".into());}
+                self.state.copies(bytes)?;
+                return copy_custom_value(self.state.created_events[id].custom.as_ref().unwrap());
             }
             let event = &self.state.created_events[id];
             let native = |handle: Option<u32>| handle.map_or(Value::Null, Value::Host);
@@ -600,7 +631,8 @@ impl Bridge<'_> {
         if method=="initUIEvent" && self.ui_receiver(object) {
             self.mouse_interface_argument(args.get(3),true)?;
         }
-        if self.created_event_index(object).is_some() && matches!(method, "initEvent" | "initUIEvent" | "initMouseEvent") {
+        if self.created_event_index(object).is_some() && matches!(method, "initEvent" | "initCustomEvent" | "initUIEvent" | "initMouseEvent") {
+            if method == "initCustomEvent" && !self.custom_receiver(object) { return Err(("TypeError","initCustomEvent requires a CustomEvent.".into())); }
             if method=="initUIEvent" && !self.ui_receiver(object) { return Err(("TypeError","initUIEvent requires a UIEvent.".into())); }
             if method == "initMouseEvent" && !self.mouse_receiver(object) {
                 return Err(("TypeError", "initMouseEvent requires a MouseEvent.".into()));
@@ -625,10 +657,11 @@ impl Bridge<'_> {
         let handle = self.state.next_event;
         let event = CreatedEvent { handle, name: String::new(), bubbles: false, cancelable: false,
             prevented: false, stopped: false, immediate: false,
-            target:None,current:None,phase:0,dispatching:false,passive:false,
+            target:None,current:None,phase:0,dispatching:false,initialized:false,passive:false,
             timestamp: self.state.clock_ms(Instant::now()),
             ui: matches!(interface,Interface::Ui|Interface::Mouse).then(UiData::default),
-            mouse: matches!(interface,Interface::Mouse).then(MouseData::default) };
+            mouse: matches!(interface,Interface::Mouse).then(MouseData::default),
+            custom: matches!(interface,Interface::Custom).then_some(Value::Null) };
         self.state.created_events.push(event);
         self.state.next_event = next;
         Ok(Value::Host(handle))
@@ -639,7 +672,7 @@ impl Bridge<'_> {
         Some((|| {
             self.state.work(self.state.created_events.len())?;
             match method {
-                "initEvent" | "initUIEvent" | "initMouseEvent" => {
+                "initEvent" | "initCustomEvent" | "initUIEvent" | "initMouseEvent" => {
                     if method == "initMouseEvent" && self.state.created_events[id].mouse.is_none() {
                         return Err("initMouseEvent requires a MouseEvent.".into());
                     }
@@ -663,15 +696,35 @@ impl Bridge<'_> {
                             related: self.mouse_interface_argument(args.get(14), false).map_err(|(_, message)| message)?,
                         })
                     } else { None };
-                    self.state.replace_bytes(self.state.created_events[id].name.len(), name.len())?;
+                    let custom = if method == "initCustomEvent" {
+                        let default_detail = Value::Null;
+                        let detail = args.get(3).filter(|value| !matches!(value, Value::Undefined)).unwrap_or(&default_detail);
+                        let bytes = custom_bytes(detail);
+                        if bytes > self.state.limits.host.string_bytes {return Err("CustomEvent detail exceeds the host string bound.".into());}
+                        let old = self.state.created_events[id].name.len().checked_add(custom_bytes(self.state.created_events[id].custom.as_ref().unwrap()))
+                            .ok_or("CustomEvent retained text size overflow.")?;
+                        let new = name.len().checked_add(bytes).ok_or("CustomEvent retained text size overflow.")?;
+                        self.state.copies(new)?;
+                        let retained = self.state.retained.checked_sub(old).and_then(|size| size.checked_add(new))
+                            .filter(|&size| size <= self.state.retained_limit).ok_or("CustomEvent retained text allowance exceeded.")?;
+                        let detail = copy_custom_value(detail)?;
+                        // All quota and fallible copying precede the one commit.
+                        self.state.retained = retained;
+                        Some(detail)
+                    } else {
+                        self.state.replace_bytes(self.state.created_events[id].name.len(), name.len())?;
+                        None
+                    };
                     let event = &mut self.state.created_events[id];
                     event.name = name;
+                    event.initialized = true;
                     event.bubbles = args.get(1).is_some_and(Value::truthy);
                     event.cancelable = args.get(2).is_some_and(Value::truthy);
                     event.prevented = false; event.stopped = false; event.immediate = false;
                     event.target=None;
                     if let Some(ui)=ui {event.ui=Some(ui);}
                     if let Some(mouse) = mouse { event.mouse = Some(mouse); }
+                    if let Some(custom) = custom { event.custom = Some(custom); }
                 }
                 "preventDefault" => { let event = &mut self.state.created_events[id]; if event.cancelable && !event.passive { event.prevented = true; } }
                 "stopPropagation" => { self.state.created_events[id].stopped = true; }
@@ -682,3 +735,7 @@ impl Bridge<'_> {
         })())
     }
 }
+
+#[cfg(test)]
+#[path = "script_custom_event_tests.rs"]
+mod custom_tests;

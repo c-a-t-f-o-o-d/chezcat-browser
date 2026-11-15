@@ -245,6 +245,40 @@ App input and offscreen painting; physical-desktop, live-service and complete CS
 conformance remain separate. See tools/fixtures/css-background/provenance.json.
 Semantic reference: [CSS Backgrounds and Borders](https://www.w3.org/TR/css-backgrounds-3/).
 
+## F6 — staged authored page and media integration
+
+The service objective remains actual accessible non-DRM playback with readable
+controls and real decoded output, eventually synchronized audio. Authored fixtures
+and interface prerequisites establish finite progress; they do not establish
+YouTube or other public-service acceptance.
+
+Legacy notification prerequisite: the main document's singular, case-insensitive
+createEvent('CustomEvent') creates a genuine existing-model event. Its readonly
+detail stores the actual any value, preserving object/function identity. The
+branded initCustomEvent converts arguments in order, uses declared defaults,
+returns without reinitialization during dispatch, and otherwise updates the same
+event atomically. Base initEvent preserves subclass detail. A real initialized
+flag distinguishes a fresh factory event from an initialized empty type.
+
+Existing synchronous dispatch, propagation, cancellation, trust, fatal cleanup,
+host quotas and owner-realm machinery remain authoritative. Initializer methods
+retain their genuine Function realm and validate owner access on both fresh and
+cached reads. Direct detail strings use checked retained-byte accounting and
+fallible copies; object graphs retain the existing conservative exported-argument
+lifetime. This adds no constructor/prototype framework, child factory, activation
+grant or collector redesign. The existing opaque event-prototype policy and
+absence of a global CustomEvent constructor remain explicit.
+
+Original Page tests cover defaults/brands, identity, readonly state, conversion
+effects and failures, dispatch/empty-type initialization, string/creation bounds,
+cross-realm method/detail behavior, cached access and fatal recovery. The offline
+dispatch journey preserves its prior guard/standalone/prototype checks and adds
+two real native button activations, actual listener detail/cancellation guards,
+current zero-error diagnostics and paired readable output/pixel changes. It makes
+no service request or physical-desktop claim.
+
+Semantic reference: [DOM CustomEvent and legacy initialization](https://dom.spec.whatwg.org/#interface-customevent).
+
 Every later feature records semantic references, original and selected conformance
 tests, security review, native/device/live checks still pending and exact final
 source/executable identity. Release notes describe only proven behavior.
