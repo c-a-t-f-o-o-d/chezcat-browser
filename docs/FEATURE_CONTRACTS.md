@@ -5,6 +5,29 @@ error, lifecycle and security acceptance is met; missing criteria cannot be hidd
 by shrinking the contract afterward. These contracts authorize no live check or
 public release by themselves.
 
+## T1 — shared TLS/trust and data coverage baseline
+
+Status: next. The current source uses original TLS 1.2/1.3 and X.509 code with
+explicit browser-owned PEM trust data. Startup reads trust/roots.pem beside the
+executable, or an explicit --trust-file replacement. An unavailable default
+store reports an HTTPS trust error; it does not grant certificate authority.
+The current store does not consult the OS root store or download root updates;
+revocation, certificate transparency and broad trust-program coverage are not
+established by existing local checks.
+
+The next finite acceptance is to trace and verify the selected trust/data
+authority through normal document, redirect and subresource networking, and
+record demonstrated certificate/chain coverage gaps and useful failure
+diagnostics. Reuse original bounded positive/negative TLS, X.509 and App resource
+fixtures. Preserve strict identity/certificate checks, origins, CSP, cookies,
+cancellation and checked bounds. This records the baseline and next acceptance,
+not a completed trust expansion or new compatibility claim.
+
+Everyday resource/render/input usability follows that baseline. Finite tabs,
+link-context and new-window behavior follow page usability under separate
+contracts. Completed media slices remain recorded below; further F6/YouTube
+integration is deferred.
+
 ## F1 — replaceable animation-frame operations
 
 Outcome: page wrappers can replace, delete and restore main-Window
@@ -247,6 +270,10 @@ Semantic reference: [CSS Backgrounds and Borders](https://www.w3.org/TR/css-back
 
 ## F6 — staged authored page and media integration
 
+Status: deferred for shared trust and everyday browsing foundations. Completed
+authored media and interface slices retain their finite scope and evidence;
+remaining F6/YouTube integration is outside the active development queue.
+
 The service objective remains actual accessible non-DRM playback with readable
 controls and real decoded video/audio output. Authored fixtures
 and interface prerequisites establish finite progress; they do not establish
@@ -262,9 +289,9 @@ nodes have an ordinary expando store and actual immediate Video prototype;
 unrelated element families retain their existing immediate-prototype policy.
 AUDIO retains opaque immediate identity with genuine Media ancestry.
 
-The Media prototype exposes load(), pause(), play(), src/currentTime accessors,
-and currentSrc, controls, duration, paused, ended, seeking, readyState and
-networkState getters. The Video prototype exposes decoded videoWidth/videoHeight.
+The Media prototype exposes load(), pause(), play(), src/currentTime and
+controls accessors, and currentSrc, duration, paused, ended, seeking, readyState
+and networkState getters. The Video prototype exposes decoded videoWidth/videoHeight.
 The real NETWORK_* and HAVE_* constants are inherited from the Media prototype
 and also appear on its interface object. Canonical methods/accessors have
 ordinary Web IDL descriptors, genuine brands and owner Function/Promise/
@@ -282,13 +309,51 @@ checked before coercion; existing Event/DOM borrowing policies are unchanged.
 
 Class identity alone does not add a player. Genuine unbound VIDEO/AUDIO
 load/pause calls throw a real NotSupportedError DOMException; play returns a
-genuine rejected Promise with that reason. Their state getters/setters still
-decline the missing binding explicitly. These refusals do not install an EMPTY
+genuine rejected Promise with that reason. Other playback state getters/setters
+still decline the missing binding explicitly; controls reflects the actual
+content attribute without requiring a player. These refusals do not install an EMPTY
 player or alter another player's source, control queue or device. Child players
-and additional controllers remain unsupported. controls has the existing actual getter only; its setter, VIDEO
-width/height content reflection, canPlayType, MediaError/TimeRanges and the wider
-media API remain deferred. Existing authored A/V, transport and physical-control
+and additional controllers remain unsupported. VIDEO width/height content
+reflection, canPlayType, MediaError/TimeRanges and the wider media API remain
+deferred. Existing authored A/V, transport and physical-control
 profiles are unchanged.
+
+Controls reflection prerequisite: genuine main-document HTML VIDEO/AUDIO
+controls getters and setters reflect the real null-namespace content attribute,
+including on unbound elements. Setter Boolean truthiness invokes no object
+primitive conversion; true writes an empty controls attribute and false removes
+it. A saved canonical setter bypasses ordinary own shadows through the existing
+native validation/write transaction and retains holder/receiver owner checks.
+Reflection itself creates no player, load or playback operation.
+
+Existing supported Element set/removeAttribute, namespace and attached Attr
+value/nodeValue/textContent, attachment and removal routes use the same checked
+controls transaction. Namespaced lookalikes remain inert metadata. Lookup and
+Attr identity do not imply NamedNodeMap mutation support; those mutations and
+Element.toggleAttribute remain explicitly unsupported. Other protected media
+attributes retain their existing restrictions.
+
+For the bound video, native bar paint, hit testing and keyboard handling follow
+the content attribute. When App reflow observes it absent, it cancels an armed native
+press and releases native control-key focus. Restoring the attribute does not
+restore stale input intent. The selected source, raw source Attr, clock, decoded
+frame work, pending seek and Play Promise lifetime remain independent of bar
+visibility; no reload, implicit pause/play or source retirement is added.
+
+Original Page and App controls cover Boolean and owner rules, ordinary shadows,
+unbound reflection, supported Attr routes/refusals, actual bar/input geometry,
+capture/focus cancellation and pending-seek preservation. The optimized
+App/input/offscreen controls journey captures hidden-playing/advanced, hidden-
+paused/probed and shown/restored phases in distinct snapshots. A real pending
+Play Promise survives removal and fulfills once after playing. Independent
+timestamps/decoded pixels, the exposed bottom strip and exact native bar pixels
+verify actual output. Real hit queries and page/focused Space paths verify hidden
+and unfocused refusal, restored native Play, pause and frozen output. The same
+document/source/Attr persists with one complete loopback clip fetch, paired
+document/DOM/layout/canvas observations, current zero interpreter errors and no
+audio device. Earlier authored/source/dispatch/A/V journeys remain. Full normal
+verification remains a required integration gate; this finite result establishes
+no physical OS input, audibility or public-service acceptance.
 
 Semantic references: [Media](https://html.spec.whatwg.org/multipage/media.html#htmlmediaelement),
 [Video](https://html.spec.whatwg.org/multipage/media.html#htmlvideoelement) and
@@ -305,7 +370,7 @@ shadows, with the original clock, independent pixels, events, source lifetime,
 seek, EOF/replay, Stop and navigation checks and paired document/layout/canvas
 identity. Validation scope is the finite model/interface and App/input/offscreen
 slice; full normal verification remains a separate required integration gate.
-The broader F6 objective remains in progress. This adds no device, audibility,
+The broader F6 objective remains deferred. This adds no device, audibility,
 physical-desktop or public-service acceptance.
 
 Base Event prerequisite: new Event(type, init) uses a real owner-realm
@@ -490,7 +555,7 @@ and real child-realm detail. Readable output has paired document/DOM/layout/
 canvas pixels and current zero interpreter errors. The original legacy
 notification, stack guard/recovery, base/UI/Mouse cases remain. Full normal
 verification remains a required integration gate; broader F6/service acceptance
-remains in progress. This proof adds no device, audibility or physical-desktop
+remains deferred. This proof adds no device, audibility or physical-desktop
 claim.
 
 Semantic reference: [DOM CustomEvent and legacy initialization](https://dom.spec.whatwg.org/#interface-customevent).

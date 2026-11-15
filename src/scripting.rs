@@ -1926,7 +1926,7 @@ impl Bridge<'_> {
         let media_source=name.html_is("src")&&self.media_element_receiver(node_handle(node));let media_change=media_source&&value.is_some();
         if media_change&&!self.media_source_prepared(){return Err("Media source change requires its reserved stable-state task.".into());}
         if self.doc.nodes[node].namespace==crate::html::Namespace::Html && tag(self.doc,node)=="video"
-            && !media_source && ["src","controls","width","height","poster","autoplay","loop","muted","preload","crossorigin"].iter().any(|key|name.html_is(key)) {
+            && !media_source && ["src","width","height","poster","autoplay","loop","muted","preload","crossorigin"].iter().any(|key|name.html_is(key)) {
             return Err("Changing parser-authored video source or native media attributes is not implemented; no attribute was changed.".into());
         }
         if name.namespace.is_none() { self.frame_attribute_guard(node, &name.qualified)?; }
@@ -3948,6 +3948,13 @@ impl Host for Bridge<'_> {
 
     fn set(&mut self, object: u32, property: &str, value: Value) -> Result<(), String> {
         if self.media_interface_receiver(object)&&matches!(property,"src"|"currentTime") {self.require_bound_media(object)?;}
+        if property=="controls"&&self.media_interface_receiver(object) {
+            self.state.work(1)?;
+            let node=self.node(object)?;
+            // Boolean reflection does not perform primitive coercion and does
+            // not select a source or alter the existing player's intent.
+            return self.attribute(node,"controls",value.truthy().then(String::new));
+        }
         if property=="returnValue"&&self.event_receiver(object) {return self.set_event_return_value(object,&value);}
         if property=="currentTime" && self.media_element_receiver(object) {
             let Value::Number(seconds)=value else {return Err("Media time requires numeric conversion.".into());};
@@ -4183,7 +4190,7 @@ impl Host for Bridge<'_> {
     fn call(&mut self, object: u32, method: &str, args: &[Value]) -> Result<Value, String> {
         if let Some(property)=script_media::interface_getter(method) {
             self.state.work(1)?;
-            self.require_bound_media(object)?;
+            if property!="controls" {self.require_bound_media(object)?;}
             return self.media_element_get(object,property)?.ok_or_else(||"Media interface getter is not implemented.".into());
         }
         let method=if let Some(operation)=script_media::interface_operation(method) {self.require_bound_media(object)?;operation} else {method};

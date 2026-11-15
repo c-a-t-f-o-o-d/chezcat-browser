@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "scope": "Original controls Boolean reflection, real source/Promise/frame lifetime and actual native-bar pixels/hits/key focus in one owned App/input process; no device/desktop/service claim.",
+  "provenance": {
+    "method": "Original HTML/CSS/JavaScript using the existing supported authored VIDEO and retained original independent clip/reference; no external assets",
+    "external_assets": []
+  },
+  "files": {
+    "media-controls.html": {
+      "bytes": 6076,
+      "sha256": "b7fd15a3d5e47103ef89072cd87b2d2c2c85a324e17f6e9bff1df310621755e8"
+    }
+  },
+  "retained_clip": {
+    "file": "scene-intra.ivf",
+    "sha256": "8d92ca698ea73c0fa07ee6151fa5e35e5e5d480ac21a65e8aae7dae822bfa684",
+    "reference": "scene-intra.rgba",
+    "reference_sha256": "cdc6a81119b059305ffeaa8db53e2fd6a55e9ff5f487a88255b861f5184f7a6f"
+  }
+}

@@ -10,7 +10,7 @@ pub(super) fn interface_operation(method:&str)->Option<&'static str> {
     match method {"\0Media.load"=>Some("load"),"\0Media.pause"=>Some("pause"),"\0Media.play"=>Some("play"),_=>None}
 }
 pub(super) fn interface_setter(method:&str)->Option<&'static str> {
-    match method {"\0Media.set.src"=>Some("src"),"\0Media.set.currentTime"=>Some("currentTime"),_=>None}
+    match method {"\0Media.set.src"=>Some("src"),"\0Media.set.currentTime"=>Some("currentTime"),"\0Media.set.controls"=>Some("controls"),_=>None}
 }
 pub(super) fn interface_getter(method:&str)->Option<&str> {
     method.strip_prefix("\0Media.get.").or_else(||method.strip_prefix("\0Video.get."))
@@ -855,3 +855,7 @@ mod play_tests;
 #[cfg(test)]
 #[path = "script_media_interface_tests.rs"]
 mod interface_tests;
+
+#[cfg(test)]
+#[path = "script_media_controls_tests.rs"]
+mod controls_tests;

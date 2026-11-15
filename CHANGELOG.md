@@ -1,6 +1,30 @@
 # Changes
 
-## 0.80.0-alpha.1 (candidate)
+## Unreleased
+
+Development priority is shared TLS/trust/data coverage, everyday resource/render/
+interaction usability, then finite tabs, link context and new windows. Further
+F6/YouTube work is deferred; completed finite media/interface slices remain.
+
+- Expose genuine owner-realm HTMLMediaElement/HTMLVideoElement interfaces over
+  the existing player, with stable VIDEO identity and canonical controls/slot
+  accessors that bypass ordinary own shadows. Real unbound-player refusals,
+  owner checks and control/source/Promise transactions preserve the finite scope.
+  Original model and actual input/frame/lifecycle checks passed; further F6
+  and service work is deferred.
+- Reflect the real controls content attribute through Boolean canonical/direct
+  setters and supported Attr routes, including on unbound Media elements without
+  creating players. Native bar paint/hits and key focus follow visibility;
+  removal reflow cancels stale native press/focus. Actual distinct hidden/shown
+  input, clock, independent pixels and Promise/source-lifetime checks passed.
+- Expose the genuine owner-realm CustomEvent constructor and prototype,
+  branded readonly fields and ordered dictionary conversions. CustomEvent retains
+  actual any detail with checked publication/rollback and
+  canonical initialization. Real constructed/legacy dispatch, cancellation, path
+  copies and child owners are exercised through trusted base inputs; synthetic
+  notifications remain untrusted. Native reads retain caller/foreign-owner checks.
+
+## 0.80.0-alpha.1
 
 - Adopt prospective CSAPUL 1.1 with full offline native acceptance, explicit
   personal/organization source and headless commands, strict external receipts,
@@ -13,27 +37,19 @@
   seeking, plus constrained Matroska PCM16 synchronization. One authored video
   supports real load/pause/seek/play promises and events, decoded-frame readiness,
   source retirement and acknowledged PCM time alongside native controls.
-- Expose genuine owner-realm HTMLMediaElement/HTMLVideoElement interfaces over
-  the existing player, with stable VIDEO identity and canonical controls/slot
-  accessors that bypass ordinary own shadows. Real unbound-player refusals,
-  owner checks and control/source/Promise transactions preserve the finite scope.
-  Original model and actual input/frame/lifecycle checks passed; broader F6
-  and service acceptance remain open.
 - Extend that finite authored profile to complete HTTP(S) IVF/Matroska transfers
   selected by explicit MIME, with redirects, CORS/credentials, cookie rules, CSP,
   TLS identity checks and cancellation. Partial content remains refused.
 - Paint one URL background layer on ordinary block/inline-block boxes with
   stylesheet-relative ownership, cascade, repeat/position/size, bounded loading
   and independent request/pixel/geometry checks.
-- Add genuine owner-realm Event/UIEvent/MouseEvent/CustomEvent constructors,
-  prototypes, branded readonly fields and ordered dictionary conversions.
-  CustomEvent retains actual any detail with checked publication/rollback and
-  canonical initialization. Real constructed/legacy dispatch, cancellation, path
-  copies and child owners are exercised through trusted base inputs; synthetic
-  notifications remain untrusted. Native reads retain caller/foreign-owner checks.
+- Add genuine owner-realm Event/UIEvent/MouseEvent constructors, prototypes,
+  branded readonly fields and ordered dictionary conversions. Event/UIEvent
+  dispatch/cancellation, legacy initialization, path copies and owner clocks use
+  real stored state; native reads preserve their caller and foreign-owner denial.
 
 Mouse dispatch/default activation and native pointer payloads,
-KeyboardEvent construction, streaming/ranges, MSE, muted Matroska,
+KeyboardEvent/CustomEvent constructors, streaming/ranges, MSE, muted Matroska,
 multiple players and broader HTMLMediaElement support remain unsupported. Routine
 App/input/offscreen evidence and separate opt-in WinMM sample-clock checks do not
 claim physical audibility, physical-desktop or live-service playback acceptance.

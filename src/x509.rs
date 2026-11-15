@@ -1569,6 +1569,20 @@ mod tests {
     }
 
     #[test]
+    fn original_wrong_san_fixture_validates_only_its_actual_identity() {
+        // This original signed path is valid; only the requested identity
+        // differs in the actual 127.0.0.1 App media refusal journey.
+        let chain = parse_pem_certificates(include_bytes!("../tools/fixtures/media-tls-wrong-san/wrong-san-chain.pem")).unwrap();
+        let roots = parse_pem_certificates(include_bytes!("../tools/fixtures/media-tls-wrong-san/root.pem")).unwrap();
+        let now = UNIX_EPOCH + std::time::Duration::from_secs(1_794_700_800);
+        verify_server(&chain, &roots, "wrong.invalid", now).unwrap();
+        let error = verify_server(&chain, &roots, "127.0.0.1", now).unwrap_err();
+        assert!(error.contains("subjectAltName does not match the requested host"), "{error}");
+        let public = parse_pem_certificates(include_bytes!("../trust/roots.pem")).unwrap();
+        assert!(verify_server(&chain, &public, "wrong.invalid", now).is_err());
+    }
+
+    #[test]
     fn signed_demo_path_requires_identity_time_signature_order_and_exact_trust() {
         let roots = parse_pem_certificates(include_bytes!("../tools/https-demo/ca.pem")).unwrap();
         let chain =

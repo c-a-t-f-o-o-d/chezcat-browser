@@ -1021,6 +1021,14 @@ impl App {
             }
         }
     }
+    /// Removing authored controls revokes only their native input capture.
+    /// Source ownership, decode work, clock and script media tasks stay intact.
+    pub(super) fn sync_media_controls(&mut self) {
+        if self.media.as_ref().is_some_and(|p|p.embedded&&self.document.attr(p.node,"controls").is_none()) {
+            self.media_pointer_cancel();
+            if let Some(player)=&mut self.media {player.controls_focused=false;}
+        }
+    }
     fn media_visible(&self) -> bool {
         (self.media.is_some() || self.audio.is_some())
             && self.media_control_rect().is_some()
@@ -1235,3 +1243,7 @@ impl App {
         Ok((x, y))
     }
 }
+
+#[cfg(test)]
+#[path = "app_media_controls_tests.rs"]
+mod controls_reflection_tests;

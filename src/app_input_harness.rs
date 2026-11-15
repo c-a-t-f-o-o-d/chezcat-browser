@@ -34,7 +34,7 @@ impl App {
             log.flush().map_err(|e| e.to_string())?;
             let fields: Vec<_> = line.splitn(3, '\t').collect();
             let result = (|| {
-                if matches!(fields[0], "fill" | "click" | "link" | "link-target" | "key" | "back" | "address") && self.input_access_blocked() {
+                if matches!(fields[0], "fill" | "click" | "link" | "link-target" | "key" | "back" | "address" | "media-surface" | "media-probe") && self.input_access_blocked() {
                     return Err("Visible access denial/human verification or document rate limit; stopping without retry.".into());
                 }
                 match fields.as_slice() {
@@ -44,6 +44,20 @@ impl App {
                     }
                     ["settings", action] => self.input_settings_action(action),
                     ["media", action] => {let (x,y)=self.input_media_action(action)?;writeln!(log,"Pointer native media control={action} x={x} y={y}").map_err(|e|e.to_string())?;Ok(())},
+                    ["media-surface"] => {
+                        let (x,y)=self.input_video_point(false)?;
+                        let down=self.pointer_down(x,y,false);let up=self.pointer_up(x,y);
+                        if !matches!(down,PlatformAction::None)||!matches!(up,PlatformAction::None) {return Err("Video surface input requested an external platform action.".into());}
+                        if self.focus!=Focus::Page {return Err("Actual video surface click did not focus the page.".into());}
+                        writeln!(log,"Pointer native video surface x={x} y={y} focus=Page").map_err(|e|e.to_string())?;Ok(())
+                    },
+                    ["media-probe",expected] if matches!(*expected,"hidden"|"visible") => {
+                        let (x,y)=self.input_video_point(true)?;
+                        let hit=self.media_hit(x,y);
+                        writeln!(log,"Media native hit probe expected={expected} hit={hit:?} x={x} y={y}").map_err(|e|e.to_string())?;
+                        if hit.is_some()!=(*expected=="visible") {return Err("Actual media hit test differs from expected visibility.".into());}
+                        Ok(())
+                    },
                     ["address", text] if text.chars().count()<=4096 => {
                         self.input_key("l","KeyL",0x4c,true,false,None)?;
                         if self.focus!=Focus::Address { return Err("Address shortcut did not focus browser chrome.".into()); }
@@ -75,6 +89,7 @@ impl App {
                     }
                     ["click", name] => self.input_click_control(name, false, &mut log),
                     ["key", "Enter"] => self.input_key("Enter", "Enter", 0x0d, false, false, None),
+                    ["key", "Space"] => self.input_key(" ", "Space", 0x20, false, false, None),
                     ["back"] => self.input_key("ArrowLeft", "ArrowLeft", 0x25, false, true, None),
                     ["link", needle] if !needle.is_empty() => self.input_click_link(needle, false, &mut log),
                     ["link-target", needle] if !needle.is_empty() && needle.len()<=256 => self.input_click_link(needle, true, &mut log),
@@ -109,6 +124,35 @@ impl App {
         self.input_snapshot(output, "final")?;
         writeln!(log, "All requested input actions completed; inspect evidence before claiming a search pass.").map_err(|e| e.to_string())?;
         Ok(())
+    }
+
+    // Owned development input uses the real rendered authored VIDEO box, not
+    // arbitrary desktop coordinates or a fabricated controls rectangle. The
+    // probe only queries the same hit test as native pointer delivery.
+    fn input_video_point(&self,bar:bool)->Result<(i32,i32),String> {
+        if self.view!=super::View::Page||self.menu||self.browser_panel.is_some()||self.downloads_open()
+            ||self.embedded_video.is_none()||self.embedded_video_retired() {
+            return Err("A current unobstructed authored video page is required.".into());
+        }
+        let node=self.media.as_ref().ok_or("No actual video player is installed.")?.node;
+        let (x,y,width,height)=self.page.items.iter().find_map(|item|match item {
+            crate::layout::PaintItem::Image {node:owner,x,y,width,height,..} if *owner==node=>Some((*x,*y,*width,*height)),
+            _=>None,
+        }).ok_or("The actual video has no rendered image box.")?;
+        if width<200||height<44 {return Err("The actual video box is too small for this control probe.".into());}
+        let px=i64::from(x)+if bar {40}else{i64::from(width)/2};
+        let py=i64::from(y)+if bar {i64::from(height)-28}else{i64::from(height)/2};
+        let screen_y=py+i64::from(self.content_top())-i64::from(self.scroll);
+        if px<0||px>=i64::from(self.width)||screen_y<i64::from(self.content_top())||screen_y>=i64::from(self.content_bottom()) {
+            return Err("The actual video probe point is outside the visible viewport.".into());
+        }
+        let x=i32::try_from(px).map_err(|_|"Video probe coordinate overflow.")?;
+        let page_y=i32::try_from(py).map_err(|_|"Video probe coordinate overflow.")?;
+        let y=i32::try_from(screen_y).map_err(|_|"Video probe coordinate overflow.")?;
+        if !self.page.image_topmost_at(node,x,page_y) {
+            return Err("The actual video probe point is not a visible image hit target.".into());
+        }
+        Ok((x,y))
     }
 
     fn input_key(&mut self, key: &str, code: &str, key_code: u32, ctrl: bool, alt: bool, text: Option<char>) -> Result<(), String> {
