@@ -1,9 +1,11 @@
-//! Original VP8 key-frame image decoder, following RFC 6386 sections 7–15.
+//! Original VP8 reconstruction, following RFC 6386 sections 7–15.
 //! Only the normative numeric tables are shared with the format specification.
-//! No video reference buffers, external codecs, platform decoding or unsafe code.
+//! Still-image decoding and a bounded transactional video reference state share
+//! the same transforms, probabilities, filtering and color conversion.
 
 use super::super::{dimensions_with_limit, le16, pixel, reserved, Bitmap, ImageResult};
 use std::cell::Cell;
+use std::sync::Arc;
 
 #[path = "image_vp8_tables.rs"]
 mod tables;
@@ -22,21 +24,113 @@ const CATEGORIES: [&[u8]; 6] = [
 ];
 
 struct Work<'a> {
-    remaining: Cell<usize>,
+    remaining: &'a Cell<usize>,
     check: &'a dyn Fn() -> ImageResult<()>,
+    video: bool,
 }
 impl Work<'_> {
     fn step(&self) -> ImageResult<()> {
-        let next = self
-            .remaining
-            .get()
-            .checked_sub(1)
-            .ok_or("VP8 boolean decoding exceeds its work limit.")?;
+        self.charge(1)
+    }
+    fn charge(&self, units:usize) -> ImageResult<()> {
+        let before=self.remaining.get();
+        let Some(next)=before.checked_sub(units) else {
+            self.remaining.set(0);
+            return Err(if self.video {"VP8 decoding exceeds its work limit."}else{"VP8 boolean decoding exceeds its work limit."}.into());
+        };
         self.remaining.set(next);
-        if next & 4095 == 0 {
+        if next & 4095 == 0 || units > 1 && next/4096!=before/4096 {
             (self.check)()?;
         }
         Ok(())
+    }
+    fn pixels(&self,units:usize)->ImageResult<()> {
+        if self.video {self.charge(units)}else{Ok(())}
+    }
+}
+
+#[cfg(test)]
+mod video_tests {
+    use super::*;
+    fn packets()->Vec<&'static[u8]> {
+        let bytes=include_bytes!("../tools/fixtures/scene-intra.ivf");let mut at=32;let mut out=Vec::new();
+        while at<bytes.len() {let size=u32::from_le_bytes(bytes[at..at+4].try_into().unwrap()) as usize;at+=12;out.push(&bytes[at..at+size]);at+=size;}
+        out
+    }
+    #[test]
+    fn vp8_video_keyframes_match_still_decoder_and_reset_actual_yuv_reference_aliases() {
+        let mut decoder=VideoDecoder::new(64*48,1_000_000_000);let mut previous=None;
+        for packet in packets() {
+            let expected=decode_with_pixels(packet,&||Ok(()),64*48).unwrap();
+            let actual=decoder.decode(packet,&||Ok(())).unwrap();assert_eq!(actual.pixels,expected.pixels);
+            assert_eq!((actual.width,actual.height),(expected.width,expected.height));
+            let state=decoder.state.as_ref().unwrap();let frame=&state.references[0];
+            assert!(state.references.iter().all(|reference|Arc::ptr_eq(frame,reference)));
+            if let Some(old)=previous {assert!(!Arc::ptr_eq(&old,frame));}
+            previous=Some(frame.clone());assert_eq!((frame.width,frame.height),(64,48));
+            assert_eq!(frame.planes[0].data.len(),64*48);assert_eq!(frame.planes[1].data.len(),32*24);
+            assert_eq!(state.persistent.segment_map.len(),12);
+        }
+    }
+    #[test]
+    fn vp8_video_failed_truncated_and_final_cancelled_candidates_leave_state_untouched() {
+        let packets=packets();let mut measure=VideoDecoder::new(64*48,1_000_000_000);
+        measure.decode(packets[0],&||Ok(())).unwrap();let calls=Cell::new(0);
+        measure.decode(packets[1],&||{calls.set(calls.get()+1);Ok(())}).unwrap();let final_check=calls.get();
+        let mut decoder=VideoDecoder::new(64*48,1_000_000_000);decoder.decode(packets[0],&||Ok(())).unwrap();
+        let retained=decoder.state.as_ref().unwrap().references[0].clone();
+        let probabilities=decoder.state.as_ref().unwrap().persistent.probabilities;
+        let calls=Cell::new(0);let before=decoder.remaining_work();
+        let error=decoder.decode(packets[1],&||{calls.set(calls.get()+1);if calls.get()==final_check{Err("original final cancellation".into())}else{Ok(())}}).unwrap_err();
+        assert_eq!(error,"original final cancellation");assert!(decoder.remaining_work()<before);
+        assert!(Arc::ptr_eq(&retained,&decoder.state.as_ref().unwrap().references[0]));
+        assert_eq!(probabilities,decoder.state.as_ref().unwrap().persistent.probabilities);
+        for end in [0,3,9,packets[1].len()/2] {
+            assert!(decoder.decode(&packets[1][..end],&||Ok(())).is_err());
+            assert!(Arc::ptr_eq(&retained,&decoder.state.as_ref().unwrap().references[0]));
+        }
+        decoder.decode(packets[1],&||Ok(())).unwrap();assert!(!Arc::ptr_eq(&retained,&decoder.state.as_ref().unwrap().references[0]));
+    }
+    #[test]
+    fn vp8_video_sequence_work_is_shared_failed_work_stays_charged_and_fresh_decoder_recovers() {
+        let packet=packets()[0];let mut measured=VideoDecoder::new(64*48,1_000_000_000);
+        measured.decode(packet,&||Ok(())).unwrap();let used=1_000_000_000-measured.remaining_work();assert!(used>64*48);
+        let mut decoder=VideoDecoder::new(64*48,used+used/2);decoder.decode(packet,&||Ok(())).unwrap();
+        let retained=decoder.state.as_ref().unwrap().references[0].clone();
+        assert!(decoder.decode(packet,&||Ok(())).unwrap_err().contains("work limit"));assert_eq!(decoder.remaining_work(),0);
+        assert!(Arc::ptr_eq(&retained,&decoder.state.as_ref().unwrap().references[0]));
+        assert!(decoder.decode(packet,&||Ok(())).is_err());assert_eq!(decoder.remaining_work(),0);
+        let mut fresh=VideoDecoder::new(64*48,used);fresh.decode(packet,&||Ok(())).unwrap();assert_eq!(fresh.remaining_work(),0);
+        let mut small=VideoDecoder::new(64*48-1,1_000_000_000);assert!(small.decode(packet,&||Ok(())).is_err());assert!(small.state.is_none());
+    }
+    #[test]
+    fn vp8_video_retained_reference_padding_repeats_visible_odd_edges_with_checked_work() {
+        let mut plane=Plane::new(8,8).unwrap();plane.data.fill(222);
+        for y in 0..3 {for x in 0..5 {plane.data[y*8+x]=(y*10+x) as u8;}}
+        let remaining=Cell::new(1000);let check=||Ok(());let work=Work {remaining:&remaining,check:&check,video:true};
+        plane.extend_visible_edges(5,3,&work).unwrap();
+        for y in 0..8 {for x in 0..8 {assert_eq!(plane.data[y*8+x],(y.min(2)*10+x.min(4)) as u8);}}
+        assert_eq!(remaining.get(),1000-(3*3+5*8));
+        // Odd luma dimensions use ceil/2 chroma dimensions, independently.
+        let mut chroma=Plane::new(4,4).unwrap();chroma.data.fill(99);chroma.data[..3].copy_from_slice(&[7,8,9]);chroma.data[4..7].copy_from_slice(&[17,18,19]);
+        chroma.extend_visible_edges(5usize.div_ceil(2),3usize.div_ceil(2),&work).unwrap();
+        assert_eq!(chroma.data,[7,8,9,9,17,18,19,19,17,18,19,19,17,18,19,19]);
+        assert!(chroma.extend_visible_edges(0,2,&work).is_err());
+        let exhausted=Cell::new(0);let bounded=Work {remaining:&exhausted,check:&check,video:true};
+        assert!(chroma.extend_visible_edges(3,2,&bounded).unwrap_err().contains("work limit"));
+    }
+    #[test]
+    fn vp8_video_original_one_pixel_key_retains_only_visible_edge_values_in_yuv_padding() {
+        // Existing independently encoded project-owned gray pixel, extracted
+        // from image_webp's original RIFF fixture without a new encoder.
+        let packet=[80,1,0,157,1,42,1,0,1,0,2,0,52,37,164,0,4,116,0,0,254,0,0,0];
+        let expected=decode_with_pixels(&packet,&||Ok(()),1).unwrap();
+        let mut decoder=VideoDecoder::new(1,100_000);let actual=decoder.decode(&packet,&||Ok(())).unwrap();
+        assert_eq!(actual.pixels,expected.pixels);assert_eq!(actual.pixels,[0xff7f7f7f]);
+        let state=decoder.state.as_ref().unwrap();let frame=&state.references[0];
+        assert_eq!((frame.width,frame.height),(1,1));
+        assert!(state.references.iter().all(|reference|Arc::ptr_eq(frame,reference)));
+        for plane in &frame.planes {assert!(plane.data.iter().all(|&sample|sample==plane.data[0]));}
     }
 }
 
@@ -131,6 +225,7 @@ struct Header {
     base_quant: i32,
     quant_delta: [i32; 5],
     probabilities: [u8; 1056],
+    refresh_entropy: bool,
     skip_probability: Option<u8>,
 }
 impl Header {
@@ -156,6 +251,7 @@ impl Header {
             base_quant: 0,
             quant_delta: [0; 5],
             probabilities: COEFF_DEFAULTS,
+            refresh_entropy: false,
             skip_probability: None,
         };
         if h.segments {
@@ -195,7 +291,7 @@ impl Header {
         for d in &mut h.quant_delta {
             *d = bits.optional_signed(4)?;
         }
-        bits.bit(128)?; // Future probability refresh has no effect on a still image.
+        h.refresh_entropy=bits.bit(128)?;
         for (p, update) in h.probabilities.iter_mut().zip(COEFF_UPDATES) {
             if bits.bit(update)? {
                 *p = bits.literal(8)? as u8;
@@ -390,13 +486,34 @@ struct Plane {
 }
 impl Plane {
     fn new(width: usize, height: usize) -> ImageResult<Self> {
-        let mut data = reserved(width * height)?;
-        data.resize(width * height, 0);
+        let count=width.checked_mul(height).filter(|_|width!=0&&height!=0)
+            .ok_or("VP8 plane dimensions overflow or are empty.")?;
+        let mut data = reserved(count)?;
+        data.resize(count, 0);
         Ok(Self {
             width,
             height,
             data,
         })
+    }
+    fn extend_visible_edges(&mut self, width:usize, height:usize, work:&Work<'_>)->ImageResult<()> {
+        if width==0||height==0||width>self.width||height>self.height {
+            return Err("Invalid VP8 visible reference plane dimensions.".into());
+        }
+        if width==self.width&&height==self.height {return Ok(());}
+        for row in 0..self.height {
+            (work.check)()?;
+            if row<height {
+                work.pixels(self.width-width)?;
+                let last=self.data[row*self.width+width-1];
+                self.data[row*self.width+width..(row+1)*self.width].fill(last);
+            } else {
+                work.pixels(self.width)?;
+                let source=(height-1)*self.width;
+                self.data.copy_within(source..source+self.width,row*self.width);
+            }
+        }
+        Ok(())
     }
     fn sample(&self, x: isize, y: isize) -> i32 {
         if y < 0 {
@@ -611,7 +728,7 @@ fn filtering(
     blocks: &[Macroblock],
     header: &Header,
     columns: usize,
-    check: &dyn Fn() -> ImageResult<()>,
+    work: &Work<'_>,
 ) -> ImageResult<()> {
     // RFC 6386 section 15: a zero frame-level filter disables the pass,
     // even when reference/mode adjustments would otherwise raise the level.
@@ -619,7 +736,7 @@ fn filtering(
         return Ok(());
     }
     for (index, block) in blocks.iter().enumerate() {
-        check()?;
+        (work.check)()?;
         let level = header.level(block.segment, block.luma == 4);
         if level == 0 {
             continue;
@@ -649,18 +766,22 @@ fn filtering(
             let x = mx * size;
             let y = my * size;
             if mx != 0 {
+                work.pixels(size)?;
                 plane.filter_edge(x, y, true, size, cfg, true);
             }
             if block.luma == 4 || block.residual {
                 for offset in (4..size).step_by(4) {
+                    work.pixels(size)?;
                     plane.filter_edge(x + offset, y, true, size, cfg, false);
                 }
             }
             if my != 0 {
+                work.pixels(size)?;
                 plane.filter_edge(x, y, false, size, cfg, true);
             }
             if block.luma == 4 || block.residual {
                 for offset in (4..size).step_by(4) {
+                    work.pixels(size)?;
                     plane.filter_edge(x, y + offset, false, size, cfg, false);
                 }
             }
@@ -700,6 +821,59 @@ pub(super) fn decode(data: &[u8], check: &dyn Fn() -> ImageResult<()>) -> ImageR
 }
 
 pub(super) fn decode_with_pixels(data:&[u8],check:&dyn Fn()->ImageResult<()>,maximum_pixels:usize)->ImageResult<Bitmap> {
+    let remaining=Cell::new(MAX_BOOLEAN_WORK);
+    let work=Work {remaining:&remaining,check,video:false};
+    decode_keyframe(data,&work,maximum_pixels).map(|decoded|decoded.bitmap)
+}
+
+struct YuvFrame { width:usize, height:usize, planes:[Plane;3] }
+struct Persistent {
+    probabilities:[u8;1056],
+    absolute:bool,quant:[i32;4],filter:[i32;4],segment_probs:[u8;3],
+    segment_map:Vec<u8>,reference_delta:[i32;4],mode_delta:[i32;4],
+}
+struct VideoState { references:[Arc<YuvFrame>;3], persistent:Persistent }
+struct Decoded {bitmap:Bitmap,planes:[Plane;3],header:Header,records:Vec<Macroblock>}
+
+/// Decoder state belongs to one bounded sequential replay. Work is shared
+/// across packets, including failed/cancelled attempts; references commit once.
+pub(crate) struct VideoDecoder {maximum_pixels:usize,remaining:Cell<usize>,state:Option<VideoState>}
+impl VideoDecoder {
+    pub(crate) fn new(maximum_pixels:usize,work_limit:usize)->Self {
+        Self {maximum_pixels,remaining:Cell::new(work_limit),state:None}
+    }
+    pub(crate) fn remaining_work(&self)->usize {self.remaining.get()}
+    pub(crate) fn decode(&mut self,data:&[u8],check:&dyn Fn()->ImageResult<()>)->ImageResult<Bitmap> {
+        let work=Work {remaining:&self.remaining,check,video:true};
+        check()?;
+        work.step()?;
+        if data.first().is_some_and(|tag|tag&1!=0) {
+            return Err("VP8 video interframe reconstruction is not implemented in this prerequisite.".into());
+        }
+        let mut decoded=decode_keyframe(data,&work,self.maximum_pixels)?;
+        for (index,plane) in decoded.planes.iter_mut().enumerate() {
+            let width=if index==0 {decoded.bitmap.width}else{decoded.bitmap.width.div_ceil(2)};
+            let height=if index==0 {decoded.bitmap.height}else{decoded.bitmap.height.div_ceil(2)};
+            plane.extend_visible_edges(width,height,&work)?;
+        }
+        let mut segment_map=reserved(decoded.records.len())?;
+        for block in &decoded.records {work.step()?;segment_map.push(block.segment as u8);}
+        let header=decoded.header;
+        let persistent=Persistent {
+            probabilities:if header.refresh_entropy {header.probabilities}else{COEFF_DEFAULTS},
+            absolute:header.absolute,quant:header.quant,filter:header.filter,segment_probs:header.segment_probs,
+            segment_map,reference_delta:header.reference_delta,mode_delta:header.mode_delta,
+        };
+        let frame=Arc::new(YuvFrame {width:decoded.bitmap.width,height:decoded.bitmap.height,planes:decoded.planes});
+        let candidate=VideoState {references:[frame.clone(),frame.clone(),frame],persistent};
+        check()?;
+        self.state=Some(candidate);
+        Ok(decoded.bitmap)
+    }
+}
+
+fn decode_keyframe(data:&[u8],work:&Work<'_>,maximum_pixels:usize)->ImageResult<Decoded> {
+    let check=work.check;
     check()?;
     if data.len() < 10 {
         return Err("Lossy WebP has a truncated VP8 frame header.".into());
@@ -729,11 +903,7 @@ pub(super) fn decode_with_pixels(data:&[u8],check:&dyn Fn()->ImageResult<()>,max
         .checked_add(tag >> 5)
         .filter(|&n| n <= data.len())
         .ok_or("VP8 header partition is truncated.")?;
-    let work = Work {
-        remaining: Cell::new(MAX_BOOLEAN_WORK),
-        check,
-    };
-    let mut bits = Bool::new(&data[10..first_end], &work);
+    let mut bits = Bool::new(&data[10..first_end], work);
     let header = Header::read(&mut bits)?;
     let sizes = (header.partitions - 1) * 3;
     let mut next = first_end
@@ -741,6 +911,7 @@ pub(super) fn decode_with_pixels(data:&[u8],check:&dyn Fn()->ImageResult<()>,max
         .filter(|&n| n <= data.len())
         .ok_or("VP8 token partition directory is truncated.")?;
     let mut tokens = Vec::new();
+    tokens.try_reserve_exact(header.partitions).map_err(|_|"Could not retain VP8 token partitions.")?;
     for partition in 0..header.partitions {
         let end = if partition + 1 == header.partitions {
             data.len()
@@ -753,7 +924,7 @@ pub(super) fn decode_with_pixels(data:&[u8],check:&dyn Fn()->ImageResult<()>,max
                 .filter(|&n| n <= data.len())
                 .ok_or("VP8 token partition is truncated.")?
         };
-        tokens.push(Bool::new(&data[next..end], &work));
+        tokens.push(Bool::new(&data[next..end], work));
         next = end;
     }
     let columns = width.div_ceil(16);
@@ -763,14 +934,15 @@ pub(super) fn decode_with_pixels(data:&[u8],check:&dyn Fn()->ImageResult<()>,max
         Plane::new(columns * 8, rows * 8)?,
         Plane::new(columns * 8, rows * 8)?,
     ];
-    let mut modes = vec![0; columns * 4];
-    let mut context = vec![[0u8; 9]; columns];
+    let mut modes = reserved(columns * 4)?;modes.resize(columns*4,0);
+    let mut context = reserved(columns)?;context.resize(columns,[0u8;9]);
     let mut records = reserved(columns * rows)?;
     for my in 0..rows {
         let mut left_modes = [0; 4];
         let mut left = [0u8; 9];
         for mx in 0..columns {
             check()?;
+            work.pixels(2*(16*16+2*8*8))?;
             let mut block = mode_record(
                 &mut bits,
                 &header,
@@ -849,10 +1021,11 @@ pub(super) fn decode_with_pixels(data:&[u8],check:&dyn Fn()->ImageResult<()>,max
             records.push(block);
         }
     }
-    filtering(&mut planes, &records, &header, columns, check)?;
+    filtering(&mut planes, &records, &header, columns, work)?;
     let mut output = reserved(pixels)?;
     for y in 0..height {
         check()?;
+        work.pixels(width)?;
         for x in 0..width {
             let luma = i32::from(planes[0].data[y * planes[0].width + x]) - 16;
             let u = upsample(&planes[1], x, y, width, height) - 128;
@@ -866,9 +1039,10 @@ pub(super) fn decode_with_pixels(data:&[u8],check:&dyn Fn()->ImageResult<()>,max
             ));
         }
     }
-    Ok(Bitmap {
+    let bitmap=Bitmap {
         width,
         height,
         pixels: output,
-    })
+    };
+    Ok(Decoded {bitmap,planes,header,records})
 }

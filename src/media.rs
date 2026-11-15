@@ -23,6 +23,10 @@ pub struct Limits {
     pub input_bytes: usize,
     pub frame_bytes: usize,
     pub frames: usize,
+    /// Maximum dependency packets reconstructed for one requested bitmap.
+    pub decode_frames: usize,
+    /// Shared boolean-decoder work for that complete dependency sequence.
+    pub decode_work: usize,
     pub pixels: usize,
     pub duration: Duration,
 }
@@ -32,6 +36,8 @@ impl Default for Limits {
             input_bytes: 512 * 1024 * 1024,
             frame_bytes: 32 * 1024 * 1024,
             frames: 1_000_000,
+            decode_frames: 65_536,
+            decode_work: 1_000_000_000,
             pixels: 16 * 1024 * 1024,
             duration: Duration::from_secs(7 * 24 * 3600),
         }
@@ -41,6 +47,7 @@ impl Default for Limits {
 struct Frame {
     bytes: Range<usize>,
     time: Duration,
+    key_start: usize,
 }
 pub struct Clip {
     data: Vec<u8>,
@@ -116,7 +123,7 @@ impl Clip {
             if payload.len()<10||payload[0]&1!=0||payload[0]&16==0||payload[3..6]!=[0x9d,1,0x2a]
                 ||usize::from(u16_at(payload,6)?)!=width||usize::from(u16_at(payload,8)?)!=height {return Err("Muxed video requires matching visible VP8 intra frames without scaling.".into());}
             frames.try_reserve(1).map_err(|_|"Could not grow muxed video index.")?;
-            previous=Some(time);frames.push(Frame {bytes,time});
+            previous=Some(time);let key_start=frames.len();frames.push(Frame {bytes,time,key_start});
         }
         Ok(Self {data,frames,width,height,duration,limits})
     }
@@ -202,9 +209,11 @@ impl Clip {
             frames
                 .try_reserve(1)
                 .map_err(|_| "Could not grow the video frame index.")?;
+            let key_start=frames.len();
             frames.push(Frame {
                 bytes: header_end..end,
                 time: instant,
+                key_start,
             });
             previous = stamp;
             position = end;
@@ -250,16 +259,25 @@ impl Clip {
             .frames
             .get(index)
             .ok_or("Video frame index is unavailable.")?;
-        let bitmap = crate::image::decode_vp8_frame_checked(
-            &self.data[frame.bytes.clone()],
-            self.limits.pixels,
-            check,
-        )
-        .map_err(|error| format!("Video frame {index}: {error}"))?;
-        if bitmap.width != self.width || bitmap.height != self.height {
-            return Err("Decoded video frame has a different canvas.".into());
+        let count=index.checked_sub(frame.key_start).and_then(|count|count.checked_add(1))
+            .filter(|&count|count<=self.limits.decode_frames)
+            .ok_or("Video dependency decode-frame allowance exceeded.")?;
+        // Each request owns a fresh bounded sequence. Seeks, skipped display
+        // frames and canceled generations cannot borrow another job's state.
+        let mut decoder=crate::image::Vp8VideoDecoder::new(self.limits.pixels,self.limits.decode_work);
+        let mut target=None;
+        for current in frame.key_start..=index {
+            check()?;
+            let packet=self.frames.get(current).ok_or("Video dependency index is unavailable.")?;
+            let bitmap=decoder.decode(&self.data[packet.bytes.clone()],check)
+                .map_err(|error|format!("Video frame {current}: {error}"))?;
+            if bitmap.width!=self.width||bitmap.height!=self.height {
+                return Err("Decoded video frame has a different canvas.".into());
+            }
+            target=Some(bitmap);
         }
-        Ok(Arc::new(bitmap))
+        debug_assert!(count!=0);
+        Ok(Arc::new(target.ok_or("Video dependency sequence is empty.")?))
     }
     pub fn load(
         data: Vec<u8>,
@@ -465,6 +483,23 @@ mod tests {
     fn clip() -> Clip {
         Clip::parse(SCENE.to_vec(), Limits::default(), &|| Ok(())).unwrap()
     }
+    #[test]
+    fn video_decode_sequence_has_explicit_small_allowances_and_fresh_request_recovery() {
+        let normal=Limits::default();
+        assert!(normal.decode_frames>=65_536&&normal.decode_work>=1_000_000_000);
+        for (frames,work) in [(0,normal.decode_work),(normal.decode_frames,0),(normal.decode_frames,1)] {
+            let limited=Clip::parse(SCENE.to_vec(),Limits {decode_frames:frames,decode_work:work,..normal},&||Ok(())).unwrap();
+            assert!(limited.decode(2,&||Ok(())).is_err());
+        }
+        // A fresh normal job genuinely decodes the target after a prior refusal.
+        let normal=clip();let bitmap=normal.decode(2,&||Ok(())).unwrap();
+        assert_eq!((bitmap.width,bitmap.height),(normal.width,normal.height));
+        assert_eq!(bitmap.pixels,crate::image::decode_vp8_frame_checked(
+            &normal.data[normal.frames[2].bytes.clone()],normal.limits.pixels,&||Ok(())).unwrap().pixels);
+        assert!(normal.decode(normal.frame_count(),&||Ok(())).is_err());
+        assert!(normal.decode(2,&||Err("canceled sequence".into())).unwrap_err().contains("canceled sequence"));
+    }
+
     #[test]
     fn local_video_real_container_and_keyframes_have_distinct_decoded_pixels() {
         let clip = clip();

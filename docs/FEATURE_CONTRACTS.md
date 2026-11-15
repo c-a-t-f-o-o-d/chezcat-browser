@@ -159,6 +159,30 @@ issuer/hostname rejection before media HTTP and player installation, with a real
 rendered error event. These establish the finite F4 transaction, not general
 streaming, Fetch/CORS, format or live-service support.
 
+## F5 — bounded VP8 dependencies with existing PCM synchronization
+
+Outcome: a finite visible, fixed-canvas VP8 I/P profile reuses the original IVF
+path and existing Matroska/PCM16 playback. Retain explicit unsupported tools after
+inspecting actual original bitstreams; encoder flags alone do not prove their
+absence. No new container, audio codec, runtime or operating-system decoder is
+needed for this slice. Preserve the existing still-image/keyframe versions.
+
+Acceptance includes original dependency-bearing frames and independent full
+decoded references, checked dimensions/indices/references, genuine entropy and
+reference updates, transactional decode failure/reset, malformed/truncated input,
+bounded memory and aggregate replay work, cancellation and stale-result isolation.
+Prove real pixels, dependency-aware seeks, EOF/replay and the existing acknowledged
+PCM sample-clock synchronization. WebM/Opus/Vorbis, hidden video frames, MSE and
+general service playback remain separate.
+
+State prerequisite: retain real post-filter YUV through immutable reference
+ownership, normalize visible-edge padding and publish a candidate only after the
+final cancellation check. One requested bitmap owns a fresh decoder sequence and
+shared adjustable work/packet allowances. Small profiles verify refusal and fresh
+request recovery; normal defaults grow on demand. This prerequisite preserves
+existing keyframe behavior and still explicitly declines interframes. It does not
+complete F5 or advertise dependent-frame playback.
+
 Every later feature records semantic references, original and selected conformance
 tests, security review, native/device/live checks still pending and exact final
 source/executable identity. Release notes describe only proven behavior.
