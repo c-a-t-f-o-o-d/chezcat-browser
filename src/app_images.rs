@@ -269,6 +269,8 @@ impl App {
         page.settle_dynamic_image(request, success);
         let outcome = page.finish_image_event(&mut self.document, &mut self.forms, request.node, success);
         if outcome.layout_changed { self.reflow(); }
+        // Finish this owned resource task before consuming its queued navigation.
+        self.resume_background_loading();
         self.validate_control_focus();
         self.sync_editors();
         self.show_script_errors();

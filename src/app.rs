@@ -819,6 +819,7 @@ impl App {
                         if page.initial_image_current(node) {
                             let outcome = page.finish_image_event(&mut self.document, &mut self.forms, node, success);
                             if outcome.layout_changed { self.reflow(); }
+                            self.resume_background_loading();
                         }
                     }
                 }

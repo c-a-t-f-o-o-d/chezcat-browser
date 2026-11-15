@@ -354,6 +354,8 @@ impl App {
         if outcome.layout_changed || removed {
             self.reflow();
         }
+        // Finish this owned resource task before consuming its queued navigation.
+        self.resume_background_loading();
         self.validate_control_focus();
         self.sync_editors();
         self.show_script_errors();
