@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "scope": "Original finite base Event construction, real dispatch/cancellation, native input and child owner regression fixture.",
+  "provenance": {
+    "method": "Original HTML, CSS and JavaScript authored for this regression fixture; no external source or media.",
+    "external_assets": []
+  },
+  "files": {
+    "base-event.html": {
+      "bytes": 7747,
+      "sha256": "77dbcf2257692b4dd9d6f2521a049c06ae3fc1796f1da26618d1bdb9f1e361e5"
+    }
+  }
+}

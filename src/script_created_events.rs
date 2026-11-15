@@ -406,6 +406,8 @@ var prefix=0;document.title='created-interfaces-ok';
 }
 
 pub(super) struct CreatedEvent {
+    pub(super) owner: u32,
+    pub(super) composed: bool,
     pub(super) handle: u32,
     pub(super) name: String,
     pub(super) bubbles: bool,
@@ -457,7 +459,8 @@ fn constant(name: &str) -> Option<u8> {
 
 fn base_property(name: &str) -> bool {
     constant(name).is_some() || matches!(name, "type" | "target" | "currentTarget" | "bubbles" | "cancelable"
-        | "defaultPrevented" | "eventPhase" | "timeStamp" | "isTrusted" | "composed" | "cancelBubble")
+        | "defaultPrevented" | "eventPhase" | "timeStamp" | "isTrusted" | "composed" | "cancelBubble"
+        | "srcElement" | "returnValue")
 }
 
 fn ui_property(name:&str)->bool { matches!(name,"view"|"detail"|"which") }
@@ -468,6 +471,66 @@ fn mouse_property(name: &str) -> bool {
 }
 
 impl Bridge<'_> {
+    pub(super) fn event_owner(&self,object:u32)->Option<u32> {
+        self.created_event_index(object).map(|id|self.state.created_events[id].owner)
+            .or_else(||self.state.event.as_ref().filter(|event|event.handle==object).map(|_|WINDOW))
+    }
+    pub(super) fn base_event_owner(&self,object:u32)->Option<u32> {
+        let event=&self.state.created_events[self.created_event_index(object)?];
+        (event.ui.is_none()&&event.mouse.is_none()&&event.custom.is_none()).then_some(event.owner)
+    }
+    pub(super) fn construct_base_event(&mut self,owner:u32,args:&[Value],fields:Option<&[(&str,Value)]>)->Result<Value,String> {
+        if !self.state.enabled||!self.doc.scripting_enabled {return Err("Event construction is disabled.".into());}
+        self.state.work(1)?;
+        let Some(Value::String(source))=args.first() else {return Err("Event requires a converted type.".into());};
+        if source.len()>self.state.limits.host.event_type_bytes||source.len()>self.state.limits.host.string_bytes {
+            return Err("Event type exceeds the host event-type/string allowance.".into());
+        }
+        self.state.copies(source.len())?;
+        let retained=self.state.retained.checked_add(source.len()).filter(|&n|n<=self.state.retained_limit)
+            .ok_or("Event retained text allowance exceeded.")?;
+        if self.state.created_events.len()>=self.state.limits.host.created_events {return Err("Constructed Event allowance exceeded.".into());}
+        let next=self.state.next_event.checked_add(1).filter(|next|*next<=script_class_list::BASE)
+            .ok_or("Event identity space exhausted.")?;
+        let mut name=String::new();
+        name.try_reserve(source.len()).map_err(|_|"Could not reserve Event type.")?;
+        name.push_str(source);
+        self.state.created_events.try_reserve(1).map_err(|_|"Could not reserve Event record.")?;
+        let flag=|key|fields.is_some_and(|fields|fields.iter().any(|(name,value)|*name==key&&value.truthy()));
+        let handle=self.state.next_event;
+        let timestamp=self.event_timestamp(owner,Instant::now())?;
+        let event=CreatedEvent {owner,composed:flag("composed"),handle,name,
+            bubbles:flag("bubbles"),cancelable:flag("cancelable"),prevented:false,stopped:false,immediate:false,
+            target:None,current:None,phase:0,dispatching:false,initialized:true,passive:false,
+            timestamp,ui:None,mouse:None,custom:None};
+        self.state.created_events.push(event);
+        self.state.retained=retained;
+        self.state.next_event=next;
+        Ok(Value::Host(handle))
+    }
+    pub(super) fn rollback_base_event(&mut self,handle:u32)->Result<(),String> {
+        let Some(event)=self.state.created_events.last() else {return Err("No unpublished Event record exists.".into());};
+        if event.handle!=handle||event.ui.is_some()||event.mouse.is_some()||event.custom.is_some()
+            || event.dispatching||event.target.is_some() {return Err("Unpublished Event rollback identity mismatch.".into());}
+        let retained=self.state.retained.checked_sub(event.name.len()).ok_or("Event rollback retention mismatch.")?;
+        self.state.created_events.pop();
+        self.state.retained=retained;
+        // Identity allocation and work remain charged; no capability ID is reused.
+        Ok(())
+    }
+    pub(super) fn set_event_return_value(&mut self,object:u32,value:&Value)->Result<(),String> {
+        self.state.work(1)?;
+        if !value.truthy() {
+            if let Some(id)=self.created_event_index(object) {
+                let event=&mut self.state.created_events[id];
+                if event.cancelable&&!event.passive {event.prevented=true;}
+            } else {
+                let event=self.state.event.as_mut().filter(|event|event.handle==object).ok_or("Event has expired.")?;
+                if event.cancelable&&!event.passive {event.prevented=true;}
+            }
+        }
+        Ok(())
+    }
     pub(super) fn event_native_member(&self,object:u32,name:&str)->bool {
         base_property(name) || matches!(name,"constructor"|"__proto__"|"srcElement"|"returnValue"|"composedPath"|"initEvent"|"preventDefault"|"stopPropagation"|"stopImmediatePropagation")
             || self.custom_receiver(object) && matches!(name,"detail"|"initCustomEvent")
@@ -520,7 +583,7 @@ impl Bridge<'_> {
     }
 
     pub(super) fn created_event_readonly(&self, object: u32, name: &str) -> bool {
-        name != "cancelBubble" && (self.created_event_index(object).is_some_and(|id| base_property(name)
+        !matches!(name,"cancelBubble"|"returnValue") && (self.created_event_index(object).is_some_and(|id| base_property(name)
             || self.state.created_events[id].mouse.is_some() && mouse_property(name)
             || self.state.created_events[id].custom.is_some() && name == "detail")
             || self.ui_receiver(object) && ui_property(name))
@@ -554,15 +617,17 @@ impl Bridge<'_> {
             let event = &self.state.created_events[id];
             let native = |handle: Option<u32>| handle.map_or(Value::Null, Value::Host);
             Ok(match name {
-                "target" => native(event.target),
+                "target" | "srcElement" => native(event.target),
                 "currentTarget" => native(event.current),
                 "bubbles" => Value::Bool(event.bubbles),
                 "cancelable" => Value::Bool(event.cancelable),
                 "defaultPrevented" => Value::Bool(event.prevented),
+                "returnValue" => Value::Bool(!event.prevented),
                 "cancelBubble" => Value::Bool(event.stopped),
                 "eventPhase" => Value::Number(f64::from(event.phase)),
                 "timeStamp" => Value::Number(event.timestamp),
-                "isTrusted" | "composed" => Value::Bool(false),
+                "isTrusted" => Value::Bool(false),
+                "composed" => Value::Bool(event.composed),
                 name if constant(name).is_some() => Value::Number(f64::from(constant(name).unwrap())),
                 "view" if event.ui.is_some() => native(event.ui.as_ref().unwrap().view),
                 "detail" if event.ui.is_some() => Value::Number(f64::from(event.ui.as_ref().unwrap().detail)),
@@ -655,7 +720,7 @@ impl Bridge<'_> {
         let next = self.state.next_event.checked_add(1).filter(|next|*next <= script_class_list::BASE).ok_or("Event identity space exhausted.")?;
         self.state.created_events.try_reserve(1).map_err(|_| "Constructed Event storage reservation failed.")?;
         let handle = self.state.next_event;
-        let event = CreatedEvent { handle, name: String::new(), bubbles: false, cancelable: false,
+        let event = CreatedEvent { owner:WINDOW,composed:false,handle, name: String::new(), bubbles: false, cancelable: false,
             prevented: false, stopped: false, immediate: false,
             target:None,current:None,phase:0,dispatching:false,initialized:false,passive:false,
             timestamp: self.state.clock_ms(Instant::now()),
@@ -739,3 +804,11 @@ impl Bridge<'_> {
 #[cfg(test)]
 #[path = "script_custom_event_tests.rs"]
 mod custom_tests;
+
+#[cfg(test)]
+#[path = "script_event_base_tests.rs"]
+mod base_interface_tests;
+
+#[cfg(test)]
+#[path = "script_event_opaque_path_tests.rs"]
+mod opaque_path_tests;

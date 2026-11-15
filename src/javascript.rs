@@ -85,6 +85,8 @@ mod environment_lifetime_tests;
 mod function_constructor;
 #[path = "host_objects.rs"]
 mod host_objects;
+#[path = "event_interface.rs"]
+mod event_interface;
 #[path = "runtime_diagnostics.rs"]
 mod runtime_diagnostics;
 #[path = "string_substr.rs"]
@@ -492,6 +494,15 @@ pub trait Host {
     /// Optional owner for a real native method whose first lookup may occur in
     /// another supported realm. This grants no constructor/prototype capability.
     fn native_method_owner(&self, _object:u32, _method:&str) -> Option<u32> { None }
+    /// Only fresh, still-unpublished base Event constructor/factory results opt
+    /// into atomic ordinary-store/unforgeable installation.
+    fn unpublished_base_event_owner(&self,_object:u32,_method:&str,_result:u32)->Option<u32>{None}
+    fn rollback_unpublished_base_event(&mut self,_event:u32)->Result<(),String>{
+        Err("No unpublished Event transaction exists.".into())
+    }
+    fn event_path_snapshot(&mut self,_event:u32)->Result<Vec<u32>,String>{
+        Err("Event path access is unavailable.".into())
+    }
     /// Preserve original nullish inputs for an explicitly nullable DOMString.
     /// A null returned by object coercion still undergoes ordinary ToString.
     fn nullable_string_argument(&self, _object: u32, _method: &str, _index: usize) -> bool {
@@ -8057,7 +8068,8 @@ impl Runtime {
         let args = if conversions.is_empty() && !variadic {
             args
         } else {
-            converted = Vec::with_capacity(args.len());
+            converted = Vec::new();
+            converted.try_reserve(args.len()).map_err(|_|Fault::new("Could not reserve converted native arguments."))?;
             for value in args {
                 converted.push(self.copy_value(value)?);
             }
@@ -8090,6 +8102,9 @@ impl Runtime {
         if host.synchronous_event_dispatch(object,method) {host.prepare_event_dispatch().map_err(Fault::new)?;}
         host.validate_call(object, method, args)
             .map_err(|(kind, message)| Fault::exception(kind, message))?;
+        if method==event_interface::PATH_METHOD {
+            return self.event_path_array(object,host);
+        }
         if host.synchronous_event_dispatch(object,method) {
             let token=host.begin_event_dispatch(object,args).map_err(Fault::new)?;
             let result=(|| {
@@ -8158,7 +8173,8 @@ impl Runtime {
                 if names.len() > self.limits.capacity.arguments {
                     return Err(Fault::new(format!("Native dictionary field limit reached ({}).", self.limits.capacity.arguments)));
                 }
-                let mut values = Vec::with_capacity(names.len());
+                let mut values = Vec::new();
+                values.try_reserve(names.len()).map_err(|_|Fault::new("Could not reserve native dictionary fields."))?;
                 for &name in names {
                     let reference = Reference::Property(self.copy_value(value)?, name.into());
                     values.push((name, self.read_reference(&reference, host)?));
@@ -8171,6 +8187,7 @@ impl Runtime {
         host.native_operation_caller(self.native_access_caller
             .unwrap_or_else(|| self.browser_global.map(|(window, _)| window)));
         let result=host.call_with_dictionary(object, method, args, fields.as_deref()).map_err(Fault::new);
+        if let Ok(value)=&result {self.finish_new_event_result(object,method,value,host)?;}
         if self.drain_native_promise_effects(host)?!=0 {
             self.defer_host_microtask_after_effects(ticket)?;
         }

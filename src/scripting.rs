@@ -182,6 +182,8 @@ struct AnimationFrame {
 }
 
 struct Event {
+    composed: bool,
+    path: Vec<u32>,
     handle: u32,
     target: u32,
     current: u32,
@@ -825,6 +827,7 @@ impl Page {
             .expect("fixed image constructor");
         state.native_functions.insert("Image", image);
         runtime.define_event_target_interface(WINDOW).expect("fixed EventTarget interface");
+        runtime.define_event_interface(WINDOW).expect("fixed Event interface");
         runtime.define_node_interfaces(WINDOW,dom_tree::NODE_CONSTANTS,Some((IMAGE_FACTORY,"Image"))).expect("fixed Node interfaces");
         Self { runtime, state }
     }
@@ -1417,7 +1420,7 @@ impl Page {
         let target = node.map_or(DOCUMENT, node_handle);
         let event = if input.down { "keydown" } else { "keyup" };
         self.state.pending_keyboard = Some(input);
-        let prevented = self.dispatch_to(doc, forms, target, event, true, true);
+        let prevented = self.dispatch_composed_to(doc, forms, target, event, true, true, true);
         self.state.pending_keyboard = None;
         Outcome {
             prevented,
@@ -1456,13 +1459,14 @@ impl Page {
         if !supported {
             return Outcome::default();
         }
-        let prevented = self.dispatch_to(
+        let prevented = self.dispatch_composed_to(
             doc,
             forms,
             node_handle(target),
             event,
             cancelable,
             !matches!(event, "load" | "error"),
+            matches!(event,"click"|"input"),
         );
         Outcome {
             prevented,
@@ -1479,6 +1483,19 @@ impl Page {
         event: &str,
         cancelable: bool,
         bubbles: bool,
+    ) -> bool {
+        self.dispatch_composed_to(doc,forms,target,event,cancelable,bubbles,false)
+    }
+
+    fn dispatch_composed_to(
+        &mut self,
+        doc: &mut Document,
+        forms: &mut Forms,
+        target: u32,
+        event: &str,
+        cancelable: bool,
+        bubbles: bool,
+        composed: bool,
     ) -> bool {
         // Resource completion can reach a native event tail in the same job
         // as a fatal script. It must not revive that job or queue later work.
@@ -1502,6 +1519,8 @@ impl Page {
         let handle = self.state.next_event;
         self.state.next_event = next;
         self.state.event = Some(Event {
+            composed,
+            path: Vec::new(),
             handle,
             // HTML's Window load event uses the legacy target override:
             // target is Document while currentTarget and callback this are Window.
@@ -1532,6 +1551,7 @@ impl Page {
         if bubbles {
             visits.extend(path.iter().skip(1).map(|&node| (node, false, 3)));
         }
+        if let Some(active)=&mut self.state.event {active.path=path;}
         'visits: for (current, capture, phase) in visits {
             if self
                 .state
@@ -2326,12 +2346,17 @@ impl Bridge<'_> {
 }
 
 impl Host for Bridge<'_> {
-    fn expando_owner(&self,object:u32)->Option<u32> {self.standalone_target_owner(object).or_else(||self.element_expando_receiver(object).then_some(WINDOW))}
-    fn exposed_native_prototype(&self,object:u32)->bool {self.standalone_target_owner(object).is_some()}
-    fn native_ancestry_inspection(&self,object:u32)->bool {self.exposed_native_prototype(object)||self.namespace_receiver(object)}
+    fn expando_owner(&self,object:u32)->Option<u32> {self.base_event_owner(object).or_else(||self.standalone_target_owner(object)).or_else(||self.element_expando_receiver(object).then_some(WINDOW))}
+    fn exposed_native_prototype(&self,object:u32)->bool {self.base_event_owner(object).is_some()||self.standalone_target_owner(object).is_some()}
+    fn native_ancestry_inspection(&self,object:u32)->bool {self.event_receiver(object)||self.exposed_native_prototype(object)||self.namespace_receiver(object)}
     fn event_target_interface(&self,window:u32)->bool {window==WINDOW || self.frame_context(window).is_some()}
     fn node_interface_constants(&self,window:u32)->Option<&'static [(&'static str,u16)]> {self.event_target_interface(window).then_some(dom_tree::NODE_CONSTANTS)}
     fn instance_ancestry(&self, object:u32) -> Option<crate::javascript::NativeAncestry> {
+        if let Some(window)=self.event_owner(object) {
+            // Subclass immediate prototypes stay opaque; this is their genuine
+            // implemented Event ancestry, as with the existing Node suffixes.
+            return Some(crate::javascript::NativeAncestry {window,constructor:Some((window,"Event"))});
+        }
         if let Some(window)=self.standalone_target_owner(object) {
             return Some(crate::javascript::NativeAncestry {window,constructor:Some((window,"EventTarget"))});
         }
@@ -2380,6 +2405,8 @@ impl Host for Bridge<'_> {
     }
 
     fn owns_property(&self, object: u32, property: &str) -> bool {
+        if self.event_receiver(object)&&property=="composedPath" {return false;}
+        if self.base_event_owner(object).is_some() {return false;}
         if self.node_event_method(object,property) {return false;}
         if self.standalone_target_owner(object).is_some() {return false;}
         if property=="prototype"&&self.location_instance_owner(object).is_some(){return false;}
@@ -2393,12 +2420,14 @@ impl Host for Bridge<'_> {
         self.location_instance_owner(object).is_some() || object == HISTORY || self.attr_receiver(object) || self.constructed_event_receiver(object) || self.named_map_receiver(object)
     }
     fn ordinary_lookup_tail_property(&self,object:u32,property:&str)->bool {
-        if self.node_event_method(object,property) {true}
+        if self.event_receiver(object)&&property=="composedPath" {true}
+        else if self.node_event_method(object,property) {true}
         else if self.location_instance_owner(object).is_some() {property=="prototype"}
         else if property=="animate" && self.element_expando_receiver(object) {true}
         else {self.ordinary_lookup_tail(object)}
     }
     fn native_access_owner(&self, object: u32) -> Option<u32> {
+        if let Some(owner)=self.event_owner(object) {return Some(owner);}
         if self.event_target_interface(object) {return Some(object);}
         if let Some(owner)=self.standalone_target_owner(object) {return Some(owner);}
         if let Some(window)=self.frame_instance_window(object) {return Some(window);}
@@ -2416,6 +2445,7 @@ impl Host for Bridge<'_> {
     }
 
     fn readonly_property(&self, object: u32, property: &str) -> bool {
+        if self.base_event_owner(object).is_some() {return false;}
         if self.media_element_receiver(object) && matches!(property,"currentSrc"|"videoWidth"|"videoHeight"|"duration"|"paused"|"ended"|"seeking"|"readyState"|"networkState") {return true;}
         if object==PERFORMANCE&&property=="timing"||object==PERFORMANCE_TIMING&&self.state.navigation_timing.is_some_and(|t|t.value(property).is_some()) {return true;}
         object == WINDOW && property == "history" || object == HISTORY && matches!(property, "state" | "length")
@@ -2461,6 +2491,7 @@ impl Host for Bridge<'_> {
     }
 
     fn argument_conversions(&self, object: u32, method: &str) -> &'static [(usize, bool)] {
+        if method=="Event"&&self.event_target_interface(object) {return &[(0,true)];}
         if object==WINDOW && method=="cancelAnimationFrame" {return &[(0,false)];}
         if object == HISTORY && method == "replaceState" { return &[(1, true), (2, true)]; }
         if self.named_map_receiver(object) {
@@ -2553,10 +2584,18 @@ impl Host for Bridge<'_> {
     }
 
     fn native_method_owner(&self, object:u32, method:&str) -> Option<u32> {
-        (self.constructed_event_receiver(object)
-            && matches!(method,"initEvent"|"initCustomEvent"|"initUIEvent"|"initMouseEvent")
-            && self.created_event_method(object,method).is_some()).then_some(WINDOW)
+        self.created_event_method(object,method).and_then(|_|self.event_owner(object))
     }
+
+    fn unpublished_base_event_owner(&self,object:u32,method:&str,result:u32)->Option<u32> {
+        if !(object==DOCUMENT&&method=="createEvent"||self.event_target_interface(object)&&method=="Event") {
+            return None;
+        }
+        if self.state.created_events.last().is_none_or(|event|event.handle!=result) {return None;}
+        self.base_event_owner(result)
+    }
+    fn rollback_unpublished_base_event(&mut self,event:u32)->Result<(),String>{self.rollback_base_event(event)}
+    fn event_path_snapshot(&mut self,event:u32)->Result<Vec<u32>,String>{self.copy_event_path(event)}
 
     fn nullable_string_argument(&self, object: u32, method: &str, index: usize) -> bool {
         if object==DOCUMENT && matches!(method,"createAttributeNS"|"createElementNS") && index==0 {return true;}
@@ -2588,6 +2627,7 @@ impl Host for Bridge<'_> {
     }
 
     fn required_arguments(&self, object: u32, method: &str) -> usize {
+        if method=="Event"&&self.event_target_interface(object) {return 1;}
         if object==WINDOW && matches!(method,"requestAnimationFrame"|"cancelAnimationFrame") {return 1;}
         if method=="dispatchEvent"&&self.dispatch_receiver(object){return 1;}
         if object==DOCUMENT && matches!(method,"createAttributeNS"|"createElementNS") {return 2;}
@@ -2651,6 +2691,16 @@ impl Host for Bridge<'_> {
         method: &str,
         args: &[Value],
     ) -> Result<(), (&'static str, String)> {
+        if method=="Event"&&self.event_target_interface(object) {
+            if !self.state.enabled||!self.doc.scripting_enabled {return Err(("InvalidStateError","Event construction is disabled.".into()));}
+            if args.get(1).is_some_and(|value|!matches!(value,Value::Undefined|Value::Null|Value::Object(_)|Value::Function(_)|Value::Host(_))) {
+                return Err(("TypeError","EventInit requires an object, null or undefined.".into()));
+            }
+            return Ok(());
+        }
+        if method.starts_with("\0Event.")&&!self.event_receiver(object) {
+            return Err(("TypeError","Event operation requires a genuine Event.".into()));
+        }
         if method=="pause" && self.media_element_receiver(object) && (!self.state.enabled || !self.doc.scripting_enabled) {return Err(("InvalidStateError","Scripting is disabled.".into()));}
         if object==WINDOW && method=="requestAnimationFrame" && !matches!(args.first(),Some(Value::Function(_))) {return Err(("TypeError","requestAnimationFrame requires a callable callback.".into()));}
         if self.event_target_interface(object) && matches!(method,"Node"|"Element"|"HTMLElement") {return Err(("TypeError","Illegal constructor for this native interface.".into()));}
@@ -2811,6 +2861,7 @@ impl Host for Bridge<'_> {
     }
 
     fn resolve_member_before_call(&self, object: u32) -> bool {
+        if self.event_receiver(object) {return true;}
         if self.standalone_target_owner(object).is_some() {return true;}
         if object == HISTORY || self.attr_receiver(object) || self.constructed_event_receiver(object) || self.named_map_receiver(object) || self.media_element_receiver(object) { return true; }
         self.form_receiver(object)
@@ -2898,6 +2949,9 @@ impl Host for Bridge<'_> {
     }
 
     fn accepts_receiver(&self, object: u32, method: &str, receiver: u32) -> bool {
+        if self.event_target_interface(object)&&(method.starts_with("\0Event.")||matches!(method,"initEvent"|"preventDefault"|"stopPropagation"|"stopImmediatePropagation")) {
+            return self.event_receiver(receiver);
+        }
         if matches!(method,"load"|"pause"|"play") && self.media_element_receiver(object) {return self.media_element_receiver(receiver);}
         if matches!(method,"dispatchEvent"|"addEventListener"|"removeEventListener") {
             return (self.event_target_interface(object)||self.dispatch_receiver(object)) && self.dispatch_receiver(receiver);
@@ -3115,9 +3169,10 @@ impl Host for Bridge<'_> {
     fn finish_event_dispatch(&mut self,token:usize)->bool{self.finish_synthetic_dispatch(token)}
     fn dictionary_argument(
         &self,
-        _object: u32,
+        object: u32,
         method: &str,
     ) -> Option<(usize, &'static [&'static str])> {
+        if method=="Event"&&self.event_target_interface(object) {return Some((1,&["bubbles","cancelable","composed"]));}
         match method {
             "addEventListener" => Some((2, &["capture", "once", "passive", "signal"])),
             "removeEventListener" => Some((2, &["capture"])),
@@ -3132,6 +3187,7 @@ impl Host for Bridge<'_> {
         args: &[Value],
         fields: Option<&[(&str, Value)]>,
     ) -> Result<Value, String> {
+        if method=="Event"&&self.event_target_interface(object) {return self.construct_base_event(object,args,fields);}
         if matches!(method, "addEventListener" | "removeEventListener") {
             self.state.work(1)?;
             self.event_listener(object, method, args, fields)
@@ -3575,15 +3631,17 @@ impl Host for Bridge<'_> {
                 .ok_or("Event handle has expired.")?;
             return Ok(match property {
                 "type" => Value::String(event.name.clone()),
-                "target" => Value::Host(event.target),
+                "target" | "srcElement" => Value::Host(event.target),
                 "currentTarget" => Value::Host(event.current),
                 "cancelable" => Value::Bool(event.cancelable),
                 "bubbles" => Value::Bool(event.bubbles),
                 "eventPhase" => Value::Number(f64::from(event.phase)),
                 "defaultPrevented" => Value::Bool(event.prevented),
+                "returnValue" => Value::Bool(!event.prevented),
                 "cancelBubble" => Value::Bool(event.stopped),
                 "timeStamp" => Value::Number(event.timestamp),
                 "isTrusted" => Value::Bool(true),
+                "composed" => Value::Bool(event.composed),
                 "view" if event.keyboard.is_some() => Value::Host(WINDOW),
                 "detail" if event.keyboard.is_some() => Value::Number(0.0),
                 name if event.keyboard.is_some() && keyboard_property(name) => {
@@ -3804,6 +3862,7 @@ impl Host for Bridge<'_> {
     }
 
     fn set(&mut self, object: u32, property: &str, value: Value) -> Result<(), String> {
+        if property=="returnValue"&&self.event_receiver(object) {return self.set_event_return_value(object,&value);}
         if property=="currentTime" && self.media_element_receiver(object) {
             let Value::Number(seconds)=value else {return Err("Media time requires numeric conversion.".into());};
             return self.set_media_time(node_index(object).unwrap(),seconds);
@@ -4036,6 +4095,11 @@ impl Host for Bridge<'_> {
     }
 
     fn call(&mut self, object: u32, method: &str, args: &[Value]) -> Result<Value, String> {
+        if let Some(property)=method.strip_prefix("\0Event.get.") {return self.get(object,property);}
+        if let Some(property)=method.strip_prefix("\0Event.set.") {
+            self.set(object,property,args.first().cloned().unwrap_or(Value::Undefined))?;
+            return Ok(Value::Undefined);
+        }
         if method=="pause" && self.media_element_receiver(object) {return self.pause_media(node_index(object).unwrap());}
         if method=="load" && self.media_element_receiver(object) {
             self.state.work(1)?;

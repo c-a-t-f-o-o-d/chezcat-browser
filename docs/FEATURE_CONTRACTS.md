@@ -252,6 +252,44 @@ controls and real decoded video/audio output. Authored fixtures
 and interface prerequisites establish finite progress; they do not establish
 YouTube or other public-service acceptance.
 
+Base Event prerequisite: new Event(type, init) uses a real owner-realm
+constructor and canonical prototype, branded getters/methods, phase constants
+and an own unforgeable isTrusted accessor. Required DOMString conversion and
+ordered EventInit bubbles/cancelable/composed flags use the existing runtime
+conversion paths. Own shadows and changes to Event.prototype's ordinary parent
+remain observable; dispatch uses stored type/flags rather than a shadowed type
+getter. Factory-created base
+events remain uninitialized until initEvent; initialization preserves composed
+and timeStamp while resetting the specified propagation/cancellation state.
+
+composedPath returns independent Arrays from the actual active light-DOM path,
+including through the canonical inherited method on genuine native events.
+Retained created events have an empty path after dispatch cleanup; native-input
+handles retain their existing callback-lifetime restriction. Native click and
+keyboard producers set composed;
+load/DOMContentLoaded do not. Constructor flags do not infer composition from
+the event name. Timestamps use the real owner context, coarsened to whole
+milliseconds. Saved constructors/getters/methods and fresh/cached
+access preserve owner checks. Failed per-instance setup withdraws only the new
+unpublished record; prior/reentrant effects survive and issued IDs are not reused.
+
+Original base Event tests cover descriptors/brands, ordered and reentrant
+conversion, shadow/slot separation, cancellation/path cleanup, owner realms and
+clocks, and bounded failure/recovery. The dispatch journey adds two trusted
+button activations with real construction, capture/target/bubble cancellation,
+independent path copies, initialized legacy control and child owner prototypes;
+visible results have paired document/layout/canvas pixels and zero current
+interpreter errors. That child check uses an owned loopback web origin; child
+contexts for local files remain unavailable.
+
+UIEvent, MouseEvent and CustomEvent constructors, their immediate specialized
+prototypes and native-input immediate prototypes remain unsupported. Changing
+native host prototypes, arbitrary native subclassing/newTarget and shadow-DOM
+retargeting are also unsupported. This finite base interface establishes no full
+Event-family, web-platform or public-service conformance.
+
+Semantic reference: [DOM Event, initialization and dispatch](https://dom.spec.whatwg.org/#interface-event).
+
 Legacy notification prerequisite: the main document's singular, case-insensitive
 createEvent('CustomEvent') creates a genuine existing-model event. Its readonly
 detail stores the actual any value, preserving object/function identity. The
@@ -265,9 +303,10 @@ host quotas and owner-realm machinery remain authoritative. Initializer methods
 retain their genuine Function realm and validate owner access on both fresh and
 cached reads. Direct detail strings use checked retained-byte accounting and
 fallible copies; object graphs retain the existing conservative exported-argument
-lifetime. This adds no constructor/prototype framework, child factory, activation
-grant or collector redesign. The existing opaque event-prototype policy and
-absence of a global CustomEvent constructor remain explicit.
+lifetime. Legacy CustomEvent adds no specialized constructor/prototype,
+child factory, activation grant or collector redesign. Its immediate prototype
+stays opaque while the genuine base Event ancestry and borrowed operations are
+available. A global CustomEvent constructor remains absent.
 
 Original Page tests cover defaults/brands, identity, readonly state, conversion
 effects and failures, dispatch/empty-type initialization, string/creation bounds,

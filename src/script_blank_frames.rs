@@ -8,6 +8,7 @@ const FRAME_STRIDE: u32 = 16;
 const MAX_BLANK_FRAMES: usize = 8;
 
 pub(super) struct BlankFrame {
+    clock_origin: Instant,
     owner: usize,
     connected: bool,
     last_activation: Option<Instant>,
@@ -50,6 +51,13 @@ fn document_node(index: usize, node: usize) -> u32 {
 }
 
 impl Bridge<'_> {
+    pub(super) fn event_timestamp(&self,owner:u32,now:Instant)->Result<f64,String> {
+        if owner==WINDOW {return Ok(self.state.clock_ms(now));}
+        let(index,offset)=frame_handle(owner).ok_or("Unknown Event owner Window.")?;
+        if offset!=0 {return Err("Event owner is not a Window.".into());}
+        let frame=self.state.blank_frames.get(index).ok_or("Event owner Window is unavailable.")?;
+        Ok(now.saturating_duration_since(frame.clock_origin).as_millis() as f64)
+    }
     pub(super) fn frame_node_interface(&self,handle:u32)->Option<&'static str> {
         let(index,offset)=frame_handle(handle)?;let frame=self.state.blank_frames.get(index)?;
         if offset==1 {return Some("Node");}
@@ -192,7 +200,7 @@ impl Bridge<'_> {
         Ok(owners.into_iter().map(|owner| {
             let mut document = crate::html::parse("<html><head></head><body></body></html>");
             document.scripting_enabled = self.doc.scripting_enabled;
-            BlankFrame { owner, connected: true, last_activation: None, document, origin: origin.clone(), serialized_origin: serialized_origin.clone(), base: base.clone(),
+            BlankFrame { clock_origin:Instant::now(),owner, connected: true, last_activation: None, document, origin: origin.clone(), serialized_origin: serialized_origin.clone(), base: base.clone(),
                 policy: self.state.dynamic.policy.clone() }
         }).collect())
     }

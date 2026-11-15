@@ -1,0 +1,77 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="script-src 'unsafe-inline'">
+<title>Original base Event waiting</title>
+<style>body{margin:20px;font-size:16px}h1{font-size:24px}button{margin:8px 0}p{max-width:720px}</style>
+</head><body><h1>Original base Event journey</h1>
+<div id="parent"><button id="emit" name="emit" type="button">Construct and deliver an original Event</button></div>
+<p id="result">Waiting for two real Event activations.</p>
+<p id="detail">The button checks genuine Event slots, cancellation and independent paths.</p>
+<script>
+var C=Event,P=C.prototype,button=document.getElementById('emit'),eventParent=document.getElementById('parent');
+var getType=Object.getOwnPropertyDescriptor(P,'type').get,getComposed=Object.getOwnPropertyDescriptor(P,'composed').get;
+var turns=0,constructed=0,canceled=0,legacy=0,children=0,nativeInputs=0,pathChecks=0,current=null,factoryCurrent=null,order='';
+if(typeof C!=='function'||C.name!=='Event'||C.length!==1||Object.getPrototypeOf(C)!==Function.prototype||Object.getPrototypeOf(P)!==Object.prototype)throw Error('Canonical Event interface');
+var constructorDescriptor=Object.getOwnPropertyDescriptor(C,'prototype');
+if(constructorDescriptor.value!==P||constructorDescriptor.writable||constructorDescriptor.enumerable||constructorDescriptor.configurable)throw Error('Canonical constructor descriptor');
+for(var field of ['type','target','currentTarget','bubbles','cancelable','composed','defaultPrevented']){
+ var descriptor=Object.getOwnPropertyDescriptor(P,field);
+ if(typeof descriptor.get!=='function'||descriptor.get.length!==0||descriptor.set!==undefined||!descriptor.enumerable||!descriptor.configurable)throw Error('Canonical Event getter');
+}
+var badBrands=0;try{getType.call({});}catch(error){if(error.name==='TypeError')badBrands++;}
+try{getType.call(Object.create(P));}catch(error){if(error.name==='TypeError')badBrands++;}
+if(badBrands!==2)throw Error('Event getter needs a genuine brand');
+var frame=document.createElement('iframe');frame.hidden=true;document.body.appendChild(frame);
+var childWindow=frame.contentWindow,ChildEvent=childWindow.Event,ChildPrototype=ChildEvent.prototype;
+if(ChildEvent===C||ChildPrototype===P||Object.getPrototypeOf(ChildEvent)!==childWindow.Function.prototype||Object.getPrototypeOf(ChildPrototype)!==childWindow.Object.prototype)throw Error('Independent child Event roots');
+var expectedPath=[button,eventParent,document.body,document.documentElement,document,window];
+function inspectPath(event){
+ var first=event.composedPath();
+ if(!Array.isArray(first)||first.length!==expectedPath.length)throw Error('Actual light DOM event path');
+ for(var i=0;i<expectedPath.length;i++)if(first[i]!==expectedPath[i])throw Error('Actual event path identity');
+ first[0]=window;if(event.composedPath()[0]!==button)throw Error('Path arrays are independent copies');
+ pathChecks++;
+}
+eventParent.addEventListener('base-route',function(event){
+ if(event!==current||event.target!==button||event.currentTarget!==eventParent||event.eventPhase!==1||event.defaultPrevented||event.isTrusted)throw Error('Actual capture slots');
+ inspectPath(event);event.preventDefault();if(event.defaultPrevented)throw Error('Passive listener canceled event');order+='c';
+},{capture:true,passive:true});
+button.addEventListener('base-route',function(event){
+ if(event!==current||event.type!=='visible-shadow'||getType.call(event)!=='base-route'||event.currentTarget!==button||event.eventPhase!==2||!event.composed||event.isTrusted)throw Error('Own shadow and native dispatch slots');
+ inspectPath(event);event.returnValue=false;if(!event.defaultPrevented||event.returnValue)throw Error('Real Event cancellation');
+ event.returnValue=true;if(event.returnValue)throw Error('Cancellation cannot be cleared');constructed++;order+='t';
+});
+eventParent.addEventListener('base-route',function(event){
+ if(event!==current||event.currentTarget!==eventParent||event.eventPhase!==3||!event.defaultPrevented)throw Error('Actual bubble slots');
+ inspectPath(event);order+='b';
+});
+button.addEventListener('factory-route',function(event){
+ if(event!==factoryCurrent||event.isTrusted||event.composed||event.target!==button||event.eventPhase!==2)throw Error('Initialized legacy Event delivery');
+ legacy++;event.preventDefault();
+});
+button.onclick=function(input){
+ if(!input.isTrusted||!input.composed||!getComposed.call(input)||getType.call(input)!=='click'||input.target!==button||input.currentTarget!==button||input.eventPhase!==2)throw Error('Actual trusted composed button input');
+ inspectPath(input);nativeInputs++;turns++;order='';
+ var event=new C('base-route',{bubbles:true,cancelable:true,composed:true});current=event;
+ if(Object.getPrototypeOf(event)!==P||event.constructor!==C||!(event instanceof C)||Object.prototype.toString.call(event)!=='[object Event]'||event.type!=='base-route'||event.isTrusted||!event.bubbles||!event.cancelable||!event.composed||event.target!==null||event.currentTarget!==null||event.eventPhase!==0||event.defaultPrevented||event.composedPath().length)throw Error('Actual initial Event slots');
+ var trust=Object.getOwnPropertyDescriptor(event,'isTrusted');
+ if(typeof trust.get!=='function'||trust.set!==undefined||!trust.enumerable||trust.configurable||Object.getOwnPropertyDescriptor(P,'isTrusted')!==undefined||Object.keys(event).join(',')!=='isTrusted'||trust.get.call(event)||!trust.get.call(input))throw Error('Genuine unforgeable trust getter');
+ Object.defineProperty(event,'type',{value:'visible-shadow',writable:true,configurable:true});
+ if(event.type!=='visible-shadow'||getType.call(event)!=='base-route')throw Error('Ordinary own shadow retains native type');
+ if(button.dispatchEvent(event)!==false||order!=='ctb'||event.target!==button||event.srcElement!==button||event.currentTarget!==null||event.eventPhase!==0||event.composedPath().length||!event.defaultPrevented)throw Error('Canceled dispatch result and cleanup');
+ canceled++;delete event.type;if(event.type!=='base-route')throw Error('Deleting shadow restores canonical getter');
+ inspectPath(input);
+ var factory=document.createEvent('Events');factoryCurrent=factory;
+ if(Object.getPrototypeOf(factory)!==P||factory.isTrusted||factory.composed)throw Error('Genuine uninitialized base factory');
+ var refused=false;try{button.dispatchEvent(factory);}catch(error){refused=error.name==='InvalidStateError';}
+ if(!refused)throw Error('Uninitialized factory event cannot dispatch');
+ factory.initEvent('factory-route',false,true);
+ if(button.dispatchEvent(factory)!==false||!factory.defaultPrevented||factory.currentTarget!==null||factory.eventPhase!==0||factory.composedPath().length)throw Error('Initialized factory cancellation and cleanup');
+ var child=new ChildEvent('child-'+turns,{composed:true});
+ if(Object.getPrototypeOf(child)!==ChildPrototype||!(child instanceof ChildEvent)||child instanceof C||child.constructor!==ChildEvent||getType.call(child)!=='child-'+turns||!getComposed.call(child)||child.isTrusted)throw Error('Genuine child owner Event prototype');
+ children++;
+ if(constructed!==turns||canceled!==turns||legacy!==turns||children!==turns||nativeInputs!==turns||pathChecks!==turns*5)throw Error('Exactly one dispatch result per real activation');
+ document.getElementById('result').textContent='Completed '+turns+' real Event activation(s): constructed and legacy events canceled; child realm verified.';
+ document.getElementById('detail').textContent='constructed='+constructed+' canceled='+canceled+' legacy='+legacy+' child='+children+' native='+nativeInputs+' path='+pathChecks+' brands='+badBrands;
+ document.title='Original Event activation '+turns+' passed';
+};
+</script></body></html>
