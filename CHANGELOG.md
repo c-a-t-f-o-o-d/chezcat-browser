@@ -2,63 +2,33 @@
 
 ## 0.80.0-alpha.1 (candidate)
 
-Finite genuine MouseEvent construction/prototypes now expose actual double
-coordinates, button masks, modifier flags and owner-checked interface references.
-Legacy initialization, readonly fields, ordinary overrides and failed-publication
-recovery retain real state. Synthetic Mouse dispatch/default activation and
-native pointer payloads remain explicitly unsupported.
+- Adopt prospective CSAPUL 1.1 with full offline native acceptance, explicit
+  personal/organization source and headless commands, strict external receipts,
+  same-text reuse and changed-terms checks. Decline and failed writes stop before
+  browsing; source builds check acceptance without creating it. External
+  substantive intake remains reports-only until its controls are verified.
+- Correct startup navigation bridge replacement and preserve the original
+  address/search, result/destination, one-Back and different-query input journey.
+- Support visible version-zero VP8 single-vector I/P interframes and dependency
+  seeking, plus constrained Matroska PCM16 synchronization. One authored video
+  supports real load/pause/seek/play promises and events, decoded-frame readiness,
+  source retirement and acknowledged PCM time alongside native controls.
+- Extend that finite authored profile to complete HTTP(S) IVF/Matroska transfers
+  selected by explicit MIME, with redirects, CORS/credentials, cookie rules, CSP,
+  TLS identity checks and cancellation. Partial content remains refused.
+- Paint one URL background layer on ordinary block/inline-block boxes with
+  stylesheet-relative ownership, cascade, repeat/position/size, bounded loading
+  and independent request/pixel/geometry checks.
+- Add genuine owner-realm Event/UIEvent/MouseEvent constructors, prototypes,
+  branded readonly fields and ordered dictionary conversions. Event/UIEvent
+  dispatch/cancellation, legacy initialization, path copies and owner clocks use
+  real stored state; native reads preserve their caller and foreign-owner denial.
 
-Genuine UIEvent construction and owner-realm prototypes now reuse the existing
-Event/UI slots, with readonly branded fields, exact interleaved dictionary
-conversion and legacy initialization. Real dispatch/cancellation, native keyboard
-ancestry and child owners are covered by original model and executable-input
-checks. KeyboardEvent/CustomEvent constructors and native immediate prototypes
-remain unsupported. Primitive native reads now preserve
-their actual caller, allowing a retained child's own Window/Document/Location
-fields while retaining foreign-owner denial and callback/exception restoration.
-
-Prospective CSAPUL 1.1 with full offline native first-run acceptance, explicit
-source/headless and organization acceptance, strict local receipts outside
-source/application/profile data, same-text reuse and renewed acceptance for new
-terms. Decline and failed receipt writes exit before browsing. Source builds check
-acceptance without silently creating it. External substantive intake remains
-reports-only until its signing/evaluation controls are verified.
-
-The single authored video supports finite IVF/VP8 and Matroska VP8/PCM16
-profiles, with genuine script pause(), currentTime seeking and play() promises
-alongside load() and native controls. Pending play outcomes are source-scoped
-and settle once, with genuine
-DOMException rejection reasons; playing precedes fulfillment reactions. Loading
-and seek work wait for actual decoded data before advancing playback time.
-
-The optimized-executable original App/input/offscreen journey verifies a trusted
-script play click, Promise/state/event order, measured clock advancement and
-independently derived decoded-frame pixels, then script pause with frozen time
-and pixels. Existing source identity, native controls, seek, EOF/replay, Stop and
-navigation checks remain. The finite authored Matroska profile adds source-bound
-PCM16 and acknowledged sample time. Unmarked foreign media, multiple players,
-streaming/ranges, MSE and broader HTMLMediaElement conformance remain unsupported.
-Routine offscreen checks and coordinated audio-device evidence remain separate;
-physical audibility, physical-desktop and live-service acceptance are not claimed.
-
-Supported authored media also uses bounded complete HTTP(S) GET transactions
-through the existing TLS, cookie, CSP and request-blocking paths. Require final
-200, one valid video/x-ivf or video/x-matroska MIME for its supported decoder
-profile and complete framing; reject unsolicited partial content. Existing
-source tokens cancel obsolete work. The adjustable media
-input allowance uses checked growth up to the 512 MiB HTTP/decompression ceiling;
-ordinary document/download/image caller limits remain unchanged. Original HTTP
-and authenticated TLS 1.3 executable journeys verify actual controls, time and
-independent pixels. Explicit authored crossorigin anonymous/use-credentials modes
-now apply genuine CORS checks to each tainted response and redirect, preserving
-Origin and credential history. Credential-eligible cookie effects precede CORS
-visibility checks; cross-site subresource writes preserve SameSite creation and
-overwrite/deletion rules. Real App tests verify foreign playback, credentials,
-refusals and independent pixels. Executable TLS negatives verify certificate
-issuer/identity rejection before media HTTP or player installation. Dynamic
-crossOrigin APIs, opaque cross-origin loading, streaming/ranges and broader media
-conformance remain unsupported.
-
+Mouse dispatch/default activation and native pointer payloads,
+KeyboardEvent/CustomEvent constructors, streaming/ranges, MSE, muted Matroska,
+multiple players and broader HTMLMediaElement support remain unsupported. Routine
+App/input/offscreen evidence and separate opt-in WinMM sample-clock checks do not
+claim physical audibility, physical-desktop or live-service playback acceptance.
 
 ## 0.79.0-alpha.2
 

@@ -6,6 +6,7 @@ physical desktop/device evidence and live-service outcomes are different scopes.
 
 | Area | Implemented and locally verified slice | Gaps / next acceptance | Main implementation and checks |
 | --- | --- | --- | --- |
+| License acceptance | Full offline native terms and explicit personal/organization acceptance; source/headless commands, strict minimal external receipts, same-text reuse and changed-terms/decline/write-failure refusal before browsing | Records a local choice, not verified identity or organizational authority; no account service is required | src/license_acceptance.rs, src/platform_license.rs, tools/accept_license.py, tools/check_license_acceptance.py; docs/LICENSE_ACCEPTANCE.md |
 | Navigation/search/history | HTTP(S)/files, query encoding, Google/Bing/DuckDuckGo/None setting, local result/destination/one-Back/second-query journeys; request-time bridge replacement with bounded native activation | Live behavior remains response/session-dependent | src/navigation.rs, src/search.rs, src/app_session_history.rs, src/script_navigation.rs; check_input_harness.py, check_address_search.py, check_navigation_harness.py |
 | HTTP/TLS/resources | Original transport, trust validation, redirects, decompression, workers, measured timings | No full protocol/browser security claim; media remains limited to complete transfers and explicit authored CORS modes | src/http.rs, src/tls.rs, src/x509.rs, src/loader.rs; native loopback/negative tests |
 | Privacy/storage/files | Memory-only cookies, scoped profiles/bookmarks, optional history, staged downloads and local roots | No site storage/service workers/persistent cookies; local files are not encrypted vaults | src/cookies.rs, src/profile.rs, src/history.rs, src/downloads.rs |
@@ -19,6 +20,16 @@ physical desktop/device evidence and live-service outcomes are different scopes.
 | Diagnostics | Source/activity/layout/pixels, inspector, measured network phases and finite local tooling | Reports can contain private URLs/paths/session data; titles/200/errors alone are not acceptance | src/diagnostics.rs, src/network_trace.rs; offline harness reports |
 | Platform/isolation | Windows x64, explicit FFI ownership, worker retirement/cancellation and watchdogs | No OS renderer sandbox; independent native/crypto/aggregate-memory assurance remains incomplete | src/platform.rs, src/audio_output.rs; native negative tests and PE checks |
 | Build/release | std-only production manifest, generated resources, pinned compiler and offline local gates | Each release requires an exact tagged build, complete payload, extracted-runtime checks and downloadable-asset verification | Build.cmd, tools/verify_offline.py, docs/RELEASING.md |
+
+## Evidence boundaries
+
+| Evidence type | What it establishes | What it does not establish |
+| --- | --- | --- |
+| Original model/unit tests | Specific conversions, brands, owners, queues, failure and retirement rules | Full standards conformance or visible application behavior |
+| Actual App/input/offscreen journeys | Real application input, script state/events, source/layout/canvas identity, decoded pixels and finite HTTP/TLS response checks | Physical desktop presentation, speaker output or public-service compatibility |
+| Hosted offline CI | The recorded commit's build, normal checks and local fixture journeys on its runner | A later commit, release payload, hardware output or live service |
+| Explicit opt-in WinMM checks | Device acknowledgements, PCM sample advancement, pause/seek/drain/replay and video alignment for the selected profile | Physical audibility, arbitrary devices or routine no-device CI |
+| Physical desktop / live service | Requires separate, explicit evidence for the actual session and outcome | Not inferred from source inspection, HTTP status, titles or offscreen pixels |
 
 The original authored-video App/input/offscreen journey checks a trusted script
 play click, synchronous state, one playing notification before fulfillment,
