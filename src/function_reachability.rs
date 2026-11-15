@@ -322,7 +322,7 @@ impl Runtime {
     }
 
     fn plain_array_storage(object: &Object) -> bool {
-        object.date.is_none() && object.url.is_none() && object.rect.is_none() && object.primitive.is_none()
+        object.date.is_none() && object.url.is_none() && object.rect.is_none() && object.dom_exception.is_none() && object.primitive.is_none()
             && object.promise.is_none() && object.arguments.is_none() && object.binary.is_none() && object.collection.is_none()
             && object.iterator.is_none() && object.text.is_none() && object.regexp.is_none() && object.error_name.is_none()
     }

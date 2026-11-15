@@ -66,6 +66,8 @@ mod collections;
 mod date;
 #[path = "rect_api.rs"]
 mod rect_api;
+#[path = "dom_exception.rs"]
+mod dom_exception;
 #[path = "expression_parser.rs"]
 mod expression_parser;
 #[path = "expression_evaluator.rs"]
@@ -2970,6 +2972,7 @@ enum Builtin {
     Date(date::Op),
     Url(url_api::Op),
     Rect(rect_api::Op),
+    DomException(dom_exception::Op),
     Eval,
     JsonParse,
     JsonStringify,
@@ -3072,6 +3075,7 @@ struct Object {
     date: Option<f64>,
     url: Option<url_api::Data>,
     rect: Option<rect_api::Data>,
+    dom_exception: Option<dom_exception::Data>,
     primitive: Option<primitive_wrappers::Data>,
     promise: Option<promises::Data>,
     arguments: Option<arguments::Data>,
@@ -3198,6 +3202,7 @@ pub struct Runtime {
     date_prototype: Option<usize>,
     url_roots: url_api::Roots,
     rect_roots: rect_api::Roots,
+    dom_exception_roots: dom_exception::Roots,
     string_prototype: Option<usize>,
     number_prototype: Option<usize>,
     boolean_prototype: Option<usize>,
@@ -3339,6 +3344,7 @@ impl Runtime {
             date_prototype: None,
             url_roots: url_api::Roots::default(),
             rect_roots: rect_api::Roots::default(),
+            dom_exception_roots: dom_exception::Roots::default(),
             string_prototype: None,
             number_prototype: None,
             boolean_prototype: None,
@@ -3391,7 +3397,7 @@ impl Runtime {
             job_failed_fatally: false,
             diagnostics: runtime_diagnostics::Data::default(),
             failed_window_realms: HashSet::new(),
-            deferred_intrinsics: (if defer_families { 7 } else { 0 }) | 8,
+            deferred_intrinsics: (if defer_families { 7 } else { 0 }) | 8 | 16,
             failed_intrinsics: 0,
             array_to_string_intrinsic: None,
             deferred_native_methods: Vec::new(),
@@ -3453,6 +3459,8 @@ impl Runtime {
         else { self.reserve_deferred_global_orders(intrinsic_realms::TEXT_GLOBALS)?; }
         if self.deferred_intrinsics & 8 == 0 { self.initialize_rect_api()?; }
         else { self.reserve_deferred_global_orders(intrinsic_realms::RECT_GLOBALS)?; }
+        if self.deferred_intrinsics & 16 == 0 { self.initialize_dom_exception()?; }
+        else { self.reserve_deferred_global_orders(intrinsic_realms::DOM_EXCEPTION_GLOBALS)?; }
         for (name, value) in [
             ("undefined", Value::Undefined),
             ("NaN", Value::Number(f64::NAN)),
@@ -5312,6 +5320,7 @@ impl Runtime {
             date: None,
             url: None,
             rect: None,
+            dom_exception: None,
             primitive: None,
             promise: None,
             arguments: None,
@@ -7494,6 +7503,9 @@ impl Runtime {
             Some(Function::Native(Builtin::Rect(rect_api::Op::Constructor(mutable)))) => {
                 self.rect_construct(*mutable, args, host)
             }
+            Some(Function::Native(Builtin::DomException(dom_exception::Op::Constructor))) => {
+                self.dom_exception_construct(args,host)
+            }
             Some(Function::Native(Builtin::Promise(promises::Op::Constructor))) => {
                 self.construct_promise(args, host)
             }
@@ -8395,6 +8407,9 @@ impl Runtime {
             Some(Function::Native(Builtin::Rect(operation))) => {
                 return self.rect_builtin(*operation, args, this, host);
             }
+            Some(Function::Native(Builtin::DomException(operation))) => {
+                return self.dom_exception_builtin(*operation,this);
+            }
             Some(Function::Native(Builtin::Promise(operation))) => {
                 return self.promise_builtin(*operation, args, this, host);
             }
@@ -8958,6 +8973,7 @@ impl Runtime {
             | Builtin::Date(_)
             | Builtin::Url(_)
             | Builtin::Rect(_)
+            | Builtin::DomException(_)
             | Builtin::Binary(_)
             | Builtin::Collection(_)
             | Builtin::Iterator(_)

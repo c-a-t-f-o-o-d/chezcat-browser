@@ -11,6 +11,7 @@ pub(super) const BINARY_GLOBALS: &[&str] = &["ArrayBuffer", "DataView", "Int8Arr
 pub(super) const URL_GLOBALS: &[&str] = &["URL", "URLSearchParams"];
 pub(super) const TEXT_GLOBALS: &[&str] = &["TextEncoder", "TextDecoder"];
 pub(super) const RECT_GLOBALS: &[&str] = &["DOMRectReadOnly", "DOMRect"];
+pub(super) const DOM_EXCEPTION_GLOBALS: &[&str] = &["DOMException"];
 
 macro_rules! roots {
     ($($field:ident: $kind:ty),* $(,)?) => {
@@ -40,6 +41,7 @@ roots! {
     date_prototype: Option<usize>,
     url_roots: url_api::Roots,
     rect_roots: rect_api::Roots,
+    dom_exception_roots: dom_exception::Roots,
     string_prototype: Option<usize>,
     number_prototype: Option<usize>,
     boolean_prototype: Option<usize>,
@@ -103,6 +105,7 @@ impl Runtime {
                 roots.text_roots.reachability_edges(add);
                 roots.url_roots.reachability_edges(add);
                 roots.rect_roots.reachability_edges(add);
+                roots.dom_exception_roots.reachability_edges(add);
             }};
         }
         emit!(self);
@@ -124,6 +127,7 @@ impl Runtime {
             else if URL_GLOBALS.contains(&name) { (2, URL_GLOBALS) }
             else if TEXT_GLOBALS.contains(&name) { (4, TEXT_GLOBALS) }
              else if RECT_GLOBALS.contains(&name) { (8, RECT_GLOBALS) }
+            else if DOM_EXCEPTION_GLOBALS.contains(&name) { (16, DOM_EXCEPTION_GLOBALS) }
             else { return Ok(()); };
         if self.failed_intrinsics & bit != 0 {
             return Err(Fault::new("Deferred intrinsic family is unavailable after an earlier bounded initialization failure."));
@@ -137,6 +141,7 @@ impl Runtime {
                 2 => self.initialize_url_api()?,
                 4 => { self.ensure_global_intrinsics("Uint8Array")?; self.initialize_text_encoding()?; }
                 8 => self.initialize_rect_api()?,
+                16 => self.initialize_dom_exception()?,
                 _ => unreachable!(),
             }
             for &name in names {
@@ -234,7 +239,7 @@ impl Runtime {
             global_environment, roots: Roots::default(), promise_roots: (None, None),
         });
         let result = self.with_intrinsic_realm(Some(id), |runtime| {
-            runtime.deferred_intrinsics = (if deferred { 7 } else { 0 }) | 8;
+            runtime.deferred_intrinsics = (if deferred { 7 } else { 0 }) | 8 | 16;
             runtime.initialize_realm_intrinsics()
         });
         if let Err(error) = result {
@@ -655,7 +660,7 @@ var same=/y/;if(NativeRegExp(same)!==same)throw 'intrinsic identity';
         runtime.execute("var define=Object.defineProperty,marker=0,sentinel={};var descriptor={get value(){marker=1;throw sentinel;}};", &mut NoHost).unwrap();
         while runtime.functions.len() < MAX_FUNCTIONS { runtime.native_function(Builtin::IsNaN, "fixture").unwrap(); }
         runtime.execute("try{define(window,'URL',descriptor);throw 'missing';}catch(e){if(e!==sentinel||marker!==1)throw 'conversion order';}", &mut NoHost).unwrap();
-        assert_eq!(runtime.deferred_intrinsics, 15);
+        assert_eq!(runtime.deferred_intrinsics, 31);
 
         let mut runtime = Runtime::for_capacity_test();
         runtime.bind_browser_global(77).unwrap();
@@ -667,14 +672,14 @@ var same=/y/;if(NativeRegExp(same)!==same)throw 'intrinsic identity';
     fn deferred_main_direct_binary_calls_initialize_the_receiving_realm() {
         let mut runtime = Runtime::for_capacity_test();
         runtime.execute("if(!Number.isFinite(1))throw 'number';", &mut NoHost).unwrap();
-        assert_eq!(runtime.deferred_intrinsics, 15);
+        assert_eq!(runtime.deferred_intrinsics, 31);
         let realm = runtime.allocate_realm_with_deferred_families(true).unwrap();
         let foreign = runtime.with_intrinsic_realm(Some(realm), |runtime| {
             runtime.construct_binary(binary_data::Constructor::Buffer, &[Value::Number(4.0)], &mut NoHost)
         }).unwrap();
-        assert_eq!(runtime.deferred_intrinsics, 15);
+        assert_eq!(runtime.deferred_intrinsics, 31);
         let view = runtime.construct_binary(binary_data::Constructor::View, &[foreign.clone()], &mut NoHost).unwrap();
-        assert_eq!(runtime.deferred_intrinsics, 14);
+        assert_eq!(runtime.deferred_intrinsics, 30);
         runtime.define_global("view", view).unwrap();
         runtime.execute("if(Object.getPrototypeOf(view)!==DataView.prototype||view.byteLength!==4)throw 'view realm';", &mut NoHost).unwrap();
 
@@ -698,7 +703,7 @@ var same=/y/;if(NativeRegExp(same)!==same)throw 'intrinsic identity';
         for encoder in [true, false] {
             let mut runtime = Runtime::for_capacity_test();
             let codec = runtime.construct_text_encoding(encoder, &[], &mut NoHost).unwrap();
-            assert_eq!(runtime.deferred_intrinsics, 10);
+            assert_eq!(runtime.deferred_intrinsics, 26);
             assert_eq!(runtime.call_depth, 0);
             runtime.define_global("codec", codec).unwrap();
             let source = if encoder {

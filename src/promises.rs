@@ -9,6 +9,7 @@ use super::{
     Value, MAX_CALL_DEPTH,
 };
 use std::collections::VecDeque;
+use std::sync::Arc;
 
 const MAX_DIAGNOSTICS: usize = 32;
 
@@ -52,6 +53,20 @@ enum State {
     Pending,
     Fulfilled(Value),
     Rejected(Value),
+}
+
+/// A capability for one real Runtime-owned Promise. Neither JavaScript values
+/// nor another Runtime can manufacture its native owner identity.
+#[derive(Clone)]
+pub(crate) struct NativePromise {
+    object: usize,
+    realm: Option<usize>,
+    owner: Arc<()>,
+}
+
+pub(crate) enum NativePromiseOutcome {
+    Fulfill,
+    RejectDom { name: &'static str, message: String },
 }
 
 #[derive(Clone)]
@@ -189,6 +204,9 @@ struct AllocationTrace {
 pub(super) struct Arena {
     pub(super) prototype: Option<usize>,
     pub(super) constructor: Option<usize>,
+    // Intrinsic realm switches replace only the roots above, preserving this
+    // owner for the whole Runtime and every native capability it has issued.
+    native_owner: Arc<()>,
     count: usize,
     reactions: usize,
     pairs: Vec<ResolvingPair>,
@@ -404,6 +422,63 @@ impl Runtime {
         });
         self.promises.count += 1;
         Ok(object)
+    }
+
+    /// Export a genuine pending Promise with the active realm's intrinsic
+    /// prototype, independently of the replaceable global Promise binding.
+    pub(super) fn new_native_promise(&mut self) -> Result<(NativePromise, Value), Fault> {
+        let object = self.new_promise()?;
+        let value = Value::Object(object);
+        self.pin_exported_value(&value);
+        Ok((NativePromise {
+            object,
+            realm: self.active_realm,
+            owner: self.promises.native_owner.clone(),
+        }, value))
+    }
+
+    pub(crate) fn native_promise_pending(&self, token: &NativePromise) -> Result<bool, String> {
+        if !Arc::ptr_eq(&token.owner, &self.promises.native_owner) {
+            return Err("Native Promise belongs to another Runtime.".into());
+        }
+        let data = self.objects.get(token.object).and_then(|object| object.promise.as_ref())
+            .ok_or_else(|| "Invalid native Promise identity.".to_string())?;
+        Ok(matches!(data.state, State::Pending))
+    }
+
+    /// Settle once in the Promise's creation realm. Reactions remain ordinary
+    /// queued microtasks; this entry never invokes JavaScript or checkpoints.
+    pub(crate) fn settle_native_promise(
+        &mut self, token: &NativePromise, outcome: NativePromiseOutcome,
+    ) -> Result<bool, String> {
+        if !self.native_promise_pending(token)? { return Ok(false); }
+        if self.job_failed_fatally {
+            return Err("Native Promise settlement requires a new job after a fatal failure.".into());
+        }
+        let result = self.with_intrinsic_realm(token.realm, |runtime| {
+            let (value, reject) = match outcome {
+                NativePromiseOutcome::Fulfill => (Value::Undefined, false),
+                NativePromiseOutcome::RejectDom { name, message } =>
+                    (runtime.native_dom_exception(name, &message)?, true),
+            };
+            runtime.promise_settle(token.object, value, reject)?;
+            Ok(true)
+        });
+        if result.as_ref().is_err_and(|error| error.exception.is_none()) {
+            self.job_failed_fatally = true;
+            self.cancel_microtasks();
+        }
+        result.map_err(|error| self.display_fault(error))
+    }
+
+    /// Promise-returning native operations reject ordinary exceptions. A typed
+    /// resource or capability failure must continue through the fatal path.
+    pub(super) fn rejected_native_operation(&mut self, fault: Fault) -> Result<Value, Fault> {
+        if fault.exception.is_none() { return Err(fault); }
+        let reason = self.promise_exception(fault)?;
+        let (token, value) = self.new_native_promise()?;
+        self.promise_settle(token.object, reason, true)?;
+        Ok(value)
     }
 
     fn resolving_pair(&mut self, promise: usize) -> Result<(Value, Value), Fault> {
@@ -1639,6 +1714,183 @@ Promise.resolve(4).then(function(){return 5;});queueMicrotask(function(){jobHits
         );
         assert_eq!(runtime.call_depth, 0);
         assert_eq!(runtime.eval_depth, 0);
+    }
+
+    #[test]
+    fn native_promise_real_identity_fifo_and_exactly_once_settlement() {
+        let mut runtime = Runtime::for_test();
+        let (token, value) = runtime.new_native_promise().unwrap();
+        assert!(runtime.native_promise_pending(&token).unwrap());
+        assert!(runtime.exported_object_roots.contains(&token.object));
+        runtime.define_global("nativePlay", value).unwrap();
+        runtime.execute(r#"
+var log='';
+if(!(nativePlay instanceof Promise)||Object.prototype.toString.call(nativePlay)!=='[object Promise]')throw 'identity';
+nativePlay.then(function(value){if(value!==undefined)throw 'value';log+='first;';queueMicrotask(function(){log+='nested;';});});
+nativePlay.then(function(){log+='second;';});
+queueMicrotask(function(){log+='queued;';});
+"#, &mut NoHost).unwrap();
+        assert!(runtime.settle_native_promise(&token, NativePromiseOutcome::Fulfill).unwrap());
+        assert!(!runtime.native_promise_pending(&token).unwrap());
+        let queued = runtime.promises.jobs.len();
+        assert!(!runtime.settle_native_promise(&token, NativePromiseOutcome::RejectDom {
+            name: "AbortError", message: "too late".into(),
+        }).unwrap());
+        assert_eq!(runtime.promises.jobs.len(), queued);
+        assert_eq!(runtime.execute("log;", &mut NoHost).unwrap().to_text(), "");
+        assert!(runtime.microtask_checkpoint(&mut NoHost).unwrap().is_empty());
+        assert_eq!(runtime.execute("log;", &mut NoHost).unwrap().to_text(), "queued;first;second;nested;");
+        assert!(!runtime.has_microtasks());
+    }
+
+    #[test]
+    fn native_promise_refuses_other_runtime_and_invalid_identity_without_mutation() {
+        let mut owner = Runtime::for_test();
+        let mut other = Runtime::for_test();
+        let (token, _) = owner.new_native_promise().unwrap();
+        let before = (other.objects.len(), other.value_bytes, other.job_usage(), other.promises.jobs.len());
+        assert!(other.native_promise_pending(&token).unwrap_err().contains("another Runtime"));
+        assert!(other.settle_native_promise(&token, NativePromiseOutcome::Fulfill)
+            .unwrap_err().contains("another Runtime"));
+        assert_eq!((other.objects.len(), other.value_bytes, other.job_usage(), other.promises.jobs.len()), before);
+        assert!(!other.invocation_failed_fatally());
+        assert!(owner.native_promise_pending(&token).unwrap());
+        let invalid = NativePromise { object: usize::MAX, ..token.clone() };
+        assert!(owner.native_promise_pending(&invalid).unwrap_err().contains("Invalid"));
+        let ordinary = owner.new_object(None).unwrap();
+        let invalid = NativePromise { object: ordinary, ..token.clone() };
+        assert!(owner.settle_native_promise(&invalid, NativePromiseOutcome::Fulfill).unwrap_err().contains("Invalid"));
+        assert!(owner.settle_native_promise(&token, NativePromiseOutcome::Fulfill).unwrap());
+        assert!(!owner.settle_native_promise(&token.clone(), NativePromiseOutcome::Fulfill).unwrap());
+    }
+
+    #[test]
+    fn native_promise_keeps_creation_realm_intrinsics_after_global_replacement() {
+        let mut runtime = Runtime::for_capacity_test();
+        let main_prototype = runtime.promises.prototype.unwrap();
+        let realm = runtime.allocate_intrinsic_realm().unwrap();
+        let (token, value, prototype, dom_constructor) = runtime.with_intrinsic_realm(Some(realm), |runtime| {
+            let dom_constructor = runtime.execute("var OriginalPromise=Promise,OriginalDom=DOMException;Promise=17;DOMException=19;OriginalDom;", &mut NoHost)
+                .map_err(Fault::new)?;
+            let (token, value) = runtime.new_native_promise()?;
+            Ok((token, value, runtime.promises.prototype.unwrap(), dom_constructor))
+        }).unwrap();
+        assert_eq!(runtime.active_realm, None);
+        assert_ne!(prototype, main_prototype);
+        assert_eq!(token.realm, Some(realm));
+        assert!(Arc::ptr_eq(&token.owner, &runtime.promises.native_owner));
+        assert!(matches!(runtime.objects[token.object].prototype, Some(Ordinary::Object(id)) if id==prototype));
+        runtime.define_global("nativePlay", value).unwrap();
+        runtime.define_global("ChildPromisePrototype", Value::Object(prototype)).unwrap();
+        runtime.define_global("ChildDom", dom_constructor).unwrap();
+        runtime.execute(r#"
+var checked=false;
+if(Object.getPrototypeOf(nativePlay)!==ChildPromisePrototype)throw 'creation realm';
+nativePlay.catch(function(reason){checked=Object.getPrototypeOf(reason)===ChildDom.prototype&&reason instanceof ChildDom&&!(reason instanceof DOMException)&&reason.name==='AbortError'&&reason.message==='native pause'&&reason.code===20;});
+"#, &mut NoHost).unwrap();
+        assert!(runtime.settle_native_promise(&token, NativePromiseOutcome::RejectDom {
+            name: "AbortError", message: "native pause".into(),
+        }).unwrap());
+        assert_eq!(runtime.active_realm, None);
+        assert!(runtime.microtask_checkpoint(&mut NoHost).unwrap().is_empty());
+        assert_eq!(runtime.execute("checked;", &mut NoHost).unwrap().to_text(), "true");
+    }
+
+    #[test]
+    fn native_promise_operation_rejects_only_ordinary_exceptions() {
+        let mut runtime = Runtime::for_test();
+        let before = (runtime.promises.count, runtime.objects.len(), runtime.value_bytes);
+        let fatal = match runtime.rejected_native_operation(Fault::new("native capability unavailable")) {
+            Err(fault) => fault, Ok(_) => panic!("fatal became a Promise"),
+        };
+        assert!(fatal.exception.is_none());
+        assert_eq!((runtime.promises.count, runtime.objects.len(), runtime.value_bytes), before);
+        let value = runtime.rejected_native_operation(Fault::exception("TypeError", "wrong native receiver")).unwrap();
+        runtime.define_global("failedPlay", value).unwrap();
+        runtime.execute("var rejected=false;failedPlay.catch(function(error){rejected=error instanceof TypeError&&error.message==='wrong native receiver';});", &mut NoHost).unwrap();
+        assert!(runtime.microtask_checkpoint(&mut NoHost).unwrap().is_empty());
+        assert_eq!(runtime.execute("rejected;", &mut NoHost).unwrap().to_text(), "true");
+    }
+
+    #[test]
+    fn native_promise_small_identity_limit_refuses_without_partial_export_and_recovers() {
+        let mut runtime = Runtime::for_test();
+        let normal = runtime.limits.capacity.promises;
+        runtime.limits.capacity.promises = runtime.promises.count;
+        let before = (runtime.objects.len(), runtime.value_bytes, runtime.exported_object_roots.len());
+        let error = match runtime.new_native_promise() { Err(error) => error, Ok(_) => panic!("limit accepted") };
+        assert!(error.exception.is_none() && error.message.contains("Promise identity limit"));
+        assert_eq!((runtime.objects.len(), runtime.value_bytes, runtime.exported_object_roots.len()), before);
+        runtime.limits.capacity.promises = normal;
+        runtime.begin_job();
+        let (token, _) = runtime.new_native_promise().unwrap();
+        assert!(runtime.settle_native_promise(&token, NativePromiseOutcome::Fulfill).unwrap());
+        runtime.steps = 0;
+        assert!(!runtime.settle_native_promise(&token, NativePromiseOutcome::Fulfill).unwrap());
+    }
+
+    #[test]
+    fn native_promise_settlement_work_failure_cancels_observers_and_recovers_in_new_job() {
+        let mut runtime = Runtime::for_test();
+        let (token, value) = runtime.new_native_promise().unwrap();
+        runtime.define_global("nativePlay", value).unwrap();
+        runtime.execute("var log='';nativePlay.then(function(){log+='old;';});queueMicrotask(function(){log+='stale;';});", &mut NoHost).unwrap();
+        runtime.steps = 0;
+        assert!(runtime.settle_native_promise(&token, NativePromiseOutcome::Fulfill).unwrap_err().contains("limit"));
+        assert!(runtime.invocation_failed_fatally());
+        assert!(runtime.native_promise_pending(&token).unwrap());
+        assert!(!runtime.has_microtasks());
+        runtime.begin_job();
+        runtime.execute("nativePlay.then(function(){log+='fresh;';});", &mut NoHost).unwrap();
+        assert!(runtime.settle_native_promise(&token, NativePromiseOutcome::Fulfill).unwrap());
+        assert!(runtime.microtask_checkpoint(&mut NoHost).unwrap().is_empty());
+        assert_eq!(runtime.execute("log;", &mut NoHost).unwrap().to_text(), "fresh;");
+    }
+
+    #[test]
+    fn native_promise_reaction_queue_failure_preserves_settled_state_without_replay() {
+        let mut runtime = Runtime::for_test();
+        let (token, value) = runtime.new_native_promise().unwrap();
+        runtime.define_global("nativePlay", value).unwrap();
+        runtime.execute("var log='';nativePlay.then(function(){log+='old1;';});nativePlay.then(function(){log+='old2;';});", &mut NoHost).unwrap();
+        let normal = runtime.limits.capacity.promises;
+        runtime.limits.capacity.promises = 1;
+        assert!(runtime.settle_native_promise(&token, NativePromiseOutcome::Fulfill)
+            .unwrap_err().contains("Microtask queue limit"));
+        assert!(runtime.invocation_failed_fatally());
+        assert!(!runtime.native_promise_pending(&token).unwrap());
+        assert!(!runtime.has_microtasks());
+        runtime.limits.capacity.promises = normal;
+        runtime.begin_job();
+        assert!(!runtime.settle_native_promise(&token, NativePromiseOutcome::RejectDom {
+            name: "AbortError", message: "must not replace fulfillment".into(),
+        }).unwrap());
+        runtime.execute("nativePlay.then(function(){log+='fresh;';});", &mut NoHost).unwrap();
+        assert!(runtime.microtask_checkpoint(&mut NoHost).unwrap().is_empty());
+        assert_eq!(runtime.execute("log;", &mut NoHost).unwrap().to_text(), "fresh;");
+    }
+
+    #[test]
+    fn native_promise_prior_capability_fatal_refuses_settlement_without_carryover_jobs() {
+        let mut runtime = Runtime::for_test();
+        let (token, value) = runtime.new_native_promise().unwrap();
+        runtime.define_global("nativePlay", value).unwrap();
+        runtime.define_global("opaque", Value::Host(7)).unwrap();
+        runtime.execute("var log='';nativePlay.then(function(){log+='old;';});", &mut NoHost).unwrap();
+        assert!(runtime.execute("opaque.missing;", &mut NoHost).unwrap_err().contains("No native property reads"));
+        assert!(runtime.steps > 0 && runtime.invocation_failed_fatally());
+        let before = (runtime.objects.len(), runtime.value_bytes, runtime.job_usage());
+        assert!(runtime.settle_native_promise(&token, NativePromiseOutcome::RejectDom {
+            name: "AbortError", message: "must not materialize".into(),
+        }).unwrap_err().contains("requires a new job"));
+        assert_eq!((runtime.objects.len(), runtime.value_bytes, runtime.job_usage()), before);
+        assert!(runtime.native_promise_pending(&token).unwrap());
+        assert!(!runtime.has_microtasks());
+        runtime.begin_job();
+        runtime.execute("nativePlay.then(function(){log+='new;';});", &mut NoHost).unwrap();
+        assert!(runtime.settle_native_promise(&token, NativePromiseOutcome::Fulfill).unwrap());
+        assert!(runtime.microtask_checkpoint(&mut NoHost).unwrap().is_empty());
+        assert_eq!(runtime.execute("log;", &mut NoHost).unwrap().to_text(), "new;");
     }
 
     #[test]

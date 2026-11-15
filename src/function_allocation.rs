@@ -197,7 +197,7 @@ function replace(value){
                 assert_eq!(result.unwrap().to_number(), 900.0);
                 assert_eq!(scripts, 900);
                 assert_eq!(runtime.functions.len(), baseline + 900);
-                assert_eq!(runtime.deferred_intrinsics, 15);
+                assert_eq!(runtime.deferred_intrinsics, 31);
             } else {
                 let error = result.unwrap_err();
                 assert!(error.contains("Function limit reached (1024)"), "{error}");
