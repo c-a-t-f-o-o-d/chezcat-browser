@@ -34,7 +34,7 @@ Local media uses original container/codec/sample code and real decoded frames or
 samples. Source retirement tokens, checked generations and worker cancellation
 prevent stale work from publishing. Native presentation/audio APIs do not replace
 decoding. The authored element currently supports one connected parser video,
-IVF/VP8 video, native controls, src replacement and genuine JavaScript
+finite IVF/VP8 or Matroska VP8/PCM16, native controls, src replacement and genuine JavaScript
 load/play/pause/currentTime operations. Sources retain separate in-root local-file
 authority or an immutable document-owned HTTP(S) transaction context. Network
 media uses complete bounded GET responses and the existing decoder/player,
@@ -47,8 +47,10 @@ VP8 profile adds visible version-zero single-vector interframes with immutable
 YUV references and transactional entropy/filter/segment updates. Every requested
 frame replays from its preceding keyframe under shared work and packet limits;
 failed or canceled work cannot publish reference state or stale pixels. Matroska
-video follows the existing acknowledged PCM sample clock. Authored element audio,
-MSE and complete HTMLMediaElement behavior remain future work.
+video, including the supported authored Matroska profile, follows the existing
+acknowledged PCM sample clock. Authored audio is limited to that finite PCM16
+profile; streaming, MSE, multiple players and complete HTMLMediaElement behavior
+remain unsupported.
 
 Work, retained data, collection sizes and decoder allocations have explicit
 bounds, with generous adjustable policies where implemented. Cancellation is

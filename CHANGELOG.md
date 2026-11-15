@@ -12,8 +12,8 @@ Genuine UIEvent construction and owner-realm prototypes now reuse the existing
 Event/UI slots, with readonly branded fields, exact interleaved dictionary
 conversion and legacy initialization. Real dispatch/cancellation, native keyboard
 ancestry and child owners are covered by original model and executable-input
-checks. MouseEvent/KeyboardEvent/CustomEvent constructors and native immediate
-prototypes remain outside this finite slice. Primitive native reads now preserve
+checks. KeyboardEvent/CustomEvent constructors and native immediate prototypes
+remain unsupported. Primitive native reads now preserve
 their actual caller, allowing a retained child's own Window/Document/Location
 fields while retaining foreign-owner denial and callback/exception restoration.
 
@@ -24,9 +24,10 @@ terms. Decline and failed receipt writes exit before browsing. Source builds che
 acceptance without silently creating it. External substantive intake remains
 reports-only until its signing/evaluation controls are verified.
 
-The single authored local IVF/VP8-intra video now supports genuine script
-pause(), currentTime seeking and play() promises alongside load() and native
-controls. Pending play outcomes are source-scoped and settle once, with genuine
+The single authored video supports finite IVF/VP8 and Matroska VP8/PCM16
+profiles, with genuine script pause(), currentTime seeking and play() promises
+alongside load() and native controls. Pending play outcomes are source-scoped
+and settle once, with genuine
 DOMException rejection reasons; playing precedes fulfillment reactions. Loading
 and seek work wait for actual decoded data before advancing playback time.
 
@@ -34,14 +35,17 @@ The optimized-executable original App/input/offscreen journey verifies a trusted
 script play click, Promise/state/event order, measured clock advancement and
 independently derived decoded-frame pixels, then script pause with frozen time
 and pixels. Existing source identity, native controls, seek, EOF/replay, Stop and
-navigation checks remain. Authored element audio, unmarked foreign media, multiple players
-and broader HTMLMediaElement conformance remain unsupported; this adds no
-live-site, physical-desktop or audio-device acceptance.
+navigation checks remain. The finite authored Matroska profile adds source-bound
+PCM16 and acknowledged sample time. Unmarked foreign media, multiple players,
+streaming/ranges, MSE and broader HTMLMediaElement conformance remain unsupported.
+Routine offscreen checks and coordinated audio-device evidence remain separate;
+physical audibility, physical-desktop and live-service acceptance are not claimed.
 
-Authored IVF/VP8-intra video also supports bounded complete same-origin HTTP(S)
-GET transactions through the existing TLS, cookie, CSP and request-blocking paths.
-Require final 200, one valid video/x-ivf MIME and complete framing; reject unsolicited
-partial content. Existing source tokens cancel obsolete work. The adjustable media
+Supported authored media also uses bounded complete HTTP(S) GET transactions
+through the existing TLS, cookie, CSP and request-blocking paths. Require final
+200, one valid video/x-ivf or video/x-matroska MIME for its supported decoder
+profile and complete framing; reject unsolicited partial content. Existing
+source tokens cancel obsolete work. The adjustable media
 input allowance uses checked growth up to the 512 MiB HTTP/decompression ceiling;
 ordinary document/download/image caller limits remain unchanged. Original HTTP
 and authenticated TLS 1.3 executable journeys verify actual controls, time and
