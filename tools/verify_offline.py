@@ -75,15 +75,16 @@ def main():
     folder.mkdir(parents=True); runs=[]
     pointer=ROOT/'results/verification/latest-offline.json'
     relative=str((folder/'verification.json').relative_to(ROOT))
-    capture_tests.write_json(folder/'verification.json',{'passed':False,'state':'running','runs':[]})
+    initial_commit,initial_dirty=git_state()
+    capture_tests.write_json(folder/'verification.json',{'passed':False,'state':'running','runs':[],'source_commit':initial_commit})
     capture_tests.write_json(pointer,{'report':relative,'build_info':str((folder/'build-info.json').relative_to(ROOT))})
-    before=capture_tests.source_identity(ROOT);initial_commit,initial_dirty=git_state()
+    before=capture_tests.source_identity(ROOT)
     overrides=[name for name in ['RUST_TEST_THREADS','RUST_MIN_STACK','RUSTUP_TOOLCHAIN','RUSTFLAGS','CARGO_ENCODED_RUSTFLAGS','RUSTC','RUSTC_WRAPPER','RUSTC_WORKSPACE_WRAPPER','CARGO_TARGET_DIR','CARGO_BUILD_TARGET'] if os.environ.get(name)]
     if initial_dirty is True or overrides:
-        capture_tests.write_json(folder/'verification.json',{'passed':False,'state':'refused','reason':'Clean normal verification requires no tracked edits or listed build/test overrides.','override_names':overrides,'dirty':initial_dirty})
+        capture_tests.write_json(folder/'verification.json',{'passed':False,'source_commit':initial_commit,'state':'refused','reason':'Clean normal verification requires no tracked edits or listed build/test overrides.','override_names':overrides,'dirty':initial_dirty})
         print('Refused dirty/overridden verification; latest pointer invalidated.',flush=True);return 1
     if initial_dirty is False and committed_source_identity(initial_commit)!=before:
-        capture_tests.write_json(folder/'verification.json',{'passed':False,'state':'refused','reason':'Compilation inputs differ from committed bytes, including hidden or untracked edits.'})
+        capture_tests.write_json(folder/'verification.json',{'passed':False,'source_commit':initial_commit,'state':'refused','reason':'Compilation inputs differ from committed bytes, including hidden or untracked edits.'})
         print('Refused source/commit mismatch; latest pointer invalidated.',flush=True);return 1
     def run(label,argv,timeout=600):
         row=capture_tests.execute(argv,folder/(label+'.log'),ROOT,timeout)
@@ -99,7 +100,7 @@ def main():
        ('pe',[sys.executable,'tools/check_windows_pe.py','--output',str(folder/'pe.json')])]:
         row=run(label,argv,900);runs.append(row)
         if row['state']!='completed' or row['exit_code']!=0:
-            capture_tests.write_json(folder/'verification.json',{'passed':False,'runs':runs,'source_before':before});return 1
+            capture_tests.write_json(folder/'verification.json',{'passed':False,'source_commit':initial_commit,'runs':runs,'source_before':before});return 1
     expected_exe=capture_tests.sha256(ROOT/'ChezCat.exe')
     def journey(item):
         index,args=item;return run('journey-'+str(index),[sys.executable,'tools/'+args[0],*args[1:]],180)
