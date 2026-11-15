@@ -28,23 +28,13 @@ jobs:
         # This owner-only workflow records the maintainer's instructed execution;
         # it never stands in for external contributor assent or a signature.
         run: python tools/accept_license.py --accept-license 34003a38eeb1db77472c307e23b5a5540c7625c50d9f0ea0dc7bacf6e5b9b749 --license-scope personal
+      - name: Public summary safety controls
+        run: python tools/check_public_ci_summary.py
       - name: Normal tests, release, PE and local journeys
         run: python tools/verify_offline.py
       - name: Prepare public-safe verification summary
         if: always()
-        shell: python
-        run: |
-          import json
-          from pathlib import Path
-          summary = {'passed': False, 'scope': 'Normal offline verification only; no live/device/security certification claim.'}
-          pointer = Path('results/verification/latest-offline.json')
-          if pointer.is_file():
-              location = json.loads(pointer.read_text())
-              report = json.loads(Path(location['report']).read_text())
-              summary.update(passed=report.get('passed', False), source_commit=report.get('source_commit'), executable_sha256=report.get('executable_sha256'), passing_journeys=sum(bool(x.get('valid')) for x in report.get('journeys', [])))
-          output = Path('results/verification/public-summary.json')
-          output.parent.mkdir(parents=True, exist_ok=True)
-          output.write_text(json.dumps(summary, indent=2) + '\n', encoding='utf-8')
+        run: python tools/public_ci_summary.py --print
       - name: Save public-safe summary
         if: always()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6

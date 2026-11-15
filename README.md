@@ -4,9 +4,12 @@ An experimental Windows x64 browser with an original Rust engine: networking,
 JavaScript, DOM, layout, rendering and selected media decoding. It does not embed
 Chromium, Gecko, WebKit or an external JavaScript/codec runtime.
 
-The development candidate is **0.80.0-alpha.1**, preserving the completed animation milestone. This is an experimental browser, without a
-security certification. Web-platform support is partial. The renderer and interpreter run
-in the browser process with worker threads, without an OS renderer sandbox.
+The development candidate is **0.80.0-alpha.1**, whose milestone is explicit
+offline CSAPUL 1.1 acceptance. It also includes the completed finite navigation,
+media, background-image and event slices listed below. This is an experimental
+browser without a security certification. Web-platform support is partial. The
+renderer and interpreter run in the browser process with worker threads, without
+an OS renderer sandbox.
 
 The production Cargo manifest has no third-party dependencies. Rust's standard
 library, Windows APIs, data, assets and development tools have their own roles
@@ -14,6 +17,9 @@ and licensing obligations; see [third-party notices](THIRD_PARTY_NOTICES.md).
 
 ## Scope
 
+- Full offline native license viewing and explicit acceptance, with source and
+  headless commands, personal/organization scopes and minimal external receipts.
+  Decline or invalid acceptance blocks browsing and source builds.
 - HTTP(S), original TLS/certificate handling, memory-only session cookies,
   redirects and supported CSP/resource policies.
 - Address-bar search with Google by default, Bing, DuckDuckGo and None; explicit
@@ -32,8 +38,9 @@ and licensing obligations; see [third-party notices](THIRD_PARTY_NOTICES.md).
   tied to decoded output. Supported Matroska adds source-bound PCM and
   acknowledged sample time. Complete HTTP(S) transfers admit explicit IVF or
   Matroska MIME and preserve authored crossorigin/credential checks. Routine
-  local and controlled HTTP/TLS A/V checks keep audio output closed; device
-  playback requires separate coordinated verification. Unmarked foreign sources,
+  local and controlled HTTP/TLS A/V checks keep audio output closed. Separate
+  opt-in WinMM checks verify acknowledged PCM advancement and video alignment,
+  without claiming physical audibility. Unmarked foreign sources,
   dynamic crossOrigin controls, muted Matroska, streaming and multiple players
   remain unsupported.
 - Replaceable main-window animation operations that schedule and cancel real
