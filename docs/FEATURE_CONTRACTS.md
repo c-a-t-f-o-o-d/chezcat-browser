@@ -87,7 +87,7 @@ source retirement before start cancels it, while same-document load inside the
 started task preserves its tail. Ordinary errors continue; fatal jobs stop the
 unfinished tail. Admission failure leaves state unchanged. Existing native
 controls, standalone playback and source-replacement coverage remain required.
-Full F3 additionally requires the seeking/play-promise acceptance above.
+The seek and play sub-contracts below extend this same bound local player.
 
 Seek sub-contract: finite double conversion, signed premetadata defaults and
 job-stable official positions feed the existing real decoder. Source-bound
@@ -100,7 +100,27 @@ supersession, pause interleavings, producer failure and stale source/generation.
 Control admission reserves its entry before projection; later asynchronous
 notification-allocation failure enters a reported stopped media error. A small
 capacity test proves that failure and real reload/seek recovery. No future-event
-storage guarantee or script-play promise support is implied.
+storage guarantee is implied.
+
+Play sub-contract: a genuine receiver-checked play() returns a real realm-owned
+Promise and updates logical paused state synchronously. Supported policy-denial
+and interruption paths reject with genuine DOMException reasons. Source-scoped
+pending promises settle once; the playing notification precedes fulfillment
+reactions. Pause, load/source replacement, Stop and navigation preserve the
+ownership and cancellation boundaries. Loading and pending seeks do not advance
+the real clock before requested decoded data is ready. Trusted App input supplies
+activation; synthetic events do not grant unrestricted playback.
+
+Original Runtime/Page and worker/App tests cover pending outcomes, readiness,
+source retirement and failure paths. The optimized-executable authored-video
+App/input/offscreen journey passes native controls, script pause/seek and a
+trusted script play click: genuine Promise identity, synchronous state, exactly
+one playing-before-fulfillment sequence, measured time advancement and pixels
+against independent clip timestamps/RGBA. A subsequent script pause confirms
+settled frozen time and frame pixels; native seek, EOF/replay, Stop and navigation
+remain covered. This finite local video-only evidence does not establish broader
+HTMLMediaElement conformance, audio, multiple players, network/MSE playback or
+live-service compatibility.
 
 ## F4 — network media transaction
 

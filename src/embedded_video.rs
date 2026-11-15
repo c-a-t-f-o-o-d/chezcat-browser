@@ -155,6 +155,8 @@ pub struct Snapshot {
     pub playing: bool,
     pub paused: bool,
     pub load_pending: bool,
+    pub frame_ready: bool,
+    pub error_code: Option<u8>,
     pub ended: bool,
     pub seeking: bool,
     pub ready: u8,

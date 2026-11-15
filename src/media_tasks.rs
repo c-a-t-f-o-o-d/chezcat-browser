@@ -16,9 +16,13 @@ pub(crate) struct Scope {
 pub(crate) enum Control {
     Pause { issued: Instant, position: Duration },
     Seek { seconds: f64 },
+    Play { issued: Instant, notify_queued: bool },
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum Task { Single(&'static str), Pause }
+pub(crate) enum Task {
+    Single(&'static str), Pause,
+    Playing(u64), ResolvePlay(u64), PauseReject(u64), RejectPlay(u64),
+}
 
 struct Entry {
     id: u64,
@@ -48,6 +52,38 @@ impl Queue {
         self.next = id;
         Ok(id)
     }
+    pub(crate) fn reserve_entries(&mut self,count:usize)->Result<(),String> {
+        self.prune_empty_front();
+        let total=self.entries.len().checked_add(count).ok_or("Media queue count exhausted.")?;
+        if total>self.limit {return Err("Media task allowance reached.".into());}
+        self.next.checked_add(u64::try_from(count).map_err(|_|"Media queue count is not representable.")?)
+            .ok_or("Media control identity exhausted.")?;
+        self.entries.try_reserve(count).map_err(|_|"Could not reserve media operation tasks.".into())
+    }
+
+    /// Reserve a fixed operation's separate tasks together before its visible
+    /// state changes. Their positions still represent actual enqueue order.
+    pub(crate) fn enqueue_many(&mut self,scope:Scope,entries:&[(Option<Control>,Option<Task>)])->Result<(),String> {
+        if entries.is_empty() || entries.iter().any(|(control,task)|control.is_none()&&task.is_none()) {
+            return Err("Media batch requires nonempty controls or event tasks.".into());
+        }
+        if scope.retired.load(Ordering::Relaxed) {return Err("Media source is retired.".into());}
+        self.prune_empty_front();
+        let total=self.entries.len().checked_add(entries.len()).ok_or("Media queue count exhausted.")?;
+        if total>self.limit {return Err("Media task allowance reached.".into());}
+        let count=u64::try_from(entries.len()).map_err(|_|"Media queue count is not representable.")?;
+        let next=self.next.checked_add(count).ok_or("Media control identity exhausted.")?;
+        self.entries.try_reserve(entries.len()).map_err(|_|"Could not retain the media operation tasks.")?;
+        for &(control,task) in entries {
+            // The whole sequence was checked before any publication.
+            self.next=self.next.checked_add(1).expect("admitted media identity range");
+            self.entries.push_back(Entry {id:self.next,scope:scope.clone(),control,
+                control_applied:control.is_none(),task});
+        }
+        debug_assert_eq!(self.next,next);
+        Ok(())
+    }
+
     // Each queued entry is visited at most once by the physical-control cursor.
     // Applied taskless entries behind a live task remain charged until that task
     // leaves the front; no repeated middle removal can turn seeks quadratic.

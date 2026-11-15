@@ -14,11 +14,18 @@ physical desktop/device evidence and live-service outcomes are different scopes.
 | Events | Genuine standalone EventTarget, synchronous Event/UIEvent dispatch, Text/Attr paths and native inputs | Legacy CustomEvent factory, constructible event families, broader activation missing | src/script_dispatch.rs, src/script_created_events.rs; dispatch journey |
 | CSS/layout/geometry | Loaded styles, token selectors, measured supported geometry/scrollHeight, clipping and software paint | Broader layout/font policy; unsupported reverse/viewport overflow measurements remain explicit | src/css.rs, src/layout.rs, src/script_geometry.rs; stylesheet/render journeys |
 | Fonts/images | Original selected font/image decoders and resource/presentation paths | Format subsets and cross-origin font loading need specific contracts | src/fonts.rs, src/image.rs and format modules; original pixel/negative fixtures |
-| Media | Local IVF/VP8 intra, PCM, constrained Matroska A/V; one authored video with src/load lifecycle, genuine script pause and real currentTime seeking | Script play promises, element audio/network and YouTube playback missing | src/media.rs, src/audio.rs, src/matroska.rs, src/script_media.rs; four media journeys plus source replacement |
+| Media | Local IVF/VP8 intra, PCM, constrained Matroska A/V; one authored video with src/load lifecycle, genuine script pause, real currentTime seeking and play promises tied to decoded-frame readiness | Authored element audio, network sources, multiple players, MSE and YouTube playback missing | src/media.rs, src/audio.rs, src/matroska.rs, src/script_media.rs; local media/source-replacement journeys and extended check_authored_video_harness.py |
 | Browser UI | Native settings, address input, bookmarks/history/download controls and local input paths | Full accessibility, richer UI and native locked-session presentation unverified | src/app*.rs, src/ui.rs, src/platform.rs; App/input journeys |
 | Diagnostics | Source/activity/layout/pixels, inspector, measured network phases and finite local tooling | Reports can contain private URLs/paths/session data; titles/200/errors alone are not acceptance | src/diagnostics.rs, src/network_trace.rs; offline harness reports |
 | Platform/isolation | Windows x64, explicit FFI ownership, worker retirement/cancellation and watchdogs | No OS renderer sandbox; independent native/crypto/aggregate-memory assurance remains incomplete | src/platform.rs, src/audio_output.rs; native negative tests and PE checks |
 | Build/release | std-only production manifest, generated resources, pinned compiler and offline local gates | Each release requires an exact tagged build, complete payload, extracted-runtime checks and downloadable-asset verification | Build.cmd, tools/verify_offline.py, docs/RELEASING.md |
+
+The original authored-video App/input/offscreen journey checks a trusted script
+play click, synchronous state, one playing notification before fulfillment,
+measured clock advancement and decoded pixels against independent clip frames.
+It also checks script pause/seek, frozen time/pixels, native controls, EOF/replay,
+Stop and navigation. This is finite local evidence, without network playback,
+audio-device or physical-desktop acceptance.
 
 Google Search, Images and Maps are not fully supported. YouTube page compatibility
 is limited, and playback is unsupported.

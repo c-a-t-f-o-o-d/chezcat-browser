@@ -69,6 +69,8 @@ use script_stylesheets::StylesheetState;
 mod script_images;
 #[path = "script_media.rs"]
 mod script_media;
+#[path = "script_media_play.rs"]
+mod script_media_play;
 pub(crate) use script_media::event_name as media_event_name;
 pub use script_images::DynamicImage;
 pub(crate) use script_images::MAX_IMAGE_REQUESTS;
@@ -340,6 +342,9 @@ struct State {
     navigation_timing:Option<crate::network_trace::DocumentTiming>,
     embedded_video:Option<crate::embedded_video::Snapshot>,
     media_changes:script_media::Changes,
+    media_play:script_media_play::State,
+    media_play_notify:bool,
+    media_play_fault:Option<String>,
     pending_keyboard: Option<KeyboardInput>,
     next_timer: u32,
     timer_bytes: usize,
@@ -413,6 +418,9 @@ impl State {
             navigation_timing:None,
             embedded_video:None,
             media_changes:script_media::Changes::default(),
+            media_play:script_media_play::State::default(),
+            media_play_notify:false,
+            media_play_fault:None,
             pending_keyboard: None,
             next_timer: 0,
             timer_bytes: 0,
@@ -829,7 +837,7 @@ impl Page {
         if let Some(t)=timing {self.state.clock_origin=t.origin();}
         self.state.navigation_timing=timing;
     }
-    pub fn set_embedded_video(&mut self,snapshot:Option<crate::embedded_video::Snapshot>){self.state.embedded_video=snapshot;}
+    pub fn set_embedded_video(&mut self,snapshot:Option<crate::embedded_video::Snapshot>){self.observe_media_snapshot(snapshot);}
 
     pub fn set_geometry(&mut self, geometry: crate::script_geometry::Geometry) {
         self.state.geometry = Some(geometry);
@@ -1194,7 +1202,7 @@ impl Page {
                 "onkeydown",
                 "onkeyup",
                 "onerror","onloadstart","onabort","onemptied","ondurationchange","onloadedmetadata","onloadeddata",
-                "oncanplay","oncanplaythrough","onplay","onplaying","onpause","onseeking","onseeked","ontimeupdate","onended",
+                "oncanplay","oncanplaythrough","onplay","onplaying","onwaiting","onpause","onseeking","onseeked","ontimeupdate","onended",
             ] {
                 if !matches!(name,"onclick"|"oninput"|"onchange"|"onsubmit"|"onreset"|"onload"|"onkeydown"|"onkeyup")
                     && !self.state.embedded_video.as_ref().is_some_and(|video|video.node==node) {continue;}
@@ -2502,7 +2510,7 @@ impl Host for Bridge<'_> {
     }
 
     fn method_length(&self, object:u32, method:&str) -> Option<usize> {
-        if matches!(method,"load"|"pause") && self.media_element_receiver(object) {return Some(0);}
+        if matches!(method,"load"|"pause"|"play") && self.media_element_receiver(object) {return Some(0);}
         if method=="dispatchEvent"&&self.dispatch_receiver(object){return Some(1);}
         if object==DOCUMENT && matches!(method,"createAttributeNS"|"createElementNS") {return Some(2);}
         if object==DOCUMENT && method=="createAttribute" || self.attr_element_receiver(object)&&matches!(method,"setAttributeNode"|"setAttributeNodeNS") {return Some(1);}
@@ -2802,7 +2810,7 @@ impl Host for Bridge<'_> {
     }
 
     fn method(&self, object: u32, property: &str) -> Option<&'static str> {
-        if self.media_element_receiver(object) {match property {"load"=>return Some("load"),"pause"=>return Some("pause"),_=>{}}}
+        if self.media_element_receiver(object) {match property {"load"=>return Some("load"),"pause"=>return Some("pause"),"play"=>return Some("play"),_=>{}}}
         if matches!(property,"addEventListener"|"removeEventListener"|"dispatchEvent") && self.form_named_control(object,property) {return None;}
         if self.node_event_method(object,property) {return None;}
         if property=="dispatchEvent"&&self.dispatch_receiver(object)&&!self.form_named_control(object,property){return Some("dispatchEvent");}
@@ -2861,7 +2869,7 @@ impl Host for Bridge<'_> {
     }
 
     fn accepts_receiver(&self, object: u32, method: &str, receiver: u32) -> bool {
-        if matches!(method,"load"|"pause") && self.media_element_receiver(object) {return self.media_element_receiver(receiver);}
+        if matches!(method,"load"|"pause"|"play") && self.media_element_receiver(object) {return self.media_element_receiver(receiver);}
         if matches!(method,"dispatchEvent"|"addEventListener"|"removeEventListener") {
             return (self.event_target_interface(object)||self.dispatch_receiver(object)) && self.dispatch_receiver(receiver);
         }
@@ -3733,6 +3741,33 @@ impl Host for Bridge<'_> {
             _ => Err(format!("Element property {property:?} is not supported.")),
         }
     }
+
+    fn promise_returning_operation(&self,object:u32,method:&str)->bool {
+        method=="play"&&self.media_element_receiver(object)
+    }
+    fn validate_promise_operation(&self,object:u32,method:&str)->Result<(),crate::javascript::NativePromiseFailure> {
+        use crate::javascript::NativePromiseFailure as Failure;
+        if method!="play"||!self.media_element_receiver(object) {return Err(Failure::Fatal("Media Promise operation is unavailable.".into()));}
+        if !self.state.enabled||!self.doc.scripting_enabled {return Err(Failure::Dom("InvalidStateError","Scripting is disabled for this document."));}
+        if !self.state.has_transient_activation(Instant::now()) {return Err(Failure::Dom("NotAllowedError","Playback requires trusted input in this media element's Window."));}
+        let snapshot=self.state.embedded_video.as_ref().unwrap();
+        if snapshot.error_code==Some(4) {return Err(Failure::Dom("NotSupportedError","The selected media source is not supported."));}
+        if snapshot.error_code==Some(1) {return Err(Failure::Fatal("The media controller is stopped after a resource failure.".into()));}
+        Ok(())
+    }
+    fn call_promise_operation(&mut self,object:u32,method:&str,promise:crate::javascript::NativePromise)->Result<(),crate::javascript::NativePromiseFailure> {
+        if method!="play" {return Err(crate::javascript::NativePromiseFailure::Fatal("Unknown media Promise operation.".into()));}
+        self.play_media(node_index(object).ok_or_else(||crate::javascript::NativePromiseFailure::Fatal("Invalid media element.".into()))?,promise)
+    }
+    fn peek_native_promise_effect(&self)->Option<(crate::javascript::NativePromise,Option<(&'static str,&'static str)>)> {
+        let effect=self.state.media_play.peek_effect()?;
+        let reason=effect.rejection.map(|reason|match reason {
+            script_media_play::Rejection::Abort=>("AbortError","The play request was interrupted."),
+            script_media_play::Rejection::NotSupported=>("NotSupportedError","The selected media source is not supported."),
+        });
+        Some((effect.token,reason))
+    }
+    fn finish_native_promise_effect(&mut self) {self.state.media_play.commit_effect();}
 
     fn native_operation_caller(&mut self, window: Option<u32>) {
         self.state.navigation_incumbent = window;

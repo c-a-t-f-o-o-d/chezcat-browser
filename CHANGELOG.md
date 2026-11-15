@@ -9,6 +9,20 @@ terms. Decline and failed receipt writes exit before browsing. Source builds che
 acceptance without silently creating it. External substantive intake remains
 reports-only until its signing/evaluation controls are verified.
 
+The single authored local IVF/VP8-intra video now supports genuine script
+pause(), currentTime seeking and play() promises alongside load() and native
+controls. Pending play outcomes are source-scoped and settle once, with genuine
+DOMException rejection reasons; playing precedes fulfillment reactions. Loading
+and seek work wait for actual decoded data before advancing playback time.
+
+The optimized-executable original App/input/offscreen journey verifies a trusted
+script play click, Promise/state/event order, measured clock advancement and
+independently derived decoded-frame pixels, then script pause with frozen time
+and pixels. Existing source identity, native controls, seek, EOF/replay, Stop and
+navigation checks remain. Authored element audio, network media, multiple players
+and broader HTMLMediaElement conformance remain unsupported; this adds no
+live-site, physical-desktop or audio-device acceptance.
+
 
 ## 0.79.0-alpha.2
 
@@ -43,8 +57,8 @@ Earlier valid release grants remain governed by their original terms.
 ## 0.78
 
 Real JavaScript load() reuses source retirement/stable selection and actual local
-video decoding without rewriting raw src/Attr identity. Script play/pause/seek and
-network playback remain incomplete.
+video decoding without rewriting raw src/Attr identity. At that checkpoint,
+script play/pause/seek and network playback remained incomplete.
 
 ## 0.77
 

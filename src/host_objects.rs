@@ -219,7 +219,11 @@ impl Runtime {
             if let Some(value) = self.host_method_values.get(&(handle, method)).cloned() {
                 return self.copy_value(&value);
             }
-            let value = self.host_method(handle, method).map_err(Fault::new)?;
+            let value = if host.promise_returning_operation(handle,method) {
+                let owner=host.native_access_owner(handle).ok_or_else(||Fault::new("Promise operation owner is unavailable."))?;
+                let realm=self.ensure_window_realm(owner,host)?;
+                self.with_intrinsic_realm(realm,|runtime|runtime.host_method(handle,method).map_err(Fault::new))?
+            } else {self.host_method(handle, method).map_err(Fault::new)?};
             if let Some(length) = host.method_length(handle,method) {
                 let Value::Function(id) = value else { unreachable!() };
                 self.store_property(self.function_properties[id],"length".into(),Value::Number(length as f64),Some((false,false,true)))?;
@@ -297,6 +301,9 @@ impl Runtime {
         host.native_operation_caller(self.native_access_caller
             .unwrap_or_else(|| self.browser_global.map(|(window, _)| window)));
         let result=host.set(handle,&name,value).map_err(Fault::new);
+        if self.drain_native_promise_effects(host)?!=0 {
+            self.defer_host_microtask_after_effects(ticket)?;
+        }
         self.finish_host_microtask(host,ticket)?;
         result
     }

@@ -50,6 +50,7 @@ pub(crate) fn event_name(name: &str) -> bool {
             | "canplaythrough"
             | "play"
             | "playing"
+            | "waiting"
             | "pause"
             | "seeking"
             | "seeked"
@@ -89,6 +90,8 @@ mod tests {
             playing: false,
             paused: true,
             load_pending: false,
+            frame_ready: true,
+            error_code: None,
             ended: false,
             seeking: false,
             ready: 4,
@@ -246,7 +249,78 @@ impl Page {
     }
     pub(crate) fn cancel_media_pause(&mut self) {
         if let Some(snapshot)=self.state.embedded_video.as_ref() {
+            let scope=crate::media_tasks::Scope {node:snapshot.node,retired:snapshot.retired.clone()};
+            self.state.media_play.reset_source(&scope);
             if let Ok(mut tasks)=snapshot.tasks.lock() {tasks.cancel_source(&snapshot.retired);}
+        }
+    }
+    pub(crate) fn has_media_promise_effects(&self)->bool {self.state.media_play.has_effects()}
+    pub(crate) fn pending_media_play_count(&self)->usize {self.state.media_play.pending_count()}
+    #[cfg(test)]
+    pub(crate) fn has_media_play_promises_for_test(&self)->bool {self.state.media_play.has_pending()}
+    #[cfg(test)]
+    pub(crate) fn expire_media_activation_for_test(&mut self) {
+        self.state.last_activation=Some(Instant::now()-TRANSIENT_ACTIVATION);
+    }
+    pub(crate) fn take_media_play_fault(&mut self)->Option<String> {self.state.media_play_fault.take()}
+    pub(crate) fn native_media_pause_enabled(&self)->bool {self.state.enabled}
+    pub(crate) fn request_native_media_pause(&mut self,doc:&mut Document,forms:&mut Forms)->Result<(),String> {
+        self.begin_job();
+        let node=self.state.embedded_video.as_ref().ok_or("Media binding is unavailable.")?.node;
+        Bridge {doc,forms,state:&mut self.state}.pause_media(node).map(|_|())
+    }
+    pub(super) fn observe_media_snapshot(&mut self,snapshot:Option<crate::embedded_video::Snapshot>) {
+        let old_paused=self.state.embedded_video.as_ref().is_none_or(|old|old.paused);
+        if let Some(old)=self.state.embedded_video.as_ref().filter(|old|snapshot.as_ref()
+            .is_none_or(|new|new.node!=old.node||!Arc::ptr_eq(&old.retired,&new.retired))) {
+            self.state.media_play.reset_source(&crate::media_tasks::Scope {node:old.node,retired:old.retired.clone()});
+            self.state.media_play_notify=false;
+        }
+        self.state.embedded_video=snapshot;
+        let Some(snapshot)=self.state.embedded_video.as_ref() else {return;};
+        let scope=crate::media_tasks::Scope {node:snapshot.node,retired:snapshot.retired.clone()};
+        if scope.retired.load(Ordering::Relaxed)||self.state.media_play.pending_for_source(&scope)==0 {return;}
+        use script_media_play::{BatchKind,Rejection};
+        let candidate=if snapshot.error_code==Some(4) {
+            Some((BatchKind::Reject(Rejection::NotSupported),None))
+        } else if snapshot.error_code==Some(1) {
+            self.state.media_play.reset_source(&scope);self.state.media_play_notify=false;return;
+        } else if snapshot.error_code==Some(3)&&snapshot.paused&&!old_paused {
+            // Existing decoder failure explicitly pauses this UA's player. Its
+            // internal pause aborts pending requests separately from error(code3).
+            Some((BatchKind::Reject(Rejection::Abort),Some(crate::media_tasks::Control::Pause {
+                issued:snapshot.observed,position:snapshot.position})))
+        } else if snapshot.playing&&!snapshot.paused&&!snapshot.seeking&&snapshot.frame_ready&&snapshot.ready>=3 {
+            Some((if self.state.media_play_notify {BatchKind::Playing}else{BatchKind::Resolve},None))
+        } else {None};
+        if let Some((kind,control))=candidate {
+            let result=self.state.media_play.capture_pending(&scope,kind,control,&snapshot.tasks,self.state.limits.host.media_tasks);
+            match result {
+                Ok(_)=>self.state.media_play_notify=false,
+                Err(error)=>{
+                    if matches!(kind,BatchKind::Reject(Rejection::NotSupported)) {
+                        self.state.media_play.reject_pending_now(&scope,Rejection::NotSupported);
+                    } else {self.state.media_play.reset_source(&scope);}
+                    self.state.media_play_notify=false;
+                    self.state.error("Media play readiness",&error);
+                    self.state.media_play_fault=Some(error);
+                }
+            }
+        }
+    }
+    pub(crate) fn run_media_promise_cleanup(&mut self,doc:&mut Document,forms:&mut Forms)->Outcome {
+        if !self.state.enabled || !doc.scripting_enabled || !self.state.media_play.has_effects() {return Outcome::default();}
+        self.begin_job();
+        let before=self.state.errors;
+        self.finish_media_promise_effects(doc,forms);
+        Outcome {prevented:false,layout_changed:std::mem::take(&mut self.state.changed),errors:self.state.errors.saturating_sub(before)}
+    }
+    fn finish_media_promise_effects(&mut self,doc:&mut Document,forms:&mut Forms) {
+        if self.runtime.invocation_failed_fatally() {return;}
+        let result=self.runtime.process_native_promise_effects(&mut Bridge {doc,forms,state:&mut self.state});
+        match result {
+            Ok(_)=>{self.microtask_checkpoint(doc,forms);},
+            Err(error)=>self.state.error("Native media Promise settlement",&error),
         }
     }
     pub fn take_media_selection(&mut self) -> Option<crate::embedded_video::Selection> {
@@ -258,6 +332,7 @@ impl Page {
     pub fn cancel_media_selection(&mut self) {
         if self.has_media_selection() {
             if let Some(s) = &mut self.state.embedded_video {
+                self.state.media_play.reset_source(&crate::media_tasks::Scope {node:s.node,retired:s.retired.clone()});
                 s.retired.store(true, Ordering::Relaxed);
                 s.network = 1;
             }
@@ -266,38 +341,36 @@ impl Page {
         self.state.media_changes.ready = None;
         self.state.media_changes.prepared = None;
     }
-    pub(crate) fn dispatch_media_task(&mut self, doc:&mut Document, forms:&mut Forms, node:usize, task:MediaTask) -> Outcome {
-        let event=match task {MediaTask::Single(event)=>event,MediaTask::Pause=>"timeupdate"};
-        if !self.state.enabled
-            || !doc.scripting_enabled
-            || !event_name(event)
-            || !self
-                .state
-                .embedded_video
-                .as_ref()
-                .is_some_and(|s| s.node == node)
-            || !doc.nodes.get(node).is_some_and(|n| {
-                n.namespace == crate::html::Namespace::Html
-                    && matches!(&n.kind,NodeKind::Element {tag,..} if tag=="video")
-            })
-        {
+    pub(crate) fn dispatch_media_task(&mut self,doc:&mut Document,forms:&mut Forms,node:usize,task:MediaTask)->Outcome {
+        let (event,batch,pause)=match task {
+            MediaTask::Single(event)=>(Some(event),None,false),
+            MediaTask::Pause=>(Some("timeupdate"),None,true),
+            MediaTask::Playing(id)=>(Some("playing"),Some(id),false),
+            MediaTask::ResolvePlay(id)|MediaTask::RejectPlay(id)=>(None,Some(id),false),
+            MediaTask::PauseReject(id)=>(Some("timeupdate"),Some(id),true),
+        };
+        if !self.state.enabled || !doc.scripting_enabled || event.is_some_and(|event|!event_name(event))
+            || !self.state.embedded_video.as_ref().is_some_and(|snapshot|snapshot.node==node)
+            || !doc.nodes.get(node).is_some_and(|node|node.namespace==crate::html::Namespace::Html
+                && matches!(&node.kind,NodeKind::Element {tag,..} if tag=="video")) {
             return Outcome::default();
         }
+        let scope=crate::media_tasks::Scope {node,retired:self.state.embedded_video.as_ref().unwrap().retired.clone()};
+        if batch.is_some_and(|id|!self.state.media_play.start_batch(id,&scope)) {return Outcome::default();}
         self.begin_job();
-        let before = self.state.errors;
-        self.dispatch_to(doc, forms, node_handle(node), event, false, false);
-        // Source selection may reset this same element during timeupdate or its
-        // checkpoint. A started task owns its tail; no App work runs in between.
-        if matches!(task,MediaTask::Pause) && self.state.enabled && doc.scripting_enabled
-            && !self.runtime.invocation_failed_fatally() {
-            self.dispatch_to(doc, forms, node_handle(node), "pause", false, false);
+        let before=self.state.errors;
+        if let Some(event)=event {self.dispatch_to(doc,forms,node_handle(node),event,false,false);}
+        // A started task owns its tail across same-element source changes.
+        // A typed fatal aborts further author callbacks, not the captured native
+        // Promise outcome; that cleanup remains queued for a fresh job.
+        if pause && self.state.enabled && doc.scripting_enabled && !self.runtime.invocation_failed_fatally() {
+            self.dispatch_to(doc,forms,node_handle(node),"pause",false,false);
         }
-        Outcome {
-            prevented: false,
-            layout_changed: std::mem::take(&mut self.state.changed),
-            errors: self.state.errors.saturating_sub(before),
-        }
+        if let Some(id)=batch {self.state.media_play.finish_batch(id);}
+        self.finish_media_promise_effects(doc,forms);
+        Outcome {prevented:false,layout_changed:std::mem::take(&mut self.state.changed),errors:self.state.errors.saturating_sub(before)}
     }
+
 }
 impl Bridge<'_> {
     pub(super) fn prepares_media_selection(
@@ -338,7 +411,7 @@ impl Bridge<'_> {
         }
         (match member {
             "load" => true,
-            "pause" => self.state.embedded_video.as_ref().is_some_and(|s|s.network==0),
+            "pause" | "play" => self.state.embedded_video.as_ref().is_some_and(|s|s.network==0),
             "setAttribute" => {
                 matches!(args.first(),Some(Value::String(name)) if name.eq_ignore_ascii_case("src"))
             }
@@ -368,7 +441,10 @@ impl Bridge<'_> {
         if !self.prepares_media_selection(object, member, args, setter) {
             return Ok(None);
         }
-        self.state.work(1)?;
+        self.state.work(self.state.media_play.retained_count().saturating_mul(2).saturating_add(1))?;
+        if let Some(snapshot)=self.state.embedded_video.as_ref() {
+            self.state.media_play.prepare_source_reset(&crate::media_tasks::Scope {node:snapshot.node,retired:snapshot.retired.clone()})?;
+        }
         let ticket = self
             .state
             .media_changes
@@ -420,6 +496,8 @@ impl Bridge<'_> {
             emptied: snapshot.network != 0,
             timeupdate: snapshot.position() != Duration::ZERO,
         };
+        self.state.media_play.reset_source(&crate::media_tasks::Scope {node,retired:snapshot.retired.clone()});
+        self.state.media_play_notify=false;
         if let Ok(mut tasks)=snapshot.tasks.lock() {tasks.cancel_source(&snapshot.retired);}
         snapshot.retired.store(true, Ordering::Relaxed);
         snapshot.retired = prepared.retired;
@@ -434,6 +512,7 @@ impl Bridge<'_> {
         snapshot.seeking = false;
         snapshot.ready = 0;
         snapshot.network = 3;
+        snapshot.error_code=None;snapshot.frame_ready=false;
         self.state.media_changes.official_position = 0.0;
         self.state.media_changes.default_start = 0.0;
         self.state.media_changes.ready = None;
@@ -555,6 +634,66 @@ impl Bridge<'_> {
         Ok(())
     }
 
+    pub(super) fn play_media(&mut self,node:usize,promise:crate::javascript::NativePromise)->Result<(),crate::javascript::NativePromiseFailure> {
+        use crate::javascript::NativePromiseFailure as Failure;
+        use script_media_play::BatchKind;
+        self.state.work(1).map_err(Failure::Fatal)?;
+        let limit=self.state.limits.host.media_tasks;
+        self.state.media_play.reserve_pending(limit).map_err(Failure::Fatal)?;
+        let snapshot=self.state.embedded_video.as_ref().filter(|snapshot|snapshot.node==node)
+            .ok_or_else(||Failure::Fatal("Media binding is unavailable.".into()))?;
+        {
+            let mut queue=snapshot.tasks.lock().map_err(|_|Failure::Fatal("Media task queue is unavailable.".into()))?;
+            queue.set_limit(limit);
+            let at_end=snapshot.ended||snapshot.duration.is_some_and(|duration|snapshot.position_at(Instant::now())>=duration);
+            let ready=snapshot.ready>=3&&snapshot.frame_ready&&!snapshot.seeking&&!at_end&&snapshot.error_code.is_none();
+            let count=if snapshot.paused||at_end {2}else if ready {1}else{0};
+            if count!=0 {queue.reserve_entries(count).map_err(Failure::Fatal)?;}
+        }
+        if snapshot.network==0 {self.commit_media_source_change(node).map_err(Failure::Fatal)?;}
+        let snapshot=self.state.embedded_video.as_ref().unwrap();
+        let scope=crate::media_tasks::Scope {node,retired:snapshot.retired.clone()};
+        let tasks=snapshot.tasks.clone();
+        let was_paused=snapshot.paused;
+        let issued=Instant::now();
+        // The measured position can reach the end before the next timer tick
+        // reports ended. Internal Play still seeks back before resolving.
+        let ended=snapshot.ended||snapshot.duration.is_some_and(|duration|snapshot.position_at(issued)>=duration);
+        let ready=snapshot.ready>=3&&snapshot.frame_ready&&!snapshot.seeking&&!ended&&snapshot.error_code.is_none();
+        let actual_playing=snapshot.playing;
+        self.state.media_play.push_pending(scope.clone(),promise,limit).map_err(Failure::Fatal)?;
+        let result=if was_paused&&ready {
+            self.state.media_play.capture_pending_with_prefix(&scope,BatchKind::Playing,
+                Some(crate::media_tasks::Control::Play {issued,notify_queued:true}),Some(MediaTask::Single("play")),&tasks,limit).map(|_|())
+        } else if was_paused {
+            tasks.lock().map_err(|_|"Media task queue is unavailable.".to_owned()).and_then(|mut queue|
+                queue.enqueue_many(scope.clone(),&[
+                    (Some(crate::media_tasks::Control::Play {issued,notify_queued:false}),Some(MediaTask::Single("play"))),
+                    (None,Some(MediaTask::Single("waiting"))),
+                ]))
+        } else if ended {
+            // Already-unpaused playback needs the rewind control, but no
+            // second play event. Readiness owns the eventual playing batch.
+            tasks.lock().map_err(|_|"Media task queue is unavailable.".to_owned()).and_then(|mut queue|
+                queue.enqueue_many(scope.clone(),&[
+                    (Some(crate::media_tasks::Control::Play {issued,notify_queued:false}),None),
+                    (None,Some(MediaTask::Single("waiting"))),
+                ]))
+        } else if ready {
+            self.state.media_play.capture_pending(&scope,BatchKind::Resolve,None,&tasks,limit).map(|_|())
+        } else {Ok(())};
+        if let Err(error)=result {self.state.media_play.pop_pending_last();return Err(Failure::Fatal(error));}
+        if was_paused||ended {
+            let snapshot=self.state.embedded_video.as_mut().unwrap();
+            snapshot.paused=false;snapshot.ended=false;snapshot.observed=issued;
+            snapshot.playing=ready;
+            if ended {snapshot.position=Duration::ZERO;snapshot.seeking=true;
+                self.state.media_changes.official_position=0.0;}
+        }
+        if !ready {self.state.media_play_notify|=was_paused||ended||!actual_playing;} else {self.state.media_play_notify=false;}
+        Ok(())
+    }
+
     pub(super) fn pause_media(&mut self, node:usize) -> Result<Value,String> {
         self.state.work(1)?;
         if !self.state.enabled || !self.doc.scripting_enabled {return Err("Scripting is disabled.".into());}
@@ -572,9 +711,16 @@ impl Bridge<'_> {
         let position=snapshot.position_at(issued);
         let mut tasks=snapshot.tasks.lock().map_err(|_|"Media task queue is unavailable.")?;
         tasks.set_limit(self.state.limits.host.media_tasks);
-        tasks.enqueue(crate::media_tasks::Scope {node,retired:snapshot.retired.clone()},
-            Some(crate::media_tasks::Control::Pause {issued,position}),Some(MediaTask::Pause))?;
+        let scope=crate::media_tasks::Scope {node,retired:snapshot.retired.clone()};
+        let shared=snapshot.tasks.clone();
         drop(tasks);
+        let control=crate::media_tasks::Control::Pause {issued,position};
+        let captured=self.state.media_play.capture_pending(&scope,
+            script_media_play::BatchKind::Reject(script_media_play::Rejection::Abort),Some(control),&shared,self.state.limits.host.media_tasks)?;
+        if captured.is_none() {
+            shared.lock().map_err(|_|"Media task queue is unavailable.")?.enqueue(scope,Some(control),Some(MediaTask::Pause))?;
+        }
+        self.state.media_play_notify=false;
         // Queue storage/control identity are admitted before projection. The
         // source-bound physical effect survives a producer-job failure.
         self.state.media_changes.next=ticket;
@@ -617,8 +763,8 @@ impl Bridge<'_> {
             | "currentTime" | "paused" | "ended" | "seeking" | "readyState" | "networkState" => {
                 Some(true)
             }
-            "load" | "pause" => Some(true),
-            "play" | "canPlayType" => Some(false),
+            "load" | "pause" | "play" => Some(true),
+            "canPlayType" => Some(false),
             _ => None,
         })
     }
@@ -664,3 +810,7 @@ impl Bridge<'_> {
 #[cfg(test)]
 #[path = "script_media_pause_tests.rs"]
 mod pause_tests;
+
+#[cfg(test)]
+#[path = "script_media_play_tests.rs"]
+mod play_tests;

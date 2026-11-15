@@ -14,7 +14,7 @@ fn page() -> (Document, Forms, Page, usize) {
         node,retired:Arc::new(AtomicBool::new(false)),current_src:"previous".into(),
         width:64,height:48,duration:Some(Duration::from_secs(3)),
         position:Duration::from_millis(750),observed:Instant::now(),
-        playing:true,paused:false,load_pending:false,ended:false,seeking:false,ready:4,network:1,
+        playing:true,paused:false,load_pending:false,frame_ready:true,error_code:None,ended:false,seeking:false,ready:4,network:1,
     }));
     let out=p.start(&mut doc,&mut forms,&[]);assert_eq!(out.errors,0,"{}",p.report());
     eval(&mut p,&mut doc,&mut forms,"var video=document.getElementById('v');");

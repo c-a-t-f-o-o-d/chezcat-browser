@@ -295,6 +295,10 @@ impl App {
 
     pub(super) fn process_script_requests(&mut self) -> bool {
         self.apply_media_pause();
+        let effects=self.poll_media_promise_cleanup();
+        self.process_script_requests_after_cleanup() | effects
+    }
+    fn process_script_requests_after_cleanup(&mut self) -> bool {
         if self.script_jobs_paused() {
             return false;
         }

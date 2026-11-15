@@ -115,6 +115,9 @@ mod primitive_conversion;
 mod primitive_wrappers;
 #[path = "promises.rs"]
 mod promises;
+pub(crate) use promises::{NativePromise, NativePromiseOutcome};
+#[path = "host_promise.rs"]
+mod host_promise;
 #[path = "prototypes.rs"]
 mod prototypes;
 #[path = "regexp.rs"]
@@ -330,7 +333,19 @@ pub struct NativeAncestry {
 /// never receives interpreter access; the runtime keeps the current job/realm.
 pub struct EventCallback {pub function:Value,pub target:u32,pub event:u32}
 
+pub(crate) enum NativePromiseFailure {
+    Dom(&'static str, &'static str),
+    Fatal(String),
+}
+
 pub trait Host {
+    fn promise_returning_operation(&self,_object:u32,_method:&str)->bool {false}
+    fn validate_promise_operation(&self,_object:u32,_method:&str)->Result<(),NativePromiseFailure> {Ok(())}
+    fn call_promise_operation(&mut self,_object:u32,_method:&str,_promise:NativePromise)->Result<(),NativePromiseFailure> {
+        Err(NativePromiseFailure::Fatal("Native Promise operation is unavailable.".into()))
+    }
+    fn peek_native_promise_effect(&self)->Option<(NativePromise,Option<(&'static str,&'static str)>)> {None}
+    fn finish_native_promise_effect(&mut self) {}
     fn synchronous_event_dispatch(&self,_object:u32,_method:&str)->bool {false}
     fn prepare_event_dispatch(&mut self)->Result<(),String> {Err("Synchronous event dispatch is not authorized by this host.".into())}
     fn begin_event_dispatch(&mut self,_object:u32,_args:&[Value])->Result<usize,String> {Err("Synchronous event dispatch is not authorized by this host.".into())}
@@ -8153,6 +8168,9 @@ impl Runtime {
         host.native_operation_caller(self.native_access_caller
             .unwrap_or_else(|| self.browser_global.map(|(window, _)| window)));
         let result=host.call_with_dictionary(object, method, args, fields.as_deref()).map_err(Fault::new);
+        if self.drain_native_promise_effects(host)?!=0 {
+            self.defer_host_microtask_after_effects(ticket)?;
+        }
         self.finish_host_microtask(host,ticket)?;
         result
     }
@@ -8471,6 +8489,9 @@ impl Runtime {
                 }
                 let (mut object, method, receiver_required) =
                     (*object, *method, *receiver_required);
+                if host.promise_returning_operation(object,method) {
+                    return self.call_host_promise(object,method,receiver_required,this,host);
+                }
                 if let Some(receiver) = host.global_operation_receiver(object, method, &this) {
                     self.validate_native_access(object, host)?;
                     if let Value::Host(handle) = &this { self.validate_native_access(*handle, host)?; }

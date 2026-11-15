@@ -43,6 +43,7 @@ impl App {
             aborted: false,
             tasks,
             last_update: Duration::ZERO,
+            script_play_intent:None,
         };
         let selecting=selection.raw.is_some() || selection.error.is_some();
         if !binding.enqueue_events([
@@ -88,6 +89,7 @@ impl App {
             if let Err(error) = result {
                 self.events
                     .push(format!("VIDEO node {}: {error}", binding.node));
+                binding.script_play_intent=None;
                 binding.error = Some(error);
                 binding.network = 3;
                 binding.enqueue_events(["error"]);
@@ -173,6 +175,7 @@ impl App {
             worker.cancel();
         }
         if let Some(v) = &mut self.embedded_video {
+            v.script_play_intent=None;
             if v.plan.take().is_some() {
                 v.aborted = true;
                 v.network = 1;
@@ -200,6 +203,7 @@ impl App {
             tasks:self.scripting.as_ref().and_then(|page|page.media_tasks())
                 .unwrap_or_else(||media_tasks::shared(crate::javascript::limits::BROWSER.host.media_tasks)),
             last_update: Duration::ZERO,
+            script_play_intent:None,
         };
         if !binding.enqueue_events(["loadstart"]) {
             self.events.push(format!("VIDEO node {node}: {}",binding.error.as_deref().unwrap_or("Media task queue failed.")));
@@ -231,6 +235,7 @@ impl App {
         });
         if let Err(error) = result {
             self.events.push(format!("VIDEO node {node}: {error}"));
+            binding.script_play_intent=None;
             binding.error = Some(error);
             binding.network = 3;
             binding.enqueue_events(["error"]);
@@ -254,12 +259,14 @@ impl App {
             position: Duration::ZERO,
             observed: now,
             playing: false,
-            paused: true,
+            paused: v.script_play_intent.is_none(),
             load_pending: v.plan.is_some()&&!v.aborted,
             ended: false,
             seeking: false,
             ready: 0,
             network: v.network,
+            error_code:v.error.as_ref().map(|_|if v.aborted {1}else{4}),
+            frame_ready:false,
         };
         if let Some(p) = self
             .media
@@ -270,6 +277,8 @@ impl App {
             s.height = p.clip.height as u32;
             s.duration = Some(p.clip.duration);
             s.position = p.position(now);
+            s.frame_ready=p.error.is_none()&&p.displayed==p.clip.index_at(p.position(now));
+            if p.error.is_some() {s.error_code=Some(if p.decoder_enabled {3}else{1});}
             s.playing = p.playing();
             s.paused = p.paused;
             s.ended = p.ended_reported;
@@ -325,11 +334,18 @@ impl App {
                     self.media_request_frame_physical(now);
                     self.finish_media_tick(now);
                 }
+                let intent=self.embedded_video.as_mut().and_then(|v|v.script_play_intent.take());
+                if let Some(issued)=intent {
+                    // Metadata/initial seek became real only now: never replay
+                    // elapsed wall time from the loading interval.
+                    self.script_media_play_physical(issued,false);
+                }
                 self.reflow();
             }
             Err(error) => {
                 self.events.push(format!("VIDEO node {node}: {error}"));
                 let v = self.embedded_video.as_mut().unwrap();
+                v.script_play_intent=None;
                 v.error = Some(error);
                 v.network = 3;
                 v.enqueue_events(["error"]);
@@ -337,19 +353,31 @@ impl App {
         }
         true
     }
-    fn fail_media_queue(&mut self, problem:String) {
+    pub(in crate::app) fn fail_media_queue(&mut self, problem:String) {
         self.events.push(format!("VIDEO: {problem}"));
+        // Preserve owned batch and pending rejection effects before any FIFO
+        // entry is removed. This path never dispatches JS or checkpoints.
+        if let Some(page)=&mut self.scripting {page.cancel_media_pause();}
         if let Some(worker)=&self.media_worker {worker.cancel();}
         if let Some(worker)=&self.embedded_video_worker {worker.cancel();}
-        if let Some(v)=&mut self.embedded_video {v.fail_tasks(problem.clone());}
+        if let Some(v)=&mut self.embedded_video {
+            if let Ok(mut tasks)=v.tasks.lock() {tasks.cancel_source(&v.retired);}
+            v.fail_tasks(problem.clone());
+        }
         if let Some(player)=self.media.as_mut().filter(|player|player.embedded) {player.fail_task_queue(problem);}
+        let snapshot=self.embedded_video_snapshot();
+        if let Some(page)=&mut self.scripting {page.set_embedded_video(snapshot);}
     }
     // Legacy call sites keep their issue-time guard, now draining all admitted
     // controls in the shared source FIFO before any tick or JS notification.
     pub(in crate::app) fn apply_media_pause(&mut self) -> bool {
+        // A source selector may already be ready after load()/play(). Install
+        // its binding before destructive control pops can discard the new Scope.
+        let selected=if self.embedded_video_retired() {self.process_media_selection()}else{false};
+        if self.embedded_video_retired() {return selected;}
         let Some(tasks)=self.embedded_video.as_ref().map(|v|v.tasks.clone())
             .or_else(||self.scripting.as_ref().and_then(|page|page.media_tasks())) else {return false;};
-        let mut applied=false;
+        let mut applied=selected;
         loop {
             let next=tasks.lock().map(|mut queue|queue.take_control())
                 .map_err(|_|"Media task queue is unavailable.".to_owned());
@@ -360,11 +388,20 @@ impl App {
             if !valid {continue;}
             match control {
                 crate::media_tasks::Control::Pause {issued,position}=>{
+                    if let Some(v)=&mut self.embedded_video {v.script_play_intent=None;}
                     if let Some(player)=self.media.as_mut().filter(|p|p.embedded&&p.node==scope.node&&p.sync.is_none()) {
                         player.clock.pause(issued);player.paused=true;player.dom_playback_started=false;
+                        player.script_play_waiting=false;player.record_only("pause");
                         if player.seek_resume.is_some() {player.seek_resume=Some(false);}
                         debug_assert_eq!(player.clock.position(issued),position);
                         if player.pending.is_none() {player.deadline=None;}
+                    }
+                }
+                crate::media_tasks::Control::Play {issued,notify_queued}=>{
+                    if self.media.as_ref().is_some_and(|p|p.embedded&&p.node==scope.node) {
+                        self.script_media_play_physical(issued,notify_queued);
+                    } else if let Some(v)=&mut self.embedded_video {
+                        v.script_play_intent=if v.error.is_none()&&!v.aborted {Some(issued)}else{None};
                     }
                 }
                 crate::media_tasks::Control::Seek {seconds}=>{
@@ -385,11 +422,25 @@ impl App {
         }
         applied
     }
+    pub(in crate::app) fn poll_media_promise_cleanup(&mut self)->bool {
+        if self.script_jobs_paused() {return false;}
+        let Some(page)=self.scripting.as_mut().filter(|page|page.has_media_promise_effects()) else {return false;};
+        let outcome=page.run_media_promise_cleanup(&mut self.document,&mut self.forms);
+        if outcome.layout_changed {self.reflow();}
+        self.validate_control_focus();self.sync_editors();
+        if outcome.errors!=0 {self.show_script_errors();}
+        true
+    }
     pub(in crate::app) fn flush_embedded_video(&mut self) -> bool {
         let controls=self.apply_media_pause();
         let processed=self.process_media_selection() | controls;
         let controls=self.apply_media_pause() | controls;
         if self.embedded_video_retired() {return processed | controls;}
+        if let Some(problem)=self.embedded_video.as_ref().filter(|v|v.aborted).and_then(|v|v.error.clone()) {
+            let stopped=self.media.as_ref().is_none_or(|p|p.suspended&&!p.decoder_enabled);
+            let queue_empty=self.embedded_video.as_ref().is_none_or(|v|v.tasks.lock().map_or(false,|queue|!queue.has_pending()));
+            if !stopped||!queue_empty {self.fail_media_queue(problem);return true;}
+        }
         if let Some(problem)=self.media.as_ref().filter(|player|player.embedded&&!player.decoder_enabled)
             .and_then(|player|player.error.clone()) {
             if self.embedded_video.as_ref().is_some_and(|v|v.error.as_ref()!=Some(&problem)||!v.aborted) {
@@ -410,13 +461,21 @@ impl App {
         }
         let finish=v.plan.is_none()&&!v.aborted;
         let snapshot=self.embedded_video_snapshot();
-        if let Some(page)=&mut self.scripting {page.set_embedded_video(snapshot);}
+        let mut captured_or_aborted=false;
+        let fault=if let Some(page)=&mut self.scripting {
+            page.set_embedded_video(snapshot);
+            captured_or_aborted=page.pending_media_play_count()==0;
+            page.take_media_play_fault()
+        } else {None};
+        if captured_or_aborted {if let Some(player)=&mut self.media {player.script_play_waiting=false;}}
+        if let Some(problem)=fault {self.fail_media_queue(problem);return true;}
         let budget=match tasks.lock().map(|queue|queue.count_tasks())
             .map_err(|_|"Media task queue is unavailable.".to_owned()) {
             Ok(count)=>count,Err(problem)=>{self.fail_media_queue(problem);return true;}
         };
         let mut changed=processed | controls;
         for _ in 0..budget {
+            if self.script_jobs_paused() {break;}
             let next=tasks.lock().map(|mut queue|queue.take_task())
                 .map_err(|_|"Media task queue is unavailable.".to_owned());
             let (_,scope,task)=match next {Ok(Some(task))=>task,Ok(None)=>break,Err(problem)=>{self.fail_media_queue(problem);break;}};
@@ -426,7 +485,6 @@ impl App {
                 v.node==scope.node&&Arc::ptr_eq(&v.retired,&scope.retired)&&Arc::ptr_eq(&v.tasks,&tasks)) {
                 continue;
             }
-            if self.script_jobs_paused() {continue;}
             if let Some(page)=&mut self.scripting {
                 let outcome=page.dispatch_media_task(&mut self.document,&mut self.forms,scope.node,task);
                 if outcome.layout_changed {self.reflow();}
@@ -516,7 +574,7 @@ mod tests {
             "{}",
             app.scripting.as_ref().unwrap().report()
         );
-        eval(&mut app,"if(initialMediaState!==0||!mediaWindowLoaded||video.readyState!==4||video.networkState!==1||video.currentTime!==0||mediaEvents.slice(0,6).join(',')!=='loadstart,durationchange,loadedmetadata,loadeddata,canplay,canplaythrough')throw 'actual initial sequence';video.duration=0;if(video.duration!==3)throw 'readonly duration';var absentCall=false;try{video.play();}catch(e){absentCall=e instanceof TypeError;}if(!absentCall||typeof onplay!=='undefined'||window.onloadedmetadata!==undefined)throw 'absent calls/window scope';var propertyEvents=0;video.onpause=function(e){if(e.target!==video||!e.isTrusted)throw 'native handler';propertyEvents++;};if(!('onpause' in video)||!('onerror' in video))throw 'native handler presence';");
+        eval(&mut app,"if(initialMediaState!==0||!mediaWindowLoaded||video.readyState!==4||video.networkState!==1||video.currentTime!==0||mediaEvents.slice(0,6).join(',')!=='loadstart,durationchange,loadedmetadata,loadeddata,canplay,canplaythrough')throw 'actual initial sequence';video.duration=0;if(video.duration!==3)throw 'readonly duration';var deniedPlay=video.play(),deniedSeen=false;if(!(deniedPlay instanceof Promise)||typeof onplay!=='undefined'||window.onloadedmetadata!==undefined)throw 'genuine promise/window scope';deniedPlay.catch(function(e){if(!(e instanceof DOMException)||e.name!=='NotAllowedError')throw 'play policy reason';deniedSeen=true;});queueMicrotask(function(){if(!deniedSeen)throw 'policy rejection missing';});var propertyEvents=0;video.onpause=function(e){if(e.target!==video||!e.isTrusted)throw 'native handler';propertyEvents++;};if(!('onpause' in video)||!('onerror' in video))throw 'native handler presence';");
         assert!(
             !app.media_key(0x20),
             "Page Space must not activate an unfocused element"
@@ -1086,5 +1144,191 @@ mod tests {
         assert!(app.media.as_ref().unwrap().error.is_none());
         eval(&mut app,"video.currentTime=0.7;");app.apply_media_pause();settle(&mut app);assert_reference_frame(&app,1);
         assert!(app.media.as_ref().unwrap().error.is_none());
+    }
+
+    fn activate_media_document(app:&mut App) {
+        // Real App content press/release, outside browser chrome/native media
+        // controls. No OS mouse/keyboard injection or synthetic DOM activation.
+        let y=app.content_top()+5;app.pointer_down(40,y,false);app.pointer_up(40,y);
+    }
+    fn take_decoded_source(app:&App)->Completion {
+        let deadline=Instant::now()+Duration::from_secs(5);
+        loop {
+            if let Some(source)=app.embedded_video_worker.as_ref().unwrap().take(){return source;}
+            assert!(Instant::now()<deadline);std::thread::sleep(Duration::from_millis(1));
+        }
+    }
+
+    #[test]
+    fn script_play_promise_fulfills_after_real_playing_and_decoded_frame_time_advances() {
+        let mut app=open("authored-video.html");app.wait_for_load();activate_media_document(&mut app);
+        eval(&mut app,"var playState='pending',playOrder='',playSettles=0;video.addEventListener('playing',function(){playOrder+='playing;';});var playPromise=video.play({toString:function(){throw 'ignored argument';}});if(!(playPromise instanceof Promise)||video.paused)throw 'genuine play promise';playPromise.then(function(){playState='fulfilled';playSettles++;playOrder+='then;';},function(e){throw e;});if(playState!=='pending')throw 'synchronous fulfillment';");
+        assert!(!app.media.as_ref().unwrap().clock.playing());
+        app.flush_embedded_video();assert!(app.media.as_ref().unwrap().clock.playing());assert_reference_frame(&app,0);
+        eval(&mut app,"if(playState!=='fulfilled'||playSettles!==1||playOrder!=='playing;then;'||video.paused)throw 'actual playing settlement';");
+        run(&mut app,Duration::from_millis(650));
+        let index=app.media.as_ref().unwrap().displayed;assert!(index>=1);assert_reference_frame(&app,index);
+        assert!(app.media.as_ref().unwrap().position(Instant::now())>=Duration::from_millis(500));
+        eval(&mut app,"video.pause();");app.flush_embedded_video();settle(&mut app);
+        let frozen=app.media.as_ref().unwrap().clock.position(Instant::now());run(&mut app,Duration::from_millis(30));
+        assert_eq!(app.media.as_ref().unwrap().clock.position(Instant::now()),frozen);
+        assert!(!app.scripting.as_ref().unwrap().has_media_play_promises_for_test());
+        eval(&mut app,"if(playSettles!==1||!video.paused)throw 'exact settlement/pause';");
+    }
+
+    #[test]
+    fn script_play_loading_waits_for_real_default_frame_and_keeps_admission_after_expiry() {
+        let mut app=open("authored-video-default.html");activate_media_document(&mut app);
+        eval(&mut app,"var loadedPlay='pending',loadedSettles=0;video.currentTime=1.75;video.play().then(function(){loadedPlay='fulfilled';loadedSettles++;},function(e){throw e;});if(video.paused||video.readyState!==0)throw 'loading play projection';");
+        app.flush_embedded_video();assert!(app.media.is_none());
+        eval(&mut app,"if(loadedPlay!=='pending'||video.paused)throw 'loading play settled early';");
+        app.scripting.as_mut().unwrap().expire_media_activation_for_test();
+        assert!(app.accept_embedded_video(take_decoded_source(&app)));
+        assert!(!app.media.as_ref().unwrap().clock.playing());
+        let frame=take_decoded_frame(&app);app.flush_embedded_video();
+        eval(&mut app,"if(loadedPlay!=='pending'||video.paused||!video.seeking)throw 'waiting decoded target';");
+        assert!(app.accept_media_frame(frame));assert_reference_frame(&app,3);
+        app.flush_embedded_video();assert!(app.media.as_ref().unwrap().clock.playing());
+        eval(&mut app,"if(loadedPlay!=='fulfilled'||loadedSettles!==1||video.paused||video.seeking||video.currentTime<1.75)throw 'actual loading play';");
+        assert!(!app.scripting.as_ref().unwrap().has_media_play_promises_for_test());
+    }
+
+    #[test]
+    fn script_play_ready_pause_preserves_captured_fulfillment_but_loading_pause_rejects() {
+        for ready in [false,true] {
+            let mut app=open("authored-video-default.html");if ready {app.wait_for_load();}
+            activate_media_document(&mut app);
+            eval(&mut app,"var race='pending',raceOrder='';video.addEventListener('timeupdate',function(){raceOrder+='time;';});video.addEventListener('pause',function(){raceOrder+='pause;';});video.play().then(function(){race='fulfilled';raceOrder+='then;';},function(e){if(!(e instanceof DOMException)||e.name!=='AbortError')throw 'wrong interruption';race='rejected';raceOrder+='catch;';});video.pause();if(race!=='pending'||!video.paused)throw 'pause race immediate';");
+            app.flush_embedded_video();
+            if ready {eval(&mut app,"if(race!=='fulfilled'||raceOrder.indexOf('then;')<0||raceOrder.indexOf('catch;')>=0)throw 'captured ready outcome';");}
+            else {eval(&mut app,"if(race!=='rejected'||raceOrder.indexOf('time;pause;catch;')<0)throw 'pending pause outcome '+raceOrder;");}
+            assert!(!app.scripting.as_ref().unwrap().has_media_play_promises_for_test());
+            assert!(app.media.as_ref().is_none_or(|player|!player.clock.playing()));
+        }
+    }
+
+    #[test]
+    fn script_play_load_settles_queued_outcomes_before_selection_and_does_not_replay() {
+        let mut app=open("authored-video.html");app.wait_for_load();activate_media_document(&mut app);
+        eval(&mut app,"var resetOrder='',resetSettles=0;video.play().then(function(){if(video.networkState!==3)throw 'load settlement ran after selection';resetOrder+='then;';resetSettles++;});video.load();queueMicrotask(function(){if(video.networkState!==2)throw 'stable selection missing';resetOrder+='after;';});");
+        eval(&mut app,"if(resetOrder!=='then;after;'||resetSettles!==1||!video.paused)throw 'load queued outcome '+resetOrder;");
+        app.wait_for_load();assert!(!app.media.as_ref().unwrap().clock.playing());
+        assert!(!app.scripting.as_ref().unwrap().has_media_play_promises_for_test());
+        eval(&mut app,"if(resetSettles!==1)throw 'duplicate reset settlement';");
+    }
+
+    #[test]
+    fn script_play_fatal_started_listener_defers_native_settlement_without_stale_callbacks() {
+        let mut app=open("authored-video.html");app.wait_for_load();activate_media_document(&mut app);
+        eval(&mut app,"var fatalPlaySettles=0,fatalStale=0,freshPlaySettles=0;video.addEventListener('playing',function(){queueMicrotask(function(){fatalStale++;});document.body.scrollWidth;});var fatalPromise=video.play();fatalPromise.then(function(){fatalPlaySettles++;},function(e){throw e;});");
+        app.flush_embedded_video();assert!(app.media.as_ref().unwrap().clock.playing());
+        assert!(app.scripting.as_ref().unwrap().has_media_promise_effects());
+        assert_eq!(app.scripting.as_ref().unwrap().error_count(),1);
+        // Existing fatal-job policy discards old reactions as well as queued
+        // callbacks. A fresh observer proves the genuine deferred outcome.
+        eval(&mut app,"if(fatalPlaySettles!==0||fatalStale!==0)throw 'stale fatal observers';fatalPromise.then(function(){freshPlaySettles++;},function(e){throw e;});");
+        app.process_script_requests();
+        assert!(!app.scripting.as_ref().unwrap().has_media_play_promises_for_test());
+        eval(&mut app,"if(freshPlaySettles!==1||fatalPlaySettles!==0||fatalStale!==0)throw 'fatal task settlement cleanup';");
+    }
+
+    #[test]
+    fn script_play_rewinds_eof_and_real_cached_frame_precedes_replay_fulfillment() {
+        let mut app=open("authored-video.html");app.wait_for_load();
+        eval(&mut app,"video.currentTime=3;");app.apply_media_pause();settle(&mut app);assert_reference_frame(&app,5);
+        activate_media_document(&mut app);
+        eval(&mut app,"var replayPlay='pending';video.play().then(function(){replayPlay='fulfilled';},function(e){throw e;});if(video.paused||video.ended||video.currentTime!==0)throw 'replay synchronous intent';");
+        app.flush_embedded_video();assert_reference_frame(&app,0);
+        assert!(app.media.as_ref().unwrap().clock.playing());
+        eval(&mut app,"if(replayPlay!=='fulfilled'||video.paused||video.ended||video.seeking)throw 'actual replay promise';");
+        assert!(!app.scripting.as_ref().unwrap().has_media_play_promises_for_test());
+    }
+
+    #[test]
+    fn script_play_started_playing_load_preserves_queued_and_started_outcomes_in_order() {
+        let mut app=open("authored-video.html");app.wait_for_load();activate_media_document(&mut app);
+        eval(&mut app,"var startedOrder='',startedLoads=0;video.addEventListener('playing',function(){if(startedLoads++===0)video.load();});video.play().then(function(){startedOrder+='first;';},function(e){throw e;});video.play().then(function(){startedOrder+='second;';},function(e){throw e;});");
+        app.flush_embedded_video();
+        eval(&mut app,"if(startedOrder!=='second;first;'||startedLoads!==1||!video.paused)throw 'started versus queued ownership '+startedOrder;");
+        app.wait_for_load();assert!(!app.media.as_ref().unwrap().clock.playing());
+        assert!(!app.scripting.as_ref().unwrap().has_media_play_promises_for_test());
+    }
+
+    #[test]
+    fn script_play_unsupported_source_rejects_real_promise_after_actual_file_failure() {
+        let mut app=open("authored-video.html");app.wait_for_load();activate_media_document(&mut app);
+        eval(&mut app,"var unsupportedPlay='pending',unsupportedSettles=0;video.src='missing-play-source.ivf';video.play().then(function(){throw 'unsupported fulfilled';},function(e){if(!(e instanceof DOMException)||e.name!=='NotSupportedError')throw 'source rejection reason';unsupportedPlay='rejected';unsupportedSettles++;});");
+        app.wait_for_load();app.process_script_requests();
+        assert!(app.media.is_none());assert!(app.embedded_video.as_ref().unwrap().error.is_some());
+        eval(&mut app,"if(unsupportedPlay!=='rejected'||unsupportedSettles!==1||mediaEvents.indexOf('error')<0)throw 'actual unsupported source settlement';");
+        assert!(!app.scripting.as_ref().unwrap().has_media_play_promises_for_test());
+    }
+
+    #[test]
+    fn script_play_stop_while_loading_rejects_once_and_discards_real_late_source() {
+        let mut app=open("authored-video-default.html");activate_media_document(&mut app);
+        eval(&mut app,"var stoppedPlay='pending',stoppedSettles=0;video.play().then(function(){throw 'stopped loading fulfilled';},function(e){if(!(e instanceof DOMException)||e.name!=='AbortError')throw 'stop reason';stoppedPlay='rejected';stoppedSettles++;});");
+        app.flush_embedded_video();let late=take_decoded_source(&app);
+        app.stop_loading();app.process_script_requests();
+        assert!(!app.accept_embedded_video(late));assert!(app.media.is_none());
+        eval(&mut app,"if(stoppedPlay!=='rejected'||stoppedSettles!==1)throw 'stop cleanup';");
+        assert!(!app.scripting.as_ref().unwrap().has_media_play_promises_for_test());
+    }
+
+    #[test]
+    fn script_play_real_decode_error_uses_explicit_pause_and_load_recovers() {
+        let mut app=open("authored-video.html");app.wait_for_load();
+        // Keep the independent first frame, but truncate a later compressed
+        // packet. The actual worker must discover the real decoder failure.
+        let source=include_bytes!("../tools/fixtures/scene-intra.ivf");
+        let mut bytes=source[..32].to_vec();let mut offset=32;let mut index=0;
+        while offset<source.len() {
+            let size=u32::from_le_bytes(source[offset..offset+4].try_into().unwrap()) as usize;
+            let count=if index==2 {10}else{size};
+            bytes.extend_from_slice(&(count as u32).to_le_bytes());
+            bytes.extend_from_slice(&source[offset+4..offset+12]);
+            bytes.extend_from_slice(&source[offset+12..offset+12+count]);
+            offset+=12+size;index+=1;
+        }
+        let asset=media::Clip::load(bytes,media::Limits::default(),&||Ok(())).unwrap();
+        let node=app.media.as_ref().unwrap().node;app.install_media(Some(asset),Some(node),true);
+        app.flush_embedded_video();
+        app.media_seek(Duration::from_millis(1200),Instant::now());settle(&mut app);
+        assert!(app.media.as_ref().unwrap().error.is_some());assert_reference_frame(&app,0);
+        assert_eq!(app.embedded_video_snapshot().unwrap().error_code,Some(3));
+        activate_media_document(&mut app);
+        eval(&mut app,"var decodePlay='pending',decodeOrder='',decodeSettles=0;video.addEventListener('timeupdate',function(){decodeOrder+='time;';});video.addEventListener('pause',function(){decodeOrder+='pause;';});var decodePromise=video.play();if(!(decodePromise instanceof Promise)||video.paused)throw 'decoder admission';decodePromise.then(function(){throw 'decoder fulfilled';},function(e){if(!(e instanceof DOMException)||e.name!=='AbortError')throw 'explicit decoder pause reason';decodePlay='rejected';decodeSettles++;decodeOrder+='catch;';});if(decodePlay!=='pending')throw 'numeric error rejected synchronously';");
+        app.flush_embedded_video();
+        // Observation queues the explicit internal Pause; the next normal
+        // control drain applies it before its grouped task can dispatch.
+        app.flush_embedded_video();
+        eval(&mut app,"if(decodePlay!=='rejected'||decodeSettles!==1||decodeOrder!=='time;pause;catch;'||!video.paused)throw 'decoder pause sequence '+decodeOrder;");
+        assert_reference_frame(&app,0);assert!(!app.media.as_ref().unwrap().clock.playing());
+        assert!(!app.scripting.as_ref().unwrap().has_media_play_promises_for_test());
+        eval(&mut app,"video.load();");app.wait_for_load();activate_media_document(&mut app);
+        eval(&mut app,"var recoveredPlay=0;video.play().then(function(){recoveredPlay++;},function(e){throw e;});");
+        app.flush_embedded_video();
+        eval(&mut app,"if(recoveredPlay!==1||decodeSettles!==1||video.paused)throw 'decoder reload recovery';");
+        assert!(app.media.as_ref().unwrap().clock.playing());assert!(app.media.as_ref().unwrap().error.is_none());
+    }
+
+    #[test]
+    fn script_play_rewinds_measured_eof_before_timer_reports_ended() {
+        let mut app=open("authored-video.html");app.wait_for_load();
+        eval(&mut app,"video.currentTime=2.75;");app.apply_media_pause();settle(&mut app);assert_reference_frame(&app,5);
+        let now=Instant::now();let past=now-Duration::from_secs(1);
+        {
+            let p=app.media.as_mut().unwrap();
+            p.clock.seek(Duration::from_millis(2750),past);p.clock.play(past);
+            p.paused=false;p.ended_reported=false;p.dom_playback_started=true;
+        }
+        let s=app.embedded_video_snapshot().unwrap();
+        assert_eq!(s.position,Duration::from_secs(3));assert!(s.playing&&!s.paused&&!s.ended&&s.frame_ready);
+        app.scripting.as_mut().unwrap().set_embedded_video(Some(s));activate_media_document(&mut app);
+        eval(&mut app,"var edgePlay='pending',edgePlayEvents=0;video.addEventListener('play',function(){edgePlayEvents++;});video.play().then(function(){edgePlay='fulfilled';},function(e){throw e;});if(edgePlay!=='pending'||video.paused||video.currentTime!==0||!video.seeking)throw 'pre-tick rewind admission';");
+        app.flush_embedded_video();assert_reference_frame(&app,0);
+        assert!(app.media.as_ref().unwrap().clock.playing());
+        eval(&mut app,"if(edgePlay!=='fulfilled'||video.paused||video.seeking||video.ended||edgePlayEvents!==0||video.currentTime>0.2)throw 'pre-tick real rewind';");
+        assert!(!app.scripting.as_ref().unwrap().has_media_play_promises_for_test());
     }
 }

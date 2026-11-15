@@ -15,6 +15,7 @@ pub(super) struct Embedded {
     retired:Arc<AtomicBool>,
     node:usize,raw:String,source:String,plan:Option<Arc<crate::embedded_video::Plan>>,network:u8,
     error:Option<String>,aborted:bool,tasks:MediaTasks,last_update:Duration,
+    script_play_intent:Option<Instant>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -41,6 +42,7 @@ pub(super) struct Player {
     // logical play intent; the requested bitmap must be published first.
     seek_resume:Option<bool>,
     initial_data_pending:bool,
+    script_play_waiting:bool,
     sync:Option<Synchronized>,
     clip: Arc<media::Clip>,
     pub(super) node: usize,
@@ -383,8 +385,8 @@ mod tests {
 impl Embedded {
     fn task_scope(&self) -> MediaScope { MediaScope {node:self.node,retired:self.retired.clone()} }
     fn fail_tasks(&mut self, problem:String) {
-        if let Ok(mut tasks)=self.tasks.lock() {tasks.cancel_source(&self.retired);}
-        self.plan=None;self.network=3;self.aborted=true;self.error=Some(problem);
+        // App captures owned Promise outcomes before erasing this source FIFO.
+        self.plan=None;self.network=3;self.aborted=true;self.script_play_intent=None;self.error=Some(problem);
     }
     fn enqueue_events(&mut self, events:impl IntoIterator<Item=&'static str>) -> bool {
         let scope=self.task_scope();
@@ -403,6 +405,7 @@ impl Player {
         if event=="play" {self.paused=false;}
         if matches!(event,"pause"|"stop"|"cancel"|"error"|"ended") {self.paused=true;}
         if matches!(event,"stop"|"cancel") {self.dom_playback_started=false;}
+        if matches!(event,"pause"|"stop"|"cancel"|"error") {self.script_play_waiting=false;}
         if matches!(event,"stop"|"cancel"|"error") {self.seek_resume=None;}
         if event=="pause" && self.seek_resume.is_some() {self.seek_resume=Some(false);}
 
@@ -415,6 +418,9 @@ impl Player {
                 if matches!(event,"pause"|"error"){self.dom_playback_started=false;}
             }
         }
+        self.record_only(event);
+    }
+    fn record_only(&mut self,event:&'static str) {
         if self.events.len() == 128 {
             self.events.pop_front();
             self.dropped = self.dropped.saturating_add(1);
@@ -422,9 +428,9 @@ impl Player {
         self.events.push_back(event);
     }
     fn fail_task_queue(&mut self, problem:String) {
-        if let Some((tasks,scope))=&self.task_binding {
-            if let Ok(mut tasks)=tasks.lock() {tasks.cancel_source(&scope.retired);}
-        }
+        // Queue erasure is deferred to App's failure path, after Page has
+        // captured pending and already-batched Promise outcomes.
+        self.script_play_waiting=false;
         self.clock.pause(Instant::now());self.paused=true;self.dom_playback_started=false;
         self.decoder_enabled=false;self.pending=None;self.deadline=None;self.seeking=false;self.seek_resume=None;
         self.suspended=true;self.error=Some(problem);
@@ -450,7 +456,8 @@ impl Player {
                 self.clock.play(now);
                 if !self.dom_playback_started {
                     self.dom_playback_started=true;
-                    self.event("playing");
+                    if self.script_play_waiting {self.record_only("playing");}
+                    else {self.event("playing");}
                 }
             }
             self.event("timeupdate");
@@ -550,7 +557,7 @@ impl App {
             embedded,controls_focused:false,
             task_binding:self.embedded_video.as_ref().filter(|v|embedded&&v.node==node)
                 .map(|v|(v.tasks.clone(),v.task_scope())),
-            dom_playback_started:false,paused:true,seek_resume:None,initial_data_pending:embedded&&defer_data,
+            dom_playback_started:false,paused:true,seek_resume:None,initial_data_pending:embedded&&defer_data,script_play_waiting:false,
             sync:None,
             clock: Clock::new(asset.clip.duration),
             clip: asset.clip,
@@ -577,6 +584,42 @@ impl App {
             if embedded {player.event("canplay");player.event("canplaythrough");}
         }
         self.media = Some(player);
+    }
+    // Physical execution of the source-scoped JS Play command. Page owns the
+    // play/waiting/PlayingBatch notifications and their Promise identities.
+    pub(in crate::app) fn script_media_play_physical(&mut self,issued:Instant,notify_queued:bool)->bool {
+        let now=Instant::now();
+        let rewind={
+            let Some(player)=self.media.as_mut().filter(|p|p.embedded&&p.sync.is_none()) else {return false;};
+            if !player.decoder_enabled||player.error.is_some() {player.script_play_waiting=false;return false;}
+            player.script_play_waiting=true;player.paused=false;player.suspended=false;
+            player.record_only("play");
+            // Preserve an already-requested/default bitmap. No elapsed time is
+            // accrued during its decode; complete_seek resumes at actual ready.
+            if player.seeking||player.initial_data_pending {
+                player.clock.pause(now);player.seek_resume=Some(true);return true;
+            }
+            player.position(now)>=player.clip.duration||player.ended_reported
+        };
+        if rewind {
+            // Rewind through the existing real seek/cached-poster publication,
+            // before either starting a clock or advertising ready playback.
+            self.media_seek_physical(Duration::ZERO,now);
+            self.media_request_frame_physical(now);
+        }
+        let Some(player)=self.media.as_mut().filter(|p|p.embedded&&p.sync.is_none()) else {return false;};
+        if !player.decoder_enabled||player.error.is_some() {player.script_play_waiting=false;return false;}
+        if player.seeking||player.initial_data_pending {
+            player.seek_resume=Some(true);return true;
+        }
+        let ready=Instant::now();
+        if rewind&&notify_queued {
+            player.clock.pause(ready);player.clock.seek(Duration::ZERO,ready);
+        }
+        player.ended_reported=false;
+        player.clock.play(if notify_queued {issued}else{ready});
+        if !player.dom_playback_started {player.dom_playback_started=true;player.record_only("playing");}
+        true
     }
     pub(super) fn suspend_media(&mut self) {
         self.cancel_embedded_video();
@@ -826,6 +869,23 @@ impl App {
                     .as_ref()
                     .is_some_and(|player| if player.embedded {!player.paused} else {player.clock.playing()})
                 {
+                    if self.media.as_ref().is_some_and(|p|p.embedded) && self.scripts_enabled
+                        && self.document.scripting_enabled
+                        && self.scripting.as_ref().is_some_and(|page|page.native_media_pause_enabled()) {
+                        let snapshot=self.embedded_video_snapshot();
+                        let mut captured_or_aborted=false;
+                        let fault=if let Some(page)=&mut self.scripting {
+                            page.set_embedded_video(snapshot);
+                            captured_or_aborted=page.pending_media_play_count()==0;
+                            page.take_media_play_fault()
+                        } else {None};
+                        if captured_or_aborted {if let Some(player)=&mut self.media {player.script_play_waiting=false;}}
+                        if let Some(problem)=fault {self.fail_media_queue(problem);return;}
+                        let result=self.scripting.as_mut().unwrap()
+                            .request_native_media_pause(&mut self.document,&mut self.forms);
+                        if let Err(problem)=result {self.fail_media_queue(problem);return;}
+                        self.apply_media_pause();self.flush_embedded_video();return;
+                    }
                     if let Some(worker) = &self.media_worker {
                         worker.cancel();
                     }

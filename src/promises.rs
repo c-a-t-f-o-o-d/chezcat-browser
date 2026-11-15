@@ -612,6 +612,20 @@ impl Runtime {
         if let Some(id)=ticket {if let Err(error)=self.promise_enqueue(Job::Host(id)){host.finish_native_microtask(id);return Err(error);}}
         Ok(ticket)
     }
+    // A source mutation reserves its stable-state job before committing, but
+    // load's already-queued native Promise settlements precede the later
+    // selection procedure. Reposition the admitted slot without allocation.
+    pub(super) fn defer_host_microtask_after_effects(&mut self,ticket:Option<u64>)->Result<(),Fault>{
+        if let Some(id)=ticket {
+            self.work(self.promises.jobs.len())?;
+            let index=self.promises.jobs.iter().position(|(_,job)|matches!(job,Job::Host(ticket) if *ticket==id))
+                .ok_or_else(||Fault::new("Native microtask reservation lost its queue position."))?;
+            let entry=self.promises.jobs.remove(index).unwrap();
+            self.promises.jobs.push_back(entry);
+        }
+        Ok(())
+    }
+
     pub(super) fn finish_host_microtask(&mut self,host:&mut dyn Host,ticket:Option<u64>)->Result<(),Fault>{
         if let Some(id)=ticket {if !host.finish_native_microtask(id){
             if !self.promises.jobs.back().is_some_and(|(_,job)|matches!(job,Job::Host(ticket) if *ticket==id)){return Err(Fault::new("Native microtask reservation lost its queue position."));}
