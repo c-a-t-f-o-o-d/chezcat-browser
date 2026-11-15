@@ -38,7 +38,7 @@ pub(crate) fn read_local_media_checked(path: &std::path::Path, limit: usize, che
 }
 
 /// User-controlled capabilities captured once for each document load.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct LoadOptions {
     pub media_limits: crate::media::Limits,
     pub audio_limits: crate::audio::Limits,
@@ -51,6 +51,8 @@ pub struct LoadOptions {
     /// Captured CSS viewport and device/page-zoom density for image selection.
     pub viewport_width: u32,
     pub viewport_height: u32,
+    /// Unrounded CSS viewport including the App scrollbar; separate from image line width.
+    pub media_environment: Option<css::MediaEnvironment>,
     pub density_milli: u32,
     /// Previous top-level document, for conservative SameSite cookie checks.
     pub cookie_origin: Option<crate::url::HttpUrl>,
@@ -73,6 +75,7 @@ impl Default for LoadOptions {
             blocking: Arc::new(crate::blocking::Policy::default()),
             viewport_width: 1068,
             viewport_height: 660,
+            media_environment: Some(css::MediaEnvironment::desktop_viewport(1080,660,1.0)),
             density_milli: 1000,
             cookie_origin: None,
             cookie_same_site: None,
@@ -803,6 +806,7 @@ fn load_request_progressively(
         raw.clone()
     };
     let mut document = html::parse(&markup);
+    document.media_environment=options.media_environment;
     let media_node = document_media.as_ref().and_then(|_|document.nodes.iter().enumerate().find_map(|(node,item)|
         (item.namespace==html::Namespace::Html && matches!(&item.kind,NodeKind::Element {tag,..} if tag=="img") && document.attr(node,"id")==Some("media-frame")).then_some(node)));
     document.content_type = document_type;
@@ -3907,3 +3911,7 @@ mod tests {
     }
 
 }
+
+#[cfg(test)]
+#[path="loader_media_query_tests.rs"]
+mod media_query_tests;

@@ -6,6 +6,13 @@ Development priority is shared TLS/trust/data coverage, everyday resource/render
 interaction usability, then finite tabs, link context and new windows. Further
 F6/YouTube work is deferred; completed finite media/interface slices remain.
 
+- Apply finite viewport/hover @media groups with real host CSS dimensions,
+  fractional resize/zoom thresholds and preserved cascade/stylesheet ownership.
+  Count inactive nested blocks for whole-sheet admission and keep initial font
+  use consistent with layout. Conditional font faces, wider query/media-attribute
+  grammar and dynamic/resize font fetching remain unsupported. Original native
+  and App geometry/pixel/link-hit controls cover the bounded behavior; executable
+  offscreen and normal verification remain integration requirements.
 - Give each admitted HTTP redirect hop its full bounded allowance, clipped by
   one overall deadline, so earlier redirects do not consume all time available
   to a later valid handshake. Keep cancellation, same-hop retry, redirect and

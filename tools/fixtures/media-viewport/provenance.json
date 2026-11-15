@@ -1,0 +1,40 @@
+{
+  "method": "Original HTML/CSS fixture without external assets; independently specified original RGB control.",
+  "files": {
+    "page.html": {
+      "bytes": 540,
+      "sha256": "7247c64a5f3ea721252235b575df4d116eedaceb7b09b622be600cbf0c29bf4e"
+    },
+    "base.css": {
+      "bytes": 527,
+      "sha256": "190df59e393f4a3736d8d839644aa678cc170359097888eeaed9940007b31bca"
+    },
+    "conditional.css": {
+      "bytes": 333,
+      "sha256": "ca377f30cef22440349585a571ae566894963cfb196fbefa3c8c3ccead6724bc"
+    }
+  },
+  "control": {
+    "source_dimensions_by_zoom_percent": {
+      "100": [
+        4,
+        4
+      ],
+      "125": [
+        5,
+        5
+      ]
+    },
+    "css_box": [
+      4,
+      4
+    ],
+    "rgb_components": [
+      "(19+41*x+13*y)%251",
+      "(47+17*x+61*y)%251",
+      "(83+73*x+29*y)%251"
+    ],
+    "format": "P6 RGB8",
+    "resampling_reference": false
+  }
+}

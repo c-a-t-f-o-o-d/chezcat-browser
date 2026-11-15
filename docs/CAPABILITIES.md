@@ -4,8 +4,9 @@ Every broad area remains partial. “Verified” below means the specified local
 not complete platform conformance. Source inspection, unit tests, App harness,
 physical desktop/device evidence and live-service outcomes are different scopes.
 
-Current work is shared TLS/trust compatibility and the first ordinary stylesheet-
-loading slice, followed by useful page interaction and finite tabs/new windows.
+Current work is shared TLS/trust compatibility, ordinary stylesheet resources
+and finite viewport-media rendering, followed by useful page interaction and
+finite tabs/new windows.
 About/build identity, one per-user installer and staged release discovery/upgrade
 are planned in the [roadmap](ROADMAP.md), not delivered capabilities. Further
 F6/YouTube work is deferred; completed finite media evidence remains valid.
@@ -19,7 +20,7 @@ F6/YouTube work is deferred; completed finite media evidence remains valid.
 | DOM/interfaces | Real mutation/Attr identity, selectors/collections, base Node/Element ancestry, distinct Image and genuine realm-scoped DOMException | Specialized prototypes/constructors, wider child contexts and DOM APIs missing | src/script_dom_tree.rs, src/script_attr.rs, src/host_objects.rs, src/dom_exception.rs; local namespace/Attr journey and exception originals |
 | JavaScript/realms | Original language/built-ins/promises/jobs, owner-isolated intrinsic roots and replaceable real main-Window animation operations | UTF-16 code units, modules, fetch/XHR and many interfaces incomplete | src/javascript.rs, src/intrinsic_realms.rs, src/promises.rs, src/scripting.rs; normal suite, frozen references and check_animation_harness.py |
 | Events | Genuine owner-realm Event/UIEvent/MouseEvent/CustomEvent constructors, prototypes and stored fields; actual any CustomEvent detail and atomic initialization/publication; synchronous Event/UIEvent/CustomEvent dispatch/cancellation and independent path arrays; standalone EventTarget, Text/Attr paths and native inputs | Mouse dispatch/default activation and native pointer payloads, KeyboardEvent construction and native-input immediate prototypes, child-document factories and shadow retargeting remain unsupported | src/event_interface.rs, src/script_dispatch.rs, src/script_created_events.rs; original Event/UI/Mouse/Custom interface tests and dispatch journey |
-| CSS/layout/geometry | Loaded styles, token selectors, measured supported geometry/scrollHeight, clipping, software paint and one URL background layer on ordinary block/inline-block boxes | Inline-fragment/replaced-element backgrounds, multiple layers, gradients and broader layout/font policy remain incomplete; unsupported reverse/viewport overflow measurements stay explicit | src/css.rs, src/layout.rs, src/script_geometry.rs; stylesheet/render journeys |
+| CSS/layout/geometry | Loaded styles, token selectors, finite host-context viewport/hover media groups, measured supported geometry/scrollHeight, clipping, software paint and one URL background layer on ordinary block/inline-block boxes; original native/App resize/zoom, pixels and link-hit checks | Normal verification remains required for each integration checkpoint. Conditional font faces, dynamic/resize font fetching, wider media-query/attribute grammar, inline-fragment/replaced backgrounds, multiple layers and broader layout remain incomplete; unsupported reverse/viewport overflow measurements stay explicit | src/css.rs, src/css_media.rs, src/layout.rs, src/script_geometry.rs; original media-query/initial-font/App checks and stylesheet/render journeys |
 | External stylesheets | Shared ordinary unmarked HTTP(S) parser/dynamic loading, final CSS provenance and bounded response accounting; broader page usability remains in progress | Per-hop CSP/request/mixed-content, cookie, MIME/CORP/COEP, cache and cancellation rules remain; no general stylesheet CORS, imports or CSSOM source access claim | src/http.rs, src/loader.rs, src/script_stylesheets.rs, src/app_stylesheets.rs; B1 contract and original local request/pixel/lifecycle fixtures |
 | Fonts/images | Original selected font/image decoders and resource/presentation paths | Format subsets and cross-origin font loading need specific contracts | src/fonts.rs, src/image.rs and format modules; original pixel/negative fixtures |
 | Media | Local IVF/VP8 visible fixed-canvas I/P (version-zero single-MV interframes), PCM, constrained Matroska A/V with dependency-aware seeking; one authored IVF or supported Matroska video with source/load lifecycle, script controls and play promises tied to decoded-frame/acknowledged PCM readiness; complete HTTP(S) IVF/Matroska transfers chosen by explicit MIME, with authored CORS/credential modes | SPLITMV, hidden/nonzero-version interframes, WebM/Opus/Vorbis, unmarked foreign media, dynamic crossOrigin controls, streaming/ranges, muted Matroska, multiple players, MSE and YouTube playback missing | src/media.rs, src/audio.rs, src/matroska.rs, src/script_media.rs; local media/source-replacement journeys and check_authored_video_harness.py and check_network_media_harness.py; check_authored_av_harness.py and check_network_authored_av_harness.py |
@@ -51,6 +52,19 @@ strict, and identity, expiry, signatures and constraints are unchanged. Normal
 verification remains required for integration. A coordinated browser recheck
 must establish actual request/resource behavior; these checks alone establish
 no newly usable public service. See [trust scope and refresh](../trust/README.md).
+
+The finite viewport-media slice evaluates nested matching rules against the
+real CSS viewport and explicit desktop mouse-input profile. Original native/App
+checks distinguish full viewport width from available line width, preserve
+fractional zoom thresholds, verify changed geometry/background pixels and real
+link ownership/hit removal, and retain document/source lifetime. Admission
+counts inactive descendants, keeps cascade/stylesheet URL ownership and refuses
+whole sources without publishing prefixes. Initial font-family selection uses
+the same context; nested font faces are not requested, and dynamic/resize font
+fetching remains unsupported. Executable offscreen and full normal integration
+checks are separate required acceptance, not inferred from model tests. This
+does not establish complete page appearance, script-enabled site behavior or
+physical desktop presentation.
 
 The finite CustomEvent interface journey uses two trusted base-input clicks to
 construct and deliver real untrusted notifications, retaining any detail

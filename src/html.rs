@@ -18,6 +18,8 @@ const MAX_DEPTH: usize = 128; // Open-element stack, including the synthetic roo
 pub struct Document {
     /// Host-owned resource policy, never exposed as a document capability.
     pub stylesheet_limits: crate::css::StylesheetLimits,
+    /// Host-only screen context; page script cannot supply viewport or input capabilities.
+    pub media_environment: Option<crate::css::MediaEnvironment>,
     pub title: String,
     /// The committed resource's MIME essence. Synthetic text/image viewers
     /// retain the source type; plain parser callers create HTML documents.
@@ -148,6 +150,7 @@ fn parse_internal(input: &str, context: Option<&str>, scripting: bool) -> Result
     }
     let mut document = Document {
         stylesheet_limits: crate::css::StylesheetLimits::default(),
+        media_environment: None,
         title: String::new(),
         content_type: "text/html".into(),
         scripting_enabled: false,
