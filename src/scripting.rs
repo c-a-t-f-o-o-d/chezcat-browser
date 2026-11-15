@@ -873,6 +873,7 @@ impl Page {
     /// One user action may cause click, input/change and submit/reset. App calls
     /// this once for that entire action, never once per listener or dispatch.
     pub fn begin_job(&mut self) {
+        self.refresh_media_official_position();
         self.runtime.begin_job();
         self.state.host_work = self.state.limits.host_work;
         self.state.copy_work = self.state.limits.copy_bytes;

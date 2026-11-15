@@ -196,3 +196,18 @@ fn native_media_pause_saved_operation_respects_disabled_and_foreign_callers() {
     eval(&mut p,&mut doc,&mut forms,"savedPause.call(video);if(!video.paused)throw 'native owner recovery';");
     assert!(p.media_pause().is_some());
 }
+
+#[test]
+fn native_media_current_time_is_official_and_stable_within_job_and_microtasks() {
+    let(mut doc,mut forms,mut p,_)=page();
+    // Real elapsed physical time advances between jobs. The script itself and
+    // its queued checkpoint see one official sample without relying on sleeps.
+    eval(&mut p,&mut doc,&mut forms,"var official=video.currentTime;for(var i=0;i<1000;i++){if(video.currentTime!==official)throw 'moving official position';}queueMicrotask(function(){if(video.currentTime!==official)throw 'moving checkpoint position';});");
+    let before=p.state.media_changes.official_position;
+    let snapshot=p.state.embedded_video.as_mut().unwrap();
+    snapshot.position=Duration::from_millis(1750);
+    snapshot.observed=Instant::now();
+    eval(&mut p,&mut doc,&mut forms,"if(video.currentTime<1.75||video.currentTime===official)throw 'new stable state did not refresh';video.pause();var frozenOfficial=video.currentTime;if(!video.paused||video.currentTime!==frozenOfficial)throw 'pause official update';");
+    assert!(p.state.media_changes.official_position>before);
+    assert_eq!(p.state.media_changes.official_position,p.media_pause().unwrap().position.as_secs_f64());
+}

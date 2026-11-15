@@ -26,6 +26,10 @@ pub(super) struct Pending {
 }
 #[derive(Default)]
 pub(super) struct Changes {
+    // Official position is sampled once per execution job. Physical time may
+    // continue to advance, but repeated script reads cannot observe wall time
+    // passing within the same script/listener microtask checkpoint.
+    official_position: f64,
     next: u64,
     prepared: Option<Prepared>,
     pub(super) pending: Option<Pending>,
@@ -194,6 +198,11 @@ queueMicrotask(function(){if(video.networkState!==2||video.currentSrc.indexOf('s
     }
 }
 impl Page {
+    pub(super) fn refresh_media_official_position(&mut self) {
+        self.state.media_changes.official_position = self.state.embedded_video
+            .as_ref().map_or(0.0, |snapshot| snapshot.position().as_secs_f64());
+    }
+
     pub(crate) fn media_pause(&self) -> Option<&PauseRequest> { self.state.media_changes.pause.as_ref() }
     pub(crate) fn mark_media_pause_applied(&mut self) { if let Some(p)=&mut self.state.media_changes.pause {p.applied=true;} }
     pub(crate) fn take_media_pause_task(&mut self) -> Option<PauseRequest> {
@@ -393,6 +402,7 @@ impl Bridge<'_> {
         snapshot.seeking = false;
         snapshot.ready = 0;
         snapshot.network = 3;
+        self.state.media_changes.official_position = 0.0;
         self.state.media_changes.ready = None;
         self.state.media_changes.pause = None;
         self.state.media_changes.pending = Some(pending);
@@ -503,6 +513,7 @@ impl Bridge<'_> {
         self.state.media_changes.pause=Some(request);
         let snapshot=self.state.embedded_video.as_mut().unwrap();
         snapshot.position=position;snapshot.observed=issued;snapshot.playing=false;snapshot.paused=true;
+        self.state.media_changes.official_position=position.as_secs_f64();
         Ok(Value::Undefined)
     }
     pub(super) fn media_handler_event<'a>(
@@ -569,7 +580,7 @@ impl Bridge<'_> {
             "videoWidth" => Value::Number(f64::from(s.width)),
             "videoHeight" => Value::Number(f64::from(s.height)),
             "duration" => Value::Number(s.duration.map_or(f64::NAN, |d| d.as_secs_f64())),
-            "currentTime" => Value::Number(s.position().as_secs_f64()),
+            "currentTime" => Value::Number(self.state.media_changes.official_position),
             "paused" => Value::Bool(s.paused),
             "ended" => Value::Bool(s.ended),
             "seeking" => Value::Bool(s.seeking),
