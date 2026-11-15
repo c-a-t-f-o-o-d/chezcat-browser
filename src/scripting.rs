@@ -310,6 +310,8 @@ impl LocationView {
 }
 
 struct State {
+    background_pending: bool,
+    background_tracking: bool,
     blank_frames: Vec<script_blank_frames::BlankFrame>,
     blank_frame_nodes: usize,
     geometry: Option<crate::script_geometry::Geometry>,
@@ -451,6 +453,8 @@ impl State {
             executed: 0,
             enabled: false,
             ready: "loading",
+            background_pending: false,
+            background_tracking: false,
             document_complete: false,
             last_activation: None,
             navigation_incumbent: Some(WINDOW),
@@ -1323,6 +1327,23 @@ impl Page {
         }
     }
 
+    pub(crate) fn set_background_pending(&mut self, pending: bool) {
+        self.state.background_tracking = true;
+        self.state.background_pending = pending;
+    }
+
+    // Real App resource callbacks can change the cascade before window load.
+    // Reserve its rescan; standalone Page callers retain their existing contract.
+    pub(super) fn defer_backgrounds_for_layout(&mut self, changed: bool) {
+        if self.state.background_tracking && changed { self.state.background_pending = true; }
+    }
+
+    pub(crate) fn finish_background_loading(&mut self, doc: &mut Document, forms: &mut Forms) -> Outcome {
+        if !self.state.background_pending && self.state.dynamic.load_ready {
+            self.finish_loading(doc, forms)
+        } else { Outcome::default() }
+    }
+
     /// The later resource-completion task fires load at most once. Stopping or
     /// replacing a load does not call this method for the abandoned document.
     pub fn finish_loading(&mut self, doc: &mut Document, forms: &mut Forms) -> Outcome {
@@ -1330,7 +1351,7 @@ impl Page {
             return Outcome::default();
         }
         self.state.dynamic.load_ready = true;
-        if self.state.dynamic.in_flight != 0 || self.state.stylesheets.in_flight != 0
+        if self.state.background_pending || self.state.dynamic.in_flight != 0 || self.state.stylesheets.in_flight != 0
             || self.state.embedded_video.as_ref().is_some_and(|video|video.load_pending)
             || self.state.images.entries.values().any(|entry| entry.pending) {
             return Outcome::default();
@@ -2251,12 +2272,11 @@ impl Bridge<'_> {
             return Err(format!("Inline style exceeds {} KiB.", self.state.limits.host.string_bytes / 1024).into());
         }
         self.state.copies(style.len())?;
-        let value = style
-            .split(';')
+        let value = crate::css::declaration_items(style)
             .filter_map(|item| item.split_once(':'))
             .filter(|(key, _)| key.trim().eq_ignore_ascii_case(name))
-            .map(|(_, value)| value.trim().split('!').next().unwrap_or("").trim())
-            .next_back()
+            .map(|(_, value)| crate::css::declaration_priority(value).0)
+            .last()
             .unwrap_or("")
             .to_owned();
         self.string(&value)
@@ -2269,7 +2289,7 @@ impl Bridge<'_> {
         value: &str,
         priority: &str,
     ) -> Result<(), String> {
-        validate_css_value(value, matches!(name, "font" | "font-family"), self.state.limits.host.string_bytes)?;
+        validate_css_value(name, value, self.state.limits.host.string_bytes)?;
         if !priority.is_empty() && !priority.eq_ignore_ascii_case("important") {
             return Err("CSS priority must be empty or important.".into());
         }
@@ -2279,7 +2299,7 @@ impl Bridge<'_> {
         }
         self.state.copies(existing.len())?;
         let mut style = String::new();
-        for item in existing.split(';').filter(|item| !item.trim().is_empty()) {
+        for item in crate::css::declaration_items(existing).filter(|item| !item.trim().is_empty()) {
             if item
                 .split_once(':')
                 .is_some_and(|(key, _)| key.trim().eq_ignore_ascii_case(name))
@@ -4457,6 +4477,10 @@ fn css_name(name: &str) -> Result<String, String> {
             | "color"
             | "background"
             | "background-color"
+            | "background-image"
+            | "background-repeat"
+            | "background-position"
+            | "background-size"
             | "font"
             | "font-family"
             | "font-size"
@@ -4509,7 +4533,25 @@ fn css_name(name: &str) -> Result<String, String> {
     }
     Ok(css)
 }
-fn validate_css_value(value: &str, allow_font_quotes: bool, string_limit: usize) -> Result<(), String> {
+fn validate_css_value(name: &str, value: &str, string_limit: usize) -> Result<(), String> {
+    if name == "background-image" {
+        // Reuse the genuine single-image parser. Shared declaration boundaries
+        // preserve semicolons and bangs inside URL payloads. Escaped mutation
+        // values retain the bridge's explicit finite-subset refusal.
+        if value.len() > string_limit || value.chars().any(|ch| {
+            ch.is_control() && !ch.is_ascii_whitespace()
+                || ch == '\\'
+        }) {
+            return Err("Background image mutation exceeds the string bound or contains unsupported controls/escapes.".into());
+        }
+        let keyword = value.trim();
+        if keyword.is_empty() || ["none", "inherit", "initial", "unset"].iter().any(|word| keyword.eq_ignore_ascii_case(word))
+            || crate::css::background_image_url(value).is_some() {
+            return Ok(());
+        }
+        return Err("Background image mutation requires one supported URL or background-image keyword.".into());
+    }
+    let allow_font_quotes = matches!(name, "font" | "font-family");
     if value.len() > string_limit
         || value.chars().any(|ch| {
             ch.is_control() && !ch.is_ascii_whitespace()
@@ -4543,23 +4585,25 @@ fn validate_css_value(value: &str, allow_font_quotes: bool, string_limit: usize)
     Ok(())
 }
 fn validate_style(style: &str, string_limit: usize) -> Result<(), String> {
-    for item in style.split(';').filter(|item| !item.trim().is_empty()) {
+    let mut items = crate::css::declaration_items(style);
+    for item in items.by_ref().filter(|item| !item.trim().is_empty()) {
         let (name, value) = item
             .split_once(':')
             .ok_or("Style declaration needs a colon.")?;
         let name = css_name(name.trim())?;
-        validate_css_value(
-            value.trim(),
-            matches!(name.as_str(), "font" | "font-family"),
-            string_limit,
-        )?;
+        validate_css_value(&name, value.trim(), string_limit)?;
     }
+    if !items.complete() { return Err("Inline style has an unterminated string or function.".into()); }
     Ok(())
 }
 
 #[cfg(test)]
 #[path = "script_compat_tests.rs"]
 mod compatibility_tests;
+
+#[cfg(test)]
+#[path = "script_background_style_tests.rs"]
+mod background_style_tests;
 
 #[cfg(test)]
 mod tests {

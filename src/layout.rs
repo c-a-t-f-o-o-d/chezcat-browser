@@ -24,6 +24,10 @@ const MAX_POSITIONED: usize = 2_048;
 #[path="layout_scroll.rs"]
 mod scrolling;
 
+#[cfg(test)]
+#[path = "layout_background_tests.rs"]
+mod background_tests;
+
 fn clipped_bottom(x: i32, y: i32, width: i32, height: i32, clip: Option<ClipRect>) -> Option<i32> {
     // Preserve zero-width layout extents when they are not clipped.
     let Some(clip) = clip else {
@@ -99,6 +103,7 @@ struct BoxRecord {
     padding: [i32; 4],
     border: [i32; 4],
     background: Option<usize>,
+    background_image: Option<usize>,
     borders: [Option<usize>; 4],
     hit_box: Option<usize>,
     flex: Option<FlexGroup>,
@@ -185,6 +190,17 @@ pub enum PaintItem {
     },
     Text(usize),
     Control(usize),
+    /// A block decoration, independent of replaced-image atoms and intrinsic size.
+    Background {
+        node: usize,
+        x: i32,
+        y: i32,
+        width: i32,
+        height: i32,
+        image: css::BackgroundImage,
+        presentation: crate::paint::BackgroundPresentation,
+        border: [i32; 4],
+    },
     Image {
         node: usize,
         x: i32,
@@ -350,6 +366,7 @@ impl Layout {
             }
             match &mut self.items[index] {
                 PaintItem::Rect { y, .. }
+                | PaintItem::Background { y, .. }
                 | PaintItem::Image { y, .. }
                 | PaintItem::HitBox { y, .. } => *y += delta,
                 _ => {}
@@ -405,7 +422,7 @@ impl Layout {
             if self.paint_clip(index).is_some_and(|clip|!clip.contains(x,y)){continue;}
             let rect=match item {
                 PaintItem::Image {node:owner,x:left,y:top,width,height,..}=>{if ClipRect::new(*left,*top,*width,*height).contains(x,y){return *owner==node;}continue;},
-                PaintItem::Rect {x,y,width,height,..}=>ClipRect::new(*x,*y,*width,*height),
+                PaintItem::Rect {x,y,width,height,..} | PaintItem::Background {x,y,width,height,..}=>ClipRect::new(*x,*y,*width,*height),
                 PaintItem::HitBox {x,y,width,height,link,control}=>{if link.is_none()&&control.is_none(){continue;}ClipRect::new(*x,*y,*width,*height)},
                 PaintItem::Text(i)=>{let r=&self.runs[*i];ClipRect::new(r.x,r.y,r.width(),r.height())},
                 PaintItem::Control(i)=>{let r=&self.controls[*i];ClipRect::new(r.x,r.y,r.width,r.height)},
@@ -1488,7 +1505,8 @@ impl Engine<'_> {
                     width,
                     height,
                     ..
-                } => (
+                }
+                | PaintItem::Background { x, y, width, height, .. } => (
                     HitRegion {
                         x: *x,
                         y: *y,
@@ -1935,6 +1953,7 @@ impl Engine<'_> {
         let background = style
             .background
             .and_then(|color| self.rect(x, y, outer_width, 0, color));
+        let background_image = self.background_image(index, style, x, y, outer_width, 0, border);
         let borders: [Option<usize>; 4] = std::array::from_fn(|side| {
             if border[side] > 0 {
                 self.rect(x, y, 0, 0, colors[side])
@@ -2065,6 +2084,9 @@ impl Engine<'_> {
         if let Some(item) = background {
             self.set_rect(item, x, y, outer_width, outer_height);
         }
+        if let Some(item) = background_image {
+            self.set_background_rect(item, x, y, outer_width, outer_height);
+        }
         if let Some(item) = hit_box {
             if let PaintItem::HitBox { height, .. } = &mut self.layout.items[item] {
                 *height = outer_height;
@@ -2092,6 +2114,7 @@ impl Engine<'_> {
             padding,
             border,
             background,
+            background_image,
             borders,
             hit_box,
             flex,
@@ -2313,6 +2336,7 @@ impl Engine<'_> {
                 if let Some(mut content) = self.spans[node] {
                     if let Some(record) = &self.boxes[node] {
                         content.start.items += usize::from(record.background.is_some())
+                            + usize::from(record.background_image.is_some())
                             + record.borders.iter().filter(|n| n.is_some()).count()
                             + usize::from(record.hit_box.is_some());
                         content.end.boxes =
@@ -2410,6 +2434,7 @@ impl Engine<'_> {
         for item in &mut self.layout.items[span.start.items..span.end.items] {
             match item {
                 PaintItem::Rect { x, y, .. }
+                | PaintItem::Background { x, y, .. }
                 | PaintItem::Image { x, y, .. }
                 | PaintItem::HitBox { x, y, .. } => {
                     shift(x, dx);
@@ -3160,6 +3185,9 @@ impl Engine<'_> {
             + record.border[2];
         if let Some(item) = record.background {
             self.set_rect(item, record.x, record.y, outer_width, outer_height);
+        }
+        if let Some(item) = record.background_image {
+            self.set_background_rect(item, record.x, record.y, outer_width, outer_height);
         }
         if let Some(item) = record.hit_box {
             if let PaintItem::HitBox { width, height, .. } = &mut self.layout.items[item] {
@@ -4148,6 +4176,21 @@ impl Engine<'_> {
         self.separate(" ");
     }
 
+    fn background_presentation(&self, style: &Style) -> crate::paint::BackgroundPresentation {
+        crate::paint::BackgroundPresentation {
+            size: style.background_size,
+            repeat: style.background_repeat,
+            position: style.background_position.map(|position| {
+                (
+                    position.fraction,
+                    self.length(position.offset, 0, style).unwrap_or(0) as f32,
+                )
+            }),
+            scale: self.zoom,
+            rendering: style.image_rendering,
+        }
+    }
+
     fn image_presentation(&self, node: usize, style: &Style) -> crate::paint::ImagePresentation {
         let natural = self.image_sizes.get(&node).copied().unwrap_or((0, 0));
         crate::paint::ImagePresentation {
@@ -4416,6 +4459,39 @@ impl Engine<'_> {
             color,
         });
         Some(index)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn background_image(
+        &mut self,
+        node: usize,
+        style: &Style,
+        x: i32,
+        y: i32,
+        width: i32,
+        height: i32,
+        border: [i32; 4],
+    ) -> Option<usize> {
+        if self.layout.items.len() >= MAX_ITEMS {
+            return None;
+        }
+        let image = style.background_image.as_ref()?.clone();
+        let index = self.layout.items.len();
+        self.layout.items.push(PaintItem::Background {
+            node, x, y, width, height, image,
+            presentation: self.background_presentation(style),
+            border,
+        });
+        Some(index)
+    }
+
+    fn set_background_rect(&mut self, item: usize, x: i32, y: i32, width: i32, height: i32) {
+        if let PaintItem::Background { x: rx, y: ry, width: rw, height: rh, .. } = &mut self.layout.items[item] {
+            *rx = x;
+            *ry = y;
+            *rw = width.max(0);
+            *rh = height.max(0);
+        }
     }
 
     fn set_rect(&mut self, item: usize, x: i32, y: i32, width: i32, height: i32) {

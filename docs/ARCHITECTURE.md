@@ -6,6 +6,13 @@ parsing builds document/style state, and the JavaScript runtime invokes explicit
 branded host capabilities. Layout produces paint items for the software renderer.
 Windows APIs provide window/input/presentation and low-level audio output.
 
+A supported CSS background URL retains the winning declaration's stylesheet owner
+and final redirected base. Backgrounds reuse the image worker and resource policies
+with a separate binding slot and bitmap map, keeping replaced-image state and
+natural dimensions independent. Block decorations share normal layout, clip,
+paint and input-occlusion rules. Initial and callback-selected background work
+participates in the real App document-load checkpoint.
+
 The application is one Windows process with worker threads. There is no OS
 renderer sandbox or separate untrusted-process boundary. Rust safety does not
 prove FFI, cryptography, resource policy or availability correctness.

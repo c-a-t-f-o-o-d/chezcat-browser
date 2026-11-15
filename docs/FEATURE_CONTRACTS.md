@@ -209,6 +209,42 @@ sections9–10 and16–18. Viewing-format conversion is explicit under section5.
 Container, audio and network contracts remain separate: no new WebM/audio codec,
 authored element audio, range streaming, MSE, or public-service acceptance.
 
+## C1 — a CSS image path through the shared renderer
+
+Outcome: the selected single URL background layer reaches ordinary block and
+inline-block boxes through real cascade, stylesheet-relative resolution, image
+policy, decoding, layout and painting. Supported longhands are image URL/none,
+repeat/no-repeat/repeat-x/repeat-y, finite position syntax and size auto/contain/
+cover. The existing color-only shorthand resets these noninherited values.
+URL/compound shorthands, gradients, multiple layers, inline fragments, replaced
+element decoration, row-only decoration and background animation remain outside
+this slice. No full CSS or live-page screenshot parity is implied.
+
+Preserve raw URL case and the winning declaration's source owner, including
+redirected external stylesheets and reentrant source changes. Reuse exact-origin,
+CSP, local-root, image-preference, decode and retained-image policy. Separate
+worker slots prevent background cancellation from canceling an element image on
+the same owner. Backgrounds have no natural layout dimensions or invented link/
+control target. Checked on-demand request storage and a host policy of65,536
+attempts per document bound this path; small profiles test denial without contact,
+no automatic retry, checked ID exhaustion and fresh-document recovery.
+
+Painting uses the existing alpha/filter primitives and only visible surface
+pixels, without a scaled bitmap or tile-list allocation. Padding-box positioning,
+border-box clipping, negative offsets, repetition, zoom, flex/table resize,
+ancestor clipping, positioned/fixed movement and conservative box occlusion have
+original checks. Real App cases cover script-disabled pages, image independence,
+policy refusal, source replacement, Stop/navigation and held stale responses.
+Startup and stylesheet/image/script callbacks cannot finish window load before
+their actual selected image work settles.
+
+The original loopback executable fixture checks case-sensitive stylesheet-relative
+requests, exact MIME/body hashes, independent asymmetric control/background pixels,
+unchanged measured geometry and paired document/layout/canvas evidence. It uses
+App input and offscreen painting; physical-desktop, live-service and complete CSS
+conformance remain separate. See tools/fixtures/css-background/provenance.json.
+Semantic reference: [CSS Backgrounds and Borders](https://www.w3.org/TR/css-backgrounds-3/).
+
 Every later feature records semantic references, original and selected conformance
 tests, security review, native/device/live checks still pending and exact final
 source/executable identity. Release notes describe only proven behavior.

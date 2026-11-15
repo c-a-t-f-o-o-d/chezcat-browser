@@ -18,7 +18,7 @@ struct Job {
 struct Completion {
     epoch: u64,
     request: DynamicStylesheet,
-    result: Result<String, String>,
+    result: Result<(String, Location), String>,
     events: Vec<String>,
 }
 
@@ -140,7 +140,7 @@ fn fetch(
     trust: &crate::trust::Store,
     cookies: Arc<crate::cookies::Session>,
     events: &mut Vec<String>,
-) -> Result<String, String> {
+) -> Result<(String, Location), String> {
     if let Some(error) = &job.request.error {
         return Err(error.clone());
     }
@@ -202,7 +202,9 @@ fn fetch(
         source.len(),
         response.url.display()
     ));
-    Ok(source)
+    Ok((source, Location {
+        url: Some(response.url), path: None, root: None, fragment: String::new(),
+    }))
 }
 
 impl App {
@@ -222,8 +224,10 @@ impl App {
         let mut changed = false;
         for node in removals {
             changed |= self.styles.remove(&node).is_some();
+            self.style_bases.remove(&node);
         }
         if changed {
+            if let Some(page) = &mut self.scripting { page.set_background_pending(true); }
             self.reflow();
         }
     }
@@ -248,8 +252,10 @@ impl App {
         let mut restyle = false;
         for node in removed {
             restyle |= self.styles.remove(&node).is_some();
+            self.style_bases.remove(&node);
         }
         if restyle {
+            if let Some(page) = &mut self.scripting { page.set_background_pending(true); }
             self.reflow();
             changed = true;
         }
@@ -294,6 +300,10 @@ impl App {
         let Some(completion) = self.dynamic_stylesheets.as_ref().and_then(Worker::poll) else {
             return false;
         };
+        self.accept_dynamic_stylesheet(completion)
+    }
+
+    fn accept_dynamic_stylesheet(&mut self, completion: Completion) -> bool {
         if completion.epoch != self.script_epoch {
             return false;
         }
@@ -306,10 +316,15 @@ impl App {
     fn finish_dynamic_stylesheet(
         &mut self,
         request: &DynamicStylesheet,
-        result: Result<String, String>,
+        result: Result<(String, Location), String>,
     ) {
         let Some(page) = &mut self.scripting else {
             return;
+        };
+        let owned = page.accepts_dynamic_stylesheet(&self.document, request);
+        let (result, base) = match result {
+            Ok((source, base)) => (Ok(source), Some(base)),
+            Err(error) => (Err(error), None),
         };
         let outcome = page.complete_dynamic_stylesheet(
             &mut self.document,
@@ -318,7 +333,25 @@ impl App {
             request,
             result,
         );
-        if outcome.layout_changed {
+        // Handlers may have committed another LINK mutation. Consume its
+        // existing removal before this completion reflows/selects backgrounds.
+        let mut removed = false;
+        for node in page.take_stylesheet_removals() {
+            removed |= self.styles.remove(&node).is_some();
+            self.style_bases.remove(&node);
+        }
+        if removed { page.set_background_pending(true); }
+        // Completion can synchronously run author handlers which replace or
+        // remove this LINK. Never publish the previous request's base after
+        // that mutation, or after a stale/admission-failed completion.
+        if owned && page.owns_dynamic_stylesheet(request) {
+            if self.styles.contains_key(&request.node) {
+                if let Some(base) = base { self.style_bases.insert(request.node, base); }
+            } else {
+                self.style_bases.remove(&request.node);
+            }
+        }
+        if outcome.layout_changed || removed {
             self.reflow();
         }
         self.validate_control_focus();
@@ -397,6 +430,10 @@ mod tests {
                                 "#target{display:block;width:123px;height:22px;color:#123456}".to_owned()
                             }
                             "/next.css" => { mime="text/css"; "#target{display:block;width:77px;height:19px}".to_owned() }
+                            "/base-redirect.css" => {
+                                status="302 Found"; headers="Location: /assets/theme.css\r\n".into(); String::new()
+                            }
+                            "/assets/theme.css" => { mime="text/css"; "#target{display:block;width:131px;height:21px}".to_owned() }
                             "/bad.css" => "<p>This is HTML, not CSS</p>".to_owned(),
                             "/redirect.css" => {
                                 status="302 Found";
@@ -405,6 +442,24 @@ mod tests {
                             }
                             "/forbidden.css" => { mime="text/css"; "#target{width:999px}".to_owned() }
                             "/fresh" => "<title>Fresh document</title><p>Fresh</p>".to_owned(),
+                            "/held-document" => {
+                                let _=held.1.wait_timeout_while(held.0.lock().unwrap(),Duration::from_secs(8),|open|!*open).unwrap();
+                                "<!doctype html><title>Held document committed</title><p>No old background or callbacks.</p>".to_owned()
+                            }
+                            "/startup-background"|"/image-background"|"/script-background" => callback_background_page(&path),
+                            "/background-callback.js" => {mime="text/javascript";"var originalBackgroundScript=1;".to_owned()}
+                            "/ready.ppm" => {mime="image/x-portable-pixmap";"P6\n1 1\n255\n\x64\0\0".to_owned()}
+                            "/error-background" => r#"<!doctype html><html><head><title>Waiting for error background</title></head><body><div id="target" style="display:block;width:64px;height:48px">Pending background</div><script>
+var bgWindowLoads=0,bgErrors=0;
+window.onload=function(){bgWindowLoads++;if(bgErrors!==1)throw 'stylesheet error must precede window load';document.title='Error background loaded';};
+var sheet=document.createElement('link');sheet.rel='stylesheet';sheet.href='/bad.css';
+sheet.onerror=function(){bgErrors++;document.getElementById('target').setAttribute('style','display:block;width:64px;height:48px;background-image:url(/error-background.ppm)');};
+document.head.appendChild(sheet);
+</script></body></html>"#.to_owned(),
+                            "/error-background.ppm" => {
+                                let _=held.1.wait_timeout_while(held.0.lock().unwrap(),Duration::from_secs(8),|open|!*open).unwrap();
+                                mime="image/x-portable-pixmap";"P6\n1 1\n255\n\x64\0\0".to_owned()
+                            }
                             "/blocked" | "/cross" | "/mime" | "/redirect" | "/integrity" => {
                                 let href = match path.as_str() {
                                     "/cross" => format!("http://localhost:{}/forbidden.css", address.port()),
@@ -544,6 +599,7 @@ document.head.appendChild(sheet);
                 app.events
             );
             assert!(app.styles.is_empty(), "{path}");
+            assert!(app.style_bases.is_empty(), "{path}: refused source acquired provenance");
             assert!(!site
                 .requests
                 .lock()
@@ -653,6 +709,193 @@ document.head.appendChild(sheet);
         app.navigate_location(site.location("/refused-font"),true);wait(&mut app,|app|!app.is_loading());
         assert!(!site.requests.lock().unwrap().iter().any(|path|path=="/forbidden.woff"));
         assert!(!crate::css::stylesheet_diagnostics(&app.document,&app.styles).is_empty());
+    }
+
+    fn queue_base_change(app: &mut App, source: &str) {
+        let outcome=app.scripting.as_mut().unwrap().console_eval(&mut app.document,&mut app.forms,source);
+        assert_eq!(outcome.errors,0,"{}",app.scripting.as_ref().unwrap().report());
+        if outcome.layout_changed {app.reflow();}
+        app.process_stylesheet_requests();
+    }
+    fn take_base_completion(app: &App) -> Completion {
+        let deadline=Instant::now()+Duration::from_secs(6);
+        loop {
+            if let Some(completion)=app.dynamic_stylesheets.as_ref().unwrap().poll() {return completion;}
+            assert!(Instant::now()<deadline,"real stylesheet completion timed out");
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
+    fn assert_base(app:&App,node:usize,expected:&Location) {
+        let base=app.style_bases.get(&node).expect("accepted stylesheet base");
+        assert_eq!(base.url,expected.url);assert!(base.path.is_none()&&base.root.is_none()&&base.fragment.is_empty());
+        assert!(app.styles.contains_key(&node));
+    }
+    #[test]
+    fn dynamic_stylesheet_final_redirect_base_survives_application_and_clears_on_removal() {
+        let site=Site::new();let mut app=open(&site,"/home");wait(&mut app,|app|!app.is_loading());
+        let node=*app.styles.keys().next().unwrap();assert_base(&app,node,&site.location("/sheet.css"));
+        queue_base_change(&mut app,"sheet.onload=null;sheet.href='/base-redirect.css';");
+        let completion=take_base_completion(&app);
+        assert_eq!(completion.result.as_ref().unwrap().1.url,site.location("/assets/theme.css").url);
+        assert!(app.accept_dynamic_stylesheet(completion));
+        assert_base(&app,node,&site.location("/assets/theme.css"));
+        assert!(site.requests.lock().unwrap().iter().any(|path|path=="/base-redirect.css"));
+        assert!(site.requests.lock().unwrap().iter().any(|path|path=="/assets/theme.css"));
+        eval(&mut app,"sheet.disabled=true;");
+        assert!(!app.styles.contains_key(&node)&&!app.style_bases.contains_key(&node));
+    }
+    #[test]
+    fn dynamic_stylesheet_stale_success_cannot_overwrite_new_generation_or_document_base() {
+        let site=Site::new();let mut app=open(&site,"/home");wait(&mut app,|app|!app.is_loading());
+        let node=*app.styles.keys().next().unwrap();
+        queue_base_change(&mut app,"sheet.onload=null;sheet.href='/base-redirect.css';");
+        let older=take_base_completion(&app);
+        queue_base_change(&mut app,"sheet.href='/next.css';");
+        let newer=take_base_completion(&app);assert_ne!(older.request.generation,newer.request.generation);
+        assert!(app.accept_dynamic_stylesheet(newer));assert_base(&app,node,&site.location("/next.css"));
+        let css=app.styles[&node].clone();assert!(app.accept_dynamic_stylesheet(older));
+        assert_base(&app,node,&site.location("/next.css"));assert_eq!(app.styles[&node],css);
+        queue_base_change(&mut app,"sheet.href='/base-redirect.css';");let old_document=take_base_completion(&app);
+        app.navigate_location(site.location("/fresh"),true);wait(&mut app,|app|!app.is_loading());
+        assert!(!app.accept_dynamic_stylesheet(old_document));
+        assert!(app.styles.is_empty()&&app.style_bases.is_empty());assert_eq!(app.document.title,"Fresh document");
+    }
+    #[test]
+    fn dynamic_stylesheet_load_callback_replacement_cannot_publish_previous_base() {
+        let site=Site::new();let mut app=open(&site,"/home");wait(&mut app,|app|!app.is_loading());
+        let node=*app.styles.keys().next().unwrap();
+        queue_base_change(&mut app,"sheet.onload=function(){sheet.onload=null;sheet.href='/next.css';};sheet.href='/base-redirect.css';");
+        let completion=take_base_completion(&app);assert!(app.accept_dynamic_stylesheet(completion));
+        // The genuine load handler has committed a new generation. Its old
+        // text/base must be absent before App reflow can select background URLs.
+        assert!(!app.styles.contains_key(&node)&&!app.style_bases.contains_key(&node));
+        app.process_stylesheet_requests();let next=take_base_completion(&app);
+        assert!(app.accept_dynamic_stylesheet(next));assert_base(&app,node,&site.location("/next.css"));
+        assert_eq!(app.scripting.as_ref().unwrap().error_count(),0);
+    }
+
+    #[test]
+    fn stylesheet_error_added_background_delays_window_load_until_real_image_completion() {
+        let site=Site::new();let mut app=open(&site,"/error-background");
+        wait(&mut app,|_|site.requests.lock().unwrap().iter().any(|path|path=="/error-background.ppm"));
+        assert_eq!(site.requests.lock().unwrap().iter().filter(|path|path.as_str()=="/bad.css").count(),1);
+        assert_eq!(site.requests.lock().unwrap().iter().filter(|path|path.as_str()=="/error-background.ppm").count(),1);
+        assert_eq!(app.pending_backgrounds.len(),1);assert!(app.backgrounds.is_empty());
+        assert_eq!(app.document.title,"Waiting for error background","window load ran while the actual image body was held");
+        eval(&mut app,"if(bgErrors!==1||bgWindowLoads!==0)throw 'background error-handler load barrier';");
+        site.release();wait(&mut app,|app|!app.is_loading());
+        assert_eq!(app.document.title,"Error background loaded");
+        eval(&mut app,"if(bgErrors!==1||bgWindowLoads!==1)throw 'one actual window load';");
+        assert!(app.pending_backgrounds.is_empty());assert_eq!(app.backgrounds.len(),1);
+        let bitmap=app.backgrounds.values().next().unwrap();assert_eq!((bitmap.width,bitmap.height),(1,1));assert_eq!(bitmap.pixels,[0xff640000]);
+        assert!(app.draw().pixels.contains(&0x640000));
+        for _ in 0..4 {app.poll_load();}
+        assert_eq!(site.requests.lock().unwrap().iter().filter(|path|path.as_str()=="/error-background.ppm").count(),1);
+        eval(&mut app,"if(bgWindowLoads!==1)throw 'repeated window load';");
+        assert_eq!(app.scripting.as_ref().unwrap().error_count(),1,"only the genuine bad stylesheet MIME error is expected");
+    }
+
+    fn callback_background_page(path:&str)->String {
+        let trigger=match path {
+            "/startup-background"=>"addHeldBackground();",
+            "/image-background"=>"var img=document.createElement('img');img.onload=function(){addHeldBackground();};img.src='/ready.ppm';document.body.appendChild(img);",
+            "/script-background"=>"var s=document.createElement('script');s.onload=function(){if(originalBackgroundScript!==1)throw 'actual script payload';addHeldBackground();};s.src='/background-callback.js';document.head.appendChild(s);",
+            _=>panic!("unknown original background callback fixture"),
+        };
+        r#"<!doctype html><html><head><title>Waiting for callback background</title></head><body><div id="target" style="display:block;width:64px;height:48px">Pending background</div><script>
+var bgWindowLoads=0,bgHandlers=0;
+function addHeldBackground(){bgHandlers++;document.getElementById('target').setAttribute('style','display:block;width:64px;height:48px;background-image:url(/error-background.ppm)');}
+window.onload=function(){bgWindowLoads++;if(bgHandlers!==1)throw 'callback before window load';document.title='Callback background loaded';};
+ORIGINAL_TRIGGER
+</script></body></html>"#.replace("ORIGINAL_TRIGGER",trigger)
+    }
+    fn assert_callback_background_guard(path:&str,preceding:Option<&str>) {
+        let site=Site::new();let mut app=open(&site,path);
+        wait(&mut app,|_|site.requests.lock().unwrap().iter().any(|request|request=="/error-background.ppm"));
+        if let Some(preceding)=preceding {
+            assert_eq!(site.requests.lock().unwrap().iter().filter(|request|request.as_str()==preceding).count(),1);
+        }
+        if path=="/image-background" {
+            assert_eq!(app.images.len(),1,"the original image event must follow genuine decoding");
+            let bitmap=app.images.values().next().unwrap();assert_eq!((bitmap.width,bitmap.height),(1,1));assert_eq!(bitmap.pixels,[0xff640000]);
+        }
+        assert_eq!(app.pending_backgrounds.len(),1);assert!(app.backgrounds.is_empty());
+        assert_eq!(app.document.title,"Waiting for callback background","{path}: early window load");
+        eval(&mut app,"if(bgHandlers!==1||bgWindowLoads!==0)throw 'actual callback background barrier';");
+        site.release();wait(&mut app,|app|!app.is_loading());
+        assert_eq!(app.document.title,"Callback background loaded");
+        eval(&mut app,"if(bgHandlers!==1||bgWindowLoads!==1)throw 'one callback and window load';");
+        assert_eq!(app.backgrounds.len(),1);assert!(app.pending_backgrounds.is_empty());
+        let bitmap=app.backgrounds.values().next().unwrap();assert_eq!((bitmap.width,bitmap.height),(1,1));assert_eq!(bitmap.pixels,[0xff640000]);
+        assert!(app.draw().pixels.contains(&0x640000));
+        for _ in 0..4 {app.poll_load();}
+        assert_eq!(site.requests.lock().unwrap().iter().filter(|request|request.as_str()=="/error-background.ppm").count(),1);
+        eval(&mut app,"if(bgWindowLoads!==1)throw 'repeated callback window load';");
+        assert_eq!(app.scripting.as_ref().unwrap().error_count(),0,"{path}: {}",app.scripting.as_ref().unwrap().report());
+    }
+    #[test]
+    fn startup_script_added_background_precedes_window_load_after_real_decode() {
+        assert_callback_background_guard("/startup-background",None);
+    }
+    #[test]
+    fn stopped_background_wait_never_resumes_abandoned_window_load() {
+        let site=Site::new();let mut app=open(&site,"/startup-background");
+        wait(&mut app,|_|site.requests.lock().unwrap().iter().any(|path|path=="/error-background.ppm"));
+        assert_eq!(app.pending_backgrounds.len(),1);
+        eval(&mut app,"if(bgWindowLoads!==0||bgHandlers!==1)throw 'actual pending background before Stop';");
+        app.stop_loading();
+        // The real source response is still held. Cancellation must not turn
+        // its abandoned initial load into a successful window-load callback.
+        for _ in 0..4 {app.poll_load();std::thread::sleep(Duration::from_millis(1));}
+        assert_eq!(app.document.title,"Waiting for callback background","Stop resumed an abandoned window load before the body was released");
+        eval(&mut app,"if(bgWindowLoads!==0||bgHandlers!==1)throw 'abandoned background load resumed after Stop';");
+        assert!(app.pending_backgrounds.is_empty()&&app.backgrounds.is_empty());
+        site.release();
+        let end=Instant::now()+Duration::from_millis(100);
+        while Instant::now()<end {app.poll_load();std::thread::sleep(Duration::from_millis(1));}
+        app.reflow();let _=app.draw();app.reflow();
+        for _ in 0..4 {app.poll_load();}
+        assert!(app.pending_backgrounds.is_empty()&&app.backgrounds.is_empty());
+        assert_eq!(site.requests.lock().unwrap().iter().filter(|path|path.as_str()=="/error-background.ppm").count(),1,"Stop automatically retried its retained binding");
+        assert_eq!(app.document.title,"Waiting for callback background");
+        eval(&mut app,"if(bgWindowLoads!==0||bgHandlers!==1)throw 'late abandoned window load';");
+        assert_eq!(app.scripting.as_ref().unwrap().error_count(),0);
+    }
+    #[test]
+    fn dynamic_image_load_handler_background_precedes_window_load_after_real_decode() {
+        assert_callback_background_guard("/image-background",Some("/ready.ppm"));
+    }
+
+    #[test]
+    fn uncommitted_navigation_cannot_resume_old_background_window_load() {
+        let site=Site::new();let mut app=open(&site,"/startup-background");
+        wait(&mut app,|_|site.requests.lock().unwrap().iter().any(|path|path=="/error-background.ppm"));
+        assert_eq!(app.pending_backgrounds.len(),1);
+        eval(&mut app,"if(bgWindowLoads!==0||bgHandlers!==1)throw 'old background still pending';");
+        app.navigate_location(site.location("/held-document"),true);
+        wait(&mut app,|_|site.requests.lock().unwrap().iter().any(|path|path=="/held-document"));
+        assert!(app.pending.as_ref().is_some_and(|pending|!pending.committed));
+        assert_eq!(app.location.url,site.location("/startup-background").url);
+        for _ in 0..4 {app.poll_load();std::thread::sleep(Duration::from_millis(1));}
+        assert!(app.pending.as_ref().is_some_and(|pending|!pending.committed));
+        assert_eq!(app.document.title,"Waiting for callback background","old window load ran during an uncommitted navigation");
+        eval(&mut app,"if(bgWindowLoads!==0||bgHandlers!==1)throw 'old background load resumed during navigation';");
+        site.release();wait(&mut app,|app|!app.is_loading());
+        assert!(!app.failed,"{}",app.status);assert_eq!(app.document.title,"Held document committed");
+        assert_eq!(app.location.url,site.location("/held-document").url);
+        assert!(app.backgrounds.is_empty()&&app.pending_backgrounds.is_empty()&&app.background_requests.is_empty());
+        let end=Instant::now()+Duration::from_millis(100);
+        while Instant::now()<end {app.poll_load();std::thread::sleep(Duration::from_millis(1));}
+        assert_eq!(app.document.title,"Held document committed");
+        assert!(app.backgrounds.is_empty()&&app.pending_backgrounds.is_empty());
+        eval(&mut app,"if(typeof bgWindowLoads!=='undefined'||typeof bgHandlers!=='undefined')throw 'old callback realm survived new document';");
+        assert_eq!(site.requests.lock().unwrap().iter().filter(|path|path.as_str()=="/error-background.ppm").count(),1);
+        assert_eq!(site.requests.lock().unwrap().iter().filter(|path|path.as_str()=="/held-document").count(),1);
+        assert_eq!(app.scripting.as_ref().unwrap().error_count(),0);
+    }
+    #[test]
+    fn dynamic_script_load_handler_background_precedes_window_load_after_real_decode() {
+        assert_callback_background_guard("/script-background",Some("/background-callback.js"));
     }
 
 }

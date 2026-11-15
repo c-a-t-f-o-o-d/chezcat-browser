@@ -218,10 +218,29 @@ pub struct ObjectPosition {
 }
 
 impl ObjectPosition {
+    const START: Self = Self {
+        fraction: 0.0,
+        offset: Length::Px(0.0),
+    };
     const CENTER: Self = Self {
         fraction: 0.5,
         offset: Length::Px(0.0),
     };
+}
+
+/// One supported background layer, with its winning declaration's base owner.
+/// A style attribute has no stylesheet owner and resolves against the document.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BackgroundImage {
+    pub url: String,
+    pub stylesheet: Option<usize>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BackgroundSize {
+    Auto,
+    Contain,
+    Cover,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -248,6 +267,11 @@ pub struct Style {
     pub inset: [Length; 4],
     pub color: u32,
     pub background: Option<u32>,
+    pub background_image: Option<BackgroundImage>,
+    /// Repeat the single background layer along the horizontal/vertical axes.
+    pub background_repeat: [bool; 2],
+    pub background_position: [ObjectPosition; 2],
+    pub background_size: BackgroundSize,
     pub object_fit: ObjectFit,
     pub image_rendering: ImageRendering,
     pub object_position: [ObjectPosition; 2],
@@ -298,6 +322,10 @@ impl Default for Style {
             inset: [Length::Auto; 4],
             color: 0x26364a,
             background: None,
+            background_image: None,
+            background_repeat: [true; 2],
+            background_position: [ObjectPosition::START; 2],
+            background_size: BackgroundSize::Auto,
             object_fit: ObjectFit::Fill,
             image_rendering: ImageRendering::Auto,
             object_position: [ObjectPosition::CENTER; 2],
@@ -465,6 +493,7 @@ struct Declaration {
     name: String,
     value: String,
     important: bool,
+    stylesheet: Option<usize>,
 }
 
 #[derive(Debug)]
@@ -665,7 +694,15 @@ pub fn compute_with_state(
         }
     }
     let mut rules = Vec::new();
-    for (_,source) in accepted_stylesheets(doc,external).0 {parse_sheet(&source,&mut rules);}
+    for (owner, source) in accepted_stylesheets(doc, external).0 {
+        let first = rules.len();
+        parse_sheet(&source, &mut rules);
+        for rule in &mut rules[first..] {
+            for declaration in &mut rule.declarations {
+                declaration.stylesheet = Some(owner);
+            }
+        }
+    }
 
     let mut computed = vec![Style::default(); doc.nodes.len()];
     let mut budget = MAX_MATCH_STEPS;
@@ -1190,6 +1227,32 @@ fn font_sources(value: &str) -> Option<Vec<FontSource>> {
         }
     }
     (!sources.is_empty()).then_some(sources)
+}
+
+// This first layer accepts only one URL function. Unsupported layers, image
+// functions and trailing shorthand tokens do not replace an earlier valid URL.
+pub(crate) fn background_image_url(value: &str) -> Option<String> {
+    let value = value.trim();
+    if !value.get(..4)?.eq_ignore_ascii_case("url(") {
+        return None;
+    }
+    let (name, argument, rest) = css_function(value)?;
+    if !name.eq_ignore_ascii_case("url") || !rest.trim().is_empty() {
+        return None;
+    }
+    let argument = argument.trim();
+    let url = if argument.starts_with(['\'', '"']) {
+        css_string(argument)?
+    } else {
+        if argument.chars().any(|ch| {
+            ch.is_ascii_whitespace() || ch.is_control() || matches!(ch, '\'' | '"' | '(' | ')')
+        }) {
+            return None;
+        }
+        css_unescape(argument)?
+    };
+    (!url.is_empty() && url.len() <= 2048 && !url.chars().any(char::is_control))
+        .then_some(url)
 }
 
 fn unicode_ranges(value: &str) -> Option<Vec<(u32, u32)>> {
@@ -2129,62 +2192,75 @@ fn matches_selector(
 fn parse_declarations(source: &str) -> Vec<Declaration> {
     parse_declarations_bounded(source,MAX_DECLARATIONS)
 }
+// Shared raw declaration boundaries for the parser and native style bridge.
+// This preserves quoted/parenthesized URL payloads without allocating a split
+// snapshot or inventing a second interpretation of semicolons.
+pub(crate) struct DeclarationItems<'a> {
+    source: &'a str,
+    chars: std::str::CharIndices<'a>,
+    start: usize,
+    quote: char,
+    depth: usize,
+    escaped: bool,
+    finished: bool,
+}
+pub(crate) fn declaration_items(source: &str) -> DeclarationItems<'_> {
+    DeclarationItems { source, chars: source.char_indices(), start: 0, quote: '\0', depth: 0, escaped: false, finished: false }
+}
+impl DeclarationItems<'_> {
+    pub(crate) fn complete(&self) -> bool { self.finished && self.quote == '\0' && self.depth == 0 && !self.escaped }
+}
+impl<'a> Iterator for DeclarationItems<'a> {
+    type Item = &'a str;
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            let (index, character) = match self.chars.next() {
+                Some(next) => next,
+                None if !self.finished => { self.finished = true; (self.source.len(), ';') },
+                None => return None,
+            };
+            if self.escaped { self.escaped = false; continue; }
+            if self.quote != '\0' {
+                if character == '\\' { self.escaped = true; }
+                else if character == self.quote { self.quote = '\0'; }
+                continue;
+            }
+            if matches!(character, '\'' | '"') { self.quote = character; continue; }
+            if character == '(' { self.depth += 1; }
+            if character == ')' { self.depth = self.depth.saturating_sub(1); }
+            if character != ';' || self.depth != 0 { continue; }
+            let item = &self.source[self.start..index];
+            self.start = (index + 1).min(self.source.len());
+            return Some(item);
+        }
+    }
+}
+pub(crate) fn declaration_priority(value: &str) -> (&str, bool) {
+    let value = value.trim();
+    if let Some(bang) = value.rfind('!') {
+        if value[bang + 1..].trim().eq_ignore_ascii_case("important") {
+            return (value[..bang].trim_end(), true);
+        }
+    }
+    (value, false)
+}
 fn parse_declarations_bounded(source:&str,maximum:usize)->Vec<Declaration> {
     let source = without_comments(source);
     let mut declarations = Vec::new();
-    let mut start = 0;
-    let mut quote = '\0';
-    let mut depth = 0usize;
-    let mut escaped = false;
-    for (index, character) in source
-        .char_indices()
-        .chain(std::iter::once((source.len(), ';')))
-    {
-        if escaped {
-            escaped = false;
-            continue;
-        }
-        if quote != '\0' {
-            if character == '\\' {
-                escaped = true;
-            } else if character == quote {
-                quote = '\0';
-            }
-            continue;
-        }
-        if matches!(character, '\'' | '"') {
-            quote = character;
-            continue;
-        }
-        if character == '(' {
-            depth += 1;
-        }
-        if character == ')' {
-            depth = depth.saturating_sub(1);
-        }
-        if character != ';' || depth != 0 {
-            continue;
-        }
-        if let Some((name, value)) = source[start..index].split_once(':') {
+    for item in declaration_items(&source) {
+        if let Some((name, value)) = item.split_once(':') {
             let name = name.trim().to_ascii_lowercase();
-            let mut value = value.trim().to_owned();
-            let mut important = false;
-            if let Some(bang) = value.rfind('!') {
-                if value[bang + 1..].trim().eq_ignore_ascii_case("important") {
-                    value.truncate(bang);
-                    value = value.trim_end().to_owned();
-                    important = true;
-                }
-            }
+            let (value, important) = declaration_priority(value);
+            let value = value.to_owned();
             if !name.is_empty() && name.len() <= 64 && value.len() <= 2_048 && !value.is_empty() {
                 declarations.push(Declaration {
                     name,
                     value,
                     important,
+                    stylesheet: None,
                 });
             }
         }
-        start = (index + 1).min(source.len());
         if declarations.len() == maximum {
             break;
         }
@@ -2459,11 +2535,82 @@ fn apply(style: &mut Style, parent: &Style, declaration: &Declaration) {
                 style.object_position = position;
             }
         }
-        "background" | "background-color" => {
-            if value == "transparent" || value == "none" {
+        "background-color" => {
+            if value == "inherit" {
+                style.background = parent.background;
+            } else if matches!(value.as_str(), "transparent" | "none" | "initial" | "unset") {
                 style.background = None;
             } else if let Some(color) = color(&value) {
                 style.background = Some(color);
+            }
+        }
+        "background-image" => {
+            if value == "inherit" {
+                style.background_image = parent.background_image.clone();
+            } else if matches!(value.as_str(), "none" | "initial" | "unset") {
+                style.background_image = None;
+            } else if let Some(url) = background_image_url(&declaration.value) {
+                style.background_image = Some(BackgroundImage {
+                    url,
+                    stylesheet: declaration.stylesheet,
+                });
+            }
+        }
+        "background-repeat" => {
+            if let Some(repeat) = match value.as_str() {
+                "repeat" | "initial" | "unset" => Some([true, true]),
+                "no-repeat" => Some([false, false]),
+                "repeat-x" => Some([true, false]),
+                "repeat-y" => Some([false, true]),
+                "inherit" => Some(parent.background_repeat),
+                _ => None,
+            } {
+                style.background_repeat = repeat;
+            }
+        }
+        "background-position" => {
+            if value == "inherit" {
+                style.background_position = parent.background_position;
+            } else if value == "initial" || value == "unset" {
+                style.background_position = [ObjectPosition::START; 2];
+            } else if let Some(position) = object_position(&value) {
+                style.background_position = position;
+            }
+        }
+        "background-size" => {
+            if let Some(size) = match value.as_str() {
+                "auto" | "initial" | "unset" => Some(BackgroundSize::Auto),
+                "contain" => Some(BackgroundSize::Contain),
+                "cover" => Some(BackgroundSize::Cover),
+                "inherit" => Some(parent.background_size),
+                _ => None,
+            } {
+                style.background_size = size;
+            }
+        }
+        "background" => {
+            if value == "inherit" {
+                style.background = parent.background;
+                style.background_image = parent.background_image.clone();
+                style.background_repeat = parent.background_repeat;
+                style.background_position = parent.background_position;
+                style.background_size = parent.background_size;
+            } else {
+                // Only the existing color/none shorthand subset is supported.
+                // A valid shorthand resets all the other background longhands;
+                // unsupported compound syntax must not partially reset them.
+                let background = if matches!(value.as_str(), "transparent" | "none" | "initial" | "unset") {
+                    Some(None)
+                } else {
+                    color(&value).map(Some)
+                };
+                if let Some(background) = background {
+                    style.background = background;
+                    style.background_image = None;
+                    style.background_repeat = [true; 2];
+                    style.background_position = [ObjectPosition::START; 2];
+                    style.background_size = BackgroundSize::Auto;
+                }
             }
         }
         "font" => {
@@ -2496,6 +2643,7 @@ fn apply(style: &mut Style, parent: &Style, declaration: &Declaration) {
                         name: "font-size".into(),
                         value: size,
                         important: false,
+                        stylesheet: declaration.stylesheet,
                     },
                 );
                 if let Some(line) = line {
@@ -2506,6 +2654,7 @@ fn apply(style: &mut Style, parent: &Style, declaration: &Declaration) {
                             name: "line-height".into(),
                             value: line,
                             important: false,
+                            stylesheet: declaration.stylesheet,
                         },
                     );
                 }
@@ -2965,6 +3114,182 @@ fn color(value: &str) -> Option<u32> {
         "ivory" => 0xfffff0,
         _ => return None,
     })
+}
+
+
+#[cfg(test)]
+mod background_tests {
+    use super::*;
+
+    fn node(doc: &Document, id: &str) -> usize {
+        doc.nodes.iter().enumerate()
+            .find_map(|(index, _)| (doc.attr(index, "id") == Some(id)).then_some(index))
+            .unwrap()
+    }
+
+    fn assert_initial(style: &Style) {
+        assert!(style.background_image.is_none());
+        assert_eq!(style.background_repeat, [true, true]);
+        assert_eq!(style.background_position, [ObjectPosition::START; 2]);
+        assert_eq!(style.background_size, BackgroundSize::Auto);
+    }
+
+    #[test]
+    fn background_url_preserves_case_and_decodes_existing_css_strings() {
+        for (css, url) in [
+            ("url(Pixels/CornerBG.PPM)", "Pixels/CornerBG.PPM"),
+            ("URL(\"Mixed Case/CornerBG.PPM\")", "Mixed Case/CornerBG.PPM"),
+            (r"url('Pixels/\43 ornerBG.PPM')", "Pixels/CornerBG.PPM"),
+            ("url('Images/paren(1).ppm')", "Images/paren(1).ppm"),
+            ("url(../Textures/Camel.ppm?V=AbC#Part)", "../Textures/Camel.ppm?V=AbC#Part"),
+        ] {
+            assert_eq!(background_image_url(css).as_deref(), Some(url), "{css}");
+        }
+    }
+
+    #[test]
+    fn background_url_rejects_malformed_or_unsupported_layers_without_guessing() {
+        for css in [
+            "", "none", "url()", "url('')", "url (a.ppm)", "url(a b.ppm)",
+            "url(a.ppm", "url('a.ppm)", "url(a.ppm))", "url(a.ppm) red",
+            "url(a.ppm),url(b.ppm)", "url(a.ppm) url(b.ppm)",
+            "linear-gradient(red,blue)", "image-set(url(a.ppm) 1x)",
+            "url('a\n.ppm')", "url(a\0.ppm)", r"url('a\a .ppm')",
+        ] {
+            assert!(background_image_url(css).is_none(), "{css:?}");
+        }
+    }
+
+    #[test]
+    fn background_winner_keeps_raw_url_and_exact_stylesheet_owner() {
+        let doc = crate::html::parse(r#"
+            <style id=first>
+              #order{background-image:url(FirstCase.ppm)}
+              #specific{background-image:url(SpecificCase.ppm)}
+              .fallback{background-image:url(ClassCase.ppm)}
+              #missing{background-image:url(UnmatchedCase.ppm)}
+            </style>
+            <link id=external rel=stylesheet href=sheet>
+            <style id=last>
+              #order{background-image:url(LastCase.PPM)}
+              .fallback{background-image:url(LaterClass.ppm)}
+            </style>
+            <div id=order></div><div id=specific class=fallback></div>
+            <div id=priority class=priority style="background-image:url(InlineLoses.ppm)"></div>
+            <div id=inline-important class=priority style="background-image:url(InlineWins.PPM)!important"></div>
+            <div id=inline style="background-image:url(InlineCase.PPM)"></div>
+            <div id=invalid></div><div id=plain></div>
+        "#);
+        let external = HashMap::from([(node(&doc, "external"),
+            ".priority{background-image:url(Pixels/ExternalCase.PPM)!important}#inline{background-image:url(SheetLoses.ppm)}#invalid{background-image:url(ValidCase.PPM);background-image:url(a.ppm),url(b.ppm)}".into())]);
+        let styles = compute(&doc, &external);
+        for (id, url, owner) in [
+            ("order", "LastCase.PPM", Some(node(&doc, "last"))),
+            ("specific", "SpecificCase.ppm", Some(node(&doc, "first"))),
+            ("priority", "Pixels/ExternalCase.PPM", Some(node(&doc, "external"))),
+            ("inline-important", "InlineWins.PPM", None),
+            ("inline", "InlineCase.PPM", None),
+            ("invalid", "ValidCase.PPM", Some(node(&doc, "external"))),
+        ] {
+            assert_eq!(styles[node(&doc, id)].background_image,
+                Some(BackgroundImage { url: url.into(), stylesheet: owner }), "{id}");
+        }
+        assert!(styles[node(&doc, "plain")].background_image.is_none());
+    }
+
+    #[test]
+    fn background_is_noninherited_and_explicit_inherit_keeps_base_owner() {
+        let doc = crate::html::parse(r#"
+            <style id=sheet>#parent{background-image:url(Pixels/ParentCase.ppm);background-repeat:repeat-x;background-position:right bottom;background-size:cover;background-color:#123456}</style>
+            <div id=parent>
+              <div id=normal></div>
+              <div id=inherited style="background-image:inherit;background-repeat:inherit;background-position:inherit;background-size:inherit;background-color:inherit"></div>
+              <div id=shorthand style="background:inherit"></div>
+              <div id=unset style="background-image:url(Own.ppm);background-repeat:no-repeat;background-position:center;background-size:contain;background-image:unset;background-repeat:unset;background-position:unset;background-size:unset"></div>
+            </div>
+        "#);
+        let styles = compute(&doc, &HashMap::new());
+        let parent = &styles[node(&doc, "parent")];
+        assert_initial(&styles[node(&doc, "normal")]);
+        assert_eq!(styles[node(&doc, "normal")].background, None);
+        assert_initial(&styles[node(&doc, "unset")]);
+        for id in ["inherited", "shorthand"] {
+            let inherited = &styles[node(&doc, id)];
+            assert_eq!(inherited.background_image, parent.background_image, "{id}");
+            assert_eq!(inherited.background_image.as_ref().unwrap().stylesheet, Some(node(&doc, "sheet")));
+            assert_eq!(inherited.background_repeat, [true, false]);
+            assert_eq!(inherited.background_position, parent.background_position);
+            assert_eq!(inherited.background_size, BackgroundSize::Cover);
+            assert_eq!(inherited.background, Some(0x123456));
+        }
+    }
+
+    #[test]
+    fn background_color_shorthand_resets_layer_but_longhands_and_invalid_compounds_do_not() {
+        let doc = crate::html::parse(r#"
+            <style id=sheet>.seed{background-image:url(SeedCase.ppm);background-repeat:no-repeat;background-position:center;background-size:cover;background-color:#112233}</style>
+            <div id=color class=seed style="background-color:#abcdef"></div>
+            <div id=reset class=seed style="background:#abcdef"></div>
+            <div id=transparent class=seed style="background:transparent"></div>
+            <div id=none class=seed style="background:none"></div>
+            <div id=initial class=seed style="background:initial"></div>
+            <div id=unset class=seed style="background:unset"></div>
+            <div id=invalid class=seed style="background:url(Other.ppm) red"></div>
+            <div id=image-none class=seed style="background-image:none"></div>
+        "#);
+        let styles = compute(&doc, &HashMap::new());
+        let color = &styles[node(&doc, "color")];
+        assert_eq!(color.background, Some(0xabcdef));
+        assert_eq!(color.background_image.as_ref().unwrap().url, "SeedCase.ppm");
+        assert_eq!(color.background_image.as_ref().unwrap().stylesheet, Some(node(&doc, "sheet")));
+        assert_eq!(color.background_repeat, [false, false]);
+        assert_eq!(color.background_size, BackgroundSize::Cover);
+        assert_initial(&styles[node(&doc, "reset")]);
+        assert_eq!(styles[node(&doc, "reset")].background, Some(0xabcdef));
+        for id in ["transparent", "none", "initial", "unset"] {
+            assert_initial(&styles[node(&doc, id)]);
+            assert_eq!(styles[node(&doc, id)].background, None, "{id}");
+        }
+        let invalid = &styles[node(&doc, "invalid")];
+        assert_eq!(invalid.background, Some(0x112233));
+        assert_eq!(invalid.background_image, color.background_image);
+        assert_eq!(invalid.background_repeat, [false, false]);
+        assert_eq!(invalid.background_position, [ObjectPosition::CENTER; 2]);
+        assert_eq!(invalid.background_size, BackgroundSize::Cover);
+        let none = &styles[node(&doc, "image-none")];
+        assert!(none.background_image.is_none());
+        assert_eq!(none.background_repeat, [false, false]);
+        assert_eq!(none.background_position, [ObjectPosition::CENTER; 2]);
+        assert_eq!(none.background_size, BackgroundSize::Cover);
+        assert_eq!(none.background, Some(0x112233));
+    }
+
+    #[test]
+    fn background_repeat_position_and_size_accept_only_the_finite_supported_values() {
+        for (repeat, expected) in [
+            ("repeat", [true, true]), ("no-repeat", [false, false]),
+            ("repeat-x", [true, false]), ("repeat-y", [false, true]),
+        ] {
+            let doc = crate::html::parse(&format!("<div id=target style='background-repeat:{repeat};background-repeat:round'>T</div>"));
+            assert_eq!(compute(&doc, &HashMap::new())[node(&doc, "target")].background_repeat, expected);
+        }
+        for (size, expected) in [
+            ("auto", BackgroundSize::Auto), ("contain", BackgroundSize::Contain),
+            ("cover", BackgroundSize::Cover),
+        ] {
+            let doc = crate::html::parse(&format!("<div id=target style='background-size:{size};background-size:32px 24px'>T</div>"));
+            assert_eq!(compute(&doc, &HashMap::new())[node(&doc, "target")].background_size, expected);
+        }
+        let doc = crate::html::parse("<div id=target style='background-position:right 2px bottom 25%;background-position:top 4px right;background-repeat:repeat-y;background-repeat:repeat no-repeat;background-size:contain;background-size:contain,cover'>T</div>");
+        let styles = compute(&doc, &HashMap::new());
+        let style = &styles[node(&doc, "target")];
+        assert_eq!(style.background_position, [
+            ObjectPosition { fraction: 1.0, offset: Length::Px(-2.0) },
+            ObjectPosition { fraction: 0.75, offset: Length::Px(0.0) },
+        ]);
+        assert_eq!(style.background_repeat, [false, true]);
+        assert_eq!(style.background_size, BackgroundSize::Contain);
+    }
 }
 
 #[cfg(test)]

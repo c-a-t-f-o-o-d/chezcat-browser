@@ -273,6 +273,7 @@ impl App {
         self.apply_history_replacement();
         self.cancel_stylesheet_requests();
         self.cancel_image_requests();
+        self.cancel_background_requests();
         if let Some(worker) = &self.dynamic_scripts {
             worker.cancel();
         }
