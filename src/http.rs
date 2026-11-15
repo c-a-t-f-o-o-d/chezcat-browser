@@ -860,11 +860,22 @@ impl<'a> Pool<'a> {
         request: &Request,
         mode: FetchMode,
     ) -> Result<Response, String> {
+        self.fetch_document_limited(url, request, mode, crate::downloads::MAX_DOWNLOAD_BYTES)
+    }
+
+    /// Keep a caller's smaller body bound while retaining document-hop guards.
+    pub fn fetch_document_limited(
+        &self,
+        url: &HttpUrl,
+        request: &Request,
+        mode: FetchMode,
+        limit: usize,
+    ) -> Result<Response, String> {
         fetch_in_pool(
             self,
             url,
             request,
-            crate::downloads::MAX_DOWNLOAD_BYTES,
+            limit,
             None,
             mode,
             true,

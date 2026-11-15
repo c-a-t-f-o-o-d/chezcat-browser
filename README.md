@@ -92,6 +92,12 @@ See [architecture](docs/ARCHITECTURE.md), [roadmap](docs/ROADMAP.md),
 [security policy](SECURITY.md). Routine CI uses local fixtures; device, native
 presentation and public-site checks are separate opt-in evidence.
 
+Document-only connection reports use `--diagnose URL --report FILE`. Optional
+`--diagnose-allow-host HOST` entries restrict each destination before DNS; the
+existing default redirect policy remains. Reports run no page scripts or
+subresources and do not establish access or page usability. See the
+[T1 diagnostic contract](docs/FEATURE_CONTRACTS.md).
+
 ## Licensing
 
 ChezCat is source-available under [CSAPUL 1.1](LICENSE) for the releases designated
