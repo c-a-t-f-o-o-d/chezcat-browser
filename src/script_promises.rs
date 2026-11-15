@@ -155,6 +155,67 @@ button.addEventListener('click',function(event){
     }
 
     #[test]
+    fn native_event_fatal_listener_cancels_later_callbacks_and_stale_jobs_but_keeps_timers() {
+        native_event_fatal_tail("window.document=9;");
+    }
+
+    #[test]
+    fn native_event_fatal_checkpoint_cancels_later_callbacks_and_stale_jobs_but_keeps_timers() {
+        native_event_fatal_tail("queueMicrotask(function(){window.document=9;});");
+    }
+
+    fn native_event_fatal_tail(failure: &str) {
+        let source=format!(r#"
+var order='',button=document.getElementById('go');
+setTimeout(function(){{document.title='independent timer';}},0);
+button.addEventListener('click',function(event){{order+='first';event.preventDefault();{failure}}});
+button.addEventListener('click',function(){{order+=':second';queueMicrotask(function(){{order+=':stale';document.title='stale callback';}});}});
+document.addEventListener('click',function(){{order+=':ancestor';queueMicrotask(function(){{document.title='stale ancestor';}});}});
+"#);
+        let(mut doc,mut forms,mut page,start)=make_page("<form><button id=go type=submit>Go</button></form>",&[&source]);
+        assert_eq!(start.errors,0,"{}",page.report());
+        let target=doc.nodes.iter().enumerate().find_map(|(id,_)|(doc.attr(id,"id")==Some("go")).then_some(id)).unwrap();
+        page.begin_job();let outcome=page.dispatch(&mut doc,&mut forms,target,"click",true);
+        assert_eq!(outcome.errors,1,"{}",page.report());assert!(outcome.prevented);assert!(page.state.event.is_none());
+        let stale_jobs=page.runtime.has_microtasks();
+        assert!(page.runtime.job_usage().0<page.state.limits.steps/2,"host capability failure must leave interpreter work");
+        let fresh=page.console_eval(&mut doc,&mut forms,"document.title=order+':fresh';");
+        assert_eq!(fresh.errors,0,"{}",page.report());
+        assert_eq!(doc.title,"first:fresh","stale listener work crossed the native event job boundary; pending before fresh job={stale_jobs}");
+        assert!(!stale_jobs);assert!(!page.runtime.has_microtasks());assert_eq!(page.state.timers.len(),1);
+        let timer=page.poll_timer_at(&mut doc,&mut forms,Instant::now()+Duration::from_secs(1)).unwrap();
+        assert_eq!(timer.errors,0,"{}",page.report());assert_eq!(doc.title,"independent timer");
+    }
+
+    #[test]
+    fn native_event_ordinary_listener_error_keeps_checkpoints_cancellation_and_later_listeners() {
+        let(mut doc,mut forms,mut page,start)=make_page("<form><button id=go type=submit>Go</button></form>",&[r#"
+var order='',button=document.getElementById('go');
+button.addEventListener('click',function(event){order+='first';queueMicrotask(function(){order+=':firstjob';event.preventDefault();});throw Error('ordinary listener failure');});
+button.addEventListener('click',function(event){if(!event.defaultPrevented)throw 'lost cancellation';order+=':second';queueMicrotask(function(){order+=':secondjob';document.title=order;});});
+"#]);assert_eq!(start.errors,0,"{}",page.report());
+        let target=doc.nodes.iter().enumerate().find_map(|(id,_)|(doc.attr(id,"id")==Some("go")).then_some(id)).unwrap();
+        page.begin_job();let outcome=page.dispatch(&mut doc,&mut forms,target,"click",true);
+        assert_eq!(outcome.errors,1,"{}",page.report());assert!(outcome.prevented);
+        assert_eq!(doc.title,"first:firstjob:second:secondjob");assert!(!page.runtime.has_microtasks());assert!(page.state.event.is_none());
+    }
+
+    #[test]
+    fn native_event_dynamic_script_fatal_job_cannot_run_same_job_load_tail() {
+        let(mut doc,mut forms,mut page,start)=make_page("<html><head></head><body></body></html>",&[r#"
+var tails=0,child=document.createElement('script');child.src='/fatal-child.js';
+child.onload=function(){tails++;queueMicrotask(function(){document.title='stale dynamic tail';});};
+document.head.appendChild(child);
+"#]);assert_eq!(start.errors,0,"{}",page.report());
+        let request=page.take_dynamic_scripts().pop_front().unwrap();assert!(request.error.is_none());
+        let outcome=page.complete_dynamic_script(&mut doc,&mut forms,&request,Ok(Script {
+            node:request.node,source:"window.document=9;".into(),label:"Original fatal dynamic-script tail".into(),
+        }));assert_eq!(outcome.errors,1,"{}",page.report());
+        let fresh=page.console_eval(&mut doc,&mut forms,"document.title='fresh dynamic control '+tails;");
+        assert_eq!(fresh.errors,0,"{}",page.report());assert_eq!(doc.title,"fresh dynamic control 0");assert!(!page.runtime.has_microtasks());
+    }
+
+    #[test]
     fn promise_timer_and_animation_callbacks_checkpoint_individually() {
         let (mut doc, mut forms, mut page, outcome) = make_page(
             "<p></p>",

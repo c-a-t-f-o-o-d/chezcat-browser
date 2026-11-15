@@ -1417,6 +1417,13 @@ impl Page {
         cancelable: bool,
         bubbles: bool,
     ) -> bool {
+        // Resource completion can reach a native event tail in the same job
+        // as a fatal script. It must not revive that job or queue later work.
+        if self.runtime.invocation_failed_fatally() {
+            self.runtime.cancel_microtasks();
+            self.cancel_media_selection();
+            return false;
+        }
         let result = self.event_path(doc, target);
         let path = match result {
             Ok(path) => path,
@@ -1462,7 +1469,7 @@ impl Page {
         if bubbles {
             visits.extend(path.iter().skip(1).map(|&node| (node, false, 3)));
         }
-        for (current, capture, phase) in visits {
+        'visits: for (current, capture, phase) in visits {
             if self
                 .state
                 .event
@@ -1523,9 +1530,15 @@ impl Page {
                 // This dispatch is entered by the native host, with no outer
                 // JavaScript stack. Each completed callback reaches a checkpoint
                 // while this event's cancellation/passive state is still live.
-                self.microtask_checkpoint(doc, forms);
+                let checkpoint_complete = !self.runtime.invocation_failed_fatally()
+                    && self.microtask_checkpoint(doc, forms);
                 if let Some(active) = &mut self.state.event {
                     active.passive = false;
+                }
+                if !checkpoint_complete {
+                    self.runtime.cancel_microtasks();
+                    self.cancel_media_selection();
+                    break 'visits;
                 }
                 if self.state.event.as_ref().is_some_and(|e| e.immediate) {
                     break;
