@@ -128,6 +128,15 @@ class Guards(unittest.TestCase):
         changed=runtime.with_name('changed.zip');self.archive(changed,'ChezCat',{**payload,'ChezCat.exe':b'changed controlled trap'})
         with self.assertRaisesRegex(ValueError,'manifest'):
             distribution.validate_archives(changed,source,'v0.78.0',commit,approved)
+        extra_info=runtime.with_name('extra-info.zip');identity=json.loads(payload['build-info.json']);identity['private-extra']='controlled trap'
+        self.archive(extra_info,'ChezCat',{**payload,'build-info.json':json.dumps(identity).encode()})
+        with self.assertRaisesRegex(ValueError,'missing or extra fields'):
+            distribution.validate_archives(extra_info,source,'v0.78.0',commit,approved)
+        duplicate_info=runtime.with_name('duplicate-info.zip')
+        data=b'{"source_commit":"wrong",'+payload['build-info.json'][1:]
+        self.archive(duplicate_info,'ChezCat',{**payload,'build-info.json':data})
+        with self.assertRaisesRegex(ValueError,'Duplicate runtime build-info JSON key'):
+            distribution.validate_archives(duplicate_info,source,'v0.78.0',commit,approved)
     def test_distribution_rejects_traversal_duplicate_names_and_crc_corruption(self):
         for name in ['ChezCat/../escape','ChezCat/ads:stream','ChezCat/NUL.txt']:
             with self.subTest(path=name),tempfile.NamedTemporaryFile(dir=self.root,suffix='.zip',delete=False) as stream:

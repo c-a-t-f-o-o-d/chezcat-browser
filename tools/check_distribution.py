@@ -37,6 +37,14 @@ def require(value, message):
         raise ValueError(message)
 
 
+def unique_object(pairs):
+    result = {}
+    for key, value in pairs:
+        require(key not in result, 'Duplicate runtime build-info JSON key.')
+        result[key] = value
+    return result
+
+
 def archive_payload(path, prefix):
     """Bound header sizes and reject ambiguous Windows extraction names first."""
     require(path.is_file() and path.stat().st_size <= MAX_BYTES, 'Archive is missing or exceeds its byte allowance.')
@@ -127,7 +135,10 @@ def validate_archives(runtime, source, tag, commit, approved):
     expected_names = package.runtime_names(entries) | {'ChezCat.exe'}
     require(set(runtime_data) == expected_names | {'build-info.json'}, 'Runtime archive has missing or extra payload files.')
     require(len(runtime_data['build-info.json']) <= 1024 * 1024, 'Unexpected runtime build-info size.')
-    identity = json.loads(runtime_data['build-info.json'])
+    identity = json.loads(runtime_data['build-info.json'], object_pairs_hook=unique_object)
+    require(isinstance(identity, dict) and set(identity) == {
+        'source_commit', 'clean', 'compiler', 'license_sha256', 'tag', 'files', 'self_hash_excluded'},
+        'Runtime build-info has missing or extra fields.')
     files = {name: package.sha(data) for name, data in runtime_data.items() if name != 'build-info.json'}
     require(identity.get('files') == files and identity.get('self_hash_excluded') is True, 'Runtime build manifest does not cover the exact payload.')
     require(identity.get('source_commit') == commit and identity.get('clean') is True
