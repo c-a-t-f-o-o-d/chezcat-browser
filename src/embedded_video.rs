@@ -1,4 +1,5 @@
-//! Parser-authored local IVF video source loading. No network/codec helper.
+//! Parser-authored IVF video source loading with separate local/network authority.
+//! Network plans require an immutable same-origin resource context before IO.
 use crate::{
     html::{Document, Namespace, NodeKind},
     media,
@@ -16,6 +17,7 @@ pub struct Plan {
     pub raw: String,
     pub source: Location,
     limits: media::Limits,
+    network: Option<crate::network_media::Context>,
 }
 impl Plan {
     pub fn new(
@@ -58,8 +60,11 @@ impl Plan {
         }) {
             return Err("Embedded media plan requires its actual HTML video node.".into());
         }
-        if location.url.is_some() || location.path.is_none() {
-            return Err("Embedded video currently accepts a local document and an in-root local IVF source only.".into());
+        if location.url.is_none() && location.path.is_none() {
+            return Err("Embedded video requires a local or HTTP(S) document.".into());
+        }
+        if location.url.is_some() && (location.path.is_some() || location.root.is_some()) {
+            return Err("A network video document cannot carry local-file authority.".into());
         }
         if let Some(name) = ["loop", "poster", "autoplay", "crossorigin"]
             .into_iter()
@@ -70,23 +75,35 @@ impl Plan {
         if raw.is_empty() {
             return Err("The selected media src is empty.".into());
         }
-        let source = crate::navigation::resolve(raw, base)?;
-        if source.url.is_some() || source.path.is_none() || source.root != location.root {
-            return Err(
-                "Embedded video source is outside the local document root or is not a local file."
-                    .into(),
-            );
-        }
+        let source = if let Some(origin) = &location.url {
+            // Check the base before resolution: network documents must never
+            // enter local canonicalization/opening, even for a malformed base.
+            if base.url.is_none() || base.path.is_some() || base.root.is_some() {
+                return Err("A network video source requires an HTTP(S) base.".into());
+            }
+            let source = crate::navigation::resolve(raw, base)?;
+            let target = source.url.as_ref().ok_or("A network video source must use HTTP(S).")?;
+            if source.path.is_some() || source.root.is_some() || !target.same_origin(origin) {
+                return Err("Network video currently requires the document's exact HTTP(S) origin.".into());
+            }
+            source
+        } else {
+            let source = crate::navigation::resolve(raw, base)?;
+            if source.url.is_some() || source.path.is_none() || source.root != location.root {
+                return Err(
+                    "Embedded video source is outside the local document root or is not a local file."
+                        .into(),
+                );
+            }
+            source
+        };
         policy.allows_media(policy_scope, &source)?;
-        if !source
-            .path
-            .as_ref()
-            .unwrap()
-            .extension()
-            .and_then(|s| s.to_str())
-            .is_some_and(|s| s.eq_ignore_ascii_case("ivf"))
+        if source.url.is_none()
+            && !source.path.as_ref().unwrap().extension()
+                .and_then(|s| s.to_str())
+                .is_some_and(|s| s.eq_ignore_ascii_case("ivf"))
         {
-            return Err("Embedded video currently decodes original local IVF/VP8-intra video only; other containers/audio/network are not enabled for this element slice.".into());
+            return Err("Local embedded video decodes original IVF/VP8-intra video only; other containers and element audio are not enabled.".into());
         }
         Ok(Self {
             retired,
@@ -94,7 +111,28 @@ impl Plan {
             raw: raw.into(),
             source,
             limits,
+            network: None,
         })
+    }
+    /// Planning validates source selection but grants no network authority.
+    /// The owning App supplies this immutable context before worker submission.
+    pub(crate) fn with_network_context(
+        mut self,
+        context: crate::network_media::Context,
+    ) -> Result<Self, String> {
+        let source = self.source.url.as_ref()
+            .ok_or("A local video plan cannot receive network authority.")?;
+        if !Arc::ptr_eq(&self.retired, &context.retired) {
+            return Err("The network media context belongs to a different source lifetime.".into());
+        }
+        if self.source.path.is_some() || self.source.root.is_some()
+            || !source.same_origin(&context.origin)
+        {
+            return Err("The network media context does not match the selected source origin.".into());
+        }
+        context.policy.allows_media(context.policy_scope, &self.source)?;
+        self.network = Some(context);
+        Ok(self)
     }
     fn load(&self, cancel: &AtomicBool) -> Result<media::Asset, String> {
         let check = || {
@@ -105,14 +143,18 @@ impl Plan {
             }
         };
         check()?;
-        let bytes = crate::loader::read_local_media_checked(
-            self.source
-                .path
-                .as_ref()
-                .ok_or("Missing local video path.")?,
-            self.limits.input_bytes,
-            &check,
-        )?;
+        let bytes = if let Some(source) = &self.source.url {
+            self.network.as_ref()
+                .ok_or("The selected network video has no owning resource context.")?
+                .load(source, self.limits.input_bytes, cancel)?
+        } else {
+            crate::loader::read_local_media_checked(
+                self.source.path.as_ref().ok_or("Missing local video path.")?,
+                self.limits.input_bytes,
+                &check,
+            )?
+        };
+        check()?;
         media::Clip::load(bytes, self.limits, &check)
     }
 }
@@ -414,6 +456,70 @@ mod tests {
         ] {
             assert!(authored_node(&crate::html::parse(html)).is_none(), "{html}");
         }
+    }
+    #[test]
+    fn embedded_network_plan_is_exact_origin_and_context_gated_without_extension_requirement() {
+        let location = crate::navigation::address(
+            "https://media.example.test/page", &Location::home(),
+        ).unwrap();
+        let policy = crate::csp::PolicySet::new(&location);
+        let plan = |raw: &str, base: &Location, policy: &crate::csp::PolicySet| {
+            let doc = crate::html::parse("<video src=placeholder controls></video>");
+            Plan::selected(
+                authored_node(&doc).unwrap(), raw, Arc::new(AtomicBool::new(false)),
+                &doc, &location, base, policy, media::Limits::default(), usize::MAX,
+            )
+        };
+        for raw in ["clip", "/endpoint?container=ivf", "https://media.example.test:443/clip"] {
+            let selected = plan(raw, &location, &policy).unwrap();
+            assert!(selected.network.is_none());
+            assert!(selected.load(&AtomicBool::new(false)).err().unwrap()
+                .contains("no owning resource context"));
+        }
+        for raw in [
+            "https://other.example.test/clip", "http://media.example.test/clip",
+            "https://media.example.test:444/clip", "file:///C:/not-opened.ivf",
+            "data:video/x-ivf,not-a-resource",
+        ] {
+            assert!(plan(raw, &location, &policy).is_err(), "{raw}");
+        }
+        let mut local_base = Location::home();
+        local_base.path = Some(std::path::PathBuf::from("C:/must-not-be-probed/page.html"));
+        local_base.root = Some(std::path::PathBuf::from("C:/must-not-be-probed"));
+        assert!(plan("clip", &local_base, &policy).err().unwrap().contains("HTTP(S) base"));
+        let mut denied = policy.clone();
+        denied.add_header("media-src 'none'");
+        assert!(plan("clip", &location, &denied).err().unwrap().contains("media-src/default-src"));
+        for attribute in ["crossorigin", "crossorigin=anonymous", "crossorigin=use-credentials"] {
+            let doc = crate::html::parse(&format!("<video {attribute} src=clip></video>"));
+            assert!(Plan::new(authored_node(&doc).unwrap(), &doc, &location,
+                &location, &policy, media::Limits::default()).err().unwrap()
+                .contains("source was not loaded"));
+        }
+        let make_context = |selected: &Plan, origin, policy| crate::network_media::Context {
+            origin,
+            retired: selected.retired.clone(),
+            trust: Arc::new(crate::trust::Store::unconfigured()),
+            cookies: Arc::new(crate::cookies::Session::default()),
+            blocking: Arc::new(crate::blocking::Policy::default()),
+            policy,
+            policy_scope: usize::MAX,
+            network: crate::network_trace::Trace::default(),
+        };
+        let other = crate::url::parse("https://other.example.test/").unwrap().0;
+        let selected = plan("clip", &location, &policy).unwrap();
+        let context = make_context(&selected, other, policy.clone());
+        assert!(selected.with_network_context(context).is_err());
+        let selected = plan("clip", &location, &policy).unwrap();
+        let context = make_context(&selected, location.url.clone().unwrap(), denied);
+        assert!(selected.with_network_context(context).is_err());
+        let selected = plan("clip", &location, &policy).unwrap();
+        let mut context = make_context(&selected, location.url.clone().unwrap(), policy.clone());
+        context.retired = Arc::new(AtomicBool::new(false));
+        assert!(selected.with_network_context(context).is_err());
+        let selected = plan("clip", &location, &policy).unwrap();
+        let context = make_context(&selected, location.url.clone().unwrap(), policy);
+        assert!(selected.with_network_context(context).is_ok());
     }
     #[test]
     fn embedded_video_real_source_worker_cancellation_latest_plan_and_small_profile_recovery() {

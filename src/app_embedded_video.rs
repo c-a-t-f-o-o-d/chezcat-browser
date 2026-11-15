@@ -2,6 +2,26 @@
 use super::*;
 use crate::embedded_video::{Completion, Plan, Snapshot};
 impl App {
+    /// Capture this document's ordinary resource authority, independently of
+    /// classic-script credential exceptions or mutable UI/worker state.
+    fn attach_embedded_network_context(&self, plan: Plan, policy_scope: usize) -> Result<Plan, String> {
+        if plan.source.url.is_none() {
+            return Ok(plan);
+        }
+        let origin = self.location.url.clone()
+            .ok_or("A local document cannot grant network video authority.")?;
+        let retired = plan.retired.clone();
+        plan.with_network_context(crate::network_media::Context {
+            origin,
+            retired,
+            trust: self.trust.clone(),
+            cookies: self.cookies.clone(),
+            blocking: Arc::new(crate::blocking::Policy::new(&self.profile.data().settings.blocking)),
+            policy: self.document_policy.clone(),
+            policy_scope,
+            network: self.network.clone(),
+        })
+    }
     pub(in crate::app) fn embedded_video_retired(&self) -> bool {
         self.embedded_video
             .as_ref()
@@ -74,6 +94,7 @@ impl App {
                     Err,
                 )
                 .and_then(|plan| {
+                    let plan = self.attach_embedded_network_context(plan, usize::MAX)?;
                     if self.embedded_video_worker.is_none() {
                         self.embedded_video_worker =
                             Some(crate::embedded_video::Worker::new(self.wake.clone())?);
@@ -217,13 +238,13 @@ impl App {
             &self.document_policy,
             self.media_limits,
         )
-        .and_then(|plan| {
+        .and_then(|mut plan| {
+            plan.retired = binding.retired.clone();
+            let plan = self.attach_embedded_network_context(plan, node)?;
             if self.embedded_video_worker.is_none() {
                 self.embedded_video_worker =
                     Some(crate::embedded_video::Worker::new(self.wake.clone())?);
             }
-            let mut plan=plan;
-            plan.retired=binding.retired.clone();
             let plan=Arc::new(plan);
             binding.source = plan.source.display();
             self.embedded_video_worker
@@ -1331,4 +1352,5 @@ mod tests {
         eval(&mut app,"if(edgePlay!=='fulfilled'||video.paused||video.seeking||video.ended||edgePlayEvents!==0||video.currentTime>0.2)throw 'pre-tick real rewind';");
         assert!(!app.scripting.as_ref().unwrap().has_media_play_promises_for_test());
     }
+    include!("app_network_media_tests.rs");
 }

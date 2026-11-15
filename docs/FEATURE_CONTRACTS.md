@@ -132,6 +132,19 @@ encoded/decoded input, cancellation/replacement/errors/retry policy, valid range
 responses if used, and actual frames/time. Routine CI uses loopback servers only.
 Transport200 alone does not pass playback. No stream-admission/token/DRM bypass.
 
+Transaction strategy: bounded complete GET, with no Range requests or progressive
+playback. Validate a complete final 200 response, unambiguous video/x-ivf MIME and
+absence of unsolicited partial-content metadata before the original IVF decoder.
+Retained complete bytes serve real seeking. Preserve TLS, per-hop CSP/blocking,
+credentials and cancellation; no automatic retry beyond the transport's existing
+safe stale-connection handling. Explicit load/source selection owns a new attempt.
+The first integration supports exact-origin HTTP(S) documents/resources and keeps
+local-file authority separate. Cross-origin and crossorigin-marked resources stay
+explicitly declined until the separate credentials/CORS matrix passes; this first
+slice cannot establish full F4 completion. Encoded/decompressed media uses the
+adjustable media input allowance with a 512 MiB transport ceiling and checked growth;
+ordinary document/download/resource caller limits stay unchanged.
+
 Every later feature records semantic references, original and selected conformance
 tests, security review, native/device/live checks still pending and exact final
 source/executable identity. Release notes describe only proven behavior.

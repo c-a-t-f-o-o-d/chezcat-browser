@@ -27,7 +27,11 @@ Local media uses original container/codec/sample code and real decoded frames or
 samples. Source retirement tokens, checked generations and worker cancellation
 prevent stale work from publishing. Native presentation/audio APIs do not replace
 decoding. The authored element currently supports one connected parser video,
-local IVF/VP8 intra, native controls, src replacement and JavaScript load().
+IVF/VP8 intra, native controls, src replacement and genuine JavaScript
+load/play/pause/currentTime operations. Sources retain separate in-root local-file
+authority or an immutable exact-origin HTTP(S) transaction context. Network media
+uses complete bounded GET responses and the existing decoder/player, without
+ranges or a separate runtime. CORS/cross-origin media remains unsupported.
 Standalone PCM and Matroska A/V have separate supported contracts. Network media,
 script play promises and complete HTMLMediaElement behavior are future work.
 

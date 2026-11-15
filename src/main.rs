@@ -44,6 +44,7 @@ mod matroska;
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 mod navigation;
 mod network_trace;
+mod network_media;
 mod paint;
 #[cfg(target_os = "windows")]
 mod platform;

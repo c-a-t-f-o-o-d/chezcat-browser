@@ -21,7 +21,7 @@ use network_trace::PhaseKind;
 #[path = "http_network_tests.rs"]
 mod network_tests;
 
-const MAX_BODY_BYTES: usize = 32 * 1024 * 1024;
+const MAX_BODY_BYTES: usize = 512 * 1024 * 1024;
 pub const MAX_FORM_BYTES: usize = 128 * 1024;
 pub const USER_AGENT: &str = concat!("ChezCat/", env!("CARGO_PKG_VERSION"));
 const MAX_HEADER_BYTES: usize = 32 * 1024;
@@ -177,7 +177,7 @@ fn fetch_in_pool(
 ) -> Result<Response, String> {
     let cancel = pool.cancel;
     if limit > MAX_BODY_BYTES {
-        return Err("HTTP body limit cannot exceed 32 MiB.".into());
+        return Err("HTTP body limit cannot exceed 512 MiB.".into());
     }
     if initial.body().len() > MAX_FORM_BYTES {
         return Err("HTTP form request body exceeds 128 KiB.".into());
@@ -811,7 +811,7 @@ impl<'a> Pool<'a> {
             self,
             url,
             request,
-            MAX_BODY_BYTES,
+            crate::downloads::MAX_DOWNLOAD_BYTES,
             None,
             mode,
             true,
@@ -1661,7 +1661,7 @@ fn read_response_traced<R: Read>(
 ) -> Result<Message, ResponseFailure> {
     if limit > MAX_BODY_BYTES {
         return Err(ResponseFailure::before_response(
-            "HTTP body limit cannot exceed 32 MiB.".into(),
+            "HTTP body limit cannot exceed 512 MiB.".into(),
         ));
     }
     let mut input = Input::new(TracedRead { source, trace }, limit, cancel, deadline);
@@ -2727,7 +2727,7 @@ mod tests {
             FetchMode::Normal
         )
         .unwrap_err()
-        .contains("32 MiB"));
+        .contains("512 MiB"));
     }
 
     struct PostSite {

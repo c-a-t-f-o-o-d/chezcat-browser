@@ -23,8 +23,10 @@ and licensing obligations; see [third-party notices](THIRD_PARTY_NOTICES.md).
 - Selected local IVF/VP8-intra video, PCM audio and constrained Matroska A/V.
   One authored HTML video supports native controls, source replacement and real
   JavaScript load(), issue-time pause(), currentTime seeking and play() with
-  genuine pending promises, measured playback time and decoded frames. Authored
-  element audio, network media and multiple players remain unsupported.
+  genuine pending promises, measured playback time and decoded frames. Supported
+  video can also load through a bounded complete same-origin HTTP(S) transaction.
+  Cross-origin/crossorigin-marked video, element audio and multiple players remain
+  unsupported.
 - Replaceable main-window animation operations that schedule and cancel real
   callbacks. Child-frame schedulers are unsupported.
 - Original local regression fixtures and App/input/offscreen interaction tests.

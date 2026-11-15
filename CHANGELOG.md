@@ -19,9 +19,18 @@ The optimized-executable original App/input/offscreen journey verifies a trusted
 script play click, Promise/state/event order, measured clock advancement and
 independently derived decoded-frame pixels, then script pause with frozen time
 and pixels. Existing source identity, native controls, seek, EOF/replay, Stop and
-navigation checks remain. Authored element audio, network media, multiple players
+navigation checks remain. Authored element audio, cross-origin media, multiple players
 and broader HTMLMediaElement conformance remain unsupported; this adds no
 live-site, physical-desktop or audio-device acceptance.
+
+Authored IVF/VP8-intra video also supports bounded complete same-origin HTTP(S)
+GET transactions through the existing TLS, cookie, CSP and request-blocking paths.
+Require final 200, one valid video/x-ivf MIME and complete framing; reject unsolicited
+partial content. Existing source tokens cancel obsolete work. The adjustable media
+input allowance uses checked growth up to the 512 MiB HTTP/decompression ceiling;
+ordinary document/download/image caller limits remain unchanged. Original HTTP
+and authenticated TLS 1.3 executable journeys verify actual controls, time and
+independent pixels. Cross-origin/CORS acceptance remains a separate open task.
 
 
 ## 0.79.0-alpha.2

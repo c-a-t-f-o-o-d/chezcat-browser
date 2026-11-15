@@ -2,8 +2,8 @@
 //! The bit/Huffman code originated in this project's PNG decoder. Wrappers
 //! follow RFC 1950, RFC 1951 and RFC 1952; no library implementation is used.
 
-pub const MAX_INPUT_BYTES: usize = 32 * 1024 * 1024;
-pub const MAX_OUTPUT_BYTES: usize = 32 * 1024 * 1024;
+pub const MAX_INPUT_BYTES: usize = 512 * 1024 * 1024;
+pub const MAX_OUTPUT_BYTES: usize = 512 * 1024 * 1024;
 const MAX_BLOCKS: usize = 16_384;
 const MAX_GZIP_MEMBERS: usize = 128;
 const MAX_GZIP_HEADER_BYTES: usize = 65_536;
@@ -284,6 +284,19 @@ struct Output<'a> {
     check: &'a dyn Fn() -> DecodeResult<()>,
 }
 
+// Validate lengths independently of a backing slice, so boundary and overflow
+// controls need no maximum-sized input allocation. The 512 MiB ceiling also
+// keeps Vec/isize and gzip's u32 member-size representations in range on x86.
+fn preflight(input_len: usize, limit: usize) -> DecodeResult<()> {
+    if input_len > MAX_INPUT_BYTES {
+        return Err("Compressed input exceeds the 512 MiB limit.".into());
+    }
+    if limit > MAX_OUTPUT_BYTES {
+        return Err("Decompression output limit exceeds 512 MiB.".into());
+    }
+    Ok(())
+}
+
 impl<'a> Output<'a> {
     fn new(
         data: &[u8],
@@ -291,12 +304,7 @@ impl<'a> Output<'a> {
         check: &'a dyn Fn() -> DecodeResult<()>,
     ) -> DecodeResult<Self> {
         check()?;
-        if data.len() > MAX_INPUT_BYTES {
-            return Err("Compressed input exceeds the 32 MiB limit.".into());
-        }
-        if limit > MAX_OUTPUT_BYTES {
-            return Err("Decompression output limit exceeds 32 MiB.".into());
-        }
+        preflight(data.len(), limit)?;
         Ok(Self {
             bytes: Vec::new(),
             limit,
@@ -722,6 +730,39 @@ mod tests {
             assert_eq!(gzip(&data, 32768, &check).unwrap_err(), "cancelled");
             assert_eq!(checks.get(), stop_at);
         }
-        assert!(gzip(&vec![0; MAX_INPUT_BYTES + 1], 0, &|| Ok(())).is_err());
+        assert!(preflight(MAX_INPUT_BYTES + 1, 0).is_err());
+    }
+
+    #[test]
+    fn compression_generous_admission_is_checked_without_maximum_preallocation() {
+        assert!(preflight(MAX_INPUT_BYTES,MAX_OUTPUT_BYTES).is_ok());
+        for (input,limit) in [(MAX_INPUT_BYTES+1,0),(0,MAX_OUTPUT_BYTES+1),(usize::MAX,0),(0,usize::MAX)] {
+            assert!(preflight(input,limit).is_err());
+        }
+        let check=||Ok(());let output=Output::new(&[],MAX_OUTPUT_BYTES,&check).unwrap();
+        assert_eq!(output.bytes.capacity(),0);
+        assert_eq!(gzip(&member(b"ordinary",false),MAX_OUTPUT_BYTES,&||Ok(())).unwrap(),b"ordinary");
+    }
+
+    #[test]
+    fn compression_original_stored_gzip_crosses_old_32_mib_with_complete_checked_tail() {
+        const SIZE:usize=33*1024*1024;
+        let block=vec![0xa7;65535];let mut left=SIZE;let mut crc=u32::MAX;
+        let mut encoded=vec![31,139,8,0,0,0,0,0,0,255];
+        encoded.try_reserve_exact(SIZE+SIZE.div_ceil(65535)*5+8).unwrap();
+        while left!=0 {
+            let count=left.min(block.len());let length=count as u16;left-=count;
+            encoded.push(u8::from(left==0));encoded.extend_from_slice(&length.to_le_bytes());
+            encoded.extend_from_slice(&(!length).to_le_bytes());encoded.extend_from_slice(&block[..count]);
+            crc=crc_update(crc,&block[..count]);
+        }
+        encoded.extend_from_slice(&(!crc).to_le_bytes());encoded.extend_from_slice(&(SIZE as u32).to_le_bytes());
+        let decoded=gzip(&encoded,MAX_OUTPUT_BYTES,&||Ok(())).unwrap();
+        assert_eq!(decoded.len(),SIZE);assert!(decoded.iter().all(|&byte|byte==0xa7));
+        assert!(decoded.capacity()<MAX_OUTPUT_BYTES);
+        // Corrupt the actual last output byte without updating the wrapper's
+        // CRC. A decoder returning a successful historical prefix would miss it.
+        drop(decoded);let last=encoded.len()-9;encoded[last]^=1;
+        assert!(gzip(&encoded,MAX_OUTPUT_BYTES,&||Ok(())).unwrap_err().contains("CRC-32"));
     }
 }
