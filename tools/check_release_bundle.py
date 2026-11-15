@@ -52,7 +52,13 @@ class Guards(unittest.TestCase):
         subprocess.run(['git','-c','core.autocrlf=false','init','-q'],cwd=self.root,check=True)
         subprocess.run(['git','config','core.autocrlf','false'],cwd=self.root,check=True)
         subprocess.run(['git','add','.'],cwd=self.root,check=True)
-        subprocess.run(['git','-c','user.name='+('Adam Maddox' if unsafe_owner else 'Controlled test fixture'),'-c','user.email=fixture@example.test','-c','commit.gpgsign=false','commit','-qm','Controlled parentless snapshot fixture only'],cwd=self.root,check=True)
+        fixture_name='Adam Maddox' if unsafe_owner else 'Controlled test fixture'
+        fixture_env=dict(os.environ,GIT_AUTHOR_NAME=fixture_name,GIT_COMMITTER_NAME=fixture_name,
+            GIT_AUTHOR_EMAIL='fixture@example.test',GIT_COMMITTER_EMAIL='fixture@example.test')
+        fixture_env.pop('GIT_AUTHOR_DATE',None);fixture_env.pop('GIT_COMMITTER_DATE',None)
+        subprocess.run(['git','-c','commit.gpgsign=false','commit','-qm','Controlled parentless snapshot fixture only'],cwd=self.root,env=fixture_env,check=True)
+        actual=subprocess.check_output(['git','show','-s','--format=%an%x09%ae%x09%cn%x09%ce','HEAD'],cwd=self.root,text=True).strip()
+        self.assertEqual(actual,'\t'.join([fixture_name,'fixture@example.test',fixture_name,'fixture@example.test']))
         subprocess.run(['git','tag','v0.78.0'],cwd=self.root,check=True)
         self.write('ChezCat.exe',b'Controlled bytes; never treated as a verified PE by this test')
         self.write('notices/__pycache__/private.pyc',b'private trap fixture')
@@ -176,7 +182,8 @@ class Guards(unittest.TestCase):
         self.assertTrue(package.publication.check_receipt_payload(b'{"receipt":"ordinary original reference"}'))
         self.assertTrue(package.publication.check_receipt_payload(b'const RECEIPT_FIELDS = ["schema_version", "license_version", "license_sha256", "accepted_scope", "accepted_at_utc"];'))
     def test_owner_metadata_without_verified_noreply_is_refused(self):
-        files,_=self.fixture(unsafe_owner=True)
+        with patch.dict(os.environ,{'GIT_AUTHOR_EMAIL':package.publication.OWNER_EMAIL,'GIT_COMMITTER_EMAIL':package.publication.OWNER_EMAIL}):
+            files,_=self.fixture(unsafe_owner=True)
         with self.assertRaisesRegex(ValueError,'verified GitHub noreply'):
             package.runtime_files(hashlib.sha256(files['LICENSE']).hexdigest(),'v0.78.0')
     def test_tag_version_and_stale_verification_commit_are_rejected(self):
