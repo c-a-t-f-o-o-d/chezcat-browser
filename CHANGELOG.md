@@ -2,6 +2,13 @@
 
 ## 0.80.0-alpha.1 (candidate)
 
+Genuine UIEvent construction and owner-realm prototypes now reuse the existing
+Event/UI slots, with readonly branded fields, exact interleaved dictionary
+conversion and legacy initialization. Real dispatch/cancellation, native keyboard
+ancestry and child owners are covered by original model and executable-input
+checks. MouseEvent/KeyboardEvent/CustomEvent constructors and native immediate
+prototypes remain outside this finite slice.
+
 Prospective CSAPUL 1.1 with full offline native first-run acceptance, explicit
 source/headless and organization acceptance, strict local receipts outside
 source/application/profile data, same-text reuse and renewed acceptance for new

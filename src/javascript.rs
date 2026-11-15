@@ -494,7 +494,7 @@ pub trait Host {
     /// Optional owner for a real native method whose first lookup may occur in
     /// another supported realm. This grants no constructor/prototype capability.
     fn native_method_owner(&self, _object:u32, _method:&str) -> Option<u32> { None }
-    /// Only fresh, still-unpublished base Event constructor/factory results opt
+    /// Only fresh, still-unpublished supported Event constructor/factory results opt
     /// into atomic ordinary-store/unforgeable installation.
     fn unpublished_base_event_owner(&self,_object:u32,_method:&str,_result:u32)->Option<u32>{None}
     fn rollback_unpublished_base_event(&mut self,_event:u32)->Result<(),String>{
@@ -539,6 +539,11 @@ pub trait Host {
     ) -> Option<(usize, &'static [&'static str])> {
         None
     }
+    /// Optional immediate scalar conversion for an explicitly supported native
+    /// dictionary member. It runs after that Get and before the next member Get.
+    fn dictionary_member_conversion(&self,_object:u32,_method:&str,_member:&str)->Option<bool>{None}
+    fn validate_dictionary_member(&self,_object:u32,_method:&str,_member:&str,_value:&Value)
+        ->Result<(),(&'static str,String)>{Ok(())}
     fn call_with_dictionary(
         &mut self,
         object: u32,
@@ -8177,7 +8182,16 @@ impl Runtime {
                 values.try_reserve(names.len()).map_err(|_|Fault::new("Could not reserve native dictionary fields."))?;
                 for &name in names {
                     let reference = Reference::Property(self.copy_value(value)?, name.into());
-                    values.push((name, self.read_reference(&reference, host)?));
+                    let mut member=self.read_reference(&reference, host)?;
+                    if let Some(string_hint)=host.dictionary_member_conversion(object,method,name) {
+                        let primitive=self.primitive_with_hint(member,string_hint,host)?;
+                        self.work(primitive.bytes())?;
+                        member=self.checked_value(if string_hint {Value::String(primitive.script_text()?)}
+                            else {Value::Number(primitive.script_number()?)})?;
+                    }
+                    host.validate_dictionary_member(object,method,name,&member)
+                        .map_err(|(kind,message)|Fault::exception(kind,message))?;
+                    values.push((name,member));
                 }
                 fields = Some(values);
             }

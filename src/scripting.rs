@@ -828,6 +828,7 @@ impl Page {
         state.native_functions.insert("Image", image);
         runtime.define_event_target_interface(WINDOW).expect("fixed EventTarget interface");
         runtime.define_event_interface(WINDOW).expect("fixed Event interface");
+        runtime.define_ui_event_interface(WINDOW).expect("fixed UIEvent interface");
         runtime.define_node_interfaces(WINDOW,dom_tree::NODE_CONSTANTS,Some((IMAGE_FACTORY,"Image"))).expect("fixed Node interfaces");
         Self { runtime, state }
     }
@@ -2346,8 +2347,8 @@ impl Bridge<'_> {
 }
 
 impl Host for Bridge<'_> {
-    fn expando_owner(&self,object:u32)->Option<u32> {self.base_event_owner(object).or_else(||self.standalone_target_owner(object)).or_else(||self.element_expando_receiver(object).then_some(WINDOW))}
-    fn exposed_native_prototype(&self,object:u32)->bool {self.base_event_owner(object).is_some()||self.standalone_target_owner(object).is_some()}
+    fn expando_owner(&self,object:u32)->Option<u32> {self.ordinary_event_owner(object).or_else(||self.standalone_target_owner(object)).or_else(||self.element_expando_receiver(object).then_some(WINDOW))}
+    fn exposed_native_prototype(&self,object:u32)->bool {self.ordinary_event_owner(object).is_some()||self.standalone_target_owner(object).is_some()}
     fn native_ancestry_inspection(&self,object:u32)->bool {self.event_receiver(object)||self.exposed_native_prototype(object)||self.namespace_receiver(object)}
     fn event_target_interface(&self,window:u32)->bool {window==WINDOW || self.frame_context(window).is_some()}
     fn node_interface_constants(&self,window:u32)->Option<&'static [(&'static str,u16)]> {self.event_target_interface(window).then_some(dom_tree::NODE_CONSTANTS)}
@@ -2355,7 +2356,7 @@ impl Host for Bridge<'_> {
         if let Some(window)=self.event_owner(object) {
             // Subclass immediate prototypes stay opaque; this is their genuine
             // implemented Event ancestry, as with the existing Node suffixes.
-            return Some(crate::javascript::NativeAncestry {window,constructor:Some((window,"Event"))});
+            return Some(crate::javascript::NativeAncestry {window,constructor:Some((window,if self.ui_receiver(object) {"UIEvent"}else{"Event"}))});
         }
         if let Some(window)=self.standalone_target_owner(object) {
             return Some(crate::javascript::NativeAncestry {window,constructor:Some((window,"EventTarget"))});
@@ -2406,7 +2407,7 @@ impl Host for Bridge<'_> {
 
     fn owns_property(&self, object: u32, property: &str) -> bool {
         if self.event_receiver(object)&&property=="composedPath" {return false;}
-        if self.base_event_owner(object).is_some() {return false;}
+        if self.ordinary_event_owner(object).is_some() {return false;}
         if self.node_event_method(object,property) {return false;}
         if self.standalone_target_owner(object).is_some() {return false;}
         if property=="prototype"&&self.location_instance_owner(object).is_some(){return false;}
@@ -2445,7 +2446,7 @@ impl Host for Bridge<'_> {
     }
 
     fn readonly_property(&self, object: u32, property: &str) -> bool {
-        if self.base_event_owner(object).is_some() {return false;}
+        if self.ordinary_event_owner(object).is_some() {return false;}
         if self.media_element_receiver(object) && matches!(property,"currentSrc"|"videoWidth"|"videoHeight"|"duration"|"paused"|"ended"|"seeking"|"readyState"|"networkState") {return true;}
         if object==PERFORMANCE&&property=="timing"||object==PERFORMANCE_TIMING&&self.state.navigation_timing.is_some_and(|t|t.value(property).is_some()) {return true;}
         object == WINDOW && property == "history" || object == HISTORY && matches!(property, "state" | "length")
@@ -2491,7 +2492,7 @@ impl Host for Bridge<'_> {
     }
 
     fn argument_conversions(&self, object: u32, method: &str) -> &'static [(usize, bool)] {
-        if method=="Event"&&self.event_target_interface(object) {return &[(0,true)];}
+        if matches!(method,"Event"|"UIEvent")&&self.event_target_interface(object) {return &[(0,true)];}
         if object==WINDOW && method=="cancelAnimationFrame" {return &[(0,false)];}
         if object == HISTORY && method == "replaceState" { return &[(1, true), (2, true)]; }
         if self.named_map_receiver(object) {
@@ -2588,11 +2589,11 @@ impl Host for Bridge<'_> {
     }
 
     fn unpublished_base_event_owner(&self,object:u32,method:&str,result:u32)->Option<u32> {
-        if !(object==DOCUMENT&&method=="createEvent"||self.event_target_interface(object)&&method=="Event") {
+        if !(object==DOCUMENT&&method=="createEvent"||self.event_target_interface(object)&&matches!(method,"Event"|"UIEvent")) {
             return None;
         }
         if self.state.created_events.last().is_none_or(|event|event.handle!=result) {return None;}
-        self.base_event_owner(result)
+        self.ordinary_event_owner(result)
     }
     fn rollback_unpublished_base_event(&mut self,event:u32)->Result<(),String>{self.rollback_base_event(event)}
     fn event_path_snapshot(&mut self,event:u32)->Result<Vec<u32>,String>{self.copy_event_path(event)}
@@ -2627,7 +2628,7 @@ impl Host for Bridge<'_> {
     }
 
     fn required_arguments(&self, object: u32, method: &str) -> usize {
-        if method=="Event"&&self.event_target_interface(object) {return 1;}
+        if matches!(method,"Event"|"UIEvent")&&self.event_target_interface(object) {return 1;}
         if object==WINDOW && matches!(method,"requestAnimationFrame"|"cancelAnimationFrame") {return 1;}
         if method=="dispatchEvent"&&self.dispatch_receiver(object){return 1;}
         if object==DOCUMENT && matches!(method,"createAttributeNS"|"createElementNS") {return 2;}
@@ -2691,15 +2692,18 @@ impl Host for Bridge<'_> {
         method: &str,
         args: &[Value],
     ) -> Result<(), (&'static str, String)> {
-        if method=="Event"&&self.event_target_interface(object) {
+        if matches!(method,"Event"|"UIEvent")&&self.event_target_interface(object) {
             if !self.state.enabled||!self.doc.scripting_enabled {return Err(("InvalidStateError","Event construction is disabled.".into()));}
             if args.get(1).is_some_and(|value|!matches!(value,Value::Undefined|Value::Null|Value::Object(_)|Value::Function(_)|Value::Host(_))) {
-                return Err(("TypeError","EventInit requires an object, null or undefined.".into()));
+                return Err(("TypeError",format!("{method}Init requires an object, null or undefined.")));
             }
             return Ok(());
         }
         if method.starts_with("\0Event.")&&!self.event_receiver(object) {
             return Err(("TypeError","Event operation requires a genuine Event.".into()));
+        }
+        if method.starts_with("\0UIEvent.")&&!self.ui_receiver(object) {
+            return Err(("TypeError","UIEvent operation requires a genuine UIEvent.".into()));
         }
         if method=="pause" && self.media_element_receiver(object) && (!self.state.enabled || !self.doc.scripting_enabled) {return Err(("InvalidStateError","Scripting is disabled.".into()));}
         if object==WINDOW && method=="requestAnimationFrame" && !matches!(args.first(),Some(Value::Function(_))) {return Err(("TypeError","requestAnimationFrame requires a callable callback.".into()));}
@@ -2949,6 +2953,9 @@ impl Host for Bridge<'_> {
     }
 
     fn accepts_receiver(&self, object: u32, method: &str, receiver: u32) -> bool {
+        if self.event_target_interface(object)&&(method.starts_with("\0UIEvent.")||method=="initUIEvent") {
+            return self.ui_receiver(receiver);
+        }
         if self.event_target_interface(object)&&(method.starts_with("\0Event.")||matches!(method,"initEvent"|"preventDefault"|"stopPropagation"|"stopImmediatePropagation")) {
             return self.event_receiver(receiver);
         }
@@ -3173,6 +3180,7 @@ impl Host for Bridge<'_> {
         method: &str,
     ) -> Option<(usize, &'static [&'static str])> {
         if method=="Event"&&self.event_target_interface(object) {return Some((1,&["bubbles","cancelable","composed"]));}
+        if method=="UIEvent"&&self.event_target_interface(object) {return Some((1,&["bubbles","cancelable","composed","detail","view"]));}
         match method {
             "addEventListener" => Some((2, &["capture", "once", "passive", "signal"])),
             "removeEventListener" => Some((2, &["capture"])),
@@ -3180,6 +3188,15 @@ impl Host for Bridge<'_> {
         }
     }
 
+    fn dictionary_member_conversion(&self,object:u32,method:&str,member:&str)->Option<bool>{
+        (method=="UIEvent"&&member=="detail"&&self.event_target_interface(object)).then_some(false)
+    }
+    fn validate_dictionary_member(&self,object:u32,method:&str,member:&str,value:&Value)->Result<(),(&'static str,String)>{
+        if method=="UIEvent"&&member=="view"&&self.event_target_interface(object) {
+            self.ui_view_argument(object,Some(value))?;
+        }
+        Ok(())
+    }
     fn call_with_dictionary(
         &mut self,
         object: u32,
@@ -3188,6 +3205,7 @@ impl Host for Bridge<'_> {
         fields: Option<&[(&str, Value)]>,
     ) -> Result<Value, String> {
         if method=="Event"&&self.event_target_interface(object) {return self.construct_base_event(object,args,fields);}
+        if method=="UIEvent"&&self.event_target_interface(object) {return self.construct_ui_event(object,args,fields);}
         if matches!(method, "addEventListener" | "removeEventListener") {
             self.state.work(1)?;
             self.event_listener(object, method, args, fields)
@@ -4095,6 +4113,7 @@ impl Host for Bridge<'_> {
     }
 
     fn call(&mut self, object: u32, method: &str, args: &[Value]) -> Result<Value, String> {
+        if let Some(property)=method.strip_prefix("\0UIEvent.get.") {return self.get(object,property);}
         if let Some(property)=method.strip_prefix("\0Event.get.") {return self.get(object,property);}
         if let Some(property)=method.strip_prefix("\0Event.set.") {
             self.set(object,property,args.first().cloned().unwrap_or(Value::Undefined))?;

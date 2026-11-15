@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "scope": "Original finite UIEvent constructor, dictionary order, dispatch/cancellation, native keyboard and child owner regression fixture.",
+  "provenance": {
+    "method": "Original HTML/CSS/JavaScript fixture without external assets",
+    "external_assets": []
+  },
+  "files": {
+    "ui-event.html": {
+      "bytes": 8549,
+      "sha256": "996bd9bbe2f3f9158e33cc62ee4c45f9e18f76aff7ae81766d48039d72c4e50a"
+    }
+  }
+}

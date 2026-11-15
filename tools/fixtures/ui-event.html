@@ -1,0 +1,76 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="script-src 'unsafe-inline'">
+<title>Original UIEvent waiting</title>
+<style>body{margin:20px;font-size:16px}h1{font-size:24px}p{max-width:760px}button,input{margin:6px}</style>
+</head><body><h1>Original UIEvent journey</h1>
+<label>Original native key <input id="keys" name="keys" type="text"></label>
+<button id="emit" name="emit" type="button">Construct and deliver an original UIEvent</button>
+<p id="result">Waiting for native UI keys and two real activations.</p>
+<p id="keyboard">Native UI keyboard waiting.</p><p id="detail">UIEvent constructor and dispatch waiting.</p>
+<script>
+var C=UIEvent,P=C.prototype,button=document.getElementById('emit'),keys=document.getElementById('keys');
+var getView=Object.getOwnPropertyDescriptor(P,'view').get,getDetail=Object.getOwnPropertyDescriptor(P,'detail').get,getWhich=Object.getOwnPropertyDescriptor(P,'which').get;
+var turns=0,delivered=0,canceled=0,legacy=0,children=0,nativeClicks=0,keyDown=0,keyUp=0,current=null,factoryCurrent=null,log='';
+if(typeof C!=='function'||C.name!=='UIEvent'||C.length!==1||Object.getPrototypeOf(C)!==Event||Object.getPrototypeOf(P)!==Event.prototype)throw Error('Genuine inherited UIEvent interface');
+for(var field of ['view','detail','which']){
+ var descriptor=Object.getOwnPropertyDescriptor(P,field);
+ if(typeof descriptor.get!=='function'||descriptor.get.length!==0||descriptor.set!==undefined||!descriptor.enumerable||!descriptor.configurable)throw Error('Canonical readonly UI getter');
+}
+var method=Object.getOwnPropertyDescriptor(P,'initUIEvent');
+if(typeof method.value!=='function'||method.value.length!==1||!method.writable||!method.enumerable||!method.configurable)throw Error('Canonical UI initializer');
+var badBrands=0;try{getView.call({});}catch(error){if(error.name==='TypeError')badBrands++;}
+try{getDetail.call(new Event('base-only'));}catch(error){if(error.name==='TypeError')badBrands++;}
+if(badBrands!==2||typeof MouseEvent!=='undefined'||typeof CustomEvent!=='undefined'||typeof KeyboardEvent!=='undefined')throw Error('Genuine UI brands and deferred constructors');
+var defaults=new C('defaults');if(defaults.view!==null||defaults.detail!==0||defaults.which!==0||defaults.bubbles||defaults.cancelable||defaults.composed||defaults.isTrusted)throw Error('UIEvent dictionary defaults');
+var frame=document.createElement('iframe');frame.hidden=true;document.body.appendChild(frame);
+var childWindow=frame.contentWindow,ChildC=childWindow.UIEvent,ChildP=ChildC.prototype;
+if(ChildC===C||ChildP===P||Object.getPrototypeOf(ChildC)!==childWindow.Event||Object.getPrototypeOf(ChildP)!==childWindow.Event.prototype)throw Error('Canonical child UIEvent inheritance');
+function nativeKey(event){
+ if(event.key!=='a'||event.ctrlKey)return;
+ if(!event.isTrusted||!event.composed||!(event instanceof C)||!(event instanceof Event)||getView.call(event)!==window||getDetail.call(event)!==0||getWhich.call(event)!==65||event.target!==keys)throw Error('Actual native keyboard UI ancestry and slots');
+ var type=event.type,stamp=event.timeStamp;P.initUIEvent.call(event,'ignored',false,false,null,17);
+ if(event.type!==type||event.timeStamp!==stamp||getView.call(event)!==window||getDetail.call(event)!==0||!event.isTrusted)throw Error('Native UI initialization is a dispatch no-op');
+ if(event.type==='keydown')keyDown++;else if(event.type==='keyup')keyUp++;else throw Error('Unexpected native key producer');
+ if(keyDown===1&&keyUp===1){document.getElementById('keyboard').textContent='Native UI keyboard down/up verified.';document.title='Original UIEvent keyboard passed';}
+}
+keys.addEventListener('keydown',nativeKey);keys.addEventListener('keyup',nativeKey);
+button.addEventListener('ui-route',function(event){
+ if(event!==current||event.target!==button||event.currentTarget!==button||event.eventPhase!==2||event.isTrusted||!(event instanceof C)||!(event instanceof Event)||event.detail!=='ordinary-shadow'||getDetail.call(event)!==1||getView.call(event)!==window||getWhich.call(event)!==0)throw Error('Actual UI dispatch and borrowed stored getters');
+ var path=event.composedPath();if(!Array.isArray(path)||path[0]!==button||path[path.length-1]!==window)throw Error('Actual UI dispatch path');path[0]=window;if(event.composedPath()[0]!==button)throw Error('Independent UI path copy');
+ delivered++;event.preventDefault();
+});
+button.addEventListener('ui-factory',function(event){
+ if(event!==factoryCurrent||event.isTrusted||event.composed||event.view!==window||event.detail!==turns||event.which!==0||!(event instanceof C)||!(event instanceof Event))throw Error('Actual legacy UI factory slots');
+ legacy++;event.preventDefault();
+});
+button.onclick=function(input){
+ if(!input.isTrusted||!input.composed||!(input instanceof Event)||input.target!==button||input.currentTarget!==button)throw Error('Actual trusted composed button input');
+ if(keyDown!==1||keyUp!==1)throw Error('Actual UI keyboard proof must precede activation');
+ nativeClicks++;turns++;log='';
+ var init={
+  get bubbles(){log+='B';return true;},get cancelable(){log+='C';return true;},get composed(){log+='O';return true;},
+  get detail(){log+='D';return {valueOf:function(){log+='N';return 4294967297;}};},
+  get view(){if(log!=='TBCODN')throw Error('Numeric UI conversion must finish before view Get');log+='V';return window;},
+  get which(){throw Error('Unsupported informative which dictionary member must not be read');}
+ };
+ var event=new C({toString:function(){log+='T';return 'ui-route';}},init);current=event;
+ if(log!=='TBCODNV'||Object.getPrototypeOf(event)!==P||event.constructor!==C||!(event instanceof C)||!(event instanceof Event)||Object.prototype.toString.call(event)!=='[object UIEvent]'||event.type!=='ui-route'||event.detail!==1||event.view!==window||event.which!==0||event.isTrusted||!event.bubbles||!event.cancelable||!event.composed||event.target!==null||event.defaultPrevented)throw Error('Actual ordered UIEvent construction');
+ var trust=Object.getOwnPropertyDescriptor(event,'isTrusted');if(typeof trust.get!=='function'||!trust.enumerable||trust.configurable||trust.set!==undefined||trust.get.call(event)||!trust.get.call(input))throw Error('UI family unforgeable trust getter');
+ event.view=null;event.detail=91;event.which=37;if(event.view!==window||event.detail!==1||event.which!==0)throw Error('Readonly UI slots');
+ Object.defineProperty(event,'detail',{value:'ordinary-shadow',configurable:true});
+ if(button.dispatchEvent(event)!==false||!event.defaultPrevented||event.currentTarget!==null||event.eventPhase!==0||event.composedPath().length)throw Error('Real UI cancellation and dispatch cleanup');
+ canceled++;delete event.detail;if(event.detail!==1)throw Error('Deleting own UI shadow restores canonical getter');
+ var factory=document.createEvent('UIEvents');factoryCurrent=factory;
+ if(Object.getPrototypeOf(factory)!==P||factory.isTrusted||factory.view!==null||factory.detail!==0)throw Error('Genuine uninitialized UI factory');
+ var refused=false;try{button.dispatchEvent(factory);}catch(error){refused=error.name==='InvalidStateError';}if(!refused)throw Error('Uninitialized UI factory cannot dispatch');
+ P.initUIEvent.call(factory,'ui-factory',false,true,window,turns);
+ if(button.dispatchEvent(factory)!==false||!factory.defaultPrevented||factory.currentTarget!==null||factory.eventPhase!==0)throw Error('Legacy UI initialized delivery and cleanup');
+ var child=new ChildC('child-ui',{detail:turns,view:childWindow,composed:true});
+ if(Object.getPrototypeOf(child)!==ChildP||!(child instanceof ChildC)||child instanceof C||child.constructor!==ChildC||getView.call(child)!==childWindow||getDetail.call(child)!==turns||child.isTrusted||!child.composed||Object.getPrototypeOf(child.initUIEvent)!==childWindow.Function.prototype)throw Error('Genuine child-owned UIEvent and borrowed getters');
+ children++;
+ if(delivered!==turns||canceled!==turns||legacy!==turns||children!==turns||nativeClicks!==turns)throw Error('One genuine UI delivery per trusted activation');
+ document.getElementById('result').textContent='Completed '+turns+' real UIEvent activation(s): ordered construction, cancellation and child owner verified.';
+ document.getElementById('detail').textContent='ui='+delivered+' canceled='+canceled+' legacy='+legacy+' child='+children+' native='+nativeClicks+' key_down='+keyDown+' key_up='+keyUp+' order='+log+' brands='+badBrands;
+ document.title='Original UIEvent activation '+turns+' passed';
+};
+</script></body></html>

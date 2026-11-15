@@ -475,13 +475,34 @@ impl Bridge<'_> {
         self.created_event_index(object).map(|id|self.state.created_events[id].owner)
             .or_else(||self.state.event.as_ref().filter(|event|event.handle==object).map(|_|WINDOW))
     }
-    pub(super) fn base_event_owner(&self,object:u32)->Option<u32> {
-        let event=&self.state.created_events[self.created_event_index(object)?];
-        (event.ui.is_none()&&event.mouse.is_none()&&event.custom.is_none()).then_some(event.owner)
-    }
     pub(super) fn construct_base_event(&mut self,owner:u32,args:&[Value],fields:Option<&[(&str,Value)]>)->Result<Value,String> {
+        self.construct_event_record(owner,args,fields,None)
+    }
+    pub(super) fn ordinary_event_owner(&self,object:u32)->Option<u32> {
+        let event=&self.state.created_events[self.created_event_index(object)?];
+        (event.mouse.is_none()&&event.custom.is_none()).then_some(event.owner)
+    }
+    pub(super) fn ui_view_argument(&self,owner:u32,value:Option<&Value>)->Result<Option<u32>,(&'static str,String)> {
+        let Some(value)=value else {return Ok(None)};
+        if matches!(value,Value::Null|Value::Undefined) {return Ok(None);}
+        let Value::Host(window)=value else {return Err(("TypeError","UIEvent view requires a genuine Window or null.".into()));};
+        if !self.event_target_interface(*window) {return Err(("TypeError","UIEvent view requires a genuine Window or null.".into()));}
+        if owner!=*window {
+            self.frame_window_access(Some(owner),*window).map_err(|message|("SecurityError",message))?;
+        }
+        Ok(Some(*window))
+    }
+    pub(super) fn construct_ui_event(&mut self,owner:u32,args:&[Value],fields:Option<&[(&str,Value)]>)->Result<Value,String> {
+        let field=|key|fields.and_then(|fields|fields.iter().find(|(name,_)|*name==key).map(|(_,value)|value));
+        let detail=field("detail").map(timer_integer).transpose()?.unwrap_or(0);
+        let view=self.ui_view_argument(owner,field("view")).map_err(|(_,message)|message)?;
+        self.construct_event_record(owner,args,fields,Some(UiData {view,detail}))
+    }
+    fn construct_event_record(&mut self,owner:u32,args:&[Value],fields:Option<&[(&str,Value)]>,ui:Option<UiData>)->Result<Value,String> {
         if !self.state.enabled||!self.doc.scripting_enabled {return Err("Event construction is disabled.".into());}
-        self.state.work(1)?;
+        let admission=self.state.created_events.len().checked_mul(8).and_then(|n|n.checked_add(1))
+            .ok_or("Event admission lookup work overflow.")?;
+        self.state.work(admission)?;
         let Some(Value::String(source))=args.first() else {return Err("Event requires a converted type.".into());};
         if source.len()>self.state.limits.host.event_type_bytes||source.len()>self.state.limits.host.string_bytes {
             return Err("Event type exceeds the host event-type/string allowance.".into());
@@ -502,7 +523,7 @@ impl Bridge<'_> {
         let event=CreatedEvent {owner,composed:flag("composed"),handle,name,
             bubbles:flag("bubbles"),cancelable:flag("cancelable"),prevented:false,stopped:false,immediate:false,
             target:None,current:None,phase:0,dispatching:false,initialized:true,passive:false,
-            timestamp,ui:None,mouse:None,custom:None};
+            timestamp,ui,mouse:None,custom:None};
         self.state.created_events.push(event);
         self.state.retained=retained;
         self.state.next_event=next;
@@ -510,7 +531,7 @@ impl Bridge<'_> {
     }
     pub(super) fn rollback_base_event(&mut self,handle:u32)->Result<(),String> {
         let Some(event)=self.state.created_events.last() else {return Err("No unpublished Event record exists.".into());};
-        if event.handle!=handle||event.ui.is_some()||event.mouse.is_some()||event.custom.is_some()
+        if event.handle!=handle||event.mouse.is_some()||event.custom.is_some()
             || event.dispatching||event.target.is_some() {return Err("Unpublished Event rollback identity mismatch.".into());}
         let retained=self.state.retained.checked_sub(event.name.len()).ok_or("Event rollback retention mismatch.")?;
         self.state.created_events.pop();
@@ -683,7 +704,9 @@ impl Bridge<'_> {
     }
 
     pub(super) fn validate_event_prefix(&self, object: u32, method: &str, index: usize, args: &[Value]) -> Result<(), (&'static str, String)> {
-        if (method == "initMouseEvent" && self.mouse_receiver(object) || method=="initUIEvent" && self.ui_receiver(object)) && index == 4 {
+        if method=="initUIEvent"&&self.ui_receiver(object)&&index==4 {
+            self.ui_view_argument(self.event_owner(object).unwrap_or(WINDOW),args.get(3))?;
+        } else if method=="initMouseEvent"&&self.mouse_receiver(object)&&index==4 {
             self.mouse_interface_argument(args.get(3), true)?;
         }
         Ok(())
@@ -694,7 +717,7 @@ impl Bridge<'_> {
             return Err(("NotSupportedError", unsupported_event_interface(args.first())));
         }
         if method=="initUIEvent" && self.ui_receiver(object) {
-            self.mouse_interface_argument(args.get(3),true)?;
+            self.ui_view_argument(self.event_owner(object).unwrap_or(WINDOW),args.get(3))?;
         }
         if self.created_event_index(object).is_some() && matches!(method, "initEvent" | "initCustomEvent" | "initUIEvent" | "initMouseEvent") {
             if method == "initCustomEvent" && !self.custom_receiver(object) { return Err(("TypeError","initCustomEvent requires a CustomEvent.".into())); }
@@ -714,6 +737,9 @@ impl Bridge<'_> {
     }
 
     pub(super) fn create_event(&mut self, args: &[Value]) -> Result<Value, String> {
+        let admission=self.state.created_events.len().checked_mul(8).and_then(|n|n.checked_add(1))
+            .ok_or("Event admission lookup work overflow.")?;
+        self.state.work(admission)?;
         if let Some(Value::String(name)) = args.first() { self.state.copies(name.len())?; }
         let interface = interface(args.first()).ok_or_else(|| unsupported_event_interface(args.first()))?;
         if self.state.created_events.len() >= self.state.limits.host.created_events { return Err("Constructed Event limit reached (256 per document).".into()); }
@@ -746,7 +772,9 @@ impl Bridge<'_> {
                     let name = self.text(args.first().ok_or("Event initializer requires a type.")?)?;
                     let number = |index| args.get(index).map(timer_integer).transpose().map(|n| n.unwrap_or(0));
                     let ui=if matches!(method,"initUIEvent"|"initMouseEvent") {
-                        Some(UiData {view:self.mouse_interface_argument(args.get(3),true).map_err(|(_,message)|message)?,detail:number(4)?})
+                        let view=if method=="initUIEvent" {self.ui_view_argument(self.event_owner(object).unwrap_or(WINDOW),args.get(3))}
+                            else {self.mouse_interface_argument(args.get(3),true)}.map_err(|(_,message)|message)?;
+                        Some(UiData {view,detail:number(4)?})
                     } else {None};
                     let mouse = if method == "initMouseEvent" {
                         Some(MouseData {
@@ -808,6 +836,10 @@ mod custom_tests;
 #[cfg(test)]
 #[path = "script_event_base_tests.rs"]
 mod base_interface_tests;
+
+#[cfg(test)]
+#[path = "script_ui_event_tests.rs"]
+mod ui_interface_tests;
 
 #[cfg(test)]
 #[path = "script_event_opaque_path_tests.rs"]

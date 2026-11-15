@@ -282,11 +282,50 @@ visible results have paired document/layout/canvas pixels and zero current
 interpreter errors. That child check uses an owned loopback web origin; child
 contexts for local files remain unavailable.
 
-UIEvent, MouseEvent and CustomEvent constructors, their immediate specialized
-prototypes and native-input immediate prototypes remain unsupported. Changing
-native host prototypes, arbitrary native subclassing/newTarget and shadow-DOM
-retargeting are also unsupported. This finite base interface establishes no full
-Event-family, web-platform or public-service conformance.
+MouseEvent, KeyboardEvent and CustomEvent constructors, their immediate
+specialized prototypes and native-input immediate prototypes remain unsupported.
+Changing native host prototypes, arbitrary native subclassing/newTarget and
+shadow-DOM retargeting are also unsupported. These finite interfaces establish
+no full Event-family, web-platform or public-service conformance.
+
+UIEvent prerequisite: new UIEvent(type, init) and the main document's legacy
+UIEvent/UIEvents factory reuse real UiData and Event state. Each owner has a
+canonical UIEvent constructor inheriting Event and a UIEvent.prototype inheriting
+Event.prototype. Branded readonly view/detail/which getters and initUIEvent use
+the actual slots; own shadows and ordinary prototype overrides remain observable
+without changing dispatch state. The factory remains initially uninitialized.
+
+UIEventInit converts the required type first, then gets inherited EventInit flags
+in bubbles/cancelable/composed order. It gets detail and completes numeric IDL
+long conversion before getting and validating nullable genuine Window view.
+Unknown keys, including the optional informative which extension, are ignored.
+Each declared dictionary member can opt into immediate primitive conversion and
+native validation; other existing native dictionaries retain their prior paths.
+Legacy initUIEvent preserves its positional view-before-detail conversion,
+composed and timestamp; dispatch-time initialization remains a no-op after the
+specified argument conversions. Supplementary Mouse state is retained.
+
+Constructor/view validation uses the explicit owner through reentrant getters,
+not a previous native operation's caller. Fresh/cached/saved foreign operations
+still refuse before conversion. Checked registry-size work is admitted before
+constructor/factory publication. Failed instance setup withdraws only the exact
+new record, retaining valid earlier/reentrant effects and consuming issued IDs.
+Original tests cover descriptors, order, defaults, numeric wrapping, abrupt
+completion, real owner clocks, foreign denial, small profiles and recovery.
+
+Genuine legacy Mouse and active native keyboard events have supported UIEvent
+ancestry and borrowed getters; their immediate prototypes remain opaque. Native
+click producers currently provide base Event state, without fabricated UI data.
+The actual UIEvent App/input journey uses owned HTTP for its child context,
+one native key down/up pair and two trusted activations with real UI construction,
+dispatch/cancellation, independent path copies and readable changed pixels.
+It retains the original dispatch/guard/recovery cases. Retained own-child native
+global reads after a parent-origin change remain a separate unsupported profile;
+constructor owner tests use the real Window captured while same-origin.
+
+Semantic references: [UIEvent](https://w3c.github.io/uievents/#interface-uievent),
+[UIEventInit](https://w3c.github.io/uievents/#dictdef-uieventinit) and
+[Web IDL dictionary conversion](https://webidl.spec.whatwg.org/#es-dictionary).
 
 Semantic reference: [DOM Event, initialization and dispatch](https://dom.spec.whatwg.org/#interface-event).
 

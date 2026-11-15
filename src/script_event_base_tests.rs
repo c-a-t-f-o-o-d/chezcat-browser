@@ -266,7 +266,7 @@ var ui=document.createEvent('UIEvent'),mouse=document.createEvent('MouseEvent'),
 ui.initUIEvent('ui',true,true,window,3);mouse.initMouseEvent('mouse',true,true,window,4,1,2,5,7);custom.initCustomEvent('custom',true,true,payload);
 for(var e of [ui,mouse,custom]){if(!(e instanceof Event)||!Event.prototype.isPrototypeOf(e)||getType.call(e)!==e.type||getTrust.call(e))throw 'genuine inherited Event brand';P.preventDefault.call(e);if(!e.defaultPrevented)throw 'borrowed base action';}
 P.initEvent.call(mouse,'mouse-renamed',false,false);if(mouse.type!=='mouse-renamed'||mouse.clientX!==5||mouse.detail!==4)throw 'base init preserves subclass slots';
-if(custom.detail!==payload||typeof UIEvent!=='undefined'||typeof MouseEvent!=='undefined'||typeof CustomEvent!=='undefined')throw 'explicit deferred constructor families';
+if(custom.detail!==payload||typeof UIEvent!=='function'||typeof MouseEvent!=='undefined'||typeof CustomEvent!=='undefined')throw 'real UIEvent and explicit deferred constructor families';
 var falseBrands=0;for(var invalid of [{},Object.create(P),null,undefined,3]){try{getType.call(invalid);}catch(x){if(x.name==='TypeError')falseBrands++;}}
 if(falseBrands!==5)throw 'prototype does not fabricate Event brand';
 var button=document.getElementById('button'),nativeCalls=0;
@@ -278,7 +278,8 @@ button.addEventListener('keydown',function(e){
  P.preventDefault.call(e);if(!e.defaultPrevented)throw 'native borrowed cancellation';
 });
 "#);
-    for source in ["Object.getPrototypeOf(ui);","Object.getPrototypeOf(mouse);","Object.getPrototypeOf(custom);"] {
+    evaluate(&mut page,&mut doc,&mut forms,"if(Object.getPrototypeOf(ui)!==UIEvent.prototype||!(ui instanceof UIEvent))throw 'genuine UIEvent factory interface';");
+    for source in ["Object.getPrototypeOf(mouse);","Object.getPrototypeOf(custom);"] {
         let outcome=page.console_eval(&mut doc,&mut forms,source);
         assert_eq!(outcome.errors,1,"Deferred immediate subclass prototypes stay explicitly opaque.");
     }

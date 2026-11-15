@@ -87,7 +87,8 @@ var callInit=ChildFunction('e','f','t','return f.call(e,t,false,false,null,0);')
 var converted=0,type={toString:function(){converted++;return 'changed';}};
 if(read(ui)!==canonicalPath||savedRead(ui,canonicalPath).length)throw 'same-origin child path lookup';
 "#);
-    for source in ["Object.getPrototypeOf(ui);","Object.getPrototypeOf(mouse);","Object.getPrototypeOf(custom);"] {
+    evaluate(&mut page,&mut doc,&mut forms,"if(Object.getPrototypeOf(ui)!==UIEvent.prototype||!(ui instanceof UIEvent))throw 'genuine UIEvent factory interface';");
+    for source in ["Object.getPrototypeOf(mouse);","Object.getPrototypeOf(custom);"] {
         let outcome=page.console_eval(&mut doc,&mut forms,source);
         assert_eq!(outcome.errors,1,"Immediate subclass prototypes stay explicitly opaque.");
     }
