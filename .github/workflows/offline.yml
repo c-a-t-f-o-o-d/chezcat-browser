@@ -10,9 +10,12 @@ jobs:
     if: github.repository == 'c-a-t-f-o-o-d/chezcat-browser' && github.actor == 'c-a-t-f-o-o-d'
     runs-on: windows-2025
     timeout-minutes: 35
-    env:
-      CHEZCAT_LICENSE_RECEIPT_DIR: ${{ runner.temp }}/chezcat-license
     steps:
+      - name: Select external license receipt location
+        shell: pwsh
+        run: |
+          $chezcatReceiptDir = Join-Path $env:RUNNER_TEMP 'chezcat-license'
+          Add-Content -LiteralPath $env:GITHUB_ENV -Encoding utf8 -Value "CHEZCAT_LICENSE_RECEIPT_DIR=$chezcatReceiptDir"
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           persist-credentials: false
