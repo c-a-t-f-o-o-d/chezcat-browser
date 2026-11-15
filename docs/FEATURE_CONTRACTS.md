@@ -7,26 +7,43 @@ public release by themselves.
 
 ## T1 — shared TLS/trust and data coverage baseline
 
-Status: next. The current source uses original TLS 1.2/1.3 and X.509 code with
-explicit browser-owned PEM trust data. Startup reads trust/roots.pem beside the
-executable, or an explicit --trust-file replacement. An unavailable default
-store reports an HTTPS trust error; it does not grant certificate authority.
-The current store does not consult the OS root store or download root updates;
-revocation, certificate transparency and broad trust-program coverage are not
-established by existing local checks.
+Status: in progress for a bounded diagnostic prerequisite. Original TLS 1.2/1.3,
+X.509 validation and explicit browser-owned PEM trust selection remain unchanged.
+Trust-data expansion and broader document/resource coverage are still planned.
+There is no OS trust-store lookup, automatic root update, revocation or CT claim.
 
-The next finite acceptance is to trace and verify the selected trust/data
-authority through normal document, redirect and subresource networking, and
-record demonstrated certificate/chain coverage gaps and useful failure
-diagnostics. Reuse original bounded positive/negative TLS, X.509 and App resource
-fixtures. Preserve strict identity/certificate checks, origins, CSP, cookies,
-cancellation and checked bounds. This records the baseline and next acceptance,
-not a completed trust expansion or new compatibility claim.
+`--diagnose URL --report FILE` uses the real HTTP/TLS client for document GETs,
+without an App profile, page scripts, subresources or form submission. At most
+eight targets are accepted; all are parsed before report creation or network
+contact. Encoded/decoded bodies retain the two-MiB bound, including attachments.
 
-Everyday resource/render/input usability follows that baseline. Finite tabs,
-link-context and new-window behavior follow page usability under separate
-contracts. Completed media slices remain recorded below; further F6/YouTube
-integration is deferred.
+Optional `--diagnose-allow-host HOST`, at most 128 entries and only with
+--diagnose, restricts the initial destination and every redirect before DNS,
+connecting or request transmission. ASCII DNS/IPv4 and bracketed IPv6 hosts use
+existing parser canonicalization and exact equality; URLs, ports and wildcards
+are refused. Subdomains/www variants need their own entries. Omitting this
+option preserves the legacy unrestricted diagnostic redirect policy.
+
+Reports retain the destination checked by the guard, actual exchanges and
+measured phases. A last measured phase is not an inferred failure cause.
+Metadata is single-line escaped and bounded to 4096 UTF-8 bytes per field.
+HTTP statuses and possible body markers are observations; HTTP 200 or absent
+markers establish neither access, challenge clearance nor page usability.
+Diagnostics perform no challenge interaction.
+
+Eight original native diagnostics regressions and the existing document-guard
+regression passed. They cover host admission, zero-contact redirect refusal,
+legacy redirects, actual failed-hop/phase evidence, body bounds/prevalidation,
+status/marker separation and metadata handling. Full normal integration,
+release/CLI execution and coordinated public-host outcomes remain separate gates.
+
+Next, verify shared trust/data authority through ordinary document, redirect and
+subresource paths with original TLS/X.509/App fixtures. Preserve identity and
+certificate validation, origins, CSP, cookies, cancellation and checked bounds.
+Everyday resource/render/input usability follows, then finite tabs, link contexts
+and windows. Completed media slices remain supported; further F6/YouTube work is
+deferred. This diagnostic prerequisite establishes no trust expansion or live
+compatibility outcome.
 
 ## F1 — replaceable animation-frame operations
 

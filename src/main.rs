@@ -74,6 +74,7 @@ fn main() {
             if std::env::args_os().any(|arg| {
                 arg == "--license" || arg == "--accept-license" || arg == "--license-ui-script" || arg == "--help" || arg == "-h" || arg == "--render"
                     || arg == "--diagnose"
+                    || arg == "--diagnose-allow-host"
                     || arg == "--activity-report"
                     || arg == "--save-source"
                     || arg == "--dev-input-script"
@@ -109,6 +110,7 @@ fn run() -> Result<(), String> {
     let mut find = None;
     let mut trust_file: Option<PathBuf> = None;
     let mut diagnostic_urls = Vec::new();
+    let mut diagnostic_hosts = diagnostics::AllowedHosts::default();
     let mut diagnostic_report: Option<PathBuf> = None;
     let mut activity_report: Option<PathBuf> = None;
     let mut save_source: Option<PathBuf> = None;
@@ -226,6 +228,12 @@ fn run() -> Result<(), String> {
                         .map_err(|_| "Diagnostic URLs must be UTF-8.")?,
                 );
             }
+            Some("--diagnose-allow-host") => {
+                let host = args.next()
+                    .ok_or("--diagnose-allow-host requires an ASCII host, not a URL")?
+                    .into_string().map_err(|_| "Diagnostic hosts must be ASCII.")?;
+                diagnostic_hosts.push(&host)?;
+            }
             Some("--report") => {
                 if diagnostic_report.is_some() {
                     return Err("Pass --report at most once.".into());
@@ -314,6 +322,8 @@ Source export uses the same profile isolation as rendering. It saves the origina
 Trust: --trust-file roots.pem (replaces trust/roots.pem beside the executable)
 Connection report: --diagnose https://host/path --report connection.txt
 Repeat --diagnose up to eight times, or run tools\demos\Check-Connections.cmd. Diagnostics do not load a profile.
+Optional --diagnose-allow-host HOST (repeat up to 128 times, only with --diagnose) restricts every hop before DNS to exact ASCII DNS/IPv4 or bracketed IPv6 hosts; no URL, port, or wildcard. Without this option, the existing unrestricted redirect policy remains.
+Reports record measured phases, attempted URLs and possible challenge text; receiving HTTP 200 does not establish page usability.
 
 HTTP, the TLS 1.3/1.2 HTTPS subset, gzip/deflate decoding, images, layout, controls and JavaScript use our own code. Page fonts use our TrueType/WOFF1 reader and renderer; try pages/fonts.html. GET and URL-encoded POST forms work; refresh/history asks before resending POST. The bounded JavaScript subset includes typed arrays, DataView, Map/Set, text encoding, animation frames and native keyboard events. Session cookies stay in memory; host-only and validated Domain cookies use bundled public-suffix boundaries. Same-origin script navigation and external classic script insertion are supported within work, CSP and request-blocking limits. Fetch, XHR, persistent storage and HTML injection remain unavailable. Try the workshops and pages/browser-tests.html for current limits."#);
                 println!("{}", help);
@@ -343,6 +353,7 @@ HTTP, the TLS 1.3/1.2 HTTPS subset, gzip/deflate decoding, images, layout, contr
     if inspector_window && (render.is_none() || inspector_view.is_none()) {
         return Err("--inspector-window requires --render and --inspector TAB.".into());
     }
+    diagnostic_hosts.require_diagnose(!diagnostic_urls.is_empty())?;
     if no_profile && profile_directory.is_some() {
         return Err("Choose either --no-profile or --profile-dir, not both.".into());
     }
@@ -432,7 +443,7 @@ HTTP, the TLS 1.3/1.2 HTTPS subset, gzip/deflate decoding, images, layout, contr
             );
         }
         let path = diagnostic_report.ok_or("--diagnose requires --report output.txt")?;
-        return diagnostics::write_report(&path, &diagnostic_urls, &trust);
+        return diagnostics::write_report(&path, &diagnostic_urls, &trust, &diagnostic_hosts);
     }
     let headless = render.is_some() || activity_report.is_some() || save_source.is_some() || input_script.is_some();
     let mut browser = app::App::new();

@@ -13,7 +13,7 @@ interface slices remain supported within their recorded limits.
 
 | ID | Status | Current outcome | Remaining scope |
 | --- | --- | --- | --- |
-| T1 | Next | Existing original TLS/X.509 and explicit browser-owned PEM trust data form the baseline | Verify shared trust/data authority and certificate coverage across ordinary document/resource paths, preserving validation and actionable failures |
+| T1 | In progress: bounded diagnostic prerequisite | Original document diagnostics with optional exact-host checks before DNS on every hop, actual destinations/phases and escaped status/error observations | Trust-data expansion and ordinary document/resource coverage remain planned; preserve validation and verify actual outcomes separately |
 | B1 | Queued after T1 | Existing resource, renderer and input paths are partial foundations | Address demonstrated everyday stylesheet/script/font/image, layout and interaction failures with real request-to-pixel/input proof |
 | B2 | Queued after page usability | No new tab or window capability is claimed | Define finite tabs, link-context and new-window behavior with real context/lifetime ownership |
 | L1 | Complete | Full offline native license text and explicit acceptance; personal/organization source and headless acceptance; strict external receipts, decline and changed-terms checks | No identity or organizational-authority verification; exact release packaging remains a separate gate |

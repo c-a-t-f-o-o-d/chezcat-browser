@@ -6,6 +6,10 @@ Development priority is shared TLS/trust/data coverage, everyday resource/render
 interaction usability, then finite tabs, link context and new windows. Further
 F6/YouTube work is deferred; completed finite media/interface slices remain.
 
+- Add optional exact-host document diagnostics checked before DNS on every hop,
+  with retained two-MiB body bounds, actual destinations/measured phases and
+  escaped status/error metadata. Possible body markers are observations;
+  receiving a document does not establish access or page usability.
 - Expose genuine owner-realm HTMLMediaElement/HTMLVideoElement interfaces over
   the existing player, with stable VIDEO identity and canonical controls/slot
   accessors that bypass ordinary own shadows. Real unbound-player refusals,
