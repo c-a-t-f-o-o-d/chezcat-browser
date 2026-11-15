@@ -229,8 +229,8 @@ fn toolbar_and_menu_keyboard_focus_own_their_keys() {
     app.key(0x46, false, false, true); // Alt+F
     assert!(app.menu);
     app.key(0x23, false, false, false); // End
-    assert_eq!(app.chrome.menu_selected, Some(13));
-    assert!(app.chrome_rect(ChromeAction::MenuItem(13)).is_some());
+    assert_eq!(app.chrome.menu_selected, Some(14));
+    assert!(app.chrome_rect(ChromeAction::MenuItem(14)).is_some());
     app.key(0x24, false, false, false); // Home
     assert_eq!(app.chrome.menu_selected, Some(0));
     assert!(matches!(

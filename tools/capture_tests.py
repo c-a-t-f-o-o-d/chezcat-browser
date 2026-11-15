@@ -61,7 +61,8 @@ def write_json(path, value):
 
 def source_identity(root):
     """Hash compilation inputs, not personal settings or the entire environment."""
-    paths = [root / name for name in ("Cargo.toml", "Cargo.lock", "build.rs", "LICENSE")]
+    paths = [root / name for name in ("Cargo.toml", "Cargo.lock", "build.rs", "LICENSE",
+                                       "LICENSE_SCOPE.md", "THIRD_PARTY_NOTICES.md", "SOURCE_REVISION")]
     for directory in ("src", "data", "resources", "assets", "pages", "trust",
                       "tools/fixtures", "tools/reference"):
         paths += sorted((root / directory).rglob("*"))

@@ -19,13 +19,13 @@ JOURNEYS=[['check_input_harness.py'],['check_input_harness.py','--event-namespac
  ['check_source_replacement_harness.py'],['check_animation_harness.py'],['check_license_acceptance.py'],
  ['check_navigation_harness.py'],['check_network_media_harness.py'],
  ['check_network_media_tls_harness.py'],['check_interframe_harness.py'],['check_background_harness.py'],
- ['check_authored_av_harness.py'],['check_network_authored_av_harness.py'],['check_stylesheet_origin_harness.py'],['check_media_viewport_harness.py']]
+ ['check_authored_av_harness.py'],['check_network_authored_av_harness.py'],['check_stylesheet_origin_harness.py'],['check_media_viewport_harness.py'],['check_about_harness.py']]
 
 def committed_source_identity(commit,root=None):
     """Read immutable input blobs, including edits hidden by index flags."""
     root=root or ROOT
     def included(name):
-        return name in ['Cargo.toml','Cargo.lock','build.rs','LICENSE','rust-toolchain','rust-toolchain.toml','.cargo/config','.cargo/config.toml'] or name.startswith(('src/','data/','resources/','assets/','pages/','trust/','tools/fixtures/','tools/reference/'))
+        return name in ['Cargo.toml','Cargo.lock','build.rs','LICENSE','LICENSE_SCOPE.md','THIRD_PARTY_NOTICES.md','SOURCE_REVISION','rust-toolchain','rust-toolchain.toml','.cargo/config','.cargo/config.toml'] or name.startswith(('src/','data/','resources/','assets/','pages/','trust/','tools/fixtures/','tools/reference/'))
     entries=[]
     for row in subprocess.check_output(['git','ls-tree','-rz',commit],cwd=root).split(b'\0'):
         if not row:continue
@@ -97,6 +97,7 @@ def main():
        ('artifact-guards',[sys.executable,'tools/check_release_bundle.py']),
        ('version-parser-controls',[sys.executable,'tools/check_product_version.py']),
        ('capture-controls',[sys.executable,'tools/check_capture_tests.py','--output',str(folder/'capture-controls.json')]),
+       ('build-identity-controls',[sys.executable,'tools/check_build_identity_controls.py','--output',str(folder/'build-identity-controls')]),
        ('normal',[sys.executable,'tools/capture_tests.py','--toolchain','1.99.1']),
        ('release',['rustup','run','1.99.1','cmd.exe','/d','/c','Build.cmd']),
        ('pe',[sys.executable,'tools/check_windows_pe.py','--output',str(folder/'pe.json')])]:

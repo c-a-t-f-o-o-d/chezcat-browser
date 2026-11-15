@@ -10,7 +10,7 @@ implemented slices, not complete web-platform or public-service support.
 
 Current development order is shared TLS/trust and data coverage, everyday
 resource/render/interaction usability, then finite tabs, link context and new
-windows. Add the small About/build-identity view at a suitable UI checkpoint.
+windows. A finite A1 About/build-identity slice is implemented at this UI checkpoint.
 One per-user Windows installer and staged update support follow the first page-
 usability/tabs milestones, before optional media expansion. Further F6/YouTube
 integration is deferred; completed finite media and interface slices remain
@@ -21,7 +21,7 @@ supported within their recorded limits.
 | T1 | In progress: remaining interoperability gaps | Guarded document diagnostics, a pinned conservative Mozilla NSS 98-authority selection, reviewed offline generation, shared 1024-root policy and bounded per-hop redirect clocks; coordinated document checks distinguish improved path coverage from later failures | Remaining chain/parser/protocol/timeout/admission and resource-specific failures; no broad TLS or usable-site completion claim |
 | B1 | In progress: stylesheets and finite viewport media rules | Shared unmarked cross-origin HTTP(S) stylesheet loading; host-context media rules with real resize/zoom geometry and pixels, source ownership and complete-sheet admission | Original executable width/zoom and dynamic-link cases passed; normal verification remains required for each checkpoint; retain request/security/lifecycle boundaries and explicit query/font gaps while addressing broader resource/render/input usability |
 | B2 | Planned after first page-usability milestone | No new tab or window capability is claimed | Finite tabs, link-context and new-window behavior with real page/history/worker/focus ownership |
-| A1 | Planned at a suitable UI checkpoint | No About/build-copy view is claimed | Exact embedded product/source/build identity, offline license/notices and privacy-safe copy without runtime Git |
+| A1 | Implemented finite native About slice | Browser-owned About panel, embedded full product/source/state/build description, exact main legal texts and safe build-information Copy | Normal/build/executable validation is required for each checkpoint; metadata is descriptive, not authenticated publication or signing, and App payload capture does not prove OS clipboard delivery |
 | I1 | Planned after first B1/B2 milestones | Portable runtime ZIP remains the distribution baseline | One per-user x64 MSI with complete exact payload, shortcuts/uninstall, deliberate upgrade version mapping and isolated data-preservation/recovery tests |
 | U1 | Planned with delivery work | No automatic or manual release discovery is claimed | Real published-milestone discovery, startup opt-in default OFF, manual check, bounded async work and deliberate prerelease channels |
 | U2 | Planned after installer/authenticity prerequisites | No automatic download/install/restart is claimed | Separate explicit approval, authenticated package identity, staged installer/recovery and changed-terms acceptance |

@@ -1,0 +1,9 @@
+{
+  "method": "Original HTML/CSS fixture without external assets.",
+  "file": "about-retained.html",
+  "bytes": 522,
+  "sha256": "ceffca10e4f6a32535e381da789413c6118f7870723ff815f8537843ea7242fe",
+  "network_resources": false,
+  "scripts": false,
+  "interaction": "One original same-document anchor establishes nonzero scroll before native About menu/control input."
+}

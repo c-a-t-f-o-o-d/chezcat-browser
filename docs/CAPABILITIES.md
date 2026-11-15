@@ -7,8 +7,9 @@ physical desktop/device evidence and live-service outcomes are different scopes.
 Current work is shared TLS/trust compatibility, ordinary stylesheet resources
 and finite viewport-media rendering, followed by useful page interaction and
 finite tabs/new windows.
-About/build identity, one per-user installer and staged release discovery/upgrade
-are planned in the [roadmap](ROADMAP.md), not delivered capabilities. Further
+A finite About/build-description panel is implemented at this UI checkpoint.
+One per-user installer and staged release discovery/upgrade remain planned in the
+[roadmap](ROADMAP.md), not delivered capabilities. Further
 F6/YouTube work is deferred; completed finite media evidence remains valid.
 
 | Area | Implemented and locally verified slice | Gaps / next acceptance | Main implementation and checks |
@@ -25,7 +26,7 @@ F6/YouTube work is deferred; completed finite media evidence remains valid.
 | Fonts/images | Original selected font/image decoders and resource/presentation paths | Format subsets and cross-origin font loading need specific contracts | src/fonts.rs, src/image.rs and format modules; original pixel/negative fixtures |
 | Media | Local IVF/VP8 visible fixed-canvas I/P (version-zero single-MV interframes), PCM, constrained Matroska A/V with dependency-aware seeking; one authored IVF or supported Matroska video with source/load lifecycle, script controls and play promises tied to decoded-frame/acknowledged PCM readiness; complete HTTP(S) IVF/Matroska transfers chosen by explicit MIME, with authored CORS/credential modes | SPLITMV, hidden/nonzero-version interframes, WebM/Opus/Vorbis, unmarked foreign media, dynamic crossOrigin controls, streaming/ranges, muted Matroska, multiple players, MSE and YouTube playback missing | src/media.rs, src/audio.rs, src/matroska.rs, src/script_media.rs; local media/source-replacement journeys and check_authored_video_harness.py and check_network_media_harness.py; check_authored_av_harness.py and check_network_authored_av_harness.py |
 | Media interfaces | Genuine owner-realm HTMLMediaElement/HTMLVideoElement roots, constants and slot accessors; stable VIDEO class identity and canonical load/pause/play/src/currentTime transactions through ordinary shadows; actual Boolean controls reflection and native bar/input behavior without source/clock/frame/Promise reset | One bound player; controls reflects genuine main HTML VIDEO/AUDIO attributes without a player, while unbound playback calls give real NotSupportedError outcomes and other playback-state getters/setters decline. VIDEO dimensions, extra/child players and wider media APIs remain unsupported; Element.toggleAttribute and NamedNodeMap mutation are separate gaps | src/media_interface.rs, src/script_media.rs, src/host_objects.rs, src/app_media.rs; original media-interface/controls tests, check_media_interface_harness.py and check_media_controls_harness.py |
-| Browser UI | Native settings, address input, bookmarks/history/download controls and local input paths | Tabs/new windows and About/build-copy are planned; full accessibility, richer UI and native locked-session presentation remain unverified | src/app*.rs, src/ui.rs, src/platform.rs; App/input journeys |
+| Browser UI | Native settings, address input, bookmarks/history/download controls and local input paths; finite native About panel with embedded build/source description, exact main legal texts and safe Copy action | Normal/build/offscreen About validation is required for each checkpoint. Copy payload capture does not prove OS clipboard delivery; embedded metadata is not authenticated publication/signing. Tabs/new windows, full accessibility, richer UI and native locked-session presentation remain unverified | src/app*.rs, src/build_identity.rs, src/ui.rs, src/platform.rs; original About/chrome tests and App/input journeys |
 | Diagnostics | Source/activity/layout/pixels and inspector; document-only connection reports with optional exact-host checks before DNS on each hop, actual destination/phase evidence, and escaped bounded metadata; eight new native diagnostics regressions verified | No App/profile, page scripts, subresources or usability assessment in --diagnose. Status and possible body markers do not establish access/challenge outcomes. Reports can contain private URLs/paths/session data; full normal integration and public-host checks remain separate | src/diagnostics.rs, src/diagnostics_tests.rs, src/network_trace.rs; original loopback/guard/metadata tests and offline harness reports |
 | Platform/isolation | Windows x64, explicit FFI ownership, worker retirement/cancellation and watchdogs | No OS renderer sandbox; independent native/crypto/aggregate-memory assurance remains incomplete | src/platform.rs, src/audio_output.rs; native negative tests and PE checks |
 | Build/release | std-only production manifest, generated resources, pinned compiler, portable payload and offline local gates | Per-user MSI and opt-in release discovery/authenticated upgrades are planned, not implemented. Each release requires an exact tagged build, complete payload, extracted-runtime checks and downloadable-asset verification | Build.cmd, tools/verify_offline.py, docs/RELEASING.md |
@@ -38,6 +39,7 @@ F6/YouTube work is deferred; completed finite media evidence remains valid.
 | Trust-data and native certificate checks | Exact reviewed data reproduction, source/policy pins, all selected anchors' supported forms/CA/time/self-signatures, retained identities and original signed-path refusals | Complete Firefox policy, revocation/CT, general TLS interoperability or a public website's actual behavior |
 | Document-only diagnostics | Original transport response, trust selection, guarded destinations and measured native phases for the actual attempt | Page JavaScript/subresources, readability, interaction, challenge clearance or an audit of the complete trust selection |
 | Actual App/input/offscreen journeys | Real application input, script state/events, source/layout/canvas identity, decoded pixels and finite HTTP/TLS response checks | Physical desktop presentation, speaker output or public-service compatibility |
+| App build-information copy capture | Actual typed safe metadata action returned by owned About keyboard/pointer controls, captured without changing the OS clipboard | Successful native clipboard delivery, authenticated publisher/source/binary identity or remote publication |
 | Hosted offline CI | The recorded commit's build, normal checks and local fixture journeys on its runner | A later commit, release payload, hardware output or live service |
 | Explicit opt-in WinMM checks | Device acknowledgements, PCM sample advancement, pause/seek/drain/replay and video alignment for the selected profile | Physical audibility, arbitrary devices or routine no-device CI |
 | Physical desktop / live service | Requires separate, explicit evidence for the actual session and outcome | Not inferred from source inspection, HTTP status, titles or offscreen pixels |
@@ -52,6 +54,19 @@ strict, and identity, expiry, signatures and constraints are unchanged. Normal
 verification remains required for integration. A coordinated browser recheck
 must establish actual request/resource behavior; these checks alone establish
 no newly usable public service. See [trust scope and refresh](../trust/README.md).
+
+The finite About view is a browser-owned native panel over the same live page.
+Build text preserves full prerelease SemVer and descriptive source/state/kind;
+unknown metadata stays unknown and a declared tag stays publication-unverified.
+It is not code signing or release authentication. Offline legal views retain the
+exact main LICENSE, scope and third-party notice index. Full referenced third-
+party terms remain packaged separately; the viewer does not open each referenced
+file. Safe Copy contains only allowlisted build/source/license fields, with no
+page, profile, history, receipt or path data. Its App input capture intentionally
+does not invoke the native clipboard. Original App and executable acceptance
+must establish legal-text/rendering identity, native focus/scroll/copy controls,
+return to the same page and preservation of held resource work. Normal build,
+PE and package verification remain required; no installer/update control is added.
 
 The finite viewport-media slice evaluates nested matching rules against the
 real CSS viewport and explicit desktop mouse-input profile. Original native/App
