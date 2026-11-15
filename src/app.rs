@@ -63,6 +63,8 @@ pub enum PlatformAction {
     OpenFile,
     OpenFolder(PathBuf),
     Copy(String),
+    /// Fixed safe build metadata from the native About panel only.
+    CopyBuildInformation(String),
     Cut(String),
     Paste,
 }
@@ -3433,8 +3435,7 @@ impl App {
             return action;
         }
         if self.browser_panel.is_some() {
-            self.browser_pointer_up(x, y);
-            return PlatformAction::None;
+            return self.browser_pointer_up(x, y);
         }
         if self.media_pointer_up(x,y) {return PlatformAction::None;}
         let drag = std::mem::replace(&mut self.drag, Drag::None);

@@ -2,7 +2,7 @@
 use super::*;
 use crate::ui::{self, Icon};
 
-const MENU_ITEMS: usize = 14;
+const MENU_ITEMS: usize = 15;
 const MENU_ROW: i32 = 34;
 type Rect = (i32, i32, i32, i32);
 
@@ -220,6 +220,7 @@ impl App {
                     11 => self.show_settings(),
                     12 => self.show_history(),
                     13 => self.toggle_inspector(),
+                    14 => self.show_about(),
                     _ => {}
                 }
             }
@@ -717,6 +718,7 @@ impl App {
             (Icon::Settings, "Settings", "Ctrl+,"),
             (Icon::History, "History", "Ctrl+H"),
             (Icon::Code, "Developer tools", "F12"),
+            (Icon::Code, "About ChezCat", ""),
         ];
         for (index, (icon, label, shortcut)) in rows
             .iter()

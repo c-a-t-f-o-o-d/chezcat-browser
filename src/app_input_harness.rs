@@ -43,6 +43,32 @@ impl App {
                         Ok(())
                     }
                     ["settings", action] => self.input_settings_action(action),
+                    ["about", "Open"] => {
+                        self.input_key("f","KeyF",0x46,false,true,None)?;
+                        self.input_key("End","End",0x23,false,false,None)?;
+                        self.input_key("Enter","Enter",0x0d,false,false,None)?;
+                        if self.about_displayed_text().is_none() {return Err("Native menu did not open About.".into());}
+                        Ok(())
+                    },
+                    ["about", name] if matches!(*name,"End"|"Home") => {
+                        if !matches!(self.input_about_control("Text")?,PlatformAction::None) {return Err("Read-only About focus requested a platform operation.".into());}
+                        let code=if *name=="End" {0x23}else{0x24};
+                        self.input_key(name,name,code,false,false,None)
+                    },
+                    ["about", name] => {
+                        let action=self.input_about_control(name)?;
+                        match action {
+                            PlatformAction::None if *name!="Copy"=>Ok(()),
+                            PlatformAction::CopyBuildInformation(text) if *name=="Copy" && text==crate::build_identity::current().safe_copy()=>{
+                                let target=output.join(format!("about-copy-{:02}.txt",index+1));
+                                let mut file=std::fs::OpenOptions::new().write(true).create_new(true).open(target).map_err(|e|e.to_string())?;
+                                file.write_all(text.as_bytes()).map_err(|e|e.to_string())?;file.flush().map_err(|e|e.to_string())?;
+                                writeln!(log,"Captured actual CopyBuildInformation App payload; native clipboard was not called.").map_err(|e|e.to_string())?;
+                                Ok(())
+                            },
+                            _=>Err("About input returned an unexpected platform action; clipboard not touched.".into()),
+                        }
+                    },
                     ["media", action] => {let (x,y)=self.input_media_action(action)?;writeln!(log,"Pointer native media control={action} x={x} y={y}").map_err(|e|e.to_string())?;Ok(())},
                     ["media-surface"] => {
                         let (x,y)=self.input_video_point(false)?;
@@ -227,6 +253,10 @@ impl App {
             layout.push_str(&format!("control={} name={:?} value={value:?} x={} y={} w={} h={}\n", rect.node, self.document.attr(rect.node, "name"), rect.x, rect.y, rect.width, rect.height));
         }
         std::fs::write(output.join(format!("{name}.layout.txt")), layout).map_err(|e| e.to_string())?;
+        if let Some(text)=self.about_displayed_text() {
+            std::fs::write(output.join(format!("{name}.about.txt")),text).map_err(|e|e.to_string())?;
+            std::fs::write(output.join(format!("{name}.about-state.txt")),self.about_state_report().ok_or("About state unavailable.")?).map_err(|e|e.to_string())?;
+        }
         rendered
     }
 }

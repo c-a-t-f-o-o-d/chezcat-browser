@@ -109,6 +109,7 @@ unsafe fn action(window: Handle, owner: Handle, state: *mut App, action: Platfor
         PlatformAction::None | PlatformAction::OpenFile => Ok(()),
         PlatformAction::OpenFolder(path) => open_folder(window, &path),
         PlatformAction::Copy(text) => write_clipboard(window, &text),
+        PlatformAction::CopyBuildInformation(_) => Err("Build-information copy belongs to the browser About panel.".into()),
         PlatformAction::Cut(text) => match write_clipboard(window, &text) {
             Ok(()) => {
                 if state_is_attached(owner, state) {

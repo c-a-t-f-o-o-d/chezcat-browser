@@ -6,6 +6,13 @@ Development priority is shared TLS/trust/data coverage, everyday resource/render
 interaction usability, then finite tabs, link context and new windows. Further
 F6/YouTube work is deferred; completed finite media/interface slices remain.
 
+- Add a native About panel with full embedded product/source/build description,
+  exact offline main license/scope/notice-index views and safe build-information
+  Copy through existing input/clipboard paths. Preserve the live page, history,
+  scroll and resource ownership. Declared tags remain publication-unverified;
+  App payload capture is distinct from OS clipboard proof. Referenced third-party
+  terms remain packaged separately. Normal/build/executable acceptance is required;
+  no consent, receipt, installer or update operation is introduced.
 - Apply finite viewport/hover @media groups with real host CSS dimensions,
   fractional resize/zoom thresholds and preserved cascade/stylesheet ownership.
   Count inactive nested blocks for whole-sheet admission and keep initial font

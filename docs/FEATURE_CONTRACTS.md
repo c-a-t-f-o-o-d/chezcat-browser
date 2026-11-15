@@ -191,14 +191,42 @@ work and no worker/script/media completion crossing a closed or different owner.
 
 ## A1 — About and running-build identity
 
-Status: planned for a suitable validated UI checkpoint. Show the exact embedded
-product SemVer including prerelease, source/build identity where recorded, and
-development versus published-build status without requiring Git at runtime. Keep
-product and license versions separate; expose exact LICENSE/scope/third-party
-notices offline. Copy build information excludes personal paths/profile/history;
-a locally displayed executable location is not automatically copied or sent.
-Acceptance includes real keyboard/copy behavior and agreement with the running
-packaged/development executable. Integrate update controls only as delivered.
+Status: finite source/UI implementation, with normal build and actual executable
+acceptance required for integration. Use the existing browser-owned native panel
+and menu input paths. Keep the underlying document/source, history, scroll and
+resource workers owned by the same page; About Escape closes the panel rather
+than issuing Stop. Closing returns to that page without reload or navigation.
+
+Display the embedded full product SemVer, including prerelease, source revision
+when known, source origin/clean-dirty-unknown state and build kind. Keep product
+and license versions separate. Metadata is a build-time description: an exported
+revision does not establish an unchanged tree, and a declared tagged build is
+explicitly publication-unverified. It authenticates no publisher, remote tag,
+release, executable or signature. About performs no runtime Git or network work.
+
+Native Build/License/Scope/Notices controls expose the exact embedded root
+LICENSE, LICENSE_SCOPE.md and main THIRD_PARTY_NOTICES.md index offline, using
+read-only text with keyboard focus, scrolling and resize. The complete referenced
+third-party terms remain in the distribution's packaged notice/license files;
+this finite viewer does not add routes to every referenced file. It reopens no
+acceptance flow, reads/writes no receipt and changes no user/profile setting.
+
+Copy build information uses a fixed allowlist of product/build/source and license
+version/digest fields. Exclude page markup/activity data, paths, profile/history,
+usernames and receipts. The native action uses the existing owned Windows Unicode
+clipboard backend. A development input harness may capture only the actual typed
+safe payload into local evidence; it must not call the OS clipboard or accept
+arbitrary external actions. This proves App action/payload behavior, not successful
+native clipboard delivery or authenticated build identity.
+
+Acceptance includes real menu/keyboard/pointer selection and focus; complete legal
+text identity in the actual rendering document; text scrolling/resize and paired
+native-panel pixels; safe Copy action through the real control paths; canceled
+press/closed-control refusal and recovery; preserved page/history/scroll and held
+resource-worker completion across About open/Escape; agreement with the running
+development/packaged executable's embedded metadata. Full normal verification,
+build/PE and package checks remain required. Installer, release discovery and
+update controls are separate planned features, with no placeholder update button.
 
 ## I1 — one Windows installation package
 

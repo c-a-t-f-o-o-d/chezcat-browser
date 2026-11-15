@@ -324,6 +324,23 @@ class Guards(unittest.TestCase):
         self.write('Cargo.toml',(self.root/'Cargo.toml').read_bytes()+b'# hidden edit\n')
         self.assertEqual(package.git('status','--porcelain'),b'')
         with self.assertRaisesRegex(ValueError,'differ from committed bytes'):package.verified(commit)
+    def test_hidden_embedded_legal_or_source_identity_edit_cannot_claim_committed_source(self):
+        files,commit=self.fixture()
+        names=['LICENSE_SCOPE.md','THIRD_PARTY_NOTICES.md','SOURCE_REVISION']
+        committed=verification.committed_source_identity(commit,self.root)
+        for name in names:
+            with self.subTest(input=name):
+                self.assertIn(name,committed)
+                subprocess.run(['git','update-index','--assume-unchanged',name],cwd=self.root,check=True)
+                try:
+                    self.write(name,files[name]+b'\nControlled hidden embedded-input edit.\n')
+                    self.assertEqual(package.git('status','--porcelain'),b'')
+                    self.assertNotEqual(package.capture_tests.source_identity(self.root)[name],committed[name])
+                    with self.assertRaisesRegex(ValueError,'differ from committed bytes'):package.verified(commit)
+                finally:
+                    self.write(name,files[name])
+                    subprocess.run(['git','update-index','--no-assume-unchanged',name],cwd=self.root,check=True)
+
     def test_ignored_compilation_input_cannot_claim_committed_source(self):
         _,commit=self.fixture();self.write('pages/__pycache__/untracked.pyc',b'controlled ignored input')
         self.assertEqual(package.git('status','--porcelain'),b'')

@@ -6,6 +6,7 @@ mod app;
 mod audio;
 mod audio_output;
 mod blocking;
+mod build_identity;
 mod compression;
 mod cookies;
 mod crypto_aead;

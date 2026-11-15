@@ -11,6 +11,8 @@ mod appearance_ui;
 mod blocking_ui;
 #[path = "app_bookmark_tree_ui.rs"]
 mod bookmark_tree_ui;
+#[path="app_about.rs"]
+mod about;
 
 const ROW: i32 = 52;
 const PANEL_HEADER: i32 = 60;
@@ -18,6 +20,9 @@ const PANEL_FOOTER: i32 = 54;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Action {
+    About(about::Section),
+    AboutText,
+    AboutCopy,
     Close,
     Add,
     List,
@@ -85,6 +90,7 @@ enum Action {
 
 #[derive(Clone, Copy)]
 enum PanelKind {
+    About,
     Bookmarks,
     EditBookmark { index: Option<usize> },
     Settings,
@@ -131,6 +137,7 @@ pub(super) struct BrowserPanel {
     history_policy: crate::history::Policy,
     clear_range: crate::history::ClearRange,
     return_panel: Option<Box<BrowserPanel>>,
+    about: Option<about::Contents>,
 }
 
 impl BrowserPanel {
@@ -168,6 +175,7 @@ impl BrowserPanel {
             history_policy: crate::history::Policy::default(),
             clear_range: crate::history::ClearRange::Hour,
             return_panel: None,
+            about: None,
         }
     }
     fn editor(&mut self) -> Option<&mut Editor> {
@@ -868,6 +876,7 @@ impl App {
     }
 
     fn browser_footer_height(&self) -> i32 {
+        if self.browser_panel.as_ref().is_some_and(|p|matches!(p.kind,PanelKind::About)) {return self.about_footer_height();}
         if self.browser_header_height() == 44 {
             44
         } else {
@@ -876,6 +885,7 @@ impl App {
     }
 
     fn browser_footer_y(&self) -> i32 {
+        if self.browser_panel.as_ref().is_some_and(|p|matches!(p.kind,PanelKind::About)) {return self.content_bottom()-self.about_footer_height()+6;}
         self.content_bottom()
             - if self.browser_header_height() == 44 {
                 38
@@ -907,6 +917,7 @@ impl App {
             return Vec::new();
         };
         let body = self.browser_body();
+        if matches!(panel.kind,PanelKind::About) {return self.about_controls(body);}
         if matches!(
             panel.kind,
             PanelKind::Bookmarks
@@ -937,6 +948,7 @@ impl App {
             })
         };
         match panel.kind {
+            PanelKind::About => {},
             PanelKind::Bookmarks | PanelKind::History => {
                 let history = matches!(panel.kind, PanelKind::History);
                 add(
@@ -1335,6 +1347,7 @@ impl App {
     }
 
     fn browser_body_action(&self, action: Action) -> bool {
+        if action==Action::AboutText {return true;}
         if action == Action::HistoryOptions {
             return self
                 .browser_panel
@@ -1450,6 +1463,7 @@ impl App {
                 .collect();
         }
         let order: &[Action] = match panel.kind {
+            PanelKind::About => &[Action::About(about::Section::Build),Action::About(about::Section::License),Action::About(about::Section::Scope),Action::About(about::Section::Notices),Action::AboutText,Action::AboutCopy,Action::Close],
             PanelKind::EditFolder { .. }
             | PanelKind::FolderDestination
             | PanelKind::DeleteFolder { .. } => &[],
@@ -1557,6 +1571,7 @@ impl App {
 
     fn browser_content_height(&self) -> i32 {
         match self.browser_panel.as_ref().map(|panel| panel.kind) {
+            Some(PanelKind::About) => self.browser_panel.as_ref().and_then(|p|p.about.as_ref()).map_or(0,|a|a.layout.height),
             Some(PanelKind::Settings) => 1412,
             Some(PanelKind::BlockingRules) => self.browser_body().h.max(272),
             Some(PanelKind::HistoryOptions) => 390,
@@ -1617,6 +1632,7 @@ impl App {
     }
 
     pub(super) fn sync_browser_panel(&mut self) {
+        self.sync_about_layout();
         self.sync_history_panel();
         let body = self.browser_body();
         let max = (self.browser_content_height() - body.h).max(0);
@@ -1787,6 +1803,7 @@ impl App {
         shift: bool,
         alt: bool,
     ) -> PlatformAction {
+        if let Some(action)=self.about_key(key,ctrl,shift,alt) {return action;}
         if ctrl && alt {
             return PlatformAction::None;
         }
@@ -1970,6 +1987,7 @@ impl App {
             self.sync_browser_panel();
         } else if matches!(key, 0x0d | 0x20) {
             let action = panel.focus;
+            if let Some(result)=self.browser_about_activation(action) {return result;}
             self.browser_activate(action);
         }
         PlatformAction::None
@@ -2119,7 +2137,7 @@ impl App {
         true
     }
 
-    pub(super) fn browser_pointer_up(&mut self, x: i32, y: i32) {
+    pub(super) fn browser_pointer_up(&mut self, x: i32, y: i32)->PlatformAction {
         let action = self.browser_action_at(x, y);
         let pressed = self.browser_panel.as_mut().and_then(|panel| {
             let pressed = panel.pressed;
@@ -2128,15 +2146,18 @@ impl App {
             pressed
         });
         if let Some(pressed) = pressed.filter(|pressed| Some(*pressed) == action) {
+            if let Some(result)=self.browser_about_activation(pressed) {return result;}
             self.browser_activate(pressed);
         }
+        PlatformAction::None
     }
 
     pub(super) fn browser_wants_hand(&self, x: i32, y: i32) -> bool {
         self.browser_action_at(x, y).is_some_and(|action| {
             !matches!(
                 action,
-                Action::Title
+                Action::AboutText
+                    | Action::Title
                     | Action::Address
                     | Action::Zoom
                     | Action::Home
@@ -2193,6 +2214,7 @@ impl App {
             palette.border,
         );
         let title = match panel.kind {
+            PanelKind::About => "About ChezCat",
             PanelKind::Bookmarks => "Settings / Bookmarks",
             PanelKind::EditFolder { id: None } => "New bookmark folder",
             PanelKind::EditFolder { .. } => "Edit bookmark folder",
@@ -2208,6 +2230,7 @@ impl App {
             PanelKind::EditBookmark { .. } => "Edit bookmark",
         };
         let title_icon = match panel.kind {
+            PanelKind::About => Icon::Code,
             PanelKind::Bookmarks => Icon::Bookmarks,
             PanelKind::EditFolder { .. }
             | PanelKind::FolderDestination
@@ -2255,7 +2278,9 @@ impl App {
                 | PanelKind::HistorySearch
                 | PanelKind::HistoryClear
         );
-        let message = if !panel.error.is_empty() {
+        let message = if matches!(panel.kind,PanelKind::About) {
+            format!("{} | Focus text to scroll with arrows/PgUp/PgDn/Home/End. Copy info shares build metadata only.",panel.about.as_ref().map_or("Build",|a|a.section.name()))
+        } else if !panel.error.is_empty() {
             panel.error.clone()
         } else if matches!(panel.kind, PanelKind::BlockingRules) {
             "Done returns to Settings. Apply saves your rules.".into()
@@ -2306,6 +2331,7 @@ impl App {
             body.x, body.y, body.w, body.h,
         )));
         match panel.kind {
+            PanelKind::About => self.paint_about(canvas,body,panel),
             PanelKind::Bookmarks
             | PanelKind::EditFolder { .. }
             | PanelKind::FolderDestination
@@ -2588,7 +2614,7 @@ impl App {
             PanelKind::BlockingRules => self.paint_blocking_rules(canvas, body, panel),
         }
         for control in self.browser_controls() {
-            if matches!(control.action, Action::List | Action::RuleList) {
+            if matches!(control.action, Action::AboutText | Action::List | Action::RuleList) {
                 continue;
             }
             let content = self.browser_body_action(control.action);
@@ -3029,3 +3055,7 @@ mod tests;
 #[cfg(test)]
 #[path = "app_history_ui_tests.rs"]
 mod history_tests;
+
+#[cfg(test)]
+#[path="app_about_tests.rs"]
+mod about_tests;

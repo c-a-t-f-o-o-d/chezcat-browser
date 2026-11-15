@@ -58,6 +58,28 @@ class Controls(unittest.TestCase):
             self.assertFalse(result['passed'])
             self.assertNotIn(secret,json.dumps(result))
 
+    def test_build_identity_stage_publishes_only_fixed_name_and_state(self):
+        secret='CONTROLLED_PRIVATE_METADATA_REASON'
+        source_path='C:/controlled-private/source'
+        fixture_sha='e'*40
+        log='controlled-private-build.log'
+        with tempfile.TemporaryDirectory(prefix='public-metadata-stage-') as temporary:
+            root=Path(temporary)
+            location='results/verification/offline/20261115T000000.000000Z-23456789/verification.json'
+            target=root/location;target.parent.mkdir(parents=True)
+            (root/'results/verification/latest-offline.json').write_bytes(json.dumps({'report':location}).encode())
+            target.write_bytes(json.dumps({'passed':False,'source_commit':'1'*40,'runs':[
+                {'name':'build-identity-controls','state':'completed','error':secret,'source_root':source_path,'fixture_sha':fixture_sha,'log':log},
+                {'name':secret,'state':'completed'},
+                {'name':'build-identity-controls','state':secret}]}).encode())
+            with patch.object(public.subprocess,'check_output',return_value=b'1'*40+b'\n'), patch.object(public,'find_native',return_value=None), patch.object(public,'public_basenames',return_value=set()):
+                result=public.summary(root)
+            self.assertEqual(result['stages'],[{'name':'build-identity-controls','state':'completed'}])
+            self.assertFalse(result['passed'])
+            encoded=json.dumps(result)
+            for forbidden in (secret,source_path,fixture_sha,log,'source_root','fixture_sha'):
+                self.assertNotIn(forbidden,encoded)
+
     def test_hostile_strings_unknown_identifiers_and_metadata_never_project(self):
         secret = 'https://private.invalid/path?token=CONTROLLED_SECRET'
         manifest = {'schema_version': 1, 'state': 'not_passed', 'error': secret,

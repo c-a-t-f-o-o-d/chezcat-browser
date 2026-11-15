@@ -1136,7 +1136,7 @@ unsafe fn perform_action(window: Handle, state: *mut App, action: PlatformAction
             }
         }
         PlatformAction::OpenFolder(path) => open_folder(window, &path),
-        PlatformAction::Copy(text) => write_clipboard(window, &text),
+        PlatformAction::Copy(text) | PlatformAction::CopyBuildInformation(text) => write_clipboard(window, &text),
         PlatformAction::Cut(text) => match write_clipboard(window, &text) {
             Ok(()) => {
                 if state_is_attached(window, state) {
