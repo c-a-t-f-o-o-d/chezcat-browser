@@ -11,9 +11,9 @@
   "active_pack": {
     "id": "B2",
     "status": "Shared-profile prerequisite implemented; normal integration required",
-    "scope": "One UI-thread profile writer, immutable revisioned App views, stale editor/bookmark gesture refusal and page-preserving peer refresh",
-    "native_status": "profile21 and shared-profile15 controls pass; affected browser UI34 and bookmark bar5 pass; full normal required",
-    "next_dependency": "Stable page/session IDs, browser-owned downloads and wakes, final history shutdown authority and terminal resource admission before actual tabs/windows",
+    "scope": "One profile writer with revisioned App views and stale editor/gesture refusal; browser-owned download Manager with weak App snapshots and separate retargetable wake routing",
+    "native_status": "Original shared-profile and shared-download/App lifetime controls pass; affected UI/Manager checks pass; full normal required for each implementation checkpoint",
+    "next_dependency": "Stable page/session IDs, final shared history shutdown authority and terminal resource admission before actual tabs/windows",
     "excluded": [
       "Actual tab strip/new-switch-close tabs",
       "New native windows/link dispositions",

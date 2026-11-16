@@ -235,7 +235,10 @@ pub struct App {
     profile: crate::profile::View,
     input_search_provider: Option<String>,
     stylesheet_limits: crate::css::StylesheetLimits,
-    downloads: crate::downloads::Manager,
+    downloads: crate::downloads::View,
+    // Legacy single-window ownership. Session-attached Apps retain only a Weak
+    // View; their browser coordinator owns Shared past every App/View drop.
+    owned_downloads: Option<crate::downloads::Shared>,
     downloads_ui: download_ui::DownloadsUi,
     bookmarks_bar: bookmarks_bar::BookmarkBar,
     visited: std::collections::HashSet<String>,
@@ -310,6 +313,9 @@ impl App {
         let forms = Forms::new(&document);
         let mut address = Editor::default();
         address.set(&location.display());
+        let owned_downloads = crate::downloads::Shared::new();
+        // Fresh and not escaped: no borrow or worker can conflict with view().
+        let downloads = owned_downloads.view().expect("A fresh download authority is available.");
         Self {
             document,
             page,
@@ -355,7 +361,8 @@ impl App {
             profile: crate::profile::View::default(),
             input_search_provider: None,
             stylesheet_limits: crate::css::StylesheetLimits::default(),
-            downloads: crate::downloads::Manager::default(),
+            downloads,
+            owned_downloads: Some(owned_downloads),
             downloads_ui: download_ui::DownloadsUi::default(),
             bookmarks_bar: bookmarks_bar::BookmarkBar::default(),
             visited: std::collections::HashSet::new(),
@@ -502,6 +509,7 @@ impl App {
         }
     }
     pub fn set_load_wake(&mut self, wake: loader::Wake) {
+        self.set_owned_download_wake(wake.clone());
         if let Some(worker)=&self.media_worker {worker.set_wake(wake.clone());}
         if let Some(worker)=&self.embedded_video_worker {worker.set_wake(wake.clone());}
         if let Some(worker)=&self.audio_worker {worker.set_wake(wake.clone());}

@@ -20,6 +20,11 @@ snapshots with captured editor/gesture revisions. Original two-App tests retain
 live VM/form/history/viewport state across peer refresh and refuse stale bookmark
 identities. This is internal ownership preparation; actual tabs, new windows,
 session/download routing and close retirement remain unfinished.
+The download prerequisite now retains one browser-owned Manager with weak App
+views and explicit startup attachment, while preserving legacy single-window
+ownership. Original held transfers survive the originating App, remain visible
+to a peer and use browser wake routing. Native WindowId/session coordination and
+final history/resource retirement are still required before real tabs can close.
 One per-user installer and staged release discovery/upgrade remain planned in the
 [roadmap](ROADMAP.md), not delivered capabilities. Further
 F6/YouTube work is deferred; completed finite media evidence remains valid.
