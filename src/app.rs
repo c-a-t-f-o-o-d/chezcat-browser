@@ -5635,3 +5635,7 @@ mod comment_tests;
 #[cfg(test)]
 #[path = "app_select_fragment_tests.rs"]
 mod select_fragment_tests;
+
+#[cfg(test)]
+#[path = "app_literal_prototype_tests.rs"]
+mod literal_prototype_tests;

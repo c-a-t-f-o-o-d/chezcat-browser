@@ -2469,6 +2469,7 @@ impl Parser {
         use object_literals::{Kind, Member};
         self.current += 1;
         let mut properties = Vec::new();
+        let mut prototype_seen = false;
         while !self.is("}") {
             if properties.len() == self.heap.object_properties {
                 return Err(self.unsupported(format!("Object property limit reached ({}).", self.heap.object_properties)));
@@ -2526,13 +2527,33 @@ impl Parser {
                     TokenKind::Number(number) => (number_text(number), None),
                     _ => return Err(self.error("Expected an object property name.")),
                 };
-                if name == "__proto__" {
-                    return Err(
-                        self.unsupported("Object prototype configuration is not implemented.")
-                    );
-                }
                 if name.len() > self.capacity.property_bytes {
                     return Err(self.unsupported("Property-name limit reached (256 bytes)."));
+                }
+                if name == "__proto__" {
+                    // Only a noncomputed colon definition sets [[Prototype]].
+                    // Methods/accessors/shorthand keep their existing refusal.
+                    if accessor.is_some()
+                        || !matches!(
+                            self.tokens.get(self.current + 1).map(|token| &token.kind),
+                            Some(TokenKind::Punct(":"))
+                        )
+                    {
+                        return Err(
+                            self.unsupported("Object prototype configuration is not implemented.")
+                        );
+                    }
+                    if prototype_seen {
+                        return Err(self.error("Duplicate __proto__ prototype setter."));
+                    }
+                    prototype_seen = true;
+                    self.current += 1;
+                    self.need(":")?;
+                    properties.push(Member::Prototype(self.assignment_with_in()?));
+                    if !self.eat(",") {
+                        break;
+                    }
+                    continue;
                 }
                 self.current += 1;
                 (
@@ -7151,6 +7172,10 @@ impl Runtime {
                     let key = self.property_key(key, host)?;
                     let value = self.eval(program, *value, env, this, host)?;
                     self.define_literal_member(object, key, value, *kind)?;
+                }
+                object_literals::Member::Prototype(expression) => {
+                    let value = self.eval(program, *expression, env, this, host)?;
+                    self.define_literal_prototype(object, &value)?;
                 }
                 object_literals::Member::Spread(expression) => {
                     let source = self.eval(program, *expression, env, this, host)?;
