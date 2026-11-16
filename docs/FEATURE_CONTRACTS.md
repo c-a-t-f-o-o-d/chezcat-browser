@@ -325,9 +325,13 @@ Semantic references: [DOM createComment](https://dom.spec.whatwg.org/#dom-docume
 ## CP4 — conventional select fragments and native ownership
 
 Status: twelve original parser, native-model, Page and App controls pass.
-Complete normal/build/executable integration and the unchanged selected-library
-recheck remain required for this checkpoint; library initialization and visible
-workflow improvement are separate outcomes.
+Complete normal/build/executable integration remains required for this checkpoint.
+One unchanged JS-enabled W2 recheck at1280x800/zoom100 on clean5cee344 advances
+past the select fragment to jQuery1.12.4 line1265,column4: setting INPUT type to
+hidden remains explicitly unsupported. Loading and initial rendering pass;
+initialization, dropdown/form input and async stages fail. Later Bootstrap and
+missing-library errors remain cascades. No visible workflow improvement or
+framework initialization is claimed.
 
 Checked ordinary HTML fragments admit a finite select/option/optgroup grammar,
 including conventional omitted endings, normal attribute preprocessing and real

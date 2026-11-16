@@ -22,7 +22,7 @@ supported within their recorded limits.
 
 | ID | Status | Current outcome | Remaining scope |
 | --- | --- | --- | --- |
-| CP4 | Focused twelve-control prerequisite passes; full integration required | Conventional select fragments create genuine native controls; whole-select retirement/reconnect preserves edited values and identities, projects owner/disabled state and submits connected tree order | Unchanged pinned legacy workflow recheck and exact-source gates; explicit associations, existing-control interior edits and hidden-input creation remain gaps |
+| CP4 | Focused twelve-control prerequisite passes; full integration required | Conventional select fragments create genuine native controls; whole-select retirement/reconnect preserves edited values and identities, projects owner/disabled state and submits connected tree order | Unchanged W2 recheck now refuses INPUT type=hidden mutation; exact-source gates remain. Explicit associations and existing-control interior edits remain gaps |
 | CP3 | Responsive rendering improvement; normal integration required | Unchanged Foundation6.9 generated-CSS fixture forms two columns at1280 and stacks at640 in normal JS mode; original App resize/zoom/pixel/link assertions pass | Finite em media, typed before/after stylesheet targets, explicit box-sizing inheritance and fractional flex line fitting; no generated-content painting or Vue initialization claim |
 | CP2 | Delivered prerequisite slice | Genuine main-Document createComment with real leaf/data/topology and no rendering/resource promotion; native RegExp exec/test input ToString through existing conversion and Function source | This legacy workflow next refuses select-containing innerHTML. No library initialization or visible improvement is attributed to this prerequisite |
 | CP1 | Delivered prerequisite slice | Main-Document/supported Node live child lists, existing borrowed slice, native array-like apply, fresh text replacement and genuine Document Node identity | No full DOM or whole-framework claim; subsequent prerequisites are tracked in CP2 |
@@ -54,7 +54,8 @@ widely and stacks narrowly. Initial reference-browser DOM/pixels are comparison 
 with reference interactions unrun. The prior App recheck of the unmodified
 legacy dropdown/form advanced through Comment creation and RegExp input conversion
 to checked innerHTML parsing that refused select/option structure. CP4 addresses
-that reduced prerequisite; its unchanged workflow recheck is pending. Library initialization remains unproved;
+that reduced prerequisite; one unchanged W2 recheck now reaches the INPUT
+type=hidden attribute probe. Loading and initial rendering pass while library initialization and input remain unproved;
 the independent CP3 responsive rendering improvement is measured separately.
 Selected CP2
 Test262 observations have 18 passes and two ordinary Array constructor-poisoning
@@ -69,8 +70,8 @@ parser, timeout and intentional admission failures from page rendering. Continue
 normal integration of the responsive result, then finite tabs/windows; perfect TLS or every-page
 coverage is not a prerequisite. Installer/update work remains planned.
 The next tasks are exact-source normal/optimized integration of the shared
-select/Forms prerequisite, one unchanged pinned legacy workflow recheck, and the
-separate legacy reactive prototype dependency. B2 native link/context actions
+select/Forms prerequisite, then the separate legacy reactive prototype dependency.
+The single unchanged pinned W2 recheck records hidden-input mutation as its next blocker. B2 native link/context actions
 have completed local, hosted and actual destination desktop acceptance.
 VIDEO dimensions, Element.toggleAttribute, NamedNodeMap mutation and remaining
 media/player work stay recorded gaps outside the active queue. Service playback

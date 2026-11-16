@@ -46,10 +46,15 @@
         "Main Document Node identity",
         "Native Comment/document.createComment",
         "Native RegExp input ToString",
-        "Checked innerHTML fragment select/option structure"
+        "Checked innerHTML fragment select/option structure",
+        "INPUT type=hidden attribute mutation"
       ],
-      "current_first_root": "Checked innerHTML fragment select/option structure",
-      "measurement_scope": "CP3 unchanged JS-enabled executable diagnostic recheck; first root confirmed, later cascades retained"
+      "current_first_root": "INPUT type=hidden attribute mutation",
+      "measurement_scope": "Single unchanged CP4 JS-enabled executable W2 recheck at1280x800/zoom100; one selected configuration among three workflow families; later cascades retained",
+      "source_commit": "5cee344992cbccf77657d14ee4a69dd278c76709",
+      "executable_sha256": "9baefcf519566da75fccbde8a285d70acc2b8f68b07fc3b42057e3b9a0f86252",
+      "first_root_location": "jQuery1.12.4 line1265,column4",
+      "stage_outcomes": {"load": "Passed", "initial_render": "Passed", "initialization": "Failed", "input": "Failed", "async": "Failed", "history": "Not applicable"}
     },
     {
       "id": "W3-css",
@@ -471,9 +476,9 @@
     "No public service or whole-family outcome inferred"
   ],
   "next": [
-    "Address an independently demonstrated bounded responsive-CSS page-usability pack before larger Forms work",
-    "Retain select/option fragment admission and ownership as the next blocker in the selected legacy workflow",
-    "Recheck unchanged workflows and begin finite tabs/windows after the first measured workflow improvement"
+    "Complete exact-source integration of conventional select fragment/native ownership controls",
+    "Retain measured INPUT type=hidden mutation as the next W2 blocker without repeating unchanged W2",
+    "Address the separately queued Vue static object-literal prototype prerequisite; finite B2 tabs/windows are integrated"
   ],
   "selected_standard_controls": {
     "suite": "Selected Test262 slice mode runs",
