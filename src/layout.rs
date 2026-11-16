@@ -2766,14 +2766,18 @@ impl Engine<'_> {
     // Round only when the line's cumulative sizes become physical rectangles;
     // rounding each 50% item early makes two halves overflow an odd-sized row.
     fn flex_dimension(&self, length: Length, reference: Option<i32>, style: &Style, edges: i32) -> Option<f64> {
-        if matches!(length, Length::Percent(_)) && reference.is_none() {
-            return None;
-        }
-        length.resolve(reference.unwrap_or(0) as f32 / self.zoom, style.font_size, style.root_font_size)
-            .map(|value| {
-                let physical=f64::from(value*self.zoom).clamp(-100_000.0,100_000.0);
-                (physical-if style.border_box {f64::from(edges)}else{0.0}).max(0.0)
-            })
+        let physical=if let Length::Percent(percent)=length {
+            // Avoid a lossy CSS/physical round trip: two exact halves must not
+            // exceed their reference because of division by fractional zoom.
+            let css_limit=100_000.0*f64::from(self.zoom);
+            Some((f64::from(reference?)*f64::from(percent)/100.0).clamp(-css_limit,css_limit))
+        } else {
+            length.resolve(0.0,style.font_size,style.root_font_size)
+                .map(|value| f64::from(value)*f64::from(self.zoom))
+        };
+        physical.map(|value| {
+            (value.clamp(-100_000.0,100_000.0)-if style.border_box {f64::from(edges)}else{0.0}).max(0.0)
+        })
     }
 
     fn flex_parameters(&self, item: &mut FlexItem, row: bool, reference: Option<i32>) {
@@ -5608,6 +5612,18 @@ mod tests {
         for sizing in ["box-sizing:content-box;width:50%;min-width:0", "box-sizing:border-box;width:50%;min-width:51px"] {
             let doc=parse(&format!("<div style='display:flex;flex-wrap:wrap;width:101px'><div style='flex:none;{sizing};padding:4px;border:2px solid black;height:40px;background:red'>A</div><div style='flex:none;{sizing};padding:4px;border:2px solid black;height:40px;background:blue'>B</div></div>"));
             let page=layout(&doc,500);assert!(rectangle(&page,0x0000ff).1>=rectangle(&page,0xff0000).3,"Real outer-size overflow must still wrap: {sizing}");
+        }
+    }
+
+    #[test]
+    fn flex_percentage_line_fit_uses_physical_reference_at_fractional_zoom() {
+        let doc=parse("<div style='display:flex;flex-wrap:wrap;width:100%'><div style='width:50%;flex:none;min-width:0;box-sizing:border-box;padding:4px;border:2px solid black;height:40px;background:red'>A</div><div style='width:50%;flex:none;min-width:0;box-sizing:border-box;padding:4px;border:2px solid black;height:40px;background:blue'>B</div></div>");
+        for (width,zoom) in [(64,1.5),(60,1.1),(101,1.25)] {
+            let page=build(&doc,width,zoom,&HashMap::new(),&HashMap::new());
+            let first=rectangle(&page,0xff0000);let second=rectangle(&page,0x0000ff);
+            assert_eq!(first.1,second.1,"Two halves must fit before pixel allocation at zoom{zoom}: {first:?}, {second:?}");
+            assert_eq!(first.2+second.2,width);
+            assert_eq!(first.0+first.2,second.0);
         }
     }
 
