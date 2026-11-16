@@ -9,6 +9,11 @@ import check_compatibility_workflows as scorecard
 
 
 class DiagnosticControls(unittest.TestCase):
+    def test_actual_original_fixture_manifest_matches_retained_bytes(self):
+        identities = scorecard.fixture_identity()
+        required = {name + suffix for name in ('w1', 'w2', 'w3') for suffix in ('.html', '.js')}
+        self.assertTrue(required.issubset(identities))
+
     def test_absence_sentinel_is_not_a_failure(self):
         self.assertEqual(scorecard.script_failures('Last escaped engine fault: stage=unknown kind=unknown\n'), [])
 
