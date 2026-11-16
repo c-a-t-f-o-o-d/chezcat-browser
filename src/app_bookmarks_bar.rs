@@ -20,6 +20,7 @@ enum Source {
     Link { title: String, url: String },
 }
 struct PendingDrag {
+    revision: u64,
     source: Source,
     x: i32,
     y: i32,
@@ -28,6 +29,7 @@ struct PendingDrag {
     point: (i32, i32),
 }
 struct Popup {
+    revision: u64,
     folder: u32,
     x: i32,
     first: usize,
@@ -37,7 +39,7 @@ struct Popup {
 pub(super) struct BookmarkBar {
     popup: Option<Popup>,
     hover: Option<Target>,
-    pressed: Option<Target>,
+    pressed: Option<(Target, u64)>,
     drag: Option<PendingDrag>,
     wheel: i32,
 }
@@ -45,7 +47,7 @@ pub(super) struct BookmarkBar {
 impl App {
     pub(super) fn chrome_bottom(&self) -> i32 {
         BAR_HEIGHT
-            + if self.profile.data().settings.bookmark_bar {
+            + if self.bookmark_bar_visible {
                 HEIGHT
             } else {
                 0
@@ -84,7 +86,7 @@ impl App {
     }
 
     fn bar_items(&self) -> Vec<(Target, Rect)> {
-        if !self.profile.data().settings.bookmark_bar {
+        if !self.bookmark_bar_visible {
             return Vec::new();
         }
         let mut output = Vec::new();
@@ -169,6 +171,10 @@ impl App {
         self.bookmark_hit(x, y).is_some()
     }
     pub(super) fn bookmark_bar_pointer_down(&mut self, x: i32, y: i32) -> bool {
+        if self.bookmark_hit(x, y).is_some() || self.bookmark_popup_open() {
+            let expected = self.bookmarks_bar.popup.as_ref().map_or(self.profile.revision(), |popup| popup.revision);
+            if !self.guard_profile_revision(expected) { self.close_bookmark_popup(); return true; }
+        }
         let hit = self.bookmark_hit(x, y);
         if self.bookmark_popup_open() && hit.is_none() {
             self.close_bookmark_popup();
@@ -180,10 +186,11 @@ impl App {
             self.chrome.pressed = None;
             self.focus = Focus::Page;
             self.drag = Drag::None;
-            self.bookmarks_bar.pressed = Some(target);
+            self.bookmarks_bar.pressed = Some((target, self.profile.revision()));
             self.bookmarks_bar.hover = Some(target);
             if let Target::Item(item) = target {
                 self.bookmarks_bar.drag = Some(PendingDrag {
+                    revision: self.profile.revision(),
                     source: Source::Item(item),
                     x,
                     y,
@@ -202,6 +209,7 @@ impl App {
     }
     pub(super) fn arm_current_bookmark_drag(&mut self, x: i32, y: i32) {
         self.bookmarks_bar.drag = Some(PendingDrag {
+            revision: self.profile.revision(),
             source: Source::Link {
                 title: self.document.title.clone(),
                 url: self.location.display(),
@@ -231,6 +239,7 @@ impl App {
             .collect::<Vec<_>>()
             .join(" ");
         self.bookmarks_bar.drag = Some(PendingDrag {
+            revision: self.profile.revision(),
             source: Source::Link {
                 title,
                 url: location.display(),
@@ -314,6 +323,12 @@ impl App {
         Some((parent, rows.len(), None))
     }
     pub(super) fn bookmark_bar_pointer_up(&mut self, x: i32, y: i32) -> bool {
+        let expected = self.bookmarks_bar.drag.as_ref().map(|drag| drag.revision)
+            .or_else(|| self.bookmarks_bar.pressed.map(|(_, revision)| revision))
+            .or_else(|| self.bookmarks_bar.popup.as_ref().map(|popup| popup.revision));
+        if expected.is_some_and(|revision| !self.guard_profile_revision(revision)) {
+            self.close_bookmark_popup(); return true;
+        }
         if let Some(drag) = self.bookmarks_bar.drag.take() {
             if drag.active {
                 self.bookmarks_bar.pressed = None;
@@ -355,7 +370,7 @@ impl App {
                     }
                     match data
                         .move_item(item, parent, position)
-                        .and_then(|()| self.profile.save(data))
+                        .and_then(|()| self.profile.save_at(drag.revision, data))
                     {
                         Ok(()) => {
                             self.status = "Bookmark saved in its new position.".into();
@@ -368,7 +383,7 @@ impl App {
                 return true;
             }
         }
-        let Some(pressed) = self.bookmarks_bar.pressed.take() else {
+        let Some((pressed, _)) = self.bookmarks_bar.pressed.take() else {
             return false;
         };
         if self.bookmark_hit(x, y) == Some(pressed) {
@@ -377,6 +392,8 @@ impl App {
         true
     }
     fn activate_bookmark_target(&mut self, target: Target, x: i32) {
+        let expected = self.bookmarks_bar.popup.as_ref().map_or(self.profile.revision(), |popup| popup.revision);
+        if !self.guard_profile_revision(expected) { self.close_bookmark_popup(); return; }
         match target {
             Target::Item(BookmarkItem::Link(index)) => {
                 let Some(url) = self
@@ -395,6 +412,7 @@ impl App {
             Target::Item(BookmarkItem::Folder(folder)) => {
                 let x = self.bookmarks_bar.popup.as_ref().map_or(x, |popup| popup.x);
                 self.bookmarks_bar.popup = Some(Popup {
+                    revision: self.profile.revision(),
                     folder,
                     x,
                     first: 0,
@@ -403,6 +421,7 @@ impl App {
             }
             Target::Overflow => {
                 self.bookmarks_bar.popup = Some(Popup {
+                    revision: self.profile.revision(),
                     folder: 0,
                     x,
                     first: 0,
@@ -436,6 +455,8 @@ impl App {
         if !self.bookmark_popup_open() {
             return false;
         }
+        let expected = self.bookmarks_bar.popup.as_ref().unwrap().revision;
+        if !self.guard_profile_revision(expected) { self.close_bookmark_popup(); return true; }
         let rows = self.popup_rows();
         let count = self
             .profile
@@ -469,6 +490,8 @@ impl App {
             self.close_bookmark_popup();
             return false;
         }
+        let expected = self.bookmarks_bar.popup.as_ref().unwrap().revision;
+        if !self.guard_profile_revision(expected) { self.close_bookmark_popup(); return true; }
         let popup = self.bookmarks_bar.popup.as_ref().unwrap();
         let items = self.profile.data().items(popup.folder);
         if key == 0x08 || key == 0x25 {
@@ -507,7 +530,7 @@ impl App {
         true
     }
     pub(super) fn draw_bookmarks_bar(&self, canvas: &mut Canvas) {
-        if !self.profile.data().settings.bookmark_bar {
+        if !self.bookmark_bar_visible {
             return;
         }
         let p = self.browser_palette();
@@ -787,5 +810,65 @@ mod tests {
         app.pointer_up(nested.0 + nested.2 / 2, nested.1 + 17);
         assert_eq!(*app.profile.data(), before);
         assert!(app.status.contains("subfolders"));
+    }
+
+    fn shared_profile_pair() -> (App, App, crate::profile::Shared) {
+        let shared = crate::profile::Shared::default();
+        let mut seed = shared.view().unwrap();
+        let mut data = seed.data().clone();
+        for (title,url) in [("Original one", "about:home#one"), ("Original two", "about:home#two")] {
+            data.bookmarks.push(Bookmark { title: title.into(), url: url.into(),
+                order: data.bookmarks.len() as u32, ..Bookmark::default() });
+        }
+        seed.save(data).unwrap();
+        let mut first = App::new(); let mut second = App::new();
+        first.attach_shared_profile(shared.clone()).unwrap();
+        second.attach_shared_profile(shared.clone()).unwrap();
+        (first,second,shared)
+    }
+
+    #[test]
+    fn shared_profile_bar_peer_reorder_between_press_release_cannot_retarget_link() {
+        let (mut first,mut second,shared) = shared_profile_pair();
+        let rect = bar_rect(&first, BookmarkItem::Link(1));
+        let (x,y) = (rect.0 + rect.2/2, rect.1 + rect.3/2);
+        let location = first.location.display(); let raw = first.raw.clone();
+        first.pointer_down(x,y,false);
+        let mut peer = second.profile.data().clone(); peer.bookmarks.swap(0,1);
+        second.profile.save(peer.clone()).unwrap();
+        first.pointer_up(x,y);
+        assert_eq!(first.location.display(), location);
+        assert_eq!(first.raw, raw);
+        assert!(first.bookmarks_bar.pressed.is_none());
+        assert!(first.bookmarks_bar.drag.is_none());
+        assert_eq!(shared.snapshot().unwrap().data(), &peer);
+        assert!(first.status.contains("changed"));
+        first.refresh_profile().unwrap();
+        let fresh = bar_rect(&first, BookmarkItem::Link(1));
+        click(&mut first, fresh);
+        assert_eq!(first.location.fragment, "one");
+    }
+
+    #[test]
+    fn shared_profile_bar_stale_popup_and_drag_refuse_before_index_or_drop_use() {
+        let (mut first,mut second,shared) = shared_profile_pair();
+        first.activate_bookmark_target(Target::Overflow, 10);
+        let mut peer = second.profile.data().clone(); peer.bookmarks.swap(0,1);
+        second.profile.save(peer).unwrap();
+        let location = first.location.display();
+        assert!(first.bookmark_bar_key(0x0d,false,false,false));
+        assert_eq!(first.location.display(), location);
+        assert!(first.bookmarks_bar.popup.is_none());
+        first.refresh_profile().unwrap();
+        first.arm_current_bookmark_drag(80, 30);
+        first.pointer_move(250, BAR_HEIGHT + 10, true);
+        assert!(first.bookmark_drag_active());
+        let mut newer = second.profile.data().clone(); newer.settings.dark_mode = true;
+        second.profile.save(newer.clone()).unwrap();
+        first.pointer_up(250, BAR_HEIGHT + 10);
+        assert!(first.bookmarks_bar.drag.is_none());
+        assert_eq!(first.location.display(), location);
+        assert_eq!(shared.snapshot().unwrap().data(), &newer);
+        assert_eq!(newer.bookmarks.len(), 2);
     }
 }

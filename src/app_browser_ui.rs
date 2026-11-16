@@ -106,6 +106,8 @@ enum PanelKind {
 
 pub(super) struct BrowserPanel {
     kind: PanelKind,
+    // Captured when an editor/list opens. Peer refresh never replaces this token.
+    profile_revision: Option<u64>,
     focus: Action,
     selected: Option<usize>,
     first: usize,
@@ -144,6 +146,7 @@ impl BrowserPanel {
     fn new(kind: PanelKind, focus: Action) -> Self {
         Self {
             kind,
+            profile_revision: None,
             focus,
             selected: None,
             first: 0,
@@ -241,17 +244,87 @@ impl App {
     /// Startup only: applying a profile does not execute a page or navigate.
     /// App::new remains deterministic and memory-only for tests/headless use.
     pub fn attach_profile(&mut self, store: Store) {
+        self.attach_profile_view(store.into());
+    }
+
+    /// Startup attachment for the future browser coordinator. Peer refresh does
+    /// not repeat startup page retirement or apply new session defaults.
+    pub fn attach_shared_profile(&mut self, shared: crate::profile::Shared) -> Result<(), String> {
+        let view = shared.view()?;
+        self.attach_profile_view(view);
+        Ok(())
+    }
+
+    fn attach_profile_view(&mut self, view: crate::profile::View) {
         self.cancel_pending();
         self.scripting = None;
-        self.scripts_enabled = store.data().settings.javascript;
-        self.images_enabled = store.data().settings.images;
-        self.zoom = store.data().settings.default_zoom as f32 / 100.0;
-        self.profile = store;
+        self.scripts_enabled = view.data().settings.javascript;
+        self.images_enabled = view.data().settings.images;
+        self.bookmark_bar_visible = view.data().settings.bookmark_bar;
+        self.zoom = view.data().settings.default_zoom as f32 / 100.0;
+        self.profile = view;
         self.reflow();
         if let Some(problem) = self.profile.problem() {
             self.status = format!("Preferences unavailable: {problem}");
             self.failed = false;
         }
+    }
+
+    /// Adopt an owned preference snapshot without resetting a loaded page.
+    /// Session JS/images/zoom remain; shared defaults apply to newly attached
+    /// Apps. The caller can redraw; this performs no navigation or reflow.
+    pub fn refresh_profile(&mut self) -> Result<bool, String> {
+        let changed = self.profile.refresh()?;
+        if changed {
+            // Theme/link colors are paint-only. Viewport chrome is an effective
+            // per-App choice until this App explicitly applies Settings.
+            self.rebuild_link_colors();
+            self.close_bookmark_popup();
+            let revision = self.profile.revision();
+            let mut next = self.browser_panel.as_mut();
+            while let Some(panel) = next {
+                if panel.profile_revision.is_some_and(|expected| expected != revision) {
+                    panel.cancel_pointer();
+                    if matches!(panel.kind, PanelKind::Bookmarks) {
+                        panel.selected = None;
+                        panel.selected_folder = None;
+                    }
+                    panel.error = "Settings or bookmarks changed. Reopen this panel before using it.".into();
+                }
+                next = panel.return_panel.as_deref_mut();
+            }
+        }
+        Ok(changed)
+    }
+
+    pub(super) fn guard_profile_revision(&mut self, expected: u64) -> bool {
+        let result = self.profile.shared().snapshot().and_then(|snapshot| {
+            if expected == self.profile.revision() && expected == snapshot.revision() {
+                Ok(())
+            } else {
+                Err("Settings or bookmarks changed. Reopen this panel before using it.".into())
+            }
+        });
+        if let Err(error) = result { self.profile_error(error); return false; }
+        true
+    }
+
+    fn guard_profile_panel(&mut self) -> bool {
+        let expected = self.browser_panel.as_ref().and_then(|panel| panel.profile_revision);
+        expected.is_none_or(|revision| self.guard_profile_revision(revision))
+    }
+
+    fn save_profile_editor(&mut self, next: crate::profile::Data) -> Result<(), String> {
+        let expected = self.browser_panel.as_ref().and_then(|panel| panel.profile_revision)
+            .ok_or("No profile editor owns this save.")?;
+        self.profile.save_at(expected, next)?;
+        let revision = self.profile.revision();
+        // A successful manager command keeps its deliberately selected item.
+        // Suspended editors retain their original token in return_panel.
+        if let Some(panel) = &mut self.browser_panel {
+            if matches!(panel.kind, PanelKind::Bookmarks) { panel.profile_revision = Some(revision); }
+        }
+        Ok(())
     }
 
     pub fn open_startup_home(&mut self) {
@@ -268,7 +341,14 @@ impl App {
         }
     }
 
-    fn begin_browser_panel(&mut self, panel: BrowserPanel) {
+    fn begin_browser_panel(&mut self, mut panel: BrowserPanel) {
+        if panel.profile_revision.is_none() && matches!(panel.kind,
+            PanelKind::Settings | PanelKind::BlockingRules | PanelKind::Bookmarks
+            | PanelKind::EditBookmark { .. } | PanelKind::EditFolder { .. }
+            | PanelKind::FolderDestination | PanelKind::DeleteFolder { .. }) {
+            panel.profile_revision = panel.return_panel.as_ref().and_then(|previous| previous.profile_revision)
+                .or(Some(self.profile.revision()));
+        }
         self.reset_chrome();
         self.close_downloads();
         self.close_bookmark_popup();
@@ -576,8 +656,10 @@ impl App {
     }
 
     pub fn show_settings(&mut self) {
+        if let Err(error) = self.refresh_profile() { self.profile_error(error); return; }
         let settings = &self.profile.data().settings;
         let mut panel = BrowserPanel::new(PanelKind::Settings, Action::JavaScript);
+        panel.profile_revision = Some(self.profile.revision());
         // Session flags may override disk settings; Apply deliberately commits
         // the effective choices shown here, while Cancel leaves both untouched.
         panel.javascript = self.scripts_enabled;
@@ -586,7 +668,7 @@ impl App {
         panel.blocking = settings.blocking.clone();
         panel.dark_mode = settings.dark_mode;
         panel.dark_pages = settings.dark_pages;
-        panel.bookmark_bar = settings.bookmark_bar;
+        panel.bookmark_bar = self.bookmark_bar_visible;
         panel
             .link_color
             .set(&crate::profile::format_color(settings.link_color));
@@ -607,6 +689,10 @@ impl App {
     }
 
     pub fn add_current_bookmark(&mut self) {
+        // A destination belongs to the originating manager snapshot. Validate
+        // before refresh can replace its cache or a peer can reuse its folder ID.
+        if !self.guard_profile_panel() { return; }
+        if let Err(error) = self.refresh_profile() { self.profile_error(error); return; }
         // Capture the document on screen, never an edited address or an
         // uncommitted navigation. No request payload is retained in a bookmark.
         let url = self.location.display();
@@ -623,6 +709,7 @@ impl App {
         let folder = self.browser_panel.as_ref().map_or(0, |p| p.folder);
         let title = bookmark_title(&self.document.title, &url);
         let mut panel = BrowserPanel::new(PanelKind::EditBookmark { index: None }, Action::Title);
+        panel.profile_revision = Some(self.profile.revision());
         panel.folder = folder;
         panel.title.set(&title);
         panel.title.select_all();
@@ -632,6 +719,7 @@ impl App {
     }
 
     fn edit_bookmark(&mut self, index: usize) {
+        if !self.guard_profile_revision(self.profile.revision()) { return; }
         let Some(bookmark) = self.profile.data().bookmarks.get(index) else {
             return;
         };
@@ -639,6 +727,7 @@ impl App {
             PanelKind::EditBookmark { index: Some(index) },
             Action::Title,
         );
+        panel.profile_revision = Some(self.profile.revision());
         panel.folder = bookmark.folder;
         panel.title.set(&bookmark.title);
         panel.title.select_all();
@@ -661,6 +750,7 @@ impl App {
     }
 
     fn save_bookmark(&mut self) {
+        if !self.guard_profile_panel() { return; }
         let Some(panel) = &self.browser_panel else {
             return;
         };
@@ -714,7 +804,7 @@ impl App {
             data.bookmarks.push(value);
             data.bookmarks.len() - 1
         };
-        if let Err(error) = self.profile.save(data) {
+        if let Err(error) = self.save_profile_editor(data) {
             self.profile_error(error);
             return;
         }
@@ -729,6 +819,7 @@ impl App {
     }
 
     fn remove_selected_bookmark(&mut self) {
+        if !self.guard_profile_panel() { return; }
         let Some(index) = self.browser_panel.as_ref().and_then(|panel| panel.selected) else {
             return;
         };
@@ -743,7 +834,7 @@ impl App {
             return;
         }
         data.bookmarks.remove(index);
-        if let Err(error) = self.profile.save(data) {
+        if let Err(error) = self.save_profile_editor(data) {
             self.profile_error(error);
             return;
         }
@@ -762,6 +853,7 @@ impl App {
     }
 
     fn open_selected_bookmark(&mut self) {
+        if !self.guard_profile_panel() { return; }
         let Some(index) = self.browser_panel.as_ref().and_then(|panel| panel.selected) else {
             return;
         };
@@ -785,6 +877,7 @@ impl App {
     }
 
     fn apply_browser_settings(&mut self) {
+        if !self.guard_profile_panel() { return; }
         let Some(panel) = &self.browser_panel else {
             return;
         };
@@ -807,6 +900,7 @@ impl App {
         };
         let javascript = panel.javascript;
         let images = panel.images;
+        let bookmark_bar = panel.bookmark_bar;
         let blocking = panel.blocking.clone();
         let reload = self.scripts_enabled != javascript
             || self.images_enabled != images
@@ -845,13 +939,14 @@ impl App {
         data.settings.blocking = blocking;
         data.settings.default_zoom = zoom;
         data.settings.home = home;
-        if let Err(error) = self.profile.save(data) {
+        if let Err(error) = self.save_profile_editor(data) {
             self.profile_error(error);
             return;
         }
         self.close_browser_panel();
         self.scripts_enabled = javascript;
         self.images_enabled = images;
+        self.bookmark_bar_visible = bookmark_bar;
         if !javascript {
             self.scripting = None;
             self.document.scripting_enabled = false;
@@ -1663,6 +1758,18 @@ impl App {
     }
 
     fn browser_activate(&mut self, action: Action) {
+        // Local draft edits and Cancel remain usable after a peer save. Actions
+        // interpreting persisted row/index identity require the captured owner.
+        let persisted_identity = self.browser_panel.as_ref().is_some_and(|panel| {
+            matches!(panel.kind, PanelKind::Bookmarks | PanelKind::EditBookmark { .. }
+                | PanelKind::EditFolder { .. } | PanelKind::FolderDestination | PanelKind::DeleteFolder { .. })
+                && matches!(action, Action::Add | Action::Open | Action::Edit | Action::Delete
+                    | Action::SaveBookmark | Action::Row(_) | Action::FolderRow(_) | Action::NewFolder
+                    | Action::FolderUp | Action::Destination | Action::DestinationRow(_)
+                    | Action::SaveFolder | Action::ConfirmDeleteFolder | Action::Move | Action::MoveUp | Action::MoveDown)
+                || matches!(panel.kind, PanelKind::Settings) && action == Action::Apply
+        });
+        if persisted_identity && !self.guard_profile_panel() { return; }
         if self.bookmark_tree_activate(action) || self.appearance_activate(action) {
             self.sync_browser_panel();
             return;
@@ -1706,7 +1813,11 @@ impl App {
                 {
                     self.leave_browser_panel();
                 } else {
-                    let folder = self.browser_panel.as_ref().map_or(0, |panel| panel.folder);
+                    // Cancel remains usable; a stale folder identity falls
+                    // back to the root instead of entering a reused folder ID.
+                    let folder = if self.guard_profile_panel() {
+                        self.browser_panel.as_ref().map_or(0, |panel| panel.folder)
+                    } else { 0 };
                     self.show_bookmark_folder(folder);
                 }
             }
@@ -3059,3 +3170,7 @@ mod history_tests;
 #[cfg(test)]
 #[path="app_about_tests.rs"]
 mod about_tests;
+
+#[cfg(test)]
+#[path = "app_shared_profile_tests.rs"]
+mod shared_profile_tests;

@@ -1,7 +1,8 @@
 # Finite development roadmap
 
-The active compatibility pack is **CP3: responsive stylesheet-to-layout behavior**,
-following the delivered CP1 and CP2 DOM/language prerequisite slices. T1 TLS/trust and B1 resource/rendering slices remain shared platform
+The active usability milestone is **B2: tabs, link context and new windows**,
+beginning with shared profile ownership after CP3's measured responsive rendering
+improvement. CP1 and CP2 remain delivered DOM/language prerequisites. T1 TLS/trust and B1 resource/rendering slices remain shared platform
 baselines; measured browser workflows determine the next shared blocker.
 The explicit CSAPUL 1.1 acceptance milestone is published as
 [0.80.0-alpha.1](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.80.0-alpha.1).
@@ -26,7 +27,7 @@ supported within their recorded limits.
 | CP1 | Delivered prerequisite slice | Main-Document/supported Node live child lists, existing borrowed slice, native array-like apply, fresh text replacement and genuine Document Node identity | No full DOM or whole-framework claim; subsequent prerequisites are tracked in CP2 |
 | T1 | In progress: remaining interoperability gaps | Guarded document diagnostics, a pinned conservative Mozilla NSS 98-authority selection, reviewed offline generation, shared 1024-root policy and bounded per-hop redirect clocks; coordinated document checks distinguish improved path coverage from later failures | Remaining chain/parser/protocol/timeout/admission and resource-specific failures; no broad TLS or usable-site completion claim |
 | B1 | In progress: stylesheets and finite viewport media rules | Shared unmarked cross-origin HTTP(S) stylesheet loading; host-context media rules with real resize/zoom geometry and pixels, source ownership and complete-sheet admission | Original executable width/zoom and dynamic-link cases passed; normal verification remains required for each checkpoint; retain request/security/lifecycle boundaries and explicit query/font gaps while addressing broader resource/render/input usability |
-| B2 | Planned after first measured workflow improvement | No new tab or window capability is claimed | Finite tabs, link-context and new-window behavior with real page/history/worker/focus ownership |
+| B2 | In progress: shared profile prerequisite | One profile writer with immutable revisioned App snapshots; real two-App controls preserve a loaded VM/form/history/viewport and refuse stale editor/bookmark actions | No tabs/windows are claimed. Stable page/session IDs, browser-owned downloads/wakes, final history authority and resource retirement precede actual tab/link/window interaction; normal integration remains required |
 | A1 | Implemented finite native About slice | Browser-owned About panel, embedded full product/source/state/build description, exact main legal texts and safe build-information Copy | Normal/build/executable validation is required for each checkpoint; metadata is descriptive, not authenticated publication or signing, and App payload capture does not prove OS clipboard delivery |
 | I1 | Planned after first B1/B2 milestones | Portable runtime ZIP remains the distribution baseline | One per-user x64 MSI with complete exact payload, shortcuts/uninstall, deliberate upgrade version mapping and isolated data-preservation/recovery tests |
 | U1 | Planned with delivery work | No automatic or manual release discovery is claimed | Real published-milestone discovery, startup opt-in default OFF, manual check, bounded async work and deliberate prerelease channels |
@@ -66,9 +67,9 @@ Distinguish remaining trust/path,
 parser, timeout and intentional admission failures from page rendering. Continue
 normal integration of the responsive result, then finite tabs/windows; perfect TLS or every-page
 coverage is not a prerequisite. Installer/update work remains planned.
-The next three tasks are CP3 exact-source normal/hosted integration, B2 shared
-page/session ownership and retirement, then real tab switching followed by typed
-link dispositions/new windows. The legacy select/Forms prerequisite stays queued
+The next three tasks are B2 shared-profile exact-source integration, stable
+page/session/download/history ownership and retirement, then real tab switching
+followed by typed link dispositions/new windows. The legacy select/Forms prerequisite stays queued
 as a separate shared compatibility blocker.
 VIDEO dimensions, Element.toggleAttribute, NamedNodeMap mutation and remaining
 media/player work stay recorded gaps outside the active queue. Service playback

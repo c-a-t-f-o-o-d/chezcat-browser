@@ -59,5 +59,7 @@ Full normal/build/executable verification remains required for integration.
 
 The select-containing fragment remains the first blocker in the legacy workflow.
 Finite tabs/windows are the next discrete usability milestone after this measured
-rendering improvement. Installer/update work stays planned; further media and
+rendering improvement. Their shared-profile prerequisite now has original
+two-App revision/gesture and retained-page controls; actual tab/window behavior
+and session/download/retirement ownership remain unfinished. Installer/update work stays planned; further media and
 service integration remains deferred. Routine CI stays offline.

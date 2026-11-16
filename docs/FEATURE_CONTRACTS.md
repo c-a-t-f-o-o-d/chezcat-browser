@@ -341,12 +341,41 @@ Semantic references: [Media Queries relative units](https://www.w3.org/TR/mediaq
 
 ## B2 — finite tabs, link context and new windows
 
-Status: planned after the first measured workflow improvement. Provide new/switch/close
+Status: shared-profile prerequisite implemented after the first measured
+responsive rendering improvement; full normal integration remains required.
+No tab or new-window capability is claimed by this prerequisite. Provide new/switch/close
 tabs and link actions for new tabs or ChezCat windows, including supported middle/
 Ctrl-click and keyboard actions. Keep independent page/history/scroll/loading and
 address/title state with deliberate shared profile/cookies. Acceptance must prove
 current-page preservation, tab-scoped Back/Forward, focus transfer, bounded inactive
 work and no worker/script/media completion crossing a closed or different owner.
+
+One UI-thread shared profile authority retains the existing Store's exact-byte
+disk conflicts, file lock, bounded serialization and atomic publication. App
+views own immutable revisioned snapshots; no dynamic borrow guard crosses App
+work. Saves require the captured revision, including after view refresh. Busy,
+stale, unavailable, read-only, external-edit, invalid-size and exhausted-revision
+refusals preserve committed state. Valid no-op saves retain existing Store
+semantics and do not consume a revision or create a missing file.
+
+Settings drafts retain their original token through nested rule editors.
+Bookmark manager indices, destinations, folder IDs and press/popup/drag actions
+cannot be rebound by peer changes, including deleted/reused folder IDs. Stale
+publication/navigation refuses while Cancel and local draft editing remain usable.
+Explicitly reopening a panel captures fresh data and authority.
+
+Peer refresh adopts a profile snapshot without navigation, reflow, VM/form/history
+replacement or session JS/images/zoom changes. Effective bookmark-bar visibility
+stays with the App until successful local Settings Apply, preserving viewport,
+media environment and geometry. Paint-only appearance preferences adopt at
+refresh, including rebuilding the browser-owned link-color cache. New Apps use
+the shared persisted defaults. Original two-App tests exercise actual input and
+a retained JavaScript callback, typed form state, stale nested drafts, bookmark
+index/folder reuse, popup/drag/press refusal and fresh-action recovery.
+
+Stable coordinator routing, browser-owned downloads and wake authority, shared
+history shutdown and terminal resource admission remain prerequisites for real
+tab close. A standalone cancellation helper or dropping an App is not acceptance.
 
 ## A1 — About and running-build identity
 
