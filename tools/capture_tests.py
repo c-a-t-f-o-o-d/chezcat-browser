@@ -28,6 +28,11 @@ SUMMARY = re.compile(
     r"(\d+) ignored; (\d+) measured; (\d+) filtered out;", re.MULTILINE)
 START = re.compile(r"^running (\d+) tests?$", re.MULTILINE)
 STATUS = re.compile(r"exit code: (0x[0-9a-fA-F]+)")
+MAX_PANICKING_NAMES = 8
+PANICKING_THREAD = re.compile(
+    r"^thread '([A-Za-z_][A-Za-z_0-9:]{0,511})'(?: \([0-9]{1,20}\))? "
+    r"(?:panicked at(?:[ :]|$)|has overflowed its stack(?:[.\t ]|$))", re.MULTILINE)
+PANIC_IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z_0-9]*(?:::[A-Za-z_][A-Za-z_0-9]*)*\Z")
 
 
 def now():
@@ -145,6 +150,23 @@ def execute(command, log, root, timeout_seconds):
     return row
 
 
+def panicking_names(text):
+    # Reported Rust panic/stack-overflow thread labels are diagnostic only.
+    # Expected panics or a named spawned thread do not establish test failure.
+    # Never retain panic messages, locations, unnamed threads or arbitrary text.
+    names = []
+    seen = set()
+    for match in PANICKING_THREAD.finditer(text):
+        name = match.group(1)
+        if not PANIC_IDENTIFIER.fullmatch(name) or name in seen:
+            continue
+        if len(names) == MAX_PANICKING_NAMES:
+            return names, True
+        seen.add(name)
+        names.append(name)
+    return names, False
+
+
 def analyze(log):
     with log.open("rb") as stream:
         data = stream.read(MAX_LOG_BYTES + 1)
@@ -160,6 +182,7 @@ def analyze(log):
               "completed_test_lines": len(re.findall(r"^test \S+ \.\.\. ok$", text, re.MULTILINE)),
               "failed_test_names": re.findall(r"^test (\S+) \.\.\. FAILED$", text, re.MULTILINE),
               "complete_success_summary": False}
+    result["panicking_test_names"], result["panicking_names_limited"] = panicking_names(text)
     # A single explicitly selected binary must produce one complete test run.
     # Exit code alone, an empty filter, or a serial success is not a gate.
     if len(starts) == 1 and len(summaries) == 1:
