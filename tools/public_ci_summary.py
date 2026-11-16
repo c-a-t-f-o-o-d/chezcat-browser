@@ -13,6 +13,9 @@ MAX_COUNT = 10_000_000
 SCOPE = 'Normal offline verification only; no live/device/security certification claim.'
 NAME_SCOPE = ('Only test function basenames declared beside #[test] in committed public Rust source; '
               'module prefixes are never published, and duplicate basenames may be ambiguous.')
+PANIC_SCOPE = ('Reported panic/stack-overflow thread basenames only; expected panics or '
+               'named spawned threads are not proof of a failed test.')
+MAX_NATIVE_DIAGNOSTICS = 8
 STATES = {'running', 'completed', 'failed', 'timeout', 'launch_error', 'interrupted', 'output_limit'}
 NATIVE_STATES = {'running', 'passed', 'not_passed', 'interrupted', 'error'}
 STAGES = {'license-acceptance', 'publication-boundary', 'publication-controls', 'artifact-guards',
@@ -76,9 +79,27 @@ def project_step(row, known):
     state = row.get('state')
     projected = {'state': state if isinstance(state, str) and state in STATES else 'unavailable',
                  'failed_test_basenames': [], 'failed_identifiers_complete': False}
+    code = row.get('exit_code')
+    if type(code) is int and -(1 << 31) <= code < (1 << 31):
+        projected['exit_code'] = code
     analysis = row.get('analysis')
     if not isinstance(analysis, dict):
         return projected
+    if type(analysis.get('harness_started')) is bool:
+        projected['harness_started'] = analysis['harness_started']
+    if integer(analysis.get('completed_test_lines')):
+        projected['completed_test_lines'] = analysis['completed_test_lines']
+    statuses = analysis.get('native_exit_statuses')
+    if (isinstance(statuses, list) and len(statuses) <= MAX_NATIVE_DIAGNOSTICS
+            and all(isinstance(code, str) and re.fullmatch(r'0x[0-9a-fA-F]{8}', code) for code in statuses)):
+        projected['native_exit_statuses'] = [code.lower() for code in statuses]
+    panicking = analysis.get('panicking_test_names')
+    if isinstance(panicking, list) and len(panicking) <= MAX_NATIVE_DIAGNOSTICS:
+        projected['panicking_test_basenames'] = sorted({name.rsplit('::', 1)[-1]
+            for name in panicking if isinstance(name, str) and len(name) <= 512
+            and IDENTIFIER.fullmatch(name) and name.rsplit('::', 1)[-1] in known})
+    if type(analysis.get('panicking_names_limited')) is bool:
+        projected['panicking_names_limited'] = analysis['panicking_names_limited']
     if integer(analysis.get('announced_tests')):
         projected['announced_tests'] = analysis['announced_tests']
     summary = analysis.get('summary')
@@ -102,7 +123,8 @@ def project_step(row, known):
 
 
 def native_projection(manifest, known):
-    result = {'state': 'unavailable', 'normal_test_gate_passed': False, 'identifier_scope': NAME_SCOPE}
+    result = {'state': 'unavailable', 'normal_test_gate_passed': False, 'identifier_scope': NAME_SCOPE,
+              'panic_scope': PANIC_SCOPE}
     if not isinstance(manifest, dict) or type(manifest.get('schema_version')) is not int or manifest['schema_version'] != 1:
         return result
     if isinstance(manifest.get('state'), str) and manifest['state'] in NATIVE_STATES:

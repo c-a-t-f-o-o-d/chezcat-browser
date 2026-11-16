@@ -56,6 +56,30 @@ Existing caller admission/wait limits and independent watchdogs still apply;
 blocking OS DNS can exceed a transport deadline, so it is not a strict process
 wall-clock guarantee.
 
+Shared TCP setup scans at most 256 resolver entries, retaining the first eight
+distinct socket addresses per family. The resolver's first family stays first;
+families then alternate, preserving order within each family, into at most eight
+attempts. Filling one family does not stop scanning for the other. Hitting the
+scan bound reports remaining results as unknown, including at exactly 256
+entries; family-storage and attempt-queue omissions are reported separately.
+Literal IPv4/IPv6 bypass DNS, and single-family hosts remain valid.
+
+Connects remain serial, with the existing two-second per-attempt ceiling. When
+an opposite-family candidate remains in the actual queue, a slow attempt receives
+at most half the remaining hop/overall allowance, reserving time for fallback.
+Failures advance immediately. Cancellation/deadline checks surround resolution,
+enumeration, each attempt and socket setup; failed, cancelled or unconfigured
+sockets are dropped. Blocking DNS and one bounded connect can still delay
+cancellation. This is not concurrent Happy Eyeballs or asynchronous DNS.
+
+Bounded diagnostics distinguish scanned raw family counts, retained unique and
+selected counts, attempted families, elapsed time, numeric OS codes and error
+kinds. The last error is labelled as one attempt, with no resolved-address list
+or arbitrary error text. The original hostname remains authoritative for TLS
+SNI/certificates, HTTP Host, URLs, origins, cookies and redirect checks. Original
+offline regressions use explicitly simulated family failures and local sockets;
+they do not establish external IPv6 availability or a live-service outcome.
+
 `--diagnose URL --report FILE` uses the real HTTP/TLS client for document GETs,
 without an App profile, page scripts, subresources or form submission. At most
 eight targets are accepted; all are parsed before report creation or network

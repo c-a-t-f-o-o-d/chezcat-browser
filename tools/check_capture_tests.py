@@ -228,6 +228,57 @@ class CaptureTests(unittest.TestCase):
             self.run_case('pass', name='second')
 
 
+    def test_panic_and_stack_overflow_labels_are_diagnostic_without_a_summary(self):
+        log = self.root / 'panic.log'
+        raw = ("running 2 tests\r\ntest controlled::first ... ok\r\n"
+               "thread 'controlled::panic_case' (123) panicked at C:/controlled-private/source.rs:8:2:\r\n"
+               "CONTROLLED_SECRET panic message\r\n"
+               "thread 'controlled::overflow_case' has overflowed its stack\r\n"
+               "process did not exit (exit code: 0xc00000fd, STATUS_STACK_OVERFLOW)\r\n").encode()
+        log.write_bytes(raw)
+        result = runner.analyze(log)
+        self.assertTrue(result['harness_started'])
+        self.assertEqual(result['completed_test_lines'], 1)
+        self.assertNotIn('summary', result)
+        self.assertFalse(result['complete_success_summary'])
+        self.assertEqual(result['failed_test_names'], [])
+        self.assertEqual(result['panicking_test_names'], ['controlled::panic_case', 'controlled::overflow_case'])
+        self.assertFalse(result['panicking_names_limited'])
+        self.assertEqual(result['native_exit_statuses'], ['0xc00000fd'])
+        self.assertEqual(log.read_bytes(), raw)
+        encoded = json.dumps(result['panicking_test_names'])
+        self.assertNotIn('CONTROLLED_SECRET', encoded)
+        self.assertNotIn('source.rs', encoded)
+
+    def test_panic_labels_exclude_unnamed_private_malformed_and_non_diagnostic_text(self):
+        text = ("Source: thread 'controlled::source_text' panicked at private message\n"
+                "thread '<unnamed>' has overflowed its stack\n"
+                "thread 'https://private.invalid/?secret=value' panicked at private message\n"
+                "thread 'controlled::' panicked at private message\n"
+                "thread 'controlled::wrong_outcome' completed successfully\n"
+                "thread 'controlled::not_overflow' has overflowed its stack_suffix\n"
+                f"thread '{'x' * 513}' panicked at private message\n")
+        self.assertEqual(runner.panicking_names(text), ([], False))
+
+    def test_panic_labels_deduplicate_and_stop_at_a_bounded_unique_prefix(self):
+        text = "thread 'controlled::case0' panicked at private location\n" * 20
+        text += ''.join(f"thread 'controlled::case{index}' (123) has overflowed its stack\n" for index in range(12))
+        names, limited = runner.panicking_names(text)
+        self.assertEqual(names, [f'controlled::case{index}' for index in range(8)])
+        self.assertTrue(limited)
+        self.assertEqual(runner.panicking_names(''.join(f"thread 'controlled::case{index}' panicked at private\n" for index in range(8)))[1], False)
+
+    def test_expected_reported_panic_does_not_override_a_complete_harness_pass(self):
+        log = self.root / 'expected-panic.log'
+        log.write_text("running 1 test\nthread 'controlled::expected_panic' panicked at private\n"
+                       "test controlled::expected_panic ... ok\n"
+                       "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out;\n", encoding='utf-8')
+        result = runner.analyze(log)
+        self.assertTrue(result['complete_success_summary'])
+        self.assertEqual(result['panicking_test_names'], ['controlled::expected_panic'])
+        self.assertEqual(result['failed_test_names'], [])
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, default=ROOT / 'results/verification/test-capture-runner.json')
