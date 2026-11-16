@@ -13,7 +13,20 @@ impl Temp {
     fn new()->Self{
         let mut bytes=[0u8;8];crate::random::fill(&mut bytes).unwrap();
         let token:String=bytes.iter().map(|b|format!("{b:02x}")).collect();
-        let path=std::env::temp_dir().join(format!("chezcat-session-core-{token}"));fs::create_dir(&path).unwrap();Self(path)
+        let path=std::env::temp_dir().join(format!("chezcat-session-core-{token}"));fs::create_dir(&path).unwrap();
+        // Exercise a genuine filesystem alias when short names are available.
+        // Keep input free of device prefixes; the browser canonicalizes it.
+        #[cfg(windows)]
+        let path={
+            use std::os::windows::ffi::{OsStrExt,OsStringExt};
+            #[link(name="kernel32")]
+            unsafe extern "system" {fn GetShortPathNameW(long:*const u16,short:*mut u16,size:u32)->u32;}
+            let units:Vec<u16>=path.as_os_str().encode_wide().chain(Some(0)).collect();
+            let mut short=vec![0u16;32768];
+            let size=unsafe{GetShortPathNameW(units.as_ptr(),short.as_mut_ptr(),short.len() as u32)} as usize;
+            if size>0 && size<short.len(){PathBuf::from(std::ffi::OsString::from_wide(&short[..size]))}else{path}
+        };
+        Self(path)
     }
     fn page(&self,name:&str,title:&str)->PathBuf{
         let path=self.0.join(name);fs::write(&path,format!("<!doctype html><html><head><title>{title}</title><style>body{{margin:0}}input,button{{display:block}}#spacer{{height:1800px}}</style></head><body><input id=q value=seed><button id=change type=button onclick=\"count++;document.title='{title} '+count;\">Change</button><p id=out>Actual original page</p><div id=spacer>Scroll</div><script>var count=0;</script></body></html>")).unwrap();path
@@ -28,22 +41,22 @@ fn node(app:&App,name:&str)->usize{(0..app.document.nodes.len()).find(|&node|app
 fn point(app:&App,name:&str)->(i32,i32){let node=node(app,name);let rect=app.page.controls.iter().find(|rect|rect.node==node).unwrap();(rect.x+rect.width/2,app.content_top()+rect.y-app.scroll+rect.height/2)}
 fn edit(app:&mut App,text:&str){assert!(!app.failed,"Fixture page failed: {}",app.status);let(x,y)=point(app,"q");app.pointer_down(x,y,false);app.pointer_up(x,y);app.key(0x41,true,false,false);app.paste(text);assert_eq!(app.forms.controls[&node(app,"q")].value.text(),text);}
 fn tap(app:&mut App,name:&str){let(x,y)=point(app,name);app.pointer_down(x,y,false);app.pointer_up(x,y);}
-fn until(session:&mut Session,mut ready:impl FnMut(&mut Session)->bool){let deadline=Instant::now()+Duration::from_secs(6);while !ready(session){session.poll(4).unwrap();assert!(Instant::now()<deadline,"Real session ownership fixture timed out.");thread::sleep(Duration::from_millis(2));}}
+fn until(session:&mut Session,mut ready:impl FnMut(&mut Session)->bool){let deadline=Instant::now()+Duration::from_secs(15);while !ready(session){session.poll(4).unwrap();assert!(Instant::now()<deadline,"Real session ownership fixture timed out.");thread::sleep(Duration::from_millis(2));}}
 fn received()->crate::http::Response{crate::http::Response{document_timing:None,redirected:false,url:crate::url::parse("https://download.invalid/session.bin").unwrap().0,fragment:None,status:200,protocol:Some("TLS 1.3"),request_is_post:true,cookie_same_site:false,headers:vec![("content-disposition".into(),"attachment; filename=session.bin".into())],body:b"browser download".to_vec(),events:Vec::new()}}
 
 #[test]
 fn session_core_real_tabs_keep_independent_forms_vm_source_scroll_and_back_history(){
     let temp=Temp::new();let a=temp.page("a.html","A");let b=temp.page("b.html","B");let later=temp.page("later.html","Later");
     let mut initial=App::new();initial.open(&a);edit(&mut initial,"edited A");tap(&mut initial,"change");initial.scroll_by(170);
-    let raw=initial.raw.clone();let epoch=initial.script_epoch;let nodes=initial.document.nodes.as_ptr();let scroll=initial.scroll;
+    let a_location=initial.location.clone();let raw=initial.raw.clone();let epoch=initial.script_epoch;let nodes=initial.document.nodes.as_ptr();let scroll=initial.scroll;
     let mut session=adopt(initial,Limits::default());let(window,one)=first(&session);let two=session.new_tab(window).unwrap();
-    session.with_tab(two,|app|{assert!(app.scripting.is_none());assert_eq!(app.history.len(),1);app.open(&b);edit(app,"edited B");tap(app,"change");}).unwrap();
+    let b_location=session.with_tab(two,|app|{assert!(app.scripting.is_none());assert_eq!(app.history.len(),1);app.open(&b);edit(app,"edited B");tap(app,"change");app.location.clone()}).unwrap();
     session.switch_tab(window,one).unwrap();session.with_active(window,|app|{assert_eq!(app.raw,raw);assert_eq!(app.script_epoch,epoch);assert_eq!(app.document.nodes.as_ptr(),nodes);assert_eq!(app.scroll,scroll);assert_eq!(app.document.title,"A 1");assert_eq!(app.forms.controls[&node(app,"q")].value.text(),"edited A");}).unwrap();
-    session.switch_tab(window,two).unwrap();session.with_active(window,|app|{assert_eq!(app.document.title,"B 1");assert_eq!(app.forms.controls[&node(app,"q")].value.text(),"edited B");app.open(&later);app.mouse_navigation(false);assert_eq!(app.location.path.as_ref(),Some(&b));assert_eq!(app.history.len(),3);}).unwrap();
+    session.switch_tab(window,two).unwrap();session.with_active(window,|app|{assert_eq!(app.document.title,"B 1");assert_eq!(app.forms.controls[&node(app,"q")].value.text(),"edited B");app.open(&later);app.mouse_navigation(false);assert_eq!(app.location,b_location);assert_eq!(app.history.len(),3);}).unwrap();
     session.switch_tab(window,one).unwrap();session.with_active(window,|app|{assert_eq!(app.document.title,"A 1");assert_eq!(app.history.len(),2);assert_eq!(app.raw,raw);}).unwrap();
     // Compare actual shared jars/trust without replacing each App's own origin.
-    let jar=session.cookies.clone();let trust=session.trust.clone();session.with_tab(one,|app|{assert!(Arc::ptr_eq(&app.cookies,&jar));assert!(Arc::ptr_eq(&app.trust,&trust));assert_eq!(app.location.path.as_ref(),Some(&a));}).unwrap();
-    session.with_tab(two,|app|{assert!(Arc::ptr_eq(&app.cookies,&jar));assert!(Arc::ptr_eq(&app.trust,&trust));assert_eq!(app.location.path.as_ref(),Some(&b));}).unwrap();
+    let jar=session.cookies.clone();let trust=session.trust.clone();session.with_tab(one,|app|{assert!(Arc::ptr_eq(&app.cookies,&jar));assert!(Arc::ptr_eq(&app.trust,&trust));assert_eq!(app.location,a_location);}).unwrap();
+    session.with_tab(two,|app|{assert!(Arc::ptr_eq(&app.cookies,&jar));assert!(Arc::ptr_eq(&app.trust,&trust));assert_eq!(app.location,b_location);}).unwrap();
 }
 
 #[test]
@@ -94,14 +107,14 @@ fn session_core_bounded_overflow_poll_serves_real_inactive_timers_without_hot_lo
     for (id,name) in [(one,"One"),(two,"Two"),(three,"Three")] {session.with_tab(id,|app|assert_eq!(app.document.title,format!("{name} done"))).unwrap();}
 }
 
-struct Site {address:SocketAddr,stopped:Arc<AtomicBool>,requests:Arc<Mutex<Vec<String>>>,gate:Arc<(Mutex<bool>,Condvar)>,worker:Option<thread::JoinHandle<()>>}
+struct Site {address:SocketAddr,stopped:Arc<AtomicBool>,requests:Arc<Mutex<Vec<String>>>,held:Arc<Mutex<Vec<String>>>,finished:Arc<Mutex<Vec<String>>>,gate:Arc<(Mutex<bool>,Condvar)>,worker:Option<thread::JoinHandle<()>>}
 impl Site {
     fn new(kind:&'static str)->Self{
         let listener=TcpListener::bind("127.0.0.1:0").unwrap();let address=listener.local_addr().unwrap();listener.set_nonblocking(true).unwrap();
-        let stopped=Arc::new(AtomicBool::new(false));let requests=Arc::new(Mutex::new(Vec::new()));let gate=Arc::new((Mutex::new(false),Condvar::new()));
-        let(stop,seen,held)=(stopped.clone(),requests.clone(),gate.clone());let worker=thread::spawn(move||{
-            let mut peers=Vec::new();while !stop.load(Ordering::Relaxed){match listener.accept(){Ok((mut stream,_))=>{let seen=seen.clone();let held=held.clone();peers.push(thread::spawn(move||{
-                stream.set_read_timeout(Some(Duration::from_secs(2))).unwrap();stream.set_write_timeout(Some(Duration::from_secs(2))).unwrap();let mut request=Vec::new();let mut byte=[0u8;1];while !request.ends_with(b"\r\n\r\n"){if request.len()>=8192||stream.read_exact(&mut byte).is_err(){return;}request.push(byte[0]);}
+        let stopped=Arc::new(AtomicBool::new(false));let requests=Arc::new(Mutex::new(Vec::new()));let held=Arc::new(Mutex::new(Vec::new()));let finished=Arc::new(Mutex::new(Vec::new()));let gate=Arc::new((Mutex::new(false),Condvar::new()));
+        let(stop,seen,holding,done,release)=(stopped.clone(),requests.clone(),held.clone(),finished.clone(),gate.clone());let worker=thread::spawn(move||{
+            let mut peers=Vec::new();while !stop.load(Ordering::Relaxed){match listener.accept(){Ok((mut stream,_))=>{assert!(peers.len()<32,"Fixture connection bound exceeded.");let seen=seen.clone();let holding=holding.clone();let done=done.clone();let release=release.clone();peers.push(thread::spawn(move||{
+                stream.set_read_timeout(Some(Duration::from_secs(15))).unwrap();stream.set_write_timeout(Some(Duration::from_secs(15))).unwrap();let mut request=Vec::new();let mut byte=[0u8;1];while !request.ends_with(b"\r\n\r\n"){if request.len()>=8192||stream.read_exact(&mut byte).is_err(){return;}request.push(byte[0]);}
                 let text=String::from_utf8_lossy(&request);let path=text.lines().next().and_then(|line|line.split_whitespace().nth(1)).unwrap_or("/").to_owned();seen.lock().unwrap().push(path.clone());
                 let (mime,body)=if path=="/" {
                     let content=match kind {"sheet"=>"<script>var sheet=document.createElement('link');sheet.rel='stylesheet';sheet.href='/held.css';sheet.onload=function(){document.title='LATE';};document.head.appendChild(sheet);</script>","script"=>"<script>var s=document.createElement('script');s.src='/held.js';document.body.appendChild(s);</script>","image"=>"<img src='/held.ppm' onload=\"document.title='LATE'\">","background"=>"<style>#box{background-image:url('/held.ppm')}</style>",_=>""};
@@ -111,14 +124,22 @@ impl Site {
                 else if path=="/held.bin"{("application/octet-stream",b"browser held download".to_vec())}
                 else if path=="/held.ppm"{let mut data=b"P6\n2 2\n255\n".to_vec();data.extend([0,0,255].repeat(4));("image/x-portable-pixmap",data)}else{("text/plain",b"Not a fixture route".to_vec())};
                 let header=format!("HTTP/1.1 200 OK\r\nContent-Type: {mime}\r\nContent-Length: {}\r\nConnection: close\r\nContent-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self'; object-src 'none'\r\n\r\n",body.len());let _=stream.write_all(header.as_bytes());
-                if path.starts_with("/held."){let _=held.1.wait_timeout_while(held.0.lock().unwrap(),Duration::from_secs(5),|open|!*open).unwrap();}
+                if path.starts_with("/held."){
+                    holding.lock().unwrap().push(path.clone());
+                    let(open,_)=release.1.wait_timeout_while(release.0.lock().unwrap(),Duration::from_secs(30),|open|!*open).unwrap();
+                    // Timeout is fixture failure, never implicit publication.
+                    if !*open{return;}drop(open);
+                }
                 let _=stream.write_all(&body);
+                done.lock().unwrap().push(path);
             }));},Err(error) if error.kind()==std::io::ErrorKind::WouldBlock=>thread::sleep(Duration::from_millis(1)),Err(error)=>panic!("{error}")}}
             for peer in peers{peer.join().unwrap();}
-        });Self{address,stopped,requests,gate,worker:Some(worker)}
+        });Self{address,stopped,requests,held,finished,gate,worker:Some(worker)}
     }
     fn url(&self,path:&str)->String{format!("http://{}{path}",self.address)}
     fn seen(&self,path:&str)->bool{self.requests.lock().unwrap().iter().any(|p|p==path)}
+    fn held(&self,path:&str)->bool{self.held.lock().unwrap().iter().any(|p|p==path)}
+    fn finished(&self,path:&str)->bool{self.finished.lock().unwrap().iter().any(|p|p==path)}
     fn release(&self){*self.gate.0.lock().unwrap()=true;self.gate.1.notify_all();}
 }
 impl Drop for Site{fn drop(&mut self){self.release();self.stopped.store(true,Ordering::Relaxed);if let Some(worker)=self.worker.take(){worker.join().unwrap();}}}
@@ -127,10 +148,30 @@ impl Drop for Site{fn drop(&mut self){self.release();self.stopped.store(true,Ord
 fn session_core_close_consumes_held_script_stylesheet_image_and_background_owners(){
     for(kind,resource)in[("sheet","/held.css"),("script","/held.js"),("image","/held.ppm"),("background","/held.ppm")]{
         let temp=Temp::new();let survivor=temp.page("survivor.html","Survivor");let site=Site::new(kind);let mut session=adopt(App::new(),Limits::default());let(window,closing)=first(&session);let alive=session.new_tab(window).unwrap();
-        session.with_tab(alive,|app|{app.open(&survivor);edit(app,"survives");let x=app.width-20;let y=app.content_top()+app.viewport_height()-24;app.pointer_down(x,y,false);app.pointer_up(x,y);assert!(matches!(app.focus,Focus::Page));}).unwrap();session.with_tab(closing,|app|app.open_address(&site.url("/"))).unwrap();until(&mut session,|_|site.seen(resource));session.with_tab(closing,|app|assert_eq!(app.document.title,"Held owner")).unwrap();
+        session.with_tab(alive,|app|{app.open(&survivor);edit(app,"survives");let x=app.width-20;let y=app.content_top()+app.viewport_height()-24;app.pointer_down(x,y,false);app.pointer_up(x,y);assert!(matches!(app.focus,Focus::Page));}).unwrap();
+        session.with_tab(closing,|app|app.open_address(&site.url("/"))).unwrap();
+        if kind=="image" {
+            // Deliberately let the parser resource arrive before the UI polls
+            // its queued first paint. Request arrival is not document commit.
+            let deadline=Instant::now()+Duration::from_secs(15);
+            while !site.held(resource){assert!(Instant::now()<deadline,"{kind}: parser resource did not arrive.");thread::sleep(Duration::from_millis(2));}
+        }
+        until(&mut session,|session|site.held(resource)&&session.with_tab(closing,|app|!app.failed&&app.document.title=="Held owner").unwrap());
+        session.with_tab(closing,|app|assert_eq!(app.document.title,"Held owner")).unwrap();
+        assert!(!site.finished(resource),"{kind}: held response completed before close.");
+        let retired:Vec<Box<dyn Fn()->bool>>=session.with_tab(closing,|app|{
+            let mut probes:Vec<Box<dyn Fn()->bool>>=Vec::new();
+            if let Some(worker)=&app.worker{probes.push(Box::new(worker.retirement_probe()));}
+            if let Some(worker)=&app.dynamic_scripts{probes.push(Box::new(worker.retirement_probe()));}
+            if let Some(worker)=&app.dynamic_stylesheets{probes.push(Box::new(worker.retirement_probe()));}
+            if let Some(worker)=&app.dynamic_images{probes.push(Box::new(worker.retirement_probe()));}
+            assert!(!probes.is_empty()&&probes.iter().all(|probe|!probe()));probes
+        }).unwrap();
         let before=session.with_tab(alive,|app|(app.raw.clone(),app.script_epoch,app.document.nodes.as_ptr(),app.draw().pixels.clone(),app.forms.controls[&node(app,"q")].value.text().to_owned())).unwrap();let stale=session.tab_wake(closing).unwrap();
         session.close_tab(closing).unwrap();assert!(session.with_tab(closing,|_|()).is_err());let replacement=session.new_tab(window).unwrap();assert_ne!(replacement,closing);site.release();stale();
-        let deadline=Instant::now()+Duration::from_millis(100);while Instant::now()<deadline{session.poll(4).unwrap();thread::sleep(Duration::from_millis(2));}
+        until(&mut session,|_|site.finished(resource)&&retired.iter().all(|probe|probe()));
+        let deadline=Instant::now()+Duration::from_secs(15);
+        while session.poll(4).unwrap().more{assert!(Instant::now()<deadline,"{kind}: retired wakes did not drain.");}
         assert!(!site.seen("/escaped"),"A retired script performed navigation.");session.with_tab(replacement,|app|{assert_ne!(app.document.title,"LATE");assert!(app.styles.is_empty());assert!(app.backgrounds.is_empty());}).unwrap();
         session.with_tab(alive,|app|{assert_eq!(app.raw,before.0);assert_eq!(app.script_epoch,before.1);assert_eq!(app.document.nodes.as_ptr(),before.2);assert_eq!(app.draw().pixels,before.3);assert_eq!(app.forms.controls[&node(app,"q")].value.text(),before.4);assert_eq!(app.document.title,"Survivor");}).unwrap();
     }

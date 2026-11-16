@@ -443,6 +443,14 @@ internal App ownership slice. Native userdata, inspector bindings, reentrant
 window calls, scheduling, tab-strip input and link/new-window dispositions remain
 subsequent acceptance; full normal integration is required for each checkpoint.
 
+Local-file identity controls include genuine Windows short-path aliases when
+available and compare complete accepted browser Locations. Held-resource controls
+wait for both the actual committed App document and the withheld response, force
+the parser-image-before-first-paint order, and explicitly release only after
+close. Test-only weak worker probes and server completion acknowledgments replace
+fixed sleep assumptions; original page/form/source/pixel and no-escape assertions
+remain. A held-server timeout never publishes a response.
+
 ## A1 — About and running-build identity
 
 Status: finite source/UI implementation, with normal build and actual executable

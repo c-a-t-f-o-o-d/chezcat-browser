@@ -147,6 +147,14 @@ impl Worker {
     }
 }
 
+#[cfg(test)]
+impl Worker {
+    pub(crate) fn retirement_probe(&self) -> impl Fn() -> bool + 'static {
+        let state = Arc::downgrade(&self.state);
+        move || state.upgrade().is_none()
+    }
+}
+
 impl Drop for Worker {
     fn drop(&mut self) {
         self.cancel();
