@@ -51,6 +51,8 @@ pub(crate) mod session;
 #[path = "app_platform_continuation.rs"]
 mod platform_continuation;
 pub use platform_continuation::{PlatformCompletion, PlatformRequest};
+#[path = "app_anchor.rs"]
+pub(crate) mod anchor;
 #[path = "app_images.rs"]
 mod image_jobs;
 #[path = "app_backgrounds.rs"]
@@ -297,6 +299,7 @@ pub struct App {
     trust: std::sync::Arc<crate::trust::Store>,
     wake: loader::Wake,
     platform_request_scope: std::rc::Rc<()>,
+    anchor_geometry_scope: std::rc::Rc<()>,
     pending: Option<Pending>,
     next_request: u64,
     committed_request: Option<u64>,
@@ -433,6 +436,7 @@ impl App {
             trust: std::sync::Arc::new(crate::trust::Store::unconfigured()),
             wake: std::sync::Arc::new(|| {}),
             platform_request_scope: std::rc::Rc::new(()),
+            anchor_geometry_scope: std::rc::Rc::new(()),
             pending: None,
             next_request: 0,
             committed_request: None,
@@ -669,6 +673,17 @@ impl App {
         request: crate::http::Request,
         form_policy: Option<crate::csp::PolicySet>,
     ) {
+        self.start_network_request_with_link_origin(location, kind, mode, request, form_policy, None);
+    }
+    fn start_network_request_with_link_origin(
+        &mut self,
+        location: Location,
+        kind: NavigationKind,
+        mode: crate::http::FetchMode,
+        request: crate::http::Request,
+        form_policy: Option<crate::csp::PolicySet>,
+        link_origin: Option<Option<crate::url::HttpUrl>>,
+    ) {
         self.invalidate_platform_requests();
         self.suspend_media();
         self.cancel_script_requests();
@@ -712,6 +727,9 @@ impl App {
             scroll_target: None,
         });
         let mut options = self.load_options();
+        // A resolved user link carries its source top URL only for this new
+        // chain. It never copies a reload SameSite bit or script/form authority.
+        if let Some(origin) = link_origin { options.cookie_origin = origin; }
         options.form_policy = form_policy.map(std::sync::Arc::new);
         if matches!(kind, NavigationKind::Reload(_)) {
             // A UI reload preserves how the committed document was reached;
@@ -1286,6 +1304,15 @@ impl App {
         fragment_navigation: bool,
         replace: bool,
     ) {
+        self.navigate_location_mode_with_link_origin(location, fragment_navigation, replace, None);
+    }
+    fn navigate_location_mode_with_link_origin(
+        &mut self,
+        location: Location,
+        fragment_navigation: bool,
+        replace: bool,
+        link_origin: Option<Option<crate::url::HttpUrl>>,
+    ) {
         self.invalidate_platform_requests();
         self.apply_history_replacement();
         let location = if location.url.is_none()
@@ -1319,7 +1346,7 @@ impl App {
             };
         }
         if !same_document && (location.url.is_some() || crate::media::is_local_media(&location)) {
-            self.start_network(
+            self.start_network_request_with_link_origin(
                 location,
                 if replace {
                     NavigationKind::ScriptReplace(None)
@@ -1327,6 +1354,9 @@ impl App {
                     NavigationKind::New
                 },
                 crate::http::FetchMode::Normal,
+                crate::http::Request::Get,
+                None,
+                link_origin,
             );
             return;
         }
@@ -1623,6 +1653,7 @@ impl App {
         }
     }
     fn reflow(&mut self) {
+        self.anchor_geometry_scope = std::rc::Rc::new(());
         let environment=Some(self.css_media_environment());
         self.document.media_environment=environment;
         if let Some(report)=&mut self.alternate {report.media_environment=environment;}
@@ -1720,6 +1751,7 @@ impl App {
     fn set_scroll(&mut self, scroll: i32) {
         let scroll = scroll.clamp(0, self.max_scroll());
         if scroll != self.scroll {
+            self.anchor_geometry_scope = std::rc::Rc::new(());
             self.select_popup = None;
         }
         self.scroll = scroll;

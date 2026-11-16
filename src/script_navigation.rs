@@ -21,6 +21,9 @@ impl Page {
         self.state.cookies = cookies;
     }
 
+    /// Observe a queued author navigation without consuming its authority.
+    pub fn has_navigation_request(&self) -> bool { self.state.navigation.is_some() }
+
     pub fn take_navigation(&mut self) -> Option<Navigation> {
         self.state.navigation.take()
     }

@@ -1794,7 +1794,7 @@ impl Engine<'_> {
         match &node.kind {
             NodeKind::Comment(_) => {},
             NodeKind::Text(text) => self.text(text, &style, link),
-            NodeKind::Element { tag, id, href, .. } => {
+            NodeKind::Element { tag, id, .. } => {
                 if style.display == Display::None
                     || matches!(
                         tag.as_str(),
@@ -1814,9 +1814,9 @@ impl Engine<'_> {
                     return;
                 }
                 if tag == "a" {
-                    if let Some(href) = href {
+                    if let Some(href) = self.doc.attr(index, "href") {
                         link = Some(self.layout.targets.len());
-                        self.layout.targets.push(href.clone());
+                        self.layout.targets.push(href.to_owned());
                         self.layout.target_nodes.push(index);
                     }
                 }

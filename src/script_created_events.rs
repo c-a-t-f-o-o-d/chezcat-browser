@@ -491,8 +491,8 @@ impl Bridge<'_> {
         self.construct_event_record(owner,args,fields,None,None,None)
     }
     pub(super) fn ordinary_event_owner(&self,object:u32)->Option<u32> {
-        let event=&self.state.created_events[self.created_event_index(object)?];
-        Some(event.owner)
+        self.created_event_index(object).map(|id|self.state.created_events[id].owner)
+            .or_else(||self.state.event.as_ref().filter(|event|event.handle==object&&event.mouse.is_some()).map(|_|WINDOW))
     }
     pub(super) fn ui_view_argument(&self,owner:u32,value:Option<&Value>)->Result<Option<u32>,(&'static str,String)> {
         let Some(value)=value else {return Ok(None)};
@@ -635,11 +635,12 @@ impl Bridge<'_> {
 
     pub(super) fn mouse_receiver(&self, handle: u32) -> bool {
         self.created_event_index(handle).is_some_and(|id| self.state.created_events[id].mouse.is_some())
+            || self.state.event.as_ref().is_some_and(|event|event.handle==handle&&event.mouse.is_some())
     }
 
     pub(super) fn ui_receiver(&self,handle:u32)->bool {
         self.created_event_index(handle).is_some_and(|id|self.state.created_events[id].ui.is_some())
-            || self.state.event.as_ref().is_some_and(|event|event.handle==handle && event.keyboard.is_some())
+            || self.state.event.as_ref().is_some_and(|event|event.handle==handle && (event.keyboard.is_some() || event.mouse.is_some()))
     }
 
     pub(super) fn custom_receiver(&self, handle:u32) -> bool {
@@ -665,7 +666,8 @@ impl Bridge<'_> {
         !matches!(name,"cancelBubble"|"returnValue") && (self.created_event_index(object).is_some_and(|id| base_property(name)
             || self.state.created_events[id].mouse.is_some() && mouse_property(name)
             || self.state.created_events[id].custom.is_some() && name == "detail")
-            || self.ui_receiver(object) && ui_property(name))
+            || self.ui_receiver(object) && ui_property(name)
+            || self.state.event.as_ref().is_some_and(|event|event.handle==object&&event.mouse.is_some()) && mouse_property(name))
     }
 
     pub(super) fn created_event_has(&mut self, object: u32, name: &str) -> Option<Result<bool, String>> {
@@ -760,6 +762,10 @@ impl Bridge<'_> {
     pub(super) fn validate_created_event_call(&self, object: u32, method: &str, args: &[Value]) -> Result<(), (&'static str, String)> {
         if object == DOCUMENT && method == "createEvent" && self.event_factory_enabled() && interface(args.first()).is_none() {
             return Err(("NotSupportedError", unsupported_event_interface(args.first())));
+        }
+        if method=="initMouseEvent" && self.mouse_receiver(object) {
+            self.ui_view_argument(self.event_owner(object).unwrap_or(WINDOW),args.get(3))?;
+            self.mouse_target_argument(self.event_owner(object).unwrap_or(WINDOW),args.get(14))?;
         }
         if method=="initUIEvent" && self.ui_receiver(object) {
             self.ui_view_argument(self.event_owner(object).unwrap_or(WINDOW),args.get(3))?;

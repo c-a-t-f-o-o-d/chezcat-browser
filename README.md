@@ -31,7 +31,9 @@ and licensing obligations; see [third-party notices](THIRD_PARTY_NOTICES.md).
 - Genuine Event, UIEvent, CustomEvent and finite MouseEvent construction,
   owner-realm prototypes and branded fields. CustomEvent retains actual any
   detail; Event/UIEvent/CustomEvent dispatch, cancellation and paths are real.
-  Mouse dispatch/native pointer payloads, KeyboardEvent construction and
+  A finite trusted anchor click/auxclick seam supplies actual host input and
+  cancellation; native link routing remains subsequent work. Synthetic Mouse
+  dispatch, broader native pointer payloads, KeyboardEvent construction and
   shadow-DOM retargeting remain unsupported.
 - Settings, bookmarks, optional browser history, downloads and local diagnostics.
 - Selected local IVF/VP8 video, PCM audio and constrained Matroska A/V.

@@ -66,3 +66,10 @@ shell with original pure UI and hidden-HWND controls. Full normal/optimized
 integration remains required; physical desktop interaction and link dispositions/
 context menus are separate acceptance. Installer/update work stays planned; further media and
 service integration remains deferred. Routine CI stays offline.
+
+The next anchor engine prerequisite uses genuine trusted click/auxclick and
+source-bound targets. Demonstrated shared fixes admit checked HTML href/download
+mutation and keep painted targets/link styling synchronized with live attributes.
+Original reduced App/DOM/event controls cover these semantics; native link/context
+wiring remains subsequent work. This does not change the measured library
+scorecard or establish broader framework support.

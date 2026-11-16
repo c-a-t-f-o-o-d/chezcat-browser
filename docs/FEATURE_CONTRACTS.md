@@ -465,6 +465,37 @@ owner HWND, live site or native clipboard. They do not establish physical deskto
 interaction or link dispositions/context menus. Full normal/optimized executable
 integration is required for every checkpoint.
 
+The anchor engine prerequisite is callable from the host but does not yet replace
+legacy physical link handling or wire Session dispositions/context menus. Genuine
+primary click and middle auxclick use the existing owner-realm MouseEvent brands,
+actual host coordinates/modifiers, listener path, passive/inline cancellation and
+microtask checkpoint. Invalid targets and failed bounded dispatch veto default;
+ordinary author throws alone do not cancel. Synthetic Mouse dispatch is unchanged.
+Unmeasured target-relative offset/layer coordinates remain explicitly unsupported.
+
+An opaque App hit captures the actual rendered HTML anchor, raw href/download,
+document/source/effective base and geometry identity. Stale, foreign, dragged,
+obscured and same-href replacement targets refuse before author code. The native
+scrollbar owns its painted strip. After callbacks, cancellation or queued source
+navigation suppresses default while preserving accepted author effects. Otherwise
+the same surviving node's current href/download drives default, including author
+movement. Authored downloads remain source-owned after cancellation checks.
+Browser context Open consumes a stricter original token and fabricates no click.
+
+Owned non-cloneable targets carry the already-resolved Location and file root,
+plus the source top-level cookie initiator. Consuming a target uses a new GET
+chain, including explicit opaque-local origin, without POST replay or destination
+origin/reload fallback. Future Session routing must validate full original owner
+IDs and admit background owners without temporarily activating them.
+
+HTML anchor href/download content mutations use existing conversion, retained
+limits and atomic DOM/Attr identity commits. Mutation alone navigates nowhere.
+Layout destinations and UA link styling read live null-namespace attributes,
+including removal and empty re-addition. Namespaced/uppercase metadata stays
+inert; unrelated element, foreign/resource and NamedNodeMap mutation guards stay
+unchanged. Original focused controls cover these finite semantics; full normal
+and optimized executable integration remains required at each checkpoint.
+
 Local-file identity controls include genuine Windows short-path aliases when
 available and compare complete accepted browser Locations. Held-resource controls
 wait for both the actual committed App document and the withheld response, force
@@ -939,7 +970,9 @@ contexts for local files remain unavailable.
 
 KeyboardEvent construction, its specialized prototype and native-input
 immediate prototypes remain unsupported. Synthetic
-Mouse dispatch/default activation and native pointer payloads remain unsupported.
+Mouse dispatch/default activation from synthetic events and general native
+pointer payloads remain unsupported. The finite trusted anchor host seam is
+described in B2; native link routing remains subsequent work.
 Changing native host prototypes, arbitrary native subclassing/newTarget and
 shadow-DOM retargeting are also unsupported. These finite interfaces establish
 no full Event-family, web-platform or public-service conformance.

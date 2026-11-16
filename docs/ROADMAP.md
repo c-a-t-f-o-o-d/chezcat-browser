@@ -27,7 +27,7 @@ supported within their recorded limits.
 | CP1 | Delivered prerequisite slice | Main-Document/supported Node live child lists, existing borrowed slice, native array-like apply, fresh text replacement and genuine Document Node identity | No full DOM or whole-framework claim; subsequent prerequisites are tracked in CP2 |
 | T1 | In progress: remaining interoperability gaps | Guarded document diagnostics, a pinned conservative Mozilla NSS 98-authority selection, reviewed offline generation, shared 1024-root policy and bounded per-hop redirect clocks; coordinated document checks distinguish improved path coverage from later failures | Remaining chain/parser/protocol/timeout/admission and resource-specific failures; no broad TLS or usable-site completion claim |
 | B1 | In progress: stylesheets and finite viewport media rules | Shared unmarked cross-origin HTTP(S) stylesheet loading; host-context media rules with real resize/zoom geometry and pixels, source ownership and complete-sheet admission | Original executable width/zoom and dynamic-link cases passed; normal verification remains required for each checkpoint; retain request/security/lifecycle boundaries and explicit query/font gaps while addressing broader resource/render/input usability |
-| B2 | In progress: finite native tabs/windows | Bounded Session Apps/shared authorities, software tab strip and shortcuts, real native windows, pinned inspectors, typed continuations and final-history retry; original pure UI/hidden-HWND controls | Link dispositions/context menus and physical desktop interaction remain; normal/optimized integration required at each checkpoint |
+| B2 | Native tab/window slice delivered; anchor engine prerequisite in progress | Bounded Session/shared authorities, native tab/window controls and pinned inspectors; scoped desktop acceptance; callable trusted anchor events, opaque intents and live href rendering | Native link dispositions/context-menu wiring and broader desktop interaction remain; normal/optimized integration required at each checkpoint |
 | A1 | Implemented finite native About slice | Browser-owned About panel, embedded full product/source/state/build description, exact main legal texts and safe build-information Copy | Normal/build/executable validation is required for each checkpoint; metadata is descriptive, not authenticated publication or signing, and App payload capture does not prove OS clipboard delivery |
 | I1 | Planned after first B1/B2 milestones | Portable runtime ZIP remains the distribution baseline | One per-user x64 MSI with complete exact payload, shortcuts/uninstall, deliberate upgrade version mapping and isolated data-preservation/recovery tests |
 | U1 | Planned with delivery work | No automatic or manual release discovery is claimed | Real published-milestone discovery, startup opt-in default OFF, manual check, bounded async work and deliberate prerelease channels |
@@ -67,8 +67,9 @@ Distinguish remaining trust/path,
 parser, timeout and intentional admission failures from page rendering. Continue
 normal integration of the responsive result, then finite tabs/windows; perfect TLS or every-page
 coverage is not a prerequisite. Installer/update work remains planned.
-The next tasks are exact-source integration of the finite native tab/window shell,
-then typed link dispositions and stale-safe link context actions. The legacy select/Forms prerequisite stays queued
+The next tasks are exact-source integration of the genuine anchor event/intent
+prerequisite, checked Session link dispositions, then stale-safe native link
+context actions. The legacy select/Forms prerequisite stays queued
 as a separate shared compatibility blocker.
 VIDEO dimensions, Element.toggleAttribute, NamedNodeMap mutation and remaining
 media/player work stay recorded gaps outside the active queue. Service playback
