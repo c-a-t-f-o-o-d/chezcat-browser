@@ -86,8 +86,7 @@ fn enable(app: &mut App) {
         retention_days: None,
         clear_on_exit: false,
     };
-    app.browsing_history
-        .configure(policy, crate::history::now())
+    app.configure_browsing_history(&app.browsing_history.policy_token(), policy, crate::history::now())
         .unwrap();
     app.browsing_history_changed();
 }

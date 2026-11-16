@@ -70,8 +70,7 @@ impl Site {
         let mut data = app.profile.data().clone();
         data.settings.download_folder = Some(folder.to_string_lossy().into_owned());
         app.profile.save(data).unwrap();
-        app.browsing_history
-            .configure(
+        app.configure_browsing_history(&app.browsing_history.policy_token(),
                 crate::history::Policy {
                     enabled: true,
                     ..Default::default()

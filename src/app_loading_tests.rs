@@ -219,8 +219,7 @@ fn load_handler_geometry_uses_finished_images_while_resource_report_is_open() {
 fn styled_document_accepts_input_and_timers_before_images_then_fires_load_once() {
     let peer = Peer::new();
     let mut app = App::new();
-    app.browsing_history
-        .configure(
+    app.configure_browsing_history(&app.browsing_history.policy_token(),
             crate::history::Policy {
                 enabled: true,
                 ..Default::default()
@@ -340,8 +339,7 @@ fn stop_retains_the_interactive_page_and_replacement_discards_late_images() {
 fn reload_of_a_displayed_post_redirect_uses_the_final_get_without_resubmission() {
     let peer = Peer::new();
     let mut app = App::new();
-    app.browsing_history
-        .configure(
+    app.configure_browsing_history(&app.browsing_history.policy_token(),
             crate::history::Policy {
                 enabled: true,
                 ..Default::default()

@@ -10,7 +10,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 #[path = "history_shared.rs"]
 mod shared;
-pub use shared::{Shared, View};
+pub use shared::{Commands, PolicyToken, Shared, View};
 
 pub const MAX_ENTRIES: usize = 5000;
 pub const MAX_FILE_BYTES: usize = 4 * 1024 * 1024;
@@ -177,6 +177,21 @@ impl Store {
             Ok(())
         })
         .map(|(_, changed, _)| changed)
+    }
+
+    /// Native editors retain their original Policy. Compare it to the latest
+    /// file inside the existing transaction, then apply the complete edit.
+    /// configure() deliberately retains its original explicit action semantics.
+    pub fn configure_checked(&mut self, expected: Policy, policy: Policy, now: u64) -> Result<bool, String> {
+        validate_policy(policy)?;
+        self.transact(now, policy != Policy::default(), false, |data| {
+            if data.policy != expected {
+                return Err("History settings changed in another tab, window or process. Reopen History settings before saving.".into());
+            }
+            data.policy = policy;
+            prune(data, now);
+            Ok(())
+        }).map(|(_, changed, _)| changed)
     }
 
     /// The selected row must still be the row this caller observed. Normal

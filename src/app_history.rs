@@ -9,9 +9,56 @@ const MAINTENANCE_INTERVAL: Duration = Duration::from_secs(60);
 impl App {
     /// Desktop startup only. Headless rendering never attaches this disk store.
     pub fn attach_browsing_history(&mut self, store: crate::history::Store) {
-        self.browsing_history = store;
+        let shared = crate::history::Shared::new(store);
+        let view = shared.view().expect("A fresh history authority is available.");
+        let commands = shared.commands();
+        self.browsing_history = view;
+        self.history_commands = commands;
+        self.owned_history = Some(shared);
         self.history_closed = false;
         let _ = self.refresh_browsing_history();
+    }
+
+    /// Startup-only attachment. The browser coordinator retains the authority
+    /// and owns final cleanup; App/View/command handles cannot shut it down.
+    pub fn attach_shared_browsing_history(&mut self, shared: &crate::history::Shared) -> Result<(), String> {
+        self.browsing_history.sync()?;
+        if self.history_closed || !self.browsing_history.data().entries.is_empty()
+            || self.browsing_history.data().policy != crate::history::Policy::default() {
+            return Err("Attach the browser history session before retaining visits or configuring history.".into());
+        }
+        let view = shared.view()?;
+        let commands = shared.commands();
+        self.browsing_history = view;
+        self.history_commands = commands;
+        self.owned_history = None;
+        self.history_closed = false;
+        self.refresh_browsing_history().map(|_| ())
+    }
+
+    /// Pure activation observation; expiry/file work remains in refresh.
+    pub fn sync_shared_browsing_history(&mut self) -> Result<bool, String> {
+        let result = self.browsing_history.sync();
+        if !matches!(&result, Ok(false)) { self.cancel_history_panel_pointers(); }
+        match &result {
+            Ok(_) => self.browsing_history_changed(),
+            Err(error) => self.browsing_history_failed(error.clone()),
+        }
+        result
+    }
+
+    pub(super) fn configure_browsing_history(&mut self, expected: &crate::history::PolicyToken,
+        policy: crate::history::Policy, now: u64) -> Result<bool, String> {
+        if self.history_closed { return Err("This window's history owner has closed.".into()); }
+        self.cancel_history_panel_pointers();
+        let command = self.history_commands.configure_checked(expected, policy, now);
+        let observed = self.browsing_history.sync();
+        let result = command.and_then(|changed| observed.map(|observed| changed || observed));
+        match &result {
+            Ok(_) => self.browsing_history_changed(),
+            Err(error) => self.browsing_history_failed(error.clone()),
+        }
+        result
     }
 
     pub(super) fn refresh_browsing_history(&mut self) -> Result<bool, String> {
@@ -20,6 +67,7 @@ impl App {
 
     pub(super) fn refresh_browsing_history_at(&mut self, now: u64) -> Result<bool, String> {
         let result = self.browsing_history.refresh(now);
+        if !matches!(&result, Ok(false)) { self.cancel_history_panel_pointers(); }
         match &result {
             Ok(_) => self.browsing_history_changed(),
             Err(error) => self.browsing_history_failed(error.clone()),
@@ -107,8 +155,8 @@ impl App {
         );
     }
 
-    /// Normal window shutdown only: no destructor silently performs disk I/O.
-    /// Cancel page work before honoring the latest clear-on-exit policy.
+    /// Legacy final-window cleanup uses its owned browser authority. Attached
+    /// Apps close local participation only; no destructor writes or clears data.
     pub fn finish_browsing_session(&mut self) -> Result<(), String> {
         if self.history_closed {
             return Ok(());
@@ -116,7 +164,17 @@ impl App {
         self.cancel_pending();
         self.scripting = None;
         self.history_maintenance = None;
-        let result = self.browsing_history.shutdown(crate::history::now());
+        // A legacy App owns the whole single-window authority. An attached App
+        // closes only local participation; the browser calls Shared.shutdown
+        // once after its last window, independently of App/View lifetimes.
+        let result = match &self.owned_history {
+            Some(shared) => shared.shutdown(crate::history::now()),
+            None => Ok(0),
+        };
+        let result = result.and_then(|removed| {
+            if self.owned_history.is_some() { self.browsing_history.sync()?; }
+            Ok(removed)
+        });
         match result {
             Ok(_) => {
                 self.history_closed = true;

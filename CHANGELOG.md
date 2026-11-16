@@ -9,8 +9,10 @@
   controls pass. Add browser-owned download authority with weak App views,
   separate wake routing and held transfers that survive an originating App.
   Preserve legacy single-window behavior, transfer limits, POST/no-replay,
-  cancellation/retry and no-overwrite. Actual tabs, new windows, final history
-  ownership and terminal resource retirement remain unfinished; normal
+  cancellation/retry and no-overwrite. Add shared saved-history ownership with
+  weak App views, preserved row identities, checked original-policy edits and
+  explicit final-session shutdown. Actual tabs, new windows and terminal
+  resource retirement remain unfinished; normal
   integration is required before validated delivery.
 
 - Correct responsive stylesheet-to-layout behavior: finite initial-font em media

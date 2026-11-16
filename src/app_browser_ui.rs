@@ -135,8 +135,10 @@ pub(super) struct BrowserPanel {
     dragging_field: bool,
     wheel_remainder: i32,
     history_selected: Option<u64>,
+    history_selected_entry: Option<crate::history::Entry>,
     search: Editor,
     history_policy: crate::history::Policy,
+    history_original_policy: Option<crate::history::PolicyToken>,
     clear_range: crate::history::ClearRange,
     return_panel: Option<Box<BrowserPanel>>,
     about: Option<about::Contents>,
@@ -174,8 +176,10 @@ impl BrowserPanel {
             dragging_field: false,
             wheel_remainder: 0,
             history_selected: None,
+            history_selected_entry: None,
             search: Editor::default(),
             history_policy: crate::history::Policy::default(),
+            history_original_policy: None,
             clear_range: crate::history::ClearRange::Hour,
             return_panel: None,
             about: None,
@@ -386,12 +390,8 @@ impl App {
     pub fn show_history(&mut self) {
         let error = self.refresh_browsing_history().err();
         let mut panel = BrowserPanel::new(PanelKind::History, Action::List);
-        panel.history_selected = self
-            .browsing_history
-            .data()
-            .entries
-            .first()
-            .map(|entry| entry.id);
+        panel.history_selected_entry = self.browsing_history.data().entries.first().cloned();
+        panel.history_selected = panel.history_selected_entry.as_ref().map(|entry| entry.id);
         panel.error = error
             .or_else(|| self.browsing_history_error.clone())
             .or_else(|| self.browsing_history.problem().map(str::to_owned))
@@ -403,6 +403,7 @@ impl App {
         let error = self.refresh_browsing_history().err();
         let mut panel = BrowserPanel::new(PanelKind::HistoryOptions, Action::RecordHistory);
         panel.history_policy = self.browsing_history.data().policy;
+        panel.history_original_policy = Some(self.browsing_history.policy_token());
         panel.error = error
             .or_else(|| self.browsing_history_error.clone())
             .or_else(|| self.browsing_history.problem().map(str::to_owned))
@@ -439,14 +440,13 @@ impl App {
         if let Some(previous) = &mut panel.return_panel {
             previous.search.set(&panel.search.text());
             previous.history_selected = None;
+            previous.history_selected_entry = None;
             previous.first = 0;
             previous.focus = Action::List;
         }
         self.leave_browser_panel();
         let first = self.history_matches().first().copied();
-        if let Some(panel) = &mut self.browser_panel {
-            panel.history_selected = first;
-        }
+        self.select_history_entry(first);
     }
 
     fn show_history_clear(&mut self) {
@@ -477,12 +477,11 @@ impl App {
             return;
         }
         let policy = panel.history_policy;
-        match self
-            .browsing_history
-            .configure(policy, crate::history::now())
-        {
+        let Some(original) = panel.history_original_policy.clone() else {
+            self.history_panel_error("Reopen History settings before saving.".into()); return;
+        };
+        match self.configure_browsing_history(&original, policy, crate::history::now()) {
             Ok(_) => {
-                self.browsing_history_changed();
                 self.leave_browser_panel();
                 self.status = "History settings saved.".into();
                 self.failed = false;
@@ -535,6 +534,27 @@ impl App {
             .collect()
     }
 
+    pub(super) fn cancel_history_panel_pointers(&mut self) {
+        let mut next = self.browser_panel.as_mut();
+        while let Some(panel) = next {
+            if matches!(panel.kind, PanelKind::History) { panel.cancel_pointer(); }
+            next = panel.return_panel.as_deref_mut();
+        }
+    }
+
+    fn select_history_entry(&mut self, id: Option<u64>) {
+        let entry = id.and_then(|id| self.browsing_history.data().entries.iter().find(|entry| entry.id == id)).cloned();
+        if let Some(panel) = &mut self.browser_panel {
+            panel.history_selected = entry.as_ref().map(|entry| entry.id);
+            panel.history_selected_entry = entry;
+        }
+    }
+
+    fn selected_history_entry(&self) -> Option<crate::history::Entry> {
+        let panel = self.browser_panel.as_ref()?;
+        panel.history_selected_entry.as_ref().filter(|entry| Some(entry.id) == panel.history_selected).cloned()
+    }
+
     fn sync_history_panel(&mut self) {
         if !self
             .browser_panel
@@ -546,11 +566,13 @@ impl App {
         let matches = self.history_matches();
         let rows = self.bookmark_rows();
         if let Some(panel) = &mut self.browser_panel {
-            if panel
-                .history_selected
-                .is_some_and(|id| !matches.contains(&id))
-            {
+            let valid = panel.history_selected_entry.as_ref().is_some_and(|expected| {
+                panel.history_selected == Some(expected.id) && matches.contains(&expected.id)
+                    && self.browsing_history.data().entries.iter().find(|entry| entry.id == expected.id) == Some(expected)
+            });
+            if !valid {
                 panel.history_selected = None;
+                panel.history_selected_entry = None;
             }
             panel.first = panel.first.min(matches.len().saturating_sub(rows));
         }
@@ -576,13 +598,8 @@ impl App {
     }
 
     fn open_selected_history(&mut self) {
-        let Some(id) = self
-            .browser_panel
-            .as_ref()
-            .and_then(|panel| panel.history_selected)
-        else {
-            return;
-        };
+        let Some(expected) = self.selected_history_entry() else { return; };
+        let id = expected.id;
         if let Err(error) = self.refresh_browsing_history() {
             self.history_panel_error(error);
             return;
@@ -600,7 +617,12 @@ impl App {
             self.sync_browser_panel();
             return;
         };
-        let location = match navigation::address(&entry.url, &Location::home()) {
+        if entry != &expected {
+            self.select_history_entry(None);
+            self.history_panel_error("That history entry changed. Reopen History before using it.".into());
+            return;
+        }
+        let location = match navigation::address(&expected.url, &Location::home()) {
             Ok(location) => location,
             Err(error) => {
                 self.history_panel_error(format!("Cannot open visit: {error}"));
@@ -613,20 +635,14 @@ impl App {
     }
 
     fn remove_selected_history(&mut self) {
-        let Some(id) = self
-            .browser_panel
-            .as_ref()
-            .and_then(|panel| panel.history_selected)
-        else {
+        let Some(expected) = self.selected_history_entry() else { return; };
+        let id = expected.id;
+        if self.browsing_history.data().entries.iter().find(|entry| entry.id == id) != Some(&expected) {
+            self.select_history_entry(None);
+            self.history_panel_error("That history entry changed. Reopen History before using it.".into());
             return;
-        };
-        let removed_url = self
-            .browsing_history
-            .data()
-            .entries
-            .iter()
-            .find(|entry| entry.id == id)
-            .map(|entry| entry.url.split('#').next().unwrap_or(&entry.url).to_owned());
+        }
+        let removed_url = Some(expected.url.split('#').next().unwrap_or(&expected.url).to_owned());
         match self.browsing_history.remove(id, crate::history::now()) {
             Ok(removed) => {
                 if removed {
@@ -1871,8 +1887,8 @@ impl App {
             Action::ApplyHistory => self.apply_history_options(),
             Action::ConfirmClear => self.confirm_history_clear(),
             Action::HistoryRow(id) => {
+                self.select_history_entry(Some(id));
                 if let Some(panel) = &mut self.browser_panel {
-                    panel.history_selected = Some(id);
                     panel.focus = Action::List;
                 }
             }
@@ -2036,7 +2052,7 @@ impl App {
                         _ => None,
                     };
                     if let Some(next) = next {
-                        self.browser_panel.as_mut().unwrap().history_selected = Some(matches[next]);
+                        self.select_history_entry(Some(matches[next]));
                         self.ensure_history_visible();
                     }
                 }
@@ -3174,3 +3190,7 @@ mod about_tests;
 #[cfg(test)]
 #[path = "app_shared_profile_tests.rs"]
 mod shared_profile_tests;
+
+#[cfg(test)]
+#[path = "app_shared_history_tests.rs"]
+mod shared_history_tests;

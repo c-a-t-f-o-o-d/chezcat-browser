@@ -23,8 +23,11 @@ session/download routing and close retirement remain unfinished.
 The download prerequisite now retains one browser-owned Manager with weak App
 views and explicit startup attachment, while preserving legacy single-window
 ownership. Original held transfers survive the originating App, remain visible
-to a peer and use browser wake routing. Native WindowId/session coordination and
-final history/resource retirement are still required before real tabs can close.
+to a peer and use browser wake routing. Saved history now has a browser authority
+with weak App handles, preserved selected-entry identity and checked policy
+edits. Attached Apps cannot clear history on individual close; explicit final
+shutdown belongs to the browser authority. Native WindowId/session coordination
+and terminal resource retirement are still required before real tabs can close.
 One per-user installer and staged release discovery/upgrade remain planned in the
 [roadmap](ROADMAP.md), not delivered capabilities. Further
 F6/YouTube work is deferred; completed finite media evidence remains valid.

@@ -10,17 +10,28 @@ const BUSY: &str = "Browsing history is busy. Try the action again.";
 const CLOSED: &str = "This browser history session has closed.";
 const STALE_ROW: &str = "This history entry changed in another tab or window. Reopen History before removing it.";
 
+/// Opaque original-policy identity. Visits retain it; an observed policy
+/// A->B->A transition issues a new identity while an editor retains its A.
+#[derive(Clone, Debug)]
+pub struct PolicyToken(Rc<Policy>);
+impl PolicyToken { pub fn policy(&self) -> Policy { *self.0 } }
+impl PartialEq for PolicyToken {
+    fn eq(&self, other: &Self) -> bool { Rc::ptr_eq(&self.0, &other.0) }
+}
+impl Eq for PolicyToken {}
+
 #[derive(Debug)]
 struct Snapshot {
     data: Data,
+    policy_token: PolicyToken,
     path: Option<PathBuf>,
     problem: Option<String>,
     next_expiration: Option<u64>,
     closed: bool,
 }
 impl Snapshot {
-    fn capture(store:&Store, closed:bool)->Self {
-        Self {data:store.data().clone(),path:store.path().map(Path::to_path_buf),
+    fn capture(store:&Store, closed:bool, policy_token:PolicyToken)->Self {
+        Self {data:store.data().clone(),policy_token,path:store.path().map(Path::to_path_buf),
             problem:store.problem().map(str::to_owned),next_expiration:store.next_expiration(),closed}
     }
 }
@@ -36,7 +47,10 @@ impl Authority {
         if self.current.data!=*self.store.data() || self.current.path.as_deref()!=self.store.path()
             || self.current.problem.as_deref()!=self.store.problem()
             || self.current.next_expiration!=self.store.next_expiration() || self.current.closed!=self.closed {
-            self.current=Rc::new(Snapshot::capture(&self.store,self.closed));
+            let token = if self.current.data.policy != self.store.data().policy {
+                PolicyToken(Rc::new(self.store.data().policy))
+            } else { self.current.policy_token.clone() };
+            self.current=Rc::new(Snapshot::capture(&self.store,self.closed,token));
         }
     }
 }
@@ -47,9 +61,11 @@ impl Authority {
 pub struct Shared { authority:Rc<RefCell<Authority>> }
 impl Shared {
     pub fn new(store:Store)->Self {
-        let current=Rc::new(Snapshot::capture(&store,false));
+        let token=PolicyToken(Rc::new(store.data().policy));
+        let current=Rc::new(Snapshot::capture(&store,false,token));
         Self {authority:Rc::new(RefCell::new(Authority {store,current,closed:false}))}
     }
+    pub fn commands(&self) -> Commands { Commands {authority:Rc::downgrade(&self.authority)} }
     pub fn view(&self)->Result<View,String> {
         let authority=self.authority.try_borrow().map_err(|_|BUSY.to_owned())?;
         if authority.closed {return Err(CLOSED.into());}
@@ -61,10 +77,9 @@ impl Shared {
         let result=action(&mut authority.store);authority.publish();result
     }
     pub fn refresh(&self,now:u64)->Result<bool,String> {self.change(|store|store.refresh(now))}
-    /// Explicit browser-owned action only, not a stale page/editor save. This
-    /// retains Store::configure semantics. Future settings UI must capture an
-    /// editor conflict token before refresh and resolve stale policy explicitly;
-    /// this ownership adapter adds no field merging or new conflict guarantee.
+    /// Original explicit browser-owned action, retaining Store::configure
+    /// semantics. Native policy editors use the separate checked Commands
+    /// capability with their captured token; no fields are silently merged.
     pub fn configure(&self,policy:Policy,now:u64)->Result<bool,String> {self.change(|store|store.configure(policy,now))}
     /// Exactly one successful final shutdown transaction. Failure remains open
     /// and retryable; another call after success performs no Store/file work.
@@ -73,6 +88,25 @@ impl Shared {
         if authority.closed {return Ok(0);}
         let result=authority.store.shutdown(now);
         if result.is_ok() {authority.closed=true;}
+        authority.publish();result
+    }
+}
+
+/// Native UI capability only. It neither owns the session nor exposes final
+/// shutdown, and no page API receives this Weak command handle.
+#[derive(Clone, Debug)]
+pub struct Commands { authority:Weak<RefCell<Authority>> }
+impl Commands {
+    pub fn configure_checked(&self, expected:&PolicyToken, policy:Policy, now:u64) -> Result<bool,String> {
+        let owner=self.authority.upgrade().ok_or(CLOSED)?;
+        let mut authority=owner.try_borrow_mut().map_err(|_|BUSY.to_owned())?;
+        if authority.closed {return Err(CLOSED.into());}
+        if authority.current.policy_token != *expected {
+            return Err("History settings changed in another tab or window. Reopen History settings before saving.".into());
+        }
+        // A separate process need not update our token. Store compares its
+        // actual latest policy while holding the real transaction lock.
+        let result=authority.store.configure_checked(expected.policy(),policy,now);
         authority.publish();result
     }
 }
@@ -89,6 +123,7 @@ pub struct View {
 }
 impl View {
     pub fn data(&self)->&Data {&self.current.data}
+    pub fn policy_token(&self)->PolicyToken {self.current.policy_token.clone()}
     pub fn path(&self)->Option<&Path> {self.current.path.as_deref()}
     pub fn is_closed(&self)->bool {self.gone||self.current.closed}
     pub fn problem(&self)->Option<&str> {
@@ -152,8 +187,8 @@ impl View {
     pub fn clear(&mut self,range:ClearRange,now:u64)->Result<usize,String> {
         self.change(|store|store.clear(range,now)).map(|(removed,_)|removed)
     }
-    // Deliberately no View::configure or View::shutdown. Policy editors and final
-    // session lifetime belong to the future browser coordinator, not each page.
+    // Deliberately no View::configure or View::shutdown. Native editors use
+    // separate Weak Commands; only Shared owns final browser-session cleanup.
 }
 
 #[cfg(test)]
