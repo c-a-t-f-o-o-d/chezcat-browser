@@ -126,7 +126,18 @@ struct Snapshot {
     network: Option<crate::network_trace::Snapshot>,
 }
 
+#[derive(Clone)]
+pub(super) struct PlatformInspectorState {
+    identity: std::rc::Rc<()>,mode:Mode,focused:bool,tab:Tab,pane:Pane,
+}
+impl PartialEq for PlatformInspectorState {
+    fn eq(&self,other:&Self)->bool {std::rc::Rc::ptr_eq(&self.identity,&other.identity)
+        &&self.mode==other.mode&&self.focused==other.focused&&self.tab==other.tab&&self.pane==other.pane}
+}
+impl Eq for PlatformInspectorState {}
+
 pub(super) struct Inspector {
+    platform_identity: std::rc::Rc<()>,
     pub mode: Mode,
     pub focused: bool,
     pub height: i32,
@@ -163,6 +174,7 @@ pub(super) struct Inspector {
 impl Default for Inspector {
     fn default() -> Self {
         Self {
+            platform_identity: std::rc::Rc::new(()),
             mode: Mode::Closed,
             focused: false,
             height: 330,
@@ -229,6 +241,13 @@ impl Inspector {
         self.notice.clear();
         self.invalidate();
     }
+    pub(super) fn platform_state(&self)->PlatformInspectorState {
+        PlatformInspectorState {identity:self.platform_identity.clone(),mode:self.mode,focused:self.focused,tab:self.tab,pane:self.pane}
+    }
+    pub(super) fn platform_editor(&self)->Option<&Editor> {
+        if self.mode==Mode::Closed||!self.focused {return None;}
+        match self.pane {Pane::Filter=>Some(&self.filter),Pane::Command=>Some(&self.command),_=>None}
+    }
     pub(super) fn cancel_pointer(&mut self) {
         self.pressed = None;
         self.resize_drag = None;
@@ -250,6 +269,7 @@ impl Inspector {
 impl App {
     /// The inspector does not navigate, reload, or replace the inspected page.
     pub fn open_inspector(&mut self) {
+        self.invalidate_platform_requests();
         // A native Settings/bookmark/history draft can stay above the dock.
         // Opening developer tools must not silently discard that staged edit.
         if self.view != View::Page {
@@ -274,6 +294,7 @@ impl App {
     }
 
     pub fn close_inspector(&mut self) {
+        self.invalidate_platform_requests();
         let was_docked = self.inspector.mode == Mode::Docked;
         self.inspector.mode = Mode::Closed;
         self.inspector.focused = false;
@@ -311,11 +332,13 @@ impl App {
     }
 
     pub fn inspector_focus(&mut self) {
+        if !self.inspector.focused { self.invalidate_platform_requests(); }
         self.pending_surrogate = None;
         self.inspector.focused = true;
     }
 
     pub fn inspector_utf16_input(&mut self, unit: u16) {
+        self.invalidate_platform_requests();
         // An auxiliary-window character must never edit the address bar or a
         // page field, even after Escape moves focus out of its command editor.
         self.inspector.focused = true;
@@ -325,6 +348,7 @@ impl App {
     pub fn main_window_focus(&mut self) {
         self.pending_surrogate = None;
         if self.inspector.mode == Mode::Detached {
+            if self.inspector.focused { self.invalidate_platform_requests(); }
             self.inspector.focused = false;
         }
     }
@@ -695,6 +719,7 @@ impl App {
     }
 
     pub fn inspector_pointer_down(&mut self, x: i32, y: i32) {
+        self.invalidate_platform_requests();
         self.pending_surrogate = None;
         self.inspector.focused = true;
         self.focus = Focus::Page;
@@ -787,6 +812,7 @@ impl App {
     }
 
     pub fn inspector_pointer_up(&mut self, x: i32, y: i32) -> PlatformAction {
+        self.invalidate_platform_requests();
         let pressed = self.inspector.pressed.take();
         self.inspector.cancel_pointer();
         if let Some(action) = pressed.filter(|action| Some(*action) == self.inspector_hit(x, y)) {
@@ -871,6 +897,7 @@ impl App {
     }
 
     fn inspector_tab(&mut self, tab: Tab) {
+        self.invalidate_platform_requests();
         self.inspector.tab = tab;
         self.inspector.scroll = 0;
         self.inspector.detail_scroll = 0;
@@ -934,6 +961,7 @@ impl App {
         shift: bool,
         alt: bool,
     ) -> PlatformAction {
+        self.invalidate_platform_requests();
         if alt {
             return PlatformAction::None;
         }
@@ -1092,6 +1120,7 @@ impl App {
     }
 
     pub fn inspector_paste(&mut self, text: &str) {
+        self.invalidate_platform_requests();
         match self.inspector.pane {
             Pane::Filter => {
                 self.inspector.filter.insert(text, 128);
@@ -1107,6 +1136,7 @@ impl App {
     }
 
     pub fn inspector_cut_copied(&mut self, text: &str) {
+        self.invalidate_platform_requests();
         match self.inspector.pane {
             Pane::Filter if self.inspector.filter.selected() == text => {
                 self.inspector.filter.delete_selection();

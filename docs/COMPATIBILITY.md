@@ -60,8 +60,9 @@ Full normal/build/executable verification remains required for integration.
 The select-containing fragment remains the first blocker in the legacy workflow.
 Finite tabs/windows are the next discrete usability milestone after this measured
 rendering improvement. Their shared-profile prerequisite now has original
-two-App revision/gesture and retained-page controls; actual tab/window behavior
-remains unfinished. Shared download authority and wake routing now have original
-held-transfer and two-App controls; stable session IDs, final history authority
-and terminal resource admission remain next. Installer/update work stays planned; further media and
+two-App revision/gesture and retained-page controls. Session ownership, shared
+downloads/history and terminal retirement now support a finite native tab/window
+shell with original pure UI and hidden-HWND controls. Full normal/optimized
+integration remains required; physical desktop interaction and link dispositions/
+context menus are separate acceptance. Installer/update work stays planned; further media and
 service integration remains deferred. Routine CI stays offline.

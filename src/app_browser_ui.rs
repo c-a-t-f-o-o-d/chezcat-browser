@@ -104,7 +104,18 @@ enum PanelKind {
     DeleteFolder { id: u32 },
 }
 
+#[derive(Clone)]
+pub(super) struct PlatformPanelState {
+    identity: std::rc::Rc<()>,
+    focus: Action,
+}
+impl PartialEq for PlatformPanelState {
+    fn eq(&self,other:&Self)->bool {std::rc::Rc::ptr_eq(&self.identity,&other.identity)&&self.focus==other.focus}
+}
+impl Eq for PlatformPanelState {}
+
 pub(super) struct BrowserPanel {
+    platform_identity: std::rc::Rc<()>,
     kind: PanelKind,
     // Captured when an editor/list opens. Peer refresh never replaces this token.
     profile_revision: Option<u64>,
@@ -147,6 +158,7 @@ pub(super) struct BrowserPanel {
 impl BrowserPanel {
     fn new(kind: PanelKind, focus: Action) -> Self {
         Self {
+            platform_identity: std::rc::Rc::new(()),
             kind,
             profile_revision: None,
             focus,
@@ -183,6 +195,18 @@ impl BrowserPanel {
             clear_range: crate::history::ClearRange::Hour,
             return_panel: None,
             about: None,
+        }
+    }
+    pub(super) fn platform_state(&self)->PlatformPanelState {
+        PlatformPanelState {identity:self.platform_identity.clone(),focus:self.focus}
+    }
+    pub(super) fn platform_editor(&self)->Option<&Editor> {
+        match self.focus {
+            Action::Title=>Some(&self.title),
+            Action::Address|Action::Home|Action::RuleEntry=>Some(&self.address),
+            Action::Zoom=>Some(&self.zoom),Action::LinkColor=>Some(&self.link_color),
+            Action::VisitedColor=>Some(&self.visited_color),Action::DownloadFolder=>Some(&self.download_folder),
+            Action::SearchField=>Some(&self.search),_=>None,
         }
     }
     fn editor(&mut self) -> Option<&mut Editor> {
@@ -346,6 +370,7 @@ impl App {
     }
 
     fn begin_browser_panel(&mut self, mut panel: BrowserPanel) {
+        self.invalidate_platform_requests();
         if panel.profile_revision.is_none() && matches!(panel.kind,
             PanelKind::Settings | PanelKind::BlockingRules | PanelKind::Bookmarks
             | PanelKind::EditBookmark { .. } | PanelKind::EditFolder { .. }
@@ -369,6 +394,7 @@ impl App {
     }
 
     pub(super) fn close_browser_panel(&mut self) {
+        self.invalidate_platform_requests();
         self.browser_panel = None;
         self.drag = Drag::None;
         self.pending_surrogate = None;

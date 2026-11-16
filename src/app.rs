@@ -48,6 +48,9 @@ mod style_jobs;
 mod session_history;
 #[path = "app_session.rs"]
 pub(crate) mod session;
+#[path = "app_platform_continuation.rs"]
+mod platform_continuation;
+pub use platform_continuation::{PlatformCompletion, PlatformRequest};
 #[path = "app_images.rs"]
 mod image_jobs;
 #[path = "app_backgrounds.rs"]
@@ -293,6 +296,7 @@ pub struct App {
     worker: Option<loader::Worker>,
     trust: std::sync::Arc<crate::trust::Store>,
     wake: loader::Wake,
+    platform_request_scope: std::rc::Rc<()>,
     pending: Option<Pending>,
     next_request: u64,
     committed_request: Option<u64>,
@@ -428,6 +432,7 @@ impl App {
             worker: None,
             trust: std::sync::Arc::new(crate::trust::Store::unconfigured()),
             wake: std::sync::Arc::new(|| {}),
+            platform_request_scope: std::rc::Rc::new(()),
             pending: None,
             next_request: 0,
             committed_request: None,
@@ -472,6 +477,7 @@ impl App {
         self.error(format!("{}: {error}", fit_text(attempted, 100)));
     }
     pub fn open(&mut self, path: &Path) {
+        self.invalidate_platform_requests();
         self.cancel_pending();
         match navigation::explicit(path) {
             Ok(location) => self.navigate(location),
@@ -489,6 +495,7 @@ impl App {
         match query {Ok(address)=>self.open_address(&address),Err(error)=>{self.cancel_pending();self.navigation_error(input,error);}}
     }
     pub fn open_address(&mut self, address: &str) {
+        self.invalidate_platform_requests();
         match navigation::address(address, &self.location) {
             Ok(location) => self.navigate_location(location, address.contains('#')),
             Err(error) => {
@@ -662,6 +669,7 @@ impl App {
         request: crate::http::Request,
         form_policy: Option<crate::csp::PolicySet>,
     ) {
+        self.invalidate_platform_requests();
         self.suspend_media();
         self.cancel_script_requests();
         self.select_popup = None;
@@ -1278,6 +1286,7 @@ impl App {
         fragment_navigation: bool,
         replace: bool,
     ) {
+        self.invalidate_platform_requests();
         self.apply_history_replacement();
         let location = if location.url.is_none()
             && location.path.is_none()
@@ -1403,6 +1412,7 @@ impl App {
         }
     }
     fn history_move(&mut self, delta: isize) {
+        self.invalidate_platform_requests();
         self.apply_history_replacement();
         let index = self.navigation_history_index() as isize + delta;
         if index < 0 || index >= self.history.len() as isize {
@@ -1487,6 +1497,7 @@ impl App {
         self.commit_with_history(location, loaded, images_pending, Default::default(), history_length);
     }
     fn commit_with_history(&mut self, location: Location, loaded: Loaded, images_pending: bool, history_data: crate::scripting::HistoryData, history_length: usize) {
+        self.invalidate_platform_requests();
         self.cancel_embedded_video();
         self.embedded_video=None;
         self.cancel_script_requests();
@@ -1830,6 +1841,7 @@ impl App {
         report
     }
     fn toggle_view(&mut self, requested: View) {
+        self.invalidate_platform_requests();
         let view = if self.view == requested {
             View::Page
         } else {
@@ -1948,6 +1960,7 @@ impl App {
         {
             return;
         }
+        self.invalidate_platform_requests();
         self.select_popup = None;
         self.chrome.focus = None;
         self.focus = Focus::Control(node);
@@ -2608,6 +2621,7 @@ impl App {
         }
     }
     fn focus_address(&mut self) {
+        self.invalidate_platform_requests();
         self.reset_chrome();
         self.select_popup = None;
         self.focus = Focus::Address;
@@ -2624,6 +2638,7 @@ impl App {
         self.sync_editors();
     }
     fn open_find(&mut self) {
+        self.invalidate_platform_requests();
         self.reset_chrome();
         self.select_popup = None;
         let changed = !self.find_open;
@@ -2646,6 +2661,7 @@ impl App {
         self.sync_editors();
     }
     fn key_default(&mut self, key: u32, ctrl: bool, shift: bool, alt: bool) -> PlatformAction {
+        self.invalidate_platform_requests();
         // AltGr belongs to text input. Page dispatch has already observed the
         // key; it must not dismiss a browser menu or steal an inspector editor.
         if ctrl && alt {
@@ -2904,6 +2920,7 @@ impl App {
         PlatformAction::None
     }
     pub fn text_input(&mut self, ch: char) {
+        self.invalidate_platform_requests();
         if self.downloads_open() || self.bookmark_popup_open() {
             return;
         }
@@ -2931,6 +2948,7 @@ impl App {
         self.paste(ch.encode_utf8(&mut buffer));
     }
     pub fn utf16_input(&mut self, unit: u16) {
+        self.invalidate_platform_requests();
         if (0xd800..=0xdbff).contains(&unit) {
             self.pending_surrogate = Some(unit);
             return;
@@ -2949,6 +2967,7 @@ impl App {
         }
     }
     pub fn paste(&mut self, text: &str) {
+        self.invalidate_platform_requests();
         if self.downloads_open() || self.bookmark_popup_open() {
             return;
         }
@@ -2985,6 +3004,7 @@ impl App {
         self.sync_editors();
     }
     pub fn cut_copied(&mut self, text: &str) {
+        self.invalidate_platform_requests();
         if self.inspector.focused && self.inspector.mode != inspector::Mode::Closed {
             self.inspector_cut_copied(text);
             return;
@@ -3194,6 +3214,7 @@ impl App {
         (y, thumb, track)
     }
     pub fn pointer_down(&mut self, x: i32, y: i32, shift: bool) -> PlatformAction {
+        self.invalidate_platform_requests();
         if self.downloads_pointer_down(x, y) {
             return PlatformAction::None;
         }
@@ -3319,6 +3340,7 @@ impl App {
         PlatformAction::None
     }
     pub fn pointer_move(&mut self, x: i32, y: i32, dragging: bool) -> bool {
+        if dragging { self.invalidate_platform_requests(); }
         if self.downloads_open() {
             return self.downloads_pointer_move(x, y);
         }
@@ -3441,6 +3463,7 @@ impl App {
         changed || !matches!(self.drag, Drag::None)
     }
     pub fn pointer_up(&mut self, x: i32, y: i32) -> PlatformAction {
+        self.invalidate_platform_requests();
         if let Some(action) = self.downloads_pointer_up(x, y) {
             return action;
         }
