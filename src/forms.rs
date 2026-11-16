@@ -87,7 +87,7 @@ pub fn kind(doc: &Document, node: usize) -> Option<Kind> {
 fn tag(doc: &Document, node: usize) -> &str {
     match &doc.nodes[node].kind {
         NodeKind::Element { tag, .. } => tag,
-        NodeKind::Text(_) => "",
+        NodeKind::Text(_) | NodeKind::Comment(_) => "",
     }
 }
 
@@ -135,6 +135,7 @@ pub fn caption(doc: &Document, node: usize, kind: Kind) -> String {
         let mut stack: Vec<_> = doc.nodes[node].children.iter().rev().copied().collect();
         while let Some(child) = stack.pop() {
             match &doc.nodes[child].kind {
+                NodeKind::Comment(_) => {},
                 NodeKind::Text(value) => {
                     for ch in value.chars().take(256 - text.chars().count().min(256)) {
                         text.push(ch);
@@ -219,6 +220,7 @@ fn option_text(doc: &Document, node: usize) -> (String, bool) {
             return (text, true);
         }
         match &doc.nodes[child].kind {
+            NodeKind::Comment(_) => {},
             NodeKind::Text(value) => {
                 for ch in value.chars() {
                     bytes += ch.len_utf8();
@@ -513,6 +515,7 @@ fn textarea_initial(doc: &Document, node: usize) -> (String, bool) {
             return (text, true);
         }
         match &doc.nodes[child].kind {
+            NodeKind::Comment(_) => {},
             NodeKind::Text(value) => {
                 for ch in value.chars() {
                     units += ch.len_utf16();

@@ -2251,6 +2251,7 @@ fn build_snapshot(app: &App) -> Snapshot {
                         }
                         text.push('>');
                     }
+                    html::NodeKind::Comment(value) => { text = format!("<!--{}-->", truncate(value, 240)); }
                     html::NodeKind::Text(value) => {
                         let value = value
                             .split_whitespace()
@@ -2274,7 +2275,7 @@ fn build_snapshot(app: &App) -> Snapshot {
                         depth: depth.saturating_sub(1),
                         children: !item.children.is_empty(),
                         number: 0,
-                        color: if matches!(item.kind, html::NodeKind::Text(_)) {
+                        color: if matches!(item.kind, html::NodeKind::Text(_) | html::NodeKind::Comment(_)) {
                             ui::MUTED
                         } else {
                             ui::INK
@@ -2425,6 +2426,11 @@ fn selected_details(app: &App) -> Vec<String> {
     let (index, node) = node;
     let mut lines = vec![format!("Node {index}"), String::new()];
     match &node.kind {
+        html::NodeKind::Comment(data) => {
+            lines.push("Comment data:".into());
+            lines.extend(data.lines().take(128).map(|line| truncate(line, 4096)));
+            return lines;
+        }
         html::NodeKind::Text(text) => {
             lines.push("Text content:".into());
             lines.extend(text.lines().take(128).map(|line| truncate(line, 4096)));

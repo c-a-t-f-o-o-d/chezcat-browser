@@ -158,6 +158,11 @@ impl Page {
 }
 
 impl Bridge<'_> {
+    pub(super) fn comment_receiver(&self, object:u32)->bool {
+        node_index(object).is_some_and(|node|self.dom_accessible(node)
+            && matches!(self.doc.nodes[node].kind,NodeKind::Comment(_)))
+    }
+
     pub(super) fn node_identity_receiver(&self,object:u32)->bool {
         !self.is_frame_handle(object) && self.namespace_receiver(object)
     }
@@ -349,6 +354,7 @@ impl Bridge<'_> {
 
     pub(super) fn dom_readonly(&self, object: u32, property: &str) -> bool {
         if object==DOCUMENT && document_node_property(property) {return true;}
+        if property=="length" && self.comment_receiver(object) {return true;}
         if property=="childNodes" {return object==DOCUMENT || node_index(object).is_some_and(|node|self.dom_accessible(node));}
         if property == "attributes" { return self.class_list_element_receiver(object); }
         if matches!(property,"localName"|"prefix"|"namespaceURI") {
@@ -380,6 +386,7 @@ impl Bridge<'_> {
                 && script_stylesheets::link_attribute(property)
                     .is_some_and(|name| name != "disabled")
             || matches!(self.doc.nodes[node].kind, NodeKind::Text(_)) && property == "data"
+            || self.comment_receiver(object) && matches!(property,"data"|"nodeValue"|"textContent")
     }
 
     pub(super) fn dom_validate_call(
@@ -545,7 +552,7 @@ impl Bridge<'_> {
         if common_node_property(property) || self.dom_method(object, property).is_some() {
             return Ok(Some(true));
         }
-        if matches!(self.doc.nodes[node].kind, NodeKind::Text(_)) {
+        if matches!(self.doc.nodes[node].kind, NodeKind::Text(_) | NodeKind::Comment(_)) {
             return Ok(Some(matches!(
                 property,
                 "data" | "nodeValue" | "textContent" | "length"
@@ -640,13 +647,16 @@ impl Bridge<'_> {
             return Err(self.unavailable_offset(node, property));
         }
         let text = matches!(self.doc.nodes[node].kind, NodeKind::Text(_));
+        let comment = matches!(self.doc.nodes[node].kind, NodeKind::Comment(_));
         if let Some(value) = self.frame_content(node, property) { return Ok(Some(value)); }
         if common_node_property(property) {
             return Ok(Some(match property {
-                "nodeType" => Value::Number(if text { 3.0 } else { 1.0 }),
+                "nodeType" => Value::Number(if text { 3.0 } else if comment { 8.0 } else { 1.0 }),
                 "nodeName" => {
                     let name = if text {
                         "#text".into()
+                    } else if comment {
+                        "#comment".into()
                     } else {
                         tag(self.doc, node).to_ascii_uppercase()
                     };
@@ -697,7 +707,7 @@ impl Bridge<'_> {
                 }
             }));
         }
-        if let NodeKind::Text(value) = &self.doc.nodes[node].kind {
+        if let NodeKind::Text(value) | NodeKind::Comment(value) = &self.doc.nodes[node].kind {
             return Ok(Some(match property {
                 "data" | "nodeValue" | "textContent" => {
                     if value.len() > self.state.limits.host.string_bytes {
@@ -750,10 +760,22 @@ impl Bridge<'_> {
         }
         let bytes = match &kind {
             NodeKind::Element { tag, .. } => tag.len(),
-            NodeKind::Text(text) => text.len(),
+            NodeKind::Text(text) | NodeKind::Comment(text) => text.len(),
         };
-        self.state.replace_bytes(0, bytes)?;
         let node = self.doc.nodes.len();
+        let handle = u32::try_from(node).ok().and_then(|index|NODE_BASE.checked_add(index))
+            .filter(|handle|*handle<STYLE_BASE).ok_or("DOM node identity space exhausted.")?;
+        // Reserve every owner container before bytes or a native identity are published.
+        self.doc.nodes.try_reserve(1).map_err(|_|"DOM node storage reservation failed.")?;
+        self.state.dom.created.try_reserve(1).map_err(|_|"DOM created identity reservation failed.")?;
+        self.state.detached_nodes.try_reserve(1).map_err(|_|"DOM detached identity reservation failed.")?;
+        self.state.tree.active.try_reserve(1).map_err(|_|"DOM active-state reservation failed.")?;
+        self.state.tree.parents.try_reserve(1).map_err(|_|"DOM parent-state reservation failed.")?;
+        self.state.dom.connected.try_reserve(1).map_err(|_|"DOM connection-state reservation failed.")?;
+        if matches!(&kind,NodeKind::Element{tag,..} if tag=="script") {
+            self.state.dom.force_async.try_reserve(1).map_err(|_|"DOM script-state reservation failed.")?;
+        }
+        self.state.replace_bytes(0, bytes)?;
         if matches!(&kind, NodeKind::Element { tag, .. } if tag == "script") {
             self.state.dom.force_async.insert(node);
         }
@@ -769,7 +791,7 @@ impl Bridge<'_> {
         self.state.tree.active.push(false);
         self.state.tree.parents.push(None);
         self.state.dom.connected.push(false);
-        Ok(Value::Host(node_handle(node)))
+        Ok(Value::Host(handle))
     }
 
     // No mutation may invalidate a loaded resource, native form value, form
@@ -1182,11 +1204,12 @@ impl Bridge<'_> {
         if let Some(attribute)=self.html_text_reflection(node,property) {
             let value=self.text(value)?;self.attribute(node,attribute,Some(value))?;return Ok(true);
         }
-        if let NodeKind::Text(old) = &self.doc.nodes[node].kind {
+        if let NodeKind::Text(old) | NodeKind::Comment(old) = &self.doc.nodes[node].kind {
             if !matches!(property, "data" | "nodeValue" | "textContent") {
                 return Ok(false);
             }
             let old_len = old.len();
+            let comment = matches!(self.doc.nodes[node].kind,NodeKind::Comment(_));
             self.mutation_ancestors(node)?;
             let text = if matches!(value, Value::Null) && property != "data" {
                 String::new()
@@ -1194,9 +1217,9 @@ impl Bridge<'_> {
                 self.text(value)?
             };
             self.state.replace_bytes(old_len, text.len())?;
-            self.doc.nodes[node].kind = NodeKind::Text(text);
+            self.doc.nodes[node].kind = if comment {NodeKind::Comment(text)} else {NodeKind::Text(text)};
             self.state.dom_committed();
-            if self.state.dom.connected[node] {
+            if self.state.dom.connected[node] && !comment {
                 self.state.layout_changed();
                 if let Some(parent) =
                     self.state.tree.parents[node].filter(|&parent| self.dom_script(parent))
@@ -1274,8 +1297,11 @@ impl Bridge<'_> {
             if name=="img" {return self.create_image(&[]).map(Some);}
             return self.create_dom_node(NodeKind::Element {tag:name,id:None,href:None,attrs:Vec::new()}).map(Some);
         }
-        if object == DOCUMENT && matches!(method, "createElement" | "createTextNode") {
+        if object == DOCUMENT && matches!(method, "createElement" | "createTextNode" | "createComment") {
             let text = self.text(args.first().ok_or("DOM creation requires one argument.")?)?;
+            if method == "createComment" {
+                return self.create_dom_node(NodeKind::Comment(text)).map(Some);
+            }
             if method == "createTextNode" {
                 return self.create_dom_node(NodeKind::Text(text)).map(Some);
             }

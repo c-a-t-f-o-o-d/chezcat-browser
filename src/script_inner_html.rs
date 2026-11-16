@@ -39,6 +39,12 @@ impl Bridge<'_> {
             let item = &self.doc.nodes[node];
             match &item.kind {
                 NodeKind::Text(text) => escaped(self.state, &mut out, text, false, raw)?,
+                NodeKind::Comment(data) => {
+                    self.state.work(data.len())?;
+                    append(self.state, &mut out, "<!--")?;
+                    append(self.state, &mut out, data)?;
+                    append(self.state, &mut out, "-->")?;
+                }
                 NodeKind::Element { tag, attrs, .. } => {
                     if item.namespace != crate::html::Namespace::Html || tag == "template" { return Err("HTML serialization of foreign/template content is not implemented.".into()); }
                     if end { append(self.state, &mut out, "</")?; append(self.state, &mut out, tag)?; append(self.state, &mut out, ">")?; continue; }
