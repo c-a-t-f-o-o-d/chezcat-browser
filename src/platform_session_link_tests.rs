@@ -1,4 +1,4 @@
-//! Original task-created hidden-HWND link lifetime controls. ALL UNRUN.
+//! Original task-created hidden-HWND link lifetime controls.
 //! Message payloads are deterministic dispatcher controls, not physical OS input
 //! acceptance. No user-owned HWND, clipboard, popup interaction or live site.
 use super::*;
@@ -80,7 +80,7 @@ unsafe fn background_cancel_reentry(route: Binding) -> usize {
 }
 unsafe fn background_after_input(route: Binding) -> usize {
     no_native_borrows();
-    SendMessageW(route.hwnd as Handle, 0x0200, 0, packed(80, 160));
+    SendMessageW(route.hwnd as Handle, 0x0200, 0x0001, packed(80, 160));
     LINK_BACKGROUND
 }
 unsafe fn background_after_move(route: Binding) -> usize {
@@ -105,7 +105,7 @@ unsafe fn foreground_after_close(route: Binding) -> usize {
 }
 unsafe fn pre_context_input(route: Binding) {
     no_native_borrows();
-    SendMessageW(route.hwnd as Handle, 0x0200, 0, packed(80, 160));
+    SendMessageW(route.hwnd as Handle, 0x0200, 0x0001, packed(80, 160));
 }
 unsafe fn pre_context_same_owner_reload(route: Binding) {
     no_native_borrows();
@@ -526,5 +526,68 @@ fn hidden_link_unpaired_up_cannot_consume_programmatic_pure_press_without_native
         assert_eq!(GetCapture(), null_mut());
         assert_eq!(edit(|b| Ok(b.session.tab_count())).unwrap(), 2);
         assert!(!TEST_REENTRY_BUSY.with(|slot| slot.get()));
+    });
+}
+
+// Dispatcher controls for a possible popup hover lifecycle, not a trace of the
+// observed desktop failure. The owned popup hook still exercises LinkMenu Drop.
+unsafe fn background_after_passive_popup_hover(route: Binding) -> usize {
+    no_native_borrows();
+    SendMessageW(route.hwnd as Handle, 0x02a3, 0, 0);
+    SendMessageW(route.hwnd as Handle, 0x0200, 0, packed(5, 5));
+    SendMessageW(route.hwnd as Handle, 0x0200, 0x0004 | 0x0008, packed(80, 160));
+    no_native_borrows();
+    LINK_BACKGROUND
+}
+unsafe fn background_after_held_popup_move(route: Binding, buttons: usize) -> usize {
+    no_native_borrows();
+    assert_eq!(GetCapture(), null_mut(), "Held-button control must isolate raw message bits from capture-derived dragging");
+    assert!(POINTER_CAPTURE.with(|slot| slot.get().is_none()));
+    SendMessageW(route.hwnd as Handle, 0x0200, buttons, packed(80, 160));
+    no_native_borrows();
+    LINK_BACKGROUND
+}
+unsafe fn background_after_left_popup_move(route: Binding) -> usize { background_after_held_popup_move(route, 0x0001) }
+unsafe fn background_after_right_popup_move(route: Binding) -> usize { background_after_held_popup_move(route, 0x0002) }
+unsafe fn background_after_middle_popup_move(route: Binding) -> usize { background_after_held_popup_move(route, 0x0010) }
+unsafe fn background_after_x1_popup_move(route: Binding) -> usize { background_after_held_popup_move(route, 0x0020) }
+unsafe fn background_after_x2_popup_move(route: Binding) -> usize { background_after_held_popup_move(route, 0x0040) }
+fn context_author_counts_zero(origin: InputOwner) {
+    with_tab(origin, App::context_hover_test_assert_author_counts_zero).unwrap();
+}
+
+#[test]
+fn hidden_link_popup_passive_hover_keeps_exact_target_without_author_callback_and_drops_menu() {
+    ui_thread(|| unsafe {
+        let files=LinkFiles::new("go.addEventListener('click',function(){calls++;document.title='BAD context click';});go.addEventListener('auxclick',function(){calls++;document.title='BAD context auxclick';});");
+        let shell=Shell::new(files.app());let origin=shell.origin();
+        let expected=observe_tab(origin,|app|crate::navigation::resolve("target.html",&app.context_hover_test_locations().1).unwrap()).unwrap();
+        TEST_LINK_MENU_DROPS.with(|slot|slot.set(0));
+        TEST_LINK_MENU.with(|slot|slot.set(Some(background_after_passive_popup_hover)));
+        context(&shell);
+        assert_eq!(TEST_LINK_MENU_DROPS.with(|slot|slot.get()),1);
+        assert_eq!(edit(|b|b.session.active(origin.window)).unwrap(),Some(origin.tab));
+        let tabs=edit(|b|Ok(b.session.window_tabs(origin.window)?.to_vec())).unwrap();
+        assert_eq!(tabs.len(),2);assert_ne!(tabs[1],origin.tab);
+        edit(|b|b.session.observe_tab(tabs[1],|app|{assert_eq!(app.context_hover_test_locations().0,expected);assert_eq!(app.document.title,"Native destination");})).unwrap();
+        assert_eq!(observe_tab(origin,|app|app.document.title.clone()).unwrap(),"Native source");context_author_counts_zero(origin);
+        no_native_borrows();assert!(!TEST_REENTRY_BUSY.with(|slot|slot.get()));
+    });
+}
+
+#[test]
+fn hidden_link_popup_each_held_button_move_without_capture_refuses_command_and_drops_menu() {
+    ui_thread(|| unsafe {
+        let files=LinkFiles::new("go.addEventListener('click',function(){calls++;document.title='BAD context click';});go.addEventListener('auxclick',function(){calls++;document.title='BAD context auxclick';});");
+        let shell=Shell::new(files.app());let origin=shell.origin();
+        TEST_LINK_MENU_DROPS.with(|slot|slot.set(0));
+        for (index,hook) in [background_after_left_popup_move as unsafe fn(Binding)->usize,background_after_right_popup_move,background_after_middle_popup_move,background_after_x1_popup_move,background_after_x2_popup_move].into_iter().enumerate(){
+            TEST_LINK_MENU.with(|slot|slot.set(Some(hook)));context(&shell);
+            assert_eq!(TEST_LINK_MENU_DROPS.with(|slot|slot.get()),index+1);
+            assert_eq!(edit(|b|Ok((b.session.tab_count(),b.session.window_count(),b.session.active(origin.window)?))).unwrap(),(1,1,Some(origin.tab)));
+            assert_eq!(observe_tab(origin,|app|app.document.title.clone()).unwrap(),"Native source");context_author_counts_zero(origin);
+            assert!(POINTER_CAPTURE.with(|slot|slot.get().is_none()));assert_eq!(GetCapture(),null_mut());
+        }
+        no_native_borrows();assert!(!TEST_REENTRY_BUSY.with(|slot|slot.get()));
     });
 }

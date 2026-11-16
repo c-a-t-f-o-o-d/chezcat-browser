@@ -1185,7 +1185,10 @@ unsafe extern "system" fn procedure(
         return DefWindowProcW(hwnd, message, wparam, lparam);
     };
     let initial = owner_for(route);
-    if matches!(message, 0x0100..=0x0109 | 0x0200..=0x020e | 0x02a3 | 0x0319 | 0x0233 | 0x007b) {
+    // Popup hover/leave changes presentation, not the captured link authority.
+    // Any held mouse button still retires it, independently of capture/dragging.
+    if matches!(message, 0x0100..=0x0109 | 0x0201..=0x020e | 0x0319 | 0x0233 | 0x007b)
+        || (message == 0x0200 && wparam & 0x73 != 0) {
         let _ = edit(|b| { b.ui.invalidate_link_context(window); Ok(()) });
     }
     match message {

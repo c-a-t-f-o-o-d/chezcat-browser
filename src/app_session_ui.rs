@@ -151,7 +151,7 @@ impl SessionUi {
         Ok(Outcome{request,repaint:true,..Outcome::default()})
     }
     pub fn pointer_move(&mut self,session:&mut Session,id:WindowId,x:i32,y:i32,dragging:bool)->Result<bool,String>{
-        self.invalidate_link_context(id);let geometry=self.geometry(session,id)?;let index=self.index(id)?;
+        if dragging{self.invalidate_link_context(id);}let geometry=self.geometry(session,id)?;let index=self.index(id)?;
         if self.windows[index].press.as_ref().is_some_and(|press|press.token!=geometry.token){self.pointer_cancel(session,id)?;return Ok(true);}
         if self.windows[index].press.as_ref().is_some_and(|press|press.native&&!dragging){self.pointer_cancel(session,id)?;return Ok(true);}
         if let Some(press)=&mut self.windows[index].press{press.moved|=(i64::from(x)-i64::from(press.x)).abs()>4||(i64::from(y)-i64::from(press.y)).abs()>4;}
@@ -181,7 +181,7 @@ impl SessionUi {
         if let Some(tab)=tab{let _=session.with_tab(tab,|app|{app.pointer_cancel();app.pending_surrogate=None;});}Ok(())
     }
     pub fn pointer_leave(&mut self,session:&mut Session,id:WindowId)->Result<bool,String>{
-        self.invalidate_link_context(id);let index=self.index(id)?;let changed=self.windows[index].hover.take().is_some();
+        let index=self.index(id)?;let changed=self.windows[index].hover.take().is_some();
         let page=session.active(id)?;if let Some(tab)=page{Ok(session.with_tab(tab,|app|app.pointer_leave())?||changed)}else{Ok(changed)}
     }
     pub fn wants_hand(&self,session:&Session,id:WindowId,x:i32,y:i32)->Result<bool,String>{

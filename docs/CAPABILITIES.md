@@ -36,6 +36,9 @@ history retry. Full normal/optimized integration is required at each checkpoint;
 these controls do not establish physical desktop interaction. Native link gestures
 and explicit foreground/background/window context commands now use checked Session
 admission and source-bound intents.
+Passive popup hover/leave retains the original link target; dragging and all five
+held-button move bits still invalidate it, even without native capture. This
+lifetime correction preserves the existing source/document and input guards.
 The engine provides genuine trusted anchor click/auxclick,
 guarded App hit/context tokens and owned resolved link targets with source cookie
 initiators. Live HTML href/download mutations use the existing checked DOM/Attr

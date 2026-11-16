@@ -538,7 +538,11 @@ never reacquires a link. Non-link controls, media, selection and bookmark drops
 retain their original release behavior with native legacy link default disabled.
 
 Context origin identity is captured before native coordinate/capture calls; popup
-completion rechecks the original source, geometry and all-input menu scope. No
+completion rechecks the original source, geometry and guarded menu scope. Passive
+hover and leave retain that scope; dragging and any held-button native move retire
+it, including all five button bits without capture. Ctrl/Shift-only movement is
+passive. Other keyboard/text, button, wheel, drop, navigation, owner, document,
+live-href and native move/resize invalidations remain. No
 Session/App/registry borrow spans popup creation, tracking, destruction or native
 reentry. Keyboard context requests without a measured anchor keep default native
 behavior. Temporary owned popup focus/capture cancellation preserves its token.

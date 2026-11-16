@@ -1,4 +1,4 @@
-//! Original real-App native UI/link controls. PRIVATE DRAFT; ALL UNRUN.
+//! Original real-App native UI/link controls.
 //! Host payload values are supplied through the pure seam; physical OS input,
 //! popup interaction and native activation are not claimed by these controls.
 use super::*;
@@ -114,7 +114,7 @@ fn native_ui_menu_scope_refuses_keyup_input_membership_and_logical_window_aba(){
             2=>{ui.resize(&mut session,window,940,700).unwrap();ui.resize(&mut session,window,900,700).unwrap();},
             3=>{let tab=ui.new_tab(&mut session,window).unwrap();let replacement=session.active(window).unwrap().unwrap();assert!(tab.repaint);ui.close_tab(&mut session,window,replacement).unwrap();},
             4=>{let(other,_)=session.new_window(600,500).unwrap();ui.resize(&mut session,other,600,532).unwrap();ui.activate_window(&mut session,other).unwrap();ui.activate_window(&mut session,window).unwrap();ui.close_window(&mut session,other).unwrap();},
-            _=>{ui.pointer_move(&mut session,window,point.0+1,point.1,false).unwrap();},
+            _=>{ui.pointer_move(&mut session,window,point.0+1,point.1,true).unwrap();},
         }
         ui.open_link_context(&mut session,context,LinkDisposition::BackgroundTab).unwrap();assert_eq!(session.tab_count(),1);assert_eq!(session.window_count(),1);realm(&mut session,source,0,0);
     }
@@ -249,4 +249,47 @@ fn http_setup(files:&Files)->(NavigationSite,Session,SessionUi,WindowId,TabId){
     let http=NavigationSite::new(files);let mut app=App::new();app.open_address(&format!("http://{}/source",http.address));app.wait_for_load();assert!(!app.failed,"{}",app.status);assert_eq!(app.document.title,"UI link source");
     let mut session=Session::adopt(Box::new(app),super::super::Limits::default()).map_err(|(_,error)|error).unwrap();let window=session.window_ids().next().unwrap();let tab=session.active(window).unwrap().unwrap();
     let mut ui=SessionUi::new();ui.resize(&mut session,window,900,700).unwrap();(http,session,ui,window,tab)
+}
+
+// Passive hover is presentation only. A menu retains the original anchor even
+// when hover leaves its rendered box; these calls do not manufacture a click.
+#[test]
+fn native_ui_context_survives_passive_hover_and_leave_without_author_callback(){
+    for change in 0..3{let files=Files::new();let(mut session,mut ui,window,source)=files.setup();let point=point(&session,source,"a");
+        let expected=session.observe_tab(source,|app|crate::navigation::resolve("target.html",&app.base_location).unwrap()).unwrap();
+        let scope=session.observe_tab(source,|app|app.platform_request_scope.clone()).unwrap();
+        let context=ui.link_context(&mut session,window,point.0,point.1).unwrap().unwrap();
+        if change!=1{ui.pointer_move(&mut session,window,5,5,false).unwrap();}
+        if change!=0{ui.pointer_leave(&mut session,window).unwrap();}
+        assert!(session.observe_tab(source,|app|Rc::ptr_eq(&scope,&app.platform_request_scope)).unwrap(),"Passive presentation changed the App request scope");
+        let out=ui.open_link_context(&mut session,context,LinkDisposition::BackgroundTab).unwrap();
+        assert!(out.opened.is_none());assert_eq!(session.tab_count(),2);assert_eq!(session.window_count(),1);assert_eq!(session.active(window).unwrap(),Some(source));
+        let destination=*session.window_tabs(window).unwrap().last().unwrap();assert_ne!(destination,source);
+        session.observe_tab(destination,|app|{assert_eq!(app.location,expected);assert_eq!(app.document.title,"UI link target");}).unwrap();
+        session.observe_tab(source,|app|assert_eq!(app.document.title,"UI link source")).unwrap();realm(&mut session,source,0,0);
+        eval(&mut session,source,"if(document.getElementById('q').value!=='seed')throw 'passive hover changed editable value';");
+    }
+}
+
+#[test]
+fn native_ui_context_refuses_dragging_move_even_after_passive_leave(){
+    let files=Files::new();let(mut session,mut ui,window,source)=files.setup();let point=point(&session,source,"a");
+    let context=ui.link_context(&mut session,window,point.0,point.1).unwrap().unwrap();
+    ui.pointer_move(&mut session,window,point.0+1,point.1,true).unwrap();ui.pointer_leave(&mut session,window).unwrap();
+    ui.open_link_context(&mut session,context,LinkDisposition::BackgroundTab).unwrap();
+    assert_eq!(session.tab_count(),1);assert_eq!(session.window_count(),1);assert_eq!(session.active(window).unwrap(),Some(source));
+    session.observe_tab(source,|app|assert_eq!(app.document.title,"UI link source")).unwrap();realm(&mut session,source,0,0);
+}
+
+// Test-only App descendant adapters: preserve exact location/root comparison
+// and real console evaluation without exposing production App internals.
+impl App {
+    pub(crate) fn context_hover_test_locations(&self)->(crate::navigation::Location,crate::navigation::Location){
+        (self.location.clone(),self.base_location.clone())
+    }
+    pub(crate) fn context_hover_test_assert_author_counts_zero(&mut self){
+        let page=self.scripting.as_mut().unwrap();
+        let result=page.console_eval(&mut self.document,&mut self.forms,"if(calls!==0)throw 'context dispatched an author click or auxclick';");
+        assert_eq!(result.errors,0,"{}",page.report());
+    }
 }

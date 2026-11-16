@@ -6,8 +6,11 @@
   activation and checked Session admission. Add explicit foreground/background tab
   and window context commands, direct unselected background creation, and bounded
   native popup/capture lifetimes. Exact release points and capture generations
-  prevent stale or unpaired input from consuming replacement gestures. Retain
-  ordinary controls, selection/bookmark drag and the existing Alt download path.
+  prevent stale or unpaired input from consuming replacement gestures. Preserve
+  popup targets across passive hover/leave; dragging or any held mouse-button
+  move still retires them, independently of native capture.
+  Ordinary controls, selection/bookmark drag and the existing Alt download path
+  retain their behavior.
   Original pure and task-owned hidden-window controls pass; complete normal,
   optimized and desktop acceptance is required for each delivered checkpoint.
 
