@@ -2069,7 +2069,7 @@ impl Runtime {
                         "RegExp method requires a RegExp receiver.",
                     ));
                 }
-                self.regexp_method(id, method, args)
+                self.regexp_method(id, method, args, host)
             }
             Builtin::ErrorToString => {
                 let object = self.ordinary_required(&this)?;

@@ -810,11 +810,13 @@ impl Page {
             (DOCUMENT, "createElement"),
             (DOCUMENT, "createElementNS"),
             (DOCUMENT, "createTextNode"),
+            (DOCUMENT, "createComment"),
             (DOCUMENT, "addEventListener"),
             (DOCUMENT, "removeEventListener"),
             (DOCUMENT, "dispatchEvent"),
         ] {
             let function = if object == HISTORY || object==DOCUMENT&&method=="createElementNS" { runtime.host_method_with_length(object, method, 2) }
+                else if object==DOCUMENT&&method=="createComment" {runtime.host_method_with_length(object,method,1)}
                 else { runtime.host_method(object, method) }.expect("fixed native method");
             state.native_methods.push((object, method, function));
         }
@@ -2557,7 +2559,7 @@ impl Host for Bridge<'_> {
             return &[(0, false), (1, false)];
         }
         if object == NAVIGATOR && method == "sendBeacon"
-            || object == DOCUMENT && matches!(method, "createElement" | "createTextNode" | "createAttribute")
+            || object == DOCUMENT && matches!(method, "createElement" | "createTextNode" | "createComment" | "createAttribute")
         {
             return &[(0, true)];
         }
@@ -2586,6 +2588,7 @@ impl Host for Bridge<'_> {
     }
 
     fn method_length(&self, object:u32, method:&str) -> Option<usize> {
+        if object==DOCUMENT && method=="createComment" {return Some(1);}
         if matches!(method,"load"|"pause"|"play") && self.media_element_receiver(object) {return Some(0);}
         if method=="dispatchEvent"&&self.dispatch_receiver(object){return Some(1);}
         if object==DOCUMENT && matches!(method,"createAttributeNS"|"createElementNS") {return Some(2);}
@@ -2647,7 +2650,7 @@ impl Host for Bridge<'_> {
     }
 
     fn nullish_string_setter(&self, object: u32, property: &str) -> bool {
-        self.attr_receiver(object) && matches!(property, "nodeValue" | "textContent")
+        (self.attr_receiver(object) || self.comment_receiver(object)) && matches!(property, "nodeValue" | "textContent")
     }
 
     fn null_string_setter(&self, object: u32, property: &str) -> bool {
@@ -2696,7 +2699,7 @@ impl Host for Bridge<'_> {
             || object == DOCUMENT
                 && matches!(
                     method,
-                    "getElementById" | "createElement" | "createTextNode"
+                    "getElementById" | "createElement" | "createTextNode" | "createComment"
                 )
             || node_index(object).is_some()
                 && matches!(
@@ -2865,7 +2868,7 @@ impl Host for Bridge<'_> {
                         property,
                         "textContent" | "id" | "className" | "title" | "value" | "selectedIndex"
                     ) || self.doc.nodes.get(node).is_some_and(|node| {
-                        matches!(node.kind, NodeKind::Text(_))
+                        matches!(node.kind, NodeKind::Text(_) | NodeKind::Comment(_))
                             && matches!(property, "data" | "nodeValue")
                     }) || property == "text"
                         && tag(self.doc, node) == "script"
@@ -3554,6 +3557,7 @@ impl Host for Bridge<'_> {
                     | "createElement"
                     | "createElementNS"
                     | "createTextNode"
+                    | "createComment"
                     | "createAttribute"
                     | "createAttributeNS"
                     | "addEventListener"
@@ -4629,7 +4633,7 @@ fn text_container(tag: &str) -> bool {
 }
 fn node_bytes(node: &Node) -> usize {
     match &node.kind {
-        NodeKind::Text(text) => text.len(),
+        NodeKind::Text(text) | NodeKind::Comment(text) => text.len(),
         NodeKind::Element { id, attrs, .. } => {
             id.as_ref().map_or(0, String::len)
                 + attrs.iter().map(crate::html::Attribute::bytes).sum::<usize>()
@@ -4803,6 +4807,10 @@ mod script_child_nodes_tests;
 #[cfg(test)]
 #[path = "script_document_node_tests.rs"]
 mod script_document_node_tests;
+
+#[cfg(test)]
+#[path = "script_comment_tests.rs"]
+mod script_comment_tests;
 
 #[cfg(test)]
 #[path = "script_background_style_tests.rs"]

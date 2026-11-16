@@ -9,22 +9,22 @@
     "dom_source_sha256": "19a6d0b92549926f971a0d181d501b694a3129b7a3d3bbedccafaf30c26bd570"
   },
   "active_pack": {
-    "id": "CP1",
-    "scope": "Live main-Document/supported Node child lists, existing host slice, native array-like apply, fresh text replacement and genuine Document Node identity/canonical getters",
-    "native_status": "Focused original Page/App checks passed; normal/build/executable integration required",
-    "normal_limits": {
-      "node_lists": 65536,
-      "snapshot_references": 1048576
-    },
-    "excluded": [
-      "Full DOM",
-      "Comment/DocumentType creation",
-      "Template contents DocumentFragment model",
-      "Child-Document collections",
-      "Whole-library support"
-    ],
+    "id": "CP2",
     "status": "Prerequisite",
-    "next_dependency": "Native Comment nodes and document.createComment"
+    "scope": "Genuine main-Document Comment factory/data/topology and existing native RegExp exec/test input ToString",
+    "native_status": "Focused original Page/App/language controls passed; normal/build/executable integration required",
+    "inherits_limits": "Existing CP1 host/VM admission policies; no quota expansion",
+    "next_dependency": "This legacy workflow: checked HTML fragment select/option structure; responsive CSS is independently actionable",
+    "excluded": [
+      "Parsed comments",
+      "Full Comment/CharacterData interfaces",
+      "DocumentType and template-content models",
+      "Child-context factory",
+      "Generic RegExpExec/custom exec",
+      "Object-valued lastIndex conversion",
+      "RegExp constructor pattern/flag conversion",
+      "Whole-library support"
+    ]
   },
   "workflows": [
     {
@@ -49,9 +49,12 @@
         "Document childNodes at borrowed slice",
         "Native-host Function.apply capture",
         "Main Document Node identity",
-        "Native Comment/document.createComment"
+        "Native Comment/document.createComment",
+        "Native RegExp input ToString",
+        "Checked innerHTML fragment select/option structure"
       ],
-      "current_first_root": "Native Comment/document.createComment"
+      "current_first_root": "Checked innerHTML fragment select/option structure",
+      "measurement_scope": "CP2 development App recheck, not a full normal/executable checkpoint"
     },
     {
       "id": "W3-css",
@@ -441,9 +444,9 @@
     "No public service or whole-family outcome inferred"
   ],
   "next": [
-    "Implement genuine native Comment/document.createComment with reduced original controls",
-    "Recheck the unchanged selected legacy workflow and retain separate responsive/reactive outcomes",
-    "Begin finite tabs/windows after the first measured workflow improvement"
+    "Address an independently demonstrated bounded responsive-CSS page-usability pack before larger Forms work",
+    "Retain select/option fragment admission and ownership as the next blocker in the selected legacy workflow",
+    "Recheck unchanged workflows and begin finite tabs/windows after the first measured workflow improvement"
   ],
   "selected_standard_controls": {
     "suite": "Selected Test262 slice mode runs",
@@ -453,6 +456,31 @@
     "failure_scope": "Ordinary Array constructor-poisoning behavior",
     "assertions": "Failing assertions retained",
     "unavailable_hosts": "Classified separately from language assertions",
-    "whole_suite_conformance": false
-  }
+    "whole_suite_conformance": false,
+    "baseline_pack": "CP2",
+    "execution_scope": "Selected actual CP2 observations only; no full-suite conformance inference",
+    "control_runs": 30,
+    "control_passed": 30,
+    "inputs_unchanged": true
+  },
+  "previous_packs": [
+    {
+      "id": "CP1",
+      "scope": "Live main-Document/supported Node child lists, existing host slice, native array-like apply, fresh text replacement and genuine Document Node identity/canonical getters",
+      "native_status": "Focused original Page/App checks passed; normal/build/executable integration required",
+      "normal_limits": {
+        "node_lists": 65536,
+        "snapshot_references": 1048576
+      },
+      "excluded": [
+        "Full DOM",
+        "Comment/DocumentType creation",
+        "Template contents DocumentFragment model",
+        "Child-Document collections",
+        "Whole-library support"
+      ],
+      "status": "Delivered prerequisite slice"
+    }
+  ],
+  "last_complete_pack": "CP1"
 }

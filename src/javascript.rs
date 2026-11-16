@@ -54,6 +54,9 @@ mod deferred_native_methods;
 #[path = "function_source.rs"]
 mod function_source;
 #[cfg(test)]
+#[path = "regexp_input_conversion_tests.rs"]
+mod regexp_input_conversion_tests;
+#[cfg(test)]
 #[path = "statement_expression_tests.rs"]
 mod statement_expression_tests;
 #[path = "binding_patterns.rs"]
@@ -4999,7 +5002,7 @@ impl Runtime {
         Ok(Value::Object(id))
     }
 
-    fn regexp_method(&mut self, id: usize, method: &str, args: &[Value]) -> Result<Value, Fault> {
+    fn regexp_method(&mut self, id: usize, method: &str, args: &[Value], host: &mut dyn Host) -> Result<Value, Fault> {
         if method == "toString" {
             let expression = self.object(id)?.regexp.clone().unwrap();
             return self.checked_value(Value::String(format!(
@@ -5008,8 +5011,10 @@ impl Runtime {
                 expression.flags.text()
             )));
         }
-        let value = args.first().unwrap_or(&Value::Undefined);
-        value.primitive()?;
+        // The receiver was branded before entry. Input ToString may run real
+        // author getters/callbacks and must precede reading matching state.
+        let value = self.copy_value(args.first().unwrap_or(&Value::Undefined))?;
+        let value = self.primitive_with_hint(value, true, host)?;
         self.work_as(value.bytes().saturating_mul(3), WorkKind::StringMethodInput)?;
         let text = value.script_text()?;
         let input: Vec<_> = text.encode_utf16().collect();
@@ -8733,7 +8738,7 @@ impl Runtime {
         }
         if let Value::Object(id) = object {
             if self.object(id)?.regexp.is_some() && matches!(method, "test" | "exec" | "toString") {
-                return self.regexp_method(id, method, args);
+                return self.regexp_method(id, method, args, host);
             }
             if method == "hasOwnProperty" {
                 let key = self.copy_value(args.first().unwrap_or(&Value::Undefined))?;

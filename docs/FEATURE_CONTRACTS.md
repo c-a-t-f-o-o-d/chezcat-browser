@@ -182,10 +182,9 @@ physical desktop presentation or complete public-page compatibility.
 
 ## CP1 — real collections, calls and Node identity
 
-Status: Prerequisite. Finite source and focused original Page/App controls are
-verified; normal native, build and executable/workload checks remain required for
-integration. The unmodified legacy workload progresses to native Comment/
-createComment, so initialization and visible improvement are not established.
+Status: delivered prerequisite slice. Later source checkpoints retain the normal
+native/build/executable integration gates. CP1 does not establish library
+initialization or visible improvement; connected follow-up behavior is in CP2.
 
 Use the genuine retained main Document and supported main Node objects. Each
 childNodes getter returns one stable, live NodeList identity for that root. Reads
@@ -220,8 +219,9 @@ Explicit small profiles retain refusal/rollback/recovery witnesses. The original
 1000-update semantic cases retain their workloads and verify fresh Text and
 preserved old data within the normal budgets.
 
-The parser still represents Element and Text only. This pack does not create
-Comment/DocumentType nodes or a full Document/template-content implementation.
+The HTML tokenizer still omits parsed comments and DocumentType nodes. CP2 adds
+native-created Comments separately; no full Document/template-content model is
+implied.
 Template childNodes explicitly declines rather than exposing inert AST input as
 a fabricated fragment. Hidden child Documents keep their existing unsupported
 collection boundary; ordinary list reads do not activate inert queries/resources.
@@ -248,6 +248,55 @@ Semantic references: [DOM childNodes](https://dom.spec.whatwg.org/#dom-node-chil
 [DOM textContent](https://dom.spec.whatwg.org/#dom-node-textcontent), and
 [ECMAScript 2025 Array.prototype.slice](https://262.ecma-international.org/16.0/#sec-array.prototype.slice), and
 [CreateListFromArrayLike](https://262.ecma-international.org/16.0/#sec-createlistfromarraylike).
+
+## CP2 — genuine Comment and native RegExp input conversion
+
+Status: Prerequisite. Focused original Page, App and language controls pass;
+normal native/build/executable integration is required for each checkpoint.
+The unchanged selected legacy workload reaches a later select-containing
+innerHTML fragment refusal, with initialization and visible improvement unproved.
+
+Main Document createComment performs required DOMString conversion and creates a
+real retained Comment leaf with nodeType8, nodeName#comment, actual owner/topology
+and data/UTF-16 length. Supported data/nodeValue/textContent updates, cloning,
+ordinary tree insertion/removal, live child lists and bounded serialization use
+the real node. Comments separate Text runs during normalize. Shared node/data
+admission, allocation preflight, readonly/brand/owner rules and rollback remain.
+Comment data does not become Element selector membership, descendant Text,
+button/form captions, executable script/style source, a resource request, a
+rendered box, an intrinsic/flex item or a link hit. Original App controls verify
+real nodes with preserved text/layout/hits and resource ownership.
+
+The tokenizer still omits parsed comments, and checked fragment parsing still
+refuses comments. No Comment constructor/prototype family, full CharacterData,
+DocumentType, template-content tree or child-context factory is claimed.
+Loaded-resource, origin and cancellation boundaries remain.
+
+Existing native RegExp exec/test paths now perform actual input ToString, using
+String-preferred conversion with ordered symbol/ordinary getters and callbacks.
+Genuine existing Function source conversion is reused, including public conversion
+overrides. Receiver branding precedes input conversion, which precedes matching
+state/lastIndex reads. Thrown identity, reentry, owner/result/error realms,
+transient lifetime and shared step/copy/regexp budgets retain their rules; fatal
+capability/quota failures are not swallowed and do not reset the job allowance.
+Generic RegExpExec/custom exec, object-valued lastIndex conversion, constructor
+pattern/flag conversion and other string/RegExp protocols remain unchanged.
+
+Required original controls cover Comment data/identity/leaf/topology, normalize
+barriers, query/text/script/style/render/resource exclusions, allocation/owner
+refusal and actual App input/render ownership; RegExp Function/object conversion,
+hint/order/callback identity, invalid receivers/Symbols, lastIndex/reentry,
+cross-realm behavior, native denial and bounded recovery. Framework rechecks keep
+the next first blocker separate from later missing-library cascades. Selected
+CP2 Test262 checks retain 18 passes and two ordinary Array constructor failures
+across 20 mode runs, with all 30 runner controls passing and unchanged inputs;
+this is no full-suite conformance claim. The select fragment is this workflow
+blocker, while independently demonstrated responsive CSS can form the next
+bounded page-usability pack before larger Forms work.
+
+Semantic references: [DOM createComment](https://dom.spec.whatwg.org/#dom-document-createcomment),
+[Comment](https://dom.spec.whatwg.org/#interface-comment), and
+[ECMAScript 2025 ToString](https://262.ecma-international.org/16.0/#sec-tostring).
 
 ## B2 — finite tabs, link context and new windows
 

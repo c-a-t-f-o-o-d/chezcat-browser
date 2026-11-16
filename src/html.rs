@@ -46,7 +46,7 @@ impl Document {
                 .iter()
                 .find(|attr| attr.name.html_is(name.as_ref()))
                 .map(|attr| attr.value.as_str()),
-            NodeKind::Text(_) => None,
+            NodeKind::Text(_) | NodeKind::Comment(_) => None,
         }
     }
 }
@@ -119,6 +119,8 @@ pub enum NodeKind {
         attrs: Vec<Attribute>,
     },
     Text(String),
+    // Genuine retained DOM Comment data; the current HTML tokenizer still omits parsed comments.
+    Comment(String),
 }
 
 pub fn parse(input: &str) -> Document {

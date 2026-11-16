@@ -733,6 +733,13 @@ pub(crate) fn compute_with_environment(
             computed[index] = style;
             continue;
         }
+        // Comments are real DOM leaves with no CSS box or inherited display.
+        if matches!(node.kind, NodeKind::Comment(_)) {
+            let mut style = Style::inherited(&parent);
+            style.display = Display::None;
+            computed[index] = style;
+            continue;
+        }
         let NodeKind::Element { tag, href, .. } = &node.kind else {
             computed[index] = parent;
             continue;
