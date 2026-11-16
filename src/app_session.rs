@@ -115,6 +115,14 @@ impl Session {
     fn tab_index(&self,id:TabId)->Result<usize,String>{self.tabs.iter().position(|tab|tab.id==id).ok_or_else(||"This browser tab has closed.".into())}
     pub fn window_tabs(&self,id:WindowId)->Result<&[TabId],String>{Ok(&self.windows[self.window_index(id)?].tabs)}
     pub fn active(&self,id:WindowId)->Result<Option<TabId>,String>{Ok(self.windows[self.window_index(id)?].active)}
+    /// Owned read observations only: rendering/title/cursor queries enqueue no
+    /// work and expose no retained App reference to the native message layer.
+    pub fn observe_tab<T>(&self,id:TabId,observe:impl FnOnce(&App)->T)->Result<T,String>{
+        self.running()?;let index=self.tab_index(id)?;Ok(observe(&self.tabs[index].app))
+    }
+    pub fn observe_active<T>(&self,id:WindowId,observe:impl FnOnce(&App)->T)->Result<T,String>{
+        self.running()?;let tab=self.active(id)?.ok_or("This window has no active tab.")?;self.observe_tab(tab,observe)
+    }
     pub fn with_tab<T>(&mut self,id:TabId,action:impl FnOnce(&mut App)->T)->Result<T,String>{
         self.running()?;let index=self.tab_index(id)?;let result=action(&mut self.tabs[index].app);
         self.mailbox.send(Event::Tab(self.tabs[index].window,id));Ok(result)
@@ -151,7 +159,7 @@ impl Session {
         // The global owner Vec and this window's list were bounded/reserved.
         self.windows[index].tabs.try_reserve(1).map_err(|_|"Cannot reserve window tab membership.")?;
         let app=self.fresh_app(window,tab,self.windows[index].width,self.windows[index].height)?;
-        if let Some(old)=self.windows[index].active {let old_index=self.tab_index(old)?;self.tabs[old_index].app.pointer_cancel();self.tabs[old_index].app.pending_surrogate=None;}
+        if let Some(old)=self.windows[index].active {let old_index=self.tab_index(old)?;self.tabs[old_index].app.invalidate_platform_requests();self.tabs[old_index].app.pointer_cancel();self.tabs[old_index].app.pending_surrogate=None;}
         self.next_tab=next;self.tabs.push(Tab{id:tab,window,app});self.windows[index].tabs.push(tab);self.windows[index].active=Some(tab);
         self.mailbox.send(Event::Tab(window,tab));Ok(tab)
     }
@@ -175,7 +183,7 @@ impl Session {
     }
     pub fn switch_tab(&mut self,window:WindowId,tab:TabId)->Result<(),String>{
         self.running()?;let wi=self.window_index(window)?;self.prepare_activation(wi,tab)?;
-        if self.windows[wi].active!=Some(tab) {if let Some(old)=self.windows[wi].active {let old_index=self.tab_index(old)?;self.tabs[old_index].app.pointer_cancel();self.tabs[old_index].app.pending_surrogate=None;}}
+        if self.windows[wi].active!=Some(tab) {if let Some(old)=self.windows[wi].active {let old_index=self.tab_index(old)?;self.tabs[old_index].app.invalidate_platform_requests();self.tabs[old_index].app.pointer_cancel();self.tabs[old_index].app.pending_surrogate=None;}}
         self.windows[wi].active=Some(tab);Ok(())
     }
     pub fn resize_window(&mut self,id:WindowId,width:i32,height:i32)->Result<(),String>{
@@ -283,6 +291,9 @@ impl App {
         drop(self);
     }
 }
+
+#[path="app_session_ui.rs"]
+pub(crate) mod window_ui;
 
 #[cfg(test)]
 #[path="app_session_tests.rs"]
