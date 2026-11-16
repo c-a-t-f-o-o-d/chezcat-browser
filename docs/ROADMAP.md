@@ -1,7 +1,7 @@
 # Finite development roadmap
 
-The active compatibility pack is **CP2: genuine Comment nodes and RegExp input
-conversion**, following the delivered CP1 DOM/collection/Node prerequisite slice. T1 TLS/trust and B1 resource/rendering slices remain shared platform
+The active compatibility pack is **CP3: responsive stylesheet-to-layout behavior**,
+following the delivered CP1 and CP2 DOM/language prerequisite slices. T1 TLS/trust and B1 resource/rendering slices remain shared platform
 baselines; measured browser workflows determine the next shared blocker.
 The explicit CSAPUL 1.1 acceptance milestone is published as
 [0.80.0-alpha.1](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.80.0-alpha.1).
@@ -21,7 +21,8 @@ supported within their recorded limits.
 
 | ID | Status | Current outcome | Remaining scope |
 | --- | --- | --- | --- |
-| CP2 | Prerequisite: focused source/model/App checks pass | Genuine main-Document createComment with real leaf/data/topology and no rendering/resource promotion; native RegExp exec/test input ToString through existing conversion and Function source | This legacy workflow next refuses select-containing innerHTML; responsive CSS remains a separate actionable bounded pack before larger Forms work. No initialization or visible improvement; normal/build/executable integration remains required |
+| CP3 | Responsive rendering improvement; normal integration required | Unchanged Foundation6.9 generated-CSS fixture forms two columns at1280 and stacks at640 in normal JS mode; original App resize/zoom/pixel/link assertions pass | Finite em media, typed before/after stylesheet targets, explicit box-sizing inheritance and fractional flex line fitting; no generated-content painting or Vue initialization claim |
+| CP2 | Delivered prerequisite slice | Genuine main-Document createComment with real leaf/data/topology and no rendering/resource promotion; native RegExp exec/test input ToString through existing conversion and Function source | This legacy workflow next refuses select-containing innerHTML. No library initialization or visible improvement is attributed to this prerequisite |
 | CP1 | Delivered prerequisite slice | Main-Document/supported Node live child lists, existing borrowed slice, native array-like apply, fresh text replacement and genuine Document Node identity | No full DOM or whole-framework claim; subsequent prerequisites are tracked in CP2 |
 | T1 | In progress: remaining interoperability gaps | Guarded document diagnostics, a pinned conservative Mozilla NSS 98-authority selection, reviewed offline generation, shared 1024-root policy and bounded per-hop redirect clocks; coordinated document checks distinguish improved path coverage from later failures | Remaining chain/parser/protocol/timeout/admission and resource-specific failures; no broad TLS or usable-site completion claim |
 | B1 | In progress: stylesheets and finite viewport media rules | Shared unmarked cross-origin HTTP(S) stylesheet loading; host-context media rules with real resize/zoom geometry and pixels, source ownership and complete-sheet admission | Original executable width/zoom and dynamic-link cases passed; normal verification remains required for each checkpoint; retain request/security/lifecycle boundaries and explicit query/font gaps while addressing broader resource/render/input usability |
@@ -46,14 +47,14 @@ Every implementation checkpoint requires normal verification. CP1 and CP2 reuse
 shared DOM/language paths rather than library-specific emulation. The original
 asynchronous form/result/one-Back/different-query workflow passes its bounded
 local stages. A selected legacy reactive workload still has a separate prototype-
-configuration blocker; a generated-CSS panel stacks narrowly but its wide two-
-column layout fails. Initial reference-browser DOM/pixels are comparison evidence,
+configuration blocker; the unchanged generated-CSS panel now forms two columns
+widely and stacks narrowly. Initial reference-browser DOM/pixels are comparison evidence,
 with reference interactions unrun. The development App recheck of the unmodified
 legacy dropdown/form advances through Comment creation and RegExp input conversion
 to checked innerHTML parsing that refuses select/option structure. This is the
-next blocker in that legacy workflow; independently demonstrated responsive CSS
-remains an actionable bounded page-usability pack before larger Forms work.
-Library initialization and visible improvement are still unproved. Selected CP2
+next blocker in that legacy workflow. Its library initialization remains unproved;
+the independent CP3 responsive rendering improvement is measured separately.
+Selected CP2
 Test262 observations have 18 passes and two ordinary Array constructor-poisoning
 failures across 20 mode runs; all 30 runner controls pass and inputs are unchanged.
 These small denominators establish no full-suite conformance. B1 includes
@@ -63,8 +64,12 @@ offscreen width/zoom and dynamic-stylesheet acceptance before treating that
 rendering checkpoint as integrated; broader page usability remains in progress.
 Distinguish remaining trust/path,
 parser, timeout and intentional admission failures from page rendering. Continue
-meaningful page usability, then finite tabs/windows; perfect TLS or every-page
+normal integration of the responsive result, then finite tabs/windows; perfect TLS or every-page
 coverage is not a prerequisite. Installer/update work remains planned.
+The next three tasks are CP3 exact-source normal/hosted integration, B2 shared
+page/session ownership and retirement, then real tab switching followed by typed
+link dispositions/new windows. The legacy select/Forms prerequisite stays queued
+as a separate shared compatibility blocker.
 VIDEO dimensions, Element.toggleAttribute, NamedNodeMap mutation and remaining
 media/player work stay recorded gaps outside the active queue. Service playback
 remains unproved by local media evidence.

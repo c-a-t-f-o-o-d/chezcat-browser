@@ -7,6 +7,10 @@ pub use media::{Hover, MediaEnvironment};
 
 use crate::html::{Document, NodeKind};
 
+// Current browser-owned initial font basis. Media em units use this initial
+// value, independently of author font declarations and physical display zoom.
+const INITIAL_FONT_SIZE: f32 = 16.0;
+
 const MAX_DECLARATIONS: usize = 4096;
 const MAX_SELECTOR_BYTES: usize = 512;
 const MAX_MATCH_STEPS: usize = 128_000_000;
@@ -331,8 +335,8 @@ impl Default for Style {
             object_fit: ObjectFit::Fill,
             image_rendering: ImageRendering::Auto,
             object_position: [ObjectPosition::CENTER; 2],
-            font_size: 16.0,
-            root_font_size: 16.0,
+            font_size: INITIAL_FONT_SIZE,
+            root_font_size: INITIAL_FONT_SIZE,
             font_families: vec!["serif".into()],
             font_weight: 400,
             bold: false,
@@ -525,8 +529,12 @@ enum Relation {
     GeneralSibling,
 }
 
+#[derive(Clone,Copy,Debug,PartialEq,Eq)]
+enum SelectorTarget { Element, Before, After }
+
 #[derive(Debug)]
 struct Selector {
+    target: SelectorTarget,
     parts: Vec<Compound>,
     relations: Vec<Relation>,
     specificity: (u16, u16, u16),
@@ -568,7 +576,7 @@ pub fn query_all(
 }
 
 pub fn valid_query_selector(source: &str) -> bool {
-    source.len() <= MAX_SELECTOR_BYTES * 16 && parse_selector_list(source).is_some()
+    source.len() <= MAX_SELECTOR_BYTES * 16 && parse_selector_list(source, false).is_some()
 }
 
 fn query_matches(
@@ -582,7 +590,7 @@ fn query_matches(
     if source.len() > MAX_SELECTOR_BYTES * 16 {
         return Err("Selector query exceeds 8 KiB.".into());
     }
-    let selectors = parse_selector_list(source)
+    let selectors = parse_selector_list(source, false)
         .ok_or("Invalid selector or selector syntax outside the supported subset.")?;
     let cost = doc.nodes.len().saturating_mul(3);
     if cost > *budget {
@@ -717,7 +725,7 @@ pub(crate) fn compute_with_environment(
 
     let mut computed = vec![Style::default(); doc.nodes.len()];
     let mut budget = MAX_MATCH_STEPS;
-    let mut root_font_size = 16.0;
+    let mut root_font_size = INITIAL_FONT_SIZE;
     for &index in &order {
         let node = &doc.nodes[index];
         let parent = parents[index]
@@ -1080,7 +1088,7 @@ fn parse_sheet_with_media(source:&str,rules:&mut Vec<Rule>,environment:Option<Me
     let mut allocation_failed=false;
     let result=media::walk(source,maximum_blocks,environment,|prelude,body,active| {
         if active && !prelude.trim_start().starts_with('@') {
-            if let Some(selectors)=parse_selector_list(prelude) {
+            if let Some(selectors)=parse_selector_list(prelude, true) {
                 let declarations=parse_declarations(body);
                 if !selectors.is_empty() && !declarations.is_empty() {
                     if rules.try_reserve(1).is_err() {allocation_failed=true;return false;}
@@ -1696,7 +1704,7 @@ fn sheet_blocks(source: &str, mut visit: impl FnMut(&str, &str) -> bool) {
     }
 }
 
-fn parse_selector_list(source: &str) -> Option<Vec<Selector>> {
+fn parse_selector_list(source: &str, pseudo_targets: bool) -> Option<Vec<Selector>> {
     let mut selectors = Vec::new();
     let mut start = 0;
     let mut bracket = false;
@@ -1720,7 +1728,9 @@ fn parse_selector_list(source: &str) -> Option<Vec<Selector>> {
                 if selectors.len() == 15 {
                     return None;
                 }
-                selectors.push(parse_selector(&source[start..position])?);
+                let selector=parse_selector(&source[start..position])?;
+                if !pseudo_targets && selector.target!=SelectorTarget::Element {return None;}
+                selectors.push(selector);
                 start = position + 1;
             }
             _ => {}
@@ -1729,7 +1739,9 @@ fn parse_selector_list(source: &str) -> Option<Vec<Selector>> {
     if bracket || quote.is_some() {
         return None;
     }
-    selectors.push(parse_selector(&source[start..])?);
+    let selector=parse_selector(&source[start..])?;
+    if !pseudo_targets && selector.target!=SelectorTarget::Element {return None;}
+    selectors.push(selector);
     Some(selectors)
 }
 
@@ -1743,6 +1755,7 @@ fn parse_selector(source: &str) -> Option<Selector> {
     let mut parts = Vec::new();
     let mut relations = Vec::new();
     let mut specificity = (0u16, 0u16, 0u16);
+    let mut target=SelectorTarget::Element;
     while position < bytes.len() && parts.len() < 12 {
         let compound_start = position;
         let mut part = Compound {
@@ -1792,6 +1805,19 @@ fn parse_selector(source: &str) -> Option<Selector> {
                 }
                 Some(b':') => {
                     position += 1;
+                    if bytes.get(position)==Some(&b':') {
+                        position+=1;
+                        let start=position;
+                        while bytes.get(position).is_some_and(|b|ident(*b)) {position+=1;}
+                        target=if source[start..position].eq_ignore_ascii_case("before") {SelectorTarget::Before}
+                            else if source[start..position].eq_ignore_ascii_case("after") {SelectorTarget::After}
+                            else {return None;};
+                        // This finite slice admits only a terminal pseudo-element.
+                        // It never repairs a malformed suffix or later combinator.
+                        if bytes[position..].iter().any(|b|!b.is_ascii_whitespace()) {return None;}
+                        specificity.2+=1;
+                        break;
+                    }
                     let start = position;
                     while bytes.get(position).is_some_and(|b| ident(*b)) {
                         position += 1;
@@ -1840,6 +1866,7 @@ fn parse_selector(source: &str) -> Option<Selector> {
         return None;
     }
     Some(Selector {
+        target,
         parts,
         relations,
         specificity,
@@ -2073,6 +2100,12 @@ fn matches_selector(
     context: &MatchContext<'_>,
     budget: &mut usize,
 ) -> bool {
+    if selector.target!=SelectorTarget::Element {
+        // Recognizing a valid pseudo target preserves atomic style lists; no
+        // generated node exists in this renderer and none matches an Element.
+        if *budget!=0 {*budget-=1;}
+        return false;
+    }
     fn at(
         selector: &Selector,
         part: usize,
@@ -2843,8 +2876,9 @@ fn apply(style: &mut Style, parent: &Style, declaration: &Declaration) {
             }
         }
         "box-sizing" => match value.as_str() {
-            "content-box" => style.border_box = false,
+            "content-box" | "initial" | "unset" => style.border_box = false,
             "border-box" => style.border_box = true,
+            "inherit" => style.border_box = parent.border_box,
             _ => {}
         },
         "flex-direction" => {
@@ -4032,8 +4066,8 @@ mod tests {
         assert!(
             parse_selector(&format!("[data-x='{}']", "a".repeat(MAX_SELECTOR_BYTES))).is_none()
         );
-        assert!(parse_selector_list(&["input"; 16].join(",")).is_some());
-        assert!(parse_selector_list(&["input"; 17].join(",")).is_none());
+        assert!(parse_selector_list(&["input"; 16].join(","), false).is_some());
+        assert!(parse_selector_list(&["input"; 17].join(","), false).is_none());
     }
 
     #[test]
@@ -4156,3 +4190,7 @@ mod tests {
 #[cfg(test)]
 #[path="css_media_tests.rs"]
 mod media_tests;
+
+#[cfg(test)]
+#[path="css_responsive_tests.rs"]
+mod responsive_tests;

@@ -8,7 +8,9 @@ Current work selects evidenced shared platform blockers through original browser
 workflows and unmodified local libraries. Delivered CP1 supplies the shared
 collection/call/Node prerequisites. CP2 adds genuine native-created Comments and
 existing RegExp input ToString; focused Page/App/language controls pass, while
-normal/build/executable integration stays required. TLS/trust and resource/render
+normal/build/executable integration stays required. CP3 supplies a measured
+responsive Foundation6.9 rendering improvement with the original JS-enabled
+fixture: two columns at1280 and stacking at640. TLS/trust and resource/render
 slices remain partial baselines. Finite tabs/new windows follow the first measured
 workflow improvement. See the [compatibility scope](COMPATIBILITY.md) and its
 machine-readable [catalogue](compatibility.json).
@@ -74,6 +76,18 @@ does not invoke the native clipboard. Original App and executable acceptance
 must establish legal-text/rendering identity, native focus/scroll/copy controls,
 return to the same page and preservation of held resource work. Normal build,
 PE and package verification remain required; no installer/update control is added.
+
+The responsive slice admits finite em media lengths using the browser's initial
+16CSSpx font basis, independently of author root/body fonts and physical zoom.
+Recognized terminal ::before/::after stylesheet targets preserve valid atomic
+selector lists without matching ordinary elements or painting generated content.
+Explicit box-sizing inherit uses the actual parent; initial/unset remain
+content-box and the property is not naturally inherited. Flex main-size line
+admission retains fractions until cumulative pixel allocation, so two50% items
+fit odd widths while genuine padding/minimum overflow still wraps. Wider units,
+pseudo targets and generated content remain unsupported in this finite slice.
+The unchanged Foundation fixture's rendering stage improves independently of
+its remaining Vue prototype blocker; full normal integration remains required.
 
 The finite viewport-media slice evaluates nested matching rules against the
 real CSS viewport and explicit desktop mouse-input profile. Original native/App

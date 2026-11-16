@@ -130,8 +130,11 @@ fn feature(text: &str, environment: Option<MediaEnvironment>) -> Option<bool> {
 }
 
 fn pixels(text: &str) -> Option<f64> {
-    let has_unit = text.as_bytes().get(text.len().saturating_sub(2)..).is_some_and(|tail| tail.eq_ignore_ascii_case(b"px"));
-    let number = if has_unit { &text[..text.len()-2] } else { text };
+    let tail=text.as_bytes().get(text.len().saturating_sub(2)..);
+    let scale=if tail.is_some_and(|unit|unit.eq_ignore_ascii_case(b"px")) {Some(1.0)}
+        else if tail.is_some_and(|unit|unit.eq_ignore_ascii_case(b"em")) {Some(f64::from(super::INITIAL_FONT_SIZE))}
+        else {None};
+    let number = if scale.is_some() { &text[..text.len()-2] } else { text };
     let bytes = number.as_bytes();
     let mut at = 0;
     if bytes.first().is_some_and(|b| matches!(*b, b'+' | b'-')) { at += 1; }
@@ -153,7 +156,8 @@ fn pixels(text: &str) -> Option<f64> {
     }
     if at != bytes.len() { return None; }
     let value: f64 = number.parse().ok()?;
-    (value.is_finite() && (has_unit || value == 0.0)).then_some(value)
+    let amount=value*scale.unwrap_or(1.0);
+    (value.is_finite() && amount.is_finite() && (scale.is_some() || value==0.0)).then_some(amount)
 }
 
 pub(super) fn is_media(prelude: &str) -> Option<&str> {

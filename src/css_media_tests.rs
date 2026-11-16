@@ -90,7 +90,7 @@ fn css_media_malformed_conditions_do_not_apply_a_prefix_or_invert_to_true() {
         "screen and (min-width:640px) garbage",
         "screen and (width:640px) and",
         "not screen and (width:)",
-        "not screen and (width:640em)",
+        "not screen and (width:640rem)",
         "not screen and (width:12px:extra)",
         "only", "not", "screen and ((width:640px))",
         "not screen and (width:éa)",

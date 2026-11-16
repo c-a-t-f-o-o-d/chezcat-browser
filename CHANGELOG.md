@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Correct responsive stylesheet-to-layout behavior: finite initial-font em media
+  lengths, terminal before/after stylesheet targets without ordinary-element
+  matches, explicit box-sizing inheritance and fractional flex line fitting.
+  The unchanged JS-enabled Foundation6.9 fixture now forms two columns at1280
+  and stacks at640. Original App geometry, padding pixels, links and zoom
+  controls remain; Vue initialization and complete framework support are
+  separate gaps. Normal/build/executable verification is required for integration.
+
 Development priority is measured ordinary-browser compatibility through small
 shared platform fixes and unmodified local workloads, then finite tabs, link
 context and new windows after the first measured workflow improvement. Further

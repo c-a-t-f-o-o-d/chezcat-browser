@@ -298,6 +298,47 @@ Semantic references: [DOM createComment](https://dom.spec.whatwg.org/#dom-docume
 [Comment](https://dom.spec.whatwg.org/#interface-comment), and
 [ECMAScript 2025 ToString](https://262.ecma-international.org/16.0/#sec-tostring).
 
+## CP3 — responsive stylesheet-to-layout behavior
+
+Status: measured rendering improvement in the unchanged Foundation6.9 fixture;
+full normal/build/executable verification remains required for integration.
+At1280x800, zoom100 and normal JavaScript, the original panels now share a row;
+at640x800 they retain their original stacking. Vue's prototype initialization
+failure is separate, so no reactive interaction or full-framework pass is claimed.
+
+Finite em media lengths use the same browser-owned initial16CSSpx font basis as
+default Style initialization. Author html/body fonts do not change that basis;
+the real CSS viewport lifecycle supplies resize and zoom conditions. Preserve
+finite/overflow checks, unknown/malformed negation refusal and inactive-block
+admission. Wider units and conditional/dynamic font fetching remain separate.
+
+Recognize terminal double-colon before/after stylesheet targets while preserving
+atomic selector lists. They never match an ordinary Element, contribute another
+alternative's specificity or generate painted content. Unknown/malformed list
+members and existing selector/work caps still refuse atomically. DOM query
+pseudo-target support remains outside this stylesheet-only slice.
+
+Apply explicit box-sizing inherit from the actual parent; initial/unset select
+the noninherited content-box initial value. Preserve ordinary cascade and natural
+noninheritance. Retain fractional flex main/basis/min/max sizes during line
+admission/distribution and round at existing cumulative rectangle allocation;
+two50% border-box items fit odd widths, while genuine content-box or minimum-size
+overflow still wraps. Keep existing length/work/geometry limits.
+
+Original native controls cover author-font independence, fractional em thresholds,
+invalid/overflow/inactive media, pseudo/list specificity and refusal, explicit
+versus natural box sizing and fractional flex sizing/overflow. Actual App tests
+keep1023/1024,640/1280,125% zoom and odd-width geometry, exact padding/guard pixels,
+link hits and unchanged document/source/epoch. The pinned Foundation workflow
+retains original assets, JS mode, viewport and independent image-pixel checks;
+its remaining runtime error stays visible. Resource/CSP/origin/cancellation and
+stylesheet admission negatives remain mandatory affected checks.
+
+Semantic references: [Media Queries relative units](https://www.w3.org/TR/mediaqueries-4/#units),
+[pseudo-elements](https://www.w3.org/TR/selectors-4/#pseudo-elements),
+[box-sizing](https://www.w3.org/TR/css-sizing-3/#box-sizing), and
+[flex line collection](https://www.w3.org/TR/css-flexbox-1/#algo-line-break).
+
 ## B2 — finite tabs, link context and new windows
 
 Status: planned after the first measured workflow improvement. Provide new/switch/close
