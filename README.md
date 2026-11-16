@@ -4,12 +4,16 @@ An experimental Windows x64 browser with an original Rust engine: networking,
 JavaScript, DOM, layout, rendering and selected media decoding. It does not embed
 Chromium, Gecko, WebKit or an external JavaScript/codec runtime.
 
-The development candidate is **0.80.0-alpha.1**, whose milestone is explicit
-offline CSAPUL 1.1 acceptance. It also includes the completed finite navigation,
-media, background-image and event slices listed below. This is an experimental
-browser without a security certification. Web-platform support is partial. The
-renderer and interpreter run in the browser process with worker threads, without
-an OS renderer sandbox.
+The next release target is [**0.81.0-alpha.1**](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.81.0-alpha.1), one consolidated catch-up prerelease
+for the completed finite B2 tabs/windows/link milestone and integrated platform
+and compatibility prerequisites since **0.80.0-alpha.1**. Exact final versioned
+source, release validation, packages and publication remain pending; this target
+is not yet a published release. The earlier **0.80.0-alpha.1** release remains the
+offline CSAPUL 1.1 acceptance milestone, with its supplied tag and assets unchanged.
+
+This is an experimental browser without a security certification. Web-platform
+support is partial. The renderer and interpreter run in the browser process with
+worker threads, without an OS renderer sandbox.
 
 The production Cargo manifest has no third-party dependencies. Rust's standard
 library, Windows APIs, data, assets and development tools have their own roles
@@ -28,6 +32,18 @@ and licensing obligations; see [third-party notices](THIRD_PARTY_NOTICES.md).
 - Address-bar search with Google by default, Bing, DuckDuckGo and None; explicit
   URL/file intent is kept separate from search and navigation errors.
 - HTML/DOM, a bounded JavaScript subset, events, CSS layout and software painting.
+- Shared compatibility prerequisites include live Document/Node child lists,
+  genuine Comment leaves, fresh text replacement and native array-like apply.
+  Conventional select/option/optgroup fragments use the real native form model;
+  whole-subtree removal and reconnection preserve identities and edited values,
+  retire stale popup/focus/hits and maintain connected form submission order.
+  Rich select content, existing-control interior edits, new explicit form
+  associations and hidden-input creation remain unsupported.
+- Static noncomputed object-literal `__proto__: value` setters preserve genuine
+  null/object/function prototype links, ignore other primitives without coercion
+  and reject duplicate special setters before execution. Ordinary own
+  `__proto__` properties and legacy prototype access remain unsupported. These
+  finite prerequisites do not establish framework initialization or interaction.
 - Genuine Event, UIEvent, CustomEvent and finite MouseEvent construction,
   owner-realm prototypes and branded fields. CustomEvent retains actual any
   detail; Event/UIEvent/CustomEvent dispatch, cancellation and paths are real.
@@ -64,14 +80,16 @@ These are scoped foundations, not complete standards support. The
 [capability matrix](docs/CAPABILITIES.md) separates implementation from evidence.
 Google Search, Images and Maps are not fully supported. YouTube page compatibility
 is limited, and playback is unsupported. Further F6/YouTube work is deferred.
-The finite native tab/window shell adds a browser-owned tab strip and shortcuts,
-real windows and tab-pinned inspectors. Original pure UI and hidden-window controls
-cover ownership and lifetime. Native links support current, foreground/background
-tabs and new windows with source-bound context commands. Full normal/optimized
-and desktop acceptance is required for each checkpoint. Named browsing contexts,
-script-opened windows and wider accessibility remain gaps. Remaining TLS gaps stay explicit;
-perfect TLS coverage is not required before useful page-usability work. The
-trust-data subset does not establish new live-service compatibility.
+The completed finite B2 source milestone adds a browser-owned tab strip and
+shortcuts, real windows and tab-pinned inspectors. Original pure UI and
+hidden-window controls cover ownership and lifetime. Native links support current,
+foreground/background tabs and new windows with source-bound context commands.
+Normal/optimized, hosted and scoped desktop acceptance evidence identifies the
+implemented checkpoint; release validation still applies to the exact final
+versioned candidate. Named browsing contexts, script-opened windows and wider
+accessibility remain gaps. Remaining TLS gaps stay explicit; perfect TLS coverage
+is not required before useful page-usability work. The trust-data subset does not
+establish new live-service compatibility.
 
 ## Build
 

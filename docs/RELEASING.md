@@ -16,6 +16,29 @@ patch releases preserve its contract except documented security necessities.
 Alpha/RC contracts remain unstable. Persisted-data changes need migration and
 recovery tests. See FEATURE_CONTRACTS.md and CAPABILITIES.md.
 
+Completion of a named finite milestone starts release closeout before the next
+independent implementation item. Reconcile its integrated source and required
+local, hosted and scoped acceptance evidence, then complete the exact final
+versioned-source, package and publication checks below. Source integration,
+green CI and development-runtime delivery are distinct from published delivery.
+Record the actual immutable tag, downloadable assets and downloaded-byte checks
+before reporting a release complete.
+
+The planned [v0.81.0-alpha.1](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.81.0-alpha.1) is one consolidated catch-up prerelease for the
+completed B2 milestone and integrated platform/compatibility prerequisites since
+v0.80.0-alpha.1. Its final versioned-source gates, packages and publication remain
+pending. The target designation does not establish published assets. Preserve
+v0.80.0-alpha.1 and other existing releases as immutable historical delivery.
+
+Keep closeout focused on concrete blockers: a failed exact-source check, missing
+required acceptance, an unresolved exposed high/critical runtime defect, unavailable
+publication access or a failed package/download check. Record the affected step,
+its evidence and the next corrective action. Use the recorded licensing and
+publication disposition with the existing exact-term checks; revisit it only
+when material facts change. A concrete blocker leaves closeout pending and must
+be reported with the next corrective action. Resume the next independent
+implementation item after closeout completes.
+
 The existing tag/manual workflow handles completed milestones. It has no daily
 schedule or daily-enable option. One publication concurrency group serializes
 manual and tag runs without cancelling an in-progress release. Trusted branch

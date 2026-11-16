@@ -5,10 +5,19 @@ error, lifecycle and security acceptance is met; missing criteria cannot be hidd
 by shrinking the contract afterward. These contracts authorize no live check or
 public release by themselves.
 
+The [0.81.0-alpha.1 release target](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.81.0-alpha.1)
+consolidates the completed finite B2 milestone and integrated prerequisites below.
+Prior checkpoint evidence stays bound to its source; the new release's exact
+clean-source, build, archive, extracted-runtime and published-byte gates remain
+pending. Source integration, CI and development delivery are distinct from actual
+publication. Named completed milestones close under [RELEASING.md](RELEASING.md)
+before an independent feature item begins.
+
 ## T1 — shared TLS/trust and data coverage baseline
 
-Status: in progress for bounded diagnostics, a reviewed Mozilla-derived trust
-subset and ordinary document/resource coverage. Original TLS 1.2/1.3 and X.509
+Status: finite diagnostics, trust-data and bounded dual-stack corrections are
+integrated; ordinary document/resource interoperability remains in progress.
+Original TLS 1.2/1.3 and X.509
 cryptographic, identity and path rules remain. Configured trust authority expands
 to the explicitly selected data, with a shared bounded root capacity.
 
@@ -79,6 +88,11 @@ or arbitrary error text. The original hostname remains authoritative for TLS
 SNI/certificates, HTTP Host, URLs, origins, cookies and redirect checks. Original
 offline regressions use explicitly simulated family failures and local sockets;
 they do not establish external IPv6 availability or a live-service outcome.
+The correction was integrated by
+[PR22](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/22), with accepted source
+[63ac9c6](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/63ac9c61054bed3f639904b3d94c91dff455d7bc).
+Its recorded normal/optimized and local/hosted offline evidence covers this finite
+correction, not completion of the broader T1 area.
 
 `--diagnose URL --report FILE` uses the real HTTP/TLS client for document GETs,
 without an App profile, page scripts, subresources or form submission. At most
@@ -275,10 +289,11 @@ Semantic references: [DOM childNodes](https://dom.spec.whatwg.org/#dom-node-chil
 
 ## CP2 — genuine Comment and native RegExp input conversion
 
-Status: Prerequisite. Focused original Page, App and language controls pass;
-normal native/build/executable integration is required for each checkpoint.
-The unchanged selected legacy workload reaches a later select-containing
-innerHTML fragment refusal, with initialization and visible improvement unproved.
+Status: delivered prerequisite. Focused original Page, App and language controls
+cover the finite slice; each new checkpoint requires normal native/build/executable
+verification. At the historical CP2 checkpoint, the unchanged legacy workload next
+refused a select-containing innerHTML fragment. CP4's later unchanged recheck now
+reaches hidden-input mutation. Initialization and visible improvement remain unproved.
 
 Main Document createComment performs required DOMString conversion and creates a
 real retained Comment leaf with nodeType8, nodeName#comment, actual owner/topology
@@ -314,9 +329,9 @@ cross-realm behavior, native denial and bounded recovery. Framework rechecks kee
 the next first blocker separate from later missing-library cascades. Selected
 CP2 Test262 checks retain 18 passes and two ordinary Array constructor failures
 across 20 mode runs, with all 30 runner controls passing and unchanged inputs;
-this is no full-suite conformance claim. The select fragment is this workflow
-blocker, while independently demonstrated responsive CSS can form the next
-bounded page-usability pack before larger Forms work.
+this is no full-suite conformance claim. The select fragment was the historical
+CP2 first blocker. CP3 subsequently delivered the independent responsive CSS
+improvement; CP4's later workflow first blocker is hidden-input mutation.
 
 Semantic references: [DOM createComment](https://dom.spec.whatwg.org/#dom-document-createcomment),
 [Comment](https://dom.spec.whatwg.org/#interface-comment), and
@@ -324,9 +339,13 @@ Semantic references: [DOM createComment](https://dom.spec.whatwg.org/#dom-docume
 
 ## CP5 — finite object-literal prototype setter
 
-Ten original language and App controls pass. Each checkpoint still requires
-normal/build/executable integration. Only static noncomputed colon definitions
-whose name is __proto__ set the new object's existing internal prototype link.
+Status: delivered finite prerequisite, integrated by
+[PR25](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/25) from checkpoint
+[fb385cb](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/fb385cb6c0b06988d55beb8c60f9f9a7cab6e431).
+Ten original language/App controls and recorded normal/build/executable integration
+cover that checkpoint. New checkpoints still require exact verification.
+Only static noncomputed colon definitions
+whose name is `__proto__` set the new object's existing internal prototype link.
 Null removes the link, ordinary objects/functions retain exact identity, and
 other primitive RHS values are evaluated once and ignored without coercion or
 own-property creation. The RHS keeps source order and abrupt completion; it does
@@ -334,7 +353,7 @@ not infer a property function name. Duplicate special setters are early syntax
 errors before script effects, including quoted/escaped static names and primitive
 RHS values. Existing member/name, chain, cycle, extensibility and work bounds apply.
 
-Computed keys, shorthand, methods, accessors, JSON own keys and legacy __proto__
+Computed keys, shorthand, methods, accessors, JSON own keys and legacy `__proto__`
 reads/writes retain explicit unsupported boundaries. Host objects remain outside
 script prototype chains; a native refusal does not invoke host getters/setters or
 turn a fatal capability error into an author-catchable success. Ordinary field
@@ -347,7 +366,7 @@ fields, null-root identity, zero script errors, loaded source, location, history
 and realm identity remain genuine. This is software App input/paint proof, not
 physical desktop or framework initialization evidence.
 
-One unchanged pinned Vue2.7.16 W3 invocation on clean abe2e3b, at1280x800 and
+One unchanged pinned Vue 2.7.16 W3 invocation on clean abe2e3b, at 1280x800 and
 640x800/zoom100 with JavaScript/images enabled, now admits the whole file past its
 prior literal parse refusal. Both executions first fail at line11,column3613:
 an undefined noncallable concat member. This does not prove the later prototype
@@ -363,9 +382,16 @@ and [OrdinarySetPrototypeOf](https://262.ecma-international.org/16.0/#sec-ordina
 
 ## CP4 — conventional select fragments and native ownership
 
-Status: twelve original parser, native-model, Page and App controls pass.
-Complete normal/build/executable integration remains required for this checkpoint.
-One unchanged JS-enabled W2 recheck at1280x800/zoom100 on clean5cee344 advances
+Status: delivered finite prerequisite, integrated by
+[PR24](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/24) from checkpoint
+[73f3315](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/73f3315ae23760966efb1c1e6bf8ff3e2492c6c4).
+Recorded normal/optimized and local/hosted offline verification covers that
+checkpoint; the release target still requires its exact-source delivery gates.
+
+Twelve original parser, native-model, Page and App controls pass. The recorded
+integration covers this finite slice; each new checkpoint still requires exact
+normal/build/executable verification.
+One unchanged JS-enabled W2 recheck at 1280x800/zoom100 on clean5cee344 advances
 past the select fragment to jQuery1.12.4 line1265,column4: setting INPUT type to
 hidden remains explicitly unsupported. Loading and initial rendering pass;
 initialization, dropdown/form input and async stages fail. Later Bootstrap and
@@ -407,11 +433,15 @@ and [form owner reset](https://html.spec.whatwg.org/multipage/form-control-infra
 
 ## CP3 — responsive stylesheet-to-layout behavior
 
-Status: measured rendering improvement in the unchanged Foundation6.9 fixture;
-full normal/build/executable verification remains required for integration.
-At1280x800, zoom100 and normal JavaScript, the original panels now share a row;
-at640x800 they retain their original stacking. Vue's prototype initialization
-failure is separate, so no reactive interaction or full-framework pass is claimed.
+Status: delivered finite rendering prerequisite, with the unchanged
+Foundation 6.9 fixture and original App controls integrated before B2. The source
+[5d2f115](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/5d2f1151e58a6d16ec62a5c1cb3a06cc90d6497b)
+records this shared rendering correction. Each new checkpoint still requires
+exact normal/build/executable verification.
+At 1280x800, zoom100 and normal JavaScript, the original panels now share a row;
+at 640x800 they retain their original stacking. Vue execution is separate; the
+latest unchanged W3 first-root failure is recorded under CP5. No reactive
+interaction or full-framework pass is claimed.
 
 Finite em media lengths use the same browser-owned initial16CSSpx font basis as
 default Style initialization. Author html/body fonts do not change that basis;
@@ -448,9 +478,15 @@ Semantic references: [Media Queries relative units](https://www.w3.org/TR/mediaq
 
 ## B2 — finite tabs, link context and new windows
 
-Status: shared authorities, Session ownership, finite native tabs/windows and
-explicit link/context actions implemented after the measured responsive improvement.
-Complete normal/optimized and desktop acceptance is required at each checkpoint. Provide new/switch/close
+Status: completed finite milestone after the measured responsive improvement;
+shared authorities, Session ownership, native tabs/windows and explicit link/context
+actions were integrated by [PR23](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/23).
+The accepted source [67c5d69](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/67c5d691012eeb39767e44000d9c1aeac8cdea1a)
+and subsequent checkpoints 73f3315 and fb385cb have recorded local/hosted offline
+verification. Separate actual Windows desktop records cover six groups at 67c5d69,
+six at 73f3315 and four at fb385cb. Each is limited to its observed source/scope;
+the 0.81.0-alpha.1 release gates remain separate.
+Complete normal/optimized and desktop acceptance is required at each new checkpoint. Provide new/switch/close
 tabs and link actions for new tabs or ChezCat windows, including supported middle/
 Ctrl-click and keyboard actions. Keep independent page/history/scroll/loading and
 address/title state with deliberate shared profile/cookies. Acceptance must prove
@@ -496,11 +532,11 @@ retry, part-file cleanup and no-overwrite publication remain unchanged.
 Workers use a stable retargetable browser signal dispatcher. It releases its
 mutex before invoking or dropping callbacks. Page wake changes cannot retarget
 an externally owned browser download route. An already-cloned callback may still
-run after retargeting; future native routing must reject closed/reused WindowIds
+run after retargeting; native routing must reject closed/reused WindowIds
 and use nonblocking signals. The adapter alone does not provide native lifetime
 acceptance. Original held-transfer/two-App, wake reentry/retarget, admission,
 cancel/retry/no-overwrite, received-response, closed-authority and legacy popup
-controls cover this prerequisite; full normal integration remains required.
+controls cover this integrated prerequisite; full normal integration remains required for each new checkpoint.
 
 Saved browsing history retains the original Store's locks, bounded data, exact
 disk conflicts, expiry and atomic publication under one browser authority.
@@ -632,8 +668,10 @@ behavior. Temporary owned popup focus/capture cancellation preserves its token.
 Original factory7, App/UI19 and native16 controls cover these additions; the native
 controls use actual hidden task-owned HWNDs under the original serialized fixture,
 including creation refusal, exact payloads, owner/press ABA and capture exhaustion.
-They do not claim physical menu interaction. Full normal/optimized and actual
-desktop acceptance remains required before a delivered feature claim.
+Those hidden-window controls alone do not claim physical menu interaction.
+The separate actual desktop acceptance recorded above establishes the finite
+checkpoint behavior. Full normal/optimized and actual desktop acceptance remains
+required for each new delivered checkpoint.
 
 HTML anchor href/download content mutations use existing conversion, retained
 limits and atomic DOM/Attr identity commits. Mutation alone navigates nowhere.
@@ -931,7 +969,7 @@ exercise entropy rollback, segment disable/reenable, reference copy/refresh,
 malformed/truncated input and final-cancellation atomicity. Real App tests hold
 decoded results across newer seeks, source changes, native Stop and navigation.
 
-The executable journey checks actual script/native controls and promises, all24
+The executable journey checks actual script/native controls and promises, all 24
 independent frames in nonsequential/backward IVF and Matroska seeks, EOF/replay,
 source lifecycle and complete loopback HTTP(S) video. Existing Matroska PCM16
 selected offsets and an explicit WinMM device journey cover their distinct scopes:
