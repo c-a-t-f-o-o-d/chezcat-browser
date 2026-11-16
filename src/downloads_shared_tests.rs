@@ -46,7 +46,8 @@ struct Held {
     thread:Option<thread::JoinHandle<()>>,
 }
 impl Held {
-    fn new(expected:usize)->Self {
+    fn new(expected:usize)->Self {Self::with_accepted_notice(expected,None)}
+    fn with_accepted_notice(expected:usize,accepted:Option<mpsc::Sender<()>>)->Self {
         let listener=TcpListener::bind("127.0.0.1:0").unwrap();
         let location=super::super::web_location(crate::url::parse(&format!("http://{}/payload.bin",listener.local_addr().unwrap())).unwrap().0);
         listener.set_nonblocking(true).unwrap();
@@ -59,8 +60,11 @@ impl Held {
                     Err(error) if error.kind()==std::io::ErrorKind::WouldBlock=>{thread::sleep(Duration::from_millis(1));continue;},
                     Err(error)=>panic!("Owned download peer failed: {error}"),
                 };
+                stream.set_nonblocking(false).unwrap();
                 stream.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
                 stream.set_write_timeout(Some(Duration::from_secs(2))).unwrap();
+                // The regression peer withholds request bytes until this notice.
+                if let Some(notice)=&accepted {notice.send(()).unwrap();}
                 let mut request=Vec::new();let mut byte=[0u8;1];
                 while !request.ends_with(b"\r\n\r\n") {
                     assert!(request.len()<4096);stream.read_exact(&mut byte).unwrap();request.push(byte[0]);
@@ -78,7 +82,47 @@ impl Held {
     fn wait(&self,count:usize){for _ in 0..count {self.observed.recv_timeout(Duration::from_secs(3)).unwrap();}}
     fn release(&mut self){if let Some(send)=self.release.take(){let _=send.send(());}if let Some(thread)=self.thread.take(){thread.join().unwrap();}}
 }
-impl Drop for Held {fn drop(&mut self){self.release();}}
+impl Drop for Held {
+    fn drop(&mut self){
+        // Explicit release still checks the worker result. Cleanup must not
+        // panic again when a failed observed wait is already unwinding.
+        if let Some(send)=self.release.take(){let _=send.send(());}
+        if let Some(thread)=self.thread.take(){let _=thread.join();}
+    }
+}
+
+
+#[test]
+fn held_download_peer_waits_for_complete_split_request_and_releases_exact_response() {
+    let (notice,accepted)=mpsc::channel();
+    let mut held=Held::with_accepted_notice(1,Some(notice));
+    let url=held.location.url.as_ref().unwrap();
+    let mut peer=std::net::TcpStream::connect((url.host.as_str(),url.port)).unwrap();
+    peer.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+    peer.set_write_timeout(Some(Duration::from_secs(2))).unwrap();
+    accepted.recv_timeout(Duration::from_secs(3)).expect("Owned fixture did not accept the deliberately silent peer.");
+    // Synchronize acceptance before either phase, rather than assuming that
+    // connect completion means the server has started reading request bytes.
+    assert!(matches!(held.observed.recv_timeout(Duration::from_millis(100)),Err(mpsc::RecvTimeoutError::Timeout)),
+        "A live accepted peer with no request must not be announced or disconnect.");
+    peer.write_all(b"GET /payload.bin HTTP/1.1\r\nHost: local").unwrap();
+    assert!(matches!(held.observed.recv_timeout(Duration::from_millis(100)),Err(mpsc::RecvTimeoutError::Timeout)),
+        "A partial header without its final empty line must not be announced or disconnect.");
+    peer.write_all(b"host\r\n\r\n").unwrap();
+    held.wait(1);
+    let mut headers=Vec::new();let mut byte=[0u8;1];
+    while !headers.ends_with(b"\r\n\r\n") {
+        assert!(headers.len()<512,"Owned response headers exceeded their finite bound.");
+        peer.read_exact(&mut byte).unwrap();headers.push(byte[0]);
+    }
+    assert_eq!(headers,b"HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: 7\r\nConnection: close\r\n\r\n");
+    // The same explicit release used by the product controls checks worker
+    // completion. Destructor cleanup alone cannot turn a worker panic into PASS.
+    held.release();
+    let mut body=Vec::new();
+    peer.take(8).read_to_end(&mut body).unwrap();
+    assert_eq!(body,b"payload");
+}
 
 #[test]
 fn shared_download_view_drop_keeps_held_transfer_and_worker_uses_retargeted_wake() {
