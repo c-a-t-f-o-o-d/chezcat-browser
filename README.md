@@ -32,7 +32,8 @@ and licensing obligations; see [third-party notices](THIRD_PARTY_NOTICES.md).
   owner-realm prototypes and branded fields. CustomEvent retains actual any
   detail; Event/UIEvent/CustomEvent dispatch, cancellation and paths are real.
   A finite trusted anchor click/auxclick seam supplies actual host input and
-  cancellation; native link routing remains subsequent work. Synthetic Mouse
+  cancellation; native primary/middle link routing and browser-owned link context
+  commands consume guarded source intents. Synthetic Mouse
   dispatch, broader native pointer payloads, KeyboardEvent construction and
   shadow-DOM retargeting remain unsupported.
 - Settings, bookmarks, optional browser history, downloads and local diagnostics.
@@ -65,9 +66,10 @@ Google Search, Images and Maps are not fully supported. YouTube page compatibili
 is limited, and playback is unsupported. Further F6/YouTube work is deferred.
 The finite native tab/window shell adds a browser-owned tab strip and shortcuts,
 real windows and tab-pinned inspectors. Original pure UI and hidden-window controls
-cover ownership and lifetime; full normal/optimized integration is required for
-each checkpoint. Link dispositions/context menus and physical desktop interaction
-remain separate acceptance. Remaining TLS gaps stay explicit;
+cover ownership and lifetime. Native links support current, foreground/background
+tabs and new windows with source-bound context commands. Full normal/optimized
+and desktop acceptance is required for each checkpoint. Named browsing contexts,
+script-opened windows and wider accessibility remain gaps. Remaining TLS gaps stay explicit;
 perfect TLS coverage is not required before useful page-usability work. The
 trust-data subset does not establish new live-service compatibility.
 

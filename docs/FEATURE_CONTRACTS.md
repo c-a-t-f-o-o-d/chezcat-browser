@@ -341,9 +341,9 @@ Semantic references: [Media Queries relative units](https://www.w3.org/TR/mediaq
 
 ## B2 — finite tabs, link context and new windows
 
-Status: shared authorities, Session ownership and finite native tab/window shell
-implemented after the measured responsive improvement; full normal integration
-is required at each checkpoint. Link dispositions and link context remain next. Provide new/switch/close
+Status: shared authorities, Session ownership, finite native tabs/windows and
+explicit link/context actions implemented after the measured responsive improvement.
+Complete normal/optimized and desktop acceptance is required at each checkpoint. Provide new/switch/close
 tabs and link actions for new tabs or ChezCat windows, including supported middle/
 Ctrl-click and keyboard actions. Keep independent page/history/scroll/loading and
 address/title state with deliberate shared profile/cookies. Acceptance must prove
@@ -465,8 +465,8 @@ owner HWND, live site or native clipboard. They do not establish physical deskto
 interaction or link dispositions/context menus. Full normal/optimized executable
 integration is required for every checkpoint.
 
-The anchor engine prerequisite is callable from the host but does not yet replace
-legacy physical link handling or wire Session dispositions/context menus. Genuine
+Native link routing now consumes the anchor engine and checked Session admission.
+Genuine
 primary click and middle auxclick use the existing owner-realm MouseEvent brands,
 actual host coordinates/modifiers, listener path, passive/inline cancellation and
 microtask checkpoint. Invalid targets and failed bounded dispatch veto default;
@@ -485,8 +485,44 @@ Browser context Open consumes a stricter original token and fabricates no click.
 Owned non-cloneable targets carry the already-resolved Location and file root,
 plus the source top-level cookie initiator. Consuming a target uses a new GET
 chain, including explicit opaque-local origin, without POST replay or destination
-origin/reload fallback. Future Session routing must validate full original owner
-IDs and admit background owners without temporarily activating them.
+origin/reload fallback. Session admission validates full original owner IDs and
+active membership, preflights caps/identities/storage/shared-service observations,
+and publishes background owners without temporarily activating them. Failures
+retain existing owners; new-window native creation failure retires its destination.
+
+| Native link input | Disposition after author cancellation/download checks |
+| --- | --- |
+| Primary | Current tab |
+| Ctrl + primary | Background tab |
+| Ctrl + Shift + primary | Foreground tab |
+| Shift + primary | New ChezCat window |
+| Middle | Background tab |
+| Shift + middle | Foreground tab |
+| Context command | Explicit foreground tab, background tab or new window |
+
+The existing native Alt-only download shortcut retains its path. Other Alt/Meta
+bits remain real event data and add no disposition. Authored download attributes
+remain source-owned, including context actions; commands fabricate no DOM click.
+Named browsing contexts, authored target handling and script-opened windows are
+outside this finite user-controlled disposition slice.
+
+Native pointer capture has a checked full-owner/generation lease. One-shot release
+envelopes carry the original posted screen point and modifiers. Missing, sent,
+stale-owner and older-generation releases cannot cancel or consume a replacement
+press/capture; valid releases finish once. Jitter preserves capture and drag-return
+never reacquires a link. Non-link controls, media, selection and bookmark drops
+retain their original release behavior with native legacy link default disabled.
+
+Context origin identity is captured before native coordinate/capture calls; popup
+completion rechecks the original source, geometry and all-input menu scope. No
+Session/App/registry borrow spans popup creation, tracking, destruction or native
+reentry. Keyboard context requests without a measured anchor keep default native
+behavior. Temporary owned popup focus/capture cancellation preserves its token.
+Original factory7, App/UI19 and native16 controls cover these additions; the native
+controls use actual hidden task-owned HWNDs under the original serialized fixture,
+including creation refusal, exact payloads, owner/press ABA and capture exhaustion.
+They do not claim physical menu interaction. Full normal/optimized and actual
+desktop acceptance remains required before a delivered feature claim.
 
 HTML anchor href/download content mutations use existing conversion, retained
 limits and atomic DOM/Attr identity commits. Mutation alone navigates nowhere.
@@ -972,7 +1008,7 @@ KeyboardEvent construction, its specialized prototype and native-input
 immediate prototypes remain unsupported. Synthetic
 Mouse dispatch/default activation from synthetic events and general native
 pointer payloads remain unsupported. The finite trusted anchor host seam is
-described in B2; native link routing remains subsequent work.
+described in B2 and used by its guarded native link routing.
 Changing native host prototypes, arbitrary native subclassing/newTarget and
 shadow-DOM retargeting are also unsupported. These finite interfaces establish
 no full Event-family, web-platform or public-service conformance.

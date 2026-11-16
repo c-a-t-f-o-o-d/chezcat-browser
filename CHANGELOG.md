@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Route native primary/middle link gestures through genuine guarded click/auxclick
+  activation and checked Session admission. Add explicit foreground/background tab
+  and window context commands, direct unselected background creation, and bounded
+  native popup/capture lifetimes. Exact release points and capture generations
+  prevent stale or unpaired input from consuming replacement gestures. Retain
+  ordinary controls, selection/bookmark drag and the existing Alt download path.
+  Original pure and task-owned hidden-window controls pass; complete normal,
+  optimized and desktop acceptance is required for each delivered checkpoint.
+
 - Add a callable trusted anchor click/auxclick prerequisite with genuine
   MouseEvent fields, listener paths, cancellation and microtask effects. Opaque
   App hit/context tokens refuse stale or obscured targets; resolved link targets

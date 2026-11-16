@@ -327,3 +327,7 @@ fn hidden_native_final_history_failure_keeps_retry_host_and_posts_quit_only_afte
         assert!(!TEST_REENTRY_BUSY.with(|s| s.get()));
     });
 }
+
+// New original hidden-HWND link controls; every existing assertion above is retained.
+#[path = "platform_session_link_tests.rs"]
+mod links;

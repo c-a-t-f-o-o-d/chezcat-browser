@@ -243,6 +243,11 @@ extern "system" {
     fn SetCapture(window: Handle) -> Handle;
     fn GetCapture() -> Handle;
     fn ReleaseCapture() -> i32;
+    fn CreatePopupMenu() -> Handle;
+    fn AppendMenuW(menu: Handle, flags: u32, item: usize, text: *const u16) -> i32;
+    fn TrackPopupMenu(menu: Handle, flags: u32, x: i32, y: i32,
+        reserved: i32, owner: Handle, exclude: *const Rect) -> i32;
+    fn DestroyMenu(menu: Handle) -> i32;
     fn OpenClipboard(owner: Handle) -> i32;
     fn CloseClipboard() -> i32;
     fn EmptyClipboard() -> i32;

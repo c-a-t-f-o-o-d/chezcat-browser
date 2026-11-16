@@ -63,13 +63,15 @@ rendering improvement. Their shared-profile prerequisite now has original
 two-App revision/gesture and retained-page controls. Session ownership, shared
 downloads/history and terminal retirement now support a finite native tab/window
 shell with original pure UI and hidden-HWND controls. Full normal/optimized
-integration remains required; physical desktop interaction and link dispositions/
-context menus are separate acceptance. Installer/update work stays planned; further media and
+integration remains required; native link/context dispositions now have original
+pure and hidden-HWND controls, with physical desktop interaction as separate
+acceptance. Installer/update work stays planned; further media and
 service integration remains deferred. Routine CI stays offline.
 
-The next anchor engine prerequisite uses genuine trusted click/auxclick and
+The anchor engine uses genuine trusted click/auxclick and
 source-bound targets. Demonstrated shared fixes admit checked HTML href/download
 mutation and keep painted targets/link styling synchronized with live attributes.
-Original reduced App/DOM/event controls cover these semantics; native link/context
-wiring remains subsequent work. This does not change the measured library
+Original App/DOM/event and native lifetime controls cover explicit link/context
+routing. Complete normal/optimized and desktop acceptance is still required per
+checkpoint. This does not change the measured library
 scorecard or establish broader framework support.
