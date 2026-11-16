@@ -11,6 +11,15 @@
   Original pure and task-owned hidden-window controls pass; complete normal,
   optimized and desktop acceptance is required for each delivered checkpoint.
 
+- Replace first-eight resolver truncation with bounded, deduplicated dual-stack
+  selection and serial family fallback. Preserve resolver preference and each
+  family's order; reserve deadline time for a queued alternative family while
+  retaining realistic single-family connect budgets. Report scan/storage/attempt
+  limits and individual family/error outcomes without resolved-address lists.
+  Original offline controls cover prefix omission, deadlines, cancellation and
+  local socket ownership. Blocking DNS and concurrent Happy Eyeballs remain
+  outside this correction; TLS hostname and request-policy checks are unchanged.
+
 - Add a callable trusted anchor click/auxclick prerequisite with genuine
   MouseEvent fields, listener paths, cancellation and microtask effects. Opaque
   App hit/context tokens refuse stale or obscured targets; resolved link targets

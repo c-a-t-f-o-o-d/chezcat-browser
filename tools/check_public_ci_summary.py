@@ -206,5 +206,94 @@ print('test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered ou
                 self.assertNotIn(forbidden, encoded)
 
 
+    def test_abort_metadata_projects_only_strict_bounded_numbers_and_booleans(self):
+        row = {'state': 'failed', 'exit_code': 101, 'error': 'CONTROLLED_SECRET',
+               'analysis': {'harness_started': True, 'completed_test_lines': 37,
+                            'native_exit_statuses': ['0xC00000FD'], 'failed_test_names': []}}
+        result = public.project_step(row, set())
+        self.assertEqual(result['exit_code'], 101)
+        self.assertTrue(result['harness_started'])
+        self.assertEqual(result['completed_test_lines'], 37)
+        self.assertEqual(result['native_exit_statuses'], ['0xc00000fd'])
+        self.assertFalse(result['failed_identifiers_complete'])
+        self.assertNotIn('summary', result)
+        self.assertNotIn('CONTROLLED_SECRET', json.dumps(result))
+        for code in [-(1 << 31), -1, 0, (1 << 31) - 1]:
+            self.assertEqual(public.project_step({'exit_code': code}, set())['exit_code'], code)
+        for invalid in [True, False, '101', -(1 << 31) - 1, 1 << 31, 101.0, None, {'private': 'text'}]:
+            self.assertNotIn('exit_code', public.project_step({'exit_code': invalid}, set()))
+        for invalid in [0, 1, 'true', None, {'private': 'text'}]:
+            result = public.project_step({'analysis': {'harness_started': invalid}}, set())
+            self.assertNotIn('harness_started', result)
+        for invalid in [True, '1', -1, public.MAX_COUNT + 1, None, {'private': 'text'}]:
+            result = public.project_step({'analysis': {'completed_test_lines': invalid}}, set())
+            self.assertNotIn('completed_test_lines', result)
+        for invalid in ['0xc00000fd', ['0xc00000fd PRIVATE'], ['c00000fd'], ['0x1'],
+                        ['0x100000000'], ['0x0000000g'], [0xc00000fd], ['0xc00000fd'] * 9]:
+            result = public.project_step({'analysis': {'native_exit_statuses': invalid}}, set())
+            self.assertNotIn('native_exit_statuses', result)
+
+    def test_reported_panic_projection_uses_only_committed_known_basenames(self):
+        secret = 'CONTROLLED_SECRET'
+        names = ['private_module::known_abort', 'PRIVATE_PREFIX::known_panic',
+                 'https://private.invalid/?token=' + secret, 'C:/private/source.rs',
+                 'private_module::unknown', 'x' * 513, {'private': secret}, 'known_panic PRIVATE']
+        row = {'state': 'failed', 'analysis': {'panicking_test_names': names,
+               'panicking_names_limited': True, 'error': secret, 'log': 'C:/private/raw.log'}}
+        result = public.project_step(row, {'known_abort', 'known_panic'})
+        self.assertEqual(result['panicking_test_basenames'], ['known_abort', 'known_panic'])
+        self.assertTrue(result['panicking_names_limited'])
+        self.assertEqual(result['failed_test_basenames'], [])
+        self.assertNotIn('summary', result)
+        encoded = json.dumps(result)
+        for private in [secret, 'private_module', 'PRIVATE_PREFIX', 'https://', 'C:/private', 'unknown', '.log']:
+            self.assertNotIn(private, encoded)
+        for invalid in [names + ['known_abort'], secret, {'private': secret}]:
+            self.assertNotIn('panicking_test_basenames', public.project_step({'analysis': {'panicking_test_names': invalid}}, {'known_abort'}))
+        self.assertNotIn('panicking_names_limited', public.project_step({'analysis': {'panicking_names_limited': secret}}, set()))
+
+    def test_controlled_abort_without_summary_keeps_numeric_status_and_serial_diagnostic_separate(self):
+        # An original Python producer models incomplete native output; this is
+        # not evidence of the cause of any hosted Rust process failure.
+        child = '''import os, sys
+print('running 2 tests', flush=True)
+print('test private_module::known_first ... ok', flush=True)
+if sys.argv[1] == 'abort':
+ print("thread 'private_module::known_abort' (123) has overflowed its stack", flush=True)
+ print('CONTROLLED_SECRET C:/private/source.rs https://private.invalid/?token=secret', flush=True)
+ print('process did not exit (exit code: 0xc00000fd, STATUS_STACK_OVERFLOW)', flush=True)
+ os._exit(71)
+print('test private_module::known_abort ... ok', flush=True)
+print('test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out;', flush=True)
+'''
+        with tempfile.TemporaryDirectory(prefix='public-abort-diagnostics-') as temporary:
+            root = Path(temporary)
+            (root / 'src').mkdir()
+            (root / 'src/main.rs').write_text('// Original controlled source\n', encoding='utf-8')
+            producer = root / 'producer.py'
+            producer.write_text(child, encoding='utf-8')
+            with redirect_stdout(io.StringIO()):
+                native = capture_tests.capture(root, root / 'capture',
+                    [('normal', [sys.executable, str(producer), 'abort']),
+                     ('serial', [sys.executable, str(producer), 'pass'])], 20)
+            result = public.native_projection(native, {'known_first', 'known_abort'})
+            self.assertFalse(result['normal_test_gate_passed'])
+            normal = result['normal']
+            self.assertEqual(normal['state'], 'failed')
+            self.assertEqual(normal['exit_code'], 71)
+            self.assertTrue(normal['harness_started'])
+            self.assertEqual(normal['completed_test_lines'], 1)
+            self.assertEqual(normal['native_exit_statuses'], ['0xc00000fd'])
+            self.assertEqual(normal['panicking_test_basenames'], ['known_abort'])
+            self.assertEqual(normal['failed_test_basenames'], [])
+            self.assertFalse(normal['failed_identifiers_complete'])
+            self.assertNotIn('summary', normal)
+            self.assertEqual(result['serial']['summary']['passed'], 2)
+            self.assertIn('not proof', result['panic_scope'])
+            encoded = json.dumps(result)
+            for private in ['CONTROLLED_SECRET', 'private_module', 'C:/private', 'https://', str(root), '.log', 'environment', 'command']:
+                self.assertNotIn(private, encoded)
+
+
 if __name__ == '__main__':
     unittest.main()
