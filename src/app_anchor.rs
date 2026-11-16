@@ -1,5 +1,5 @@
-//! Bounded App anchor activation prerequisite. No Session/native disposition
-//! wiring lives here; actual browser owners must retain their full typed IDs.
+//! Guarded App anchor activation. Session/native owners retain their full typed
+//! IDs and the original opaque gesture/context across native reentry.
 use super::*;
 use crate::scripting::AnchorMouseInput;
 use std::rc::Rc;
@@ -13,6 +13,9 @@ pub(crate) struct AnchorHit {
 /// Native menus keep the original snapshot; command selection never re-hits or
 /// invokes a fake author click. Logical input/navigation invalidates its scope.
 pub(crate) struct AnchorContext(AnchorHit);
+/// Source/geometry identity before native menu preparation can reenter. No hit
+/// is acquired after a changed source merely because its full owner IDs survive.
+pub(crate) struct AnchorContextOrigin {scope:Rc<()>,geometry:Rc<()>}
 /// Only an accepted source anchor can construct this capability. The destination
 /// keeps its exact content root and source top URL; no POST/policy authority.
 pub(crate) struct OwnedLinkTarget {
@@ -59,6 +62,33 @@ impl App {
     }
     pub(crate) fn anchor_hit(&self,x:i32,y:i32,button:u8)->Option<AnchorHit>{if !matches!(button,0|1){return None;}self.anchor_snapshot(x,y,Some(button))}
     pub(crate) fn anchor_context(&self,x:i32,y:i32)->Option<AnchorContext>{self.anchor_snapshot(x,y,None).map(AnchorContext)}
+    /// Preserve the actual primary down grammar before arming a link. A down
+    /// which merely closes an overlay cannot capture a newly exposed anchor.
+    pub(crate) fn primary_anchor_down(&mut self,x:i32,y:i32,shift:bool)->(PlatformAction,Option<AnchorHit>){
+        self.pointer_cancel();let action=self.pointer_down(x,y,shift);
+        let text=matches!(&self.drag,Drag::Text{x:start_x,y:start_y,href:Some(_),..}if *start_x==x&&*start_y==y);
+        let hit=if text{self.anchor_hit(x,y,0)}else{None};(action,hit)
+    }
+    /// Middle input is anchor-only; it never enters primary controls/media/text.
+    pub(crate) fn middle_anchor_down(&mut self,x:i32,y:i32)->Option<AnchorHit>{
+        self.pointer_cancel();self.invalidate_platform_requests();self.anchor_hit(x,y,1)
+    }
+    pub(crate) fn anchor_hit_valid(&self,hit:&AnchorHit,x:i32,y:i32,dragged:bool,button:u8)->bool{
+        !dragged&&(i64::from(x)-i64::from(hit.x)).abs()<=4&&(i64::from(y)-i64::from(hit.y)).abs()<=4
+            &&hit.button==Some(button)&&matches!(button,0|1)&&self.anchor_before(hit,x,y)
+    }
+    pub(crate) fn anchor_context_valid(&self,context:&AnchorContext)->bool{
+        let hit=&context.0;self.anchor_before(hit,hit.x,hit.y)
+    }
+    pub(crate) fn anchor_context_origin(&self)->AnchorContextOrigin{
+        AnchorContextOrigin{scope:self.platform_request_scope.clone(),geometry:self.anchor_geometry_scope.clone()}
+    }
+    pub(crate) fn anchor_context_from_origin(&self,origin:AnchorContextOrigin,x:i32,y:i32)->Option<AnchorContext>{
+        if !Rc::ptr_eq(&origin.scope,&self.platform_request_scope)||!Rc::ptr_eq(&origin.geometry,&self.anchor_geometry_scope){return None;}
+        self.anchor_context(x,y)
+    }
+    /// Use the same page status failure surface as the existing follow resolver.
+    pub(crate) fn anchor_default_error(&mut self,error:String){self.error(error);}
     fn anchor_source_unchanged(&self,hit:&AnchorHit,scope:&Rc<()>)->bool{
         Rc::ptr_eq(scope,&self.platform_request_scope)&&self.script_epoch==hit.document
             &&self.location==hit.source&&self.view==View::Page
@@ -88,9 +118,8 @@ impl App {
     /// dragged. Client coordinates are computed from the App page viewport here;
     /// native screen coordinates and modifiers remain the actual supplied input.
     pub(crate) fn activate_anchor(&mut self,hit:AnchorHit,x:i32,y:i32,dragged:bool,mut input:AnchorMouseInput)->Result<AnchorDefault,String>{
-        if dragged||(i64::from(x)-i64::from(hit.x)).abs()>4||(i64::from(y)-i64::from(hit.y)).abs()>4
-            ||hit.button!=Some(input.button)||!matches!(input.button,0|1)||!input.screen_x.is_finite()||!input.screen_y.is_finite()
-            ||!self.anchor_before(&hit,x,y){return Err("The original anchor gesture is stale or cancelled.".into());}
+        if !self.anchor_hit_valid(&hit,x,y,dragged,input.button)||!input.screen_x.is_finite()||!input.screen_y.is_finite()
+            {return Err("The original anchor gesture is stale or cancelled.".into());}
         self.invalidate_platform_requests();let scope=self.platform_request_scope.clone();
         self.update_script_geometry();self.script_begin_job();input.client_x=f64::from(x)/f64::from(self.zoom);
         input.client_y=f64::from(y-self.content_top())/f64::from(self.zoom);
@@ -121,3 +150,7 @@ impl App {
 #[cfg(test)]
 #[path="app_anchor_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path="app_native_link_tests.rs"]
+mod native_link_tests;

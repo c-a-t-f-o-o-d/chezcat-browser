@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- Route native primary/middle link gestures through genuine guarded click/auxclick
+  activation and checked Session admission. Add explicit foreground/background tab
+  and window context commands, direct unselected background creation, and bounded
+  native popup/capture lifetimes. Exact release points and capture generations
+  prevent stale or unpaired input from consuming replacement gestures. Preserve
+  popup targets across passive hover/leave; dragging or any held mouse-button
+  move still retires them, independently of native capture.
+  Ordinary controls, selection/bookmark drag and the existing Alt download path
+  retain their behavior.
+  Original pure and task-owned hidden-window controls pass; complete normal,
+  optimized and desktop acceptance is required for each delivered checkpoint.
+
 - Replace first-eight resolver truncation with bounded, deduplicated dual-stack
   selection and serial family fallback. Preserve resolver preference and each
   family's order; reserve deadline time for a queued alternative family while

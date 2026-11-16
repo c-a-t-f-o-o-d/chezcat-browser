@@ -1,9 +1,11 @@
 //! Browser-owned tab strip and pure main-window input/render routing. Native
 //! HWNDs/clipboard/dialogs live elsewhere and receive owned typed outcomes only.
-use super::{Session,TabId,WindowId};
+use super::{Session,TabId,WindowId,LinkDisposition};
+use crate::app::anchor::{AnchorHit,AnchorContext,AnchorContextOrigin,AnchorDefault,OwnedLinkTarget};
+use std::rc::Rc;
 use crate::app::{PlatformAction,PlatformRequest};
 use crate::paint::{Canvas,ClipRect,GLYPH_HEIGHT};
-use crate::scripting::KeyboardInput;
+use crate::scripting::{KeyboardInput,AnchorMouseInput};
 use crate::ui;
 
 pub const STRIP_HEIGHT:i32=32;
@@ -21,15 +23,21 @@ enum Hit {Select(TabId),Close(TabId),New}
 #[derive(Clone,PartialEq,Eq)]
 struct Token {window:WindowId,members:Vec<TabId>,active:Option<TabId>,width:i32,height:i32,first:usize,revision:u64}
 struct Geometry {token:Token,controls:Vec<(Hit,ClipRect)>}
-struct Press {target:Target,token:Token,x:i32,y:i32,moved:bool}
+struct Press {target:Target,token:Token,x:i32,y:i32,moved:bool,button:u8,native:bool,anchor:Option<AnchorHit>}
+/// Browser-owned one-shot menu target. No source reference survives native work.
+pub(crate) struct LinkContext {window:WindowId,tab:TabId,token:Token,scope:Rc<()>,anchor:AnchorContext}
+/// Pre-native menu origin stamp. Temporary pointer cancellation is harmless;
+/// any intervening source, logical input, or geometry change refuses acquisition.
+pub(crate) struct LinkContextOrigin {window:WindowId,tab:TabId,token:Token,scope:Rc<()>,anchor:AnchorContextOrigin}
+#[derive(Clone,Copy)]
 enum Target {Strip(Hit,ClipRect),Page(TabId)}
 struct Window {
     id:WindowId,width:i32,height:i32,first:usize,revision:u64,
-    members:Vec<TabId>,active:Option<TabId>,press:Option<Press>,hover:Option<Hit>,swallowed:u8,
+    members:Vec<TabId>,active:Option<TabId>,press:Option<Press>,hover:Option<Hit>,swallowed:u8,menu_scope:Rc<()>,
 }
 impl Window {
     fn preflight(&self)->Result<(),String>{self.revision.checked_add(2).ok_or("Tab strip interaction identity exhausted.")?;Ok(())}
-    fn bump(&mut self)->Result<(),String>{let revision=self.revision.checked_add(1).ok_or("Tab strip interaction identity exhausted.")?;self.press=None;self.revision=revision;Ok(())}
+    fn bump(&mut self)->Result<(),String>{let revision=self.revision.checked_add(1).ok_or("Tab strip interaction identity exhausted.")?;self.press=None;self.menu_scope=Rc::new(());self.revision=revision;Ok(())}
 }
 #[derive(Default)]
 pub struct SessionUi {windows:Vec<Window>,logical_active:Option<WindowId>}
@@ -77,7 +85,7 @@ impl SessionUi {
         let index=match self.windows.iter().position(|window|window.id==id){Some(index)=>index,None=>{
             if self.windows.len()==MAX_WINDOWS{return Err("Browser UI window limit was reached.".into());}
             self.windows.try_reserve(1).map_err(|_|"Cannot reserve browser window UI.")?;
-            self.windows.push(Window{id,width,height,first:0,revision:0,members:Vec::new(),active:None,press:None,hover:None,swallowed:0});self.windows.len()-1
+            self.windows.push(Window{id,width,height,first:0,revision:0,members:Vec::new(),active:None,press:None,hover:None,swallowed:0,menu_scope:Rc::new(())});self.windows.len()-1
         }};
         let changed=self.windows[index].width!=width||self.windows[index].height!=height;
         self.windows[index].preflight()?;
@@ -97,6 +105,7 @@ impl SessionUi {
         session.window_tabs(id)?;
         if self.logical_active!=Some(id){
             if let Some(old)=self.logical_active {if let Ok(Some(tab))=session.active(old){let _=session.with_tab(tab,|app|app.invalidate_platform_requests());}}
+            if let Some(old)=self.logical_active{self.invalidate_link_context(old);}self.invalidate_link_context(id);
             self.logical_active=Some(id);
         }Ok(())
     }
@@ -130,27 +139,31 @@ impl SessionUi {
         match action{PlatformAction::None=>None,action=>Some(RoutedRequest{window,tab,request:app.platform_request(action)})}
     }
     pub fn pointer_down(&mut self,session:&mut Session,id:WindowId,x:i32,y:i32,shift:bool)->Result<Outcome,String>{
-        self.activate_window(session,id)?;self.pointer_cancel(session,id)?;self.refresh(session,id)?;let geometry=self.geometry(session,id)?;let index=self.index(id)?;
+        self.invalidate_link_context(id);self.activate_window(session,id)?;self.pointer_cancel(session,id)?;self.refresh(session,id)?;let geometry=self.geometry(session,id)?;let index=self.index(id)?;
         if y<STRIP_HEIGHT{
-            if let Some((hit,rect))=Self::hit(&geometry,x,y){self.windows[index].press=Some(Press{target:Target::Strip(hit,rect),token:geometry.token,x,y,moved:false});}
+            if let Some((hit,rect))=Self::hit(&geometry,x,y){self.windows[index].press=Some(Press{target:Target::Strip(hit,rect),token:geometry.token,x,y,moved:false,button:0,native:false,anchor:None});}
             return Ok(Outcome{repaint:true,..Outcome::default()});
         }
         if x<0||x>=self.windows[index].width||y>=self.windows[index].height{return Ok(Outcome::default());}
         let tab=geometry.token.active.ok_or("This window has no active tab.")?;
         let request=session.with_tab(tab,|app|{let action=app.pointer_down(x,y-STRIP_HEIGHT,shift);Self::route(id,tab,app,action)})?;
-        self.windows[index].press=Some(Press{target:Target::Page(tab),token:geometry.token,x,y,moved:false});
+        self.windows[index].press=Some(Press{target:Target::Page(tab),token:geometry.token,x,y,moved:false,button:0,native:false,anchor:None});
         Ok(Outcome{request,repaint:true,..Outcome::default()})
     }
     pub fn pointer_move(&mut self,session:&mut Session,id:WindowId,x:i32,y:i32,dragging:bool)->Result<bool,String>{
-        let geometry=self.geometry(session,id)?;let index=self.index(id)?;
+        if dragging{self.invalidate_link_context(id);}let geometry=self.geometry(session,id)?;let index=self.index(id)?;
         if self.windows[index].press.as_ref().is_some_and(|press|press.token!=geometry.token){self.pointer_cancel(session,id)?;return Ok(true);}
-        if let Some(press)=&mut self.windows[index].press{press.moved|=(x-press.x).abs()>4||(y-press.y).abs()>4;}
+        if self.windows[index].press.as_ref().is_some_and(|press|press.native&&!dragging){self.pointer_cancel(session,id)?;return Ok(true);}
+        if let Some(press)=&mut self.windows[index].press{press.moved|=(i64::from(x)-i64::from(press.x)).abs()>4||(i64::from(y)-i64::from(press.y)).abs()>4;}
+        let page_dragging=match self.windows[index].press.as_ref(){Some(press)if press.native&&press.button==1=>false,Some(press)if press.native&&press.anchor.is_some()&&!press.moved=>false,_=>dragging};
         let hover=if y<STRIP_HEIGHT{Self::hit(&geometry,x,y).map(|(hit,_)|hit)}else{None};let changed=self.windows[index].hover!=hover;self.windows[index].hover=hover;
         let page=match self.windows[index].press.as_ref().map(|press|&press.target){Some(Target::Page(tab))=>Some(*tab),Some(Target::Strip(..))=>None,None if !dragging&&y>=STRIP_HEIGHT=>geometry.token.active,_=>None};
-        if let Some(tab)=page{Ok(session.with_tab(tab,|app|app.pointer_move(x,y-STRIP_HEIGHT,dragging))?||changed)}else{Ok(changed)}
+        if let Some(tab)=page{Ok(session.with_tab(tab,|app|app.pointer_move(x,y-STRIP_HEIGHT,page_dragging))?||changed)}else{Ok(changed)}
     }
     pub fn pointer_up(&mut self,session:&mut Session,id:WindowId,x:i32,y:i32)->Result<Outcome,String>{
-        let geometry=self.geometry(session,id)?;let index=self.index(id)?;let Some(press)=self.windows[index].press.take()else{return Ok(Outcome::default());};
+        self.invalidate_link_context(id);let geometry=self.geometry(session,id)?;let index=self.index(id)?;let Some(press)=self.windows[index].press.take()else{return Ok(Outcome::default());};
+        // A legacy wrapper cannot manufacture the native mouse payload.
+        if press.native{if let Target::Page(tab)=press.target{let _=session.with_tab(tab,|app|app.pointer_cancel());}return Ok(Outcome{repaint:true,..Outcome::default()});}
         if press.token!=geometry.token{if let Target::Page(tab)=press.target{let _=session.with_tab(tab,|app|app.pointer_cancel());}return Ok(Outcome{repaint:true,..Outcome::default()});}
         match press.target{
             Target::Page(tab)=>{let request=session.with_tab(tab,|app|{let action=app.pointer_up(x,y-STRIP_HEIGHT);Self::route(id,tab,app,action)})?;Ok(Outcome{request,repaint:true,..Outcome::default()})},
@@ -179,16 +192,16 @@ impl SessionUi {
         if y<STRIP_HEIGHT{return Ok(false);}session.observe_active(id,|app|app.inspector_resize_cursor(x,y-STRIP_HEIGHT))
     }
     pub fn new_tab(&mut self,session:&mut Session,id:WindowId)->Result<Outcome,String>{
-        let index=self.index(id)?;self.windows[index].preflight()?;let tab=session.new_tab(id)?;session.with_tab(tab,|app|app.focus_address())?;self.refresh(session,id)?;Ok(Outcome{repaint:true,..Outcome::default()})
+        self.invalidate_link_context(id);let index=self.index(id)?;self.windows[index].preflight()?;let tab=session.new_tab(id)?;session.with_tab(tab,|app|app.focus_address())?;self.refresh(session,id)?;Ok(Outcome{repaint:true,..Outcome::default()})
     }
     pub fn close_tab(&mut self,session:&mut Session,id:WindowId,tab:TabId)->Result<Outcome,String>{
-        let index=self.index(id)?;self.windows[index].preflight()?;if !session.window_tabs(id)?.contains(&tab){return Err("This tab is not in the requested browser window.".into());}
+        self.invalidate_link_context(id);let index=self.index(id)?;self.windows[index].preflight()?;if !session.window_tabs(id)?.contains(&tab){return Err("This tab is not in the requested browser window.".into());}
         session.close_tab(tab)?;if session.window_tabs(id)?.is_empty(){return self.close_window(session,id);}
         self.refresh(session,id)?;Ok(Outcome{repaint:true,..Outcome::default()})
     }
     pub fn close_window(&mut self,session:&mut Session,id:WindowId)->Result<Outcome,String>{session.close_window(id)?;self.forget(id);Ok(Outcome{closed:Some(id),repaint:true,..Outcome::default()})}
     pub fn key_event(&mut self,session:&mut Session,id:WindowId,input:KeyboardInput)->Result<Outcome,String>{
-        self.activate_window(session,id)?;let index=self.index(id)?;let bit=match input.key_code{0x54=>1,0x57=>2,0x09=>4,0x4e=>8,_=>0};
+        self.invalidate_link_context(id);self.activate_window(session,id)?;let index=self.index(id)?;let bit=match input.key_code{0x54=>1,0x57=>2,0x09=>4,0x4e=>8,_=>0};
         if !input.down&&bit!=0&&self.windows[index].swallowed&bit!=0{self.windows[index].swallowed&=!bit;return Ok(Outcome{suppress_text:true,..Outcome::default()});}
         if input.down&&bit!=0{self.windows[index].swallowed&=!bit;}
         if input.down&&input.ctrl&&!input.alt&&!input.meta&&bit!=0{
@@ -206,19 +219,172 @@ impl SessionUi {
         let(request,suppress_text)=session.with_tab(tab,|app|{let(action,suppress)=app.key_event(input);(Self::route(id,tab,app,action),suppress)})?;
         Ok(Outcome{request,suppress_text,repaint:true,..Outcome::default()})
     }
-    pub fn utf16_input(&mut self,session:&mut Session,id:WindowId,unit:u16)->Result<(),String>{session.with_active(id,|app|app.utf16_input(unit))?;Ok(())}
+    pub fn utf16_input(&mut self,session:&mut Session,id:WindowId,unit:u16)->Result<(),String>{self.invalidate_link_context(id);session.with_active(id,|app|app.utf16_input(unit))?;Ok(())}
     pub fn wheel_at(&mut self,session:&mut Session,id:WindowId,x:i32,y:i32,delta:i32,ctrl:bool,shift:bool)->Result<(),String>{
-        if y<STRIP_HEIGHT{
+        self.invalidate_link_context(id);if y<STRIP_HEIGHT{
             self.pointer_cancel(session,id)?;let geometry=self.geometry(session,id)?;let index=self.index(id)?;let visible=Self::visible(self.windows[index].width,geometry.token.members.len());
             let maximum=geometry.token.members.len().saturating_sub(visible);let next=(geometry.token.first as i64-i64::from(delta.signum())).clamp(0,maximum as i64)as usize;
             if next!=self.windows[index].first{self.windows[index].bump()?;self.windows[index].first=next;self.windows[index].members=geometry.token.members;self.windows[index].active=geometry.token.active;}return Ok(());
         }
         session.with_active(id,|app|app.wheel_at(x,y-STRIP_HEIGHT,delta,ctrl,shift))?;Ok(())
     }
-    pub fn download_at(&mut self,session:&mut Session,id:WindowId,x:i32,y:i32)->Result<bool,String>{if y<STRIP_HEIGHT{return Ok(false);}session.with_active(id,|app|app.download_at(x,y-STRIP_HEIGHT))}
-    pub fn mouse_navigation(&mut self,session:&mut Session,id:WindowId,forward:bool)->Result<(),String>{self.pointer_cancel(session,id)?;session.with_active(id,|app|{app.invalidate_platform_requests();app.mouse_navigation(forward);})?;Ok(())}
+    pub fn download_at(&mut self,session:&mut Session,id:WindowId,x:i32,y:i32)->Result<bool,String>{self.invalidate_link_context(id);if y<STRIP_HEIGHT{return Ok(false);}session.with_active(id,|app|app.download_at(x,y-STRIP_HEIGHT))}
+    pub fn mouse_navigation(&mut self,session:&mut Session,id:WindowId,forward:bool)->Result<(),String>{self.invalidate_link_context(id);self.pointer_cancel(session,id)?;session.with_active(id,|app|{app.invalidate_platform_requests();app.mouse_navigation(forward);})?;Ok(())}
 }
 
 #[cfg(test)]
 #[path="app_session_ui_tests.rs"]
 mod tests;
+
+impl SessionUi {
+    /// Menu-only lifetime identity. Temporary native focus/capture loss does not
+    /// call this; real input and logical changes do, even when author-cancelled.
+    pub(crate) fn invalidate_link_context(&mut self,id:WindowId){
+        if let Some(window)=self.windows.iter_mut().find(|window|window.id==id){window.menu_scope=Rc::new(());}
+    }
+    /// Native capture leases observe the exact original pure press without
+    /// inferring an owner from a replacement active page or allocating geometry.
+    pub(crate) fn has_link_pointer(&self,session:&Session,id:WindowId,tab:TabId,button:u8)->bool{
+        let Some(window)=self.windows.iter().find(|window|window.id==id)else{return false;};
+        let Some(press)=window.press.as_ref()else{return false;};
+        let original=match press.target{Target::Page(owner)=>press.native&&owner==tab,Target::Strip(..)=>button==0&&!press.native};
+        self.logical_active==Some(id)&&original&&press.button==button&&press.token.window==id&&press.token.active==Some(tab)&&press.token.revision==window.revision
+            &&(press.token.width,press.token.height)==(window.width,window.height)
+            &&session.active(id).ok().flatten()==Some(tab)
+            &&session.window_tabs(id).is_ok_and(|tabs|tabs==press.token.members.as_slice())
+    }
+    /// A missing/stale native release cancels only its retained originating
+    /// press. With no press it must not mutate the current replacement page.
+    pub(crate) fn cancel_link_pointer(&mut self,session:&mut Session,id:WindowId,expected:Option<TabId>)->Result<bool,String>{
+        let Ok(index)=self.index(id)else{return Ok(false);};
+        if let Some(expected)=expected{
+            if !self.windows[index].press.as_ref().is_some_and(|press|press.token.window==id&&match press.target{Target::Page(tab)=>tab==expected,Target::Strip(..)=>press.token.active==Some(expected)}){return Ok(false);}
+        }
+        let Some(press)=self.windows[index].press.take()else{return Ok(false);};
+        if let Target::Page(tab)=press.target{
+            if session.window_tabs(id).is_ok_and(|tabs|tabs.contains(&tab)){
+                let _=session.with_tab(tab,|app|{app.pointer_cancel();app.pending_surrogate=None;});
+            }
+        }Ok(true)
+    }
+    pub(crate) fn link_pointer_down(&mut self,session:&mut Session,id:WindowId,x:i32,y:i32,button:u8,shift:bool)->Result<Outcome,String>{
+        self.invalidate_link_context(id);self.activate_window(session,id)?;self.pointer_cancel(session,id)?;self.refresh(session,id)?;
+        if !matches!(button,0|1){return Ok(Outcome::default());}
+        let geometry=self.geometry(session,id)?;let index=self.index(id)?;
+        if y<STRIP_HEIGHT{return if button==0{self.pointer_down(session,id,x,y,shift)}else{Ok(Outcome::default())};}
+        if x<0||x>=self.windows[index].width||y>=self.windows[index].height{return Ok(Outcome::default());}
+        let tab=geometry.token.active.ok_or("This window has no active tab.")?;
+        let(request,anchor)=session.with_tab(tab,|app|{
+            if button==0{let(action,anchor)=app.primary_anchor_down(x,y-STRIP_HEIGHT,shift);(Self::route(id,tab,app,action),anchor)}
+            else{(None,app.middle_anchor_down(x,y-STRIP_HEIGHT))}
+        })?;
+        self.windows[index].press=Some(Press{target:Target::Page(tab),token:geometry.token,x,y,moved:false,button,native:true,anchor});
+        Ok(Outcome{request,repaint:true,..Outcome::default()})
+    }
+    pub(crate) fn link_pointer_up(&mut self,session:&mut Session,id:WindowId,x:i32,y:i32,input:AnchorMouseInput)->Result<Outcome,String>{
+        self.invalidate_link_context(id);let geometry=self.geometry(session,id)?;let index=self.index(id)?;
+        // Tab strip presses retain their existing browser-only release grammar.
+        if self.windows[index].press.as_ref().is_some_and(|press|!press.native&&matches!(press.target,Target::Strip(..))){
+            return if input.button==0{self.pointer_up(session,id,x,y)}else{self.pointer_cancel(session,id)?;Ok(Outcome{repaint:true,..Outcome::default()})};
+        }
+        let Some(press)=self.windows[index].press.take()else{return Ok(Outcome::default());};
+        let Target::Page(tab)=press.target else{return Ok(Outcome::default());};
+        if !press.native||press.button!=input.button||press.token!=geometry.token||!matches!(input.button,0|1)
+            ||!input.screen_x.is_finite()||!input.screen_y.is_finite(){
+            let _=session.with_tab(tab,|app|app.pointer_cancel());return Ok(Outcome{repaint:true,..Outcome::default()});
+        }
+        let moved=press.moved||(i64::from(x)-i64::from(press.x)).abs()>4||(i64::from(y)-i64::from(press.y)).abs()>4;
+        let mut request=None;
+        let default=session.with_tab(tab,|app|{
+            if let Some(hit)=press.anchor{
+                if app.anchor_hit_valid(&hit,x,y-STRIP_HEIGHT,moved,input.button){
+                    app.pointer_cancel();return match app.activate_anchor(hit,x,y-STRIP_HEIGHT,false,input){Ok(default)=>Some(default),Err(error)=>{app.anchor_default_error(error);None}};
+                }
+                if !moved{app.pointer_cancel();return None;}
+            }
+            // Always finish primary non-link behavior with legacy link default
+            // disabled. Missing/stale capture can never acquire a new target.
+            if input.button==0{let action=app.pointer_up_without_link_default(x,y-STRIP_HEIGHT);request=Self::route(id,tab,app,action);}
+            else{app.pointer_cancel();}None
+        })?;
+        if let Some(AnchorDefault::Link(target,_))=default{return self.admit_link(session,id,tab,target,Self::link_disposition(input));}
+        Ok(Outcome{request,repaint:true,..Outcome::default()})
+    }
+    fn link_disposition(input:AnchorMouseInput)->LinkDisposition{
+        // Alt/Meta remain honest event data; only the approved button/Ctrl/Shift
+        // combinations select a disposition. The native Alt-only shortcut runs
+        // before this path and retains its existing download behavior.
+        if input.button==1{return if input.shift{LinkDisposition::ForegroundTab}else{LinkDisposition::BackgroundTab};}
+        if input.ctrl{return if input.shift{LinkDisposition::ForegroundTab}else{LinkDisposition::BackgroundTab};}
+        if input.shift{LinkDisposition::NewWindow}else{LinkDisposition::Current}
+    }
+    fn admit_link(&mut self,session:&mut Session,window:WindowId,tab:TabId,target:OwnedLinkTarget,disposition:LinkDisposition)->Result<Outcome,String>{
+        self.refresh(session,window)?;let index=self.index(window)?;self.windows[index].preflight()?;
+        let(width,height)=(self.windows[index].width,self.windows[index].height);
+        if matches!(disposition,LinkDisposition::ForegroundTab|LinkDisposition::BackgroundTab){
+            self.windows[index].members.try_reserve(1).map_err(|_|"Cannot reserve browser tab UI.")?;
+        }
+        let mut new_members=Vec::new();let mut new_scope=None;
+        if disposition==LinkDisposition::NewWindow{
+            if self.windows.len()==MAX_WINDOWS{return Err("Browser UI window limit was reached.".into());}
+            self.windows.try_reserve(1).map_err(|_|"Cannot reserve browser window UI.")?;
+            new_members.try_reserve_exact(1).map_err(|_|"Cannot reserve new browser tab UI.")?;new_scope=Some(Rc::new(()));
+        }
+        let admission=session.open_link(window,tab,target,disposition)?;
+        if admission.disposition==LinkDisposition::NewWindow{
+            // The factory already supplied source content bounds. Publish the
+            // preallocated one-tab UI directly; create_main binds actual client
+            // dimensions later. No recoverable UI allocation follows admission.
+            new_members.push(admission.tab);self.windows.push(Window{id:admission.window,width,height,first:0,revision:0,
+                members:new_members,active:Some(admission.tab),press:None,hover:None,swallowed:0,menu_scope:new_scope.unwrap()});
+            self.activate_window(session,admission.window)?;
+            Ok(Outcome{opened:Some((admission.window,admission.tab)),repaint:true,..Outcome::default()})
+        }else{
+            // All recoverable UI preflights precede Session publication. Avoid a
+            // post-admission geometry allocation for this one known new member.
+            if matches!(disposition,LinkDisposition::ForegroundTab|LinkDisposition::BackgroundTab){
+                let ui=&mut self.windows[index];ui.bump()?;ui.members.push(admission.tab);
+                if disposition==LinkDisposition::ForegroundTab{ui.active=Some(admission.tab);}
+                ui.first=Self::first_with_active(ui.first,ui.members.len(),Self::visible(ui.width,ui.members.len()),ui.active.and_then(|active|ui.members.iter().position(|tab|*tab==active)));
+                ui.hover=None;
+            }
+            Ok(Outcome{repaint:true,..Outcome::default()})
+        }
+    }
+    pub(crate) fn link_context_origin(&mut self,session:&mut Session,id:WindowId)->Result<Option<LinkContextOrigin>,String>{
+        self.invalidate_link_context(id);self.activate_window(session,id)?;self.refresh(session,id)?;
+        let geometry=self.geometry(session,id)?;let index=self.index(id)?;let Some(tab)=geometry.token.active else{return Ok(None);};
+        let anchor=session.observe_tab(tab,|app|app.anchor_context_origin())?;
+        Ok(Some(LinkContextOrigin{window:id,tab,token:geometry.token,scope:self.windows[index].menu_scope.clone(),anchor}))
+    }
+    pub(crate) fn link_context_from_origin(&mut self,session:&mut Session,origin:LinkContextOrigin,x:i32,y:i32)->Result<Option<LinkContext>,String>{
+        let LinkContextOrigin{window,tab,token,scope,anchor}=origin;
+        let Ok(index)=self.index(window)else{return Ok(None);};let Ok(geometry)=self.geometry(session,window)else{return Ok(None);};
+        if token!=geometry.token||!Rc::ptr_eq(&scope,&self.windows[index].menu_scope)||session.active(window).ok().flatten()!=Some(tab)
+            ||x<0||x>=self.windows[index].width||y<STRIP_HEIGHT||y>=self.windows[index].height{return Ok(None);}
+        let Some(anchor)=session.observe_tab(tab,|app|app.anchor_context_from_origin(anchor,x,y-STRIP_HEIGHT))?else{return Ok(None);};
+        Ok(Some(LinkContext{window,tab,token,scope,anchor}))
+    }
+    pub(crate) fn link_context(&mut self,session:&mut Session,id:WindowId,x:i32,y:i32)->Result<Option<LinkContext>,String>{
+        self.pointer_cancel(session,id)?;let Some(origin)=self.link_context_origin(session,id)?else{return Ok(None);};
+        self.link_context_from_origin(session,origin,x,y)
+    }
+    pub(crate) fn open_link_context(&mut self,session:&mut Session,context:LinkContext,disposition:LinkDisposition)->Result<Outcome,String>{
+        let LinkContext{window,tab,token,scope,anchor}=context;
+        let Ok(index)=self.index(window)else{return Ok(Outcome::default());};
+        let Ok(geometry)=self.geometry(session,window)else{return Ok(Outcome::default());};
+        if token!=geometry.token||!Rc::ptr_eq(&scope,&self.windows[index].menu_scope)
+            ||session.active(window).ok().flatten()!=Some(tab){return Ok(Outcome::default());}
+        self.invalidate_link_context(window);
+        let default=session.with_tab(tab,|app|{
+            if !app.anchor_context_valid(&anchor){return None;}
+            match app.open_anchor_context(anchor){Ok(default)=>Some(default),Err(error)=>{app.anchor_default_error(error);None}}
+        })?;
+        if let Some(AnchorDefault::Link(target,_))=default{return self.admit_link(session,window,tab,target,disposition);}
+        Ok(Outcome{repaint:true,..Outcome::default()})
+    }
+}
+
+#[cfg(test)]
+#[path="app_session_ui_link_tests.rs"]
+mod link_tests;

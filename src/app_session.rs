@@ -292,6 +292,10 @@ impl App {
     }
 }
 
+#[path="app_session_link.rs"]
+mod link_admission;
+pub(crate) use link_admission::{LinkAdmission,LinkDisposition};
+
 #[path="app_session_ui.rs"]
 pub(crate) mod window_ui;
 

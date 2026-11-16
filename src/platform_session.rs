@@ -2,7 +2,8 @@
 //! No Session/App/registry guard spans a native call, including modal dialogs.
 use super::*;
 use crate::app::session::window_ui::{Outcome, RoutedRequest, SessionUi};
-use crate::app::session::{Limits, Session, TabId, WindowId};
+use crate::app::session::{Limits, LinkDisposition, Session, TabId, WindowId};
+use crate::scripting::AnchorMouseInput;
 use crate::app::{PlatformCompletion, PlatformRequest};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 #[path = "platform_session_routes.rs"]
@@ -11,6 +12,22 @@ pub(super) use routes::{Binding, InputOwner, Owner};
 use routes::{InputRoutes, Registry};
 const CLASS: &str = "ChezCatWindow";
 const TIMER: usize = 0x4f45;
+const LINK_FOREGROUND: usize = 1;
+const LINK_BACKGROUND: usize = 2;
+const LINK_WINDOW: usize = 3;
+/// One exact queued release. No App address or borrow crosses DispatchMessageW.
+#[derive(Clone, Copy)]
+struct MouseRelease {
+    hwnd: usize, message: u32, wparam: usize, lparam: isize,
+    route: Binding, origin: InputOwner, input: AnchorMouseInput,
+    capture: Option<PointerCapture>,
+}
+/// One bounded native pointer lease, including the pending down preparation.
+/// Its checked generation prevents an old completion releasing a nested press.
+#[derive(Clone, Copy)]
+struct PointerCapture {
+    generation: u64, route: Binding, origin: InputOwner, button: u8, pending: bool,
+}
 struct Browser {
     session: Session,
     ui: SessionUi,
@@ -26,6 +43,14 @@ std::thread_local! {
     static BROWSER:RefCell<Option<Browser>>=const{RefCell::new(None)};
     static NATIVE:RefCell<Option<Registry>>=const{RefCell::new(None)};
     static INPUT:RefCell<InputRoutes>=RefCell::new(InputRoutes::new());
+    static MOUSE_RELEASE:Cell<Option<MouseRelease>>=const{Cell::new(None)};
+    static POINTER_CAPTURE:Cell<Option<PointerCapture>>=const{Cell::new(None)};
+    static NEXT_POINTER_CAPTURE:Cell<u64>=const{Cell::new(0)};
+    #[cfg(test)] static TEST_CAPTURE_REENTRY:Cell<Option<unsafe fn(Binding)>>=const{Cell::new(None)};
+    #[cfg(test)] static TEST_LINK_MENU:Cell<Option<unsafe fn(Binding)->usize>>=const{Cell::new(None)};
+    #[cfg(test)] static TEST_LINK_CONTEXT_REENTRY:Cell<Option<unsafe fn(Binding)>>=const{Cell::new(None)};
+    #[cfg(test)] static TEST_LINK_MENU_DROPS:Cell<usize>=const{Cell::new(0)};
+    #[cfg(test)] static TEST_LINK_HOST_REFUSAL:Cell<bool>=const{Cell::new(false)};
     static CLOSE_PROMPT:Cell<bool>=const{Cell::new(false)};
     #[cfg(test)] static TEST_HISTORY_CHOICE:Cell<Option<i32>>=const{Cell::new(None)};
     #[cfg(test)] static TEST_REENTRY_BUSY:Cell<bool>=const{Cell::new(false)};
@@ -167,7 +192,13 @@ pub(super) unsafe fn destroyed(hwnd: Handle) {
     }
     let key = GetWindowLongPtrW(hwnd, -21) as usize;
     registry(|r| r.remove(key));
+    POINTER_CAPTURE.with(|slot| {
+        if slot.get().is_some_and(|lease| lease.route.key == key && lease.route.hwnd == hwnd as usize) { slot.set(None); }
+    });
     INPUT.with(|r| r.borrow_mut().forget(hwnd as usize));
+    MOUSE_RELEASE.with(|slot| {
+        if slot.get().is_some_and(|release| release.hwnd == hwnd as usize) { slot.set(None); }
+    });
     KillTimer(hwnd, TIMER);
     forget_frame_colors(hwnd);
     SetWindowLongPtrW(hwnd, -21, 0);
@@ -225,6 +256,9 @@ unsafe fn mutate<T>(
     .unwrap_or_default();
     registry(|r| r.suspend_inspectors());
     let result = edit(operation);
+    // Retire a logically lost press before any inspector/native operation can
+    // reenter. The lease is copied; this call owns no browser/registry guard.
+    reconcile_pointer_capture();
     let live = edit(|b| {
         Ok(b.session
             .window_ids()
@@ -289,9 +323,7 @@ pub(super) unsafe fn perform_request(route: Binding, origin: InputOwner, request
         PlatformAction::None => Ok(None),
         PlatformAction::OpenFile if origin.inspector => Ok(None),
         PlatformAction::OpenFile => {
-            if GetCapture() == hwnd {
-                ReleaseCapture();
-            }
+            retire_capture_for(route, Some(origin));
             if !attached(route) {
                 return;
             }
@@ -334,6 +366,15 @@ pub(super) unsafe fn inspector_request(
         perform_request(route, origin, request);
     }
 }
+/// The cfg(test) refusal exercises this exact continuation's rollback, without
+/// exhausting native resources or displaying a test-owned window.
+unsafe fn create_admitted_main(window: WindowId) -> Result<Handle, String> {
+    #[cfg(test)]
+    if TEST_LINK_HOST_REFUSAL.with(|slot| slot.replace(false)) {
+        return Err("Task-created native host admission refusal.".into());
+    }
+    create_main(window, !cfg!(test))
+}
 unsafe fn outcome(route: Binding, result: Result<Outcome, String>) {
     match result {
         Ok(outcome) => {
@@ -341,7 +382,7 @@ unsafe fn outcome(route: Binding, result: Result<Outcome, String>) {
                 close_native(window, true);
             }
             if let Some((window, _)) = outcome.opened {
-                if let Err(error) = create_main(window, true) {
+                if let Err(error) = create_admitted_main(window) {
                     let _ = mutate(|b| {
                         b.session.close_window(window)?;
                         b.ui.forget(window);
@@ -395,9 +436,7 @@ pub(super) unsafe fn refresh_window(window: WindowId) {
     };
     if let Some((token, address)) = prompt {
         let hwnd = route.hwnd as Handle;
-        if GetCapture() == hwnd {
-            ReleaseCapture();
-        }
+        retire_capture_for(route, Some(InputOwner { window, tab, inspector: false }));
         if !attached(route) {
             return;
         }
@@ -671,6 +710,7 @@ fn shutdown_attempt() -> Result<(), String> {
     })
 }
 unsafe fn retire_native(routes: Vec<Binding>) {
+    reconcile_pointer_capture();
     for route in routes {
         if route.hwnd != 0 && native_matches(route) {
             KillTimer(route.hwnd as Handle, TIMER);
@@ -762,6 +802,7 @@ unsafe fn close_native(window: WindowId, already_closed: bool) {
             Ok(())
         })
     };
+    reconcile_pointer_capture();
     if let Err(error) = result {
         registry(|r| r.restore_window(window));
         report(host, &error);
@@ -778,7 +819,168 @@ unsafe fn close_native(window: WindowId, already_closed: bool) {
     arm_scheduler();
 }
 
+fn current_capture(lease: PointerCapture) -> bool {
+    POINTER_CAPTURE.with(|slot| slot.get().is_some_and(|current|
+        current.generation == lease.generation && current.route.key == lease.route.key
+            && current.route.hwnd == lease.route.hwnd && current.origin == lease.origin
+            && current.button == lease.button))
+}
+unsafe fn retire_pointer_capture(lease: PointerCapture) -> bool {
+    if !current_capture(lease) { return false; }
+    // Clear before Win32. A reentrant replacement may install its own higher
+    // generation and must survive this old ReleaseCapture completion.
+    POINTER_CAPTURE.with(|slot| slot.set(None));
+    let _ = edit(|b| b.ui.cancel_link_pointer(&mut b.session, lease.origin.window, Some(lease.origin.tab)));
+    if native_matches(lease.route) && GetCapture() == lease.route.hwnd as Handle
+        && native_matches(lease.route) && POINTER_CAPTURE.with(|slot| slot.get().is_none()) {
+        ReleaseCapture();
+    }
+    true
+}
+unsafe fn retire_capture_for(route: Binding, origin: Option<InputOwner>) {
+    if let Some(lease) = POINTER_CAPTURE.with(|slot| slot.get()).filter(|lease|
+        lease.route.key == route.key && lease.route.hwnd == route.hwnd
+            && origin.map_or(true, |owner| lease.origin == owner)) {
+        retire_pointer_capture(lease);
+    }
+}
+unsafe fn reconcile_pointer_capture() {
+    let Some(lease) = POINTER_CAPTURE.with(|slot| slot.get()) else { return; };
+    let live = attached(lease.route) && edit(|b| Ok(alive(&b.session, lease.origin)
+        && (lease.pending || b.ui.has_link_pointer(&b.session, lease.origin.window, lease.origin.tab, lease.button))))
+        .unwrap_or(false);
+    let captured = lease.pending || GetCapture() == lease.route.hwnd as Handle;
+    if !live || !captured { retire_pointer_capture(lease); }
+}
+unsafe fn begin_pointer_capture(route: Binding, origin: InputOwner, button: u8) -> Option<PointerCapture> {
+    if origin.inspector || route.owner != Owner::Main(origin.window) || !matches!(button, 0 | 1) { return None; }
+    if let Some(old) = POINTER_CAPTURE.with(|slot| slot.get()) { retire_pointer_capture(old); }
+    // A nested replacement acquired during the old release owns its lease.
+    if POINTER_CAPTURE.with(|slot| slot.get().is_some()) || !same_active(route, Some(origin)) { return None; }
+    let generation = NEXT_POINTER_CAPTURE.with(|slot| {
+        let next = slot.get().checked_add(1)?; slot.set(next); Some(next)
+    })?;
+    let lease = PointerCapture { generation, route, origin, button, pending: true };
+    POINTER_CAPTURE.with(|slot| slot.set(Some(lease)));
+    Some(lease)
+}
+unsafe fn finish_pointer_capture(lease: PointerCapture) {
+    if current_capture(lease) {
+        POINTER_CAPTURE.with(|slot| slot.set(Some(PointerCapture { pending: false, ..lease })));
+        reconcile_pointer_capture();
+    }
+}
+unsafe fn release_envelope(message: &Message) -> Option<MouseRelease> {
+    let button = match message.message { 0x0202 => 0, 0x0208 => 1, _ => return None };
+    let route = binding(message.window)?;
+    let origin = owner_for(route)?;
+    if origin.inspector || route.owner != Owner::Main(origin.window) { return None; }
+    Some(MouseRelease {
+        hwnd: message.window as usize, message: message.message,
+        wparam: message.wparam, lparam: message.lparam, route, origin,
+        capture: POINTER_CAPTURE.with(|slot| slot.get()),
+        input: AnchorMouseInput {
+            button, ctrl: message.wparam & 0x0008 != 0, shift: message.wparam & 0x0004 != 0,
+            alt: key_is_down(0x12), meta: key_is_down(0x5b) || key_is_down(0x5c),
+            screen_x: f64::from(message.point.x), screen_y: f64::from(message.point.y),
+            ..AnchorMouseInput::default()
+        },
+    })
+}
+fn take_release(hwnd: Handle, message: u32, wparam: usize, lparam: isize) -> Option<MouseRelease> {
+    MOUSE_RELEASE.with(|slot| {
+        let release = slot.get()?;
+        if (release.hwnd, release.message, release.wparam, release.lparam)
+            != (hwnd as usize, message, wparam, lparam) { return None; }
+        slot.set(None);
+        Some(release)
+    })
+}
+fn exact_release(release: MouseRelease, route: Binding, initial: Option<InputOwner>) -> bool {
+    release.route.key == route.key && release.route.hwnd == route.hwnd
+        && release.route.owner == route.owner && initial == Some(release.origin)
+        && release.capture.is_some_and(|lease| lease.origin == release.origin
+            && lease.route.key == route.key && lease.route.hwnd == route.hwnd && lease.route.owner == route.owner
+            && lease.button == release.input.button && !lease.pending && current_capture(lease))
+        && same_active(route, Some(release.origin))
+}
+struct LinkMenu(Handle);
+impl Drop for LinkMenu {
+    fn drop(&mut self) {
+        unsafe { DestroyMenu(self.0); }
+        #[cfg(test)] TEST_LINK_MENU_DROPS.with(|slot| slot.set(slot.get() + 1));
+    }
+}
+unsafe fn choose_link_command(route: Binding, origin: InputOwner, x: i32, y: i32) -> Option<LinkDisposition> {
+    let raw = CreatePopupMenu();
+    if raw.is_null() { return None; }
+    let menu = LinkMenu(raw);
+    for (id, label) in [
+        (LINK_FOREGROUND, "Open link in foreground tab"),
+        (LINK_BACKGROUND, "Open link in background tab"),
+        (LINK_WINDOW, "Open link in new window"),
+    ] {
+        let label = wide(label);
+        if AppendMenuW(menu.0, 0, id, label.as_ptr()) == 0 { return None; }
+        if !same_active(route, Some(origin)) { return None; }
+    }
+    // The hook is bounded to this task's hidden HWND controls. Production always
+    // enters the real popup loop with the same owned menu and no browser guards.
+    #[cfg(test)]
+    let command = TEST_LINK_MENU.with(|slot| slot.take()).map_or(0, |hook| hook(route));
+    #[cfg(not(test))]
+    let command = TrackPopupMenu(menu.0, 0x0100 | 0x0080 | 0x0002,
+        x, y, 0, route.hwnd as Handle, null()) as usize;
+    #[cfg(test)] let _ = (x, y);
+    match command {
+        LINK_FOREGROUND => Some(LinkDisposition::ForegroundTab),
+        LINK_BACKGROUND => Some(LinkDisposition::BackgroundTab),
+        LINK_WINDOW => Some(LinkDisposition::NewWindow),
+        _ => None,
+    }
+}
+/// Retain the original context locally through the modal loop. Every native
+/// call is outside edit/registry, and completion never re-hits or rebinds it.
+unsafe fn link_context_menu(route: Binding, initial: Option<InputOwner>, x: i32, y: i32) -> bool {
+    if (x, y) == (-1, -1) { return false; }
+    let Some(origin) = initial.filter(|owner| !owner.inspector) else { return false; };
+    if route.owner != Owner::Main(origin.window) || !same_active(route, Some(origin)) { return false; }
+    let _ = edit(|b| b.ui.pointer_cancel(&mut b.session, origin.window));
+    // Capture source/document/input/geometry identity before the first native
+    // conversion/capture call. Full owner IDs alone cannot reject same-owner
+    // replacement during those reentrant operations.
+    let stamp = match edit(|b| b.ui.link_context_origin(&mut b.session, origin.window)) {
+        Ok(Some(stamp)) => stamp,
+        _ => return false,
+    };
+    #[cfg(test)]
+    if let Some(hook) = TEST_LINK_CONTEXT_REENTRY.with(|slot| slot.take()) { hook(route); }
+    reconcile_pointer_capture();
+    if !same_active(route, Some(origin)) { return false; }
+    let mut point = Point { x, y };
+    if ScreenToClient(route.hwnd as Handle, &mut point) == 0
+        || !same_active(route, Some(origin)) { return false; }
+    let context = match edit(|b| b.ui.link_context_from_origin(&mut b.session, stamp, point.x, point.y)) {
+        Ok(Some(context)) => context,
+        _ => return false,
+    };
+    let command = choose_link_command(route, origin, x, y);
+    if let Some(disposition) = command.filter(|_| same_active(route, Some(origin))) {
+        let result = mutate(|b| b.ui.open_link_context(&mut b.session, context, disposition));
+        outcome(route, result);
+    }
+    true
+}
 unsafe fn dispatch_native(message: &Message) {
+    if matches!(message.message, 0x0202 | 0x0208) {
+        let release = release_envelope(message);
+        MOUSE_RELEASE.with(|slot| slot.set(release));
+        // This is the genuine queued message's screen point, not a later cursor
+        // sample or a client-to-screen reconstruction after window movement.
+        DispatchMessageW(message);
+        MOUSE_RELEASE.with(|slot| slot.set(None));
+        return;
+    }
     if matches!(message.message, 0x0100 | 0x0104) && binding(message.window).is_some() {
         let captured = binding(message.window);
         let origin = captured.and_then(owner_for);
@@ -907,6 +1109,8 @@ unsafe extern "system" fn procedure(
     wparam: usize,
     lparam: isize,
 ) -> isize {
+    // Take the matching queued payload before any native operation can reenter.
+    let release = take_release(hwnd, message, wparam, lparam);
     match message {
         0x0081 => {
             let create = &*(lparam as *const CreateStruct);
@@ -981,6 +1185,12 @@ unsafe extern "system" fn procedure(
         return DefWindowProcW(hwnd, message, wparam, lparam);
     };
     let initial = owner_for(route);
+    // Popup hover/leave changes presentation, not the captured link authority.
+    // Any held mouse button still retires it, independently of capture/dragging.
+    if matches!(message, 0x0100..=0x0109 | 0x0201..=0x020e | 0x0319 | 0x0233 | 0x007b)
+        || (message == 0x0200 && wparam & 0x73 != 0) {
+        let _ = edit(|b| { b.ui.invalidate_link_context(window); Ok(()) });
+    }
     match message {
         0x0010 => {
             close_native(window, false);
@@ -1005,12 +1215,23 @@ unsafe extern "system" fn procedure(
                     b.ui.resize(&mut b.session, window, rect.right, rect.bottom)?;
                     b.ui.frame(&b.session, window)
                 });
+                reconcile_pointer_capture();
                 if let Ok(canvas) = frame {
                     present_canvas(dc, &rect, &canvas);
                 }
             }
             EndPaint(hwnd, &paint);
             0
+        }
+        0x0003 => {
+            // A top-level screen-position change does not resize App geometry,
+            // but must retire gestures/menus captured at its old native origin.
+            let _ = edit(|b| {
+                b.ui.invalidate_link_context(window);
+                b.ui.pointer_cancel(&mut b.session, window)
+            });
+            reconcile_pointer_capture();
+            DefWindowProcW(hwnd, message, wparam, lparam)
         }
         0x0005 => {
             let mut rect: Rect = zeroed();
@@ -1021,6 +1242,7 @@ unsafe extern "system" fn procedure(
                 {
                     report(route, &error);
                 }
+                reconcile_pointer_capture();
                 inspector_window::sync(window);
                 InvalidateRect(hwnd, null(), 0);
                 arm_scheduler();
@@ -1048,9 +1270,7 @@ unsafe extern "system" fn procedure(
         }
         0x020b if matches!((wparam >> 16) & 0xffff, 1 | 2) => 1,
         0x020c if matches!((wparam >> 16) & 0xffff, 1 | 2) => {
-            if GetCapture() == hwnd {
-                ReleaseCapture();
-            }
+            retire_capture_for(route, initial);
             if same_active(route, initial) {
                 let _ = mutate(|b| {
                     b.ui.mouse_navigation(&mut b.session, window, (wparam >> 16) & 0xffff == 2)
@@ -1061,9 +1281,7 @@ unsafe extern "system" fn procedure(
             1
         }
         0x0319 if matches!((lparam as usize >> 16) & 0x0fff, 1 | 2) => {
-            if GetCapture() == hwnd {
-                ReleaseCapture();
-            }
+            retire_capture_for(route, initial);
             if same_active(route, initial) {
                 let _ = mutate(|b| {
                     b.ui.mouse_navigation(
@@ -1159,25 +1377,49 @@ unsafe extern "system" fn procedure(
         0x0201 => {
             let (x, y) = mouse_coordinates(lparam);
             let shift = key_is_down(0x10);
+            let Some(origin) = initial else { return 0; };
+            let Some(lease) = begin_pointer_capture(route, origin, 0) else { return 0; };
             SetFocus(hwnd);
-            if !same_active(route, initial) {
-                return 0;
+            if !current_capture(lease) || !same_active(route, Some(origin)) {
+                retire_pointer_capture(lease); return 0;
             }
             if key_is_down(0x12)
                 && !key_is_down(0x11)
                 && !shift
                 && mutate(|b| b.ui.download_at(&mut b.session, window, x, y)).unwrap_or(false)
             {
+                retire_pointer_capture(lease);
                 refresh_window(window);
                 arm_scheduler();
                 return 0;
             }
             SetCapture(hwnd);
-            if same_active(route, initial) {
-                let result = mutate(|b| b.ui.pointer_down(&mut b.session, window, x, y, shift));
+            if current_capture(lease) && same_active(route, Some(origin)) && GetCapture() == hwnd {
+                let result = mutate(|b| b.ui.link_pointer_down(&mut b.session, window, x, y, 0, shift));
+                finish_pointer_capture(lease);
                 outcome(route, result);
-            }
+            } else { retire_pointer_capture(lease); }
             0
+        }
+        0x0207 => {
+            let (x, y) = mouse_coordinates(lparam);
+            let shift = wparam & 0x0004 != 0;
+            let Some(origin) = initial else { return 0; };
+            let Some(lease) = begin_pointer_capture(route, origin, 1) else { return 0; };
+            SetFocus(hwnd);
+            if !current_capture(lease) || !same_active(route, Some(origin)) { retire_pointer_capture(lease); return 0; }
+            SetCapture(hwnd);
+            if current_capture(lease) && same_active(route, Some(origin)) && GetCapture() == hwnd {
+                let result = mutate(|b| b.ui.link_pointer_down(&mut b.session, window, x, y, 1, shift));
+                finish_pointer_capture(lease);
+                outcome(route, result);
+            } else { retire_pointer_capture(lease); }
+            0
+        }
+        0x007b => {
+            let (x, y) = mouse_coordinates(lparam);
+            if link_context_menu(route, initial, x, y) { 0 }
+            else { DefWindowProcW(hwnd, message, wparam, lparam) }
         }
         0x0200 => {
             let mut tracking = MouseTracking {
@@ -1188,10 +1430,11 @@ unsafe extern "system" fn procedure(
             };
             TrackMouseEvent(&mut tracking);
             let (x, y) = mouse_coordinates(lparam);
-            let dragging = wparam & 1 != 0 && GetCapture() == hwnd;
+            let dragging = wparam & (0x0001 | 0x0010) != 0 && GetCapture() == hwnd;
             if same_active(route, initial) {
                 let changed = edit(|b| b.ui.pointer_move(&mut b.session, window, x, y, dragging))
                     .unwrap_or(false);
+                reconcile_pointer_capture();
                 cursor(route, x, y);
                 if changed {
                     InvalidateRect(hwnd, null(), 0);
@@ -1206,24 +1449,47 @@ unsafe extern "system" fn procedure(
             }
             0
         }
-        0x0202 => {
+        0x0202 | 0x0208 => {
             let (x, y) = mouse_coordinates(lparam);
-            let result = mutate(|b| b.ui.pointer_up(&mut b.session, window, x, y));
-            if GetCapture() == hwnd {
-                ReleaseCapture();
-            }
-            if attached(route) {
+            let accepted = release.filter(|release| exact_release(*release, route, initial));
+            let button = if message == 0x0202 { 0 } else { 1 };
+            let owns_route = |lease: &PointerCapture| lease.route.key == route.key
+                && lease.route.hwnd == route.hwnd && lease.route.owner == route.owner && lease.button == button;
+            let lease = release.and_then(|release| release.capture)
+                .filter(|lease| owns_route(lease) && current_capture(*lease));
+            let result = if let Some(release) = accepted {
+                mutate(|b| b.ui.link_pointer_up(&mut b.session, window, x, y, release.input))
+            } else {
+                // No original current generation means no pointer authority.
+                // Missing/sent envelopes and capture-less envelopes are no-ops
+                // for both pure presses and native capture, even in this owner.
+                Ok(Outcome::default())
+            };
+            if let Some(lease) = lease { retire_pointer_capture(lease); }
+            if POINTER_CAPTURE.with(|slot| slot.get().is_none())
+                && accepted.is_some_and(|release| same_active(route, Some(release.origin))) {
                 let _ = edit(|b| b.ui.pointer_move(&mut b.session, window, x, y, false));
             }
             outcome(route, result);
             0
         }
-        0x0215 | 0x0008 | 0x001f => {
+        0x0215 => {
+            #[cfg(test)]
+            if let Some(hook) = TEST_CAPTURE_REENTRY.with(|slot| slot.take()) { hook(route); }
+            // A replacement may already have recaptured this HWND while the
+            // old ReleaseCapture is reentering. Only retire the still-lost lease.
+            if let Some(lease) = POINTER_CAPTURE.with(|slot| slot.get()).filter(|lease|
+                lease.route.key == route.key && lease.route.hwnd == route.hwnd && !lease.pending) {
+                if GetCapture() != hwnd { retire_pointer_capture(lease); }
+            }
+            // Mouse capture changes never clear unchanged keyboard/text routes.
+            InvalidateRect(hwnd, null(), 0);
+            DefWindowProcW(hwnd, message, wparam, lparam)
+        }
+        0x0008 | 0x001f => {
             let _ = edit(|b| b.ui.pointer_cancel(&mut b.session, window));
             INPUT.with(|r| r.borrow_mut().forget(hwnd as usize));
-            if message != 0x0215 && GetCapture() == hwnd {
-                ReleaseCapture();
-            }
+            reconcile_pointer_capture();
             InvalidateRect(hwnd, null(), 0);
             DefWindowProcW(hwnd, message, wparam, lparam)
         }

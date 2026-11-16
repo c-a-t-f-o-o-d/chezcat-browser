@@ -6,6 +6,43 @@ use std::io::Write;
 use std::path::Path;
 use std::time::Duration;
 
+// The canvas uses the existing checked Canvas allocation bound. Text comes
+// from the same bounded App/document reports; only one snapshot is retained.
+struct InputSnapshot {
+    canvas: crate::paint::Canvas,
+    activity: String,
+    source: String,
+    layout: String,
+    about: Option<(String, Option<String>)>,
+}
+
+fn input_snapshot_token(value: &str, limit: usize) -> bool {
+    !value.is_empty() && value.len() <= limit
+        && value.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
+}
+
+impl InputSnapshot {
+    fn write(mut self, output: &Path, name: &str) -> Result<(), String> {
+        // Keep all pre-action text evidence even if raster output fails.
+        let rendered = (|| -> Result<(), String> {
+            if self.canvas.pixels.is_empty() { return Err("Could not allocate harness render surface.".into()); }
+            let mut file = std::io::BufWriter::new(std::fs::File::create(output.join(format!("{name}.ppm"))).map_err(|e| e.to_string())?);
+            write!(file, "P6\n{} {}\n255\n", self.canvas.width, self.canvas.height).map_err(|e| e.to_string())?;
+            for pixel in &self.canvas.pixels { file.write_all(&[(pixel >> 16) as u8, (pixel >> 8) as u8, *pixel as u8]).map_err(|e| e.to_string())?; }
+            file.flush().map_err(|e| e.to_string())
+        })();
+        self.activity.push_str(&format!("Stage paired_ppm_written={}\n", u8::from(rendered.is_ok())));
+        std::fs::write(output.join(format!("{name}.activity.txt")), self.activity).map_err(|e| e.to_string())?;
+        std::fs::write(output.join(format!("{name}.source.html")), self.source).map_err(|e| e.to_string())?;
+        std::fs::write(output.join(format!("{name}.layout.txt")), self.layout).map_err(|e| e.to_string())?;
+        if let Some((text, state)) = self.about {
+            std::fs::write(output.join(format!("{name}.about.txt")), text).map_err(|e| e.to_string())?;
+            std::fs::write(output.join(format!("{name}.about-state.txt")), state.ok_or("About state unavailable.")?).map_err(|e| e.to_string())?;
+        }
+        rendered
+    }
+}
+
 impl App {
     fn input_access_blocked(&self) -> bool {
         let status_denied = self.network.snapshot().rows.iter().any(|row|
@@ -15,6 +52,13 @@ impl App {
             "verify that you are not a robot", "confirm that you are not a robot", "access denied",
             "access to this page has been denied", "complete the captcha", "before you continue to google",
             "rate limit exceeded", "too many requests"].iter().any(|signal| rendered.contains(signal))
+    }
+
+    fn input_guard_action(&self, action: &str) -> Result<(), String> {
+        if matches!(action, "fill" | "click" | "snapshot-click" | "link" | "link-target" | "key" | "back" | "address" | "media-surface" | "media-probe") && self.input_access_blocked() {
+            return Err("Visible access denial/human verification or document rate limit; stopping without retry.".into());
+        }
+        Ok(())
     }
 
     pub fn run_input_script(&mut self, script: &Path, output: &Path) -> Result<(), String> {
@@ -34,9 +78,7 @@ impl App {
             log.flush().map_err(|e| e.to_string())?;
             let fields: Vec<_> = line.splitn(3, '\t').collect();
             let result = (|| {
-                if matches!(fields[0], "fill" | "click" | "link" | "link-target" | "key" | "back" | "address" | "media-surface" | "media-probe") && self.input_access_blocked() {
-                    return Err("Visible access denial/human verification or document rate limit; stopping without retry.".into());
-                }
+                self.input_guard_action(fields[0])?;
                 match fields.as_slice() {
                     ["provider", endpoint] => {
                         self.input_search_provider=Some(crate::search::local_fixture(endpoint)?);
@@ -92,8 +134,11 @@ impl App {
                         if self.address.text()!=*text {return Err("Actual address input differs from requested text.".into());}
                         Ok(())
                     }
-                    ["snapshot", name] if !name.is_empty() && name.len() <= 48 && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_') => {
+                    ["snapshot", name] if input_snapshot_token(name, 48) => {
                         self.input_snapshot(output, &format!("{:02}-{name}", index + 1))
+                    }
+                    ["snapshot-click", name, control] if input_snapshot_token(name, 48) && input_snapshot_token(control, 48) => {
+                        self.input_snapshot_click(output, &format!("{:02}-{name}", index + 1), control, &mut log)
                     }
                     ["fill", name, text] if text.chars().count() <= 512 => {
                         self.input_click_control(name, true, &mut log)?;
@@ -228,21 +273,12 @@ impl App {
         Ok(())
     }
 
-    fn input_snapshot(&self, output: &Path, name: &str) -> Result<(), String> {
-        // Draw before reporting so the numeric stamp describes this PPM. Keep
-        // text evidence even if the surface allocation or file output fails.
-        let rendered = (|| -> Result<(), String> {
-            let canvas = self.draw();
-            if canvas.pixels.is_empty() { return Err("Could not allocate harness render surface.".into()); }
-            let mut file = std::io::BufWriter::new(std::fs::File::create(output.join(format!("{name}.ppm"))).map_err(|e| e.to_string())?);
-            write!(file, "P6\n{} {}\n255\n", canvas.width, canvas.height).map_err(|e| e.to_string())?;
-            for pixel in &canvas.pixels { file.write_all(&[(pixel >> 16) as u8, (pixel >> 8) as u8, *pixel as u8]).map_err(|e| e.to_string())?; }
-            file.flush().map_err(|e| e.to_string())
-        })();
-        let mut activity = self.activity_report();
-        activity.push_str(&format!("Stage paired_ppm_written={}\n", u8::from(rendered.is_ok())));
-        std::fs::write(output.join(format!("{name}.activity.txt")), activity).map_err(|e| e.to_string())?;
-        std::fs::write(output.join(format!("{name}.source.html")), self.document_source()).map_err(|e| e.to_string())?;
+    fn prepare_input_snapshot(&self) -> InputSnapshot {
+        // Draw and sample the corresponding reports before any output I/O.
+        // Real playback continues; no clock, task or media state is suspended.
+        let canvas = self.draw();
+        let activity = self.activity_report();
+        let source = self.document_source().to_owned();
         let mut layout = String::new();
         for run in &self.page.runs {
             let target = run.link.and_then(|index| self.page.link_targets().nth(index));
@@ -252,13 +288,40 @@ impl App {
             let value = self.forms.controls.get(&rect.node).map(|control| control.value.text());
             layout.push_str(&format!("control={} name={:?} value={value:?} x={} y={} w={} h={}\n", rect.node, self.document.attr(rect.node, "name"), rect.x, rect.y, rect.width, rect.height));
         }
-        std::fs::write(output.join(format!("{name}.layout.txt")), layout).map_err(|e| e.to_string())?;
-        if let Some(text)=self.about_displayed_text() {
-            std::fs::write(output.join(format!("{name}.about.txt")),text).map_err(|e|e.to_string())?;
-            std::fs::write(output.join(format!("{name}.about-state.txt")),self.about_state_report().ok_or("About state unavailable.")?).map_err(|e|e.to_string())?;
-        }
-        rendered
+        let about = self.about_displayed_text().map(|text| (text.to_owned(), self.about_state_report()));
+        InputSnapshot { canvas, activity, source, layout, about }
     }
+
+    fn input_snapshot(&self, output: &Path, name: &str) -> Result<(), String> {
+        self.prepare_input_snapshot().write(output, name)
+    }
+
+    fn input_snapshot_click(&mut self, output: &Path, name: &str, control: &str, log: &mut impl Write) -> Result<(), String> {
+        // The script's raw label/control are each <=48 ASCII token bytes;
+        // the generated label also has its bounded two-digit action prefix.
+        if !input_snapshot_token(name, 51) || !input_snapshot_token(control, 48) {
+            return Err("Invalid bounded snapshot-click label or control name.".into());
+        }
+        self.input_guard_action("snapshot-click")?;
+        let mut click_log = Vec::new();
+        click_log.try_reserve(128).map_err(|_| "Snapshot-click log reservation failed.")?;
+        let snapshot = self.prepare_input_snapshot();
+        if snapshot.canvas.pixels.is_empty() || snapshot.about.as_ref().is_some_and(|(_, state)| state.is_none()) {
+            // Preserve the normal snapshot's text/error evidence without input.
+            return snapshot.write(output, name);
+        }
+        // The same trusted App pointer path runs before raster/text/log writes
+        // and before the outer driver's per-action settling. No WM shortcut.
+        let clicked = self.input_click_control(control, false, &mut click_log);
+        let written = snapshot.write(output, name);
+        let logged = log.write_all(&click_log).map_err(|error| error.to_string());
+        let mut errors = Vec::new();
+        if let Err(error) = clicked { errors.push(error); }
+        if let Err(error) = written { errors.push(format!("Snapshot output failed: {error}")); }
+        if let Err(error) = logged { errors.push(format!("Snapshot-click log failed: {error}")); }
+        if errors.is_empty() { Ok(()) } else { Err(errors.join("; ")) }
+    }
+
 }
 
 #[cfg(test)]
@@ -282,5 +345,100 @@ mod tests {
         app.forms=crate::forms::Forms::new(&app.document);
         app.reflow();
         assert!(app.input_access_blocked());
+    }
+
+
+    struct SnapshotFiles(std::path::PathBuf);
+    impl SnapshotFiles {
+        fn new() -> Self {
+            let mut random = [0u8; 8];
+            crate::random::fill(&mut random).unwrap();
+            let suffix: String = random.iter().map(|byte| format!("{byte:02x}")).collect();
+            let root = std::env::temp_dir().join(format!("chezcat-snapshot-click-{suffix}"));
+            std::fs::create_dir(&root).unwrap();
+            std::fs::write(root.join("source.html"), r#"<!doctype html><title>Before snapshot click</title><body><button id=change name=change type=button>Change</button><p id=marker>BEFORE_MARKER</p><script>
+document.getElementById('change').onclick=function(e){if(!e.isTrusted)throw Error('untrusted snapshot click');document.title='After snapshot click';document.getElementById('marker').textContent='AFTER_MARKER';};
+</script></body>"#).unwrap();
+            Self(root)
+        }
+        fn app(&self) -> App {
+            let mut app = App::new();
+            app.resize(640, 480);
+            app.open(&self.0.join("source.html"));
+            assert!(!app.failed, "{}", app.status);
+            assert_eq!(app.document.title, "Before snapshot click");
+            assert!(app.scripting.as_ref().unwrap().report().contains("0 error(s)."));
+            app
+        }
+    }
+    impl Drop for SnapshotFiles {
+        fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.0); }
+    }
+
+    #[test]
+    fn input_snapshot_click_keeps_pre_click_pixels_and_text_and_clicks_before_output_failure() {
+        let files = SnapshotFiles::new();
+        for collision in [false, true] {
+            let mut app = files.app();
+            let before = app.draw();
+            let original_source = app.document_source().to_owned();
+            let output = files.0.join(if collision { "blocked-output" } else { "output" });
+            std::fs::create_dir(&output).unwrap();
+            if collision { std::fs::create_dir(output.join("before.ppm")).unwrap(); }
+            let mut log = Vec::new();
+            let result = app.input_snapshot_click(&output, "before", "change", &mut log);
+            assert_eq!(result.is_err(), collision);
+            assert_eq!(app.document.title, "After snapshot click", "Output failure must not move output ahead of the real click");
+            assert!(app.page.runs.iter().any(|run| run.text.contains("AFTER_MARKER")));
+            assert!(app.scripting.as_ref().unwrap().report().contains("0 error(s)."));
+            assert!(String::from_utf8(log).unwrap().contains("Pointer control node="));
+            let activity = std::fs::read_to_string(output.join("before.activity.txt")).unwrap();
+            assert!(activity.contains("Page title: Before snapshot click"));
+            assert!(!activity.contains("Page title: After snapshot click"));
+            assert!(activity.contains(if collision { "Stage paired_ppm_written=0" } else { "Stage paired_ppm_written=1" }));
+            let layout = std::fs::read_to_string(output.join("before.layout.txt")).unwrap();
+            assert!(layout.contains("BEFORE_MARKER"));
+            assert!(!layout.contains("AFTER_MARKER"));
+            assert_eq!(std::fs::read_to_string(output.join("before.source.html")).unwrap(), original_source);
+            if !collision {
+                let mut expected = format!("P6\n{} {}\n255\n", before.width, before.height).into_bytes();
+                for pixel in &before.pixels { expected.extend_from_slice(&[(pixel >> 16) as u8, (pixel >> 8) as u8, *pixel as u8]); }
+                assert_eq!(std::fs::read(output.join("before.ppm")).unwrap(), expected, "Pixels must describe the same pre-click page as the text evidence");
+                assert_ne!(app.draw().pixels, before.pixels);
+            }
+        }
+    }
+
+    #[test]
+    fn input_snapshot_click_refuses_malformed_tokens_and_access_denial_without_input() {
+        let files = SnapshotFiles::new();
+        let invalid = [
+            "snapshot-click\t../before\tchange\n".to_owned(),
+            "snapshot-click\tbefore\n".to_owned(),
+            "snapshot-click\tbefore\t\n".to_owned(),
+            "snapshot-click\tbefore\tchange\textra\n".to_owned(),
+            format!("snapshot-click\t{}\tchange\n", "x".repeat(49)),
+            format!("snapshot-click\tbefore\t{}\n", "x".repeat(49)),
+        ];
+        for (index, source) in invalid.iter().enumerate() {
+            let mut app = files.app();
+            let script = files.0.join("input.tsv");
+            std::fs::write(&script, source).unwrap();
+            let output = files.0.join(format!("invalid-{index}"));
+            assert!(app.run_input_script(&script, &output).is_err());
+            assert_eq!(app.document.title, "Before snapshot click");
+            assert!(!app.page.runs.iter().any(|run| run.text.contains("AFTER_MARKER")));
+            assert!(!output.join("01-before.activity.txt").exists());
+        }
+        let mut app = files.app();
+        app.network.begin("GET", "https://fixture.test/", "document").response(403);
+        let script = files.0.join("input.tsv");
+        std::fs::write(&script, "snapshot-click\tbefore\tchange\n").unwrap();
+        let output = files.0.join("denied");
+        let error = app.run_input_script(&script, &output).unwrap_err();
+        assert!(error.contains("Visible access denial/human verification or document rate limit"));
+        assert_eq!(app.document.title, "Before snapshot click");
+        assert!(!app.page.runs.iter().any(|run| run.text.contains("AFTER_MARKER")));
+        assert!(!output.join("01-before.activity.txt").exists());
     }
 }

@@ -20,7 +20,10 @@ ROOT=Path(__file__).resolve().parents[1]
 LABELS=['metadata','hidden-playing','hidden-advanced','hidden-paused','hidden-probed',
     'shown','shown-unfocused','restored-paused','restored-frozen']
 VISIBLE={'metadata','shown','shown-unfocused','restored-paused','restored-frozen'}
-SCRIPT='snapshot\tmetadata\nclick\tplay-hide\nsnapshot\thidden-playing\nwait\t700\nsnapshot\thidden-advanced\nclick\tpause\nsnapshot\thidden-paused\nmedia-probe\thidden\nmedia-surface\nkey\tSpace\nsnapshot\thidden-probed\nclick\tshow\nsnapshot\tshown\nmedia-probe\tvisible\nmedia-surface\nkey\tSpace\nsnapshot\tshown-unfocused\nmedia\tPlay\nwait\t650\nkey\tSpace\nsnapshot\trestored-paused\nwait\t350\nsnapshot\trestored-frozen\n'
+# Pair moving evidence with its pause before output I/O. The restored-play
+# interval also includes 250 ms settling after Play and after wait: 750 ms
+# exceeds a 500 ms original frame without exhausting the three-second clip.
+SCRIPT='snapshot\tmetadata\nclick\tplay-hide\nsnapshot\thidden-playing\nwait\t700\nsnapshot-click\thidden-advanced\tpause\nsnapshot\thidden-paused\nmedia-probe\thidden\nmedia-surface\nkey\tSpace\nsnapshot\thidden-probed\nclick\tshow\nsnapshot\tshown\nmedia-probe\tvisible\nmedia-surface\nkey\tSpace\nsnapshot\tshown-unfocused\nmedia\tPlay\nwait\t250\nkey\tSpace\nsnapshot\trestored-paused\nwait\t350\nsnapshot\trestored-frozen\n'
 
 def require(condition,message):
     if not condition:raise ValueError(message)
