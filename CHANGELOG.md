@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Add a callable trusted anchor click/auxclick prerequisite with genuine
+  MouseEvent fields, listener paths, cancellation and microtask effects. Opaque
+  App hit/context tokens refuse stale or obscured targets; resolved link targets
+  preserve the original file root and cookie initiator without POST replay.
+  Admit real HTML anchor href/download mutations through the checked DOM/Attr
+  path, and use live href attributes for painted destinations and link styling.
+  Original event, App, attribute and scrollbar controls pass. Native pointer,
+  Session link dispositions and context-menu wiring remain subsequent work;
+  normal/optimized integration is required before validated delivery.
+
 - Add a finite native tab/window shell with a browser-owned tab strip,
   new/switch/close shortcuts, real native windows and tab-pinned inspectors.
   Checked numeric native routes and owned App/editor continuations preserve

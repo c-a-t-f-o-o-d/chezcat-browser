@@ -358,12 +358,16 @@ impl Bridge<'_> {
             || key == "border" && self.html_border_property(node)
             || key == "ismap" && self.html_image_map_property(node)
             || key == "srcdoc" && self.iframe_srcdoc_property(node);
+        // Anchor content attributes carry no navigation authority. Only an
+        // accepted activation resolves their current raw values.
+        let anchor_attribute = self.doc.nodes[node].namespace == crate::html::Namespace::Html
+            && tag(self.doc, node) == "a" && matches!(key, "href" | "download");
         // Nonce text follows existing CSP snapshots/queues; changing metadata
         // does not rerun a parsed script. Attribution reporting is unavailable:
         // preserve its content attribute without advertising an IDL API or
         // generating an attribution/report request.
         if !matches!(key, "id" | "class" | "style" | "title" | "hidden" | "disabled" | "role" | "lang" | "dir" | "nonce" | "attributionsrc")
-            && !inert_attribute_name(key) && !image_attribute && !media_source && !media_controls && !style_type {
+            && !inert_attribute_name(key) && !image_attribute && !anchor_attribute && !media_source && !media_controls && !style_type {
             return Err(format!("Supported attributes exclude {key:?} on {} in this native/metadata subset; no attribute was changed.",tag(self.doc,node)));
         }
         if key == "src" && image_attribute {
@@ -384,3 +388,7 @@ impl Bridge<'_> {
         })())
     }
 }
+
+#[cfg(test)]
+#[path = "script_anchor_attribute_tests.rs"]
+mod anchor_attribute_tests;

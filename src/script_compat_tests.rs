@@ -1688,7 +1688,7 @@ document.title='attr-conversion-ok';
 
 #[test]
 fn attr_removal_and_setters_keep_resource_control_and_inert_policy() {
-    let (mut doc, mut forms, mut page, outcome) = page("<body><input id=p value=initial onclick='return false'><img id=image src='https://example.test/x.png' srcset='responsive.png 1x'><a id=link href='https://example.test/'>link</a><template><i id=inert title=x></i></template></body>", &[]);
+    let (mut doc, mut forms, mut page, outcome) = page("<body><input id=p value=initial onclick='return false'><img id=image src='https://example.test/x.png' srcset='responsive.png 1x'><link id=link rel=stylesheet href='https://example.test/'><template><i id=inert title=x></i></template></body>", &[]);
     assert_eq!(outcome.errors, 0, "{}", page.report());
     let nodes: Vec<_> = ["p", "image", "link", "inert"].iter().map(|id| (0..doc.nodes.len()).find(|&n| doc.attr(n, "id") == Some(*id)).unwrap()).collect();
     let mut bridge = Bridge { doc: &mut doc, forms: &mut forms, state: &mut page.state };
@@ -2366,8 +2366,8 @@ var premature=false;try{set.call(b,{toString(){premature=true;return 'data-empty
 if(premature)throw 'required arguments must be checked before conversion';
 document.title='read methods passed';
 "#,
-          "document.getElementById('b').setAttribute('href','https://other.example/');",
-          "if(document.getElementById('b').getAttribute('href')!=='/other')throw 'unsafe mutation';document.title+=' safely';"],
+          "document.getElementById('c').setAttribute('type','radio');",
+          "if(document.getElementById('b').getAttribute('href')!=='/other'||document.getElementById('c').getAttribute('type')!=='checkbox')throw 'unsafe mutation';document.title+=' safely';"],
     );
     assert_eq!(outcome.errors, 1, "{}", page.report());
     assert_eq!(doc.title, "read methods passed safely");

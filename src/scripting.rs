@@ -48,6 +48,9 @@ mod script_normalize;
 mod script_element_properties;
 #[path = "script_created_events.rs"]
 mod script_created_events;
+#[path = "script_anchor_mouse.rs"]
+mod script_anchor_mouse;
+pub use script_anchor_mouse::AnchorMouseInput;
 #[path = "script_dispatch.rs"]
 mod script_dispatch;
 #[path = "script_navigation.rs"]
@@ -201,6 +204,7 @@ struct Event {
     phase: u8,
     passive: bool,
     keyboard: Option<KeyboardInput>,
+    mouse: Option<AnchorMouseInput>,
     timestamp: f64,
 }
 
@@ -1212,6 +1216,7 @@ impl Page {
             }
             for name in [
                 "onclick",
+                "onauxclick",
                 "oninput",
                 "onchange",
                 "onsubmit",
@@ -1222,7 +1227,7 @@ impl Page {
                 "onerror","onloadstart","onabort","onemptied","ondurationchange","onloadedmetadata","onloadeddata",
                 "oncanplay","oncanplaythrough","onplay","onplaying","onwaiting","onpause","onseeking","onseeked","ontimeupdate","onended",
             ] {
-                if !matches!(name,"onclick"|"oninput"|"onchange"|"onsubmit"|"onreset"|"onload"|"onkeydown"|"onkeyup")
+                if !matches!(name,"onclick"|"onauxclick"|"oninput"|"onchange"|"onsubmit"|"onreset"|"onload"|"onkeydown"|"onkeyup")
                     && !self.state.embedded_video.as_ref().is_some_and(|video|video.node==node) {continue;}
                 let Some(source) = doc.attr(node, name) else {
                     continue;
@@ -1508,24 +1513,34 @@ impl Page {
         bubbles: bool,
         composed: bool,
     ) -> bool {
+        self.dispatch_composed_status(doc, forms, target, event, cancelable, bubbles, composed, None).0
+    }
+
+    // Existing callers retain their cancellation result; native anchor input
+    // additionally requires a completed path and callback/checkpoint traversal.
+    fn dispatch_composed_status(
+        &mut self, doc: &mut Document, forms: &mut Forms, target: u32,
+        event: &str, cancelable: bool, bubbles: bool, composed: bool,
+        mouse: Option<AnchorMouseInput>,
+    ) -> (bool, bool) {
         // Resource completion can reach a native event tail in the same job
         // as a fatal script. It must not revive that job or queue later work.
         if self.runtime.invocation_failed_fatally() {
             self.runtime.cancel_microtasks();
             self.cancel_media_selection();
-            return false;
+            return (false, false);
         }
         let result = self.event_path(doc, target);
         let path = match result {
             Ok(path) => path,
             Err(error) => {
                 self.state.error(event, &error);
-                return false;
+                return (false, false);
             }
         };
         let Some(next) = self.state.next_event.checked_add(1).filter(|next|*next <= script_class_list::BASE) else {
             self.state.error(event, "Event identity limit reached.");
-            return false;
+            return (false, false);
         };
         let handle = self.state.next_event;
         self.state.next_event = next;
@@ -1550,6 +1565,7 @@ impl Page {
             phase: 0,
             passive: false,
             keyboard: self.state.pending_keyboard.take(),
+            mouse,
             timestamp: self.state.clock_ms(Instant::now()),
         });
         let mut visits: Vec<_> = path
@@ -1563,6 +1579,7 @@ impl Page {
             visits.extend(path.iter().skip(1).map(|&node| (node, false, 3)));
         }
         if let Some(active)=&mut self.state.event {active.path=path;}
+        let mut complete = true;
         'visits: for (current, capture, phase) in visits {
             if self
                 .state
@@ -1632,6 +1649,7 @@ impl Page {
                 if !checkpoint_complete {
                     self.runtime.cancel_microtasks();
                     self.cancel_media_selection();
+                    complete = false;
                     break 'visits;
                 }
                 if self.state.event.as_ref().is_some_and(|e| e.immediate) {
@@ -1641,7 +1659,8 @@ impl Page {
         }
         // Handles expire instead of being reused: retained JS event references
         // can never mutate a later event's cancellation state.
-        self.state.event.take().is_some_and(|event| event.prevented)
+        let prevented = self.state.event.take().is_some_and(|event| event.prevented);
+        (prevented, complete && !self.runtime.invocation_failed_fatally())
     }
 
     fn event_path(&mut self, doc: &Document, target: u32) -> Result<Vec<u32>, String> {
@@ -2177,7 +2196,7 @@ impl Bridge<'_> {
         // accepted through add/removeEventListener on existing EventTargets.
         let allowed = self.media_element_receiver(handle) && script_media::event_name(event) || matches!(
             event,
-            "click" | "input" | "change" | "submit" | "reset" | "keydown" | "keyup"
+            "click" | "auxclick" | "input" | "change" | "submit" | "reset" | "keydown" | "keyup"
         ) || event == "DOMContentLoaded" && matches!(handle, DOCUMENT | WINDOW)
             || event == "load" && handle == WINDOW
             || matches!(event, "load" | "error")
@@ -2435,7 +2454,7 @@ impl Host for Bridge<'_> {
     }
 
     fn ordinary_lookup_tail(&self, object:u32) -> bool {
-        self.location_instance_owner(object).is_some() || object == HISTORY || self.attr_receiver(object) || self.constructed_event_receiver(object) || self.named_map_receiver(object)
+        self.location_instance_owner(object).is_some() || object == HISTORY || self.attr_receiver(object) || self.ordinary_event_owner(object).is_some() || self.named_map_receiver(object)
     }
     fn ordinary_lookup_tail_property(&self,object:u32,property:&str)->bool {
         if matches!(property,"nodeType"|"nodeName") && self.node_identity_receiver(object) {true}
@@ -3356,7 +3375,7 @@ impl Host for Bridge<'_> {
             return Ok(&[("window", true), ("self", true), ("globalThis", false),
                 ("document", true), ("console", true), ("navigator", true),
                 ("clientInformation", true), ("location", true), ("performance", true),
-                ("onclick", true), ("oninput", true), ("onchange", true), ("onsubmit", true),
+                ("onclick", true), ("onauxclick", true), ("oninput", true), ("onchange", true), ("onsubmit", true),
                 ("onreset", true), ("onload", true), ("onkeydown", true), ("onkeyup", true)]);
         }
         if self.frame_context(window).is_none() { return Err("Unknown Window key receiver.".into()); }
@@ -3459,8 +3478,9 @@ impl Host for Bridge<'_> {
                 return Err("Event handle has expired.".into());
             }
             if self.created_event_method(object, property).is_some() { return Ok(true); }
+            let mouse = self.state.event.as_ref().unwrap().mouse.is_some();
             let keyboard = self.state.event.as_ref().unwrap().keyboard.is_some();
-            return Ok(keyboard && keyboard_property(property)
+            return Ok(mouse && self.event_native_member(object, property) || keyboard && keyboard_property(property)
                 || matches!(
                     property,
                     "type"
@@ -3722,6 +3742,7 @@ impl Host for Bridge<'_> {
             }
             return self.location_property(property);
         }
+        if let Some(value) = self.trusted_mouse_get(object, property) { return value; }
         if (EVENT_BASE..script_class_list::BASE).contains(&object) {
             let event = self
                 .state
@@ -4258,6 +4279,7 @@ impl Host for Bridge<'_> {
         if method=="getElementsByClassName" && (object==DOCUMENT || self.attr_element_receiver(object)) {
             return self.create_class_collection(object,args.first().ok_or("getElementsByClassName requires one argument.")?);
         }
+        if let Some(result) = self.trusted_mouse_call(object, method, args) { return result; }
         if let Some(result) = self.created_event_call(object, method, args) { return result; }
         if (method == "initEvent" || method=="initUIEvent" && self.ui_receiver(object)) && self.state.event.as_ref().is_some_and(|event| event.handle == object) {
             // Ordinary WebIDL conversion has completed. The trusted dispatch
@@ -4587,7 +4609,7 @@ fn keyboard_property(property: &str) -> bool {
 
 fn handler_event(property: &str) -> Option<&str> {
     match property {
-        "onclick" | "oninput" | "onchange" | "onsubmit" | "onreset" | "onload" | "onkeydown"
+        "onclick" | "onauxclick" | "oninput" | "onchange" | "onsubmit" | "onreset" | "onload" | "onkeydown"
         | "onkeyup" | "onerror" => Some(&property[2..]),
         _ => None,
     }

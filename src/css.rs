@@ -748,7 +748,7 @@ pub(crate) fn compute_with_environment(
             computed[index] = style;
             continue;
         }
-        let NodeKind::Element { tag, href, .. } = &node.kind else {
+        let NodeKind::Element { tag, .. } = &node.kind else {
             computed[index] = parent;
             continue;
         };
@@ -757,7 +757,7 @@ pub(crate) fn compute_with_environment(
         user_agent(
             &mut style,
             tag,
-            href.is_some(),
+            doc.attr(index, "href").is_some(),
             doc.attr(index, "hidden").is_some(),
         );
         if tag == "th" && parent.align == Align::Left {
