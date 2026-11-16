@@ -7,6 +7,15 @@ shared platform fixes and unmodified local workloads, then finite tabs, link
 context and new windows after the first measured workflow improvement. Further
 F6/YouTube work is deferred; completed finite media/interface slices remain.
 
+- Create genuine main-Document Comment leaves with real data/UTF-16 length,
+  ownership and supported tree behavior. Keep Comment data out of Text, selectors,
+  script/style/resource processing and rendering; parsed comments and full
+  CharacterData/Comment interfaces remain outside this slice. Reuse actual
+  String-preferred input conversion in native RegExp exec/test, including genuine
+  Function conversion, reentry and unchanged receiver/state/owner/quota rules.
+  Focused Page/App/language controls pass; normal/build/executable gates remain
+  required. The unchanged legacy workload next refuses select-containing
+  innerHTML, so initialization and visible improvement remain unproved.
 - Expose genuine stable live childNodes lists on the main Document and supported
   Nodes through the shared NodeList path, reusing native-host borrowed slice.
   Correct Element textContent replacement to create fresh Text or no empty child,
@@ -14,9 +23,9 @@ F6/YouTube work is deferred; completed finite media/interface slices remain.
   Accept genuine native array-like Function.apply arguments through checked,
   ordered capture without changing callable-target or abrupt-completion rules.
   Supply genuine main-Document Node identity and owner-aware canonical nodeType/
-  nodeName accessors over existing supported node slots. The unmodified legacy
-  workflow now reaches missing native Comment/createComment; this remains a
-  prerequisite pack, with no initialization or visible-improvement claim.
+  nodeName accessors over existing supported node slots. This delivered
+  prerequisite slice does not claim library initialization or visible improvement;
+  subsequent connected dependencies are recorded separately.
   Keep checked growth, explicit small quotas and loaded-resource/inert boundaries;
   no full DOM/template-content or complete framework compatibility is implied.
 - Add a native About panel with full embedded product/source/build description,

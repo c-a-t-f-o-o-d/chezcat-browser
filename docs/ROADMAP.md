@@ -1,7 +1,7 @@
 # Finite development roadmap
 
-The active compatibility pack is **CP1: real DOM collections, calls and Node
-identity**. T1 TLS/trust and B1 resource/rendering slices remain shared platform
+The active compatibility pack is **CP2: genuine Comment nodes and RegExp input
+conversion**, following the delivered CP1 DOM/collection/Node prerequisite slice. T1 TLS/trust and B1 resource/rendering slices remain shared platform
 baselines; measured browser workflows determine the next shared blocker.
 The explicit CSAPUL 1.1 acceptance milestone is published as
 [0.80.0-alpha.1](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.80.0-alpha.1).
@@ -21,7 +21,8 @@ supported within their recorded limits.
 
 | ID | Status | Current outcome | Remaining scope |
 | --- | --- | --- | --- |
-| CP1 | Prerequisite: finite shared DOM/call correctness | Main-Document/supported Node live child lists, existing borrowed slice, native array-like apply, fresh text replacement and genuine Document Node identity; focused Page/App controls pass | The unmodified legacy workload reaches the next missing prerequisite, native Comment/createComment; initialization and visible improvement remain unproved. Normal/build/executable integration is required |
+| CP2 | Prerequisite: focused source/model/App checks pass | Genuine main-Document createComment with real leaf/data/topology and no rendering/resource promotion; native RegExp exec/test input ToString through existing conversion and Function source | This legacy workflow next refuses select-containing innerHTML; responsive CSS remains a separate actionable bounded pack before larger Forms work. No initialization or visible improvement; normal/build/executable integration remains required |
+| CP1 | Delivered prerequisite slice | Main-Document/supported Node live child lists, existing borrowed slice, native array-like apply, fresh text replacement and genuine Document Node identity | No full DOM or whole-framework claim; subsequent prerequisites are tracked in CP2 |
 | T1 | In progress: remaining interoperability gaps | Guarded document diagnostics, a pinned conservative Mozilla NSS 98-authority selection, reviewed offline generation, shared 1024-root policy and bounded per-hop redirect clocks; coordinated document checks distinguish improved path coverage from later failures | Remaining chain/parser/protocol/timeout/admission and resource-specific failures; no broad TLS or usable-site completion claim |
 | B1 | In progress: stylesheets and finite viewport media rules | Shared unmarked cross-origin HTTP(S) stylesheet loading; host-context media rules with real resize/zoom geometry and pixels, source ownership and complete-sheet admission | Original executable width/zoom and dynamic-link cases passed; normal verification remains required for each checkpoint; retain request/security/lifecycle boundaries and explicit query/font gaps while addressing broader resource/render/input usability |
 | B2 | Planned after first measured workflow improvement | No new tab or window capability is claimed | Finite tabs, link-context and new-window behavior with real page/history/worker/focus ownership |
@@ -41,17 +42,21 @@ supported within their recorded limits.
 | F6 controls reflection | Complete for the original model/App slice | Real Boolean controls reflection, including unbound Media nodes; native bar paint/hits/focus with preserved source, clock, frame and Promise lifetime | Full normal verification is required for integration; VIDEO dimensions, Element.toggleAttribute and NamedNodeMap mutation remain separate source gaps |
 | F6 | Deferred for browser foundations | Authored synchronized A/V, genuine Media/Video interfaces and finite Event/UIEvent/MouseEvent/CustomEvent construction are implemented prerequisites; Event/UIEvent/CustomEvent dispatch and cancellation work | Actual ordinary non-DRM YouTube playback is unproved; Mouse dispatch/native pointer payloads, KeyboardEvent construction and broader page/player APIs remain unsupported |
 
-Every implementation checkpoint requires normal verification. CP1 reuses the
-shared DOM/collection path rather than library-specific emulation. The original
+Every implementation checkpoint requires normal verification. CP1 and CP2 reuse
+shared DOM/language paths rather than library-specific emulation. The original
 asynchronous form/result/one-Back/different-query workflow passes its bounded
 local stages. A selected legacy reactive workload still has a separate prototype-
 configuration blocker; a generated-CSS panel stacks narrowly but its wide two-
 column layout fails. Initial reference-browser DOM/pixels are comparison evidence,
-with reference interactions unrun. The unmodified legacy dropdown/form recheck advances through child lists, host
-apply and Document identity to missing native Comment/createComment. Address that
-shared dependency next; there is no library initialization or visible-improvement
-claim yet. Selected Test262 slice observations retain 18 passes and two ordinary
-Array constructor-poisoning failures out of 20 mode runs. B1 includes
+with reference interactions unrun. The development App recheck of the unmodified
+legacy dropdown/form advances through Comment creation and RegExp input conversion
+to checked innerHTML parsing that refuses select/option structure. This is the
+next blocker in that legacy workflow; independently demonstrated responsive CSS
+remains an actionable bounded page-usability pack before larger Forms work.
+Library initialization and visible improvement are still unproved. Selected CP2
+Test262 observations have 18 passes and two ordinary Array constructor-poisoning
+failures across 20 mode runs; all 30 runner controls pass and inputs are unchanged.
+These small denominators establish no full-suite conformance. B1 includes
 the bounded stylesheet path and a finite viewport-media slice, with original
 local request, source-order, geometry/pixel and lifetime checks. Require actual
 offscreen width/zoom and dynamic-stylesheet acceptance before treating that

@@ -16,25 +16,27 @@ is inferred from the small selected case sets.
 | Selected local workflow | Observed boundary |
 | --- | --- |
 | Original asynchronous form/search/navigation | Async ready state, Unicode form submission, readable results, destination activation, exactly one Back and a different query pass the bounded App/input workflow |
-| Unmodified jQuery1.12.4 with Bootstrap3.4.1 dropdown/form | Rechecks advance past child lists, native array-like apply and main-Document Node identity to missing native Comment/createComment. Later missing-library errors are cascades. Initialization and visible improvement are not established |
+| Unmodified jQuery1.12.4 with Bootstrap3.4.1 dropdown/form | Development App rechecks advance past Comment creation and RegExp input conversion to checked innerHTML refusal of select/option structure. Later missing-library errors are cascades. Initialization and visible improvement are not established |
 | Foundation6.9.0 generated CSS with original controls | Narrow stacking passes; the wide two-column layout fails. These observations assess selected CSS output, not optional Foundation JavaScript |
 | Vue2.7.16 runtime with an original reactive component | First observed blocker is unsupported object-prototype configuration. Modern Vue3 has a separate missing Proxy prerequisite; legacy and modern tiers are not interchangeable |
 | Independent browser reference | Initial DOM and pixels were captured; interactions were not run and do not supply a workflow-pass denominator |
 
-CP1 provides genuine SameObject live child lists over actual retained Element/Text
-nodes, ordinary static copies through existing native-host slice, ordered native
-array-like Function.apply capture, and correct
-fresh/empty Element textContent replacement. Saved old nodes retain identities
-and data; owner, resource, quota, rollback and recovery controls remain. Comment,
-DocumentType and template-content trees, child-Document collections and full DOM
-coverage are not added. Normal/executable integration and the unmodified-library
-recheck remain required acceptance. Genuine main-Document Node facts and real
-Node.prototype nodeType/nodeName getters now pass focused original controls. CP1
-remains a prerequisite pack; native Comment/createComment is the next connected
-dependency. Selected Test262 slice checks have 18 passes and two ordinary Array
-constructor-poisoning failures across 20 mode runs; the failing assertions are
-retained, with no full-suite conformance inference. See the
-[CP1 contract](FEATURE_CONTRACTS.md#cp1--real-collections-calls-and-node-identity).
+Delivered CP1 provides the real collection/call/replacement/Node prerequisites.
+CP2 adds genuine native-created Comment leaves and standard input ToString for
+existing native RegExp exec/test paths, with focused original Page/App/language
+controls. Comment data stays out of Text, rendering, selectors and resources;
+the tokenizer still omits parsed comments. Full Comment/CharacterData interfaces,
+generic RegExpExec/custom exec and object-valued lastIndex remain outside scope.
+Neither pack establishes library initialization or a visible workflow improvement.
+Normal/build/executable integration and unchanged-library rechecks remain required.
+See the [CP1](FEATURE_CONTRACTS.md#cp1--real-collections-calls-and-node-identity) and
+[CP2 contracts](FEATURE_CONTRACTS.md#cp2--genuine-comment-and-native-regexp-input-conversion).
+
+Selected CP2 Test262 observations have 18 passes and two ordinary Array
+constructor-poisoning failures across 20 mode runs; all 30 runner controls pass
+and inputs remain unchanged. Failing assertions are retained, with no full-suite
+conformance inference. Original workflow and reference entries retain their stated
+measured scopes rather than becoming a new all-workflow run.
 
 Generated server output is assessed as delivered HTML/CSS/JS, not by the server
 brand. TypeScript/JSX build tools are not browser engines; their compiled output
@@ -44,7 +46,9 @@ remain unassessed. Wider modules, async networking, strings, storage, worker,
 accessibility, layout/font and frame APIs remain partial or missing as recorded in
 the [capability matrix](CAPABILITIES.md).
 
-The next pack follows the next actual first blocker and its shared dependency.
+The select-containing fragment is the next blocker in the legacy workflow, not
+a mandatory next feature. Independently demonstrated responsive CSS remains an
+actionable bounded page-usability pack before larger Forms work.
 Finite tabs/windows follow the first measured workflow improvement rather than
 universal compatibility. Installer/update work stays planned; further media and
 service integration remains deferred. Routine CI stays offline.
