@@ -84,8 +84,7 @@ fn local_visits_record_documents_but_not_startup_fragments_or_failed_targets() {
     assert_eq!(app.browsing_history.data().entries.len(), 4);
     let mut policy = app.browsing_history.data().policy;
     policy.enabled = false;
-    app.browsing_history
-        .configure(policy, crate::history::now())
+    app.configure_browsing_history(&app.browsing_history.policy_token(), policy, crate::history::now())
         .unwrap();
     app.open(&two);
     assert_eq!(app.browsing_history.data().entries.len(), 4);
@@ -111,12 +110,12 @@ fn age_cleanup_runs_with_recording_and_javascript_disabled_and_no_page_activity(
         retention_days: Some(1),
         clear_on_exit: false,
     };
-    app.browsing_history.configure(policy, old).unwrap();
+    app.configure_browsing_history(&app.browsing_history.policy_token(), policy, old).unwrap();
     app.browsing_history
         .record(old, "Expired", "https://example.com/old")
         .unwrap();
     policy.enabled = false;
-    app.browsing_history.configure(policy, old).unwrap();
+    app.configure_browsing_history(&app.browsing_history.policy_token(), policy, old).unwrap();
     app.browsing_history_changed();
     assert!(app.next_history_maintenance().is_some());
     app.history_maintenance = Some(std::time::Instant::now());

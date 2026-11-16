@@ -245,7 +245,9 @@ pub struct App {
     link_paint: HashMap<usize, u32>,
     network: crate::network_trace::Trace,
     last_network_revision: u64,
-    browsing_history: crate::history::Store,
+    browsing_history: crate::history::View,
+    history_commands: crate::history::Commands,
+    owned_history: Option<crate::history::Shared>,
     browsing_history_error: Option<String>,
     history_maintenance: Option<std::time::Instant>,
     history_closed: bool,
@@ -316,6 +318,9 @@ impl App {
         let owned_downloads = crate::downloads::Shared::new();
         // Fresh and not escaped: no borrow or worker can conflict with view().
         let downloads = owned_downloads.view().expect("A fresh download authority is available.");
+        let owned_history = crate::history::Shared::new(crate::history::Store::memory());
+        let browsing_history = owned_history.view().expect("A fresh history authority is available.");
+        let history_commands = owned_history.commands();
         Self {
             document,
             page,
@@ -369,7 +374,9 @@ impl App {
             link_paint: HashMap::new(),
             network: crate::network_trace::Trace::default(),
             last_network_revision: 0,
-            browsing_history: crate::history::Store::memory(),
+            browsing_history,
+            history_commands,
+            owned_history: Some(owned_history),
             browsing_history_error: None,
             history_maintenance: None,
             history_closed: false,

@@ -1042,8 +1042,7 @@ fn deleting_history_rebuilds_visited_colors_after_the_last_retained_visit() {
     data.settings.visited_color = Some(0x789abc);
     app.profile.save(data).unwrap();
     let now = crate::history::now();
-    app.browsing_history
-        .configure(
+    app.configure_browsing_history(&app.browsing_history.policy_token(),
             crate::history::Policy {
                 enabled: true,
                 retention_days: None,

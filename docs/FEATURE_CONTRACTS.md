@@ -395,6 +395,25 @@ acceptance. Original held-transfer/two-App, wake reentry/retarget, admission,
 cancel/retry/no-overwrite, received-response, closed-authority and legacy popup
 controls cover this prerequisite; full normal integration remains required.
 
+Saved browsing history retains the original Store's locks, bounded data, exact
+disk conflicts, expiry and atomic publication under one browser authority.
+Weak App views own immutable snapshots; neither view drop nor attached App close
+performs final clear-on-exit. Explicit final authority shutdown runs once after
+success; a failed shutdown remains retryable. Legacy single-App startup retains
+an explicit local owner and its existing exit behavior.
+
+History selection captures the full observed Entry independently of later view
+refresh. A changed or reused ID cannot silently open or remove a replacement;
+peer refresh invalidates the selected action and its armed pointer. Settings
+capture an opaque original-policy token separately from edited values. Visits
+and expiry preserve that token; observed policy changes, including A-to-B-to-A,
+replace it. Apply checks the token and original persisted policy inside the
+existing locked transaction. Unobserved external A-to-B-to-A edits cannot be
+detected without a persisted revision and are not claimed. Busy, stale, closed
+and external-policy failures preserve committed state and remain visible.
+Original App/history controls cover these finite ownership behaviors; stable
+coordinator routing and complete terminal retirement remain separate acceptance.
+
 ## A1 — About and running-build identity
 
 Status: finite source/UI implementation, with normal build and actual executable

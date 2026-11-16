@@ -6,6 +6,15 @@ parsing builds document/style state, and the JavaScript runtime invokes explicit
 branded host capabilities. Layout produces paint items for the software renderer.
 Windows APIs provide window/input/presentation and low-level audio output.
 
+Browser profile, downloads and saved-history authorities are separate from page
+state. App views retain owned snapshots and weak access handles; a view cannot
+extend an authority's lifetime or perform final history shutdown. Saved-history
+settings carry an original policy token and check the latest policy inside the
+existing locked file transaction. Row selections retain the complete observed
+entry, so a refreshed same-ID replacement cannot become the selected action.
+The browser coordinator must explicitly perform final history shutdown; dropping
+an App never silently clears history or performs disk I/O.
+
 A supported CSS background URL retains the winning declaration's stylesheet owner
 and final redirected base. Backgrounds reuse the image worker and resource policies
 with a separate binding slot and bitmap map, keeping replaced-image state and
