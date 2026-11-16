@@ -2,13 +2,23 @@
 
 ## Unreleased
 
+- Add a finite native tab/window shell with a browser-owned tab strip,
+  new/switch/close shortcuts, real native windows and tab-pinned inspectors.
+  Checked numeric native routes and owned App/editor continuations preserve
+  identity across reentrant calls. Initialize UI before input, retain earlier
+  scheduling deadlines, purge stale translated text and keep a retry host after
+  final history cleanup failure. Original continuation, pure UI and hidden-HWND
+  controls pass; full normal/optimized integration is required for delivery.
+  Link dispositions/context menus and physical desktop interaction remain
+  separate acceptance.
+
 - Add an internal bounded Session core with real boxed App owners, checked
   process-scoped tab/window identities, shared-service adoption and typed wake
   polling. Closing a page removes its routes before consuming its realm and
   resource workers; browser downloads survive, and only explicit final shutdown
-  clears history. Original ownership/held-resource controls pass. Native window
-  bindings, tab controls and link/new-window interaction remain unfinished;
-  normal integration is required before validated delivery.
+  clears history. Original ownership/held-resource controls pass. This internal
+  prerequisite underpins the native shell; link dispositions/context remain
+  unfinished. Normal integration is required before validated delivery.
 
 - Begin the B2 ownership prerequisite with one shared profile writer, immutable
   App snapshots and stale settings/bookmark editor and gesture refusal. Peer
@@ -19,8 +29,8 @@
   Preserve legacy single-window behavior, transfer limits, POST/no-replay,
   cancellation/retry and no-overwrite. Add shared saved-history ownership with
   weak App views, preserved row identities, checked original-policy edits and
-  explicit final-session shutdown. Actual tabs, new windows and native
-  ownership integration remain unfinished; normal
+  explicit final-session shutdown. These authorities underpin the native shell;
+  normal
   integration is required before validated delivery.
 
 - Correct responsive stylesheet-to-layout behavior: finite initial-font em media
