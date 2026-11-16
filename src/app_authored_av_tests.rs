@@ -41,6 +41,36 @@ fn settle(app:&mut App) {
     app.flush_embedded_video();
 }
 
+// Hold a real mock worker after its Pause publication, outside its state lock.
+// Navigation can then enqueue Clear while the worker is observably unserved.
+struct PcmWakeGate(Arc<(std::sync::Mutex<(bool,bool)>,std::sync::Condvar)>);
+impl PcmWakeGate {
+    fn new()->Self{Self(Arc::new((std::sync::Mutex::new((false,false)),std::sync::Condvar::new())))}
+    fn wake(&self)->crate::loader::Wake{
+        let gate=self.0.clone();Arc::new(move||{
+            let mut state=gate.0.lock().unwrap();state.0=true;gate.1.notify_all();
+            while !state.1{state=gate.1.wait(state).unwrap();}
+        })
+    }
+    fn wait(&self){
+        let(state,timed)=self.0.1.wait_timeout_while(self.0.0.lock().unwrap(),Duration::from_secs(5),|state|!state.0).unwrap();
+        let reached=!timed.timed_out()&&state.0;drop(state);
+        assert!(reached,"Mock PCM Pause did not publish before navigation.");
+    }
+    fn release(&self){self.0.0.lock().unwrap_or_else(|error|error.into_inner()).1=true;self.0.1.notify_all();}
+}
+impl Drop for PcmWakeGate{fn drop(&mut self){self.release();}}
+
+fn await_cleared_pcm(app:&App){
+    let until=Instant::now()+Duration::from_secs(5);
+    while let Some(worker)=&app.audio_worker {
+        let ownership=worker.ownership();
+        if ownership==(false,0,false){break;}
+        assert!(Instant::now()<until,"PCM clear did not acknowledge: {ownership:?}");
+        std::thread::sleep(Duration::from_millis(1));
+    }
+}
+
 #[test]
 fn authored_local_av_metadata_installs_both_tracks_before_sync_without_opening_a_device() {
     let files=Files::new();let mut app=files.open();
@@ -90,6 +120,11 @@ fn authored_av_source_removal_then_load_and_navigation_clear_both_tracks() {
     let files=Files::new();
     for remove in [true,false] {
         let mut app=files.open();assert!(app.audio.is_some());
+        let gate=(!remove).then(PcmWakeGate::new);
+        if let Some(gate)=&gate {
+            app.audio_worker=Some(crate::audio_output::Worker::mock_for_app(gate.wake()).unwrap());
+            app.suspend_audio();gate.wait();
+        }
         if remove {
             // Existing structural guards still reject removal of a loaded
             // VIDEO. Exercise the supported actual source-removal operation.
@@ -105,6 +140,13 @@ fn authored_av_source_removal_then_load_and_navigation_clear_both_tracks() {
         } else {app.open(&files.next);app.wait_for_load();}
         assert!(app.audio.is_none()&&app.media.is_none());
         assert!(app.audio_sync_state().is_none());
+        if let Some(gate)=&gate {
+            // Page load has committed, but the real Clear command cannot run
+            // until the earlier worker wake is released. No device was opened.
+            assert_eq!(app.audio_worker.as_ref().unwrap().ownership(),(false,0,true));
+            gate.release();
+        }
+        await_cleared_pcm(&app);
         assert!(app.audio_worker.as_ref().is_none_or(|worker|worker.ownership()==(false,0,false)));
     }
 }
