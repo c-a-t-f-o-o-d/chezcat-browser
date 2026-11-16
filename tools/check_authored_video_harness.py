@@ -47,7 +47,10 @@ def main(source=None, trust_file=None, fixture_stem=None, display_profile=None, 
     folder = ROOT / 'results/verification/autonomy' / (datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S.%fZ') + '-authored-video-journey-' + uuid.uuid4().hex[:8])
     folder.mkdir(parents=True)
     script = folder / 'authored.tsv'
-    script.write_text('snapshot\tmetadata\nmedia\tPlay\nwait\t650\nmedia\tPause\nsnapshot\tpaused\nwait\t500\nsnapshot\tfrozen\nclick\treload\nsnapshot\treloaded\nmedia\tPlay\nwait\t650\nclick\tjs-pause\nsnapshot\tjs-issued\nwait\t1000\nsnapshot\tjs-settled\nwait\t750\nsnapshot\tjs-frozen\nclick\tjs-seek\nwait\t1000\nsnapshot\tjs-seek-settled\nwait\t750\nsnapshot\tjs-seek-frozen\nclick\tjs-play\nwait\t450\nsnapshot\tjs-playing\nclick\tjs-pause\nwait\t1000\nsnapshot\tjs-play-paused\nwait\t750\nsnapshot\tjs-play-frozen\nmedia\tSeek:2200\nsnapshot\tseeked\nmedia\tPlay\nwait\t1200\nsnapshot\tended\nmedia\tPlay\nsnapshot\treplay\nmedia\tStop\nsnapshot\tstopped\nlink\tLeave\nsnapshot\tnavigated\n', encoding='utf-8', newline='\n')
+    # The App driver already pumps media/events for 250 ms after each action.
+    # Do not add another wait before capturing moving playback: evidence I/O
+    # and settling must leave time for the following genuine JS pause.
+    script.write_text('snapshot\tmetadata\nmedia\tPlay\nwait\t650\nmedia\tPause\nsnapshot\tpaused\nwait\t500\nsnapshot\tfrozen\nclick\treload\nsnapshot\treloaded\nmedia\tPlay\nwait\t650\nclick\tjs-pause\nsnapshot\tjs-issued\nwait\t1000\nsnapshot\tjs-settled\nwait\t750\nsnapshot\tjs-frozen\nclick\tjs-seek\nwait\t1000\nsnapshot\tjs-seek-settled\nwait\t750\nsnapshot\tjs-seek-frozen\nclick\tjs-play\nsnapshot\tjs-playing\nclick\tjs-pause\nwait\t1000\nsnapshot\tjs-play-paused\nwait\t750\nsnapshot\tjs-play-frozen\nmedia\tSeek:2200\nsnapshot\tseeked\nmedia\tPlay\nwait\t1200\nsnapshot\tended\nmedia\tPlay\nsnapshot\treplay\nmedia\tStop\nsnapshot\tstopped\nlink\tLeave\nsnapshot\tnavigated\n', encoding='utf-8', newline='\n')
     before = capture_tests.source_identity(ROOT)
     out = folder / 'journey'
     source = str(source if source is not None else ROOT / 'tools/fixtures/authored-video.html')
