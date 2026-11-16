@@ -52,6 +52,7 @@ impl App {
     }
 
     pub(in crate::app) fn show_bookmark_folder(&mut self, id: u32) {
+        if let Err(error) = self.refresh_profile() { self.profile_error(error); return; }
         let id = if id == 0 || self.profile.data().folder(id).is_some() {
             id
         } else {
@@ -59,6 +60,7 @@ impl App {
         };
         let previous = self.browser_panel.take();
         let mut panel = BrowserPanel::new(PanelKind::Bookmarks, Action::List);
+        panel.profile_revision = Some(self.profile.revision());
         panel.folder = id;
         panel.return_panel = previous.and_then(|mut previous| match previous.kind {
             PanelKind::Settings => Some(Box::new(previous)),
@@ -345,7 +347,7 @@ impl App {
                 return;
             }
         };
-        if let Err(error) = self.profile.save(data) {
+        if let Err(error) = self.save_profile_editor(data) {
             self.profile_error(error);
             return;
         }
@@ -405,7 +407,7 @@ impl App {
         let position = data.items(destination).len();
         if let Err(error) = data
             .move_item(item, destination, position)
-            .and_then(|()| self.profile.save(data))
+            .and_then(|()| self.save_profile_editor(data))
         {
             self.profile_error(error);
             return;
@@ -440,7 +442,7 @@ impl App {
         let mut data = self.profile.data().clone();
         if let Err(error) = data
             .move_item(item, parent, target)
-            .and_then(|()| self.profile.save(data))
+            .and_then(|()| self.save_profile_editor(data))
         {
             self.profile_error(error);
             return;
@@ -471,7 +473,7 @@ impl App {
         let parent = panel.folder;
         let mut data = self.profile.data().clone();
         let (links, folders) = data.remove_folder(id);
-        if let Err(error) = self.profile.save(data) {
+        if let Err(error) = self.save_profile_editor(data) {
             self.profile_error(error);
             return;
         }
@@ -481,6 +483,14 @@ impl App {
     }
 
     pub(super) fn bookmark_tree_activate(&mut self, action: Action) -> bool {
+        let persisted = self.browser_panel.as_ref().is_some_and(|panel| matches!(panel.kind,
+            PanelKind::Bookmarks | PanelKind::EditBookmark { .. } | PanelKind::EditFolder { .. }
+            | PanelKind::FolderDestination | PanelKind::DeleteFolder { .. }));
+        if persisted && matches!(action, Action::Open | Action::Edit | Action::Delete | Action::Row(_)
+            | Action::FolderRow(_) | Action::NewFolder | Action::FolderUp | Action::Destination
+            | Action::Move | Action::DestinationRow(_) | Action::SaveFolder
+            | Action::ConfirmDeleteFolder | Action::MoveUp | Action::MoveDown)
+            && !self.guard_profile_panel() { return true; }
         let manager = self
             .browser_panel
             .as_ref()
@@ -566,6 +576,8 @@ impl App {
     }
 
     pub(super) fn bookmark_tree_key(&mut self, key: u32) {
+        if !self.browser_panel.as_ref().is_some_and(|panel| matches!(panel.kind, PanelKind::Bookmarks)) { return; }
+        if !self.guard_profile_panel() { return; }
         if key == 0x08 || key == 0x25 {
             self.bookmark_tree_activate(Action::FolderUp);
             return;

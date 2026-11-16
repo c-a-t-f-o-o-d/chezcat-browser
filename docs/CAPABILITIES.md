@@ -15,6 +15,11 @@ slices remain partial baselines. Finite tabs/new windows follow the first measur
 workflow improvement. See the [compatibility scope](COMPATIBILITY.md) and its
 machine-readable [catalogue](compatibility.json).
 A finite About/build-description panel is implemented at this UI checkpoint.
+The B2 profile prerequisite now provides one shared writer and immutable App
+snapshots with captured editor/gesture revisions. Original two-App tests retain
+live VM/form/history/viewport state across peer refresh and refuse stale bookmark
+identities. This is internal ownership preparation; actual tabs, new windows,
+session/download routing and close retirement remain unfinished.
 One per-user installer and staged release discovery/upgrade remain planned in the
 [roadmap](ROADMAP.md), not delivered capabilities. Further
 F6/YouTube work is deferred; completed finite media evidence remains valid.

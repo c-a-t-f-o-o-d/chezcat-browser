@@ -9,18 +9,16 @@
     "dom_source_sha256": "19a6d0b92549926f971a0d181d501b694a3129b7a3d3bbedccafaf30c26bd570"
   },
   "active_pack": {
-    "id": "CP3",
-    "status": "Measured responsive rendering improvement; normal integration required",
-    "scope": "Initial-font em media, typed terminal before/after stylesheet targets, explicit box-sizing inheritance and fractional flex line fitting",
-    "native_status": "Original responsive/App and flex checks passed; full normal/build/executable gates required",
-    "inherits_limits": "Existing stylesheet/selector/match/layout budgets; no quota expansion",
-    "next_dependency": "B2 shared page/session ownership and retirement, then actual tabs/link dispositions/windows",
+    "id": "B2",
+    "status": "Shared-profile prerequisite implemented; normal integration required",
+    "scope": "One UI-thread profile writer, immutable revisioned App views, stale editor/bookmark gesture refusal and page-preserving peer refresh",
+    "native_status": "profile21 and shared-profile15 controls pass; affected browser UI34 and bookmark bar5 pass; full normal required",
+    "next_dependency": "Stable page/session IDs, browser-owned downloads and wakes, final history shutdown authority and terminal resource admission before actual tabs/windows",
     "excluded": [
-      "Generated-content painting",
-      "DOM-query pseudo-target support",
-      "Wider media units and font scheduling",
-      "Vue initialization/reactive interaction",
-      "Whole-framework support"
+      "Actual tab strip/new-switch-close tabs",
+      "New native windows/link dispositions",
+      "Standalone close-owner lifecycle",
+      "window.open/opener semantics"
     ]
   },
   "workflows": [
@@ -533,6 +531,23 @@
         "Object-valued lastIndex conversion",
         "RegExp constructor pattern/flag conversion",
         "Whole-library support"
+      ]
+    }
+  ],
+  "completed_capability_packs": [
+    {
+      "id": "CP3",
+      "status": "Measured responsive rendering improvement; local and hosted normal integration passed",
+      "scope": "Initial-font em media, typed terminal before/after stylesheet targets, explicit box-sizing inheritance and fractional flex line fitting",
+      "native_status": "Original responsive/App and flex checks passed; full normal/build/executable gates required",
+      "inherits_limits": "Existing stylesheet/selector/match/layout budgets; no quota expansion",
+      "next_dependency": "B2 shared page/session ownership and retirement, then actual tabs/link dispositions/windows",
+      "excluded": [
+        "Generated-content painting",
+        "DOM-query pseudo-target support",
+        "Wider media units and font scheduling",
+        "Vue initialization/reactive interaction",
+        "Whole-framework support"
       ]
     }
   ]

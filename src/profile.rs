@@ -17,6 +17,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 mod bookmark_tree;
 pub use bookmark_tree::BookmarkItem;
 
+#[path = "profile_shared.rs"]
+mod shared;
+pub use shared::{Shared, Snapshot, View};
+
 pub fn parse_color(value: &str) -> Result<Option<u32>, String> {
     let value = value.trim();
     if value.is_empty() {
