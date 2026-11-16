@@ -5987,12 +5987,30 @@ impl Runtime {
         if matches!(value, Value::Null | Value::Undefined) {
             return Ok(Vec::new());
         }
-        // Keep native handles outside this ordinary-object operation before
-        // reading length or invoking any script-controlled conversion.
-        if matches!(value, Value::Host(_)) {
-            return Err(Fault::new(
-                "Function.apply on a native host array-like is not implemented.",
-            ));
+        if let Value::Host(handle) = value {
+            self.reject_foreign_window(value, host)?;
+            // CreateListFromArrayLike uses Get, not a presence test: missing
+            // positions become actual undefined arguments. Capture length once
+            // before conversion/index getters can change the live collection.
+            let length_value = self.host_read(*handle, "length", host)?;
+            let numeric = self.binary_number(&length_value, host)?;
+            let length = if numeric.is_nan() || numeric <= 0.0 { 0.0 }
+                else { numeric.floor().min(9_007_199_254_740_991.0) };
+            if length > self.limits.capacity.arguments as f64 {
+                return Err(self.argument_limit_fault());
+            }
+            if length > usize::MAX as f64 {
+                return Err(Fault::new("Native apply length exceeds the index representation."));
+            }
+            let length = length as usize;
+            let mut result = Vec::new();
+            result.try_reserve_exact(length)
+                .map_err(|_| Fault::new("Native apply argument reservation failed."))?;
+            for index in 0..length {
+                self.step()?;
+                result.push(self.host_read(*handle, &index.to_string(), host)?);
+            }
+            return Ok(result);
         }
         let object = Ordinary::from_value(value).ok_or_else(|| {
             Fault::exception("TypeError", "Function.apply requires an array-like object.")
@@ -9265,6 +9283,10 @@ fn loose_equal(left: &Value, right: &Value) -> Result<bool, Fault> {
         _ => Ok(false),
     }
 }
+
+#[cfg(test)]
+#[path = "host_apply_tests.rs"]
+mod host_apply_tests;
 
 #[cfg(test)]
 mod tests {

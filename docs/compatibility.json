@@ -1,0 +1,458 @@
+{
+  "schema": 1,
+  "scope": "Finite source and local browser-workflow assessment, not full conformance or whole-family compatibility",
+  "reference": {
+    "language": "ECMAScript 2025, edition 16",
+    "language_url": "https://262.ecma-international.org/16.0/",
+    "dom_url": "https://dom.spec.whatwg.org/",
+    "dom_source_commit": "e4f4f4f0ace83fe6c52ab68e047351ce7f2dcd69",
+    "dom_source_sha256": "19a6d0b92549926f971a0d181d501b694a3129b7a3d3bbedccafaf30c26bd570"
+  },
+  "active_pack": {
+    "id": "CP1",
+    "scope": "Live main-Document/supported Node child lists, existing host slice, native array-like apply, fresh text replacement and genuine Document Node identity/canonical getters",
+    "native_status": "Focused original Page/App checks passed; normal/build/executable integration required",
+    "normal_limits": {
+      "node_lists": 65536,
+      "snapshot_references": 1048576
+    },
+    "excluded": [
+      "Full DOM",
+      "Comment/DocumentType creation",
+      "Template contents DocumentFragment model",
+      "Child-Document collections",
+      "Whole-library support"
+    ],
+    "status": "Prerequisite",
+    "next_dependency": "Native Comment nodes and document.createComment"
+  },
+  "workflows": [
+    {
+      "id": "W1",
+      "kind": "Original async form/results/navigation",
+      "status": "Assessed subset",
+      "passed_stages": [
+        "Async ready",
+        "Unicode form submit",
+        "Readable results",
+        "Open destination",
+        "Exactly one Back",
+        "Different query"
+      ]
+    },
+    {
+      "id": "W2",
+      "kind": "Unmodified jQuery1.12.4 + Bootstrap3.4.1 dropdown/form",
+      "status": "Blocked at next prerequisite; no initialization or visible improvement",
+      "cascades_count_as_roots": false,
+      "observed_first_roots": [
+        "Document childNodes at borrowed slice",
+        "Native-host Function.apply capture",
+        "Main Document Node identity",
+        "Native Comment/document.createComment"
+      ],
+      "current_first_root": "Native Comment/document.createComment"
+    },
+    {
+      "id": "W3-css",
+      "kind": "Foundation6.9.0 generated CSS",
+      "status": "Partial",
+      "narrow_stacking": "Passed",
+      "wide_two_columns": "Failed",
+      "optional_javascript": "Not assessed"
+    },
+    {
+      "id": "W3-reactive",
+      "kind": "Vue2.7.16 original reactive component",
+      "status": "Blocked",
+      "first_root": "Object-prototype configuration unsupported",
+      "modern_tier": "Vue3 Proxy prerequisite missing"
+    },
+    {
+      "id": "reference",
+      "kind": "Independent browser",
+      "initial_dom_pixels": "Captured",
+      "interactions": "Not run"
+    }
+  ],
+  "platform": [
+    {
+      "area": "ECMAScript grammar/environments/completions/calls",
+      "status": "Partial",
+      "sources": [
+        "src/javascript.rs",
+        "src/expression_parser.rs",
+        "tools/check_javascript.py"
+      ]
+    },
+    {
+      "area": "Objects/descriptors/prototypes/constructors/iteration/collections",
+      "status": "Partial",
+      "sources": [
+        "src/prototypes.rs",
+        "src/array_ops.rs",
+        "src/collections.rs",
+        "src/symbols.rs",
+        "src/iterable_builtins.rs",
+        "src/intrinsic_realms.rs"
+      ]
+    },
+    {
+      "area": "Strings/numbers/regexp/binary data",
+      "status": "Partial",
+      "sources": [
+        "src/javascript.rs",
+        "src/regexp.rs",
+        "src/binary_data.rs",
+        "src/string_replacement.rs"
+      ]
+    },
+    {
+      "area": "Promises/tasks/realms and browser scripts",
+      "status": "Partial",
+      "sources": [
+        "src/promises.rs",
+        "src/scripting.rs",
+        "src/script_timer_global_tests.rs",
+        "src/intrinsic_realms.rs",
+        "src/loader.rs",
+        "src/script_resources.rs"
+      ]
+    },
+    {
+      "area": "HTML/tree/DOM/attributes/collections/selectors",
+      "status": "Partial",
+      "sources": [
+        "src/html.rs",
+        "src/script_dom_tree.rs",
+        "src/script_inner_html.rs",
+        "src/script_collections.rs",
+        "src/script_attr.rs",
+        "src/css.rs",
+        "src/script_media_controls_tests.rs"
+      ]
+    },
+    {
+      "area": "Forms/focus/input/events/default actions/navigation/geometry/observers",
+      "status": "Partial",
+      "sources": [
+        "src/forms.rs",
+        "src/app_keyboard.rs",
+        "src/script_dispatch.rs",
+        "src/event_interface.rs",
+        "src/script_navigation.rs",
+        "src/script_geometry.rs",
+        "src/script_dom_tree.rs",
+        "src/app_session_history.rs"
+      ]
+    },
+    {
+      "area": "HTTP/Fetch/XHR/body/encoding/cookies/policy/cache/network lifecycle",
+      "status": "Partial",
+      "sources": [
+        "src/http.rs",
+        "src/http_stylesheet.rs",
+        "src/http_media_cors.rs",
+        "src/network_trace.rs",
+        "src/cookies.rs",
+        "src/csp.rs",
+        "src/text_encoding.rs",
+        "src/scripting.rs",
+        "src/loader.rs"
+      ]
+    },
+    {
+      "area": "CSS/cascade/selectors/conditional rules/layout/hit testing",
+      "status": "Partial",
+      "sources": [
+        "src/css.rs",
+        "src/css_media.rs",
+        "src/layout.rs",
+        "src/layout_scroll.rs",
+        "src/app_backgrounds.rs"
+      ]
+    },
+    {
+      "area": "Fonts/images/intrinsic/responsive presentation",
+      "status": "Partial",
+      "sources": [
+        "src/font.rs",
+        "src/fonts.rs",
+        "src/image.rs",
+        "src/image_svg.rs",
+        "src/image_selection.rs",
+        "src/loader.rs",
+        "src/app_images.rs"
+      ]
+    },
+    {
+      "area": "Script storage, workers, custom elements and shadow DOM",
+      "status": "Missing",
+      "sources": [
+        "src/scripting.rs",
+        "src/cookies.rs",
+        "src/script_blank_frames.rs",
+        "docs/CAPABILITIES.md"
+      ]
+    },
+    {
+      "area": "Accessibility/Intl/SVG DOM/canvas/Wasm/media",
+      "status": "Partial",
+      "sources": [
+        "src/platform.rs",
+        "src/app_browser_ui.rs",
+        "src/image_svg.rs",
+        "src/media.rs",
+        "src/matroska.rs",
+        "src/script_media.rs",
+        "tools/compatibility_cases.json",
+        "docs/CAPABILITIES.md"
+      ]
+    }
+  ],
+  "families": [
+    {
+      "name": "vanilla JavaScript",
+      "role": "browser language/DOM",
+      "status": "Partial"
+    },
+    {
+      "name": "jQuery",
+      "role": "browser runtime",
+      "status": "Not assessed"
+    },
+    {
+      "name": "React",
+      "role": "browser UI runtime",
+      "status": "Not assessed"
+    },
+    {
+      "name": "AngularJS1.x",
+      "role": "legacy browser runtime",
+      "status": "Not assessed"
+    },
+    {
+      "name": "Angular",
+      "role": "compiled browser runtime",
+      "status": "Deferred"
+    },
+    {
+      "name": "Vue",
+      "role": "browser UI runtime",
+      "status": "Partial"
+    },
+    {
+      "name": "Svelte",
+      "role": "development compiler plus browser runtime",
+      "status": "Deferred"
+    },
+    {
+      "name": "Ember",
+      "role": "browser framework/runtime",
+      "status": "Deferred"
+    },
+    {
+      "name": "Redux",
+      "role": "browser-capable state library",
+      "status": "Not assessed"
+    },
+    {
+      "name": "Bootstrap",
+      "role": "compiled CSS plus browser JS",
+      "status": "Not assessed"
+    },
+    {
+      "name": "Tailwind",
+      "role": "development CSS compiler; output CSS",
+      "status": "Deferred"
+    },
+    {
+      "name": "Foundation",
+      "role": "generated CSS and optional separate JS",
+      "status": "Partial"
+    },
+    {
+      "name": "Chakra UI",
+      "role": "React browser components plus runtime styling",
+      "status": "Deferred"
+    },
+    {
+      "name": "Popper",
+      "role": "browser positioning runtime",
+      "status": "Deferred"
+    },
+    {
+      "name": "Emotion / CSS-in-JS",
+      "role": "browser styling runtime plus optional build transforms",
+      "status": "Deferred"
+    },
+    {
+      "name": "Next.js",
+      "role": "server/build tool plus browser output",
+      "status": "Deferred"
+    },
+    {
+      "name": "Nuxt",
+      "role": "server/build tool plus Vue browser output",
+      "status": "Deferred"
+    },
+    {
+      "name": "SvelteKit",
+      "role": "server/build tool plus browser output",
+      "status": "Deferred"
+    },
+    {
+      "name": "Node.js",
+      "role": "external server/development host",
+      "status": "Not assessed"
+    },
+    {
+      "name": "Express",
+      "role": "external Node HTTP server framework",
+      "status": "Not assessed"
+    },
+    {
+      "name": "ASP.NET Core",
+      "role": "external server framework",
+      "status": "Not assessed"
+    },
+    {
+      "name": "ASP.NET classic / Web Forms",
+      "role": "external .NET Framework server",
+      "status": "Not assessed"
+    },
+    {
+      "name": "Razor",
+      "role": "server template language/compiler",
+      "status": "Not assessed"
+    },
+    {
+      "name": "MVC",
+      "role": "external server framework",
+      "status": "Not assessed"
+    },
+    {
+      "name": "Java portlets",
+      "role": "external portal/server component standard",
+      "status": "Not assessed"
+    },
+    {
+      "name": "Telerik/Kendo jQuery",
+      "role": "browser widget family",
+      "status": "Deferred"
+    },
+    {
+      "name": "Telerik/Kendo React",
+      "role": "React browser components",
+      "status": "Deferred"
+    },
+    {
+      "name": "Telerik/Kendo Angular",
+      "role": "Angular browser components",
+      "status": "Deferred"
+    },
+    {
+      "name": "Telerik/Kendo Vue",
+      "role": "Vue browser components/wrappers",
+      "status": "Deferred"
+    },
+    {
+      "name": "Telerik ASP.NET Core/MVC wrappers",
+      "role": "server helpers generating browser clients",
+      "status": "Deferred"
+    },
+    {
+      "name": "Blazor Server / interactive-server",
+      "role": "browser client plus external .NET server",
+      "status": "Deferred"
+    },
+    {
+      "name": "Blazor WebAssembly",
+      "role": "downloaded sandboxed browser Wasm/.NET payload",
+      "status": "Deferred"
+    },
+    {
+      "name": "Jest",
+      "role": "external Node test host",
+      "status": "Harness blocked"
+    },
+    {
+      "name": "Mocha",
+      "role": "Node test host OR browser test workload",
+      "status": "Not assessed"
+    },
+    {
+      "name": "Storybook",
+      "role": "development host/build plus browser stories",
+      "status": "Deferred"
+    },
+    {
+      "name": "Cypress",
+      "role": "external browser automation driver/test host",
+      "status": "Harness blocked"
+    },
+    {
+      "name": "Playwright",
+      "role": "external browser automation driver/test host",
+      "status": "Harness blocked"
+    },
+    {
+      "name": "TypeScript",
+      "role": "development compiler/language",
+      "status": "Deliberately unsupported"
+    },
+    {
+      "name": "JSX / TSX",
+      "role": "development source syntax",
+      "status": "Deliberately unsupported"
+    },
+    {
+      "name": "ESM",
+      "role": "native browser module format",
+      "status": "Missing"
+    },
+    {
+      "name": "UMD / IIFE",
+      "role": "delivered classic browser JS conventions",
+      "status": "Partial"
+    },
+    {
+      "name": "Bundled CommonJS",
+      "role": "ordinary JS wrapper/module-map output",
+      "status": "Not assessed"
+    },
+    {
+      "name": "Host-only CommonJS",
+      "role": "Node/server module environment",
+      "status": "Deliberately unsupported"
+    },
+    {
+      "name": "Lattice",
+      "role": "Unresolved",
+      "status": "Not assessed"
+    }
+  ],
+  "evidence_boundaries": [
+    "Source inventory is not an executed assertion",
+    "Model tests are not App/input/render evidence",
+    "Initial reference captures are not interaction passes",
+    "Unavailable test hosts are not language assertion failures",
+    "Cascades are separated from the first root",
+    "No public service or whole-family outcome inferred"
+  ],
+  "next": [
+    "Implement genuine native Comment/document.createComment with reduced original controls",
+    "Recheck the unchanged selected legacy workflow and retain separate responsive/reactive outcomes",
+    "Begin finite tabs/windows after the first measured workflow improvement"
+  ],
+  "selected_standard_controls": {
+    "suite": "Selected Test262 slice mode runs",
+    "mode_runs": 20,
+    "passed": 18,
+    "failed": 2,
+    "failure_scope": "Ordinary Array constructor-poisoning behavior",
+    "assertions": "Failing assertions retained",
+    "unavailable_hosts": "Classified separately from language assertions",
+    "whole_suite_conformance": false
+  }
+}

@@ -1,7 +1,7 @@
 //! Bounded ordinary expandos on explicitly selected native objects and live
 //! named-property reflection. Host handles never acquire arbitrary capability.
 
-use super::{Fault, Function, Host, Ordinary, Runtime, Value};
+use super::{Accessors, Fault, Function, Host, Ordinary, Runtime, Value};
 
 impl Runtime {
     /// Publish the real interface only after its complete private prototype is ready.
@@ -61,6 +61,12 @@ impl Runtime {
                 self.store_property(self.function_properties[allocation.id],"prototype".into(),Value::Object(prototype),Some((false,false,false)))?;
                 self.store_symbol_property(prototype,self.symbol_to_string_tag.unwrap(),Value::String(name.into()),Some((false,false,true)))?;
                 if name=="Node" {
+                    for (key,operation) in [("nodeType","\0Node.get.nodeType"),("nodeName","\0Node.get.nodeName")] {
+                        let getter=self.allocate_host_function_with_length(window,operation,0).map_err(Fault::new)?;
+                        if let Some(Function::Host {receiver_required,..})=self.functions.get_mut(getter.id) {*receiver_required=true;}
+                        self.store_property(self.function_properties[getter.id],"name".into(),Value::String(format!("get {key}")),Some((false,false,true)))?;
+                        self.store_accessor_property(prototype,key.into(),Accessors {get:Some(getter.id),set:None},(true,true))?;
+                    }
                     for &(key,value) in constants {
                         for object in [prototype,self.function_properties[allocation.id]] {
                             self.store_property(object,key.into(),Value::Number(f64::from(value)),Some((true,false,false)))?;

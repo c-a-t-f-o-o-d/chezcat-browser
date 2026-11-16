@@ -1,0 +1,10 @@
+<!doctype html><html><head><meta charset="utf-8"><title>W2 legacy @@QUERY@@</title>
+<link rel="stylesheet" href="/bootstrap-3.4.1.css"><link rel="stylesheet" href="/workflow.css"></head><body>
+<main class="container"><h1>Original legacy dropdown and form</h1><p id="response-id">@@RESPONSE@@</p>
+<p id="init-state">W2 waiting for library initialization</p><p id="menu-state">W2 dropdown closed</p>
+<div id="library-menu" class="dropdown"><button name="menu-toggle" type="button" class="btn btn-default dropdown-toggle" data-toggle="dropdown" aria-expanded="false">Choose local query</button>
+<ul class="dropdown-menu"><li><button name="choose-amber" id="choose-amber" type="button">Amber choice</button></li></ul></div>
+<p id="selected-state">W2 no trusted choice yet</p><p id="async-state">W2 no asynchronous update yet</p>
+<form action="/w2/result"><label>Query <input id="query" name="q" value="@@QUERY@@" class="form-control"></label><button name="submit-legacy" type="submit" class="btn btn-primary">Submit local query</button></form>
+<p id="server-result">W2 server query=@@QUERY@@</p><img class="original-control" src="/control.ppm" alt="Original four color control"><div class="original-marker"></div></main>
+<script src="/jquery-1.12.4.js"></script><script src="/bootstrap-3.4.1.js"></script><script src="/w2.js"></script></body></html>

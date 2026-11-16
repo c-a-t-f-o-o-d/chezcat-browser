@@ -5539,3 +5539,7 @@ mod tests {
 #[cfg(test)]
 #[path="app_media_query_tests.rs"]
 mod media_query_tests;
+
+#[cfg(test)]
+#[path="app_child_nodes_tests.rs"]
+mod child_nodes_tests;

@@ -71,6 +71,34 @@
       "sha256": "441f90651898c5ec49946f4b1d2c63e8183f608262c79c843caf0d9f1573f3b7",
       "bytes": 885,
       "ok": true
+    },
+    {
+      "path": "test/built-ins/Array/prototype/slice/create-non-array.js",
+      "url": "https://raw.githubusercontent.com/tc39/test262/48221d7c1f7745dc13e420a2e850a248c0b2afb4/test/built-ins/Array/prototype/slice/create-non-array.js",
+      "sha256": "d24cdf6f49ed61c85b9af7783006dd4c5d89c77176a4d8887757d4a22df6448c",
+      "bytes": 863,
+      "ok": true
+    },
+    {
+      "path": "test/built-ins/Array/prototype/slice/15.4.4.10-10-c-ii-1.js",
+      "url": "https://raw.githubusercontent.com/tc39/test262/48221d7c1f7745dc13e420a2e850a248c0b2afb4/test/built-ins/Array/prototype/slice/15.4.4.10-10-c-ii-1.js",
+      "sha256": "a7b1d572a1246609ae660adfad20cb20bc48a8a5bd75096d548f0494f59e1ff4",
+      "bytes": 693,
+      "ok": true
+    },
+    {
+      "path": "test/built-ins/Array/prototype/slice/S15.4.4.10_A1.1_T1.js",
+      "url": "https://raw.githubusercontent.com/tc39/test262/48221d7c1f7745dc13e420a2e850a248c0b2afb4/test/built-ins/Array/prototype/slice/S15.4.4.10_A1.1_T1.js",
+      "sha256": "ddb811c75fe85f8aa368c206d896dfa584421a9f1f4626a576cdb48a374a7a6a",
+      "bytes": 1297,
+      "ok": true
+    },
+    {
+      "path": "test/built-ins/Array/prototype/slice/create-ctor-poisoned.js",
+      "url": "https://raw.githubusercontent.com/tc39/test262/48221d7c1f7745dc13e420a2e850a248c0b2afb4/test/built-ins/Array/prototype/slice/create-ctor-poisoned.js",
+      "sha256": "1bce1ba36887cc88f76dbca418df301a2a02395b805e7be5a53ed4c3b48470af",
+      "bytes": 593,
+      "ok": true
     }
   ],
   "scope": "Selected genuine upstream tests and harness files only. Files are stored unchanged; this is not a full Test262 runner or conformance claim."

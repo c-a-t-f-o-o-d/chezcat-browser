@@ -97,6 +97,7 @@ def main():
        ('artifact-guards',[sys.executable,'tools/check_release_bundle.py']),
        ('version-parser-controls',[sys.executable,'tools/check_product_version.py']),
        ('capture-controls',[sys.executable,'tools/check_capture_tests.py','--output',str(folder/'capture-controls.json')]),
+       ('compatibility-workflow-controls',[sys.executable,'tools/check_compatibility_workflow_controls.py']),
        ('build-identity-controls',[sys.executable,'tools/check_build_identity_controls.py','--output',str(folder/'build-identity-controls')]),
        ('normal',[sys.executable,'tools/capture_tests.py','--toolchain','1.99.1']),
        ('release',['rustup','run','1.99.1','cmd.exe','/d','/c','Build.cmd']),

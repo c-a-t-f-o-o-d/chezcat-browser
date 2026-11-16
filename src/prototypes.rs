@@ -2032,6 +2032,9 @@ impl Runtime {
             }
             Builtin::ArrayMethod(method) => {
                 if method=="slice" {
+                    if matches!(this, Value::Null | Value::Undefined) {
+                        return Err(Fault::exception("TypeError", "Array.prototype.slice requires a non-null receiver."));
+                    }
                     if let Value::Host(handle) = this { return self.array_slice_host(handle,args,host); }
                 }
                 if matches!(method, "flat" | "flatMap") {

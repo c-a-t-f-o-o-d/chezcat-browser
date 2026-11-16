@@ -17,7 +17,12 @@ if(d.beforeInterfaceRead!==1||typeof d.animate!=='undefined'||'animate' in d)thr
 var reads=0,calls='',polyfill=function(a,b){if(this!==d)throw 'polyfill receiver';calls+=a+b;this.setAttribute('data-polyfill',calls);return this;};
 Object.defineProperty(Element.prototype,'animate',{configurable:true,get:function(){reads++;return polyfill;}});
 if(!('animate' in d)||reads!==0||d.animate('A','B')!==d||d['animate']?.('C','D')!==d||reads!==2||d.getAttribute('data-polyfill')!=='ABCD')throw 'polyfill inheritance';
-Object.defineProperty(Element.prototype,'nodeType',{configurable:true,get:function(){throw 'native shadow';}});if(d.nodeType!==1)throw 'native precedence';delete Element.prototype.nodeType;
+var canonicalType=Object.getOwnPropertyDescriptor(Node.prototype,'nodeType').get,shadowReads=0;
+Object.defineProperty(Element.prototype,'nodeType',{configurable:true,get:function(){shadowReads++;return 37;}});
+if(d.nodeType!==37||shadowReads!==1||canonicalType.call(d)!==1)throw 'real inherited getter versus native slot';
+var shadowMarker={};Object.defineProperty(Element.prototype,'nodeType',{configurable:true,get:function(){throw shadowMarker;}});
+try{d.nodeType;throw 'missing inherited getter abrupt';}catch(e){if(e!==shadowMarker)throw e;}
+delete Element.prototype.nodeType;if(d.nodeType!==1||canonicalType.call(d)!==1)throw 'canonical getter restoration';
 delete Element.prototype.animate;if(typeof d.animate!=='undefined'||'animate' in d)throw 'polyfill deletion';
 var oldElement=Element,oldNode=Node;Element=17;delete window.Node;if(!(d instanceof oldElement)||!(text instanceof oldNode)||typeof Node!=='undefined')throw 'canonical anchors';
 document.title='base-node-interfaces-ok';
@@ -1874,6 +1879,10 @@ fn default_namespace_uses_actual_document_root_and_retains_invalid_handle_and_wo
 }
 
 fn page(markup: &str, scripts: &[&str]) -> (Document, Forms, Page, Outcome) {
+    page_with_limits(markup,scripts,crate::javascript::limits::CAPACITY_REGRESSION)
+}
+
+fn page_with_limits(markup: &str, scripts: &[&str], limits:crate::javascript::limits::Limits) -> (Document, Forms, Page, Outcome) {
     let mut doc = crate::html::parse(markup);
     doc.scripting_enabled = true;
     let mut forms = Forms::new(&doc);
@@ -1886,7 +1895,7 @@ fn page(markup: &str, scripts: &[&str]) -> (Document, Forms, Page, Outcome) {
             label: format!("compat script {node}"),
         })
         .collect();
-    let mut page = Page::for_test();
+    let mut page = Page::with_limits(limits);
     page.set_location(
         &crate::navigation::address(
             "https://www.google.com/search?q=test",
@@ -2405,7 +2414,7 @@ document.title='queries passed';
 
 #[test]
 fn selector_snapshots_preserve_detached_nodes_and_keep_live_lookup_separate() {
-    let (doc, _, page, outcome) = page(
+    let (doc, _, page, outcome) = page_with_limits(
         "<div id=root><span id=a class=card><b id=inner>old</b></span><span id=b class=card>second</span></div><p id=counter>0</p>",
         &[r#"
 var root=document.getElementById('root'),list=root.querySelectorAll('.card'),a=list[0],inner=document.getElementById('inner');
@@ -2417,19 +2426,23 @@ if(a.querySelector('b')!==inner||a.querySelectorAll('b')[0]!==inner)throw 'detac
 var visited='';list.forEach(function(node){visited+=node.textContent;});if(visited!=='oldsecond')throw 'snapshot contents';
 inner.textContent='retained';if(a.textContent!=='retained'||root.textContent!=='new')throw 'detached mutation';
 a.textContent='changed';if(a.textContent!=='changed'||inner.parentNode!==null||inner.textContent!=='retained'||root.textContent!=='new')throw 'detached replacement';
-var counter=document.getElementById('counter');for(var i=0;i<1000;i++)counter.textContent=String(i);
-if(counter.textContent!=='999')throw 'counter';document.title='snapshot passed';
+var counter=document.getElementById('counter'),counterChildren=counter.childNodes,originalCounter=counterChildren[0],previous=originalCounter;
+for(var i=0;i<1000;i++){var priorData=previous.data;counter.textContent=String(i);var current=counterChildren[0];if(current===previous||previous.data!==priorData||previous.parentNode!==null||previous.isConnected)throw 'fresh replacement retains superseded Text';previous=current;}
+if(counter.textContent!=='999'||counterChildren.length!==1||originalCounter.data!=='0'||originalCounter.parentNode!==null||originalCounter.isConnected)throw 'counter or saved original';document.title='snapshot passed';
 "#],
+        crate::javascript::limits::BROWSER,
     );
     assert_eq!(outcome.errors, 0, "{}", page.report());
     assert_eq!(doc.title, "snapshot passed");
-    assert_eq!(page.state.detached_nodes.len(), 6);
+    assert_eq!(page.state.detached_nodes.len(), 1007, "Parsed subtree identities, detached replacements and all superseded counter Texts remain retained.");
+    assert!(page.state.retained >= 2908, "Every replacement payload, including superseded Text, remains charged");
     assert!(page.state.retained <= page.state.retained_limit);
+    assert!(doc.nodes.len() <= page.state.node_limit);
     let before = crate::html::parse("<div id=root><span id=a class=card><b id=inner>old</b></span><span id=b class=card>second</span></div><p id=counter>0</p>").nodes.len();
     assert_eq!(
         doc.nodes.len(),
-        before + 2,
-        "counter replacement must reuse its text node"
+        before + 1003,
+        "Three earlier replacements and all 1000 counter updates create fresh Text nodes"
     );
 }
 

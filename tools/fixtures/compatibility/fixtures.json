@@ -1,0 +1,67 @@
+{
+  "schema_version": 1,
+  "scope": "Original HTML/CSS/JavaScript development fixtures with exact separate upstream MIT notices; no external artwork or fonts. Library distributions stay in external cache.",
+  "workflows": {
+    "W1": "Original vanilla Unicode search, async, result, one Back, different query",
+    "W2": "Unmodified legacy dropdown, trusted selection, async text and real form",
+    "W3": "Runtime-only Vue 2 reactivity with independent Foundation CSS at two viewports"
+  },
+  "files": {
+    "inputs.json": {
+      "bytes": 5568,
+      "sha256": "055f43044412d56234ef16438479f9c7d2b21024b65bc0c0db23b5dd6cefacdc"
+    },
+    "INPUTS.md": {
+      "bytes": 1555,
+      "sha256": "6fdc556e583e83dd35cd0f163887987aa202e98ccd642a6c49a55f00231e193f"
+    },
+    "licenses/bootstrap-3.4.1-LICENSE.txt": {
+      "bytes": 1085,
+      "sha256": "f2bc4d83a3c6e3733a229ff8039eba3ef481ea097323c5d0642107df857db4dc"
+    },
+    "licenses/foundation-sites-6.9.0-LICENSE.txt": {
+      "bytes": 1071,
+      "sha256": "843c77d20bdacda0cf3d51773abd90b24abbd26283e89f44c6a65ef820a5622f"
+    },
+    "licenses/jquery-1.12.4-LICENSE.txt": {
+      "bytes": 1606,
+      "sha256": "f980a306a01e5881cc8004115f7e6dde44e7f5296477237d37d169a86ce7c094"
+    },
+    "licenses/vue-2.7.16-LICENSE.txt": {
+      "bytes": 1091,
+      "sha256": "17fb24bc303763f3fe1911ee24e5225c7ad59f0e3a5d8123e9b730c100a306a6"
+    },
+    "README.md": {
+      "bytes": 3535,
+      "sha256": "9623d88e7daeb16014841c14b375f0f4bd0c1dcacc2352b0d563355861e36cd3"
+    },
+    "w1.html": {
+      "bytes": 618,
+      "sha256": "c30ff8fbf077d9ea10ab79fd1d77530620b248da0c68f0f51e22f4affd7c284e"
+    },
+    "w1.js": {
+      "bytes": 264,
+      "sha256": "f37acfbab93eff1ec4c62ce34e0c617dce0919b5631e573b48f13bd8eed1a06a"
+    },
+    "w2.html": {
+      "bytes": 1346,
+      "sha256": "565ed4c7e4a6aaa0ea40dc767f4b1075fbe53f07daf37555c2bc58a3e0243440"
+    },
+    "w2.js": {
+      "bytes": 848,
+      "sha256": "1023fe69c53a884774103f57fdac723103058c60cc34198620942485a24c94b0"
+    },
+    "w3.html": {
+      "bytes": 771,
+      "sha256": "7aef3a4bd31f027f2453d9e14c965c6f5f6c0b15758870401efbe03a95942773"
+    },
+    "w3.js": {
+      "bytes": 1498,
+      "sha256": "eae3326a493df1eb5c582513445d7d169c196a42efdd7fdf9220288118553a2d"
+    },
+    "workflow.css": {
+      "bytes": 426,
+      "sha256": "fb9b9354c3d249a4d4a404ccf9d092d54eee3dc9ee3bd12d05d4fda4ce99d130"
+    }
+  }
+}
