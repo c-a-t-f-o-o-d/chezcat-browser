@@ -61,9 +61,11 @@ These are scoped foundations, not complete standards support. The
 [capability matrix](docs/CAPABILITIES.md) separates implementation from evidence.
 Google Search, Images and Maps are not fully supported. YouTube page compatibility
 is limited, and playback is unsupported. Further F6/YouTube work is deferred.
-Next, recheck shared TLS/trust/data behavior through ordinary document and
-resource paths, then improve everyday rendering and interaction usability before
-finite tabs, link context and new windows. Remaining TLS gaps stay explicit;
+The finite native tab/window shell adds a browser-owned tab strip and shortcuts,
+real windows and tab-pinned inspectors. Original pure UI and hidden-window controls
+cover ownership and lifetime; full normal/optimized integration is required for
+each checkpoint. Link dispositions/context menus and physical desktop interaction
+remain separate acceptance. Remaining TLS gaps stay explicit;
 perfect TLS coverage is not required before useful page-usability work. The
 trust-data subset does not establish new live-service compatibility.
 

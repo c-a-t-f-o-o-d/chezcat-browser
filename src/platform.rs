@@ -13,6 +13,8 @@ use crate::app::{App, PlatformAction};
 mod inspector_window;
 #[path = "platform_keyboard.rs"]
 mod keyboard_input;
+#[path = "platform_session.rs"]
+mod session_window;
 #[path = "platform_license.rs"]
 mod license_window;
 
@@ -29,16 +31,8 @@ type FileDialogHook = unsafe extern "system" fn(Handle, u32, usize, isize) -> us
 
 const MAX_CLIPBOARD_BYTES: usize = 2 * 1024 * 1024;
 const CF_UNICODETEXT: u32 = 13;
-const SCRIPT_TIMER_ID: usize = 0x4f42;
-const HISTORY_TIMER_ID: usize = 0x4f43;
-const DOWNLOAD_TIMER_ID: usize = 0x4f44;
 const APP_ICON_ID: usize = 101;
 std::thread_local! {
-    // The shell owns one window. Remember its armed deadline so mouse/paint
-    // activity cannot keep resetting and postponing the same timer.
-    static SCRIPT_TIMER_WAKE: Cell<Option<(usize, std::time::Instant)>> = const { Cell::new(None) };
-    static HISTORY_TIMER_WAKE: Cell<Option<(usize, std::time::Instant)>> = const { Cell::new(None) };
-    static DOWNLOAD_TIMER_OWNER: Cell<Option<(usize, u32)>> = const { Cell::new(None) };
     static FRAME_COLORS: RefCell<Vec<(usize, u32, u32)>> = const { RefCell::new(Vec::new()) };
 }
 
@@ -232,6 +226,7 @@ extern "system" {
     fn GetCursorPos(point: *mut Point) -> i32;
     fn TrackMouseEvent(tracking: *mut MouseTracking) -> i32;
     fn ScreenToClient(window: Handle, point: *mut Point) -> i32;
+    fn PeekMessageW(message: *mut Message, window: Handle, min: u32, max: u32, remove: u32) -> i32;
     fn GetKeyState(key: i32) -> i16;
     fn GetKeyboardState(state: *mut u8) -> i32;
     fn GetKeyboardLayout(thread: u32) -> Handle;
@@ -405,508 +400,7 @@ fn show_message(message: &str, kind: u32) {
 }
 
 pub fn run(app: App) -> Result<(), String> {
-    // Single UI thread. This Box outlives the window and the entire message loop.
-    let mut state = Box::new(app);
-    let class_name = wide("ChezCatWindow");
-    let title = wide(&state.title());
-    unsafe {
-        SetProcessDPIAware();
-        let instance = GetModuleHandleW(null());
-        if instance.is_null() {
-            return Err(std::io::Error::last_os_error().to_string());
-        }
-        let icons = WindowIcons::load(instance)?;
-        let class = WindowClass {
-            style: 0x0003, // CS_HREDRAW | CS_VREDRAW
-            procedure: Some(window_proc),
-            class_extra: 0,
-            window_extra: 0,
-            instance,
-            icon: icons.large,
-            cursor: LoadCursorW(null_mut(), 32512usize as *const u16),
-            background: null_mut(),
-            menu_name: null(),
-            class_name: class_name.as_ptr(),
-        };
-        if RegisterClassW(&class) == 0 {
-            return Err(std::io::Error::last_os_error().to_string());
-        }
-        if let Err(error) = inspector_window::register(instance, icons.large) {
-            UnregisterClassW(class_name.as_ptr(), instance);
-            return Err(error);
-        }
-        let state_ptr: *mut App = &mut *state;
-        let window = CreateWindowExW(
-            0,
-            class_name.as_ptr(),
-            title.as_ptr(),
-            0x00cf0000,
-            i32::MIN,
-            i32::MIN,
-            1120,
-            840,
-            null_mut(),
-            null_mut(),
-            instance,
-            state_ptr.cast(),
-        );
-        if window.is_null() {
-            let error = std::io::Error::last_os_error().to_string();
-            inspector_window::unregister(instance);
-            UnregisterClassW(class_name.as_ptr(), instance);
-            return Err(error);
-        }
-        SendMessageW(window, 0x0080, 1, icons.large as isize); // WM_SETICON / ICON_BIG
-        SendMessageW(window, 0x0080, 0, icons.small as isize); // WM_SETICON / ICON_SMALL
-        let colors = state.title_bar_colors();
-        sync_frame_colors(window, colors);
-        DragAcceptFiles(window, 1);
-        let wake_window = window as usize;
-        state.set_load_wake(std::sync::Arc::new(move || {
-            // This callback posts only a signal; it never touches App across threads.
-            PostMessageW(wake_window as Handle, 0x8001, 0, 0);
-        }));
-        if state.poll_load() {
-            refresh(window, state_ptr);
-        }
-        sync_script_timer(window, state_ptr);
-        sync_history_timer(window, state_ptr);
-        sync_download_timer(window, state_ptr);
-        ShowWindow(window, 5);
-        UpdateWindow(window);
-        let mut message: Message = zeroed();
-        let result = loop {
-            let code = GetMessageW(&mut message, null_mut(), 0, 0);
-            if code == 0 {
-                // Also handles a WM_QUIT posted independently of WM_DESTROY.
-                DestroyWindow(window);
-                break Ok(());
-            }
-            if code == -1 {
-                let error = std::io::Error::last_os_error().to_string();
-                DestroyWindow(window);
-                break Err(error);
-            }
-            if message.window == window && matches!(message.message, 0x0100 | 0x0104) {
-                // Run page keydown before producing its WM_CHAR. A canceled
-                // key must not insert text later, and the decision must belong
-                // to this exact message rather than an unrelated next key.
-                keyboard_input::prepare(&message);
-                DispatchMessageW(&message);
-                let canceled = keyboard_input::complete(&message);
-                if !canceled && state_is_attached(window, state_ptr) {
-                    TranslateMessage(&message);
-                }
-            } else {
-                TranslateMessage(&message);
-                DispatchMessageW(&message);
-            }
-        };
-        inspector_window::unregister(instance);
-        UnregisterClassW(class_name.as_ptr(), instance);
-        let cleanup = state.finish_browsing_session();
-        match (result, cleanup) {
-            (Err(error), Err(cleanup)) => Err(format!("{error}\n\n{cleanup}")),
-            (Err(error), _) | (_, Err(error)) => Err(error),
-            _ => Ok(()),
-        }
-    }
-}
-
-unsafe extern "system" fn window_proc(
-    window: Handle,
-    message: u32,
-    wparam: usize,
-    lparam: isize,
-) -> isize {
-    match message {
-        0x0081 => {
-            // WM_NCCREATE: attach the stable Box pointer before later messages.
-            let create = &*(lparam as *const CreateStruct);
-            SetLastError(0);
-            let previous = SetWindowLongPtrW(window, -21, create.parameters as isize);
-            if previous == 0 && GetLastError() != 0 {
-                return 0;
-            }
-            return 1;
-        }
-        0x0082 => {
-            // WM_NCDESTROY: no later callback may access application state.
-            KillTimer(window, SCRIPT_TIMER_ID);
-            KillTimer(window, HISTORY_TIMER_ID);
-            KillTimer(window, DOWNLOAD_TIMER_ID);
-            DOWNLOAD_TIMER_OWNER.with(|owner| {
-                if owner
-                    .get()
-                    .is_some_and(|(handle, _)| handle == window as usize)
-                {
-                    owner.set(None);
-                }
-            });
-            forget_frame_colors(window);
-            SCRIPT_TIMER_WAKE.with(|wake| {
-                if wake
-                    .get()
-                    .is_some_and(|(owner, _)| owner == window as usize)
-                {
-                    wake.set(None);
-                }
-            });
-            HISTORY_TIMER_WAKE.with(|wake| {
-                if wake
-                    .get()
-                    .is_some_and(|(owner, _)| owner == window as usize)
-                {
-                    wake.set(None);
-                }
-            });
-            SetWindowLongPtrW(window, -21, 0);
-            return DefWindowProcW(window, message, wparam, lparam);
-        }
-        0x0002 => {
-            PostQuitMessage(0);
-            return 0;
-        } // WM_DESTROY
-        0x0014 => return 1, // WM_ERASEBKGND: our complete pixel buffer clears the surface.
-        0x0024 => {
-            // WM_GETMINMAXINFO
-            let sizes = &mut *(lparam as *mut MinMaxInfo);
-            sizes.min_track_size = Point { x: 420, y: 300 };
-            return 0;
-        }
-        _ => {}
-    }
-    let state = GetWindowLongPtrW(window, -21) as *mut App;
-    if state.is_null() {
-        return DefWindowProcW(window, message, wparam, lparam);
-    }
-
-    // Do not retain &mut App across Win32 calls: some APIs synchronously re-enter
-    // this procedure. App methods themselves do not invoke the windowing APIs.
-    match message {
-        0x0113 if wparam == DOWNLOAD_TIMER_ID => {
-            // Visible request bars advance every 100 ms; a downloads-only popup
-            // needs just one elapsed-time update per second. These are measured
-            // durations, never fabricated byte percentages.
-            (&mut *state).poll_load();
-            refresh(window, state);
-            0
-        }
-        0x0113 if wparam == HISTORY_TIMER_ID => {
-            KillTimer(window, HISTORY_TIMER_ID);
-            HISTORY_TIMER_WAKE.with(|wake| wake.set(None));
-            if (&mut *state).poll_history_maintenance() {
-                refresh(window, state);
-            } else {
-                sync_history_timer(window, state);
-            }
-            0
-        }
-        0x0113 if wparam == SCRIPT_TIMER_ID => {
-            // Windows repeats timers; use it as a one-shot signal and arm only
-            // the next deadline after running one callback on this UI thread.
-            KillTimer(window, SCRIPT_TIMER_ID);
-            SCRIPT_TIMER_WAKE.with(|wake| wake.set(None));
-            if (&mut *state).poll_page_timer() {
-                refresh(window, state);
-            } else {
-                sync_script_timer(window, state);
-            }
-            0
-        }
-        0x8001 => {
-            if (&mut *state).poll_load() {
-                refresh(window, state);
-            }
-            0
-        }
-        0x031a | 0x0320 => {
-            // WM_THEMECHANGED / WM_DWMCOLORIZATIONCOLORCHANGED.
-            forget_frame_colors(window);
-            let colors = (&*state).title_bar_colors();
-            sync_frame_colors(window, colors);
-            DefWindowProcW(window, message, wparam, lparam)
-        }
-        0x000f => {
-            // WM_PAINT
-            let mut paint: PaintStruct = zeroed();
-            let dc = BeginPaint(window, &mut paint);
-            let mut rect: Rect = zeroed();
-            GetClientRect(window, &mut rect);
-            if !dc.is_null() && rect.right > 0 && rect.bottom > 0 {
-                let canvas = {
-                    let app = &mut *state;
-                    app.resize(rect.right, rect.bottom);
-                    app.draw()
-                };
-                present_canvas(dc, &rect, &canvas);
-            }
-            EndPaint(window, &paint);
-            0
-        }
-        0x0005 => {
-            // WM_SIZE
-            let mut rect: Rect = zeroed();
-            GetClientRect(window, &mut rect);
-            if rect.right > 0 && rect.bottom > 0 {
-                {
-                    (&mut *state).resize(rect.right, rect.bottom);
-                }
-                inspector_window::sync(window, state);
-                sync_script_timer(window, state);
-                InvalidateRect(window, null(), 0);
-            }
-            0
-        }
-        0x020a => {
-            // WM_MOUSEWHEEL uses screen coordinates even when another window
-            // currently owns focus. Route the wheel to the pane under it.
-            let delta = ((wparam >> 16) & 0xffff) as u16 as i16 as i32;
-            let ctrl = key_is_down(0x11);
-            let shift = key_is_down(0x10);
-            let (x, y) = mouse_coordinates(lparam);
-            let mut point = Point { x, y };
-            ScreenToClient(window, &mut point);
-            {
-                (&mut *state).wheel_at(point.x, point.y, delta, ctrl, shift);
-            }
-            refresh(window, state);
-            0
-        }
-        // Consume both halves of X-button delivery, but navigate only on up.
-        // DefWindowProc would otherwise generate a second WM_APPCOMMAND.
-        0x020b if matches!((wparam >> 16) & 0xffff, 1 | 2) => 1,
-        0x020c if matches!((wparam >> 16) & 0xffff, 1 | 2) => {
-            if GetCapture() == window {
-                ReleaseCapture();
-            }
-            (&mut *state).mouse_navigation((wparam >> 16) & 0xffff == 2);
-            refresh(window, state);
-            1
-        }
-        0x0319 if matches!((lparam as usize >> 16) & 0x0fff, 1 | 2) => {
-            if GetCapture() == window {
-                ReleaseCapture();
-            }
-            (&mut *state).mouse_navigation((lparam as usize >> 16) & 0x0fff == 2);
-            refresh(window, state);
-            1
-        }
-        0x0007 => {
-            (&mut *state).main_window_focus();
-            0
-        }
-        0x0100 | 0x0104 => {
-            // WM_KEYDOWN / WM_SYSKEYDOWN. Leave native system shortcuts alone.
-            let key = wparam as u32;
-            if matches!(key, 0xa6 | 0xa7) {
-                (&mut *state).mouse_navigation(key == 0xa7);
-                refresh(window, state);
-                return 0;
-            }
-            let input = keyboard_input::event(key, lparam, true, message == 0x0104);
-            let (ctrl, alt) = (input.ctrl, input.alt);
-            // AltGr is reported as Ctrl+Alt on Windows. It belongs to text entry,
-            // not Ctrl/Alt browser shortcuts; TranslateMessage supplies its text.
-            if input.meta
-                || message == 0x0104
-                    && !(ctrl && alt)
-                    && (!alt || !matches!(key, 0x25 | 0x27 | 0x24 | 0x44 | 0x46))
-            {
-                return DefWindowProcW(window, message, wparam, lparam);
-            }
-            let (action, prevented) = { (&mut *state).key_event(input) };
-            if prevented {
-                keyboard_input::cancel(window, message, wparam, lparam);
-            }
-            perform_action(window, state, action);
-            refresh(window, state);
-            0
-        }
-        0x0101 | 0x0105 => {
-            // Keyup still reaches the live page if keydown prevented scrolling
-            // or text. Browser-owned focus/shortcuts are filtered inside App.
-            let input = keyboard_input::event(wparam as u32, lparam, false, message == 0x0105);
-            (&mut *state).key_event(input);
-            refresh(window, state);
-            DefWindowProcW(window, message, wparam, lparam)
-        }
-        0x0102 | 0x0106 => {
-            // WM_CHAR / WM_SYSCHAR supply UTF-16 code units, including surrogate pairs.
-            // Commands already handled by WM_KEYDOWN must not insert control text.
-            // AltGr appears as Ctrl+Alt and may legitimately produce printable text.
-            let ctrl = key_is_down(0x11);
-            let alt = key_is_down(0x12);
-            if message == 0x0106 && !(ctrl && alt) {
-                // Alt+D/Alt+F were handled as key commands; other native system text
-                // keeps its default handling. AltGr-generated text is allowed.
-                return if matches!(wparam as u32, 0x44 | 0x64 | 0x46 | 0x66) {
-                    0
-                } else {
-                    DefWindowProcW(window, message, wparam, lparam)
-                };
-            }
-            if wparam <= u16::MAX as usize && wparam >= 0x20 && wparam != 0x7f && (!ctrl || alt) {
-                {
-                    (&mut *state).utf16_input(wparam as u16);
-                }
-                refresh(window, state);
-            }
-            0
-        }
-        0x0109 => {
-            // WM_UNICHAR: acknowledge the Unicode support probe, or accept a scalar.
-            if wparam == 0xffff {
-                return 1;
-            }
-            if let Some(character) = u32::try_from(wparam).ok().and_then(char::from_u32) {
-                if !character.is_control() {
-                    {
-                        (&mut *state).text_input(character);
-                    }
-                    refresh(window, state);
-                }
-            }
-            0
-        }
-        0x0201 => {
-            // WM_LBUTTONDOWN; client coordinates are signed 16-bit values.
-            let (x, y) = mouse_coordinates(lparam);
-            let shift = key_is_down(0x10);
-            SetFocus(window);
-            if key_is_down(0x12) && !key_is_down(0x11) && !shift && (&mut *state).download_at(x, y)
-            {
-                refresh(window, state);
-                return 0;
-            }
-            SetCapture(window);
-            let action = { (&mut *state).pointer_down(x, y, shift) };
-            perform_action(window, state, action);
-            refresh(window, state);
-            0
-        }
-        0x0200 => {
-            // WM_MOUSEMOVE continues a selection outside the client area while captured.
-            let mut tracking = MouseTracking {
-                size: size_of::<MouseTracking>() as u32,
-                flags: 0x00000002, // TME_LEAVE, no hover timer.
-                window,
-                hover_time: 0,
-            };
-            TrackMouseEvent(&mut tracking);
-            let (x, y) = mouse_coordinates(lparam);
-            let dragging = wparam & 1 != 0 && GetCapture() == window;
-            let changed = { (&mut *state).pointer_move(x, y, dragging) };
-            set_client_cursor(state, x, y);
-            // Hover can change the footer without a drag; unchanged motion is idle.
-            if changed {
-                InvalidateRect(window, null(), 0);
-            }
-            0
-        }
-        0x02a3 => {
-            // WM_MOUSELEAVE clears hover without terminating a captured selection.
-            if (&mut *state).pointer_leave() {
-                InvalidateRect(window, null(), 0);
-            }
-            0
-        }
-        0x0202 => {
-            // WM_LBUTTONUP completes selection before releasing capture. ReleaseCapture
-            // can re-enter through WM_CAPTURECHANGED, whose cancellation is idempotent.
-            let (x, y) = mouse_coordinates(lparam);
-            let action = { (&mut *state).pointer_up(x, y) };
-            if GetCapture() == window {
-                ReleaseCapture();
-            }
-            // Restore hover after normal capture release. Actual capture loss
-            // still cancels a press without triggering its action.
-            (&mut *state).pointer_move(x, y, false);
-            perform_action(window, state, action);
-            refresh(window, state);
-            0
-        }
-        0x0215 => {
-            // WM_CAPTURECHANGED must cancel dragging without following a pending link.
-            {
-                (&mut *state).pointer_cancel();
-            }
-            InvalidateRect(window, null(), 0);
-            0
-        }
-        0x0008 | 0x001f => {
-            // WM_KILLFOCUS / WM_CANCELMODE: do not retain a drag across a dialog or Alt+Tab.
-            {
-                (&mut *state).pointer_cancel();
-            }
-            if GetCapture() == window {
-                ReleaseCapture();
-            }
-            InvalidateRect(window, null(), 0);
-            DefWindowProcW(window, message, wparam, lparam)
-        }
-        0x0020 if lparam & 0xffff == 1 => {
-            // WM_SETCURSOR / HTCLIENT. Nonclient resize cursors remain Windows-owned.
-            let mut point = Point { x: 0, y: 0 };
-            if GetCursorPos(&mut point) != 0 && ScreenToClient(window, &mut point) != 0 {
-                set_client_cursor(state, point.x, point.y);
-                1
-            } else {
-                DefWindowProcW(window, message, wparam, lparam)
-            }
-        }
-        0x0233 => {
-            // WM_DROPFILES; load only the first explicitly dropped file.
-            let drop = wparam as Handle;
-            let length = DragQueryFileW(drop, 0, null_mut(), 0);
-            let path = if length > 0 && length < 32768 {
-                let mut buffer = vec![0u16; length as usize + 1];
-                let copied = DragQueryFileW(drop, 0, buffer.as_mut_ptr(), buffer.len() as u32);
-                Some(PathBuf::from(std::ffi::OsString::from_wide(
-                    &buffer[..copied as usize],
-                )))
-            } else {
-                None
-            };
-            DragFinish(drop);
-            if let Some(path) = path {
-                (&mut *state).open(&path);
-            }
-            refresh(window, state);
-            0
-        }
-        _ => DefWindowProcW(window, message, wparam, lparam),
-    }
-}
-
-unsafe fn refresh(window: Handle, state: *mut App) {
-    if !state_is_attached(window, state) {
-        return;
-    }
-    let confirmation = { (&mut *state).take_resubmission_prompt() };
-    if let Some((token, address)) = confirmation {
-        if GetCapture() == window {
-            ReleaseCapture();
-        }
-        let text = wide(&format!("This page was loaded by sending form data. Sending it again can repeat the action.\n\nDestination: {address}\n\nResend the form data?"));
-        let caption = wide("Resend form data? - ChezCat");
-        // Yes/No, default No. The dialog dispatches messages; keep no borrow of
-        // App across it and recheck window ownership and the request token.
-        let accepted = MessageBoxW(window, text.as_ptr(), caption.as_ptr(), 0x124) == 6;
-        if !state_is_attached(window, state) {
-            return;
-        }
-        (&mut *state).confirm_resubmission(token, accepted);
-    }
-    let title = { wide(&(*state).title()) };
-    SetWindowTextW(window, title.as_ptr());
-    let colors = (&*state).title_bar_colors();
-    sync_frame_colors(window, colors);
-    sync_script_timer(window, state);
-    sync_history_timer(window, state);
-    sync_download_timer(window, state);
-    inspector_window::sync(window, state);
-    InvalidateRect(window, null(), 0);
+    session_window::run(app)
 }
 
 unsafe fn present_canvas(dc: Handle, rect: &Rect, canvas: &crate::paint::Canvas) {
@@ -946,84 +440,6 @@ unsafe fn present_canvas(dc: Handle, rect: &Rect, canvas: &crate::paint::Canvas)
     );
 }
 
-unsafe fn sync_history_timer(window: Handle, state: *mut App) {
-    if !state_is_attached(window, state) {
-        return;
-    }
-    let desired = (&*state)
-        .next_history_maintenance()
-        .map(|due| (window as usize, due));
-    if HISTORY_TIMER_WAKE.with(|wake| wake.get() == desired) {
-        return;
-    }
-    KillTimer(window, HISTORY_TIMER_ID);
-    HISTORY_TIMER_WAKE.with(|wake| wake.set(None));
-    let Some((_, due)) = desired else {
-        return;
-    };
-    let remaining = due.saturating_duration_since(std::time::Instant::now());
-    let milliseconds = remaining
-        .as_millis()
-        .saturating_add(u128::from(remaining.subsec_nanos() % 1_000_000 != 0))
-        .clamp(1, 0x7fff_ffff) as u32;
-    if SetTimer(window, HISTORY_TIMER_ID, milliseconds, None) == 0 {
-        (&mut *state).history_timer_unavailable();
-    } else {
-        HISTORY_TIMER_WAKE.with(|wake| wake.set(desired));
-    }
-}
-
-unsafe fn sync_script_timer(window: Handle, state: *mut App) {
-    if !state_is_attached(window, state) {
-        return;
-    }
-    let desired = (&*state)
-        .next_page_timer()
-        .map(|due| (window as usize, due));
-    if SCRIPT_TIMER_WAKE.with(|wake| wake.get() == desired) {
-        return;
-    }
-    KillTimer(window, SCRIPT_TIMER_ID);
-    SCRIPT_TIMER_WAKE.with(|wake| wake.set(None));
-    let Some((_, due)) = desired else {
-        return;
-    };
-    let remaining = due.saturating_duration_since(std::time::Instant::now());
-    // SetTimer has a platform minimum granularity. Round up; never run early.
-    let milliseconds = remaining
-        .as_millis()
-        .saturating_add(u128::from(remaining.subsec_nanos() % 1_000_000 != 0))
-        .clamp(1, 0x7fff_ffff) as u32;
-    if SetTimer(window, SCRIPT_TIMER_ID, milliseconds, None) == 0 {
-        (&mut *state).script_timer_unavailable();
-    } else {
-        SCRIPT_TIMER_WAKE.with(|wake| wake.set(desired));
-    }
-}
-
-unsafe fn sync_download_timer(window: Handle, state: *mut App) {
-    if !state_is_attached(window, state) {
-        return;
-    }
-    let desired = if (&*state).network_needs_tick() {
-        Some((window as usize, 100))
-    } else if (&*state).downloads_open() && (&*state).downloads_active() {
-        Some((window as usize, 1000))
-    } else {
-        None
-    };
-    if DOWNLOAD_TIMER_OWNER.with(|owner| owner.get() == desired) {
-        return;
-    }
-    KillTimer(window, DOWNLOAD_TIMER_ID);
-    DOWNLOAD_TIMER_OWNER.with(|owner| owner.set(None));
-    if let Some((_, milliseconds)) = desired {
-        if SetTimer(window, DOWNLOAD_TIMER_ID, milliseconds, None) != 0 {
-            DOWNLOAD_TIMER_OWNER.with(|owner| owner.set(desired));
-        }
-    }
-}
-
 fn colorref(rgb: u32) -> u32 {
     ((rgb & 0xff) << 16) | (rgb & 0xff00) | ((rgb >> 16) & 0xff)
 }
@@ -1037,6 +453,7 @@ fn forget_frame_colors(window: Handle) {
 }
 
 unsafe fn sync_frame_colors(window: Handle, colors: (u32, u32)) {
+    let Some(route) = session_window::binding(window) else { return; };
     let changed = FRAME_COLORS.with(|cache| {
         let mut cache = cache.borrow_mut();
         if let Some(previous) = cache.iter_mut().find(|entry| entry.0 == window as usize) {
@@ -1045,8 +462,8 @@ unsafe fn sync_frame_colors(window: Handle, colors: (u32, u32)) {
             }
             *previous = (window as usize, colors.0, colors.1);
         } else {
-            // Only the main window and its one detached inspector use this.
-            if cache.len() >= 4 {
+            // Bounded main/inspector native routes share this small frame cache.
+            if cache.len() >= 40 {
                 cache.clear();
             }
             cache.push((window as usize, colors.0, colors.1));
@@ -1064,18 +481,21 @@ unsafe fn sync_frame_colors(window: Handle, colors: (u32, u32)) {
     let luminance =
         ((colors.0 >> 16) & 255) * 299 + ((colors.0 >> 8) & 255) * 587 + (colors.0 & 255) * 114;
     let dark: i32 = i32::from(luminance < 128_000);
+    if !session_window::native_matches(route) { return; }
     let _ = DwmSetWindowAttribute(
         window,
         20,
         (&dark as *const i32).cast(),
         size_of::<i32>() as u32,
     );
+    if !session_window::native_matches(route) { return; }
     let _ = DwmSetWindowAttribute(
         window,
         35,
         (&caption as *const u32).cast(),
         size_of::<u32>() as u32,
     );
+    if !session_window::native_matches(route) { return; }
     let _ = DwmSetWindowAttribute(
         window,
         36,
@@ -1093,77 +513,6 @@ fn mouse_coordinates(lparam: isize) -> (i32, i32) {
 
 unsafe fn key_is_down(key: i32) -> bool {
     GetKeyState(key) < 0
-}
-
-unsafe fn state_is_attached(window: Handle, state: *const App) -> bool {
-    GetWindowLongPtrW(window, -21) as *const App == state
-}
-
-unsafe fn set_client_cursor(state: *const App, x: i32, y: i32) {
-    let hand = { (&*state).wants_hand(x, y) };
-    let resize = { (&*state).inspector_resize_cursor(x, y) };
-    let resource = if resize {
-        32645usize
-    } else if hand {
-        32649usize
-    } else {
-        32512usize
-    };
-    let cursor = LoadCursorW(null_mut(), resource as *const u16);
-    if !cursor.is_null() {
-        SetCursor(cursor);
-    }
-}
-
-unsafe fn perform_action(window: Handle, state: *mut App, action: PlatformAction) {
-    // The action owns its data. Clipboard functions and the modal file picker may
-    // dispatch messages, so no application reference is held while they run.
-    let result = match action {
-        PlatformAction::None => Ok(()),
-        PlatformAction::OpenFile => {
-            if GetCapture() == window {
-                ReleaseCapture();
-            }
-            match choose_file(window) {
-                Ok(Some(path)) => {
-                    if state_is_attached(window, state) {
-                        (&mut *state).open(&path);
-                    }
-                    Ok(())
-                }
-                Ok(None) => Ok(()),
-                Err(error) => Err(error),
-            }
-        }
-        PlatformAction::OpenFolder(path) => open_folder(window, &path),
-        PlatformAction::Copy(text) | PlatformAction::CopyBuildInformation(text) => write_clipboard(window, &text),
-        PlatformAction::Cut(text) => match write_clipboard(window, &text) {
-            Ok(()) => {
-                if state_is_attached(window, state) {
-                    (&mut *state).cut_copied(&text);
-                }
-                Ok(())
-            }
-            Err(error) => Err(error),
-        },
-        PlatformAction::Paste => match read_clipboard(window) {
-            Ok(Some(text)) => {
-                if state_is_attached(window, state) {
-                    (&mut *state).paste(&text);
-                }
-                Ok(())
-            }
-            Ok(None) => Ok(()),
-            Err(error) => Err(error),
-        },
-    };
-    if let Err(error) = result {
-        if state_is_attached(window, state) {
-            let text = wide(&error);
-            let caption = wide("ChezCat");
-            MessageBoxW(window, text.as_ptr(), caption.as_ptr(), 0x10);
-        }
-    }
 }
 
 /// This action accepts only a real local directory, then asks Explorer to

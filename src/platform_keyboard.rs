@@ -7,37 +7,22 @@ use crate::scripting::KeyboardInput;
 
 type KeyMessage = (usize, u32, usize, isize);
 std::thread_local! {
-    static TRANSLATION: Cell<Option<(KeyMessage, bool)>> = const { Cell::new(None) };
+    // Modal/native nested dispatch must not overwrite an outer key's decision.
+    static TRANSLATION: RefCell<Vec<(KeyMessage, bool)>> = const { RefCell::new(Vec::new()) };
 }
-
 fn identity(message: &Message) -> KeyMessage {
-    (
-        message.window as usize,
-        message.message,
-        message.wparam,
-        message.lparam,
-    )
+    (message.window as usize,message.message,message.wparam,message.lparam)
 }
-
-pub(super) fn prepare(message: &Message) {
-    TRANSLATION.with(|slot| slot.set(Some((identity(message), false))));
+pub(super) fn prepare(message: &Message) -> bool {
+    TRANSLATION.with(|slot|{let Ok(mut stack)=slot.try_borrow_mut() else{return false;};
+        if stack.len()==32{return false;}stack.push((identity(message),false));true})
 }
-
 pub(super) fn complete(message: &Message) -> bool {
-    TRANSLATION.with(|slot| {
-        slot.replace(None)
-            .is_some_and(|(key, canceled)| key == identity(message) && canceled)
-    })
+    TRANSLATION.with(|slot|{let Ok(mut stack)=slot.try_borrow_mut() else{return true;};
+        let Some(index)=stack.iter().rposition(|(key,_)|*key==identity(message)) else{return true;};stack.remove(index).1})
 }
-
-pub(super) fn cancel(window: Handle, message: u32, wparam: usize, lparam: isize) {
-    TRANSLATION.with(|slot| {
-        if let Some((key, _)) = slot.get() {
-            if key == (window as usize, message, wparam, lparam) {
-                slot.set(Some((key, true)));
-            }
-        }
-    });
+pub(super) fn cancel(window: Handle,message:u32,wparam:usize,lparam:isize) {
+    TRANSLATION.with(|slot|{if let Ok(mut stack)=slot.try_borrow_mut(){if let Some((_,canceled))=stack.iter_mut().rev().find(|(key,_)|*key==(window as usize,message,wparam,lparam)){*canceled=true;}}});
 }
 
 pub(super) unsafe fn event(key: u32, lparam: isize, down: bool, system: bool) -> KeyboardInput {
@@ -98,5 +83,15 @@ pub(super) unsafe fn event(key: u32, lparam: isize, down: bool, system: bool) ->
         repeat: down && lparam & (1 << 30) != 0,
         location: key_location(code),
         key_code: key,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn message(key:usize)->Message{Message{window:7usize as Handle,message:0x0100,wparam:key,lparam:1,time:0,point:Point{x:0,y:0},private:0}}
+    #[test] fn nested_native_translation_keeps_outer_cancel_decision(){
+        let outer=message(65);let inner=message(66);assert!(prepare(&outer));cancel(outer.window,outer.message,outer.wparam,outer.lparam);
+        assert!(prepare(&inner));assert!(!complete(&inner));assert!(complete(&outer));assert!(complete(&outer));
     }
 }

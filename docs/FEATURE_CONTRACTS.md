@@ -341,9 +341,9 @@ Semantic references: [Media Queries relative units](https://www.w3.org/TR/mediaq
 
 ## B2 — finite tabs, link context and new windows
 
-Status: shared-profile prerequisite implemented after the first measured
-responsive rendering improvement; full normal integration remains required.
-No tab or new-window capability is claimed by this prerequisite. Provide new/switch/close
+Status: shared authorities, Session ownership and finite native tab/window shell
+implemented after the measured responsive improvement; full normal integration
+is required at each checkpoint. Link dispositions and link context remain next. Provide new/switch/close
 tabs and link actions for new tabs or ChezCat windows, including supported middle/
 Ctrl-click and keyboard actions. Keep independent page/history/scroll/loading and
 address/title state with deliberate shared profile/cookies. Acceptance must prove
@@ -439,9 +439,31 @@ Nine original controls exercise real VM/form/source/scroll/Back isolation, input
 capture transfer, resize/close activation, stale IDs/wakes and bounded inactive
 timers, held scripts/stylesheets/images/backgrounds, live-download adoption,
 decoded media-token retirement and final-only history/readonly retry. This is an
-internal App ownership slice. Native userdata, inspector bindings, reentrant
-window calls, scheduling, tab-strip input and link/new-window dispositions remain
-subsequent acceptance; full normal integration is required for each checkpoint.
+internal App ownership slice. The native shell now routes through checked numeric
+registry keys and complete typed owners, with no App pointer in native userdata.
+It initializes the UI from actual client bounds before refresh or input, including
+hidden windows. The tab strip composes the active App and supports mouse tab
+selection/close/new actions, overflow scrolling, Ctrl+T/W/Tab/Shift+Tab and Ctrl+N.
+New-window failure retires only its reserved native route and rolls back its new
+core owner. Platform continuations retain their original App/document/editor and
+typed tab identity across modal reentry; logical owner changes refuse late results.
+
+Detached inspectors stay pinned to their actual tab, including inactive tabs.
+Routes suspend before consuming App mutations and retire before native destruction.
+No Session/App/registry borrow spans Win32, modal, clipboard or painting calls.
+One scheduler preserves earlier deadlines and transfers to a surviving window.
+Translated characters retain their originating tab; switching tabs purges old
+translations without swallowing WM_QUIT. Only successful final history shutdown
+posts quit; failed cleanup leaves a non-browsing retry host.
+
+Seven original continuation controls, ten pure Session UI controls and eight
+native controls cover these finite behaviors. Three native controls create actual
+hidden task-owned HWNDs on dedicated threads, exercise real message dispatch and
+destruction, and use a real read-only history failure/retry. Unexpected test-only
+modal errors are recorded and fail outside native callbacks. They use no OS input,
+owner HWND, live site or native clipboard. They do not establish physical desktop
+interaction or link dispositions/context menus. Full normal/optimized executable
+integration is required for every checkpoint.
 
 Local-file identity controls include genuine Windows short-path aliases when
 available and compare complete accepted browser Locations. Held-resource controls

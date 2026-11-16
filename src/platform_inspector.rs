@@ -1,17 +1,14 @@
-//! Owned, modeless developer-tools window. The browser's Box<App> remains the
-//! sole owner. Userdata stores the owner HWND, never another owning App pointer.
-//! No App borrow crosses a Win32 call that can dispatch messages.
+//! Each auxiliary window is pinned to one complete Session/Window/Tab identity.
+//! Userdata contains a checked numeric native key, never an App or binding pointer.
+use super::session_window::{self as host, Binding, InputOwner, Owner};
 use super::*;
-
+use crate::app::session::WindowId;
 const CLASS: &str = "ChezCatInspectorWindow";
-std::thread_local! {
-    static WINDOW: Cell<Option<(usize, usize)>> = const { Cell::new(None) };
-}
 
 pub(super) unsafe fn register(instance: Handle, icon: Handle) -> Result<(), String> {
     let name = wide(CLASS);
     let class = WindowClass {
-        style: 0x0003,
+        style: 3,
         procedure: Some(procedure),
         class_extra: 0,
         window_extra: 0,
@@ -31,33 +28,63 @@ pub(super) unsafe fn register(instance: Handle, icon: Handle) -> Result<(), Stri
         Ok(())
     }
 }
-
 pub(super) unsafe fn unregister(instance: Handle) {
-    if let Some((_, window)) = WINDOW.with(|slot| slot.replace(None)) {
-        DestroyWindow(window as Handle);
+    for route in host::all_routes() {
+        if matches!(route.owner, Owner::Inspector(..)) {
+            host::retire_route(route);
+        }
     }
     let name = wide(CLASS);
     UnregisterClassW(name.as_ptr(), instance);
 }
-
-pub(super) unsafe fn sync(owner: Handle, state: *mut App) {
-    if !state_is_attached(owner, state) {
+// Bounded by the browser's tab limit. Multiple detached tools remain pinned to
+// their original pages when the selected tab changes, including inactive pages.
+pub(super) unsafe fn sync(window: WindowId) {
+    let Some(main) = host::main_route(window) else {
         return;
-    }
-    let detached = (&*state).inspector_detached();
-    let existing = WINDOW.with(|slot| slot.get());
-    if detached {
-        if let Some((parent, window)) = existing {
-            if parent == owner as usize {
-                let colors = (&*state).title_bar_colors();
-                sync_frame_colors(window as Handle, colors);
-                InvalidateRect(window as Handle, null(), 0);
-            }
+    };
+    for tab in host::tab_ids(window) {
+        if !host::attached(main) {
             return;
         }
+        let origin = InputOwner {
+            window,
+            tab,
+            inspector: true,
+        };
+        let Ok((detached, colors)) = observe_owner(main, origin, |app| {
+            (app.inspector_detached(), app.title_bar_colors())
+        }) else {
+            continue;
+        };
+        let existing = host::inspector_routes(window)
+            .into_iter()
+            .find(|r| r.owner == Owner::Inspector(window, tab) && !r.closing);
+        if !detached {
+            if let Some(route) = existing {
+                host::retire_route(route);
+            }
+            continue;
+        }
+        if let Some(route) = existing {
+            if host::attached(route) {
+                sync_frame_colors(route.hwnd as Handle, colors);
+                if host::attached(route) {
+                    InvalidateRect(route.hwnd as Handle, null(), 0);
+                }
+            }
+            continue;
+        }
+        let key = match host::reserve_inspector(window, tab) {
+            Ok(key) => key,
+            Err(error) => {
+                let _ = with_owner(main, origin, |app| app.inspector_detach_failed(error));
+                continue;
+            }
+        };
         let name = wide(CLASS);
         let title = wide("Developer tools - ChezCat");
-        let window = CreateWindowExW(
+        let hwnd = CreateWindowExW(
             0,
             name.as_ptr(),
             title.as_ptr(),
@@ -66,81 +93,83 @@ pub(super) unsafe fn sync(owner: Handle, state: *mut App) {
             i32::MIN,
             1040,
             680,
-            owner,
+            main.hwnd as Handle,
             null_mut(),
             GetModuleHandleW(null()),
-            owner,
+            key as *mut c_void,
         );
-        if window.is_null() {
+        if hwnd.is_null() {
+            host::forget_key(key);
             let error = std::io::Error::last_os_error().to_string();
-            if state_is_attached(owner, state) {
-                (&mut *state).inspector_detach_failed(error);
+            let _ = with_owner(main, origin, |app| app.inspector_detach_failed(error));
+            continue;
+        }
+        let Some(route) = host::binding(hwnd)
+            .filter(|route| route.key == key && route.owner == Owner::Inspector(window, tab))
+        else {
+            host::retire_reserved(key);
+            continue;
+        };
+        if !host::attached(main)
+            || observe_owner(main, origin, |a| a.inspector_detached()).ok() != Some(true)
+        {
+            host::retire_reserved(key);
+            continue;
+        }
+        sync_frame_colors(hwnd, colors);
+        if host::show_auxiliary() && host::attached(route) {
+            ShowWindow(hwnd, 5);
+            if host::attached(route) {
+                UpdateWindow(hwnd);
             }
-            return;
-        }
-        if !state_is_attached(owner, state) {
-            DestroyWindow(window);
-            return;
-        }
-        WINDOW.with(|slot| slot.set(Some((owner as usize, window as usize))));
-        let colors = (&*state).title_bar_colors();
-        sync_frame_colors(window, colors);
-        ShowWindow(window, 5);
-        UpdateWindow(window);
-    } else if let Some((parent, window)) = existing {
-        if parent == owner as usize {
-            WINDOW.with(|slot| slot.set(None));
-            DestroyWindow(window as Handle);
         }
     }
 }
-
-unsafe fn app(window: Handle) -> Option<(Handle, *mut App)> {
-    let owner = GetWindowLongPtrW(window, -21) as Handle;
-    if owner.is_null() {
-        return None;
+fn with_owner<T>(
+    route: Binding,
+    origin: InputOwner,
+    action: impl FnOnce(&mut App) -> T,
+) -> Result<T, String> {
+    if !host::attached(route) {
+        return Err("The inspector native owner has retired.".into());
     }
-    let state = GetWindowLongPtrW(owner, -21) as *mut App;
-    (!state.is_null()).then_some((owner, state))
+    host::with_tab(origin, action)
 }
-
-unsafe fn action(window: Handle, owner: Handle, state: *mut App, action: PlatformAction) {
-    let result = match action {
-        PlatformAction::None | PlatformAction::OpenFile => Ok(()),
-        PlatformAction::OpenFolder(path) => open_folder(window, &path),
-        PlatformAction::Copy(text) => write_clipboard(window, &text),
-        PlatformAction::CopyBuildInformation(_) => Err("Build-information copy belongs to the browser About panel.".into()),
-        PlatformAction::Cut(text) => match write_clipboard(window, &text) {
-            Ok(()) => {
-                if state_is_attached(owner, state) {
-                    (&mut *state).inspector_cut_copied(&text);
-                }
-                Ok(())
-            }
-            Err(error) => Err(error),
-        },
-        PlatformAction::Paste => match read_clipboard(window) {
-            Ok(Some(text)) => {
-                if state_is_attached(owner, state) {
-                    (&mut *state).inspector_paste(&text);
-                }
-                Ok(())
-            }
-            Ok(None) => Ok(()),
-            Err(error) => Err(error),
-        },
-    };
-    if let Err(error) = result {
-        if state_is_attached(owner, state) {
-            let text = wide(&error);
-            let title = wide("ChezCat inspector");
-            MessageBoxW(window, text.as_ptr(), title.as_ptr(), 0x10);
-        }
+fn observe_owner<T>(
+    route: Binding,
+    origin: InputOwner,
+    action: impl FnOnce(&App) -> T,
+) -> Result<T, String> {
+    if !host::attached(route) {
+        return Err("The inspector native owner has retired.".into());
+    }
+    host::observe_tab(origin, action)
+}
+unsafe fn repaint(route: Binding, origin: InputOwner) {
+    if !host::attached(route) {
+        return;
+    }
+    host::refresh_window(origin.window);
+    if host::attached(route) {
+        InvalidateRect(route.hwnd as Handle, null(), 0);
+    }
+    host::schedule();
+}
+unsafe fn cursor(route: Binding, origin: InputOwner, x: i32, y: i32) {
+    if !host::attached(route) {
+        return;
+    }
+    let hand = observe_owner(route, origin, |a| a.inspector_wants_hand(x, y)).unwrap_or(false);
+    let cursor = LoadCursorW(
+        null_mut(),
+        (if hand { 32649usize } else { 32512usize }) as *const u16,
+    );
+    if host::attached(route) {
+        SetCursor(cursor);
     }
 }
-
 unsafe extern "system" fn procedure(
-    window: Handle,
+    hwnd: Handle,
     message: u32,
     wparam: usize,
     lparam: isize,
@@ -148,27 +177,22 @@ unsafe extern "system" fn procedure(
     match message {
         0x0081 => {
             let create = &*(lparam as *const CreateStruct);
+            let key = create.parameters as usize;
+            if !host::attach_key(key, hwnd) {
+                return 0;
+            }
             SetLastError(0);
-            let previous = SetWindowLongPtrW(window, -21, create.parameters as isize);
+            let previous = SetWindowLongPtrW(hwnd, -21, key as isize);
             if previous == 0 && GetLastError() != 0 {
+                host::forget_key(key);
                 return 0;
             }
             return 1;
         }
         0x0082 => {
-            forget_frame_colors(window);
-            WINDOW.with(|slot| {
-                if slot
-                    .get()
-                    .is_some_and(|(_, handle)| handle == window as usize)
-                {
-                    slot.set(None);
-                }
-            });
-            SetWindowLongPtrW(window, -21, 0);
-            return DefWindowProcW(window, message, wparam, lparam);
+            host::destroyed(hwnd);
+            return DefWindowProcW(hwnd, message, wparam, lparam);
         }
-        // Closing a developer window must never terminate the browser's loop.
         0x0002 => return 0,
         0x0014 => return 1,
         0x0024 => {
@@ -177,111 +201,140 @@ unsafe extern "system" fn procedure(
         }
         _ => {}
     }
-    let Some((owner, state)) = app(window) else {
-        return DefWindowProcW(window, message, wparam, lparam);
+    let Some(route) = host::binding(hwnd) else {
+        return DefWindowProcW(hwnd, message, wparam, lparam);
+    };
+    let Some(origin) = host::owner_for(route) else {
+        return DefWindowProcW(hwnd, message, wparam, lparam);
     };
     match message {
         0x031a | 0x0320 => {
-            forget_frame_colors(window);
-            let colors = (&*state).title_bar_colors();
-            sync_frame_colors(window, colors);
-            DefWindowProcW(window, message, wparam, lparam)
+            forget_frame_colors(hwnd);
+            if let Ok(colors) = observe_owner(route, origin, |a| a.title_bar_colors()) {
+                sync_frame_colors(hwnd, colors);
+            }
+            DefWindowProcW(hwnd, message, wparam, lparam)
         }
         0x0010 => {
-            (&mut *state).close_inspector();
-            refresh(owner, state);
+            let _ = with_owner(route, origin, |a| a.close_inspector());
+            host::refresh_window(origin.window);
             0
         }
         0x0007 => {
-            (&mut *state).inspector_focus();
-            InvalidateRect(window, null(), 0);
+            host::activate_window(origin.window);
+            let _ = with_owner(route, origin, |a| a.inspector_focus());
+            InvalidateRect(hwnd, null(), 0);
             0
         }
         0x0008 | 0x001f | 0x0215 => {
-            (&mut *state).inspector_cancel_pointer();
-            if message != 0x0215 && GetCapture() == window {
+            let _ = with_owner(route, origin, |a| a.inspector_cancel_pointer());
+            host::forget_input(hwnd);
+            if message != 0x0215 && GetCapture() == hwnd {
                 ReleaseCapture();
             }
-            InvalidateRect(window, null(), 0);
-            DefWindowProcW(window, message, wparam, lparam)
+            if host::attached(route) {
+                InvalidateRect(hwnd, null(), 0);
+            }
+            DefWindowProcW(hwnd, message, wparam, lparam)
         }
         0x0005 => {
             let mut rect: Rect = zeroed();
-            GetClientRect(window, &mut rect);
+            GetClientRect(hwnd, &mut rect);
             if rect.right > 0 && rect.bottom > 0 {
-                (&mut *state).inspector_window_size(rect.right, rect.bottom);
+                let _ = with_owner(route, origin, |a| {
+                    a.inspector_window_size(rect.right, rect.bottom)
+                });
+                InvalidateRect(hwnd, null(), 0);
             }
-            InvalidateRect(window, null(), 0);
             0
         }
         0x000f => {
             let mut paint: PaintStruct = zeroed();
-            let dc = BeginPaint(window, &mut paint);
+            let dc = BeginPaint(hwnd, &mut paint);
             let mut rect: Rect = zeroed();
-            GetClientRect(window, &mut rect);
-            if !dc.is_null() && rect.right > 0 && rect.bottom > 0 {
-                let canvas = {
-                    let app = &mut *state;
-                    app.inspector_window_size(rect.right, rect.bottom);
-                    app.draw_inspector_window()
-                };
-                present_canvas(dc, &rect, &canvas);
+            GetClientRect(hwnd, &mut rect);
+            if !dc.is_null() && rect.right > 0 && rect.bottom > 0 && host::attached(route) {
+                let canvas = with_owner(route, origin, |a| {
+                    a.inspector_window_size(rect.right, rect.bottom);
+                    a.draw_inspector_window()
+                });
+                if let Ok(canvas) = canvas {
+                    present_canvas(dc, &rect, &canvas);
+                }
             }
-            EndPaint(window, &paint);
+            EndPaint(hwnd, &paint);
             0
         }
         0x020a => {
             let (x, y) = mouse_coordinates(lparam);
             let mut point = Point { x, y };
-            ScreenToClient(window, &mut point);
+            ScreenToClient(hwnd, &mut point);
             let delta = ((wparam >> 16) & 0xffff) as u16 as i16 as i32;
             let ctrl = key_is_down(0x11);
             let shift = key_is_down(0x10);
-            (&mut *state).inspector_wheel(point.x, point.y, delta, ctrl, shift);
-            InvalidateRect(window, null(), 0);
+            let _ = with_owner(route, origin, |a| {
+                a.inspector_wheel(point.x, point.y, delta, ctrl, shift)
+            });
+            repaint(route, origin);
             0
         }
         0x020b if matches!((wparam >> 16) & 0xffff, 1 | 2) => 1,
         0x020c if matches!((wparam >> 16) & 0xffff, 1 | 2) => {
-            if GetCapture() == window {
+            if GetCapture() == hwnd {
                 ReleaseCapture();
             }
-            (&mut *state).mouse_navigation((wparam >> 16) & 0xffff == 2);
-            refresh(owner, state);
+            let _ = with_owner(route, origin, |a| {
+                a.mouse_navigation((wparam >> 16) & 0xffff == 2)
+            });
+            repaint(route, origin);
             1
         }
         0x0319 if matches!((lparam as usize >> 16) & 0x0fff, 1 | 2) => {
-            if GetCapture() == window {
+            if GetCapture() == hwnd {
                 ReleaseCapture();
             }
-            (&mut *state).mouse_navigation((lparam as usize >> 16) & 0x0fff == 2);
-            refresh(owner, state);
+            let _ = with_owner(route, origin, |a| {
+                a.mouse_navigation((lparam as usize >> 16) & 0x0fff == 2)
+            });
+            repaint(route, origin);
             1
         }
-        0x0100 => {
+        0x0100 | 0x0104 => {
             let key = wparam as u32;
+            let Some(origin) = host::key_owner(hwnd, key, true, route) else {
+                return 0;
+            };
             if matches!(key, 0xa6 | 0xa7) {
-                (&mut *state).mouse_navigation(key == 0xa7);
-                refresh(owner, state);
+                let _ = with_owner(route, origin, |a| a.mouse_navigation(key == 0xa7));
+                keyboard_input::cancel(hwnd, message, wparam, lparam);
+                repaint(route, origin);
                 return 0;
             }
             let ctrl = key_is_down(0x11);
             let shift = key_is_down(0x10);
             let alt = key_is_down(0x12);
             if ctrl && alt {
-                return DefWindowProcW(window, message, wparam, lparam);
+                return DefWindowProcW(hwnd, message, wparam, lparam);
             }
-            let next = (&mut *state).inspector_key(key, ctrl, shift, alt);
-            action(window, owner, state, next);
-            refresh(owner, state);
+            if ctrl || alt {
+                keyboard_input::cancel(hwnd, message, wparam, lparam);
+            }
+            host::inspector_request(route, origin, |a| a.inspector_key(key, ctrl, shift, alt));
+            repaint(route, origin);
             0
+        }
+        0x0101 | 0x0105 => {
+            let _ = host::key_owner(hwnd, wparam as u32, false, route);
+            DefWindowProcW(hwnd, message, wparam, lparam)
         }
         0x0102 => {
             let ctrl = key_is_down(0x11);
             let alt = key_is_down(0x12);
             if wparam <= u16::MAX as usize && wparam >= 0x20 && wparam != 0x7f && (!ctrl || alt) {
-                (&mut *state).inspector_utf16_input(wparam as u16);
-                InvalidateRect(window, null(), 0);
+                if let Some(origin) = host::text_owner(hwnd, lparam) {
+                    let _ = with_owner(route, origin, |a| a.inspector_utf16_input(wparam as u16));
+                    repaint(route, origin);
+                }
             }
             0
         }
@@ -295,55 +348,61 @@ unsafe extern "system" fn procedure(
                 .filter(|ch| !ch.is_control())
             {
                 let mut buffer = [0u8; 4];
-                (&mut *state).inspector_paste(ch.encode_utf8(&mut buffer));
-                InvalidateRect(window, null(), 0);
+                let _ = with_owner(route, origin, |a| {
+                    a.inspector_paste(ch.encode_utf8(&mut buffer))
+                });
+                repaint(route, origin);
             }
             0
         }
         0x0201 => {
             let (x, y) = mouse_coordinates(lparam);
-            SetFocus(window);
-            SetCapture(window);
-            (&mut *state).inspector_pointer_down(x, y);
-            InvalidateRect(window, null(), 0);
+            SetFocus(hwnd);
+            if !host::attached(route) {
+                return 0;
+            }
+            SetCapture(hwnd);
+            if host::attached(route) {
+                let _ = with_owner(route, origin, |a| a.inspector_pointer_down(x, y));
+                InvalidateRect(hwnd, null(), 0);
+            }
             0
         }
         0x0200 => {
             let (x, y) = mouse_coordinates(lparam);
-            let dragging = wparam & 1 != 0 && GetCapture() == window;
-            if (&mut *state).inspector_pointer_move(x, y, dragging) {
-                InvalidateRect(window, null(), 0);
+            let dragging = wparam & 1 != 0 && GetCapture() == hwnd;
+            if with_owner(route, origin, |a| a.inspector_pointer_move(x, y, dragging))
+                .unwrap_or(false)
+            {
+                InvalidateRect(hwnd, null(), 0);
             }
-            let hand = (&*state).inspector_wants_hand(x, y);
-            SetCursor(LoadCursorW(
-                null_mut(),
-                (if hand { 32649usize } else { 32512usize }) as *const u16,
-            ));
+            cursor(route, origin, x, y);
             0
         }
         0x0202 => {
             let (x, y) = mouse_coordinates(lparam);
-            let next = (&mut *state).inspector_pointer_up(x, y);
-            if GetCapture() == window {
+            let request = with_owner(route, origin, |a| {
+                let action = a.inspector_pointer_up(x, y);
+                a.inspector_platform_request(action)
+            });
+            if GetCapture() == hwnd {
                 ReleaseCapture();
             }
-            action(window, owner, state, next);
-            refresh(owner, state);
+            if let Ok(request) = request {
+                host::perform_request(route, origin, request);
+            }
+            repaint(route, origin);
             0
         }
         0x0020 if lparam & 0xffff == 1 => {
             let mut point = Point { x: 0, y: 0 };
-            if GetCursorPos(&mut point) != 0 && ScreenToClient(window, &mut point) != 0 {
-                let hand = (&*state).inspector_wants_hand(point.x, point.y);
-                SetCursor(LoadCursorW(
-                    null_mut(),
-                    (if hand { 32649usize } else { 32512usize }) as *const u16,
-                ));
+            if GetCursorPos(&mut point) != 0 && ScreenToClient(hwnd, &mut point) != 0 {
+                cursor(route, origin, point.x, point.y);
                 1
             } else {
-                DefWindowProcW(window, message, wparam, lparam)
+                DefWindowProcW(hwnd, message, wparam, lparam)
             }
         }
-        _ => DefWindowProcW(window, message, wparam, lparam),
+        _ => DefWindowProcW(hwnd, message, wparam, lparam),
     }
 }

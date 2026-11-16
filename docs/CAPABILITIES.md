@@ -18,8 +18,7 @@ A finite About/build-description panel is implemented at this UI checkpoint.
 The B2 profile prerequisite now provides one shared writer and immutable App
 snapshots with captured editor/gesture revisions. Original two-App tests retain
 live VM/form/history/viewport state across peer refresh and refuse stale bookmark
-identities. This is internal ownership preparation; actual tabs, new windows,
-session/download routing and close retirement remain unfinished.
+identities. These authorities now support the finite Session/native tab shell.
 The download prerequisite now retains one browser-owned Manager with weak App
 views and explicit startup attachment, while preserving legacy single-window
 ownership. Original held transfers survive the originating App, remain visible
@@ -29,9 +28,13 @@ edits. Attached Apps cannot clear history on individual close; explicit final
 shutdown belongs to the browser authority. An internal Session core now owns real
 boxed Apps, checked process-scoped tab/window IDs, bounded polling and consuming
 page retirement. Original tests exercise independent live page state, held
-resources, stale wakes and final-only history cleanup. Native window bindings,
-tab controls, link dispositions and inspector lifetime integration remain
-required before interactive tabs/windows are available.
+resources, stale wakes and final-only history cleanup. The native shell adds a
+software tab strip, new/switch/close actions, Ctrl+T/W/Tab/Shift+Tab/N, real window
+creation and tab-pinned detached inspectors. Original pure UI and task-created
+hidden-HWND controls cover input ownership, reentry, scheduling, text purge and
+history retry. Full normal/optimized integration is required at each checkpoint;
+these controls do not establish physical desktop interaction. Link dispositions
+and link context menus remain unfinished.
 One per-user installer and staged release discovery/upgrade remain planned in the
 [roadmap](ROADMAP.md), not delivered capabilities. Further
 F6/YouTube work is deferred; completed finite media evidence remains valid.
@@ -50,7 +53,7 @@ F6/YouTube work is deferred; completed finite media evidence remains valid.
 | Fonts/images | Original selected font/image decoders and resource/presentation paths | Format subsets and cross-origin font loading need specific contracts | src/fonts.rs, src/image.rs and format modules; original pixel/negative fixtures |
 | Media | Local IVF/VP8 visible fixed-canvas I/P (version-zero single-MV interframes), PCM, constrained Matroska A/V with dependency-aware seeking; one authored IVF or supported Matroska video with source/load lifecycle, script controls and play promises tied to decoded-frame/acknowledged PCM readiness; complete HTTP(S) IVF/Matroska transfers chosen by explicit MIME, with authored CORS/credential modes | SPLITMV, hidden/nonzero-version interframes, WebM/Opus/Vorbis, unmarked foreign media, dynamic crossOrigin controls, streaming/ranges, muted Matroska, multiple players, MSE and YouTube playback missing | src/media.rs, src/audio.rs, src/matroska.rs, src/script_media.rs; local media/source-replacement journeys and check_authored_video_harness.py and check_network_media_harness.py; check_authored_av_harness.py and check_network_authored_av_harness.py |
 | Media interfaces | Genuine owner-realm HTMLMediaElement/HTMLVideoElement roots, constants and slot accessors; stable VIDEO class identity and canonical load/pause/play/src/currentTime transactions through ordinary shadows; actual Boolean controls reflection and native bar/input behavior without source/clock/frame/Promise reset | One bound player; controls reflects genuine main HTML VIDEO/AUDIO attributes without a player, while unbound playback calls give real NotSupportedError outcomes and other playback-state getters/setters decline. VIDEO dimensions, extra/child players and wider media APIs remain unsupported; Element.toggleAttribute and NamedNodeMap mutation are separate gaps | src/media_interface.rs, src/script_media.rs, src/host_objects.rs, src/app_media.rs; original media-interface/controls tests, check_media_interface_harness.py and check_media_controls_harness.py |
-| Browser UI | Native settings, address input, bookmarks/history/download controls and local input paths; finite native About panel with embedded build/source description, exact main legal texts and safe Copy action | Normal/build/offscreen About validation is required for each checkpoint. Copy payload capture does not prove OS clipboard delivery; embedded metadata is not authenticated publication/signing. Tabs/new windows, full accessibility, richer UI and native locked-session presentation remain unverified | src/app*.rs, src/build_identity.rs, src/ui.rs, src/platform.rs; original About/chrome tests and App/input journeys |
+| Browser UI | Native settings, address input, bookmarks/history/download controls; finite About panel; bounded Session tab strip, tab shortcuts and native windows with pinned inspectors | Normal/build/executable integration is required for each checkpoint. Hidden HWND and pure UI controls do not establish physical desktop interaction. Link dispositions/context menus, full accessibility and native locked-session presentation remain unfinished. Copy payload capture does not prove OS clipboard delivery; embedded metadata is descriptive | src/app*.rs, src/build_identity.rs, src/ui.rs, src/platform*.rs; original About/chrome, Session UI and owned native-window controls |
 | Diagnostics | Source/activity/layout/pixels and inspector; document-only connection reports with optional exact-host checks before DNS on each hop, actual destination/phase evidence, and escaped bounded metadata; eight new native diagnostics regressions verified | No App/profile, page scripts, subresources or usability assessment in --diagnose. Status and possible body markers do not establish access/challenge outcomes. Reports can contain private URLs/paths/session data; full normal integration and public-host checks remain separate | src/diagnostics.rs, src/diagnostics_tests.rs, src/network_trace.rs; original loopback/guard/metadata tests and offline harness reports |
 | Platform/isolation | Windows x64, explicit FFI ownership, worker retirement/cancellation and watchdogs | No OS renderer sandbox; independent native/crypto/aggregate-memory assurance remains incomplete | src/platform.rs, src/audio_output.rs; native negative tests and PE checks |
 | Build/release | std-only production manifest, generated resources, pinned compiler, portable payload and offline local gates | Per-user MSI and opt-in release discovery/authenticated upgrades are planned, not implemented. Each release requires an exact tagged build, complete payload, extracted-runtime checks and downloadable-asset verification | Build.cmd, tools/verify_offline.py, docs/RELEASING.md |
