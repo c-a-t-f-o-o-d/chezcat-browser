@@ -3495,6 +3495,14 @@ impl App {
         changed || !matches!(self.drag, Drag::None)
     }
     pub fn pointer_up(&mut self, x: i32, y: i32) -> PlatformAction {
+        self.pointer_up_mode(x, y, true)
+    }
+    /// Native link activation owns its guarded author/default path separately.
+    /// Keep every other existing release behavior, without a hidden link fallback.
+    pub(crate) fn pointer_up_without_link_default(&mut self, x: i32, y: i32) -> PlatformAction {
+        self.pointer_up_mode(x, y, false)
+    }
+    fn pointer_up_mode(&mut self, x: i32, y: i32, allow_link_default: bool) -> PlatformAction {
         self.invalidate_platform_requests();
         if let Some(action) = self.downloads_pointer_up(x, y) {
             return action;
@@ -3553,6 +3561,7 @@ impl App {
             }
             return PlatformAction::None;
         }
+        if allow_link_default {
         if let Drag::Text {
             href: Some(href),
             moved: false,
@@ -3581,6 +3590,7 @@ impl App {
                     self.follow(&href);
                 }
             }
+        }
         }
         PlatformAction::None
     }
