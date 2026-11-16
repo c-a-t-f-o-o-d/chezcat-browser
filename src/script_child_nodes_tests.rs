@@ -236,3 +236,33 @@ if(read(old,entered)!=='old'||entered.entered!==1)throw 'same-origin actual read
     page.set_location(&crate::navigation::Location {url:Some(crate::url::parse("https://example.test/original").unwrap().0),path:None,root:None,fragment:String::new()});
     evaluate(&mut page,&mut doc,&mut forms,"if(read(fresh,entered)!=='replacement'||entered.entered!==3||list[0]!==fresh||fresh.parentNode!==p)throw 'same-origin recovery keeps actual replacement identity';");
 }
+
+#[test]
+fn child_nodes_real_host_apply_copies_actual_nodes_and_preserves_receiver() {
+    let (_,_,page)=fixture("<html><head></head><body><div id=p>lead<b id=b>middle</b>tail</div></body></html>",r#"
+var p=document.getElementById('p'),list=p.childNodes,b=document.getElementById('b'),receiver={},calls=0;
+function inspect(a,middle,z){calls++;if(this!==receiver||arguments.length!==3||a!==list[0]||a.data!=='lead'||middle!==b||z!==list[2]||z.data!=='tail')throw 'real host apply arguments/this';return 17;}
+if(inspect.apply(receiver,list)!==17||calls!==1)throw 'real function target';
+var copied=[];if(Array.prototype.push.apply(copied,document.childNodes)!==1||copied[0]!==document.documentElement)throw 'exact native push/apply Document shape';
+Array.prototype.push.apply(copied,list);if(copied.length!==4||copied[2]!==b||copied[1]!==list[0])throw 'native push/apply Element shape';
+p.removeChild(b);if(copied[2]!==b||list.length!==2||copied.length!==4)throw 'ordinary copied list is static';
+var errors=0;for(var wrong of [1,true,'abc'])try{inspect.apply(receiver,wrong);}catch(e){if(e instanceof TypeError)errors++;else throw e;}
+if(errors!==3||calls!==1)throw 'primitive argArray is not array-like Object';
+"#);
+    assert!(!page.has_host_tasks());
+}
+
+#[test]
+fn child_nodes_real_host_apply_foreign_owner_stops_before_target() {
+    let (mut doc,mut forms,mut page)=fixture("<html><head></head><body><div id=p>kept</div></body></html>",r#"
+var list=document.getElementById('p').childNodes,frame=document.createElement('iframe');frame.hidden=true;document.body.appendChild(frame);
+var w=frame.contentWindow,invoke=w.Function('target','nodes','marker','marker.entered++;return target.apply(null,nodes);'),marker={entered:0},called=0;
+function target(text){called++;return text;}
+if(invoke(target,list,marker)!==list[0]||called!==1||marker.entered!==1)throw 'same-origin host apply control';
+"#);
+    page.set_location(&crate::navigation::Location {url:Some(crate::url::parse("https://other.test/").unwrap().0),path:None,root:None,fragment:String::new()});
+    let out=page.console_eval(&mut doc,&mut forms,"invoke(target,list,marker);");assert_eq!(out.errors,1,"{}",page.report());
+    evaluate(&mut page,&mut doc,&mut forms,"if(called!==1||marker.entered!==2||list.length!==1)throw 'foreign apply entered but target untouched';");
+    page.set_location(&crate::navigation::Location {url:Some(crate::url::parse("https://example.test/original").unwrap().0),path:None,root:None,fragment:String::new()});
+    evaluate(&mut page,&mut doc,&mut forms,"if(invoke(target,list,marker)!==list[0]||called!==2||marker.entered!==3)throw 'same-origin apply recovery';");
+}

@@ -9,6 +9,11 @@ pub(super) fn native_node_member(name:&str)->bool {
     node_constant(name).is_some() || "constructor __proto__ nodeType nodeName baseURI isConnected ownerDocument parentNode parentElement childNodes firstChild lastChild previousSibling nextSibling nodeValue textContent getRootNode hasChildNodes normalize cloneNode isEqualNode isSameNode compareDocumentPosition contains lookupPrefix lookupNamespaceURI isDefaultNamespace insertBefore appendChild replaceChild removeChild addEventListener removeEventListener dispatchEvent".split_ascii_whitespace().any(|candidate|candidate==name)
 }
 
+// Finite real main-Document Node facts, not a new Document interface family.
+pub(super) fn document_node_property(name:&str)->bool {
+    matches!(name,"nodeType"|"nodeName"|"isConnected"|"ownerDocument"|"parentNode"|"parentElement"|"firstChild"|"lastChild"|"previousSibling"|"nextSibling")
+}
+
 const MAX_DOM_DEPTH: usize = 128;
 
 #[derive(Default)]
@@ -153,6 +158,26 @@ impl Page {
 }
 
 impl Bridge<'_> {
+    pub(super) fn node_identity_receiver(&self,object:u32)->bool {
+        !self.is_frame_handle(object) && self.namespace_receiver(object)
+    }
+
+    pub(super) fn document_node_get(&mut self,property:&str)->Result<Option<Value>,String> {
+        if !document_node_property(property) {return Ok(None);}
+        Ok(Some(match property {
+            "nodeType"=>Value::Number(9.0),
+            "nodeName"=>return self.string("#document").map(Some),
+            "isConnected"=>Value::Bool(true),
+            "firstChild"|"lastChild"=>{
+                self.state.rebuild(self.doc)?;
+                let root=self.doc.nodes.first().ok_or("Main Document root is unavailable.")?;
+                let child=if property=="firstChild" {root.children.first()}else{root.children.last()};
+                child.map_or(Value::Null,|&node|Value::Host(node_handle(node)))
+            }
+            _=>Value::Null,
+        }))
+    }
+
     pub(super) fn attr_element_receiver(&self, object: u32) -> bool {
         node_index(object).is_some_and(|node| self.dom_accessible(node)
             && matches!(self.doc.nodes[node].kind, NodeKind::Element { .. }))
@@ -323,6 +348,7 @@ impl Bridge<'_> {
     }
 
     pub(super) fn dom_readonly(&self, object: u32, property: &str) -> bool {
+        if object==DOCUMENT && document_node_property(property) {return true;}
         if property=="childNodes" {return object==DOCUMENT || node_index(object).is_some_and(|node|self.dom_accessible(node));}
         if property == "attributes" { return self.class_list_element_receiver(object); }
         if matches!(property,"localName"|"prefix"|"namespaceURI") {

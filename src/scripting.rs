@@ -2419,6 +2419,7 @@ impl Host for Bridge<'_> {
     }
 
     fn owns_property(&self, object: u32, property: &str) -> bool {
+        if matches!(property,"nodeType"|"nodeName") && self.node_identity_receiver(object) {return false;}
         if self.video_interface_receiver(object)&&script_media::interface_member(property) {return false;}
         if self.event_receiver(object)&&property=="composedPath" {return false;}
         if self.ordinary_event_owner(object).is_some() {return false;}
@@ -2435,7 +2436,8 @@ impl Host for Bridge<'_> {
         self.location_instance_owner(object).is_some() || object == HISTORY || self.attr_receiver(object) || self.constructed_event_receiver(object) || self.named_map_receiver(object)
     }
     fn ordinary_lookup_tail_property(&self,object:u32,property:&str)->bool {
-        if self.event_receiver(object)&&property=="composedPath" {true}
+        if matches!(property,"nodeType"|"nodeName") && self.node_identity_receiver(object) {true}
+        else if self.event_receiver(object)&&property=="composedPath" {true}
         else if self.node_event_method(object,property) {true}
         else if self.location_instance_owner(object).is_some() {property=="prototype"}
         else if property=="animate" && self.element_expando_receiver(object) {true}
@@ -2606,6 +2608,7 @@ impl Host for Bridge<'_> {
     }
 
     fn native_method_owner(&self, object:u32, method:&str) -> Option<u32> {
+        if self.event_target_interface(object) && matches!(method,"\0Node.get.nodeType"|"\0Node.get.nodeName") {return Some(object);}
         if self.node_list_receiver(object) && matches!(method,"item"|"forEach") {return Some(WINDOW);}
         if self.event_target_interface(object)&&(method.starts_with("\0CustomEvent.")||method=="initCustomEvent") {return Some(object);}
         if self.event_target_interface(object)&&method.starts_with("\0Media.")
@@ -2999,6 +3002,7 @@ impl Host for Bridge<'_> {
         if self.event_target_interface(object)&&(method.starts_with("\0UIEvent.")||method=="initUIEvent") {
             return self.ui_receiver(receiver);
         }
+        if self.event_target_interface(object) && matches!(method,"\0Node.get.nodeType"|"\0Node.get.nodeName") {return self.node_identity_receiver(receiver);}
         if self.event_target_interface(object)&&(method.starts_with("\0Event.")||matches!(method,"initEvent"|"preventDefault"|"stopPropagation"|"stopImmediatePropagation")) {
             return self.event_receiver(receiver);
         }
@@ -3128,6 +3132,7 @@ impl Host for Bridge<'_> {
     }
 
     fn own_data(&mut self, object: u32, property: &str) -> Result<Option<Value>, String> {
+        if object==DOCUMENT && dom_tree::document_node_property(property) {self.state.work(1)?;return Ok(None);}
         if self.standalone_target_owner(object).is_some() {self.state.work(1)?;return Ok(None);}
         if script_named_map::element(object).is_some() { return self.named_map_own_data(object, property); }
         if self.attr_receiver(object) { self.state.work(1)?; return Ok(None); }
@@ -3174,6 +3179,7 @@ impl Host for Bridge<'_> {
     }
 
     fn delete(&mut self, object: u32, property: &str) -> Result<bool, String> {
+        if object==DOCUMENT && dom_tree::document_node_property(property) {self.state.work(1)?;return Ok(true);}
         if script_named_map::element(object).is_some() {
             return if collection_index(property).is_some() { self.named_map_has(object, property).map(|present| !present) }
                 else { self.named_map_own_data(object, property)?; Ok(true) };
@@ -3516,6 +3522,7 @@ impl Host for Bridge<'_> {
             ));
         }
         if object == DOCUMENT {
+            if dom_tree::document_node_property(property) {return Ok(true);}
             if dom_tree::node_constant(property).is_some() { return Ok(true); }
             if property == "createEvent" && self.event_factory_enabled() { return Ok(true); }
             if matches!(property, "isDefaultNamespace" | "compareDocumentPosition") { return Ok(true); }
@@ -3780,6 +3787,7 @@ impl Host for Bridge<'_> {
             };
         }
         if object == DOCUMENT {
+            if let Some(value)=self.document_node_get(property)? {return Ok(value);}
             if let Some(number) = dom_tree::node_constant(property) {
                 return Ok(Value::Number(f64::from(number)));
             }
@@ -3818,7 +3826,6 @@ impl Host for Bridge<'_> {
                 "prerendering" => Ok(Value::Bool(false)),
                 "images" => Ok(Value::Host(DOCUMENT_IMAGES)),
                 "childNodes" => self.create_child_list(DOCUMENT),
-                "parentElement" | "parentNode" | "ownerDocument" => Ok(Value::Null),
                 _ => self.named_document_property(property),
             };
         }
@@ -4205,6 +4212,7 @@ impl Host for Bridge<'_> {
             return self.media_element_get(object,property)?.ok_or_else(||"Media interface getter is not implemented.".into());
         }
         let method=if let Some(operation)=script_media::interface_operation(method) {self.require_bound_media(object)?;operation} else {method};
+        if let Some(property)=method.strip_prefix("\0Node.get.") {return self.get(object,property);}
         if let Some(property)=method.strip_prefix("\0MouseEvent.get.") {return self.get(object,property);}
         if let Some(property)=method.strip_prefix("\0CustomEvent.get.") {return self.get(object,property);}
         if let Some(property)=method.strip_prefix("\0UIEvent.get.") {return self.get(object,property);}
@@ -4791,6 +4799,10 @@ mod compatibility_tests;
 #[cfg(test)]
 #[path = "script_child_nodes_tests.rs"]
 mod script_child_nodes_tests;
+
+#[cfg(test)]
+#[path = "script_document_node_tests.rs"]
+mod script_document_node_tests;
 
 #[cfg(test)]
 #[path = "script_background_style_tests.rs"]

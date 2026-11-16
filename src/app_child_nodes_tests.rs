@@ -12,6 +12,9 @@ impl Fixture {
 <style>html,body{margin:0}#owner{width:81px;height:27px;background:#111111}</style></head><body>
 <p id=output>Waiting for input</p><div id=owner>first<span id=middle>second</span></div><button id=change>Change list</button>
 <script>
+if(document.nodeType!==9||document.nodeName!=='#document'||!document.isConnected)throw 'actual App Document Node identity';
+var documentTypeGetter=Object.getOwnPropertyDescriptor(Node.prototype,'nodeType').get;
+if(documentTypeGetter.call(document)!==9||document.firstChild!==document.childNodes[0])throw 'canonical App Document slots';
 var docList=document.childNodes;
 var documentSnapshot=Array.prototype.slice.call(docList);
 if(docList!==document.childNodes||!Array.isArray(documentSnapshot)||documentSnapshot.length!==docList.length||documentSnapshot.indexOf(document.documentElement)<0)throw 'real Document child-node snapshot';
