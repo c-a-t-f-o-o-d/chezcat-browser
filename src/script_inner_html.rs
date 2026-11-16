@@ -116,7 +116,7 @@ impl Bridge<'_> {
             if let NodeKind::Element { tag: name, attrs, .. } = &item.kind {
                 let href = match &item.kind { NodeKind::Element {href, ..} => href.as_ref().map_or(0, String::len), _ => 0 };
                 bytes = bytes.checked_add(name.len()).and_then(|bytes| bytes.checked_add(href)).ok_or("HTML fragment retained size overflow.")?;
-                if item.namespace != crate::html::Namespace::Html || forms::kind(&staged, local).is_some() || matches!(name.as_str(), "form" | "fieldset" | "legend" | "style" | "link" | "base" | "meta" | "title" | "iframe" | "object" | "embed" | "source" | "audio" | "video") {
+                if item.namespace != crate::html::Namespace::Html || forms::kind(&staged, local).is_some() && name != "select" || matches!(name.as_str(), "form" | "fieldset" | "legend" | "style" | "link" | "base" | "meta" | "title" | "iframe" | "object" | "embed" | "source" | "audio" | "video") {
                     return Err("HTML fragment replacement of native controls/forms or unsupported resources is not implemented.".into());
                 }
                 self.state.work(attrs.len())?;
@@ -149,6 +149,13 @@ impl Bridge<'_> {
         let mut children = Vec::new();
         children.try_reserve(staged.nodes[0].children.len()).map_err(|_| "HTML children reservation failed.")?;
         children.extend(staged.nodes[0].children.iter().map(|&child| base + child - 1));
+        let mut form_roots = Vec::new();
+        form_roots.try_reserve(self.doc.nodes[node].children.len().saturating_add(children.len())).map_err(|_| "Select fragment roots reservation failed.")?;
+        form_roots.extend(self.doc.nodes[node].children.iter().map(|&root| (root, None)));
+        form_roots.extend(children.iter().map(|&root| (root, Some(node))));
+        let form_plan = self.prepare_select_form_change(Some((&staged, base)), &form_roots)?;
+        self.state.copies(form_plan.retained_bytes)?;
+        let bytes = bytes.checked_add(form_plan.retained_bytes).ok_or("HTML/native select payload overflow.")?;
         self.state.replace_bytes(0, bytes)?; // Detached old storage stays retained.
         // No fallible operation follows publication of the new child list.
         for &root in &self.doc.nodes[node].children { self.state.tree.parents[root] = None; }
@@ -166,6 +173,7 @@ impl Bridge<'_> {
         }
         self.state.dom.fragment_scripts.extend(scripts);
         self.doc.nonce_unsafe_nodes.extend(staged.nonce_unsafe_nodes.into_iter().map(|local| base + local - 1));
+        form_plan.commit(self.forms);
         self.commit_image_connections(image_plans);
         self.state.dom_committed();
         self.state.dirty = true;

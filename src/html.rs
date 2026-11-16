@@ -131,7 +131,7 @@ pub fn parse(input: &str) -> Document {
 /// callers never create a source wrapper that markup could escape. Unsupported
 /// tree-builder recovery and unrepresented comment nodes reject explicitly.
 pub(crate) fn parse_fragment(input: &str, context: &str, scripting: bool) -> Result<Document, String> {
-    if !matches!(context, "div" | "span" | "p" | "a" | "section" | "article" | "main" | "header" | "footer" | "aside" | "nav" | "li" | "ul" | "ol" | "dl" | "dt" | "dd" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6" | "em" | "b" | "strong" | "i" | "u" | "small" | "label" | "pre" | "blockquote" | "body" | "title" | "textarea" | "script" | "style" | "xmp" | "iframe" | "noembed" | "noframes" | "plaintext") {
+    if !matches!(context, "div" | "span" | "p" | "a" | "section" | "article" | "main" | "header" | "footer" | "aside" | "nav" | "li" | "ul" | "ol" | "dl" | "dt" | "dd" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6" | "em" | "b" | "strong" | "i" | "u" | "small" | "label" | "pre" | "blockquote" | "body" | "title" | "textarea" | "script" | "style" | "xmp" | "iframe" | "noembed" | "noframes" | "plaintext" | "select" | "optgroup" | "option") {
         return Err("HTML fragment parsing for this element context is not implemented.".into());
     }
     parse_internal(input, Some(context), scripting)
@@ -232,7 +232,8 @@ fn parse_internal(input: &str, context: Option<&str>, scripting: bool) -> Result
         position = tag.end;
 
         if checked {
-            if matches!(tag.name.as_str(), "html" | "head" | "body" | "frameset" | "frame" | "table" | "caption" | "colgroup" | "col" | "tbody" | "thead" | "tfoot" | "tr" | "td" | "th" | "select" | "option" | "optgroup" | "template" | "svg" | "math" | "picture" | "image" | "xmp" | "noembed" | "noframes" | "plaintext" | "listing") || tag.name == "noscript" && scripting {
+            checked_select_tag(&stack, &document, &tag.name, tag.closing)?;
+            if matches!(tag.name.as_str(), "html" | "head" | "body" | "frameset" | "frame" | "table" | "caption" | "colgroup" | "col" | "tbody" | "thead" | "tfoot" | "tr" | "td" | "th" | "template" | "svg" | "math" | "picture" | "image" | "xmp" | "noembed" | "noframes" | "plaintext" | "listing") || tag.name == "noscript" && scripting {
                 return Err("HTML fragment structural, table/select or foreign-content recovery is not implemented.".into());
             }
             if !tag.closing {
@@ -347,6 +348,40 @@ fn parse_internal(input: &str, context: Option<&str>, scripting: bool) -> Result
 
     if checked { document.scripting_enabled = scripting; }
     Ok(document)
+}
+
+// This finite conventional select slice follows the current in-body select,
+// option and optgroup rules where the existing stack is sufficient. It does
+// not claim customizable-select content or unsupported parser recovery.
+// Validate before the generic stack can pop an unrelated ancestor or publish
+// any result. Unchecked full-document parsing deliberately keeps its policy.
+fn checked_select_tag(stack: &[usize], document: &Document, incoming: &str, closing: bool) -> Result<(), String> {
+    let name = |node: usize| match &document.nodes[node].kind {
+        NodeKind::Element { tag, .. } => tag.as_str(),
+        _ => "",
+    };
+    let context = name(0);
+    let select = stack.iter().position(|&node| name(node) == "select");
+    let active = select.is_some() || matches!(context, "optgroup" | "option");
+    let unsupported = || "HTML fragment nonconventional select recovery is not implemented.".to_owned();
+    if !active {
+        return if (incoming == "select" && !closing) || !matches!(incoming, "select" | "option" | "optgroup") {
+            Ok(())
+        } else { Err(unsupported()) };
+    }
+    // A conventional option fragment can contain character data only in this
+    // slice. Rich option content remains explicitly unsupported.
+    if context == "option" { return Err(unsupported()); }
+    let current = *stack.last().unwrap();
+    match (incoming, closing) {
+        ("select", false) => Err(unsupported()), // Nested select needs recovery.
+        ("select", true) if select.is_some_and(|position| position > 0) => Ok(()),
+        ("option", false) => Ok(()), // close_implied pops the prior option.
+        ("option", true) if current != 0 && name(current) == "option" => Ok(()),
+        ("optgroup", false) if context != "optgroup" => Ok(()),
+        ("optgroup", true) if stack.iter().skip(1).any(|&node| name(node) == "optgroup") => Ok(()),
+        _ => Err(unsupported()),
+    }
 }
 
 fn fragment_formatting(name: &str) -> bool {
@@ -1158,3 +1193,7 @@ mod tests {
         assert_eq!(wide.nodes[0].children.len(), MAX_NODES - 1);
     }
 }
+
+#[cfg(test)]
+#[path = "html_select_fragment_tests.rs"]
+mod select_fragment_tests;

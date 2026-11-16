@@ -1,8 +1,8 @@
 # Finite development roadmap
 
-The active usability milestone is **B2: tabs, link context and new windows**,
-continuing with internal Session ownership after CP3's measured responsive rendering
-improvement. CP1 and CP2 remain delivered DOM/language prerequisites. T1 TLS/trust and B1 resource/rendering slices remain shared platform
+The active compatibility prerequisite is **CP4: select fragments and native ownership**,
+following integrated B2 tabs, link context and new windows and CP3's measured
+responsive rendering improvement. CP1 and CP2 remain delivered DOM/language prerequisites. T1 TLS/trust and B1 resource/rendering slices remain shared platform
 baselines; measured browser workflows determine the next shared blocker.
 The explicit CSAPUL 1.1 acceptance milestone is published as
 [0.80.0-alpha.1](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.80.0-alpha.1).
@@ -22,6 +22,7 @@ supported within their recorded limits.
 
 | ID | Status | Current outcome | Remaining scope |
 | --- | --- | --- | --- |
+| CP4 | Focused twelve-control prerequisite passes; full integration required | Conventional select fragments create genuine native controls; whole-select retirement/reconnect preserves edited values and identities, projects owner/disabled state and submits connected tree order | Unchanged pinned legacy workflow recheck and exact-source gates; explicit associations, existing-control interior edits and hidden-input creation remain gaps |
 | CP3 | Responsive rendering improvement; normal integration required | Unchanged Foundation6.9 generated-CSS fixture forms two columns at1280 and stacks at640 in normal JS mode; original App resize/zoom/pixel/link assertions pass | Finite em media, typed before/after stylesheet targets, explicit box-sizing inheritance and fractional flex line fitting; no generated-content painting or Vue initialization claim |
 | CP2 | Delivered prerequisite slice | Genuine main-Document createComment with real leaf/data/topology and no rendering/resource promotion; native RegExp exec/test input ToString through existing conversion and Function source | This legacy workflow next refuses select-containing innerHTML. No library initialization or visible improvement is attributed to this prerequisite |
 | CP1 | Delivered prerequisite slice | Main-Document/supported Node live child lists, existing borrowed slice, native array-like apply, fresh text replacement and genuine Document Node identity | No full DOM or whole-framework claim; subsequent prerequisites are tracked in CP2 |
@@ -50,10 +51,10 @@ asynchronous form/result/one-Back/different-query workflow passes its bounded
 local stages. A selected legacy reactive workload still has a separate prototype-
 configuration blocker; the unchanged generated-CSS panel now forms two columns
 widely and stacks narrowly. Initial reference-browser DOM/pixels are comparison evidence,
-with reference interactions unrun. The development App recheck of the unmodified
-legacy dropdown/form advances through Comment creation and RegExp input conversion
-to checked innerHTML parsing that refuses select/option structure. This is the
-next blocker in that legacy workflow. Its library initialization remains unproved;
+with reference interactions unrun. The prior App recheck of the unmodified
+legacy dropdown/form advanced through Comment creation and RegExp input conversion
+to checked innerHTML parsing that refused select/option structure. CP4 addresses
+that reduced prerequisite; its unchanged workflow recheck is pending. Library initialization remains unproved;
 the independent CP3 responsive rendering improvement is measured separately.
 Selected CP2
 Test262 observations have 18 passes and two ordinary Array constructor-poisoning
@@ -67,10 +68,10 @@ Distinguish remaining trust/path,
 parser, timeout and intentional admission failures from page rendering. Continue
 normal integration of the responsive result, then finite tabs/windows; perfect TLS or every-page
 coverage is not a prerequisite. Installer/update work remains planned.
-The next tasks are exact-source normal/optimized integration of native link/context
-actions, measured desktop acceptance, then the shared legacy select/Forms
-prerequisite. That fragment failure stays recorded
-as a separate shared compatibility blocker.
+The next tasks are exact-source normal/optimized integration of the shared
+select/Forms prerequisite, one unchanged pinned legacy workflow recheck, and the
+separate legacy reactive prototype dependency. B2 native link/context actions
+have completed local, hosted and actual destination desktop acceptance.
 VIDEO dimensions, Element.toggleAttribute, NamedNodeMap mutation and remaining
 media/player work stay recorded gaps outside the active queue. Service playback
 remains unproved by local media evidence.

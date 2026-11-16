@@ -5631,3 +5631,7 @@ mod child_nodes_tests;
 #[cfg(test)]
 #[path="app_comment_tests.rs"]
 mod comment_tests;
+
+#[cfg(test)]
+#[path = "app_select_fragment_tests.rs"]
+mod select_fragment_tests;

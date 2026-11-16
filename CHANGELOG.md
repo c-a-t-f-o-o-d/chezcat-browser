@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Admit bounded conventional select/option/optgroup fragments into the real
+  native form model. Whole-select removal, movement and reconnection preserve
+  values and identities, retire stale popup/focus/hit participation, and update
+  form ownership and disabled state before publication. Unrelated edited controls
+  retain their values and editor selections. Submission follows connected tree
+  order. Rich select content, existing-control interior edits, new explicit form
+  associations and hidden-input creation remain unsupported.
+
 - Route native primary/middle link gestures through genuine guarded click/auxclick
   activation and checked Session admission. Add explicit foreground/background tab
   and window context commands, direct unselected background creation, and bounded

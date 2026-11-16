@@ -78,6 +78,9 @@ pub(crate) use script_media::event_name as media_event_name;
 pub use script_images::DynamicImage;
 pub(crate) use script_images::MAX_IMAGE_REQUESTS;
 use script_images::ImagesState;
+#[path = "script_select_fragments.rs"]
+mod script_select_fragments;
+
 #[path = "script_inner_html.rs"]
 mod script_inner_html;
 #[path = "script_history.rs"]
