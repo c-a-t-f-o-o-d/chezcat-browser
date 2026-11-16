@@ -377,6 +377,24 @@ Stable coordinator routing, browser-owned downloads and wake authority, shared
 history shutdown and terminal resource admission remain prerequisites for real
 tab close. A standalone cancellation helper or dropping an App is not acceptance.
 
+The download ownership prerequisite retains one original bounded Manager in a
+browser authority, with weak App views and owned entry snapshots. Dropping an
+originating App/view does not cancel a session transfer. Existing single-window
+Apps retain their own authority, and startup shared attachment refuses any
+retained active or finished work instead of silently replacing it. Popup state
+remains App-local; busy/closed operation failures are visible. Original limits,
+TLS, response validation, explicit received-POST/no-replay behavior, cancellation,
+retry, part-file cleanup and no-overwrite publication remain unchanged.
+
+Workers use a stable retargetable browser signal dispatcher. It releases its
+mutex before invoking or dropping callbacks. Page wake changes cannot retarget
+an externally owned browser download route. An already-cloned callback may still
+run after retargeting; future native routing must reject closed/reused WindowIds
+and use nonblocking signals. The adapter alone does not provide native lifetime
+acceptance. Original held-transfer/two-App, wake reentry/retarget, admission,
+cancel/retry/no-overwrite, received-response, closed-authority and legacy popup
+controls cover this prerequisite; full normal integration remains required.
+
 ## A1 — About and running-build identity
 
 Status: finite source/UI implementation, with normal build and actual executable

@@ -67,6 +67,28 @@ struct Control {
 }
 
 impl App {
+    /// Startup only: a browser coordinator owns Shared and its dispatcher.
+    /// Never move a live Manager or silently cancel retained single-App work.
+    pub fn attach_shared_downloads(&mut self, shared: &downloads::Shared) -> Result<(), String> {
+        self.downloads.refresh()?;
+        if self.downloads.active_count() != 0 || !self.downloads.entries().is_empty() {
+            return Err("Attach the browser download session before starting or retaining downloads.".into());
+        }
+        let view = shared.view()?;
+        self.downloads = view;
+        // The previous local authority was verified empty before it can drop.
+        self.owned_downloads = None;
+        Ok(())
+    }
+
+    pub(super) fn set_owned_download_wake(&mut self, wake: loader::Wake) {
+        // Externally attached Apps cannot retarget the browser dispatcher from
+        // their page wake. Only the legacy App's own authority uses this route.
+        if let Some(shared) = &self.owned_downloads {
+            if let Err(error) = shared.set_wake(Some(wake)) { self.download_error(error); }
+        }
+    }
+
     pub fn downloads_open(&self) -> bool {
         self.downloads_ui.open
     }
@@ -97,6 +119,7 @@ impl App {
         self.downloads_ui.pressed = None;
         self.downloads_ui.pointer = false;
         self.downloads_ui.error.clear();
+        if let Err(error) = self.downloads.refresh() { self.download_error(error); }
     }
 
     pub fn toggle_downloads(&mut self) {
@@ -139,7 +162,6 @@ impl App {
                 suggested,
                 &folder,
                 self.trust.clone(),
-                self.wake.clone(),
             )
         });
         match result {
@@ -155,7 +177,7 @@ impl App {
         self.show_downloads();
         let result = self.download_folder().and_then(|folder| {
             self.downloads
-                .start_received(response, &folder, self.trust.clone(), self.wake.clone())
+                .start_received(response, &folder, self.trust.clone())
         });
         match result {
             Ok(_) => {
@@ -228,7 +250,24 @@ impl App {
             .filter(|entry| entry.status.active())
             .map(|entry| entry.id)
             .collect();
-        let changed = self.downloads.poll();
+        let prior_problem = self.downloads.problem().map(str::to_owned);
+        let changed = match self.downloads.poll() {
+            Ok(changed) => {
+                if let Some(problem) = &prior_problem {
+                    if self.downloads_ui.error == *problem {
+                        self.downloads_ui.error.clear();
+                        self.status = "Downloads are available again.".into();
+                        self.failed = false;
+                    }
+                }
+                changed || prior_problem.is_some()
+            }
+            Err(error) => {
+                let changed = self.downloads_ui.error != error;
+                self.download_error(error);
+                return changed;
+            }
+        };
         if changed && self.downloads_open() {
             if let Some(entry) = self
                 .downloads
@@ -573,6 +612,13 @@ impl App {
 
     fn activate_download_action(&mut self, action: Action) -> PlatformAction {
         self.downloads_ui.error.clear();
+        if matches!(action, Action::Cancel(_) | Action::Retry(_) | Action::EntryFolder(_)
+            | Action::Details(_) | Action::Clear) {
+            if let Err(error) = self.downloads.refresh() {
+                self.download_error(error);
+                return PlatformAction::None;
+            }
+        }
         match action {
             Action::Close => self.close_downloads(),
             Action::Settings => {
@@ -588,12 +634,19 @@ impl App {
             },
             Action::Current => self.download_current(),
             Action::Cancel(id) => {
-                self.downloads.cancel(id);
+                match self.downloads.cancel(id) {
+                    Ok(true) => {},
+                    Ok(false) => {
+                        self.status = "That download is no longer active.".into();
+                        self.failed = false;
+                    }
+                    Err(error) => self.download_error(error),
+                }
             }
             Action::Retry(id) => {
                 let result = self.download_folder().and_then(|folder| {
                     self.downloads
-                        .retry(id, &folder, self.trust.clone(), self.wake.clone())
+                        .retry(id, &folder, self.trust.clone())
                 });
                 match result {
                     Ok(_) => {
@@ -633,10 +686,14 @@ impl App {
                 }
             }
             Action::Clear => {
-                let count = self.downloads.clear_finished();
-                self.downloads_ui.first = 0;
-                self.status = format!("Cleared {count} finished download(s) from the list. Saved files remain in the download folder.");
-                self.failed = false;
+                match self.downloads.clear_finished() {
+                    Ok(count) => {
+                        self.downloads_ui.first = 0;
+                        self.status = format!("Cleared {count} finished download(s) from the list. Saved files remain in the download folder.");
+                        self.failed = false;
+                    }
+                    Err(error) => self.download_error(error),
+                }
             }
         }
         PlatformAction::None
@@ -1064,3 +1121,7 @@ mod tests {
 #[cfg(test)]
 #[path = "app_attachment_tests.rs"]
 mod attachment_tests;
+
+#[cfg(test)]
+#[path = "app_shared_downloads_tests.rs"]
+mod shared_downloads_tests;

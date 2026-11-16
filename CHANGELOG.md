@@ -6,8 +6,12 @@
   App snapshots and stale settings/bookmark editor and gesture refusal. Peer
   refresh preserves live VM, form, history and viewport state; effective
   bookmark-bar visibility remains per App until local Apply. Original two-App
-  controls pass. Actual tabs, new windows and shared session/download retirement
-  remain unfinished; normal integration is required before validated delivery.
+  controls pass. Add browser-owned download authority with weak App views,
+  separate wake routing and held transfers that survive an originating App.
+  Preserve legacy single-window behavior, transfer limits, POST/no-replay,
+  cancellation/retry and no-overwrite. Actual tabs, new windows, final history
+  ownership and terminal resource retirement remain unfinished; normal
+  integration is required before validated delivery.
 
 - Correct responsive stylesheet-to-layout behavior: finite initial-font em media
   lengths, terminal before/after stylesheet targets without ordinary-element
