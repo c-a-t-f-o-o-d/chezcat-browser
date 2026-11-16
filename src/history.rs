@@ -8,6 +8,10 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
+#[path = "history_shared.rs"]
+mod shared;
+pub use shared::{Shared, View};
+
 pub const MAX_ENTRIES: usize = 5000;
 pub const MAX_FILE_BYTES: usize = 4 * 1024 * 1024;
 pub const MAX_TITLE_BYTES: usize = 1024;
