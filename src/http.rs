@@ -25,6 +25,10 @@ mod network_tests;
 #[path = "http_deadline_tests.rs"]
 mod deadline_tests;
 
+#[path = "http_connect.rs"]
+mod connection;
+use connection::connect;
+
 #[path = "http_media_cors.rs"]
 mod media_cors;
 pub(crate) use media_cors::Credentials as MediaCredentials;
@@ -1407,9 +1411,13 @@ fn open<'a>(
 }
 
 fn check(cancel: &AtomicBool, deadline: Instant) -> Result<(), String> {
+    check_at(cancel, deadline, Instant::now())
+}
+
+fn check_at(cancel: &AtomicBool, deadline: Instant, now: Instant) -> Result<(), String> {
     if cancel.load(Ordering::Acquire) {
         Err("HTTP request cancelled.".into())
-    } else if Instant::now() >= deadline {
+    } else if now >= deadline {
         Err("HTTP request timed out.".into())
     } else {
         Ok(())
@@ -1421,90 +1429,6 @@ fn retryable(error: &io::Error) -> bool {
         error.kind(),
         io::ErrorKind::Interrupted | io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
     )
-}
-
-fn connect(
-    url: &HttpUrl,
-    cancel: &AtomicBool,
-    deadline: Instant,
-    events: &mut Vec<String>,
-    trace: &network_trace::Ticket,
-) -> Result<TcpStream, String> {
-    check(cancel, deadline)?;
-    // At most two summaries per attempt sequence. Resolved IPs and request
-    // query values are deliberately absent; redirects already have a fixed cap.
-    // OS DNS resolution can block inside ToSocketAddrs. It is deliberately not
-    // put on an unbounded series of detached resolver threads.
-    let started = Instant::now();
-    let literal = url.host.parse::<IpAddr>();
-    if literal.is_err() {
-        trace.phase(PhaseKind::Dns);
-    }
-    let addresses: Result<Vec<SocketAddr>, String> = match literal {
-        Ok(ip) => Ok(vec![SocketAddr::new(ip, url.port)]),
-        Err(_) => (url.host.as_str(), url.port)
-            .to_socket_addrs()
-            .map(|addresses| addresses.take(8).collect())
-            .map_err(|error| format!("DNS lookup failed: {error}")),
-    };
-    events.push(format!(
-        "Connection timing: DNS lookup={} ms; outcome={}; address candidates={}",
-        started.elapsed().as_millis(),
-        if literal.is_ok() {
-            "skipped (literal address)"
-        } else if addresses.is_ok() {
-            "resolved"
-        } else {
-            "failed"
-        },
-        addresses.as_ref().map_or(0, Vec::len)
-    ));
-    trace.end_phase();
-    let addresses = addresses?;
-    let started = Instant::now();
-    trace.phase(PhaseKind::Connect);
-    let mut attempts = 0;
-    let result = (|| {
-        check(cancel, deadline)?;
-        let mut failure = "The host has no usable network address.".to_owned();
-        for address in addresses {
-            check(cancel, deadline)?;
-            let timeout = CONNECT_TIMEOUT.min(deadline.saturating_duration_since(Instant::now()));
-            attempts += 1;
-            match TcpStream::connect_timeout(&address, timeout) {
-                Ok(stream) => {
-                    // TLS handshake records and form headers/body are separate
-                    // writes. Send them promptly instead of waiting for a delayed
-                    // ACK of an earlier small record before the peer can proceed.
-                    stream
-                        .set_nodelay(true)
-                        .map_err(|error| format!("Cannot disable TCP send delay: {error}"))?;
-                    stream
-                        .set_read_timeout(Some(POLL_TIMEOUT))
-                        .map_err(|error| format!("Cannot set HTTP read timeout: {error}"))?;
-                    stream
-                        .set_write_timeout(Some(POLL_TIMEOUT))
-                        .map_err(|error| format!("Cannot set HTTP write timeout: {error}"))?;
-                    check(cancel, deadline)?;
-                    return Ok(stream);
-                }
-                Err(error) => failure = format!("HTTP connection failed: {error}"),
-            }
-        }
-        check(cancel, deadline)?;
-        Err(failure)
-    })();
-    events.push(format!(
-        "Connection timing: TCP connect={} ms; attempts={attempts}; outcome={}",
-        started.elapsed().as_millis(),
-        if result.is_ok() {
-            "connected"
-        } else {
-            "failed"
-        }
-    ));
-    trace.end_phase();
-    result
 }
 
 fn send<W: Write>(
