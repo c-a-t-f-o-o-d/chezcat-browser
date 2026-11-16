@@ -1,5 +1,5 @@
-//! Original bounded real-App admission controls. UNRUN private draft: no native
-//! mouse/menu/OS activation acceptance is claimed by these Session tests.
+//! Original bounded real-App admission controls. Native mouse/menu/OS
+//! activation acceptance is covered separately from these Session tests.
 use super::*;
 use crate::app::{App, Drag, Focus, View};
 use crate::app::anchor::{AnchorDefault, AnchorTrigger};
@@ -10,7 +10,7 @@ use std::net::{SocketAddr, TcpListener};
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -391,9 +391,15 @@ fn session_link_file_target_retains_exact_resolved_base_and_original_content_roo
 
 #[derive(Clone, Debug)]
 struct Request { method: String, path: String, cookie: String, body: Vec<u8> }
+#[derive(Default)]
+struct FixtureProgress {
+    header_bytes: AtomicUsize,
+    body_waiting: AtomicBool,
+    incomplete_peers: AtomicUsize,
+}
 struct Site {
     address: SocketAddr, stopped: Arc<AtomicBool>, requests: Arc<Mutex<Vec<Request>>>,
-    worker: Option<thread::JoinHandle<()>>,
+    worker: Option<thread::JoinHandle<()>>, progress: Arc<FixtureProgress>,
 }
 impl Site {
     fn new(cross_site_base: bool) -> Self {
@@ -402,24 +408,32 @@ impl Site {
         let address = listener.local_addr().unwrap();
         let requests = Arc::new(Mutex::new(Vec::new()));
         let stopped = Arc::new(AtomicBool::new(false));
+        let progress = Arc::new(FixtureProgress::default());
+        let observed = progress.clone();
         let (seen, stop) = (requests.clone(), stopped.clone());
         let host = if cross_site_base { "127.0.0.1" } else { "localhost" };
         let source = format!("<!doctype html><base href='http://{host}:{}/base/'><title>POST source</title><style>body{{margin:0}}a{{display:block;width:180px;height:30px}}</style><body><input id=q value=seed><a id=go href=destination>Actual GET target</a>", address.port());
         let worker = thread::spawn(move || {
             let mut count = 0;
-            while !stop.load(Ordering::Relaxed) {
+            'accept: while !stop.load(Ordering::Relaxed) {
                 match listener.accept() {
                     Ok((mut stream, _)) => {
                         count += 1;
                         assert!(count <= 12, "Original HTTP fixture connection bound exceeded");
+                        // Accepted Winsock sockets inherit the polling listener mode.
+                        stream.set_nonblocking(false).unwrap();
                         stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
                         stream.set_write_timeout(Some(Duration::from_secs(5))).unwrap();
                         let mut bytes = Vec::new();
                         let mut one = [0u8; 1];
                         while !bytes.ends_with(b"\r\n\r\n") {
                             assert!(bytes.len() < 16384, "Original request header bound exceeded");
-                            if stream.read_exact(&mut one).is_err() { return; }
+                            if stream.read_exact(&mut one).is_err() {
+                                observed.incomplete_peers.fetch_add(1, Ordering::SeqCst);
+                                continue 'accept;
+                            }
                             bytes.push(one[0]);
+                            observed.header_bytes.fetch_add(1, Ordering::SeqCst);
                         }
                         let text = String::from_utf8(bytes).unwrap();
                         let mut words = text.lines().next().unwrap().split_whitespace();
@@ -429,7 +443,11 @@ impl Site {
                         let length = text.lines().filter_map(|line| line.split_once(':')).find(|(name, _)| name.eq_ignore_ascii_case("content-length")).map_or(0, |(_, value)| value.trim().parse::<usize>().unwrap());
                         assert!(length <= 16384, "Original request body bound exceeded");
                         let mut body = vec![0; length];
-                        stream.read_exact(&mut body).unwrap();
+                        observed.body_waiting.store(true, Ordering::SeqCst);
+                        if stream.read_exact(&mut body).is_err() {
+                            observed.incomplete_peers.fetch_add(1, Ordering::SeqCst);
+                            continue 'accept;
+                        }
                         seen.lock().unwrap().push(Request { method, path: path.clone(), cookie, body });
                         let (status, extra, body) = match path.as_str() {
                             "/source" => ("200 OK", "", source.clone()),
@@ -444,7 +462,7 @@ impl Site {
                 }
             }
         });
-        Self { address, stopped, requests, worker: Some(worker) }
+        Self { address, stopped, requests, worker: Some(worker), progress }
     }
     fn source(&self) -> String { format!("http://localhost:{}/source", self.address.port()) }
 }
@@ -508,4 +526,72 @@ fn session_link_shared_factory_uses_original_top_cookie_origin_and_get_chain_aft
                 "Cookie chain used the effective base, prior response bit, or destination in place of original top URL on {path}");
         }
     }
+}
+
+// These controls use the actual Site listener. Progress observations establish
+// the deliberately incomplete request stages without relying on a timing sleep.
+fn fixture_wait(mut observed: impl FnMut() -> bool) {
+    let deadline = Instant::now() + Duration::from_secs(6);
+    while !observed() {
+        assert!(Instant::now() < deadline, "Original fixture did not reach the required request stage");
+        thread::sleep(Duration::from_millis(1));
+    }
+}
+fn fixture_client(site: &Site) -> std::net::TcpStream {
+    let stream = std::net::TcpStream::connect(site.address).expect("Fixture must keep listening after an incomplete peer");
+    stream.set_read_timeout(Some(Duration::from_secs(6))).unwrap();
+    stream.set_write_timeout(Some(Duration::from_secs(6))).unwrap();
+    stream
+}
+fn fixture_response(mut client: std::net::TcpStream) -> Vec<u8> {
+    let mut response = Vec::new();
+    client.read_to_end(&mut response).expect("Fixture must return the complete framed response");
+    let split = response.windows(4).position(|part| part == b"\r\n\r\n").expect("HTTP response header terminator");
+    let header = std::str::from_utf8(&response[..split]).unwrap();
+    assert!(header.starts_with("HTTP/1.1 200 OK\r\n"), "{header}");
+    let length = header.lines().find_map(|line| line.strip_prefix("Content-Length: ")).unwrap().parse::<usize>().unwrap();
+    let body = response[split + 4..].to_vec();
+    assert_eq!(body.len(), length, "Original response must contain exactly its declared bytes");
+    body
+}
+#[test]
+fn session_link_http_fixture_keeps_listening_after_cancelled_peers() {
+    let site = Site::new(false);
+    drop(fixture_client(&site));
+    fixture_wait(|| site.progress.incomplete_peers.load(Ordering::SeqCst) == 1);
+    let mut partial = fixture_client(&site);
+    partial.write_all(b"POST /source HTTP/1.1\r\nHost: localhost\r\nContent-Length: 6\r\n\r\nab").unwrap();
+    drop(partial);
+    fixture_wait(|| site.progress.incomplete_peers.load(Ordering::SeqCst) == 2);
+    assert!(site.requests.lock().unwrap().is_empty(), "Incomplete peers must never become recorded requests");
+    let mut client = fixture_client(&site);
+    client.write_all(b"GET /landing HTTP/1.1\r\nHost: localhost\r\n\r\n").unwrap();
+    assert_eq!(fixture_response(client), b"<!doctype html><title>GET destination</title><p>New chain</p>");
+    let requests = site.requests.lock().unwrap();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].method, "GET");
+    assert_eq!(requests[0].path, "/landing");
+    assert!(requests[0].body.is_empty());
+}
+#[test]
+fn session_link_http_fixture_waits_for_fragmented_header_and_body() {
+    let site = Site::new(false);
+    let mut client = fixture_client(&site);
+    let prefix = b"POST /source HTTP/1.1\r\nHost: localhost\r\nContent-Length: 6\r\n";
+    client.write_all(prefix).unwrap();
+    fixture_wait(|| site.progress.header_bytes.load(Ordering::SeqCst) == prefix.len());
+    assert!(site.requests.lock().unwrap().is_empty());
+    client.write_all(b"\r\nabc").unwrap();
+    fixture_wait(|| site.progress.body_waiting.load(Ordering::SeqCst));
+    assert!(site.requests.lock().unwrap().is_empty());
+    client.write_all(b"def").unwrap();
+    let body = fixture_response(client);
+    assert!(std::str::from_utf8(&body).unwrap().contains("<title>POST source</title>"));
+    let requests = site.requests.lock().unwrap();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].method, "POST");
+    assert_eq!(requests[0].path, "/source");
+    assert_eq!(requests[0].body, b"abcdef");
+    assert!(requests[0].cookie.is_empty());
+    assert_eq!(site.progress.incomplete_peers.load(Ordering::SeqCst), 0);
 }
