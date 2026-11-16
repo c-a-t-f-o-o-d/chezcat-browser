@@ -450,6 +450,25 @@ var same=/y/;if(NativeRegExp(same)!==same)throw 'intrinsic identity';
     }
 
     #[test]
+    fn regexp_input_conversion_preserves_callback_and_builtin_owner_realms() {
+        let mut runtime = Runtime::for_capacity_test();
+        expose_test_realm(&mut runtime);
+        assert_eq!(runtime.execute(r#"
+var childInput=ChildFunction('var owner=Array,value={};value[Symbol.toPrimitive]=function(h){if(Array!==owner||this!==value||h!=="string")throw "conversion owner";return "child";};return value;')();
+var childTest=ChildRegExp.prototype.test,childExec=ChildRegExp.prototype.exec;
+if(!/child/.test(childInput)||!childTest.call(/child/,childInput))throw 'borrowed conversion';
+var result=childExec.call(/child/,childInput);
+if(result[0]!=='child'||Object.getPrototypeOf(result)!==ChildArray.prototype||Array===ChildArray||realmSecret!==91)throw 'exec result owner and caller restore';
+var invalid=ChildFunction('return {toString:function(){return Symbol("invalid");}};')(),caught=false;
+try{childTest.call(/x/,invalid);}catch(e){caught=Object.getPrototypeOf(e)===ChildTypeError.prototype;}
+if(!caught||realmSecret!==91||Object.getPrototypeOf([])!==Array.prototype)throw 'conversion failure owner and restore';
+'ok';
+"#, &mut NoHost).unwrap().to_text(), "ok");
+        assert_eq!((runtime.active_realm, runtime.global_environment), (None, 0));
+        assert!(runtime.transient_registration_is_empty());
+    }
+
+    #[test]
     fn foreign_jobs_and_compilation_gate_keep_context_and_shared_queue() {
         let mut runtime = Runtime::for_capacity_test();
         expose_test_realm(&mut runtime);
