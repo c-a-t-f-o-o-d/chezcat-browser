@@ -431,6 +431,14 @@ impl Worker {
         self.shared.0.lock().unwrap().network.clone()
     }
 }
+#[cfg(test)]
+impl Worker {
+    pub(crate) fn retirement_probe(&self) -> impl Fn() -> bool + 'static {
+        let state = Arc::downgrade(&self.shared);
+        move || state.upgrade().is_none()
+    }
+}
+
 impl Drop for Worker {
     fn drop(&mut self) {
         self.cancel();

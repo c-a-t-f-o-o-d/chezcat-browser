@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Add an internal bounded Session core with real boxed App owners, checked
+  process-scoped tab/window identities, shared-service adoption and typed wake
+  polling. Closing a page removes its routes before consuming its realm and
+  resource workers; browser downloads survive, and only explicit final shutdown
+  clears history. Original ownership/held-resource controls pass. Native window
+  bindings, tab controls and link/new-window interaction remain unfinished;
+  normal integration is required before validated delivery.
+
 - Begin the B2 ownership prerequisite with one shared profile writer, immutable
   App snapshots and stale settings/bookmark editor and gesture refusal. Peer
   refresh preserves live VM, form, history and viewport state; effective
@@ -11,8 +19,8 @@
   Preserve legacy single-window behavior, transfer limits, POST/no-replay,
   cancellation/retry and no-overwrite. Add shared saved-history ownership with
   weak App views, preserved row identities, checked original-policy edits and
-  explicit final-session shutdown. Actual tabs, new windows and terminal
-  resource retirement remain unfinished; normal
+  explicit final-session shutdown. Actual tabs, new windows and native
+  ownership integration remain unfinished; normal
   integration is required before validated delivery.
 
 - Correct responsive stylesheet-to-layout behavior: finite initial-font em media

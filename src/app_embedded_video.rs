@@ -193,6 +193,25 @@ impl App {
                 && !v.retired.load(Ordering::Relaxed)
         })
     }
+    /// Internal terminal Box<App> consumption, not Stop/suspend/replay. Retire
+    /// both bindings before the session drops realm, tasks and resource workers.
+    pub(in crate::app) fn retire_embedded_video_owner(&mut self) {
+        if let Some(page) = &mut self.scripting {
+            page.retire_media_owner();
+        }
+        if let Some(binding) = &mut self.embedded_video {
+            binding.retired.store(true, Ordering::Relaxed);
+            if let Ok(mut tasks) = binding.tasks.lock() {
+                tasks.cancel_source(&binding.retired);
+            }
+            binding.plan = None;
+            binding.script_play_intent = None;
+        }
+        if let Some(worker) = &self.embedded_video_worker {
+            worker.cancel();
+        }
+    }
+
     pub(in crate::app) fn cancel_embedded_video(&mut self) {
         if let Some(page) = &mut self.scripting {
             page.cancel_media_selection();
