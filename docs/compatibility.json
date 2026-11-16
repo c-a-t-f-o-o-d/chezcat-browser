@@ -9,21 +9,18 @@
     "dom_source_sha256": "19a6d0b92549926f971a0d181d501b694a3129b7a3d3bbedccafaf30c26bd570"
   },
   "active_pack": {
-    "id": "CP2",
-    "status": "Prerequisite",
-    "scope": "Genuine main-Document Comment factory/data/topology and existing native RegExp exec/test input ToString",
-    "native_status": "Focused original Page/App/language controls passed; normal/build/executable integration required",
-    "inherits_limits": "Existing CP1 host/VM admission policies; no quota expansion",
-    "next_dependency": "This legacy workflow: checked HTML fragment select/option structure; responsive CSS is independently actionable",
+    "id": "CP3",
+    "status": "Measured responsive rendering improvement; normal integration required",
+    "scope": "Initial-font em media, typed terminal before/after stylesheet targets, explicit box-sizing inheritance and fractional flex line fitting",
+    "native_status": "Original responsive/App and flex checks passed; full normal/build/executable gates required",
+    "inherits_limits": "Existing stylesheet/selector/match/layout budgets; no quota expansion",
+    "next_dependency": "B2 shared page/session ownership and retirement, then actual tabs/link dispositions/windows",
     "excluded": [
-      "Parsed comments",
-      "Full Comment/CharacterData interfaces",
-      "DocumentType and template-content models",
-      "Child-context factory",
-      "Generic RegExpExec/custom exec",
-      "Object-valued lastIndex conversion",
-      "RegExp constructor pattern/flag conversion",
-      "Whole-library support"
+      "Generated-content painting",
+      "DOM-query pseudo-target support",
+      "Wider media units and font scheduling",
+      "Vue initialization/reactive interaction",
+      "Whole-framework support"
     ]
   },
   "workflows": [
@@ -54,15 +51,47 @@
         "Checked innerHTML fragment select/option structure"
       ],
       "current_first_root": "Checked innerHTML fragment select/option structure",
-      "measurement_scope": "CP2 development App recheck, not a full normal/executable checkpoint"
+      "measurement_scope": "CP3 unchanged JS-enabled executable diagnostic recheck; first root confirmed, later cascades retained"
     },
     {
       "id": "W3-css",
       "kind": "Foundation6.9.0 generated CSS",
-      "status": "Partial",
+      "status": "Tested for stated responsive rendering scope",
       "narrow_stacking": "Passed",
-      "wide_two_columns": "Failed",
-      "optional_javascript": "Not assessed"
+      "wide_two_columns": "Passed",
+      "optional_javascript": "Not assessed",
+      "viewport_zoom_javascript": "1280x800 and640x800, zoom100, normal JavaScript enabled",
+      "before_wide_positions": [
+        [
+          38,
+          163
+        ],
+        [
+          38,
+          266
+        ]
+      ],
+      "after_wide_positions": [
+        [
+          38,
+          163
+        ],
+        [
+          648,
+          163
+        ]
+      ],
+      "narrow_positions": [
+        [
+          38,
+          163
+        ],
+        [
+          38,
+          266
+        ]
+      ],
+      "remaining": "Separate Vue prototype initialization failure remains; no reactive interaction pass"
     },
     {
       "id": "W3-reactive",
@@ -482,5 +511,29 @@
       "status": "Delivered prerequisite slice"
     }
   ],
-  "last_complete_pack": "CP1"
+  "last_complete_pack": "CP1",
+  "completed_prerequisite_packs": [
+    {
+      "id": "CP1",
+      "scope": "Real collections, calls and Node identity"
+    },
+    {
+      "id": "CP2",
+      "status": "Prerequisite",
+      "scope": "Genuine main-Document Comment factory/data/topology and existing native RegExp exec/test input ToString",
+      "native_status": "Focused original Page/App/language controls passed; normal/build/executable integration required",
+      "inherits_limits": "Existing CP1 host/VM admission policies; no quota expansion",
+      "next_dependency": "This legacy workflow: checked HTML fragment select/option structure; responsive CSS is independently actionable",
+      "excluded": [
+        "Parsed comments",
+        "Full Comment/CharacterData interfaces",
+        "DocumentType and template-content models",
+        "Child-context factory",
+        "Generic RegExpExec/custom exec",
+        "Object-valued lastIndex conversion",
+        "RegExp constructor pattern/flag conversion",
+        "Whole-library support"
+      ]
+    }
+  ]
 }

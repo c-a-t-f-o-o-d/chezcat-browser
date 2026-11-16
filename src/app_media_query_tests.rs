@@ -15,10 +15,11 @@ html,body{margin:0;padding:0}#navigation{padding-left:120px;background:#eeeeee}
 
 struct Fixture(PathBuf);
 impl Fixture {
-    fn new()->Self {
+    fn new()->Self {Self::from_source(PAGE)}
+    fn from_source(source:&str)->Self {
         static NEXT:AtomicUsize=AtomicUsize::new(0);
         let folder=std::env::temp_dir().join(format!("chezcat-media-query-{}-{}",std::process::id(),NEXT.fetch_add(1,Ordering::Relaxed)));
-        std::fs::create_dir(&folder).unwrap();std::fs::write(folder.join("page.html"),PAGE).unwrap();Self(folder)
+        std::fs::create_dir(&folder).unwrap();std::fs::write(folder.join("page.html"),source).unwrap();Self(folder)
     }
     fn open(&self)->App {let mut app=App::new();app.scripts_enabled=false;app.open(&self.0.join("page.html"));assert!(!app.failed,"{}",app.status);assert!(!app.is_loading());app}
 }
@@ -87,4 +88,65 @@ fn css_media_actual_app_zoom_recomputes_css_viewport_without_reloading_source(){
     assert_eq!(sample(&app,result),0xaa2200);assert!(app.page.border_rects[result].unwrap().y>0);
     app.set_zoom(1.0);assert_eq!(sample(&app,result),0x008844);assert_eq!(app.page.border_rects[result].unwrap().y,0);
     assert_eq!(app.document.nodes.as_ptr(),nodes);assert_eq!(app.raw,raw);assert_eq!(app.events,events);assert!(app.scripting.is_none());
+}
+
+// Original local CSS-only App acceptance. This uses no third-party CSS, scripts,
+// service, reference renderer, OS input or device. Layout/paint/hits are genuine.
+const RESPONSIVE: &str = r#"<!doctype html><html><head><title>Original responsive CSS gates</title><style>
+html{font-size:32px;box-sizing:border-box}body{margin:0;font-size:18px}
+*,::before,::after{box-sizing:inherit}
+.row{display:flex;flex-flow:row wrap;width:100%}
+.panel{width:100%;height:40px;padding:4px;border:2px solid #264b73;flex:0 0 auto;min-width:0}
+@media print,screen and (min-width:64em){.panel{width:50%}}
+#first{background:#aa2200}#second{background:#008844}
+.panel::before,.panel::after{display:block;width:9000px;height:9000px;background:#ff0000}
+#guard{width:16px;height:16px;background:#168048}
+#guard,::original-unsupported{background:#ff0000}
+</style></head><body><div id=row class=row><div id=first class=panel><a id=link href=#destination>Original result</a></div><div id=second class=panel>Second panel</div></div><div id=guard></div><div id=destination></div></body></html>"#;
+
+fn responsive_pixels(app:&App,node:usize,color:u32) {
+    let rect=app.page.border_rects[node].unwrap();let canvas=app.draw();
+    // Inside actual padding, clear of both the solid border and text glyphs.
+    let x=rect.x+3;let y=app.content_top()+rect.y+3;
+    assert!(x>=0&&y>=0&&(x as usize)<canvas.width&&(y as usize)<canvas.height);
+    assert_eq!(canvas.pixels[y as usize*canvas.width+x as usize],color);
+}
+fn responsive_state(app:&App,wide:bool) {
+    let styles=crate::css::compute(&app.document,&app.styles);
+    for name in ["row","first","second"] {
+        let node=id(app,name);
+        assert!(styles[node].border_box,"{name} must inherit the root border-box through the universal rule: {:?}",styles[node]);
+    }
+    let expected=crate::css::Length::Percent(if wide {50.0}else{100.0});
+    assert_eq!(styles[id(app,"first")].width,expected,"Actual App media environment must choose the panel width");
+    let row=app.page.border_rects[id(app,"row")].unwrap();
+    let first=app.page.border_rects[id(app,"first")].unwrap();
+    let second=app.page.border_rects[id(app,"second")].unwrap();
+    if wide {
+        assert_eq!(first.y,second.y,"Admitted 64em plus inherited border-box must actually form one row: row={row:?}, first={first:?}, second={second:?}, style={:?}",styles[id(app,"first")]);
+        assert!((second.x-first.x-first.width).abs()<=1);
+        assert!((first.width+second.width-row.width).abs()<=1);
+    } else {
+        assert!(second.y>=first.y+first.height,"Below the initial-font threshold, actual panels stack");
+        assert!((first.width-row.width).abs()<=1);assert!((second.width-row.width).abs()<=1);
+    }
+    responsive_pixels(app,id(app,"first"),0xaa2200);responsive_pixels(app,id(app,"second"),0x008844);
+    responsive_pixels(app,id(app,"guard"),0x168048);
+    assert!(app.page.height<200,"Pseudo target rules must not create or restyle ordinary boxes");
+    visible_link(app,"#destination",id(app,"link"),&["Original","result"]);
+}
+
+#[test]
+fn css_responsive_actual_app_em_pseudo_inherit_wide_narrow_zoom_and_owned_pixels() {
+    let fixture=Fixture::from_source(RESPONSIVE);let mut app=fixture.open();
+    let nodes=app.document.nodes.as_ptr();let raw=app.raw.clone();let location=app.location.display();let epoch=app.script_epoch;
+    app.resize(1023,760);responsive_state(&app,false);
+    app.resize(1024,760);assert_eq!(app.document.media_environment.unwrap().width,1024.0);responsive_state(&app,true);
+    app.resize(640,760);responsive_state(&app,false);
+    app.resize(1280,760);responsive_state(&app,true);
+    app.set_zoom(1.25);assert_eq!(app.document.media_environment.unwrap().width,1024.0);responsive_state(&app,true);
+    app.resize(1279,760);assert!(app.document.media_environment.unwrap().width<1024.0);responsive_state(&app,false);
+    app.set_zoom(1.0);responsive_state(&app,true);
+    assert_eq!(app.document.nodes.as_ptr(),nodes);assert_eq!(app.raw,raw);assert_eq!(app.location.display(),location);assert_eq!(app.script_epoch,epoch);
+    assert!(!app.failed);assert!(!app.is_loading());assert!(app.scripting.is_none());
 }
