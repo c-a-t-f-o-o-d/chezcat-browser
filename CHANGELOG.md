@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Implement the finite noncomputed object-literal `__proto__: value` setter using
+  the existing guarded prototype chain. Null, ordinary objects and functions keep
+  real prototype identity; other primitives are evaluated and ignored without
+  coercion or an own property. Duplicate special setters are early syntax errors.
+  Original language and real App input/text-pixel controls cover this slice.
+  Ordinary own `__proto__` properties, legacy accessor operations and native-host
+  prototype chains remain explicitly unsupported.
+
 - Admit bounded conventional select/option/optgroup fragments into the real
   native form model. Whole-select removal, movement and reconnection preserve
   values and identities, retire stale popup/focus/hit participation, and update

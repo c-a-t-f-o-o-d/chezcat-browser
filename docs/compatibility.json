@@ -100,7 +100,14 @@
       "id": "W3-reactive",
       "kind": "Vue2.7.16 original reactive component",
       "status": "Blocked",
-      "first_root": "Object-prototype configuration unsupported",
+      "first_root": "Undefined noncallable concat member during execution",
+      "observed_first_roots": ["Object-prototype configuration unsupported during parsing", "Undefined noncallable concat member during execution"],
+      "source_commit": "abe2e3bd5bc8e967f4dd2e33ddc4f74ea4ddfd97",
+      "executable_sha256": "ed33208f918452be9e3506841dfe5f347997d09805d055a1f63c3c8b345853c1",
+      "first_root_location": "Vue2.7.16 runtime line11,column3613",
+      "measurement_scope": "Single unchanged W3 invocation, two configurations1280x800 and640x800, zoom100, JavaScript/images enabled; zero of two selected configuration passes among three workflow families",
+      "stage_outcomes": {"load": "Passed", "initial_render": "Passed", "generated_css": "Passed", "initialization": "Failed", "input": "Failed", "async": "Failed", "history": "Not applicable"},
+      "limits": "The whole file parses; the later prototype literal is not proved executed. Ordinary prototype membership/access remains an unobserved boundary; no Vue initialization or visible workflow improvement.",
       "modern_tier": "Vue3 Proxy prerequisite missing"
     },
     {
@@ -476,9 +483,9 @@
     "No public service or whole-family outcome inferred"
   ],
   "next": [
-    "Complete exact-source integration of conventional select fragment/native ownership controls",
+    "Complete exact-source integration of finite literal-prototype setters with genuine App input/pixels",
     "Retain measured INPUT type=hidden mutation as the next W2 blocker without repeating unchanged W2",
-    "Address the separately queued Vue static object-literal prototype prerequisite; finite B2 tabs/windows are integrated"
+    "Reduce the actual Vue concat execution dependency separately; CP4 select/native ownership and finite B2 tabs/windows are integrated"
   ],
   "selected_standard_controls": {
     "suite": "Selected Test262 slice mode runs",

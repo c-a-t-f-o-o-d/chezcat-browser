@@ -26,9 +26,33 @@ pub(super) enum Member {
         kind: Kind,
     },
     Spread(ExprId),
+    /// A static noncomputed colon __proto__ definition, never a data property.
+    Prototype(ExprId),
 }
 
 impl Runtime {
+    /// ECMA-262 13.2.5.5: evaluate the RHS once, never coerce it, and ignore
+    /// primitive RHS values. Keep native Host objects outside script chains.
+    pub(super) fn define_literal_prototype(
+        &mut self,
+        object: usize,
+        value: &Value,
+    ) -> Result<(), Fault> {
+        let prototype = match value {
+            Value::Null => None,
+            Value::Host(_) => {
+                return Err(Fault::new(
+                    "Native host object prototypes cannot be used in a literal.",
+                ));
+            }
+            _ => match Ordinary::from_value(value) {
+                Some(prototype) => Some(prototype),
+                None => return Ok(()),
+            },
+        };
+        self.set_prototype(Ordinary::Object(object), prototype)
+    }
+
     pub(super) fn define_literal_member(
         &mut self,
         object: usize,
@@ -438,3 +462,7 @@ if(log!=='a'||copy!==undefined)throw 'spread abrupt completion';
         assert!(error.contains("String limit"), "{error}");
     }
 }
+
+#[cfg(test)]
+#[path = "object_literal_prototype_tests.rs"]
+mod prototype_tests;

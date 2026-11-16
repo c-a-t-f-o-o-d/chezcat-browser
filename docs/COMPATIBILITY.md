@@ -18,7 +18,7 @@ is inferred from the small selected case sets.
 | Original asynchronous form/search/navigation | Async ready state, Unicode form submission, readable results, destination activation, exactly one Back and a different query pass the bounded App/input workflow |
 | Unmodified jQuery1.12.4 with Bootstrap3.4.1 dropdown/form | One unchanged CP4 App recheck advances past conventional select fragments to jQuery line1265,column4 setting INPUT type=hidden. Load and initial rendering pass; initialization, input and async stages fail. Later missing-library errors are cascades; no visible workflow improvement is established |
 | Foundation6.9.0 generated CSS with original controls | The unchanged JS-enabled fixture now forms two columns at1280 and stacks at640, with its original independent image pixels. This is a responsive rendering improvement; Vue initialization and optional Foundation JavaScript are separate |
-| Vue2.7.16 runtime with an original reactive component | First observed blocker is unsupported object-prototype configuration. Modern Vue3 has a separate missing Proxy prerequisite; legacy and modern tiers are not interchangeable |
+| Vue2.7.16 runtime with an original reactive component | One unchanged CP5 invocation at1280/640 admits the prior literal parse boundary, then first fails during execution on undefined concat at11:3613. Load/initial render/Foundation CSS pass; Vue mount/input/async fail. Modern Vue3 retains its separate Proxy prerequisite |
 | Independent browser reference | Initial DOM and pixels were captured; interactions were not run and do not supply a workflow-pass denominator |
 
 Delivered CP1 provides the real collection/call/replacement/Node prerequisites.
@@ -59,6 +59,10 @@ Full normal/build/executable verification remains required for integration.
 
 The select-containing fragment prerequisite passes its reduced controls; the
 single unchanged legacy workflow recheck now refuses INPUT type=hidden mutation.
+The separate finite literal-prototype prerequisite passes ten language/App
+controls, including real input and isolated text pixels. The unchanged Vue file
+parses, but its concat failure occurs before the later literal is known to run;
+ordinary prototype membership/access remains an unobserved future boundary.
 Finite tabs/windows are the next discrete usability milestone after this measured
 rendering improvement. Their shared-profile prerequisite now has original
 two-App revision/gesture and retained-page controls. Session ownership, shared

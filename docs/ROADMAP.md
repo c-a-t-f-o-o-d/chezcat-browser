@@ -1,7 +1,7 @@
 # Finite development roadmap
 
-The active compatibility prerequisite is **CP4: select fragments and native ownership**,
-following integrated B2 tabs, link context and new windows and CP3's measured
+The active compatibility prerequisite is **CP5: finite object-literal prototype setters**,
+following integrated CP4 select/native ownership, B2 tabs/link context/windows and CP3's measured
 responsive rendering improvement. CP1 and CP2 remain delivered DOM/language prerequisites. T1 TLS/trust and B1 resource/rendering slices remain shared platform
 baselines; measured browser workflows determine the next shared blocker.
 The explicit CSAPUL 1.1 acceptance milestone is published as
@@ -22,7 +22,8 @@ supported within their recorded limits.
 
 | ID | Status | Current outcome | Remaining scope |
 | --- | --- | --- | --- |
-| CP4 | Focused twelve-control prerequisite passes; full integration required | Conventional select fragments create genuine native controls; whole-select retirement/reconnect preserves edited values and identities, projects owner/disabled state and submits connected tree order | Unchanged W2 recheck now refuses INPUT type=hidden mutation; exact-source gates remain. Explicit associations and existing-control interior edits remain gaps |
+| CP5 | Ten language/App controls pass; exact-source integration required | Static colon literal prototype setters preserve real null/Object/Function links, primitive RHS behavior, ordering and early duplicate errors; actual App input changes independent text pixels | Unchanged Vue now parses then fails on undefined concat at11:3613; no Vue mount/input/async pass. Ordinary own/legacy prototype access remains a separate boundary |
+| CP4 | Delivered finite prerequisite | Conventional select fragments create genuine native controls; whole-select retirement/reconnect preserves edited values and identities, projects owner/disabled state and submits connected tree order | Unchanged W2 recheck now refuses INPUT type=hidden mutation. Explicit associations and existing-control interior edits remain gaps |
 | CP3 | Responsive rendering improvement; normal integration required | Unchanged Foundation6.9 generated-CSS fixture forms two columns at1280 and stacks at640 in normal JS mode; original App resize/zoom/pixel/link assertions pass | Finite em media, typed before/after stylesheet targets, explicit box-sizing inheritance and fractional flex line fitting; no generated-content painting or Vue initialization claim |
 | CP2 | Delivered prerequisite slice | Genuine main-Document createComment with real leaf/data/topology and no rendering/resource promotion; native RegExp exec/test input ToString through existing conversion and Function source | This legacy workflow next refuses select-containing innerHTML. No library initialization or visible improvement is attributed to this prerequisite |
 | CP1 | Delivered prerequisite slice | Main-Document/supported Node live child lists, existing borrowed slice, native array-like apply, fresh text replacement and genuine Document Node identity | No full DOM or whole-framework claim; subsequent prerequisites are tracked in CP2 |
@@ -49,7 +50,8 @@ Every implementation checkpoint requires normal verification. CP1 and CP2 reuse
 shared DOM/language paths rather than library-specific emulation. The original
 asynchronous form/result/one-Back/different-query workflow passes its bounded
 local stages. A selected legacy reactive workload still has a separate prototype-
-configuration blocker; the unchanged generated-CSS panel now forms two columns
+literal parse blocker has a reduced CP5 implementation; its single unchanged
+recheck now first fails during execution on undefined concat at11:3613. The generated-CSS panel forms two columns
 widely and stacks narrowly. Initial reference-browser DOM/pixels are comparison evidence,
 with reference interactions unrun. The prior App recheck of the unmodified
 legacy dropdown/form advanced through Comment creation and RegExp input conversion
@@ -69,9 +71,9 @@ Distinguish remaining trust/path,
 parser, timeout and intentional admission failures from page rendering. Continue
 normal integration of the responsive result, then finite tabs/windows; perfect TLS or every-page
 coverage is not a prerequisite. Installer/update work remains planned.
-The next tasks are exact-source normal/optimized integration of the shared
-select/Forms prerequisite, then the separate legacy reactive prototype dependency.
-The single unchanged pinned W2 recheck records hidden-input mutation as its next blocker. B2 native link/context actions
+The next tasks are exact-source normal/optimized integration of CP5 and a
+separate reduction of its measured concat execution dependency. The single
+unchanged pinned W2 recheck retains hidden-input mutation as a separate backlog item. B2 native link/context actions
 have completed local, hosted and actual destination desktop acceptance.
 VIDEO dimensions, Element.toggleAttribute, NamedNodeMap mutation and remaining
 media/player work stay recorded gaps outside the active queue. Service playback

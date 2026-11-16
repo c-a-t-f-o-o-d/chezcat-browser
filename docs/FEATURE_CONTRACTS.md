@@ -322,6 +322,45 @@ Semantic references: [DOM createComment](https://dom.spec.whatwg.org/#dom-docume
 [Comment](https://dom.spec.whatwg.org/#interface-comment), and
 [ECMAScript 2025 ToString](https://262.ecma-international.org/16.0/#sec-tostring).
 
+## CP5 — finite object-literal prototype setter
+
+Ten original language and App controls pass. Each checkpoint still requires
+normal/build/executable integration. Only static noncomputed colon definitions
+whose name is __proto__ set the new object's existing internal prototype link.
+Null removes the link, ordinary objects/functions retain exact identity, and
+other primitive RHS values are evaluated once and ignored without coercion or
+own-property creation. The RHS keeps source order and abrupt completion; it does
+not infer a property function name. Duplicate special setters are early syntax
+errors before script effects, including quoted/escaped static names and primitive
+RHS values. Existing member/name, chain, cycle, extensibility and work bounds apply.
+
+Computed keys, shorthand, methods, accessors, JSON own keys and legacy __proto__
+reads/writes retain explicit unsupported boundaries. Host objects remain outside
+script prototype chains; a native refusal does not invoke host getters/setters or
+turn a fatal capability error into an author-catchable success. Ordinary field
+descriptors and unrelated Object.prototype behavior are unchanged.
+
+An original App fixture uses real pointer down/up twice to create and retain a
+null-root state bag across input jobs. Exact DOM/layout and isolated white-region
+text pixels change I to WWW to III; down-only does not run the handler. Ordinary
+fields, null-root identity, zero script errors, loaded source, location, history
+and realm identity remain genuine. This is software App input/paint proof, not
+physical desktop or framework initialization evidence.
+
+One unchanged pinned Vue2.7.16 W3 invocation on clean abe2e3b, at1280x800 and
+640x800/zoom100 with JavaScript/images enabled, now admits the whole file past its
+prior literal parse refusal. Both executions first fail at line11,column3613:
+an undefined noncallable concat member. This does not prove the later prototype
+literal ran. Loading, initial rendering and independent Foundation CSS pass;
+Vue initialization, reactive input and async stages fail in both configurations.
+Ordinary prototype membership/access remains a separate unobserved boundary.
+No library edits, polyfill, reference substitution or visible Vue improvement is
+claimed; later missing-library errors remain cascades.
+
+Semantic references: [ES2025 object-initializer early errors](https://262.ecma-international.org/16.0/#sec-object-initializer-static-semantics-early-errors),
+[PropertyDefinitionEvaluation](https://262.ecma-international.org/16.0/#sec-runtime-semantics-propertydefinitionevaluation),
+and [OrdinarySetPrototypeOf](https://262.ecma-international.org/16.0/#sec-ordinarysetprototypeof).
+
 ## CP4 — conventional select fragments and native ownership
 
 Status: twelve original parser, native-model, Page and App controls pass.
