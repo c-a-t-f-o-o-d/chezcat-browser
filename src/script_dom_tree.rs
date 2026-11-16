@@ -832,7 +832,13 @@ impl Bridge<'_> {
             self.state.work(1)?;
             depth = depth.max(level);
             let name = tag(self.doc, node);
-            if forms::kind(self.doc, node).is_some()
+            let select_branch = self.owned_select_member(root, node);
+            let owned_select = matches!(name, "select" | "option" | "optgroup") && select_branch;
+            if select_branch && matches!(&self.doc.nodes[node].kind, NodeKind::Element { .. })
+                && !matches!(name, "select" | "option" | "optgroup") {
+                return Err("Moving nonconventional select descendants or resources is not implemented.".into());
+            }
+            if forms::kind(self.doc, node).is_some() && !owned_select
                 || matches!(
                     name,
                     "html"
@@ -841,8 +847,6 @@ impl Bridge<'_> {
                         | "form"
                         | "fieldset"
                         | "legend"
-                        | "option"
-                        | "optgroup"
                         | "style"
                         | "title"
                         | "object"
@@ -852,6 +856,7 @@ impl Bridge<'_> {
                         | "template"
                         | "video" | "audio" | "source"
                 )
+                || matches!(name, "option" | "optgroup") && !owned_select
                 || name == "noscript" && self.doc.scripting_enabled
                 || name == "script" && !self.dom_script(node)
                 || name == "link" && !self.dom_stylesheet(node)
@@ -995,6 +1000,7 @@ impl Bridge<'_> {
         let changed_layout = connected || self.state.dom.connected[child];
         let images = self.prepare_image_connections(&incoming_nodes, connected)?;
 
+        let form_plan = self.prepare_select_form_change(None, &[(old, None), (child, Some(parent))])?;
         // No fallible work remains after publishing either parent's new list.
         if let Some(source) = source_parent.filter(|&source| source != parent) { self.doc.nodes[source].children = source_children; }
         self.doc.nodes[parent].children = children;
@@ -1011,6 +1017,7 @@ impl Bridge<'_> {
             if connected { self.state.detached_nodes.remove(&node); }
             else { self.state.detached_nodes.insert(node); }
         }
+        form_plan.commit(self.forms);
         self.commit_image_connections(images);
         self.state.dom_committed();
         self.state.dirty = true;
@@ -1086,6 +1093,8 @@ impl Bridge<'_> {
         let connected = method != "removeChild" && self.state.dom.connected[parent];
         let image_plans = self.prepare_image_connections(&descendants, connected)?;
         let frames = self.prepare_blank_frames(&descendants, connected, parent)?;
+        let form_plan = self.prepare_select_form_change(None, &[(child, if method == "removeChild" { None } else { Some(parent) })])?;
+        if method != "removeChild" { self.doc.nodes[parent].children.try_reserve(1).map_err(|_| "DOM destination children reservation failed.")?; }
         if let Some(old_parent) = old_parent {
             self.doc.nodes[old_parent]
                 .children
@@ -1115,6 +1124,7 @@ impl Bridge<'_> {
                 self.state.detached_nodes.insert(node);
             }
         }
+        form_plan.commit(self.forms);
         self.commit_blank_frames(&descendants, frames);
         self.commit_image_connections(image_plans);
         self.state.dom_committed();

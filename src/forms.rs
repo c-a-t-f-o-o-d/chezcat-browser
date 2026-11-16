@@ -1091,7 +1091,8 @@ impl Forms {
             self.validate_submission(doc, owner, submitter)?;
         }
         let mut query = String::new();
-        for (&node, control) in &self.controls {
+        for node in self.submission_order(doc)? {
+            let control = &self.controls[&node];
             if control.owner != Some(owner) || control.disabled {
                 continue;
             }
@@ -1262,6 +1263,10 @@ fn encode_into(text: &str, output: &mut String, limit: usize) -> Result<(), Stri
     }
     Ok(())
 }
+
+#[path = "forms_select_fragments.rs"]
+mod select_fragments;
+pub(crate) use select_fragments::SelectFormPlan;
 
 #[cfg(test)]
 mod tests {

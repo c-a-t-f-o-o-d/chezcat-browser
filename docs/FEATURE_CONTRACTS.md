@@ -322,6 +322,50 @@ Semantic references: [DOM createComment](https://dom.spec.whatwg.org/#dom-docume
 [Comment](https://dom.spec.whatwg.org/#interface-comment), and
 [ECMAScript 2025 ToString](https://262.ecma-international.org/16.0/#sec-tostring).
 
+## CP4 — conventional select fragments and native ownership
+
+Status: twelve original parser, native-model, Page and App controls pass.
+Complete normal/build/executable integration remains required for this checkpoint.
+One unchanged JS-enabled W2 recheck at1280x800/zoom100 on clean5cee344 advances
+past the select fragment to jQuery1.12.4 line1265,column4: setting INPUT type to
+hidden remains explicitly unsupported. Loading and initial rendering pass;
+initialization, dropdown/form input and async stages fail. Later Bootstrap and
+missing-library errors remain cascades. No visible workflow improvement or
+framework initialization is claimed.
+
+Checked ordinary HTML fragments admit a finite select/option/optgroup grammar,
+including conventional omitted endings, normal attribute preprocessing and real
+single-select defaults. Unsupported recovery, rich descendants, foreign content,
+comments, resources and parser bounds retain explicit refusals. Pure parser
+select contexts do not enable mutation inside an existing native control.
+
+New native controls are prepared independently with genuine option/group node
+identities and bounded control/option/value/retained-payload accounting. Existing
+editors, caret/selection and selected values are not reconstructed. Whole-select
+container insertion, removal, replacement and movement stage prospective parent,
+nearest-form and disabled-fieldset/first-legend metadata before publication.
+Detached controls retain identity/value while leaving layout, focus, popup, hits
+and submission participation; reconnect restores native participation without
+restoring retired focus. Submission walks the connected document in tree order.
+
+Logical limit, work, origin, owner and allocation-preflight refusals precede tree
+and native publication. Existing std BTreeMap physical allocation failure can
+still abort the process; recoverable process-OOM atomicity is not claimed.
+New select explicit form associations, existing-control interior mutation,
+createElement(select), hidden-input admission, multiple/large select controls and
+customizable select content remain unsupported. Existing resource and ID-owner
+guards are unchanged; no framework-specific fallback or library edits are used.
+
+The App controls exercise actual software paint, popup choice and input/change
+events, then timer-driven removal while focused with an open popup. Stale points
+cannot change the detached value; reconnection preserves DOM/native identities,
+form order and an unrelated edited input's value/caret/selection/offset. These
+controls do not claim physical desktop or external HTTP submission coverage.
+
+Semantic references: [HTML fragment parsing](https://html.spec.whatwg.org/multipage/parsing.html#parsing-html-fragments),
+[select selectedness](https://html.spec.whatwg.org/multipage/form-elements.html#selectedness-setting-algorithm),
+and [form owner reset](https://html.spec.whatwg.org/multipage/form-control-infrastructure.html#reset-the-form-owner).
+
 ## CP3 — responsive stylesheet-to-layout behavior
 
 Status: measured rendering improvement in the unchanged Foundation6.9 fixture;
