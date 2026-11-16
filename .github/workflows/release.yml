@@ -101,9 +101,27 @@ jobs:
         env:
           SOURCE_COMMIT: ${{ steps.identity.outputs.source_commit }}
         run: |
-          import hashlib, json, os
+          import hashlib, json, os, re, subprocess
           from pathlib import Path
           def sha(data): return hashlib.sha256(data).hexdigest()
+          def release_notes_from_changelog(data, version):
+              assert type(data) is bytes and 0 < len(data) <= 256 * 1024
+              assert type(version) is str and re.fullmatch(r'\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?', version)
+              text = data.decode('utf-8')
+              assert not text.startswith('\ufeff') and '\r' not in text
+              assert all(ch in '\n\t' or ord(ch) >= 32 and ord(ch) != 127 for ch in text)
+              lines, heading = text.split('\n'), '## ' + version
+              starts = [index for index, line in enumerate(lines) if line == heading]
+              assert len(starts) == 1, 'One exact versioned CHANGELOG section is required'
+              start = starts[0]
+              end = next((index for index in range(start + 1, len(lines)) if lines[index].startswith('## ')), len(lines))
+              body = '\n'.join(lines[start + 1:end]).strip('\n')
+              assert body.strip(), 'Versioned release notes are empty'
+              markdown = heading + '\n\n' + body + '\n'
+              encoded = markdown.encode('utf-8')
+              assert 0 < len(encoded) <= 16 * 1024, 'Versioned release notes exceed their byte bound'
+              return {'source_path': 'CHANGELOG.md', 'version': version, 'markdown': markdown,
+                      'bytes': len(encoded), 'sha256': sha(encoded)}
           # The preceding distribution gate must exit zero before this step.
           # Never upload its raw logs, full verification maps or private records.
           distribution = json.loads(Path('results/verification/release-distribution.json').read_text())
@@ -118,6 +136,10 @@ jobs:
           assert info['source_commit'] == os.environ['SOURCE_COMMIT'] and info['dirty'] is False
           record['executable_sha256'] = info['executable_sha256']
           record['scope'] = 'Descriptive build provenance: exact tag, normal offline gate, distribution payload checks and extracted offline App/input journey. No signed attestation, live-site/device test, reproducibility or security-certification claim.'
+          changelog_object = os.environ['SOURCE_COMMIT'] + ':CHANGELOG.md'
+          assert 0 < int(subprocess.check_output(['git', 'cat-file', '-s', changelog_object], text=True)) <= 256 * 1024
+          changelog = subprocess.check_output(['git', 'cat-file', 'blob', changelog_object])
+          record['release_notes'] = release_notes_from_changelog(changelog, os.environ['RELEASE_TAG'][1:])
           Path('dist/publication.json').write_text(json.dumps(record, indent=2) + '\n', encoding='utf-8')
           names = ['ChezCat-windows-x64.zip', 'ChezCat-source.zip', 'publication.json']
           Path('dist/SHA256SUMS').write_text(''.join(sha((Path('dist') / name).read_bytes()) + '  ' + name + '\n' for name in names), encoding='utf-8')
@@ -163,6 +185,20 @@ jobs:
           from urllib.parse import quote
           def sha(data): return hashlib.sha256(data).hexdigest()
           def gh(*args): return subprocess.check_output(['gh', *args], text=True)
+          def release_notes_markdown(notes, tag):
+              assert type(notes) is dict and set(notes) == {'source_path', 'version', 'markdown', 'bytes', 'sha256'}
+              assert notes['source_path'] == 'CHANGELOG.md' and notes['version'] == tag[1:]
+              assert type(notes['markdown']) is str and type(notes['bytes']) is int
+              encoded = notes['markdown'].encode('utf-8')
+              assert 0 < len(encoded) <= 16 * 1024 and notes['bytes'] == len(encoded)
+              assert type(notes['sha256']) is str and re.fullmatch('[0-9a-f]{64}', notes['sha256'])
+              assert sha(encoded) == notes['sha256'], 'Transferred release-note bytes differ'
+              heading = '## ' + tag[1:] + '\n\n'
+              assert notes['markdown'].startswith(heading) and notes['markdown'].endswith('\n')
+              assert notes['markdown'][len(heading):].strip(), 'Transferred release notes are empty'
+              assert '\r' not in notes['markdown'] and not notes['markdown'].startswith('\ufeff')
+              assert all(ch in '\n\t' or ord(ch) >= 32 and ord(ch) != 127 for ch in notes['markdown'])
+              return notes['markdown']
           tag, commit = os.environ['RELEASE_TAG'], os.environ['SOURCE_COMMIT']
           assert re.fullmatch(r'v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?', tag)
           assert re.fullmatch('[0-9a-f]{40}', commit)
@@ -180,6 +216,7 @@ jobs:
           assert record['license_scope'] == 'containing-source-revision'
           assert re.fullmatch('[0-9a-f]{64}', record['license_scope_sha256'])
           assert record['validation']['offline_startup'] and record['validation']['original_app_input_journey']
+          release_markdown = release_notes_markdown(record['release_notes'], tag)
           obj = json.loads(gh('api', 'repos/' + os.environ['GH_REPO'] + '/git/ref/tags/' + quote(tag, safe='')))['object']
           for _ in range(4):
               if obj['type'] == 'commit': break
@@ -187,7 +224,7 @@ jobs:
               obj = json.loads(gh('api', 'repos/' + os.environ['GH_REPO'] + '/git/tags/' + obj['sha']))['object']
           assert obj['type'] == 'commit' and obj['sha'] == commit, 'Remote tag changed'
           notes = Path(os.environ['RUNNER_TEMP']) / 'chezcat-release-notes.md'
-          notes.write_text('Experimental ChezCat ' + tag + '\n\nSource: ' + commit + '\n\nWindows runtime and separate source ZIP; see publication.json and SHA256SUMS. Normal offline checks, payload identity and an extracted offline App/input journey passed. Web-platform support is partial; no full Google/YouTube, physical audio/desktop, security audit or reproducibility claim. See the tagged capability, security and licensing documents.\n', encoding='utf-8')
+          notes.write_text('Experimental ChezCat ' + tag + '\n\nSource: ' + commit + '\n\n' + release_markdown + '\nWindows runtime and separate source ZIP; see publication.json and SHA256SUMS. This release workflow passed normal offline checks, payload identity and an extracted offline App/input journey. Web-platform support remains partial; these CI checks do not establish live-service/device behavior, signed attestation, audit or reproducibility. See the tagged capability, security and licensing documents.\n', encoding='utf-8')
           assets = [str(Path('dist') / name) for name in sorted(expected)] + ['dist/SHA256SUMS']
           args = ['release', 'create', tag, '--repo', os.environ['GH_REPO'], '--verify-tag', '--title', 'ChezCat ' + tag, '--notes-file', str(notes), '--latest=false']
           if '-' in tag: args.append('--prerelease')

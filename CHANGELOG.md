@@ -2,168 +2,99 @@
 
 ## Unreleased
 
-- Implement the finite noncomputed object-literal `__proto__: value` setter using
-  the existing guarded prototype chain. Null, ordinary objects and functions keep
-  real prototype identity; other primitives are evaluated and ignored without
-  coercion or an own property. Duplicate special setters are early syntax errors.
-  Original language and real App input/text-pixel controls cover this slice.
-  Ordinary own `__proto__` properties, legacy accessor operations and native-host
-  prototype chains remain explicitly unsupported.
+No additional completed milestone is recorded beyond the release target below.
 
-- Admit bounded conventional select/option/optgroup fragments into the real
-  native form model. Whole-select removal, movement and reconnection preserve
-  values and identities, retire stale popup/focus/hit participation, and update
-  form ownership and disabled state before publication. Unrelated edited controls
-  retain their values and editor selections. Submission follows connected tree
-  order. Rich select content, existing-control interior edits, new explicit form
-  associations and hidden-input creation remain unsupported.
+## 0.81.0-alpha.1
 
-- Route native primary/middle link gestures through genuine guarded click/auxclick
-  activation and checked Session admission. Add explicit foreground/background tab
-  and window context commands, direct unselected background creation, and bounded
-  native popup/capture lifetimes. Exact release points and capture generations
-  prevent stale or unpaired input from consuming replacement gestures. Preserve
-  popup targets across passive hover/leave; dragging or any held mouse-button
-  move still retires them, independently of native capture.
-  Ordinary controls, selection/bookmark drag and the existing Alt download path
-  retain their behavior.
-  Original pure and task-owned hidden-window controls pass; complete normal,
-  optimized and desktop acceptance is required for each delivered checkpoint.
+Release target: [v0.81.0-alpha.1](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.81.0-alpha.1).
+This is one consolidated catch-up for the completed finite B2 milestone and the
+integrated prerequisites accumulated since 0.80.0-alpha.1. A versioned source
+section is not a publication claim. Delivery requires exact clean source,
+normal/optimized/PE and offline gates, complete payload, an extracted-runtime
+journey and downloaded-asset checks. The actual release's
+publication.json and SHA256SUMS identify its source and delivered bytes.
 
-- Replace first-eight resolver truncation with bounded, deduplicated dual-stack
-  selection and serial family fallback. Preserve resolver preference and each
-  family's order; reserve deadline time for a queued alternative family while
-  retaining realistic single-family connect budgets. Report scan/storage/attempt
-  limits and individual family/error outcomes without resolved-address lists.
-  Original offline controls cover prefix omission, deadlines, cancellation and
-  local socket ownership. Blocking DNS and concurrent Happy Eyeballs remain
-  outside this correction; TLS hostname and request-policy checks are unchanged.
+- Complete the finite B2 tab/window and native link/context milestone. A bounded
+  Session owns independent pages, history, scroll and loading state; browser-owned
+  profile, download and history authorities preserve shared state and reject stale
+  editor/gesture identities. Native tabs, shortcuts, real windows and tab-pinned
+  inspectors use checked routes and reentrant continuations. Primary/middle link
+  gestures and explicit foreground/background/window context commands consume
+  genuine source-bound intents. Popup hover/leave preserves the original target;
+  dragging or any held mouse button retires it. Capture generations and exact
+  release envelopes refuse stale or unpaired gestures without changing ordinary
+  controls, selection/bookmark drag or the existing Alt download path.
+- Integrate CP1 and CP2 shared DOM/language prerequisites: stable live
+  main-Document/supported Node child lists, checked borrowed slice/array-like
+  apply, genuine Document Node accessors, fresh text replacement, native-created
+  Comment leaves and RegExp input ToString through the original conversion path.
+  Comments retain real identity/data/topology without becoming rendered Text or
+  resource/selector content. No full DOM or complete library support is claimed.
+- Deliver CP3's finite responsive rendering improvement. The unchanged
+  JS-enabled Foundation 6.9 fixture forms two columns at 1280 and stacks at 640.
+  Initial-font em media, terminal before/after stylesheet targets, explicit
+  box-sizing inheritance and fractional flex fitting reuse the shared cascade
+  and layout. Original App resize/zoom/geometry, independent pixels and link-hit
+  checks remain. Generated-content painting and Vue initialization are separate.
+- Deliver CP4 conventional select/option/optgroup fragments backed by genuine
+  native controls and staged ownership. Whole-select removal/movement/reconnect
+  retains identities and edited values, retires popup/focus/hit participation and
+  projects connected form order/disabled state before publication. Twelve reduced
+  controls include App choice/submission and active-popup retirement/reconnect.
+  The unchanged W2 recheck advances to refused INPUT type=hidden mutation;
+  initialization and interaction still fail.
+- Deliver CP5 finite static colon object-literal prototype setters through the
+  existing guarded chain. Null, ordinary objects and functions retain real
+  prototype identity; primitive RHS values are evaluated once and ignored without
+  coercion or an own property. Duplicate setters are early syntax errors. Ten
+  language/App controls include real input and independent text pixels. One
+  unchanged W3 invocation at two widths now parses the pinned Vue runtime, then
+  first fails on undefined concat at 11:3613. This does not prove the later literal
+  executed; Vue initialization/input/async remain failed in both configurations.
+- Integrate T1's bounded dual-stack correction and the finite shared transport,
+  diagnostics and trust-data work. Resolver scanning retains both families and
+  preserves preference/order within explicit scan/storage/attempt limits; serial
+  fallback reserves deadline time for a queued alternative family. Redirect hops
+  share an absolute overall deadline. Exact-host document diagnostics and a
+  pinned conservative 98-authority NSS subset retain source/policy notices and
+  existing certificate, origin, cookie and request-policy checks. Blocking DNS,
+  serial cancellation latency, concurrent Happy Eyeballs and broader TLS remain
+  gaps; document responses do not establish site usability or challenge clearance.
+- Retain the integrated B1 stylesheet/viewport slices and finite A1 About panel:
+  guarded unmarked cross-origin stylesheets, real host resize/zoom media geometry,
+  descriptive full product/source/build text, exact offline legal views and safe
+  build-information Copy. Declared tags are publication-unverified metadata;
+  captured App payload does not establish native clipboard delivery. No installer,
+  release discovery or upgrade control is added.
+- Retain the completed finite Media/Video and CustomEvent interface slices:
+  genuine owner-realm roots and canonical controls, source/clock/frame/Promise
+  lifetime, Boolean controls reflection, real constructed/legacy notification
+  dispatch/cancellation and child-owner checks. Local App/input/offscreen evidence
+  remains distinct from physical audio, physical desktop and public-service proof.
 
-- Add a callable trusted anchor click/auxclick prerequisite with genuine
-  MouseEvent fields, listener paths, cancellation and microtask effects. Opaque
-  App hit/context tokens refuse stale or obscured targets; resolved link targets
-  preserve the original file root and cookie initiator without POST replay.
-  Admit real HTML anchor href/download mutations through the checked DOM/Attr
-  path, and use live href attributes for painted destinations and link styling.
-  Original event, App, attribute and scrollbar controls pass. Native pointer,
-  Session link dispositions and context-menu wiring remain subsequent work;
-  normal/optimized integration is required before validated delivery.
+Checkpoint evidence is source-scoped. The B2 accepted source
+[67c5d69](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/67c5d691012eeb39767e44000d9c1aeac8cdea1a)
+was integrated by [PR23](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/23).
+The subsequent select checkpoint
+[73f3315](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/73f3315ae23760966efb1c1e6bf8ff3e2492c6c4)
+and literal checkpoint
+[fb385cb](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/fb385cb6c0b06988d55beb8c60f9f9a7cab6e431)
+were integrated by [PR24](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/24)
+and [PR25](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/25).
+Recorded local/hosted offline verification applies to those checkpoints.
+Separate actual Windows desktop records cover six groups at 67c5d69, six at 73f3315
+and four at fb385cb. Each record is limited to its observed source/scope; none
+identifies the new release binary. The bounded T1 correction was integrated by
+[PR22](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/22).
 
-- Add a finite native tab/window shell with a browser-owned tab strip,
-  new/switch/close shortcuts, real native windows and tab-pinned inspectors.
-  Checked numeric native routes and owned App/editor continuations preserve
-  identity across reentrant calls. Initialize UI before input, retain earlier
-  scheduling deadlines, purge stale translated text and keep a retry host after
-  final history cleanup failure. Original continuation, pure UI and hidden-HWND
-  controls pass; full normal/optimized integration is required for delivery.
-  Link dispositions/context menus and physical desktop interaction remain
-  separate acceptance.
-
-- Add an internal bounded Session core with real boxed App owners, checked
-  process-scoped tab/window identities, shared-service adoption and typed wake
-  polling. Closing a page removes its routes before consuming its realm and
-  resource workers; browser downloads survive, and only explicit final shutdown
-  clears history. Original ownership/held-resource controls pass. This internal
-  prerequisite underpins the native shell; link dispositions/context remain
-  unfinished. Normal integration is required before validated delivery.
-
-- Begin the B2 ownership prerequisite with one shared profile writer, immutable
-  App snapshots and stale settings/bookmark editor and gesture refusal. Peer
-  refresh preserves live VM, form, history and viewport state; effective
-  bookmark-bar visibility remains per App until local Apply. Original two-App
-  controls pass. Add browser-owned download authority with weak App views,
-  separate wake routing and held transfers that survive an originating App.
-  Preserve legacy single-window behavior, transfer limits, POST/no-replay,
-  cancellation/retry and no-overwrite. Add shared saved-history ownership with
-  weak App views, preserved row identities, checked original-policy edits and
-  explicit final-session shutdown. These authorities underpin the native shell;
-  normal
-  integration is required before validated delivery.
-
-- Correct responsive stylesheet-to-layout behavior: finite initial-font em media
-  lengths, terminal before/after stylesheet targets without ordinary-element
-  matches, explicit box-sizing inheritance and fractional flex line fitting.
-  The unchanged JS-enabled Foundation6.9 fixture now forms two columns at1280
-  and stacks at640. Original App geometry, padding pixels, links and zoom
-  controls remain; Vue initialization and complete framework support are
-  separate gaps. Normal/build/executable verification is required for integration.
-
-Development priority is measured ordinary-browser compatibility through small
-shared platform fixes and unmodified local workloads, then finite tabs, link
-context and new windows after the first measured workflow improvement. Further
-F6/YouTube work is deferred; completed finite media/interface slices remain.
-
-- Create genuine main-Document Comment leaves with real data/UTF-16 length,
-  ownership and supported tree behavior. Keep Comment data out of Text, selectors,
-  script/style/resource processing and rendering; parsed comments and full
-  CharacterData/Comment interfaces remain outside this slice. Reuse actual
-  String-preferred input conversion in native RegExp exec/test, including genuine
-  Function conversion, reentry and unchanged receiver/state/owner/quota rules.
-  Focused Page/App/language controls pass; normal/build/executable gates remain
-  required. The unchanged legacy workload next refuses select-containing
-  innerHTML, so initialization and visible improvement remain unproved.
-- Expose genuine stable live childNodes lists on the main Document and supported
-  Nodes through the shared NodeList path, reusing native-host borrowed slice.
-  Correct Element textContent replacement to create fresh Text or no empty child,
-  retain saved old identities/data and refresh topology before first owner access.
-  Accept genuine native array-like Function.apply arguments through checked,
-  ordered capture without changing callable-target or abrupt-completion rules.
-  Supply genuine main-Document Node identity and owner-aware canonical nodeType/
-  nodeName accessors over existing supported node slots. This delivered
-  prerequisite slice does not claim library initialization or visible improvement;
-  subsequent connected dependencies are recorded separately.
-  Keep checked growth, explicit small quotas and loaded-resource/inert boundaries;
-  no full DOM/template-content or complete framework compatibility is implied.
-- Add a native About panel with full embedded product/source/build description,
-  exact offline main license/scope/notice-index views and safe build-information
-  Copy through existing input/clipboard paths. Preserve the live page, history,
-  scroll and resource ownership. Declared tags remain publication-unverified;
-  App payload capture is distinct from OS clipboard proof. Referenced third-party
-  terms remain packaged separately. Normal/build/executable acceptance is required;
-  no consent, receipt, installer or update operation is introduced.
-- Apply finite viewport/hover @media groups with real host CSS dimensions,
-  fractional resize/zoom thresholds and preserved cascade/stylesheet ownership.
-  Count inactive nested blocks for whole-sheet admission and keep initial font
-  use consistent with layout. Conditional font faces, wider query/media-attribute
-  grammar and dynamic/resize font fetching remain unsupported. Original native
-  and App geometry/pixel/link-hit controls cover the bounded behavior; executable
-  offscreen and normal verification remain integration requirements.
-- Give each admitted HTTP redirect hop its full bounded allowance, clipped by
-  one overall deadline, so earlier redirects do not consume all time available
-  to a later valid handshake. Keep cancellation, same-hop retry, redirect and
-  security/body bounds, with original short-profile transport regressions.
-- Load ordinary unmarked cross-origin stylesheets through the shared
-  HTTP/CSS path with per-hop policy, cookie, MIME/CORP/COEP, safe cache reuse and
-  source cancellation, including rejected-body accounting and original local
-  request/pixel/lifecycle regressions. General stylesheet CORS, imports and CSSOM
-  rules remain unsupported; broader page usability is still in progress.
-- Expand browser-owned trust data to a pinned, conservative 98-authority Mozilla
-  NSS subset with retained MPL notices, offline reproducibility and a reviewed
-  verifier-source hash gate. Share a 1024-root capacity across PEM/store/TLS
-  entry points while preserving certificate, identity and path validation;
-  restricted and unsupported authorities remain excluded. No OS trust lookup,
-  automatic refresh, revocation/CT or live-service outcome is implied.
-- Add optional exact-host document diagnostics checked before DNS on every hop,
-  with retained two-MiB body bounds, actual destinations/measured phases and
-  escaped status/error metadata. Possible body markers are observations;
-  receiving a document does not establish access or page usability.
-- Expose genuine owner-realm HTMLMediaElement/HTMLVideoElement interfaces over
-  the existing player, with stable VIDEO identity and canonical controls/slot
-  accessors that bypass ordinary own shadows. Real unbound-player refusals,
-  owner checks and control/source/Promise transactions preserve the finite scope.
-  Original model and actual input/frame/lifecycle checks passed; further F6
-  and service work is deferred.
-- Reflect the real controls content attribute through Boolean canonical/direct
-  setters and supported Attr routes, including on unbound Media elements without
-  creating players. Native bar paint/hits and key focus follow visibility;
-  removal reflow cancels stale native press/focus. Actual distinct hidden/shown
-  input, clock, independent pixels and Promise/source-lifetime checks passed.
-- Expose the genuine owner-realm CustomEvent constructor and prototype,
-  branded readonly fields and ordered dictionary conversions. CustomEvent retains
-  actual any detail with checked publication/rollback and
-  canonical initialization. Real constructed/legacy dispatch, cancellation, path
-  copies and child owners are exercised through trusted base inputs; synthetic
-  notifications remain untrusted. Native reads retain caller/foreign-owner checks.
+Named/script-opened contexts, wider accessibility, existing-select interior edits,
+new explicit select form associations, hidden-input admission, ordinary own/legacy
+`__proto__` operations, native-host prototype chains, String.prototype.concat and
+broader framework support remain outside these completed slices. Wider Unicode,
+CSS, storage, frames, codecs/containers and media/player APIs remain partial.
+Google Search/Images/Maps are not fully supported; YouTube playback is unproved.
+Installer/update work and further F6/service work remain deferred. The next
+independent compatibility reduction follows this milestone's release closeout.
 
 ## 0.80.0-alpha.1
 
