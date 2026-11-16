@@ -17,7 +17,12 @@ if(d.beforeInterfaceRead!==1||typeof d.animate!=='undefined'||'animate' in d)thr
 var reads=0,calls='',polyfill=function(a,b){if(this!==d)throw 'polyfill receiver';calls+=a+b;this.setAttribute('data-polyfill',calls);return this;};
 Object.defineProperty(Element.prototype,'animate',{configurable:true,get:function(){reads++;return polyfill;}});
 if(!('animate' in d)||reads!==0||d.animate('A','B')!==d||d['animate']?.('C','D')!==d||reads!==2||d.getAttribute('data-polyfill')!=='ABCD')throw 'polyfill inheritance';
-Object.defineProperty(Element.prototype,'nodeType',{configurable:true,get:function(){throw 'native shadow';}});if(d.nodeType!==1)throw 'native precedence';delete Element.prototype.nodeType;
+var canonicalType=Object.getOwnPropertyDescriptor(Node.prototype,'nodeType').get,shadowReads=0;
+Object.defineProperty(Element.prototype,'nodeType',{configurable:true,get:function(){shadowReads++;return 37;}});
+if(d.nodeType!==37||shadowReads!==1||canonicalType.call(d)!==1)throw 'real inherited getter versus native slot';
+var shadowMarker={};Object.defineProperty(Element.prototype,'nodeType',{configurable:true,get:function(){throw shadowMarker;}});
+try{d.nodeType;throw 'missing inherited getter abrupt';}catch(e){if(e!==shadowMarker)throw e;}
+delete Element.prototype.nodeType;if(d.nodeType!==1||canonicalType.call(d)!==1)throw 'canonical getter restoration';
 delete Element.prototype.animate;if(typeof d.animate!=='undefined'||'animate' in d)throw 'polyfill deletion';
 var oldElement=Element,oldNode=Node;Element=17;delete window.Node;if(!(d instanceof oldElement)||!(text instanceof oldNode)||typeof Node!=='undefined')throw 'canonical anchors';
 document.title='base-node-interfaces-ok';

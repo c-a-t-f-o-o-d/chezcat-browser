@@ -45,12 +45,14 @@ var childRead=w.Function('value','field','return value[field];'),own=w.Function(
 if(childRead(rootDoc,'body')!==document.body||childRead(rootLocation,'href')!==location.href)throw 'same-origin foreign owner control';
 "#);
     diverge(&mut page);
-    let allocations=page.runtime.window_allocation_state_for_test();
     for source in ["w.window;","w.document;","childDoc.body;","childBody.nodeType;","childLocation.href;","childRead(rootDoc,'body');","childRead(rootLocation,'href');"] {
+        // Compare each denied operation with its immediate entry state. The
+        // legitimate recovery below can materialize a main Node backing store.
+        let allocations=page.runtime.window_allocation_state_for_test();
         let outcome=page.console_eval(&mut doc,&mut forms,source);
         assert_eq!(outcome.errors,1,"{source}: {}",page.report());
         assert!(page.report().contains("same-origin"),"{source}: {}",page.report());
-        assert_eq!(page.runtime.window_allocation_state_for_test(),allocations);
+        assert_eq!(page.runtime.window_allocation_state_for_test(),allocations,"refused read allocated: {source}");
         evaluate(&mut page,&mut doc,&mut forms,"if(!own()||document.body.nodeType!==1||window!==self)throw 'later owner recovery';");
     }
 }
