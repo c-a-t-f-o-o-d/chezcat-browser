@@ -23,6 +23,10 @@ const MAX_HEADER_BYTES: usize = 16 * 1024;
 const MAX_COLLISIONS: usize = 1000;
 pub type Wake = Arc<dyn Fn() + Send + Sync>;
 
+#[path = "downloads_shared.rs"]
+mod shared;
+pub use shared::{Shared, View};
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Status {
     Receiving,
@@ -45,6 +49,7 @@ struct Retry {
     suggested: Option<String>,
 }
 
+#[derive(Clone)]
 pub struct Entry {
     pub id: u64,
     pub name: String,
