@@ -414,6 +414,35 @@ and external-policy failures preserve committed state and remain visible.
 Original App/history controls cover these finite ownership behaviors; stable
 coordinator routing and complete terminal retirement remain separate acceptance.
 
+The internal Session core adopts the initial App's existing profile, download
+and history authorities without reopening files or replacing a live Manager.
+Fresh boxed Apps keep independent realms, forms, documents, Back/Forward,
+scroll and loading state. They share the cookie jar and immutable trust, retain
+their own request origin/context, and copy only configured base fonts.
+
+Full typed TabId/WindowId values include a checked process-wide Session generation
+and nonreused checked serials. Diagnostic serial getters are not routing IDs.
+Closed, wrong-window and foreign-Session identities refuse access. Bounded typed
+wake queues coalesce events and request a finite sweep on overflow; round-robin
+poll budgets and deadlines keep inactive timers/resources progressing.
+
+Closing the active tab prepares its actual survivor through the normal snapshot
+and resize path before committing close; observation failures preserve the
+requested owner. All closed routes disappear before consuming the Box. Teardown
+retires App/realm media tokens and drops realm/resource workers directly, without
+Stop/reflow, author callbacks or new resource admission. Browser downloads
+survive page closure. Explicit Session shutdown alone ends browser downloads and
+finalizes shared history; failed history cleanup remains retryable while refusing
+new owners. Session Drop does not silently clear history.
+
+Nine original controls exercise real VM/form/source/scroll/Back isolation, input
+capture transfer, resize/close activation, stale IDs/wakes and bounded inactive
+timers, held scripts/stylesheets/images/backgrounds, live-download adoption,
+decoded media-token retirement and final-only history/readonly retry. This is an
+internal App ownership slice. Native userdata, inspector bindings, reentrant
+window calls, scheduling, tab-strip input and link/new-window dispositions remain
+subsequent acceptance; full normal integration is required for each checkpoint.
+
 ## A1 — About and running-build identity
 
 Status: finite source/UI implementation, with normal build and actual executable

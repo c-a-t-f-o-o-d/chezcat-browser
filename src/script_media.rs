@@ -346,6 +346,18 @@ impl Page {
     pub fn has_media_selection(&self) -> bool {
         self.state.media_changes.pending.is_some() || self.state.media_changes.ready.is_some()
     }
+    /// Terminal page-owner teardown only. The caller immediately drops this
+    /// realm; no author callback, Promise effect or checkpoint executes here.
+    /// Unlike native Stop, a decoded source is retired even without a selection.
+    pub(crate) fn retire_media_owner(&mut self) {
+        self.cancel_media_pause();
+        if let Some(snapshot) = &self.state.embedded_video {
+            snapshot.retired.store(true, Ordering::Relaxed);
+        }
+        self.cancel_media_selection();
+        self.state.media_play_notify = false;
+    }
+
     pub fn cancel_media_selection(&mut self) {
         if self.has_media_selection() {
             if let Some(s) = &mut self.state.embedded_video {

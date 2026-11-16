@@ -46,6 +46,8 @@ mod search_tests;
 mod style_jobs;
 #[path = "app_session_history.rs"]
 mod session_history;
+#[path = "app_session.rs"]
+pub(crate) mod session;
 #[path = "app_images.rs"]
 mod image_jobs;
 #[path = "app_backgrounds.rs"]

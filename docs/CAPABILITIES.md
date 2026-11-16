@@ -26,8 +26,12 @@ ownership. Original held transfers survive the originating App, remain visible
 to a peer and use browser wake routing. Saved history now has a browser authority
 with weak App handles, preserved selected-entry identity and checked policy
 edits. Attached Apps cannot clear history on individual close; explicit final
-shutdown belongs to the browser authority. Native WindowId/session coordination
-and terminal resource retirement are still required before real tabs can close.
+shutdown belongs to the browser authority. An internal Session core now owns real
+boxed Apps, checked process-scoped tab/window IDs, bounded polling and consuming
+page retirement. Original tests exercise independent live page state, held
+resources, stale wakes and final-only history cleanup. Native window bindings,
+tab controls, link dispositions and inspector lifetime integration remain
+required before interactive tabs/windows are available.
 One per-user installer and staged release discovery/upgrade remain planned in the
 [roadmap](ROADMAP.md), not delivered capabilities. Further
 F6/YouTube work is deferred; completed finite media evidence remains valid.

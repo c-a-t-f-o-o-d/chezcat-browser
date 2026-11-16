@@ -15,6 +15,15 @@ entry, so a refreshed same-ID replacement cannot become the selected action.
 The browser coordinator must explicitly perform final history shutdown; dropping
 an App never silently clears history or performs disk I/O.
 
+The internal Session core owns bounded collections of boxed Apps and adopts the
+initial App's existing service authorities. Full tab/window identities include
+a checked process-wide Session generation and a nonreused local serial. Scoped
+App callbacks and typed wake messages avoid retaining App pointers in workers.
+Closing an owner removes its routes before consuming its Box, retires source
+tokens and drops its realm/resource workers directly. This core has original App
+tests; native window bindings, tab chrome and inspector routing still require
+integration before interactive tab/window support is claimed.
+
 A supported CSS background URL retains the winning declaration's stylesheet owner
 and final redirected base. Backgrounds reuse the image worker and resource policies
 with a separate binding slot and bitmap map, keeping replaced-image state and
