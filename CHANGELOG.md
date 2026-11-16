@@ -2,10 +2,23 @@
 
 ## Unreleased
 
-Development priority is shared TLS/trust/data coverage, everyday resource/render/
-interaction usability, then finite tabs, link context and new windows. Further
+Development priority is measured ordinary-browser compatibility through small
+shared platform fixes and unmodified local workloads, then finite tabs, link
+context and new windows after the first measured workflow improvement. Further
 F6/YouTube work is deferred; completed finite media/interface slices remain.
 
+- Expose genuine stable live childNodes lists on the main Document and supported
+  Nodes through the shared NodeList path, reusing native-host borrowed slice.
+  Correct Element textContent replacement to create fresh Text or no empty child,
+  retain saved old identities/data and refresh topology before first owner access.
+  Accept genuine native array-like Function.apply arguments through checked,
+  ordered capture without changing callable-target or abrupt-completion rules.
+  Supply genuine main-Document Node identity and owner-aware canonical nodeType/
+  nodeName accessors over existing supported node slots. The unmodified legacy
+  workflow now reaches missing native Comment/createComment; this remains a
+  prerequisite pack, with no initialization or visible-improvement claim.
+  Keep checked growth, explicit small quotas and loaded-resource/inert boundaries;
+  no full DOM/template-content or complete framework compatibility is implied.
 - Add a native About panel with full embedded product/source/build description,
   exact offline main license/scope/notice-index views and safe build-information
   Copy through existing input/clipboard paths. Preserve the live page, history,

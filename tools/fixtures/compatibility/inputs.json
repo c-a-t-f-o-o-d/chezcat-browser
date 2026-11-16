@@ -1,0 +1,139 @@
+{
+  "schema_version": 1,
+  "complete": true,
+  "scope": "Pinned browser distributions for isolated offline development fixtures only; external cache, never runtime dependencies or release assets. No download or installation is performed by the scorecard.",
+  "assets": [
+    {
+      "id": "jquery-1.12.4-js",
+      "package": "jquery",
+      "version": "1.12.4",
+      "kind": "browser-runtime",
+      "mime": "text/javascript",
+      "cache_path": "jquery-1.12.4/jquery-1.12.4.js",
+      "bytes": 293430,
+      "sha256": "430f36f9b5f21aae8cc9dca6a81c4d3d84da5175eaedcf2fdc2c226302cb3575",
+      "source": {
+        "url": "https://code.jquery.com/jquery-1.12.4.js"
+      },
+      "license": {
+        "spdx": "MIT",
+        "cache_path": "jquery-1.12.4/LICENSE.txt",
+        "bytes": 1606,
+        "sha256": "f980a306a01e5881cc8004115f7e6dde44e7f5296477237d37d169a86ce7c094",
+        "notice": "licenses/jquery-1.12.4-LICENSE.txt",
+        "source": {
+          "url": "https://raw.githubusercontent.com/jquery/jquery/1.12.4/LICENSE.txt"
+        }
+      },
+      "unmodified": true
+    },
+    {
+      "id": "bootstrap-3.4.1-js",
+      "package": "bootstrap",
+      "version": "3.4.1",
+      "kind": "browser-runtime",
+      "mime": "text/javascript",
+      "cache_path": "bootstrap-3.4.1/bootstrap-3.4.1.js",
+      "bytes": 75484,
+      "sha256": "dbd2a35e72edc7d6bde483481a912f1c38aa57fab2747d9b071d317339ee03a2",
+      "source": {
+        "url": "https://raw.githubusercontent.com/twbs/bootstrap/v3.4.1/dist/js/bootstrap.js"
+      },
+      "license": {
+        "spdx": "MIT",
+        "cache_path": "bootstrap-3.4.1/LICENSE",
+        "bytes": 1085,
+        "sha256": "f2bc4d83a3c6e3733a229ff8039eba3ef481ea097323c5d0642107df857db4dc",
+        "notice": "licenses/bootstrap-3.4.1-LICENSE.txt",
+        "source": {
+          "url": "https://raw.githubusercontent.com/twbs/bootstrap/v3.4.1/LICENSE"
+        }
+      },
+      "unmodified": true
+    },
+    {
+      "id": "bootstrap-3.4.1-css",
+      "package": "bootstrap",
+      "version": "3.4.1",
+      "kind": "stylesheet",
+      "mime": "text/css",
+      "cache_path": "bootstrap-3.4.1/bootstrap-3.4.1.css",
+      "bytes": 145933,
+      "sha256": "d170052c16caec3810f2dee6456539045d8e326f6d8ed7c7f78e59ed34de348a",
+      "source": {
+        "url": "https://raw.githubusercontent.com/twbs/bootstrap/v3.4.1/dist/css/bootstrap.css"
+      },
+      "license": {
+        "spdx": "MIT",
+        "cache_path": "bootstrap-3.4.1/LICENSE",
+        "bytes": 1085,
+        "sha256": "f2bc4d83a3c6e3733a229ff8039eba3ef481ea097323c5d0642107df857db4dc",
+        "notice": "licenses/bootstrap-3.4.1-LICENSE.txt",
+        "source": {
+          "url": "https://raw.githubusercontent.com/twbs/bootstrap/v3.4.1/LICENSE"
+        }
+      },
+      "unmodified": true
+    },
+    {
+      "id": "foundation-sites-6.9.0-css",
+      "package": "foundation-sites",
+      "version": "6.9.0",
+      "kind": "stylesheet",
+      "mime": "text/css",
+      "cache_path": "foundation-sites-6.9.0/foundation.min.css",
+      "bytes": 131304,
+      "sha256": "c500decbe33468e54180f1b6238850d810e85dcdfbea7f87f56bcb17051a51e4",
+      "source": {
+        "url": "https://registry.npmjs.org/foundation-sites/-/foundation-sites-6.9.0.tgz",
+        "archive_sha256": "947855ed0db6ee70ea7904d428a599fb1b010d9a2fbb8a981cc5bf762f53aad5",
+        "archive_integrity": "sha512-bZpjL6lxuGViy1UU/NuMddyAAJP0YgJYKNh+8ZtDWhQRtiY1yQISxHmgF4V8EFx7DWHDTdZC1fwFysnMAYkdQg==",
+        "member": "package/dist/css/foundation.min.css"
+      },
+      "license": {
+        "spdx": "MIT",
+        "cache_path": "foundation-sites-6.9.0/LICENSE",
+        "bytes": 1071,
+        "sha256": "843c77d20bdacda0cf3d51773abd90b24abbd26283e89f44c6a65ef820a5622f",
+        "notice": "licenses/foundation-sites-6.9.0-LICENSE.txt",
+        "source": {
+          "url": "https://registry.npmjs.org/foundation-sites/-/foundation-sites-6.9.0.tgz",
+          "archive_sha256": "947855ed0db6ee70ea7904d428a599fb1b010d9a2fbb8a981cc5bf762f53aad5",
+          "archive_integrity": "sha512-bZpjL6lxuGViy1UU/NuMddyAAJP0YgJYKNh+8ZtDWhQRtiY1yQISxHmgF4V8EFx7DWHDTdZC1fwFysnMAYkdQg==",
+          "member": "package/LICENSE"
+        }
+      },
+      "unmodified": true
+    },
+    {
+      "id": "vue-2.7.16-js",
+      "package": "vue",
+      "version": "2.7.16",
+      "kind": "browser-runtime",
+      "mime": "text/javascript",
+      "cache_path": "vue-2.7.16/vue.runtime.min.js",
+      "bytes": 76411,
+      "sha256": "c403020f02111ef6dde6088c72e4baf584adb5b408a562bef1413e1f53e0b899",
+      "source": {
+        "url": "https://registry.npmjs.org/vue/-/vue-2.7.16.tgz",
+        "archive_sha256": "4f17d3265ff02a297224db426cc6a36c168b7f788f67de9440823432c75e3bd9",
+        "archive_integrity": "sha512-4gCtFXaAA3zYZdTp5s4Hl2sozuySsgz4jy1EnpBHNfpMa9dK1ZCG7viqBPCwXtmgc8nHqUsAu3G4gtmXkkY3Sw==",
+        "member": "package/dist/vue.runtime.min.js"
+      },
+      "license": {
+        "spdx": "MIT",
+        "cache_path": "vue-2.7.16/LICENSE",
+        "bytes": 1091,
+        "sha256": "17fb24bc303763f3fe1911ee24e5225c7ad59f0e3a5d8123e9b730c100a306a6",
+        "notice": "licenses/vue-2.7.16-LICENSE.txt",
+        "source": {
+          "url": "https://registry.npmjs.org/vue/-/vue-2.7.16.tgz",
+          "archive_sha256": "4f17d3265ff02a297224db426cc6a36c168b7f788f67de9440823432c75e3bd9",
+          "archive_integrity": "sha512-4gCtFXaAA3zYZdTp5s4Hl2sozuySsgz4jy1EnpBHNfpMa9dK1ZCG7viqBPCwXtmgc8nHqUsAu3G4gtmXkkY3Sw==",
+          "member": "package/LICENSE"
+        }
+      },
+      "unmodified": true
+    }
+  ]
+}

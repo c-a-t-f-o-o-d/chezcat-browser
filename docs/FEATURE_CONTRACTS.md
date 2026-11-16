@@ -180,9 +180,78 @@ checks owned requests, paired source/layout/pixels and dynamic stylesheet
 application. These proofs establish the finite local rendering behavior, not
 physical desktop presentation or complete public-page compatibility.
 
+## CP1 — real collections, calls and Node identity
+
+Status: Prerequisite. Finite source and focused original Page/App controls are
+verified; normal native, build and executable/workload checks remain required for
+integration. The unmodified legacy workload progresses to native Comment/
+createComment, so initialization and visible improvement are not established.
+
+Use the genuine retained main Document and supported main Node objects. Each
+childNodes getter returns one stable, live NodeList identity for that root. Reads
+observe the actual immediate Element/Text children in tree order, including Text;
+existing item/forEach and readonly indexed/length behavior remain. Out-of-range
+indices return undefined and item returns null; HTMLCollection named aliases are
+not introduced. Borrowed Array.prototype.slice reuses the existing host backend:
+it captures initial length, performs ordered conversion/HasProperty/Get, retains
+holes and returns an ordinary static Array of the same actual node identities.
+Null/undefined slice receivers give an ordinary TypeError before argument
+coercion; unrelated unsupported borrowed-array operations are not broadened.
+Function.apply accepts admitted native array-like objects through the existing
+call and transient-lifetime machinery. It captures/converts length once, checks
+the argument policy, then Gets each position in order; absent positions become
+undefined arguments. Getter failures and fatal limits retain their existing
+semantics, target-callable ordering is preserved, and no partial argument list
+invokes the target.
+
+Element textContent replaces all children: nonempty text creates a fresh Text,
+while empty text creates no child. Saved superseded nodes keep their original
+identity/data and detached subtree relationships, and remain charged to the
+document budget. Complete validation, checked accounting and storage reservation
+precede publication. Loaded resources, native form/caption ownership and existing
+inert-subtree mutation restrictions remain. A cached live list refreshes dirty
+topology before returning new Text handles, preserving owner/realm checks before
+first access or argument coercion. Native function ownership is not chosen by
+the realm that happens to read a method first.
+
+Normal host policy allows 65536 NodeList identities and 1048576 retained snapshot
+references, with checked on-demand growth and a disjoint handle representation.
+Explicit small profiles retain refusal/rollback/recovery witnesses. The original
+1000-update semantic cases retain their workloads and verify fresh Text and
+preserved old data within the normal budgets.
+
+The parser still represents Element and Text only. This pack does not create
+Comment/DocumentType nodes or a full Document/template-content implementation.
+Template childNodes explicitly declines rather than exposing inert AST input as
+a fabricated fragment. Hidden child Documents keep their existing unsupported
+collection boundary; ordinary list reads do not activate inert queries/resources.
+Parsed, executed script Text is inspectable, while its forbidden content/removal/
+move/non-noop normalize mutations remain refused without source/DOM/queue changes.
+
+The genuine logical main Document exposes nodeType9, nodeName#document, its
+connected root/child identities and correct null owner/parent/sibling facts. Real
+Node.prototype nodeType/nodeName accessors read supported Document/Element/Text/
+Attr slots, with stable descriptors, brands and owner checks. Prototype lookup and
+saved canonical getters stay distinct. Readonly/strict writes, ignored arguments,
+foreign holders/receivers and bounded recovery are tested. This adds no new
+constructor, Document mutation, baseURI, nullable setter or child-frame scope.
+
+Required original controls include the exact Document/root/Element borrowed-slice
+case, live versus copied identities across detach/reinsert/replace, Text empty
+lists, item coercion/brand/arity ordering, holes and abrupt completion, cached and
+saved foreign-owner refusal, fresh-Text first access, capacity recovery, real App
+input/render ownership and an unmodified selected-library workflow recheck.
+Framework initialization, interaction, CSS layout and reference-browser comparison
+have separate outcomes; cascaded errors do not count as new first blockers.
+
+Semantic references: [DOM childNodes](https://dom.spec.whatwg.org/#dom-node-childnodes),
+[DOM textContent](https://dom.spec.whatwg.org/#dom-node-textcontent), and
+[ECMAScript 2025 Array.prototype.slice](https://262.ecma-international.org/16.0/#sec-array.prototype.slice), and
+[CreateListFromArrayLike](https://262.ecma-international.org/16.0/#sec-createlistfromarraylike).
+
 ## B2 — finite tabs, link context and new windows
 
-Status: planned after the first meaningful B1 milestone. Provide new/switch/close
+Status: planned after the first measured workflow improvement. Provide new/switch/close
 tabs and link actions for new tabs or ChezCat windows, including supported middle/
 Ctrl-click and keyboard actions. Keep independent page/history/scroll/loading and
 address/title state with deliberate shared profile/cookies. Acceptance must prove

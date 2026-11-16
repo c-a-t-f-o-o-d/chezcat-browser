@@ -1,0 +1,7 @@
+body { margin: 24px; font-family: sans-serif; font-size: 18px; }
+h1 { font-size: 26px; }
+input, button { font-size: 18px; }
+.original-panel { padding: 12px; border: 2px solid #264b73; margin-bottom: 12px; }
+.original-control { width: 4px; height: 4px; image-rendering: pixelated; }
+.original-marker { width: 96px; height: 24px; background-color: #285c91; }
+#async-state, #selected-state, #reactive-state { min-height: 28px; }
