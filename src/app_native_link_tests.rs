@@ -1,4 +1,4 @@
-//! Original real-App native-boundary controls. PRIVATE DRAFT; ALL UNRUN.
+//! Original real-App native-boundary controls.
 //! No actual native input, owner windows, clipboard, or live sites.
 use super::*;
 use std::fs;
@@ -55,8 +55,8 @@ fn native_app_middle_never_enters_primary_control_selection_or_legacy_drag(){
 
 #[test]
 fn native_app_overlay_closing_down_cannot_rearm_an_old_or_underlying_anchor(){
-    let files=Files::new();let mut app=files.app();let anchor=point(&app,"a");app.primary_anchor_down(anchor.0,anchor.1,false);
+    let files=Files::new();let mut app=files.app();let original=app.location.clone();let anchor=point(&app,"a");app.primary_anchor_down(anchor.0,anchor.1,false);
     let select=control(&app,"s");app.pointer_down(select.0,select.1,false);app.pointer_up(select.0,select.1);assert!(app.select_popup.is_some());
     let(_,hit)=app.primary_anchor_down(anchor.0,anchor.1,false);assert!(hit.is_none(),"Closing a select popup cannot create a fresh link gesture");
-    app.pointer_up_without_link_default(anchor.0,anchor.1);assert_eq!(app.document.title,"Native boundary source");assert_eq!(app.location.path.as_ref().unwrap(),&files.0.join("source.html"));
+    app.pointer_up_without_link_default(anchor.0,anchor.1);assert_eq!(app.document.title,"Native boundary source");assert_eq!(app.location,original);
 }
