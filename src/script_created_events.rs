@@ -236,7 +236,7 @@ document.addEventListener('click',function(){order+='bad';});
         assert_eq!(doc.title, "native-stop-ok");
         let outcome = page.console_eval(&mut doc, &mut forms, "saved.cancelBubble=true;");
         assert_eq!(outcome.errors, 1, "{}", page.report());
-        assert!(page.report().contains("expired"));
+        assert!(page.report().contains("expired"), "{}", page.report());
     }
 
     #[test]
@@ -492,7 +492,11 @@ impl Bridge<'_> {
     }
     pub(super) fn ordinary_event_owner(&self,object:u32)->Option<u32> {
         self.created_event_index(object).map(|id|self.state.created_events[id].owner)
-            .or_else(||self.state.event.as_ref().filter(|event|event.handle==object&&event.mouse.is_some()).map(|_|WINDOW))
+            // Base dispatched Events use the same genuine ordinary-property
+            // store as MouseEvents. KeyboardEvent's opaque specialized fields
+            // retain their existing native routing and inspection boundary.
+            .or_else(||self.state.event.as_ref().filter(|event|event.handle==object
+                && (event.mouse.is_some() || event.keyboard.is_none())).map(|_|WINDOW))
     }
     pub(super) fn ui_view_argument(&self,owner:u32,value:Option<&Value>)->Result<Option<u32>,(&'static str,String)> {
         let Some(value)=value else {return Ok(None)};
@@ -892,6 +896,10 @@ impl Bridge<'_> {
         })())
     }
 }
+
+#[cfg(test)]
+#[path = "script_event_own_properties_tests.rs"]
+mod own_properties_tests;
 
 #[cfg(test)]
 #[path = "script_custom_event_interface_tests.rs"]
