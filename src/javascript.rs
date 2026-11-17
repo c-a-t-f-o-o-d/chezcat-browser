@@ -129,6 +129,9 @@ pub(crate) use promises::{NativePromise, NativePromiseOutcome};
 mod host_promise;
 #[path = "prototypes.rs"]
 mod prototypes;
+#[cfg(test)]
+#[path = "legacy_object_prototype_tests.rs"]
+mod legacy_object_prototype_tests;
 #[path = "regexp.rs"]
 mod regexp;
 #[cfg(test)]
@@ -5518,9 +5521,6 @@ impl Runtime {
     fn property_name(&mut self, name: &str) -> Result<(), Fault> {
         if name.len() > self.limits.capacity.property_bytes {
             return Err(Fault::new("Property-name limit reached (256 bytes)."));
-        }
-        if name == "__proto__" {
-            return Err(Fault::new("Object prototype access is not implemented."));
         }
         self.work_as(name.len(), WorkKind::PropertyName)
     }
@@ -11536,7 +11536,7 @@ if(errors!==6)throw 'quantifier syntax';'brace-ok';
             "function f(){try{while(true){}}finally{return 1;}}test.record(f());",
             "function f(){try{return f();}finally{test.record('finally');}}try{f();}catch(e){test.record('caught');}",
             "try{test.unavailable();}catch(e){test.record('caught');}finally{test.record('finally');}",
-            "try{let o={};o.__proto__;}catch(e){test.record('caught');}finally{test.record('finally');}",
+            "try{Object.setPrototypeOf(test,{});}catch(e){test.record('caught');}finally{test.record('finally');}",
             "function f(){try{Array(8193);}finally{return 1;}}test.record(f());",
         ] {
             eprintln!("fatal capability witness: {source}");
