@@ -37,7 +37,7 @@ def main(argv=None):
     import check_authored_av_harness as authored
     import check_network_media_harness as network
     require(network.ROOT.resolve() == repo, 'Fixture server must belong to the selected product repository.')
-    folder = repo / 'results/verification/autonomy' / (
+    folder = capture_tests.verification_root(repo) / 'autonomy' / (
         datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S.%fZ')
         + '-network-authored-av-' + uuid.uuid4().hex[:8])
     folder.mkdir(parents=True)
@@ -55,8 +55,9 @@ def main(argv=None):
         'public_service_requests_made_by_driver': 0}
     manifest = folder / 'manifest.json'
     pointer = repo / 'results/verification/latest-network-authored-av.json'
+    pointer.parent.mkdir(parents=True, exist_ok=True)
     capture_tests.write_json(manifest, record)
-    capture_tests.write_json(pointer, {'report': manifest.relative_to(repo).as_posix(),
+    capture_tests.write_json(pointer, {'report': capture_tests.evidence_reference(manifest, repo),
         'passed': False, 'state': 'running'})
     try:
         require(checks['existing_executable'], 'Build the existing product executable before this journey.')
@@ -120,7 +121,7 @@ def main(argv=None):
     checks['both_complete_transports'] = len(record['cases']) == len(network.TRANSPORTS)
     record.update(source_after=after, passed=bool(checks) and all(value is True for value in checks.values()), state='completed')
     capture_tests.write_json(manifest, record)
-    capture_tests.write_json(pointer, {'report': manifest.relative_to(repo).as_posix(),
+    capture_tests.write_json(pointer, {'report': capture_tests.evidence_reference(manifest, repo),
         'passed': record['passed'], 'state': record['state']})
     print(json.dumps(checks, indent=2))
     print('Evidence: ' + str(folder))

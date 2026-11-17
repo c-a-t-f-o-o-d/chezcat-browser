@@ -15,7 +15,7 @@ import capture_tests
 ROOT=Path(__file__).resolve().parents[1]
 def main():
     parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--device',action='store_true');args=parser.parse_args()
-    folder=ROOT/'results/verification/autonomy'/(datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S.%fZ')+'-pcm-'+('device' if args.device else 'metadata')+'-journey-'+uuid.uuid4().hex[:8]);folder.mkdir(parents=True)
+    folder=capture_tests.verification_root(ROOT) / 'autonomy'/(datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S.%fZ')+'-pcm-'+('device' if args.device else 'metadata')+'-journey-'+uuid.uuid4().hex[:8]);folder.mkdir(parents=True)
     actions='snapshot\tready\n'
     if args.device:actions+='media\tPlay\nwait\t350\nmedia\tPause\nsnapshot\tpaused\nwait\t400\nsnapshot\tfrozen\nmedia\tSeek:1300\nsnapshot\tseeked\nmedia\tPlay\nwait\t1000\nsnapshot\tended\nmedia\tPlay\nsnapshot\treplay\n'
     else:actions+='media\tSeek:750\nsnapshot\tseeked\n'

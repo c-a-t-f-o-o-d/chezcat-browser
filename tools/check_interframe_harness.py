@@ -42,11 +42,11 @@ def reused(name, folder, callback):
     evidence = re.findall(r'^Evidence: (.+)$', log.read_text(encoding='utf-8'), re.M)
     require(len(evidence) == 1, 'Reused checker must emit exactly one evidence record.')
     path = Path(evidence[0].strip()).resolve() / 'manifest.json'
-    require(path.is_relative_to((ROOT / 'results/verification').resolve()), 'Evidence escaped verification directory.')
+    require(path.is_relative_to(capture_tests.verification_root(ROOT)), 'Evidence escaped verification directory.')
     result = json.loads(path.read_text(encoding='utf-8'))
     require(status == 0 and bool(result['checks']) and all(value is True for value in result['checks'].values()),
         name + ' failed; original evidence retained.')
-    return result | {'manifest': path.relative_to(ROOT).as_posix(), 'manifest_sha256': capture_tests.sha256(path)}
+    return result | {'manifest': capture_tests.evidence_reference(path, ROOT), 'manifest_sha256': capture_tests.sha256(path)}
 
 
 def stage_pages(folder, fixture_dir):
@@ -161,7 +161,7 @@ def main():
     parser.add_argument('--device', action='store_true', help='explicit opt-in existing WinMM sample-clock journey; no physical-audibility claim')
     args = parser.parse_args()
     fixture_dir = args.fixture_dir.resolve()
-    folder = ROOT / 'results/verification/autonomy' / (datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S.%fZ') + '-interframe-journey-' + uuid.uuid4().hex[:8])
+    folder = capture_tests.verification_root(ROOT) / 'autonomy' / (datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S.%fZ') + '-interframe-journey-' + uuid.uuid4().hex[:8])
     folder.mkdir(parents=True)
     before = capture_tests.source_identity(ROOT)
     exe = capture_tests.sha256(ROOT / 'ChezCat.exe')

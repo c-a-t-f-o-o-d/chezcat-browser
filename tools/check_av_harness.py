@@ -42,7 +42,7 @@ def main(fixture_stem=None, video_fixture_stem=None, *, device=None, display_pro
     video_fixture_stem=Path(video_fixture_stem) if video_fixture_stem is not None else ROOT/'tools/fixtures/scene-intra'
     clip,reference,reference_sha256,profile=fixture_reference(video_fixture_stem,display_profile)
     last_frame=len(clip['frames'])-1;native_seek_frame=frame_at(clip,2200)
-    folder=ROOT/'results/verification/autonomy'/(datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S.%fZ')+'-av-'+('device' if args.device else 'metadata')+'-journey-'+uuid.uuid4().hex[:8]);folder.mkdir(parents=True)
+    folder=capture_tests.verification_root(ROOT) / 'autonomy'/(datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S.%fZ')+'-av-'+('device' if args.device else 'metadata')+'-journey-'+uuid.uuid4().hex[:8]);folder.mkdir(parents=True)
     actions='snapshot\tready\n'
     if args.device:actions+='media\tPlay\nwait\t350\nmedia\tPause\nsnapshot\tpaused\nwait\t400\nsnapshot\tfrozen\n'
     actions+='media\tSeek:2200\nsnapshot\tseeked\n'

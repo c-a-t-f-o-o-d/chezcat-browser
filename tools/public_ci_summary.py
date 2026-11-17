@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import re
 import subprocess
+import capture_tests
 
 ROOT = Path(__file__).resolve().parents[1]
 MAX_JSON = 4 * 1024 * 1024
@@ -145,7 +146,7 @@ def native_projection(manifest, known):
     return result
 
 
-def find_native(root, report):
+def find_native(root, report, verification=None):
     runs = report.get('runs')
     if not isinstance(runs, list) or len(runs) > MAX_ROWS:
         return None
@@ -156,7 +157,8 @@ def find_native(root, report):
     source = report.get('source_before')
     if start is None or finish is None or start > finish or not isinstance(source, dict):
         return None
-    folder = root / 'results/verification/windows-tests'
+    verification = capture_tests.checked_output_path(verification if verification is not None else root / 'results/verification')
+    folder = verification / 'windows-tests'
     try:
         candidates = [p for p in folder.iterdir() if re.fullmatch(RUN_NAME, p.name)]
     except OSError:
@@ -165,7 +167,7 @@ def find_native(root, report):
         return None
     matches = []
     for candidate in candidates:
-        manifest = read_json(candidate / 'manifest.json', root)
+        manifest = read_json(candidate / 'manifest.json', verification)
         if manifest is None:
             continue
         began, ended = utc(manifest.get('started_utc')), utc(manifest.get('finished_utc'))
@@ -185,9 +187,14 @@ def summary(root=ROOT):
             result['source_commit'] = commit
         pointer = read_json(root / 'results/verification/latest-offline.json', root)
         location = pointer.get('report') if isinstance(pointer, dict) else None
-        if not isinstance(location, str) or not re.fullmatch('results/verification/offline/' + RUN_NAME + '/verification.json', location.replace('\\', '/')):
+        if not isinstance(location, str):
             return result
-        report = read_json(root.joinpath(*location.replace('\\', '/').split('/')), root)
+        external = location.startswith('verification:')
+        pattern = ('verification:offline/' if external else 'results/verification/offline/') + RUN_NAME + '/verification.json'
+        if not re.fullmatch(pattern, location.replace('\\', '/')):
+            return result
+        verification = capture_tests.verification_root(root) if external else root / 'results/verification'
+        report = read_json(capture_tests.evidence_path(location, root), verification)
         if report is None or result['source_commit'] is None or report.get('source_commit') != result['source_commit']:
             return result
         result['passed'] = report.get('passed') is True and report.get('source_commit') == result['source_commit'] and result['source_commit'] is not None
@@ -205,7 +212,7 @@ def summary(root=ROOT):
                 name, state = row.get('name'), row.get('state')
                 if isinstance(name, str) and (name in STAGES or re.fullmatch(r'journey-[0-9]{1,3}', name)) and isinstance(state, str) and state in STATES:
                     result['stages'].append({'name': name, 'state': state})
-        result['native_tests'] = native_projection(find_native(root, report), public_basenames(root))
+        result['native_tests'] = native_projection(find_native(root, report, verification), public_basenames(root))
         # A serial success or a malformed/unlinked native record cannot turn
         # the original normal gate into a public passing result.
         result['passed'] = result['passed'] and result['native_tests']['normal_test_gate_passed']
@@ -216,12 +223,13 @@ def summary(root=ROOT):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--output', type=Path, default=ROOT / 'results/verification/public-summary.json')
+    parser.add_argument('--output', type=Path)
     parser.add_argument('--print', action='store_true', dest='print_summary')
     args = parser.parse_args(argv)
-    output = args.output.resolve()
-    if not output.is_relative_to((ROOT / 'results/verification').resolve()) or output.suffix != '.json':
-        parser.error('Output must be verification JSON inside this checkout.')
+    verification = capture_tests.verification_root(ROOT)
+    output = capture_tests.checked_output_path(args.output or verification / 'public-summary.json')
+    if not output.is_relative_to(verification) or output.suffix != '.json':
+        parser.error('Output must be JSON within selected verification storage.')
     safe = summary()
     encoded = (json.dumps(safe, indent=2) + '\n').encode('utf-8')
     output.parent.mkdir(parents=True, exist_ok=True)

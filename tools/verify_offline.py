@@ -64,22 +64,28 @@ def build_identity(source):
     version=re.search(r'^version\s*=\s*"([^"]+)"',(ROOT/'Cargo.toml').read_text(encoding='utf-8'),re.M)[1]
     return {'source_commit':commit,'dirty':dirty,'cargo_version':version,
       'compiler':subprocess.check_output(['rustup','run','1.99.1','rustc','-vV'],cwd=ROOT,text=True),
-      'python':sys.version.split()[0],'source_identity':source,
+      'python':sys.version.split()[0],'source_identity':source,'output_configuration':capture_tests.output_configuration(ROOT),
       'source_map_sha256':hashlib.sha256(json.dumps(source,sort_keys=True,separators=(',',':')).encode()).hexdigest(),
       'executable_sha256':capture_tests.sha256(ROOT/'ChezCat.exe'),
       'scope':'Build identity only; no reproducibility or security certification.'}
 
 def main():
-    folder=ROOT/'results/verification/offline'/(
+    pointer=ROOT/'results/verification/latest-offline.json'
+    pointer.parent.mkdir(parents=True,exist_ok=True)
+    capture_tests.write_json(pointer,{'passed':False,'state':'preparing-output'})
+    try:configuration=capture_tests.output_configuration(ROOT)
+    except (OSError,ValueError):
+        capture_tests.write_json(pointer,{'passed':False,'state':'refused','reason':'Invalid output configuration.'})
+        print('Refused invalid output configuration; latest pointer invalidated.',flush=True);return 1
+    folder=capture_tests.verification_root(ROOT)/'offline'/(
         datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S.%fZ')+'-'+uuid.uuid4().hex[:8])
     folder.mkdir(parents=True); runs=[]
-    pointer=ROOT/'results/verification/latest-offline.json'
-    relative=str((folder/'verification.json').relative_to(ROOT))
+    relative=capture_tests.evidence_reference(folder/'verification.json',ROOT)
     initial_commit,initial_dirty=git_state()
     capture_tests.write_json(folder/'verification.json',{'passed':False,'state':'running','runs':[],'source_commit':initial_commit})
-    capture_tests.write_json(pointer,{'report':relative,'build_info':str((folder/'build-info.json').relative_to(ROOT))})
+    capture_tests.write_json(pointer,{'report':relative,'build_info':capture_tests.evidence_reference(folder/'build-info.json',ROOT)})
     before=capture_tests.source_identity(ROOT)
-    overrides=[name for name in ['RUST_TEST_THREADS','RUST_MIN_STACK','RUSTUP_TOOLCHAIN','RUSTFLAGS','CARGO_ENCODED_RUSTFLAGS','RUSTC','RUSTC_WRAPPER','RUSTC_WORKSPACE_WRAPPER','CARGO_TARGET_DIR','CARGO_BUILD_TARGET'] if os.environ.get(name)]
+    overrides=[name for name in ['RUST_TEST_THREADS','RUST_MIN_STACK','RUSTUP_TOOLCHAIN','RUSTFLAGS','CARGO_ENCODED_RUSTFLAGS','RUSTC','RUSTC_WRAPPER','RUSTC_WORKSPACE_WRAPPER','CARGO_BUILD_TARGET'] if os.environ.get(name)]
     if initial_dirty is True or overrides:
         capture_tests.write_json(folder/'verification.json',{'passed':False,'source_commit':initial_commit,'state':'refused','reason':'Clean normal verification requires no tracked edits or listed build/test overrides.','override_names':overrides,'dirty':initial_dirty})
         print('Refused dirty/overridden verification; latest pointer invalidated.',flush=True);return 1
@@ -116,18 +122,18 @@ def main():
         evidence=re.findall(r'Evidence: (.+)',log)
         if len(evidence)!=1:journey_records.append({'valid':False});continue
         path=Path(evidence[0].strip()).resolve()
-        if not path.is_relative_to(ROOT.resolve()):journey_records.append({'valid':False});continue
+        if not path.is_relative_to(capture_tests.verification_root(ROOT)):journey_records.append({'valid':False});continue
         manifest=json.loads((path/'manifest.json').read_text(encoding='utf-8'))
         valid=(manifest.get('executable_sha256',manifest.get('exe_sha256'))==expected_exe and manifest['source_before']==before and manifest['source_after']==before and all(manifest['checks'].values()))
-        journey_records.append({'valid':valid,'manifest':str((path/'manifest.json').relative_to(ROOT)), 'sha256':capture_tests.sha256(path/'manifest.json')})
+        journey_records.append({'valid':valid,'manifest':capture_tests.evidence_reference(path/'manifest.json',ROOT), 'sha256':capture_tests.sha256(path/'manifest.json')})
     after=capture_tests.source_identity(ROOT);final_commit,final_dirty=git_state()
-    passed=(before==after and final_commit==initial_commit and final_dirty is not True and capture_tests.sha256(ROOT/'ChezCat.exe')==expected_exe and len(journey_records)==len(JOURNEYS) and all(r['valid'] for r in journey_records) and all(r['state']=='completed' and r['exit_code']==0 for r in runs))
+    passed=(configuration==capture_tests.output_configuration(ROOT) and before==after and final_commit==initial_commit and final_dirty is not True and capture_tests.sha256(ROOT/'ChezCat.exe')==expected_exe and len(journey_records)==len(JOURNEYS) and all(r['valid'] for r in journey_records) and all(r['state']=='completed' and r['exit_code']==0 for r in runs))
     identity=build_identity(after);capture_tests.write_json(folder/'build-info.json',identity)
     report={'passed':passed,'runs':runs,'journeys':journey_records,'source_before':before,'source_after':after,
-       'executable_sha256':identity['executable_sha256'],'source_commit':identity['source_commit'],
+       'executable_sha256':identity['executable_sha256'],'source_commit':identity['source_commit'],'output_configuration':configuration,
        'scope':f'Normal suite, release, PE and {len(JOURNEYS)} fixed local App/input journeys. No public service/audio device/native desktop claim.'}
     capture_tests.write_json(folder/'verification.json',report)
-    (ROOT/'results/verification/latest-offline.json').write_text(json.dumps({'report':str((folder/'verification.json').relative_to(ROOT)),'build_info':str((folder/'build-info.json').relative_to(ROOT))},indent=2)+'\n',encoding='utf-8')
+    (ROOT/'results/verification/latest-offline.json').write_text(json.dumps({'report':capture_tests.evidence_reference(folder/'verification.json',ROOT),'build_info':capture_tests.evidence_reference(folder/'build-info.json',ROOT)},indent=2)+'\n',encoding='utf-8')
     print('Report: '+str(folder/'verification.json'));return 0 if passed else 1
 
 if __name__=='__main__':raise SystemExit(main())

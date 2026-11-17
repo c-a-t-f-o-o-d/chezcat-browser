@@ -221,12 +221,13 @@ def main():
         help='existing product executable; never built by this driver')
     args = parser.parse_args()
     exe = args.exe.resolve()
-    folder = ROOT / 'results/verification/autonomy' / (
+    folder = capture_tests.verification_root(ROOT) / 'autonomy' / (
         datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S.%fZ')
         + '-background-journey-' + uuid.uuid4().hex[:8])
     folder.mkdir(parents=True)
     manifest = folder / 'manifest.json'
     pointer = ROOT / 'results/verification/latest-background.json'
+    pointer.parent.mkdir(parents=True, exist_ok=True)
     checks = {'existing_executable': False, 'existing_exact_license_acceptance': False,
         'journey_completed': False}
     record = {'schema_version': 1, 'passed': False, 'state': 'running', 'scope': __doc__,
@@ -234,7 +235,7 @@ def main():
         'runner_sha256': capture_tests.sha256(Path(__file__)),
         'license_accepted_by_driver': False, 'public_service_requests_made_by_driver': 0}
     capture_tests.write_json(manifest, record)
-    capture_tests.write_json(pointer, {'report': manifest.relative_to(ROOT).as_posix(), 'passed': False, 'state': 'running'})
+    capture_tests.write_json(pointer, {'report': capture_tests.evidence_reference(manifest, ROOT), 'passed': False, 'state': 'running'})
     try:
         record['source_before'] = capture_tests.source_identity(ROOT)
         checks['existing_executable'] = exe.is_file()
@@ -253,7 +254,7 @@ def main():
     checks['executable_unchanged'] = exe.is_file() and capture_tests.sha256(exe) == record['executable_sha256']
     record.update(passed=bool(checks) and all(value is True for value in checks.values()), state='completed')
     capture_tests.write_json(manifest, record)
-    capture_tests.write_json(pointer, {'report': manifest.relative_to(ROOT).as_posix(), 'passed': record['passed'], 'state': record['state']})
+    capture_tests.write_json(pointer, {'report': capture_tests.evidence_reference(manifest, ROOT), 'passed': record['passed'], 'state': record['state']})
     print(json.dumps(checks, indent=2))
     print('Evidence: ' + str(folder))
     return 0 if record['passed'] else 1

@@ -16,12 +16,55 @@ import verify_offline as verification
 
 class Guards(unittest.TestCase):
     def setUp(self):
+        selection=patch.dict(os.environ);selection.start();self.addCleanup(selection.stop)
+        os.environ.pop('CHEZCAT_VERIFICATION_ROOT',None)
+        os.environ.pop('CARGO_TARGET_DIR',None)
         self.temp=tempfile.TemporaryDirectory(prefix='chezcat-package-guards-');self.addCleanup(self.temp.cleanup)
         self.root=Path(self.temp.name)
         self.patcher=patch.object(package,'ROOT',self.root);self.patcher.start();self.addCleanup(self.patcher.stop)
         privacy=patch.object(package.publication,'ROOT',self.root);privacy.start();self.addCleanup(privacy.stop)
     def write(self,name,data):
         p=self.root/name;p.parent.mkdir(parents=True,exist_ok=True);p.write_bytes(data)
+    def test_distribution_failure_reports_fixed_stage_without_raw_error(self):
+        self.write('runtime.zip',b'owned invalid archive fixture')
+        self.write('source.zip',b'owned invalid archive fixture')
+        output=self.root/'distribution.json';public=io.StringIO()
+        private_error='owned-private-error-sentinel'
+        arguments=['--runtime',str(self.root/'runtime.zip'),'--source',str(self.root/'source.zip'),
+                   '--output',str(output),'--tag','v0.81.0-alpha.2','--commit','1'*40,'--license-sha256','2'*64]
+        with patch.object(distribution,'validate_archives',side_effect=ValueError(private_error)),contextlib.redirect_stdout(public):
+            self.assertEqual(distribution.main(arguments),1)
+        record=json.loads(output.read_text())
+        self.assertEqual(record['failure_stage'],'archive-identity')
+        self.assertEqual(record['error'],private_error)
+        self.assertNotIn(private_error,public.getvalue())
+        self.assertIn('"failure_stage": "archive-identity"',public.getvalue())
+    def test_extracted_consumer_child_confines_inherited_storage(self):
+        folder=self.root/'runtime with spaces !';folder.mkdir()
+        tools=self.root/'tools';tools.mkdir()
+        (folder/'ChezCat.exe').write_bytes(b'Owned non-executable fixture; never launched.')
+        (tools/'check_input_harness.py').write_text(
+            'import json,os\n'
+            'def main():\n'
+            '    (ROOT/"child-scope.json").write_text(json.dumps({"root":str(ROOT),"selected":os.environ["CHEZCAT_VERIFICATION_ROOT"]}))\n'
+            '    return 37\n',encoding='utf-8')
+        external=str(self.root/'parent external storage')
+        def execute(command,log,root,timeout):
+            if command[0]==str(folder/'ChezCat.exe'):
+                Path(command[command.index('--render')+1]).write_bytes(b'P6\n2 1\n255\n'+bytes([0,255,0,255,0,255]))
+                Path(command[command.index('--activity-report')+1]).write_text('Page title: ChezCat',encoding='utf-8')
+                self.assertIn('--no-profile',command)
+                return {'state':'completed','exit_code':0}
+            child=subprocess.run(command,cwd=root,capture_output=True,text=True,timeout=20,check=False)
+            log.write_text(child.stdout+child.stderr,encoding='utf-8')
+            self.assertEqual(child.returncode,37)
+            return {'state':'failed','exit_code':37}
+        with patch.dict(os.environ,{'CHEZCAT_VERIFICATION_ROOT':external}),patch.object(distribution,'require_license_acceptance'),patch.object(distribution.capture_tests,'execute',side_effect=execute):
+            with self.assertRaisesRegex(ValueError,'Extracted standard App/input journey did not complete'):
+                distribution.exercise_runtime(folder,self.root)
+            self.assertEqual(os.environ['CHEZCAT_VERIFICATION_ROOT'],external)
+        observed=json.loads((folder/'child-scope.json').read_text())
+        self.assertEqual(observed,{'root':str(folder.resolve()),'selected':str(folder.resolve()/'results/verification')})
     def test_no_operative_license_refuses_runtime(self):
         with self.assertRaisesRegex(ValueError,'No operative LICENSE'):package.runtime_files('0'*64,'v0.78.0')
     def test_draft_is_not_an_adoption(self):

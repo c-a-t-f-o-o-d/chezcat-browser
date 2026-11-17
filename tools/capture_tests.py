@@ -35,6 +35,88 @@ PANICKING_THREAD = re.compile(
 PANIC_IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z_0-9]*(?:::[A-Za-z_][A-Za-z_0-9]*)*\Z")
 
 
+
+def checked_output_path(value):
+    """Normalize one explicit local output location without following links."""
+    path = Path(value)
+    if (not path.is_absolute() or '..' in path.parts or path.drive.startswith('\\\\') or path == Path(path.anchor)
+            or any(ord(char) < 32 or ord(char) == 127 for char in str(path))):
+        raise ValueError('Output location must be an absolute normalized local path.')
+    for part in (path, *path.parents):
+        try:
+            information = part.lstat()
+        except FileNotFoundError:
+            continue
+        if part.is_symlink() or getattr(information, 'st_file_attributes', 0) & 0x400:
+            raise ValueError('Output locations cannot use links/reparse points.')
+    return path.resolve()
+
+
+def verification_root(root=None):
+    """Storage role only: the source root and compilation map stay unchanged."""
+    root = Path(root if root is not None else ROOT).resolve()
+    default = checked_output_path(root / 'results/verification')
+    selected = os.environ.get('CHEZCAT_VERIFICATION_ROOT')
+    result = default if selected is None else checked_output_path(selected)
+    if result.exists() and not result.is_dir():
+        raise ValueError('Verification storage is occupied by a non-directory.')
+    if result != default and (result.is_relative_to(root) or root.is_relative_to(result)):
+        raise ValueError('Select the default verification directory or separate external storage.')
+    return result
+
+
+def cargo_target_dir(root=None):
+    root = Path(root if root is not None else ROOT).resolve()
+    selected = Path(os.environ.get('CARGO_TARGET_DIR') or root / 'target')
+    result = checked_output_path(selected if selected.is_absolute() else root / selected)
+    if result.exists() and not result.is_dir():
+        raise ValueError('Cargo target storage is occupied by a non-directory.')
+    if result == root or root.is_relative_to(result) or (result.is_relative_to(root)
+            and not any(result.is_relative_to(root / name) for name in ('target', 'results'))):
+        raise ValueError('Cargo target storage cannot overwrite source/input directories.')
+    return result
+
+
+def output_configuration(root=None):
+    return {'verification_root': str(verification_root(root)), 'cargo_target_dir': str(cargo_target_dir(root)),
+            'requested_TEMP': os.environ.get('TEMP'), 'requested_TMP': os.environ.get('TMP')}
+
+
+def evidence_reference(path, root=None):
+    """Legacy checkout refs stay valid; external refs are confined logical names."""
+    root = Path(root if root is not None else ROOT).resolve()
+    path = checked_output_path(path)
+    storage = verification_root(root)
+    if not path.is_relative_to(storage):
+        raise ValueError('Evidence escaped selected verification storage.')
+    return path.relative_to(root).as_posix() if path.is_relative_to(root) else 'verification:' + path.relative_to(storage).as_posix()
+
+
+def evidence_path(reference, root=None):
+    root = Path(root if root is not None else ROOT).resolve()
+    if not isinstance(reference, str) or not reference or len(reference) > 32768:
+        raise ValueError('Invalid verification reference.')
+    external = reference.startswith('verification:')
+    spelling = reference[len('verification:'):] if external else reference
+    parts = spelling.replace('\\', '/').split('/')
+    if external:
+        if any(not part or part in ('.', '..') or ':' in part for part in parts):
+            raise ValueError('Invalid confined verification reference.')
+        base = verification_root(root)
+        result = checked_output_path(base.joinpath(*parts))
+    else:
+        # Preserve the existing checkout-relative/checkout-contained contract.
+        # An arbitrary absolute external path is never an evidence reference.
+        path = Path(spelling)
+        if '..' in parts:
+            raise ValueError('Verification references cannot traverse parents.')
+        base = root
+        result = checked_output_path(path if path.is_absolute() else root.joinpath(*parts))
+    if not result.is_relative_to(base):
+        raise ValueError('Verification reference escaped its selected role.')
+    return result
+
+
 def now():
     return datetime.now(timezone.utc).isoformat(timespec="milliseconds")
 
@@ -219,10 +301,13 @@ def passed(row):
             and row.get("analysis", {}).get("complete_success_summary") is True)
 
 
-def commands(toolchain):
+def commands(toolchain, target_dir=None):
     prefix = ["rustup", "run", toolchain]
     cargo = prefix + ["cargo", "test", "--offline", "--locked", "--bin", "chezcat",
                       "--message-format=json", "--", "--no-capture", "--color=never"]
+    if target_dir is not None:
+        position = cargo.index("--")
+        cargo[position:position] = ["--target-dir", str(target_dir)]
     return [("compiler", prefix + ["rustc", "-Vv"]),
             ("normal", cargo), ("serial", cargo + ["--test-threads=1"])]
 
@@ -232,7 +317,8 @@ def capture(root, run, plan, timeout_seconds):
     before = source_identity(root)
     manifest = {"schema_version": 1, "started_utc": now(), "state": "running",
                 "scope": "Native test diagnostics only; no browser release build or site capture.",
-                "source_before": before, "steps": [], "normal_test_gate_passed": False,
+                "source_before": before, "output_configuration": output_configuration(root),
+                "steps": [], "normal_test_gate_passed": False,
                 "runner_sha256": sha256(Path(__file__)), "effective_RUST_BACKTRACE": "1",
                 "timeout_seconds_per_stage": timeout_seconds,
                 "polled_log_limit_bytes": MAX_LOG_BYTES,
@@ -290,15 +376,19 @@ def capture(root, run, plan, timeout_seconds):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--toolchain", default="stable")
+    parser.add_argument("--print-target-dir", action="store_true", help="Print the validated Cargo output location without building/testing.")
     parser.add_argument("--timeout-seconds", type=int, default=600)
     args = parser.parse_args(argv)
+    if args.print_target_dir:
+        print(cargo_target_dir(ROOT))
+        return 0
     if not re.fullmatch(r"[A-Za-z0-9_.-]+", args.toolchain) or args.toolchain.startswith("-"):
         parser.error("Use a rustup toolchain name, not a shell command or option")
     if not 15 <= args.timeout_seconds <= 1800:
         parser.error("--timeout-seconds must be 15..1800")
-    run = ROOT / "results/verification/windows-tests" / (
+    run = verification_root(ROOT) / "windows-tests" / (
         datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ") + "-" + uuid.uuid4().hex[:8])
-    result = capture(ROOT, run, commands(args.toolchain), args.timeout_seconds)
+    result = capture(ROOT, run, commands(args.toolchain, cargo_target_dir(ROOT)), args.timeout_seconds)
     print("\n" + (run / "summary.txt").read_text(encoding="utf-8"))
     print("Results: " + str(run))
     return 0 if result["normal_test_gate_passed"] else 1

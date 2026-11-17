@@ -43,12 +43,16 @@ def environment(changes):
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--repo',default=ROOT,type=Path)
-    parser.add_argument('--output',type=Path,help='new owned output directory within repo/results')
+    parser.add_argument('--output',type=Path,help='new owned output directory within selected verification storage (legacy repo/results by default)')
     parser.add_argument('--toolchain',default='1.99.1-x86_64-pc-windows-msvc')
     args=parser.parse_args();root=args.repo.resolve(strict=True)
-    out=(args.output or root/'results/verification/autonomy'/(datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S.%fZ')+'-build-identity-controls-'+uuid.uuid4().hex[:8])).resolve()
+    sys.path.insert(0,str(root/'tools'));import capture_tests
+    out=(args.output or capture_tests.verification_root(root)/'autonomy'/(datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S.%fZ')+'-build-identity-controls-'+uuid.uuid4().hex[:8])).resolve()
     results=(root/'results').resolve()
-    if not results.is_relative_to(root) or out==results or not out.is_relative_to(results):raise ValueError('Select a new owned output directory within repo/results.')
+    selected=capture_tests.verification_root(root)
+    out=capture_tests.checked_output_path(out)
+    allowed=selected if os.environ.get('CHEZCAT_VERIFICATION_ROOT') is not None else results
+    if out==allowed or not out.is_relative_to(allowed):raise ValueError('Select a new owned output directory within selected verification storage.')
     if out.exists():raise ValueError('Output already exists; retain the previous evidence.')
     receipt=os.environ.get('CHEZCAT_LICENSE_RECEIPT_DIR')
     if not receipt:raise ValueError('Select the existing explicit external receipt; this helper never accepts terms.')

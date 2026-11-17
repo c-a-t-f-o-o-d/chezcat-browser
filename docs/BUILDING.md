@@ -83,3 +83,23 @@ is supported. The containing commit or exported SOURCE_REVISION supplies its
 source identity; obsolete ancestry IDs cannot authorize the package. A ZIP
 built/tested outside Git records its exported SOURCE_REVISION with dirty status
 unknown; it cannot authorize a runtime release package.
+
+
+## Selecting local build and verification storage
+
+`CARGO_TARGET_DIR` selects a reusable Cargo cache. `Build.cmd` validates that
+location and copies the release executable from the same selected target.
+The source checkout and root `ChezCat.exe` keep their existing roles.
+
+`CHEZCAT_VERIFICATION_ROOT` optionally selects an absolute, separate local
+verification directory; without it, normal tools retain `results/verification`.
+Normal test logs and the fixed offline journeys inherit this selection, including
+their nested checkers. Small `latest-*.json` pointers remain in the checkout and
+external references use confined `verification:` names. Raw reports stay private;
+public summaries still project only their bounded approved fields.
+
+Set these values and `TEMP`/`TMP` only for owned child processes. No compiler,
+credential store, real license receipt or profile is relocated. Keep one writer
+per output tree and retain failed/ambiguous evidence. Output selection does not
+relax clean-source, exact executable, offline/locked, license or test requirements.
+Frozen compatibility scorecards retain their pinned invocation/storage contract.

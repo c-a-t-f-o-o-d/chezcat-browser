@@ -194,8 +194,10 @@ def exercise_runtime(folder, evidence):
             'Startup pixels/activity do not show the bundled local home page.')
     # Import the trusted checkout's runner, without placing tools or source in
     # the runtime bundle. The standard mode does not read optional fixture files.
-    code = ('import pathlib,sys; sys.path.insert(0,sys.argv[1]); '
-            'import check_input_harness as h; h.ROOT=pathlib.Path(sys.argv[2]); '
+    code = ('import os,pathlib,sys; runtime=pathlib.Path(sys.argv[2]).resolve(); '
+            'os.environ["CHEZCAT_VERIFICATION_ROOT"]=str(runtime/"results/verification"); '
+            'sys.path.insert(0,sys.argv[1]); '
+            'import check_input_harness as h; h.ROOT=runtime; '
             'sys.argv=["check_input_harness.py"]; raise SystemExit(h.main())')
     journey = capture_tests.execute([sys.executable, '-B', '-c', code, str(root / 'tools'), str(folder)],
         evidence / 'original-journey.log', folder, 240)
@@ -233,6 +235,7 @@ def main(argv=None):
         'validation': {'offline_startup': False, 'original_app_input_journey': False}}
     result = {'schema_version': 1, 'passed': False, 'checks': checks, 'publication': publication,
         'scope': 'Exact tagged archive bytes and one extracted offline startup/standard local App-input journey; no public site, device, desktop, reproducibility or security certification.'}
+    phase = 'archive-identity'
     try:
         runtime = args.runtime.resolve(); source = args.source.resolve()
         for name, path in [('runtime', runtime), ('source', source)]:
@@ -241,13 +244,17 @@ def main(argv=None):
         payload, static_checks = validate_archives(runtime, source, args.tag, args.commit, args.license_sha256)
         checks.update(static_checks)
         publication['license_scope_sha256'] = package.sha(payload['LICENSE_SCOPE.md'])
+        phase = 'license-acceptance'
         require_license_acceptance()
+        phase = 'runtime-extraction'
         evidence = output.parent / (output.stem + '-evidence-' + uuid.uuid4().hex[:8])
         evidence.mkdir()
         folder = evidence / 'ChezCat'
         extract_runtime(payload, folder)
+        phase = 'extracted-runtime'
         result['evidence'] = exercise_runtime(folder, evidence)
         checks['offline_startup'] = checks['original_app_input_journey'] = True
+        phase = 'payload-preservation'
         checks['extracted_payload_unchanged'] = all((folder / name).read_bytes() == data for name, data in payload.items())
         require(checks['extracted_payload_unchanged'], 'Extracted runtime payload changed during exercise.')
         result['passed'] = publication['passed'] = all(checks.values())
@@ -255,8 +262,12 @@ def main(argv=None):
     except (ValueError, OSError, KeyError, TypeError, UnicodeError, RuntimeError,
             subprocess.SubprocessError, zipfile.BadZipFile, zlib.error, KeyboardInterrupt) as error:
         result['error'] = str(error)
+        result['failure_stage'] = phase
     capture_tests.write_json(output, result)
     print('Distribution report: ' + str(output))
+    if not result['passed']:
+        # Only fixed stage/check names are public; raw errors remain in the report.
+        print(json.dumps({'passed': False, 'failure_stage': phase, 'checks': checks}))
     return 0 if result['passed'] else 1
 
 

@@ -12,7 +12,7 @@ DIGEST=accept_license.DIGEST
 def main():
     parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--exe',type=Path,default=ROOT/'ChezCat.exe');args=parser.parse_args()
     exe=args.exe.resolve();before=capture_tests.source_identity(ROOT)
-    folder=ROOT/'results/verification/autonomy'/(datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S.%fZ')+'-license-'+uuid.uuid4().hex[:8]);folder.mkdir(parents=True)
+    folder=capture_tests.verification_root(ROOT) / 'autonomy'/(datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S.%fZ')+'-license-'+uuid.uuid4().hex[:8]);folder.mkdir(parents=True)
     checks={};runs=[];seen=[];ui_records=[]
     class Fixture(http.server.BaseHTTPRequestHandler):
         def do_GET(self):
@@ -95,9 +95,15 @@ def main():
             execute('default-profile-runtime-refusal',[str(exe),'--accept-license',DIGEST,'--license-scope','personal','--license-receipt-dir',str(profile_receipt)],env={'LOCALAPPDATA':str(appdata)},success=False)
             execute('default-profile-source-refusal',[sys.executable,str(ROOT/'tools/accept_license.py'),'--accept-license',DIGEST,'--license-scope','personal','--receipt-dir',str(profile_receipt)],env={'LOCALAPPDATA':str(appdata)},success=False)
             require('default-profile-no-receipt',not profile_receipt.exists() and len(seen)==count)
-            copied=folder/'copied';copied.mkdir();(copied/'receipt.json').write_bytes(original)
-            execute('copied-checkout-refusal',[str(exe),url,'--activity-report',str(temp/'copy.txt'),'--license-receipt-dir',str(copied)],cwd=ROOT/'pages',success=False)
-            require('copied-checkout-no-network',len(seen)==count)
+            # A genuine original source-project ancestor, independent of storage drive.
+            project=folder/'copied-checkout';(project/'src').mkdir(parents=True);(project/'pages').mkdir()
+            (project/'Cargo.toml').write_text('[package]\nname="owned-receipt-boundary-fixture"\nversion="0.0.0"\nedition="2021"\n',encoding='utf-8')
+            (project/'src/main.rs').write_text('fn main() {}\n',encoding='utf-8')
+            copied=project/'copied';copied.mkdir();(copied/'receipt.json').write_bytes(original)
+            require('copied-checkout-original-source-markers',(project/'Cargo.toml').is_file() and (project/'src/main.rs').is_file())
+            execute('copied-checkout-refusal',[str(exe),url,'--no-profile','--activity-report',str(temp/'copy.txt'),'--license-receipt-dir',str(copied)],cwd=project/'pages',success=False)
+            execute('copied-source-checkout-refusal',[sys.executable,str(ROOT/'tools/accept_license.py'),'--check','--receipt-dir',str(copied)],cwd=project/'pages',success=False)
+            require('copied-checkout-no-network',len(seen)==count and (copied/'receipt.json').read_bytes()==original)
             script=temp/'bad.tsv';script.write_text('license\t'+'0'*64+'\nchoose\tpersonal\n')
             execute('wrong-ui-digest',[str(exe),url,'--activity-report',str(temp/'bad.txt'),'--license-receipt-dir',str(missing),'--license-ui-script',str(script),'--license-ui-report',str(temp/'bad-ui.json')],success=False)
             require('wrong-ui-digest-no-consent',not missing.exists() and len(seen)==count)

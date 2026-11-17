@@ -136,7 +136,7 @@ def run_case(transport, folder, fixture_stem=None, display_profile=None, *,
     evidence = re.findall(r'^Evidence: (.+)$', child_log.read_text(encoding='utf-8'), re.M)
     require(len(evidence) == 1, 'The reused authored checker must emit exactly one evidence record.')
     child_folder = Path(evidence[0].strip()).resolve()
-    require(child_folder.is_relative_to((ROOT / 'results/verification').resolve()),
+    require(child_folder.is_relative_to(capture_tests.verification_root(ROOT)),
         'Authored evidence must stay inside the product verification directory.')
     child_path = child_folder / 'manifest.json'
     child = json.loads(child_path.read_text(encoding='utf-8'))
@@ -165,7 +165,7 @@ def run_case(transport, folder, fixture_stem=None, display_profile=None, *,
         if transport == 'https' else bool(responses) and all(row['tls'] is None for row in responses))
     checks.update({'authored:' + name: value is True for name, value in child['checks'].items()})
     result = {'transport': transport, 'passed': all(checks.values()), 'checks': checks,
-        'source': source, 'authored_manifest': child_path.relative_to(ROOT).as_posix(),
+        'source': source, 'authored_manifest': capture_tests.evidence_reference(child_path, ROOT),
         'authored_manifest_sha256': capture_tests.sha256(child_path),
         'source_before': child['source_before'], 'source_after': child['source_after'],
         'executable_sha256': child['executable_sha256'], 'responses': responses,
@@ -178,7 +178,7 @@ def run_case(transport, folder, fixture_stem=None, display_profile=None, *,
 
 def main():
     argparse.ArgumentParser(description=__doc__).parse_args()
-    folder = ROOT / 'results/verification/autonomy' / (
+    folder = capture_tests.verification_root(ROOT) / 'autonomy' / (
         datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S.%fZ')
         + '-network-media-journey-' + uuid.uuid4().hex[:8])
     folder.mkdir(parents=True)
@@ -195,8 +195,9 @@ def main():
         'public_service_requests_made_by_driver': 0}
     manifest = folder / 'manifest.json'
     pointer = ROOT / 'results/verification/latest-network-media.json'
+    pointer.parent.mkdir(parents=True, exist_ok=True)
     capture_tests.write_json(manifest, record)
-    capture_tests.write_json(pointer, {'report': manifest.relative_to(ROOT).as_posix(),
+    capture_tests.write_json(pointer, {'report': capture_tests.evidence_reference(manifest, ROOT),
         'passed': False, 'state': 'running'})
     try:
         require(checks['existing_executable'], 'Build the existing product executable before running this journey.')
@@ -230,7 +231,7 @@ def main():
     checks['both_complete_transports'] = len(record['cases']) == len(TRANSPORTS)
     record.update(source_after=after, passed=all(checks.values()), state='completed')
     capture_tests.write_json(manifest, record)
-    capture_tests.write_json(pointer, {'report': manifest.relative_to(ROOT).as_posix(),
+    capture_tests.write_json(pointer, {'report': capture_tests.evidence_reference(manifest, ROOT),
         'passed': record['passed'], 'state': record['state']})
     print(json.dumps(checks, indent=2))
     print('Evidence: ' + str(folder))

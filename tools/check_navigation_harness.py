@@ -298,12 +298,13 @@ def main():
     args = parser.parse_args()
     exe = args.exe.resolve()
     selected = CASES if args.case == 'all' else (args.case,)
-    folder = ROOT / 'results/verification/autonomy' / (
+    folder = capture_tests.verification_root(ROOT) / 'autonomy' / (
         datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S.%fZ')
         + '-navigation-journey-' + uuid.uuid4().hex[:8])
     folder.mkdir(parents=True)
     manifest = folder / 'manifest.json'
     pointer = ROOT / 'results/verification/latest-navigation.json'
+    pointer.parent.mkdir(parents=True, exist_ok=True)
     before = capture_tests.source_identity(ROOT)
     exe_before = capture_tests.sha256(exe) if exe.is_file() else None
     checks = {'existing_executable': exe_before is not None, 'existing_exact_license_acceptance': False}
@@ -314,7 +315,7 @@ def main():
         'checks': checks, 'cases': [], 'public_service_requests_made_by_driver': 0,
         'license_accepted_by_driver': False}
     capture_tests.write_json(manifest, record)
-    capture_tests.write_json(pointer, {'report': manifest.relative_to(ROOT).as_posix(),
+    capture_tests.write_json(pointer, {'report': capture_tests.evidence_reference(manifest, ROOT),
         'passed': False, 'state': 'running', 'case_selection': list(selected)})
     results = []
     try:
@@ -351,7 +352,7 @@ def main():
     checks['executable_unchanged'] = exe.is_file() and capture_tests.sha256(exe) == exe_before
     record.update(source_after=after, passed=all(checks.values()), state='completed')
     capture_tests.write_json(manifest, record)
-    capture_tests.write_json(pointer, {'report': manifest.relative_to(ROOT).as_posix(),
+    capture_tests.write_json(pointer, {'report': capture_tests.evidence_reference(manifest, ROOT),
         'passed': record['passed'], 'state': record['state'], 'case_selection': list(selected)})
     print('Evidence: ' + str(folder))
     return 0 if record['passed'] else 1

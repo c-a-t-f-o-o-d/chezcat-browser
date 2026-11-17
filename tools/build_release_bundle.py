@@ -92,9 +92,7 @@ def approve_license(approved,tag,commit=None):
     return entries
 
 def report_path(name):
-    p=(ROOT/name).resolve()
-    if not p.is_relative_to(ROOT.resolve()):raise ValueError('Verification path escaped the source root.')
-    return p
+    return capture_tests.evidence_path(name,ROOT)
 
 def verified(commit):
     pointer=json.loads((ROOT/'results/verification/latest-offline.json').read_text(encoding='utf-8'))

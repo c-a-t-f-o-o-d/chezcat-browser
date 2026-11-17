@@ -3,6 +3,7 @@ from contextlib import redirect_stdout
 from datetime import datetime, timedelta, timezone
 import io
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -16,6 +17,37 @@ import public_ci_summary as public
 
 
 class Controls(unittest.TestCase):
+
+    def setUp(self):
+        selection = patch.dict(os.environ)
+        selection.start();self.addCleanup(selection.stop)
+        os.environ.pop('CHEZCAT_VERIFICATION_ROOT', None)
+        os.environ.pop('CARGO_TARGET_DIR', None)
+
+    def test_external_report_uses_source_git_and_never_projects_private_locations(self):
+        with tempfile.TemporaryDirectory(prefix='owned-summary-routing-') as temporary:
+            base = Path(temporary);root = base / 'source';external = base / 'private verification'
+            pointer = root / 'results/verification/latest-offline.json';pointer.parent.mkdir(parents=True)
+            name = '20261115T000000.000000Z-23456789'
+            report = external / 'offline' / name / 'verification.json';report.parent.mkdir(parents=True)
+            report.write_text(json.dumps({'passed': False, 'source_commit': '1' * 40,
+                'private_path': str(external), 'runs': [{'name': 'normal', 'state': 'failed', 'command': [str(external)]}]}))
+            pointer.write_text(json.dumps({'report': 'verification:offline/' + name + '/verification.json'}))
+            with patch.dict(os.environ, {'CHEZCAT_VERIFICATION_ROOT': str(external)}), patch.object(public.subprocess, 'check_output', return_value=b'1' * 40 + b'\n') as source_git, patch.object(public, 'public_basenames', return_value=set()):
+                value = public.summary(root)
+            self.assertEqual(value['stages'], [{'name': 'normal', 'state': 'failed'}])
+            self.assertEqual(source_git.call_args.kwargs['cwd'], root)
+            self.assertFalse(value['passed'])
+            self.assertNotIn(str(external), json.dumps(value))
+            self.assertEqual(value['native_tests']['state'], 'unavailable')
+            # A malformed/missing external reference cannot fall back to a legacy report.
+            legacy = root / 'results/verification/offline' / name / 'verification.json';legacy.parent.mkdir(parents=True)
+            legacy.write_text(json.dumps({'passed': True, 'source_commit': '1' * 40, 'runs': [{'name': 'pe', 'state': 'completed'}]}))
+            for reference in ('verification:../offline/' + name + '/verification.json', str(legacy), 'verification:offline/20000101T000000.000000Z-00000000/verification.json'):
+                pointer.write_text(json.dumps({'report': reference}))
+                with patch.dict(os.environ, {'CHEZCAT_VERIFICATION_ROOT': str(external)}), patch.object(public.subprocess, 'check_output', return_value=b'1' * 40 + b'\n'):
+                    self.assertEqual(public.summary(root)['stages'], [])
+
     def test_offline_failure_and_refusal_reports_bind_commit_before_commands(self):
         import verify_offline as verification
         for dirty in [False, True]:
