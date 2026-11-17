@@ -300,7 +300,7 @@ impl Runtime {
         // iterator getters or other callbacks. Children still reenter eval
         // through its native guard and share the heap-frame quota.
         if matches!(&program.exprs[id].kind, ExprKind::Literal(_) | ExprKind::Name(_)
-            | ExprKind::This | ExprKind::RegExp(_)
+            | ExprKind::This | ExprKind::NewTarget | ExprKind::RegExp(_)
             | ExprKind::Array(_) | ExprKind::Object(_) | ExprKind::TemplateLiteral(..)) {
             if self.evaluation_frames >= MAX_EVALUATION_FRAMES {
                 return Err(Fault::new("Pending evaluation limit reached (4096)."));
@@ -363,6 +363,7 @@ impl Runtime {
                 None => Err(Fault::exception("ReferenceError", format!("{name} is not defined."))),
             },
             ExprKind::This => self.copy_value(this),
+            ExprKind::NewTarget => self.new_target_value(),
             ExprKind::Function(template) => self.make_function(program, *template, env, this),
             ExprKind::RegExp(expression) => self.regexp_object(expression.clone()),
             ExprKind::Array(elements) => self.eval_array_literal(program, elements, env, this, host),
