@@ -5650,3 +5650,7 @@ mod string_concat_tests;
 #[cfg(test)]
 #[path = "app_hidden_input_tests.rs"]
 mod hidden_input_tests;
+
+#[cfg(test)]
+#[path = "app_text_input_tests.rs"]
+mod text_input_tests;
