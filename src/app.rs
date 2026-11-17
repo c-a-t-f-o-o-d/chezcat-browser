@@ -5658,6 +5658,10 @@ mod rgba_border_tests;
 mod css_background_tests;
 
 #[cfg(test)]
+#[path="app_css_color_tests.rs"]
+mod css_color_tests;
+
+#[cfg(test)]
 #[path="app_document_fragment_tests.rs"]
 mod document_fragment_tests;
 
