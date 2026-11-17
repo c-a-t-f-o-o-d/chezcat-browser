@@ -5,6 +5,41 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 #[test]
+fn anchor_url_app_idl_mutation_updates_real_hit_without_granting_navigation() {
+    let files=Files::new();let mut app=files.page("");
+    let source=app.location.clone();let root=source.root.clone();
+    let (x,y)=point(&app,"a");
+    eval(&mut app,"a.href='other.html#original';if(a.getAttribute('href')!=='other.html#original')throw 'raw IDL';");
+    assert_eq!(app.location,source);
+    assert_eq!(app.page.link_at(x,y-app.content_top()+app.scroll),Some("other.html#original"));
+    assert!(!app.scripting.as_ref().unwrap().has_navigation_request());
+    let target=take_link(activate(&mut app,"a",input(0)));
+    assert_eq!(target.location,navigation::resolve("other.html#original",&app.base_location).unwrap());
+    assert_eq!(target.location.root,root);
+    eval(&mut app,"a.href='../outside.html';");
+    assert_eq!(app.location,source);
+    let hit=app.anchor_hit(x,y,0).unwrap();
+    assert!(app.activate_anchor(hit,x,y,false,input(0)).is_err(),"The trusted activation boundary must reject a file-root escape after IDL assignment");
+    assert_eq!(app.location.root,root);
+}
+
+#[test]
+fn anchor_url_app_local_file_projection_preserves_fragment_colons_and_absolute_href() {
+    let files=Files::new();let mut app=files.page("");let source=app.location.clone();
+    for raw in ["#part:one","other.html#part:one"] {
+        eval(&mut app,&format!("a.href='{raw}';document.title=a.href;"));
+        assert_eq!(app.document.title,navigation::selection_url(raw,&app.base_location).unwrap());
+        assert_eq!(app.document.attr(node(&app,"a"),"href"),Some(raw));
+    }
+    let absolute=app.document.title.clone();
+    eval(&mut app,"a.href=a.href;document.title=a.href;");
+    assert_eq!(app.document.attr(node(&app,"a"),"href"),Some(absolute.as_str()));
+    assert_eq!(app.document.title,absolute);
+    assert_eq!(app.location,source);
+    assert!(!app.scripting.as_ref().unwrap().has_navigation_request());
+}
+
+#[test]
 fn anchor_app_native_scrollbar_strip_masks_pointer_and_context_but_plain_page_edge_remains_live() {
     let files=Files::new();
     files.write("site/target.html","<title>Strip target</title>");

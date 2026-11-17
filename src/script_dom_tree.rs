@@ -357,6 +357,8 @@ impl Bridge<'_> {
         if property=="length" && self.comment_receiver(object) {return true;}
         if property=="childNodes" {return object==DOCUMENT || node_index(object).is_some_and(|node|self.dom_accessible(node));}
         if property == "attributes" { return self.class_list_element_receiver(object); }
+        if property == "origin" && node_index(object).is_some_and(|node|
+            self.dom_accessible(node) && self.anchor_url_property(node, property)) { return true; }
         if matches!(property,"localName"|"prefix"|"namespaceURI") {
             return self.attr_element_receiver(object) && node_index(object).is_some_and(|node|
                 self.doc.nodes[node].namespace==crate::html::Namespace::Html);
@@ -380,6 +382,7 @@ impl Bridge<'_> {
             return false;
         };
         if self.html_text_reflection(node,property).is_some() {return true;}
+        if property != "origin" && self.anchor_url_property(node, property) { return true; }
         self.dom_script(node)
             && script_attribute(property).is_some_and(|name| !boolean_script_attribute(name))
             || self.dom_stylesheet(node)
@@ -492,6 +495,7 @@ impl Bridge<'_> {
             return Ok(None);
         };
         let node = self.dom_node(node_handle(node))?;
+        if self.anchor_url_property(node, property) { return Ok(Some(true)); }
         if property=="type"&&self.style_type_receiver(object){return Ok(Some(true));}
         if property=="src"&&tag(self.doc,node)=="script"&&self.doc.nodes[node].namespace==crate::html::Namespace::Html {return Ok(Some(true));}
         if property=="href"&&tag(self.doc,node)=="link"&&self.doc.nodes[node].namespace==crate::html::Namespace::Html {return Ok(Some(true));}
@@ -578,6 +582,7 @@ impl Bridge<'_> {
             return Ok(None);
         }
         let node = self.dom_node(object)?;
+        if self.anchor_url_property(node, property) { return self.anchor_url_get(node, property).map(Some); }
         if property=="type"&&self.style_type_receiver(object){
             let raw=self.doc.attr(node,"type").unwrap_or("");
             if raw.len()>self.state.limits.host.string_bytes{return Err("Style type result exceeds the configured string allowance.".into());}
@@ -1211,6 +1216,10 @@ impl Bridge<'_> {
             return Ok(false);
         }
         let node = self.dom_node(object)?;
+        if property != "origin" && self.anchor_url_property(node, property) {
+            self.anchor_url_set(node, property, value)?;
+            return Ok(true);
+        }
         if let Some(attribute)=self.html_text_reflection(node,property) {
             let value=self.text(value)?;self.attribute(node,attribute,Some(value))?;return Ok(true);
         }
