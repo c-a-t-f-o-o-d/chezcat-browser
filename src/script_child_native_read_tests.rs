@@ -80,11 +80,14 @@ var own=w.Function('return window===self&&document.body.nodeType===1&&location.h
     // origin divergence; only the existing named native reads are supported.
     for changed_origin in [false,true] {
         if changed_origin {diverge(&mut page);}
+        let refusal=if changed_origin {"requires a verified same-origin web context"}
+            else {"foreign Window operation is not implemented"};
         for source in ["read.call(w);","write.call(w,19);","invoke.call(w);"] {
+            page.clear_console();
             let allocations=page.runtime.window_allocation_state_for_test();
             let outcome=page.console_eval(&mut doc,&mut forms,source);
             assert_eq!(outcome.errors,1,"{source}: {}",page.report());
-            assert!(page.report().contains("foreign Window operation is not implemented"),"{source}: {}",page.report());
+            assert!(page.report().contains(refusal),"{source}: {}",page.report());
             assert_eq!(page.runtime.window_allocation_state_for_test(),allocations,"refused super receiver allocated: {source}");
             evaluate(&mut page,&mut doc,&mut forms,"if(reads!==1||writes!==1||calls!==1||!own()||window!==self||document.body.nodeType!==1)throw 'super refusal effects or owner recovery';");
         }
