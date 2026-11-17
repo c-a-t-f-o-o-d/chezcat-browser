@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import subprocess
 import tempfile
+import time
 import unittest
 import zipfile
 from unittest.mock import patch
@@ -15,11 +16,21 @@ import check_distribution as distribution
 import verify_offline as verification
 
 class Guards(unittest.TestCase):
+    def cleanup_fixture(self):
+        # Windows can briefly retain the emptied temporary Git directory.
+        # Retry only sharing violations during cleanup, never test assertions.
+        for attempt in range(21):
+            try:
+                self.temp.cleanup()
+                return
+            except PermissionError as error:
+                if os.name!='nt' or getattr(error,'winerror',None)!=32 or attempt==20:raise
+                time.sleep(.1)
     def setUp(self):
         selection=patch.dict(os.environ);selection.start();self.addCleanup(selection.stop)
         os.environ.pop('CHEZCAT_VERIFICATION_ROOT',None)
         os.environ.pop('CARGO_TARGET_DIR',None)
-        self.temp=tempfile.TemporaryDirectory(prefix='chezcat-package-guards-');self.addCleanup(self.temp.cleanup)
+        self.temp=tempfile.TemporaryDirectory(prefix='chezcat-package-guards-');self.addCleanup(self.cleanup_fixture)
         self.root=Path(self.temp.name)
         self.patcher=patch.object(package,'ROOT',self.root);self.patcher.start();self.addCleanup(self.patcher.stop)
         privacy=patch.object(package.publication,'ROOT',self.root);privacy.start();self.addCleanup(privacy.stop)

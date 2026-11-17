@@ -103,3 +103,9 @@ credential store, real license receipt or profile is relocated. Keep one writer
 per output tree and retain failed/ambiguous evidence. Output selection does not
 relax clean-source, exact executable, offline/locked, license or test requirements.
 Frozen compatibility scorecards retain their pinned invocation/storage contract.
+
+Keep `TEMP`/`TMP` outside every source checkout, including parent repositories,
+so receipt-isolation fixtures can use trusted external temporary storage. For
+the complete offline gate, explicitly select the existing external receipt with
+`CHEZCAT_LICENSE_RECEIPT_DIR` and verify it with `tools/accept_license.py --check`.
+Selecting a directory does not accept terms or create a receipt.
