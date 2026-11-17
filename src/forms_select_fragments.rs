@@ -65,20 +65,7 @@ impl Forms {
                     if initial.encode_utf16().count() > MAX_VALUE_UNITS || name.len() > MAX_QUERY || bytes > MAX_TOTAL_VALUE_BYTES {
                         return Err("Text INPUT value, name or form payload limit reached; no control was admitted.".into());
                     }
-                    let mut value = Editor::default();
-                    set_form_value(&mut value, initial, Kind::Text);
-                    let control = Control { owner: None, kind: Kind::Text, value, dirty_value: false,
-                        name: name.into(), caption: caption(doc, local, Kind::Text),
-                        disabled: doc.attr(local, "disabled").is_some(), readonly: doc.attr(local, "readonly").is_some(),
-                        required: doc.attr(local, "required").is_some(), checked: false,
-                        max_length: doc.attr(local, "maxlength").and_then(|value| value.parse().ok())
-                            .unwrap_or(MAX_VALUE_UNITS).min(MAX_VALUE_UNITS),
-                        tab_index: doc.attr(local, "tabindex").and_then(parse_tab_index).unwrap_or(0),
-                        select: None, initial: initial.into(), initially_checked: false, image_point: (0, 0) };
-                    let extra = name.len().checked_add(initial.len())
-                        .and_then(|bytes| bytes.checked_add(control.caption.len()))
-                        .and_then(|bytes| bytes.checked_add(control.value.chars.len().saturating_mul(std::mem::size_of::<char>())))
-                        .ok_or("Text INPUT retained payload overflow.")?;
+                    let (control, extra) = text_inputs::text_control(doc, local, name, initial, None)?;
                     plan.retained_bytes = plan.retained_bytes.checked_add(extra).ok_or("Native fragment retained payload overflow.")?;
                     plan.additions.insert(base + local - 1, control);
                     continue;

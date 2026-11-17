@@ -104,6 +104,7 @@ impl Bridge<'_> {
         let connected=self.state.dom.connected[parent];
         let form_plan=self.prepare_select_form_change(None,&overrides)?;
         let images=self.prepare_image_connections(&incoming,connected)?;
+        self.state.replace_bytes(0,form_plan.retained_bytes)?;
         // All validation, quota checks, allocations and native plans precede
         // the first write. No author callback or fallible work in publication.
         self.doc.nodes[donor].children.clear();

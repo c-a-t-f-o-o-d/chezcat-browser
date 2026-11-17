@@ -2702,7 +2702,7 @@ fn dom_tree_rejections_preserve_existing_controls_resources_and_parent_links() {
             "var root=document.getElementById('root'),child=document.getElementById('child'),outside=document.getElementById('outside');child.appendChild(root);",
             "root.insertBefore(document.createElement('p'),outside);",
             "document.body.removeChild(document.getElementById('form'));",
-            "document.body.appendChild(document.createElement('input'));",
+            "document.body.appendChild(document.createElement('textarea'));",
             "document.body.appendChild(document.getElementById('image'));",
             "var text=document.createTextNode('safe');text.appendChild(document.createElement('span'));",
             "if(root.parentNode!==document.body||child.parentNode!==root||root.textContent!=='old'||outside.parentNode!==document.body||document.getElementById('query').value!=='original'||document.images.length!==1||text.data!=='safe')throw 'partial mutation';document.title='mutation limits recovered';",

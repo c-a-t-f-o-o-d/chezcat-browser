@@ -818,6 +818,7 @@ impl Bridge<'_> {
         while let Some(index) = current {
             self.state.work(1)?;
             if self.forms.controls.contains_key(&index)
+                || tag(self.doc, index) == "input"
                 || tag(self.doc, index) == "script" && !self.dom_script(index)
                 || matches!(
                     tag(self.doc, index),
@@ -855,7 +856,7 @@ impl Bridge<'_> {
                 && !matches!(name, "select" | "option" | "optgroup") {
                 return Err("Moving nonconventional select descendants or resources is not implemented.".into());
             }
-            if forms::kind(self.doc, node).is_some() && !owned_select && !self.hidden_input(node) && !self.owned_fragment_text_input(node)
+            if forms::kind(self.doc, node).is_some() && !owned_select && !self.hidden_input(node) && !self.owned_fragment_text_input(node) && !self.fresh_text_input(node)
                 || matches!(
                     name,
                     "html"
@@ -1019,6 +1020,7 @@ impl Bridge<'_> {
         let images = self.prepare_image_connections(&incoming_nodes, connected)?;
 
         let form_plan = self.prepare_select_form_change(None, &[(old, None), (child, Some(parent))])?;
+        self.state.replace_bytes(0,form_plan.retained_bytes)?;
         // No fallible work remains after publishing either parent's new list.
         if let Some(source) = source_parent.filter(|&source| source != parent) { self.doc.nodes[source].children = source_children; }
         self.doc.nodes[parent].children = children;
@@ -1092,6 +1094,11 @@ impl Bridge<'_> {
         let (descendants, depth) = self.mutation_subtree(child).map_err(|error| format!(
             "{error} Operation={method}; parent={parent}<{:?}>; child={child}<{:?}>; old_parent={old_parent:?}; reference={reference:?}.",
             prefix(tag(self.doc, parent), 64), prefix(tag(self.doc, child), 64)))?;
+        self.state.work(descendants.len().saturating_mul(2))?;
+        if descendants.iter().any(|&node| self.fresh_text_input(node))
+            && descendants.iter().any(|&node| matches!(tag(self.doc,node),"script"|"link"|"iframe")) {
+            return Err("New native INPUT admission with script, stylesheet or frame subtrees is not implemented; no tree was changed.".into());
+        }
         if method != "removeChild" && tag(self.doc, parent) == "picture" && tag(self.doc, child) == "img" {
             return Err("Dynamic picture image selection is not implemented.".into());
         }
@@ -1114,6 +1121,8 @@ impl Bridge<'_> {
         let frames = self.prepare_blank_frames(&descendants, connected, parent)?;
         let form_plan = self.prepare_select_form_change(None, &[(child, if method == "removeChild" { None } else { Some(parent) })])?;
         if method != "removeChild" { self.doc.nodes[parent].children.try_reserve(1).map_err(|_| "DOM destination children reservation failed.")?; }
+        self.state.detached_nodes.try_reserve(descendants.len()).map_err(|_| "DOM detached INPUT identity reservation failed.")?;
+        self.state.replace_bytes(0,form_plan.retained_bytes)?;
         if let Some(old_parent) = old_parent {
             self.doc.nodes[old_parent]
                 .children

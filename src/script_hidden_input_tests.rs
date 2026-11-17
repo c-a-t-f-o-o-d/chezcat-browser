@@ -111,14 +111,15 @@ fn hidden_input_unsupported_type_changes_and_transaction_refusals_keep_both_mode
 }
 
 #[test]
-fn hidden_input_namespace_spelling_and_unbound_nonhidden_tree_guards_remain() {
+fn hidden_input_namespace_spelling_preserves_default_text_admission() {
     let (mut doc,mut forms,mut page,outcome)=run("var input=document.createElement('input');input.id='new';input.setAttributeNS('urn:original-test','type','hidden');if(input.type!=='text'||input.getAttributeNS(null,'type')!==null)throw 'namespaced type became native';");
     assert_eq!(outcome.errors,0,"{}",page.report());let input=id(&doc,"new");
     assert!(!forms.controls.contains_key(&input));
-    let host=id(&doc,"host");let children=doc.nodes[host].children.clone();
+    let host=id(&doc,"host");
     let outcome=page.console_eval(&mut doc,&mut forms,"document.getElementById('host').appendChild(input);");
-    assert_ne!(outcome.errors,0,"An unbound text input must retain the existing mutation refusal");
-    assert_eq!(doc.nodes[host].children,children);assert!(!forms.controls.contains_key(&input));
+    assert_eq!(outcome.errors,0,"{}",page.report());
+    assert!(doc.nodes[host].children.contains(&input));assert_eq!(forms.controls[&input].kind,Kind::Text);
+    assert_eq!(doc.attr(input,"type"),None,"Namespaced hidden metadata cannot select native hidden mode");
 }
 
 #[test]

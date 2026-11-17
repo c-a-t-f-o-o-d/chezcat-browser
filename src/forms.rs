@@ -1409,6 +1409,9 @@ mod select_fragments;
 
 #[path = "forms_hidden_inputs.rs"]
 mod hidden_inputs;
+#[path = "forms_text_inputs.rs"]
+mod text_inputs;
+pub(crate) use text_inputs::TextInputPlan;
 pub(crate) use select_fragments::{fragment_text_input, SelectFormPlan};
 
 #[cfg(test)]
