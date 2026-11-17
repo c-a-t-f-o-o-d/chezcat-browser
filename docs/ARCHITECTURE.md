@@ -20,9 +20,12 @@ initial App's existing service authorities. Full tab/window identities include
 a checked process-wide Session generation and a nonreused local serial. Scoped
 App callbacks and typed wake messages avoid retaining App pointers in workers.
 Closing an owner removes its routes before consuming its Box, retires source
-tokens and drops its realm/resource workers directly. This core has original App
-tests; native window bindings, tab chrome and inspector routing still require
-integration before interactive tab/window support is claimed.
+tokens and drops its realm/resource workers directly. The native shell binds
+checked Session identities to real windows, tab chrome, shortcuts and tab-pinned
+inspectors. Native registry keys contain no App addresses; routing resolves the
+current owner again after reentrant native operations. Guarded link intents admit
+current, foreground/background tab and new-window actions. Named contexts,
+script-opened windows and broader accessibility remain outside this finite shell.
 
 A supported CSS background URL retains the winning declaration's stylesheet owner
 and final redirected base. Backgrounds reuse the image worker and resource policies
