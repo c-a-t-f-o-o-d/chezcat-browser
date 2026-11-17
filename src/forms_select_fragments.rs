@@ -1,4 +1,4 @@
-//! New select controls are prepared independently; existing editors/selections
+//! New fragment controls are prepared independently; existing editors/selections
 //! are never reconstructed. Removed controls retain native identity and values.
 use super::*;
 
@@ -25,16 +25,64 @@ fn select_bytes(control: &Control) -> usize {
             + select.rows.iter().map(|row| match row { SelectRow::Group { label, .. } => label.len(), _ => 0 }).sum::<usize>()
     })
 }
+
+/// This fragment slice admits only default, empty-type and explicit text INPUTs.
+/// Forms::kind also recognizes other types; that is not fragment admission.
+pub(crate) fn fragment_text_input(doc: &Document, node: usize) -> bool {
+    doc.nodes.get(node).is_some_and(|item| item.namespace == crate::html::Namespace::Html)
+        && tag(doc, node) == "input"
+        && doc.attr(node, "type").is_none_or(|value| value.is_empty() || value.eq_ignore_ascii_case("text"))
+}
+
 impl Forms {
     pub(crate) fn prepare_selects(&self, fragment: Option<(&Document, usize)>) -> Result<SelectFormPlan, String> {
         if self.limited { return Err("Native form limits already exceeded; no select was admitted.".into()); }
         let mut plan = SelectFormPlan { additions: BTreeMap::new(), metadata: Vec::new(), retained_bytes: 0 };
         let mut options: usize = self.controls.values().filter_map(|control| control.select.as_ref()).map(|select| select.options.len()).sum();
         let mut bytes: usize = self.controls.values().map(|control| control.name.len()
-            + control.value.chars.iter().map(|ch| ch.len_utf8()).sum::<usize>() + select_bytes(control)).sum();
+            + control.initial.len().max(control.value.chars.iter().map(|ch| ch.len_utf8()).sum::<usize>())
+            + select_bytes(control)).sum();
+        if bytes > MAX_TOTAL_VALUE_BYTES || options > MAX_TOTAL_OPTIONS {
+            return Err("Existing native form payload exceeds its limits; no fragment control was admitted.".into());
+        }
         if let Some((doc, base)) = fragment {
             if base == 0 || base.checked_add(doc.nodes.len().saturating_sub(1)).is_none() { return Err("Select native identity range overflow.".into()); }
             for local in 1..doc.nodes.len() {
+                if tag(doc, local) == "input" {
+                    if !fragment_text_input(doc, local) {
+                        return Err("New fragment INPUTs currently require absent, empty or text type; no control was admitted.".into());
+                    }
+                    if doc.attr(local, "form").is_some() {
+                        return Err("Explicit form association on a new fragment INPUT is not implemented.".into());
+                    }
+                    if self.controls.len().saturating_add(plan.additions.len()) >= MAX_CONTROLS {
+                        return Err("Native form control limit reached before INPUT admission.".into());
+                    }
+                    let initial = doc.attr(local, "value").unwrap_or("");
+                    let name = doc.attr(local, "name").unwrap_or("");
+                    bytes = bytes.checked_add(initial.len()).and_then(|bytes| bytes.checked_add(name.len()))
+                        .ok_or("Text INPUT payload accounting overflow.")?;
+                    if initial.encode_utf16().count() > MAX_VALUE_UNITS || name.len() > MAX_QUERY || bytes > MAX_TOTAL_VALUE_BYTES {
+                        return Err("Text INPUT value, name or form payload limit reached; no control was admitted.".into());
+                    }
+                    let mut value = Editor::default();
+                    set_form_value(&mut value, initial, Kind::Text);
+                    let control = Control { owner: None, kind: Kind::Text, value, dirty_value: false,
+                        name: name.into(), caption: caption(doc, local, Kind::Text),
+                        disabled: doc.attr(local, "disabled").is_some(), readonly: doc.attr(local, "readonly").is_some(),
+                        required: doc.attr(local, "required").is_some(), checked: false,
+                        max_length: doc.attr(local, "maxlength").and_then(|value| value.parse().ok())
+                            .unwrap_or(MAX_VALUE_UNITS).min(MAX_VALUE_UNITS),
+                        tab_index: doc.attr(local, "tabindex").and_then(parse_tab_index).unwrap_or(0),
+                        select: None, initial: initial.into(), initially_checked: false, image_point: (0, 0) };
+                    let extra = name.len().checked_add(initial.len())
+                        .and_then(|bytes| bytes.checked_add(control.caption.len()))
+                        .and_then(|bytes| bytes.checked_add(control.value.chars.len().saturating_mul(std::mem::size_of::<char>())))
+                        .ok_or("Text INPUT retained payload overflow.")?;
+                    plan.retained_bytes = plan.retained_bytes.checked_add(extra).ok_or("Native fragment retained payload overflow.")?;
+                    plan.additions.insert(base + local - 1, control);
+                    continue;
+                }
                 if tag(doc, local) != "select" { continue; }
                 if doc.nodes[local].namespace != crate::html::Namespace::Html || kind(doc, local) != Some(Kind::Select) {
                     return Err("Dynamic select currently requires a conventional single-select control.".into());
@@ -59,7 +107,7 @@ impl Forms {
                     option.group = option.group.map(|node| node + base - 1);
                 }
                 for row in &mut selected.rows { if let SelectRow::Group { node, .. } = row { *node += base - 1; } }
-                let mut control = Control { owner: None, kind: Kind::Select, value: Editor::default(), name: name.into(),
+                let mut control = Control { owner: None, kind: Kind::Select, value: Editor::default(), dirty_value: false, name: name.into(),
                     caption: String::new(), disabled: doc.attr(local, "disabled").is_some(), readonly: false,
                     required: doc.attr(local, "required").is_some(), checked: false, max_length: MAX_VALUE_UNITS,
                     tab_index: doc.attr(local, "tabindex").and_then(parse_tab_index).unwrap_or(0),
