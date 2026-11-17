@@ -46,7 +46,7 @@ impl Document {
                 .iter()
                 .find(|attr| attr.name.html_is(name.as_ref()))
                 .map(|attr| attr.value.as_str()),
-            NodeKind::Text(_) | NodeKind::Comment(_) => None,
+            NodeKind::Text(_) | NodeKind::Comment(_) | NodeKind::DocumentFragment => None,
         }
     }
 }
@@ -121,6 +121,8 @@ pub enum NodeKind {
     Text(String),
     // Genuine retained DOM Comment data; the current HTML tokenizer still omits parsed comments.
     Comment(String),
+    // A genuine detached Node container; insertion splices its children.
+    DocumentFragment,
 }
 
 pub fn parse(input: &str) -> Document {

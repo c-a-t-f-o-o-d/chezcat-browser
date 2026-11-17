@@ -33,6 +33,8 @@ mod dom_tree;
 mod script_position;
 #[path = "script_node_root.rs"]
 mod script_node_root;
+#[path = "script_document_fragments.rs"]
+mod script_document_fragments;
 #[path = "script_timezone.rs"]
 mod script_timezone;
 use dom_tree::DomState;
@@ -831,12 +833,14 @@ impl Page {
             (DOCUMENT, "createElementNS"),
             (DOCUMENT, "createTextNode"),
             (DOCUMENT, "createComment"),
+            (DOCUMENT, "createDocumentFragment"),
             (DOCUMENT, "addEventListener"),
             (DOCUMENT, "removeEventListener"),
             (DOCUMENT, "dispatchEvent"),
         ] {
             let function = if object == HISTORY || object==DOCUMENT&&method=="createElementNS" { runtime.host_method_with_length(object, method, 2) }
                 else if object==DOCUMENT&&method=="createComment" {runtime.host_method_with_length(object,method,1)}
+                else if object==DOCUMENT&&method=="createDocumentFragment" {runtime.host_method_with_length(object,method,0)}
                 else { runtime.host_method(object, method) }.expect("fixed native method");
             state.native_methods.push((object, method, function));
         }
@@ -1875,7 +1879,7 @@ impl Bridge<'_> {
         self.state.rebuild(self.doc)?;
         Ok(match self.state.tree.parents[node] {
             Some(0) if document => Value::Host(DOCUMENT),
-            Some(parent) if parent != 0 => Value::Host(node_handle(parent)),
+            Some(parent) if parent != 0 && (document || matches!(self.doc.nodes[parent].kind,NodeKind::Element {..})) => Value::Host(node_handle(parent)),
             _ => Value::Null,
         })
     }
@@ -2400,8 +2404,8 @@ impl Bridge<'_> {
 }
 
 impl Host for Bridge<'_> {
-    fn expando_owner(&self,object:u32)->Option<u32> {self.ordinary_event_owner(object).or_else(||self.standalone_target_owner(object)).or_else(||self.element_expando_receiver(object).then_some(WINDOW))}
-    fn exposed_native_prototype(&self,object:u32)->bool {self.ordinary_event_owner(object).is_some()||self.standalone_target_owner(object).is_some()||self.video_interface_receiver(object)}
+    fn expando_owner(&self,object:u32)->Option<u32> {self.ordinary_event_owner(object).or_else(||self.standalone_target_owner(object)).or_else(||(self.element_expando_receiver(object)||self.fragment_receiver(object)).then_some(WINDOW))}
+    fn exposed_native_prototype(&self,object:u32)->bool {self.ordinary_event_owner(object).is_some()||self.standalone_target_owner(object).is_some()||self.video_interface_receiver(object)||self.fragment_receiver(object)}
     fn native_ancestry_inspection(&self,object:u32)->bool {self.event_receiver(object)||self.exposed_native_prototype(object)||self.namespace_receiver(object)}
     fn event_target_interface(&self,window:u32)->bool {window==WINDOW || self.frame_context(window).is_some()}
     fn node_interface_constants(&self,window:u32)->Option<&'static [(&'static str,u16)]> {self.event_target_interface(window).then_some(dom_tree::NODE_CONSTANTS)}
@@ -2426,7 +2430,7 @@ impl Host for Bridge<'_> {
                     else if self.media_interface_receiver(object) {(WINDOW,"HTMLMediaElement")}
                     else if tag(self.doc,node)=="img" {(IMAGE_FACTORY,"Image")} else {(WINDOW,"HTMLElement")}
                 } else {(WINDOW,"Element")}
-            } else {(WINDOW,"Node")})
+            } else if self.fragment_receiver(object) {(WINDOW,"DocumentFragment")} else {(WINDOW,"Node")})
         } else if object==DOCUMENT || self.attr_receiver(object) {Some((WINDOW,"Node"))} else {None};
         let known=node.is_some() || matches!(object,DOCUMENT|CONSOLE|NAVIGATOR|PLUGINS|MIME_TYPES|DOCUMENT_IMAGES|LOCATION|PERFORMANCE|PERFORMANCE_TIMING|HISTORY)
             || self.attr_receiver(object) || self.event_receiver(object) || self.class_list_receiver(object) || self.named_map_receiver(object)
@@ -2467,6 +2471,7 @@ impl Host for Bridge<'_> {
         if self.event_receiver(object)&&property=="composedPath" {return false;}
         if self.ordinary_event_owner(object).is_some() {return false;}
         if self.node_event_method(object,property) {return false;}
+        if self.fragment_receiver(object) {return matches!(property,"childNodes"|"nodeValue"|"textContent"|"parentNode"|"parentElement"|"ownerDocument"|"isConnected"|"firstChild"|"lastChild"|"previousSibling"|"nextSibling") || self.dom_method(object,property).is_some();}
         if self.standalone_target_owner(object).is_some() {return false;}
         if property=="prototype"&&self.location_instance_owner(object).is_some(){return false;}
         if self.element_expando_receiver(object) {return self.element_native_property(object,property);}
@@ -2526,6 +2531,7 @@ impl Host for Bridge<'_> {
     }
 
     fn string_setter(&self, object: u32, property: &str) -> bool {
+        if self.fragment_receiver(object) && matches!(property,"nodeValue"|"textContent") {return true;}
         if self.hidden_input_property(object,property) {return true;}
         if self.text_input_default_property(object,property) {return true;}
         if self.media_interface_receiver(object)&&property=="src" {return true;}
@@ -2632,6 +2638,7 @@ impl Host for Bridge<'_> {
     }
 
     fn method_length(&self, object:u32, method:&str) -> Option<usize> {
+        if object==DOCUMENT && method=="createDocumentFragment" {return Some(0);}
         if method==script_node_root::ROOT_METHOD && self.root_node_receiver(object) {return Some(0);}
         if object==DOCUMENT && method=="createComment" {return Some(1);}
         if matches!(method,"load"|"pause"|"play") && self.media_element_receiver(object) {return Some(0);}
@@ -2656,6 +2663,7 @@ impl Host for Bridge<'_> {
     }
 
     fn native_method_owner(&self, object:u32, method:&str) -> Option<u32> {
+        if self.event_target_interface(object) && method=="DocumentFragment" {return Some(object);}
         if self.event_target_interface(object) && method==script_node_root::ROOT_METHOD {return Some(object);}
         if self.event_target_interface(object) && matches!(method,"\0Node.get.nodeType"|"\0Node.get.nodeName") {return Some(object);}
         if self.node_list_receiver(object) && matches!(method,"item"|"forEach") {return Some(WINDOW);}
@@ -2696,7 +2704,7 @@ impl Host for Bridge<'_> {
     }
 
     fn nullish_string_setter(&self, object: u32, property: &str) -> bool {
-        (self.attr_receiver(object) || self.comment_receiver(object)) && matches!(property, "nodeValue" | "textContent")
+        (self.attr_receiver(object) || self.comment_receiver(object) || self.fragment_receiver(object)) && matches!(property, "nodeValue" | "textContent")
     }
 
     fn null_string_setter(&self, object: u32, property: &str) -> bool {
@@ -2773,6 +2781,9 @@ impl Host for Bridge<'_> {
         method: &str,
         args: &[Value],
     ) -> Result<(), (&'static str, String)> {
+        if self.event_target_interface(object) && method=="DocumentFragment" {
+            return if object==WINDOW {Ok(())} else {Err(("NotSupportedError","Child DocumentFragment allocation is not implemented.".into()))};
+        }
         if method==script_node_root::ROOT_METHOD {return self.validate_root_node_options(object,args);}
         let method=script_media::interface_operation(method).unwrap_or(method);
         if matches!(method,"load"|"pause")&&self.media_interface_receiver(object)&&!self.media_element_receiver(object) {
@@ -2986,6 +2997,7 @@ impl Host for Bridge<'_> {
     }
 
     fn method(&self, object: u32, property: &str) -> Option<&'static str> {
+        if object==DOCUMENT && property=="createDocumentFragment" {return Some("createDocumentFragment");}
         if self.root_node_member(object,property) {return None;}
         if self.media_element_receiver(object) {match property {"load"=>return Some("load"),"pause"=>return Some("pause"),"play"=>return Some("play"),_=>{}}}
         if matches!(property,"addEventListener"|"removeEventListener"|"dispatchEvent") && self.form_named_control(object,property) {return None;}
@@ -3046,6 +3058,12 @@ impl Host for Bridge<'_> {
     }
 
     fn accepts_receiver(&self, object: u32, method: &str, receiver: u32) -> bool {
+        if object==DOCUMENT && method=="createDocumentFragment" {return receiver==DOCUMENT;}
+        if matches!(method,"appendChild"|"insertBefore"|"replaceChild"|"removeChild") {
+            let parent=|handle|node_index(handle).is_some_and(|node|self.dom_accessible(node)
+                && matches!(self.doc.nodes[node].kind,NodeKind::Element {..}|NodeKind::DocumentFragment));
+            if parent(object) {return parent(receiver);}
+        }
         if self.event_target_interface(object) && method==script_node_root::ROOT_METHOD {return self.root_node_receiver(receiver);}
         if self.event_target_interface(object)&&(method.starts_with("\0CustomEvent.")||method=="initCustomEvent") {return self.custom_receiver(receiver);}
         if self.event_target_interface(object)&&method.starts_with("\0Video.") {return self.video_interface_receiver(receiver);}
@@ -3422,6 +3440,7 @@ impl Host for Bridge<'_> {
     }
 
     fn has(&mut self, object: u32, property: &str) -> Result<bool, String> {
+        if object==DOCUMENT && property=="createDocumentFragment" {self.state.work(1)?;return Ok(true);}
         if self.root_node_member(object,property) {self.state.work(1)?;return Ok(false);}
         if property=="dispatchEvent"&&self.dispatch_receiver(object){return Ok(true);}
         self.state.work(1)?;
@@ -4275,6 +4294,7 @@ impl Host for Bridge<'_> {
     }
 
     fn call(&mut self, object: u32, method: &str, args: &[Value]) -> Result<Value, String> {
+        if object==WINDOW && method=="DocumentFragment" {return self.create_dom_node(NodeKind::DocumentFragment);}
         if method==script_node_root::ROOT_METHOD {return self.get_root_node(object,args,None);}
         if let Some(property)=script_media::interface_getter(method) {
             self.state.work(1)?;
@@ -4700,6 +4720,7 @@ fn text_container(tag: &str) -> bool {
 }
 fn node_bytes(node: &Node) -> usize {
     match &node.kind {
+        NodeKind::DocumentFragment => 0,
         NodeKind::Text(text) | NodeKind::Comment(text) => text.len(),
         NodeKind::Element { id, attrs, .. } => {
             id.as_ref().map_or(0, String::len)
