@@ -379,6 +379,10 @@ impl Bridge<'_> {
 mod child_native_read_tests;
 
 #[cfg(test)]
+#[path = "script_document_own_security_tests.rs"]
+mod document_own_security_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 

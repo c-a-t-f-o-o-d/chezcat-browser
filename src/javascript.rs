@@ -394,6 +394,9 @@ pub trait Host {
     fn bounding_rect_snapshot(&mut self, _object: u32) -> Option<Result<[f64; 4], String>> { None }
     /// Real ordinary expando storage for an explicitly proven native family.
     fn expando_owner(&self, _object:u32) -> Option<u32> { None }
+    /// Preserve a native named-read/presence fallback after ordinary own keys.
+    /// Only explicitly opted-in native receivers use this; other hosts do not.
+    fn ordinary_native_fallback(&self, _object:u32, _property:&str) -> bool { false }
     fn instance_ancestry(&self, _object:u32) -> Option<NativeAncestry> { None }
     /// Actual exposed immediate prototype, distinct from a read-only Object tail.
     fn exposed_native_prototype(&self, _object:u32) -> bool { false }
@@ -6062,7 +6065,7 @@ impl Runtime {
                 .is_some(),
             Value::Host(handle) => {
                 if let Some(object) = self.host_ordinary(handle, &name, host)? {
-                    self.property_owner(object, &name)?.is_some()
+                    self.host_ordinary_has(handle, object, &name, host)?
                 } else if let Some(tail) = self.host_lookup_tail(handle,&name,host)? {
                     self.property_owner(tail,&name)?.is_some()
                 } else if self.is_browser_global(handle) && !self.host_owns_global(&name, host) {
