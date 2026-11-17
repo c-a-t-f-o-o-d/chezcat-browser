@@ -215,33 +215,100 @@ fn native_ui_old_envelope_cancellation_does_not_consume_replacement_gesture(){
 // The two authored-navigation controls require a genuine HTTP document. The
 // browser deliberately refuses script navigation from local files; do not fake
 // its App/Location origin or relax that production boundary for a fixture.
+#[derive(Default)]
+struct NavigationProgress{
+    header_bytes:std::sync::atomic::AtomicUsize,
+    incomplete_peers:std::sync::atomic::AtomicUsize,
+    completed_responses:std::sync::atomic::AtomicUsize,
+}
 struct NavigationSite{
     address:std::net::SocketAddr,stop:std::sync::Arc<std::sync::atomic::AtomicBool>,worker:Option<std::thread::JoinHandle<()>>,
+    progress:std::sync::Arc<NavigationProgress>,
 }
 impl NavigationSite{
     fn new(files:&Files)->Self{
         use std::io::{Read,Write};use std::sync::{Arc,atomic::{AtomicBool,Ordering}};use std::time::Duration;
         let source=fs::read(files.0.join("source.html")).unwrap();let target=fs::read(files.0.join("target.html")).unwrap();let other=fs::read(files.0.join("other.html")).unwrap();
         let listener=std::net::TcpListener::bind("127.0.0.1:0").unwrap();listener.set_nonblocking(true).unwrap();let address=listener.local_addr().unwrap();
-        let stop=Arc::new(AtomicBool::new(false));let stopped=stop.clone();
-        let worker=std::thread::spawn(move||{let mut requests=0;while !stopped.load(Ordering::Relaxed){match listener.accept(){
+        let stop=Arc::new(AtomicBool::new(false));let stopped=stop.clone();let progress=Arc::new(NavigationProgress::default());let observed=progress.clone();
+        let worker=std::thread::spawn(move||{let mut requests=0;'accept:while !stopped.load(Ordering::Relaxed){match listener.accept(){
             Ok((mut stream,_))=>{
                 requests+=1;assert!(requests<=16,"Original navigation fixture request bound exceeded");
+                // Accepted Winsock sockets inherit the polling listener mode.
+                stream.set_nonblocking(false).unwrap();
                 stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();stream.set_write_timeout(Some(Duration::from_secs(5))).unwrap();
                 let mut header=Vec::new();let mut byte=[0u8;1];while !header.ends_with(b"\r\n\r\n"){
-                    assert!(header.len()<16384,"Original navigation fixture header bound exceeded");if stream.read_exact(&mut byte).is_err(){return;}header.push(byte[0]);
+                    assert!(header.len()<16384,"Original navigation fixture header bound exceeded");if stream.read_exact(&mut byte).is_err(){observed.incomplete_peers.fetch_add(1,Ordering::SeqCst);continue 'accept;}header.push(byte[0]);observed.header_bytes.fetch_add(1,Ordering::SeqCst);
                 }
                 let header=String::from_utf8(header).unwrap();let path=header.lines().next().unwrap().split_whitespace().nth(1).unwrap();
                 let(status,body)=match path{"/source"=>("200 OK",source.as_slice()),"/target.html"=>("200 OK",target.as_slice()),"/other.html"=>("200 OK",other.as_slice()),_=>("404 Not Found",b"<title>Unexpected navigation fixture route</title>".as_slice())};
                 let response=format!("HTTP/1.1 {status}\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",body.len());stream.write_all(response.as_bytes()).unwrap();stream.write_all(body).unwrap();
+                observed.completed_responses.fetch_add(1,Ordering::SeqCst);
             },
             Err(error)if error.kind()==std::io::ErrorKind::WouldBlock=>std::thread::sleep(Duration::from_millis(1)),
             Err(error)=>panic!("{error}"),
         }}});
-        Self{address,stop,worker:Some(worker)}
+        Self{address,stop,worker:Some(worker),progress}
     }
 }
 impl Drop for NavigationSite{fn drop(&mut self){self.stop.store(true,std::sync::atomic::Ordering::Relaxed);if let Some(worker)=self.worker.take(){worker.join().unwrap();}}}
+
+// Observe the actual private fixture stages before completing each request.
+// These controls do not infer which incomplete-peer condition occurred in a
+// historical App failure, and do not replace any native navigation assertion.
+fn navigation_fixture_wait(mut observed:impl FnMut()->bool){
+    let deadline=std::time::Instant::now()+std::time::Duration::from_secs(5);
+    while !observed(){
+        assert!(std::time::Instant::now()<deadline,"Original navigation fixture did not reach the required request stage");
+        std::thread::yield_now();
+    }
+}
+fn navigation_fixture_client(site:&NavigationSite)->std::net::TcpStream{
+    let stream=std::net::TcpStream::connect(site.address).expect("Navigation fixture must keep listening after an incomplete peer");
+    stream.set_read_timeout(Some(std::time::Duration::from_secs(5))).unwrap();
+    stream.set_write_timeout(Some(std::time::Duration::from_secs(5))).unwrap();
+    stream
+}
+fn navigation_fixture_response(mut client:std::net::TcpStream)->Vec<u8>{
+    use std::io::Read;
+    let mut response=Vec::new();
+    client.read_to_end(&mut response).expect("Navigation fixture must return the complete framed response");
+    let split=response.windows(4).position(|part|part==b"\r\n\r\n").expect("HTTP response header terminator");
+    let header=std::str::from_utf8(&response[..split]).unwrap();
+    assert!(header.starts_with("HTTP/1.1 200 OK\r\n"),"{header}");
+    let length=header.lines().find_map(|line|line.strip_prefix("Content-Length: ")).unwrap().parse::<usize>().unwrap();
+    let body=response[split+4..].to_vec();
+    assert_eq!(body.len(),length,"Original navigation response must contain exactly its declared bytes");
+    body
+}
+#[test]
+fn native_ui_navigation_fixture_keeps_listening_after_cancelled_peer(){
+    use std::io::Write;use std::sync::atomic::Ordering;
+    let files=Files::new();let(local,local_ui,_,_)=files.setup();drop(local_ui);drop(local);
+    let expected=fs::read(files.0.join("source.html")).unwrap();let site=NavigationSite::new(&files);
+    drop(navigation_fixture_client(&site));
+    navigation_fixture_wait(||site.progress.incomplete_peers.load(Ordering::SeqCst)==1);
+    assert_eq!(site.progress.header_bytes.load(Ordering::SeqCst),0);
+    assert_eq!(site.progress.completed_responses.load(Ordering::SeqCst),0);
+    let mut client=navigation_fixture_client(&site);client.write_all(b"GET /source HTTP/1.1\r\nHost: localhost\r\n\r\n").unwrap();
+    assert_eq!(navigation_fixture_response(client),expected);
+    assert_eq!(site.progress.completed_responses.load(Ordering::SeqCst),1);
+    assert_eq!(site.progress.incomplete_peers.load(Ordering::SeqCst),1);
+}
+#[test]
+fn native_ui_navigation_fixture_waits_for_fragmented_header(){
+    use std::io::Write;use std::sync::atomic::Ordering;
+    let files=Files::new();let(local,local_ui,_,_)=files.setup();drop(local_ui);drop(local);
+    let expected=fs::read(files.0.join("source.html")).unwrap();let site=NavigationSite::new(&files);
+    let mut client=navigation_fixture_client(&site);let prefix=b"GET /source HTTP/1.1\r\nHost: localhost\r\n";client.write_all(prefix).unwrap();
+    navigation_fixture_wait(||site.progress.header_bytes.load(Ordering::SeqCst)==prefix.len()||site.progress.incomplete_peers.load(Ordering::SeqCst)!=0);
+    assert_eq!(site.progress.header_bytes.load(Ordering::SeqCst),prefix.len());
+    assert_eq!(site.progress.incomplete_peers.load(Ordering::SeqCst),0,"Navigation fixture must wait for the remaining header bytes");
+    assert_eq!(site.progress.completed_responses.load(Ordering::SeqCst),0);
+    client.write_all(b"\r\n").unwrap();assert_eq!(navigation_fixture_response(client),expected);
+    assert_eq!(site.progress.completed_responses.load(Ordering::SeqCst),1);
+    assert_eq!(site.progress.incomplete_peers.load(Ordering::SeqCst),0);
+}
 fn http_setup(files:&Files)->(NavigationSite,Session,SessionUi,WindowId,TabId){
     // Reuse and validate the identical source/target/other fixture bytes. The
     // temporary original local session owns only its ordinary memory services.
