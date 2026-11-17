@@ -362,10 +362,10 @@ var log='';Promise.resolve().then(function(){try{p.replaceChild(orphan,orphan);}
 
 #[test]
 fn replace_child_rejects_unsupported_native_subtrees_before_editing_either_parent() {
-    // Whole text INPUTs now have a checked native move path. Checkbox subtrees
+    // Whole text INPUTs and owned checkboxes have checked native move paths. Radio subtrees
     // retain an unsupported-native witness for the same atomicity assertions.
-    for (old,new) in [("<span id=old>old</span>","<section id=incoming><input id=field type=checkbox value=original></section>"),
-        ("<span id=old><input id=field type=checkbox value=original></span>","<section id=incoming>new</section>")] {
+    for (old,new) in [("<span id=old>old</span>","<section id=incoming><input id=field type=radio value=original></section>"),
+        ("<span id=old><input id=field type=radio value=original></span>","<section id=incoming>new</section>")] {
         let html=format!("<div id=p>{old}</div><div id=q>{new}</div>");
         let (mut doc,mut forms,mut page,outcome)=page(&html,&["document.getElementById('field').value='edited';"]);
         assert_eq!(outcome.errors,0,"{}",page.report());
