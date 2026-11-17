@@ -51,7 +51,7 @@ impl Forms {
             checked: existing.is_some_and(|control| control.checked),
             max_length: existing.map_or(MAX_VALUE_UNITS, |control| control.max_length),
             tab_index: existing.map_or(0, |control| control.tab_index), select: None,
-            initial: text.into(), initially_checked: existing.is_some_and(|control| control.initially_checked),
+            button_element: false, initial: text.into(), initially_checked: existing.is_some_and(|control| control.initially_checked),
             image_point: (0,0),
         };
         let mut controls = BTreeMap::new();

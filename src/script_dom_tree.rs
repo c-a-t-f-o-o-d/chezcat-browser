@@ -850,13 +850,19 @@ impl Bridge<'_> {
             self.state.work(1)?;
             depth = depth.max(level);
             let name = tag(self.doc, node);
+            if self.native_button(node) || self.fresh_button(node) {
+                self.state.work(self.doc.nodes.len())?;
+                let (work,copy) = forms::button_caption_work(self.doc,node)?;
+                self.state.work(work)?;self.state.copies(copy)?;
+                forms::validate_button_caption(self.doc,node)?;
+            }
             let select_branch = self.owned_select_member(root, node);
             let owned_select = matches!(name, "select" | "option" | "optgroup") && select_branch;
             if select_branch && matches!(&self.doc.nodes[node].kind, NodeKind::Element { .. })
                 && !matches!(name, "select" | "option" | "optgroup") {
                 return Err("Moving nonconventional select descendants or resources is not implemented.".into());
             }
-            if forms::kind(self.doc, node).is_some() && !owned_select && !self.hidden_input(node) && !self.owned_fragment_text_input(node) && !self.fresh_text_input(node)
+            if forms::kind(self.doc, node).is_some() && !owned_select && !self.hidden_input(node) && !self.owned_fragment_text_input(node) && !self.fresh_text_input(node) && !self.native_button(node) && !self.fresh_button(node)
                 || matches!(
                     name,
                     "html"
@@ -971,6 +977,7 @@ impl Bridge<'_> {
         let source_parent = self.state.tree.parents[child];
         if let Some(source) = source_parent { self.mutation_ancestors(source)?; }
         let (incoming_nodes, depth) = self.mutation_subtree(child)?;
+        self.validate_button_children(parent,&incoming_nodes)?;
         let (outgoing_nodes, _) = self.mutation_subtree(old)?;
         if self.doc.nodes[parent].namespace != crate::html::Namespace::Html && !self.fragment_receiver(node_handle(parent))
             || matches!(tag(self.doc, parent), "script" | "link" | "iframe")
@@ -1094,8 +1101,9 @@ impl Bridge<'_> {
         let (descendants, depth) = self.mutation_subtree(child).map_err(|error| format!(
             "{error} Operation={method}; parent={parent}<{:?}>; child={child}<{:?}>; old_parent={old_parent:?}; reference={reference:?}.",
             prefix(tag(self.doc, parent), 64), prefix(tag(self.doc, child), 64)))?;
+        self.validate_button_children(parent,&descendants)?;
         self.state.work(descendants.len().saturating_mul(2))?;
-        if descendants.iter().any(|&node| self.fresh_text_input(node))
+        if descendants.iter().any(|&node| self.fresh_text_input(node) || self.fresh_button(node) || self.native_button(node))
             && descendants.iter().any(|&node| matches!(tag(self.doc,node),"script"|"link"|"iframe")) {
             return Err("New native INPUT admission with script, stylesheet or frame subtrees is not implemented; no tree was changed.".into());
         }

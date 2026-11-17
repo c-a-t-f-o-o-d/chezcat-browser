@@ -98,7 +98,7 @@ impl Forms {
                     caption: String::new(), disabled: doc.attr(local, "disabled").is_some(), readonly: false,
                     required: doc.attr(local, "required").is_some(), checked: false, max_length: MAX_VALUE_UNITS,
                     tab_index: doc.attr(local, "tabindex").and_then(parse_tab_index).unwrap_or(0),
-                    select: Some(selected), initial: String::new(), initially_checked: false, image_point: (0, 0) };
+                    select: Some(selected), button_element: false, initial: String::new(), initially_checked: false, image_point: (0, 0) };
                 let initial = control.select.as_ref().unwrap().selected;
                 control.set_selection(initial);
                 let extra = name.len().checked_add(select_bytes(&control)).and_then(|bytes| bytes.checked_add(control.caption.len()))
