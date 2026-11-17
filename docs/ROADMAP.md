@@ -10,14 +10,15 @@ The [release process](RELEASING.md) remains available for those requests.
 
 ## Active work
 
-1. Finish and validate genuine Node.getRootNode for the measured modern jQuery
-   blocker, then recheck that unchanged workload. The API is being wired; no pass
-   or library initialization is claimed yet.
-2. Integrate the concat and hidden-input prerequisites, plus Node work when
-   validated, through normal full-regression/PR/CI safeguards. Concat advances Vue
-   to object-prototype access; hidden inputs advance legacy jQuery to an
-   input-containing innerHTML fragment. The separate modern samples are measured,
-   with their actual remaining blockers in the compatibility record.
+1. Freeze and integrate the concat, hidden-input and genuine Node root candidate
+   through full normal regression and PR/hosted CI safeguards. Focused controls and
+   the original Node App fixture pass; modern revision2 rechecks retain failed
+   initialization/input. Full candidate validation remains outstanding, and new
+   releases remain owner-request-only.
+2. Reduce the measured anchor URL reflection and native INPUT fragment boundaries:
+   modern jQuery reaches href assignment at7963:1, while legacy jQuery reaches an
+   input-containing innerHTML fragment at2684:2. Preserve shared DOM, form, URL and
+   resource guards rather than adding library-specific behavior.
 3. Reduce the next visible CSS candidate alongside language/DOM dependencies.
    Source inspection suggests custom-property padding/border handling; it is not a
    proved fix, and rgba is an additional gap. Rank these with the measured Vue,
@@ -36,8 +37,8 @@ reference output and test counts alone do not establish ChezCat compatibility.
 Finite B2 tabs/windows, guarded primary/middle link actions and native context
 commands are delivered. CP1-CP5 provide collection/Node, Comment/RegExp, responsive
 CSS, conventional select and literal-prototype prerequisites. These do not imply
-whole-framework initialization. The separately committed concat and hidden-input
-corrections have focused App evidence and await final candidate integration.
+whole-framework initialization. The separately committed concat, hidden-input and
+Node root corrections have focused/App evidence and await full candidate integration.
 T1 TLS/trust and B1 resource/rendering remain
 partial shared foundations; the finite A1 About, license acceptance and existing
 media/interface slices retain their stated contracts.

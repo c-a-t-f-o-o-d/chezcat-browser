@@ -9,20 +9,36 @@
     "dom_source_sha256": "19a6d0b92549926f971a0d181d501b694a3129b7a3d3bbedccafaf30c26bd570"
   },
   "active_pack": {
-    "id": "hidden-input",
-    "contract_id": "CP7",
-    "status": "Original finite prerequisite implemented and committed; full candidate/public integration pending",
-    "source_commit": "c679a2ed51a170e21e9773768a399a065bc31e88",
-    "scope": "Fresh detached HTML hidden-input admission; parsed-hidden attribute/IDL name/value/default reflection; retained tree/form ownership and serialization; no hidden box, hit or focus",
-    "native_status": "Nine focused and twelve adjacent select controls pass; actual App software click/text pixels, native form request serialization, neighbor value/cursor and source/history preservation; foreign-namespace atomic refusal reproduced then passed",
-    "workflow_scope": "Unchanged W2 advances to input-containing innerHTML refusal; its actual dirty development build is recorded separately, including an unregistered Node draft",
-    "next_dependency": "Genuine Node.getRootNode is being implemented for the separate modern jQuery blocker; no Node API pass is claimed yet",
+    "id": "node-root",
+    "contract_id": "CP8",
+    "status": "Original prerequisite committed and independently reviewed; focused/App validation passed, full candidate/public integration pending",
+    "source_commit": "3677129709bbb7fad6185a753ad9794047cb438c",
+    "scope": "Genuine zero-arity Node.prototype.getRootNode with ordinary property behavior, ordered composed dictionary Get/ToBoolean and current ordinary-tree roots for Document, detached subtrees, Attr and supported same-origin child Nodes",
+    "native_status": "Nine Node root, four existing Node constants and thirty-two namespace controls pass; receiver/origin refusal before hooks and bounded malformed-edge/cycle/work checks retained",
+    "validation_note": "Initial8/1 was a new test comparing a returned Document with a method; the oracle was corrected with no production change",
+    "app_evidence": {
+      "build_provenance": {
+        "source_commit": "be579b17243e0bf3f0452aa2de1516641e2f820a",
+        "dirty": false,
+        "executable_sha256": "e44ce342e2630551e994f8da36cb506dcd7b06a720755931824b4df9ac7e4944",
+        "source_map_sha256": "af53f8d25a41f5192c5560fcc5135bbc8b1647b13788ec64fa0c2007b8932b7a",
+        "cargo_version": "cargo 1.99.1 (5f94df478 2026-08-27)",
+        "profile": "existing development profile; not release/full validation"
+      },
+      "scope": "Same original trusted-click App fixture; genuine connected/detached/reconnected roots and changed visible text/pixels",
+      "script_errors": 0,
+      "isolated_crop": false,
+      "physical_desktop": false,
+      "full_regression_or_CI": false
+    },
+    "workflow_scope": "Modern fixture revision2 uses its own clean diagnostic build; jQuery advances to href assignment, while class syntax still blocks Bootstrap initialization",
+    "next_dependency": "Complete full candidate/PR/CI integration, then measured anchor URL reflection/native INPUT fragments and a concrete CSS candidate",
     "excluded": [
-      "Existing native input-type transitions",
-      "INPUT contents replacement and general input-containing innerHTML fragments",
-      "Whole-library initialization/interaction",
-      "Physical desktop or HTTP submission acceptance",
-      "Release validation"
+      "ShadowRoot/shadow-tree APIs",
+      "Broader child-context DOM support",
+      "Cross-origin access",
+      "Framework-specific shims or whole-library support",
+      "Release/full-candidate acceptance inferred from focused tests"
     ]
   },
   "workflows": [
@@ -197,12 +213,12 @@
       "kind": "Unmodified jQuery4.0.0 separate original input/update app",
       "status": "Tested selected workflow; blocked during initialization",
       "build_provenance": {
-        "source_commit": "b3db29a470279ab6eb0f719b72c48f7a7b8b4f92",
-        "dirty": true,
-        "executable_sha256": "688a1318dba0fc81bbe383297b773248f95495d163d046b198201124cb8c5a28",
-        "source_map_sha256": "aa7500d92c6b8c0a7c7fcda11cafa331393bc42562044662d8200060a1018ce8",
+        "source_commit": "be579b17243e0bf3f0452aa2de1516641e2f820a",
+        "dirty": false,
+        "executable_sha256": "e44ce342e2630551e994f8da36cb506dcd7b06a720755931824b4df9ac7e4944",
+        "source_map_sha256": "af53f8d25a41f5192c5560fcc5135bbc8b1647b13788ec64fa0c2007b8932b7a",
         "cargo_version": "cargo 1.99.1 (5f94df478 2026-08-27)",
-        "profile": "existing development profile; not release validation"
+        "profile": "existing development profile; not release/full validation"
       },
       "configurations": [
         [
@@ -218,31 +234,85 @@
         "parse": "Not established",
         "initialization": "Failed",
         "render": "Passed",
-        "input": "Harness blocked; initialization also failed",
+        "input": "Failed",
         "async": "Failed"
       },
-      "first_root": "Element property \"getRootNode\" is not supported.",
-      "first_root_location": "jQuery4.0.0 line4321,column7",
+      "first_root": "Element property \"href\" is not writable in this subset.",
+      "first_root_location": "jQuery4.0.0 line7963,column1",
       "cascades_count_as_roots": false,
       "reference_browser": "Not run",
-      "measurement_scope": "One bounded local App invocation per selected configuration; original paired document/layout/pixels and independent control are ChezCat output; no whole-library pass",
+      "measurement_scope": "One bounded revision2 local App invocation per selected configuration, using an actual clean diagnostic development build; no full regression/hosted CI/release or whole-library pass",
       "parse_scope": "Conservative runner reports Not established; the first explicit failure is retained without inferring all dormant paths parsed",
-      "render_scope": "Initial authored page and independent control render; no jQuery-driven visible update or timer pass",
-      "fixture_revision": 1,
-      "interaction_harness": "Harness blocked: revision1 controls had IDs but lacked the name attributes selected by the App driver. Startup load/render/first script failures remain observed; no trusted input was executed.",
-      "fixture_correction": "Revision2 adds unique action names and preflight controls; upstream assets, script apps and old raw records remain unchanged. New runtime result pending."
+      "render_scope": "Initial authored page and independent control render; completed driver input does not establish a jQuery-driven visible update or timer pass",
+      "fixture_revision": 2,
+      "interaction_harness": "Revision2 has unique action names; the actual App driver completes without the revision1 missing-name refusal",
+      "previous_measurements": [
+        {
+          "status": "Tested selected workflow; blocked during initialization",
+          "build_provenance": {
+            "source_commit": "b3db29a470279ab6eb0f719b72c48f7a7b8b4f92",
+            "dirty": true,
+            "executable_sha256": "688a1318dba0fc81bbe383297b773248f95495d163d046b198201124cb8c5a28",
+            "source_map_sha256": "aa7500d92c6b8c0a7c7fcda11cafa331393bc42562044662d8200060a1018ce8",
+            "cargo_version": "cargo 1.99.1 (5f94df478 2026-08-27)",
+            "profile": "existing development profile; not release validation"
+          },
+          "configurations": [
+            [
+              1280,
+              800
+            ]
+          ],
+          "zoom": 100,
+          "javascript_enabled": true,
+          "profile": "--no-profile",
+          "stage_outcomes": {
+            "load": "Passed",
+            "parse": "Not established",
+            "initialization": "Failed",
+            "render": "Passed",
+            "input": "Harness blocked; initialization also failed",
+            "async": "Failed"
+          },
+          "first_root": "Element property \"getRootNode\" is not supported.",
+          "first_root_location": "jQuery4.0.0 line4321,column7",
+          "cascades_count_as_roots": false,
+          "reference_browser": "Not run",
+          "measurement_scope": "One bounded local App invocation per selected configuration; original paired document/layout/pixels and independent control are ChezCat output; no whole-library pass",
+          "parse_scope": "Conservative runner reports Not established; the first explicit failure is retained without inferring all dormant paths parsed",
+          "render_scope": "Initial authored page and independent control render; no jQuery-driven visible update or timer pass",
+          "fixture_revision": 1,
+          "interaction_harness": "Harness blocked: revision1 controls had IDs but lacked the name attributes selected by the App driver. Startup load/render/first script failures remain observed; no trusted input was executed.",
+          "fixture_correction": "Revision2 adds unique action names and preflight controls; upstream assets, script apps and old raw records remain unchanged. New runtime result pending."
+        }
+      ],
+      "observed_first_roots": [
+        "Element property \"getRootNode\" is not supported.",
+        "Element property \"href\" is not writable in this subset."
+      ],
+      "process_outcomes": [
+        {
+          "viewport": [
+            1280,
+            800
+          ],
+          "state": "completed",
+          "exit_code": 0
+        }
+      ],
+      "interaction_outcome": "Trusted input attempted; library input/timer effects failed after initialization refusal"
     },
     {
       "id": "modern-bootstrap",
       "kind": "Unmodified Bootstrap5.3.9 CSS/bundle separate original responsive/dropdown app",
       "status": "Tested selected workflow; blocked during initialization",
       "build_provenance": {
-        "source_commit": "b3db29a470279ab6eb0f719b72c48f7a7b8b4f92",
-        "dirty": true,
-        "executable_sha256": "688a1318dba0fc81bbe383297b773248f95495d163d046b198201124cb8c5a28",
-        "source_map_sha256": "aa7500d92c6b8c0a7c7fcda11cafa331393bc42562044662d8200060a1018ce8",
+        "source_commit": "be579b17243e0bf3f0452aa2de1516641e2f820a",
+        "dirty": false,
+        "executable_sha256": "e44ce342e2630551e994f8da36cb506dcd7b06a720755931824b4df9ac7e4944",
+        "source_map_sha256": "af53f8d25a41f5192c5560fcc5135bbc8b1647b13788ec64fa0c2007b8932b7a",
         "cargo_version": "cargo 1.99.1 (5f94df478 2026-08-27)",
-        "profile": "existing development profile; not release validation"
+        "profile": "existing development profile; not release/full validation"
       },
       "configurations": [
         [
@@ -262,7 +332,7 @@
         "parse": "Not established",
         "initialization": "Failed",
         "render": "Passed",
-        "input": "Harness blocked; initialization also failed",
+        "input": "Failed",
         "async": "Not applicable",
         "framework_layout": "Passed"
       },
@@ -270,16 +340,86 @@
       "first_root_location": "Bootstrap5.3.9 bundle line599,column3",
       "cascades_count_as_roots": false,
       "reference_browser": "Not run",
-      "measurement_scope": "One bounded local App invocation per selected configuration; original paired document/layout/pixels and independent control are ChezCat output; no whole-library pass",
+      "measurement_scope": "One bounded revision2 local App invocation per selected configuration, using an actual clean diagnostic development build; no full regression/hosted CI/release or whole-library pass",
       "parse_scope": "Conservative runner reports Not established; the first explicit failure is retained without inferring all dormant paths parsed",
       "dependencies": {
         "popper": "2.11.8, included in the pinned bundle",
         "jquery": "Not loaded; independent workload"
       },
-      "render_scope": "Unmodified Bootstrap CSS places the original cards beside each other at1280 and stacks them at640; dropdown input remains failed",
-      "fixture_revision": 1,
-      "interaction_harness": "Harness blocked: revision1 controls had IDs but lacked the name attributes selected by the App driver. Startup load/render/first script failures remain observed; no trusted input was executed.",
-      "fixture_correction": "Revision2 adds unique action names and preflight controls; upstream assets, script apps and old raw records remain unchanged. New runtime result pending."
+      "render_scope": "Unmodified Bootstrap CSS places original cards beside each other at1280 and stacks them at640; correctly named dropdown choice remains unrendered after failed initialization",
+      "fixture_revision": 2,
+      "interaction_harness": "Revision2 action names exist; class syntax prevents initialization, leaving the menu choice unrendered. This is distinct from revision1 missing-name HarnessBlocked behavior",
+      "previous_measurements": [
+        {
+          "status": "Tested selected workflow; blocked during initialization",
+          "build_provenance": {
+            "source_commit": "b3db29a470279ab6eb0f719b72c48f7a7b8b4f92",
+            "dirty": true,
+            "executable_sha256": "688a1318dba0fc81bbe383297b773248f95495d163d046b198201124cb8c5a28",
+            "source_map_sha256": "aa7500d92c6b8c0a7c7fcda11cafa331393bc42562044662d8200060a1018ce8",
+            "cargo_version": "cargo 1.99.1 (5f94df478 2026-08-27)",
+            "profile": "existing development profile; not release validation"
+          },
+          "configurations": [
+            [
+              1280,
+              800
+            ],
+            [
+              640,
+              800
+            ]
+          ],
+          "zoom": 100,
+          "javascript_enabled": true,
+          "profile": "--no-profile",
+          "stage_outcomes": {
+            "load": "Passed",
+            "parse": "Not established",
+            "initialization": "Failed",
+            "render": "Passed",
+            "input": "Harness blocked; initialization also failed",
+            "async": "Not applicable",
+            "framework_layout": "Passed"
+          },
+          "first_root": "Unsupported syntax \"class\".",
+          "first_root_location": "Bootstrap5.3.9 bundle line599,column3",
+          "cascades_count_as_roots": false,
+          "reference_browser": "Not run",
+          "measurement_scope": "One bounded local App invocation per selected configuration; original paired document/layout/pixels and independent control are ChezCat output; no whole-library pass",
+          "parse_scope": "Conservative runner reports Not established; the first explicit failure is retained without inferring all dormant paths parsed",
+          "dependencies": {
+            "popper": "2.11.8, included in the pinned bundle",
+            "jquery": "Not loaded; independent workload"
+          },
+          "render_scope": "Unmodified Bootstrap CSS places the original cards beside each other at1280 and stacks them at640; dropdown input remains failed",
+          "fixture_revision": 1,
+          "interaction_harness": "Harness blocked: revision1 controls had IDs but lacked the name attributes selected by the App driver. Startup load/render/first script failures remain observed; no trusted input was executed.",
+          "fixture_correction": "Revision2 adds unique action names and preflight controls; upstream assets, script apps and old raw records remain unchanged. New runtime result pending."
+        }
+      ],
+      "observed_first_roots": [
+        "Unsupported syntax \"class\"."
+      ],
+      "process_outcomes": [
+        {
+          "viewport": [
+            1280,
+            800
+          ],
+          "state": "failed",
+          "exit_code": 1
+        },
+        {
+          "viewport": [
+            640,
+            800
+          ],
+          "state": "failed",
+          "exit_code": 1
+        }
+      ],
+      "interaction_outcome": "DependencyBlocked by failed initialization; raw runner input stage remains Failed"
     },
     {
       "id": "reference",
@@ -301,14 +441,42 @@
     "configuration_denominator": 3,
     "passed_configurations": 0,
     "reference_browser": "Not run",
-    "input_scope": "Pinned unmodified development-only distributions/notices; legacy W2 assets and its historical hidden-input measurement are unchanged",
+    "input_scope": "Pinned unmodified upstream assets/notices are unchanged; modern revision2 adds correct control names. Legacy W2 and Vue retain their earlier distinct measurement/build records",
     "integrity_checks": {
       "original_fixtures_unchanged": true,
       "inputs_unchanged": true,
       "executable_unchanged": true,
       "build_record_unchanged": true,
       "helpers_unchanged": true
-    }
+    },
+    "fixture_revision": 2,
+    "fixture_manifest": "tools/fixtures/compatibility-modern/fixtures.json",
+    "fixture_manifest_sha256": "41c67b054991d7d786758a172ac347ee918e08d7376878145a9f3756b84569ab",
+    "build_provenance": {
+      "source_commit": "be579b17243e0bf3f0452aa2de1516641e2f820a",
+      "dirty": false,
+      "executable_sha256": "e44ce342e2630551e994f8da36cb506dcd7b06a720755931824b4df9ac7e4944",
+      "source_map_sha256": "af53f8d25a41f5192c5560fcc5135bbc8b1647b13788ec64fa0c2007b8932b7a",
+      "cargo_version": "cargo 1.99.1 (5f94df478 2026-08-27)",
+      "profile": "existing development profile; not release/full validation"
+    },
+    "previous_assessments": [
+      {
+        "fixture_revision": 1,
+        "workflow_denominator": 2,
+        "configuration_denominator": 3,
+        "passed_configurations": 0,
+        "build_provenance": {
+          "source_commit": "b3db29a470279ab6eb0f719b72c48f7a7b8b4f92",
+          "dirty": true,
+          "executable_sha256": "688a1318dba0fc81bbe383297b773248f95495d163d046b198201124cb8c5a28",
+          "source_map_sha256": "aa7500d92c6b8c0a7c7fcda11cafa331393bc42562044662d8200060a1018ce8",
+          "cargo_version": "cargo 1.99.1 (5f94df478 2026-08-27)",
+          "profile": "existing development profile; not release validation"
+        },
+        "scope": "Preserved revision1 startup/load/render observations plus separate missing-name HarnessBlocked interaction; raw records are not relabeled revision2"
+      }
+    ]
   },
   "platform": [
     {
@@ -692,12 +860,13 @@
     "No public service or whole-family outcome inferred",
     "Dirty development-build HEAD, executable digest and source-map hash remain explicit; later committed source is not substituted as the compiled identity",
     "Modern parse Not established is distinct from initialization failure and from observed initial rendering",
-    "Hidden-input W2 uses its own actual dirty development build; an unregistered Node draft does not establish a Node.getRootNode implementation or workflow result"
+    "Hidden-input W2 uses its own actual dirty development build; an unregistered Node draft does not establish a Node.getRootNode implementation or workflow result",
+    "Later clean Node/modern revision2 diagnostic results retain a distinct build/source map; revision1 startup/HarnessBlocked records and earlier dirty W2/W3 records remain separate, with no full regression or CI inferred"
   ],
   "next": [
-    "Finish and validate genuine Node.getRootNode for the measured modern jQuery blocker, then recheck that unchanged workload; no API or initialization pass yet",
-    "Complete normal full-regression/PR/CI integration for the concat/hidden-input candidate and Node work only when validated; no automatic release",
-    "Reduce the CSS custom-property padding/border candidate suggested by source inspection, with rgba a separate gap; rank with remaining legacy fragment/Vue/Bootstrap blockers and add modern Vue/React when prerequisites are actionable"
+    "Freeze and complete normal full-regression/PR/CI integration for concat, hidden-input and genuine Node root prerequisites; no new release",
+    "Reduce measured anchor URL reflection and native INPUT fragments: modern jQuery href assignment7963:1 and legacy input-containing innerHTML2684:2",
+    "Reduce the concrete CSS custom-property padding/border candidate, with rgba a separate gap; retain class/prototype and modern Vue/React prerequisites until actionable"
   ],
   "selected_standard_controls": {
     "suite": "Selected Test262 slice mode runs",
@@ -744,6 +913,23 @@
         "Array.concat changes",
         "Framework-specific shims/polyfills",
         "Whole-framework initialization",
+        "Release validation"
+      ]
+    },
+    {
+      "id": "hidden-input",
+      "contract_id": "CP7",
+      "status": "Original finite prerequisite implemented and committed; full candidate/public integration pending",
+      "source_commit": "c679a2ed51a170e21e9773768a399a065bc31e88",
+      "scope": "Fresh detached HTML hidden-input admission; parsed-hidden attribute/IDL name/value/default reflection; retained tree/form ownership and serialization; no hidden box, hit or focus",
+      "native_status": "Nine focused and twelve adjacent select controls pass; actual App software click/text pixels, native form request serialization, neighbor value/cursor and source/history preservation; foreign-namespace atomic refusal reproduced then passed",
+      "workflow_scope": "Unchanged W2 advances to input-containing innerHTML refusal; its actual dirty development build is recorded separately, including an unregistered Node draft",
+      "next_dependency": "Genuine Node.getRootNode is being implemented for the separate modern jQuery blocker; no Node API pass is claimed yet",
+      "excluded": [
+        "Existing native input-type transitions",
+        "INPUT contents replacement and general input-containing innerHTML fragments",
+        "Whole-library initialization/interaction",
+        "Physical desktop or HTTP submission acceptance",
         "Release validation"
       ]
     }

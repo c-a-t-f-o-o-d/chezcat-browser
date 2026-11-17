@@ -338,6 +338,37 @@ Semantic references: [DOM createComment](https://dom.spec.whatwg.org/#dom-docume
 [Comment](https://dom.spec.whatwg.org/#interface-comment), and
 [ECMAScript 2025 ToString](https://262.ecma-international.org/16.0/#sec-tostring).
 
+## CP8 — genuine Node.getRootNode over ordinary trees
+
+Expose the real zero-arity Node prototype method through ordinary property
+resolution, override/deletion and borrowed-call behavior. Require a genuine
+accessible Node receiver before options hooks. Read the optional dictionary's
+composed member through observable Get and ToBoolean; preserve getter effects and
+exceptions, then walk the current tree after those effects. Nullish options use
+the default; non-dictionary primitives refuse. No Node-shaped object or direct
+host call may bypass dictionary conversion or receiver/access validation.
+
+Return the genuine Document for a connected ordinary tree, the actual root of a
+detached subtree, and the Attr itself even when it has an ownerElement. Supported
+same-origin child trees retain their own Document identity; cross-origin access
+refuses before options hooks. Both composed values share the ordinary root because
+ShadowRoot/shadow-tree APIs remain unavailable. Preserve bounded work, edge/index
+identity and cycle checks; malformed ancestry refuses without a DOM commit.
+
+Nine Node root controls, four existing Node constants and thirty-two namespace
+controls pass. An initial new-test oracle compared a returned Document with a
+method; correcting that expectation required no production change. The same
+original trusted-click App fixture now gives zero script errors, genuine
+connected/detached/reconnected roots and changed visible text/pixels. Its clean
+diagnostic build is distinct from the earlier dirty workload builds. This is not
+isolated-crop, physical desktop or full candidate acceptance.
+
+Modern jQuery fixture revision2 now advances to anchor href assignment at7963:1;
+initialization/input/async still fail. Bootstrap retains class syntax at599:3 and
+its separate initialization-dependent dropdown blockage. Earlier fixture revision1
+startup and HarnessBlocked records remain historical. Full normal regression and
+hosted integration are still required for the final candidate.
+
 ## CP7 — finite hidden-input admission and native form state
 
 Admit hidden type on a fresh detached HTML INPUT through the genuine native form
