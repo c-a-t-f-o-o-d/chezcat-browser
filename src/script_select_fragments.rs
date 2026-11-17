@@ -32,17 +32,21 @@ impl Bridge<'_> {
     pub(super) fn prepare_select_form_change(&mut self, fragment: Option<(&Document, usize)>,
         overrides: &[(usize, Option<usize>)]) -> Result<forms::SelectFormPlan, String> {
         let mut created_inputs = Vec::new();
+        let mut created_buttons = Vec::new();
         self.state.work(self.doc.nodes.len())?;
         created_inputs.try_reserve(self.doc.nodes.len().min(forms::MAX_CONTROLS)).map_err(|_| "Created INPUT plan reservation failed.")?;
+        created_buttons.try_reserve(self.doc.nodes.len().min(forms::MAX_CONTROLS)).map_err(|_| "Created BUTTON plan reservation failed.")?;
         for node in 0..self.doc.nodes.len() {
-            if !self.fresh_text_input(node) { continue; }
+            let button = self.fresh_button(node);
+            if !self.fresh_text_input(node) && !button { continue; }
             let mut ancestor = Some(node);
             for _ in 0..128 {
                 let Some(index) = ancestor else { break; };
                 self.state.work(1)?;
                 if overrides.iter().any(|(root, _)| *root == index) {
-                    if created_inputs.len() >= forms::MAX_CONTROLS { return Err("Native form control limit reached before created INPUT insertion.".into()); }
-                    created_inputs.push(node); break;
+                    if created_inputs.len().saturating_add(created_buttons.len()) >= forms::MAX_CONTROLS { return Err("Native form control limit reached before created control insertion.".into()); }
+                    if button {created_buttons.push(node);} else {created_inputs.push(node);}
+                    break;
                 }
                 ancestor = self.state.tree.parents.get(index).copied().flatten();
             }
@@ -50,7 +54,7 @@ impl Bridge<'_> {
         let mut affected = Vec::new();
         affected.try_reserve(self.forms.controls.len()).map_err(|_| "Select affected-control reservation failed.")?;
         for (&node, control) in &self.forms.controls {
-            if !matches!(control.kind,Kind::Select|Kind::Hidden|Kind::Text) { continue; }
+            if !matches!(control.kind,Kind::Select|Kind::Hidden|Kind::Text) && !self.native_button(node) { continue; }
             let mut ancestor = Some(node);
             for _ in 0..128 {
                 let Some(index) = ancestor else { break; };
@@ -61,7 +65,7 @@ impl Bridge<'_> {
         }
         let new_control = fragment.is_some_and(|(doc, _)| (1..doc.nodes.len()).any(|node|
             tag(doc, node) == "select" || forms::fragment_text_input(doc, node)));
-        if affected.is_empty() && !new_control && created_inputs.is_empty() {
+        if affected.is_empty() && !new_control && created_inputs.is_empty() && created_buttons.is_empty() {
             return Ok(forms::SelectFormPlan { additions: std::collections::BTreeMap::new(), metadata: Vec::new(), retained_bytes: 0 });
         }
         let extra = fragment.map_or(0, |(doc, _)| doc.nodes.len().saturating_sub(1));
@@ -80,6 +84,15 @@ impl Bridge<'_> {
         }
         let mut plan = self.forms.prepare_selects(fragment)?;
         if !created_inputs.is_empty() { self.forms.add_created_text_inputs(self.doc,&created_inputs,&mut plan)?; }
+        if !created_buttons.is_empty() {
+            self.state.work(self.forms.default_scan_work())?;
+            for &node in &created_buttons {
+                self.state.work(self.doc.nodes.len())?;
+                let (work,copy) = forms::button_caption_work(self.doc,node)?;
+                self.state.work(work)?;self.state.copies(copy)?;
+            }
+            self.forms.add_created_buttons(self.doc,&created_buttons,&mut plan)?;
+        }
         let mut parents = Vec::new();
         parents.try_reserve(self.doc.nodes.len().saturating_add(extra)).map_err(|_| "Select parent projection reservation failed.")?;
         parents.extend(self.state.tree.parents.iter().copied());
@@ -100,9 +113,10 @@ impl Bridge<'_> {
         let view = SelectView { document: self.doc, fragment };
         for node in selects {
             let kind = self.forms.controls.get(&node).or_else(|| plan.additions.get(&node)).map(|control| control.kind);
-            let input = matches!(kind, Some(Kind::Hidden | Kind::Text));
-            if kind == Some(Kind::Text) && view.attr(node, "form").is_some() {
-                return Err("Moving text INPUTs with explicit form association is not implemented; no tree was changed.".into());
+            let button = view.tag(node) == "button" && matches!(kind,Some(Kind::Button|Kind::Submit|Kind::Reset));
+            let input = matches!(kind, Some(Kind::Hidden | Kind::Text)) || button;
+            if (kind == Some(Kind::Text) || button) && view.attr(node, "form").is_some() {
+                return Err("Moving text INPUTs or BUTTONs with explicit form association is not implemented; no tree was changed.".into());
             }
             let mut ancestor = Some(node);
             let mut connected = false;
@@ -126,6 +140,7 @@ impl Bridge<'_> {
                 }
                 let name = view.tag(index);
                 if index != node && (matches!(name, "head" | "script" | "style" | "template" | "iframe" | "object" | "datalist")
+                    || button && matches!(name,"select"|"option"|"optgroup"|"button")
                     || name == "noscript" && self.doc.scripting_enabled) {
                     return Err("Native select connection in an inert context is not implemented.".into());
                 }

@@ -83,6 +83,7 @@ impl Bridge<'_> {
             return Err("Fragment replacement cannot retire foreign or script/stylesheet/frame resources; no tree was changed.".into());
         }
         if outgoing.iter().any(|node|seen.contains(node)) {return Err("Fragment source overlaps the replaced subtree.".into());}
+        self.validate_button_children(parent,&incoming)?;
         if roots.is_empty() && old.is_none() {return Ok(Value::Host(*handle));}
 
         let total=self.doc.nodes[parent].children.len().checked_add(roots.len()).ok_or("Fragment destination size overflow.")?;

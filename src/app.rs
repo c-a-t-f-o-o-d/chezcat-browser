@@ -5676,3 +5676,7 @@ mod css_variable_tests;
 #[cfg(test)]
 #[path = "app_text_input_tests.rs"]
 mod text_input_tests;
+
+#[cfg(test)]
+#[path = "app_created_button_tests.rs"]
+mod created_button_tests;
