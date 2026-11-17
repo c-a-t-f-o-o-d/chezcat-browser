@@ -2578,8 +2578,12 @@ fn apply(style: &mut Style, parent: &Style, declaration: &Declaration) {
             }
         }
         "color" => {
-            if value == "inherit" {
+            // color is inherited; currentColor on color itself is inherit.
+            // Keep the finite initial palette rather than adding system colors.
+            if matches!(value.as_str(), "inherit" | "unset" | "currentcolor") {
                 style.color = parent.color;
+            } else if value == "initial" {
+                style.color = Style::default().color;
             } else if let Some(color) = color(&value) {
                 style.color = color;
             }
@@ -4302,3 +4306,7 @@ mod rgba_border_tests;
 #[cfg(test)]
 #[path="css_background_variable_tests.rs"]
 mod background_variable_tests;
+
+#[cfg(test)]
+#[path="css_color_variable_tests.rs"]
+mod color_variable_tests;
