@@ -1,4 +1,4 @@
-//! Whole conventional select and finite text INPUT subtrees share the native form model. Existing
+//! Whole conventional select and finite text/owned checkbox INPUT subtrees share the native form model. Existing
 //! editors and selectedness are retained; prospective parent metadata is staged.
 use super::*;
 
@@ -11,6 +11,13 @@ impl SelectView<'_> {
     fn attr(&self, node: usize, name: &str) -> Option<&str> { let (doc, node) = self.source(node); doc.attr(node, name) }
 }
 impl Bridge<'_> {
+    pub(super) fn owned_native_checkbox(&self,node:usize)->bool {
+        self.doc.nodes.get(node).is_some_and(|item|
+            item.namespace==crate::html::Namespace::Html && item.children.is_empty())
+            && tag(self.doc,node)=="input"
+            && self.doc.attr(node,"type").is_some_and(|value|value.eq_ignore_ascii_case("checkbox"))
+            && self.forms.controls.get(&node).is_some_and(|control|control.kind==Kind::Checkbox)
+    }
     pub(super) fn owned_fragment_text_input(&self, node: usize) -> bool {
         forms::fragment_text_input(self.doc, node)
             && self.forms.controls.get(&node).is_some_and(|control| control.kind == Kind::Text)
@@ -54,7 +61,7 @@ impl Bridge<'_> {
         let mut affected = Vec::new();
         affected.try_reserve(self.forms.controls.len()).map_err(|_| "Select affected-control reservation failed.")?;
         for (&node, control) in &self.forms.controls {
-            if !matches!(control.kind,Kind::Select|Kind::Hidden|Kind::Text) && !self.native_button(node) { continue; }
+            if !matches!(control.kind,Kind::Select|Kind::Hidden|Kind::Text) && !self.native_button(node) && !self.owned_native_checkbox(node) { continue; }
             let mut ancestor = Some(node);
             for _ in 0..128 {
                 let Some(index) = ancestor else { break; };
@@ -114,9 +121,10 @@ impl Bridge<'_> {
         for node in selects {
             let kind = self.forms.controls.get(&node).or_else(|| plan.additions.get(&node)).map(|control| control.kind);
             let button = view.tag(node) == "button" && matches!(kind,Some(Kind::Button|Kind::Submit|Kind::Reset));
-            let input = matches!(kind, Some(Kind::Hidden | Kind::Text)) || button;
-            if (kind == Some(Kind::Text) || button) && view.attr(node, "form").is_some() {
-                return Err("Moving text INPUTs or BUTTONs with explicit form association is not implemented; no tree was changed.".into());
+            let checkbox = view.tag(node)=="input" && kind==Some(Kind::Checkbox);
+            let input = matches!(kind, Some(Kind::Hidden | Kind::Text)) || button || checkbox;
+            if (kind == Some(Kind::Text) || button || checkbox) && view.attr(node, "form").is_some() {
+                return Err("Moving text/checkbox INPUTs or BUTTONs with explicit form association is not implemented; no tree was changed.".into());
             }
             let mut ancestor = Some(node);
             let mut connected = false;
@@ -178,3 +186,7 @@ mod tests;
 #[cfg(test)]
 #[path = "script_text_fragment_tests.rs"]
 mod text_fragment_tests;
+
+#[cfg(test)]
+#[path="script_checkbox_move_tests.rs"]
+mod checkbox_move_tests;

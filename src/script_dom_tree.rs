@@ -862,7 +862,7 @@ impl Bridge<'_> {
                 && !matches!(name, "select" | "option" | "optgroup") {
                 return Err("Moving nonconventional select descendants or resources is not implemented.".into());
             }
-            if forms::kind(self.doc, node).is_some() && !owned_select && !self.hidden_input(node) && !self.owned_fragment_text_input(node) && !self.fresh_text_input(node) && !self.native_button(node) && !self.fresh_button(node)
+            if forms::kind(self.doc, node).is_some() && !owned_select && !self.hidden_input(node) && !self.owned_fragment_text_input(node) && !self.owned_native_checkbox(node) && !self.fresh_text_input(node) && !self.native_button(node) && !self.fresh_button(node)
                 || matches!(
                     name,
                     "html"
@@ -1103,7 +1103,7 @@ impl Bridge<'_> {
             prefix(tag(self.doc, parent), 64), prefix(tag(self.doc, child), 64)))?;
         self.validate_button_children(parent,&descendants)?;
         self.state.work(descendants.len().saturating_mul(2))?;
-        if descendants.iter().any(|&node| self.fresh_text_input(node) || self.fresh_button(node) || self.native_button(node))
+        if descendants.iter().any(|&node| self.fresh_text_input(node) || self.owned_native_checkbox(node) || self.fresh_button(node) || self.native_button(node))
             && descendants.iter().any(|&node| matches!(tag(self.doc,node),"script"|"link"|"iframe")) {
             return Err("New native INPUT admission with script, stylesheet or frame subtrees is not implemented; no tree was changed.".into());
         }
