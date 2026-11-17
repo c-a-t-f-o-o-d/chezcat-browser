@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "verified_date": "2026-11-16",
+  "scope": "Pinned unmodified development inputs; external cache only, never runtime payloads",
+  "versions": {"jquery": "4.0.0", "bootstrap": "5.3.9", "popper": "2.11.8"},
+  "assets": {
+    "jquery": {"cache_path": "jquery-4.0.0/jquery-4.0.0.js", "route": "/jquery-4.0.0.js", "mime": "text/javascript", "bytes": 255967, "sha256": "f5fb077959ca06faa1dc50761d8bbb836c6c78067932537a2b3fea9e401257c5", "url": "https://code.jquery.com/jquery-4.0.0.js", "licenses": ["jquery"]},
+    "bootstrap_js": {"cache_path": "bootstrap-5.3.9/bootstrap.bundle.js", "route": "/bootstrap.bundle.js", "mime": "text/javascript", "bytes": 208346, "sha256": "56d73efb18652e2682e6daa95196442fe3b50200e283e188f8904e061d823752", "url": "https://raw.githubusercontent.com/twbs/bootstrap/v5.3.9/dist/js/bootstrap.bundle.js", "licenses": ["bootstrap", "popper"]},
+    "bootstrap_css": {"cache_path": "bootstrap-5.3.9/bootstrap.css", "route": "/bootstrap.css", "mime": "text/css", "bytes": 280620, "sha256": "ec743fa098b0dc109177873c05296547234dcff6777c5a7d7324974a1aa4c172", "url": "https://raw.githubusercontent.com/twbs/bootstrap/v5.3.9/dist/css/bootstrap.css", "licenses": ["bootstrap"]}
+  },
+  "licenses": {
+    "jquery": {"spdx": "MIT", "cache_path": "jquery-4.0.0/LICENSE.txt", "notice": "licenses/jquery-4.0.0-LICENSE.txt", "bytes": 1097, "sha256": "d4db9ebe6f29f5168eac45ad713f055623ac5d0dcd5ba92da23d650ae012020d", "url": "https://raw.githubusercontent.com/jquery/jquery-dist/4.0.0/LICENSE.txt"},
+    "bootstrap": {"spdx": "MIT", "cache_path": "bootstrap-5.3.9/LICENSE", "notice": "licenses/bootstrap-5.3.9-LICENSE.txt", "bytes": 1093, "sha256": "bc0cd18d94c028f1c0b62ec9fdaddcb9921c1e07c29cf52dc7df8cca9daf2488", "url": "https://raw.githubusercontent.com/twbs/bootstrap/v5.3.9/LICENSE"},
+    "popper": {"spdx": "MIT", "cache_path": "popper-2.11.8/LICENSE.md", "notice": "licenses/popper-2.11.8-LICENSE.txt", "bytes": 1082, "sha256": "bf67e2c9b7974543bb18ced3a0b37f53729aaff953b442dd89a3adaf90fd93e8", "url": "https://cdn.jsdelivr.net/npm/@popperjs/core@2.11.8/LICENSE.md"}
+  }
+}
