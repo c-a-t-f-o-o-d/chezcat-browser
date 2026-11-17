@@ -1,4 +1,4 @@
-//! Finite unregistered custom properties for padding, border and background color.
+//! Finite unregistered custom properties for padding, border and opaque colors.
 //! https://www.w3.org/TR/css-variables-1/
 //! Values inherit after substitution. This adds neither CSSOM nor URL loads.
 use super::*;
@@ -271,7 +271,7 @@ fn expand(text:&str,depth:usize,budget:&mut Budget,lookup:&mut impl FnMut(&str,&
 }
 
 fn box_property(name:&str)->bool {
-    matches!(name,"padding"|"padding-top"|"padding-right"|"padding-bottom"|"padding-left"|"border"|"border-width"|"border-style"|"border-color"|"background-color"|"background")
+    matches!(name,"padding"|"padding-top"|"padding-right"|"padding-bottom"|"padding-left"|"border"|"border-width"|"border-style"|"border-color"|"background-color"|"background"|"color")
         || ["top","right","bottom","left"].iter().any(|side|
             name==format!("border-{side}") || ["width","style","color"].iter().any(|part|name==format!("border-{side}-{part}")))
 }
@@ -279,6 +279,7 @@ fn border_value(value:&str)->bool {
     parse_border(value).is_some()
 }
 fn valid_box(name:&str,value:&str)->bool {
+    if name=="color" {return value=="currentcolor" || color(value).is_some();}
     if matches!(name,"background-color"|"background") {
         return matches!(value,"transparent"|"none"|"currentcolor") || color(value).is_some();
     }
@@ -294,6 +295,7 @@ fn valid_box(name:&str,value:&str)->bool {
 }
 fn reset_box(style:&mut Style,parent:&Style,name:&str,inherit:bool) {
     let initial=Style::default(); let source=if inherit{parent}else{&initial};
+    if name=="color" {style.color=source.color;return;}
     if matches!(name,"background-color"|"background") {
         style.background=source.background;
         style.background_current_color=source.background_current_color;
@@ -319,7 +321,8 @@ fn reset_box(style:&mut Style,parent:&Style,name:&str,inherit:bool) {
 pub(super) fn apply_box(style:&mut Style,parent:&Style,declaration:&Declaration,variables:&Variables,budget:&mut Budget)->bool {
     if !box_property(&declaration.name) || !has_var(&declaration.value) {return false;}
     // A var()-bearing declaration participates in the cascade before its
-    // substituted grammar is known. Failure resets its components; it cannot
+    // substituted grammar is known. Failure uses unset (the parent's computed
+    // foreground for color, initial components for boxes/backgrounds); it cannot
     // resurrect an earlier author declaration.
     let result=variables.substitute(&declaration.value,budget).ok().flatten();
     let value=result.as_deref().unwrap_or("").trim().to_ascii_lowercase();
@@ -331,10 +334,10 @@ pub(super) fn apply_box(style:&mut Style,parent:&Style,declaration:&Declaration,
             reset_box(style,parent,&declaration.name,false);
             return true;
         }
-        reset_box(style,parent,&declaration.name,value=="inherit");
+        reset_box(style,parent,&declaration.name,value=="inherit" || (declaration.name=="color" && value=="unset"));
     } else if valid_box(&declaration.name,&value) {
         apply(style,parent,&Declaration {name:declaration.name.clone(),value,important:declaration.important,stylesheet:declaration.stylesheet});
-    } else {reset_box(style,parent,&declaration.name,false);}
+    } else {reset_box(style,parent,&declaration.name,declaration.name=="color");}
     true
 }
 
@@ -442,5 +445,23 @@ mod tests {
         assert!(apply_box(&mut style,&parent,&inherit,&Variables::default(),&mut Budget{work:10000,copies:64}));
         assert_eq!(style.background,None);assert!(!style.background_current_color);assert_eq!(style.background_image,None);assert_eq!(style.background_repeat,[true;2]);assert_eq!(style.background_size,BackgroundSize::Auto);
         assert_eq!(parent.background_image.as_ref().unwrap().url,"ParentCase".repeat(128));
+    }
+
+    #[test]
+    fn color_variable_consumer_limits_inherit_without_mutating_other_style_components() {
+        let declaration=Declaration{name:"color".into(),value:"var(--missing,#ffffff)".into(),important:false,stylesheet:None};
+        let mut parent=Style::default();parent.color=0x112233;
+        let mut style=Style::default();style.color=0xff0000;style.background=Some(0x0d6efd);style.background_current_color=true;
+        style.background_image=Some(BackgroundImage{url:"KeptCase.ppm".into(),stylesheet:Some(17)});style.background_size=BackgroundSize::Contain;
+        style.padding=[Length::Px(7.0);4];style.border_color=[Some(0);4];style.border_alpha=[51;4];style.font_families=vec!["monospace".into()];style.font_size=19.0;
+        let snapshot=style.clone();
+        assert!(apply_box(&mut style,&parent,&declaration,&Variables::default(),&mut Budget{work:0,copies:0}));assert_eq!(style.color,0x112233);
+        let mut many=String::new();for index in 0..=MAX_NAMES {many.push_str(&format!("--n{index}:red;"));}
+        let declarations=parse_declarations(&many);let blocked=Variables::cascade(&Variables::default(),declarations.iter(),&mut Budget::default());assert!(blocked.blocked);
+        style.color=0xff0000;assert!(apply_box(&mut style,&parent,&declaration,&blocked,&mut Budget::default()));assert_eq!(style.color,0x112233,"Blocked maps cannot revive author red or use an unbudgeted white fallback");
+        style.color=0xff0000;assert!(apply_box(&mut style,&parent,&declaration,&Variables::default(),&mut Budget{work:10000,copies:0}));assert_eq!(style.color,0x112233);
+        assert_eq!(style.background,snapshot.background);assert_eq!(style.background_current_color,snapshot.background_current_color);assert_eq!(style.background_image,snapshot.background_image);assert_eq!(style.background_size,snapshot.background_size);
+        assert_eq!(style.padding,snapshot.padding);assert_eq!(style.border_color,snapshot.border_color);assert_eq!(style.border_alpha,snapshot.border_alpha);assert_eq!(style.font_families,snapshot.font_families);assert_eq!(style.font_size,snapshot.font_size);
+        assert_eq!(parent.color,0x112233);
     }
 }
