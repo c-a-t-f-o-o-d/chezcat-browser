@@ -208,9 +208,11 @@ def read_stage(folder, label):
     errors = script_failures(activity)
     runs = [{'x': int(x), 'y': int(y), 'w': int(w), 'h': int(h), 'text': text}
         for x, y, w, h, text in re.findall(r'^x=(-?\d+) y=(-?\d+) w=(\d+) h=(\d+) text="([^"\n]*)"', layout, re.M)]
-    title = re.search(r'<title>(.*?)</title>', source, re.S | re.I)
+    # Saved source is the original response, not live DOM state. The activity
+    # header records the actual current title; later diagnostics cannot replace it.
+    titles = re.findall(r'^Page title: ([^\r\n]*)$', activity.split('\n\n', 1)[0], re.M)
     return {'present': True, 'label': label, 'paired': paired, 'document': document, 'layout': geometry, 'canvas': canvas,
-        'title': html.unescape(title[1]) if title else None, 'visible': ' '.join(run['text'] for run in runs), 'runs': runs,
+        'title': titles[0] if len(titles) == 1 else None, 'visible': ' '.join(run['text'] for run in runs), 'runs': runs,
         'zero_errors': len(summaries) == 1 and int(summaries[0][0]) >= 1 and int(summaries[0][2]) == 0,
         'first_root': errors[0] if errors else None, 'later_script_errors': errors[1:],
         'fonts': [line for line in activity.splitlines() if line.startswith('FONTS:')],
