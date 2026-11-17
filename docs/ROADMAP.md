@@ -66,11 +66,11 @@ workloads, without framework-specific substitutes.
 
 | State | ID | Deliverable & scope | Completion evidence |
 | :--- | :--- | :--- | :--- |
-| ✅ Merged | `DOM-01` | **String concat, hidden-input state, and genuine Node roots** | [PR #29](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/29) integrated the finite contracts. This is not whole-framework compatibility. |
-| ✅ Merged | `DOM-02` | **Anchor HTTP(S) URL reflection** | [PR #30](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/30) integrated scoped live URL values. Wider URL semantics remain bounded by the contract. |
-| 🟡 Under review | `DOM-03` | **Native text INPUT fragments and retained editor state** | [PR #32](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/32): real editing/reset, dirty/default values, neighboring controls, ownership, and atomic refusals. Branch results report modern jQuery startup passing; integration remains separate. |
-| ◻️ Next | `DOM-04` | **Native Event own-property behavior** | Reproduce the trusted-input failure reported by PR #32; implement normal property lookup without weakening branded access. Recheck the unchanged modern jQuery input/timer workflow. |
-| ◻️ Next | `DOM-05` | **DocumentFragment and subsequent legacy DOM boundaries** | Reduce the next failure reported by PR #32, then verify fragment insertion, tree identity, form state, and rollback. Preserve the unchanged legacy workload and any next blocker. |
+| ✅ Merged | <code>DOM&#8209;01</code> | **String concat, hidden-input state, and genuine Node roots** | [PR #29](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/29) integrated the finite contracts. This is not whole-framework compatibility. |
+| ✅ Merged | <code>DOM&#8209;02</code> | **Anchor HTTP(S) URL reflection** | [PR #30](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/30) integrated scoped live URL values. Wider URL semantics remain bounded by the contract. |
+| 🟡 Under review | <code>DOM&#8209;03</code> | **Native text INPUT fragments and retained editor state** | [PR #32](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/32): real editing/reset, dirty/default values, neighboring controls, ownership, and atomic refusals. Branch results report modern jQuery startup passing; integration remains separate. |
+| ◻️ Next | <code>DOM&#8209;04</code> | **Native Event own-property behavior** | Reproduce the trusted-input failure reported by PR #32; implement normal property lookup without weakening branded access. Recheck the unchanged modern jQuery input/timer workflow. |
+| ◻️ Next | <code>DOM&#8209;05</code> | **DocumentFragment and subsequent legacy DOM boundaries** | Reduce the next failure reported by PR #32, then verify fragment insertion, tree identity, form state, and rollback. Preserve the unchanged legacy workload and any next blocker. |
 
 ### CSS — Visible layout and color correctness
 
@@ -79,9 +79,9 @@ only their initial HTML paint or absence of script errors.
 
 | State | ID | Deliverable & scope | Completion evidence |
 | :--- | :--- | :--- | :--- |
-| 🟡 Under review | `CSS-01` | **Inherited custom properties in padding and borders** | [PR #31](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/31) reports a real App reduction changing from 80×30 to 104×46, matching an opaque literal control's pixels, hits, and reflow. Hosted verification still gates integration; no full Bootstrap styling claim. |
-| ◻️ Investigate | `CSS-02` | **Alpha colors, including `rgba()`** | Establish the current parser/compositing boundary with an original reduction. Verify computed values, alpha composition, clipping, and painted output against a reference; do not assume every spelling is absent or supported. |
-| ◻️ Ongoing | `CSS-03` | **Image, font, sizing, and input-layout defects** | Rank reproducible visible failures by shared impact; keep real dimensions, resource outcomes, paint, and hit testing consistent. Select the next finite scope from evidence. |
+| 🟡 Under review | <code>CSS&#8209;01</code> | **Inherited custom properties in padding and borders** | [PR #31](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/31) reports a real App reduction changing from 80×30 to 104×46, matching an opaque literal control's pixels, hits, and reflow. Hosted verification still gates integration; no full Bootstrap styling claim. |
+| ◻️ Investigate | <code>CSS&#8209;02</code> | **Alpha colors, including `rgba()`** | Establish the current parser/compositing boundary with an original reduction. Verify computed values, alpha composition, clipping, and painted output against a reference; do not assume every spelling is absent or supported. |
+| ◻️ Ongoing | <code>CSS&#8209;03</code> | **Image, font, sizing, and input-layout defects** | Rank reproducible visible failures by shared impact; keep real dimensions, resource outcomes, paint, and hit testing consistent. Select the next finite scope from evidence. |
 
 ### JS & Frameworks — From startup to useful interaction
 
@@ -90,10 +90,10 @@ A passing startup probe is a step, not a working application.
 
 | State | ID | Deliverable & scope | Completion evidence |
 | :--- | :--- | :--- | :--- |
-| ◻️ Planned | `JS-01` | **Object-prototype access used by the Vue workload** | Reduce the recorded Vue 2.7.16 boundary and implement shared semantics with receiver, realm, ordering, and access checks. Recheck mount, input, and asynchronous updates separately. |
-| ◻️ Planned | `JS-02` | **Class syntax and semantics used by modern applications** | Define a coherent parser/runtime slice from the recorded Bootstrap 5.3.9 failure. Test behavior, not merely parsing; preserve explicit limits for unfinished class features. |
-| ◻️ Dependency-gated | `FW-01` | **One modern Vue or React application** | Pin an official distribution and compatible dependencies. First record a genuine baseline; completion requires mounting, a user-driven state change, visible DOM/pixel output, and relevant asynchronous behavior. |
-| ◻️ Continuing | `FW-02` | **Modern and legacy cohort coverage** | Keep existing legacy samples and separate modern jQuery/Bootstrap cases. Add materially different generations when evidence makes them useful; never infer support for every version from one sample. |
+| ◻️ Planned | <code>JS&#8209;01</code> | **Object-prototype access used by the Vue workload** | Reduce the recorded Vue 2.7.16 boundary and implement shared semantics with receiver, realm, ordering, and access checks. Recheck mount, input, and asynchronous updates separately. |
+| ◻️ Planned | <code>JS&#8209;02</code> | **Class syntax and semantics used by modern applications** | Define a coherent parser/runtime slice from the recorded Bootstrap 5.3.9 failure. Test behavior, not merely parsing; preserve explicit limits for unfinished class features. |
+| ◻️ Dependency-gated | <code>FW&#8209;01</code> | **One modern Vue or React application** | Pin an official distribution and compatible dependencies. First record a genuine baseline; completion requires mounting, a user-driven state change, visible DOM/pixel output, and relevant asynchronous behavior. |
+| ◻️ Continuing | <code>FW&#8209;02</code> | **Modern and legacy cohort coverage** | Keep existing legacy samples and separate modern jQuery/Bootstrap cases. Add materially different generations when evidence makes them useful; never infer support for every version from one sample. |
 
 Exact versions, build identities, stage results, and first failures belong in
 [COMPATIBILITY.md](COMPATIBILITY.md) and [compatibility.json](compatibility.json).
@@ -110,10 +110,10 @@ a language rewrite, generic framework, or speculative parallel engine.
 
 | State | ID | Milestone | Entry condition & finite outcome |
 | :--- | :--- | :--- | :--- |
-| ◻️ Incremental | `PERF-01` | **Representative performance baselines** | Reuse successful original fixtures. Record parse/script/style/layout/paint time, input responsiveness, and retained memory across repeated navigation, with exact build/configuration and repeatable conditions. Failed or incomplete execution is not a speed win. |
-| 🧊 Later | `ISO-01` | **Sandboxed content processes** | Begin after representative load/render/input/navigation and selected media paths are repeatable, before positioning the browser for sensitive everyday use. Separate privileged browser services from restricted content; validate bounded messages, access refusals, crash containment, recovery, and resource limits. Multiple processes alone are not a sandbox. |
-| 🧊 Later | `GPU-01` | **GPU compositing/presentation with software fallback** | Start from measured rendering costs. Keep original rendering commands, add a bounded platform backend, verify equivalent behavior, device-loss recovery, and a “Use hardware acceleration when available” setting with active/fallback diagnostics. Expand rasterization only with evidence. |
-| 🧊 Separate decision | `GPU-02` | **Accelerated video presentation / decoding boundary** | Presenting our decoded frames is distinct from delegating decoding. No OS-codec fallback or replacement decoder is authorized by the graphics milestone; hardware decoding needs an explicit originality/dependency decision. |
+| ◻️ Incremental | <code>PERF&#8209;01</code> | **Representative performance baselines** | Reuse successful original fixtures. Record parse/script/style/layout/paint time, input responsiveness, and retained memory across repeated navigation, with exact build/configuration and repeatable conditions. Failed or incomplete execution is not a speed win. |
+| 🧊 Later | <code>ISO&#8209;01</code> | **Sandboxed content processes** | Begin after representative load/render/input/navigation and selected media paths are repeatable, before positioning the browser for sensitive everyday use. Separate privileged browser services from restricted content; validate bounded messages, access refusals, crash containment, recovery, and resource limits. Multiple processes alone are not a sandbox. |
+| 🧊 Later | <code>GPU&#8209;01</code> | **GPU compositing/presentation with software fallback** | Start from measured rendering costs. Keep original rendering commands, add a bounded platform backend, verify equivalent behavior, device-loss recovery, and a “Use hardware acceleration when available” setting with active/fallback diagnostics. Expand rasterization only with evidence. |
+| 🧊 Separate decision | <code>GPU&#8209;02</code> | **Accelerated video presentation / decoding boundary** | Presenting our decoded frames is distinct from delegating decoding. No OS-codec fallback or replacement decoder is authorized by the graphics milestone; hardware decoding needs an explicit originality/dependency decision. |
 
 Current reality remains [one browser process with worker threads and software
 rendering](ARCHITECTURE.md). Isolation and GPU acceleration are **planned, not
@@ -129,9 +129,9 @@ branch protections and required checks remain in force during the transition.
 
 | State | ID | Deliverable | Exit criteria |
 | :--- | :--- | :--- | :--- |
-| ◻️ Planned | `DX-01` | **Asynchronous CI/CD handoff** | Focused local checks precede a clean public source checkpoint. Hosted jobs own canonical integration/release checks and publish concise results. No routine agent polling or duplicate local delivery audit. The maintainer triages hosted failures; failing changes cannot promote or publish. |
-| ◻️ Planned | `DX-02` | **Commit-identified development artifacts** | Successful trusted CI exposes a complete, clearly labeled development payload with its real source identity, required notices/data, no private material, and bounded retention. It is not a release, tag, or version bump. |
-| ◻️ Proposed | `DX-03` | **Lightweight public `dev` integration channel** | Adopt only with explicit triggers, protected promotion, trusted identities, and no duplicate validation for unchanged inputs. Keep `main` current with promoted known-good work. Do not create another manually supervised release stage. |
+| ◻️ Planned | <code>DX&#8209;01</code> | **Asynchronous CI/CD handoff** | Focused local checks precede a clean public source checkpoint. Hosted jobs own canonical integration/release checks and publish concise results. No routine agent polling or duplicate local delivery audit. The maintainer triages hosted failures; failing changes cannot promote or publish. |
+| ◻️ Planned | <code>DX&#8209;02</code> | **Commit-identified development artifacts** | Successful trusted CI exposes a complete, clearly labeled development payload with its real source identity, required notices/data, no private material, and bounded retention. It is not a release, tag, or version bump. |
+| ◻️ Proposed | <code>DX&#8209;03</code> | **Lightweight public `dev` integration channel** | Adopt only with explicit triggers, protected promotion, trusted identities, and no duplicate validation for unchanged inputs. Keep `main` current with promoted known-good work. Do not create another manually supervised release stage. |
 
 For requested releases, freeze the selected revision and hand it to the existing
 pipeline. Continue independent coding without mutating that snapshot. Pipeline
