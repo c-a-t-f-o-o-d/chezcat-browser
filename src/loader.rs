@@ -208,12 +208,31 @@ struct WorkerState {
     document: Option<(u64, Loaded)>,
     images: Option<(u64, ImageUpdate)>,
     completed: Option<Completion>,
+    #[cfg(test)]
+    completion_held_for_test: bool,
     progress: Option<(u64, String)>,
     stopping: bool,
     wake: Wake,
 }
 pub struct Worker {
     shared: Arc<(Mutex<WorkerState>, Condvar)>,
+}
+
+/// Test-only message-delivery gate. Transport and document publication continue;
+/// dropping the guard exposes the completion on the next ordinary poll.
+#[cfg(test)]
+pub(crate) struct CompletionHold {
+    shared: std::sync::Weak<(Mutex<WorkerState>, Condvar)>,
+}
+
+#[cfg(test)]
+impl Drop for CompletionHold {
+    fn drop(&mut self) {
+        if let Some(shared) = self.shared.upgrade() {
+            let Ok(mut state) = shared.0.lock() else { return; };
+            state.completion_held_for_test = false;
+        }
+    }
 }
 impl Worker {
     #[allow(dead_code)] // Retained isolated loader API for independent callers.
@@ -235,6 +254,8 @@ impl Worker {
                 document: None,
                 images: None,
                 completed: None,
+                #[cfg(test)]
+                completion_held_for_test: false,
                 progress: None,
                 stopping: false,
                 wake,
@@ -417,6 +438,16 @@ impl Worker {
     }
     pub fn poll(&self) -> Poll {
         let mut state = self.shared.0.lock().unwrap();
+        #[cfg(test)]
+        if state.completion_held_for_test {
+            return Poll {
+                download: state.download.take(),
+                progress: state.progress.take(),
+                document: state.document.take(),
+                images: state.images.take(),
+                completed: None,
+            };
+        }
         Poll {
             download: state.download.take(),
             progress: state.progress.take(),
@@ -424,6 +455,30 @@ impl Worker {
             images: state.images.take(),
             completed: state.completed.take(),
         }
+    }
+
+    /// At a navigation handoff, preserve only a physically completed matching
+    /// document load. This never waits for transport or steals a document that
+    /// the App has not committed. Associated image callbacks precede completion
+    /// through the App's ordinary delivery path.
+    pub(crate) fn take_completed_document(&self, id: u64) -> Option<Poll> {
+        let mut state = self.shared.0.lock().unwrap();
+        if state.stopping || state.active.is_some()
+            || state.network.as_ref().is_none_or(|(current, _)| *current != id)
+            || state.document.is_some() || state.download.is_some()
+            || state.images.as_ref().is_some_and(|(current, _)| *current != id)
+            || state.progress.as_ref().is_some_and(|(current, _)| *current != id)
+            || !state.completed.as_ref().is_some_and(|completion|
+                completion.id == id && completion.result.as_ref().is_ok_and(|end| !end.download)) {
+            return None;
+        }
+        Some(Poll {
+            download: None,
+            progress: state.progress.take(),
+            document: None,
+            images: state.images.take(),
+            completed: state.completed.take(),
+        })
     }
     /// The latest requested navigation, including an in-flight or failed load.
     /// Clones share measurements; a later submit installs a fresh recorder.
@@ -433,6 +488,18 @@ impl Worker {
 }
 #[cfg(test)]
 impl Worker {
+    pub(crate) fn completed_document_ready_for_test(&self, id: u64) -> bool {
+        self.shared.0.lock().unwrap().completed.as_ref().is_some_and(|completion|
+            completion.id == id && completion.result.as_ref().is_ok_and(|end| !end.download))
+    }
+
+    pub(crate) fn hold_completion_for_test(&self) -> CompletionHold {
+        let mut state = self.shared.0.lock().unwrap();
+        assert!(!state.completion_held_for_test, "Only one completion hold per test worker");
+        state.completion_held_for_test = true;
+        CompletionHold { shared: Arc::downgrade(&self.shared) }
+    }
+
     pub(crate) fn retirement_probe(&self) -> impl Fn() -> bool + 'static {
         let state = Arc::downgrade(&self.shared);
         move || state.upgrade().is_none()
@@ -448,6 +515,81 @@ impl Drop for Worker {
         // A blocking OS DNS call cannot be cancelled by std::net. Do not hold up
         // the UI or process shutdown waiting for it; this single worker exits
         // when the OS call returns (or the process ends).
+    }
+}
+
+#[cfg(test)]
+mod completed_document_handoff_tests {
+    use super::*;
+
+    fn ready_worker() -> Worker {
+        Worker { shared: Arc::new((Mutex::new(WorkerState {
+            network: Some((7, crate::network_trace::Trace::default())),
+            download: None, request: None, active: None, document: None,
+            images: Some((7, ImageUpdate {
+                images: HashMap::new(), animations: HashMap::new(),
+                outcomes: vec![(3, true)], events: vec!["image before load".into()], skipped: 1,
+            })),
+            completed: Some(Completion { id: 7, result: Ok(LoadEnd {
+                download: false, events: vec!["load complete".into()], skipped: 1, notice: String::new(),
+            }) }),
+            completion_held_for_test: false,
+            progress: Some((7, "ready".into())), stopping: false, wake: Arc::new(|| {}),
+        }), Condvar::new())) }
+    }
+
+    #[test]
+    fn completed_document_handoff_delivers_matching_images_and_success_once() {
+        let worker = ready_worker();
+        let poll = worker.take_completed_document(7).expect("Stored matching success");
+        assert!(poll.document.is_none() && poll.download.is_none());
+        assert_eq!(poll.progress, Some((7, "ready".into())));
+        let (id, images) = poll.images.unwrap();
+        assert_eq!(id, 7);
+        assert_eq!(images.outcomes, vec![(3, true)]);
+        assert_eq!(images.events, vec!["image before load"]);
+        assert_eq!(images.skipped, 1);
+        let completed = poll.completed.unwrap();
+        assert_eq!(completed.id, 7);
+        assert_eq!(completed.result.unwrap().events, vec!["load complete"]);
+        assert!(worker.take_completed_document(7).is_none());
+        let next = worker.poll();
+        assert!(next.progress.is_none() && next.images.is_none() && next.completed.is_none());
+    }
+
+    #[test]
+    fn completed_document_handoff_refusals_preserve_queued_resources() {
+        for case in ["not-ready", "error", "download", "wrong-id", "wrong-trace", "no-trace", "wrong-images", "wrong-progress", "active", "stopping"] {
+            let worker = ready_worker();
+            let requested = if case == "wrong-id" { 8 } else { 7 };
+            let before = {
+                let mut state = worker.shared.0.lock().unwrap();
+                match case {
+                    "not-ready" => state.completed = None,
+                    "error" => state.completed.as_mut().unwrap().result = Err("real failure".into()),
+                    "download" => state.completed.as_mut().unwrap().result.as_mut().unwrap().download = true,
+                    "wrong-trace" => state.network.as_mut().unwrap().0 = 8,
+                    "no-trace" => state.network = None,
+                    "wrong-images" => state.images.as_mut().unwrap().0 = 8,
+                    "wrong-progress" => state.progress.as_mut().unwrap().0 = 8,
+                    "active" => state.active = Some(Arc::new(AtomicBool::new(false))),
+                    "stopping" => state.stopping = true,
+                    "wrong-id" => {},
+                    _ => unreachable!(),
+                }
+                (state.completed.as_ref().map(|completion| (completion.id, completion.result.is_ok())),
+                 state.images.as_ref().map(|(id, images)| (*id, images.outcomes.clone(), images.events.clone(), images.skipped)),
+                 state.progress.clone())
+            };
+            assert!(worker.take_completed_document(requested).is_none(), "{case}");
+            {
+                let state = worker.shared.0.lock().unwrap();
+                let after = (state.completed.as_ref().map(|completion| (completion.id, completion.result.is_ok())),
+                    state.images.as_ref().map(|(id, images)| (*id, images.outcomes.clone(), images.events.clone(), images.skipped)),
+                    state.progress.clone());
+                assert_eq!(before, after, "Refusal must retain owned resources: {case}");
+            }
+        }
     }
 }
 
