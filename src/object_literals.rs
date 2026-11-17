@@ -284,7 +284,8 @@ mod tests {
             "({set x(...a){}});",
             "({get x:1});",
             "({get __proto__(){return 1;}});",
-            "({get x(){super.x;}});",
+            // Accessors have a HomeObject, but only derived constructors admit super().
+            "({get x(){super();}});",
             "({async x(){}});",
             "({async [x](){}});",
             "({*x(){}});",

@@ -58,6 +58,40 @@ if(childRead(rootDoc,'body')!==document.body||childRead(rootLocation,'href')!==l
 }
 
 #[test]
+fn child_native_super_receiver_refuses_foreign_window_before_base_callbacks_and_recovers() {
+    let(mut doc,mut forms,mut page)=start(r#"
+var reads=0,writes=0,calls=0;
+class Base {
+ get value(){reads++;return this;}
+ set value(input){writes++;}
+ method(){calls++;return this;}
+}
+class Derived extends Base {
+ read(){return super.value;}
+ write(input){super.value=input;}
+ invoke(){return super.method();}
+}
+var read=Derived.prototype.read,write=Derived.prototype.write,invoke=Derived.prototype.invoke;
+if(read.call(window)!==window||invoke.call(window)!==window)throw 'own-window borrowed super receiver';
+write.call(window,17);
+var own=w.Function('return window===self&&document.body.nodeType===1&&location.href==="about:blank";');
+"#);
+    // Foreign Window object operations remain a capability refusal even before
+    // origin divergence; only the existing named native reads are supported.
+    for changed_origin in [false,true] {
+        if changed_origin {diverge(&mut page);}
+        for source in ["read.call(w);","write.call(w,19);","invoke.call(w);"] {
+            let allocations=page.runtime.window_allocation_state_for_test();
+            let outcome=page.console_eval(&mut doc,&mut forms,source);
+            assert_eq!(outcome.errors,1,"{source}: {}",page.report());
+            assert!(page.report().contains("foreign Window operation is not implemented"),"{source}: {}",page.report());
+            assert_eq!(page.runtime.window_allocation_state_for_test(),allocations,"refused super receiver allocated: {source}");
+            evaluate(&mut page,&mut doc,&mut forms,"if(reads!==1||writes!==1||calls!==1||!own()||window!==self||document.body.nodeType!==1)throw 'super refusal effects or owner recovery';");
+        }
+    }
+}
+
+#[test]
 fn child_native_event_fresh_cached_saved_guards_precede_coercion_after_divergence() {
     let(mut doc,mut forms,mut page)=start(r#"
 var event=new UIEvent('kept',{detail:29,view:window}),get=Object.getOwnPropertyDescriptor(UIEvent.prototype,'detail').get,init=event.initUIEvent;

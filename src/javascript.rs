@@ -81,6 +81,9 @@ mod base_class_tests;
 #[path = "derived_class_tests.rs"]
 mod derived_class_tests;
 #[cfg(test)]
+#[path = "derived_class_lifetime_tests.rs"]
+mod derived_class_lifetime_tests;
+#[cfg(test)]
 #[path = "super_home_object_tests.rs"]
 mod super_home_object_tests;
 #[cfg(test)]
