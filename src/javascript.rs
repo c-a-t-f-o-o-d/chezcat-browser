@@ -8648,7 +8648,7 @@ impl Runtime {
         let Value::Function(index) = function else {
             return Err(Self::not_callable_fault(&function));
         };
-        if matches!(self.functions.get(index), Some(Function::Script { .. })) {
+        if self.is_ordinary_script_call(index) {
             return self.call_script_value(index, args, this, None, host);
         }
         self.call_non_script_value(index, args, this, host)
@@ -8660,6 +8660,14 @@ impl Runtime {
         Fault::exception("TypeError", format!(
             "The value is not a callable function. Actual value type: {}.",
             function.diagnostic_type()))
+    }
+
+    #[inline(never)]
+    fn is_ordinary_script_call(&self, index: usize) -> bool {
+        // Type classification returns before a recursive body starts. Keep its
+        // Program/template borrows out of the persistent call-forwarding frame.
+        matches!(self.functions.get(index), Some(Function::Script { program, template, .. })
+            if !program.templates[*template].class_constructor)
     }
 
     #[inline(never)]
@@ -8785,7 +8793,10 @@ impl Runtime {
                 self.call_depth -= 1;
                 return self.checked_value(result?);
             }
-            Some(Function::Script { .. }) => unreachable!("script dispatch handled separately"),
+            Some(Function::Script { program, template, .. }) if program.templates[*template].class_constructor => {
+                return Err(Self::class_constructor_call_fault());
+            }
+            Some(Function::Script { .. }) => unreachable!("ordinary script dispatch handled separately"),
             Some(Function::Vacant) | None => return Err(Fault::new("Invalid function handle.")),
         }
     }
@@ -8811,6 +8822,14 @@ impl Runtime {
     }
 
     #[inline(never)]
+    #[cold]
+    fn class_constructor_call_fault() -> Fault {
+        // Keep typed Error allocation and its unoptimized scratch off ordinary
+        // recursive Script frames. This is only the rejected class-call path.
+        Fault::exception("TypeError", "Class constructors require new.")
+    }
+
+    #[inline(never)]
     fn call_script_value(
         &mut self, index: usize, args: &[Value], this: Value, new_target: Option<usize>, host: &mut dyn Host,
     ) -> Result<Value, Fault> {
@@ -8827,9 +8846,6 @@ impl Runtime {
         else {
             unreachable!()
         };
-        if program.templates[*template].class_constructor && new_target.is_none() {
-            return Err(Fault::exception("TypeError", "Class constructors require new."));
-        }
         let (program, template, parent, lexical_this) = (
             program.clone(),
             *template,
