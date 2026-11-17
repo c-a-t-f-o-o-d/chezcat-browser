@@ -1,5 +1,5 @@
 //! Original reduced controls for the finite static colon prototype setter.
-//! Ordinary own __proto__ keys and legacy access remain explicit boundaries.
+//! Colon prototype setters stay distinct from ordinary own __proto__ data keys.
 use super::*;
 use super::super::Host;
 
@@ -167,19 +167,12 @@ fn literal_prototype_walk_work_limit_is_atomic_and_a_fresh_job_recovers() {
 }
 
 #[test]
-fn literal_prototype_deferred_ordinary_keys_and_legacy_access_still_refuse_explicitly() {
+fn literal_prototype_deferred_shorthand_methods_and_accessors_still_refuse_explicitly() {
     for source in [
         "var __proto__=1;({__proto__});",
         "({__proto__(){}});",
         "({get __proto__(){return 1;}});",
         "({set __proto__(value){}});",
-        "({['__proto__']:1});",
-        "Object.defineProperty({},'__proto__',{value:1});",
-        "Object.getOwnPropertyDescriptor({},'__proto__');",
-        "('__proto__' in {});",
-        "({}).__proto__;",
-        "({}).__proto__={};",
-        r#"JSON.parse('{"__proto__":null}');"#,
     ] {
         let mut runtime = Runtime::for_test();
         let error = runtime.execute(source, &mut GuardHost::default()).unwrap_err();
@@ -187,11 +180,14 @@ fn literal_prototype_deferred_ordinary_keys_and_legacy_access_still_refuse_expli
         runtime.begin_job();
         assert_eq!(runtime.execute("({__proto__:null,answer:4}).answer;", &mut GuardHost::default()).unwrap().to_text(), "4");
     }
+}
+
+#[test]
+fn literal_prototype_computed_data_keys_descriptors_and_legacy_access_are_ordinary() {
     let mut runtime = Runtime::for_test();
     let mut host = GuardHost::default();
     runtime.execute("var keys=0,rhs=0,later=0;", &mut host).unwrap();
-    let error = runtime.execute("({[(keys++,'__proto__')]:(rhs++,1),after:(later++,2)});", &mut host).unwrap_err();
-    assert!(error.contains("Object prototype access"), "{error}");
-    runtime.begin_job();
-    assert_eq!(runtime.execute("keys+':'+rhs+':'+later;", &mut host).unwrap().to_text(), "1:0:0");
+    runtime.execute("var object={[(keys++,'__proto__')]:(rhs++,1),after:(later++,2)};if(object.__proto__!==1||Object.getPrototypeOf(object)!==Object.prototype||Object.getOwnPropertyDescriptor(object,'__proto__').value!==1)throw 'computed own data';", &mut host).unwrap();
+    assert_eq!(runtime.execute("keys+':'+rhs+':'+later;", &mut host).unwrap().to_text(), "1:1:1");
+    assert_eq!(runtime.execute(r#"var ordinary={};if(!('__proto__' in ordinary)||ordinary.__proto__!==Object.prototype)throw 'legacy lookup';Object.defineProperty(ordinary,'__proto__',{value:7});if(ordinary.__proto__!==7||Object.getPrototypeOf(ordinary)!==Object.prototype)throw 'own descriptor';var json=JSON.parse('{"__proto__":null}');if(json.__proto__!==null||!Object.prototype.hasOwnProperty.call(json,'__proto__')||Object.getPrototypeOf(json)!==Object.prototype)throw 'JSON own data';'ok';"#, &mut host).unwrap().to_text(), "ok");
 }
