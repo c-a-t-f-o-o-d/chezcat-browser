@@ -2757,7 +2757,7 @@ fn dynamic_dom_depth_is_bounded_and_next_script_can_run() {
     ]);
     assert_eq!(outcome.errors, 1, "{}", page.report());
     assert_eq!(doc.title, "DOM depth recovered");
-    assert!(page.report().contains("tree depth limit"));
+    assert!(page.report().contains("tree depth limit"), "{}", page.report());
 }
 
 #[test]

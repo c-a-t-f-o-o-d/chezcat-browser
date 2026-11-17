@@ -275,3 +275,44 @@ if(button.name!=='via-alias'||button.value!=='raw\r\nvalue'||button.form!==docum
     assert_eq!(forms.controls[&node].kind,Kind::Button);
     assert_eq!(forms.controls[&node].name,"still-name");assert_eq!(forms.controls[&node].value.text(),"still-value");
 }
+
+#[test]
+fn created_button_caption_ancestry_preserves_exact_tree_depth_boundary_and_recovery() {
+    let (mut doc,mut forms,mut page)=fixture();
+    run(&mut doc,&mut forms,&mut page,r#"
+var boundaryRoot=document.createElement('div'),boundaryTail=boundaryRoot;
+for(var depth=1;depth<128;depth++){
+ var next=document.createElement('div');boundaryTail.appendChild(next);boundaryTail=next;
+}
+var beyond=document.createElement('span');
+if(boundaryTail.getRootNode()!==boundaryRoot||boundaryRoot.isConnected||boundaryTail.parentNode===null)throw 'exact admitted depth';
+"#);
+    let root=doc.nodes.iter().enumerate().find_map(|(node,entry)|
+        (page.state.dom.created.contains(&node) && tag(&doc,node)=="div"
+            && page.state.tree.parents[node].is_none() && !entry.children.is_empty()).then_some(node)).unwrap();
+    let mut tail=root;let mut depth=1;
+    while let Some(&child)=doc.nodes[tail].children.first() {tail=child;depth+=1;}
+    assert_eq!(depth,128,"The original maximum tree must remain admissible");
+    let beyond=doc.nodes.iter().enumerate().find_map(|(node,_)|
+        (page.state.dom.created.contains(&node) && tag(&doc,node)=="span" && page.state.tree.parents[node].is_none()).then_some(node)).unwrap();
+    {
+        let mut bridge=Bridge{doc:&mut doc,forms:&mut forms,state:&mut page.state};
+        assert!(bridge.validate_button_children(tail,&[beyond]).is_ok(),"An exactly exhausted128-step ancestry is complete");
+        // Internal cycle control: completing128steps is not sufficient when
+        // ancestry is still present. Restore the synthetic link immediately.
+        bridge.state.tree.parents[root]=Some(root);
+        assert!(bridge.validate_button_children(tail,&[beyond]).unwrap_err().contains("BUTTON caption ancestry limit"));
+        bridge.state.tree.parents[root]=None;
+    }
+    let model=controls(&forms);let parents=page.state.tree.parents.clone();let connected=page.state.dom.connected.clone();
+    let children=doc.nodes.iter().map(|entry|entry.children.clone()).collect::<Vec<_>>();
+    let retained=page.state.retained;let commits=page.state.dom_commits;
+    let result=page.console_eval(&mut doc,&mut forms,"boundaryTail.appendChild(beyond);");
+    assert_eq!(result.errors,1,"{}",page.report());
+    assert!(page.report().contains("DOM tree depth limit reached"),"{}",page.report());
+    assert_eq!(controls(&forms),model);assert_eq!(page.state.tree.parents,parents);assert_eq!(page.state.dom.connected,connected);
+    assert_eq!(doc.nodes.iter().map(|entry|entry.children.clone()).collect::<Vec<_>>(),children);
+    assert_eq!(page.state.retained,retained);assert_eq!(page.state.dom_commits,commits);
+    run(&mut doc,&mut forms,&mut page,"if(boundaryTail.getRootNode()!==boundaryRoot||beyond.parentNode!==null||boundaryRoot.isConnected)throw 'partial depth mutation';document.title='Exact depth recovered';");
+    assert_eq!(doc.title,"Exact depth recovered");
+}

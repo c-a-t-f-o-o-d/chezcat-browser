@@ -74,7 +74,9 @@ impl Bridge<'_> {
             }
             ancestor = self.state.tree.parents.get(node).copied().flatten();
         }
-        Err("BUTTON caption ancestry limit reached.".into())
+        // The final permitted step may exhaust the chain. The tree operation
+        // still checks the prospective parent-plus-child depth independently.
+        if ancestor.is_none() {Ok(())} else {Err("BUTTON caption ancestry limit reached.".into())}
     }
 }
 
