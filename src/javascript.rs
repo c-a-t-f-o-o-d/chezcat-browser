@@ -7701,7 +7701,7 @@ impl Runtime {
             }) if program.templates[*template].constructible => {
                 let object = self.script_constructor_receiver(new_target.unwrap_or(index), host)?;
                 let result =
-                    self.call_value_with_target(Value::Function(index), args, Value::Object(object), new_target, host)?;
+                    self.call_constructed_script(index, args, Value::Object(object), new_target, host)?;
                 Ok(
                     if matches!(
                         result,
@@ -8489,21 +8489,10 @@ impl Runtime {
 
     #[inline(always)]
     fn call_value(&mut self, function: Value, args: &[Value], this: Value, host: &mut dyn Host) -> Result<Value, Fault> {
-        self.call_value_with_target(function, args, this, None, host)
-    }
-
-    #[inline(always)]
-    fn call_value_with_target(&mut self, function: Value, args: &[Value], this: Value, new_target: Option<usize>, host: &mut dyn Host) -> Result<Value, Fault> {
+        // Keep constructor-only root/error temporaries out of this inlined
+        // ordinary-call frame. Recursive calls share the unchanged native-stack
+        // and call-depth guards, including the one-MiB try/finally control.
         let marker = self.publish_call_inputs(&function, &this, args)?;
-        if let Some(target) = new_target {
-            if let Err(error) = self.push_transient_root(function_reachability::Edge::Function(target)) {
-                self.restore_transient_marker(marker);
-                return Err(error);
-            }
-        }
-        // Only audited forwarding helpers can run without a blanket inhibitor.
-        // Their inputs stay registered until the nested call has returned;
-        // apply list construction has its own guard for partial getter results.
         if !matches!(&function, Value::Function(id) if matches!(self.functions.get(*id),
             Some(Function::Script { .. } | Function::Bound(_)
                 | Function::Native(Builtin::FunctionMethod("call" | "apply") | Builtin::Eval)))) {
@@ -8512,18 +8501,45 @@ impl Runtime {
             }
             self.inhibit_transient_collection_for("native-call");
         }
-        let result = self.call_value_routed(function, args, this, new_target, host);
+        let result = self.call_value_routed(function, args, this, host);
         self.restore_transient_marker(marker);
         result
     }
 
-    fn call_value_routed(&mut self, function: Value, args: &[Value], this: Value, new_target: Option<usize>, host: &mut dyn Host) -> Result<Value, Fault> {
+    // construct_value_routed has already established this Script constructor's
+    // realm and native-access caller, including across prototype getters. Keep
+    // explicit construction arguments off the ordinary forwarding ABI below.
+    #[inline(never)]
+    fn call_constructed_script(&mut self, index: usize, args: &[Value], this: Value, new_target: Option<usize>, host: &mut dyn Host) -> Result<Value, Fault> {
+        debug_assert!(matches!(self.functions.get(index), Some(Function::Script { .. })));
+        let marker = self.publish_call_inputs(&Value::Function(index), &this, args)?;
+        if let Some(target) = new_target {
+            if let Err(error) = self.push_transient_root(function_reachability::Edge::Function(target)) {
+                self.restore_transient_marker(marker);
+                return Err(error);
+            }
+        }
+        let result = (|| {
+            // Preserve the ordinary call-entry checks and their work ordering.
+            self.step()?;
+            if args.len() > self.limits.capacity.arguments { return Err(self.argument_limit_fault()); }
+            for value in args {
+                if value.bytes() > self.limits.capacity.string_bytes { return Err(self.string_limit_fault()); }
+            }
+            if this.bytes() > self.limits.capacity.string_bytes { return Err(self.string_limit_fault()); }
+            self.call_script_value(index, args, this, new_target, host)
+        })();
+        self.restore_transient_marker(marker);
+        result
+    }
+
+    fn call_value_routed(&mut self, function: Value, args: &[Value], this: Value, host: &mut dyn Host) -> Result<Value, Fault> {
         if self.changes_native_access_caller(&function) {
-            return self.call_with_native_access_caller(function, args, this, new_target, host);
+            return self.call_with_native_access_caller(function, args, this, host);
         }
         let realm = match &function { Value::Function(id) => self.function_realms.get(*id).copied().unwrap_or(self.active_realm), _ => self.active_realm };
-        if realm == self.active_realm { return self.call_value_in_realm(function, args, this, new_target, host); }
-        self.with_intrinsic_realm(realm, |runtime| runtime.call_value_in_realm(function, args, this, new_target, host))
+        if realm == self.active_realm { return self.call_value_in_realm(function, args, this, host); }
+        self.with_intrinsic_realm(realm, |runtime| runtime.call_value_in_realm(function, args, this, host))
     }
 
     #[inline(never)]
@@ -8537,14 +8553,14 @@ impl Runtime {
     // Keep that frame off ordinary recursive Script calls on small test stacks.
     #[inline(never)]
     fn call_with_native_access_caller(&mut self, function: Value, args: &[Value], this: Value,
-        new_target: Option<usize>, host: &mut dyn Host) -> Result<Value, Fault> {
+        host: &mut dyn Host) -> Result<Value, Fault> {
         let realm = match &function { Value::Function(id) => self.function_realms.get(*id).copied().unwrap_or(self.active_realm), _ => self.active_realm };
         let previous = self.native_access_caller;
         self.native_access_caller = if matches!(&function, Value::Function(id) if matches!(self.functions.get(*id), Some(Function::Script { .. }))) {
             None
         } else { Some(self.browser_global.map(|(window, _)| window)) };
-        let result = if realm == self.active_realm { self.call_value_in_realm(function, args, this, new_target, host) }
-            else { self.with_intrinsic_realm(realm, |runtime| runtime.call_value_in_realm(function, args, this, new_target, host)) };
+        let result = if realm == self.active_realm { self.call_value_in_realm(function, args, this, host) }
+            else { self.with_intrinsic_realm(realm, |runtime| runtime.call_value_in_realm(function, args, this, host)) };
         self.native_access_caller = previous;
         result
     }
@@ -8554,7 +8570,6 @@ impl Runtime {
         function: Value,
         args: &[Value],
         this: Value,
-        new_target: Option<usize>,
         host: &mut dyn Host,
     ) -> Result<Value, Fault> {
         self.step()?;
@@ -8573,7 +8588,7 @@ impl Runtime {
             return Err(Self::not_callable_fault(&function));
         };
         if matches!(self.functions.get(index), Some(Function::Script { .. })) {
-            return self.call_script_value(index, args, this, new_target, host);
+            return self.call_script_value(index, args, this, None, host);
         }
         self.call_non_script_value(index, args, this, host)
     }
@@ -8715,6 +8730,26 @@ impl Runtime {
     }
 
     #[inline(never)]
+    fn register_script_invocation_inputs(
+        &mut self, index: usize, parent: usize, this: &Value, new_target: Option<usize>,
+    ) -> Result<(), Fault> {
+        // Complete constructor/arrow selection and all registration scratch
+        // before the recursive Script body is entered. The caller retains only
+        // the previous explicit context, restoring it on every Result path.
+        self.push_transient_value(this)?;
+        self.push_transient_root(function_reachability::Edge::Environment(parent))?;
+        let Function::Script { program, template, lexical_invocation, .. } = &self.functions[index]
+            else { unreachable!() };
+        let invocation = if program.templates[*template].arrow { *lexical_invocation }
+            else { Some(InvocationContext { new_target }) };
+        if let Some(target) = invocation.and_then(|context| context.new_target) {
+            self.push_transient_root(function_reachability::Edge::Function(target))?;
+        }
+        self.invocation = invocation;
+        Ok(())
+    }
+
+    #[inline(never)]
     fn call_script_value(
         &mut self, index: usize, args: &[Value], this: Value, new_target: Option<usize>, host: &mut dyn Host,
     ) -> Result<Value, Fault> {
@@ -8726,17 +8761,16 @@ impl Runtime {
             template,
             environment,
             lexical_this,
-            lexical_invocation,
+            ..
         } = &self.functions[index]
         else {
             unreachable!()
         };
-        let (program, template, parent, lexical_this, lexical_invocation) = (
+        let (program, template, parent, lexical_this) = (
             program.clone(),
             *template,
             *environment,
             lexical_this.clone(),
-            *lexical_invocation,
         );
         let this = if let Some(value) = lexical_this {
             self.work(value.bytes())?;
@@ -8751,25 +8785,25 @@ impl Runtime {
             this
         };
         let marker = self.transient_marker();
-        let invocation = if program.templates[template].arrow { lexical_invocation }
-            else { Some(InvocationContext { new_target }) };
-        let rooted = self.push_transient_value(&this)
-            .and_then(|()| self.push_transient_root(function_reachability::Edge::Environment(parent)))
-            .and_then(|()| match invocation.and_then(|context| context.new_target) {
-                Some(target) => self.push_transient_root(function_reachability::Edge::Function(target)),
-                None => Ok(()),
-            });
-        if let Err(error) = rooted { self.restore_transient_marker(marker); return Err(error); }
+        let previous_invocation = self.invocation;
+        if let Err(error) = self.register_script_invocation_inputs(index, parent, &this, new_target) {
+            self.invocation = previous_invocation;
+            self.restore_transient_marker(marker);
+            return Err(error);
+        }
         #[cfg(test)]
         if let Some(observe) = self.transient_roots.script_input_observer { observe(self, index, args, &this); }
         self.transient_roots.script_entries = self.transient_roots.script_entries.saturating_add(1);
         if self.transient_roots.inhibited == 0 {
             self.transient_roots.uninhibited_script_entries = self.transient_roots.uninhibited_script_entries.saturating_add(1);
         }
-        if let Err(error) = self.collect_function_candidates_at_entry() { self.restore_transient_marker(marker); return Err(error); }
+        if let Err(error) = self.collect_function_candidates_at_entry() {
+            self.invocation = previous_invocation;
+            self.restore_transient_marker(marker);
+            return Err(error);
+        }
         self.call_depth += 1;
         let previous_strict = self.strict;
-        let previous_invocation = std::mem::replace(&mut self.invocation, invocation);
         self.transient_roots.owned_call_depth += 1;
         self.strict = program.templates[template].strict;
         let result = (|| {
