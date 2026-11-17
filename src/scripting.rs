@@ -54,6 +54,8 @@ mod script_element_properties;
 mod script_created_events;
 #[path = "script_anchor_mouse.rs"]
 mod script_anchor_mouse;
+#[path = "script_anchor_url.rs"]
+mod script_anchor_url;
 pub use script_anchor_mouse::AnchorMouseInput;
 #[path = "script_dispatch.rs"]
 mod script_dispatch;

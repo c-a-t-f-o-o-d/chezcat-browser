@@ -148,6 +148,7 @@ mod template_literals;
 mod text_encoding;
 #[path = "url_api.rs"]
 mod url_api;
+pub(crate) use url_api::{project as anchor_url_project, mutate as anchor_url_mutate};
 #[path = "work_attribution.rs"]
 mod work_attribution;
 #[path = "execution_limits.rs"]
