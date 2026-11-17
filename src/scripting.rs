@@ -44,6 +44,8 @@ mod script_attr;
 mod script_hidden_inputs;
 #[path = "script_text_inputs.rs"]
 mod script_text_inputs;
+#[path = "script_buttons.rs"]
+mod script_buttons;
 #[path = "script_attribute_names.rs"]
 mod script_attribute_names;
 #[path = "script_class_list.rs"]
@@ -1970,6 +1972,7 @@ impl Bridge<'_> {
 
     fn attribute_named(&mut self, node: usize, name: crate::html::AttributeName, value: Option<String>) -> Result<(), String> {
         let text_input = self.prepare_text_input_attribute(node, &name, value.as_deref())?;
+        let button = self.prepare_button_attribute(node, &name, value.as_deref())?;
         let media_source=name.html_is("src")&&self.media_element_receiver(node_handle(node));let media_change=media_source&&value.is_some();
         if media_change&&!self.media_source_prepared(){return Err("Media source change requires its reserved stable-state task.".into());}
         if self.doc.nodes[node].namespace==crate::html::Namespace::Html && tag(self.doc,node)=="video"
@@ -2052,6 +2055,7 @@ impl Bridge<'_> {
             self.forms.refresh_disabled(self.doc);
         }
         if let Some(plan) = text_input { plan.commit(self.forms); }
+        if let Some(plan) = button { plan.commit(self.forms); }
         if slot.is_some() || new != 0 { self.state.dom_committed(); }
         if self.state.tree.active.get(node).copied().unwrap_or(false) {
             self.state.layout_changed();
@@ -2531,6 +2535,7 @@ impl Host for Bridge<'_> {
     }
 
     fn string_setter(&self, object: u32, property: &str) -> bool {
+        if self.button_string_property(object,property) {return true;}
         if self.fragment_receiver(object) && matches!(property,"nodeValue"|"textContent") {return true;}
         if self.hidden_input_property(object,property) {return true;}
         if self.text_input_default_property(object,property) {return true;}
@@ -3641,6 +3646,7 @@ impl Host for Bridge<'_> {
             ) || !matches!(self.named_document_property(property)?, Value::Undefined));
         }
         if self.hidden_input_property(object,property) { return Ok(true); }
+        if self.button_property(object,property) { return Ok(true); }
         if self.text_input_default_property(object,property) || self.button_type_property(object,property) { return Ok(true); }
         if let Some(has) = self.dom_has(object, property)? {
             return Ok(has);
@@ -3914,6 +3920,7 @@ impl Host for Bridge<'_> {
             };
         }
         if let Some(value) = self.hidden_input_get(object,property)? {return Ok(value);}
+        if let Some(value) = self.button_get(object,property)? {return Ok(value);}
         if let Some(value) = self.text_input_metadata_get(object,property)? {return Ok(value);}
         if let Some(value) = self.dom_get(object, property)? {
             return Ok(value);
@@ -4051,6 +4058,7 @@ impl Host for Bridge<'_> {
     }
 
     fn set(&mut self, object: u32, property: &str, value: Value) -> Result<(), String> {
+        if self.button_set(object,property,&value)? {return Ok(());}
         if self.text_input_set(object,property,&value)? {return Ok(());}
         if self.hidden_input_set(object,property,&value)? {return Ok(());}
         if self.media_interface_receiver(object)&&matches!(property,"src"|"currentTime") {self.require_bound_media(object)?;}

@@ -435,6 +435,9 @@ pub struct Control {
     pub max_length: usize,
     pub tab_index: i32,
     pub select: Option<SelectState>,
+    // Element identity is independent of the shared activation kind. INPUT
+    // submit/reset/button controls keep their existing Reset normalization.
+    button_element: bool,
     initial: String,
     initially_checked: bool,
     // CSS-pixel coordinates selected by a real image activation. Keyboard and
@@ -774,7 +777,15 @@ impl Forms {
                 })
                 .collect();
             let mut value = Editor::default();
-            set_form_value(&mut value, &initial, kind);
+            if tag(doc,node) == "button" && doc.nodes[node].namespace == crate::html::Namespace::Html {
+                // BUTTON uses raw content-attribute value mode; its caption is
+                // separate DOM text, and form submission retains CR/LF.
+                value.chars = initial.chars().collect();
+                value.cursor = value.chars.len();
+                value.anchor = value.cursor;
+            } else {
+                set_form_value(&mut value, &initial, kind);
+            }
             let checked = doc.attr(node, "checked").is_some();
             let select = if kind == Kind::Select {
                 let (state, limited, bytes) = select_state(doc, node);
@@ -818,6 +829,7 @@ impl Forms {
                     .and_then(parse_tab_index)
                     .unwrap_or(0),
                 select,
+                button_element: doc.nodes[node].namespace == crate::html::Namespace::Html && tag(doc,node) == "button",
                 initial,
                 initially_checked: checked,
                 image_point: (0, 0),
@@ -1028,7 +1040,11 @@ impl Forms {
                     control.set_selection(selected);
                     continue;
                 }
-                set_form_value(&mut control.value, &control.initial, control.kind);
+                // An actual BUTTON value remains in current-attribute mode;
+                // the shared INPUT activation kinds retain their old path.
+                if !control.button_element {
+                    set_form_value(&mut control.value, &control.initial, control.kind);
+                }
                 if matches!(control.kind, Kind::Text | Kind::TextArea) {
                     control.dirty_value = false;
                 }
@@ -1411,6 +1427,9 @@ mod select_fragments;
 mod hidden_inputs;
 #[path = "forms_text_inputs.rs"]
 mod text_inputs;
+#[path = "forms_buttons.rs"]
+mod buttons;
+pub(crate) use buttons::{button_caption_node, button_caption_work, validate_button_caption, ButtonAttributePlan};
 pub(crate) use text_inputs::TextInputPlan;
 pub(crate) use select_fragments::{fragment_text_input, SelectFormPlan};
 

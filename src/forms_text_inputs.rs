@@ -64,10 +64,10 @@ pub(super) fn text_control(doc: &Document, node: usize, name: &str, initial: &st
         readonly: doc.attr(node, "readonly").is_some(), required: doc.attr(node, "required").is_some(), checked: false,
         max_length: doc.attr(node, "maxlength").and_then(|value| value.parse().ok()).unwrap_or(MAX_VALUE_UNITS).min(MAX_VALUE_UNITS),
         tab_index: doc.attr(node, "tabindex").and_then(parse_tab_index).unwrap_or(0), select: None,
-        initial: copy_text(initial)?, initially_checked: false, image_point: (0, 0) }, retained))
+        button_element: false, initial: copy_text(initial)?, initially_checked: false, image_point: (0, 0) }, retained))
 }
 
-fn control_payload(control: &Control) -> Result<usize, String> {
+pub(super) fn control_payload(control: &Control) -> Result<usize, String> {
     let live = control.value.chars.iter().map(|ch| ch.len_utf8()).sum::<usize>();
     let mut bytes = control.name.len().checked_add(control.initial.len().max(live)).ok_or("Native form payload overflow.")?;
     if let Some(select) = &control.select {
@@ -83,7 +83,7 @@ fn control_payload(control: &Control) -> Result<usize, String> {
 }
 
 impl Forms {
-    fn text_payload(&self, changed: Option<(usize, &str, usize)>) -> Result<usize, String> {
+    pub(super) fn text_payload(&self, changed: Option<(usize, &str, usize)>) -> Result<usize, String> {
         if self.limited || self.controls.len() > MAX_CONTROLS {
             return Err("Native form limits already exceeded; no text INPUT was changed.".into());
         }
