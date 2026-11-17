@@ -1,8 +1,46 @@
+<div align="center">
+
 # Changes
+
+*Source history, measured progress, and immutable published snapshots.*
+
+[Home](README.md) · [Roadmap](docs/ROADMAP.md) · [Compatibility](docs/COMPATIBILITY.md) · [Release procedure](docs/RELEASING.md)
+
+</div>
+
+---
+
+> [!NOTE]
+> Versioned entries below retain their historical wording and scope. Their
+> original gaps and release-time procedures do not override the current roadmap
+> or imply that later source changes are present in an old download.
 
 ## Unreleased
 
-No additional completed milestone is recorded beyond the release target below.
+Integrated development through `a65d37c` on November 17, 2026 includes:
+
+- [PR #29](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/29): bounded
+  String.prototype.concat, finite hidden-input state, genuine Node.getRootNode
+  and independent legacy/modern compatibility fixtures.
+- [PR #30](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/30): scoped live
+  anchor HTTP(S) URL reflection.
+- [PR #32](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/32): staged native
+  text INPUT fragments, retained dirty/default values, Reset and focus retirement.
+  Its modern jQuery fixture initializes; the later Event correction below covers
+  the pinned trusted-input/timer workflow.
+- [PR #33](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/33): refreshed
+  README/roadmap presentation and explicit current CI/release boundaries.
+- [PR #31](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/31): bounded
+  inherited CSS custom properties for supported padding/border values, with
+  original pixel, hit-target and reflow evidence; broader styling remains partial.
+- [PR #34](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/34): ordinary
+  string/symbol property lookup for dispatched base Events, retaining native
+  state and access guards. The unchanged pinned modern jQuery app passes startup,
+  trusted input and asynchronous timer text update; no full-framework claim.
+
+These changes are newer than the fixed alpha.2 assets. No next release version or
+publication date is reserved. Named releases remain owner-request-only; current
+local/hosted checks and agent-owned failure diagnosis remain in place.
 
 ## 0.81.0-alpha.2
 

@@ -1,4 +1,16 @@
+<div align="center">
+
 # Explicit HTTPS trust
+
+*Reviewed certificate data. Original verification. No silent trust expansion.*
+
+[Home](../README.md) · [Security](../SECURITY.md) · [Capabilities](../docs/CAPABILITIES.md) · [Third-party notices](../THIRD_PARTY_NOTICES.md)
+
+</div>
+
+---
+
+[Default selection](#default-data-and-selection) · [Custom stores](#explicit-custom-stores-and-verifier-bounds) · [Offline refresh](#reviewed-offline-refresh)
 
 ChezCat reads `trust/roots.pem` beside the executable once at startup. The file
 contains certificate data; the browser's original Rust TLS, X.509, RSA and ECDSA

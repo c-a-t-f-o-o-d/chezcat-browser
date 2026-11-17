@@ -1,4 +1,19 @@
+<div align="center">
+
 # Accepting CSAPUL 1.1
+
+*An explicit offline choice, with a minimal local receipt.*
+
+[Home](../README.md) · [Documentation](README.md) · [License](../LICENSE) · [Contributing](../CONTRIBUTING.md)
+
+</div>
+
+---
+
+> [!NOTE]
+> The implemented commands and receipt locations are documented in the
+> [build guide](BUILDING.md#license-receipts-and-command-line-use). The policy text
+> below is preserved; this presentation update does not change the terms.
 
 The exact root LICENSE and LICENSE_SCOPE.md control. Acceptance is not copyright
 registration, proof that all material is copyrightable, or permission to bypass

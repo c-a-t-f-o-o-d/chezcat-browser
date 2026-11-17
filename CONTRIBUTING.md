@@ -1,4 +1,16 @@
+<div align="center">
+
 # Contributing
+
+*Useful reports, accurate provenance, and explicit inclusion rights.*
+
+[Home](README.md) · [Security](SECURITY.md) · [Privacy](docs/CONTRIBUTOR_PRIVACY.md) · [Contributor record](CONTRIBUTORS.md)
+
+</div>
+
+---
+
+[Feedback](#feedback-versus-material-for-inclusion) · [Visibility](#public-versus-private-submissions) · [Review process](#review-and-acceptance-process) · [Intake](#intake-controls-and-privacy)
 
 ChezCat welcomes ordinary bug reports, compatibility observations and feature suggestions. Submit ordinary issues through the official repository. Use the private security-reporting route for sensitive findings.
 

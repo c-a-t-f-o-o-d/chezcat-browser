@@ -1,4 +1,14 @@
+<div align="center">
+
 # Third-party and provenance scope
+
+*Separate materials keep their separate rights and notices.*
+
+[Home](README.md) · [License scope](LICENSE_SCOPE.md) · [Trust data](trust/README.md) · [Public-suffix data](data/public_suffix/README.md)
+
+</div>
+
+---
 
 CSAPUL applies only to Covered Material designated in LICENSE_SCOPE.md. It does
 not override separate terms, prior grants or independent rights. Preserve the
