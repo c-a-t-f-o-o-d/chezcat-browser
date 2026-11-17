@@ -121,7 +121,7 @@ enum Target {
     Member { receiver: Value, key: PropertyKey, function: Option<Value> },
     Chain(CallTarget),
     Construct(Value),
-    Super(super::derived_context::SuperCallTarget),
+    Super(Box<super::derived_context::SuperCallTarget>),
 }
 
 impl Target {
@@ -788,9 +788,12 @@ impl Runtime {
         scratch: &mut Scratch<'p>, env: usize, this: &Value, host: &mut dyn Host,
     ) -> Result<Transition<'p>, Fault> {
         match state {
-            State::StartSuper { target, arguments } => self.next_heap_argument(Call {
-                target: Target::Super(target), arguments, index: 0, start: scratch.arguments.len(), after: AfterCall::Value,
-            }, scratch, env, this, host),
+            State::StartSuper { target, arguments } => {
+                self.work_as(std::mem::size_of::<super::derived_context::SuperCallTarget>(), super::WorkKind::ArgumentCapture)?;
+                self.next_heap_argument(Call {
+                    target: Target::Super(Box::new(target)), arguments, index: 0, start: scratch.arguments.len(), after: AfterCall::Value,
+                }, scratch, env, this, host)
+            }
             State::SuperCallee(arguments) => {
                 let Completion::Reference(reference) = completion else { unreachable!() };
                 let function = self.read_reference(&reference, host)?;
@@ -932,8 +935,16 @@ impl Runtime {
             Target::Member { receiver, key, function } => self.invoke_member_call(receiver, key, function, arguments, host),
             Target::Chain(target) => self.invoke_chain_call(target, arguments, host),
             Target::Construct(constructor) => self.construct_value(constructor, arguments, host),
-            Target::Super(target) => self.finish_super_call(target, arguments, host),
+            Target::Super(target) => self.invoke_heap_super_target(target, arguments, host),
         }
+    }
+
+    #[inline(never)]
+    fn invoke_heap_super_target(&mut self, target: Box<super::derived_context::SuperCallTarget>, arguments: &[Value], host: &mut dyn Host) -> Result<Value, Fault> {
+        // Keep unboxing and construction-only scratch outside the shared target
+        // dispatcher. Its super arm carries a pointer instead of an inline
+        // constructor Value through every ordinary Invoke activation.
+        self.finish_super_call(*target, arguments, host)
     }
 
     fn finish_heap_chain<'p>(&mut self, current: Completion, end: ChainEnd, _host: &mut dyn Host)

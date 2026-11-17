@@ -8659,7 +8659,11 @@ impl Runtime {
                 if value.bytes() > self.limits.capacity.string_bytes { return Err(self.string_limit_fault()); }
             }
             if this.bytes() > self.limits.capacity.string_bytes { return Err(self.string_limit_fault()); }
-            self.call_script_value(index, args, this, new_target, host)
+            if self.is_derived_script_constructor(index) {
+                self.call_derived_script_value(index, args, this, new_target, host)
+            } else {
+                self.call_script_value(index, args, this, new_target, host)
+            }
         })();
         self.restore_transient_marker(marker);
         result
@@ -8739,6 +8743,12 @@ impl Runtime {
         // Program/template borrows out of the persistent call-forwarding frame.
         matches!(self.functions.get(index), Some(Function::Script { program, template, .. })
             if !program.templates[*template].class_constructor)
+    }
+
+    #[inline(never)]
+    fn is_derived_script_constructor(&self, index: usize) -> bool {
+        matches!(self.functions.get(index), Some(Function::Script { program, template, .. })
+            if program.templates[*template].derived_constructor)
     }
 
     #[inline(never)]
@@ -8986,6 +8996,52 @@ impl Runtime {
         let result = (|| {
             self.script_parameters_and_body(&program, template, index, parent, args, &this, host)
         })();
+        self.call_depth -= 1;
+        self.transient_roots.owned_call_depth -= 1;
+        self.strict = previous_strict;
+        self.invocation = previous_invocation;
+        self.restore_transient_marker(marker);
+        result
+    }
+
+    // Derived completion may execute real default-super construction before
+    // releasing its invocation environment. Keep that completion pipeline out
+    // of the qualified ordinary Script entry and its direct immutable body.
+    #[inline(never)]
+    fn call_derived_script_value(
+        &mut self, index: usize, args: &[Value], this: Value, new_target: Option<usize>, host: &mut dyn Host,
+    ) -> Result<Value, Fault> {
+        if self.call_depth >= MAX_CALL_DEPTH {
+            return Err(Fault::new("Function call limit reached (32)."));
+        }
+        let Function::Script { program, template, environment, .. } = &self.functions[index]
+            else { unreachable!() };
+        let (program, template, parent) = (program.clone(), *template, *environment);
+        debug_assert!(program.templates[template].derived_constructor && program.templates[template].strict);
+        let marker = self.transient_marker();
+        let previous_invocation = self.invocation;
+        if let Err(error) = self.register_script_invocation_inputs(index, parent, &this, new_target) {
+            self.invocation = previous_invocation;
+            self.restore_transient_marker(marker);
+            return Err(error);
+        }
+        #[cfg(test)]
+        if let Some(observe) = self.transient_roots.script_input_observer { observe(self, index, args, &this); }
+        self.transient_roots.script_entries = self.transient_roots.script_entries.saturating_add(1);
+        if self.transient_roots.inhibited == 0 {
+            self.transient_roots.uninhibited_script_entries = self.transient_roots.uninhibited_script_entries.saturating_add(1);
+        }
+        if let Err(error) = self.collect_function_candidates_at_entry() {
+            self.release_unentered_invocation(index);
+            self.invocation = previous_invocation;
+            self.restore_transient_marker(marker);
+            return Err(error);
+        }
+        self.call_depth += 1;
+        let previous_strict = self.strict;
+        self.transient_roots.owned_call_depth += 1;
+        self.strict = program.templates[template].strict;
+        let result = self.derived_script_parameters_and_body(&program, template, index, parent, args, &this, host);
         self.call_depth -= 1;
         self.transient_roots.owned_call_depth -= 1;
         self.strict = previous_strict;

@@ -88,6 +88,41 @@ impl Runtime {
             program, template, callee, parent, args, this, host, &mut scopes,
         );
         self.finish_transient_inhibition(inhibited);
+        let result = match prepared {
+            Ok(body) => match self.statements(program, &program.templates[template].body, body, this, host) {
+                Ok(Control::Return(value)) => Ok(value),
+                Ok(Control::Normal(_)) => Ok(Value::Undefined),
+                Ok(_) => Err(Fault::new("Unexpected loop control outside a loop.")),
+                Err(error) => Err(error),
+            },
+            Err(error) => Err(error),
+        };
+        self.restore_transient_marker(marker);
+        for scope in scopes.into_iter().rev().flatten() {
+            self.release_environment(scope);
+        }
+        result
+    }
+
+    #[inline(never)]
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn derived_script_parameters_and_body(
+        &mut self,
+        program: &Rc<Program>,
+        template: usize,
+        callee: usize,
+        parent: usize,
+        args: &[Value],
+        this: &Value,
+        host: &mut dyn Host,
+    ) -> Result<Value, Fault> {
+        let mut scopes = [None; 4];
+        let marker = self.transient_marker();
+        let inhibited = self.inhibit_transient_collection();
+        let prepared = self.prepare_script_call(
+            program, template, callee, parent, args, this, host, &mut scopes,
+        );
+        self.finish_transient_inhibition(inhibited);
         let mut result = match prepared {
             Ok(body) => match self.statements(program, &program.templates[template].body, body, this, host) {
                 Ok(Control::Return(value)) => Ok(value),
