@@ -13,6 +13,9 @@ mod scope_candidate_tests;
 #[cfg(test)]
 #[path = "scope_collection_tests.rs"]
 mod scope_collection_tests;
+#[cfg(test)]
+#[path = "new_target_lifetime_tests.rs"]
+mod new_target_lifetime_tests;
 
 #[derive(Clone, Copy, Debug)]
 pub(super) enum Edge { Object(usize), Function(usize), Environment(usize) }
@@ -356,6 +359,9 @@ impl Runtime {
             + self.host_objects.len() + self.host_method_values.len() + exported.len()
             + self.exported_function_roots.len() + self.exported_object_roots.len())?;
         if transient { for &edge in &self.transient_roots.roots { graph.add(edge); } }
+        if let Some(target) = self.invocation.and_then(|context| context.new_target) {
+            graph.add(Edge::Function(target));
+        }
         graph.add(Edge::Environment(0));
         graph.add(Edge::Environment(self.global_environment));
         for realm in &self.intrinsic_realms { graph.add(Edge::Environment(realm.global_environment)); }
@@ -400,9 +406,12 @@ impl Runtime {
                     let Some(&properties) = self.function_properties.get(id) else { add(Edge::Object(usize::MAX)); continue; };
                     add(Edge::Object(properties));
                     match &self.functions[id] {
-                        Function::Script { environment, lexical_this, .. } => {
+                        Function::Script { environment, lexical_this, lexical_invocation, .. } => {
                             add(Edge::Environment(*environment));
                             if let Some(value) = lexical_this { Edge::value(value, &mut add); }
+                            if let Some(target) = lexical_invocation.and_then(|context| context.new_target) {
+                                add(Edge::Function(target));
+                            }
                         }
                         Function::Bound(bound) => bound.reachability_edges(&mut add),
                         Function::Promise(closure) => closure.reachability_edges(&mut add),

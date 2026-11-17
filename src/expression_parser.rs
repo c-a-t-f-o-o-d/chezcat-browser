@@ -237,6 +237,16 @@ impl Parser {
 
     fn constructor_expression(&mut self, at: usize) -> Result<ExprId, Fault> {
         self.need("new")?;
+        if self.eat(".") {
+            if !self.is("target") {
+                return Err(self.error("Expected target after new."));
+            }
+            self.current += 1;
+            if !self.new_target_allowed {
+                return Err(self.error("new.target requires an enclosing ordinary function."));
+            }
+            return self.expr(ExprKind::NewTarget, at);
+        }
         self.enter()?;
         let result = (|| {
             let constructor = self.expression_goal(Goal::member(false))?;

@@ -241,7 +241,7 @@ fn scratch_parser(source: &str, enclosing: usize) -> Parser {
         delimiter_ends: vec![usize::MAX; tokens.len()], tokens, deferred_bodies: Vec::new(),
         current: 0, depth: 0, expression_frames: enclosing, argument_entries: 0,
         if_branches: 0, strict: false, loops: Vec::new(), breakables: Vec::new(),
-        labels: Vec::new(), allow_in: false, functions: 0,
+        labels: Vec::new(), allow_in: false, functions: 0, new_target_allowed: false,
     }
 }
 
