@@ -45,7 +45,7 @@ class DiagnosticControls(unittest.TestCase):
             return scorecard.read_stage(folder, 'live')
 
     def test_stage_title_uses_live_activity_and_keeps_literal_entities(self):
-        result = self.title_stage('ChezCat test activity report\nStatus: complete\nPage title: Live &amp; title 雪\nJavaScript enabled: true')
+        result = self.title_stage('ChezCat test activity report\nStatus: complete\nPage title: Live &amp; title 雪\nJavaScript enabled: true\nImages enabled: true')
         self.assertTrue(result['paired'])
         self.assertEqual(result['title'], 'Live &amp; title 雪')
 
@@ -53,6 +53,12 @@ class DiagnosticControls(unittest.TestCase):
         for header in ('ChezCat test activity report\nStatus: complete',
                        'ChezCat test activity report\nPage title: First\nPage title: Ambiguous'):
             with self.subTest(header=header):
+                self.assertIsNone(self.title_stage(header)['title'])
+
+    def test_multiline_live_title_cannot_pass_as_its_first_line(self):
+        for title in ('Expected\nextra', 'Expected\rextra', 'Expected\nPage title: Extra'):
+            with self.subTest(title=title):
+                header = 'ChezCat test activity report\nStatus: complete\nPage title: ' + title + '\nJavaScript enabled: true\nImages enabled: true'
                 self.assertIsNone(self.title_stage(header)['title'])
 
     def reference_exception_case(self, app_error=None):
