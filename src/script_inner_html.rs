@@ -38,6 +38,10 @@ impl Bridge<'_> {
             self.state.work(1)?;
             let item = &self.doc.nodes[node];
             match &item.kind {
+                NodeKind::DocumentFragment => {
+                    self.state.work(item.children.len())?;
+                    stack.extend(item.children.iter().rev().map(|&child| (child, false, raw)));
+                }
                 NodeKind::Text(text) => escaped(self.state, &mut out, text, false, raw)?,
                 NodeKind::Comment(data) => {
                     self.state.work(data.len())?;

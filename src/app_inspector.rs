@@ -2269,6 +2269,7 @@ fn build_snapshot(app: &App) -> Snapshot {
                 };
                 let mut text = String::new();
                 match &item.kind {
+                    html::NodeKind::DocumentFragment => text.push_str("#document-fragment"),
                     html::NodeKind::Element { tag, attrs, .. } => {
                         let _ = write!(text, "<{tag}");
                         for attr in attrs.iter().take(8) {
@@ -2456,6 +2457,10 @@ fn selected_details(app: &App) -> Vec<String> {
     let (index, node) = node;
     let mut lines = vec![format!("Node {index}"), String::new()];
     match &node.kind {
+        html::NodeKind::DocumentFragment => {
+            lines.push("DocumentFragment: no element attributes or layout box.".into());
+            return lines;
+        }
         html::NodeKind::Comment(data) => {
             lines.push("Comment data:".into());
             lines.extend(data.lines().take(128).map(|line| truncate(line, 4096)));

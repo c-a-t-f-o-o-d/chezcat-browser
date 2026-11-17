@@ -1792,7 +1792,7 @@ impl Engine<'_> {
             return;
         };
         match &node.kind {
-            NodeKind::Comment(_) => {},
+            NodeKind::Comment(_) | NodeKind::DocumentFragment => {},
             NodeKind::Text(text) => self.text(text, &style, link),
             NodeKind::Element { tag, id, .. } => {
                 if style.display == Display::None
@@ -2484,7 +2484,7 @@ impl Engine<'_> {
         if depth > MAX_DEPTH || self.measure_visits >= 40_000 {
             return Intrinsic::default();
         }
-        if matches!(self.doc.nodes[node].kind, NodeKind::Comment(_)) { return Intrinsic::default(); }
+        if matches!(self.doc.nodes[node].kind, NodeKind::Comment(_) | NodeKind::DocumentFragment) { return Intrinsic::default(); }
         if let Some(value) = self.intrinsics[node] {
             return value;
         }
@@ -2494,7 +2494,7 @@ impl Engine<'_> {
             return Intrinsic::default();
         }
         let mut value = match &self.doc.nodes[node].kind {
-            NodeKind::Comment(_) => Intrinsic::default(),
+            NodeKind::Comment(_) | NodeKind::DocumentFragment => Intrinsic::default(),
             NodeKind::Text(text) => {
                 let advance = self.space_width(&style);
                 let shaped = self.font_spec(&style).map(|font| font.shape(text));
