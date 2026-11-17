@@ -116,7 +116,7 @@ impl Bridge<'_> {
                 if input && index != 0 {
                     let (doc, local) = view.source(index);
                     if doc.nodes[local].namespace != crate::html::Namespace::Html
-                        && !matches!(doc.nodes[local].kind,NodeKind::DocumentFragment) {
+                        && !(doc.nodes[local].namespace == crate::html::Namespace::None && matches!(doc.nodes[local].kind,NodeKind::DocumentFragment)) {
                         return Err(if kind == Some(Kind::Hidden) {
                             "Hidden input connection requires known HTML ancestry; no tree was changed."
                         } else {

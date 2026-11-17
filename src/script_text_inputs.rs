@@ -29,7 +29,10 @@ impl Bridge<'_> {
         for _ in 0..128 {
             let Some(index) = ancestor else { return Ok(()); };
             self.state.work(1)?;
-            if index == 0 || self.doc.nodes.get(index).is_none_or(|entry| entry.namespace != crate::html::Namespace::Html)
+            let fragment = self.doc.nodes.get(index).is_some_and(|entry|
+                entry.namespace == crate::html::Namespace::None && matches!(entry.kind,NodeKind::DocumentFragment))
+                && self.fragment_receiver(node_handle(index));
+            if index == 0 || self.doc.nodes.get(index).is_none_or(|entry| entry.namespace != crate::html::Namespace::Html) && !fragment
                 || index != node && (matches!(tag(self.doc,index), "head" | "script" | "style" | "template" | "iframe" | "object" | "datalist" | "select" | "option" | "optgroup")
                     || tag(self.doc,index) == "noscript" && self.doc.scripting_enabled) {
                 return Err("Text INPUT admission requires detached known HTML ancestry outside inert/native interiors.".into());

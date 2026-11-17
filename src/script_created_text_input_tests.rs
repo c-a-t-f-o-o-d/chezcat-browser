@@ -423,3 +423,131 @@ var refusedCalls=0, refusedType={toString:function(){refusedCalls++;return 'hidd
         assert_eq!(copy_cost(false,existing_hidden),copy_cost(true,existing_hidden), "Type dispatch must charge one converted RHS");
     }
 }
+
+#[test]
+fn created_text_input_fragment_bare_admission_edits_and_connected_splice_preserve_state() {
+    let (mut doc, mut forms, mut page) = fixture();
+    let neighbor = id(&doc, "neighbor");
+    forms.script_set_value(neighbor, "neighbor kept").unwrap();
+    forms.controls.get_mut(&neighbor).unwrap().value.cursor = 2;
+    forms.controls.get_mut(&neighbor).unwrap().value.anchor = 5;
+    let preserved = controls(&forms).into_iter().find(|row| row.0 == neighbor).unwrap();
+    run(&mut doc, &mut forms, &mut page, r#"
+var fragment=document.createDocumentFragment(),list=fragment.childNodes,input=document.createElement('input');input.id='fragment-input';
+fragment.appendChild(input);
+if(fragment.nodeType!==11||input.parentNode!==fragment||input.getRootNode()!==fragment||input.form!==null)throw 'genuine detached parent';
+if(input.name!==''||input.value!==''||input.defaultValue!=='')throw 'bare native state';
+input.setAttribute('type','text');input.name='q';input.defaultValue='initial';input.value='edited';input.defaultValue='reset';
+if(input.value!=='edited'||input.defaultValue!=='reset'||input.name!=='q'||input.isConnected)throw 'detached dirty/default state';
+"#);
+    let input = id(&doc, "fragment-input");
+    assert_eq!(forms.controls[&input].kind, Kind::Text);
+    assert_eq!(forms.controls[&input].owner, None);
+    assert!(forms.controls[&input].dirty_value);
+    let editor = &mut forms.controls.get_mut(&input).unwrap().value;
+    editor.cursor = 1; editor.anchor = 4; editor.offset = 1;
+    run(&mut doc, &mut forms, &mut page, r#"
+if(document.getElementById('host').appendChild(fragment)!==fragment||list.length!==0||fragment.parentNode!==null)throw 'donor splice';
+if(input.parentNode!==document.getElementById('host')||input.getRootNode()!==document||!input.isConnected||input.form!==document.getElementById('f'))throw 'connected native owner';
+if(input.value!=='edited'||input.defaultValue!=='reset')throw 'splice replaced editor';
+"#);
+    assert_eq!(forms.controls[&input].owner, Some(id(&doc, "f")));
+    assert_eq!((forms.controls[&input].value.cursor, forms.controls[&input].value.anchor, forms.controls[&input].value.offset), (1, 4, 1));
+    assert_eq!(controls(&forms).into_iter().find(|row| row.0 == neighbor), Some(preserved));
+    assert_eq!(query(&doc, &forms, "f").as_deref(), Some("neighbor=neighbor+kept&q=edited"));
+}
+
+#[test]
+fn created_text_input_fragment_transfers_keep_one_native_editor_until_document_insertion() {
+    let (mut doc, mut forms, mut page) = fixture();
+    run(&mut doc, &mut forms, &mut page, r#"
+var first=new DocumentFragment(),second=document.createDocumentFragment(),input=document.createElement('input');input.id='transfer-input';
+first.appendChild(input);input.type='text';input.name='transfer';input.defaultValue='default';input.value='moved';
+"#);
+    let input = id(&doc, "transfer-input");
+    let count = forms.controls.len();
+    let editor = &mut forms.controls.get_mut(&input).unwrap().value;
+    editor.cursor = 1; editor.anchor = 4; editor.offset = 1;
+    let detached = controls(&forms);
+    run(&mut doc, &mut forms, &mut page, r#"
+second.appendChild(input);
+if(first.childNodes.length!==0||input.parentNode!==second||input.getRootNode()!==second||input.form!==null)throw 'ordinary fragment transfer';
+first.appendChild(second);
+if(second.childNodes.length!==0||input.parentNode!==first||input.getRootNode()!==first||input.form!==null)throw 'fragment donor transfer';
+"#);
+    assert_eq!(controls(&forms), detached);
+    run(&mut doc, &mut forms, &mut page, "document.getElementById('destination').appendChild(first);if(first.childNodes.length!==0||input.form!==document.getElementById('g')||input.getRootNode()!==document||input.value!=='moved'||input.defaultValue!=='default')throw 'final native transfer';");
+    assert_eq!(forms.controls.len(), count);
+    assert_eq!(forms.controls[&input].owner, Some(id(&doc, "g")));
+    assert!(forms.controls[&input].dirty_value);
+    assert_eq!((forms.controls[&input].value.cursor, forms.controls[&input].value.anchor, forms.controls[&input].value.offset), (1, 4, 1));
+    assert_eq!(query(&doc, &forms, "g").as_deref(), Some("transfer=moved"));
+    assert_eq!(query(&doc, &forms, "f").as_deref(), Some("neighbor=original"));
+}
+
+#[test]
+fn created_text_input_fragment_internal_fresh_payload_splice_checks_combined_retained_limit() {
+    let (mut doc, mut forms, mut page) = fixture();
+    run(&mut doc, &mut forms, &mut page, "document.getElementById('host').innerHTML='<span id=old>old</span>';var donor=new DocumentFragment(),a=document.createElement('input'),b=document.createElement('input');a.id='a';b.id='b';");
+    let donor = doc.nodes.iter().position(|node| matches!(node.kind, NodeKind::DocumentFragment)).unwrap();
+    let host = id(&doc, "host");
+    let inputs = [id(&doc, "a"), id(&doc, "b")];
+    // Internal topology only: public append already admits each input. Raw
+    // nonempty attributes let this control exercise admission during a splice.
+    for (node, name, value) in [(inputs[0], "qa", "one"), (inputs[1], "qb", "two")] {
+        let NodeKind::Element { attrs, .. } = &mut doc.nodes[node].kind else { unreachable!() };
+        for (key, text) in [("name", name), ("value", value)] {
+            attrs.push(crate::html::Attribute { name: crate::html::AttributeName::unqualified(key.into()), value: text.into() });
+            page.state.retained += key.len() + text.len();
+        }
+        page.state.tree.parents[node] = Some(donor);
+    }
+    doc.nodes[donor].children = inputs.to_vec();
+    page.state.dirty = true;
+    page.state.rebuild(&doc).unwrap();
+    let original = controls(&forms);
+    let children = [donor, host].map(|node| doc.nodes[node].children.clone());
+    let parents = page.state.tree.parents.clone();
+    let connected = page.state.dom.connected.clone();
+    let retained = page.state.retained;
+    let commits = page.state.dom_commits;
+    let one_native = 2 + 3 + 3 + 3 * std::mem::size_of::<char>();
+    let mut bridge = Bridge { doc: &mut doc, forms: &mut forms, state: &mut page.state };
+    bridge.doc.nodes[donor].namespace = crate::html::Namespace::UnknownForeign;
+    assert!(bridge.prepare_created_text_plan(inputs[0], None, None).is_err(), "A fragment kind cannot bypass unknown foreign provenance");
+    bridge.doc.nodes[donor].namespace = crate::html::Namespace::None;
+    let staged = bridge.prepare_created_text_plan(inputs[0], None, None).unwrap();
+    assert_eq!(staged.retained_bytes(), one_native, "Fresh admission accepts a genuine detached fragment ancestor");
+    drop(staged);
+    assert_eq!(controls(bridge.forms), original);
+    bridge.state.retained_limit = retained + 2 * one_native - 1;
+    assert!(bridge.splice_document_fragment(host, "appendChild", &[Value::Host(node_handle(donor))]).is_err());
+    assert_eq!([donor, host].map(|node| bridge.doc.nodes[node].children.clone()), children);
+    assert_eq!(bridge.state.tree.parents, parents);
+    assert_eq!(bridge.state.dom.connected, connected);
+    assert_eq!(controls(bridge.forms), original);
+    assert_eq!(bridge.state.retained, retained);
+    assert_eq!(bridge.state.dom_commits, commits);
+    assert!(!bridge.state.images.has_changes());
+    drop(bridge);
+    assert!(page.take_dynamic_scripts().is_empty());
+    assert!(page.take_dynamic_stylesheets().is_empty());
+    assert!(page.take_image_changes().2.is_empty());
+    let mut bridge = Bridge { doc: &mut doc, forms: &mut forms, state: &mut page.state };
+    bridge.state.retained_limit = retained + 2 * one_native;
+    bridge.splice_document_fragment(host, "appendChild", &[Value::Host(node_handle(donor))]).unwrap();
+    assert!(bridge.doc.nodes[donor].children.is_empty());
+    assert_eq!(&bridge.doc.nodes[host].children[children[1].len()..], &inputs);
+    assert_eq!(bridge.state.retained, retained + 2 * one_native);
+    for (node, name, value) in [(inputs[0], "qa", "one"), (inputs[1], "qb", "two")] {
+        let control = &bridge.forms.controls[&node];
+        assert_eq!(control.kind, Kind::Text);
+        assert_eq!(control.name, name);
+        assert_eq!(control.value.text(), value);
+        assert_eq!(bridge.forms.text_default_value(node).unwrap(), value);
+        assert_eq!(control.owner, Some(id(bridge.doc, "f")));
+        assert!(!control.dirty_value);
+        assert!(bridge.state.dom.connected[node]);
+        assert_eq!(bridge.state.tree.parents[node], Some(host));
+    }
+}
