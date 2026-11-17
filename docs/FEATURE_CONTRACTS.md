@@ -337,6 +337,26 @@ Semantic references: [DOM createComment](https://dom.spec.whatwg.org/#dom-docume
 [Comment](https://dom.spec.whatwg.org/#interface-comment), and
 [ECMAScript 2025 ToString](https://262.ecma-international.org/16.0/#sec-tostring).
 
+## CP6 — bounded String.prototype.concat
+
+One genuine native method uses the existing generic String receiver conversion,
+then converts arguments once in order with the string hint and returns a primitive
+string. Live conversion hooks may replace later hooks, reenter the method or throw;
+saved native identity, callback realms and abrupt-completion identity are retained.
+The method has native arity one and ordinary writable/configurable, non-enumerable
+prototype metadata. Existing native-capability denial, byte/copy/step allowances,
+root guards and explicit lone-surrogate refusal remain; no Array.concat change,
+polyfill or library-specific route is admitted.
+
+Nine original VM/realm/App groups cover generic/boxed receivers, argument and hook
+order, reentry, Symbol and abrupt failures, metadata/prototype changes, native
+denial and budget recovery. Actual software pointer down/up changes independent
+DOM/layout text pixels; down alone does not activate. Four adjacent substring
+groups pass. The unchanged Vue workload advances to object-prototype access and
+still fails initialization/input/async. This is a prerequisite, not whole-library
+support or physical desktop evidence. Normal regression and hosted integration
+remain required for the final candidate.
+
 ## CP5 — finite object-literal prototype setter
 
 Status: delivered finite prerequisite, integrated by
@@ -372,7 +392,8 @@ prior literal parse refusal. Both executions first fail at line11,column3613:
 an undefined noncallable concat member. This does not prove the later prototype
 literal ran. Loading, initial rendering and independent Foundation CSS pass;
 Vue initialization, reactive input and async stages fail in both configurations.
-Ordinary prototype membership/access remains a separate unobserved boundary.
+Ordinary prototype membership/access was unobserved at that checkpoint; the
+later CP6 recheck now reaches that separate boundary.
 No library edits, polyfill, reference substitution or visible Vue improvement is
 claimed; later missing-library errors remain cascades.
 
@@ -440,7 +461,7 @@ records this shared rendering correction. Each new checkpoint still requires
 exact normal/build/executable verification.
 At 1280x800, zoom100 and normal JavaScript, the original panels now share a row;
 at 640x800 they retain their original stacking. Vue execution is separate; the
-latest unchanged W3 first-root failure is recorded under CP5. No reactive
+latest unchanged W3 first-root failure is recorded under CP6. No reactive
 interaction or full-framework pass is claimed.
 
 Finite em media lengths use the same browser-owned initial16CSSpx font basis as

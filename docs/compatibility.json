@@ -9,16 +9,18 @@
     "dom_source_sha256": "19a6d0b92549926f971a0d181d501b694a3129b7a3d3bbedccafaf30c26bd570"
   },
   "active_pack": {
-    "id": "B2",
-    "status": "Shared-profile prerequisite implemented; normal integration required",
-    "scope": "One profile writer with revisioned App views and stale editor/gesture refusal; browser-owned download Manager with weak App snapshots and separate retargetable wake routing",
-    "native_status": "Original shared-profile and shared-download/App lifetime controls pass; affected UI/Manager checks pass; full normal required for each implementation checkpoint",
-    "next_dependency": "Stable page/session IDs, final shared history shutdown authority and terminal resource admission before actual tabs/windows",
+    "id": "string-concat",
+    "status": "Original prerequisite implemented and committed; public integration pending",
+    "source_commit": "8b3112d170c2bad2cbb9c44561c725aa90339409",
+    "scope": "Genuine generic String.prototype.concat with ordered receiver/argument conversions through existing realm, native-capability and work bounds",
+    "native_status": "Nine focused VM/realm/App controls pass, including actual software input and text-pixel changes; no physical desktop or framework pass inferred",
+    "workflow_scope": "Diagnostic development build identity is recorded separately on measured workflows; it is not rebound to this committed checkpoint",
+    "next_dependency": "Demonstrated hidden INPUT mutation/DOM behavior in legacy W2; Vue object-prototype access, modern jQuery getRootNode and Bootstrap class syntax remain separate measured blockers",
     "excluded": [
-      "Actual tab strip/new-switch-close tabs",
-      "New native windows/link dispositions",
-      "Standalone close-owner lifecycle",
-      "window.open/opener semantics"
+      "Array.concat changes",
+      "Framework-specific shims/polyfills",
+      "Whole-framework initialization",
+      "Release validation"
     ]
   },
   "workflows": [
@@ -54,7 +56,14 @@
       "source_commit": "5cee344992cbccf77657d14ee4a69dd278c76709",
       "executable_sha256": "9baefcf519566da75fccbde8a285d70acc2b8f68b07fc3b42057e3b9a0f86252",
       "first_root_location": "jQuery1.12.4 line1265,column4",
-      "stage_outcomes": {"load": "Passed", "initial_render": "Passed", "initialization": "Failed", "input": "Failed", "async": "Failed", "history": "Not applicable"}
+      "stage_outcomes": {
+        "load": "Passed",
+        "initial_render": "Passed",
+        "initialization": "Failed",
+        "input": "Failed",
+        "async": "Failed",
+        "history": "Not applicable"
+      }
     },
     {
       "id": "W3-css",
@@ -94,29 +103,175 @@
           266
         ]
       ],
-      "remaining": "Separate Vue prototype initialization failure remains; no reactive interaction pass"
+      "remaining": "Separate Vue object-prototype access failure at11:3808 remains in the post-concat development recheck; no reactive interaction pass"
     },
     {
       "id": "W3-reactive",
       "kind": "Vue2.7.16 original reactive component",
       "status": "Blocked",
-      "first_root": "Undefined noncallable concat member during execution",
-      "observed_first_roots": ["Object-prototype configuration unsupported during parsing", "Undefined noncallable concat member during execution"],
-      "source_commit": "abe2e3bd5bc8e967f4dd2e33ddc4f74ea4ddfd97",
-      "executable_sha256": "ed33208f918452be9e3506841dfe5f347997d09805d055a1f63c3c8b345853c1",
-      "first_root_location": "Vue2.7.16 runtime line11,column3613",
-      "measurement_scope": "Single unchanged W3 invocation, two configurations1280x800 and640x800, zoom100, JavaScript/images enabled; zero of two selected configuration passes among three workflow families",
-      "stage_outcomes": {"load": "Passed", "initial_render": "Passed", "generated_css": "Passed", "initialization": "Failed", "input": "Failed", "async": "Failed", "history": "Not applicable"},
-      "limits": "The whole file parses; the later prototype literal is not proved executed. Ordinary prototype membership/access remains an unobserved boundary; no Vue initialization or visible workflow improvement.",
-      "modern_tier": "Vue3 Proxy prerequisite missing"
+      "first_root": "Object prototype access is not implemented",
+      "observed_first_roots": [
+        "Object-prototype configuration unsupported during parsing",
+        "Undefined noncallable concat member during execution",
+        "Object prototype access is not implemented"
+      ],
+      "source_commit": "b3db29a470279ab6eb0f719b72c48f7a7b8b4f92",
+      "executable_sha256": "688a1318dba0fc81bbe383297b773248f95495d163d046b198201124cb8c5a28",
+      "first_root_location": "Vue2.7.16 runtime line11,column3808",
+      "measurement_scope": "One unchanged post-concat W3 invocation at1280x800 and640x800, zoom100, JavaScript/images enabled; zero of two selected configurations pass; diagnostic development build, not clean-source or release validation",
+      "stage_outcomes": {
+        "load": "Passed",
+        "initial_render": "Passed",
+        "generated_css": "Passed",
+        "initialization": "Failed",
+        "input": "Failed",
+        "async": "Failed",
+        "history": "Not applicable"
+      },
+      "limits": "Execution advances beyond the prior undefined concat failure at11:3613 to the explicit object-prototype access refusal at11:3808. Initial rendering/Foundation CSS pass; Vue initialization, reactive input and async remain failed. No visible Vue workflow improvement or whole-framework support is claimed.",
+      "modern_tier": "Vue3 Proxy prerequisite missing",
+      "previous_measurements": [
+        {
+          "source_commit": "abe2e3bd5bc8e967f4dd2e33ddc4f74ea4ddfd97",
+          "executable_sha256": "ed33208f918452be9e3506841dfe5f347997d09805d055a1f63c3c8b345853c1",
+          "first_root": "Undefined noncallable concat member during execution",
+          "first_root_location": "Vue2.7.16 runtime line11,column3613",
+          "measurement_scope": "Single unchanged W3 invocation, two configurations1280x800 and640x800, zoom100, JavaScript/images enabled; zero of two selected configuration passes among three workflow families",
+          "stage_outcomes": {
+            "load": "Passed",
+            "initial_render": "Passed",
+            "generated_css": "Passed",
+            "initialization": "Failed",
+            "input": "Failed",
+            "async": "Failed",
+            "history": "Not applicable"
+          },
+          "limits": "The whole file parses; the later prototype literal is not proved executed. Ordinary prototype membership/access remains an unobserved boundary; no Vue initialization or visible workflow improvement."
+        }
+      ],
+      "dirty": true,
+      "build_provenance": {
+        "source_commit": "b3db29a470279ab6eb0f719b72c48f7a7b8b4f92",
+        "dirty": true,
+        "executable_sha256": "688a1318dba0fc81bbe383297b773248f95495d163d046b198201124cb8c5a28",
+        "source_map_sha256": "aa7500d92c6b8c0a7c7fcda11cafa331393bc42562044662d8200060a1018ce8",
+        "cargo_version": "cargo 1.99.1 (5f94df478 2026-08-27)",
+        "profile": "existing development profile; not release validation"
+      },
+      "reference_browser": "Not run for this invocation"
+    },
+    {
+      "id": "modern-jquery",
+      "kind": "Unmodified jQuery4.0.0 separate original input/update app",
+      "status": "Tested selected workflow; blocked during initialization",
+      "build_provenance": {
+        "source_commit": "b3db29a470279ab6eb0f719b72c48f7a7b8b4f92",
+        "dirty": true,
+        "executable_sha256": "688a1318dba0fc81bbe383297b773248f95495d163d046b198201124cb8c5a28",
+        "source_map_sha256": "aa7500d92c6b8c0a7c7fcda11cafa331393bc42562044662d8200060a1018ce8",
+        "cargo_version": "cargo 1.99.1 (5f94df478 2026-08-27)",
+        "profile": "existing development profile; not release validation"
+      },
+      "configurations": [
+        [
+          1280,
+          800
+        ]
+      ],
+      "zoom": 100,
+      "javascript_enabled": true,
+      "profile": "--no-profile",
+      "stage_outcomes": {
+        "load": "Passed",
+        "parse": "Not established",
+        "initialization": "Failed",
+        "render": "Passed",
+        "input": "Failed",
+        "async": "Failed"
+      },
+      "first_root": "Element property \"getRootNode\" is not supported.",
+      "first_root_location": "jQuery4.0.0 line4321,column7",
+      "cascades_count_as_roots": false,
+      "reference_browser": "Not run",
+      "measurement_scope": "One bounded local App invocation per selected configuration; original paired document/layout/pixels and independent control are ChezCat output; no whole-library pass",
+      "parse_scope": "Conservative runner reports Not established; the first explicit failure is retained without inferring all dormant paths parsed",
+      "render_scope": "Initial authored page and independent control render; no jQuery-driven visible update or timer pass"
+    },
+    {
+      "id": "modern-bootstrap",
+      "kind": "Unmodified Bootstrap5.3.9 CSS/bundle separate original responsive/dropdown app",
+      "status": "Tested selected workflow; blocked during initialization",
+      "build_provenance": {
+        "source_commit": "b3db29a470279ab6eb0f719b72c48f7a7b8b4f92",
+        "dirty": true,
+        "executable_sha256": "688a1318dba0fc81bbe383297b773248f95495d163d046b198201124cb8c5a28",
+        "source_map_sha256": "aa7500d92c6b8c0a7c7fcda11cafa331393bc42562044662d8200060a1018ce8",
+        "cargo_version": "cargo 1.99.1 (5f94df478 2026-08-27)",
+        "profile": "existing development profile; not release validation"
+      },
+      "configurations": [
+        [
+          1280,
+          800
+        ],
+        [
+          640,
+          800
+        ]
+      ],
+      "zoom": 100,
+      "javascript_enabled": true,
+      "profile": "--no-profile",
+      "stage_outcomes": {
+        "load": "Passed",
+        "parse": "Not established",
+        "initialization": "Failed",
+        "render": "Passed",
+        "input": "Failed",
+        "async": "Not applicable",
+        "framework_layout": "Passed"
+      },
+      "first_root": "Unsupported syntax \"class\".",
+      "first_root_location": "Bootstrap5.3.9 bundle line599,column3",
+      "cascades_count_as_roots": false,
+      "reference_browser": "Not run",
+      "measurement_scope": "One bounded local App invocation per selected configuration; original paired document/layout/pixels and independent control are ChezCat output; no whole-library pass",
+      "parse_scope": "Conservative runner reports Not established; the first explicit failure is retained without inferring all dormant paths parsed",
+      "dependencies": {
+        "popper": "2.11.8, included in the pinned bundle",
+        "jquery": "Not loaded; independent workload"
+      },
+      "render_scope": "Unmodified Bootstrap CSS places the original cards beside each other at1280 and stacks them at640; dropdown input remains failed"
     },
     {
       "id": "reference",
       "kind": "Independent browser",
       "initial_dom_pixels": "Captured",
-      "interactions": "Not run"
+      "interactions": "Not run",
+      "scope": "Historical initial captures only; no reference-browser run for the post-concat W3 or modern measurements"
     }
   ],
+  "modern_assessment": {
+    "input_manifest": "tools/fixtures/compatibility-modern/inputs.json",
+    "input_manifest_sha256": "61261579acf07352274a03be6562d206b0eda27474a00da7fab16dd949eb1bae",
+    "versions": {
+      "jquery": "4.0.0",
+      "bootstrap": "5.3.9",
+      "popper": "2.11.8"
+    },
+    "workflow_denominator": 2,
+    "configuration_denominator": 3,
+    "passed_configurations": 0,
+    "reference_browser": "Not run",
+    "input_scope": "Pinned unmodified development-only distributions/notices; legacy W2 assets and its historical hidden-input measurement are unchanged",
+    "integrity_checks": {
+      "original_fixtures_unchanged": true,
+      "inputs_unchanged": true,
+      "executable_unchanged": true,
+      "build_record_unchanged": true,
+      "helpers_unchanged": true
+    }
+  },
   "platform": [
     {
       "area": "ECMAScript grammar/environments/completions/calls",
@@ -261,7 +416,15 @@
     {
       "name": "jQuery",
       "role": "browser runtime",
-      "status": "Not assessed"
+      "status": "Partial; selected legacy and modern workflows blocked",
+      "measured_versions": [
+        "1.12.4",
+        "4.0.0"
+      ],
+      "workflow_refs": [
+        "W2",
+        "modern-jquery"
+      ]
     },
     {
       "name": "React",
@@ -301,7 +464,15 @@
     {
       "name": "Bootstrap",
       "role": "compiled CSS plus browser JS",
-      "status": "Not assessed"
+      "status": "Partial; selected CSS renders while JavaScript workflows remain blocked",
+      "measured_versions": [
+        "3.4.1",
+        "5.3.9"
+      ],
+      "workflow_refs": [
+        "W2",
+        "modern-bootstrap"
+      ]
     },
     {
       "name": "Tailwind",
@@ -480,12 +651,14 @@
     "Initial reference captures are not interaction passes",
     "Unavailable test hosts are not language assertion failures",
     "Cascades are separated from the first root",
-    "No public service or whole-family outcome inferred"
+    "No public service or whole-family outcome inferred",
+    "Dirty development-build HEAD, executable digest and source-map hash remain explicit; later committed source is not substituted as the compiled identity",
+    "Modern parse Not established is distinct from initialization failure and from observed initial rendering"
   ],
   "next": [
-    "Complete exact-source integration of finite literal-prototype setters with genuine App input/pixels",
-    "Retain measured INPUT type=hidden mutation as the next W2 blocker without repeating unchanged W2",
-    "Reduce the actual Vue concat execution dependency separately; CP4 select/native ownership and finite B2 tabs/windows are integrated"
+    "Integrate the original concat prerequisite through normal full-regression/PR/CI safeguards; no automatic release",
+    "Fix the demonstrated legacy W2 hidden INPUT mutation/DOM blocker while retaining separate modern measurements",
+    "Rank Vue object-prototype access, modern jQuery getRootNode, Bootstrap class syntax and visible CSS/resource defects by shared page impact; add modern Vue/React when prerequisites become actionable"
   ],
   "selected_standard_controls": {
     "suite": "Selected Test262 slice mode runs",
@@ -521,7 +694,7 @@
       "status": "Delivered prerequisite slice"
     }
   ],
-  "last_complete_pack": "CP1",
+  "last_complete_pack": "CP5",
   "completed_prerequisite_packs": [
     {
       "id": "CP1",
@@ -529,11 +702,11 @@
     },
     {
       "id": "CP2",
-      "status": "Prerequisite",
+      "status": "Delivered finite prerequisite; integrated",
       "scope": "Genuine main-Document Comment factory/data/topology and existing native RegExp exec/test input ToString",
-      "native_status": "Focused original Page/App/language controls passed; normal/build/executable integration required",
+      "native_status": "Focused original Page/App/language controls passed; integrated source is included in published36adf20",
       "inherits_limits": "Existing CP1 host/VM admission policies; no quota expansion",
-      "next_dependency": "This legacy workflow: checked HTML fragment select/option structure; responsive CSS is independently actionable",
+      "next_dependency": "Historical select-fragment dependency was delivered by CP4; latest legacy W2 blocker is hidden INPUT mutation",
       "excluded": [
         "Parsed comments",
         "Full Comment/CharacterData interfaces",
@@ -544,6 +717,16 @@
         "RegExp constructor pattern/flag conversion",
         "Whole-library support"
       ]
+    },
+    {
+      "id": "CP4",
+      "status": "Delivered finite prerequisite; integrated",
+      "scope": "Conventional select fragments and staged native ownership with retained whole-container state; hidden INPUT mutation remains distinct"
+    },
+    {
+      "id": "CP5",
+      "status": "Delivered finite prerequisite; integrated",
+      "scope": "Finite static colon literal prototype setters with existing chain guards and actual App input/text-pixel controls; broader prototype access remains unsupported"
     }
   ],
   "completed_capability_packs": [
@@ -553,13 +736,25 @@
       "scope": "Initial-font em media, typed terminal before/after stylesheet targets, explicit box-sizing inheritance and fractional flex line fitting",
       "native_status": "Original responsive/App and flex checks passed; full normal/build/executable gates required",
       "inherits_limits": "Existing stylesheet/selector/match/layout budgets; no quota expansion",
-      "next_dependency": "B2 shared page/session ownership and retirement, then actual tabs/link dispositions/windows",
+      "next_dependency": "Finite B2 tabs/windows were delivered; subsequent CSS/resource defects are ranked alongside measured language/DOM blockers",
       "excluded": [
         "Generated-content painting",
         "DOM-query pseudo-target support",
         "Wider media units and font scheduling",
         "Vue initialization/reactive interaction",
         "Whole-framework support"
+      ]
+    },
+    {
+      "id": "B2",
+      "status": "Delivered finite tabs/windows/link/context milestone",
+      "source_commit": "36adf203291cf25e05adceb222e18c0668dfb38d",
+      "scope": "Browser-owned shared profile/download/history authorities, bounded Session/App owners, native tabs/windows/shortcuts/pinned inspectors and guarded primary/middle/context link dispositions",
+      "validation": "Source-scoped normal/optimized, hosted and six-group native desktop acceptance; actual published alpha.2 downloaded/extracted offline runtime checks passed",
+      "excluded": [
+        "Named browsing contexts",
+        "window.open/opener semantics",
+        "Broader accessibility"
       ]
     }
   ]
