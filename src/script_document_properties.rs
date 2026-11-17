@@ -5,6 +5,9 @@ use super::*;
 impl Bridge<'_> {
     pub(super) fn document_native_property(&self, name: &str) -> bool {
         dom_tree::native_node_member(name)
+            // An unavailable native factory keeps its diagnostic dispatch;
+            // its presence/callable exposure remains controlled by the gate.
+            || name == "createEvent"
             || self.method(DOCUMENT, name).is_some()
             // The fixed startup table also owns legacy prebound methods that
             // Host::method does not expose through dynamic native dispatch.

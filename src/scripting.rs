@@ -4922,6 +4922,10 @@ mod script_document_own_descriptor_tests;
 mod script_document_prebound_methods_tests;
 
 #[cfg(test)]
+#[path = "script_document_dispatch_tests.rs"]
+mod script_document_dispatch_tests;
+
+#[cfg(test)]
 #[path = "script_comment_tests.rs"]
 mod script_comment_tests;
 
