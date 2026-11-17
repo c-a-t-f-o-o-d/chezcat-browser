@@ -1,10 +1,10 @@
-# Capability and dependency matrix — 0.81.0-alpha.1 release target
+# Capability and dependency matrix — 0.81.0-alpha.2 release target
 
 Every broad area remains partial. “Verified” below means the specified local slice,
 not complete platform conformance. Source inspection, unit tests, App harness,
 physical desktop/device evidence and live-service outcomes are different scopes.
 
-The [0.81.0-alpha.1 release target](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.81.0-alpha.1)
+The [0.81.0-alpha.2 release target](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.81.0-alpha.2)
 is one consolidated catch-up for completed finite B2 and integrated prerequisites.
 Its new exact release gates and actual publication remain pending. Source
 integration, hosted CI and a development delivery do not establish a published
@@ -68,7 +68,7 @@ installer and staged release discovery/upgrade remain planned in the
 | Browser UI | Native settings, address input, bookmarks/history/download controls; finite About panel; Session tabs/windows/pinned inspectors; guarded primary/middle links and explicit foreground/background/window context commands | Recorded actual desktop acceptance covers the checkpoint sources above; each new checkpoint requires exact normal/optimized and desktop evidence. Hidden HWND/pure controls alone do not establish physical desktop interaction. Named contexts, script-opened windows, full accessibility and native locked-session presentation remain gaps. Copy capture does not prove OS clipboard delivery | src/app*.rs, src/build_identity.rs, src/ui.rs, src/platform*.rs; original About/chrome, Session admission/input and owned native-window controls |
 | Diagnostics | Source/activity/layout/pixels and inspector; document-only connection reports with optional exact-host checks before DNS on each hop, actual destination/phase evidence, and escaped bounded metadata; eight new native diagnostics regressions verified | No App/profile, page scripts, subresources or usability assessment in --diagnose. Status and possible body markers do not establish access/challenge outcomes. Reports can contain private URLs/paths/session data; full normal integration and public-host checks remain separate | src/diagnostics.rs, src/diagnostics_tests.rs, src/network_trace.rs; original loopback/guard/metadata tests and offline harness reports |
 | Platform/isolation | Windows x64, explicit FFI ownership, worker retirement/cancellation and watchdogs | No OS renderer sandbox; independent native/crypto/aggregate-memory assurance remains incomplete | src/platform.rs, src/audio_output.rs; native negative tests and PE checks |
-| Build/release | std-only production manifest, generated resources, pinned compiler, portable payload and offline local gates | Per-user MSI and opt-in release discovery/authenticated upgrades are planned, not implemented. The 0.81.0-alpha.1 release gates remain pending: exact tagged build, complete payload, extracted-runtime checks and downloadable-asset verification; source/CI/development delivery alone is not publication | Build.cmd, tools/verify_offline.py, docs/RELEASING.md |
+| Build/release | std-only production manifest, generated resources, pinned compiler, portable payload and offline local gates | Per-user MSI and opt-in release discovery/authenticated upgrades are planned, not implemented. The 0.81.0-alpha.2 release gates remain pending: exact tagged build, complete payload, extracted-runtime checks and downloadable-asset verification; source/CI/development delivery alone is not publication | Build.cmd, tools/verify_offline.py, docs/RELEASING.md |
 
 TCP fallback retains candidates from both families within a 256-entry resolver
 scan and eight-attempt queue; resolver preference and within-family order remain.

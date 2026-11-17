@@ -24,7 +24,7 @@ green CI and development-runtime delivery are distinct from published delivery.
 Record the actual immutable tag, downloadable assets and downloaded-byte checks
 before reporting a release complete.
 
-The planned [v0.81.0-alpha.1](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.81.0-alpha.1) is one consolidated catch-up prerelease for the
+The planned [v0.81.0-alpha.2](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.81.0-alpha.2) is one consolidated catch-up prerelease for the
 completed B2 milestone and integrated platform/compatibility prerequisites since
 v0.80.0-alpha.1. Its final versioned-source gates, packages and publication remain
 pending. The target designation does not establish published assets. Preserve
@@ -49,6 +49,11 @@ SemVer. Windows numeric fields map MAJOR,MINOR,PATCH,0 (each within16bits), with
 prerelease labels in strings and tag. Historical0.78 strings are not rewritten.
 Build SHA, clean state, compiler/target and payload hashes identify a build; they
 do not assert reproducibility across SDK/linker installations or certify safety.
+
+The immutable v0.81.0-alpha.1 candidate stopped before publication because its
+runtime trust README linked to a development-only generator. The replacement
+0.81.0-alpha.2 corrects the link and requires its own exact-source gates; the
+earlier tag is retained and is not moved or reused.
 
 ## Contribution and routine verification
 

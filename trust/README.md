@@ -15,7 +15,7 @@ The unchanged [certdata.txt](mozilla/certdata.txt) snapshot retains upstream
 notices; its MPL-2.0 terms and [license](mozilla/LICENSE-MPL-2.0.txt) remain
 separate from the original browser's license.
 
-The original offline [generator](../tools/generate_trust.py) joins certificates
+The original offline [generator](https://github.com/c-a-t-f-o-o-d/chezcat-browser/blob/9ad97abd2d2f971d976d8260c4087b7319d9f64f/tools/generate_trust.py) joins certificates
 to their exact NSS trust objects. It selects server-auth trusted delegators only
 after an explicit original-verifier capability review and the recorded
 [policy](mozilla/policy.json). Of 113 server-auth authorities, 103 have supported

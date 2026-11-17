@@ -5,7 +5,7 @@ error, lifecycle and security acceptance is met; missing criteria cannot be hidd
 by shrinking the contract afterward. These contracts authorize no live check or
 public release by themselves.
 
-The [0.81.0-alpha.1 release target](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.81.0-alpha.1)
+The [0.81.0-alpha.2 release target](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.81.0-alpha.2)
 consolidates the completed finite B2 milestone and integrated prerequisites below.
 Prior checkpoint evidence stays bound to its source; the new release's exact
 clean-source, build, archive, extracted-runtime and published-byte gates remain
@@ -485,7 +485,7 @@ The accepted source [67c5d69](https://github.com/c-a-t-f-o-o-d/chezcat-browser/c
 and subsequent checkpoints 73f3315 and fb385cb have recorded local/hosted offline
 verification. Separate actual Windows desktop records cover six groups at 67c5d69,
 six at 73f3315 and four at fb385cb. Each is limited to its observed source/scope;
-the 0.81.0-alpha.1 release gates remain separate.
+the 0.81.0-alpha.2 release gates remain separate.
 Complete normal/optimized and desktop acceptance is required at each new checkpoint. Provide new/switch/close
 tabs and link actions for new tabs or ChezCat windows, including supported middle/
 Ctrl-click and keyboard actions. Keep independent page/history/scroll/loading and

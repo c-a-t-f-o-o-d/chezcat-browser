@@ -4,9 +4,9 @@
 
 No additional completed milestone is recorded beyond the release target below.
 
-## 0.81.0-alpha.1
+## 0.81.0-alpha.2
 
-Release target: [v0.81.0-alpha.1](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.81.0-alpha.1).
+Release target: [v0.81.0-alpha.2](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.81.0-alpha.2).
 This is one consolidated catch-up for the completed finite B2 milestone and the
 integrated prerequisites accumulated since 0.80.0-alpha.1. A versioned source
 section is not a publication claim. Delivery requires exact clean source,
@@ -14,6 +14,9 @@ normal/optimized/PE and offline gates, complete payload, an extracted-runtime
 journey and downloaded-asset checks. The actual release's
 publication.json and SHA256SUMS identify its source and delivered bytes.
 
+- Correct the runtime trust-documentation link to its public source; development
+  generators remain outside the runtime ZIP. Allow scoped external Cargo and
+  verification storage while retaining exact-source, receipt and evidence guards.
 - Complete the finite B2 tab/window and native link/context milestone. A bounded
   Session owns independent pages, history, scroll and loading state; browser-owned
   profile, download and history authorities preserve shared state and reject stale
@@ -95,6 +98,14 @@ CSS, storage, frames, codecs/containers and media/player APIs remain partial.
 Google Search/Images/Maps are not fully supported; YouTube playback is unproved.
 Installer/update work and further F6/service work remain deferred. The next
 independent compatibility reduction follows this milestone's release closeout.
+
+## 0.81.0-alpha.1 — validation candidate only
+
+The immutable [candidate tag](https://github.com/c-a-t-f-o-o-d/chezcat-browser/tree/v0.81.0-alpha.1)
+passed the normal offline gate and packaging, then failed the runtime
+documentation-link check before extracted startup. No release or assets
+were published. Its source and tag remain unchanged; the correction uses
+0.81.0-alpha.2 with fresh exact-source delivery checks.
 
 ## 0.80.0-alpha.1
 
