@@ -292,8 +292,9 @@ Semantic references: [DOM childNodes](https://dom.spec.whatwg.org/#dom-node-chil
 Status: delivered prerequisite. Focused original Page, App and language controls
 cover the finite slice; each new checkpoint requires normal native/build/executable
 verification. At the historical CP2 checkpoint, the unchanged legacy workload next
-refused a select-containing innerHTML fragment. CP4's later unchanged recheck now
-reaches hidden-input mutation. Initialization and visible improvement remain unproved.
+refused a select-containing innerHTML fragment. CP4's later unchanged recheck reached
+hidden-input mutation; CP7 now advances to an input-containing innerHTML fragment.
+Library initialization and visible workflow improvement remain unproved.
 
 Main Document createComment performs required DOMString conversion and creates a
 real retained Comment leaf with nodeType8, nodeName#comment, actual owner/topology
@@ -331,11 +332,43 @@ CP2 Test262 checks retain 18 passes and two ordinary Array constructor failures
 across 20 mode runs, with all 30 runner controls passing and unchanged inputs;
 this is no full-suite conformance claim. The select fragment was the historical
 CP2 first blocker. CP3 subsequently delivered the independent responsive CSS
-improvement; CP4's later workflow first blocker is hidden-input mutation.
+improvement; hidden-input admission is a separate CP7 prerequisite.
 
 Semantic references: [DOM createComment](https://dom.spec.whatwg.org/#dom-document-createcomment),
 [Comment](https://dom.spec.whatwg.org/#interface-comment), and
 [ECMAScript 2025 ToString](https://262.ecma-international.org/16.0/#sec-tostring).
+
+## CP7 — finite hidden-input admission and native form state
+
+Admit hidden type on a fresh detached HTML INPUT through the genuine native form
+model. Existing parsed hidden inputs share bounded attribute and IDL name/value/
+defaultValue reflection with the hidden default-value mode. Whole-node insertion,
+removal and movement preserve identities, current tree/form ownership and connected
+submission order. Hidden controls never gain a layout box, hit target or focus,
+including when author CSS requests display and dimensions. Unrelated edited
+controls retain their values and caret/selection state.
+
+Stage attribute, tree and native form changes before publication. Preserve host
+work/copy/value/control limits and namespace/foreign-owner refusal; logical limit,
+namespace and owner refusal publish no partial DOM or native state. Existing
+process-OOM limitations remain. Existing native input-type
+transitions, changing INPUT contents and general input-containing innerHTML
+fragments remain refused. No library-specific path or quota expansion is admitted.
+
+Nine focused controls and twelve adjacent select controls pass. Actual App software
+pointer down/up creates the hidden control and changes only the authored text in
+an isolated white crop; down alone does not run the action. The test checks no
+hidden box/focus despite author display rules, native form request serialization,
+neighbor value/cursor preservation and unchanged source/location/history. A
+foreign-namespace negative first reproduced a failure and then passed the atomic
+guard. These are bounded model/App results, not physical desktop, HTTP submission
+or whole-library acceptance.
+
+The unchanged W2 workload advances from hidden type mutation at jQuery1.12.4
+1265:4 to `div.innerHTML = '<input/>'` at2684:2. Load/initial render pass while
+initialization/input/async still fail. Its explicitly dirty development build and
+separate earlier failures remain recorded; normal regression and hosted integration
+are still required for the final candidate.
 
 ## CP6 — bounded String.prototype.concat
 
@@ -414,7 +447,7 @@ integration covers this finite slice; each new checkpoint still requires exact
 normal/build/executable verification.
 One unchanged JS-enabled W2 recheck at 1280x800/zoom100 on clean5cee344 advances
 past the select fragment to jQuery1.12.4 line1265,column4: setting INPUT type to
-hidden remains explicitly unsupported. Loading and initial rendering pass;
+hidden was explicitly unsupported at that checkpoint. Loading and initial rendering pass;
 initialization, dropdown/form input and async stages fail. Later Bootstrap and
 missing-library errors remain cascades. No visible workflow improvement or
 framework initialization is claimed.
@@ -438,9 +471,10 @@ Logical limit, work, origin, owner and allocation-preflight refusals precede tre
 and native publication. Existing std BTreeMap physical allocation failure can
 still abort the process; recoverable process-OOM atomicity is not claimed.
 New select explicit form associations, existing-control interior mutation,
-createElement(select), hidden-input admission, multiple/large select controls and
+createElement(select), multiple/large select controls and
 customizable select content remain unsupported. Existing resource and ID-owner
 guards are unchanged; no framework-specific fallback or library edits are used.
+Hidden-input admission was outside CP4; CP7 adds its separate finite native path.
 
 The App controls exercise actual software paint, popup choice and input/change
 events, then timer-driven removal while focused with an open popup. Stale points

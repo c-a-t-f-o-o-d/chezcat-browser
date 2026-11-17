@@ -37,8 +37,10 @@ and licensing obligations; see [third-party notices](THIRD_PARTY_NOTICES.md).
   Conventional select/option/optgroup fragments use the real native form model;
   whole-subtree removal and reconnection preserve identities and edited values,
   retire stale popup/focus/hits and maintain connected form submission order.
-  Rich select content, existing-control interior edits, new explicit form
-  associations and hidden-input creation remain unsupported.
+  Fresh hidden inputs and parsed hidden-input attributes, values and whole-tree
+  moves now retain native form state. Rich select content, existing-control
+  interior edits, new explicit select associations, arbitrary input fragments and
+  existing input-type transitions remain unsupported.
 - Static noncomputed object-literal `__proto__: value` setters preserve genuine
   null/object/function prototype links, ignore other primitives without coercion
   and reject duplicate special setters before execution. Ordinary own

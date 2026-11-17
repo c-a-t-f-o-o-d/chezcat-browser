@@ -9,17 +9,19 @@
     "dom_source_sha256": "19a6d0b92549926f971a0d181d501b694a3129b7a3d3bbedccafaf30c26bd570"
   },
   "active_pack": {
-    "id": "string-concat",
-    "status": "Original prerequisite implemented and committed; public integration pending",
-    "source_commit": "8b3112d170c2bad2cbb9c44561c725aa90339409",
-    "scope": "Genuine generic String.prototype.concat with ordered receiver/argument conversions through existing realm, native-capability and work bounds",
-    "native_status": "Nine focused VM/realm/App controls pass, including actual software input and text-pixel changes; no physical desktop or framework pass inferred",
-    "workflow_scope": "Diagnostic development build identity is recorded separately on measured workflows; it is not rebound to this committed checkpoint",
-    "next_dependency": "Demonstrated hidden INPUT mutation/DOM behavior in legacy W2; Vue object-prototype access, modern jQuery getRootNode and Bootstrap class syntax remain separate measured blockers",
+    "id": "hidden-input",
+    "contract_id": "CP7",
+    "status": "Original finite prerequisite implemented and committed; full candidate/public integration pending",
+    "source_commit": "c679a2ed51a170e21e9773768a399a065bc31e88",
+    "scope": "Fresh detached HTML hidden-input admission; parsed-hidden attribute/IDL name/value/default reflection; retained tree/form ownership and serialization; no hidden box, hit or focus",
+    "native_status": "Nine focused and twelve adjacent select controls pass; actual App software click/text pixels, native form request serialization, neighbor value/cursor and source/history preservation; foreign-namespace atomic refusal reproduced then passed",
+    "workflow_scope": "Unchanged W2 advances to input-containing innerHTML refusal; its actual dirty development build is recorded separately, including an unregistered Node draft",
+    "next_dependency": "Genuine Node.getRootNode is being implemented for the separate modern jQuery blocker; no Node API pass is claimed yet",
     "excluded": [
-      "Array.concat changes",
-      "Framework-specific shims/polyfills",
-      "Whole-framework initialization",
+      "Existing native input-type transitions",
+      "INPUT contents replacement and general input-containing innerHTML fragments",
+      "Whole-library initialization/interaction",
+      "Physical desktop or HTTP submission acceptance",
       "Release validation"
     ]
   },
@@ -40,7 +42,7 @@
     {
       "id": "W2",
       "kind": "Unmodified jQuery1.12.4 + Bootstrap3.4.1 dropdown/form",
-      "status": "Blocked at next prerequisite; no initialization or visible improvement",
+      "status": "Blocked at next prerequisite; no library initialization or visible workflow improvement",
       "cascades_count_as_roots": false,
       "observed_first_roots": [
         "Document childNodes at borrowed slice",
@@ -49,21 +51,51 @@
         "Native Comment/document.createComment",
         "Native RegExp input ToString",
         "Checked innerHTML fragment select/option structure",
-        "INPUT type=hidden attribute mutation"
+        "INPUT type=hidden attribute mutation",
+        "Input-containing innerHTML fragment replacement"
       ],
-      "current_first_root": "INPUT type=hidden attribute mutation",
-      "measurement_scope": "Single unchanged CP4 JS-enabled executable W2 recheck at1280x800/zoom100; one selected configuration among three workflow families; later cascades retained",
-      "source_commit": "5cee344992cbccf77657d14ee4a69dd278c76709",
-      "executable_sha256": "9baefcf519566da75fccbde8a285d70acc2b8f68b07fc3b42057e3b9a0f86252",
-      "first_root_location": "jQuery1.12.4 line1265,column4",
+      "current_first_root": "HTML fragment replacement of native controls/forms or unsupported resources is not implemented",
+      "measurement_scope": "One unchanged post-hidden-input W2 invocation at1280x800/zoom100 with JavaScript/images enabled; zero of one selected configuration passes; actual dirty development build, not clean-source/release validation",
+      "source_commit": "c679a2ed51a170e21e9773768a399a065bc31e88",
+      "executable_sha256": "6a1866f01f67ecea163f683cfaa11f43c0259aec4fe4a15b78083f3843d8cc19",
+      "first_root_location": "jQuery1.12.4 line2684,column2",
       "stage_outcomes": {
         "load": "Passed",
-        "initial_render": "Passed",
         "initialization": "Failed",
+        "initial_render": "Passed",
         "input": "Failed",
         "async": "Failed",
         "history": "Not applicable"
-      }
+      },
+      "previous_measurements": [
+        {
+          "source_commit": "5cee344992cbccf77657d14ee4a69dd278c76709",
+          "executable_sha256": "9baefcf519566da75fccbde8a285d70acc2b8f68b07fc3b42057e3b9a0f86252",
+          "current_first_root": "INPUT type=hidden attribute mutation",
+          "first_root_location": "jQuery1.12.4 line1265,column4",
+          "measurement_scope": "Single unchanged CP4 JS-enabled executable W2 recheck at1280x800/zoom100; one selected configuration among three workflow families; later cascades retained",
+          "stage_outcomes": {
+            "load": "Passed",
+            "initial_render": "Passed",
+            "initialization": "Failed",
+            "input": "Failed",
+            "async": "Failed",
+            "history": "Not applicable"
+          }
+        }
+      ],
+      "first_root_operation": "div.innerHTML = '<input/>'",
+      "dirty": true,
+      "build_provenance": {
+        "source_commit": "c679a2ed51a170e21e9773768a399a065bc31e88",
+        "dirty": true,
+        "executable_sha256": "6a1866f01f67ecea163f683cfaa11f43c0259aec4fe4a15b78083f3843d8cc19",
+        "source_map_sha256": "cd382202249a432da1a6c43da711fd3185e5df8d9b23953a094c592f46882f3b",
+        "cargo_version": "cargo 1.99.1 (5f94df478 2026-08-27)",
+        "profile": "existing development profile; not release validation",
+        "unregistered_draft": "script_node_root.rs is not registered/compiled into runtime"
+      },
+      "limits": "The hidden-input type mutation at1265:4 is passed; the later input-containing innerHTML operation at2684:2 remains refused. Later missing-library errors are cascades. The unregistered Node draft supplies no Node.getRootNode result."
     },
     {
       "id": "W3-css",
@@ -186,7 +218,7 @@
         "parse": "Not established",
         "initialization": "Failed",
         "render": "Passed",
-        "input": "Failed",
+        "input": "Harness blocked; initialization also failed",
         "async": "Failed"
       },
       "first_root": "Element property \"getRootNode\" is not supported.",
@@ -195,7 +227,10 @@
       "reference_browser": "Not run",
       "measurement_scope": "One bounded local App invocation per selected configuration; original paired document/layout/pixels and independent control are ChezCat output; no whole-library pass",
       "parse_scope": "Conservative runner reports Not established; the first explicit failure is retained without inferring all dormant paths parsed",
-      "render_scope": "Initial authored page and independent control render; no jQuery-driven visible update or timer pass"
+      "render_scope": "Initial authored page and independent control render; no jQuery-driven visible update or timer pass",
+      "fixture_revision": 1,
+      "interaction_harness": "Harness blocked: revision1 controls had IDs but lacked the name attributes selected by the App driver. Startup load/render/first script failures remain observed; no trusted input was executed.",
+      "fixture_correction": "Revision2 adds unique action names and preflight controls; upstream assets, script apps and old raw records remain unchanged. New runtime result pending."
     },
     {
       "id": "modern-bootstrap",
@@ -227,7 +262,7 @@
         "parse": "Not established",
         "initialization": "Failed",
         "render": "Passed",
-        "input": "Failed",
+        "input": "Harness blocked; initialization also failed",
         "async": "Not applicable",
         "framework_layout": "Passed"
       },
@@ -241,7 +276,10 @@
         "popper": "2.11.8, included in the pinned bundle",
         "jquery": "Not loaded; independent workload"
       },
-      "render_scope": "Unmodified Bootstrap CSS places the original cards beside each other at1280 and stacks them at640; dropdown input remains failed"
+      "render_scope": "Unmodified Bootstrap CSS places the original cards beside each other at1280 and stacks them at640; dropdown input remains failed",
+      "fixture_revision": 1,
+      "interaction_harness": "Harness blocked: revision1 controls had IDs but lacked the name attributes selected by the App driver. Startup load/render/first script failures remain observed; no trusted input was executed.",
+      "fixture_correction": "Revision2 adds unique action names and preflight controls; upstream assets, script apps and old raw records remain unchanged. New runtime result pending."
     },
     {
       "id": "reference",
@@ -653,12 +691,13 @@
     "Cascades are separated from the first root",
     "No public service or whole-family outcome inferred",
     "Dirty development-build HEAD, executable digest and source-map hash remain explicit; later committed source is not substituted as the compiled identity",
-    "Modern parse Not established is distinct from initialization failure and from observed initial rendering"
+    "Modern parse Not established is distinct from initialization failure and from observed initial rendering",
+    "Hidden-input W2 uses its own actual dirty development build; an unregistered Node draft does not establish a Node.getRootNode implementation or workflow result"
   ],
   "next": [
-    "Integrate the original concat prerequisite through normal full-regression/PR/CI safeguards; no automatic release",
-    "Fix the demonstrated legacy W2 hidden INPUT mutation/DOM blocker while retaining separate modern measurements",
-    "Rank Vue object-prototype access, modern jQuery getRootNode, Bootstrap class syntax and visible CSS/resource defects by shared page impact; add modern Vue/React when prerequisites become actionable"
+    "Finish and validate genuine Node.getRootNode for the measured modern jQuery blocker, then recheck that unchanged workload; no API or initialization pass yet",
+    "Complete normal full-regression/PR/CI integration for the concat/hidden-input candidate and Node work only when validated; no automatic release",
+    "Reduce the CSS custom-property padding/border candidate suggested by source inspection, with rgba a separate gap; rank with remaining legacy fragment/Vue/Bootstrap blockers and add modern Vue/React when prerequisites are actionable"
   ],
   "selected_standard_controls": {
     "suite": "Selected Test262 slice mode runs",
@@ -692,6 +731,21 @@
         "Whole-library support"
       ],
       "status": "Delivered prerequisite slice"
+    },
+    {
+      "id": "string-concat",
+      "status": "Original prerequisite implemented and committed; public integration pending",
+      "source_commit": "8b3112d170c2bad2cbb9c44561c725aa90339409",
+      "scope": "Genuine generic String.prototype.concat with ordered receiver/argument conversions through existing realm, native-capability and work bounds",
+      "native_status": "Nine focused VM/realm/App controls pass, including actual software input and text-pixel changes; no physical desktop or framework pass inferred",
+      "workflow_scope": "Diagnostic development build identity is recorded separately on measured workflows; it is not rebound to this committed checkpoint",
+      "next_dependency": "Demonstrated hidden INPUT mutation/DOM behavior in legacy W2; Vue object-prototype access, modern jQuery getRootNode and Bootstrap class syntax remain separate measured blockers",
+      "excluded": [
+        "Array.concat changes",
+        "Framework-specific shims/polyfills",
+        "Whole-framework initialization",
+        "Release validation"
+      ]
     }
   ],
   "last_complete_pack": "CP5",
@@ -706,7 +760,7 @@
       "scope": "Genuine main-Document Comment factory/data/topology and existing native RegExp exec/test input ToString",
       "native_status": "Focused original Page/App/language controls passed; integrated source is included in published36adf20",
       "inherits_limits": "Existing CP1 host/VM admission policies; no quota expansion",
-      "next_dependency": "Historical select-fragment dependency was delivered by CP4; latest legacy W2 blocker is hidden INPUT mutation",
+      "next_dependency": "Historical select-fragment dependency was delivered by CP4; CP7 hidden-input work advances the latest legacy W2 recheck to an input-containing innerHTML fragment",
       "excluded": [
         "Parsed comments",
         "Full Comment/CharacterData interfaces",

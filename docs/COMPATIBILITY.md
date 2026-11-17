@@ -20,7 +20,7 @@ is inferred from the small selected case sets.
 | Selected local workflow | Observed boundary |
 | --- | --- |
 | Original asynchronous form/search/navigation | Async ready state, Unicode form submission, readable results, destination activation, exactly one Back and a different query pass the bounded App/input workflow |
-| Unmodified jQuery1.12.4 with Bootstrap3.4.1 dropdown/form | One unchanged CP4 App recheck advances past conventional select fragments to jQuery line1265,column4 setting INPUT type=hidden. Load and initial rendering pass; initialization, input and async stages fail. Later missing-library errors are cascades; no visible workflow improvement is established |
+| Unmodified jQuery1.12.4 with Bootstrap3.4.1 dropdown/form | The unchanged hidden-input recheck at1280 advances from setting INPUT type=hidden at1265:4 to `div.innerHTML = '<input/>'` at2684:2. Load and initial rendering pass; initialization, input and async stages fail. Later missing-library errors are cascades; no visible library workflow improvement is established |
 | Foundation6.9.0 generated CSS with original controls | The unchanged JS-enabled fixture now forms two columns at1280 and stacks at640, with its original independent image pixels. This is a responsive rendering improvement; Vue initialization and optional Foundation JavaScript are separate |
 | Vue2.7.16 runtime with an original reactive component | The unchanged concat recheck at1280/640 advances from undefined concat at11:3613 to object-prototype access at11:3808. Load/initial render/Foundation CSS pass; Vue mount/input/async fail. Modern Vue3 retains its separate Proxy prerequisite |
 | Separate unmodified jQuery4.0.0 input app | Load and initial paired rendering pass; the first failure is unsupported getRootNode at4321:7. Initialization, trusted input and timer update fail. This is independent of the legacy hidden-input blocker |
@@ -63,15 +63,21 @@ padding pixels and owned link hits. This finite rendering result does not imply
 that the separately blocked Vue component initializes or responds to input.
 Full normal/build/executable verification remains required for integration.
 
-The select-containing fragment prerequisite passes its reduced controls; the
-single unchanged legacy workflow recheck now refuses INPUT type=hidden mutation.
+The hidden-input prerequisite passes nine focused and twelve adjacent select
+controls. Actual App software clicks create a genuine hidden control, change an
+isolated text crop, preserve a neighboring edited value/cursor and source/history,
+and retain native form request serialization. Hidden inputs gain no box or focus,
+even under authored display rules. The unchanged legacy workload next refuses an
+input-containing innerHTML fragment at2684:2; initialization remains failed.
 The separate finite literal-prototype prerequisite passes ten language/App
 controls, including real input and isolated text pixels. Original concat controls
 now pass nine VM/realm/App groups and four adjacent substring groups. Its unchanged
 Vue recheck reaches the separate object-prototype boundary; no mount or reactive
-interaction is established. The new workload observations use an explicitly dirty
-development build with a retained source map and executable identity, not a clean
-release result; the catalogue preserves that provenance.
+interaction is established. The workload observations use explicitly dirty
+development builds with retained source maps and executable identities, not clean
+release results; the catalogue preserves the distinct concat and hidden-input
+build records. The hidden-input build contains an unregistered Node draft and
+establishes no getRootNode result.
 Finite tabs/windows and guarded native link/context actions are delivered in
 [0.81.0-alpha.2](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.81.0-alpha.2).
 Their source-scoped normal/optimized, hosted and desktop acceptance is separate

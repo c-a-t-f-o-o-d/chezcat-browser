@@ -10,17 +10,19 @@ The [release process](RELEASING.md) remains available for those requests.
 
 ## Active work
 
-1. Complete the bounded `String.prototype.concat` correction and recheck the
-   unchanged Vue2.7.16 workload at its existing widths. Focused language/realm/App
-   controls do not establish Vue initialization or visible framework improvement.
-2. Fix the demonstrated hidden INPUT mutation/DOM prerequisite in the legacy
-   jQuery workflow. In the same cycle, attempt separate pinned current jQuery and
-   Bootstrap samples independently of legacy success, preserving unmodified
-   distributions and the existing fixtures.
-3. Rank subsequent shared JavaScript, DOM/events, script loading, CSS/cascade,
-   layout/painting, image/font and input fixes by actual page impact. Keep visible
-   rendering defects in the queue alongside language prerequisites. Add a modern
-   Vue or React representative when its concrete shared blockers are actionable.
+1. Finish and validate genuine Node.getRootNode for the measured modern jQuery
+   blocker, then recheck that unchanged workload. The API is being wired; no pass
+   or library initialization is claimed yet.
+2. Integrate the concat and hidden-input prerequisites, plus Node work when
+   validated, through normal full-regression/PR/CI safeguards. Concat advances Vue
+   to object-prototype access; hidden inputs advance legacy jQuery to an
+   input-containing innerHTML fragment. The separate modern samples are measured,
+   with their actual remaining blockers in the compatibility record.
+3. Reduce the next visible CSS candidate alongside language/DOM dependencies.
+   Source inspection suggests custom-property padding/border handling; it is not a
+   proved fix, and rgba is an additional gap. Rank these with the measured Vue,
+   legacy fragment and Bootstrap class boundaries, image/font and input defects.
+   Add a modern Vue or React representative when concrete prerequisites are actionable.
 
 Each cycle starts with one bounded original reproduction, implements the shared
 fix, runs focused affected and security-negative checks, and inspects the actual
@@ -34,15 +36,17 @@ reference output and test counts alone do not establish ChezCat compatibility.
 Finite B2 tabs/windows, guarded primary/middle link actions and native context
 commands are delivered. CP1-CP5 provide collection/Node, Comment/RegExp, responsive
 CSS, conventional select and literal-prototype prerequisites. These do not imply
-whole-framework initialization. T1 TLS/trust and B1 resource/rendering remain
+whole-framework initialization. The separately committed concat and hidden-input
+corrections have focused App evidence and await final candidate integration.
+T1 TLS/trust and B1 resource/rendering remain
 partial shared foundations; the finite A1 About, license acceptance and existing
 media/interface slices retain their stated contracts.
 
 The [capability matrix](CAPABILITIES.md) owns implemented behavior and limits.
 [Compatibility](COMPATIBILITY.md) and its [catalogue](compatibility.json) own exact
-version/workflow observations and first causal failures. The latest legacy jQuery
-hidden-input and Vue concat observations remain distinct until their respective
-workloads are rechecked. Complete site support, every codec and perfect screenshots
+version/workflow observations and first causal failures, including preserved
+earlier hidden-input and concat failures and their distinct later rechecks.
+Complete site support, every codec and perfect screenshots
 are not prerequisites for useful progress. Security defects and demonstrated
 shared dependencies can change this order.
 
