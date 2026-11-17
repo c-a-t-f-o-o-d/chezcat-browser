@@ -6282,7 +6282,7 @@ window.addEventListener('load',()=>{order+='-load';});"#],
     #[test]
     fn attribute_changes_cannot_reassociate_controls_or_add_active_capabilities() {
         let (doc, forms, page, result) = setup(
-            "<body><p id=first>First</p><form id=f></form><input id=input form=f value=keep><p id=out></p></body>",
+            "<body><p id=first>First</p><form id=f></form><input id=input type=checkbox form=f value=keep><p id=out></p></body>",
             &[
                 "document.getElementById('f').id='other';",
                 "document.getElementById('first').setAttribute('id','f');",
