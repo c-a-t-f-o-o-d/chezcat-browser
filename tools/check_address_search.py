@@ -11,7 +11,7 @@ import capture_tests
 ROOT=Path(__file__).resolve().parents[1]
 
 def main():
-    folder=ROOT/'results/verification/autonomy'/(datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S.%fZ')+'-address-search-'+uuid.uuid4().hex[:8])
+    folder=capture_tests.verification_root(ROOT) / 'autonomy'/(datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S.%fZ')+'-address-search-'+uuid.uuid4().hex[:8])
     folder.mkdir(parents=True)
     seen=[]
     class Site(http.server.BaseHTTPRequestHandler):

@@ -81,7 +81,7 @@ def main():
     import check_network_media_harness as network
     require(authored.ROOT.resolve()==root and network.ROOT.resolve()==root,'Checker imports must belong to the selected repository.')
     executable=(args.exe or root/'ChezCat.exe').resolve()
-    folder=root/'results/verification/autonomy'/(datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S.%fZ')+'-media-interface-journey-'+uuid.uuid4().hex[:8])
+    folder=capture_tests.verification_root(root) / 'autonomy'/(datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S.%fZ')+'-media-interface-journey-'+uuid.uuid4().hex[:8])
     folder.mkdir(parents=True)
     before=capture_tests.source_identity(root)
     exe_before=capture_tests.sha256(executable) if executable.is_file() else None
@@ -112,10 +112,10 @@ def main():
             evidence=re.findall(r'^Evidence: (.+)$',output,re.M)
             require(len(evidence)==1,'Expected exactly one reused checker evidence record.')
             child=Path(evidence[0].strip()).resolve()
-            require(child.is_relative_to((root/'results/verification').resolve()),'Original evidence must remain in selected product verification.')
+            require(child.is_relative_to(capture_tests.verification_root(root)),'Original evidence must remain in selected product verification.')
             extra,markers=interface_checks(child)
             proof.update({'passed':status==0 and all(extra.values()),'checks':extra,'markers':markers,
-                'authored_manifest':(child/'manifest.json').relative_to(root).as_posix(),
+                'authored_manifest':capture_tests.evidence_reference(child/'manifest.json', root),
                 'authored_manifest_sha256':capture_tests.sha256(child/'manifest.json')})
             capture_tests.write_json(folder/'interface-proof.json',proof)
             return 0 if proof['passed'] else 1

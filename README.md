@@ -4,7 +4,7 @@ An experimental Windows x64 browser with an original Rust engine: networking,
 JavaScript, DOM, layout, rendering and selected media decoding. It does not embed
 Chromium, Gecko, WebKit or an external JavaScript/codec runtime.
 
-The next release target is [**0.81.0-alpha.1**](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.81.0-alpha.1), one consolidated catch-up prerelease
+The next release target is [**0.81.0-alpha.2**](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.81.0-alpha.2), one consolidated catch-up prerelease
 for the completed finite B2 tabs/windows/link milestone and integrated platform
 and compatibility prerequisites since **0.80.0-alpha.1**. Exact final versioned
 source, release validation, packages and publication remain pending; this target

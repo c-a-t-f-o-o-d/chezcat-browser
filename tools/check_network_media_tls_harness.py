@@ -127,7 +127,7 @@ def run_case(name,folder):
 
 
 def main():
-    folder=ROOT/'results/verification/autonomy'/(
+    folder=capture_tests.verification_root(ROOT) / 'autonomy'/(
         datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S.%fZ')+'-media-tls-refusal-'+uuid.uuid4().hex[:8])
     folder.mkdir(parents=True)
     before=capture_tests.source_identity(ROOT)

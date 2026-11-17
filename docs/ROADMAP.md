@@ -1,6 +1,6 @@
 # Finite development roadmap
 
-The active milestone is **B2 release closeout for 0.81.0-alpha.1**: one consolidated
+The active milestone is **B2 release closeout for 0.81.0-alpha.2**: one consolidated
 catch-up for completed finite tabs/windows/link-context behavior and the integrated
 CP1–CP5, T1 and B1/A1 prerequisites. After publication is verified, the next
 independent compatibility item is the measured String.prototype.concat dependency.
@@ -9,7 +9,7 @@ shared baselines; measured workflows determine subsequent finite work.
 The explicit CSAPUL 1.1 acceptance milestone is published as
 [0.80.0-alpha.1](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.80.0-alpha.1).
 The next release target is
-[0.81.0-alpha.1](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.81.0-alpha.1).
+[0.81.0-alpha.2](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.81.0-alpha.2).
 Its exact release gates are pending; a source milestone, green CI or development
 delivery is not a published release. Completed named milestones close through the
 exact-source build, package and download checks in the [release process](RELEASING.md)
@@ -60,7 +60,7 @@ have recorded local/hosted offline checks. Separate actual Windows desktop recor
 cover six groups at 67c5d69, six at 73f3315 and four at fb385cb. Those source-scoped
 records do not substitute for the new release's
 exact clean source/executable, payload, extraction and published-byte checks.
-The 0.81.0-alpha.1 target closes these accumulated milestones once those checks
+The 0.81.0-alpha.2 target closes these accumulated milestones once those checks
 and actual publication complete; no release is asserted by this roadmap alone.
 
 CP1 and CP2 use shared DOM/language paths. CP4's single unchanged W2 recheck now

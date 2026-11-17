@@ -44,7 +44,7 @@ def fixture_reference(stem, display_profile=None):
 
 
 def main(source=None, trust_file=None, fixture_stem=None, display_profile=None, exe=None):
-    folder = ROOT / 'results/verification/autonomy' / (datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S.%fZ') + '-authored-video-journey-' + uuid.uuid4().hex[:8])
+    folder = capture_tests.verification_root(ROOT) / 'autonomy' / (datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S.%fZ') + '-authored-video-journey-' + uuid.uuid4().hex[:8])
     folder.mkdir(parents=True)
     script = folder / 'authored.tsv'
     # Keep the original 450 ms decode opportunity. Capture moving evidence in

@@ -97,6 +97,10 @@ class CaptureTests(unittest.TestCase):
                                 second["data/public_suffix/rules.rs"])
 
     def setUp(self):
+        selection = patch.dict(runner.os.environ)
+        selection.start();self.addCleanup(selection.stop)
+        runner.os.environ.pop('CHEZCAT_VERIFICATION_ROOT', None)
+        runner.os.environ.pop('CARGO_TARGET_DIR', None)
         self.temp = tempfile.TemporaryDirectory(prefix='chezcat-test-diagnostics-')
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name) / 'project with spaces'
@@ -277,6 +281,36 @@ class CaptureTests(unittest.TestCase):
         self.assertTrue(result['complete_success_summary'])
         self.assertEqual(result['panicking_test_names'], ['controlled::expected_panic'])
         self.assertEqual(result['failed_test_names'], [])
+
+    def test_external_output_roles_keep_source_and_confine_logical_refs(self):
+        external = Path(self.temp.name) / 'external verification with spaces'
+        target = Path(self.temp.name) / 'reusable cargo target'
+        # Keep the input spelling; checked output locations have canonical identity.
+        with patch.dict(runner.os.environ, {'CHEZCAT_VERIFICATION_ROOT': str(external), 'CARGO_TARGET_DIR': str(target)}):
+            self.assertEqual(runner.verification_root(self.root), external.resolve())
+            self.assertEqual(runner.cargo_target_dir(self.root), target.resolve())
+            destination = external / 'autonomy/owned/manifest.json'
+            reference = runner.evidence_reference(destination, self.root)
+            self.assertEqual(reference, 'verification:autonomy/owned/manifest.json')
+            self.assertEqual(runner.evidence_path(reference, self.root), destination.resolve())
+            self.assertEqual(runner.evidence_path('results/old.json', self.root), (self.root / 'results/old.json').resolve())
+            for invalid in ('verification:../outside.json', 'verification:/outside.json', str(Path(self.temp.name) / 'outside.json')):
+                with self.subTest(reference=invalid), self.assertRaises(ValueError):
+                    runner.evidence_path(invalid, self.root)
+            command = runner.commands('stable', target)[1][1]
+            self.assertEqual(command[command.index('--target-dir') + 1], str(target))
+            self.assertLess(command.index('--target-dir'), command.index('--'))
+
+    def test_output_locations_refuse_source_overwrite_relative_and_empty_selection(self):
+        occupied = Path(self.temp.name) / 'occupied-output';occupied.write_text('Owned original sentinel')
+        for value in ('', 'relative-output', str(self.root), str(self.root / 'src'), str(occupied), str(Path(self.root.anchor))):
+            with self.subTest(value=value), patch.dict(runner.os.environ, {'CHEZCAT_VERIFICATION_ROOT': value}), self.assertRaises(ValueError):
+                runner.verification_root(self.root)
+        with patch.dict(runner.os.environ, {'CARGO_TARGET_DIR': str(self.root / 'src')}), self.assertRaises(ValueError):
+            runner.cargo_target_dir(self.root)
+        with patch.dict(runner.os.environ, {'CARGO_TARGET_DIR': str(occupied)}), self.assertRaises(ValueError):
+            runner.cargo_target_dir(self.root)
+
 
 
 def main():
