@@ -2521,6 +2521,24 @@ fn flex_shorthand(value: &str) -> Option<(f32, f32, Length)> {
     ))
 }
 
+// Shared finite font-size grammar for literal and substituted longhands.
+// Font-size em/% use the parent's computed size; rem uses the current root
+// metric (the initial root metric while computing the root's own font-size).
+fn font_size_value(value:&str,parent:f32,root:f32)->Option<f32> {
+    // One ASCII size token only. parse_length's numeric trimming must not join a
+    // substituted number with an adjoining source unit, e.g. var(--n)px.
+    if !value.is_ascii() || value.bytes().any(|byte|byte.is_ascii_whitespace()) {return None;}
+    let size=match value {
+        "inherit"|"unset"=>Some(parent),
+        "initial"|"medium"=>Some(INITIAL_FONT_SIZE),
+        "xx-small"=>Some(9.0),"x-small"=>Some(10.0),"small"=>Some(13.0),
+        "large"=>Some(18.0),"x-large"=>Some(24.0),"xx-large"=>Some(32.0),
+        "smaller"=>Some(parent*0.8),"larger"=>Some(parent*1.2),
+        _=>parse_length(value,false,false).and_then(|size|size.resolve(parent,parent,root)),
+    }?;
+    Some(size.clamp(1.0,256.0))
+}
+
 fn apply(style: &mut Style, parent: &Style, declaration: &Declaration) {
     let value = declaration.value.trim().to_ascii_lowercase();
     match declaration.name.as_str() {
@@ -2768,24 +2786,7 @@ fn apply(style: &mut Style, parent: &Style, declaration: &Declaration) {
             }
         }
         "font-size" => {
-            let size = match value.as_str() {
-                "inherit" => Some(parent.font_size),
-                "xx-small" => Some(9.0),
-                "x-small" => Some(10.0),
-                "small" => Some(13.0),
-                "medium" => Some(16.0),
-                "large" => Some(18.0),
-                "x-large" => Some(24.0),
-                "xx-large" => Some(32.0),
-                "smaller" => Some(parent.font_size * 0.8),
-                "larger" => Some(parent.font_size * 1.2),
-                _ => parse_length(&value, false, false).and_then(|size| {
-                    size.resolve(parent.font_size, parent.font_size, style.root_font_size)
-                }),
-            };
-            if let Some(size) = size {
-                style.font_size = size.clamp(1.0, 256.0);
-            }
+            if let Some(size)=font_size_value(&value,parent.font_size,style.root_font_size) {style.font_size=size;}
         }
         "font-weight" => {
             if let Some(weight) = font_weight(&value, parent.font_weight) {
@@ -4310,3 +4311,7 @@ mod background_variable_tests;
 #[cfg(test)]
 #[path="css_color_variable_tests.rs"]
 mod color_variable_tests;
+
+#[cfg(test)]
+#[path="css_font_size_variable_tests.rs"]
+mod font_size_variable_tests;

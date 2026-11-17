@@ -5662,6 +5662,10 @@ mod css_background_tests;
 mod css_color_tests;
 
 #[cfg(test)]
+#[path="app_css_font_size_tests.rs"]
+mod css_font_size_tests;
+
+#[cfg(test)]
 #[path="app_document_fragment_tests.rs"]
 mod document_fragment_tests;
 
