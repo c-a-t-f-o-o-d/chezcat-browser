@@ -1,3 +1,5 @@
+> 🧪 **State what changed, what was actually checked, and what remains limited.**
+
 ## Behavior and contract
 
 Describe the concrete problem, resulting behavior, finite scope and deferred cases.

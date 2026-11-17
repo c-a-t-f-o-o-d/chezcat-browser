@@ -1,4 +1,14 @@
+<div align="center">
+
 # ChezCat icon
+
+*The project icon, original controls, and reproducible asset preparation.*
+
+[Home](../README.md) · [Branding](../docs/BRANDING.md) · [Build guide](../docs/BUILDING.md)
+
+</div>
+
+---
 
 The ChezCat icon is a C-cat monogram: a cream C with two feline ears and a teal tail terminal on a midnight navy rounded tile.
 

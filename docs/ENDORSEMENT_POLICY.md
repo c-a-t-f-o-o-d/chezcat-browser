@@ -1,4 +1,14 @@
+<div align="center">
+
 # Official branches and approvals
+
+*Requests, exact permission scope, and an auditable approval register.*
+
+[Home](../README.md) · [Documentation](README.md) · [License](../LICENSE) · [Contributing](../CONTRIBUTING.md)
+
+</div>
+
+---
 
 Use an Official branch / endorsement request issue in the official repository. Licensing, contractual notices and confidential commercial-permission enquiries may be directed to legal@bitmadd.com after its operation is verified; no email acknowledgement constitutes approval. This is a request channel only; opening an issue is not permission. A hosting request must separately identify whether anyone outside permitted Personal Use or Internal Use can operate the browser or consume its engine functionality, including invitation-only partner/vendor access and browser jobs delivered as a service.
 

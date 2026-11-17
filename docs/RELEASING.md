@@ -1,143 +1,181 @@
+<div align="center">
+
 # Development and releases
 
-Use tested main and short-lived feat/, fix/, docs/ and security branches, with
-PR integration and recorded checks. Solo maintainer/agent review is identified
-honestly; no nonexistent second reviewer is required. Keep one primary finite
-feature contract active. release/ branches serve genuinely maintained parallel
-lines only. Never import raw pre-transition private ancestry or recovery refs.
+*Frequent source progress. Explicit release decisions. Verified delivery.*
 
-Ordinary commits keep the planned product version. New releases require an
-explicit owner request, queued after the current coherent implementation task
-reaches a safe checkpoint. There is no automatic milestone, daily, per-commit or
-scheduled publisher. Choose a new version only for that requested release.
-The product version and CSAPUL license version are independent. Verify the actual
-tag/release before claiming it published.
-During0.x, minor releases can change a stated interface;
-patch releases preserve its contract except documented security necessities.
-Alpha/RC contracts remain unstable. Persisted-data changes need migration and
-recovery tests. See FEATURE_CONTRACTS.md and CAPABILITIES.md.
+[Home](../README.md) · [Roadmap](ROADMAP.md) · [Capabilities](CAPABILITIES.md) · [Documentation](README.md)
 
-Development continues through coherent commits and normal PR/CI integration
-without waiting for publication. For an explicitly requested release, reconcile
-its integrated source and required local, hosted and scoped acceptance evidence,
-then complete the exact final
-versioned-source, package and publication checks below. Source integration,
-green CI and development-runtime delivery are distinct from published delivery.
-Record the actual immutable tag, downloadable assets and downloaded-byte checks
-before reporting a release complete.
+</div>
 
-The published [v0.81.0-alpha.2](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.81.0-alpha.2) is one consolidated catch-up prerelease for the
-completed B2 milestone and integrated platform/compatibility prerequisites since
-v0.80.0-alpha.1. Its immutable source at 36adf20, non-draft prerelease, four assets,
-checksums and independent downloaded/extracted offline runtime checks passed.
-That completed one-time closeout does not authorize another release. Preserve
-v0.80.0-alpha.1 and other existing releases as immutable historical delivery.
+---
 
-Keep closeout focused on concrete blockers: a failed exact-source check, missing
-required acceptance, an unresolved exposed high/critical runtime defect, unavailable
-publication access or a failed package/download check. Record the affected step,
-its evidence and the next corrective action. Use the recorded licensing and
-publication disposition with the existing exact-term checks; revisit it only
-when material facts change. A concrete blocker leaves closeout pending and must
-be reported with the next corrective action. Preserve the checkpoint and continue
-independent development; do not let repeated release retries hold coding.
+## Release policy
 
-The existing tag/manual workflow remains available for owner-requested releases.
-It has no daily schedule or daily-enable option. One publication concurrency group serializes
-manual and tag runs without cancelling an in-progress release. Trusted branch
-push CI remains verification, with no automatic release promotion.
+> [!IMPORTANT]
+> **Named releases require an explicit owner request.** Queue it after the current
+> coherent implementation checkpoint. A merged PR, passing CI or completed feature
+> does not authorize a version bump, release tag, package or publication.
 
-Cargo, UI/help/User-Agent and Windows string metadata use the full release
-SemVer. Windows numeric fields map MAJOR,MINOR,PATCH,0 (each within16bits), with
-prerelease labels in strings and tag. Historical0.78 strings are not rewritten.
-Build SHA, clean state, compiler/target and payload hashes identify a build; they
-do not assert reproducibility across SDK/linker installations or certify safety.
+| Activity | Normal path | Release required? |
+| :--- | :--- | :--- |
+| **Source development** | Short-lived `feat/`, `fix/`, `docs/`, or `security/` branch, coherent commits, PR and existing checks | No |
+| **Integrated source** | Tested `main`; inspect the actual commit/check result | No |
+| **Development artifacts / dev channel** | Proposed roadmap work; not assumed operational | No |
+| **Named release** | Owner request → final source → immutable tag → exact delivery gates | Yes: explicit authorization |
 
-The immutable v0.81.0-alpha.1 candidate stopped before publication because its
-runtime trust README linked to a development-only generator. The replacement
-0.81.0-alpha.2 corrected the link and passed its own exact-source gates; the
-earlier tag is retained and is not moved or reused.
+Keep the current CI approach. The agent investigates failed checks and fixes
+related mistakes; routine failure triage is not transferred to the maintainer.
+Safe independent work may continue without mutating inputs under verification.
+The asynchronous handoff redesign is deferred. Do not weaken branch rules or
+required checks as a documentation change.
+
+[Routine verification](#contribution-and-routine-verification) · [Tagged delivery](#exact-tagged-delivery)
+· [Payloads](#payloads-and-identity) · [Failures](#when-a-check-fails)
+
+## Development discipline
+
+Use tested main and short-lived branches with PR integration and recorded checks.
+Identify solo maintainer/agent review honestly; do not invent a second reviewer.
+Keep one primary finite feature contract active. `release/` branches serve genuinely
+maintained parallel lines only. Never import pre-transition private ancestry or
+recovery refs into the public graph.
+
+Ordinary commits retain the product version. Product and CSAPUL license versions
+are independent. During 0.x, minor versions can change a stated interface; patch
+versions preserve its contract except documented security necessities. Alpha/RC
+contracts remain unstable. Persisted-data changes require migration/recovery
+checks. See [feature contracts](FEATURE_CONTRACTS.md) and [capabilities](CAPABILITIES.md).
+
+A completed PR is a checkpoint, not a requirement to stop development or issue a
+release. Source integration, green CI, development-runtime delivery and publication
+are different states. Report only the state actually reached.
+
+## Published baseline
+
+| Snapshot | Recorded outcome |
+| :--- | :--- |
+| **v0.81.0-alpha.2** | Published from `36adf20`, with runtime/source ZIPs, `publication.json`, `SHA256SUMS`, and downloaded/extracted verification |
+| **v0.81.0-alpha.1** | Immutable validation candidate; runtime documentation-link failure stopped publication. Tag retained, no release assets published |
+| **Earlier published releases** | Keep their original source, assets, licensing and valid grants unchanged |
+
+The [alpha.2 release](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.81.0-alpha.2)
+was a one-time catch-up for finite B2 and integrated prerequisites. Its completed
+delivery does not authorize another release or retroactively include newer source.
 
 ## Contribution and routine verification
 
-Routine hosted Windows CI runs on this maintainer's branch/main pushes. External
-intake is currently reports-only: the external-evaluation workflow does not fetch,
-execute or evaluate substantive submissions. Ordinary issue reports and minimal
-original bug reproducers follow CONTRIBUTING.md and the published agreement.
+Use focused affected and security-negative checks while editing. Before integration,
+pass the existing `tools/verify_offline.py` gate: normal Windows tests, optimized
+build, PE/resources/version/import checks, identity/packaging controls and required
+local App/input journeys. Preserve normal failures and serial diagnostics separately.
+Routine browser verification is offline. Public sites, physical desktop and audio
+devices require separate scoped evidence.
 
-Before enabling substantive evaluation, operationally verify exact-version C2
-assent, private storage and authority records bound to the immutable submission
-and agreement digest. A dispatch input or green run does not prove assent.
-Maintained inclusion separately requires the executed assignment and countersigned
-Schedule A for the exact accepted scope. Keep signatures and identity records
-private under docs/CONTRIBUTOR_PRIVACY.md. Owner-controlled work requires no
-fictional outside signature. Independent platform and limited original
-bug-reproducer rights remain separate.
+Trusted maintainer branch/main pushes use the existing hosted Windows workflow.
+The separate external-evaluation workflow does not fetch or execute substantive
+submissions: external intake remains reports-only until its permission/record
+controls are operationally verified.
 
-All build/test jobs have read-only permissions, pinned actions and hosted runners;
-no secrets, privileged pull_request_target checkout or personal-desktop runner
-evaluates public submissions. No source shared cache or downstream release promotion
-is used for external evaluation. CodeQL eligibility for CSAPUL is not assumed.
+<details>
+<summary><strong>🔐 External intake, permissions, and license acceptance</strong></summary>
 
-Maintainer-owned CI/release execution uses a named affirmative acceptance step
-under the repository/owner gate: `python tools/accept_license.py --accept-license
-<approved-full-license-sha256> --license-scope personal`, with
-`CHEZCAT_LICENSE_RECEIPT_DIR` pointing to a runner-temporary external directory.
-This is the owner's scoped authorization for that maintainer run, not assent by
-outside users or contributors. A directory variable alone grants no acceptance.
-Keep the receipt private and out of logs, caches and uploaded artifacts. Extracted
-runtime checks inherit and validate the same-text receipt; they have no bypass.
-Changed license text needs fresh affirmative acceptance. See BUILDING.md and
-LICENSE_ACCEPTANCE.md for local commands and organizational scope.
+Before substantive evaluation, verify exact-version C2 assent, private storage,
+authority records, immutable submission identity and agreement digest. A dispatch
+input or green run is not assent. Maintained inclusion separately requires an
+executed assignment and countersigned Schedule A for the exact scope. Keep
+signatures and identity records private under [contributor privacy](CONTRIBUTOR_PRIVACY.md).
+Owner-controlled work needs no fictional outside signature; independent platform
+and limited original bug-reproducer rights remain separate. See
+[contributing](../CONTRIBUTING.md).
 
-Use focused tests while editing. Before integration, pass tools/verify_offline.py:
-normal Windows tests, optimized build, PE/resources/version/import inspection,
-identity/packaging controls and required local App/input journeys. Preserve normal
-failures and diagnostic serial retries separately. Routine CI stays offline;
-public sites, physical desktop presentation and audio-device checks are separate.
+Build/test jobs use read-only permissions, pinned actions and hosted runners.
+No secret-bearing privileged `pull_request_target` checkout or personal desktop
+runner evaluates public submissions. External evaluation has no shared source
+cache or downstream release promotion. CodeQL eligibility for CSAPUL is not assumed.
+
+Maintainer CI/release execution uses the named affirmative acceptance step:
+`python tools/accept_license.py --accept-license <approved-full-license-sha256>
+--license-scope personal`, with `CHEZCAT_LICENSE_RECEIPT_DIR` pointing to an external
+runner-temporary directory. This records only the owner's scoped authorization,
+not outside contributor assent. Directory selection alone grants no acceptance.
+Keep receipts out of logs, caches and artifacts. Extracted checks validate the
+same exact terms; changed license text needs fresh affirmative acceptance.
+
+</details>
 
 ## Exact tagged delivery
 
-1. Complete the finite feature and review actual trust-boundary changes. Update
-   version/resources, release notes and accompanying license/scope deliberately.
-   CSAPUL1.1 LICENSE bytes for this containing revision are pinned at SHA256
-   34003a38eeb1db77472c307e23b5a5540c7625c50d9f0ea0dc7bacf6e5b9b749.
-   Existing immutable releases retain their supplied licenses and valid earlier
-   grants; never rewrite their assets or tags to adopt later terms.
-2. Validate the exact clean final commit, including the actual merge identity.
-   Re-fetch main; use only explicit non-force branch updates preserving others' work.
-3. Create a new unused immutable v<fullCargoVersion> tag on that public source.
-   Never move/reuse it for corrected source. A source change after failure requires
-   a new prerelease version/tag; a no-source-change service rerun is recorded.
-4. release.yml checks out that exact tag, validates it and the adopted license,
-   runs offline gates, packages runtime/source ZIPs and checksums, checks payloads
-   and exercises the extracted runtime. Only its explicit release payloads and
-   public-safe provenance record are retained as Actions artifacts.
-5. The separate publication job has contents:write, executes no project code,
-   rechecks transferred hashes and remote tag, creates the actual release with
-   verified existing tag, uploads explicit assets, then downloads/checks their
-   bytes. Ordinary jobs retain contents:read; repository-wide defaults stay read.
+```mermaid
+flowchart TD
+    REQUEST["Explicit owner request"] --> SOURCE["Clean final source and version"]
+    SOURCE --> TAG["New immutable matching tag"]
+    TAG --> VERIFY["Offline tests and optimized build"]
+    VERIFY --> PACKAGE["Exact runtime and source packages"]
+    PACKAGE --> EXTRACT["Payload checks and extracted App journey"]
+    EXTRACT --> PUBLISH["Separate publication job"]
+    PUBLISH --> DOWNLOAD["Download and compare published bytes"]
+```
 
-Runtime ZIP includes executable, pages/assets/trust, applicable notices/data,
-LICENSE and its containing-revision scope, exact acceptance/privacy/contribution
-policies and change summary, product docs and exact build identity. Private
-acceptance receipts are excluded. Source ZIP is separate and contains buildable
-source/resources/fixtures, never app binaries or
-private operations. Verify LICENSE working/blob/ZIP digests, source/tag agreement,
-complete payload and an extracted offline journey. The committed scope has one
-exact `Scope: containing-source-revision` line and one `License-SHA256: <digest>`
-line matching the approved license. A parentless snapshot is valid; old ancestry
-lists and withdrawn source identities are not distribution prerequisites.
-Do not recursively archive a
-development workspace. Missing/draft/mismatched license or dirty/stale proof fails
-closed. The packager does not publish; release workflow performs actual delivery.
+The diagram summarizes existing responsibilities; it is not a new automatic
+promotion mechanism. A failed gate leaves the requested delivery incomplete.
 
-Release notes state supported behavior and deferred features, exact source/tag,
-downloadable assets and SHA256SUMS. publication.json describes actual checks and
-compiler/payload identities; it is not a signed attestation. Claim hosted CI,
-attestations, device tests or reproduction only when they actually ran. An actual
-unresolved exposed high/critical runtime defect blocks the affected binary release;
-absent exhaustive certification is not a substitute for concrete risk disposition.
+| Step | Required action | Do not substitute |
+| :--- | :--- | :--- |
+| **1 · Prepare** | Finish the finite scope, review trust-boundary changes, and deliberately update version/resources and release notes | Automatic versioning after every feature |
+| **2 · Bind source** | Validate the exact clean final commit, including merge identity; refresh main without force updates | Old build evidence relabeled as new source |
+| **3 · Tag** | Create an unused immutable `v<fullCargoVersion>` tag on that source | Moving/reusing a tag after source changes |
+| **4 · Build and package** | Existing `release.yml` checks the exact tag/license, runs offline gates, packages source/runtime/checksums and exercises extracted output | A locally staged ZIP treated as published |
+| **5 · Publish** | Separate write-permission job checks transferred hashes and remote tag, creates the release, uploads explicit assets, downloads and compares their bytes | A source merge or successful upload attempt treated as verified delivery |
 
-Later license changes need an explicit revision and release/scope record. Never
-silently replace the exact license attached to an existing immutable release.
+The operative CSAPUL 1.1 LICENSE digest remains
+`34003a38eeb1db77472c307e23b5a5540c7625c50d9f0ea0dc7bacf6e5b9b749`.
+Existing releases retain their exact supplied license and earlier valid grants.
+Never rewrite their tags/assets to adopt later terms.
+
+The tag/manual workflow has no daily schedule. One publication concurrency group
+serializes manual/tag runs without canceling an in-progress release. Trusted branch
+push CI is verification—not automatic release promotion. The publication job has
+`contents: write` and executes no project code; ordinary jobs/defaults remain
+read-only. Pinned actions and exact inputs retain their existing requirements.
+
+## Payloads and identity
+
+| Payload | Required contents | Excluded |
+| :--- | :--- | :--- |
+| **Runtime ZIP** | Executable, matching pages/assets/trust, notices/data, LICENSE and containing-revision scope, acceptance/privacy/contribution policies, change summary, product docs, exact build identity | Receipts, profiles, private operations, unrelated workspace contents |
+| **Source ZIP** | Buildable tracked source/resources/fixtures with applicable notices and source identity | Application binaries and private operations |
+| **Public provenance** | Actual source/tag, compiler/payload identities, performed checks and checksums | Private logs; invented signing, certification or reproducibility claims |
+
+Verify working/blob/ZIP LICENSE digests, tag/source agreement, complete payload and
+an extracted offline journey. Scope contains exactly one
+`Scope: containing-source-revision` and one matching `License-SHA256: <digest>`
+line. Parentless snapshots are valid; old ancestry lists and withdrawn identities
+are not release prerequisites. Do not recursively archive a development workspace.
+Missing/draft/mismatched licensing or dirty/stale proof fails closed. The packager
+does not publish; the workflow performs actual delivery.
+
+Cargo, UI/help/User-Agent and Windows string metadata use the full release SemVer.
+Windows numeric fields map MAJOR,MINOR,PATCH,0, each within 16 bits, with prerelease
+labels in strings/tag. Historical version text is not rewritten. Source SHA,
+clean state, compiler/target and payload hashes identify bytes; they do not certify
+security or cross-SDK/linker bit-for-bit reproducibility.
+
+## When a check fails
+
+Record the failed stage and its concrete evidence. The agent investigates and
+repairs the affected work without hiding failure, reducing assertions or treating
+a diagnostic serial pass as the required normal result.
+
+Release blockers include failed exact-source checks, missing required acceptance,
+an unresolved exposed high/critical runtime defect, unavailable publication access,
+or package/download failure. Keep the checkpoint and continue safe independent
+work; repeated release retries must not consume the browser-development queue.
+A no-source-change service rerun is recorded. Changed source needs a new unused
+release version/tag, not replacement bytes under an old identity.
+
+Reuse recorded licensing/publication decisions unless material facts change.
+Absent exhaustive certification is not a substitute for concrete risk disposition.
+Release notes state supported/deferred behavior, exact source/tag, assets and
+SHA256SUMS. `publication.json` is descriptive evidence, not a signed attestation.
+Later license changes need an explicit revision and scope/release record.

@@ -1,178 +1,180 @@
+<div align="center">
+
 # Capability and dependency matrix
 
-Every broad area remains partial. "Verified" below means the specified local slice,
-not complete platform conformance. Source inspection, unit tests, App harness,
-physical desktop/device evidence and live-service outcomes have distinct scopes.
-This document owns implemented limits; work order belongs to the
-[roadmap](ROADMAP.md), measured version/workflow results to
-[compatibility](COMPATIBILITY.md) and its [catalogue](compatibility.json), and lasting
-behavior and acceptance to the [feature contracts](FEATURE_CONTRACTS.md).
+*Implemented behavior, explicit limits, and the evidence behind each claim.*
 
-[0.81.0-alpha.2](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.81.0-alpha.2)
-is published from source 36adf20 with four assets, checksum validation and independent
-downloaded/extracted offline runtime checks. That source has normal/optimized,
-hosted and six-group scoped native desktop acceptance. Each result retains its
-actual build/scope; unit/App/hidden-HWND checks alone do not prove desktop output.
-The source integrates finite B2 and CP1-CP5 prerequisites, not complete library or
-public-service support. Future releases require an explicit owner request under
-the [release process](RELEASING.md).
+[Home](../README.md) · [Roadmap](ROADMAP.md) · [Documentation](README.md) · [Compatibility](COMPATIBILITY.md)
 
-| Area | Implemented and locally verified slice | Gaps / next acceptance | Main implementation and checks |
-| --- | --- | --- | --- |
-| License acceptance | Full offline native terms and explicit personal/organization acceptance; source/headless commands, strict minimal external receipts, same-text reuse and changed-terms/decline/write-failure refusal before browsing | Records a local choice, not verified identity or organizational authority; no account service is required | src/license_acceptance.rs, src/platform_license.rs, tools/accept_license.py, tools/check_license_acceptance.py; docs/LICENSE_ACCEPTANCE.md |
-| Navigation/search/history | HTTP(S)/files, query encoding, Google/Bing/DuckDuckGo/None setting, local result/destination/one-Back/second-query journeys; request-time bridge replacement with bounded native activation | Live behavior remains response/session-dependent | src/navigation.rs, src/search.rs, src/app_session_history.rs, src/script_navigation.rs; check_input_harness.py, check_address_search.py, check_navigation_harness.py |
-| HTTP/TLS/resources | Original transport and certificate validation; bounded deduplicated IPv4/IPv6 interleaving, eight serial attempts with deadline reservation for the alternative family and redacted per-attempt diagnostics; explicit local PEM stores with shared 1024-root capacity; a pinned conservative 98-authority Mozilla NSS selection, offline generation/source-identity gates and native CA/time/self-signature checks; bounded per-hop/overall redirect deadlines, decompression, workers and measured timings | Coordinated document checks show that some previously refused certificate paths now validate; chain/parser/protocol/timeout/admission and resource-specific gaps remain. The data subset is not full Firefox policy or broad TLS compatibility; no OS trust-store lookup, root auto-update, revocation/CT or security-certification claim. Media remains bounded complete transfers with explicit CORS modes | src/http.rs, src/trust.rs, src/tls.rs, src/x509.rs, src/loader.rs; tools/generate_trust.py, trust/mozilla/selection.json; native signed-path/negative and data-tool tests |
-| Privacy/storage/files | Memory-only cookies, scoped profiles/bookmarks, optional history, staged downloads and local roots | No site storage/service workers/persistent cookies; local files are not encrypted vaults | src/cookies.rs, src/profile.rs, src/history.rs, src/downloads.rs |
-| DOM/interfaces | Real mutation/Attr identity, selectors/collections, stable live main-Document/supported Node childNodes, checked native array-like apply, genuine Document Node accessors/getRootNode over ordinary accessible trees, text replacement and native-created Comment leaves; conventional select fragments and finite hidden-input admission/reflection with staged native ownership, retained tree/form state and no hidden box/focus | The unchanged W2 recheck next refuses `div.innerHTML = '<input/>'`; new checkpoints require exact integration verification. No library initialization/visible-improvement claim. Existing native input-type transitions, input-containing innerHTML, explicit select form associations, existing-control interior edits, createElement(select), parsed comments, full CharacterData, DocumentType/template-content and child-Document collections remain unsupported. Shadow DOM remains unavailable; modern jQuery now refuses anchor href IDL assignment | src/script_queries.rs, src/script_dom_tree.rs, src/scripting.rs, src/script_node_root.rs, src/script_hidden_inputs.rs, src/forms_hidden_inputs.rs, src/script_select_fragments.rs, src/forms_select_fragments.rs, src/array_ops.rs; original parser/native-model/Page/App root/hidden-input/select and namespace/Attr/owner controls |
-| JavaScript/realms | Original language/built-ins/promises/jobs, native RegExp input ToString, bounded String.prototype.concat with live ordered coercion, finite static colon object-literal prototype setters with real null/Object/Function links and ignored primitive RHS, owner-isolated intrinsic roots and main-Window animation operations | Unchanged Vue execution now reaches object-prototype access; ordinary own/legacy `__proto__` operations and native-host prototype chains remain guarded. Class syntax, UTF-16 code units, generic RegExpExec/custom exec, object-valued lastIndex, modules, fetch/XHR and many interfaces remain incomplete | src/javascript.rs, src/string_concat.rs, src/object_literals.rs, src/prototypes.rs, src/intrinsic_realms.rs, src/promises.rs, src/scripting.rs; original concat/literal prototype/App text-pixel controls, normal suite and check_animation_harness.py |
-| Events | Genuine owner-realm Event/UIEvent/MouseEvent/CustomEvent constructors and branded fields; real Event/UIEvent/CustomEvent dispatch/cancellation; finite native anchor click/auxclick with actual host payload, frozen listener paths and microtask cancellation | Synthetic Mouse dispatch, general native pointer delivery, KeyboardEvent construction/specialized native keyboard prototypes, child-document factories and shadow retargeting remain unsupported | src/event_interface.rs, src/script_dispatch.rs, src/script_created_events.rs, src/script_anchor_mouse.rs; original interface, anchor and dispatch controls |
-| CSS/layout/geometry | Loaded styles, token selectors, finite host-context viewport/hover media groups, measured supported geometry/scrollHeight, clipping, software paint and one URL background layer on ordinary block/inline-block boxes; original native/App resize/zoom, pixels and link-hit checks | Normal verification remains required for each integration checkpoint. Conditional font faces, dynamic/resize font fetching, wider media-query/attribute grammar, inline-fragment/replaced backgrounds, multiple layers and broader layout remain incomplete; unsupported reverse/viewport overflow measurements stay explicit | src/css.rs, src/css_media.rs, src/layout.rs, src/script_geometry.rs; original media-query/initial-font/App checks and stylesheet/render journeys |
-| External stylesheets | Shared ordinary unmarked HTTP(S) parser/dynamic loading, final CSS provenance and bounded response accounting; broader page usability remains in progress | Per-hop CSP/request/mixed-content, cookie, MIME/CORP/COEP, cache and cancellation rules remain; no general stylesheet CORS, imports or CSSOM source access claim | src/http.rs, src/loader.rs, src/script_stylesheets.rs, src/app_stylesheets.rs; B1 contract and original local request/pixel/lifecycle fixtures |
-| Fonts/images | Original selected font/image decoders and resource/presentation paths | Format subsets and cross-origin font loading need specific contracts | src/fonts.rs, src/image.rs and format modules; original pixel/negative fixtures |
-| Media | Local IVF/VP8 visible fixed-canvas I/P (version-zero single-MV interframes), PCM, constrained Matroska A/V with dependency-aware seeking; one authored IVF or supported Matroska video with source/load lifecycle, script controls and play promises tied to decoded-frame/acknowledged PCM readiness; complete HTTP(S) IVF/Matroska transfers chosen by explicit MIME, with authored CORS/credential modes | SPLITMV, hidden/nonzero-version interframes, WebM/Opus/Vorbis, unmarked foreign media, dynamic crossOrigin controls, streaming/ranges, muted Matroska, multiple players, MSE and YouTube playback missing | src/media.rs, src/audio.rs, src/matroska.rs, src/script_media.rs; local media/source-replacement journeys and check_authored_video_harness.py and check_network_media_harness.py; check_authored_av_harness.py and check_network_authored_av_harness.py |
-| Media interfaces | Genuine owner-realm HTMLMediaElement/HTMLVideoElement roots, constants and slot accessors; stable VIDEO class identity and canonical load/pause/play/src/currentTime transactions through ordinary shadows; actual Boolean controls reflection and native bar/input behavior without source/clock/frame/Promise reset | One bound player; controls reflects genuine main HTML VIDEO/AUDIO attributes without a player, while unbound playback calls give real NotSupportedError outcomes and other playback-state getters/setters decline. VIDEO dimensions, extra/child players and wider media APIs remain unsupported; Element.toggleAttribute and NamedNodeMap mutation are separate gaps | src/media_interface.rs, src/script_media.rs, src/host_objects.rs, src/app_media.rs; original media-interface/controls tests, check_media_interface_harness.py and check_media_controls_harness.py |
-| Browser UI | Native settings, address input, bookmarks/history/download controls; finite About panel; Session tabs/windows/pinned inspectors; guarded primary/middle links and explicit foreground/background/window context commands | Recorded actual desktop acceptance covers the released source above; changed native behavior requires affected acceptance, with normal/optimized and hosted checks at integration boundaries. Hidden HWND/pure controls alone do not establish physical desktop interaction. Named contexts, script-opened windows, full accessibility and native locked-session presentation remain gaps. Copy capture does not prove OS clipboard delivery | src/app*.rs, src/build_identity.rs, src/ui.rs, src/platform*.rs; original About/chrome, Session admission/input and owned native-window controls |
-| Diagnostics | Source/activity/layout/pixels and inspector; document-only connection reports with optional exact-host checks before DNS on each hop, actual destination/phase evidence, and escaped bounded metadata; eight new native diagnostics regressions verified | No App/profile, page scripts, subresources or usability assessment in --diagnose. Status and possible body markers do not establish access/challenge outcomes. Reports can contain private URLs/paths/session data; full normal integration and public-host checks remain separate | src/diagnostics.rs, src/diagnostics_tests.rs, src/network_trace.rs; original loopback/guard/metadata tests and offline harness reports |
-| Platform/isolation | Windows x64, explicit FFI ownership, worker retirement/cancellation and watchdogs | No OS renderer sandbox; independent native/crypto/aggregate-memory assurance remains incomplete | src/platform.rs, src/audio_output.rs; native negative tests and PE checks |
-| Build/release | std-only production manifest, generated resources, pinned compiler, portable payload and offline local gates | Per-user MSI and opt-in release discovery/authenticated upgrades are planned, not implemented. The 0.81.0-alpha.2 exact tagged build, complete payload, extracted-runtime and downloadable-byte checks passed. Future release checks run only for explicit owner requests; source/CI/development delivery alone is not publication | Build.cmd, tools/verify_offline.py, docs/RELEASING.md |
+</div>
 
-TCP fallback retains candidates from both families within a 256-entry resolver
-scan and eight-attempt queue; resolver preference and within-family order remain.
-Scan exhaustion reports remaining results as unknown. Blocking OS DNS, up to one
-two-second connect before cancellation, and concurrent Happy Eyeballs remain
-limitations. Offline simulated failures and real local sockets establish this
-scope; external IPv6 or paused-service success is not claimed. The original
-hostname still drives TLS, HTTP Host and origin/cookie/redirect policy.
+---
+
+## Read the matrix correctly
+
+> [!IMPORTANT]
+> **Every broad platform area remains partial.** “Implemented” describes a finite
+> contract, not complete standards or website support. Local tests, App journeys,
+> physical devices, and live services are different evidence scopes.
+
+**Source snapshot:** public `main` at `a65d37c` (November 17, 2026). This includes
+PRs [#29](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/29),
+[#30](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/30),
+[#31](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/31),
+[#32](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/32), and
+[#34](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/34).
+The fixed [alpha.2 downloads](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.81.0-alpha.2)
+remain at `36adf20`; these later changes do not update those binaries.
+
+[Browser & platform](#browser-and-platform) · [DOM & JavaScript](#dom-and-javascript)
+· [Rendering](#rendering-and-resources) · [Media](#media)
+· [Evidence](#evidence-boundaries) · [Implementation map](#implementation-map)
+
+## Browser and platform
+
+| Capability | Implemented slice | Important limits |
+| :--- | :--- | :--- |
+| **Native shell** | Tabs/windows, tab-pinned inspectors, guarded primary/middle links and foreground/background/new-window context actions | Named contexts, script-opened windows, wider accessibility, and locked-desktop presentation remain gaps |
+| **Navigation** | HTTP(S)/files, explicit URL/file intent, encoded address searches, Google/Bing/DuckDuckGo/None providers, local result/destination/one-Back/second-query journeys | Live outcomes are response/session-dependent; failed navigation is distinct from the retained page |
+| **Profile and storage** | Settings, bookmarks, optional history, staged downloads, guarded local roots, memory-only cookies | No general site storage, service workers, or persistent cookies; local files are not encrypted vaults |
+| **About / identity** | Full descriptive version/source/state/kind, offline license access, allowlisted Copy data | Metadata is not signing/authentication; App copy capture alone does not prove OS clipboard delivery |
+| **License acceptance** | Full offline terms, explicit personal/organization acceptance, strict minimal external receipts, same-text reuse, changed-terms/decline/write-failure refusal | Records a local choice—not verified identity, organizational authority, or an online account |
+| **Build and delivery** | Zero third-party production Cargo dependencies, pinned tools, generated resources, portable ZIP and offline gates | Installer and update discovery/upgrade remain planned; releases require owner requests |
+| **Isolation** | Checked ownership, worker retirement/cancellation, explicit FFI boundaries and watchdogs | One process; no OS renderer sandbox or whole-process memory sandbox |
+
+## DOM and JavaScript
+
+| Capability | Implemented slice | Important limits |
+| :--- | :--- | :--- |
+| **DOM identity and collections** | Genuine Document/Node accessors, stable live supported childNodes, checked native array-like apply/slice, Attr identity, text replacement and native-created Comment leaves | Parsed comments, full CharacterData, DocumentType/template-content and child-Document collections remain outside the finite scope |
+| **Node roots** | Genuine `Node.getRootNode()` for ordinary accessible connected/detached trees, Attr and supported same-origin child trees; ordered options conversion and owner/work checks | No Shadow DOM or fabricated child scope |
+| **Select fragments** | Conventional select/option/optgroup fragments; whole-subtree removal/reconnection retains identities, edited values, owner/order/disabled state and retires stale focus/hits | Rich select content, existing-select interior edits, explicit new select associations, and createElement(select) remain unsupported |
+| **Hidden inputs** | Fresh hidden-input admission, finite name/value/default reflection and whole-tree moves through native ownership; no box or focus target | Arbitrary existing input-type transitions and unrelated unsupported input kinds remain refused |
+| **Text-input fragments** | Default/explicit text INPUT fragments through staged native transactions; dirty/default values, caret/selection, Reset and focus retirement; finite BUTTON.type reads | Unsupported kinds, foreign/inert ancestry, new explicit form associations and exhausted limits reject atomically. This is not unrestricted innerHTML/form support |
+| **Anchor URLs** | Scoped live HTTP(S) `href` reflection and related URL values through shared URL/DOM behavior | Wider URL semantics remain contract-bounded; reflection does not grant navigation authority |
+| **Language/runtime** | Original interpreter, selected built-ins/promises/jobs, owner-isolated intrinsic roots, RegExp input ToString and generic ordered `String.prototype.concat` | Classes, broader prototype access, UTF-16 code-unit semantics, generic RegExpExec/custom exec, object-valued lastIndex, modules, fetch/XHR and many APIs remain incomplete |
+| **Literal prototypes** | Finite static-colon object-literal prototype setters with real null/Object/Function links and ignored primitive RHS | Ordinary own/legacy `__proto__` operations and wider native-host prototype chains remain guarded |
+| **Events** | Genuine owner-realm Event/UIEvent/MouseEvent/CustomEvent construction and branded state; real Event/UIEvent/CustomEvent dispatch/cancellation; finite trusted anchor click/auxclick; dispatched base Events use genuine ordinary string/symbol property lookup with metered own storage and protected isTrusted | Synthetic Mouse dispatch, general pointer delivery, specialized keyboard interfaces and shadow retargeting remain gaps |
+| **Animation frames** | Replaceable/deletable/restorable main-window scheduling and cancellation through real callbacks and budgets | Child-frame schedulers remain unsupported |
+
+**Integration is not full framework support.** PR #34's exact optimized candidate
+passes the unchanged pinned jQuery 4.0.0 offline app through startup, genuine
+trusted input, and an asynchronous timer text update. This is one workflow, not
+AJAX/Deferred or full-framework support. Legacy jQuery remains at the recorded
+`createDocumentFragment` boundary; Vue and Bootstrap retain language dependencies.
+See [compatibility outcomes](COMPATIBILITY.md) for exact versions and stages.
+
+## Rendering and resources
+
+| Capability | Implemented slice | Important limits |
+| :--- | :--- | :--- |
+| **CSS/layout** | Loaded styles, token selectors, finite viewport/hover media groups, measured supported geometry/scrollHeight, clipping and software painting | Wider media/selector grammar, pseudo-element generated painting and broad layout remain incomplete |
+| **Responsive foundation** | Initial-font em media, explicit box-sizing inheritance and fractional flex fitting; Foundation fixture stacks at 640 and forms two columns at 1280 | Does not establish framework initialization or complete component styling |
+| **Stylesheets** | Ordinary unmarked parser/dynamic HTTP(S) sheets, guarded redirects, final URL ownership and bounded accounting | No general stylesheet CORS, imports or CSSOM source access. Marked modes retain their documented subset |
+| **CSS backgrounds** | One URL layer on ordinary block/inline-block boxes with ownership, cascade, repeat/position/size and shared resource lifecycle | Inline-fragment/replaced backgrounds and multiple layers remain incomplete |
+| **Fonts and images** | Selected original decoders and bounded resource/presentation paths | Format subsets and cross-origin font loading require specific contracts; conditional/dynamic/resize font fetching remains limited |
+| **Custom properties** | PR #31 integrates bounded, case-sensitive inherited variables for supported padding/border values, nested fallbacks, cycles, token boundaries and invalid-computed-value handling; original App pixels/hits/reflow match a literal control | Alpha colors, calc(), CSSOM and full Bootstrap component styling remain outside this qualification |
+| **GPU acceleration** | Not implemented | Planned measured graphics backend with software fallback; not a replacement decoder grant |
+
+<details>
+<summary><strong>📐 Viewport and responsive behavior</strong></summary>
+
+Finite em media lengths use the browser's initial 16 CSS-pixel font basis, not
+an author root/body font or physical zoom. Recognized terminal ::before/::after
+stylesheet targets preserve valid atomic selector lists without matching ordinary
+elements or painting generated content. Explicit box-sizing inherit uses the
+actual parent; initial/unset remain content-box. Fractional flex main sizes are
+retained until cumulative pixel allocation so two 50% items fit odd widths while
+real padding/minimum overflow still wraps.
+
+Nested matching media rules use the real CSS viewport and an explicit desktop
+mouse profile. Tests distinguish full viewport width from available line width,
+retain fractional zoom thresholds, and verify geometry/background pixels/link
+ownership. Admission counts inactive descendants; whole-sheet refusal cannot
+publish a prefix. Initial font selection uses the same context, but nested font
+faces and dynamic/resize font fetching are not added. Offscreen results are not
+physical desktop or complete live-page results.
+
+</details>
+
+## Networking, trust, and diagnostics
+
+| Area | Current behavior | Boundary |
+| :--- | :--- | :--- |
+| **Transport** | Original HTTP/TLS/certificate handling, redirects, decompression, workers and timings | Protocol, parser, chain and admission gaps remain |
+| **Dual-stack fallback** | Up to 256 resolver entries, per-family retention, eight bounded serial attempts, opposite-family time reservation and redacted diagnostics | Blocking OS DNS, up to one two-second connect before cancellation, and no concurrent Happy Eyeballs |
+| **Trust** | Reviewed conservative 98-authority Mozilla NSS subset; explicit PEM replacement with shared 1,024-root capacity | No OS-store discovery, automatic root updates, revocation/CT, full Firefox policy or security certification |
+| **Policy** | Original hostname for TLS/Host/origin; per-hop CSP, cookies, credentials, mixed-content, MIME and response-policy checks | A successful response is not a usable website or challenge clearance |
+| **Diagnostics** | Document-only `--diagnose` with optional exact-host restrictions before DNS, phase/timing evidence and escaped bounded metadata | No page scripts/subresources, profile or usability assessment; raw reports may contain private data |
+
+See [explicit HTTPS trust](../trust/README.md) and the [T1 contract](FEATURE_CONTRACTS.md#t1--shared-tlstrust-and-data-coverage-baseline).
+The selected roots exclude unsupported forms and restrictions rather than
+silently broadening trust. Custom stores replace the default and remain strict.
+
+## Media
+
+| Area | Implemented slice | Not established |
+| :--- | :--- | :--- |
+| **Formats** | Local IVF/VP8 visible fixed-canvas version-zero single-MV I/P, PCM and constrained Matroska A/V | SPLITMV, hidden/nonzero-version interframes, WebM/Opus/Vorbis or all codecs |
+| **Authored playback** | One supported player, source/load lifecycle, native controls, script play/pause/seek, promises tied to real decoded output | Multiple players, MSE, streaming/ranges, muted Matroska or complete HTMLMediaElement |
+| **Network playback** | Complete bounded HTTP(S) IVF/Matroska responses selected by MIME and explicit authored CORS/credential modes | Unmarked foreign playback, general Fetch/CORS, ordinary YouTube or service playback |
+| **Interfaces** | Genuine owner-realm Media/Video roots/constants/accessors; saved canonical operations and Boolean controls reflection | VIDEO dimensions, dynamic crossOrigin, extra/child players and broader APIs |
+| **Controls lifecycle** | Hide/restore bar without resetting source, clock, frames, seek or play promises; real hit/focus retirement | Physical input or audible output inferred from offscreen tests |
+
+<details>
+<summary><strong>🎞️ Decoding and playback evidence</strong></summary>
+
+Original authored journeys check trusted play, event/Promise order, actual clock
+advancement, independently expected frame pixels, pause/seek/freeze, native
+controls, EOF/replay, Stop and navigation. Loopback HTTP/TLS journeys retain
+those assertions and response identity. Policy, MIME/status/partial-response,
+cancellation, replacement, and stale-completion negatives remain independent.
+Issuer/hostname refusal checks prevent media HTTP/player installation and render
+a real error event.
+
+Interframe journeys visit original frames across two keyframe groups in IVF and
+Matroska. Native YUV and centered-bilinear BT.601 display references separate
+codec and presentation results; the recorded display profile bounds mean RGB
+error below 0.5 and maximum channel error at 2. Entropy/reference updates,
+segment retention, rollback, cancellation and bounded replay are tested.
+
+Routine verification keeps audio devices closed. Opt-in WinMM checks establish
+acknowledged PCM advancement, pause/seek/drain/replay and alignment for the selected
+profile—not physical audibility or arbitrary-device compatibility.
+
+</details>
 
 ## Evidence boundaries
 
-| Evidence type | What it establishes | What it does not establish |
-| --- | --- | --- |
-| Original model/unit tests | Specific conversions, brands, owners, queues, failure and retirement rules | Full standards conformance or visible application behavior |
-| Trust-data and native certificate checks | Exact reviewed data reproduction, source/policy pins, all selected anchors' supported forms/CA/time/self-signatures, retained identities and original signed-path refusals | Complete Firefox policy, revocation/CT, general TLS interoperability or a public website's actual behavior |
-| Document-only diagnostics | Original transport response, trust selection, guarded destinations and measured native phases for the actual attempt | Page JavaScript/subresources, readability, interaction, challenge clearance or an audit of the complete trust selection |
-| Actual App/input/offscreen journeys | Real application input, script state/events, source/layout/canvas identity, decoded pixels and finite HTTP/TLS response checks | Physical desktop presentation, speaker output or public-service compatibility |
-| App build-information copy capture | Actual typed safe metadata action returned by owned About keyboard/pointer controls, captured without changing the OS clipboard | Successful native clipboard delivery, authenticated publisher/source/binary identity or remote publication |
-| Pinned local library/workflow checks | Exact selected assets, first-root versus cascaded errors, and separately observed initialization/input/navigation/layout stages | Whole-library/version-family compatibility, unrelated deployment output, or a public service |
-| Initial reference-browser DOM and pixels | An independent initial-state comparison for the original fixture at the recorded viewport | Reference interactions, cross-browser conformance or a successful ChezCat workflow |
-| Hosted offline CI | The recorded commit's build, normal checks and local fixture journeys on its runner | A later commit, release payload, hardware output or live service |
-| Verified published release | The actual immutable tag/source, explicit runtime/source assets, descriptive publication.json, extracted-runtime gates and downloaded-byte verification | Inferred from source/CI/development alone; signed attestation, exhaustive certification, reproducibility or full platform/service support |
-| Explicit opt-in WinMM checks | Device acknowledgements, PCM sample advancement, pause/seek/drain/replay and video alignment for the selected profile | Physical audibility, arbitrary devices or routine no-device CI |
-| Physical desktop / live service | Requires separate, explicit evidence for the actual session and outcome | Not inferred from source inspection, HTTP status, titles or offscreen pixels |
+| Evidence | Establishes | Does not establish |
+| :--- | :--- | :--- |
+| **Model/unit checks** | Specific conversion, owner, queue, rollback and lifetime rules | Full standards conformance or visible page success |
+| **App/input/offscreen** | Real application input, state, layout, hit targets and decoded pixels | Physical desktop, speakers, or public-service compatibility |
+| **Pinned library fixtures** | Exact versions and separately observed startup/input/async/layout results | Every library version or an unrelated website |
+| **Reference-browser capture** | The actually captured comparison stages | Unrun reference interactions or successful ChezCat execution |
+| **Hosted offline CI** | The recorded commit/configuration on its runner | Later source, release assets, devices or live services |
+| **Published release** | Actual source/tag, payload, extracted checks and downloaded bytes | Signing, exhaustive certification, reproduction or universal support |
+| **Physical/live check** | Explicit observed session and outcome | Results inferred from HTTP 200, titles, elapsed time or zero script errors |
 
-The default trust bundle selects 98 authorities from pinned Mozilla NSS 2.94
-data with separate MPL notices. Four leaf-issuance cutoffs, one externally imposed
-name restriction, ten unsupported forms and 54 non-server-auth entries are
-excluded entirely. Original native checks validate every selected anchor and
-retain prior exact identities; offline tool tests exercise deterministic
-selection, strict refusal and verifier-source pins. Custom PEM replacement stays
-strict, and identity, expiry, signatures and constraints are unchanged. Normal
-verification remains required for each new checkpoint. A coordinated browser recheck
-must establish actual request/resource behavior; these checks alone establish
-no newly usable public service. See [trust scope and refresh](../trust/README.md).
+The alpha.2 release has its own normal/optimized/hosted and scoped desktop evidence.
+Later source changes retain separate checks and do not retroactively change those
+released bytes. Google Search/Images/Maps are not fully supported; ordinary
+YouTube playback remains unsupported.
 
-The finite About view is a browser-owned native panel over the same live page.
-Build text preserves full prerelease SemVer and descriptive source/state/kind;
-unknown metadata stays unknown and a declared tag stays publication-unverified.
-It is not code signing or release authentication. Offline legal views retain the
-exact main LICENSE, scope and third-party notice index. Full referenced third-
-party terms remain packaged separately; the viewer does not open each referenced
-file. Safe Copy contains only allowlisted build/source/license fields, with no
-page, profile, history, receipt or path data. Its App input capture intentionally
-does not invoke the native clipboard. Original App and executable acceptance
-must establish legal-text/rendering identity, native focus/scroll/copy controls,
-return to the same page and preservation of held resource work. Normal build,
-PE and package verification remain required; no installer/update control is added.
+## Implementation map
 
-The responsive slice admits finite em media lengths using the browser's initial
-16CSSpx font basis, independently of author root/body fonts and physical zoom.
-Recognized terminal ::before/::after stylesheet targets preserve valid atomic
-selector lists without matching ordinary elements or painting generated content.
-Explicit box-sizing inherit uses the actual parent; initial/unset remain
-content-box and the property is not naturally inherited. Flex main-size line
-admission retains fractions until cumulative pixel allocation, so two50% items
-fit odd widths while genuine padding/minimum overflow still wraps. Wider units,
-pseudo targets and generated content remain unsupported in this finite slice.
-The unchanged Foundation fixture's rendering stage improves independently of
-Vue execution. CP3 is integrated; CP6 advances unchanged W3 to the separate
-object-prototype boundary. Each new checkpoint still requires exact normal integration.
+Paths are repository-root-relative references, not additional runtime payloads.
 
-The finite viewport-media slice evaluates nested matching rules against the
-real CSS viewport and explicit desktop mouse-input profile. Original native/App
-checks distinguish full viewport width from available line width, preserve
-fractional zoom thresholds, verify changed geometry/background pixels and real
-link ownership/hit removal, and retain document/source lifetime. Admission
-counts inactive descendants, keeps cascade/stylesheet URL ownership and refuses
-whole sources without publishing prefixes. Initial font-family selection uses
-the same context; nested font faces are not requested, and dynamic/resize font
-fetching remains unsupported. Executable offscreen and full normal integration
-checks are separate required acceptance, not inferred from model tests. This
-does not establish complete page appearance, script-enabled site behavior or
-physical desktop presentation.
+| Concern | Primary implementation / checks |
+| :--- | :--- |
+| DOM and native forms | `src/script_dom_tree.rs`, `src/script_node_root.rs`, `src/script_hidden_inputs.rs`, `src/script_select_fragments.rs`, native form modules and original Page/App controls |
+| Language/realms | `src/javascript.rs`, `src/string_concat.rs`, `src/object_literals.rs`, `src/prototypes.rs`, `src/intrinsic_realms.rs`, `src/promises.rs` |
+| Events | `src/event_interface.rs`, `src/script_dispatch.rs`, `src/script_created_events.rs`, `src/script_anchor_mouse.rs` |
+| Network/trust | `src/http.rs`, `src/tls.rs`, `src/x509.rs`, `src/trust.rs`, `src/loader.rs`, original signed-path/data/negative checks |
+| Layout/resources | `src/css.rs`, `src/css_media.rs`, `src/layout.rs`, `src/script_geometry.rs`, stylesheet/render journeys |
+| Media | `src/media.rs`, `src/audio.rs`, `src/matroska.rs`, `src/script_media.rs`, authored/interface/source-replacement journeys |
+| Browser shell | `src/app*.rs`, `src/platform*.rs`, `src/ui.rs`, `src/build_identity.rs`, session/native-owner controls |
+| Delivery | `Build.cmd`, `tools/verify_offline.py`, [release guide](RELEASING.md) |
 
-The finite CustomEvent interface journey uses two trusted base-input clicks to
-construct and deliver real untrusted notifications, retaining any detail
-identity, canonical initialization through own shadows, capture/target/bubble
-cancellation and independent path copies. Genuine child constructor roots and
-child-realm detail are checked over owned HTTP. Readable results have current
-zero interpreter errors and paired document/DOM/layout/canvas pixels. The original
-legacy notification and stack/base/UI/Mouse cases remain. Model tests separately
-cover ordered conversion, foreign-owner guards, combined retention, newest-only
-unpublished rollback, bounded refusal and ordinary/fatal recovery. Normal
-verification remains required for each new checkpoint; this establishes no device,
-physical-desktop or public-service behavior.
-
-The finite Media/Video interface journey drives saved canonical Play/load/pause
-and the currentTime setter despite own method/data/accessor shadows. It reuses
-the original real clock, independent frame pixels, Promise/event order, frozen
-pause and seek, source identity, EOF/replay, Stop and navigation checks, with
-paired document/DOM/layout/canvas observations and no audio device. Model tests
-separately cover descriptor/brand rules, saved/fresh/cached owner guards,
-source-selection FIFO, no-binding refusal and bounded getter-work recovery.
-This completes that finite interface/App slice. Every implementation checkpoint
-also requires normal verification; broader F6/service acceptance remains deferred.
-
-The controls-reflection journey keeps hidden and restored native bars in
-distinct actual snapshots. It checks decoded pixels and independent frame time,
-the exposed image bottom strip versus exact bar pixels, real hit queries,
-hidden/unfocused Space refusal and restored focused native pause/freeze. A Play
-Promise survives removal and fulfills once; raw source Attr, selected source,
-clock and frame lifetime persist with one full loopback clip fetch. Original App
-controls separately verify armed-press/focus cancellation at removal reflow and
-pending-seek preservation. These are App/input/offscreen and model proofs, with
-paired document/DOM/layout/canvas observations, zero current interpreter errors
-and a closed audio owner. Normal integration verification remains required;
-physical OS input, audible output and service compatibility are separate.
-
-The original authored-video App/input/offscreen journey checks a trusted script
-play click, synchronous state, one playing notification before fulfillment,
-measured clock advancement and decoded pixels against independent clip frames.
-It also checks script pause/seek, frozen time/pixels, native controls, EOF/replay,
-Stop and navigation. The network journey repeats those assertions over original
-loopback HTTP and authenticated TLS 1.3, checking complete response identities and
-decoded pixels. Original App/transport tests cover policy refusal, MIME/status/
-partial-response errors, cancellation, replacement and stale completions. This
-also includes real App cross-origin playback and credential/header/cookie
-controls. The TLS-refusal executable journey proves untrusted issuer and hostname
-failures prevent media HTTP requests and player installation, while rendering the
-actual error event. This finite evidence does not establish general Fetch/CORS,
-general audio-device or physical-desktop acceptance.
-
-The finite interframe journey reuses those real controls and source-lifecycle
-checks, visits every original frame across two keyframe groups in IVF and
-Matroska, and repeats HTTP(S) video playback. Independent native VP8 YUV and
-explicit centered-bilinear BT.601 display references separate decoding from
-presentation. The display profile requires mean RGB error below0.5 and maximum
-channel error2. Codec tests cover entropy/reference updates, segment retention,
-rollback, cancellation and bounded replay work. An explicitly requested WinMM
-journey additionally checks acknowledged sample advancement, pause, seek, completed
-PCM drain, replay and decoded video alignment. Routine verification keeps devices
-closed; neither check claims physical audibility or live-service playback.
-
-Google Search, Images and Maps are not fully supported. YouTube page compatibility
-is limited, and playback is unsupported.
-
-Main-window animation operations support replacement and real callback scheduling
-and cancellation. Child-frame animation schedulers are unsupported. See the
-[F1 feature contract](FEATURE_CONTRACTS.md#f1--replaceable-animation-frame-operations)
-for the technical scope and acceptance criteria.
+For full lasting acceptance requirements, consult [feature contracts](FEATURE_CONTRACTS.md).
+For task order, use the [roadmap](ROADMAP.md); this matrix is not a release schedule.

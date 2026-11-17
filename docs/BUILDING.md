@@ -1,111 +1,167 @@
+<div align="center">
+
 # Building and checking ChezCat
 
-The supported development target is x86_64-pc-windows-msvc. Install Microsoft's
-C++ linker/build tools and Windows SDK, the Rust 1.99.1 toolchain pinned by
-rust-toolchain.toml, and Python 3.14.8. No Cargo package download is needed for
-normal builds/tests. Initial toolchain/action installation can require network
-access; browser verification remains offline.
+*A reproducible starting point for local builds and scoped verification.*
+
+[Home](../README.md) · [Roadmap](ROADMAP.md) · [Capabilities](CAPABILITIES.md) · [Compatibility](COMPATIBILITY.md)
+
+</div>
+
+---
+
+## Prerequisites
+
+| Requirement | Supported setup |
+| :--- | :--- |
+| **Target** | Windows x64, `x86_64-pc-windows-msvc` |
+| **Native tools** | Microsoft C++ linker/build tools and Windows SDK |
+| **Rust** | `1.99.1`, pinned by `rust-toolchain.toml` |
+| **Python** | `3.14.8` for development/verification scripts |
+| **Production dependencies** | No third-party Cargo packages are required for normal builds/tests |
+
+Initial toolchain/action installation may require network access. Browser
+verification uses offline/local fixtures; this does not mean every setup step is
+network-free.
+
+## Quick start
+
+### 1 · Install the pinned compiler and read the terms
 
 ```powershell
 rustup toolchain install 1.99.1 --profile minimal --component clippy --no-self-update
 rustc --version
 python tools/accept_license.py --show
+```
+
+### 2 · Accept only after reviewing the exact terms
+
+The following is an affirmative **personal-scope** choice, not a required copy-and-
+paste step before reading. Use organization scope only with the necessary authority.
+
+```powershell
 python tools/accept_license.py --accept-license 34003a38eeb1db77472c307e23b5a5540c7625c50d9f0ea0dc7bacf6e5b9b749 --license-scope personal
+```
+
+Source builds/tests check a valid receipt; they do not silently create acceptance.
+To inspect an existing receipt without accepting again:
+
+```powershell
+python tools/accept_license.py --check
+```
+
+### 3 · Build and keep the resources together
+
+```powershell
 .\Build.cmd
-python tools/capture_tests.py --toolchain 1.99.1
+```
+
+`Build.cmd` writes `ChezCat.exe` beside the source checkout. Keep matching pages,
+assets, trust data, and notices with the executable. Rust and Python are development
+tools, not application runtime dependencies. A source ZIP is not a ready-to-run
+Windows runtime bundle.
+
+## Choose the right verification scope
+
+| Work | Check | Evidence boundary |
+| :--- | :--- | :--- |
+| **Ordinary edits** | Focused affected tests and relevant security negatives | Proves the changed behavior, not a complete integration pass |
+| **Native suite** | `python tools/capture_tests.py --toolchain 1.99.1` | Normal Windows test results for the actual source/configuration |
+| **Integration** | `python tools/verify_offline.py` | Normal tests, optimized build, PE checks, and required local App journeys |
+| **Physical devices / public sites** | Separate explicitly scoped checks | Not inferred from routine offline verification |
+| **Named release** | [Release procedure](RELEASING.md) | Only for an explicit owner-requested publication |
+
+```powershell
 python tools/verify_offline.py
 ```
 
-Read the complete terms before the affirmative acceptance command. The shown
-command records personal-scope acceptance; an authorized organization user chooses
-`--license-scope organization`. Source builds and tests check a valid receipt;
-they do not accept silently. To inspect the current receipt without acceptance,
-run `python tools/accept_license.py --check`.
+The complete gate uses bounded child-process cleanup and records source-input maps
+and executable hashes. A serial diagnostic retry does not erase a normal failure.
+Results/build outputs are ignored files. Loopback HTTP fixtures are local tests,
+not probes of public services. The agent retains responsibility for investigating
+failed checks and fixing the affected work; the CI handoff redesign is deferred.
 
-The default receipt is outside the source tree and browser profile, under the
-user's local application data in `ChezCat/License/receipt.json`. An explicit
-`--receipt-dir <absolute-external-directory>` or the
-`CHEZCAT_LICENSE_RECEIPT_DIR` environment variable selects an external location;
-selecting a directory is not consent. Keep receipts out of source, runtime ZIPs,
-logs and uploaded artifacts. Matching exact license text can reuse its receipt;
-changed text requires affirmative acceptance again. See LICENSE_ACCEPTANCE.md.
+<details>
+<summary><strong>🧪 What the local journeys exercise</strong></summary>
 
-The application supports `ChezCat.exe --license` without browsing or networking.
-Its affirmative CLI is `ChezCat.exe --accept-license <full-license-sha256>
---license-scope personal|organization`, with optional
-`--license-receipt-dir <absolute-external-directory>`. The same receipt governs
-ordinary CLI, GUI, headless and automation use before browsing/network activity.
-Help and license viewing do not require acceptance.
+Form/query/destination/Back/second-input behavior, provider persistence/None, CSS
+resources, native interfaces/events, real video frames, audio and A/V metadata,
+source replacement/reload, and animation wrappers/cancellation/microtasks/navigation.
+These are App/input/offscreen checks. Physical audibility, desktop input, and
+native presentation while locked remain separate, unclaimed outcomes.
 
-The final verification command runs the normal Windows suite, optimized build,
-PE checks and all required local interaction journeys with bounded child-process
-cleanup. Its
-JSON report records the source input map and executable hashes. A serial diagnostic
-retry never erases a normal failure. Results and build outputs are ignored files.
-Loopback fixture HTTP servers are local tests, not public-service probes.
+</details>
 
-The journeys cover form/query/destination/Back/second-input behavior against local
-pages, provider persistence/None, CSS resources, native interfaces/events, real
-video frames, audio metadata, A/V metadata, source replacement/reload and real
-animation wrappers/cancellation/microtasks/navigation. They are
-App/input/offscreen coverage. Device audibility, physical desktop input and native
-presentation while locked are separate, unclaimed checks.
+## License receipts and command-line use
 
-Resource files are necessary generated build inputs, not application executables.
-After intentionally changing resources/chezcat.rc or assets/chezcat.ico, run:
+The default receipt is outside the checkout/profile in the user's local application
+data under `ChezCat/License/receipt.json`. `--receipt-dir <absolute-external-directory>`
+or `CHEZCAT_LICENSE_RECEIPT_DIR` selects another external location. **Choosing a
+folder is not consent.** Keep receipts out of source, runtime ZIPs, logs, and uploaded
+artifacts. Identical exact terms may reuse a receipt; changed terms need renewed
+acceptance. See [license acceptance](LICENSE_ACCEPTANCE.md).
+
+`ChezCat.exe --license` is available without browsing/networking. The affirmative
+application CLI is `ChezCat.exe --accept-license <full-license-sha256>
+--license-scope personal|organization`, optionally with
+`--license-receipt-dir <absolute-external-directory>`. The same receipt controls
+ordinary CLI, GUI, headless, and automation use before browsing/network activity.
+Help and license viewing remain available without acceptance.
+
+## Selecting local build and verification storage
+
+| Setting | Purpose | Constraint |
+| :--- | :--- | :--- |
+| `CARGO_TARGET_DIR` | Reusable Cargo build cache; Build.cmd copies from this selected target | Keep one writer per output tree |
+| `CHEZCAT_VERIFICATION_ROOT` | Optional absolute, separate verification directory | Defaults to `results/verification`; confined external references use `verification:` names |
+| `TEMP` / `TMP` | Child-process temporary storage | Keep outside every source checkout, including parent repositories |
+| `CHEZCAT_LICENSE_RECEIPT_DIR` | Existing external receipt location | Does not accept terms or create a receipt |
+
+Normal logs and fixed offline journeys inherit verification storage, including
+nested checkers. Small `latest-*.json` pointers remain in the checkout. Raw reports
+stay private; public summaries include only approved bounded fields. Frozen
+compatibility scorecards retain their pinned invocation/storage contract.
+
+Set these values only for owned child processes. Do not relocate compilers,
+credentials, actual receipts, or profiles. Retain failed/ambiguous evidence.
+Output selection never relaxes source/build identity, offline/locked, licensing,
+or test requirements. For the complete gate, explicitly select and check the
+existing external receipt.
+
+## Generated resources
+
+After intentionally changing `resources/chezcat.rc` or `assets/chezcat.ico`:
 
 ```powershell
 python tools/build_icon_resources.py --portable
 ```
 
-Commit the matching .res/.o/checksum inputs and verify version/icons again. The
-normal build uses those resources without an external icon generator. Development
-reference scripts may optionally require Node, Pillow, OpenSSL or other tools;
-those are not production dependencies and are not required by verify_offline.py.
+Commit matching `.res`, `.o`, and checksum inputs; verify version/icons again.
+Normal builds link those supplied resources without an external icon generator.
+Optional development references may use Node, Pillow, OpenSSL, or other tools;
+they are not production dependencies and are not required by `verify_offline.py`.
 
-A runtime bundle needs ChezCat.exe, pages/, assets/, trust/, notices/, relevant
-data notices, LICENSE, the containing-revision LICENSE_SCOPE.md, license
-acceptance/contributor privacy policies, the 1.1 change summary and exact build
-metadata. License receipts are private local state and are never runtime
-payloads. No historical commit list is required or included. A source ZIP is not a
-ready Windows runtime bundle. The release packager deliberately refuses an absent,
-unapproved/draft or hash-mismatched project license. Do not package a development
-workspace recursively. Build identity includes Git commit, clean/dirty status,
-compiler/target and file hashes; identity is not proof of security or bit-for-bit
-reproducibility across different Windows SDK/linker installations.
+## Source and runtime identity
 
-For private review only, --review-source on build_release_bundle.py creates a
-clearly named unapproved source ZIP without adopting licensing terms. Normal
---source and runtime modes require the approved tracked license and hash, plus
-one exact `Scope: containing-source-revision` and `License-SHA256: <digest>`
-designation in the committed scope notice. A parentless public source snapshot
-is supported. The containing commit or exported SOURCE_REVISION supplies its
-source identity; obsolete ancestry IDs cannot authorize the package. A ZIP
-built/tested outside Git records its exported SOURCE_REVISION with dirty status
-unknown; it cannot authorize a runtime release package.
+<details>
+<summary><strong>📦 Packaging boundaries and private-review exports</strong></summary>
 
+A runtime bundle includes the executable, pages/assets/trust/notices, relevant
+data notices, LICENSE, containing-revision LICENSE_SCOPE, acceptance/privacy/
+contribution policies, change summary, and exact build metadata. Receipts and
+private operational material are never runtime payloads. Do not recursively
+archive a workspace. Missing, draft, unapproved, or hash-mismatched licensing
+causes packaging to refuse.
 
-## Selecting local build and verification storage
+Build commit, clean/dirty state, compiler/target, and file hashes are identities,
+not security certification or proof of bit-for-bit reproduction across SDK/linker
+installations.
 
-`CARGO_TARGET_DIR` selects a reusable Cargo cache. `Build.cmd` validates that
-location and copies the release executable from the same selected target.
-The source checkout and root `ChezCat.exe` keep their existing roles.
+`--review-source` on `build_release_bundle.py` creates a clearly named unapproved
+source ZIP for private review only. Ordinary `--source` and runtime modes require
+the approved tracked license/hash and exact containing-revision scope markers.
+Parentless public snapshots are supported; obsolete ancestry identities cannot
+authorize a package. Outside Git, an exported SOURCE_REVISION identifies a source
+ZIP with dirty state unknown; it does not authorize a runtime release package.
 
-`CHEZCAT_VERIFICATION_ROOT` optionally selects an absolute, separate local
-verification directory; without it, normal tools retain `results/verification`.
-Normal test logs and the fixed offline journeys inherit this selection, including
-their nested checkers. Small `latest-*.json` pointers remain in the checkout and
-external references use confined `verification:` names. Raw reports stay private;
-public summaries still project only their bounded approved fields.
-
-Set these values and `TEMP`/`TMP` only for owned child processes. No compiler,
-credential store, real license receipt or profile is relocated. Keep one writer
-per output tree and retain failed/ambiguous evidence. Output selection does not
-relax clean-source, exact executable, offline/locked, license or test requirements.
-Frozen compatibility scorecards retain their pinned invocation/storage contract.
-
-Keep `TEMP`/`TMP` outside every source checkout, including parent repositories,
-so receipt-isolation fixtures can use trusted external temporary storage. For
-the complete offline gate, explicitly select the existing external receipt with
-`CHEZCAT_LICENSE_RECEIPT_DIR` and verify it with `tools/accept_license.py --check`.
-Selecting a directory does not accept terms or create a receipt.
+</details>
