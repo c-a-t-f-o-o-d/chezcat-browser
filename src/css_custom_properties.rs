@@ -1,4 +1,4 @@
-//! Finite unregistered custom properties for padding and border consumers.
+//! Finite unregistered custom properties for padding, border and background color.
 //! https://www.w3.org/TR/css-variables-1/
 //! Values inherit after substitution. This adds neither CSSOM nor URL loads.
 use super::*;
@@ -271,7 +271,7 @@ fn expand(text:&str,depth:usize,budget:&mut Budget,lookup:&mut impl FnMut(&str,&
 }
 
 fn box_property(name:&str)->bool {
-    matches!(name,"padding"|"padding-top"|"padding-right"|"padding-bottom"|"padding-left"|"border"|"border-width"|"border-style"|"border-color")
+    matches!(name,"padding"|"padding-top"|"padding-right"|"padding-bottom"|"padding-left"|"border"|"border-width"|"border-style"|"border-color"|"background-color"|"background")
         || ["top","right","bottom","left"].iter().any(|side|
             name==format!("border-{side}") || ["width","style","color"].iter().any(|part|name==format!("border-{side}-{part}")))
 }
@@ -279,6 +279,9 @@ fn border_value(value:&str)->bool {
     parse_border(value).is_some()
 }
 fn valid_box(name:&str,value:&str)->bool {
+    if matches!(name,"background-color"|"background") {
+        return matches!(value,"transparent"|"none"|"currentcolor") || color(value).is_some();
+    }
     if name=="padding" {return lengths(value,false,false).is_some();}
     if name.starts_with("padding-") {return parse_length(value,false,false).is_some();}
     if name=="border" || ["top","right","bottom","left"].iter().any(|side|name==format!("border-{side}")) {return border_value(value);}
@@ -291,6 +294,17 @@ fn valid_box(name:&str,value:&str)->bool {
 }
 fn reset_box(style:&mut Style,parent:&Style,name:&str,inherit:bool) {
     let initial=Style::default(); let source=if inherit{parent}else{&initial};
+    if matches!(name,"background-color"|"background") {
+        style.background=source.background;
+        style.background_current_color=source.background_current_color;
+        if name=="background" {
+            style.background_image=source.background_image.clone();
+            style.background_repeat=source.background_repeat;
+            style.background_position=source.background_position;
+            style.background_size=source.background_size;
+        }
+        return;
+    }
     for (side,index) in [("top",0),("right",1),("bottom",2),("left",3)] {
         if name=="padding" || name==format!("padding-{side}") {style.padding[index]=source.padding[index];}
         let entire=name=="border" || name==format!("border-{side}");
@@ -310,6 +324,13 @@ pub(super) fn apply_box(style:&mut Style,parent:&Style,declaration:&Declaration,
     let result=variables.substitute(&declaration.value,budget).ok().flatten();
     let value=result.as_deref().unwrap_or("").trim().to_ascii_lowercase();
     if matches!(value.as_str(),"inherit"|"initial"|"unset") {
+        // The finite background shorthand can inherit an existing single image
+        // layer. Charge its URL copy; substitution does not introduce URL syntax.
+        if value=="inherit" && declaration.name=="background"
+            && budget.copy(parent.background_image.as_ref().map_or(0,|image|image.url.len())).is_err() {
+            reset_box(style,parent,&declaration.name,false);
+            return true;
+        }
         reset_box(style,parent,&declaration.name,value=="inherit");
     } else if valid_box(&declaration.name,&value) {
         apply(style,parent,&Declaration {name:declaration.name.clone(),value,important:declaration.important,stylesheet:declaration.stylesheet});
@@ -402,5 +423,24 @@ mod tests {
         let mut large=String::new();for index in 0..40 {large.push_str(&format!("--n{index}:{};","x".repeat(2000)));}
         let declarations=parse_declarations(&large);assert!(Variables::cascade(&Variables::default(),declarations.iter(),&mut Budget::default()).blocked);
         let mut budget=Budget{work:10000,copies:0};assert!(Variables::default().substitute("var(--missing,2px)",&mut budget).is_err());
+    }
+
+    #[test]
+    fn background_variable_exhausted_and_blocked_allowances_reset_without_resource_growth() {
+        let declaration=Declaration{name:"background-color".into(),value:"var(--missing,#0d6efd)".into(),important:false,stylesheet:None};
+        let mut style=Style::default();style.background=Some(0xff0000);style.background_current_color=true;style.padding=[Length::Px(7.0);4];style.border_alpha=[51;4];
+        assert!(apply_box(&mut style,&Style::default(),&declaration,&Variables::default(),&mut Budget{work:0,copies:0}));
+        assert_eq!(style.background,None);assert!(!style.background_current_color);assert_eq!(style.padding,[Length::Px(7.0);4]);assert_eq!(style.border_alpha,[51;4]);
+        let mut many=String::new();for index in 0..=MAX_NAMES {many.push_str(&format!("--n{index}:red;"));}
+        let declarations=parse_declarations(&many);let blocked=Variables::cascade(&Variables::default(),declarations.iter(),&mut Budget::default());
+        assert!(blocked.blocked);style.background=Some(0xff0000);
+        assert!(apply_box(&mut style,&Style::default(),&declaration,&blocked,&mut Budget::default()));assert_eq!(style.background,None);
+        let mut parent=Style::default();parent.background=Some(0x112233);
+        parent.background_image=Some(BackgroundImage{url:"ParentCase".repeat(128),stylesheet:Some(17)});parent.background_repeat=[false;2];parent.background_size=BackgroundSize::Cover;
+        let inherit=Declaration{name:"background".into(),value:"var(--missing,inherit)".into(),important:false,stylesheet:None};
+        style.background=Some(0xff0000);style.background_current_color=true;style.background_image=Some(BackgroundImage{url:"OldCase.ppm".into(),stylesheet:Some(9)});
+        assert!(apply_box(&mut style,&parent,&inherit,&Variables::default(),&mut Budget{work:10000,copies:64}));
+        assert_eq!(style.background,None);assert!(!style.background_current_color);assert_eq!(style.background_image,None);assert_eq!(style.background_repeat,[true;2]);assert_eq!(style.background_size,BackgroundSize::Auto);
+        assert_eq!(parent.background_image.as_ref().unwrap().url,"ParentCase".repeat(128));
     }
 }
