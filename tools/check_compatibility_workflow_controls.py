@@ -28,6 +28,39 @@ class DiagnosticControls(unittest.TestCase):
         activity = first + '\n' + later + '\nLast escaped engine fault: stage=unknown kind=unknown\n'
         self.assertEqual(scorecard.script_failures(activity), [first, later])
 
+    def title_stage(self, header):
+        """Synthetic paired artifacts; no executable, network or browser run."""
+        with tempfile.TemporaryDirectory() as scratch:
+            folder = Path(scratch)
+            activity = header + '\n\n' + (
+                'Stage document=1 dom_commit=1\n'
+                'Stage layout=1 layout_document=1 layout_dom=1 page_view=1\n'
+                'Stage canvas=1 document=1 dom_commit=1 layout=1 layout_document=1 layout_dom=1 page_view=1 width=2 height=2\n'
+                'Stage paired_ppm_written=1\n1 script(s), 0 active listener(s), 0 error(s).\n'
+                'Page title: Later diagnostic text must not replace the header\n')
+            (folder / '00-live.activity.txt').write_text(activity, encoding='utf-8')
+            (folder / '00-live.layout.txt').write_text('', encoding='utf-8')
+            (folder / '00-live.source.html').write_text('<title>Original source title</title>', encoding='utf-8')
+            (folder / '00-live.ppm').write_bytes(b'P6\n2 2\n255\n' + bytes(12))
+            return scorecard.read_stage(folder, 'live')
+
+    def test_stage_title_uses_live_activity_and_keeps_literal_entities(self):
+        result = self.title_stage('ChezCat test activity report\nStatus: complete\nPage title: Live &amp; title 雪\nJavaScript enabled: true\nImages enabled: true')
+        self.assertTrue(result['paired'])
+        self.assertEqual(result['title'], 'Live &amp; title 雪')
+
+    def test_missing_or_ambiguous_live_title_never_falls_back_to_original_source(self):
+        for header in ('ChezCat test activity report\nStatus: complete',
+                       'ChezCat test activity report\nPage title: First\nPage title: Ambiguous'):
+            with self.subTest(header=header):
+                self.assertIsNone(self.title_stage(header)['title'])
+
+    def test_multiline_live_title_cannot_pass_as_its_first_line(self):
+        for title in ('Expected\nextra', 'Expected\rextra', 'Expected\nPage title: Extra'):
+            with self.subTest(title=title):
+                header = 'ChezCat test activity report\nStatus: complete\nPage title: ' + title + '\nJavaScript enabled: true\nImages enabled: true'
+                self.assertIsNone(self.title_stage(header)['title'])
+
     def reference_exception_case(self, app_error=None):
         """Synthetic score facts only: no App, socket, browser or package runs."""
         class Fixture:
