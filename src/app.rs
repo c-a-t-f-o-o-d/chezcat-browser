@@ -648,6 +648,17 @@ impl App {
         self.status = "Loading stopped.".to_owned();
         self.failed = false;
     }
+    fn finish_ready_load_before_replacement(&mut self) -> bool {
+        let Some(id) = self.pending.as_ref().filter(|pending|
+            pending.committed && self.committed_request == Some(pending.id)).map(|pending| pending.id) else {
+            return false;
+        };
+        let Some(poll) = self.worker.as_ref().and_then(|worker| worker.take_completed_document(id)) else {
+            return false;
+        };
+        self.apply_loader_poll(poll)
+    }
+
     fn start_network(
         &mut self,
         location: Location,
@@ -684,6 +695,9 @@ impl App {
         form_policy: Option<crate::csp::PolicySet>,
         link_origin: Option<Option<crate::url::HttpUrl>>,
     ) {
+        // Complete only an already-finished owned document before replacement
+        // clears its worker slot and retires the old script/resource queues.
+        self.finish_ready_load_before_replacement();
         self.invalidate_platform_requests();
         self.suspend_media();
         self.cancel_script_requests();
@@ -774,6 +788,17 @@ impl App {
             return changed;
         };
         let poll = worker.poll();
+        changed |= self.apply_loader_poll(poll);
+        if changed && self.view == View::Resources {
+            self.refresh_resource_view();
+        }
+        changed
+    }
+
+    // Shared delivery path: handoff completion retains the ordinary resource,
+    // source-ID and load-event ordering without polling unrelated script work.
+    fn apply_loader_poll(&mut self, poll: loader::Poll) -> bool {
+        let mut changed = false;
         if let Some((id, text)) = poll.progress {
             if self
                 .pending
@@ -930,9 +955,6 @@ impl App {
                     }
                 }
             }
-        }
-        if changed && self.view == View::Resources {
-            self.refresh_resource_view();
         }
         changed
     }

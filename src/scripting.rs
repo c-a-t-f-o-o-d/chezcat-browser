@@ -742,6 +742,11 @@ impl Default for Page {
 impl Page {
     pub(crate) fn dom_commit_generation(&self) -> Option<u64> { self.state.dom_commits }
 
+    #[cfg(test)]
+    pub(crate) fn loading_state_for_test(&self) -> (&'static str, bool) {
+        (self.state.ready, self.state.dynamic.load_ready)
+    }
+
     pub fn new() -> Self {
         Self::with_limits(crate::javascript::limits::BROWSER)
     }

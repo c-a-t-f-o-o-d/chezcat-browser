@@ -87,40 +87,90 @@ struct Request {
 struct Peer {
     address: SocketAddr,
     gate: Arc<(Mutex<bool>, Condvar)>,
+    boot_gate: Arc<(Mutex<bool>, Condvar)>,
     stopped: Arc<AtomicBool>,
     requests: Arc<Mutex<Vec<Request>>>,
+    errors: Arc<Mutex<Vec<String>>>,
+    finished: Arc<Mutex<Vec<String>>>,
     worker: Option<std::thread::JoinHandle<()>>,
+}
+
+fn record_peer_error(errors: &Mutex<Vec<String>>, stage: &str, kind: std::io::ErrorKind) {
+    let mut errors = errors.lock().unwrap();
+    if errors.len() < 32 {
+        errors.push(format!("{stage}: {kind:?}").chars().take(120).collect());
+    }
+}
+
+fn wait_peer_gate(gate: &(Mutex<bool>, Condvar), errors: &Mutex<Vec<String>>, stage: &str) {
+    let open = gate.0.lock().unwrap();
+    let (open, timed) = gate.1.wait_timeout_while(open, Duration::from_secs(10), |open| !*open).unwrap();
+    if timed.timed_out() && !*open {
+        record_peer_error(errors, stage, std::io::ErrorKind::TimedOut);
+    }
 }
 
 impl Peer {
     fn new(other_origin: Option<String>) -> Self {
+        Self::with_boot_held(other_origin, false)
+    }
+
+    fn with_boot_held(other_origin: Option<String>, held: bool) -> Self {
+        Self::with_boot_held_and_load_navigation(other_origin, held, false)
+    }
+
+    fn with_boot_held_and_load_navigation(other_origin: Option<String>, held: bool, load_navigation: bool) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap();
         let gate = Arc::new((Mutex::new(false), Condvar::new()));
+        let boot_gate = Arc::new((Mutex::new(!held), Condvar::new()));
         let stopped = Arc::new(AtomicBool::new(false));
         let requests = Arc::new(Mutex::new(Vec::new()));
+        let errors = Arc::new(Mutex::new(Vec::new()));
+        let finished = Arc::new(Mutex::new(Vec::new()));
         let (server_gate, server_stopped, server_requests) =
             (gate.clone(), stopped.clone(), requests.clone());
+        let server_boot_gate = boot_gate.clone();
+        let server_errors = errors.clone();
+        let server_finished = finished.clone();
         let worker = std::thread::spawn(move || {
             let mut workers = Vec::new();
             for stream in listener.incoming() {
-                let Ok(mut stream) = stream else { break };
+                let mut stream = match stream {
+                    Ok(stream) => stream,
+                    Err(error) => { record_peer_error(&server_errors, "accept", error.kind()); break; }
+                };
                 if server_stopped.load(Ordering::Relaxed) {
                     break;
                 }
                 let gate = server_gate.clone();
+                let boot_gate = server_boot_gate.clone();
+                let errors = server_errors.clone();
+                let finished = server_finished.clone();
                 let requests = server_requests.clone();
                 let other_origin = other_origin.clone();
                 workers.push(std::thread::spawn(move || {
-                    stream.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
-                    stream.set_write_timeout(Some(Duration::from_secs(2))).unwrap();
+                    stream.set_read_timeout(Some(Duration::from_secs(2))).unwrap_or_else(|error| {
+                        record_peer_error(&errors, "set-read-timeout", error.kind());
+                        panic!("Loopback fixture read-timeout setup failed: {error:?}");
+                    });
+                    stream.set_write_timeout(Some(Duration::from_secs(2))).unwrap_or_else(|error| {
+                        record_peer_error(&errors, "set-write-timeout", error.kind());
+                        panic!("Loopback fixture write-timeout setup failed: {error:?}");
+                    });
                     let mut bytes = Vec::new();
                     let mut byte = [0u8; 1];
                     while !bytes.ends_with(b"\r\n\r\n") && bytes.len() < 32768 {
-                        if stream.read_exact(&mut byte).is_err() { return; }
+                        if let Err(error) = stream.read_exact(&mut byte) {
+                            record_peer_error(&errors, "header-read", error.kind());
+                            return;
+                        }
                         bytes.push(byte[0]);
                     }
-                    if !bytes.ends_with(b"\r\n\r\n") { return; }
+                    if !bytes.ends_with(b"\r\n\r\n") {
+                        record_peer_error(&errors, "header-limit", std::io::ErrorKind::InvalidData);
+                        return;
+                    }
                     let header = String::from_utf8_lossy(&bytes);
                     let mut first = header.lines().next().unwrap_or("").split_whitespace();
                     let method = first.next().unwrap_or("").to_owned();
@@ -129,14 +179,17 @@ impl Peer {
                         .find(|(name, _)| name.eq_ignore_ascii_case("cookie"))
                         .map_or_else(String::new, |(_, value)| value.trim().to_owned());
                     requests.lock().unwrap().push(Request { method, path: path.clone(), cookie });
+                    if path == "/boot.js" { wait_peer_gate(&boot_gate, &errors, "boot-gate"); }
                     if path=="/timing-held" {
                         let body="<html><body><script>document.title='STALE timing';</script></body></html>";
-                        let header=format!("HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",body.len());let _=stream.write_all(header.as_bytes());
-                        let open=gate.0.lock().unwrap();let _=gate.1.wait_timeout_while(open,Duration::from_secs(10),|open|!*open).unwrap();let _=stream.write_all(body.as_bytes());return;
+                        let header=format!("HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",body.len());
+                        if let Err(error)=stream.write_all(header.as_bytes()) { record_peer_error(&errors,"timing-header-write",error.kind()); }
+                        wait_peer_gate(&gate, &errors, "timing-body-gate");
+                        if let Err(error)=stream.write_all(body.as_bytes()) { record_peer_error(&errors,"timing-body-write",error.kind()); }
+                        return;
                     }
                     if matches!(path.as_str(), "/search?q=test" | "/held.js"|"/timing-held") {
-                        let open = gate.0.lock().unwrap();
-                        let _ = gate.1.wait_timeout_while(open, Duration::from_secs(10), |open| !*open).unwrap();
+                        wait_peer_gate(&gate, &errors, "response-gate");
                     }
                     let (mut status, mut mime, mut extra) = (200, "text/html", String::new());
                     let body = match path.as_str() {
@@ -145,7 +198,9 @@ impl Peer {
                         "/timing-fail"=>{status=204;String::new()},
                         "/home" => {
                             extra.push_str("Set-Cookie: sid=server; HttpOnly; Path=/\r\n");
-                            HOME.to_owned()
+                            if load_navigation {
+                                HOME.replace("document.title='Home loaded';", "document.title='Home loaded';location.assign('/escaped');")
+                            } else { HOME.to_owned() }
                         }
                         "/boot.js" => { mime = "text/javascript"; BOOT.to_owned() }
                         "/search?q=test" => SEARCH.to_owned(),
@@ -185,7 +240,11 @@ impl Peer {
                         }
                     };
                     let response = format!("HTTP/1.1 {status} Test\r\nContent-Type: {mime};charset=utf-8\r\n{extra}Content-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
-                    let _ = stream.write_all(response.as_bytes());
+                    if let Err(error) = stream.write_all(response.as_bytes()) {
+                        record_peer_error(&errors, &format!("response-write {}", path.chars().take(64).collect::<String>()), error.kind());
+                    }
+                    let mut finished = finished.lock().unwrap();
+                    if finished.len() < 32 { finished.push(path.chars().take(64).collect()); }
                 }));
             }
             for worker in workers {
@@ -195,8 +254,11 @@ impl Peer {
         Self {
             address,
             gate,
+            boot_gate,
             stopped,
             requests,
+            errors,
+            finished,
             worker: Some(worker),
         }
     }
@@ -208,6 +270,15 @@ impl Peer {
     fn release(&self) {
         *self.gate.0.lock().unwrap() = true;
         self.gate.1.notify_all();
+    }
+
+    fn release_boot(&self) {
+        *self.boot_gate.0.lock().unwrap() = true;
+        self.boot_gate.1.notify_all();
+    }
+
+    fn response_finished(&self, path: &str) -> bool {
+        self.finished.lock().unwrap().iter().any(|finished| finished == path)
     }
 
     fn request(&self, path: &str) -> Option<Request> {
@@ -223,6 +294,7 @@ impl Peer {
 impl Drop for Peer {
     fn drop(&mut self) {
         self.release();
+        self.release_boot();
         self.stopped.store(true, Ordering::Relaxed);
         let _ = TcpStream::connect(self.address);
         self.worker.take().unwrap().join().unwrap();
@@ -250,6 +322,33 @@ fn until(app: &mut App, condition: impl Fn(&App) -> bool) {
         app.poll_load();
         app.poll_script_timer();
         assert!(Instant::now() < deadline, "{}\n{}", app.status, report(app));
+        std::thread::sleep(Duration::from_millis(1));
+    }
+}
+
+fn failure_context(app: &App, peer: &Peer) -> String {
+    let (ready, load_ready) = app.scripting.as_ref()
+        .map_or(("no realm", false), |page| page.loading_state_for_test());
+    let pending = app.pending.as_ref().map(|pending| (pending.id, pending.committed));
+    let paths: Vec<_> = peer.requests.lock().unwrap().iter().take(16)
+        .map(|request| request.path.chars().take(64).collect::<String>()).collect();
+    let errors = peer.errors.lock().unwrap().clone();
+    let search_cookie = peer.request("/search?q=test").map(|request| request.cookie == "sid=server; client=ready");
+    let boot_cookie = peer.request("/boot.js").map(|request| request.cookie == "sid=server");
+    let home_cookie = peer.request("/home").map(|request| request.cookie.is_empty());
+    let search_released = *peer.gate.0.lock().unwrap();
+    let boot_released = *peer.boot_gate.0.lock().unwrap();
+    format!("title={:?}; ready={ready}; load_ready={load_ready}; pending(id,committed)={pending:?}; history(len,index)=({},{}); paths={paths:?}; cookie_checks(search,boot,home)={:?}; gates(search,boot)=({search_released},{boot_released}); peer_errors={errors:?}",
+        app.document.title.chars().take(96).collect::<String>(), app.history.len(), app.history_index,
+        (search_cookie, boot_cookie, home_cookie))
+}
+
+fn until_peer(app: &mut App, peer: &Peer, condition: impl Fn(&App) -> bool) {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !condition(app) {
+        app.poll_load();
+        app.poll_script_timer();
+        assert!(Instant::now() < deadline, "{}\n{}\n{}", app.status, report(app), failure_context(app, peer));
         std::thread::sleep(Duration::from_millis(1));
     }
 }
@@ -285,40 +384,134 @@ fn external_bootstrap_sends_session_cookies_and_replaces_history_after_real_resp
     let peer = Peer::new(None);
     let mut app = App::new();
     app.open_address(&peer.url("/home"));
-    until(&mut app, |_| peer.request("/search?q=test").is_some());
+    assert_external_bootstrap_outcomes(&mut app, &peer);
+}
+
+fn assert_external_bootstrap_outcomes(app: &mut App, peer: &Peer) {
+    until_peer(app, peer, |_| peer.request("/search?q=test").is_some());
     // The response is still withheld: inspect the executing old realm before
     // navigation commits and its diagnostics are legitimately discarded.
-    no_script_errors(&app);
-    assert_eq!(app.document.title, "Home loaded");
-    assert_eq!(app.location.display(), peer.url("/home"));
-    assert_eq!(app.history.len(), 2);
+    assert_eq!(app.scripting.as_ref().unwrap().error_count(), 0, "{}\n{}", report(app), failure_context(app, peer));
+    assert_eq!(app.document.title, "Home loaded", "{}", failure_context(app, peer));
+    assert_eq!(app.location.display(), peer.url("/home"), "{}", failure_context(app, peer));
+    assert_eq!(app.history.len(), 2, "{}", failure_context(app, peer));
     let request = peer.request("/search?q=test").unwrap();
-    assert_eq!(request.method, "GET");
-    assert_eq!(request.cookie, "sid=server; client=ready");
-    assert_eq!(peer.request("/boot.js").unwrap().cookie, "sid=server");
-    assert!(peer.request("/home").unwrap().cookie.is_empty());
+    assert_eq!(request.method, "GET", "{}", failure_context(app, peer));
+    assert_eq!(request.cookie, "sid=server; client=ready", "{}", failure_context(app, peer));
+    assert_eq!(peer.request("/boot.js").unwrap().cookie, "sid=server", "{}", failure_context(app, peer));
+    assert!(peer.request("/home").unwrap().cookie.is_empty(), "{}", failure_context(app, peer));
 
     peer.release();
-    until(&mut app, |app| !app.is_loading());
-    assert_eq!(app.document.title, "Results for ?q=test");
-    assert_eq!(app.location.display(), peer.url("/search?q=test"));
-    no_script_errors(&app);
+    until_peer(app, peer, |app| !app.is_loading());
+    assert_eq!(app.document.title, "Results for ?q=test", "{}", failure_context(app, peer));
+    assert_eq!(app.location.display(), peer.url("/search?q=test"), "{}", failure_context(app, peer));
+    assert_eq!(app.scripting.as_ref().unwrap().error_count(), 0, "{}\n{}", report(app), failure_context(app, peer));
     assert_eq!(
         app.history.len(),
         2,
-        "replace must not append a third entry"
+        "replace must not append a third entry: {}", failure_context(app, peer)
     );
-    assert_eq!(app.history_index, 1);
+    assert_eq!(app.history_index, 1, "{}", failure_context(app, peer));
     assert_eq!(
         app.history[1].location.display(),
-        peer.url("/search?q=test")
+        peer.url("/search?q=test"), "{}", failure_context(app, peer)
     );
-    assert!(peer
+    let all_get = peer
         .requests
         .lock()
         .unwrap()
         .iter()
-        .all(|request| request.method == "GET"));
+        .all(|request| request.method == "GET");
+    assert!(all_get, "{}", failure_context(app, peer));
+}
+
+#[test]
+fn external_bootstrap_delayed_document_completion_keeps_cookie_history_contract() {
+    let peer = Peer::with_boot_held(None, true);
+    let mut app = App::new();
+    app.open_address(&peer.url("/home"));
+    let hold = app.worker.as_ref().expect("Real HTTP loader").hold_completion_for_test();
+    // First prove that /home's real success is physically stored while normal
+    // delivery is held. BOOT then selects navigation before ordinary poll can
+    // consume that success. No CSS or scheduler timing selects this ordering.
+    until_peer(&mut app, &peer, |app| app.pending.as_ref().is_some_and(|pending|
+        pending.committed && app.worker.as_ref().unwrap().completed_document_ready_for_test(pending.id)));
+    peer.release_boot();
+    until_peer(&mut app, &peer, |_| peer.request("/search?q=test").is_some());
+    assert_eq!(app.location.display(), peer.url("/home"), "{}", failure_context(&app, &peer));
+    drop(hold);
+    assert_external_bootstrap_outcomes(&mut app, &peer);
+}
+
+#[test]
+fn external_bootstrap_ready_handoff_preserves_the_already_captured_replacement() {
+    let peer = Peer::with_boot_held_and_load_navigation(None, true, true);
+    let mut app = App::new();
+    app.open_address(&peer.url("/home"));
+    let hold = app.worker.as_ref().unwrap().hold_completion_for_test();
+    until_peer(&mut app, &peer, |app| app.pending.as_ref().is_some_and(|pending|
+        pending.committed && app.worker.as_ref().unwrap().completed_document_ready_for_test(pending.id)));
+    peer.release_boot();
+    until_peer(&mut app, &peer, |_| peer.request("/search?q=test").is_some());
+    drop(hold);
+    assert_external_bootstrap_outcomes(&mut app, &peer);
+    assert!(peer.request("/escaped").is_none(), "The retired load callback cannot override the captured replacement: {}", failure_context(&app, &peer));
+}
+
+#[test]
+fn external_bootstrap_handoff_refuses_uncommitted_wrong_source_notready_and_stopped_loads() {
+    let peer = Peer::with_boot_held(None, true);
+    let mut app = App::new();
+    app.open_address(&peer.url("/home"));
+    let id = app.pending.as_ref().unwrap().id;
+    let hold = app.worker.as_ref().unwrap().hold_completion_for_test();
+    // Observe the real worker success before letting App consume its document.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !app.worker.as_ref().unwrap().completed_document_ready_for_test(id) {
+        assert!(Instant::now() < deadline, "{}", failure_context(&app, &peer));
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert!(!app.pending.as_ref().unwrap().committed);
+    assert!(!app.finish_ready_load_before_replacement());
+    assert!(app.worker.as_ref().unwrap().take_completed_document(id).is_none(), "An unconsumed document must stay on the normal commit path");
+    assert!(app.worker.as_ref().unwrap().completed_document_ready_for_test(id));
+    until_peer(&mut app, &peer, |app| app.pending.as_ref().is_some_and(|pending|
+        pending.committed && app.worker.as_ref().unwrap().completed_document_ready_for_test(pending.id)));
+    app.committed_request = Some(id.wrapping_add(1));
+    assert!(!app.finish_ready_load_before_replacement());
+    assert!(app.worker.as_ref().unwrap().completed_document_ready_for_test(id), "Wrong-source refusal cannot consume owned delivery");
+    assert_eq!(app.scripting.as_ref().unwrap().loading_state_for_test(), ("interactive", false));
+    app.committed_request = Some(id);
+    app.worker.as_ref().unwrap().cancel();
+    assert!(!app.finish_ready_load_before_replacement(), "A physically unavailable completion cannot manufacture readiness");
+    assert_eq!(app.scripting.as_ref().unwrap().loading_state_for_test(), ("interactive", false));
+    app.stop_loading();
+    assert!(!app.finish_ready_load_before_replacement());
+    assert_eq!(app.document.title, "Home document");
+    drop(hold);
+    app.open_address(&peer.url("/fresh"));
+    until_peer(&mut app, &peer, |app| !app.is_loading());
+    assert_eq!(app.document.title, "Fresh document", "{}", failure_context(&app, &peer));
+    peer.release_boot();
+    until_peer(&mut app, &peer, |_| peer.response_finished("/boot.js"));
+    for _ in 0..8 { app.poll_load(); app.poll_script_timer(); std::thread::sleep(Duration::from_millis(1)); }
+    assert_eq!(app.document.title, "Fresh document", "{}", failure_context(&app, &peer));
+    no_script_errors(&app);
+    assert!(peer.request("/search?q=test").is_none() && peer.request("/escaped").is_none(), "Stopped old work cannot navigate after a new commit: {}", failure_context(&app, &peer));
+}
+
+#[test]
+fn external_bootstrap_document_completion_before_boot_keeps_cookie_history_contract() {
+    let peer = Peer::with_boot_held(None, true);
+    let mut app = App::new();
+    app.open_address(&peer.url("/home"));
+    assert!(app.pending.is_some(), "{}", failure_context(&app, &peer));
+    // Inverse stage control: deliver the initial completion while the real
+    // BOOT HTTP response remains gated, then retain every original assertion.
+    until_peer(&mut app, &peer, |app| app.pending.is_none());
+    assert!(peer.request("/search?q=test").is_none(), "{}", failure_context(&app, &peer));
+    peer.release_boot();
+    assert_external_bootstrap_outcomes(&mut app, &peer);
 }
 
 #[test]
