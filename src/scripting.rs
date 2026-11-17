@@ -31,6 +31,8 @@ use dom_collections::collection_handle_index;
 mod dom_tree;
 #[path = "script_position.rs"]
 mod script_position;
+#[path = "script_node_root.rs"]
+mod script_node_root;
 #[path = "script_timezone.rs"]
 mod script_timezone;
 use dom_tree::DomState;
@@ -2445,6 +2447,7 @@ impl Host for Bridge<'_> {
     }
 
     fn owns_property(&self, object: u32, property: &str) -> bool {
+        if self.root_node_member(object,property) {return false;}
         if matches!(property,"nodeType"|"nodeName") && self.node_identity_receiver(object) {return false;}
         if self.video_interface_receiver(object)&&script_media::interface_member(property) {return false;}
         if self.event_receiver(object)&&property=="composedPath" {return false;}
@@ -2462,7 +2465,8 @@ impl Host for Bridge<'_> {
         self.location_instance_owner(object).is_some() || object == HISTORY || self.attr_receiver(object) || self.ordinary_event_owner(object).is_some() || self.named_map_receiver(object)
     }
     fn ordinary_lookup_tail_property(&self,object:u32,property:&str)->bool {
-        if matches!(property,"nodeType"|"nodeName") && self.node_identity_receiver(object) {true}
+        if self.root_node_member(object,property) {true}
+        else if matches!(property,"nodeType"|"nodeName") && self.node_identity_receiver(object) {true}
         else if self.event_receiver(object)&&property=="composedPath" {true}
         else if self.node_event_method(object,property) {true}
         else if self.location_instance_owner(object).is_some() {property=="prototype"}
@@ -2613,6 +2617,7 @@ impl Host for Bridge<'_> {
     }
 
     fn method_length(&self, object:u32, method:&str) -> Option<usize> {
+        if method==script_node_root::ROOT_METHOD && self.root_node_receiver(object) {return Some(0);}
         if object==DOCUMENT && method=="createComment" {return Some(1);}
         if matches!(method,"load"|"pause"|"play") && self.media_element_receiver(object) {return Some(0);}
         if method=="dispatchEvent"&&self.dispatch_receiver(object){return Some(1);}
@@ -2636,6 +2641,7 @@ impl Host for Bridge<'_> {
     }
 
     fn native_method_owner(&self, object:u32, method:&str) -> Option<u32> {
+        if self.event_target_interface(object) && method==script_node_root::ROOT_METHOD {return Some(object);}
         if self.event_target_interface(object) && matches!(method,"\0Node.get.nodeType"|"\0Node.get.nodeName") {return Some(object);}
         if self.node_list_receiver(object) && matches!(method,"item"|"forEach") {return Some(WINDOW);}
         if self.event_target_interface(object)&&(method.starts_with("\0CustomEvent.")||method=="initCustomEvent") {return Some(object);}
@@ -2751,6 +2757,7 @@ impl Host for Bridge<'_> {
         method: &str,
         args: &[Value],
     ) -> Result<(), (&'static str, String)> {
+        if method==script_node_root::ROOT_METHOD {return self.validate_root_node_options(object,args);}
         let method=script_media::interface_operation(method).unwrap_or(method);
         if matches!(method,"load"|"pause")&&self.media_interface_receiver(object)&&!self.media_element_receiver(object) {
             return Err(("NotSupportedError","This media element has no implemented player binding.".into()));
@@ -2963,6 +2970,7 @@ impl Host for Bridge<'_> {
     }
 
     fn method(&self, object: u32, property: &str) -> Option<&'static str> {
+        if self.root_node_member(object,property) {return None;}
         if self.media_element_receiver(object) {match property {"load"=>return Some("load"),"pause"=>return Some("pause"),"play"=>return Some("play"),_=>{}}}
         if matches!(property,"addEventListener"|"removeEventListener"|"dispatchEvent") && self.form_named_control(object,property) {return None;}
         if self.node_event_method(object,property) {return None;}
@@ -3022,6 +3030,7 @@ impl Host for Bridge<'_> {
     }
 
     fn accepts_receiver(&self, object: u32, method: &str, receiver: u32) -> bool {
+        if self.event_target_interface(object) && method==script_node_root::ROOT_METHOD {return self.root_node_receiver(receiver);}
         if self.event_target_interface(object)&&(method.starts_with("\0CustomEvent.")||method=="initCustomEvent") {return self.custom_receiver(receiver);}
         if self.event_target_interface(object)&&method.starts_with("\0Video.") {return self.video_interface_receiver(receiver);}
         if self.event_target_interface(object)&&method.starts_with("\0Media.") {return self.media_interface_receiver(receiver);}
@@ -3161,6 +3170,7 @@ impl Host for Bridge<'_> {
     }
 
     fn own_data(&mut self, object: u32, property: &str) -> Result<Option<Value>, String> {
+        if self.root_node_member(object,property) {self.state.work(1)?;return Ok(None);}
         if object==DOCUMENT && dom_tree::document_node_property(property) {self.state.work(1)?;return Ok(None);}
         if self.standalone_target_owner(object).is_some() {self.state.work(1)?;return Ok(None);}
         if script_named_map::element(object).is_some() { return self.named_map_own_data(object, property); }
@@ -3208,6 +3218,7 @@ impl Host for Bridge<'_> {
     }
 
     fn delete(&mut self, object: u32, property: &str) -> Result<bool, String> {
+        if self.root_node_member(object,property) {self.state.work(1)?;return Ok(true);}
         if object==DOCUMENT && dom_tree::document_node_property(property) {self.state.work(1)?;return Ok(true);}
         if script_named_map::element(object).is_some() {
             return if collection_index(property).is_some() { self.named_map_has(object, property).map(|present| !present) }
@@ -3257,6 +3268,7 @@ impl Host for Bridge<'_> {
         object: u32,
         method: &str,
     ) -> Option<(usize, &'static [&'static str])> {
+        if method==script_node_root::ROOT_METHOD && self.root_node_receiver(object) {return Some((0,&["composed"]));}
         if method=="Event"&&self.event_target_interface(object) {return Some((1,&["bubbles","cancelable","composed"]));}
         if method=="CustomEvent"&&self.event_target_interface(object) {return Some((1,&["bubbles","cancelable","composed","detail"]));}
         if method=="UIEvent"&&self.event_target_interface(object) {return Some((1,&["bubbles","cancelable","composed","detail","view"]));}
@@ -3298,6 +3310,7 @@ impl Host for Bridge<'_> {
         args: &[Value],
         fields: Option<&[(&str, Value)]>,
     ) -> Result<Value, String> {
+        if method==script_node_root::ROOT_METHOD {return self.get_root_node(object,args,fields);}
         if method=="Event"&&self.event_target_interface(object) {return self.construct_base_event(object,args,fields);}
         if method=="CustomEvent"&&self.event_target_interface(object) {return self.construct_custom_event(object,args,fields);}
         if method=="UIEvent"&&self.event_target_interface(object) {return self.construct_ui_event(object,args,fields);}
@@ -3393,6 +3406,7 @@ impl Host for Bridge<'_> {
     }
 
     fn has(&mut self, object: u32, property: &str) -> Result<bool, String> {
+        if self.root_node_member(object,property) {self.state.work(1)?;return Ok(false);}
         if property=="dispatchEvent"&&self.dispatch_receiver(object){return Ok(true);}
         self.state.work(1)?;
         if script_named_map::element(object).is_some() { return self.named_map_has(object, property); }
@@ -3680,6 +3694,7 @@ impl Host for Bridge<'_> {
 
     fn get(&mut self, object: u32, property: &str) -> Result<Value, String> {
         self.state.work(1)?;
+        if self.root_node_member(object,property) {return Ok(Value::Undefined);}
         if script_named_map::element(object).is_some() { return self.named_map_get(object, property); }
         if script_class_list::element(object).is_some() { return self.class_list_get(object,property); }
         if let Some(result) = self.created_event_get(object, property) { return result; }
@@ -4241,6 +4256,7 @@ impl Host for Bridge<'_> {
     }
 
     fn call(&mut self, object: u32, method: &str, args: &[Value]) -> Result<Value, String> {
+        if method==script_node_root::ROOT_METHOD {return self.get_root_node(object,args,None);}
         if let Some(property)=script_media::interface_getter(method) {
             self.state.work(1)?;
             if property!="controls" {self.require_bound_media(object)?;}
