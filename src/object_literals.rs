@@ -64,6 +64,9 @@ impl Runtime {
             let Value::Function(function) = value else {
                 return Err(Fault::new("Invalid object method definition."));
             };
+            if let super::Function::Script { home_object, .. } = &mut self.functions[function] {
+                *home_object = Some(Ordinary::Object(object));
+            }
             self.literal_function_name(function, &key, kind)?;
             if matches!(kind, Kind::Getter | Kind::Setter) {
                 // Repeated accessor definitions replace only their own half.

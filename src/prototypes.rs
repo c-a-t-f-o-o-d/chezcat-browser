@@ -683,6 +683,63 @@ impl Runtime {
         self.set_property(id, name, value)
     }
 
+    pub(super) fn assign_super_property(
+        &mut self, base: Ordinary, name: String, value: Value, receiver: Value, host: &mut dyn Host,
+    ) -> Result<(), Fault> {
+        self.property_name(&name)?;
+        if let Some(owner) = self.property_owner(base, &name)? {
+            if let Some(accessor) = self.objects[owner].properties.get(&name).and_then(|property| property.accessor) {
+                if accessor.set.is_none() {
+                    return if self.strict { Err(Fault::exception("TypeError", "The super property has no setter.")) } else { Ok(()) };
+                }
+                self.call_accessor(accessor.set, receiver, &[value], host)?;
+                return Ok(());
+            }
+            let readonly = self.objects[owner].properties.get(&name)
+                .is_some_and(|property| property.getter.is_some() || !property.writable)
+                || self.string_object_index(owner, &name).is_some()
+                || name == "length" && self.objects[owner].length.is_some() && !self.objects[owner].length_writable
+                || self.objects[owner].regexp.is_some() && !self.objects[owner].properties.contains_key(&name);
+            if readonly {
+                return if self.strict { Err(Fault::exception("TypeError", "The super property is read-only.")) } else { Ok(()) };
+            }
+        }
+        if matches!(receiver, Value::Host(_)) {
+            return Err(Fault::new("Super data writes to native host receivers are not implemented."));
+        }
+        let Some(receiver) = Ordinary::from_value(&receiver) else {
+            return if self.strict { Err(Fault::exception("TypeError", "A super data receiver must be an object.")) } else { Ok(()) };
+        };
+        let id = self.ordinary_id(receiver)?;
+        if self.objects[id].properties.get(&name).is_some_and(|property|
+            property.accessor.is_some() || property.getter.is_some() || !property.writable)
+            || self.string_object_index(id, &name).is_some()
+            || name == "length" && self.objects[id].length.is_some() && !self.objects[id].length_writable
+            || self.objects[id].regexp.is_some() && self.owns_property(id, &name)? && !self.objects[id].properties.contains_key(&name)
+        {
+            return if self.strict { Err(Fault::exception("TypeError", "The super receiver property is read-only or an accessor.")) } else { Ok(()) };
+        }
+        let existing = self.owns_property(id, &name)?;
+        if existing {
+            // Only a checked writable own data descriptor reaches this path.
+            // Preserve existing exotic/length conversion and strictness rules.
+            return self.assign_ordinary_property_with_receiver(receiver, name, value, receiver.value(), host);
+        }
+        if !self.objects[id].extensible
+            || self.objects[id].length.is_some_and(|length|
+                super::property_index(&name).is_some_and(|index| index >= length) && !self.objects[id].length_writable)
+        {
+            return if self.strict { Err(Fault::exception("TypeError", "A super receiver property cannot be created.")) } else { Ok(()) };
+        }
+        if let Some(index) = self.typed_numeric_key(id, &name)? {
+            if !self.typed_index_valid(id, index) {
+                return if self.strict { Err(Fault::exception("TypeError", "The super receiver index is invalid.")) } else { Ok(()) };
+            }
+        }
+        // Create directly on the receiver, never invoke its inherited setter.
+        self.store_property(id, name, value, Some((true, true, true)))
+    }
+
     pub(super) fn set_prototype(
         &mut self,
         object: Ordinary,

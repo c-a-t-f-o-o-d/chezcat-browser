@@ -88,7 +88,7 @@ impl Runtime {
             program, template, callee, parent, args, this, host, &mut scopes,
         );
         self.finish_transient_inhibition(inhibited);
-        let result = match prepared {
+        let mut result = match prepared {
             Ok(body) => match self.statements(program, &program.templates[template].body, body, this, host) {
                 Ok(Control::Return(value)) => Ok(value),
                 Ok(Control::Normal(_)) => Ok(Value::Undefined),
@@ -97,6 +97,7 @@ impl Runtime {
             },
             Err(error) => Err(error),
         };
+        self.finish_script_constructor_result(&program.templates[template], args, host, &mut result);
         self.restore_transient_marker(marker);
         for scope in scopes.into_iter().rev().flatten() {
             self.release_environment(scope);
@@ -119,9 +120,21 @@ impl Runtime {
     ) -> Result<usize, Fault> {
         let function = &program.templates[template];
         let has_expressions = function.has_parameter_expressions(program);
-        let call_scope = self.new_environment(parent, true)?;
+        let call_scope = if function.arrow {
+            self.new_environment(parent, true)?
+        } else {
+            let context = self.invocation.ok_or_else(|| Fault::new("Missing prepared function environment."))?;
+            if self.invocation_data(context)?.callee != callee {
+                return Err(Fault::new("Mismatched prepared function environment."));
+            }
+            context.environment
+        };
         scopes[0] = Some(call_scope);
-        self.push_transient_root(super::function_reachability::Edge::Environment(call_scope))?;
+        // Ordinary invocation setup already owns this root. Only an arrow's
+        // separate parameter scope needs an additional registration here.
+        if function.arrow {
+            self.push_transient_root(super::function_reachability::Edge::Environment(call_scope))?;
+        }
         // Sloppy default eval may introduce vars, but cannot replace formal
         // bindings. Keeping these records distinct also preserves its closures.
         let parameters = if has_expressions && !function.strict {

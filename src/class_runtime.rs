@@ -1,21 +1,60 @@
-//! Genuine finite base classes. Literal members install ordinary descriptors
-//! without global Object lookups or author callbacks. The private transaction
-//! stays rooted/inhibited until its constructor is returned to the evaluator.
+//! Genuine finite Script/null classes. Heritage evaluates in the private TDZ
+//! scope; literal members then install ordinary descriptors without callbacks.
 //! https://tc39.es/ecma262/#sec-runtime-semantics-classdefinitionevaluation
 use super::*;
 
 impl Runtime {
     pub(super) fn make_class(
-        &mut self, program: &Rc<Program>, class: usize, environment: usize, this: &Value,
+        &mut self, program: &Rc<Program>, class: usize, environment: usize, this: &Value, host: &mut dyn Host,
     ) -> Result<Value, Fault> {
-        let marker = self.inhibit_transient_collection_for("class-definition");
-        let result = self.make_class_unpublished(program, class, environment, this);
+        let marker = self.transient_marker();
+        let scope = self.new_environment(environment, false)?;
+        let syntax = &program.classes[class];
+        let result = (|| {
+            self.push_transient_root(function_reachability::Edge::Environment(scope))?;
+            if let Some(name) = &syntax.name {
+                self.put_binding(scope, name.clone(), None, Declaration::Const, false)?;
+            }
+            let (constructor_parent, instance_parent) = if let Some(heritage) = syntax.heritage {
+                let base = self.eval(program, heritage, scope, this, host)?;
+                self.push_transient_value(&base)?;
+                if matches!(base, Value::Null) {
+                    (self.function_prototype.map(Ordinary::Function), None)
+                } else {
+                    if !self.from_constructor(&base)? {
+                        return Err(Fault::exception("TypeError", "A class base must be a constructor or null."));
+                    }
+                    let Value::Function(base) = base else { unreachable!() };
+                    if !matches!(self.functions.get(base), Some(Function::Script { .. })) {
+                        return Err(Fault::new("Native, bound and builtin class bases are not implemented."));
+                    }
+                    let prototype = self.get_ordinary_property_with_host(Ordinary::Function(base), "prototype", host)?;
+                    self.push_transient_value(&prototype)?;
+                    let instance_parent = match prototype {
+                        Value::Null => None,
+                        Value::Host(_) => return Err(Fault::new("Native host object class prototypes are not implemented.")),
+                        _ => Some(Ordinary::from_value(&prototype).ok_or_else(|| Fault::exception(
+                            "TypeError", "A class base prototype must be an object or null."))?),
+                    };
+                    (Some(Ordinary::Function(base)), instance_parent)
+                }
+            } else {
+                (self.function_prototype.map(Ordinary::Function), self.object_prototype.map(Ordinary::Object))
+            };
+            self.collect_before_function_literal()?;
+            let inhibited = self.inhibit_transient_collection_for("class-definition");
+            let result = self.make_class_unpublished(program, class, scope, this, constructor_parent, instance_parent);
+            self.restore_transient_marker(inhibited);
+            result
+        })();
+        self.release_environment(scope);
         self.restore_transient_marker(marker);
         result
     }
 
     fn make_class_unpublished(
-        &mut self, program: &Rc<Program>, class: usize, environment: usize, this: &Value,
+        &mut self, program: &Rc<Program>, class: usize, scope: usize, this: &Value,
+        constructor_parent: Option<Ordinary>, instance_parent: Option<Ordinary>,
     ) -> Result<Value, Fault> {
         self.step()?;
         let syntax = &program.classes[class];
@@ -31,12 +70,7 @@ impl Runtime {
             return Err(Fault::new(format!("Object identity limit reached ({} per document).", self.limits.heap.objects)));
         }
         self.work_as(functions.saturating_mul(std::mem::size_of::<class_parser::Member>()), WorkKind::PatternPreparation)?;
-        let scope = self.new_environment(environment, false)?;
         let result = (|| {
-            self.push_transient_root(function_reachability::Edge::Environment(scope))?;
-            if let Some(name) = &syntax.name {
-                self.put_binding(scope, name.clone(), None, Declaration::Const, false)?;
-            }
             let constructor = self.make_function(program, syntax.constructor, scope, this)?;
             let Value::Function(constructor_id) = constructor else { unreachable!() };
             self.scope_assigned_closures.insert(constructor_id);
@@ -45,6 +79,11 @@ impl Runtime {
             let StoredValue::Value(Value::Object(prototype)) = self.objects[properties].properties["prototype"].value else {
                 return Err(Fault::new("Invalid class prototype identity."));
             };
+            self.set_prototype(Ordinary::Function(constructor_id), constructor_parent)?;
+            self.set_prototype(Ordinary::Object(prototype), instance_parent)?;
+            if let Function::Script { home_object, .. } = &mut self.functions[constructor_id] {
+                *home_object = Some(Ordinary::Object(prototype));
+            }
             self.store_property(properties, "prototype".into(), Value::Object(prototype), Some((false, false, false)))?;
             self.class_function_name(constructor_id, syntax.name.as_deref().unwrap_or(""), object_literals::Kind::Method)?;
             if let Some(name) = &syntax.name {
@@ -57,6 +96,9 @@ impl Runtime {
                 self.object_assigned_closures.insert(method_id);
                 self.class_function_name(method_id, &member.name, member.kind)?;
                 let owner = if member.is_static { properties } else { prototype };
+                if let Function::Script { home_object, .. } = &mut self.functions[method_id] {
+                    *home_object = Some(if member.is_static { Ordinary::Function(constructor_id) } else { Ordinary::Object(prototype) });
+                }
                 if matches!(member.kind, object_literals::Kind::Getter | object_literals::Kind::Setter) {
                     let mut accessor = self.objects[owner].properties.get(&member.name)
                         .and_then(|property| property.accessor).unwrap_or(Accessors { get: None, set: None });
@@ -69,7 +111,6 @@ impl Runtime {
             }
             Ok(Value::Function(constructor_id))
         })();
-        self.release_environment(scope);
         result
     }
 

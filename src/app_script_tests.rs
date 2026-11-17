@@ -601,7 +601,7 @@ fn unsupported_startup_script_preserves_the_page_and_valid_handlers() {
     let mut app = fixture.open(
         "<title>Kept page</title><p id=out>Still here</p>\
          <button id=good type=button onclick=\"document.getElementById('out').textContent='working';\">Try</button>\
-         <script>document.title='must not execute';class Unsupported extends Object {}</script>",
+         <script>document.title='must not execute';class Unsupported {field=1;}</script>",
     );
     assert_eq!(app.document.title, "Kept page");
     assert_eq!(text(&app, "out"), "Still here");

@@ -33,6 +33,10 @@ impl Edge {
             Reference::Binding(id, _) => add(Self::Environment(*id)),
             Reference::Property(receiver, _) | Reference::SymbolProperty(receiver, _) => Self::value(receiver, add),
             Reference::ComputedProperty(receiver, key) => { Self::value(receiver, add); Self::value(key, add); }
+            Reference::SuperProperty { base, receiver, .. } => {
+                if let Some(base) = base { Self::value(&base.value(), add); }
+                Self::value(receiver, add);
+            }
             Reference::Missing(_) | Reference::Global(_) => {}
         }
     }
@@ -179,11 +183,13 @@ impl Runtime {
           for (id, environment) in self.environments.iter().enumerate() {
             if graph.environments[id] { continue; }
             if let Some(environment) = environment {
-                meter.charge((environment.bindings.len() + environment.arguments.as_ref().map_or(0, arguments::Pending::reachability_cost)) * 2).map_err(Fault::new)?;
+                meter.charge((environment.bindings.len() + environment.arguments.as_ref().map_or(0, arguments::Pending::reachability_cost)
+                    + usize::from(environment.invocation.is_some()) * 6) * 2).map_err(Fault::new)?;
                 environments += 1;
                 bindings = bindings.checked_add(environment.bindings.len()).ok_or_else(|| Fault::new("Invalid environment retirement accounting."))?;
                 let retained = environment.bindings.values().filter_map(|binding| binding.value.as_ref()).map(Value::bytes)
-                    .chain(environment.arguments.as_ref().map(arguments::Pending::bytes));
+                    .chain(environment.arguments.as_ref().map(arguments::Pending::bytes))
+                    .chain(environment.invocation.as_ref().map(derived_context::Data::bytes));
                 for retained in retained { bytes = bytes.checked_add(retained).ok_or_else(|| Fault::new("Invalid environment retirement accounting."))?; }
             }
           }
@@ -362,8 +368,8 @@ impl Runtime {
             + self.host_objects.len() + self.host_method_values.len() + exported.len()
             + self.exported_function_roots.len() + self.exported_object_roots.len())?;
         if transient { for &edge in &self.transient_roots.roots { graph.add(edge); } }
-        if let Some(target) = self.invocation.and_then(|context| context.new_target) {
-            graph.add(Edge::Function(target));
+        if let Some(context) = self.invocation {
+            graph.add(Edge::Environment(context.environment));
         }
         graph.add(Edge::Environment(0));
         graph.add(Edge::Environment(self.global_environment));
@@ -397,24 +403,27 @@ impl Runtime {
             match edge {
                 Edge::Environment(id) => {
                     let Some(environment) = self.environments[id].as_ref() else { add(Edge::Environment(usize::MAX)); continue; };
-                    meter.charge(2 + environment.bindings.len() * 2 + environment.arguments.as_ref().map_or(0, arguments::Pending::reachability_cost))?;
+                    meter.charge(2 + environment.bindings.len() * 2 + environment.arguments.as_ref().map_or(0, arguments::Pending::reachability_cost)
+                        + usize::from(environment.invocation.is_some()) * 6)?;
                     if let Some(parent) = environment.parent { add(Edge::Environment(parent)); }
                     for binding in environment.bindings.values() {
                         if let Some(value) = &binding.value { Edge::value(value, &mut add); }
                     }
                     if let Some(pending) = &environment.arguments { pending.reachability_edges(&mut add); }
+                    if let Some(invocation) = &environment.invocation { invocation.reachability_edges(&mut add); }
                 }
                 Edge::Function(id) => {
                     meter.charge(16 + match &self.functions[id] { Function::Bound(bound) => bound.reachability_cost(), _ => 0 })?;
                     let Some(&properties) = self.function_properties.get(id) else { add(Edge::Object(usize::MAX)); continue; };
                     add(Edge::Object(properties));
                     match &self.functions[id] {
-                        Function::Script { environment, lexical_this, lexical_invocation, .. } => {
+                        Function::Script { environment, lexical_this, lexical_invocation, home_object, .. } => {
                             add(Edge::Environment(*environment));
                             if let Some(value) = lexical_this { Edge::value(value, &mut add); }
-                            if let Some(target) = lexical_invocation.and_then(|context| context.new_target) {
-                                add(Edge::Function(target));
+                            if let Some(context) = lexical_invocation {
+                                add(Edge::Environment(context.environment));
                             }
+                            if let Some(home) = home_object { Edge::value(&home.value(), &mut add); }
                         }
                         Function::Bound(bound) => bound.reachability_edges(&mut add),
                         Function::Promise(closure) => closure.reachability_edges(&mut add),
