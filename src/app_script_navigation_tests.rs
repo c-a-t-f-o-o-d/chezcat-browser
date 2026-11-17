@@ -477,6 +477,11 @@ fn external_bootstrap_handoff_refuses_uncommitted_wrong_source_notready_and_stop
     assert!(app.worker.as_ref().unwrap().completed_document_ready_for_test(id));
     until_peer(&mut app, &peer, |app| app.pending.as_ref().is_some_and(|pending|
         pending.committed && app.worker.as_ref().unwrap().completed_document_ready_for_test(pending.id)));
+    // This control releases a retired in-flight BOOT response after /fresh.
+    // Cancellation before request contact is valid and produces no response to
+    // wait for, so establish real peer receipt while its response remains held.
+    until_peer(&mut app, &peer, |_| peer.request("/boot.js").is_some());
+    assert!(!peer.response_finished("/boot.js"), "BOOT must remain held before cancellation");
     app.committed_request = Some(id.wrapping_add(1));
     assert!(!app.finish_ready_load_before_replacement());
     assert!(app.worker.as_ref().unwrap().completed_document_ready_for_test(id), "Wrong-source refusal cannot consume owned delivery");

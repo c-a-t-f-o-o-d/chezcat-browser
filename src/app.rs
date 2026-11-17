@@ -5684,3 +5684,6 @@ mod text_input_tests;
 #[cfg(test)]
 #[path = "app_created_button_tests.rs"]
 mod created_button_tests;
+#[cfg(test)]
+#[path = "app_base_class_tests.rs"]
+mod base_class_tests;

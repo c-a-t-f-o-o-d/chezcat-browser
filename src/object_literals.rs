@@ -108,7 +108,7 @@ impl Runtime {
         }
     }
 
-    fn literal_function_name(
+    pub(super) fn literal_function_name(
         &mut self,
         function: usize,
         key: &PropertyKey,

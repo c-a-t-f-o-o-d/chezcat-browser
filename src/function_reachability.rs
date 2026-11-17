@@ -16,6 +16,9 @@ mod scope_collection_tests;
 #[cfg(test)]
 #[path = "new_target_lifetime_tests.rs"]
 mod new_target_lifetime_tests;
+#[cfg(test)]
+#[path = "base_class_lifetime_tests.rs"]
+mod base_class_lifetime_tests;
 
 #[derive(Clone, Copy, Debug)]
 pub(super) enum Edge { Object(usize), Function(usize), Environment(usize) }

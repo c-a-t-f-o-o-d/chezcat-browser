@@ -53,6 +53,7 @@ impl Runtime {
         host: &mut dyn Host,
     ) -> Result<Value, Fault> {
         let value = self.eval(program, expression, environment, this, host)?;
+        if let Some(name) = name { self.infer_class_name(program, expression, name, &value)?; }
         if let (Some(name), ExprKind::Function(template), Value::Function(function)) =
             (name, &program.exprs[expression].kind, &value)
         {
