@@ -30,7 +30,7 @@ impl Bridge<'_> {
         let mut affected = Vec::new();
         affected.try_reserve(self.forms.controls.len()).map_err(|_| "Select affected-control reservation failed.")?;
         for (&node, control) in &self.forms.controls {
-            if control.kind != Kind::Select { continue; }
+            if !matches!(control.kind,Kind::Select|Kind::Hidden) { continue; }
             let mut ancestor = Some(node);
             for _ in 0..128 {
                 let Some(index) = ancestor else { break; };
@@ -66,6 +66,7 @@ impl Bridge<'_> {
         selects.extend(plan.additions.keys().copied());
         let view = SelectView { document: self.doc, fragment };
         for node in selects {
+            let hidden = self.forms.controls.get(&node).is_some_and(|control| control.kind == Kind::Hidden);
             let mut ancestor = Some(node);
             let mut connected = false;
             let mut nearest_form = None;
@@ -75,6 +76,12 @@ impl Bridge<'_> {
                 self.state.work(1)?;
                 depth += 1;
                 if depth > 128 || index >= parents.len() { return Err("Select projected ancestry limit reached.".into()); }
+                if hidden && index != 0 {
+                    let (doc, local) = view.source(index);
+                    if doc.nodes[local].namespace != crate::html::Namespace::Html {
+                        return Err("Hidden input connection requires known HTML ancestry; no tree was changed.".into());
+                    }
+                }
                 let name = view.tag(index);
                 if index != node && (matches!(name, "head" | "script" | "style" | "template" | "iframe" | "object" | "datalist")
                     || name == "noscript" && self.doc.scripting_enabled) {

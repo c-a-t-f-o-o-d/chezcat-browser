@@ -5643,3 +5643,7 @@ mod literal_prototype_tests;
 #[cfg(test)]
 #[path = "app_string_concat_tests.rs"]
 mod string_concat_tests;
+
+#[cfg(test)]
+#[path = "app_hidden_input_tests.rs"]
+mod hidden_input_tests;

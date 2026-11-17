@@ -341,6 +341,7 @@ impl Bridge<'_> {
             return self.attribute_named(node, name, value);
         }
         let key = name.qualified.as_str();
+        if self.hidden_input_attribute(node,&name,&value)? {return Ok(());}
         let media_source=key=="src"&&self.media_element_receiver(node_handle(node));
         let media_controls=key=="controls"&&self.media_interface_receiver(node_handle(node));
         let style_type=key=="type"&&self.style_type_receiver(node_handle(node));
@@ -392,3 +393,7 @@ impl Bridge<'_> {
 #[cfg(test)]
 #[path = "script_anchor_attribute_tests.rs"]
 mod anchor_attribute_tests;
+
+#[cfg(test)]
+#[path = "script_hidden_input_tests.rs"]
+mod hidden_input_tests;

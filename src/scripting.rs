@@ -36,6 +36,8 @@ mod script_timezone;
 use dom_tree::DomState;
 #[path = "script_attr.rs"]
 mod script_attr;
+#[path = "script_hidden_inputs.rs"]
+mod script_hidden_inputs;
 #[path = "script_attribute_names.rs"]
 mod script_attribute_names;
 #[path = "script_class_list.rs"]
@@ -2506,6 +2508,7 @@ impl Host for Bridge<'_> {
     }
 
     fn string_setter(&self, object: u32, property: &str) -> bool {
+        if self.hidden_input_property(object,property) {return true;}
         if self.media_interface_receiver(object)&&property=="src" {return true;}
         if property=="type"&&self.style_type_receiver(object){return true;}
         if self.media_element_receiver(object)&&property=="src"{return true;}
@@ -2676,7 +2679,8 @@ impl Host for Bridge<'_> {
     }
 
     fn null_string_setter(&self, object: u32, property: &str) -> bool {
-        property == "innerHTML" && self.attr_element_receiver(object)
+        property == "value" && self.hidden_input_property(object,property)
+            || property == "innerHTML" && self.attr_element_receiver(object)
             || property == "border" && node_index(object).is_some_and(|node|
             self.html_border_property(node) && matches!(tag(self.doc, node), "img" | "object"))
     }
@@ -3587,6 +3591,7 @@ impl Host for Bridge<'_> {
                     | "removeEventListener"
             ) || !matches!(self.named_document_property(property)?, Value::Undefined));
         }
+        if self.hidden_input_property(object,property) { return Ok(true); }
         if let Some(has) = self.dom_has(object, property)? {
             return Ok(has);
         }
@@ -3857,6 +3862,7 @@ impl Host for Bridge<'_> {
                 _ => self.named_document_property(property),
             };
         }
+        if let Some(value) = self.hidden_input_get(object,property)? {return Ok(value);}
         if let Some(value) = self.dom_get(object, property)? {
             return Ok(value);
         }
@@ -3993,6 +3999,7 @@ impl Host for Bridge<'_> {
     }
 
     fn set(&mut self, object: u32, property: &str, value: Value) -> Result<(), String> {
+        if self.hidden_input_set(object,property,&value)? {return Ok(());}
         if self.media_interface_receiver(object)&&matches!(property,"src"|"currentTime") {self.require_bound_media(object)?;}
         if property=="controls"&&self.media_interface_receiver(object) {
             self.state.work(1)?;

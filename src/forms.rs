@@ -1266,6 +1266,9 @@ fn encode_into(text: &str, output: &mut String, limit: usize) -> Result<(), Stri
 
 #[path = "forms_select_fragments.rs"]
 mod select_fragments;
+
+#[path = "forms_hidden_inputs.rs"]
+mod hidden_inputs;
 pub(crate) use select_fragments::SelectFormPlan;
 
 #[cfg(test)]
