@@ -180,6 +180,95 @@ fn text_input_actual_app_fragment_fill_delete_and_reset_preserve_native_editors(
 }
 
 #[test]
+fn created_text_input_actual_app_trusted_creation_edit_name_and_reset_keep_neighbor() {
+    let fixture = Fixture::new();
+    std::fs::write(fixture.0.join("page.html"), r#"<!doctype html><title>Text input ready</title><style>
+html,body{margin:0;padding:0;background:#ffffff}
+input{display:block;width:220px;height:32px;margin:0}
+#neighbor{position:absolute;left:20px;top:20px}
+#host{position:absolute;left:20px;top:120px;width:220px;height:32px}
+button{position:absolute;left:280px;width:180px;height:32px}
+#create{top:20px}#rename{top:70px}#reset{top:120px}
+</style><body><form id=g><input id=neighbor name=neighbor value="neighbor seed"></form>
+<form id=f><div id=host></div><button id=create type=button>Create input</button><button id=rename type=button>Rename input</button><button id=reset type=reset>Reset input</button></form><script>
+var dynamic=null,edits=0;
+document.getElementById('create').onclick=function(event){
+ if(!event.isTrusted||dynamic!==null)throw 'one trusted creation required';
+ dynamic=document.createElement('input');
+ dynamic.setAttribute('name','reactive-name');
+ dynamic.setAttribute('type','text');
+ dynamic.value='seed';
+ document.getElementById('host').appendChild(dynamic);dynamic.id='dynamic';
+ dynamic.oninput=function(event){
+  if(!event.isTrusted||event.target!==this||this.defaultValue!=='')throw 'trusted native edit/default required';
+  edits++;document.title='Edited '+edits;
+ };
+ document.title='Created native input';
+};
+document.getElementById('rename').onclick=function(event){
+ if(!event.isTrusted)throw 'trusted rename required';
+ var live=dynamic.value;dynamic.name='renamed';dynamic.defaultValue='reset seed';
+ if(dynamic.value!==live)throw 'default replaced edited value';
+ document.title='Renamed '+edits;
+};
+</script>"#).unwrap();
+    let mut app = fixture.open();
+    let raw = app.raw.clone();
+    let location = app.location.clone();
+    let history = (app.history_index, app.history.len());
+    click(&mut app,"neighbor");
+    key(&mut app,0x24,false);
+    key(&mut app,0x23,true);
+    app.paste("neighbor kept");
+    clean(&app);
+    key(&mut app,0x24,false);
+    for _ in 0..2 { key(&mut app,0x27,false); }
+    for _ in 0..3 { key(&mut app,0x27,true); }
+    let preserved = neighbor(&app);
+    assert_eq!((preserved.1,preserved.2),(5,2));
+    assert!(preserved.4);
+
+    click(&mut app,"create");
+    assert_eq!(app.document.title,"Created native input");
+    let dynamic = id(&app,"dynamic");
+    let initial_pixels = control_pixels(&app,"dynamic",120);
+    assert_eq!(app.forms.controls[&dynamic].name,"reactive-name");
+    assert_eq!(app.forms.controls[&dynamic].value.text(),"seed");
+    assert_eq!(app.forms.text_default_value(dynamic).unwrap(),"");
+    assert_eq!(neighbor(&app),preserved);
+
+    click(&mut app,"dynamic");
+    assert!(app.focus == Focus::Control(dynamic));
+    key(&mut app,0x24,false);
+    app.text_input('K');
+    app.paste("ey ");
+    key(&mut app,0x23,false);
+    key(&mut app,0x08,false);
+    assert_eq!(app.document.title,"Edited 3");
+    assert_eq!(app.forms.controls[&dynamic].value.text(),"Key see");
+    assert_eq!(app.forms.text_default_value(dynamic).unwrap(),"");
+    assert_eq!(neighbor(&app),preserved);
+
+    click(&mut app,"rename");
+    assert_eq!(app.document.title,"Renamed 3");
+    assert_eq!(app.forms.controls[&dynamic].name,"renamed");
+    assert_eq!(app.document.attr(dynamic,"name"),Some("renamed"));
+    assert_eq!(app.forms.controls[&dynamic].value.text(),"Key see");
+    assert_eq!(app.forms.text_default_value(dynamic).unwrap(),"reset seed");
+    assert_ne!(control_pixels(&app,"dynamic",120),initial_pixels,"Actual text edits change the same unfocused native box");
+    click(&mut app,"reset");
+    assert_eq!(app.document.title,"Renamed 3","Native Reset must not synthesize input callbacks");
+    assert_eq!(app.forms.controls[&dynamic].value.text(),"reset seed");
+    assert!(!app.forms.controls[&dynamic].dirty_value);
+    assert_eq!(neighbor(&app),preserved,"Reset in the new input's form preserves the other form's native editor");
+    control_pixels(&app,"dynamic",120);
+    assert_eq!(app.raw,raw);
+    assert_eq!(app.location,location);
+    assert_eq!((app.history_index,app.history.len()),history);
+    clean(&app);
+}
+
+#[test]
 fn text_input_actual_app_reflow_retires_focused_editor_and_preserves_visible_neighbor() {
     fn editor(app: &App, node: usize) -> (String, usize, usize, usize, bool) {
         let control = &app.forms.controls[&node];

@@ -31,6 +31,22 @@ impl Bridge<'_> {
     }
     pub(super) fn prepare_select_form_change(&mut self, fragment: Option<(&Document, usize)>,
         overrides: &[(usize, Option<usize>)]) -> Result<forms::SelectFormPlan, String> {
+        let mut created_inputs = Vec::new();
+        self.state.work(self.doc.nodes.len())?;
+        created_inputs.try_reserve(self.doc.nodes.len().min(forms::MAX_CONTROLS)).map_err(|_| "Created INPUT plan reservation failed.")?;
+        for node in 0..self.doc.nodes.len() {
+            if !self.fresh_text_input(node) { continue; }
+            let mut ancestor = Some(node);
+            for _ in 0..128 {
+                let Some(index) = ancestor else { break; };
+                self.state.work(1)?;
+                if overrides.iter().any(|(root, _)| *root == index) {
+                    if created_inputs.len() >= forms::MAX_CONTROLS { return Err("Native form control limit reached before created INPUT insertion.".into()); }
+                    created_inputs.push(node); break;
+                }
+                ancestor = self.state.tree.parents.get(index).copied().flatten();
+            }
+        }
         let mut affected = Vec::new();
         affected.try_reserve(self.forms.controls.len()).map_err(|_| "Select affected-control reservation failed.")?;
         for (&node, control) in &self.forms.controls {
@@ -45,13 +61,25 @@ impl Bridge<'_> {
         }
         let new_control = fragment.is_some_and(|(doc, _)| (1..doc.nodes.len()).any(|node|
             tag(doc, node) == "select" || forms::fragment_text_input(doc, node)));
-        if affected.is_empty() && !new_control {
+        if affected.is_empty() && !new_control && created_inputs.is_empty() {
             return Ok(forms::SelectFormPlan { additions: std::collections::BTreeMap::new(), metadata: Vec::new(), retained_bytes: 0 });
         }
         let extra = fragment.map_or(0, |(doc, _)| doc.nodes.len().saturating_sub(1));
         if fragment.is_some_and(|(_, base)| base != self.doc.nodes.len()) { return Err("Select fragment identity base changed.".into()); }
         self.state.work(self.doc.nodes.len().saturating_add(extra).saturating_add(self.forms.controls.len()))?;
+        if !created_inputs.is_empty() {
+            self.state.work(self.forms.default_scan_work())?;
+            let mut copy = 0usize;
+            for &node in &created_inputs {
+                let name = self.doc.attr(node,"name").map_or(0,str::len);
+                let initial = self.doc.attr(node,"value").map_or(0,str::len);
+                self.state.work(name.saturating_add(initial))?;
+                copy = copy.saturating_add(name).saturating_add(initial.saturating_mul(6));
+            }
+            self.state.copies(copy)?;
+        }
         let mut plan = self.forms.prepare_selects(fragment)?;
+        if !created_inputs.is_empty() { self.forms.add_created_text_inputs(self.doc,&created_inputs,&mut plan)?; }
         let mut parents = Vec::new();
         parents.try_reserve(self.doc.nodes.len().saturating_add(extra)).map_err(|_| "Select parent projection reservation failed.")?;
         parents.extend(self.state.tree.parents.iter().copied());
