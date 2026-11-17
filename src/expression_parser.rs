@@ -311,6 +311,8 @@ impl Parser {
             Phase::Infix(self.prefix_expression(op, context.at)?)
         } else if self.is("new") {
             Phase::Postfix(Postfix::new(self.constructor_expression(context.at)?))
+        } else if self.is("super") {
+            Phase::Postfix(Postfix::new(self.super_expression(context.at, context.goal.calls)?))
         } else if self.eat("(") {
             self.push_expression_frame(pending, Frame::Group(context))?;
             context = Context { goal: Goal::expression(0), at: self.at(), allow_in: true };
@@ -319,6 +321,33 @@ impl Parser {
             Phase::Postfix(Postfix::new(self.primary()?))
         };
         Ok((context, phase))
+    }
+
+    fn super_expression(&mut self, at: usize, calls: bool) -> Result<ExprId, Fault> {
+        self.need("super")?;
+        if self.is("(") {
+            if !self.super_call_allowed || !calls {
+                return Err(self.error("super() requires an enclosing derived constructor."));
+            }
+            let arguments = self.arguments()?;
+            return self.expr(ExprKind::SuperCall(arguments), at);
+        }
+        if !self.super_property_allowed {
+            return Err(self.error("A super property requires an enclosing method home object."));
+        }
+        if self.is("[") {
+            return Err(self.unsupported("Computed super properties are not implemented."));
+        }
+        self.need(".")?;
+        let TokenKind::Word(name) = &self.token().kind else {
+            return Err(self.error("Expected a literal super property name."));
+        };
+        if name.len() > self.capacity.property_bytes {
+            return Err(self.unsupported("Super property-name limit reached."));
+        }
+        let name = name.clone();
+        self.current += 1;
+        self.expr(ExprKind::SuperMember(name), at)
     }
 
     fn postfix_expression(
