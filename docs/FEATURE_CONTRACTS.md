@@ -1,17 +1,17 @@
-# Initial feature contracts
+# Feature contracts
 
 Scope is agreed before implementation. Completion means all contracted normal,
 error, lifecycle and security acceptance is met; missing criteria cannot be hidden
 by shrinking the contract afterward. These contracts authorize no live check or
 public release by themselves.
 
-The [0.81.0-alpha.2 release target](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.81.0-alpha.2)
-consolidates the completed finite B2 milestone and integrated prerequisites below.
-Prior checkpoint evidence stays bound to its source; the new release's exact
-clean-source, build, archive, extracted-runtime and published-byte gates remain
-pending. Source integration, CI and development delivery are distinct from actual
-publication. Named completed milestones close under [RELEASING.md](RELEASING.md)
-before an independent feature item begins.
+This document owns lasting behavior, refusal and acceptance requirements. The
+[roadmap](ROADMAP.md) owns work order, the [capability matrix](CAPABILITIES.md)
+implemented limits, and [compatibility](COMPATIBILITY.md) measured workflows.
+Historical execution results remain bound to their recorded source and scope;
+they do not replace affected checks for a changed implementation. Development
+continues independently of releases, which require an explicit owner request
+under [RELEASING.md](RELEASING.md).
 
 ## T1 — shared TLS/trust and data coverage baseline
 
@@ -386,7 +386,7 @@ Status: delivered finite prerequisite, integrated by
 [PR24](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/24) from checkpoint
 [73f3315](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/73f3315ae23760966efb1c1e6bf8ff3e2492c6c4).
 Recorded normal/optimized and local/hosted offline verification covers that
-checkpoint; the release target still requires its exact-source delivery gates.
+checkpoint. The published 0.81.0-alpha.2 source includes this prerequisite.
 
 Twelve original parser, native-model, Page and App controls pass. The recorded
 integration covers this finite slice; each new checkpoint still requires exact
@@ -485,8 +485,10 @@ The accepted source [67c5d69](https://github.com/c-a-t-f-o-o-d/chezcat-browser/c
 and subsequent checkpoints 73f3315 and fb385cb have recorded local/hosted offline
 verification. Separate actual Windows desktop records cover six groups at 67c5d69,
 six at 73f3315 and four at fb385cb. Each is limited to its observed source/scope;
-the 0.81.0-alpha.2 release gates remain separate.
-Complete normal/optimized and desktop acceptance is required at each new checkpoint. Provide new/switch/close
+the published 0.81.0-alpha.2 source at 36adf20 also has six scoped desktop groups
+and its own exact-source and extracted-runtime verification. Desktop checks apply
+to affected native behavior; full normal/optimized and hosted verification remain
+integration gates. Provide new/switch/close
 tabs and link actions for new tabs or ChezCat windows, including supported middle/
 Ctrl-click and keyboard actions. Keep independent page/history/scroll/loading and
 address/title state with deliberate shared profile/cookies. Acceptance must prove
@@ -730,7 +732,8 @@ update controls are separate planned features, with no placeholder update button
 
 ## I1 — one Windows installation package
 
-Status: planned after the first B1/B2 milestones. Prefer one per-user x64 MSI,
+Status: preserved backlog, deferred behind the current browser-foundation queue.
+Prefer one per-user x64 MSI,
 retaining the portable ZIP and complete exact validated runtime payload, trust
 provenance, assets/pages and license/notices. Use standard Windows installation,
 shortcuts and uninstall registration, without a privileged updater service or

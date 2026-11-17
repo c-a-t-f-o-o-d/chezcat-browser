@@ -5,6 +5,10 @@ inventory, a parser success, HTTP200, zero script errors or a library name alone
 does not establish a working page. The [machine-readable catalogue](compatibility.json)
 classifies 44 named families and formats by their actual browser, build, server
 or test-host role. Unassessed entries are not assumed to work or fail.
+This document and the catalogue own measured version/workflow results; development
+order belongs to the [roadmap](ROADMAP.md), implemented limits to the
+[capability matrix](CAPABILITIES.md), and lasting acceptance to the
+[feature contracts](FEATURE_CONTRACTS.md).
 
 The semantic reference for the active language checks is ECMAScript 2025, edition
 16; DOM references use the living DOM specification. Original model tests, pinned
@@ -19,6 +23,8 @@ is inferred from the small selected case sets.
 | Unmodified jQuery1.12.4 with Bootstrap3.4.1 dropdown/form | One unchanged CP4 App recheck advances past conventional select fragments to jQuery line1265,column4 setting INPUT type=hidden. Load and initial rendering pass; initialization, input and async stages fail. Later missing-library errors are cascades; no visible workflow improvement is established |
 | Foundation6.9.0 generated CSS with original controls | The unchanged JS-enabled fixture now forms two columns at1280 and stacks at640, with its original independent image pixels. This is a responsive rendering improvement; Vue initialization and optional Foundation JavaScript are separate |
 | Vue2.7.16 runtime with an original reactive component | One unchanged CP5 invocation at1280/640 admits the prior literal parse boundary, then first fails during execution on undefined concat at11:3613. Load/initial render/Foundation CSS pass; Vue mount/input/async fail. Modern Vue3 retains its separate Proxy prerequisite |
+| jQuery4.0.0, separate original input/update sample | Planned independent modern-version measurement; no load, parse, initialization, rendering or interaction result is claimed |
+| Bootstrap5.3.9, separate original responsive/dropdown sample | Planned independent modern-version measurement with its documented bundled dependencies; no legacy-jQuery result is assigned to it |
 | Independent browser reference | Initial DOM and pixels were captured; interactions were not run and do not supply a workflow-pass denominator |
 
 Delivered CP1 provides the real collection/call/replacement/Node prerequisites.
@@ -63,20 +69,18 @@ The separate finite literal-prototype prerequisite passes ten language/App
 controls, including real input and isolated text pixels. The unchanged Vue file
 parses, but its concat failure occurs before the later literal is known to run;
 ordinary prototype membership/access remains an unobserved future boundary.
-Finite tabs/windows are the next discrete usability milestone after this measured
-rendering improvement. Their shared-profile prerequisite now has original
-two-App revision/gesture and retained-page controls. Session ownership, shared
-downloads/history and terminal retirement now support a finite native tab/window
-shell with original pure UI and hidden-HWND controls. Full normal/optimized
-integration remains required; native link/context dispositions now have original
-pure and hidden-HWND controls, with physical desktop interaction as separate
-acceptance. Installer/update work stays planned; further media and
-service integration remains deferred. Routine CI stays offline.
+Finite tabs/windows and guarded native link/context actions are delivered in
+[0.81.0-alpha.2](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.81.0-alpha.2).
+Their source-scoped normal/optimized, hosted and desktop acceptance is separate
+from this library scorecard. The concat correction is in development; its focused
+language/App result does not establish that the unchanged Vue workload initializes.
+Legacy and modern library measurements remain separate. Installer/update work,
+further media and service integration stay deferred. Routine CI stays offline.
 
 The anchor engine uses genuine trusted click/auxclick and
 source-bound targets. Demonstrated shared fixes admit checked HTML href/download
 mutation and keep painted targets/link styling synchronized with live attributes.
 Original App/DOM/event and native lifetime controls cover explicit link/context
-routing. Complete normal/optimized and desktop acceptance is still required per
-checkpoint. This does not change the measured library
+routing. Changed native behavior requires affected acceptance; normal regression
+and hosted CI remain integration gates. This does not change the measured library
 scorecard or establish broader framework support.
