@@ -66,6 +66,33 @@ pub struct Canvas {
     clip: ClipRect,
 }
 
+/// Preserve the existing top/right/bottom/left side precedence. Translucent
+/// sides partition the border area so an overlapping corner is blended once.
+pub(crate) fn border_segments(
+    x: i32, y: i32, width: i32, height: i32, border: [i32; 4], alpha: [u8; 4],
+) -> [(i32, i32, i32, i32); 4] {
+    if alpha == [255; 4] {
+        return [
+            (x, y, width, border[0]),
+            (x.saturating_add(width).saturating_sub(border[1]), y, border[1], height),
+            (x, y.saturating_add(height).saturating_sub(border[2]), width, border[2]),
+            (x, y, border[3], height),
+        ];
+    }
+    let width = width.max(0);
+    let height = height.max(0);
+    let left = border[3].clamp(0, width);
+    let right = border[1].clamp(0, width - left);
+    let bottom = border[2].clamp(0, height);
+    let top = border[0].clamp(0, height - bottom);
+    [
+        (x.saturating_add(left), y, width - left - right, top),
+        (x.saturating_add(width - right), y, right, height - bottom),
+        (x.saturating_add(left), y.saturating_add(height - bottom), width - left, bottom),
+        (x, y, left, height),
+    ]
+}
+
 impl Canvas {
     pub fn new(width: usize, height: usize) -> Self {
         let empty = || Self {
@@ -111,6 +138,37 @@ impl Canvas {
             i64::from(h),
             color,
         );
+    }
+
+    /// Source-over an RGB rectangle against the current clipped canvas.
+    pub fn fill_rect_alpha(&mut self, x: i32, y: i32, w: i32, h: i32, color: u32, alpha: u8) {
+        if alpha == 0 || w <= 0 || h <= 0 {
+            return;
+        }
+        if alpha == 255 {
+            self.fill_rect(x, y, w, h, color);
+            return;
+        }
+        let left = i64::from(x).max(0).max(i64::from(self.clip.left));
+        let top = i64::from(y).max(0).max(i64::from(self.clip.top));
+        let right = (i64::from(x) + i64::from(w)).min(self.width as i64).min(i64::from(self.clip.right));
+        let bottom = (i64::from(y) + i64::from(h)).min(self.height as i64).min(i64::from(self.clip.bottom));
+        if left >= right || top >= bottom {
+            return;
+        }
+        let source = color & 0x00ff_ffff;
+        let alpha = u32::from(alpha);
+        let inverse = 255 - alpha;
+        for row in top as usize..bottom as usize {
+            let start = row * self.width + left as usize;
+            let end = row * self.width + right as usize;
+            for pixel in &mut self.pixels[start..end] {
+                let channel = |shift: u32| {
+                    ((((source >> shift) & 255) * alpha + ((*pixel >> shift) & 255) * inverse + 127) / 255) << shift
+                };
+                *pixel = channel(16) | channel(8) | channel(0);
+            }
+        }
     }
 
     /// Blend one RGB pixel with an eight-bit coverage value. Like the other
@@ -1315,6 +1373,36 @@ mod tests {
             .iter()
             .all(|pixel| *pixel == 0));
         assert!(canvas.pixels[9 * 12..].iter().any(|pixel| *pixel != 0));
+    }
+
+    #[test]
+    fn rgba_rectangles_use_actual_backdrop_and_obey_clip_and_extreme_coordinates() {
+        let mut canvas=Canvas::new(6,4);
+        canvas.fill_rect(0,0,6,4,0x64c832);
+        canvas.set_clip(Some(super::ClipRect::new(1,1,3,2)));
+        canvas.fill_rect_alpha(-2,-2,6,5,0,51);
+        for y in 0..4 {for x in 0..6 {
+            assert_eq!(canvas.pixels[y*6+x],if (1..4).contains(&x)&&(1..3).contains(&y) {0x50a028}else{0x64c832});
+        }}
+        let before=canvas.pixels.clone();
+        canvas.fill_rect_alpha(0,0,6,4,0xffffff,0);
+        canvas.fill_rect_alpha(i32::MAX,0,i32::MAX,4,0xffffff,128);
+        canvas.fill_rect_alpha(0,i32::MIN,6,i32::MAX,0xffffff,128);
+        canvas.fill_rect_alpha(0,0,-1,4,0xffffff,128);
+        assert_eq!(canvas.pixels,before);
+        canvas.fill_rect_alpha(2,2,1,1,0xaabbcc,255);
+        assert_eq!(canvas.pixels[2*6+2],0xaabbcc);
+        let mut empty=Canvas::new(0,2);empty.fill_rect_alpha(0,0,5,5,0xffffff,128);
+        assert!(empty.pixels.is_empty());
+    }
+
+    #[test]
+    fn rgba_border_corners_blend_once_when_sides_overlap_the_whole_box() {
+        let mut canvas=Canvas::new(4,4);canvas.fill_rect(0,0,4,4,0x64c832);
+        for (x,y,width,height) in super::border_segments(0,0,4,4,[3;4],[51;4]) {
+            canvas.fill_rect_alpha(x,y,width,height,0,51);
+        }
+        assert_eq!(canvas.pixels,[0x50a028;16]);
     }
 
     #[test]

@@ -299,6 +299,8 @@ pub struct Style {
     pub padding: [Length; 4],
     pub border_width: [Length; 4],
     pub border_color: [Option<u32>; 4],
+    /// Border-only straight alpha. Other CSS color consumers remain opaque.
+    pub border_alpha: [u8; 4],
     pub border_solid: [bool; 4],
     pub width: Length,
     pub max_width: Option<Length>,
@@ -353,6 +355,7 @@ impl Default for Style {
             padding: [Length::Px(0.0); 4],
             border_width: [Length::Px(3.0); 4],
             border_color: [None; 4],
+            border_alpha: [255; 4],
             border_solid: [false; 4],
             width: Length::Auto,
             max_width: None,
@@ -3012,19 +3015,17 @@ fn apply(style: &mut Style, parent: &Style, declaration: &Declaration) {
             }
         }
         "border-color" => {
-            let values: Option<Vec<_>> = value
-                .split_ascii_whitespace()
-                .take(5)
-                .map(|v| {
-                    if v == "currentcolor" {
-                        Some(None)
-                    } else {
-                        color(v).map(Some)
-                    }
-                })
-                .collect();
-            if let Some(values) = values.and_then(|values| four(&values)) {
-                style.border_color = values;
+            if value=="inherit" {
+                style.border_color=parent.border_color.map(|rgb|Some(rgb.unwrap_or(parent.color)));
+                style.border_alpha=parent.border_alpha;
+            } else if matches!(value.as_str(),"initial"|"unset") {
+                style.border_color=[None;4];style.border_alpha=[255;4];
+            } else {
+                let values=border_parts(&value).and_then(|parts|parts.into_iter().map(border_color_value).collect::<Option<Vec<_>>>());
+                if let Some(values) = values.and_then(|values| four(&values)) {
+                    style.border_color = values.map(|(rgb,_)|rgb);
+                    style.border_alpha = values.map(|(_,alpha)|alpha);
+                }
             }
         }
         "border-style" => {
@@ -3058,10 +3059,11 @@ fn apply(style: &mut Style, parent: &Style, declaration: &Declaration) {
                         style.border_width[index] = value;
                     }
                 } else if name == format!("border-{side}-color") {
-                    if value == "currentcolor" {
-                        style.border_color[index] = None;
-                    } else if let Some(color) = color(&value) {
-                        style.border_color[index] = Some(color);
+                    let inherited=if value=="inherit" {Some((Some(parent.border_color[index].unwrap_or(parent.color)),parent.border_alpha[index]))}
+                        else if matches!(value.as_str(),"initial"|"unset") {Some((None,255))} else {border_color_value(&value)};
+                    if let Some((rgb,alpha)) = inherited {
+                        style.border_color[index] = rgb;
+                        style.border_alpha[index] = alpha;
                     }
                 } else if name == format!("border-{side}-style") {
                     match value.as_str() {
@@ -3076,40 +3078,106 @@ fn apply(style: &mut Style, parent: &Style, declaration: &Declaration) {
 }
 
 fn apply_border(style: &mut Style, side: Option<usize>, value: &str) {
-    let mut width = Length::Px(3.0);
-    let mut solid = false;
-    let mut border_color = None;
-    let mut seen = false;
-    for part in value.split_ascii_whitespace() {
-        if let Some(value) = border_length(part) {
-            width = value;
-            seen = true;
-        } else if part == "solid" {
-            solid = true;
-            seen = true;
-        } else if matches!(part, "none" | "hidden") {
-            solid = false;
-            seen = true;
-        } else if part == "currentcolor" {
-            border_color = None;
-            seen = true;
-        } else if let Some(value) = color(part) {
-            border_color = Some(value);
-            seen = true;
-        } else {
-            return;
-        }
-    }
-    if !seen {
-        return;
-    }
+    let Some((width,solid,rgb,alpha))=parse_border(value) else {return;};
     for index in 0..4 {
         if side.is_none() || side == Some(index) {
             style.border_width[index] = width;
             style.border_solid[index] = solid;
-            style.border_color[index] = border_color;
+            style.border_color[index] = rgb;
+            style.border_alpha[index] = alpha;
         }
     }
+}
+
+// Border component boundaries are whitespace outside functions. Splitting an
+// rgba() at its internal spaces would turn a single color into several tokens.
+// The existing declaration/output limit also bounds this finite scanner.
+fn border_parts(value:&str)->Option<Vec<&str>> {
+    if value.len()>2048 {return None;}
+    let mut result=Vec::new();let mut start=None;let mut depth=0usize;
+    for (index,ch) in value.char_indices() {
+        if ch.is_ascii_whitespace() && depth==0 {
+            if let Some(start)=start.take() {
+                if result.len()==4 {return None;}result.push(&value[start..index]);
+            }
+            continue;
+        }
+        if start.is_none() {start=Some(index);}
+        match ch {
+            '('=>{depth+=1;if depth>8{return None;}},
+            ')'=>{depth=depth.checked_sub(1)?;},
+            '\''|'"'|'['|']'|'{'|'}'|'\\'=>return None,
+            _=>{},
+        }
+    }
+    if depth!=0 {return None;}
+    if let Some(start)=start {if result.len()==4{return None;}result.push(&value[start..]);}
+    if result.is_empty(){None}else{Some(result)}
+}
+
+/// Border-only RGBA; alpha is never discarded or premixed against a guessed
+/// backdrop. Existing text/background color parsing stays unchanged.
+fn rgba_number(text:&str)->Option<f64> {
+    // A Rust float parser also accepts `1.` and `1.e2`; CSS tokenizes those as
+    // a number followed by other tokens. Require one complete CSS number first.
+    if text.is_empty() || text.len()>2048 || !text.is_ascii() {return None;}
+    let bytes=text.as_bytes();let mut index=0;
+    if matches!(bytes.get(index),Some(b'+'|b'-')) {index+=1;}
+    let integer=index;while bytes.get(index).is_some_and(u8::is_ascii_digit) {index+=1;}
+    let has_integer=index>integer;
+    if bytes.get(index)==Some(&b'.') {
+        index+=1;let fraction=index;
+        while bytes.get(index).is_some_and(u8::is_ascii_digit) {index+=1;}
+        if index==fraction {return None;}
+    } else if !has_integer {return None;}
+    if matches!(bytes.get(index),Some(b'e'|b'E')) {
+        index+=1;if matches!(bytes.get(index),Some(b'+'|b'-')) {index+=1;}
+        let exponent=index;while bytes.get(index).is_some_and(u8::is_ascii_digit) {index+=1;}
+        if index==exponent {return None;}
+    }
+    if index!=bytes.len() {return None;}
+    text.parse::<f64>().ok().filter(|value|value.is_finite())
+}
+fn border_color_value(value:&str)->Option<(Option<u32>,u8)> {
+    if value=="currentcolor" {return Some((None,255));}
+    if value=="transparent" {return Some((Some(0),0));}
+    if let Some(body)=value.strip_prefix("rgba(").and_then(|body|body.strip_suffix(')')) {
+        if value.len()>2048 {return None;}
+        let mut fields=body.split(',').map(|field|field.trim_matches(|ch:char|ch.is_ascii_whitespace()));
+        let channels=[fields.next()?,fields.next()?,fields.next()?];let alpha=fields.next()?;
+        if fields.next().is_some() {return None;}
+        let percent=channels[0].ends_with('%');
+        if channels.iter().any(|channel|channel.ends_with('%')!=percent) {return None;}
+        let mut rgb=0u32;
+        for (channel,shift) in channels.into_iter().zip([16,8,0]) {
+            let channel=if percent {channel.strip_suffix('%')?}else{channel};
+            let number=rgba_number(channel)?;
+            let number=if percent {number.clamp(0.0,100.0)*255.0/100.0}else{number.clamp(0.0,255.0)};
+            rgb|=(number.round()as u32)<<shift;
+        }
+        let alpha=rgba_number(alpha)?;
+        return Some((Some(rgb),(alpha.clamp(0.0,1.0)*255.0).round()as u8));
+    }
+    color(value).map(|rgb|(Some(rgb),255))
+}
+
+fn parse_border(value:&str)->Option<(Length,bool,Option<u32>,u8)> {
+    let mut width = Length::Px(3.0);
+    let mut solid = false;
+    let(mut rgb,mut alpha)=(None,255);
+    let(mut seen_width,mut seen_style,mut seen_color)=(false,false,false);
+    for part in border_parts(value)? {
+        if let Some(value) = border_length(part) {
+            if seen_width{return None;}width=value;seen_width=true;
+        } else if matches!(part,"solid"|"none"|"hidden") {
+            if seen_style{return None;}solid=part=="solid";seen_style=true;
+        } else if let Some((value,opacity)) = border_color_value(part) {
+            if seen_color{return None;}rgb=value;alpha=opacity;seen_color=true;
+        } else {
+            return None;
+        }
+    }
+    Some((width,solid,rgb,alpha))
 }
 
 fn color(value: &str) -> Option<u32> {
@@ -4208,3 +4276,7 @@ mod media_tests;
 #[cfg(test)]
 #[path="css_responsive_tests.rs"]
 mod responsive_tests;
+
+#[cfg(test)]
+#[path="css_rgba_border_tests.rs"]
+mod rgba_border_tests;
