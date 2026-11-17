@@ -110,6 +110,24 @@ impl Url {
             Ok(())
         }
     }
+    fn project(&self, name: &str) -> Option<String> {
+        Some(match name {
+            "href" => self.href(),
+            "origin" => self.origin(),
+            "protocol" => self.protocol().into(),
+            "username" => self.username.clone(),
+            "password" => self.password.clone(),
+            "host" => self.host(),
+            "hostname" => self.hostname.clone(),
+            "port" => self.port.map_or(String::new(), |p| p.to_string()),
+            "pathname" => self.path.clone(),
+            "search" => self.query.as_ref().filter(|s| !s.is_empty())
+                .map_or(String::new(), |s| format!("?{s}")),
+            "hash" => self.fragment.as_ref().filter(|s| !s.is_empty())
+                .map_or(String::new(), |s| format!("#{s}")),
+            _ => return None,
+        })
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -649,6 +667,134 @@ fn parse_url(input: &str, base: Option<&Url>) -> Result<Url, ParseError> {
     url.check()?;
     Ok(url)
 }
+
+// Pure component mutation shared by URL values and hyperlink reflection. A
+// false result is a parser-state no-op, so callers retain their original value.
+fn mutate_component(value: &mut Url, name: &str, text: &str) -> Result<bool, ParseError> {
+    if text.len() > MAX_URL_BYTES {
+        return Err(ParseError::Limit("URL length limit reached (16 KiB)."));
+    }
+    let text = if matches!(name, "username" | "password") {
+        text.to_owned()
+    } else {
+        clean(text, false)
+    };
+    match name {
+        "username" => value.username = encode(&text, Encode::User, MAX_URL_BYTES)?,
+        "password" => value.password = encode(&text, Encode::User, MAX_URL_BYTES)?,
+        "pathname" => value.path = path(&text)?,
+        "search" => {
+            value.query = if text.is_empty() { None } else {
+                Some(encode(text.strip_prefix('?').unwrap_or(&text), Encode::Query, MAX_URL_BYTES)?)
+            };
+        }
+        "hash" => {
+            value.fragment = if text.is_empty() { None } else {
+                Some(encode(text.strip_prefix('#').unwrap_or(&text), Encode::Fragment, MAX_URL_BYTES)?)
+            };
+        }
+        "protocol" => {
+            let name = text.split(':').next().unwrap_or("");
+            if name.eq_ignore_ascii_case("http") {
+                value.secure = false;
+            } else if name.eq_ignore_ascii_case("https") {
+                value.secure = true;
+            } else if scheme(&format!("{name}:")).is_some() {
+                return Err(ParseError::Unsupported("URL values support only HTTP(S) schemes."));
+            } else {
+                return Ok(false);
+            }
+            if value.port == Some(value.default_port()) {
+                value.port = None;
+            }
+        }
+        "port" => match port(&text, value.default_port(), true) {
+            Ok(port) => value.port = port,
+            Err(ParseError::Invalid) => return Ok(false),
+            Err(error) => return Err(error),
+        },
+        "host" | "hostname" => {
+            let text = text.split(['/', '?', '#', '\\']).next().unwrap_or("");
+            let (host, p) = match host_port(text) {
+                Ok(parts) => parts,
+                Err(ParseError::Invalid) => return Ok(false),
+                Err(error) => return Err(error),
+            };
+            if name == "hostname" && p.is_some() {
+                return Ok(false);
+            }
+            match hostname(host) {
+                Ok(host) => value.hostname = host,
+                Err(ParseError::Invalid) => return Ok(false),
+                Err(error) => return Err(error),
+            }
+            if name == "host" {
+                if let Some(p) = p.filter(|p| !p.is_empty()) {
+                    if let Ok(port) = port(p, value.default_port(), true) {
+                        value.port = port;
+                    }
+                }
+            }
+        }
+        _ => return Err(ParseError::Unsupported("Unknown URL component mutation property.")),
+    }
+    value.check()?;
+    Ok(true)
+}
+
+fn parse_projected_url(raw: &str, base: Option<&str>) -> Result<Url, ParseError> {
+    if raw.len() > MAX_URL_BYTES {
+        return Err(ParseError::Limit("URL length limit reached (16 KiB)."));
+    }
+    let base = match base {
+        None => None,
+        Some(text) => match parse_url(text, None) {
+            Ok(value) => Some(value),
+            Err(error @ ParseError::Limit(_)) => return Err(error),
+            Err(error) => {
+                // A standalone HTTP(S) URL does not require a supported base.
+                // With a supported base, same-scheme inputs still use it above.
+                if scheme(&clean(raw, true)).is_some() {
+                    return parse_url(raw, None);
+                }
+                return Err(error);
+            }
+        },
+    };
+    parse_url(raw, base.as_ref())
+}
+fn optional_projection<T>(value: Result<T, ParseError>) -> Result<Option<T>, String> {
+    match value {
+        Ok(value) => Ok(Some(value)),
+        Err(ParseError::Invalid) => Ok(None),
+        Err(ParseError::Unsupported(message) | ParseError::Limit(message)) => Err(message.into()),
+    }
+}
+
+/// Project a fresh HTTP(S) URL record without modifying its raw content attribute.
+/// Invalid URLs return None; unsupported capabilities and bounds remain errors.
+/// This helper neither navigates nor grants the transport parser any authority.
+pub(crate) fn project(raw: &str, base: Option<&str>, property: &str) -> Result<Option<String>, String> {
+    let value = optional_projection(parse_projected_url(raw, base))?;
+    value.map(|value| value.project(property).ok_or_else(|| "Unknown URL projection property.".into())).transpose()
+}
+
+/// Mutate one HTTP(S) URL component and return a serialized href to reflect.
+/// None preserves the raw attribute on an invalid URL or parser-state no-op.
+/// The href setter itself is raw reflection and does not call this helper.
+pub(crate) fn mutate(raw: &str, base: Option<&str>, property: &str, input: &str) -> Result<Option<String>, String> {
+    if !matches!(property, "protocol" | "username" | "password" | "host" | "hostname" | "port" | "pathname" | "search" | "hash") {
+        return Err("Unknown URL component mutation property.".into());
+    }
+    if input.len() > MAX_URL_BYTES {
+        return Err("URL length limit reached (16 KiB).".into());
+    }
+    let Some(mut value) = optional_projection(parse_projected_url(raw, base))? else { return Ok(None); };
+    match optional_projection(mutate_component(&mut value, property, input))? {
+        Some(true) => Ok(Some(value.href())),
+        _ => Ok(None),
+    }
+}
 fn pair_text_bytes(pairs: &[Pair]) -> usize {
     pairs.iter().map(|(a, b)| a.len() + b.len()).sum()
 }
@@ -1134,28 +1280,7 @@ impl Runtime {
         }
         self.work(self.url_record(id)?.0.bytes())?;
         let value = self.url_record(id)?.0;
-        let text = match name {
-            "href" => value.href(),
-            "origin" => value.origin(),
-            "protocol" => value.protocol().into(),
-            "username" => value.username.clone(),
-            "password" => value.password.clone(),
-            "host" => value.host(),
-            "hostname" => value.hostname.clone(),
-            "port" => value.port.map_or(String::new(), |p| p.to_string()),
-            "pathname" => value.path.clone(),
-            "search" => value
-                .query
-                .as_ref()
-                .filter(|s| !s.is_empty())
-                .map_or(String::new(), |s| format!("?{s}")),
-            "hash" => value
-                .fragment
-                .as_ref()
-                .filter(|s| !s.is_empty())
-                .map_or(String::new(), |s| format!("#{s}")),
-            _ => unreachable!(),
-        };
+        let text = value.project(name).expect("Known URL accessor property");
         self.checked_value(Value::String(text))
     }
     fn url_set(&mut self, id: usize, name: &str, text: String) -> Result<Value, Fault> {
@@ -1169,97 +1294,10 @@ impl Runtime {
             self.url_replace(id, value, true)?;
             return Ok(Value::Undefined);
         }
-        let text = if matches!(name, "username" | "password") {
-            text
-        } else {
-            clean(&text, false)
-        };
-        let mut update_query = false;
-        match name {
-            "username" => {
-                value.username =
-                    encode(&text, Encode::User, MAX_URL_BYTES).map_err(ParseError::fault)?
-            }
-            "password" => {
-                value.password =
-                    encode(&text, Encode::User, MAX_URL_BYTES).map_err(ParseError::fault)?
-            }
-            "pathname" => value.path = path(&text).map_err(ParseError::fault)?,
-            "search" => {
-                value.query = if text.is_empty() {
-                    None
-                } else {
-                    Some(
-                        encode(
-                            text.strip_prefix('?').unwrap_or(&text),
-                            Encode::Query,
-                            MAX_URL_BYTES,
-                        )
-                        .map_err(ParseError::fault)?,
-                    )
-                };
-                update_query = true;
-            }
-            "hash" => {
-                value.fragment = if text.is_empty() {
-                    None
-                } else {
-                    Some(
-                        encode(
-                            text.strip_prefix('#').unwrap_or(&text),
-                            Encode::Fragment,
-                            MAX_URL_BYTES,
-                        )
-                        .map_err(ParseError::fault)?,
-                    )
-                }
-            }
-            "protocol" => {
-                let name = text.split(':').next().unwrap_or("");
-                if name.eq_ignore_ascii_case("http") {
-                    value.secure = false;
-                } else if name.eq_ignore_ascii_case("https") {
-                    value.secure = true;
-                } else if scheme(&format!("{name}:")).is_some() {
-                    return Err(Fault::new("URL values support only HTTP(S) schemes."));
-                } else {
-                    return Ok(Value::Undefined);
-                }
-                if value.port == Some(value.default_port()) {
-                    value.port = None;
-                }
-            }
-            "port" => match port(&text, value.default_port(), true) {
-                Ok(port) => value.port = port,
-                Err(ParseError::Invalid) => return Ok(Value::Undefined),
-                Err(e) => return Err(e.fault()),
-            },
-            "host" | "hostname" => {
-                let text = text.split(['/', '?', '#', '\\']).next().unwrap_or("");
-                let (host, p) = match host_port(text) {
-                    Ok(parts) => parts,
-                    Err(ParseError::Invalid) => return Ok(Value::Undefined),
-                    Err(e) => return Err(e.fault()),
-                };
-                if name == "hostname" && p.is_some() {
-                    return Ok(Value::Undefined);
-                }
-                match hostname(host) {
-                    Ok(host) => value.hostname = host,
-                    Err(ParseError::Invalid) => return Ok(Value::Undefined),
-                    Err(e) => return Err(e.fault()),
-                }
-                if name == "host" {
-                    if let Some(p) = p.filter(|p| !p.is_empty()) {
-                        if let Ok(port) = port(p, value.default_port(), true) {
-                            value.port = port;
-                        }
-                    }
-                }
-            }
-            _ => unreachable!(),
+        if !mutate_component(&mut value, name, &text).map_err(ParseError::fault)? {
+            return Ok(Value::Undefined);
         }
-        self.url_replace(id, value, update_query)?;
+        self.url_replace(id, value, name == "search")?;
         Ok(Value::Undefined)
     }
     fn params_next(&mut self, id: usize) -> Result<Option<Value>, Fault> {
@@ -1544,3 +1582,87 @@ impl Runtime {
 #[cfg(test)]
 #[path = "url_api_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+mod projection_tests {
+    use super::{mutate, project, MAX_URL_BYTES};
+
+    #[test]
+    fn anchor_url_projection_serializes_each_http_component() {
+        let raw = "HTTPS://u%20name:p%40ss@EXAMPLE.test:443/a/../b?q#h";
+        for (property, expected) in [
+            ("href", "https://u%20name:p%40ss@example.test/b?q#h"),
+            ("origin", "https://example.test"), ("protocol", "https:"),
+            ("username", "u%20name"), ("password", "p%40ss"),
+            ("host", "example.test"), ("hostname", "example.test"),
+            ("port", ""), ("pathname", "/b"), ("search", "?q"), ("hash", "#h"),
+        ] {
+            assert_eq!(project(raw, None, property).unwrap().as_deref(), Some(expected), "{property}");
+        }
+        assert_eq!(project("https://example.test/?#", None, "href").unwrap().as_deref(), Some("https://example.test/?#"));
+        for property in ["search", "hash"] {
+            assert_eq!(project("https://example.test/?#", None, property).unwrap().as_deref(), Some(""));
+        }
+    }
+
+    #[test]
+    fn anchor_url_projection_uses_live_base_and_independent_absolute_urls() {
+        for (base, expected) in [
+            ("https://one.test/a/b/page", "https://one.test/a/next?x#f"),
+            ("https://two.test/new/page", "https://two.test/next?x#f"),
+        ] {
+            assert_eq!(project("../next?x#f", Some(base), "href").unwrap().as_deref(), Some(expected));
+        }
+        assert_eq!(project("http:next", Some("http://example.test/a/page"), "href").unwrap().as_deref(), Some("http://example.test/a/next"));
+        assert_eq!(project("https://EXAMPLE.test:443/a", Some("file:///C:/fixture/page.html"), "href").unwrap().as_deref(), Some("https://example.test/a"));
+        assert!(project("next", Some("file:///C:/fixture/page.html"), "href").unwrap_err().contains("only HTTP(S)"));
+    }
+
+    #[test]
+    fn anchor_url_projection_preserves_invalid_and_explicit_capability_failures() {
+        for raw in ["https://[bad/", "https://example.test:65536/", "relative-without-base"] {
+            assert_eq!(project(raw, None, "href").unwrap(), None, "{raw}");
+        }
+        assert!(project("ftp://example.test/a", None, "href").unwrap_err().contains("only HTTP(S)"));
+        assert!(project("https://caf\u{e9}.test/", None, "href").unwrap_err().contains("IDNA"));
+        let too_long = "x".repeat(MAX_URL_BYTES + 1);
+        assert!(project(&too_long, None, "href").unwrap_err().contains("limit"));
+        assert!(project("https://example.test/", Some(&too_long), "href").unwrap_err().contains("limit"));
+    }
+
+    #[test]
+    fn anchor_url_mutation_reuses_component_encoding_and_port_rules() {
+        let raw = "https://user:pass@example.test:8443/a?x#f";
+        for (property, input, expected) in [
+            ("protocol", "http:", "http://user:pass@example.test:8443/a?x#f"),
+            ("username", "new name", "https://new%20name:pass@example.test:8443/a?x#f"),
+            ("password", "new@pass", "https://user:new%40pass@example.test:8443/a?x#f"),
+            ("host", "OTHER.TEST", "https://user:pass@other.test:8443/a?x#f"),
+            ("hostname", "[2001:db8::1]", "https://user:pass@[2001:db8::1]:8443/a?x#f"),
+            ("port", "443tail", "https://user:pass@example.test/a?x#f"),
+            ("pathname", "/next/../final?q#f", "https://user:pass@example.test:8443/final%3Fq%23f?x#f"),
+            ("search", "?q=one two#part", "https://user:pass@example.test:8443/a?q=one%20two%23part#f"),
+            ("hash", "#new part", "https://user:pass@example.test:8443/a?x#new%20part"),
+        ] {
+            assert_eq!(mutate(raw, None, property, input).unwrap().as_deref(), Some(expected), "{property}");
+        }
+    }
+
+    #[test]
+    fn anchor_url_mutation_preserves_raw_on_invalid_url_and_component_noop() {
+        let raw = "../raw";
+        let base = Some("https://EXAMPLE.test:443/a/page");
+        for (property, input) in [("port", "invalid"), ("hostname", "other.test:80"), ("host", ""), ("protocol", "1http")] {
+            assert_eq!(mutate(raw, base, property, input).unwrap(), None, "{property}");
+        }
+        assert_eq!(mutate("https://[bad/", None, "hash", "x").unwrap(), None);
+        assert_eq!(mutate(raw, base, "hash", "#x").unwrap().as_deref(), Some("https://example.test/raw#x"));
+        assert!(mutate(raw, base, "protocol", "ftp").unwrap_err().contains("only HTTP(S)"));
+        assert!(mutate(raw, base, "hostname", "caf\u{e9}.test").unwrap_err().contains("IDNA"));
+        assert!(mutate(raw, base, "origin", "x").is_err());
+        let too_long = "x".repeat(MAX_URL_BYTES + 1);
+        assert!(mutate(raw, base, "hash", &too_long).unwrap_err().contains("limit"));
+        let expanded = "\u{80}".repeat(MAX_URL_BYTES / 2);
+        assert!(mutate(raw, base, "hash", &expanded).unwrap_err().contains("limit"));
+    }
+}
