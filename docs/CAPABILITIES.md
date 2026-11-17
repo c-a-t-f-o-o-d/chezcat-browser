@@ -1,55 +1,21 @@
-# Capability and dependency matrix — 0.81.0-alpha.2 release target
+# Capability and dependency matrix
 
-Every broad area remains partial. “Verified” below means the specified local slice,
+Every broad area remains partial. "Verified" below means the specified local slice,
 not complete platform conformance. Source inspection, unit tests, App harness,
-physical desktop/device evidence and live-service outcomes are different scopes.
+physical desktop/device evidence and live-service outcomes have distinct scopes.
+This document owns implemented limits; work order belongs to the
+[roadmap](ROADMAP.md), measured version/workflow results to
+[compatibility](COMPATIBILITY.md) and its [catalogue](compatibility.json), and lasting
+behavior and acceptance to the [feature contracts](FEATURE_CONTRACTS.md).
 
-The [0.81.0-alpha.2 release target](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.81.0-alpha.2)
-is one consolidated catch-up for completed finite B2 and integrated prerequisites.
-Its new exact release gates and actual publication remain pending. Source
-integration, hosted CI and a development delivery do not establish a published
-release; publication.json and SHA256SUMS bind the actual release's source/assets.
-
-B2 provides browser-owned profile/download/history authorities, independent
-Session/App owners, finite native tabs/windows/shortcuts and pinned inspectors,
-plus guarded primary/middle link gestures and foreground/background/window context
-commands. Passive popup hover/leave retains the original source-bound target;
-dragging and all five held-button move bits invalidate it without requiring
-capture. Captured source/document/owner, exact release-envelope and native capture
-generation checks remain. The B2 accepted source
-[67c5d69](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/67c5d691012eeb39767e44000d9c1aeac8cdea1a),
-select checkpoint [73f3315](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/73f3315ae23760966efb1c1e6bf8ff3e2492c6c4)
-and literal checkpoint [fb385cb](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/fb385cb6c0b06988d55beb8c60f9f9a7cab6e431)
-have recorded local/hosted offline checks. Separate actual Windows desktop records
-cover six groups at 67c5d69, six at 73f3315 and four at fb385cb, each limited to its
-observed source/scope. Hidden-HWND/unit/App controls retain their narrower scopes;
-prior desktop records do not identify the new release binary.
-
-CP1/CP2 deliver shared collection/call/Node, native-created Comment and RegExp
-input-conversion prerequisites. CP3 delivers the independent responsive
-Foundation 6.9 rendering improvement: two columns at 1280 and stacking at 640 in the
-unchanged JS-enabled fixture. CP4 delivers conventional select fragments, staged
-native ownership and whole-container retirement/reconnect with retained identities
-and edited values; twelve reduced controls include actual App popup/choice/form
-behavior. Its single unchanged W2 recheck reaches refused INPUT type=hidden
-mutation. Loading/initial rendering pass; initialization and interaction fail.
-
-CP5 delivers finite static colon object-literal prototype setters using the
-existing chain guards; ten language/App controls include real software input and
-independent text pixels. The single unchanged W3 invocation now parses the pinned
-Vue runtime, then first fails on undefined concat at 11:3613 in both selected
-widths. This does not prove the later prototype literal executed. Vue
-initialization/input/async remain failed; ordinary own/legacy `__proto__` operations
-and native-host prototype chains stay guarded. String.prototype.concat remains
-a separate future dependency, with no framework/polyfill workaround claimed.
-
-T1's finite trust-data, diagnostics and bounded dual-stack correction are integrated,
-while broader TLS and B1 page usability remain partial. The finite A1 About panel
-and completed media/interface slices retain their existing evidence. One per-user
-installer and staged release discovery/upgrade remain planned in the
-[roadmap](ROADMAP.md); further F6/YouTube work is deferred. See the
-[compatibility scope](COMPATIBILITY.md), [catalogue](compatibility.json) and
-[release closeout policy](RELEASING.md).
+[0.81.0-alpha.2](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.81.0-alpha.2)
+is published from source 36adf20 with four assets, checksum validation and independent
+downloaded/extracted offline runtime checks. That source has normal/optimized,
+hosted and six-group scoped native desktop acceptance. Each result retains its
+actual build/scope; unit/App/hidden-HWND checks alone do not prove desktop output.
+The source integrates finite B2 and CP1-CP5 prerequisites, not complete library or
+public-service support. Future releases require an explicit owner request under
+the [release process](RELEASING.md).
 
 | Area | Implemented and locally verified slice | Gaps / next acceptance | Main implementation and checks |
 | --- | --- | --- | --- |
@@ -65,10 +31,10 @@ installer and staged release discovery/upgrade remain planned in the
 | Fonts/images | Original selected font/image decoders and resource/presentation paths | Format subsets and cross-origin font loading need specific contracts | src/fonts.rs, src/image.rs and format modules; original pixel/negative fixtures |
 | Media | Local IVF/VP8 visible fixed-canvas I/P (version-zero single-MV interframes), PCM, constrained Matroska A/V with dependency-aware seeking; one authored IVF or supported Matroska video with source/load lifecycle, script controls and play promises tied to decoded-frame/acknowledged PCM readiness; complete HTTP(S) IVF/Matroska transfers chosen by explicit MIME, with authored CORS/credential modes | SPLITMV, hidden/nonzero-version interframes, WebM/Opus/Vorbis, unmarked foreign media, dynamic crossOrigin controls, streaming/ranges, muted Matroska, multiple players, MSE and YouTube playback missing | src/media.rs, src/audio.rs, src/matroska.rs, src/script_media.rs; local media/source-replacement journeys and check_authored_video_harness.py and check_network_media_harness.py; check_authored_av_harness.py and check_network_authored_av_harness.py |
 | Media interfaces | Genuine owner-realm HTMLMediaElement/HTMLVideoElement roots, constants and slot accessors; stable VIDEO class identity and canonical load/pause/play/src/currentTime transactions through ordinary shadows; actual Boolean controls reflection and native bar/input behavior without source/clock/frame/Promise reset | One bound player; controls reflects genuine main HTML VIDEO/AUDIO attributes without a player, while unbound playback calls give real NotSupportedError outcomes and other playback-state getters/setters decline. VIDEO dimensions, extra/child players and wider media APIs remain unsupported; Element.toggleAttribute and NamedNodeMap mutation are separate gaps | src/media_interface.rs, src/script_media.rs, src/host_objects.rs, src/app_media.rs; original media-interface/controls tests, check_media_interface_harness.py and check_media_controls_harness.py |
-| Browser UI | Native settings, address input, bookmarks/history/download controls; finite About panel; Session tabs/windows/pinned inspectors; guarded primary/middle links and explicit foreground/background/window context commands | Recorded actual desktop acceptance covers the checkpoint sources above; each new checkpoint requires exact normal/optimized and desktop evidence. Hidden HWND/pure controls alone do not establish physical desktop interaction. Named contexts, script-opened windows, full accessibility and native locked-session presentation remain gaps. Copy capture does not prove OS clipboard delivery | src/app*.rs, src/build_identity.rs, src/ui.rs, src/platform*.rs; original About/chrome, Session admission/input and owned native-window controls |
+| Browser UI | Native settings, address input, bookmarks/history/download controls; finite About panel; Session tabs/windows/pinned inspectors; guarded primary/middle links and explicit foreground/background/window context commands | Recorded actual desktop acceptance covers the released source above; changed native behavior requires affected acceptance, with normal/optimized and hosted checks at integration boundaries. Hidden HWND/pure controls alone do not establish physical desktop interaction. Named contexts, script-opened windows, full accessibility and native locked-session presentation remain gaps. Copy capture does not prove OS clipboard delivery | src/app*.rs, src/build_identity.rs, src/ui.rs, src/platform*.rs; original About/chrome, Session admission/input and owned native-window controls |
 | Diagnostics | Source/activity/layout/pixels and inspector; document-only connection reports with optional exact-host checks before DNS on each hop, actual destination/phase evidence, and escaped bounded metadata; eight new native diagnostics regressions verified | No App/profile, page scripts, subresources or usability assessment in --diagnose. Status and possible body markers do not establish access/challenge outcomes. Reports can contain private URLs/paths/session data; full normal integration and public-host checks remain separate | src/diagnostics.rs, src/diagnostics_tests.rs, src/network_trace.rs; original loopback/guard/metadata tests and offline harness reports |
 | Platform/isolation | Windows x64, explicit FFI ownership, worker retirement/cancellation and watchdogs | No OS renderer sandbox; independent native/crypto/aggregate-memory assurance remains incomplete | src/platform.rs, src/audio_output.rs; native negative tests and PE checks |
-| Build/release | std-only production manifest, generated resources, pinned compiler, portable payload and offline local gates | Per-user MSI and opt-in release discovery/authenticated upgrades are planned, not implemented. The 0.81.0-alpha.2 release gates remain pending: exact tagged build, complete payload, extracted-runtime checks and downloadable-asset verification; source/CI/development delivery alone is not publication | Build.cmd, tools/verify_offline.py, docs/RELEASING.md |
+| Build/release | std-only production manifest, generated resources, pinned compiler, portable payload and offline local gates | Per-user MSI and opt-in release discovery/authenticated upgrades are planned, not implemented. The 0.81.0-alpha.2 exact tagged build, complete payload, extracted-runtime and downloadable-byte checks passed. Future release checks run only for explicit owner requests; source/CI/development delivery alone is not publication | Build.cmd, tools/verify_offline.py, docs/RELEASING.md |
 
 TCP fallback retains candidates from both families within a 256-entry resolver
 scan and eight-attempt queue; resolver preference and within-family order remain.

@@ -4,11 +4,11 @@ An experimental Windows x64 browser with an original Rust engine: networking,
 JavaScript, DOM, layout, rendering and selected media decoding. It does not embed
 Chromium, Gecko, WebKit or an external JavaScript/codec runtime.
 
-The next release target is [**0.81.0-alpha.2**](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.81.0-alpha.2), one consolidated catch-up prerelease
-for the completed finite B2 tabs/windows/link milestone and integrated platform
-and compatibility prerequisites since **0.80.0-alpha.1**. Exact final versioned
-source, release validation, packages and publication remain pending; this target
-is not yet a published release. The earlier **0.80.0-alpha.1** release remains the
+The published [**0.81.0-alpha.2** prerelease](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.81.0-alpha.2) consolidates
+the completed finite B2 tabs/windows/link milestone and integrated platform
+and compatibility prerequisites since **0.80.0-alpha.1**. Its immutable source,
+four downloadable assets, checksums and extracted offline runtime were verified.
+The earlier **0.80.0-alpha.1** release remains the
 offline CSAPUL 1.1 acceptance milestone, with its supplied tag and assets unchanged.
 
 This is an experimental browser without a security certification. Web-platform
@@ -84,9 +84,8 @@ The completed finite B2 source milestone adds a browser-owned tab strip and
 shortcuts, real windows and tab-pinned inspectors. Original pure UI and
 hidden-window controls cover ownership and lifetime. Native links support current,
 foreground/background tabs and new windows with source-bound context commands.
-Normal/optimized, hosted and scoped desktop acceptance evidence identifies the
-implemented checkpoint; release validation still applies to the exact final
-versioned candidate. Named browsing contexts, script-opened windows and wider
+Normal/optimized, hosted and scoped desktop acceptance identifies the released
+source checkpoint. Named browsing contexts, script-opened windows and wider
 accessibility remain gaps. Remaining TLS gaps stay explicit; perfect TLS coverage
 is not required before useful page-usability work. The trust-data subset does not
 establish new live-service compatibility.
@@ -120,6 +119,10 @@ See [architecture](docs/ARCHITECTURE.md), [roadmap](docs/ROADMAP.md),
 [changes](CHANGELOG.md), [contribution policy](CONTRIBUTING.md) and
 [security policy](SECURITY.md). Routine CI uses local fixtures; device, native
 presentation and public-site checks are separate opt-in evidence.
+The roadmap orders development, the capability matrix records implemented limits,
+compatibility records measured workflows, and feature contracts define lasting
+behavior and acceptance. Development continues through normal PR/CI integration;
+new releases require an explicit owner request.
 
 Document-only connection reports use `--diagnose URL --report FILE`. Optional
 `--diagnose-allow-host HOST` entries restrict each destination before DNS; the

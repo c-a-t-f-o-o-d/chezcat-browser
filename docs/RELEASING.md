@@ -6,28 +6,31 @@ honestly; no nonexistent second reviewer is required. Keep one primary finite
 feature contract active. release/ branches serve genuinely maintained parallel
 lines only. Never import raw pre-transition private ancestry or recovery refs.
 
-Ordinary commits keep the planned product version. Publish releases only for
-completed milestones; there is no daily or per-commit release cadence. Choose a
-release version once when a finite feature contract or explicitly authorized
-replacement milestone is complete. The product version and CSAPUL license version
-are independent. Verify the actual tag/release before claiming it published.
+Ordinary commits keep the planned product version. New releases require an
+explicit owner request, queued after the current coherent implementation task
+reaches a safe checkpoint. There is no automatic milestone, daily, per-commit or
+scheduled publisher. Choose a new version only for that requested release.
+The product version and CSAPUL license version are independent. Verify the actual
+tag/release before claiming it published.
 During0.x, minor releases can change a stated interface;
 patch releases preserve its contract except documented security necessities.
 Alpha/RC contracts remain unstable. Persisted-data changes need migration and
 recovery tests. See FEATURE_CONTRACTS.md and CAPABILITIES.md.
 
-Completion of a named finite milestone starts release closeout before the next
-independent implementation item. Reconcile its integrated source and required
-local, hosted and scoped acceptance evidence, then complete the exact final
+Development continues through coherent commits and normal PR/CI integration
+without waiting for publication. For an explicitly requested release, reconcile
+its integrated source and required local, hosted and scoped acceptance evidence,
+then complete the exact final
 versioned-source, package and publication checks below. Source integration,
 green CI and development-runtime delivery are distinct from published delivery.
 Record the actual immutable tag, downloadable assets and downloaded-byte checks
 before reporting a release complete.
 
-The planned [v0.81.0-alpha.2](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.81.0-alpha.2) is one consolidated catch-up prerelease for the
+The published [v0.81.0-alpha.2](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.81.0-alpha.2) is one consolidated catch-up prerelease for the
 completed B2 milestone and integrated platform/compatibility prerequisites since
-v0.80.0-alpha.1. Its final versioned-source gates, packages and publication remain
-pending. The target designation does not establish published assets. Preserve
+v0.80.0-alpha.1. Its immutable source at 36adf20, non-draft prerelease, four assets,
+checksums and independent downloaded/extracted offline runtime checks passed.
+That completed one-time closeout does not authorize another release. Preserve
 v0.80.0-alpha.1 and other existing releases as immutable historical delivery.
 
 Keep closeout focused on concrete blockers: a failed exact-source check, missing
@@ -36,11 +39,11 @@ publication access or a failed package/download check. Record the affected step,
 its evidence and the next corrective action. Use the recorded licensing and
 publication disposition with the existing exact-term checks; revisit it only
 when material facts change. A concrete blocker leaves closeout pending and must
-be reported with the next corrective action. Resume the next independent
-implementation item after closeout completes.
+be reported with the next corrective action. Preserve the checkpoint and continue
+independent development; do not let repeated release retries hold coding.
 
-The existing tag/manual workflow handles completed milestones. It has no daily
-schedule or daily-enable option. One publication concurrency group serializes
+The existing tag/manual workflow remains available for owner-requested releases.
+It has no daily schedule or daily-enable option. One publication concurrency group serializes
 manual and tag runs without cancelling an in-progress release. Trusted branch
 push CI remains verification, with no automatic release promotion.
 
@@ -52,7 +55,7 @@ do not assert reproducibility across SDK/linker installations or certify safety.
 
 The immutable v0.81.0-alpha.1 candidate stopped before publication because its
 runtime trust README linked to a development-only generator. The replacement
-0.81.0-alpha.2 corrects the link and requires its own exact-source gates; the
+0.81.0-alpha.2 corrected the link and passed its own exact-source gates; the
 earlier tag is retained and is not moved or reused.
 
 ## Contribution and routine verification
