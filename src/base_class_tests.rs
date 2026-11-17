@@ -282,8 +282,8 @@ fn base_class_invalid_and_unsupported_syntax_is_rejected_before_program_effects(
         assert_no_effects(source);
     }
     for source in [
-        "effects++;class C extends Object{}",
-        "effects++;class C{method(){return super.value;}}",
+        "effects++;class C extends Object{field=effects++;}",
+        "effects++;class C{method(){return super[effects++];}}",
         "effects++;class C{[effects++](){}}",
         "effects++;class C{#private(){}}",
         "effects++;class C{value=effects++;}",

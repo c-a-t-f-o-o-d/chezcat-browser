@@ -5696,3 +5696,6 @@ mod checkbox_move_tests;
 #[cfg(test)]
 #[path = "app_base_class_tests.rs"]
 mod base_class_tests;
+#[cfg(test)]
+#[path = "app_derived_class_tests.rs"]
+mod derived_class_tests;

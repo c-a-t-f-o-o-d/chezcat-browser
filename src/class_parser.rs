@@ -1,13 +1,14 @@
 //! Original finite base-class syntax. Method bodies reuse the bounded deferred
 //! function parser; no class source is rewritten or executed during parsing.
 //! https://tc39.es/ecma262/#sec-class-definitions
-use super::{number_text, object_literals::Kind, ExprKind, Fault, Parser, Template, TokenKind};
+use super::{number_text, object_literals::Kind, ExprId, ExprKind, Fault, Parser, Template, TokenKind};
 use std::collections::HashSet;
 
 #[derive(Clone)]
 pub(super) struct Class {
     pub(super) name: Option<String>,
     pub(super) constructor: usize,
+    pub(super) heritage: Option<ExprId>,
     pub(super) members: Vec<Member>,
 }
 
@@ -44,9 +45,7 @@ impl Parser {
         } else {
             None
         };
-        if self.is("extends") {
-            return Err(self.unsupported("Derived classes are not implemented."));
-        }
+        let heritage = if self.eat("extends") { Some(self.left_hand_side_expression()?) } else { None };
         self.need("{")?;
         let mut members = Vec::new();
         let mut constructor = None;
@@ -99,7 +98,7 @@ impl Parser {
             if !self.is("(") {
                 return Err(self.unsupported("Class fields are not implemented; expected a method parameter list."));
             }
-            let template = self.function(None, method_start)?;
+            let template = self.function_with_super(None, method_start, true, is_constructor && heritage.is_some())?;
             let syntax = &self.program.templates[template];
             let names = syntax.parameter_names(&self.program);
             if names.iter().collect::<HashSet<_>>().len() != names.len() {
@@ -116,6 +115,8 @@ impl Parser {
             syntax.constructible = is_constructor;
             syntax.class_constructor = is_constructor;
             syntax.class_element = true;
+            syntax.derived_constructor = is_constructor && heritage.is_some();
+            syntax.default_constructor = false;
             if is_constructor {
                 constructor = Some(template);
             } else {
@@ -137,7 +138,8 @@ impl Parser {
             self.program.templates.try_reserve(1).map_err(|_| self.unsupported("Unable to reserve bounded class constructor storage."))?;
             self.program.templates.push(Template {
                 source_start: start, source_end: end, dynamic_source: false,
-                arrow: false, constructible: true, class_constructor: true, class_element: true, strict: true,
+                arrow: false, constructible: true, class_constructor: true, class_element: true,
+                derived_constructor: heritage.is_some(), default_constructor: true, strict: true,
                 name: None, params: Vec::new(), rest: false,
                 trailing_parameter_comma: false, body: Vec::new(),
             });
@@ -146,7 +148,7 @@ impl Parser {
         let index = self.program.classes.len();
         self.program.classes.try_reserve(1).map_err(|_| self.unsupported("Unable to reserve bounded class syntax storage."))?;
         self.program.class_members += members.len();
-        self.program.classes.push(Class { name, constructor, members });
+        self.program.classes.push(Class { name, constructor, heritage, members });
         Ok(ExprKind::Class(index))
     }
 

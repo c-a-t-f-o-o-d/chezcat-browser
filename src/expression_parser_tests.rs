@@ -242,6 +242,7 @@ fn scratch_parser(source: &str, enclosing: usize) -> Parser {
         current: 0, depth: 0, expression_frames: enclosing, argument_entries: 0,
         if_branches: 0, strict: false, loops: Vec::new(), breakables: Vec::new(),
         labels: Vec::new(), allow_in: false, functions: 0, new_target_allowed: false,
+        super_property_allowed: false, super_call_allowed: false,
     }
 }
 
