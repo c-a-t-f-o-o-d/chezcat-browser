@@ -19,6 +19,10 @@ The production Cargo manifest has no third-party dependencies. Rust's standard
 library, Windows APIs, data, assets and development tools have their own roles
 and licensing obligations; see [third-party notices](THIRD_PARTY_NOTICES.md).
 
+The scope below describes current development source. Concat, hidden-input mutation
+and Node root operations are additions after the immutable alpha.2 release; their
+final candidate integration remains pending.
+
 ## Scope
 
 - Full offline native license viewing and explicit acceptance, with source and
@@ -34,11 +38,18 @@ and licensing obligations; see [third-party notices](THIRD_PARTY_NOTICES.md).
 - HTML/DOM, a bounded JavaScript subset, events, CSS layout and software painting.
 - Shared compatibility prerequisites include live Document/Node child lists,
   genuine Comment leaves, fresh text replacement and native array-like apply.
+  Node.getRootNode returns genuine ordinary roots for connected/detached nodes,
+  Attr and supported same-origin child trees, with ordered options conversion
+  and existing access/work guards. Shadow DOM remains unsupported.
   Conventional select/option/optgroup fragments use the real native form model;
   whole-subtree removal and reconnection preserve identities and edited values,
   retire stale popup/focus/hits and maintain connected form submission order.
-  Rich select content, existing-control interior edits, new explicit form
-  associations and hidden-input creation remain unsupported.
+  Fresh hidden inputs and parsed hidden-input attributes, values and whole-tree
+  moves now retain native form state. Rich select content, existing-control
+  interior edits, new explicit select associations, arbitrary input fragments and
+  existing input-type transitions remain unsupported.
+- Bounded native String.prototype.concat converts generic receivers and arguments
+  in order through the existing realm, capability and work guards.
 - Static noncomputed object-literal `__proto__: value` setters preserve genuine
   null/object/function prototype links, ignore other primitives without coercion
   and reject duplicate special setters before execution. Ordinary own

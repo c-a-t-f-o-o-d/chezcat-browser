@@ -20,11 +20,11 @@ is inferred from the small selected case sets.
 | Selected local workflow | Observed boundary |
 | --- | --- |
 | Original asynchronous form/search/navigation | Async ready state, Unicode form submission, readable results, destination activation, exactly one Back and a different query pass the bounded App/input workflow |
-| Unmodified jQuery1.12.4 with Bootstrap3.4.1 dropdown/form | One unchanged CP4 App recheck advances past conventional select fragments to jQuery line1265,column4 setting INPUT type=hidden. Load and initial rendering pass; initialization, input and async stages fail. Later missing-library errors are cascades; no visible workflow improvement is established |
+| Unmodified jQuery1.12.4 with Bootstrap3.4.1 dropdown/form | The unchanged hidden-input recheck at1280 advances from setting INPUT type=hidden at1265:4 to `div.innerHTML = '<input/>'` at2684:2. Load and initial rendering pass; initialization, input and async stages fail. Later missing-library errors are cascades; no visible library workflow improvement is established |
 | Foundation6.9.0 generated CSS with original controls | The unchanged JS-enabled fixture now forms two columns at1280 and stacks at640, with its original independent image pixels. This is a responsive rendering improvement; Vue initialization and optional Foundation JavaScript are separate |
-| Vue2.7.16 runtime with an original reactive component | One unchanged CP5 invocation at1280/640 admits the prior literal parse boundary, then first fails during execution on undefined concat at11:3613. Load/initial render/Foundation CSS pass; Vue mount/input/async fail. Modern Vue3 retains its separate Proxy prerequisite |
-| jQuery4.0.0, separate original input/update sample | Planned independent modern-version measurement; no load, parse, initialization, rendering or interaction result is claimed |
-| Bootstrap5.3.9, separate original responsive/dropdown sample | Planned independent modern-version measurement with its documented bundled dependencies; no legacy-jQuery result is assigned to it |
+| Vue2.7.16 runtime with an original reactive component | The unchanged concat recheck at1280/640 advances from undefined concat at11:3613 to object-prototype access at11:3808. Load/initial render/Foundation CSS pass; Vue mount/input/async fail. Modern Vue3 retains its separate Proxy prerequisite |
+| Separate unmodified jQuery4.0.0 input app, fixture revision2 | The App driver completes and load/initial rendering pass. Execution advances past getRootNode at4321:7 to refused anchor href assignment at7963:1; initialization, input effects and timer update still fail. This is independent of the legacy input-fragment blocker |
+| Separate unmodified Bootstrap5.3.9 app with bundled Popper2.11.8, fixture revision2 | Load/initial rendering and responsive CSS pass at1280/640. Class syntax at599:3 still prevents initialization, so the correctly named menu choice remains unrendered and interaction is dependency-blocked. This measures original card positions, not complete component styling |
 | Independent browser reference | Initial DOM and pixels were captured; interactions were not run and do not supply a workflow-pass denominator |
 
 Delivered CP1 provides the real collection/call/replacement/Node prerequisites.
@@ -63,12 +63,26 @@ padding pixels and owned link hits. This finite rendering result does not imply
 that the separately blocked Vue component initializes or responds to input.
 Full normal/build/executable verification remains required for integration.
 
-The select-containing fragment prerequisite passes its reduced controls; the
-single unchanged legacy workflow recheck now refuses INPUT type=hidden mutation.
+The hidden-input prerequisite passes nine focused and twelve adjacent select
+controls. Actual App software clicks create a genuine hidden control, change an
+isolated text crop, preserve a neighboring edited value/cursor and source/history,
+and retain native form request serialization. Hidden inputs gain no box or focus,
+even under authored display rules. The unchanged legacy workload next refuses an
+input-containing innerHTML fragment at2684:2; initialization remains failed.
 The separate finite literal-prototype prerequisite passes ten language/App
-controls, including real input and isolated text pixels. The unchanged Vue file
-parses, but its concat failure occurs before the later literal is known to run;
-ordinary prototype membership/access remains an unobserved future boundary.
+controls, including real input and isolated text pixels. Original concat controls
+now pass nine VM/realm/App groups and four adjacent substring groups. Its unchanged
+Vue recheck reaches the separate object-prototype boundary; no mount or reactive
+interaction is established. Earlier concat and hidden-input observations retain
+their distinct dirty development-build records; the unregistered Node draft in the
+hidden-input build supplied no Node API result. The later Node/modern revision2
+checks use a separate clean diagnostic source map and executable, with no full
+regression, hosted CI or release validation inferred.
+
+Nine Node root controls, four Node constants and thirty-two namespace controls
+pass. The original trusted-click App fixture now reports zero script errors and
+correct connected/detached/reconnected roots with changed visible text and pixels.
+That is actual App output, without an isolated-crop or physical desktop claim.
 Finite tabs/windows and guarded native link/context actions are delivered in
 [0.81.0-alpha.2](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.81.0-alpha.2).
 Their source-scoped normal/optimized, hosted and desktop acceptance is separate
@@ -84,3 +98,15 @@ Original App/DOM/event and native lifetime controls cover explicit link/context
 routing. Changed native behavior requires affected acceptance; normal regression
 and hosted CI remain integration gates. This does not change the measured library
 scorecard or establish broader framework support.
+
+The modern cohort uses exact unmodified distributions and retained MIT notices
+under the source-only `tools/fixtures/compatibility-modern/inputs.json` manifest.
+Its two workflows cover three configurations; the existing legacy fixtures remain
+unchanged. Parsing is reported conservatively when no dedicated parser-phase
+diagnostic exists: the actual first error is retained, while initialization and
+interaction remain failed. No reference browser was run for these new samples.
+Revision1's three configuration records remain preserved: startup library failures,
+loading and initial rendering were observed, while missing control names caused a
+separate HarnessBlocked interaction result. Revision2 supplies the names selected
+by the App driver. Its jQuery command completes; Bootstrap's remaining hidden
+choice is blocked by failed initialization, rather than the old naming defect.

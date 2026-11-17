@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "scope": "Original separate modern development apps and retained MIT notices; distributions stay external",
+  "files": {
+    "bootstrap-app.js": {
+      "bytes": 911,
+      "sha256": "f2260b28a6df9fc0408ab0a313aa5c94313918dfeff938f137acfb46ef4ba13a"
+    },
+    "bootstrap.html": {
+      "bytes": 1320,
+      "sha256": "1a642750ac3e05e76fab66751351eca46d7efe9217f9ee70563dad09e6c24eb9"
+    },
+    "inputs.json": {
+      "bytes": 2118,
+      "sha256": "61261579acf07352274a03be6562d206b0eda27474a00da7fab16dd949eb1bae"
+    },
+    "jquery-app.js": {
+      "bytes": 540,
+      "sha256": "1153cd6b5b670422bcfa74bf4281ebba123904524104ec2d02bd8b65a6597ece"
+    },
+    "jquery.html": {
+      "bytes": 766,
+      "sha256": "70521a3b624ee6f6a774320af6d4e8d18d6e3d4b78d335c1a1abf56c5c573ecc"
+    },
+    "licenses/bootstrap-5.3.9-LICENSE.txt": {
+      "bytes": 1093,
+      "sha256": "bc0cd18d94c028f1c0b62ec9fdaddcb9921c1e07c29cf52dc7df8cca9daf2488"
+    },
+    "licenses/jquery-4.0.0-LICENSE.txt": {
+      "bytes": 1097,
+      "sha256": "d4db9ebe6f29f5168eac45ad713f055623ac5d0dcd5ba92da23d650ae012020d"
+    },
+    "licenses/popper-2.11.8-LICENSE.txt": {
+      "bytes": 1082,
+      "sha256": "bf67e2c9b7974543bb18ced3a0b37f53729aaff953b442dd89a3adaf90fd93e8"
+    },
+    "modern.css": {
+      "bytes": 252,
+      "sha256": "5065f0894698daf8717e82d5ae5c35f3bc17d572a32bedca8ec365bad6b82845"
+    },
+    "README.md": {
+      "bytes": 3525,
+      "sha256": "5aaf85e3bef504a4ff0fb562441aa4a495a104b22414ddacc24a7cee496acf14"
+    }
+  },
+  "revision": 2,
+  "previous_revision_source_commit": "10c3ef79ef7dc6cffd6a52dbe67b035024e22fc4",
+  "revision_note": "Add control names matching existing App actions; prior three configuration records retain separate startup and HarnessBlocked observations; no revision2 runtime result inferred"
+}

@@ -838,7 +838,7 @@ impl Bridge<'_> {
                 && !matches!(name, "select" | "option" | "optgroup") {
                 return Err("Moving nonconventional select descendants or resources is not implemented.".into());
             }
-            if forms::kind(self.doc, node).is_some() && !owned_select
+            if forms::kind(self.doc, node).is_some() && !owned_select && !self.hidden_input(node)
                 || matches!(
                     name,
                     "html"

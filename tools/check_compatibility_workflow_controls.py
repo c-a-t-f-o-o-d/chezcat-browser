@@ -6,6 +6,7 @@ import tempfile
 from unittest.mock import patch
 import urllib.parse
 import check_compatibility_workflows as scorecard
+import check_modern_compatibility_workflows as modern
 
 
 class DiagnosticControls(unittest.TestCase):
@@ -81,6 +82,90 @@ class DiagnosticControls(unittest.TestCase):
         self.assertFalse(result['checks']['all_current_scripts_zero_errors'])
         self.assertEqual(result['first_ordered_script_failure'], failure)
         self.assertFalse(result['reference_initial']['passed'])
+
+
+class ModernScoreControls(unittest.TestCase):
+    """Synthetic score facts only; no executable, HTTP server or browser runs."""
+    def facts(self):
+        base = {'present': True, 'paired': True, 'javascript_enabled': True,
+                'zero_errors': True, 'first_root': None, 'later_script_errors': [],
+                'original_control_exact_pixels': [24, 200, 4, 4],
+                'canvas': {'width': '1280', 'height': '800'}}
+        return {'loaded': dict(base, visible='jQuery initialized version=4.0.0'),
+                'updated': dict(base, visible='jQuery trusted update amber 雪 jQuery asynchronous update complete')}
+
+    def scores(self, stages):
+        requests = [{'target': path, 'completed': True, 'status': 200} for path in
+                    ('/jquery/', '/jquery-app.js', '/modern.css', '/control.ppm', '/jquery-4.0.0.js')]
+        return modern.score('jquery', 1280, stages, requests)
+
+    def test_actions_require_control_names_and_correct_tags(self):
+        valid = '<input id="modern-name" name="modern-name"><button name="jquery-apply"></button>'
+        modern.check_action_targets('jquery', valid)
+        for invalid in (valid.replace(' name="modern-name"', ''),
+                        valid + '<input name="modern-name">',
+                        valid.replace('<input ', '<p '),
+                        valid.replace('name="modern-name"', 'name="modern-name" name="duplicate"')):
+            with self.subTest(source=invalid), self.assertRaises(ValueError):
+                modern.check_action_targets('jquery', invalid)
+
+    def test_actual_rectangle_contract_passes_complete_synthetic_score(self):
+        self.assertTrue(all(row['state'] == 'Passed' for row in self.scores(self.facts()).values()))
+
+    def test_missing_false_and_malformed_controls_refuse_render(self):
+        for value in (None, False, True, [], [24, 200, 4], [-1, 200, 4, 4],
+                      [24, 200, 4, 5], [True, 200, 4, 4], {'x': 24}):
+            with self.subTest(value=value):
+                stages = self.facts()
+                stages['loaded']['original_control_exact_pixels'] = value
+                self.assertEqual(self.scores(stages)['render']['state'], 'Failed')
+        stages = self.facts()
+        del stages['loaded']['original_control_exact_pixels']
+        self.assertEqual(self.scores(stages)['render']['state'], 'Failed')
+
+    def test_control_must_fit_actual_canvas_and_valid_dimensions(self):
+        for rectangle, canvas in (([1278, 200, 4, 4], {'width': '1280', 'height': '800'}),
+                                  ([24, 798, 4, 4], {'width': '1280', 'height': '800'}),
+                                  ([24, 200, 4, 4], {}),
+                                  ([24, 200, 4, 4], {'width': 'unknown', 'height': '800'}),
+                                  ([24, 200, 4, 4], {'width': 1280.0, 'height': '800'})):
+            with self.subTest(rectangle=rectangle, canvas=canvas):
+                stages = self.facts()
+                stages['loaded'].update(original_control_exact_pixels=rectangle, canvas=canvas)
+                self.assertEqual(self.scores(stages)['render']['state'], 'Failed')
+
+    def test_snapshot_error_refuses_render_even_with_stale_positive_facts(self):
+        stages = self.facts()
+        stages['loaded']['snapshot_error'] = 'Control PPM unavailable'
+        self.assertEqual(self.scores(stages)['render']['state'], 'Failed')
+        stages['loaded'] = {'present': False, 'snapshot_error': 'Control PPM unavailable', 'first_root': None}
+        scores = self.scores(stages)
+        self.assertEqual(scores['render']['state'], 'Failed')
+        self.assertEqual(scores['initialization']['state'], 'Failed')
+
+    def test_initialization_cascade_preserves_only_observed_load_and_render(self):
+        stages = self.facts()
+        stages['loaded'].update(visible='jQuery initialization pending', zero_errors=False,
+                                first_root='library.js: JavaScript error at line 1, column 1: actual runtime failure.')
+        stages['updated'].update(zero_errors=False, first_root='Uncaught exception: jQuery is undefined')
+        scores = self.scores(stages)
+        self.assertEqual(scores['load']['state'], 'Passed')
+        self.assertEqual(scores['render']['state'], 'Passed')
+        self.assertEqual(scores['parse']['state'], 'Not established')
+        for name in ('initialization', 'input', 'async'):
+            self.assertEqual(scores[name]['state'], 'Failed')
+
+    def test_runtime_syntaxerror_kind_is_not_renamed_parser_failure(self):
+        stages = self.facts()
+        stages['loaded'].update(visible='Initialization pending', zero_errors=False,
+                                first_root='Last escaped engine fault: stage=execute kind=SyntaxError')
+        self.assertEqual(self.scores(stages)['parse']['state'], 'Not established')
+
+    def test_explicit_parser_fault_is_retained_if_engine_provides_it(self):
+        stages = self.facts()
+        stages['loaded'].update(visible='Initialization pending', zero_errors=False,
+                                first_root='Last escaped engine fault: stage=parse kind=fatal')
+        self.assertEqual(self.scores(stages)['parse']['state'], 'Failed')
 
 
 if __name__ == '__main__':

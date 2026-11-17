@@ -292,8 +292,9 @@ Semantic references: [DOM childNodes](https://dom.spec.whatwg.org/#dom-node-chil
 Status: delivered prerequisite. Focused original Page, App and language controls
 cover the finite slice; each new checkpoint requires normal native/build/executable
 verification. At the historical CP2 checkpoint, the unchanged legacy workload next
-refused a select-containing innerHTML fragment. CP4's later unchanged recheck now
-reaches hidden-input mutation. Initialization and visible improvement remain unproved.
+refused a select-containing innerHTML fragment. CP4's later unchanged recheck reached
+hidden-input mutation; CP7 now advances to an input-containing innerHTML fragment.
+Library initialization and visible workflow improvement remain unproved.
 
 Main Document createComment performs required DOMString conversion and creates a
 real retained Comment leaf with nodeType8, nodeName#comment, actual owner/topology
@@ -331,11 +332,94 @@ CP2 Test262 checks retain 18 passes and two ordinary Array constructor failures
 across 20 mode runs, with all 30 runner controls passing and unchanged inputs;
 this is no full-suite conformance claim. The select fragment was the historical
 CP2 first blocker. CP3 subsequently delivered the independent responsive CSS
-improvement; CP4's later workflow first blocker is hidden-input mutation.
+improvement; hidden-input admission is a separate CP7 prerequisite.
 
 Semantic references: [DOM createComment](https://dom.spec.whatwg.org/#dom-document-createcomment),
 [Comment](https://dom.spec.whatwg.org/#interface-comment), and
 [ECMAScript 2025 ToString](https://262.ecma-international.org/16.0/#sec-tostring).
+
+## CP8 — genuine Node.getRootNode over ordinary trees
+
+Expose the real zero-arity Node prototype method through ordinary property
+resolution, override/deletion and borrowed-call behavior. Require a genuine
+accessible Node receiver before options hooks. Read the optional dictionary's
+composed member through observable Get and ToBoolean; preserve getter effects and
+exceptions, then walk the current tree after those effects. Nullish options use
+the default; non-dictionary primitives refuse. No Node-shaped object or direct
+host call may bypass dictionary conversion or receiver/access validation.
+
+Return the genuine Document for a connected ordinary tree, the actual root of a
+detached subtree, and the Attr itself even when it has an ownerElement. Supported
+same-origin child trees retain their own Document identity; cross-origin access
+refuses before options hooks. Both composed values share the ordinary root because
+ShadowRoot/shadow-tree APIs remain unavailable. Preserve bounded work, edge/index
+identity and cycle checks; malformed ancestry refuses without a DOM commit.
+
+Nine Node root controls, four existing Node constants and thirty-two namespace
+controls pass. An initial new-test oracle compared a returned Document with a
+method; correcting that expectation required no production change. The same
+original trusted-click App fixture now gives zero script errors, genuine
+connected/detached/reconnected roots and changed visible text/pixels. Its clean
+diagnostic build is distinct from the earlier dirty workload builds. This is not
+isolated-crop, physical desktop or full candidate acceptance.
+
+Modern jQuery fixture revision2 now advances to anchor href assignment at7963:1;
+initialization/input/async still fail. Bootstrap retains class syntax at599:3 and
+its separate initialization-dependent dropdown blockage. Earlier fixture revision1
+startup and HarnessBlocked records remain historical. Full normal regression and
+hosted integration are still required for the final candidate.
+
+## CP7 — finite hidden-input admission and native form state
+
+Admit hidden type on a fresh detached HTML INPUT through the genuine native form
+model. Existing parsed hidden inputs share bounded attribute and IDL name/value/
+defaultValue reflection with the hidden default-value mode. Whole-node insertion,
+removal and movement preserve identities, current tree/form ownership and connected
+submission order. Hidden controls never gain a layout box, hit target or focus,
+including when author CSS requests display and dimensions. Unrelated edited
+controls retain their values and caret/selection state.
+
+Stage attribute, tree and native form changes before publication. Preserve host
+work/copy/value/control limits and namespace/foreign-owner refusal; logical limit,
+namespace and owner refusal publish no partial DOM or native state. Existing
+process-OOM limitations remain. Existing native input-type
+transitions, changing INPUT contents and general input-containing innerHTML
+fragments remain refused. No library-specific path or quota expansion is admitted.
+
+Nine focused controls and twelve adjacent select controls pass. Actual App software
+pointer down/up creates the hidden control and changes only the authored text in
+an isolated white crop; down alone does not run the action. The test checks no
+hidden box/focus despite author display rules, native form request serialization,
+neighbor value/cursor preservation and unchanged source/location/history. A
+foreign-namespace negative first reproduced a failure and then passed the atomic
+guard. These are bounded model/App results, not physical desktop, HTTP submission
+or whole-library acceptance.
+
+The unchanged W2 workload advances from hidden type mutation at jQuery1.12.4
+1265:4 to `div.innerHTML = '<input/>'` at2684:2. Load/initial render pass while
+initialization/input/async still fail. Its explicitly dirty development build and
+separate earlier failures remain recorded; normal regression and hosted integration
+are still required for the final candidate.
+
+## CP6 — bounded String.prototype.concat
+
+One genuine native method uses the existing generic String receiver conversion,
+then converts arguments once in order with the string hint and returns a primitive
+string. Live conversion hooks may replace later hooks, reenter the method or throw;
+saved native identity, callback realms and abrupt-completion identity are retained.
+The method has native arity one and ordinary writable/configurable, non-enumerable
+prototype metadata. Existing native-capability denial, byte/copy/step allowances,
+root guards and explicit lone-surrogate refusal remain; no Array.concat change,
+polyfill or library-specific route is admitted.
+
+Nine original VM/realm/App groups cover generic/boxed receivers, argument and hook
+order, reentry, Symbol and abrupt failures, metadata/prototype changes, native
+denial and budget recovery. Actual software pointer down/up changes independent
+DOM/layout text pixels; down alone does not activate. Four adjacent substring
+groups pass. The unchanged Vue workload advances to object-prototype access and
+still fails initialization/input/async. This is a prerequisite, not whole-library
+support or physical desktop evidence. Normal regression and hosted integration
+remain required for the final candidate.
 
 ## CP5 — finite object-literal prototype setter
 
@@ -372,7 +456,8 @@ prior literal parse refusal. Both executions first fail at line11,column3613:
 an undefined noncallable concat member. This does not prove the later prototype
 literal ran. Loading, initial rendering and independent Foundation CSS pass;
 Vue initialization, reactive input and async stages fail in both configurations.
-Ordinary prototype membership/access remains a separate unobserved boundary.
+Ordinary prototype membership/access was unobserved at that checkpoint; the
+later CP6 recheck now reaches that separate boundary.
 No library edits, polyfill, reference substitution or visible Vue improvement is
 claimed; later missing-library errors remain cascades.
 
@@ -393,7 +478,7 @@ integration covers this finite slice; each new checkpoint still requires exact
 normal/build/executable verification.
 One unchanged JS-enabled W2 recheck at 1280x800/zoom100 on clean5cee344 advances
 past the select fragment to jQuery1.12.4 line1265,column4: setting INPUT type to
-hidden remains explicitly unsupported. Loading and initial rendering pass;
+hidden was explicitly unsupported at that checkpoint. Loading and initial rendering pass;
 initialization, dropdown/form input and async stages fail. Later Bootstrap and
 missing-library errors remain cascades. No visible workflow improvement or
 framework initialization is claimed.
@@ -417,9 +502,10 @@ Logical limit, work, origin, owner and allocation-preflight refusals precede tre
 and native publication. Existing std BTreeMap physical allocation failure can
 still abort the process; recoverable process-OOM atomicity is not claimed.
 New select explicit form associations, existing-control interior mutation,
-createElement(select), hidden-input admission, multiple/large select controls and
+createElement(select), multiple/large select controls and
 customizable select content remain unsupported. Existing resource and ID-owner
 guards are unchanged; no framework-specific fallback or library edits are used.
+Hidden-input admission was outside CP4; CP7 adds its separate finite native path.
 
 The App controls exercise actual software paint, popup choice and input/change
 events, then timer-driven removal while focused with an open popup. Stale points
@@ -440,7 +526,7 @@ records this shared rendering correction. Each new checkpoint still requires
 exact normal/build/executable verification.
 At 1280x800, zoom100 and normal JavaScript, the original panels now share a row;
 at 640x800 they retain their original stacking. Vue execution is separate; the
-latest unchanged W3 first-root failure is recorded under CP5. No reactive
+latest unchanged W3 first-root failure is recorded under CP6. No reactive
 interaction or full-framework pass is claimed.
 
 Finite em media lengths use the same browser-owned initial16CSSpx font basis as

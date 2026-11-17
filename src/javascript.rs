@@ -96,6 +96,8 @@ mod media_interface;
 mod runtime_diagnostics;
 #[path = "string_substr.rs"]
 mod string_substr;
+#[path = "string_concat.rs"]
+mod string_concat;
 #[path = "global_operations.rs"]
 mod global_operations;
 #[path = "iterable_builtins.rs"]
@@ -8804,6 +8806,7 @@ impl Runtime {
             return self.checked_value(value);
         }
         if let Value::String(text) = object {
+            if method == "concat" { return self.string_concat(&text,args,host); }
             if method == "substr" { return self.string_substr(&text,args,host); }
             if matches!(method, "search" | "match" | "replace") {
                 return self.regexp_string_method(&text, method, args, host);
