@@ -1,138 +1,199 @@
 <div align="center">
 
-# 🐱 ChezCat Browser
+<img src="assets/chezcat-icon.png" width="128" height="128" alt="ChezCat browser icon">
 
-**An original browser engine, written in Rust.**
+# ChezCat Browser
 
-[![Published prerelease](https://img.shields.io/static/v1?label=Published&message=0.81.0-alpha.2&color=0e7490)](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.81.0-alpha.2)
-[![Windows x64](https://img.shields.io/static/v1?label=Platform&message=Windows%20x64&color=2563eb)](docs/BUILDING.md)
-[![Main verification](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/workflows/offline.yml/badge.svg?branch=main&event=push)](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/workflows/offline.yml)
-[![License](https://img.shields.io/static/v1?label=License&message=CSAPUL%201.1&color=64748b)](LICENSE)
+### An original browser engine. Written in Rust. Built one shared capability at a time.
 
-*From network bytes to page pixels—original networking, JavaScript, DOM, layout,
+*From network bytes to page pixels—networking, JavaScript, DOM, layout,
 rendering, and selected media decoding.*
 
-[Download alpha.2](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.81.0-alpha.2) · [Roadmap](docs/ROADMAP.md) · [Capabilities](docs/CAPABILITIES.md) · [Compatibility](docs/COMPATIBILITY.md) · [Build](#build) · [Security](SECURITY.md)
+[![Published prerelease](https://img.shields.io/static/v1?label=Published&message=0.81.0-alpha.2&color=0e7490&style=flat-square)](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.81.0-alpha.2)
+[![Windows x64](https://img.shields.io/static/v1?label=Platform&message=Windows%20x64&color=2563eb&style=flat-square)](docs/BUILDING.md)
+[![Production Cargo dependencies](https://img.shields.io/static/v1?label=Production%20Cargo%20dependencies&message=0&color=6d28d9&style=flat-square)](docs/ARCHITECTURE.md)
+[![Main verification](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/workflows/offline.yml/badge.svg?branch=main&event=push)](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/workflows/offline.yml)
+[![License](https://img.shields.io/static/v1?label=License&message=CSAPUL%201.1&color=64748b&style=flat-square)](LICENSE)
+
+**[📦 Download](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.81.0-alpha.2)** · **[🗺️ Roadmap](docs/ROADMAP.md)** · **[🔨 Build](#build)** · **[🧪 Compatibility](docs/COMPATIBILITY.md)** · **[📖 Documentation](#documentation)**
 
 </div>
 
 ---
 
 > [!WARNING]
-> **Experimental, not a daily-driver security claim.** Web-platform support is
-> partial. The renderer and interpreter currently share the browser process with
-> worker threads; there is no OS renderer sandbox. Many modern pages do not yet
-> render or interact correctly. Passing CI does not establish complete site support.
+> **Experimental browser—not yet a daily driver.** Modern websites can render
+> incorrectly or fail to interact. Content runs in the browser process with worker
+> threads, without an OS renderer sandbox. Passing CI is not a security
+> certification or a claim of complete website support.
 
 ## Why ChezCat?
 
-ChezCat explores building a small Windows browser from its own implementation,
-not embedding Chromium, Gecko, WebKit, or an external JavaScript/codec runtime.
-The production Cargo manifest has **zero third-party dependencies**. Rust's
-standard library, Windows APIs, reviewed data, assets, and development tools have
-separate roles and licensing obligations; see [third-party notices](THIRD_PARTY_NOTICES.md).
+ChezCat is a Windows x64 browser built around its **own engine**, rather than an
+embedded Chromium, Gecko, WebKit, or external JavaScript/codec runtime.
 
-| Foundation | What is here | What to expect |
+| 🦀 Original implementation | 🌐 Shared web capabilities | 🔬 Observable progress |
 | :--- | :--- | :--- |
-| **Browser shell** | Native tabs/windows, address search, bookmarks, settings, history, downloads, and About/build identity | Useful finite workflows; wider accessibility and script-opened/named contexts remain gaps |
-| **Original web platform** | HTML/DOM, a bounded JavaScript interpreter, CSS layout, and software painting | Shared standards-aligned improvements, not library-specific replacements |
-| **Networking and trust** | Original HTTP(S)/TLS/certificate handling, session cookies, redirects, and guarded resources | Explicit trust/origin/CSP boundaries; broader protocol and site coverage remain partial |
-| **Selected media** | Original constrained VP8/PCM/Matroska paths and finite Media/Video interfaces | Not general streaming, all codecs, or working YouTube playback |
-| **Measured compatibility** | Original regressions and pinned legacy/modern framework applications | Load, initialization, rendering, input, and async results are reported separately |
+| Original Rust with **zero third-party production Cargo dependencies**. | Standards-aligned language, DOM, CSS, and resource behavior—not website-specific replacements. | Real page output, input, and asynchronous behavior, with exact limits and remaining failures recorded. |
 
-## Where Development Is Going
+Rust's standard library, Windows APIs, reviewed data, assets, and development
+tools still have their own roles and licensing obligations. See
+[third-party notices](THIRD_PARTY_NOTICES.md).
 
-**Make representative pages work, then make them faster and more isolated.**
+## What is here
 
-The current focus is shared DOM/input behavior, JavaScript semantics, CSS variables
-and colors, and image/font/layout correctness. The [roadmap](docs/ROADMAP.md) shows
-merged work, review-stage changes, and the next measured dependencies. It also
-records performance baselines, sandboxed content processes, and GPU acceleration
-with software fallback as future work—not features available today.
+| Area | Current foundation |
+| :--- | :--- |
+| 🖥️ **Native browser shell** | Tabs, multiple windows, link context actions, address search, bookmarks, settings, optional history, downloads, and About/build identity. |
+| 🧩 **Web platform** | Original HTML/DOM, a bounded JavaScript interpreter, events, CSS layout, and software painting. Compatibility is growing through shared fixes. |
+| 🔐 **Networking and trust** | Original HTTP(S), TLS/certificate handling, memory-only session cookies, redirects, and explicit resource/CSP boundaries. |
+| 🎞️ **Selected media** | Original constrained VP8, PCM audio, and Matroska paths with finite playback interfaces—not general streaming or working YouTube playback. |
+| 🧪 **Compatibility workloads** | Original regressions plus separate, unmodified legacy and modern framework fixtures. Loading, startup, rendering, input, and async results remain distinct. |
 
-### Published build vs. development source
+These are **implemented slices, not complete standards support**. The
+[capability matrix](docs/CAPABILITIES.md) owns the detailed limits; the
+[compatibility report](docs/COMPATIBILITY.md) records measured application outcomes.
 
-| Use | Choose | Meaning |
+---
+
+## Choose your build
+
+| You want… | Start here | What you are getting |
 | :--- | :--- | :--- |
-| A fixed downloadable snapshot | [**0.81.0-alpha.2**](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.81.0-alpha.2) | Published prerelease with its own source revision, notices, checksums, and runtime/source ZIPs |
-| Integrated development progress | Public `main` | Newer source may contain changes absent from the latest release; inspect its current CI result |
-| Work under review | [Open pull requests](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pulls) | Feature-branch results are not a promise that `main` or the published binary includes them |
+| **A fixed downloadable snapshot** | [📦 0.81.0-alpha.2](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.81.0-alpha.2) | A published prerelease with runtime/source ZIPs, notices, checksums, and its own source identity. |
+| **Newer integrated development** | Public `main` + [build instructions](#build) | Source changes that may not exist in the published executable. Check the current CI result. |
+| **Work under review** | [🔎 Open pull requests](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pulls) | Feature-branch work with its own results and remaining checks; not necessarily in `main`. |
 
-PRs [#29](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/29) and
-[#30](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/30) integrated string/DOM
-prerequisites and scoped anchor URL reflection **after** alpha.2. They do not make
-the existing alpha.2 downloads newer. Completing a milestone does not trigger a
-release; new named releases require an explicit owner request.
+> [!IMPORTANT]
+> **New source does not update an old download.** Published alpha.2 assets remain
+> unchanged. Named releases are created only on explicit owner request; ordinary
+> commits, PRs, CI runs, and development builds do not require a release.
 
-The main-branch badge reports GitHub Actions status, not full browser compatibility.
-Development binary artifacts and a lightweight `dev` promotion channel are planned
-in the roadmap; this page does not claim either is operational.
+Commit-identified development downloads and a possible `dev` channel remain
+roadmap items, not advertised delivery options. The CI badge reports workflow
+status—not how well every website works.
+
+## Development highlights
+
+*Snapshot: November 17, 2026 · public source through `e97dc85`.*
+
+| State | Improvement | Evidence and boundary |
+| :--- | :--- | :--- |
+| ✅ **Merged** | **Shared string and DOM primitives** | [PR #29](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/29): `String.prototype.concat`, hidden-input state, and genuine `Node.getRootNode()` behavior. |
+| ✅ **Merged** | **Anchor URL reflection** | [PR #30](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/30): scoped live HTTP(S) URL values used by ordinary page code. |
+| ✅ **Merged** | **Text-input fragments without lost edits** | [PR #32](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/32): staged native input creation, retained edited/default values, Reset behavior, and focus retirement. |
+| 🟡 **Under review** | **CSS variables in padding and borders** | [PR #31](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/31): inherited custom properties and measured box/pixel improvements; integration remains gated by verification. |
+
+The pinned **jQuery 4.0.0 fixture now passes startup** in the PR #32 evidence;
+trusted input still encounters a native Event-property gap. Legacy jQuery reaches
+a separate `DocumentFragment` boundary. **Startup progress is not complete
+framework compatibility.** Linked PRs and compatibility records carry the precise
+scope and newer results.
+
+### Next: useful pages, then measured speed and stronger isolation
+
+| Now | Next foundations | Later, when ready |
+| :--- | :--- | :--- |
+| Shared DOM/events, JavaScript semantics, CSS variables/colors, and image/font/layout correctness. | Broader representative framework interactions and lightweight performance baselines. | Sandboxed content processes and measured GPU rendering with a software fallback. |
+
+**[Explore the full roadmap →](docs/ROADMAP.md)** for milestone IDs, dependencies,
+completion evidence, and deferred work. Isolation and GPU acceleration are planned,
+not implemented; they do not block the current compatibility work.
+
+---
+
+## Inside the engine
+
+```mermaid
+flowchart LR
+    INPUT["Network / local bytes"] --> PARSE["HTML + CSS parsing"]
+    PARSE --> DOM["Document + styles"]
+    JS["Original JavaScript + DOM APIs"] <--> DOM
+    DOM --> LAYOUT["Style + layout"]
+    LAYOUT --> PAINT["Software painting"]
+    PAINT --> WINDOW["Native Windows presentation"]
+```
+
+*A conceptual view, not a complete scheduling or security diagram.* Browser-owned
+services and document-owned work keep explicit lifetime, origin, and access
+boundaries. The implementation currently uses **one Windows process with worker
+threads**. See [architecture and boundaries](docs/ARCHITECTURE.md).
 
 ## Scope
 
-The [capability matrix](docs/CAPABILITIES.md) is the authority for implemented
-behavior and limits. The [compatibility report](docs/COMPATIBILITY.md) records exact
-library versions and measured application outcomes. Neither an HTTP 200 response,
-a successful parse, nor a green unit-test count establishes a working website.
-
 <details>
-<summary><strong>Explore the finite implementation scope</strong></summary>
+<summary><strong>🖥️ Browser, navigation, and resources</strong></summary>
 
-**Browser and resources.** Native tab/window navigation and guarded current,
-foreground/background-tab and new-window link actions are implemented. Address
-search supports Google by default, Bing, DuckDuckGo, or None; explicit URL/file
-intent remains distinct. The browser includes settings, bookmarks, optional
-history, downloads, and diagnostics. Browser-owned trust data contains a pinned,
-conservative 98-authority Mozilla NSS subset with provenance and explicit
-custom-store replacement; see [HTTPS trust](trust/README.md). It is data, not an
-external TLS engine or a promise of universal TLS compatibility.
+Native tabs/windows and guarded current, foreground/background-tab, and new-window
+link actions are implemented. Address search supports Google by default, Bing,
+DuckDuckGo, or None; explicit URL/file intent remains distinct. Settings,
+bookmarks, optional history, downloads, and diagnostics are available within their
+contracts. Named contexts, script-opened windows, and wider accessibility remain gaps.
 
-**DOM and JavaScript.** Finite prerequisites include live Document/Node child
-lists, genuine Comment leaves, text replacement, native array-like apply, generic
-String.prototype.concat, and genuine Node.getRootNode behavior for supported
-connected/detached trees. Hidden-input state and conventional select fragments
-preserve native form ownership within their contracts. Static noncomputed
-object-literal prototype setters are supported; wider prototype behavior remains
-partial. Scoped anchor HTTP(S) reflection is integrated in development source.
-Shadow DOM, arbitrary input fragments/type transitions, and broader host APIs
-remain gaps or work under review; see the current compatibility evidence.
-
-**Events and layout.** Genuine Event/UIEvent/CustomEvent and finite MouseEvent
-interfaces preserve branded state and ownership. Supported trusted link events
-and native context commands use source-bound intents. Synthetic mouse dispatch,
-broader pointer/keyboard interfaces, and shadow retargeting remain limited.
-The current renderer is software-based. Responsive layout improvements are finite;
-a passing layout fixture does not imply complete framework styling.
-
-**Media.** Supported local IVF/VP8, PCM audio, and constrained Matroska A/V paths
-use original decoders. Finite version-zero single-vector interframes, source
-replacement, seeking, native controls, and selected script playback operations
-are supported under their contracts. Supported network media uses bounded complete
-responses, with explicit source/credential policies. Wider interframe modes,
-hidden frames, streaming, multiple players, dynamic crossOrigin controls, and
-complete HTMLMediaElement behavior remain outside the implemented scope.
-Ordinary YouTube playback is unsupported. Controlled audio/output checks do not
-establish physical audibility or general device compatibility.
-
-**Evidence and acceptance.** Original model, App/input/offscreen, native desktop,
-and live-service observations have different scopes. Google Search, Images, and
-Maps are not fully supported. Current build/source identity and declared limits
-matter more than a broad supported/unsupported label.
+Trust data contains a pinned, conservative **98-authority Mozilla NSS subset**
+with provenance and explicit custom-store replacement. It is public data, not an
+external TLS engine or a guarantee that every HTTPS site will connect. See
+[HTTPS trust](trust/README.md) and [security](SECURITY.md).
 
 </details>
 
+<details>
+<summary><strong>🧩 JavaScript, DOM, events, and rendering</strong></summary>
+
+Finite shared primitives include live Document/Node child lists, genuine Comment
+leaves, text replacement, native array-like apply, generic string concatenation,
+and genuine roots for supported connected/detached trees. Conventional select
+fragments and supported hidden/text-input operations preserve native form state.
+Text input fragments retain edited/default values; unsupported input kinds and
+ownership cases still reject without publishing partial state.
+
+Static noncomputed object-literal prototype setters are supported; wider
+prototype behavior and class semantics remain incomplete. Shadow DOM, arbitrary
+input-type transitions, modules, and broader host APIs remain gaps.
+Event/UIEvent/CustomEvent and finite MouseEvent interfaces preserve branded state;
+broader synthetic dispatch and keyboard/pointer behavior remain limited.
+
+The renderer is software-based. Responsive layout improvements are finite, and
+passing a layout fixture does not establish full framework styling. Google Search,
+Images, and Maps are not fully supported. Consult the
+[capability matrix](docs/CAPABILITIES.md) and [compatibility results](docs/COMPATIBILITY.md).
+
+</details>
+
+<details>
+<summary><strong>🎞️ Media and current playback limits</strong></summary>
+
+Selected local IVF/VP8, PCM audio, and constrained Matroska A/V use original
+decoders. Finite version-zero single-vector interframes, source replacement,
+seeking, native controls, and selected script playback operations are supported
+under their contracts. Supported network media uses bounded complete responses
+with explicit source and credential policies.
+
+Wider interframe modes, hidden frames, streaming, multiple players, dynamic
+crossOrigin controls, and full HTMLMediaElement behavior remain outside the
+implemented scope. **Ordinary YouTube playback is unsupported.** Controlled
+output checks do not establish physical audibility or general device compatibility.
+
+</details>
+
+---
+
 ## Build
 
-Use **Windows x64**, Microsoft C++ build tools/Windows SDK, **Rust 1.99.1 MSVC**,
-and **Python 3.14.8** for verification scripts. From an approved source checkout:
+### 1 · Prepare Windows x64
+
+Use Microsoft C++ build tools/Windows SDK, **Rust 1.99.1 MSVC**, and **Python 3.14.8**
+for verification scripts. From your source checkout:
 
 ```powershell
 rustup toolchain install 1.99.1 --profile minimal --component clippy --no-self-update
 python tools/accept_license.py --show
 ```
 
-Read the terms. The following is an affirmative **personal-scope** acceptance
-command; run it only after deciding to accept:
+### 2 · Read the terms, then build
+
+The following records an affirmative **personal-scope** acceptance. Run it only
+after reading and deciding to accept the exact terms:
 
 ```powershell
 python tools/accept_license.py --accept-license 34003a38eeb1db77472c307e23b5a5540c7625c50d9f0ea0dc7bacf6e5b9b749 --license-scope personal
@@ -140,42 +201,68 @@ python tools/accept_license.py --accept-license 34003a38eeb1db77472c307e23b5a554
 ```
 
 Use `--license-scope organization` only with the required organizational authority.
-A missing or changed-text receipt blocks builds and ordinary execution; help and
-license viewing remain available. `Build.cmd` writes `ChezCat.exe` beside the
-project. Run it with the accompanying pages, assets, and trust data. Rust and
-Python are development tools, not application runtime dependencies.
+Missing or changed-text acceptance blocks builds and ordinary execution; help and
+license viewing remain available.
 
-For the complete integration check:
+### 3 · Run with the matching resources
+
+`Build.cmd` writes **`ChezCat.exe`** beside the project. Keep its accompanying
+pages, assets, trust data, and notices together. Rust and Python are development
+tools, not application runtime dependencies.
+
+<details>
+<summary><strong>🧪 Verification and development checks</strong></summary>
+
+Use focused affected tests while editing. The complete integration check is:
 
 ```powershell
 python tools/verify_offline.py
 ```
 
-Use focused affected tests during ordinary edits. See [building and testing](docs/BUILDING.md)
-for prerequisites and the distinction between development checks and delivery.
+Existing local and hosted integration gates remain in place. The development
+agent investigates failed checks and fixes the affected work; failures are not
+silently ignored or passed back to the maintainer by default. No new asynchronous
+handoff or branch-promotion system is enabled by this documentation.
 
-## Development and Reporting
+Routine CI uses local fixtures. Physical desktop, audio-device, and public-site
+observations are separate evidence. See [building and testing](docs/BUILDING.md)
+and the [release procedure](docs/RELEASING.md).
 
-| Start here | What it answers |
+</details>
+
+## Documentation
+
+| Explore | What you will find |
 | :--- | :--- |
-| [Roadmap](docs/ROADMAP.md) | What is merged, active, next, or deferred? |
-| [Capabilities](docs/CAPABILITIES.md) | What behavior is implemented, and what are its limits? |
-| [Compatibility](docs/COMPATIBILITY.md) | What actually happened in the pinned application workflows? |
-| [Architecture](docs/ARCHITECTURE.md) | Where are ownership, execution, rendering, and security boundaries? |
-| [Feature contracts](docs/FEATURE_CONTRACTS.md) | Which behavior and acceptance requirements must be preserved? |
-| [Release process](docs/RELEASING.md) | How are explicitly requested builds validated and published? |
-| [Changelog](CHANGELOG.md) | What changed in the source? |
+| 🗺️ [**Roadmap**](docs/ROADMAP.md) | Merged work, current milestones, dependencies, and future architecture. |
+| 📋 [**Capabilities**](docs/CAPABILITIES.md) | Implemented behavior, explicit limits, and unsupported areas. |
+| 🧪 [**Compatibility**](docs/COMPATIBILITY.md) | Versioned framework/workflow observations and first remaining blockers. |
+| 🏗️ [**Architecture**](docs/ARCHITECTURE.md) | Component ownership, execution, rendering, and security boundaries. |
+| 📐 [**Feature contracts**](docs/FEATURE_CONTRACTS.md) | Lasting behavior and acceptance requirements. |
+| 🔧 [**Build guide**](docs/BUILDING.md) | Toolchain, source builds, and verification. |
+| 📦 [**Release procedure**](docs/RELEASING.md) | Delivery for explicitly requested releases. |
+| 📝 [**Changelog**](CHANGELOG.md) | Recorded source history. |
 
-Routine hosted checks use local fixtures. Native presentation, physical audio,
-and public-site observations remain separate evidence. Development uses coherent
-public commits and PRs without waiting for a release. See the roadmap's delivery
-work for the planned CI handoff and development-artifact improvements.
+## Development and reporting
 
-For bug reports and contributions, read [CONTRIBUTING.md](CONTRIBUTING.md); for
-security concerns, use [SECURITY.md](SECURITY.md). Document-only connection reports
-use `--diagnose URL --report FILE`; optional `--diagnose-allow-host HOST` entries
-restrict destinations before DNS. Those reports run no page scripts/subresources
-and do not establish page usability. See the [T1 contract](docs/FEATURE_CONTRACTS.md).
+Development uses coherent public commits and PRs without waiting for a release.
+A completed PR is a checkpoint, not the end of the development queue. Keep the
+current verification-and-repair workflow; broader CI handoff changes are deferred.
+
+For bug reports and contributions, read [CONTRIBUTING.md](CONTRIBUTING.md). For
+security concerns, follow [SECURITY.md](SECURITY.md).
+
+<details>
+<summary><strong>🔎 Connection-only diagnostics</strong></summary>
+
+Use `--diagnose URL --report FILE`; optional `--diagnose-allow-host HOST` entries
+restrict destinations before DNS. These reports run no page scripts or
+subresources and do not establish page usability. See the
+[T1 contract](docs/FEATURE_CONTRACTS.md).
+
+</details>
+
+---
 
 ## Licensing
 
@@ -188,6 +275,19 @@ offerings remain restricted; the exact license controls.
 **This is not an OSI-approved open-source license.** Independent third-party terms
 and valid grants for earlier releases remain unchanged.
 
+<details>
+<summary><strong>License identity and related policies</strong></summary>
+
 License SHA-256: `34003a38eeb1db77472c307e23b5a5540c7625c50d9f0ea0dc7bacf6e5b9b749`.
 
 [License acceptance](docs/LICENSE_ACCEPTANCE.md) · [Third-party notices](THIRD_PARTY_NOTICES.md) · [Branding](docs/BRANDING.md) · [Changes from 1.0](licensing/CHANGES-1.1.md)
+
+</details>
+
+<div align="center">
+
+**An original engine. Measured progress.**
+
+[Roadmap](docs/ROADMAP.md) · [Build guide](docs/BUILDING.md) · [Compatibility](docs/COMPATIBILITY.md)
+
+</div>

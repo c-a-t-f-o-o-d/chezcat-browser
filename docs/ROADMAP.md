@@ -23,7 +23,7 @@ of complete framework support. No date or version is assigned to the next releas
 | Channel | What it contains | When it changes |
 | :--- | :--- | :--- |
 | **Published prerelease** | [0.81.0-alpha.2](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.81.0-alpha.2), source `36adf20`, released November 17, 2026 (UTC) | Explicit owner request; immutable tag and assets |
-| **Public `main`** | Integrated development source; PRs [#29](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/29) and [#30](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/30) add behavior beyond alpha.2 | Coherent PRs after applicable integration checks |
+| **Public `main`** | Integrated development source; PRs [#29](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/29), [#30](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/30), and [#32](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/32) add behavior beyond alpha.2 | Coherent PRs after applicable integration checks |
 | **Public feature branches** | Reviewable work in progress with its own check status | Meaningful implementation checkpoints, independently of releases |
 | **Development binaries** | Planned CI artifacts identified by source commit, not another GitHub Release | Delivery work `DX-02`; not advertised as available yet |
 
@@ -31,7 +31,7 @@ of complete framework support. No date or version is assigned to the next releas
 flowchart LR
     BASE["Published alpha.2"] --> DOM["DOM / string foundation<br/>Merged: PR 29"]
     DOM --> URL["Anchor URL reflection<br/>Merged: PR 30"]
-    URL --> INPUT["INPUT fragments + events<br/>Active compatibility work"]
+    URL --> INPUT["INPUT fragments: merged PR 32<br/>Events: next compatibility work"]
     URL --> CSS["CSS variables + colors<br/>Active visual work"]
     INPUT --> APPS["Useful framework workflows"]
     CSS --> APPS
@@ -46,8 +46,9 @@ wait for complete framework or video support.
 > [!IMPORTANT]
 > **Owner-gated releases.** Completing a feature, merging a PR, or passing CI does
 > not trigger a release. An explicit request is queued after the current coherent
-> development task. CI/CD owns the requested build, package, and publication steps;
-> a failed check blocks promotion or publication, not unrelated coding.
+> development task. Keep the existing verification workflow: the agent investigates
+> failed checks and fixes affected work. A failed gate blocks promotion or
+> publication; unrelated authorized coding can continue.
 
 ---
 
@@ -55,7 +56,7 @@ wait for complete framework or video support.
 
 **Legend:** ✅ **Merged** · 🟡 **Under review** · ◻️ **Next / planned** · 🧊 **Deferred**
 
-Snapshot: November 17, 2026, using public `main` at `9e5be72` and the linked PRs.
+Snapshot: November 17, 2026, using public `main` at `e97dc85` and the linked PRs.
 PR pages carry changing review and CI status. Branch-only results are not results
 for `main` or for the published alpha.2 binary.
 
@@ -68,7 +69,7 @@ workloads, without framework-specific substitutes.
 | :--- | :--- | :--- | :--- |
 | ✅ Merged | <code>DOM&#8209;01</code> | **String concat, hidden-input state, and genuine Node roots** | [PR #29](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/29) integrated the finite contracts. This is not whole-framework compatibility. |
 | ✅ Merged | <code>DOM&#8209;02</code> | **Anchor HTTP(S) URL reflection** | [PR #30](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/30) integrated scoped live URL values. Wider URL semantics remain bounded by the contract. |
-| 🟡 Under review | <code>DOM&#8209;03</code> | **Native text INPUT fragments and retained editor state** | [PR #32](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/32): real editing/reset, dirty/default values, neighboring controls, ownership, and atomic refusals. Branch results report modern jQuery startup passing; integration remains separate. |
+| ✅ Merged | <code>DOM&#8209;03</code> | **Native text INPUT fragments and retained editor state** | [PR #32](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/32) integrated real editing/reset, dirty/default values, neighboring controls, ownership, atomic refusals, and focus retirement. Its pinned modern jQuery fixture passes startup; full interaction remains blocked. |
 | ◻️ Next | <code>DOM&#8209;04</code> | **Native Event own-property behavior** | Reproduce the trusted-input failure reported by PR #32; implement normal property lookup without weakening branded access. Recheck the unchanged modern jQuery input/timer workflow. |
 | ◻️ Next | <code>DOM&#8209;05</code> | **DocumentFragment and subsequent legacy DOM boundaries** | Reduce the next failure reported by PR #32, then verify fragment insertion, tree identity, form state, and rollback. Preserve the unchanged legacy workload and any next blocker. |
 
@@ -122,21 +123,25 @@ Neither depends on supporting every website first.
 
 ---
 
-## Delivery — Frequent Source, Pipeline-Owned Builds
+## Delivery — Frequent Source, Verified Builds
 
-**Policy is agreed; the automation work below is not yet implemented.** Existing
-branch protections and required checks remain in force during the transition.
+**Keep the current CI approach.** The development agent reviews failures and fixes
+the affected work through the existing local, PR, and hosted checks. The proposed
+asynchronous handoff is deferred; no workflow, branch-protection, or promotion
+change is enabled by this documentation. Development source continues to advance
+independently of owner-requested releases.
 
 | State | ID | Deliverable | Exit criteria |
 | :--- | :--- | :--- | :--- |
-| ◻️ Planned | <code>DX&#8209;01</code> | **Asynchronous CI/CD handoff** | Focused local checks precede a clean public source checkpoint. Hosted jobs own canonical integration/release checks and publish concise results. No routine agent polling or duplicate local delivery audit. The maintainer triages hosted failures; failing changes cannot promote or publish. |
+| 🧊 Deferred | <code>DX&#8209;01</code> | **Asynchronous CI/CD handoff** | Retain the current agent-owned failure diagnosis and repair. Revisit handoff only by a later owner decision; do not transfer routine failed-build triage to the maintainer or weaken integration gates. |
 | ◻️ Planned | <code>DX&#8209;02</code> | **Commit-identified development artifacts** | Successful trusted CI exposes a complete, clearly labeled development payload with its real source identity, required notices/data, no private material, and bounded retention. It is not a release, tag, or version bump. |
 | ◻️ Proposed | <code>DX&#8209;03</code> | **Lightweight public `dev` integration channel** | Adopt only with explicit triggers, protected promotion, trusted identities, and no duplicate validation for unchanged inputs. Keep `main` current with promoted known-good work. Do not create another manually supervised release stage. |
 
-For requested releases, freeze the selected revision and hand it to the existing
-pipeline. Continue independent coding without mutating that snapshot. Pipeline
-failure leaves delivery incomplete; it never justifies claiming a release passed.
-See [RELEASING.md](RELEASING.md) for the existing checks and the handoff boundary.
+For requested releases, preserve the selected source identity and use the existing
+validation and publication procedure. The agent remains responsible for analyzing
+and correcting failures. Continue safe independent work without modifying inputs
+under verification; do not claim failed delivery succeeded. See
+[RELEASING.md](RELEASING.md).
 
 ---
 
@@ -184,7 +189,7 @@ not establish browser compatibility.
 | **alpha.2** | `CP1–CP5` prerequisites | Collection/Node, Comment/RegExp, responsive CSS, conventional select, and literal-prototype foundations |
 | **alpha.2** | `T1 / B1` foundations | Scoped TLS/trust, dual-stack transport, stylesheet/resource and viewport behavior; broader coverage remains partial |
 | **alpha.2** | Selected media/interfaces | Existing finite VP8/PCM/Matroska, Media/Video and event slices within their documented limits |
-| **Post-alpha.2 source** | `DOM-01 / DOM-02` | PR #29 string/hidden-input/Node-root work and PR #30 anchor URL reflection; not retroactively part of alpha.2 |
+| **Post-alpha.2 source** | `DOM-01 / DOM-02 / DOM-03` | PR #29 string/hidden-input/Node-root work, PR #30 anchor URL reflection, and PR #32 native text INPUT fragments; not retroactively part of alpha.2 |
 
 Published assets remain immutable. Read the [capability matrix](CAPABILITIES.md)
 for exclusions and the [changelog](../CHANGELOG.md) for source history.

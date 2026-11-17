@@ -45,7 +45,7 @@ impl Forms {
             .ok_or("Hidden input copy size overflow.")?;
         let control = Control {
             owner: existing.and_then(|control| control.owner), kind: Kind::Hidden,
-            value: editor, name: name.into(), caption: String::new(),
+            value: editor, dirty_value: false, name: name.into(), caption: String::new(),
             disabled: existing.map_or(doc.attr(node,"disabled").is_some(), |control| control.disabled),
             readonly: doc.attr(node,"readonly").is_some(), required: doc.attr(node,"required").is_some(),
             checked: existing.is_some_and(|control| control.checked),

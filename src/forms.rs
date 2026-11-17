@@ -421,6 +421,9 @@ pub struct Control {
     pub owner: Option<usize>,
     pub kind: Kind,
     pub value: Editor,
+    // The HTML dirty value flag belongs to the control, not its current text.
+    // Setting .value to the existing/default value still makes a text control dirty.
+    pub dirty_value: bool,
     pub name: String,
     pub caption: String,
     pub disabled: bool,
@@ -438,6 +441,11 @@ pub struct Control {
 }
 
 impl Control {
+    pub fn mark_value_dirty(&mut self) {
+        if matches!(self.kind, Kind::Text | Kind::TextArea) {
+            self.dirty_value = true;
+        }
+    }
     pub fn editable(&self) -> bool {
         matches!(self.kind, Kind::Text | Kind::TextArea) && !self.disabled && !self.readonly
     }
@@ -474,7 +482,7 @@ impl Control {
         if !self.editable() {
             return;
         }
-        self.value.delete_selection();
+        let deleted = self.value.delete_selection();
         let used: usize = self.value.chars.iter().map(|ch| ch.len_utf16()).sum();
         let mut available = self.max_length.saturating_sub(used);
         let incoming: Vec<char> = normalized_chars(text)
@@ -493,6 +501,33 @@ impl Control {
             .splice(self.value.cursor..self.value.cursor, incoming);
         self.value.cursor += count;
         self.value.anchor = self.value.cursor;
+        if deleted || count != 0 {
+            self.mark_value_dirty();
+        }
+    }
+}
+
+/// Prepared text INPUT default-value state. The caller must commit without
+/// callbacks after its DOM attribute transaction has passed every fallible check.
+/// Native byte metrics are separate from the DOM attribute's retained bytes;
+/// old_native_bytes is not a DOM debit unless the caller previously charged it.
+pub(crate) struct TextDefaultPlan {
+    node: usize,
+    initial: String,
+    value: Option<Editor>,
+    pub(crate) copy_bytes: usize,
+    pub(crate) old_native_bytes: usize,
+    pub(crate) new_native_bytes: usize,
+}
+
+impl TextDefaultPlan {
+    pub(crate) fn commit(self, forms: &mut Forms) {
+        let control = forms.controls.get_mut(&self.node).expect("Prepared text INPUT identity");
+        debug_assert_eq!(control.kind, Kind::Text);
+        control.initial = self.initial;
+        if let Some(value) = self.value {
+            control.value = value;
+        }
     }
 }
 
@@ -557,6 +592,100 @@ pub struct Forms {
 }
 
 impl Forms {
+    /// Upper bound for the native payload scan before preparing an attribute
+    /// plan. Include item counts even when all names/values/labels are empty.
+    pub(crate) fn default_scan_work(&self) -> usize {
+        self.controls.values().fold(self.controls.len().saturating_add(1), |work, control| {
+            let mut work = work.saturating_add(control.name.len()).saturating_add(control.initial.len())
+                .saturating_add(control.value.chars.len().saturating_mul(std::mem::size_of::<char>()));
+            if let Some(select) = &control.select {
+                work = work.saturating_add(select.options.len()).saturating_add(select.rows.len());
+                for option in &select.options {
+                    work = work.saturating_add(option.value.len()).saturating_add(option.label.len());
+                }
+                for row in &select.rows {
+                    if let SelectRow::Group { label, .. } = row { work = work.saturating_add(label.len()); }
+                }
+            }
+            work
+        })
+    }
+
+    pub(crate) fn text_default_value(&self, node: usize) -> Result<&str, String> {
+        let control = self.controls.get(&node).filter(|control| control.kind == Kind::Text)
+            .ok_or("Default value update requires a native text INPUT.")?;
+        Ok(&control.initial)
+    }
+
+    /// Attribute removal supplies None. Raw default text is retained, while a
+    /// pristine live value uses the existing single-line CR/LF sanitization.
+    /// Dirty editors, including caret/selection/offset, are not reconstructed.
+    pub(crate) fn prepare_text_default(&self, node: usize, value: Option<&str>) -> Result<TextDefaultPlan, String> {
+        if self.limited || self.controls.len() > MAX_CONTROLS {
+            return Err("Native form limits already exceeded; text default was not changed.".into());
+        }
+        let control = self.controls.get(&node).filter(|control| control.kind == Kind::Text)
+            .ok_or("Default value update requires a native text INPUT.")?;
+        let text = value.unwrap_or("");
+        if text.encode_utf16().count() > MAX_VALUE_UNITS {
+            return Err("A text INPUT default is limited to 4096 UTF-16 units.".into());
+        }
+        let sanitized_bytes = text.chars().filter(|ch| !matches!(ch, '\r' | '\n'))
+            .map(char::len_utf8).sum::<usize>();
+        let mut total = 0usize;
+        for (&other, item) in &self.controls {
+            if item.name.len() > MAX_QUERY {
+                return Err("A form control name exceeds 8192 bytes; text default was not changed.".into());
+            }
+            let live = if other == node && !control.dirty_value { sanitized_bytes }
+                else { item.value.chars.iter().map(|ch| ch.len_utf8()).sum() };
+            let default = if other == node { text.len() } else { item.initial.len() };
+            // Bound either the edited value or its retained Reset default. Do
+            // not count identical initial/live text twice or discard defaults.
+            total = total.checked_add(item.name.len())
+                .and_then(|total| total.checked_add(live.max(default)))
+                .ok_or("Text default form payload overflow.")?;
+            if let Some(select) = &item.select {
+                for option in &select.options {
+                    total = total.checked_add(option.value.len())
+                        .and_then(|total| total.checked_add(option.label.len()))
+                        .ok_or("Text default option payload overflow.")?;
+                }
+                for row in &select.rows {
+                    if let SelectRow::Group { label, .. } = row {
+                        total = total.checked_add(label.len()).ok_or("Text default group payload overflow.")?;
+                    }
+                }
+            }
+            if total > MAX_TOTAL_VALUE_BYTES {
+                return Err("Combined form names, values and defaults exceed 128 KiB; no default was changed.".into());
+            }
+        }
+        let mut initial = String::new();
+        initial.try_reserve(text.len()).map_err(|_| "Text default reservation failed.")?;
+        initial.push_str(text);
+        let same_value = control.value.chars.iter().copied()
+            .eq(text.chars().filter(|ch| !matches!(ch, '\r' | '\n')));
+        let value = if control.dirty_value || same_value { None } else {
+            let mut editor = Editor::default();
+            let count = text.chars().filter(|ch| !matches!(ch, '\r' | '\n')).count();
+            editor.chars.try_reserve(count).map_err(|_| "Text default editor reservation failed.")?;
+            editor.chars.extend(text.chars().filter(|ch| !matches!(ch, '\r' | '\n')));
+            editor.cursor = editor.chars.len();
+            editor.anchor = editor.cursor;
+            Some(editor)
+        };
+        let old_editor_bytes = control.value.chars.len().checked_mul(std::mem::size_of::<char>())
+            .ok_or("Text default native payload overflow.")?;
+        let copied_editor_bytes = value.as_ref().map_or(0, |editor| editor.chars.len() * std::mem::size_of::<char>());
+        let old_native_bytes = control.initial.len().checked_add(old_editor_bytes)
+            .ok_or("Text default native payload overflow.")?;
+        let new_native_bytes = initial.len().checked_add(if value.is_some() { copied_editor_bytes } else { old_editor_bytes })
+            .ok_or("Text default native payload overflow.")?;
+        let copy_bytes = initial.len().checked_add(copied_editor_bytes).ok_or("Text default copy size overflow.")?;
+        Ok(TextDefaultPlan { node, initial, value, copy_bytes, old_native_bytes, new_native_bytes })
+    }
+
     pub fn new(doc: &Document) -> Self {
         let mut result = Self {
             controls: BTreeMap::new(),
@@ -666,6 +795,7 @@ impl Forms {
                     kind
                 },
                 value,
+                dirty_value: false,
                 name: name.chars().take(MAX_QUERY).collect(),
                 caption: if kind == Kind::Select {
                     String::new()
@@ -813,10 +943,15 @@ impl Forms {
             return Err("Combined form names and values exceed 128 KiB.".into());
         }
         let control = self.controls.get_mut(&node).unwrap();
-        control.value.chars = text.chars().collect();
-        control.value.cursor = control.value.chars.len();
-        control.value.anchor = control.value.cursor;
-        control.value.offset = 0;
+        let same_text = matches!(kind, Kind::Text | Kind::TextArea)
+            && control.value.chars.iter().copied().eq(text.chars());
+        if !same_text {
+            control.value.chars = text.chars().collect();
+            control.value.cursor = control.value.chars.len();
+            control.value.anchor = control.value.cursor;
+            control.value.offset = 0;
+        }
+        control.mark_value_dirty();
         // Text inputs keep their original default for Reset. The other supported
         // input types use the value attribute/default-value mode.
         if !matches!(kind, Kind::Text | Kind::TextArea) {
@@ -892,6 +1027,9 @@ impl Forms {
                     continue;
                 }
                 set_form_value(&mut control.value, &control.initial, control.kind);
+                if matches!(control.kind, Kind::Text | Kind::TextArea) {
+                    control.dirty_value = false;
+                }
                 control.checked = control.initially_checked;
                 if control.kind == Kind::Radio && control.checked {
                     radios.push(node);
@@ -1269,7 +1407,7 @@ mod select_fragments;
 
 #[path = "forms_hidden_inputs.rs"]
 mod hidden_inputs;
-pub(crate) use select_fragments::SelectFormPlan;
+pub(crate) use select_fragments::{fragment_text_input, SelectFormPlan};
 
 #[cfg(test)]
 mod tests {
@@ -1299,6 +1437,132 @@ mod tests {
             .find(|(node, _)| doc.attr(*node, "id") == Some(id))
             .unwrap()
             .0
+    }
+
+    #[test]
+    fn text_input_default_plan_stages_pristine_value_without_rebuilding_neighbors() {
+        let doc = html::parse("<form id=f><input id=i name=q value=before><input id=other name=keep value=neighbor></form>");
+        let node = node_id(&doc, "i");
+        let other = node_id(&doc, "other");
+        let mut forms = Forms::new(&doc);
+        forms.controls.get_mut(&other).unwrap().value.cursor = 2;
+        forms.controls.get_mut(&other).unwrap().value.anchor = 5;
+        forms.controls.get_mut(&other).unwrap().value.offset = 1;
+        forms.controls.get_mut(&node).unwrap().value.cursor = 1;
+        forms.controls.get_mut(&node).unwrap().value.anchor = 4;
+        forms.controls.get_mut(&node).unwrap().value.offset = 1;
+        let unchanged = forms.prepare_text_default(node, Some("before")).unwrap();
+        assert_eq!(unchanged.copy_bytes, 6, "Equal pristine values retain their editor");
+        unchanged.commit(&mut forms);
+        let editor = &forms.controls[&node].value;
+        assert_eq!((editor.cursor, editor.anchor, editor.offset), (1, 4, 1));
+        assert!(!forms.controls[&node].dirty_value);
+        let plan = forms.prepare_text_default(node, Some("a\r\nb")).unwrap();
+        assert_eq!(forms.text_default_value(node).unwrap(), "before");
+        assert_eq!(forms.controls[&node].value.text(), "before");
+        assert_eq!((plan.copy_bytes, plan.old_native_bytes, plan.new_native_bytes), (12, 30, 12));
+        plan.commit(&mut forms);
+        assert_eq!(forms.text_default_value(node).unwrap(), "a\r\nb");
+        let control = &forms.controls[&node];
+        assert_eq!(control.value.text(), "ab");
+        assert_eq!((control.value.cursor, control.value.anchor, control.value.offset), (2, 2, 0));
+        assert!(!control.dirty_value);
+        let neighbor = &forms.controls[&other];
+        assert_eq!(neighbor.value.text(), "neighbor");
+        assert_eq!((neighbor.value.cursor, neighbor.value.anchor, neighbor.value.offset), (2, 5, 1));
+    }
+
+    #[test]
+    fn text_input_default_same_value_write_dirties_and_reset_restores_latest_default() {
+        let doc = html::parse("<form id=f><input id=i value=base></form>");
+        let node = node_id(&doc, "i");
+        let mut forms = Forms::new(&doc);
+        {
+            let editor = &mut forms.controls.get_mut(&node).unwrap().value;
+            editor.cursor = 1;
+            editor.anchor = 3;
+            editor.offset = 1;
+        }
+        forms.script_set_value(node, "base").unwrap();
+        assert!(forms.controls[&node].dirty_value, "Equal .value assignment must still set the dirty flag");
+        let plan = forms.prepare_text_default(node, Some("next")).unwrap();
+        assert_eq!(plan.copy_bytes, 4, "A dirty editor is retained, not recopied");
+        plan.commit(&mut forms);
+        let control = &forms.controls[&node];
+        assert_eq!(control.value.text(), "base");
+        assert_eq!((control.value.cursor, control.value.anchor, control.value.offset), (1, 3, 1));
+        assert_eq!(forms.text_default_value(node).unwrap(), "next");
+        forms.reset(node_id(&doc, "f"));
+        assert_eq!(forms.controls[&node].value.text(), "next");
+        assert!(!forms.controls[&node].dirty_value);
+        forms.prepare_text_default(node, None).unwrap().commit(&mut forms);
+        assert_eq!(forms.text_default_value(node).unwrap(), "");
+        assert_eq!(forms.controls[&node].value.text(), "");
+        assert!(!forms.controls[&node].dirty_value);
+    }
+
+    #[test]
+    fn text_input_default_native_edits_and_other_control_modes_keep_distinct_flags() {
+        let doc = html::parse("<form id=f><input id=i value=base><textarea id=t>area</textarea><input id=h type=hidden value=hidden><input id=c type=checkbox value=yes checked><select id=s><option value=a>A<option value=b>B</select></form>");
+        let mut forms = Forms::new(&doc);
+        let node = node_id(&doc, "i");
+        forms.controls.get_mut(&node).unwrap().insert("");
+        assert!(!forms.controls[&node].dirty_value);
+        forms.controls.get_mut(&node).unwrap().readonly = true;
+        forms.controls.get_mut(&node).unwrap().insert("ignored");
+        assert_eq!(forms.controls[&node].value.text(), "base");
+        assert!(!forms.controls[&node].dirty_value);
+        forms.controls.get_mut(&node).unwrap().readonly = false;
+        forms.controls.get_mut(&node).unwrap().insert("X");
+        assert_eq!(forms.controls[&node].value.text(), "baseX");
+        assert!(forms.controls[&node].dirty_value);
+        let textarea = node_id(&doc, "t");
+        forms.script_set_value(textarea, "edited\r\narea").unwrap();
+        assert_eq!(forms.controls[&textarea].value.text(), "edited\narea");
+        assert!(forms.controls[&textarea].dirty_value);
+        for (id, value) in [("h", "newhidden"), ("c", "other"), ("s", "b")] {
+            let other = node_id(&doc, id);
+            forms.script_set_value(other, value).unwrap();
+            assert!(!forms.controls[&other].dirty_value);
+            assert!(forms.prepare_text_default(other, Some("refused")).is_err());
+        }
+        assert_eq!(forms.controls[&node_id(&doc, "h")].initial, "newhidden");
+        assert!(forms.controls[&node_id(&doc, "c")].checked);
+        assert_eq!(forms.controls[&node_id(&doc, "s")].value.text(), "b");
+        assert!(forms.prepare_text_default(textarea, Some("refused")).is_err());
+        forms.reset(node_id(&doc, "f"));
+        assert_eq!(forms.controls[&node].value.text(), "base");
+        assert_eq!(forms.controls[&textarea].value.text(), "area");
+        assert!(!forms.controls[&node].dirty_value && !forms.controls[&textarea].dirty_value);
+    }
+
+    #[test]
+    fn text_input_default_refusals_preserve_state_and_existing_payload_bounds() {
+        let empty_select = Forms::new(&html::parse("<select></select>"));
+        let one_empty_option = Forms::new(&html::parse("<select><option></option></select>"));
+        assert!(one_empty_option.default_scan_work() > empty_select.default_scan_work(),
+            "Empty option/row entries still consume scan work");
+        let source = format!("<form id=f>{}<input id=empty></form>",
+            (0..32).map(|index| format!("<input id=i{index} value='{}'>", "x".repeat(MAX_VALUE_UNITS))).collect::<String>());
+        let doc = html::parse(&source);
+        let mut forms = Forms::new(&doc);
+        assert!(!forms.limited, "The original defaults exactly fill the existing 128 KiB allowance");
+        let first = node_id(&doc, "i0");
+        let empty = node_id(&doc, "empty");
+        forms.script_set_value(first, "").unwrap();
+        assert!(forms.controls[&first].dirty_value);
+        assert!(forms.prepare_text_default(empty, Some("x")).is_err(), "Edited live text cannot hide retained Reset defaults from the payload bound");
+        assert_eq!(forms.text_default_value(empty).unwrap(), "");
+        assert_eq!(forms.controls[&empty].value.text(), "");
+        assert!(!forms.controls[&empty].dirty_value);
+        assert!(forms.prepare_text_default(empty, Some(&"🦀".repeat(MAX_VALUE_UNITS / 2 + 1))).is_err());
+        assert!(forms.prepare_text_default(usize::MAX, None).is_err());
+        forms.controls.get_mut(&empty).unwrap().name = "n".repeat(MAX_QUERY + 1);
+        assert!(forms.prepare_text_default(empty, None).is_err());
+        assert_eq!(forms.text_default_value(empty).unwrap(), "");
+        assert_eq!(forms.controls[&first].value.text(), "");
+        assert_eq!(forms.text_default_value(first).unwrap().len(), MAX_VALUE_UNITS);
+        assert!(forms.controls[&first].dirty_value);
     }
 
     #[test]
