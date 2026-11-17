@@ -275,6 +275,9 @@ pub struct Style {
     pub inset: [Length; 4],
     pub color: u32,
     pub background: Option<u32>,
+    /// Retain currentColor through explicit inheritance; background holds the
+    /// used opaque color after this element's foreground cascade finishes.
+    pub background_current_color: bool,
     pub background_image: Option<BackgroundImage>,
     /// Repeat the single background layer along the horizontal/vertical axes.
     pub background_repeat: [bool; 2],
@@ -332,6 +335,7 @@ impl Default for Style {
             inset: [Length::Auto; 4],
             color: 0x26364a,
             background: None,
+            background_current_color: false,
             background_image: None,
             background_repeat: [true; 2],
             background_position: [ObjectPosition::START; 2],
@@ -894,6 +898,10 @@ pub(crate) fn compute_with_environment(
                 apply(&mut style, &parent, declaration);
             }
         }
+        // currentColor computes to itself, including across explicit inherit;
+        // its used value is this element's final foreground, independent of
+        // declaration order. Existing foreground and border policy is unchanged.
+        if style.background_current_color {style.background=Some(style.color);}
         if tag == "html" {
             root_font_size = style.font_size;
             style.root_font_size = root_font_size;
@@ -2614,10 +2622,16 @@ fn apply(style: &mut Style, parent: &Style, declaration: &Declaration) {
         "background-color" => {
             if value == "inherit" {
                 style.background = parent.background;
+                style.background_current_color = parent.background_current_color;
+            } else if value == "currentcolor" {
+                style.background = Some(style.color);
+                style.background_current_color = true;
             } else if matches!(value.as_str(), "transparent" | "none" | "initial" | "unset") {
                 style.background = None;
+                style.background_current_color = false;
             } else if let Some(color) = color(&value) {
                 style.background = Some(color);
+                style.background_current_color = false;
             }
         }
         "background-image" => {
@@ -2667,6 +2681,7 @@ fn apply(style: &mut Style, parent: &Style, declaration: &Declaration) {
         "background" => {
             if value == "inherit" {
                 style.background = parent.background;
+                style.background_current_color = parent.background_current_color;
                 style.background_image = parent.background_image.clone();
                 style.background_repeat = parent.background_repeat;
                 style.background_position = parent.background_position;
@@ -2677,11 +2692,14 @@ fn apply(style: &mut Style, parent: &Style, declaration: &Declaration) {
                 // unsupported compound syntax must not partially reset them.
                 let background = if matches!(value.as_str(), "transparent" | "none" | "initial" | "unset") {
                     Some(None)
+                } else if value == "currentcolor" {
+                    Some(Some(style.color))
                 } else {
                     color(&value).map(Some)
                 };
                 if let Some(background) = background {
                     style.background = background;
+                    style.background_current_color = value == "currentcolor";
                     style.background_image = None;
                     style.background_repeat = [true; 2];
                     style.background_position = [ObjectPosition::START; 2];
@@ -4280,3 +4298,7 @@ mod responsive_tests;
 #[cfg(test)]
 #[path="css_rgba_border_tests.rs"]
 mod rgba_border_tests;
+
+#[cfg(test)]
+#[path="css_background_variable_tests.rs"]
+mod background_variable_tests;
