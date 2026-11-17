@@ -498,9 +498,19 @@ if(count!==3)throw 'object requirements';
             assert_eq!(host.0, 0);
             assert_eq!(runtime.call_depth, 0);
         }
-        for source in ["Object.fromEntries([['__proto__',1]]);"] {
-            assert!(Runtime::for_test().execute(source, &mut NoHost).is_err());
-        }
+    }
+
+    #[test]
+    fn from_entries_proto_key_is_ordinary_own_data_without_changing_chain() {
+        let value = Runtime::for_test().execute(r#"
+var parent=Object.prototype, value={marker:1};
+var object=Object.fromEntries([['__proto__',value]]);
+var descriptor=Object.getOwnPropertyDescriptor(object,'__proto__');
+if(Object.getPrototypeOf(object)!==parent||object.__proto__!==value||!Object.prototype.hasOwnProperty.call(object,'__proto__'))throw 'ordinary fromEntries key';
+if(!descriptor.writable||!descriptor.enumerable||!descriptor.configurable||descriptor.value!==value||descriptor.get!==undefined)throw 'real data descriptor';
+'from-entries-key-ok';
+"#, &mut NoHost).unwrap();
+        assert_eq!(value.to_text(), "from-entries-key-ok");
     }
 
     #[test]

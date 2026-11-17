@@ -94,7 +94,7 @@ impl Runtime {
             Builtin::ObjectStatic("defineProperty") => 3,
             Builtin::FunctionMethod("apply") => 2,
             Builtin::FunctionMethod("toString")
-            | Builtin::ObjectMethod("toString" | "valueOf")
+            | Builtin::ObjectMethod("toString" | "valueOf" | "\0get __proto__")
             | Builtin::ErrorToString => 0,
             Builtin::ArrayMethod(
                 "pop" | "toString" | "shift" | "reverse" | "toReversed" | "flat",
@@ -271,6 +271,9 @@ impl Runtime {
         ] {
             self.prototype_method(object, name, Builtin::ObjectMethod(name))?;
         }
+        let Value::Function(get) = self.native_function(Builtin::ObjectMethod("\0get __proto__"), "get __proto__")? else { unreachable!() };
+        let Value::Function(set) = self.native_function(Builtin::ObjectMethod("\0set __proto__"), "set __proto__")? else { unreachable!() };
+        self.store_accessor_property(object, "__proto__".into(), Accessors { get: Some(get), set: Some(set) }, (false, true))?;
         let function_properties = self.ordinary_id(Ordinary::Function(function))?;
         for name in ["call", "apply", "bind", "toString"] {
             self.prototype_method(function_properties, name, Builtin::FunctionMethod(name))?;
@@ -1836,6 +1839,38 @@ impl Runtime {
         args: &[Value],
         host: &mut dyn Host,
     ) -> Result<Value, Fault> {
+        // ECMA-262 Object.prototype.__proto__: real per-realm accessors, not a
+        // special assignment/key rule. Native inspection/mutation continues to
+        // use its existing provenance and origin gates before any author hook.
+        if method == "\0get __proto__" {
+            Self::require_property_receiver(&this)?;
+            self.reject_foreign_window(&this, host)?;
+            let prototype = if let Value::Host(handle) = this {
+                Some(self.native_instance_prototype(handle, host)?)
+            } else {
+                let object = if let Some(object) = Ordinary::from_value(&this) { object }
+                    else { Ordinary::from_value(&self.box_primitive(this)?).unwrap() };
+                self.ordinary_prototype(object)?
+            };
+            return Ok(prototype.map_or(Value::Null, Ordinary::value));
+        }
+        if method == "\0set __proto__" {
+            Self::require_property_receiver(&this)?;
+            self.reject_foreign_window(&this, host)?;
+            let prototype = args.first().unwrap_or(&Value::Undefined);
+            if !matches!(prototype, Value::Null | Value::Object(_) | Value::Function(_) | Value::Host(_)) {
+                return Ok(Value::Undefined);
+            }
+            let Some(object) = Ordinary::from_value(&this) else {
+                return if matches!(this, Value::Host(_)) {
+                    Err(Fault::new("Native host object prototypes cannot be changed."))
+                } else { Ok(Value::Undefined) };
+            };
+            self.reject_foreign_window(prototype, host)?;
+            let prototype = self.prototype_argument(prototype)?;
+            self.set_prototype(object, prototype)?;
+            return Ok(Value::Undefined);
+        }
         if method == "toString" {
             if Ordinary::from_value(&this).is_some() || matches!(&this,Value::Host(handle) if host.exposed_native_prototype(*handle)) {
                 if let Value::Host(handle)=this {self.validate_native_access(handle,host)?;}
