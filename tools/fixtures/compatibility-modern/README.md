@@ -23,12 +23,30 @@ requires an exact executable digest and existing real acceptance. `--exe` select
 the corresponding executable. Outputs must be fresh children of the configured
 verification storage (`CHEZCAT_VERIFICATION_ROOT` or the normal default).
 
-The actual App driver supplies trusted input and paired source/layout/pixel
-snapshots. The jQuery app applies a field value after a real click and uses an
+The App driver targets controls by their `name` attributes for trusted input and
+paired source/layout/pixel snapshots. The jQuery app applies a field value after a
+real click and uses an
 original timer callback to update text through jQuery; it does not establish
 AJAX/Deferred support. The Bootstrap app opens a real dropdown, chooses its item,
 and measures its two responsive columns at 1280 and 640. No library is patched,
 polyfilled, replaced, or driven through a reference browser.
+
+## Fixture revision 2
+
+Revision 2 adds names matching the four existing action IDs: `modern-name`,
+`jquery-apply`, `modern-menu-toggle` and `modern-menu-choice`. The previous exact
+fixtures remain in Git at `10c3ef79ef7dc6cffd6a52dbe67b035024e22fc4`.
+That revision supplied only IDs, so the name-based App driver reported no rendered
+control named `modern-name` or `modern-menu-toggle`. Its three configuration records
+retain their observed startup library failures, loading and initial rendering;
+their interaction attempts also have a separate `HarnessBlocked` cause.
+
+Keep those original records bound to revision 1. Do not rewrite them as revision 2
+or infer an interaction pass from the name correction. A structural HTML check can
+prove that action names exist uniquely; it cannot prove that a menu choice becomes
+visible, a library initializes or trusted interaction succeeds. Fresh App rechecks
+must establish those outcomes. `fixtures.json` pins this revision's original files;
+the upstream distributions and `inputs.json` asset/license pins are unchanged.
 
 Loading, demonstrated parsing, initialization, initial rendering and interaction
 are reported separately. A syntax failure is distinguished only when the engine

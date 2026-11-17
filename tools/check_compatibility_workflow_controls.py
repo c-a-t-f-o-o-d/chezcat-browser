@@ -99,6 +99,16 @@ class ModernScoreControls(unittest.TestCase):
                     ('/jquery/', '/jquery-app.js', '/modern.css', '/control.ppm', '/jquery-4.0.0.js')]
         return modern.score('jquery', 1280, stages, requests)
 
+    def test_actions_require_control_names_and_correct_tags(self):
+        valid = '<input id="modern-name" name="modern-name"><button name="jquery-apply"></button>'
+        modern.check_action_targets('jquery', valid)
+        for invalid in (valid.replace(' name="modern-name"', ''),
+                        valid + '<input name="modern-name">',
+                        valid.replace('<input ', '<p '),
+                        valid.replace('name="modern-name"', 'name="modern-name" name="duplicate"')):
+            with self.subTest(source=invalid), self.assertRaises(ValueError):
+                modern.check_action_targets('jquery', invalid)
+
     def test_actual_rectangle_contract_passes_complete_synthetic_score(self):
         self.assertTrue(all(row['state'] == 'Passed' for row in self.scores(self.facts()).values()))
 

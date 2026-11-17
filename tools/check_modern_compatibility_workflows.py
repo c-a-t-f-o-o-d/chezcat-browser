@@ -6,6 +6,7 @@ watchdog. Never download, install, accept terms, change libraries or drive a des
 import argparse
 from datetime import datetime, timezone
 import hashlib
+from html.parser import HTMLParser
 import json
 from pathlib import Path
 import re
@@ -38,6 +39,31 @@ def sha(data):
     return hashlib.sha256(data).hexdigest()
 
 
+def check_action_targets(workflow, source):
+    """The App driver selects rendered form controls by name, not element id."""
+    class Controls(HTMLParser):
+        def __init__(self):
+            super().__init__(convert_charrefs=True)
+            self.named = {}
+
+        def handle_starttag(self, tag, attrs):
+            names = [value for key, value in attrs if key == 'name']
+            require(len(names) <= 1, 'Ambiguous control name attributes in original fixture.')
+            if names and names[0]:
+                self.named.setdefault(names[0], []).append(tag)
+
+    controls = Controls()
+    controls.feed(source)
+    for line in actions(workflow):
+        fields = line.split('\t')
+        if fields[0] not in ('fill', 'click'):
+            continue
+        matches = controls.named.get(fields[1], [])
+        require(len(matches) == 1, 'App action requires one named control: ' + fields[1])
+        allowed = ('input', 'textarea') if fields[0] == 'fill' else ('input', 'button')
+        require(matches[0] in allowed, 'App action targets an unsupported control: ' + fields[1])
+
+
 def read_json(path, limit=4 * 1024 * 1024):
     require(path.is_file() and path.stat().st_size <= limit, 'Expected bounded JSON file is unavailable.')
     return json.loads(path.read_bytes())
@@ -54,6 +80,8 @@ def fixture_identity():
         require(path.is_file() and path.stat().st_size == item['bytes'] <= 2 * 1024 * 1024, 'Fixture size mismatch: ' + name)
         data = path.read_bytes()
         require(len(data) == item['bytes'] and sha(data) == item['sha256'], 'Original fixture changed: ' + name)
+    for workflow in WORKFLOWS:
+        check_action_targets(workflow, (FIXTURES / (workflow + '.html')).read_text(encoding='utf-8'))
     return {name: item['sha256'] for name, item in files.items()}
 
 
