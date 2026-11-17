@@ -178,3 +178,80 @@ fn text_input_actual_app_fragment_fill_delete_and_reset_preserve_native_editors(
     assert_eq!((app.history_index, app.history.len()), history);
     clean(&app);
 }
+
+#[test]
+fn text_input_actual_app_reflow_retires_focused_editor_and_preserves_visible_neighbor() {
+    fn editor(app: &App, node: usize) -> (String, usize, usize, usize, bool) {
+        let control = &app.forms.controls[&node];
+        (control.value.text(), control.value.cursor, control.value.anchor, control.value.offset, control.dirty_value)
+    }
+    fn remove_and_reflow(app: &mut App, source: &str) {
+        // The resource/media completion paths can enter this exact App reflow
+        // boundary after author callbacks. Do not call focus validation here:
+        // that would conceal whether reflow retires stale native admission.
+        let outcome = app.scripting.as_mut().unwrap().console_eval(&mut app.document, &mut app.forms, source);
+        assert_eq!(outcome.errors, 0, "{}", app.scripting.as_ref().unwrap().report());
+        assert!(outcome.layout_changed, "Removing a connected native control must change layout");
+        app.reflow();
+    }
+    let fixture = Fixture::new();
+    let mut app = fixture.open();
+    let raw = app.raw.clone();
+    let location = app.location.clone();
+    let history = (app.history_index, app.history.len());
+    click(&mut app, "create");
+    let dynamic = id(&app, "dynamic");
+    let neighbor = id(&app, "neighbor");
+    let parsed = id(&app, "parsed");
+
+    // Positive control: retirement of a different native input must not steal
+    // the visible editor's focus, dirty text, cursor, selection or scroll.
+    fixture.input(&mut app, "retirement-neighbor", "fill\tneighbor\tneighbor kept\n");
+    key(&mut app, 0x24, false);
+    for _ in 0..2 { key(&mut app, 0x27, false); }
+    for _ in 0..3 { key(&mut app, 0x27, true); }
+    assert!(app.focus == Focus::Control(neighbor));
+    let preserved = editor(&app, neighbor);
+    remove_and_reflow(&mut app, "parsed.parentNode.removeChild(parsed);");
+    assert!(!app.page.controls.iter().any(|rect| rect.node == parsed));
+    assert_eq!(app.forms.controls[&parsed].owner, None);
+    assert!(app.focus == Focus::Control(neighbor), "A visible unaffected neighbor must retain focus");
+    assert_eq!(editor(&app, neighbor), preserved);
+
+    // Enter the fragment-created editor through actual pointer delivery, then
+    // type/paste literal data through the same App admission used by the shell.
+    click(&mut app, "dynamic");
+    key(&mut app, 0x24, false);
+    app.text_input('R');
+    app.paste("etired ");
+    clean(&app);
+    assert_eq!(app.forms.controls[&dynamic].value.text(), "Retired initial");
+    assert_eq!(app.document.title, "Dynamic 2");
+    assert!(app.focus == Focus::Control(dynamic));
+    let old_rect = app.page.controls.iter().find(|rect| rect.node == dynamic).unwrap().clone();
+    let retired = editor(&app, dynamic);
+    remove_and_reflow(&mut app, "dynamic.parentNode.removeChild(dynamic);");
+    assert!(app.forms.controls.contains_key(&dynamic), "Retirement preserves the actual native editor identity");
+    assert_eq!(app.forms.controls[&dynamic].owner, None);
+    assert!(!app.forms.controls[&dynamic].disabled, "The negative must exercise an enabled retained editor");
+    assert!(!app.page.controls.iter().any(|rect| rect.node == dynamic));
+    assert!(app.page.border_rects[dynamic].is_none());
+    assert_eq!(app.page.control_at(old_rect.x + old_rect.width / 2, old_rect.y + old_rect.height / 2), None);
+    assert_eq!(editor(&app, dynamic), retired, "Detachment itself preserves the editor");
+    let retired_title = app.document.title.clone();
+    app.text_input('X');
+    app.paste("NO RETIRED PASTE");
+    assert_eq!(editor(&app, dynamic), retired,
+        "Retired editor accepted native input: focus_page={}, title={:?}, script={} ",
+        app.focus == Focus::Page, app.document.title, app.scripting.as_ref().unwrap().report());
+    assert!(app.focus == Focus::Page, "Reflow must retire focus before later native input admission");
+    assert_eq!(app.document.title, retired_title, "Retired input cannot dispatch an authored input callback");
+    assert_eq!(editor(&app, neighbor), preserved, "Rejected retired input cannot edit a neighboring control");
+    let outcome = app.scripting.as_mut().unwrap().console_eval(&mut app.document, &mut app.forms,
+        "if(dynamicEdits!==2||parsedEdits!==0)throw 'retired native input callback';");
+    assert_eq!(outcome.errors, 0, "{}", app.scripting.as_ref().unwrap().report());
+    assert_eq!(app.raw, raw);
+    assert_eq!(app.location, location);
+    assert_eq!((app.history_index, app.history.len()), history);
+    clean(&app);
+}

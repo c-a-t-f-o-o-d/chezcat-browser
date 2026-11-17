@@ -1712,6 +1712,7 @@ impl App {
         self.drag = Drag::None;
         self.set_scroll(self.scroll.clamp(0, self.max_scroll()));
         self.update_find(false);
+        self.validate_control_focus();
     }
     pub fn resize(&mut self, width: i32, height: i32) {
         let width = width.clamp(1, 8192);
