@@ -187,6 +187,7 @@ pub enum PaintItem {
         width: i32,
         height: i32,
         color: u32,
+        alpha: u8,
     },
     Text(usize),
     Control(usize),
@@ -240,6 +241,7 @@ pub struct ImageControl {
     pub height: i32,
     pub border: [i32; 4],
     pub border_color: [u32; 4],
+    pub border_alpha: [u8; 4],
     pub presentation: crate::paint::ImagePresentation,
 }
 
@@ -532,6 +534,7 @@ struct Decoration {
     border: [i32; 4],
     padding: [i32; 4],
     colors: [u32; 4],
+    alpha: [u8; 4],
     items: Vec<PaintItem>,
     context: Option<usize>,
     link: Option<usize>,
@@ -704,6 +707,7 @@ pub fn build_viewport_with_fonts(
             width,
             height: MAX_HEIGHT,
             color,
+            alpha: 255,
         });
     }
     let mut parents = vec![None; doc.nodes.len()];
@@ -1960,7 +1964,9 @@ impl Engine<'_> {
         let background_image = self.background_image(index, style, x, y, outer_width, 0, border);
         let borders: [Option<usize>; 4] = std::array::from_fn(|side| {
             if border[side] > 0 {
-                self.rect(x, y, 0, 0, colors[side])
+                let item=self.rect(x, y, 0, 0, colors[side]);
+                if let Some(item)=item {if let PaintItem::Rect {alpha,..}=&mut self.layout.items[item] {*alpha=style.border_alpha[side];}}
+                item
             } else {
                 None
             }
@@ -2096,12 +2102,7 @@ impl Engine<'_> {
                 *height = outer_height;
             }
         }
-        let boxes = [
-            (x, y, outer_width, border[0]),
-            (x + outer_width - border[1], y, border[1], outer_height),
-            (x, y + outer_height - border[2], outer_width, border[2]),
-            (x, y, border[3], outer_height),
-        ];
+        let boxes = crate::paint::border_segments(x,y,outer_width,outer_height,border,style.border_alpha);
         for side in 0..4 {
             if let Some(item) = borders[side] {
                 let (x, y, w, h) = boxes[side];
@@ -3218,22 +3219,10 @@ impl Engine<'_> {
                 *height = outer_height;
             }
         }
-        let sides = [
-            (record.x, record.y, outer_width, record.border[0]),
-            (
-                record.x + outer_width - record.border[1],
-                record.y,
-                record.border[1],
-                outer_height,
-            ),
-            (
-                record.x,
-                record.y + outer_height - record.border[2],
-                outer_width,
-                record.border[2],
-            ),
-            (record.x, record.y, record.border[3], outer_height),
-        ];
+        let alpha=record.borders.map(|item|item.and_then(|item|match self.layout.items.get(item) {
+            Some(PaintItem::Rect {alpha,..})=>Some(*alpha),_=>None,
+        }).unwrap_or(255));
+        let sides=crate::paint::border_segments(record.x,record.y,outer_width,outer_height,record.border,alpha);
         for (side, (x, y, w, h)) in sides.into_iter().enumerate() {
             if let Some(item) = record.borders[side] {
                 self.set_rect(item, x, y, w, h);
@@ -3726,6 +3715,7 @@ impl Engine<'_> {
                 border,
                 padding,
                 colors: style.border_color.map(|color| color.unwrap_or(style.color)),
+                alpha: style.border_alpha,
                 items: Vec::new(),
                 context: self.inline_context,
                 link,
@@ -4173,6 +4163,7 @@ impl Engine<'_> {
                 height: content_height,
                 border,
                 border_color: style.border_color.map(|color| color.unwrap_or(style.color)),
+                border_alpha: style.border_alpha,
                 presentation: self.image_presentation(node, style),
             }),
         });
@@ -4404,6 +4395,7 @@ impl Engine<'_> {
                 border,
                 padding,
                 colors: style.border_color.map(|color| color.unwrap_or(style.color)),
+                alpha: style.border_alpha,
                 items: Vec::new(),
                 context: self.inline_context,
                 link: None,
@@ -4480,6 +4472,7 @@ impl Engine<'_> {
             width,
             height,
             color,
+            alpha: 255,
         });
         Some(index)
     }
@@ -4598,14 +4591,10 @@ impl Engine<'_> {
                         width,
                         height,
                         color,
+                        alpha: 255,
                     });
                 }
-                let boxes = [
-                    (x, y, width, border[0]),
-                    (x + width - border[1], y, border[1], height),
-                    (x, y + height - border[2], width, border[2]),
-                    (x, y, border[3], height),
-                ];
+                let boxes = crate::paint::border_segments(x,y,width,height,border,decoration.alpha);
                 for (side, (x, y, width, height)) in boxes.into_iter().enumerate() {
                     if border[side] > 0 {
                         items.push(PaintItem::Rect {
@@ -4614,6 +4603,7 @@ impl Engine<'_> {
                             width,
                             height,
                             color: decoration.colors[side],
+                            alpha: decoration.alpha[side],
                         });
                     }
                 }
@@ -5050,6 +5040,7 @@ mod tests {
                     width,
                     height,
                     color,
+                    ..
                 } if *color == wanted => Some((*x, *y, *width, *height)),
                 _ => None,
             })
@@ -5085,6 +5076,7 @@ mod tests {
                     width,
                     height,
                     color: 0xeeeeee,
+                    ..
                 } => Some((*x, *y, *width, *height)),
                 _ => None,
             })

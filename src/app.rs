@@ -3725,10 +3725,11 @@ impl App {
                     width,
                     height,
                     color,
+                    alpha,
                 } => {
                     let y = y + top - self.scroll;
                     if y < bottom && y.saturating_add(height) > top {
-                        canvas.fill_rect(x, y, width, height, self.page_background_color(color));
+                        canvas.fill_rect_alpha(x, y, width, height, self.page_background_color(color), alpha);
                     }
                 }
                 PaintItem::Background { node, x, y, width, height, border, presentation, .. } => {
@@ -4149,23 +4150,9 @@ fn draw_control(
                 bitmap,
                 image.presentation,
             );
-            let [top, right, bottom, left] = image.border;
-            canvas.fill_rect(x, y, width, top, image.border_color[0]);
-            canvas.fill_rect(
-                x.saturating_add(width).saturating_sub(right),
-                y,
-                right,
-                height,
-                image.border_color[1],
-            );
-            canvas.fill_rect(
-                x,
-                y.saturating_add(height).saturating_sub(bottom),
-                width,
-                bottom,
-                image.border_color[2],
-            );
-            canvas.fill_rect(x, y, left, height, image.border_color[3]);
+            for (side,(x,y,width,height)) in crate::paint::border_segments(x,y,width,height,image.border,image.border_alpha).into_iter().enumerate() {
+                canvas.fill_rect_alpha(x,y,width,height,image.border_color[side],image.border_alpha[side]);
+            }
             if focused {
                 let color = 0x178b78;
                 canvas.fill_rect(x, y, width, 1, color);
@@ -5661,6 +5648,10 @@ mod comment_tests;
 #[cfg(test)]
 #[path = "app_select_fragment_tests.rs"]
 mod select_fragment_tests;
+
+#[cfg(test)]
+#[path="app_rgba_border_tests.rs"]
+mod rgba_border_tests;
 
 #[cfg(test)]
 #[path = "app_literal_prototype_tests.rs"]
