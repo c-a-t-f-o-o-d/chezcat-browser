@@ -123,7 +123,7 @@ impl Runtime {
     pub(super) fn ensure_native_expando(&mut self,handle:u32,host:&dyn Host,create:bool)->Result<(),Fault> {
         self.validate_native_access(handle, host)?;
         let Some(owner)=host.expando_owner(handle) else {
-            if self.native_expando_owners.contains_key(&handle) {return Err(Fault::new("Native expando receiver is no longer accessible."));}
+            if self.native_expando_owners.contains_key(&handle) {return Err(Fault::new("Native expando receiver has expired or is no longer accessible."));}
             return Ok(());
         };
         self.reject_foreign_window(&Value::Host(handle),host)?;
@@ -354,7 +354,10 @@ impl Runtime {
     ) -> Result<Vec<String>, Fault> {
         self.reject_foreign_window(&Value::Host(handle), host)?;
         if self.is_browser_global(handle) { return self.window_keys(inherited, true, host); }
-        self.ensure_native_expando(handle,host,inherited && host.exposed_native_prototype(handle))?;
+        // Fresh ordinary native instances already own their real unforgeable
+        // slots before any string/symbol read. Publish the metered store for
+        // own inspection too; ensure still requires explicit owner/provenance.
+        self.ensure_native_expando(handle,host,host.exposed_native_prototype(handle))?;
         if inherited && host.expando_owner(handle).is_some() && !host.exposed_native_prototype(handle) {
             return Err(Fault::new("Inherited native Element enumeration is not implemented."));
         }
