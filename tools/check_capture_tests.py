@@ -13,6 +13,7 @@ import unittest
 from unittest.mock import patch
 
 import capture_tests as runner
+from check_authored_video_controls import AuthoredVideoControls
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -319,7 +320,8 @@ def main():
     args = parser.parse_args()
     log = io.StringIO()
     result = unittest.TextTestRunner(stream=log, verbosity=2).run(
-        unittest.defaultTestLoader.loadTestsFromTestCase(CaptureTests))
+        unittest.TestSuite(unittest.defaultTestLoader.loadTestsFromTestCase(case)
+            for case in (CaptureTests, AuthoredVideoControls)))
     report = {'scope': 'Controlled Python subprocess and parsing tests; no Rust or Windows runtime executed.',
               'tests_run': result.testsRun, 'failures': len(result.failures),
               'errors': len(result.errors), 'skipped': len(result.skipped),

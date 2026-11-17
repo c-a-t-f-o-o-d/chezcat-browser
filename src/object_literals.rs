@@ -64,6 +64,9 @@ impl Runtime {
             let Value::Function(function) = value else {
                 return Err(Fault::new("Invalid object method definition."));
             };
+            if let super::Function::Script { home_object, .. } = &mut self.functions[function] {
+                *home_object = Some(Ordinary::Object(object));
+            }
             self.literal_function_name(function, &key, kind)?;
             if matches!(kind, Kind::Getter | Kind::Setter) {
                 // Repeated accessor definitions replace only their own half.
@@ -281,7 +284,8 @@ mod tests {
             "({set x(...a){}});",
             "({get x:1});",
             "({get __proto__(){return 1;}});",
-            "({get x(){super.x;}});",
+            // Accessors have a HomeObject, but only derived constructors admit super().
+            "({get x(){super();}});",
             "({async x(){}});",
             "({async [x](){}});",
             "({*x(){}});",

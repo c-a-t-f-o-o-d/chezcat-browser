@@ -70,9 +70,22 @@ mod bound_functions;
 mod class_parser;
 #[path = "class_runtime.rs"]
 mod class_runtime;
+#[path = "derived_context.rs"]
+mod derived_context;
+#[path = "super_access.rs"]
+mod super_access;
 #[cfg(test)]
 #[path = "base_class_tests.rs"]
 mod base_class_tests;
+#[cfg(test)]
+#[path = "derived_class_tests.rs"]
+mod derived_class_tests;
+#[cfg(test)]
+#[path = "derived_class_lifetime_tests.rs"]
+mod derived_class_lifetime_tests;
+#[cfg(test)]
+#[path = "super_home_object_tests.rs"]
+mod super_home_object_tests;
 #[cfg(test)]
 #[path = "strict_missing_assignment_tests.rs"]
 mod strict_missing_assignment_tests;
@@ -1554,6 +1567,8 @@ enum ExprKind {
     Name(String),
     This,
     NewTarget,
+    SuperCall(Vec<Argument>),
+    SuperMember(String),
     Unary(&'static str, ExprId),
     Binary(&'static str, ExprId, ExprId),
     Conditional(ExprId, ExprId, ExprId),
@@ -1624,6 +1639,8 @@ struct Template {
     constructible: bool,
     class_constructor: bool,
     class_element: bool,
+    derived_constructor: bool,
+    default_constructor: bool,
     strict: bool,
     name: Option<String>,
     params: Vec<Parameter>,
@@ -1660,6 +1677,8 @@ struct DeferredBody {
     strict: bool,
     function_depth: usize,
     new_target_allowed: bool,
+    super_property_allowed: bool,
+    super_call_allowed: bool,
 }
 
 struct Parser {
@@ -1681,6 +1700,8 @@ struct Parser {
     allow_in: bool,
     functions: usize,
     new_target_allowed: bool,
+    super_property_allowed: bool,
+    super_call_allowed: bool,
 }
 
 impl Parser {
@@ -1702,12 +1723,13 @@ impl Parser {
     fn parse_context_with_capacity(source: &str, regexp_budget: &mut usize,
         strict: bool, active_depth: usize, capacity: limits::Capacities,
         heap: limits::HeapLimits) -> Result<Program, Fault> {
-        Self::parse_invocation_context(source, regexp_budget, strict, active_depth, capacity, heap, false)
+        Self::parse_invocation_context(source, regexp_budget, strict, active_depth, capacity, heap, false, false, false)
     }
 
     fn parse_invocation_context(source: &str, regexp_budget: &mut usize,
         strict: bool, active_depth: usize, capacity: limits::Capacities,
-        heap: limits::HeapLimits, new_target_allowed: bool) -> Result<Program, Fault> {
+        heap: limits::HeapLimits, new_target_allowed: bool,
+        super_property_allowed: bool, super_call_allowed: bool) -> Result<Program, Fault> {
         let tokens = tokenize_with_capacity(source, regexp_budget, capacity)?;
         // Index braces and parentheses once. Deferred bodies and arrow lookahead
         // reuse this token-sized map instead of rescanning nested token ranges.
@@ -1767,6 +1789,8 @@ impl Parser {
             allow_in: true,
             functions: 0,
             new_target_allowed,
+            super_property_allowed,
+            super_call_allowed,
         };
         let mut directives = true;
         while !matches!(parser.token().kind, TokenKind::End) {
@@ -1802,6 +1826,8 @@ impl Parser {
             strict: self.strict,
             function_depth: self.functions + 1,
             new_target_allowed: !self.program.templates[id].arrow || self.new_target_allowed,
+            super_property_allowed: self.super_property_allowed,
+            super_call_allowed: self.super_call_allowed,
         });
         self.current = end + 1;
         Ok(id)
@@ -1821,6 +1847,8 @@ impl Parser {
             self.enter()?;
             self.functions = body.function_depth;
             self.new_target_allowed = body.new_target_allowed;
+            self.super_property_allowed = body.super_property_allowed;
+            self.super_call_allowed = body.super_call_allowed;
             self.strict = body.strict;
             self.allow_in = true;
             self.loops.clear();
@@ -2304,8 +2332,15 @@ impl Parser {
     }
 
     fn function(&mut self, name: Option<String>, start: usize) -> Result<usize, Fault> {
+        self.function_with_super(name, start, false, false)
+    }
+
+    fn function_with_super(&mut self, name: Option<String>, start: usize,
+        super_property_allowed: bool, super_call_allowed: bool) -> Result<usize, Fault> {
         self.enter()?;
         let previous_new_target = std::mem::replace(&mut self.new_target_allowed, true);
+        let previous_super_property = std::mem::replace(&mut self.super_property_allowed, super_property_allowed);
+        let previous_super_call = std::mem::replace(&mut self.super_call_allowed, super_call_allowed);
         let (params, rest, trailing_parameter_comma) = self.parameters(false)?;
         let id = self.defer_body(Template {
             source_start: start,
@@ -2315,6 +2350,8 @@ impl Parser {
             constructible: true,
             class_constructor: false,
             class_element: false,
+            derived_constructor: false,
+            default_constructor: false,
             strict: self.strict,
             name,
             params,
@@ -2323,6 +2360,8 @@ impl Parser {
             body: Vec::new(),
         })?;
         self.new_target_allowed = previous_new_target;
+        self.super_property_allowed = previous_super_property;
+        self.super_call_allowed = previous_super_call;
         self.depth -= 1;
         Ok(id)
     }
@@ -2356,7 +2395,7 @@ impl Parser {
     fn assignable(&self, expression: ExprId) -> bool {
         matches!(
             self.program.exprs[expression].kind,
-            ExprKind::Name(_) | ExprKind::Member(_, _)
+            ExprKind::Name(_) | ExprKind::Member(_, _) | ExprKind::SuperMember(_)
         )
     }
     fn arrow_ahead(&self) -> bool {
@@ -2404,6 +2443,8 @@ impl Parser {
                 constructible: false,
                 class_constructor: false,
                 class_element: false,
+                derived_constructor: false,
+                default_constructor: false,
                 strict: self.strict,
                 name: None,
                 params,
@@ -2446,6 +2487,8 @@ impl Parser {
             constructible: false,
             class_constructor: false,
             class_element: false,
+            derived_constructor: false,
+            default_constructor: false,
             strict,
             name: None,
             params,
@@ -2637,7 +2680,7 @@ impl Parser {
                 {
                     return Err(self.error("A setter parameter cannot be followed by a comma."));
                 }
-                let template = self.function(None, position)?;
+                let template = self.function_with_super(None, position, true, false)?;
                 let params = &self.program.templates[template].params;
                 let kind = accessor.unwrap_or(Kind::Method);
                 if kind == Kind::Getter && !params.is_empty() {
@@ -3086,6 +3129,7 @@ struct Environment {
     // Pin its ancestor chain before publishing the retaining handle.
     captured: bool,
     arguments: Option<arguments::Pending>,
+    invocation: Option<derived_context::Data>,
     parent: Option<usize>,
     function_scope: bool,
     catch_parameter: Option<String>,
@@ -3233,7 +3277,7 @@ struct Object {
 /// eval in a top-level arrow cannot acquire function-only syntax permission.
 #[derive(Clone, Copy)]
 struct InvocationContext {
-    new_target: Option<usize>,
+    environment: usize,
 }
 
 enum Function {
@@ -3253,6 +3297,7 @@ enum Function {
         environment: usize,
         lexical_this: Option<Value>,
         lexical_invocation: Option<InvocationContext>,
+        home_object: Option<Ordinary>,
     },
 }
 
@@ -3299,6 +3344,7 @@ enum Reference {
     // assignment the RHS runs first; compound operations convert independently
     // for their read and write, as required for observable user callbacks.
     ComputedProperty(Value, Value),
+    SuperProperty { base: Option<Ordinary>, receiver: Value, name: Box<str> },
 }
 
 enum LoopIterator {
@@ -3451,6 +3497,7 @@ impl Runtime {
                 next_order: 0,
                 captured: true,
                 arguments: None,
+                invocation: None,
                 parent: None,
                 function_scope: true,
                 catch_parameter: None,
@@ -3867,7 +3914,7 @@ impl Runtime {
     fn new_target_value(&mut self) -> Result<Value, Fault> {
         let context = self.invocation.ok_or_else(|| Fault::exception(
             "SyntaxError", "new.target requires an enclosing ordinary function."))?;
-        Ok(context.new_target.map_or(Value::Undefined, Value::Function))
+        Ok(self.invocation_data(context)?.new_target.map_or(Value::Undefined, Value::Function))
     }
 
     fn string_eval(
@@ -3911,9 +3958,15 @@ impl Runtime {
         self.call_depth += 1;
         self.transient_roots.owned_call_depth += 1;
         let result = (|| {
+            let (super_property_allowed, super_call_allowed) = if let Some(context) = self.invocation {
+                let data = self.invocation_data(context)?;
+                (data.home_object.is_some(), data.derived_constructor)
+            } else { (false, false) };
             let program =
                 self.register_program_invocation(source, false, direct.is_some() && self.strict,
-                    direct.is_some() && self.invocation.is_some())?;
+                    direct.is_some() && self.invocation.is_some(),
+                    direct.is_some() && super_property_allowed,
+                    direct.is_some() && super_call_allowed)?;
             self.strict = program.strict;
             let outer = direct.map_or(self.global_environment, |(environment, _)| environment);
             let this = if let Some((_, this)) = direct {
@@ -4062,11 +4115,12 @@ impl Runtime {
         handler: bool,
         strict: bool,
     ) -> Result<Rc<Program>, Fault> {
-        self.register_program_invocation(source, handler, strict, false)
+        self.register_program_invocation(source, handler, strict, false, false, false)
     }
 
     fn register_program_invocation(
         &mut self, source: &str, handler: bool, strict: bool, new_target_allowed: bool,
+        super_property_allowed: bool, super_call_allowed: bool,
     ) -> Result<Rc<Program>, Fault> {
         self.step()?;
         self.prepare_program_capacity(source.len(), 0, true)?;
@@ -4077,7 +4131,8 @@ impl Runtime {
         }
         self.work_as(source.len(), WorkKind::ProgramCompilation)?;
         let program = Rc::new(Parser::parse_invocation_context(source, &mut self.regexp_work,
-            strict, self.eval_depth, self.limits.capacity, self.limits.heap, new_target_allowed).map_err(|mut fault| {
+            strict, self.eval_depth, self.limits.capacity, self.limits.heap, new_target_allowed,
+            super_property_allowed, super_call_allowed).map_err(|mut fault| {
             if fault.message.contains("Parser nesting limit") && self.eval_depth != 0 {
                 fault.message.push_str(&format!(" Active native entries={}; calls={}; heap expression frames={}.",
                     self.eval_depth, self.call_depth, self.evaluation_frames));
@@ -4195,6 +4250,7 @@ impl Runtime {
             next_order: 0,
             captured: false,
             arguments: None,
+            invocation: None,
             parent: Some(parent),
             function_scope,
             catch_parameter: None,
@@ -4527,10 +4583,7 @@ impl Runtime {
             environment
         };
         let lexical_this = if program.templates[template].arrow {
-            if self.value_bytes.saturating_add(this.bytes()) > self.limits.heap.retained_values {
-                return Err(Fault::new(format!("Retained value limit reached ({} bytes).", self.limits.heap.retained_values)));
-            }
-            let value = self.copy_value(this)?;
+            let value = self.capture_arrow_this(this)?;
             self.value_bytes += value.bytes();
             Some(value)
         } else {
@@ -4543,6 +4596,7 @@ impl Runtime {
             environment,
             lexical_this,
             lexical_invocation: if program.templates[template].arrow { self.invocation } else { None },
+            home_object: None,
         })?;
         debug_assert_eq!(inserted.id, index);
         if program.templates[template].class_element {
@@ -4846,6 +4900,7 @@ impl Runtime {
         if let Some(environment) = self.environments[id].take() {
             self.bindings -= environment.bindings.len();
             self.value_bytes -= environment.arguments.as_ref().map_or(0, arguments::Pending::bytes);
+            self.value_bytes -= environment.invocation.as_ref().map_or(0, derived_context::Data::bytes);
             self.value_bytes -= environment.bindings.values()
                 .filter_map(|binding| binding.value.as_ref())
                 .map(Value::bytes).sum::<usize>();
@@ -4865,10 +4920,12 @@ impl Runtime {
     fn collect_environments(&mut self) {
         let mut live = vec![false; self.environments.len()];
         let mut roots = vec![0];
+        if let Some(context) = self.invocation { roots.push(context.environment); }
         roots.extend(self.intrinsic_realms.iter().map(|realm| realm.global_environment));
         for function in &self.functions {
-            if let Function::Script { environment, .. } = function {
+            if let Function::Script { environment, lexical_invocation, .. } = function {
                 roots.push(*environment);
+                if let Some(context) = lexical_invocation { roots.push(context.environment); }
             }
         }
         roots.extend(self.objects.iter().filter_map(|object| {
@@ -7197,10 +7254,15 @@ impl Runtime {
                     format!("{name} is not defined."),
                 )),
             },
-            ExprKind::This => self.copy_value(this),
+            ExprKind::This => self.context_this(this),
             ExprKind::NewTarget => self.new_target_value(),
             ExprKind::Function(template) => self.make_function(program, *template, env, this),
-            ExprKind::Class(class) => self.make_class(program, *class, env, this),
+            ExprKind::Class(class) => self.make_class(program, *class, env, this, host),
+            ExprKind::SuperCall(arguments) => self.eval_super_call(program, arguments, env, this, host),
+            ExprKind::SuperMember(name) => {
+                let reference = self.super_reference(name)?;
+                self.read_reference(&reference, host)
+            }
             ExprKind::Object(_) | ExprKind::Array(_) => {
                 self.eval_collection(program, id, env, this, host)
             }
@@ -7307,7 +7369,7 @@ impl Runtime {
                     }
                     if matches!(
                         program.exprs[*argument].kind,
-                        ExprKind::Name(_) | ExprKind::Member(_, _)
+                        ExprKind::Name(_) | ExprKind::Member(_, _) | ExprKind::SuperMember(_)
                     ) {
                         let reference = self.reference(program, *argument, env, this, host)?;
                         return self.delete_reference(reference, host);
@@ -7476,6 +7538,9 @@ impl Runtime {
             unreachable!()
         };
         match &program.exprs[*callee].kind {
+            ExprKind::SuperMember(name) => {
+                self.eval_super_member_call(program, name, arguments, env, this, host)
+            }
             ExprKind::OptionalChain(_, _) => {
                 self.call_parenthesized_chain(program, *callee, arguments, env, this, host)
             }
@@ -7757,6 +7822,11 @@ impl Runtime {
             Some(Function::Script {
                 program, template, ..
             }) if program.templates[*template].constructible => {
+                if program.templates[*template].derived_constructor {
+                    // A derived constructor owns an uninitialized binding, not
+                    // a receiver allocated before super selects its real base.
+                    return self.call_constructed_script(index, args, Value::Undefined, new_target, host);
+                }
                 let object = self.script_constructor_receiver(new_target.unwrap_or(index), host)?;
                 let result =
                     self.call_constructed_script(index, args, Value::Object(object), new_target, host)?;
@@ -7846,6 +7916,7 @@ impl Runtime {
                 let property = self.eval(program, *property, env, this, host)?;
                 Ok(Reference::ComputedProperty(object, property))
             }
+            ExprKind::SuperMember(name) => self.super_reference(name),
             _ => Err(Fault::new("Invalid assignment reference.")),
         }
     }
@@ -7878,6 +7949,7 @@ impl Runtime {
             }
             Reference::Binding(env, name) => self.read_binding(*env, name, host),
             Reference::Global(name) => self.global_value(name, host),
+            Reference::SuperProperty { base, receiver, name } => self.read_super_property(*base, receiver, name, host),
             Reference::Missing(name) => Err(Fault::exception(
                 "ReferenceError",
                 format!("{name} is not defined."),
@@ -7969,6 +8041,7 @@ impl Runtime {
             Reference::SymbolProperty(object, key) => self.assign_symbol_property(object, key, value, host),
             Reference::Binding(env, name) => self.write_binding(env, &name, value, false, host),
             Reference::Global(name) => self.set_global(name, value, host),
+            Reference::SuperProperty { base, receiver, name } => self.write_super_property(base, receiver, name, value, host),
             Reference::Missing(name) if self.is_operation_global(&name) => {
                 if self.strict {
                     Err(Fault::exception("ReferenceError", format!("{name} is not defined.")))
@@ -8012,6 +8085,7 @@ impl Runtime {
             return self.delete_reference(key.reference(object), host);
         }
         let deleted = match reference {
+            Reference::SuperProperty { .. } => return Err(Fault::exception("ReferenceError", "A super property cannot be deleted.")),
             Reference::ComputedProperty(_, _) => unreachable!(),
             Reference::SymbolProperty(object, key) => {
                 Self::require_property_receiver(&object)?;
@@ -8591,7 +8665,11 @@ impl Runtime {
                 if value.bytes() > self.limits.capacity.string_bytes { return Err(self.string_limit_fault()); }
             }
             if this.bytes() > self.limits.capacity.string_bytes { return Err(self.string_limit_fault()); }
-            self.call_script_value(index, args, this, new_target, host)
+            if self.is_derived_script_constructor(index) {
+                self.call_derived_script_value(index, args, this, new_target, host)
+            } else {
+                self.call_script_value(index, args, this, new_target, host)
+            }
         })();
         self.restore_transient_marker(marker);
         result
@@ -8671,6 +8749,12 @@ impl Runtime {
         // Program/template borrows out of the persistent call-forwarding frame.
         matches!(self.functions.get(index), Some(Function::Script { program, template, .. })
             if !program.templates[*template].class_constructor)
+    }
+
+    #[inline(never)]
+    fn is_derived_script_constructor(&self, index: usize) -> bool {
+        matches!(self.functions.get(index), Some(Function::Script { program, template, .. })
+            if program.templates[*template].derived_constructor)
     }
 
     #[inline(never)]
@@ -8813,14 +8897,39 @@ impl Runtime {
         // the previous explicit context, restoring it on every Result path.
         self.push_transient_value(this)?;
         self.push_transient_root(function_reachability::Edge::Environment(parent))?;
-        let Function::Script { program, template, lexical_invocation, .. } = &self.functions[index]
+        let Function::Script { program, template, lexical_invocation, home_object, .. } = &self.functions[index]
             else { unreachable!() };
-        let invocation = if program.templates[*template].arrow { *lexical_invocation }
-            else { Some(InvocationContext { new_target }) };
-        if let Some(target) = invocation.and_then(|context| context.new_target) {
-            self.push_transient_root(function_reachability::Edge::Function(target))?;
+        let (arrow, lexical, derived, home) = (program.templates[*template].arrow,
+            *lexical_invocation, program.templates[*template].derived_constructor, *home_object);
+        if arrow {
+            if let Some(context) = lexical {
+                self.invocation_data(context)?;
+                self.push_transient_root(function_reachability::Edge::Environment(context.environment))?;
+            }
+            self.invocation = lexical;
+            return Ok(());
         }
-        self.invocation = invocation;
+        let retained = if derived { 0 } else { this.bytes() };
+        if self.value_bytes.saturating_add(retained) > self.limits.heap.retained_values {
+            return Err(Fault::new(format!("Retained value limit reached ({} bytes).", self.limits.heap.retained_values)));
+        }
+        let this_binding = if derived { derived_context::ThisBinding::Uninitialized }
+            else { derived_context::ThisBinding::Initialized(self.copy_value(this)?) };
+        // Moving the existing call scope before defaults must not skip the old
+        // entry reclamation opportunity when the environment arena is full.
+        if self.free_environments.is_empty() && self.environments.len() >= self.limits.capacity.environments {
+            self.collect_function_candidates_at_entry()?;
+        }
+        let scope = self.new_environment(parent, true)?;
+        self.environment_mut(scope).invocation = Some(derived_context::Data {
+            callee: index, new_target, this_binding, home_object: home, derived_constructor: derived,
+        });
+        self.value_bytes += retained;
+        if let Err(error) = self.push_transient_root(function_reachability::Edge::Environment(scope)) {
+            self.release_environment(scope);
+            return Err(error);
+        }
+        self.invocation = Some(InvocationContext { environment: scope });
         Ok(())
     }
 
@@ -8881,6 +8990,7 @@ impl Runtime {
             self.transient_roots.uninhibited_script_entries = self.transient_roots.uninhibited_script_entries.saturating_add(1);
         }
         if let Err(error) = self.collect_function_candidates_at_entry() {
+            self.release_unentered_invocation(index);
             self.invocation = previous_invocation;
             self.restore_transient_marker(marker);
             return Err(error);
@@ -8892,6 +9002,52 @@ impl Runtime {
         let result = (|| {
             self.script_parameters_and_body(&program, template, index, parent, args, &this, host)
         })();
+        self.call_depth -= 1;
+        self.transient_roots.owned_call_depth -= 1;
+        self.strict = previous_strict;
+        self.invocation = previous_invocation;
+        self.restore_transient_marker(marker);
+        result
+    }
+
+    // Derived completion may execute real default-super construction before
+    // releasing its invocation environment. Keep that completion pipeline out
+    // of the qualified ordinary Script entry and its direct immutable body.
+    #[inline(never)]
+    fn call_derived_script_value(
+        &mut self, index: usize, args: &[Value], this: Value, new_target: Option<usize>, host: &mut dyn Host,
+    ) -> Result<Value, Fault> {
+        if self.call_depth >= MAX_CALL_DEPTH {
+            return Err(Fault::new("Function call limit reached (32)."));
+        }
+        let Function::Script { program, template, environment, .. } = &self.functions[index]
+            else { unreachable!() };
+        let (program, template, parent) = (program.clone(), *template, *environment);
+        debug_assert!(program.templates[template].derived_constructor && program.templates[template].strict);
+        let marker = self.transient_marker();
+        let previous_invocation = self.invocation;
+        if let Err(error) = self.register_script_invocation_inputs(index, parent, &this, new_target) {
+            self.invocation = previous_invocation;
+            self.restore_transient_marker(marker);
+            return Err(error);
+        }
+        #[cfg(test)]
+        if let Some(observe) = self.transient_roots.script_input_observer { observe(self, index, args, &this); }
+        self.transient_roots.script_entries = self.transient_roots.script_entries.saturating_add(1);
+        if self.transient_roots.inhibited == 0 {
+            self.transient_roots.uninhibited_script_entries = self.transient_roots.uninhibited_script_entries.saturating_add(1);
+        }
+        if let Err(error) = self.collect_function_candidates_at_entry() {
+            self.release_unentered_invocation(index);
+            self.invocation = previous_invocation;
+            self.restore_transient_marker(marker);
+            return Err(error);
+        }
+        self.call_depth += 1;
+        let previous_strict = self.strict;
+        self.transient_roots.owned_call_depth += 1;
+        self.strict = program.templates[template].strict;
+        let result = self.derived_script_parameters_and_body(&program, template, index, parent, args, &this, host);
         self.call_depth -= 1;
         self.transient_roots.owned_call_depth -= 1;
         self.strict = previous_strict;
@@ -11266,7 +11422,7 @@ caught;
             ("var code='eval(code)';try{eval(code);}catch(e){test.record('caught');}finally{test.record('finally');}".to_owned(), "limit"),
             ("try{for(var n=0;n<200;n++)eval('1');}catch(e){test.record('caught');}finally{test.record('finally');}".to_owned(), "Retained script limit"),
             (format!("try{{eval('{}1;');}}catch(e){{test.record('caught');}}finally{{test.record('finally');}}", "!".repeat(500)), "Parser nesting limit"),
-            ("try{eval('class Unsupported extends Object {}');}catch(e){test.record('caught');}finally{test.record('finally');}".to_owned(), "Derived classes"),
+            ("try{eval('class Unsupported {field=1;}');}catch(e){test.record('caught');}finally{test.record('finally');}".to_owned(), "Class fields"),
             ("try{eval('({async value(){return 1;}})');}catch(e){test.record('caught');}finally{test.record('finally');}".to_owned(), "not implemented"),
         ] {
             let (mut runtime, mut host) = test_runtime();
@@ -12297,7 +12453,7 @@ if(errors!==6)throw 'quantifier syntax';'brace-ok';
     fn parsing_finishes_before_any_script_effects() {
         for source in [
             "test.value=1; const thing={async x(){return 1;}};",
-            "test.value=1; class Nope extends Object {}",
+            "test.value=1; class Nope {field=1;}",
             "test.value=1; let duplicate; let duplicate;",
             "test.value=1; function f(){break;}",
             "test.value=1; if(true) let local=1;",

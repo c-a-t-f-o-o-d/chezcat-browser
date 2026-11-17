@@ -317,7 +317,7 @@ impl Runtime {
         host: &mut dyn Host,
     ) -> Result<Completion, Fault> {
         match program.exprs[id].kind {
-            ExprKind::Name(_) | ExprKind::Member(_, _) => self
+            ExprKind::Name(_) | ExprKind::Member(_, _) | ExprKind::SuperMember(_) => self
                 .reference(program, id, env, this, host)
                 .map(Completion::Reference),
             ExprKind::OptionalChain(_, _) => self.chain_reference(program, id, env, this, host),
@@ -439,6 +439,10 @@ impl Runtime {
                     receiver,
                     name: None,
                 })
+            }
+            Reference::SuperProperty { base, receiver, name } => {
+                let function = self.read_super_property(base, &receiver, &name, host)?;
+                Ok(CallTarget { function: Some(function), receiver, name: Some(name.into_string()) })
             }
             reference => {
                 let function = self.read_reference(&reference, host)?;

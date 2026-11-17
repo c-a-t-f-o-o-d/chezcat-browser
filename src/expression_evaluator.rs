@@ -101,7 +101,7 @@ impl Request {
             Self::Reference(id) => (id, Mode::Reference),
             Self::Chain(id) => (id, Mode::Chain),
             Self::Operand(id) => (id, match &program.exprs[id].kind {
-                ExprKind::Name(_) | ExprKind::Member(..) => Mode::Reference,
+                ExprKind::Name(_) | ExprKind::Member(..) | ExprKind::SuperMember(_) => Mode::Reference,
                 ExprKind::OptionalChain(..) => Mode::Chain,
                 _ => Mode::Value,
             }),
@@ -121,6 +121,7 @@ enum Target {
     Member { receiver: Value, key: PropertyKey, function: Option<Value> },
     Chain(CallTarget),
     Construct(Value),
+    Super(Box<super::derived_context::SuperCallTarget>),
 }
 
 impl Target {
@@ -134,6 +135,11 @@ impl Target {
             Self::Chain(target) => {
                 Edge::value(&target.receiver, add);
                 if let Some(function) = &target.function { Edge::value(function, add); }
+            }
+            Self::Super(target) => {
+                Edge::value(&target.constructor, add);
+                add(Edge::Function(target.new_target));
+                add(Edge::Environment(target.environment));
             }
         }
     }
@@ -169,6 +175,8 @@ enum State<'p> {
     PatternValue(super::binding_patterns::Id),
     UpdateReference { increase: bool, prefix: bool },
     Callee { arguments: &'p [Argument], direct_eval: bool, construct: bool },
+    StartSuper { target: super::derived_context::SuperCallTarget, arguments: &'p [Argument] },
+    SuperCallee(&'p [Argument]),
     MemberBase { key: ExprId, arguments: &'p [Argument] },
     MemberKey { receiver: Value, arguments: &'p [Argument] },
     GroupedCall(&'p [Argument]),
@@ -188,6 +196,11 @@ impl State<'_> {
                 if let Some(value) = before { Edge::value(value, add); }
             }
             Self::Argument(call) => call.target.root_edges(add),
+            Self::StartSuper { target, .. } => {
+                Edge::value(&target.constructor, add);
+                add(Edge::Function(target.new_target));
+                add(Edge::Environment(target.environment));
+            }
             _ => {}
         }
     }
@@ -296,7 +309,7 @@ impl Runtime {
             return self.eval_heap_function_literal(program, template, env, this);
         }
         if let ExprKind::Class(class) = program.exprs[id].kind {
-            return self.eval_heap_class_literal(program, class, env, this);
+            return self.eval_heap_class_literal(program, class, env, this, host);
         }
         // Compound helpers already own their traversal state. Do not retain
         // this driver's large Frame/Transition temporaries while they invoke
@@ -355,7 +368,7 @@ impl Runtime {
     // state during callback reentry in unoptimized Windows builds.
     #[inline(never)]
     fn eval_heap_class_literal(&mut self, program: &Rc<Program>, class: usize,
-        env: usize, this: &Value) -> Result<Value, Fault> {
+        env: usize, this: &Value, host: &mut dyn Host) -> Result<Value, Fault> {
         if self.evaluation_frames >= MAX_EVALUATION_FRAMES {
             return Err(Fault::new("Pending evaluation limit reached (4096)."));
         }
@@ -364,7 +377,7 @@ impl Runtime {
         let result = match self.publish_heap_roots(&scratch, env, this, None, None, None) {
             Ok(marker) => {
                 let result = self.collect_before_function_literal()
-                    .and_then(|()| self.make_class(program, class, env, this));
+                    .and_then(|()| self.make_class(program, class, env, this, host));
                 self.restore_transient_marker(marker);
                 result
             }
@@ -386,10 +399,14 @@ impl Runtime {
                 None if self.global_exists(name, host)? => self.global_value(name, host),
                 None => Err(Fault::exception("ReferenceError", format!("{name} is not defined."))),
             },
-            ExprKind::This => self.copy_value(this),
+            ExprKind::This => self.context_this(this),
             ExprKind::NewTarget => self.new_target_value(),
             ExprKind::Function(template) => self.make_function(program, *template, env, this),
-            ExprKind::Class(class) => self.make_class(program, *class, env, this),
+            ExprKind::Class(class) => self.make_class(program, *class, env, this, host),
+            ExprKind::SuperMember(name) => {
+                let reference = self.super_reference(name)?;
+                self.read_reference(&reference, host)
+            }
             ExprKind::RegExp(expression) => self.regexp_object(expression.clone()),
             ExprKind::Array(elements) => self.eval_array_literal(program, elements, env, this, host),
             ExprKind::Object(properties) => self.eval_object_literal(program, properties, env, this, host),
@@ -540,7 +557,7 @@ impl Runtime {
         } else if let ExprKind::Class(class) = program.exprs[id].kind {
             let marker = self.publish_heap_roots(scratch, env, this, None, None, completed)?;
             let result = self.collect_before_function_literal()
-                .and_then(|()| self.make_class(program, class, env, this));
+                .and_then(|()| self.make_class(program, class, env, this, host));
             self.restore_transient_marker(marker);
             result
         } else {
@@ -566,6 +583,7 @@ impl Runtime {
                     }))),
                 ExprKind::Member(base, key) => Ok(Transition::Child(Request::Value(*base),
                     State::ReadBase { key: *key, end: ReadEnd::Reference })),
+                ExprKind::SuperMember(name) => Ok(Transition::Done(Completion::Reference(self.super_reference(name)?))),
                 _ => Err(Fault::new("Invalid assignment reference.")),
             };
         }
@@ -583,7 +601,7 @@ impl Runtime {
             ExprKind::Unary(op, argument) => {
                 if *op == "delete" {
                     let request = match &program.exprs[*argument].kind {
-                        ExprKind::Name(_) | ExprKind::Member(..) => Request::Reference(*argument),
+                        ExprKind::Name(_) | ExprKind::Member(..) | ExprKind::SuperMember(_) => Request::Reference(*argument),
                         ExprKind::OptionalChain(..) => Request::Chain(*argument),
                         _ => Request::Value(*argument),
                     };
@@ -607,6 +625,9 @@ impl Runtime {
                 self.step()?; // reference construction, before receiver evaluation
                 Transition::Child(Request::Value(*base), State::ReadBase { key: *key, end: ReadEnd::Value })
             }
+            ExprKind::SuperMember(name) => Transition::Read(self.super_reference(name)?, ReadEnd::Value),
+            ExprKind::SuperCall(arguments) => Transition::Resume(
+                State::StartSuper { target: self.prepare_super_call()?, arguments }, Completion::Value(Value::Undefined)),
             ExprKind::Assign(op, left, right) => {
                 if let ExprKind::Pattern(pattern) = program.exprs[*left].kind {
                     Transition::Child(Request::Value(*right), State::PatternValue(pattern))
@@ -626,6 +647,7 @@ impl Runtime {
                     Transition::Child(Request::Value(*base), State::MemberBase { key: *key, arguments })
                 }
                 ExprKind::OptionalChain(..) => Transition::Child(Request::Chain(*callee), State::GroupedCall(arguments)),
+                ExprKind::SuperMember(_) => Transition::Child(Request::Reference(*callee), State::SuperCallee(arguments)),
                 kind => Transition::Child(Request::Value(*callee), State::Callee { arguments,
                     direct_eval: matches!(kind, ExprKind::Name(name) if name == "eval"), construct: false }),
             },
@@ -651,6 +673,7 @@ impl Runtime {
         match state {
             state @ (State::Callee { .. } | State::MemberBase { .. }
                 | State::MemberKey { .. } | State::GroupedCall(_)
+                | State::StartSuper { .. } | State::SuperCallee(_)
                 | State::Argument(_) | State::ChainNext { .. } | State::ChainKey { .. }) =>
                 self.resume_heap_call(program, state, completion, scratch, env, this, host),
             state => self.resume_heap_value(program, state, completion, scratch, env, this, host),
@@ -765,6 +788,20 @@ impl Runtime {
         scratch: &mut Scratch<'p>, env: usize, this: &Value, host: &mut dyn Host,
     ) -> Result<Transition<'p>, Fault> {
         match state {
+            State::StartSuper { target, arguments } => {
+                self.work_as(std::mem::size_of::<super::derived_context::SuperCallTarget>(), super::WorkKind::ArgumentCapture)?;
+                self.next_heap_argument(Call {
+                    target: Target::Super(Box::new(target)), arguments, index: 0, start: scratch.arguments.len(), after: AfterCall::Value,
+                }, scratch, env, this, host)
+            }
+            State::SuperCallee(arguments) => {
+                let Completion::Reference(reference) = completion else { unreachable!() };
+                let function = self.read_reference(&reference, host)?;
+                let Reference::SuperProperty { receiver, name, .. } = reference else { unreachable!() };
+                self.next_heap_argument(Call { target: Target::Member {
+                    receiver, key: PropertyKey::String(name.into_string()), function: Some(function),
+                }, arguments, index: 0, start: scratch.arguments.len(), after: AfterCall::Value }, scratch, env, this, host)
+            }
             State::Callee { arguments, direct_eval, construct } => {
                 let function = value(completion);
                 let target = if construct { Target::Construct(function) }
@@ -898,7 +935,16 @@ impl Runtime {
             Target::Member { receiver, key, function } => self.invoke_member_call(receiver, key, function, arguments, host),
             Target::Chain(target) => self.invoke_chain_call(target, arguments, host),
             Target::Construct(constructor) => self.construct_value(constructor, arguments, host),
+            Target::Super(target) => self.invoke_heap_super_target(target, arguments, host),
         }
+    }
+
+    #[inline(never)]
+    fn invoke_heap_super_target(&mut self, target: Box<super::derived_context::SuperCallTarget>, arguments: &[Value], host: &mut dyn Host) -> Result<Value, Fault> {
+        // Keep unboxing and construction-only scratch outside the shared target
+        // dispatcher. Its super arm carries a pointer instead of an inline
+        // constructor Value through every ordinary Invoke activation.
+        self.finish_super_call(*target, arguments, host)
     }
 
     fn finish_heap_chain<'p>(&mut self, current: Completion, end: ChainEnd, _host: &mut dyn Host)

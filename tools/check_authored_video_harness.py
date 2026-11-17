@@ -43,32 +43,28 @@ def fixture_reference(stem, display_profile=None):
     return clip, reference, profile['reference_rgba_sha256'], profile
 
 
-def main(source=None, trust_file=None, fixture_stem=None, display_profile=None, exe=None):
-    folder = capture_tests.verification_root(ROOT) / 'autonomy' / (datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S.%fZ') + '-authored-video-journey-' + uuid.uuid4().hex[:8])
-    folder.mkdir(parents=True)
-    script = folder / 'authored.tsv'
-    # Keep the original 450 ms decode opportunity. Capture moving evidence in
-    # memory, then pause through trusted App input before output I/O/settling.
-    script.write_text('snapshot\tmetadata\nmedia\tPlay\nwait\t650\nmedia\tPause\nsnapshot\tpaused\nwait\t500\nsnapshot\tfrozen\nclick\treload\nsnapshot\treloaded\nmedia\tPlay\nwait\t650\nclick\tjs-pause\nsnapshot\tjs-issued\nwait\t1000\nsnapshot\tjs-settled\nwait\t750\nsnapshot\tjs-frozen\nclick\tjs-seek\nwait\t1000\nsnapshot\tjs-seek-settled\nwait\t750\nsnapshot\tjs-seek-frozen\nclick\tjs-play\nwait\t450\nsnapshot-click\tjs-playing\tjs-pause\nwait\t1000\nsnapshot\tjs-play-paused\nwait\t750\nsnapshot\tjs-play-frozen\nmedia\tSeek:2200\nsnapshot\tseeked\nmedia\tPlay\nwait\t1200\nsnapshot\tended\nmedia\tPlay\nsnapshot\treplay\nmedia\tStop\nsnapshot\tstopped\nlink\tLeave\nsnapshot\tnavigated\n', encoding='utf-8', newline='\n')
-    before = capture_tests.source_identity(ROOT)
-    out = folder / 'journey'
-    source = str(source if source is not None else ROOT / 'tools/fixtures/authored-video.html')
-    executable = Path(exe) if exe is not None else ROOT / 'ChezCat.exe'
-    command = [str(executable), source, '--dev-input-script', str(script), '--dev-input-output', str(out), '--javascript', '--no-profile']
-    if trust_file is not None:
-        command.extend(['--trust-file', str(trust_file)])
-    row = capture_tests.execute(command, folder / 'command.log', ROOT, 120)
-    checks = {'process_completed': row['state'] == 'completed' and row['exit_code'] == 0}
-    stages = {}
-    fixture_stem = Path(fixture_stem) if fixture_stem is not None else ROOT / 'tools/fixtures/scene-intra'
-    clip, reference, reference_sha256, profile = fixture_reference(fixture_stem, display_profile)
+def replay_frame_valid(clip, state, fixture_stem):
+    if fixture_stem.resolve() == (ROOT / 'tools/fixtures/scene-intra').resolve():
+        return state['frame'] == 0
+    # Preserve the original fixture's exact frame-zero requirement; faster
+    # fixtures must remain in their first GOP within one timed display frame.
+    keys = clip.get('keyframe_indices', [0])
+    boundary = (clip['frames'][keys[1]]['timestamp'] * clip['scale'] * 1000 / clip['rate']
+        if len(keys) > 1 else state['duration_ms'])
+    target = frame_at(clip, state['time_ms'])
+    return (state['time_ms'] < boundary and 0 <= state['frame'] <= target
+        and target - state['frame'] <= 1)
+
+
+def read_snapshots(out, fixture_stem, clip, reference):
+    """Check retained App artifacts without executing or synthesizing App state."""
+    checks, stages = {}, {}
     last_frame = len(clip['frames']) - 1
     script_seek_frame = frame_at(clip, 1250)
     native_seek_frame = frame_at(clip, 2200)
-    checks['independent_reference_identity'] = hashlib.sha256(reference).hexdigest() == reference_sha256
-    checks['original_clip_identity'] = capture_tests.sha256(fixture_stem.with_suffix('.ivf')) == clip['ivf_sha256']
-    for name in ['metadata', 'paused', 'frozen', 'reloaded', 'js-issued', 'js-settled', 'js-frozen', 'js-seek-settled', 'js-seek-frozen', 'js-playing', 'js-play-paused', 'js-play-frozen', 'seeked', 'ended', 'replay', 'stopped', 'navigated']:
-        file = next(out.glob('*-' + name + '.activity.txt'), None)
+    for name in ['metadata', 'paused', 'frozen', 'reloaded', 'js-issued', 'js-settled', 'js-frozen', 'js-seek-settled', 'js-seek-frozen', 'js-playing', 'js-play-paused', 'js-play-frozen', 'seeked', 'ended', 'replay', 'replay-paused', 'stopped', 'navigated']:
+        captures = list(out.glob('*-' + name + '.activity.txt'))
+        file = (captures[0] if len(captures) == 1 else None) if name in ['replay', 'replay-paused'] else next(iter(captures), None)
         if file is None:
             checks[name + '_snapshot'] = False
             continue
@@ -91,6 +87,24 @@ def main(source=None, trust_file=None, fixture_stem=None, display_profile=None, 
         state['generation'] = int(match[10])
         state['node'] = int(binding[1]) if binding else None
         reference_frame = state['frame']
+        if name == 'replay':
+            target = frame_at(clip, state['time_ms'])
+            state['expected_frame_from_moving_time'] = target
+            checks['replay_frame_matches_original_timeline'] = replay_frame_valid(clip, state, fixture_stem)
+            checks['replay_moving_state'] = (state['playing'] and not state['ended']
+                and 0 <= state['time_ms'] < state['duration_ms']
+                and re.search(r'HTML video binding[^\n]*\bpaused=false\b', text) is not None
+                and re.search(r'HTML video binding[^\n]*\bseeking=false\b', text) is not None)
+            # A running clock can request its next frame at the capture boundary.
+            # Admit only that independently timed request, never a stale/future one.
+            checks['replay_pending_matches_moving_time'] = (state['playing'] and not state['ended']
+                and (state['pending'] == 'None'
+                    or state['pending'] == f'Some({target})' and state['frame'] < target))
+        if name == 'replay-paused':
+            checks[name + '_real_paused_binding'] = (not state['playing'] and not state['ended']
+                and 0 <= state['time_ms'] < state['duration_ms']
+                and re.search(r'HTML video binding[^\n]*\bpaused=true\b', text) is not None
+                and re.search(r'HTML video binding[^\n]*\bseeking=false\b', text) is not None)
         if name in ['js-issued', 'js-settled', 'js-frozen', 'js-play-paused', 'js-play-frozen']:
             layout = file.with_name(file.name.replace('.activity.txt', '.layout.txt')).read_text(encoding='utf-8')
             visible = ' '.join(re.findall(r'text="([^"\n]*)"', layout))
@@ -144,7 +158,7 @@ def main(source=None, trust_file=None, fixture_stem=None, display_profile=None, 
                 and state['time_ms'] == 1250 and state['frame'] == script_seek_frame
                 and re.search(r'HTML video binding[^\n]*\bpaused=true\b', text) is not None
                 and re.search(r'HTML video binding[^\n]*\bseeking=false\b', text) is not None)
-        if name in ['js-settled', 'js-frozen', 'js-seek-settled', 'js-seek-frozen', 'js-play-paused', 'js-play-frozen']:
+        if name in ['js-settled', 'js-frozen', 'js-seek-settled', 'js-seek-frozen', 'js-play-paused', 'js-play-frozen', 'replay-paused']:
             # Derive the target from original timestamp/timebase metadata,
             # independently of the player's displayed frame report.
             expected_frame = max(index for index, frame in enumerate(clip['frames'])
@@ -173,7 +187,7 @@ def main(source=None, trust_file=None, fixture_stem=None, display_profile=None, 
         state['reference_mean_rgb_error'] = sum(abs(a-b) for a, b in zip(samples, expected)) / len(expected) if expected else None
         state['frame_sample_sha256'] = hashlib.sha256(samples).hexdigest()
         checks[name + '_independent_decoded_pixels'] = bool(expected) and len(samples) == len(expected) and state['reference_mean_rgb_error'] < 6
-        if name in ['js-issued', 'js-playing']:
+        if name in ['js-issued', 'js-playing', 'replay']:
             # Pending decode is valid at an issued pause or moving snapshot.
             checks[name + '_no_decode_error'] = state['error'] == 'None'
         else:
@@ -181,24 +195,27 @@ def main(source=None, trust_file=None, fixture_stem=None, display_profile=None, 
         stages[name] = state
     if all(name in stages for name in ['metadata', 'paused', 'frozen', 'seeked', 'ended', 'replay', 'stopped']):
         p, a, b, s, e, r, t = (stages[name] for name in ['metadata', 'paused', 'frozen', 'seeked', 'ended', 'replay', 'stopped'])
-        replay_frame_valid = r['frame'] == 0
-        if fixture_stem.resolve() != (ROOT / 'tools/fixtures/scene-intra').resolve():
-            # A faster fixture can advance during normal harness settling.
-            # Prove replay is in the first GOP with a real time-derived frame;
-            # keep the original fixture's exact frame-zero assertion intact.
-            keys = clip.get('keyframe_indices', [0])
-            boundary = (clip['frames'][keys[1]]['timestamp'] * clip['scale'] * 1000 / clip['rate']
-                if len(keys) > 1 else r['duration_ms'])
-            target = frame_at(clip, r['time_ms'])
-            replay_frame_valid = (r['time_ms'] < boundary and 0 <= r['frame'] <= target
-                and target - r['frame'] <= 1)
         checks.update(initial_real_metadata=p['frame'] == 0 and p['time_ms'] == 0 and not p['playing'],
                       real_playback_advanced=0 < a['frame'] < last_frame and not a['playing'],
                       pause_froze_time_and_pixels=a['time_ms'] == b['time_ms'] and a['frame_sample_sha256'] == b['frame_sample_sha256'],
                       seek_settled_actual_frame=s['frame'] == native_seek_frame and 2150 < s['time_ms'] < 2250 and not s['playing'],
                       end_requires_actual_final_frame=e['frame'] == last_frame and e['time_ms'] == 3000 and e['ended'] and not e['playing'] and e['events'].count('ended') == 1,
-                      real_replay=r['playing'] and not r['ended'] and replay_frame_valid and r['time_ms'] < r['duration_ms'],
+                      real_replay=r['playing'] and not r['ended'] and replay_frame_valid(clip, r, fixture_stem) and r['time_ms'] < r['duration_ms'],
                       actual_stop_restored_first_frame=not t['playing'] and not t['ended'] and t['time_ms'] == 0 and t['frame_sample_sha256'] == p['frame_sample_sha256'])
+    checks['replay_all_snapshots_present'] = all(name in stages for name in ['ended', 'replay', 'replay-paused'])
+    if checks['replay_all_snapshots_present']:
+        ended, moving, paused = (stages[name] for name in ['ended', 'replay', 'replay-paused'])
+        checks['replay_started_new_generation'] = (ended['node'] == moving['node']
+            and moving['generation'] == ended['generation'] + 1)
+        checks['replay_pause_retained_source_generation'] = (moving['node'] == paused['node']
+            and moving['generation'] == paused['generation'])
+        later_events = paused['events'][len(moving['events']):]
+        checks['replay_pause_after_moving_sample'] = (moving['playing'] and not moving['ended']
+            and not paused['playing'] and not paused['ended']
+            and moving['time_ms'] <= paused['time_ms'] < paused['duration_ms']
+            and paused['events'][:len(moving['events'])] == moving['events']
+            and later_events.count('pause') == 1
+            and all(event not in ['play', 'playing', 'seeking', 'ended', 'error', 'loadstart', 'emptied'] for event in later_events))
     checks['js_pause_all_snapshots_present'] = all(name in stages for name in ['js-issued', 'js-settled', 'js-frozen'])
     if checks['js_pause_all_snapshots_present']:
         issued, settled, frozen = (stages[name] for name in ['js-issued', 'js-settled', 'js-frozen'])
@@ -222,6 +239,31 @@ def main(source=None, trust_file=None, fixture_stem=None, display_profile=None, 
         checks['js_play_pause_retained_source_generation'] = (playing['node'] == paused['node'] == frozen['node']
             and playing['generation'] == paused['generation'] == frozen['generation'])
         checks['js_play_paused_decoded_pixels_frozen'] = paused['frame_sample_sha256'] == frozen['frame_sample_sha256']
+    return checks, stages
+
+
+def main(source=None, trust_file=None, fixture_stem=None, display_profile=None, exe=None):
+    folder = capture_tests.verification_root(ROOT) / 'autonomy' / (datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S.%fZ') + '-authored-video-journey-' + uuid.uuid4().hex[:8])
+    folder.mkdir(parents=True)
+    script = folder / 'authored.tsv'
+    # Keep every original wait and the moving replay capture. A real native
+    # Pause then gives replay its own settled capture without extending waits.
+    script.write_text('snapshot\tmetadata\nmedia\tPlay\nwait\t650\nmedia\tPause\nsnapshot\tpaused\nwait\t500\nsnapshot\tfrozen\nclick\treload\nsnapshot\treloaded\nmedia\tPlay\nwait\t650\nclick\tjs-pause\nsnapshot\tjs-issued\nwait\t1000\nsnapshot\tjs-settled\nwait\t750\nsnapshot\tjs-frozen\nclick\tjs-seek\nwait\t1000\nsnapshot\tjs-seek-settled\nwait\t750\nsnapshot\tjs-seek-frozen\nclick\tjs-play\nwait\t450\nsnapshot-click\tjs-playing\tjs-pause\nwait\t1000\nsnapshot\tjs-play-paused\nwait\t750\nsnapshot\tjs-play-frozen\nmedia\tSeek:2200\nsnapshot\tseeked\nmedia\tPlay\nwait\t1200\nsnapshot\tended\nmedia\tPlay\nsnapshot\treplay\nmedia\tPause\nsnapshot\treplay-paused\nmedia\tStop\nsnapshot\tstopped\nlink\tLeave\nsnapshot\tnavigated\n', encoding='utf-8', newline='\n')
+    before = capture_tests.source_identity(ROOT)
+    out = folder / 'journey'
+    source = str(source if source is not None else ROOT / 'tools/fixtures/authored-video.html')
+    executable = Path(exe) if exe is not None else ROOT / 'ChezCat.exe'
+    command = [str(executable), source, '--dev-input-script', str(script), '--dev-input-output', str(out), '--javascript', '--no-profile']
+    if trust_file is not None:
+        command.extend(['--trust-file', str(trust_file)])
+    row = capture_tests.execute(command, folder / 'command.log', ROOT, 120)
+    checks = {'process_completed': row['state'] == 'completed' and row['exit_code'] == 0}
+    fixture_stem = Path(fixture_stem) if fixture_stem is not None else ROOT / 'tools/fixtures/scene-intra'
+    clip, reference, reference_sha256, profile = fixture_reference(fixture_stem, display_profile)
+    checks['independent_reference_identity'] = hashlib.sha256(reference).hexdigest() == reference_sha256
+    checks['original_clip_identity'] = capture_tests.sha256(fixture_stem.with_suffix('.ivf')) == clip['ivf_sha256']
+    snapshot_checks, stages = read_snapshots(out, fixture_stem, clip, reference)
+    checks.update(snapshot_checks)
     checks['source_unchanged'] = before == capture_tests.source_identity(ROOT)
     capture_tests.write_json(folder / 'manifest.json', {'scope': __doc__, 'source': source, 'trust_file_sha256': capture_tests.sha256(trust_file) if trust_file is not None else None, 'executable_sha256': capture_tests.sha256(executable), 'source_before': before, 'source_after': capture_tests.source_identity(ROOT), 'run': row, 'checks': checks, 'stages': stages})
     print(json.dumps(checks, indent=2))
