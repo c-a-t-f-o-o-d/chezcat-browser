@@ -263,7 +263,7 @@ impl Bridge<'_> {
             .map(|namespace| Value::Bool(query == namespace))
     }
 
-    fn dom_accessible(&self, node: usize) -> bool {
+    pub(super) fn dom_accessible(&self, node: usize) -> bool {
         if node == 0 || node >= self.doc.nodes.len() { return false; }
         if self.state.tree.active.get(node).copied().unwrap_or(false)
                 || self.state.detached_nodes.contains(&node)
@@ -321,6 +321,10 @@ impl Bridge<'_> {
     }
 
     pub(super) fn dom_method(&self, object: u32, property: &str) -> Option<&'static str> {
+        if self.fragment_receiver(object) {return match property {
+            "appendChild"=>Some("appendChild"),"insertBefore"=>Some("insertBefore"),
+            "replaceChild"=>Some("replaceChild"),"removeChild"=>Some("removeChild"),_=>None,
+        };}
         if object==DOCUMENT {match property {"createAttribute"=>return Some("createAttribute"),"createAttributeNS"=>return Some("createAttributeNS"),_=>{}}}
         if self.namespace_receiver(object) {
             match property {
@@ -488,6 +492,8 @@ impl Bridge<'_> {
     }
 
     pub(super) fn dom_has(&mut self, object: u32, property: &str) -> Result<Option<bool>, String> {
+        if self.fragment_receiver(object) && matches!(property,"nodeValue"|"textContent") {self.state.work(1)?;return Ok(Some(true));}
+        if self.fragment_receiver(object) {self.state.work(1)?;return Ok(Some(common_node_property(property)||property=="childNodes"||self.dom_method(object,property).is_some()));}
         if property=="childNodes" && node_index(object).is_some() {self.dom_node(object)?;return Ok(Some(true));}
         if property=="controls"&&self.media_interface_receiver(object) {self.node(object)?;return Ok(Some(true));}
         if self.media_element_receiver(object) {if let Some(value)=self.media_element_has(object,property)? {return Ok(Some(value));}}
@@ -575,6 +581,11 @@ impl Bridge<'_> {
     }
 
     pub(super) fn dom_get(&mut self, object: u32, property: &str) -> Result<Option<Value>, String> {
+        if self.fragment_receiver(object) {
+            if property=="nodeValue" {self.state.work(1)?;return Ok(Some(Value::Null));}
+            if property=="textContent" {let node=self.dom_node(object)?;return self.text_content(node).map(|value|Some(Value::String(value)));}
+            if !common_node_property(property) && property!="childNodes" {self.state.work(1)?;return Ok(Some(Value::Undefined));}
+        }
         if property=="childNodes" && node_index(object).is_some() {return self.create_child_list(object).map(Some);}
         if property=="controls"&&self.media_interface_receiver(object) {return self.media_element_get(object,property);}
         if self.media_element_receiver(object) {if let Some(value)=self.media_element_get(object,property)? {return Ok(Some(value));}}
@@ -656,9 +667,9 @@ impl Bridge<'_> {
         if let Some(value) = self.frame_content(node, property) { return Ok(Some(value)); }
         if common_node_property(property) {
             return Ok(Some(match property {
-                "nodeType" => Value::Number(if text { 3.0 } else if comment { 8.0 } else { 1.0 }),
+                "nodeType" => Value::Number(if self.fragment_receiver(object) {11.0} else if text { 3.0 } else if comment { 8.0 } else { 1.0 }),
                 "nodeName" => {
-                    let name = if text {
+                    let name = if self.fragment_receiver(object) { "#document-fragment".into() } else if text {
                         "#text".into()
                     } else if comment {
                         "#comment".into()
@@ -758,7 +769,7 @@ impl Bridge<'_> {
         Ok(None)
     }
 
-    fn create_dom_node(&mut self, kind: NodeKind) -> Result<Value, String> {
+    pub(super) fn create_dom_node(&mut self, kind: NodeKind) -> Result<Value, String> {
         self.state.rebuild(self.doc)?;
         if self.doc.nodes.len().saturating_add(self.state.blank_frame_nodes) >= self.state.node_limit {
             return Err("DOM appended-node limit reached (256 per document).".into());
@@ -766,6 +777,7 @@ impl Bridge<'_> {
         let bytes = match &kind {
             NodeKind::Element { tag, .. } => tag.len(),
             NodeKind::Text(text) | NodeKind::Comment(text) => text.len(),
+            NodeKind::DocumentFragment => 0,
         };
         let node = self.doc.nodes.len();
         let handle = u32::try_from(node).ok().and_then(|index|NODE_BASE.checked_add(index))
@@ -806,6 +818,7 @@ impl Bridge<'_> {
         while let Some(index) = current {
             self.state.work(1)?;
             if self.forms.controls.contains_key(&index)
+                || tag(self.doc, index) == "input"
                 || tag(self.doc, index) == "script" && !self.dom_script(index)
                 || matches!(
                     tag(self.doc, index),
@@ -843,7 +856,7 @@ impl Bridge<'_> {
                 && !matches!(name, "select" | "option" | "optgroup") {
                 return Err("Moving nonconventional select descendants or resources is not implemented.".into());
             }
-            if forms::kind(self.doc, node).is_some() && !owned_select && !self.hidden_input(node) && !self.owned_fragment_text_input(node)
+            if forms::kind(self.doc, node).is_some() && !owned_select && !self.hidden_input(node) && !self.owned_fragment_text_input(node) && !self.fresh_text_input(node)
                 || matches!(
                     name,
                     "html"
@@ -924,7 +937,7 @@ impl Bridge<'_> {
             return Err(("TypeError", "replaceChild requires two Node arguments.".into()));
         }
         let parent = node_index(object).unwrap();
-        if !matches!(self.doc.nodes[parent].kind, NodeKind::Element { .. }) {
+        if !matches!(self.doc.nodes[parent].kind, NodeKind::Element { .. } | NodeKind::DocumentFragment) {
             return Err(("HierarchyRequestError", "Text nodes cannot contain children.".into()));
         }
         let Value::Host(incoming) = args[0] else { unreachable!() };
@@ -951,6 +964,7 @@ impl Bridge<'_> {
         let Value::Host(incoming) = args[0] else { unreachable!() };
         let Value::Host(outgoing) = args[1] else { unreachable!() };
         let child = self.dom_node(incoming)?;
+        if self.fragment_receiver(incoming) {return self.splice_document_fragment(parent,"replaceChild",args);}
         let old = self.dom_node(outgoing)?;
         if child == old { return Ok(Value::Host(outgoing)); }
         self.mutation_ancestors(parent)?;
@@ -958,7 +972,7 @@ impl Bridge<'_> {
         if let Some(source) = source_parent { self.mutation_ancestors(source)?; }
         let (incoming_nodes, depth) = self.mutation_subtree(child)?;
         let (outgoing_nodes, _) = self.mutation_subtree(old)?;
-        if self.doc.nodes[parent].namespace != crate::html::Namespace::Html
+        if self.doc.nodes[parent].namespace != crate::html::Namespace::Html && !self.fragment_receiver(node_handle(parent))
             || matches!(tag(self.doc, parent), "script" | "link" | "iframe")
             || incoming_nodes.iter().chain(&outgoing_nodes).any(|&node|
                 self.doc.nodes[node].namespace == crate::html::Namespace::UnknownForeign
@@ -1006,6 +1020,7 @@ impl Bridge<'_> {
         let images = self.prepare_image_connections(&incoming_nodes, connected)?;
 
         let form_plan = self.prepare_select_form_change(None, &[(old, None), (child, Some(parent))])?;
+        self.state.replace_bytes(0,form_plan.retained_bytes)?;
         // No fallible work remains after publishing either parent's new list.
         if let Some(source) = source_parent.filter(|&source| source != parent) { self.doc.nodes[source].children = source_children; }
         self.doc.nodes[parent].children = children;
@@ -1036,13 +1051,14 @@ impl Bridge<'_> {
         method: &str,
         args: &[Value],
     ) -> Result<Value, String> {
-        if !matches!(self.doc.nodes[parent].kind, NodeKind::Element { .. }) {
+        if !matches!(self.doc.nodes[parent].kind, NodeKind::Element { .. } | NodeKind::DocumentFragment) {
             return Err("HierarchyRequestError: Text nodes cannot contain children.".into());
         }
         let Some(Value::Host(handle)) = args.first() else {
             return Err("A DOM node is required.".into());
         };
         let child = self.dom_node(*handle)?;
+        if self.fragment_receiver(*handle) && method!="removeChild" {return self.splice_document_fragment(parent,method,args);}
         let reference = if method == "insertBefore" {
             match args.get(1) {
                 Some(Value::Host(handle)) => Some(self.dom_node(*handle)?),
@@ -1078,6 +1094,11 @@ impl Bridge<'_> {
         let (descendants, depth) = self.mutation_subtree(child).map_err(|error| format!(
             "{error} Operation={method}; parent={parent}<{:?}>; child={child}<{:?}>; old_parent={old_parent:?}; reference={reference:?}.",
             prefix(tag(self.doc, parent), 64), prefix(tag(self.doc, child), 64)))?;
+        self.state.work(descendants.len().saturating_mul(2))?;
+        if descendants.iter().any(|&node| self.fresh_text_input(node))
+            && descendants.iter().any(|&node| matches!(tag(self.doc,node),"script"|"link"|"iframe")) {
+            return Err("New native INPUT admission with script, stylesheet or frame subtrees is not implemented; no tree was changed.".into());
+        }
         if method != "removeChild" && tag(self.doc, parent) == "picture" && tag(self.doc, child) == "img" {
             return Err("Dynamic picture image selection is not implemented.".into());
         }
@@ -1100,6 +1121,8 @@ impl Bridge<'_> {
         let frames = self.prepare_blank_frames(&descendants, connected, parent)?;
         let form_plan = self.prepare_select_form_change(None, &[(child, if method == "removeChild" { None } else { Some(parent) })])?;
         if method != "removeChild" { self.doc.nodes[parent].children.try_reserve(1).map_err(|_| "DOM destination children reservation failed.")?; }
+        self.state.detached_nodes.try_reserve(descendants.len()).map_err(|_| "DOM detached INPUT identity reservation failed.")?;
+        self.state.replace_bytes(0,form_plan.retained_bytes)?;
         if let Some(old_parent) = old_parent {
             self.doc.nodes[old_parent]
                 .children
@@ -1212,6 +1235,10 @@ impl Bridge<'_> {
         property: &str,
         value: &Value,
     ) -> Result<bool, String> {
+        if self.fragment_receiver(object) {
+            if property=="nodeValue" {self.state.work(1)?;return Ok(true);}
+            if property=="textContent" {return Err("DocumentFragment textContent replacement is not implemented; no children were changed.".into());}
+        }
         if node_index(object).is_none() {
             return Ok(false);
         }
@@ -1286,6 +1313,9 @@ impl Bridge<'_> {
         method: &str,
         args: &[Value],
     ) -> Result<Option<Value>, String> {
+        if object==DOCUMENT && method=="createDocumentFragment" {
+            return self.create_dom_node(NodeKind::DocumentFragment).map(Some);
+        }
         if node_index(object).is_some() {
             match method {
                 "hasAttributes" => {
@@ -1430,7 +1460,7 @@ pub(super) fn default_namespace(
 ) -> Result<Option<&'static str>, String> {
     state.work(1)?;
     let item = doc.nodes.get(node).ok_or("Invalid namespace node.")?;
-    let element = if node == 0 {
+    let element = if matches!(item.kind,NodeKind::DocumentFragment) { None } else if node == 0 {
         let mut found = None;
         for &child in &item.children {
             state.work(1)?;
@@ -1442,6 +1472,7 @@ pub(super) fn default_namespace(
     else if let Some(parent) = parent.filter(|&parent| parent != 0) {
         state.work(1)?;
         let item = doc.nodes.get(parent).ok_or("Invalid namespace parent.")?;
+        if matches!(item.kind,NodeKind::DocumentFragment) {return Ok(None);}
         if !matches!(item.kind, NodeKind::Element { .. }) {
             return Err("Namespace parent is not an Element.".into());
         }

@@ -11,8 +11,88 @@ impl Bridge<'_> {
     }
 
     pub(super) fn text_input_default_property(&self, object: u32, property: &str) -> bool {
-        property == "defaultValue" && self.input_receiver(object)
-            && node_index(object).is_some_and(|node| self.native_text_input(node))
+        matches!(property, "name" | "defaultValue" | "value") && self.input_receiver(object)
+            && node_index(object).is_some_and(|node| self.native_text_input(node) || self.fresh_text_input(node))
+    }
+
+    pub(super) fn fresh_text_input(&self, node: usize) -> bool {
+        forms::fragment_text_input(self.doc, node) && !self.forms.controls.contains_key(&node)
+            && self.state.dom.created.contains(&node)
+            && !self.state.dom.connected.get(node).copied().unwrap_or(true)
+    }
+
+    fn text_input_admission_guard(&mut self, node: usize) -> Result<(), String> {
+        if !self.fresh_text_input(node) || self.doc.attr(node, "form").is_some() || !self.doc.nodes[node].children.is_empty() {
+            return Err("Text INPUT admission requires a fresh detached empty default/text input without explicit form association.".into());
+        }
+        let mut ancestor = Some(node);
+        for _ in 0..128 {
+            let Some(index) = ancestor else { return Ok(()); };
+            self.state.work(1)?;
+            let fragment = self.doc.nodes.get(index).is_some_and(|entry|
+                entry.namespace == crate::html::Namespace::None && matches!(entry.kind,NodeKind::DocumentFragment))
+                && self.fragment_receiver(node_handle(index));
+            if index == 0 || self.doc.nodes.get(index).is_none_or(|entry| entry.namespace != crate::html::Namespace::Html) && !fragment
+                || index != node && (matches!(tag(self.doc,index), "head" | "script" | "style" | "template" | "iframe" | "object" | "datalist" | "select" | "option" | "optgroup")
+                    || tag(self.doc,index) == "noscript" && self.doc.scripting_enabled) {
+                return Err("Text INPUT admission requires detached known HTML ancestry outside inert/native interiors.".into());
+            }
+            ancestor = self.state.tree.parents.get(index).copied().flatten();
+        }
+        Err("Text INPUT admission ancestry limit reached.".into())
+    }
+
+    fn prepare_created_text_plan(&mut self, node: usize, attribute: Option<(&str, Option<&str>)>,
+        live: Option<&str>) -> Result<forms::TextInputPlan, String> {
+        self.text_input_admission_guard(node)?;
+        let name = match attribute { Some(("name", value)) => value.unwrap_or(""), _ => self.doc.attr(node,"name").unwrap_or("") };
+        let initial = match attribute { Some(("value", value)) => value.unwrap_or(""), _ => self.doc.attr(node,"value").unwrap_or("") };
+        let input = name.len().saturating_add(initial.len()).saturating_add(live.map_or(0,str::len));
+        self.state.work(self.forms.default_scan_work().saturating_add(input).saturating_add(self.doc.nodes[node].children.len()))?;
+        // Name/default copies, one sanitized four-byte editor, and the bounded
+        // caption all precede allocation. Retained growth is committed with DOM.
+        self.state.copies(name.len().saturating_add(initial.len().saturating_mul(6)).saturating_add(live.map_or(0,str::len).saturating_mul(4)))?;
+        self.forms.prepare_created_text_input(self.doc,node,attribute,live)
+    }
+
+    pub(super) fn text_input_type_attribute(&mut self, node: usize, name: &crate::html::AttributeName,
+        value: &Option<String>) -> Result<bool, String> {
+        if !name.html_is("type") || !forms::fragment_text_input(self.doc,node)
+            || !(self.native_text_input(node) || self.fresh_text_input(node))
+            || value.as_deref().is_some_and(|value| !value.is_empty() && !value.eq_ignore_ascii_case("text")) {
+            return Ok(false);
+        }
+        self.attribute_named(node,name.copy(),value.clone())?;
+        Ok(true)
+    }
+
+    pub(super) fn text_input_set(&mut self, object: u32, property: &str, value: &Value) -> Result<bool, String> {
+        if property == "type" && self.input_receiver(object) {
+            let node = self.node(object)?;
+            let text = self.text(value)?;
+            let name = crate::html::AttributeName::unqualified("type".into());
+            let converted = Some(text);
+            if self.text_input_type_attribute(node,&name,&converted)? { return Ok(true); }
+            // The hidden path owns the remaining finite type policy. Pass the
+            // already-converted DOMString, rather than revisiting its setter.
+            return self.hidden_input_attribute(node,&name,&converted);
+        }
+        if !self.text_input_default_property(object,property) { return Ok(false); }
+        let node = self.node(object)?;
+        let text = if property == "value" && matches!(value,Value::Null) { String::new() } else { self.text(value)? };
+        if property != "value" {
+            self.attribute(node,if property == "name" { "name" } else { "value" },Some(text))?;
+        } else {
+            let plan = if self.fresh_text_input(node) { self.prepare_created_text_plan(node,None,Some(&text))? } else {
+                self.state.work(self.forms.default_scan_work().saturating_add(text.len()))?;
+                self.state.copies(text.len().saturating_mul(4))?;
+                self.forms.prepare_text_live(node,&text)?
+            };
+            self.state.replace_bytes(0,plan.retained_bytes())?;
+            plan.commit(self.forms);
+            self.state.layout_changed();
+        }
+        Ok(true)
     }
 
     pub(super) fn button_type_property(&self, object: u32, property: &str) -> bool {
@@ -24,11 +104,21 @@ impl Bridge<'_> {
     pub(super) fn text_input_metadata_get(&mut self, object: u32, property: &str) -> Result<Option<Value>, String> {
         if self.text_input_default_property(object,property) {
             let node=self.node(object)?;
-            self.forms.text_default_value(node)?;
-            let text=self.doc.attr(node,"value").unwrap_or("");
-            if text.len()>self.state.limits.host.string_bytes {return Err("Text INPUT default exceeds the DOM string allowance.".into());}
-            self.state.copies(text.len())?;
-            return Ok(Some(Value::String(self.doc.attr(node,"value").unwrap_or("").to_owned())));
+            let fresh = self.fresh_text_input(node);
+            let size = if property == "value" && !fresh {
+                self.forms.controls[&node].value.chars.iter().map(|ch| ch.len_utf8()).sum()
+            } else { self.doc.attr(node,if property == "name" { "name" } else { "value" }).map_or(0,str::len) };
+            if size>self.state.limits.host.string_bytes {return Err("Text INPUT result exceeds the DOM string allowance.".into());}
+            // A read may materialize native state, but a failed result-copy or
+            // admission check must never publish that state.
+            self.state.copies(size)?;
+            let plan = if fresh { Some(self.prepare_created_text_plan(node,None,None)?) } else { None };
+            let text = if property == "value" {
+                if fresh { self.doc.attr(node,"value").unwrap_or("").chars().filter(|ch| !matches!(ch,'\r'|'\n')).collect() }
+                else { self.forms.controls[&node].value.text() }
+            } else { self.doc.attr(node,if property == "name" { "name" } else { "value" }).unwrap_or("").to_owned() };
+            if let Some(plan) = plan { self.state.replace_bytes(0,plan.retained_bytes())?; plan.commit(self.forms); }
+            return Ok(Some(Value::String(text)));
         }
         if self.button_type_property(object,property) {
             let node=self.node(object)?;
@@ -47,16 +137,21 @@ impl Bridge<'_> {
         Ok(None)
     }
 
-    pub(super) fn prepare_text_input_default(&mut self, node: usize, name: &crate::html::AttributeName,
-        value: Option<&str>) -> Result<Option<forms::TextDefaultPlan>, String> {
-        if !name.html_is("value") || !self.native_text_input(node) { return Ok(None); }
+    pub(super) fn prepare_text_input_attribute(&mut self, node: usize, name: &crate::html::AttributeName,
+        value: Option<&str>) -> Result<Option<forms::TextInputPlan>, String> {
+        if !(name.html_is("value") || name.html_is("name") || name.html_is("type")) { return Ok(None); }
+        if name.html_is("type") && value.is_some_and(|value| !value.is_empty() && !value.eq_ignore_ascii_case("text")) { return Ok(None); }
+        if self.fresh_text_input(node) { return self.prepare_created_text_plan(node,Some((&name.qualified,value)),None).map(Some); }
+        if !self.native_text_input(node) { return Ok(None); }
+        if name.html_is("type") { return Ok(None); }
         let scanned=self.forms.default_scan_work();
         let input=value.map_or(0,str::len);
         self.state.work(scanned.saturating_add(input).saturating_add(self.forms.controls.len()))?;
         // One raw default plus at most one four-byte-per-character editor;
         // charge this upper bound before prepare makes the first allocation.
         self.state.copies(input.checked_mul(5).ok_or("Text INPUT default copy accounting overflow.")?)?;
-        let plan=self.forms.prepare_text_default(node,value)?;
+        let plan=if name.html_is("name") { self.forms.prepare_text_name(node,value)? }
+            else { forms::TextInputPlan::Default(self.forms.prepare_text_default(node,value)?) };
         // Native values have their own finite form payload allowance. DOM
         // retained-byte accounting continues to cover the content attribute;
         // native bytes that were never charged are never subtracted from it.
@@ -67,3 +162,7 @@ impl Bridge<'_> {
 #[cfg(test)]
 #[path="script_text_input_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path="script_created_text_input_tests.rs"]
+mod created_tests;

@@ -5654,6 +5654,10 @@ mod select_fragment_tests;
 mod rgba_border_tests;
 
 #[cfg(test)]
+#[path="app_document_fragment_tests.rs"]
+mod document_fragment_tests;
+
+#[cfg(test)]
 #[path = "app_literal_prototype_tests.rs"]
 mod literal_prototype_tests;
 

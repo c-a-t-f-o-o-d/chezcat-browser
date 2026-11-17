@@ -1,8 +1,18 @@
+<div align="center">
+
 # Retained development references
+
+*Frozen inputs and independent expectations—not disposable run output.*
+
+[Home](../../README.md) · [Build guide](../../docs/BUILDING.md) · [Compatibility](../../docs/COMPATIBILITY.md)
+
+</div>
+
+---
 
 These are active inputs for the regression tools, not old verification runs.
 
-- `test262/`: six pinned upstream tests, their harness, license, and hash manifest.
+- `test262/`: pinned upstream tests, their harness, license, and hash manifest.
 - `review-040/` and `review-041/`: original frozen Node outcomes, specification
   expectations, and boundary adjudications used by the independent checkers.
 - `url-041/`: original URL programs and corrected boundary inputs.

@@ -1,4 +1,14 @@
+<div align="center">
+
 # Security policy
+
+*Experimental status, responsible reporting, and scope.*
+
+[Home](README.md) · [Capabilities](docs/CAPABILITIES.md) · [Contributing](CONTRIBUTING.md)
+
+</div>
+
+---
 
 ChezCat is experimental. Source visibility, test results and a contributor review do not constitute a security certification. No continued support or response-time guarantee is made by the license.
 

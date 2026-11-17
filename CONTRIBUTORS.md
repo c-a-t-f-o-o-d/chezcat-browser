@@ -1,4 +1,14 @@
+<div align="center">
+
 # Contributor record
+
+*Accurate credit without exposing private legal records.*
+
+[Home](README.md) · [Contributing](CONTRIBUTING.md) · [Privacy](docs/CONTRIBUTOR_PRIVACY.md)
+
+</div>
+
+---
 
 Adam Maddox (c-a-t-f-o-o-d) maintains ChezCat. The snapshot preserves existing
 product work and appropriate credit; earlier author metadata is not retained

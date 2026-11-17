@@ -113,11 +113,13 @@ impl Bridge<'_> {
         let retained_after=if total_added>=total_removed {retained_before.checked_add(total_added-total_removed)}else{retained_before.checked_sub(total_removed-total_added)}.ok_or("Attribute retained accounting overflow/underflow.")?;
         if retained_after>self.state.retained_limit {return Err("DOM retained attribute growth allowance reached.".into());}
         self.state.copies(added)?;
-        // Credit transferred payload before a growing write; for a shrinking
-        // write, defer positive identity accounting until its successful commit.
-        if removed>added {self.state.retained=retained_before.checked_sub(removed-added).ok_or("Attribute retained accounting underflow.")?;}
+        // Stage the complete identity transfer before the checked element/native
+        // write. Its final quota check must include both identity growth and
+        // any newly admitted native INPUT storage. A shrinking element write
+        // can offset a temporary positive transfer balance.
+        self.state.retained=if added>=removed {retained_before.checked_add(added-removed)}else{retained_before.checked_sub(removed-added)}
+            .ok_or("Attribute retained transfer overflow/underflow.")?;
         if let Err(error)=self.public_attribute(node,write_name,Some(value)) {self.state.retained=retained_before;return Err(error);}
-        self.state.retained=retained_after;
         if let Some(slot)=slot {let NodeKind::Element{attrs,..}=&mut self.doc.nodes[node].kind else {unreachable!()};attrs[slot].name=element_name;}
         let result=if let Some(old_id)=old_id {
             self.state.attributes[old_id].owner=None;self.state.attributes[old_id].value=old_value;
@@ -341,6 +343,7 @@ impl Bridge<'_> {
             return self.attribute_named(node, name, value);
         }
         let key = name.qualified.as_str();
+        if self.text_input_type_attribute(node,&name,&value)? {return Ok(());}
         if self.hidden_input_attribute(node,&name,&value)? {return Ok(());}
         let media_source=key=="src"&&self.media_element_receiver(node_handle(node));
         let media_controls=key=="controls"&&self.media_interface_receiver(node_handle(node));
@@ -363,7 +366,7 @@ impl Bridge<'_> {
         // accepted activation resolves their current raw values.
         let anchor_attribute = self.doc.nodes[node].namespace == crate::html::Namespace::Html
             && tag(self.doc, node) == "a" && matches!(key, "href" | "download");
-        let text_input_attribute = key == "value" && self.native_text_input(node);
+        let text_input_attribute = matches!(key,"name"|"value") && (self.native_text_input(node) || self.fresh_text_input(node));
         // Nonce text follows existing CSP snapshots/queues; changing metadata
         // does not rerun a parsed script. Attribution reporting is unavailable:
         // preserve its content attribute without advertising an IDL API or
