@@ -276,23 +276,16 @@ fn box_property(name:&str)->bool {
             name==format!("border-{side}") || ["width","style","color"].iter().any(|part|name==format!("border-{side}-{part}")))
 }
 fn border_value(value:&str)->bool {
-    let(mut width,mut style,mut shade)=(false,false,false); let mut any=false;
-    for part in value.split_ascii_whitespace() {
-        any=true;
-        if border_length(part).is_some() {if width{return false;}width=true;}
-        else if matches!(part,"none"|"hidden"|"solid") {if style{return false;}style=true;}
-        else if part=="currentcolor" || color(part).is_some() {if shade{return false;}shade=true;}
-        else {return false;}
-    } any
+    parse_border(value).is_some()
 }
 fn valid_box(name:&str,value:&str)->bool {
     if name=="padding" {return lengths(value,false,false).is_some();}
     if name.starts_with("padding-") {return parse_length(value,false,false).is_some();}
     if name=="border" || ["top","right","bottom","left"].iter().any(|side|name==format!("border-{side}")) {return border_value(value);}
-    let parts:Vec<_>=value.split_ascii_whitespace().take(5).collect();
+    let Some(parts)=border_parts(value) else{return false;};
     let valid=|part:&str| if name.ends_with("-width") {border_length(part).is_some()}
         else if name.ends_with("-style") {matches!(part,"none"|"hidden"|"solid")}
-        else {part=="currentcolor" || color(part).is_some()};
+        else {border_color_value(part).is_some()};
     let shorthand=matches!(name,"border-width"|"border-style"|"border-color");
     !parts.is_empty() && parts.len()<=if shorthand{4}else{1} && parts.iter().all(|part|valid(part))
 }
@@ -305,6 +298,7 @@ fn reset_box(style:&mut Style,parent:&Style,name:&str,inherit:bool) {
         if entire || name=="border-style" || name==format!("border-{side}-style") {style.border_solid[index]=source.border_solid[index];}
         if entire || name=="border-color" || name==format!("border-{side}-color") {
             style.border_color[index]=if inherit{Some(source.border_color[index].unwrap_or(source.color))}else{source.border_color[index]};
+            style.border_alpha[index]=source.border_alpha[index];
         }
     }
 }
