@@ -106,3 +106,94 @@ if(document.reader()!==43||document.state.kept!==44||document.nativeField!==7)th
     assert!(runtime.invocation.is_none());
     assert!(runtime.transient_registration_is_empty());
 }
+
+#[derive(Default)]
+struct ReadHost { fallback: bool, gets: Vec<String>, writes: usize, calls: usize }
+impl Host for ReadHost {
+    fn owns_property(&self, _:u32, _:&str)->bool { false }
+    fn ordinary_native_fallback(&self, handle:u32, _:&str)->bool {handle==1&&self.fallback}
+    fn get(&mut self, handle:u32, name:&str)->Result<Value,String> {
+        assert_eq!(handle,1);
+        self.gets.push(name.into());
+        Ok(if name=="nativeNamed" {Value::Number(17.0)} else {Value::Undefined})
+    }
+    fn set(&mut self,_:u32,_:&str,_:Value)->Result<(),String> {
+        self.writes+=1;Err("Unexpected native write.".into())
+    }
+    fn call(&mut self,_:u32,_:&str,_:&[Value])->Result<Value,String> {
+        self.calls+=1;Err("Unexpected native call.".into())
+    }
+}
+
+fn read_fixture(fallback:bool)->(Runtime,ReadHost) {
+    let mut runtime=Runtime::for_test();
+    runtime.bind_host_object(1,&[]).unwrap();
+    runtime.define_global("native",Value::Host(1)).unwrap();
+    (runtime,ReadHost {fallback,..ReadHost::default()})
+}
+
+#[test]
+fn document_own_properties_native_getter_recursion_uses_the_shared_guard_on_one_mib_and_recovers() {
+    std::thread::Builder::new().stack_size(1024*1024).spawn(|| {
+        for fallback in [false,true] {
+            let (mut runtime,mut host)=read_fixture(fallback);
+            runtime.execute("var entries=0,caught=0,finalized=0,after=0;Object.defineProperty(native,'x',{configurable:true,get:function(){entries++;return this.x;}});0;",&mut host).unwrap();
+            runtime.begin_job();
+            let error=runtime.execute("try{native.x;}catch(e){caught++;}finally{finalized++;}after++;",&mut host).unwrap_err();
+            assert!(error.contains("Accessor call limit reached (32)"),"fallback={fallback}: {error}");
+            assert!(runtime.invocation_failed_fatally());
+            // Each real accessor and its Script callback use the same quota.
+            assert_eq!(runtime.binding_value(runtime.global_environment,"entries").unwrap().to_number(),(MAX_CALL_DEPTH/2) as f64);
+            for name in ["caught","finalized","after"] {
+                assert_eq!(runtime.binding_value(runtime.global_environment,name).unwrap().to_number(),0.0,"{name}");
+            }
+            assert!(host.gets.is_empty(),"An own accessor must bypass native fallback");
+            assert_eq!((host.writes,host.calls),(0,0));
+            assert_eq!((runtime.call_depth,runtime.eval_depth,runtime.evaluation_frames),(0,0,0));
+            assert!(runtime.invocation.is_none());
+            assert!(runtime.transient_registration_is_empty());
+            assert!(!runtime.strict);
+            runtime.begin_job();
+            assert_eq!(runtime.execute("Object.defineProperty(native,'x',{value:7});native.x*6;",&mut host).unwrap().to_number(),42.0);
+            assert!(!runtime.invocation_failed_fatally());
+            assert!(host.gets.is_empty());
+            assert_eq!((host.writes,host.calls),(0,0));
+            assert_eq!((runtime.call_depth,runtime.eval_depth,runtime.evaluation_frames),(0,0,0));
+            assert!(runtime.invocation.is_none());
+            assert!(runtime.transient_registration_is_empty());
+        }
+    }).unwrap().join().unwrap();
+}
+
+#[test]
+fn document_own_properties_native_named_fallback_reads_once_before_inherited_accessors_and_keeps_receiver() {
+    for fallback in [false,true] {
+        let (mut runtime,mut host)=read_fixture(fallback);
+        assert_eq!(runtime.execute(r#"
+var inherited=0,named=0,own=0;
+Object.defineProperty(Object.prototype,'inheritedProbe',{configurable:true,get:function(){inherited++;if(this!==native)throw 'inherited receiver';return 23;}});
+Object.defineProperty(Object.prototype,'nativeNamed',{configurable:true,get:function(){named++;if(this!==native)throw 'named receiver';return 31;}});
+native.inheritedProbe;
+"#,&mut host).unwrap().to_number(),23.0);
+        assert_eq!(runtime.binding_value(runtime.global_environment,"inherited").unwrap().to_number(),1.0);
+        let first=if fallback {vec!["inheritedProbe"]} else {Vec::new()};
+        assert_eq!(host.gets,first);
+        assert_eq!(runtime.execute("native.nativeNamed;",&mut host).unwrap().to_number(),if fallback {17.0}else{31.0});
+        assert_eq!(runtime.binding_value(runtime.global_environment,"named").unwrap().to_number(),if fallback {0.0}else{1.0});
+        let before=host.gets.clone();
+        runtime.execute(r#"
+Object.defineProperty(native,'nativeNamed',{value:undefined,configurable:true});
+if(native.nativeNamed!==undefined)throw 'own undefined lost';
+Object.defineProperty(native,'nativeNamed',{configurable:true,get:function(){own++;if(this!==native)throw 'own receiver';return undefined;}});
+if(native.nativeNamed!==undefined||own!==1)throw 'own accessor lost';0;
+"#,&mut host).unwrap();
+        assert_eq!(host.gets,before,"Own undefined/accessors must not call native fallback");
+        assert_eq!(runtime.execute("delete native.nativeNamed;native.nativeNamed;",&mut host).unwrap().to_number(),if fallback {17.0}else{31.0});
+        let expected=if fallback {vec!["inheritedProbe","nativeNamed","nativeNamed"]}else{Vec::new()};
+        assert_eq!(host.gets,expected);
+        assert_eq!((host.writes,host.calls),(0,0));
+        assert_eq!((runtime.call_depth,runtime.eval_depth,runtime.evaluation_frames),(0,0,0));
+        assert!(runtime.invocation.is_none());
+        assert!(runtime.transient_registration_is_empty());
+    }
+}

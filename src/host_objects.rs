@@ -248,13 +248,8 @@ impl Runtime {
             return self.read_foreign_window(handle, name, host);
         }
         if let Some(object) = self.host_ordinary(handle, name, host)? {
-            if host.ordinary_native_fallback(handle,name)
-                && !self.owns_property(self.ordinary_id(object)?, name)?
-            {
-                // A named native value is not a fabricated ordinary own key.
-                // An existing own value (including undefined/accessors) wins.
-                let value = self.host_get_checked(handle, name, host)?;
-                if !matches!(value, Value::Undefined) { return self.checked_value(value); }
+            if self.host_native_fallback_required(handle, object, name, host)? {
+                return self.host_read_native_fallback(handle, object, name, host);
             }
             return self.get_ordinary_property_with_receiver(
                 object,
@@ -305,6 +300,25 @@ impl Runtime {
             );
         }
         self.checked_value(value)
+    }
+
+    #[inline(never)]
+    fn host_native_fallback_required(&mut self, handle:u32, object:Ordinary,
+        name:&str, host:&dyn Host) -> Result<bool,Fault>
+    {
+        Ok(host.ordinary_native_fallback(handle,name)
+            && !self.owns_property(self.ordinary_id(object)?, name)?)
+    }
+
+    #[inline(never)]
+    fn host_read_native_fallback(&mut self, handle:u32, object:Ordinary,
+        name:&str, host:&mut dyn Host) -> Result<Value,Fault>
+    {
+        // A named native value is not a fabricated ordinary own key.
+        // Keep this Value-producing branch out of ordinary own-accessor reads.
+        let value = self.host_get_checked(handle, name, host)?;
+        if !matches!(value, Value::Undefined) { return self.checked_value(value); }
+        self.get_ordinary_property_with_receiver(object, name, &Value::Host(handle), host)
     }
 
     pub(super) fn host_ordinary_has(&mut self, handle:u32, object:Ordinary,
