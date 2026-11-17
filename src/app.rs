@@ -2635,6 +2635,9 @@ impl App {
                 .get(&node)
                 .is_some_and(|c| c.value.text() != previous)
             {
+                if let Some(control) = self.forms.controls.get_mut(&node) {
+                    control.mark_value_dirty();
+                }
                 self.script_begin_job();
                 self.invalidate_script_geometry();
                 self.script_event(node, "input", false);
