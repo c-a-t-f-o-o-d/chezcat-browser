@@ -762,4 +762,62 @@ if(!caught||realmSecret!==91||Object.getPrototypeOf([])!==Array.prototype)throw 
         assert!(runtime.parked_main_roots.is_none());
         assert_eq!(runtime.execute("6*7;", &mut NoHost).unwrap().to_number(), 42.0);
     }
+
+    // Borrowed native concat must reenter each callback's own realm.
+    #[test]
+    fn string_concat_borrowed_native_reentry_uses_live_hooks_and_restores_realms() {
+        let mut runtime = Runtime::for_capacity_test();
+        expose_test_realm(&mut runtime);
+        runtime.execute(r#"
+var mainArray=Array,mainPrototype=Array.prototype;
+var borrowed=ChildString.prototype.concat,order='';
+if(typeof borrowed!=='function'||borrowed===String.prototype.concat)throw 'distinct realm concat';
+if(Object.getPrototypeOf(borrowed)!==ChildFunction.prototype)throw 'native function realm';
+var receiver={toString:function(){
+    if(Object.getPrototypeOf([])!==mainPrototype)throw 'receiver callback realm';
+    order+='r';return 'R';
+}};
+var later={toString:function(){throw 'obsolete later hook';}};
+var first={toString:function(){
+    if(Object.getPrototypeOf([])!==mainPrototype)throw 'first callback realm';
+    order+='a';
+    var retained=(function(text){return function(){return text;};})('B');
+    later.toString=function(){
+        if(Object.getPrototypeOf([])!==mainPrototype)throw 'replacement callback realm';
+        order+='b';return retained();
+    };
+    var nested=String.prototype.concat.call('n',{toString:function(){
+        if(Object.getPrototypeOf([])!==mainPrototype)throw 'nested callback realm';
+        order+='n';return 'N';
+    }});
+    if(nested!=='nN')throw 'native reentry result';
+    return 'A';
+}};
+if(borrowed.call(receiver,first,later)!=='RAB'||order!=='ranb')throw 'live ordered conversion hooks';
+if(Array!==mainArray||Object.getPrototypeOf([])!==mainPrototype||realmSecret!==91)throw 'main realm after return';
+
+var childError=false;
+try{borrowed.call('prefix',Symbol('not a string'));}
+catch(error){childError=error.name==='TypeError'&&Object.getPrototypeOf(error)===ChildTypeError.prototype;}
+if(!childError)throw 'native conversion error realm';
+if(Object.getPrototypeOf([])!==mainPrototype||realmSecret!==91)throw 'main realm after native error';
+
+var marker={},same=false,lateCalls=0;
+try{borrowed.call('prefix',{toString:function(){
+    if(Object.getPrototypeOf([])!==mainPrototype)throw 'throwing callback realm';
+    throw marker;
+}},{toString:function(){lateCalls++;return 'late';}});}
+catch(error){same=error===marker;}
+if(!same||lateCalls!==0)throw 'explicit throw identity or later conversion';
+if(Array!==mainArray||Object.getPrototypeOf([])!==mainPrototype||realmSecret!==91)throw 'main realm after callback error';
+'ok';
+"#, &mut NoHost).unwrap();
+        assert_eq!(runtime.active_realm, None);
+        assert_eq!(runtime.global_environment, 0);
+        assert!(runtime.parked_main_roots.is_none());
+        assert_eq!(runtime.native_access_caller, None);
+        assert_eq!(runtime.transient_roots.inhibited, 0);
+        assert_eq!((runtime.call_depth, runtime.eval_depth), (0, 0));
+        assert_eq!(runtime.execute("6*7;", &mut NoHost).unwrap().to_number(), 42.0);
+    }
 }

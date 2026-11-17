@@ -412,6 +412,7 @@ impl Runtime {
             "slice",
             "substring",
             "substr",
+            "concat",
             "charAt",
             "charCodeAt",
             "codePointAt",

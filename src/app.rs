@@ -5639,3 +5639,7 @@ mod select_fragment_tests;
 #[cfg(test)]
 #[path = "app_literal_prototype_tests.rs"]
 mod literal_prototype_tests;
+
+#[cfg(test)]
+#[path = "app_string_concat_tests.rs"]
+mod string_concat_tests;
