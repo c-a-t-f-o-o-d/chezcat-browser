@@ -362,8 +362,10 @@ var log='';Promise.resolve().then(function(){try{p.replaceChild(orphan,orphan);}
 
 #[test]
 fn replace_child_rejects_unsupported_native_subtrees_before_editing_either_parent() {
-    for (old,new) in [("<span id=old>old</span>","<section id=incoming><input id=field value=original></section>"),
-        ("<span id=old><input id=field value=original></span>","<section id=incoming>new</section>")] {
+    // Whole text INPUTs now have a checked native move path. Checkbox subtrees
+    // retain an unsupported-native witness for the same atomicity assertions.
+    for (old,new) in [("<span id=old>old</span>","<section id=incoming><input id=field type=checkbox value=original></section>"),
+        ("<span id=old><input id=field type=checkbox value=original></span>","<section id=incoming>new</section>")] {
         let html=format!("<div id=p>{old}</div><div id=q>{new}</div>");
         let (mut doc,mut forms,mut page,outcome)=page(&html,&["document.getElementById('field').value='edited';"]);
         assert_eq!(outcome.errors,0,"{}",page.report());
@@ -1688,7 +1690,7 @@ document.title='attr-conversion-ok';
 
 #[test]
 fn attr_removal_and_setters_keep_resource_control_and_inert_policy() {
-    let (mut doc, mut forms, mut page, outcome) = page("<body><input id=p value=initial onclick='return false'><img id=image src='https://example.test/x.png' srcset='responsive.png 1x'><link id=link rel=stylesheet href='https://example.test/'><template><i id=inert title=x></i></template></body>", &[]);
+    let (mut doc, mut forms, mut page, outcome) = page("<body><input id=p type=checkbox value=initial onclick='return false'><img id=image src='https://example.test/x.png' srcset='responsive.png 1x'><link id=link rel=stylesheet href='https://example.test/'><template><i id=inert title=x></i></template></body>", &[]);
     assert_eq!(outcome.errors, 0, "{}", page.report());
     let nodes: Vec<_> = ["p", "image", "link", "inert"].iter().map(|id| (0..doc.nodes.len()).find(|&n| doc.attr(n, "id") == Some(*id)).unwrap()).collect();
     let mut bridge = Bridge { doc: &mut doc, forms: &mut forms, state: &mut page.state };

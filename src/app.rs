@@ -1734,6 +1734,7 @@ impl App {
         self.drag = Drag::None;
         self.set_scroll(self.scroll.clamp(0, self.max_scroll()));
         self.update_find(false);
+        self.validate_control_focus();
     }
     pub fn resize(&mut self, width: i32, height: i32) {
         let width = width.clamp(1, 8192);
@@ -2657,6 +2658,9 @@ impl App {
                 .get(&node)
                 .is_some_and(|c| c.value.text() != previous)
             {
+                if let Some(control) = self.forms.controls.get_mut(&node) {
+                    control.mark_value_dirty();
+                }
                 self.script_begin_job();
                 self.invalidate_script_geometry();
                 self.script_event(node, "input", false);
@@ -5669,3 +5673,7 @@ mod string_concat_tests;
 #[cfg(test)]
 #[path = "app_hidden_input_tests.rs"]
 mod hidden_input_tests;
+
+#[cfg(test)]
+#[path = "app_text_input_tests.rs"]
+mod text_input_tests;

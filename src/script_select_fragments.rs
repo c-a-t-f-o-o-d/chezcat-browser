@@ -1,4 +1,4 @@
-//! Whole conventional select subtrees share the native form model. Existing
+//! Whole conventional select and finite text INPUT subtrees share the native form model. Existing
 //! editors and selectedness are retained; prospective parent metadata is staged.
 use super::*;
 
@@ -11,6 +11,10 @@ impl SelectView<'_> {
     fn attr(&self, node: usize, name: &str) -> Option<&str> { let (doc, node) = self.source(node); doc.attr(node, name) }
 }
 impl Bridge<'_> {
+    pub(super) fn owned_fragment_text_input(&self, node: usize) -> bool {
+        forms::fragment_text_input(self.doc, node)
+            && self.forms.controls.get(&node).is_some_and(|control| control.kind == Kind::Text)
+    }
     // Only a complete known select subtree may cross a DOM boundary. Mutating
     // inside a select remains guarded by mutation_ancestors in this slice.
     pub(super) fn owned_select_member(&self, root: usize, node: usize) -> bool {
@@ -30,7 +34,7 @@ impl Bridge<'_> {
         let mut affected = Vec::new();
         affected.try_reserve(self.forms.controls.len()).map_err(|_| "Select affected-control reservation failed.")?;
         for (&node, control) in &self.forms.controls {
-            if !matches!(control.kind,Kind::Select|Kind::Hidden) { continue; }
+            if !matches!(control.kind,Kind::Select|Kind::Hidden|Kind::Text) { continue; }
             let mut ancestor = Some(node);
             for _ in 0..128 {
                 let Some(index) = ancestor else { break; };
@@ -39,8 +43,9 @@ impl Bridge<'_> {
                 ancestor = self.state.tree.parents.get(index).copied().flatten();
             }
         }
-        let new_select = fragment.is_some_and(|(doc, _)| (1..doc.nodes.len()).any(|node| tag(doc, node) == "select"));
-        if affected.is_empty() && !new_select {
+        let new_control = fragment.is_some_and(|(doc, _)| (1..doc.nodes.len()).any(|node|
+            tag(doc, node) == "select" || forms::fragment_text_input(doc, node)));
+        if affected.is_empty() && !new_control {
             return Ok(forms::SelectFormPlan { additions: std::collections::BTreeMap::new(), metadata: Vec::new(), retained_bytes: 0 });
         }
         let extra = fragment.map_or(0, |(doc, _)| doc.nodes.len().saturating_sub(1));
@@ -66,7 +71,11 @@ impl Bridge<'_> {
         selects.extend(plan.additions.keys().copied());
         let view = SelectView { document: self.doc, fragment };
         for node in selects {
-            let hidden = self.forms.controls.get(&node).is_some_and(|control| control.kind == Kind::Hidden);
+            let kind = self.forms.controls.get(&node).or_else(|| plan.additions.get(&node)).map(|control| control.kind);
+            let input = matches!(kind, Some(Kind::Hidden | Kind::Text));
+            if kind == Some(Kind::Text) && view.attr(node, "form").is_some() {
+                return Err("Moving text INPUTs with explicit form association is not implemented; no tree was changed.".into());
+            }
             let mut ancestor = Some(node);
             let mut connected = false;
             let mut nearest_form = None;
@@ -76,10 +85,14 @@ impl Bridge<'_> {
                 self.state.work(1)?;
                 depth += 1;
                 if depth > 128 || index >= parents.len() { return Err("Select projected ancestry limit reached.".into()); }
-                if hidden && index != 0 {
+                if input && index != 0 {
                     let (doc, local) = view.source(index);
                     if doc.nodes[local].namespace != crate::html::Namespace::Html {
-                        return Err("Hidden input connection requires known HTML ancestry; no tree was changed.".into());
+                        return Err(if kind == Some(Kind::Hidden) {
+                            "Hidden input connection requires known HTML ancestry; no tree was changed."
+                        } else {
+                            "Text INPUT connection requires known HTML ancestry; no tree was changed."
+                        }.into());
                     }
                 }
                 let name = view.tag(index);
@@ -117,3 +130,7 @@ impl Bridge<'_> {
 #[cfg(test)]
 #[path = "script_select_fragment_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "script_text_fragment_tests.rs"]
+mod text_fragment_tests;
