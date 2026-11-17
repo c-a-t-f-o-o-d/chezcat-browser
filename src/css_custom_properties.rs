@@ -1,4 +1,4 @@
-//! Finite unregistered custom properties for padding, border and opaque colors.
+//! Finite unregistered custom properties for boxes, opaque colors and font-size.
 //! https://www.w3.org/TR/css-variables-1/
 //! Values inherit after substitution. This adds neither CSSOM nor URL loads.
 use super::*;
@@ -271,7 +271,7 @@ fn expand(text:&str,depth:usize,budget:&mut Budget,lookup:&mut impl FnMut(&str,&
 }
 
 fn box_property(name:&str)->bool {
-    matches!(name,"padding"|"padding-top"|"padding-right"|"padding-bottom"|"padding-left"|"border"|"border-width"|"border-style"|"border-color"|"background-color"|"background"|"color")
+    matches!(name,"padding"|"padding-top"|"padding-right"|"padding-bottom"|"padding-left"|"border"|"border-width"|"border-style"|"border-color"|"background-color"|"background"|"color"|"font-size")
         || ["top","right","bottom","left"].iter().any(|side|
             name==format!("border-{side}") || ["width","style","color"].iter().any(|part|name==format!("border-{side}-{part}")))
 }
@@ -279,6 +279,7 @@ fn border_value(value:&str)->bool {
     parse_border(value).is_some()
 }
 fn valid_box(name:&str,value:&str)->bool {
+    if name=="font-size" {return font_size_value(value,INITIAL_FONT_SIZE,INITIAL_FONT_SIZE).is_some();}
     if name=="color" {return value=="currentcolor" || color(value).is_some();}
     if matches!(name,"background-color"|"background") {
         return matches!(value,"transparent"|"none"|"currentcolor") || color(value).is_some();
@@ -296,6 +297,7 @@ fn valid_box(name:&str,value:&str)->bool {
 fn reset_box(style:&mut Style,parent:&Style,name:&str,inherit:bool) {
     let initial=Style::default(); let source=if inherit{parent}else{&initial};
     if name=="color" {style.color=source.color;return;}
+    if name=="font-size" {style.font_size=source.font_size;return;}
     if matches!(name,"background-color"|"background") {
         style.background=source.background;
         style.background_current_color=source.background_current_color;
@@ -322,10 +324,11 @@ pub(super) fn apply_box(style:&mut Style,parent:&Style,declaration:&Declaration,
     if !box_property(&declaration.name) || !has_var(&declaration.value) {return false;}
     // A var()-bearing declaration participates in the cascade before its
     // substituted grammar is known. Failure uses unset (the parent's computed
-    // foreground for color, initial components for boxes/backgrounds); it cannot
+    // color/font-size for inherited text properties, initial box components); it cannot
     // resurrect an earlier author declaration.
     let result=variables.substitute(&declaration.value,budget).ok().flatten();
     let value=result.as_deref().unwrap_or("").trim().to_ascii_lowercase();
+    let inherited=matches!(declaration.name.as_str(),"color"|"font-size");
     if matches!(value.as_str(),"inherit"|"initial"|"unset") {
         // The finite background shorthand can inherit an existing single image
         // layer. Charge its URL copy; substitution does not introduce URL syntax.
@@ -334,10 +337,10 @@ pub(super) fn apply_box(style:&mut Style,parent:&Style,declaration:&Declaration,
             reset_box(style,parent,&declaration.name,false);
             return true;
         }
-        reset_box(style,parent,&declaration.name,value=="inherit" || (declaration.name=="color" && value=="unset"));
+        reset_box(style,parent,&declaration.name,value=="inherit" || (inherited && value=="unset"));
     } else if valid_box(&declaration.name,&value) {
         apply(style,parent,&Declaration {name:declaration.name.clone(),value,important:declaration.important,stylesheet:declaration.stylesheet});
-    } else {reset_box(style,parent,&declaration.name,declaration.name=="color");}
+    } else {reset_box(style,parent,&declaration.name,inherited);}
     true
 }
 
@@ -463,5 +466,22 @@ mod tests {
         assert_eq!(style.background,snapshot.background);assert_eq!(style.background_current_color,snapshot.background_current_color);assert_eq!(style.background_image,snapshot.background_image);assert_eq!(style.background_size,snapshot.background_size);
         assert_eq!(style.padding,snapshot.padding);assert_eq!(style.border_color,snapshot.border_color);assert_eq!(style.border_alpha,snapshot.border_alpha);assert_eq!(style.font_families,snapshot.font_families);assert_eq!(style.font_size,snapshot.font_size);
         assert_eq!(parent.color,0x112233);
+    }
+
+    #[test]
+    fn font_size_variable_existing_allowances_inherit_without_growing_other_style_state() {
+        let declaration=Declaration{name:"font-size".into(),value:"var(--missing,24px)".into(),important:false,stylesheet:None};
+        let mut parent=Style::default();parent.font_size=18.0;
+        let mut style=Style::default();style.font_size=99.0;style.root_font_size=32.0;style.font_families=vec!["Geometry".into()];style.font_weight=700;style.italic=true;style.line_height=LineHeight::Factor(2.0);
+        style.color=0x123456;style.background=Some(0x0d6efd);style.background_image=Some(BackgroundImage{url:"KeptCase.ppm".into(),stylesheet:Some(17)});style.padding=[Length::Px(7.0);4];style.border_alpha=[51;4];
+        let snapshot=style.clone();
+        for mut budget in [Budget{work:0,copies:0},Budget{work:10000,copies:0}] {
+            style.font_size=99.0;assert!(apply_box(&mut style,&parent,&declaration,&Variables::default(),&mut budget));assert_eq!(style.font_size,18.0);
+        }
+        let mut many=String::new();for index in 0..=MAX_NAMES {many.push_str(&format!("--n{index}:24px;"));}
+        let declarations=parse_declarations(&many);let blocked=Variables::cascade(&Variables::default(),declarations.iter(),&mut Budget::default());assert!(blocked.blocked);
+        style.font_size=99.0;assert!(apply_box(&mut style,&parent,&declaration,&blocked,&mut Budget::default()));assert_eq!(style.font_size,18.0,"Blocked variable maps cannot revive author99px or an unbudgeted24px fallback");
+        assert_eq!(style.root_font_size,snapshot.root_font_size);assert_eq!(style.font_families,snapshot.font_families);assert_eq!(style.font_weight,snapshot.font_weight);assert_eq!(style.italic,snapshot.italic);assert!(matches!(style.line_height,LineHeight::Factor(value)if value==2.0));
+        assert_eq!(style.color,snapshot.color);assert_eq!(style.background,snapshot.background);assert_eq!(style.background_image,snapshot.background_image);assert_eq!(style.padding,snapshot.padding);assert_eq!(style.border_alpha,snapshot.border_alpha);assert_eq!(parent.font_size,18.0);
     }
 }
