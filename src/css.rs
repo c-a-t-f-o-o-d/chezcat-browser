@@ -4,6 +4,8 @@ use std::collections::HashMap;
 #[path="css_media.rs"]
 mod media;
 pub use media::{Hover, MediaEnvironment};
+#[path="css_custom_properties.rs"]
+mod custom_properties;
 
 use crate::html::{Document, NodeKind};
 
@@ -724,6 +726,8 @@ pub(crate) fn compute_with_environment(
     }
 
     let mut computed = vec![Style::default(); doc.nodes.len()];
+    let mut variables = vec![custom_properties::Variables::default(); doc.nodes.len()];
+    let mut variable_budget = custom_properties::Budget::default();
     let mut budget = MAX_MATCH_STEPS;
     let mut root_font_size = INITIAL_FONT_SIZE;
     for &index in &order {
@@ -732,6 +736,8 @@ pub(crate) fn compute_with_environment(
             .and_then(|parent| computed.get(parent))
             .cloned()
             .unwrap_or_default();
+        let inherited_variables = parents[index].and_then(|parent|variables.get(parent)).cloned().unwrap_or_default();
+        variables[index] = inherited_variables.clone();
         if inert[index]
             || doc.scripting_enabled
                 && matches!(&node.kind, NodeKind::Element { tag, .. } if tag == "noscript")
@@ -878,8 +884,12 @@ pub(crate) fn compute_with_environment(
             ));
         }
         applicable.sort_by_key(|(priority, _)| *priority);
+        variables[index] = custom_properties::Variables::cascade(&inherited_variables,
+            applicable.iter().map(|(_,declaration)|*declaration),&mut variable_budget);
         for (_, declaration) in applicable {
-            apply(&mut style, &parent, declaration);
+            if !custom_properties::apply_box(&mut style,&parent,declaration,&variables[index],&mut variable_budget) {
+                apply(&mut style, &parent, declaration);
+            }
         }
         if tag == "html" {
             root_font_size = style.font_size;
@@ -2285,8 +2295,8 @@ impl<'a> Iterator for DeclarationItems<'a> {
                 continue;
             }
             if matches!(character, '\'' | '"') { self.quote = character; continue; }
-            if character == '(' { self.depth += 1; }
-            if character == ')' { self.depth = self.depth.saturating_sub(1); }
+            if matches!(character,'('| '[' | '{') { self.depth += 1; }
+            if matches!(character,')'| ']' | '}') { self.depth = self.depth.saturating_sub(1); }
             if character != ';' || self.depth != 0 { continue; }
             let item = &self.source[self.start..index];
             self.start = (index + 1).min(self.source.len());
@@ -2308,13 +2318,17 @@ fn parse_declarations_bounded(source:&str,maximum:usize)->Vec<Declaration> {
     let mut declarations = Vec::new();
     for item in declaration_items(&source) {
         if let Some((name, value)) = item.split_once(':') {
-            let name = name.trim().to_ascii_lowercase();
+            let raw_name = name.trim();
+            if raw_name.len() > 64 { continue; }
+            let name = if raw_name.starts_with("--") { raw_name.to_owned() } else { raw_name.to_ascii_lowercase() };
             let (value, important) = declaration_priority(value);
-            let value = value.to_owned();
-            if !name.is_empty() && name.len() <= 64 && value.len() <= 2_048 && !value.is_empty() {
+            let custom = name.starts_with("--");
+            if !name.is_empty() && name.len() <= 64 && value.len() <= 2_048 && (!value.is_empty() || custom)
+                && (!custom || custom_properties::custom_name(&name))
+                && (!(custom || value.to_ascii_lowercase().contains("var(")) || custom_properties::valid_syntax(&value)) {
                 declarations.push(Declaration {
                     name,
-                    value,
+                    value: value.to_owned(),
                     important,
                     stylesheet: None,
                 });
