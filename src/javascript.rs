@@ -66,6 +66,16 @@ mod statement_expression_tests;
 mod binding_patterns;
 #[path = "bound_functions.rs"]
 mod bound_functions;
+#[path = "class_parser.rs"]
+mod class_parser;
+#[path = "class_runtime.rs"]
+mod class_runtime;
+#[cfg(test)]
+#[path = "base_class_tests.rs"]
+mod base_class_tests;
+#[cfg(test)]
+#[path = "strict_missing_assignment_tests.rs"]
+mod strict_missing_assignment_tests;
 #[path = "collections.rs"]
 mod collections;
 #[path = "date.rs"]
@@ -1552,6 +1562,7 @@ enum ExprKind {
     OptionalChain(ExprId, Vec<optional_chaining::Step>),
     Construct(ExprId, Vec<Argument>),
     Function(usize),
+    Class(usize),
     Object(Vec<object_literals::Member>),
     Array(Vec<Option<Argument>>),
     Pattern(binding_patterns::Id),
@@ -1608,6 +1619,8 @@ struct Template {
     dynamic_source: bool,
     arrow: bool,
     constructible: bool,
+    class_constructor: bool,
+    class_element: bool,
     strict: bool,
     name: Option<String>,
     params: Vec<Parameter>,
@@ -1623,6 +1636,8 @@ struct Program {
     exprs: Vec<Expr>,
     stmts: Vec<Stmt>,
     templates: Vec<Template>,
+    classes: Vec<class_parser::Class>,
+    class_members: usize,
     patterns: Vec<binding_patterns::Pattern>,
     body: Vec<StmtId>,
     chain_steps: usize,
@@ -1631,6 +1646,7 @@ struct Program {
 impl Program {
     fn node_count(&self) -> usize {
         self.exprs.len() + self.stmts.len() + self.chain_steps + self.patterns.len()
+            + self.classes.len() + self.class_members
     }
 }
 
@@ -1725,6 +1741,8 @@ impl Parser {
                 exprs: Vec::new(),
                 stmts: Vec::new(),
                 templates: Vec::new(),
+                classes: Vec::new(),
+                class_members: 0,
                 patterns: Vec::new(),
                 body: Vec::new(),
                 chain_steps: 0,
@@ -2041,7 +2059,7 @@ impl Parser {
         for (_, _, is_loop) in &mut self.labels[previous_labels..] {
             *is_loop = iteration;
         }
-        if labelled && (self.is("let") || self.is("const") || self.is("function")) {
+        if labelled && (self.is("let") || self.is("const") || self.is("function") || self.is("class")) {
             return Err(self.error("Use a block for a labelled lexical or function declaration."));
         }
         let result = self.statement_inner(id);
@@ -2109,6 +2127,17 @@ impl Parser {
             let kind = self.declaration(false)?;
             self.semi()?;
             kind
+        } else if self.is("class") {
+            let kind = self.class_expression(at, true)?;
+            let ExprKind::Class(class) = kind else { unreachable!() };
+            let name = self.program.classes[class].name.clone().expect("class declaration name");
+            self.check_nodes()?;
+            let pattern = self.program.patterns.len();
+            self.program.patterns.push(binding_patterns::Pattern {
+                kind: binding_patterns::Kind::Name(name), expressions: false, at,
+            });
+            let value = self.expr(ExprKind::Class(class), at)?;
+            StmtKind::Declare(Declaration::Let, vec![(pattern, Some(value))])
         } else if self.eat("function") {
             let name = self.name()?;
             let function = self.function(None, at)?;
@@ -2281,6 +2310,8 @@ impl Parser {
             dynamic_source: false,
             arrow: false,
             constructible: true,
+            class_constructor: false,
+            class_element: false,
             strict: self.strict,
             name,
             params,
@@ -2368,6 +2399,8 @@ impl Parser {
                 dynamic_source: false,
                 arrow: true,
                 constructible: false,
+                class_constructor: false,
+                class_element: false,
                 strict: self.strict,
                 name: None,
                 params,
@@ -2408,6 +2441,8 @@ impl Parser {
             dynamic_source: false,
             arrow: true,
             constructible: false,
+            class_constructor: false,
+            class_element: false,
             strict,
             name: None,
             params,
@@ -2439,6 +2474,10 @@ impl Parser {
     }
     fn primary(&mut self) -> Result<ExprId, Fault> {
         let at = self.at();
+        if self.is("class") {
+            let kind = self.class_expression(at, false)?;
+            return self.expr(kind, at);
+        }
         let kind = match self.token().kind.clone() {
             TokenKind::Number(value) => {
                 self.current += 1;
@@ -4503,6 +4542,9 @@ impl Runtime {
             lexical_invocation: if program.templates[template].arrow { self.invocation } else { None },
         })?;
         debug_assert_eq!(inserted.id, index);
+        if program.templates[template].class_element {
+            self.scope_assigned_closures.insert(index);
+        }
         self.initialize_function_properties(
             inserted,
             program.templates[template].name.as_deref().unwrap_or(""),
@@ -6490,6 +6532,9 @@ impl Runtime {
                     self.step()?;
                     if let Some(expression) = initial {
                         let value = self.eval(program, *expression, env, this, host)?;
+                        if let Some(name) = program.pattern_name(*pattern) {
+                            self.infer_class_name(program, *expression, name, &value)?;
+                        }
                         let scope_candidate = if matches!(&program.patterns[*pattern].kind, binding_patterns::Kind::Name(_)) {
                             self.fresh_anonymous_scope_closure(program, *expression, &value)
                         } else { None };
@@ -7152,6 +7197,7 @@ impl Runtime {
             ExprKind::This => self.copy_value(this),
             ExprKind::NewTarget => self.new_target_value(),
             ExprKind::Function(template) => self.make_function(program, *template, env, this),
+            ExprKind::Class(class) => self.make_class(program, *class, env, this),
             ExprKind::Object(_) | ExprKind::Array(_) => {
                 self.eval_collection(program, id, env, this, host)
             }
@@ -7221,7 +7267,11 @@ impl Runtime {
                 object_literals::Member::Property { key, value, kind } => {
                     let key = self.eval(program, *key, env, this, host)?;
                     let key = self.property_key(key, host)?;
+                    let expression = *value;
                     let value = self.eval(program, *value, env, this, host)?;
+                    if *kind == object_literals::Kind::Data {
+                        self.infer_class_property_name(program, expression, &key, &value)?;
+                    }
                     self.define_literal_member(object, key, value, *kind)?;
                 }
                 object_literals::Member::Prototype(expression) => {
@@ -7379,6 +7429,11 @@ impl Runtime {
                     (!logical).then_some(before)
                 };
                 let mut value = self.eval(program, *right, env, this, host)?;
+                if *op == "=" {
+                    if let ExprKind::Name(name) = &program.exprs[*left].kind {
+                        self.infer_class_name(program, *right, name, &value)?;
+                    }
+                }
                 if logical {
                     self.name_logical_assignment_result(program, *left, *right, &value)?;
                 }
@@ -7920,9 +7975,15 @@ impl Runtime {
                     self.set_global(name, value, host)
                 }
             }
-            Reference::Missing(name) => Err(Fault::new(format!(
-                "{name} is not defined; implicit globals are not supported."
-            ))),
+            Reference::Missing(name) => {
+                if self.strict {
+                    Err(Fault::exception("ReferenceError", format!("{name} is not defined.")))
+                } else {
+                    Err(Fault::new(format!(
+                        "{name} is not defined; implicit globals are not supported."
+                    )))
+                }
+            }
             Reference::Property(Value::Host(object), property) => {
                 if self.is_browser_global(object) { return self.set_global(property, value, host); }
                 self.host_write(object, property, value, host)
@@ -8731,6 +8792,9 @@ impl Runtime {
         else {
             unreachable!()
         };
+        if program.templates[*template].class_constructor && new_target.is_none() {
+            return Err(Fault::exception("TypeError", "Class constructors require new."));
+        }
         let (program, template, parent, lexical_this, lexical_invocation) = (
             program.clone(),
             *template,
@@ -11149,7 +11213,7 @@ caught;
             ("var code='eval(code)';try{eval(code);}catch(e){test.record('caught');}finally{test.record('finally');}".to_owned(), "limit"),
             ("try{for(var n=0;n<200;n++)eval('1');}catch(e){test.record('caught');}finally{test.record('finally');}".to_owned(), "Retained script limit"),
             (format!("try{{eval('{}1;');}}catch(e){{test.record('caught');}}finally{{test.record('finally');}}", "!".repeat(500)), "Parser nesting limit"),
-            ("try{eval('class Unsupported {}');}catch(e){test.record('caught');}finally{test.record('finally');}".to_owned(), "Unsupported syntax"),
+            ("try{eval('class Unsupported extends Object {}');}catch(e){test.record('caught');}finally{test.record('finally');}".to_owned(), "Derived classes"),
             ("try{eval('({async value(){return 1;}})');}catch(e){test.record('caught');}finally{test.record('finally');}".to_owned(), "not implemented"),
         ] {
             let (mut runtime, mut host) = test_runtime();
@@ -12180,7 +12244,7 @@ if(errors!==6)throw 'quantifier syntax';'brace-ok';
     fn parsing_finishes_before_any_script_effects() {
         for source in [
             "test.value=1; const thing={async x(){return 1;}};",
-            "test.value=1; class Nope {}",
+            "test.value=1; class Nope extends Object {}",
             "test.value=1; let duplicate; let duplicate;",
             "test.value=1; function f(){break;}",
             "test.value=1; if(true) let local=1;",

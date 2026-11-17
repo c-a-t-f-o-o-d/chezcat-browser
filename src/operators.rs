@@ -40,6 +40,9 @@ impl Runtime {
         right: ExprId,
         value: &Value,
     ) -> Result<(), Fault> {
+        if let ExprKind::Name(name) = &program.exprs[left].kind {
+            self.infer_class_name(program, right, name, value)?;
+        }
         if let (ExprKind::Name(name), ExprKind::Function(template), Value::Function(function)) =
             (&program.exprs[left].kind, &program.exprs[right].kind, value)
         {

@@ -295,6 +295,9 @@ impl Runtime {
         if let ExprKind::Function(template) = program.exprs[id].kind {
             return self.eval_heap_function_literal(program, template, env, this);
         }
+        if let ExprKind::Class(class) = program.exprs[id].kind {
+            return self.eval_heap_class_literal(program, class, env, this);
+        }
         // Compound helpers already own their traversal state. Do not retain
         // this driver's large Frame/Transition temporaries while they invoke
         // iterator getters or other callbacks. Children still reenter eval
@@ -351,6 +354,27 @@ impl Runtime {
     // oracle handles every expression kind and retains unnecessary temporary
     // state during callback reentry in unoptimized Windows builds.
     #[inline(never)]
+    fn eval_heap_class_literal(&mut self, program: &Rc<Program>, class: usize,
+        env: usize, this: &Value) -> Result<Value, Fault> {
+        if self.evaluation_frames >= MAX_EVALUATION_FRAMES {
+            return Err(Fault::new("Pending evaluation limit reached (4096)."));
+        }
+        self.evaluation_frames += 1;
+        let scratch = Scratch { frames: Vec::new(), arguments: Vec::new() };
+        let result = match self.publish_heap_roots(&scratch, env, this, None, None, None) {
+            Ok(marker) => {
+                let result = self.collect_before_function_literal()
+                    .and_then(|()| self.make_class(program, class, env, this));
+                self.restore_transient_marker(marker);
+                result
+            }
+            Err(error) => Err(error),
+        };
+        self.evaluation_frames -= 1;
+        result
+    }
+
+    #[inline(never)]
     fn eval_heap_immediate(
         &mut self, program: &Rc<Program>, id: ExprId, env: usize,
         this: &Value, host: &mut dyn Host,
@@ -365,6 +389,7 @@ impl Runtime {
             ExprKind::This => self.copy_value(this),
             ExprKind::NewTarget => self.new_target_value(),
             ExprKind::Function(template) => self.make_function(program, *template, env, this),
+            ExprKind::Class(class) => self.make_class(program, *class, env, this),
             ExprKind::RegExp(expression) => self.regexp_object(expression.clone()),
             ExprKind::Array(elements) => self.eval_array_literal(program, elements, env, this, host),
             ExprKind::Object(properties) => self.eval_object_literal(program, properties, env, this, host),
@@ -510,6 +535,12 @@ impl Runtime {
             let marker = self.publish_heap_roots(scratch, env, this, None, None, completed)?;
             let result = self.collect_before_function_literal()
                 .and_then(|()| self.make_function(program, template, env, this));
+            self.restore_transient_marker(marker);
+            result
+        } else if let ExprKind::Class(class) = program.exprs[id].kind {
+            let marker = self.publish_heap_roots(scratch, env, this, None, None, completed)?;
+            let result = self.collect_before_function_literal()
+                .and_then(|()| self.make_class(program, class, env, this));
             self.restore_transient_marker(marker);
             result
         } else {
@@ -685,6 +716,11 @@ impl Runtime {
             }
             State::AssignmentValue { op, left, right, reference, before } => {
                 let mut result = value(completion);
+                if op == "=" {
+                    if let ExprKind::Name(name) = &program.exprs[left].kind {
+                        self.infer_class_name(program, right, name, &result)?;
+                    }
+                }
                 if matches!(op, "&&=" | "||=" | "??=") {
                     self.name_logical_assignment_result(program, left, right, &result)?;
                 }

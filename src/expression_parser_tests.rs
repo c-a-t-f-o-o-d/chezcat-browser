@@ -236,7 +236,7 @@ fn scratch_parser(source: &str, enclosing: usize) -> Parser {
         heap: limits::REGRESSION_HEAP,
         program: Program {
             source: source.into(), strict: false, exprs: Vec::new(), stmts: Vec::new(),
-            templates: Vec::new(), patterns: Vec::new(), body: Vec::new(), chain_steps: 0,
+            templates: Vec::new(), classes: Vec::new(), class_members: 0, patterns: Vec::new(), body: Vec::new(), chain_steps: 0,
         },
         delimiter_ends: vec![usize::MAX; tokens.len()], tokens, deferred_bodies: Vec::new(),
         current: 0, depth: 0, expression_frames: enclosing, argument_entries: 0,
