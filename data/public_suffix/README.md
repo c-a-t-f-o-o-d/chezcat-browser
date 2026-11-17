@@ -1,4 +1,14 @@
+<div align="center">
+
 # Bundled public-suffix data
+
+*Reviewed data with explicit provenance and freshness limits.*
+
+[Home](../../README.md) · [Third-party notices](../../THIRD_PARTY_NOTICES.md) · [Notice and license](LICENSE-AND-NOTICE.md)
+
+</div>
+
+---
 
 ChezCat's original lookup in `src/public_suffix.rs` embeds `rules.rs` at compile
 time. No file beside the executable, network service, third-party Rust crate,

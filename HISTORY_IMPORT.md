@@ -1,4 +1,14 @@
+<div align="center">
+
 # Public snapshot provenance
+
+*Where this public source lineage begins.*
+
+[Home](README.md) · [Changes](CHANGELOG.md) · [Contributors](CONTRIBUTORS.md)
+
+</div>
+
+---
 
 This public source lineage starts with a parentless snapshot prepared on
 2026-11-14 (America/Chicago) from the latest completed product milestone.

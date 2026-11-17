@@ -1,4 +1,14 @@
+<div align="center">
+
 # Endorsed builds
+
+*A register of actual approvals—not an implied endorsement.*
+
+[Home](README.md) · [Approval policy](docs/ENDORSEMENT_POLICY.md) · [Branding](docs/BRANDING.md)
+
+</div>
+
+---
 
 This register contains no approval entries. It grants no endorsement, distribution permission or hosted-access permission.
 

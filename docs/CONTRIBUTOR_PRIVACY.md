@@ -1,4 +1,14 @@
+<div align="center">
+
 # Contributor privacy and legal records
+
+*Private records stay private; public credit stays precise.*
+
+[Home](../README.md) · [Documentation](README.md) · [License](../LICENSE) · [Contributing](../CONTRIBUTING.md)
+
+</div>
+
+---
 
 Licensing and record questions: legal@bitmadd.com. This notice describes the
 project's contribution-record process; it does not replace GitHub's own terms or

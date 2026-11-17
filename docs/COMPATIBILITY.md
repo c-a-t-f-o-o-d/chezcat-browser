@@ -1,112 +1,161 @@
+<div align="center">
+
 # Browser compatibility scope
 
-Compatibility is partial and measured by observable browser stages. A source
-inventory, a parser success, HTTP200, zero script errors or a library name alone
-does not establish a working page. The [machine-readable catalogue](compatibility.json)
-classifies 44 named families and formats by their actual browser, build, server
-or test-host role. Unassessed entries are not assumed to work or fail.
-This document and the catalogue own measured version/workflow results; development
-order belongs to the [roadmap](ROADMAP.md), implemented limits to the
-[capability matrix](CAPABILITIES.md), and lasting acceptance to the
-[feature contracts](FEATURE_CONTRACTS.md).
+*Measured workflows—not a blanket list of supported libraries.*
 
-The semantic reference for the active language checks is ECMAScript 2025, edition
-16; DOM references use the living DOM specification. Original model tests, pinned
-upstream cases, actual App/input/render journeys and independent browser reference
-captures have distinct scopes. A missing prerequisite or unavailable test host is
-reported separately from a language assertion failure. No conformance percentage
-is inferred from the small selected case sets.
+[Home](../README.md) · [Roadmap](ROADMAP.md) · [Capabilities](CAPABILITIES.md) · [Documentation](README.md)
 
-| Selected local workflow | Observed boundary |
-| --- | --- |
-| Original asynchronous form/search/navigation | Async ready state, Unicode form submission, readable results, destination activation, exactly one Back and a different query pass the bounded App/input workflow |
-| Unmodified jQuery1.12.4 with Bootstrap3.4.1 dropdown/form | The unchanged hidden-input recheck at1280 advances from setting INPUT type=hidden at1265:4 to `div.innerHTML = '<input/>'` at2684:2. Load and initial rendering pass; initialization, input and async stages fail. Later missing-library errors are cascades; no visible library workflow improvement is established |
-| Foundation6.9.0 generated CSS with original controls | The unchanged JS-enabled fixture now forms two columns at1280 and stacks at640, with its original independent image pixels. This is a responsive rendering improvement; Vue initialization and optional Foundation JavaScript are separate |
-| Vue2.7.16 runtime with an original reactive component | The unchanged concat recheck at1280/640 advances from undefined concat at11:3613 to object-prototype access at11:3808. Load/initial render/Foundation CSS pass; Vue mount/input/async fail. Modern Vue3 retains its separate Proxy prerequisite |
-| Separate unmodified jQuery4.0.0 input app, fixture revision2 | The App driver completes and load/initial rendering pass. Execution advances past getRootNode at4321:7 to refused anchor href assignment at7963:1; initialization, input effects and timer update still fail. This is independent of the legacy input-fragment blocker |
-| Separate unmodified Bootstrap5.3.9 app with bundled Popper2.11.8, fixture revision2 | Load/initial rendering and responsive CSS pass at1280/640. Class syntax at599:3 still prevents initialization, so the correctly named menu choice remains unrendered and interaction is dependency-blocked. This measures original card positions, not complete component styling |
-| Independent browser reference | Initial DOM and pixels were captured; interactions were not run and do not supply a workflow-pass denominator |
+</div>
 
-Delivered CP1 provides the real collection/call/replacement/Node prerequisites.
-CP2 adds genuine native-created Comment leaves and standard input ToString for
-existing native RegExp exec/test paths, with focused original Page/App/language
-controls. Comment data stays out of Text, rendering, selectors and resources;
-the tokenizer still omits parsed comments. Full Comment/CharacterData interfaces,
-generic RegExpExec/custom exec and object-valued lastIndex remain outside scope.
-Neither pack establishes library initialization or a visible workflow improvement.
-Normal/build/executable integration and unchanged-library rechecks remain required.
-See the [CP1](FEATURE_CONTRACTS.md#cp1--real-collections-calls-and-node-identity) and
-[CP2 contracts](FEATURE_CONTRACTS.md#cp2--genuine-comment-and-native-regexp-input-conversion).
+---
 
-Selected CP2 Test262 observations have 18 passes and two ordinary Array
-constructor-poisoning failures across 20 mode runs; all 30 runner controls pass
-and inputs remain unchanged. Failing assertions are retained, with no full-suite
-conformance inference. Original workflow and reference entries retain their stated
-measured scopes rather than becoming a new all-workflow run.
+## How to read this page
 
-Generated server output is assessed as delivered HTML/CSS/JS, not by the server
-brand. TypeScript/JSX build tools are not browser engines; their compiled output
-still needs the corresponding browser features. External test runners require an
-honest adapter and are not browser-library failures. Unresolved product identities
-remain unassessed. Wider modules, async networking, strings, storage, worker,
-accessibility, layout/font and frame APIs remain partial or missing as recorded in
-the [capability matrix](CAPABILITIES.md).
+> [!IMPORTANT]
+> **Load → startup → render → interact → async.** These are separate outcomes.
+> HTTP 200, successful parsing, zero startup errors, or one green test does not
+> establish a working website or support for every version of a framework.
 
-CP3 connects initial-font em media lengths, recognized terminal before/after
-stylesheet targets, explicit box-sizing inheritance and fractional flex line
-fitting. At the same1280 viewport, the unchanged Foundation panels move from
-stacked positions(38,163)/(38,266) to two columns(38,163)/(648,163); at640 the
-original stacking remains. Zoom100, normal JavaScript, original fixtures,
-unmodified distributions and independent control pixels are retained. Original
-App tests separately cover1023/1024 thresholds,125% zoom, odd-width fitting,
-padding pixels and owned link hits. This finite rendering result does not imply
-that the separately blocked Vue component initializes or responds to input.
-Full normal/build/executable verification remains required for integration.
+This page summarizes evidence available through source `a65d37c` on November 17,
+2026, including the merged PR #31, #32 and #34 results. The [catalogue](compatibility.json)
+retains its exact source-bound records and classification of 44 named families
+and formats; older records are not silently relabeled as newer runs. Source
+changes after this snapshot require their own rechecks.
 
-The hidden-input prerequisite passes nine focused and twelve adjacent select
-controls. Actual App software clicks create a genuine hidden control, change an
-isolated text crop, preserve a neighboring edited value/cursor and source/history,
-and retain native form request serialization. Hidden inputs gain no box or focus,
-even under authored display rules. The unchanged legacy workload next refuses an
-input-containing innerHTML fragment at2684:2; initialization remains failed.
-The separate finite literal-prototype prerequisite passes ten language/App
-controls, including real input and isolated text pixels. Original concat controls
-now pass nine VM/realm/App groups and four adjacent substring groups. Its unchanged
-Vue recheck reaches the separate object-prototype boundary; no mount or reactive
-interaction is established. Earlier concat and hidden-input observations retain
-their distinct dirty development-build records; the unregistered Node draft in the
-hidden-input build supplied no Node API result. The later Node/modern revision2
-checks use a separate clean diagnostic source map and executable, with no full
-regression, hosted CI or release validation inferred.
+[Current scorecard](#current-scorecard) · [Progression](#measured-progression)
+· [Method](#measurement-method) · [Historical evidence](#historical-evidence)
 
-Nine Node root controls, four Node constants and thirty-two namespace controls
-pass. The original trusted-click App fixture now reports zero script errors and
-correct connected/detached/reconnected roots with changed visible text and pixels.
-That is actual App output, without an isolated-crop or physical desktop claim.
-Finite tabs/windows and guarded native link/context actions are delivered in
-[0.81.0-alpha.2](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.81.0-alpha.2).
-Their source-scoped normal/optimized, hosted and desktop acceptance is separate
-from this library scorecard. The concat correction is in development; its focused
-language/App result does not establish that the unchanged Vue workload initializes.
-Legacy and modern library measurements remain separate. Installer/update work,
-further media and service integration stay deferred. Routine CI stays offline.
+## Current scorecard
 
-The anchor engine uses genuine trusted click/auxclick and
-source-bound targets. Demonstrated shared fixes admit checked HTML href/download
-mutation and keep painted targets/link styling synchronized with live attributes.
-Original App/DOM/event and native lifetime controls cover explicit link/context
-routing. Changed native behavior requires affected acceptance; normal regression
-and hosted CI remain integration gates. This does not change the measured library
-scorecard or establish broader framework support.
+| Workload | Observed progress | Remaining boundary | Evidence |
+| :--- | :--- | :--- | :--- |
+| **Original async form/search/navigation** | Ready state, Unicode submission, readable results, destination activation, exactly one Back and a different query pass the bounded App workflow | Not a live public-service claim | Existing original workflow records |
+| **jQuery 1.12.4 + Bootstrap 3.4.1** | Select and hidden/text INPUT prerequisites advance the unchanged legacy sample | `document.createDocumentFragment` at line 4461 after the INPUT correction; complete initialization/interaction not established | [PR #32](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/32) |
+| **jQuery 4.0.0, separate input app** | The exact optimized PR #34 candidate passes the unchanged offline App workflow through initialization, genuine trusted input and asynchronous timer text update | Limited to this pinned app; no AJAX/Deferred, every-version or full-framework claim | [PR #34](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/34), candidate `a9eadfa` |
+| **Foundation 6.9.0 generated CSS** | Unchanged JS-enabled fixture forms two columns at 1280 px and stacks at 640 px, with independent image pixels | Vue startup and optional Foundation JavaScript are separate; this is not complete styling | CP3 fixture and App geometry/pixel/hit controls |
+| **Vue 2.7.16 runtime** | Gets past the earlier literal-parser and concat boundaries at 1280/640; initial rendering/Foundation CSS pass | Object-prototype access at 11:3808; mount/input/async remain failed. Vue 3 has separate prerequisites | Unchanged W3 concat recheck |
+| **Bootstrap 5.3.9 + bundled Popper 2.11.8** | Load/initial rendering and responsive positions pass at 1280/640 | Class syntax at 599:3 prevents startup; menu interaction is dependency-blocked | Separate modern fixture revision 2 |
+| **Original CSS-variable box reduction** | PR #31 changes the box from 80×30 to 104×46, matching a literal control's opaque pixels, anchor hits and live reflow | Supported padding/border values only; alpha colors, calc(), CSSOM and full Bootstrap styling unproved | [PR #31](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/31), candidate `5cd5e52` |
+| **Reference browser** | Initial DOM and pixel captures exist for the original fixture | Interactions were not run; no reference-interaction denominator | Initial-state comparison only |
 
-The modern cohort uses exact unmodified distributions and retained MIT notices
-under the source-only `tools/fixtures/compatibility-modern/inputs.json` manifest.
-Its two workflows cover three configurations; the existing legacy fixtures remain
-unchanged. Parsing is reported conservatively when no dedicated parser-phase
-diagnostic exists: the actual first error is retained, while initialization and
-interaction remain failed. No reference browser was run for these new samples.
-Revision1's three configuration records remain preserved: startup library failures,
-loading and initial rendering were observed, while missing control names caused a
-separate HarnessBlocked interaction result. Revision2 supplies the names selected
-by the App driver. Its jQuery command completes; Bootstrap's remaining hidden
-choice is blocked by failed initialization, rather than the old naming defect.
+**Status of a PR is not a new measurement.** The linked observations retain their
+actual source and executable identity even after integration. Published alpha.2
+is older than the later DOM/string/anchor/text-input/Event/CSS-variable changes.
+
+## Measured progression
+
+| Shared capability | What changed | What it does not prove |
+| :--- | :--- | :--- |
+| **Collections, calls and Node identity** | Real live lists, checked borrowed slice/apply, genuine Document accessors and fresh text replacement | Full DOM or library startup |
+| **Comments and RegExp conversion** | Genuine native-created Comment leaves and standard input ToString on existing exec/test paths | Parsed comments, complete CharacterData, generic RegExpExec or object-valued lastIndex |
+| **Responsive CSS** | Initial-font em media, terminal pseudo-target recognition, explicit box-sizing inheritance and fractional flex fitting | Generated-content painting or unblocked Vue execution |
+| **Select and hidden inputs** | Genuine native controls, retained identities/edited values and guarded tree/form ownership | Arbitrary input types, explicit new associations or unrestricted fragment mutation |
+| **Concat and Node roots** | Ordered generic string concatenation and real connected/detached/reconnected roots | Broader prototype operations or Shadow DOM |
+| **Anchor URL reflection** | Scoped live HTTP(S) URL values used by ordinary page code | Unrestricted URL/navigation behavior |
+| **Text INPUT fragments** | Staged native creation, dirty/default value semantics, real Reset and focus retirement | Complete library interaction from the input correction alone |
+| **Base Event property lookup** | Genuine ordinary string/symbol lookup and protected native state; enables the pinned modern input/timer workflow | AJAX/Deferred or general framework conformance |
+| **CSS custom properties** | Winning custom cascade, inherited computed values, bounded fallbacks/cycles and real box painting | Alpha colors, calc(), CSSOM or complete component styling |
+
+The text-input PR's original App checks cover trusted fill, Backspace/Delete,
+latest Reset defaults, neighboring pixels/hits, and a removed editor refusing
+subsequent typing/paste. Its local and hosted candidate gates passed 2,411 normal
+tests and 25 journeys on `3d45d7e`; those numbers describe that candidate, not an
+unbounded compatibility percentage or a fresh test of every later commit.
+
+The Event candidate `a9eadfa` passed 70 related interface controls and its local/hosted
+normal gates (2,434 tests and 25 journeys). The CSS candidate `5cd5e52` passed
+2,427 tests and 25 journeys. These are distinct candidate records, not numbers
+recomputed by this documentation refresh. Earlier failed gates remain historical
+evidence; later green results do not erase them.
+
+## Measurement method
+
+The active language reference is ECMAScript 2025, edition 16; DOM uses its living
+specification. Use original model tests, pinned upstream cases, actual App/input/
+render journeys, and reference captures for their distinct purposes.
+
+| Record | Required distinction |
+| :--- | :--- |
+| **Inputs** | Exact versions, unmodified distribution bytes, compatible dependencies and retained notices |
+| **Execution** | Build/source identity, viewport/configuration, actual command and observed first failure |
+| **Stages** | Loading, parsing where directly observed, startup, initial rendering, input effects and async behavior |
+| **Failures** | First causal blocker versus cascades, unsupported host/runner setup, failed assertion or unavailable prerequisite |
+| **Comparison** | ChezCat output versus independently observed reference output; never substitute one for the other |
+
+Do not infer a dedicated parser pass when only a later runtime error is observed.
+Do not treat an unavailable test host as a language assertion failure. Hosted
+verification remains offline; this document authorizes no live-service probing.
+
+### Frameworks are workloads, not production dependencies
+
+Generated server output is assessed as delivered HTML/CSS/JS, not by server brand.
+TypeScript/JSX build tools are not browser engines; their compiled output still
+requires browser capabilities. External test runners need an honest adapter.
+Unresolved product identities remain unassessed. Modules, async networking,
+strings, storage, workers, accessibility, fonts/layout and frames retain their
+recorded partial/missing scope.
+
+## Historical evidence
+
+<details>
+<summary><strong>🧭 Earlier blockers remain useful evidence</strong></summary>
+
+Legacy W2 advanced from select fragments to hidden INPUT mutation at 1265:4,
+then to `div.innerHTML = '<input/>'` at 2684:2. PR #32's later source-bound check
+advances to createDocumentFragment. Those earlier failures remain valid for their
+original builds; they are not the current first blocker at the newer checkpoint.
+
+Modern jQuery originally failed getRootNode at 4321:7, then anchor href assignment
+at 7963:1. Revision 1 also had a distinct harness problem: controls had IDs but
+the App driver required names. Revision 2 supplies those names. Startup observations
+from revision 1 remain valid; its input result is HarnessBlocked, not an invented
+library-input failure. PR #32 later reports startup success and an Event-property
+interaction boundary. PR #34 subsequently passes the unchanged pinned input/timer
+workflow after the genuine base Event property correction.
+
+Vue's earlier undefined concat at 11:3613 is replaced by the later prototype
+boundary. Bootstrap's class failure remains separate from CSS geometry. No
+reference browser was run for the separate modern cohort. Original records,
+including failed runs, are not overwritten by this presentation update.
+
+</details>
+
+<details>
+<summary><strong>📐 The responsive rendering improvement</strong></summary>
+
+At the same 1280 px viewport, the unchanged Foundation panels moved from stacked
+positions (38,163)/(38,266) to columns (38,163)/(648,163); 640 px stacking remained.
+Normal JavaScript, 100% zoom, original fixtures, unchanged distributions and
+independent pixels were retained. Separate App controls cover 1023/1024 thresholds,
+125% zoom, odd-width fitting, padding pixels and owned link hits.
+
+This establishes that finite rendering behavior—not successful Vue initialization,
+physical desktop output, or complete component styling. The later merged CSS
+custom-property work has its own original App reduction and candidate evidence;
+it does not retroactively rerun the older Foundation fixture.
+
+</details>
+
+<details>
+<summary><strong>🧪 Selected language and native-interface records</strong></summary>
+
+CP2's selected Test262 observations include 18 passes and two Array constructor-
+poisoning failures across 20 mode runs; 30 runner controls passed. No full-suite
+conformance percentage follows from that subset.
+
+Historical focused records include nine concat groups plus four substring neighbors,
+nine hidden-input groups plus twelve select neighbors, and nine Node-root groups
+plus four Node constants and thirty-two namespace controls. The genuine Node click
+fixture reports correct live roots, changed visible text/pixels and zero errors.
+These results retain their actual scopes; physical desktop and release validation
+are separate.
+
+</details>
+
+## Where to go next
+
+[Roadmap](ROADMAP.md) owns work order. [Capabilities](CAPABILITIES.md) owns implemented
+limits. [Feature contracts](FEATURE_CONTRACTS.md) owns lasting behavior and
+acceptance. The catalogue remains the machine-readable source-bound record;
+update it only from actual new measurements, not from a visual documentation pass.
