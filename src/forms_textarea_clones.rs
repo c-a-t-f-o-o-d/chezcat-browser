@@ -18,6 +18,7 @@ impl Forms {
         let mut plan = SelectFormPlan {
             additions: BTreeMap::new(),
             metadata: Vec::new(),
+            radio_checked: Vec::new(),
             retained_bytes: 0,
         };
         for &(source, destination) in sources {

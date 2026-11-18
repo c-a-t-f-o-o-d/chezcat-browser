@@ -1680,7 +1680,9 @@
     "created_checkbox_candidate": "5731c75e3391776182768cca275a3cf4b109752f",
     "created_checkbox_result": "W2 passed the fresh checkbox setup and stopped at the textarea fragment assignment at 4492:2. The separate native checkbox workflow passed toggle and reset with the neighboring edit preserved.",
     "textarea_source": "01597d85a454256d44755e0858ad8ece4eeee720",
-    "textarea_result": "W2 passed textarea fragment installation and stopped on the deep container clone at 4493:29. An independent app read the decoded textarea default, preserved the neighboring editor and reproduced the clone refusal."
+    "textarea_result": "W2 passed textarea fragment installation and stopped on the deep container clone at 4493:29. An independent app read the decoded textarea default, preserved the neighboring editor and reproduced the clone refusal.",
+    "textarea_clone_source": "f26eeecbd66af187fbd7f830d37731fd3ff897d2",
+    "textarea_clone_result": "W2 installed and cloned the textarea fragment, read its default and stopped at the fresh input radio type assignment at 4501:2. An independent App edited deep and shallow clones and reset their distinct defaults while preserving the source and neighboring editor."
   },
   "next": [
     "Advance the measured legacy jQuery initialization and recheck its trusted input and timer stages.",

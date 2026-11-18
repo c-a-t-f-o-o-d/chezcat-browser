@@ -421,6 +421,8 @@ pub fn label_targets(doc: &Document) -> HashMap<usize, usize> {
 
 pub struct Control {
     pub owner: Option<usize>,
+    /// Engine-owned tree identity for radio grouping, independent of form owner.
+    pub group_root: usize,
     pub kind: Kind,
     pub value: Editor,
     // The HTML dirty value flag belongs to the control, not its current text.
@@ -803,6 +805,7 @@ impl Forms {
             };
             let mut control = Control {
                 owner,
+                group_root: 0,
                 kind: if kind == Kind::Select && select.is_none() {
                     Kind::Unsupported
                 } else {
@@ -1020,10 +1023,12 @@ impl Forms {
             return;
         };
         let owner = control.owner;
+        let root = control.group_root;
         let name = control.name.clone();
         for (&index, other) in &mut self.controls {
             if other.kind == Kind::Radio
                 && other.owner == owner
+                && other.group_root == root
                 && other.name == name
                 && (!name.is_empty() || index == node)
             {
@@ -1032,9 +1037,17 @@ impl Forms {
         }
     }
 
-    pub fn reset(&mut self, owner: usize) {
-        let mut radios = Vec::new();
-        for (&node, control) in &mut self.controls {
+    pub(crate) fn same_radio_group(&self, first: usize, second: usize) -> bool {
+        match (self.controls.get(&first),self.controls.get(&second)) {
+            (Some(a),Some(b)) if a.kind==Kind::Radio && b.kind==Kind::Radio =>
+                first==second || !a.name.is_empty() && a.name==b.name
+                    && a.owner==b.owner && a.group_root==b.group_root,
+            _=>false,
+        }
+    }
+
+    fn reset_values(&mut self, owner: usize) {
+        for control in self.controls.values_mut() {
             if control.owner == Some(owner) {
                 if let Some(state) = &control.select {
                     let selected = state
@@ -1053,14 +1066,40 @@ impl Forms {
                 }
                 control.checked = control.initially_checked;
                 control.dirty_checked = false;
-                if control.kind == Kind::Radio && control.checked {
-                    radios.push(node);
-                }
             }
         }
+    }
+
+    pub fn reset(&mut self, owner: usize) {
+        let radios: Vec<_> = self.controls.iter().filter_map(|(&node,c)|
+            (c.owner==Some(owner) && c.kind==Kind::Radio && c.initially_checked).then_some(node)).collect();
+        self.reset_values(owner);
         for node in radios {
             self.check_radio(node);
         }
+    }
+
+    pub(crate) fn reset_in_document(&mut self, doc: &Document, owner: usize) -> Result<(), String> {
+        // Forms with no radios need no topology allocation or traversal. For
+        // radios, preflight their genuine roots before changing any value;
+        // a detached form's controls are not in the connected Document tree.
+        let mut roots = Vec::new();
+        for c in self.controls.values().filter(|c|c.owner==Some(owner) && c.kind==Kind::Radio && c.initially_checked) {
+            if !roots.contains(&c.group_root) {
+                roots.try_reserve(1).map_err(|_|"Radio reset root reservation failed.")?;
+                roots.push(c.group_root);
+            }
+        }
+        if roots.is_empty() {self.reset_values(owner);return Ok(());}
+        let order = self.control_tree_order(doc,&roots)?;
+        self.reset_values(owner);
+        for node in order {
+            if self.controls.get(&node).is_some_and(|c|
+                c.owner==Some(owner) && c.kind==Kind::Radio && c.initially_checked) {
+                self.check_radio(node);
+            }
+        }
+        Ok(())
     }
 
     pub fn implicit_submitter(&self, node: usize) -> Result<(usize, Option<usize>), String> {
@@ -1122,6 +1161,7 @@ impl Forms {
                     && !control.name.is_empty()
                     && self.controls.values().any(|c| {
                         c.owner == Some(owner)
+                            && c.group_root == control.group_root
                             && c.kind == Kind::Radio
                             && c.name == control.name
                             && c.required
@@ -1141,6 +1181,7 @@ impl Forms {
                     Kind::Radio if control.name.is_empty() => !control.checked,
                     Kind::Radio => !self.controls.values().any(|c| {
                         c.owner == Some(owner)
+                            && c.group_root == control.group_root
                             && c.kind == Kind::Radio
                             && c.name == control.name
                             && c.checked
@@ -1493,7 +1534,7 @@ mod text_inputs;
 mod buttons;
 pub(crate) use buttons::{button_caption_node, button_caption_work, validate_button_caption, ButtonAttributePlan};
 pub(crate) use text_inputs::InputPlan;
-pub(crate) use select_fragments::{fragment_checkbox_input, fragment_text_input, textarea_content, SelectFormPlan};
+pub(crate) use select_fragments::{fragment_checkbox_input, native_radio_input, fragment_text_input, textarea_content, SelectFormPlan};
 #[path = "forms_textarea_clones.rs"]
 mod textarea_clones;
 
