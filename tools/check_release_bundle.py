@@ -208,8 +208,11 @@ class Guards(unittest.TestCase):
         receipt=json.dumps({'schema_version':1,'license_version':'1.1','license_sha256':'0'*64,'accepted_scope':'personal','accepted_at_utc':100}).encode()
         annotated=json.dumps({**json.loads(receipt),'context':'Controlled additional-context trap'}).encode()
         for name,payload in [('docs/local-state.json',receipt),('assets/local-state.dat',annotated)]:
-            with self.subTest(path=name),tempfile.TemporaryDirectory(prefix='chezcat-private-receipt-') as folder:
-                previous=self.root;self.root=Path(folder)
+            with self.subTest(path=name):
+                previous=self.root
+                # Each subtest owns a separate repository. The parent fixture
+                # removes both using its bounded Windows sharing-violation retry.
+                self.root=Path(tempfile.mkdtemp(prefix='private-receipt-',dir=self.temp.name))
                 try:
                     with patch.object(package,'ROOT',self.root),patch.object(package.publication,'ROOT',self.root):
                         files,commit=self.fixture(extra_files={name:payload})
