@@ -3,6 +3,10 @@
 
 use super::{Accessors, Fault, Function, Host, Ordinary, Runtime, Value};
 
+#[cfg(test)]
+#[path = "host_document_property_limits_tests.rs"]
+mod document_property_limits_tests;
+
 impl Runtime {
     /// Publish the real interface only after its complete private prototype is ready.
     pub fn define_event_target_interface(&mut self, window:u32) -> Result<(),String> {
@@ -77,11 +81,30 @@ impl Runtime {
                         }
                     }
                 }
+                if name=="Element" {self.define_element_sibling_getters(prototype,window,"Element")?;}
                 self.put_binding(self.global_environment,name.into(),Some(constructor),super::Declaration::Var,false)?;
                 self.global_attributes.insert(name.into(),(false,true,true));
                 self.native_constructor_prototypes.insert((window,name),prototype);
                 parent=prototype;
             }
+            // CharacterData is a separate genuine Node suffix. Specialized
+            // Text/Comment immediate prototypes remain outside this slice.
+            let node=self.native_constructor_prototypes[&(window,"Node")];
+            let node_constructor=self.objects[node].properties["constructor"].value.as_value()?.clone();
+            let Value::Function(node_constructor)=node_constructor else {return Err(Fault::new("Invalid CharacterData parent constructor."));};
+            let allocation=self.allocate_host_function_with_length(window,"CharacterData",0).map_err(Fault::new)?;
+            if let Some(Function::Host {constructible,..})=self.functions.get_mut(allocation.id) {*constructible=true;}
+            let character=self.new_object(None)?;
+            self.objects[character].prototype=Some(Ordinary::Object(node));
+            self.objects[self.function_properties[allocation.id]].prototype=Some(Ordinary::Function(node_constructor));
+            let constructor=Value::Function(allocation.id);
+            self.store_property(character,"constructor".into(),constructor.clone(),Some((false,true,true)))?;
+            self.store_property(self.function_properties[allocation.id],"prototype".into(),Value::Object(character),Some((false,false,false)))?;
+            self.store_symbol_property(character,self.symbol_to_string_tag.unwrap(),Value::String("CharacterData".into()),Some((false,false,true)))?;
+            self.define_element_sibling_getters(character,window,"CharacterData")?;
+            self.put_binding(self.global_environment,"CharacterData".into(),Some(constructor),super::Declaration::Var,false)?;
+            self.global_attributes.insert("CharacterData".into(),(false,true,true));
+            self.native_constructor_prototypes.insert((window,"CharacterData"),character);
             // Fragment is a separate Node subtype, never an Element suffix.
             let node=*self.native_constructor_prototypes.get(&(window,"Node")).ok_or_else(||Fault::new("Missing Node prototype."))?;
             let Value::Function(node_constructor)=self.objects[node].properties["constructor"].value.as_value()?.clone() else {return Err(Fault::new("Invalid Node constructor."));};
@@ -106,6 +129,21 @@ impl Runtime {
         })();
         self.restore_transient_marker(marker);
         result.map_err(Fault::display)
+    }
+
+    fn define_element_sibling_getters(&mut self,prototype:usize,window:u32,family:&str)->Result<(),Fault> {
+        let operations=match family {
+            "Element"=>[("nextElementSibling","\0Element.get.nextElementSibling"),("previousElementSibling","\0Element.get.previousElementSibling")],
+            "CharacterData"=>[("nextElementSibling","\0CharacterData.get.nextElementSibling"),("previousElementSibling","\0CharacterData.get.previousElementSibling")],
+            _=>return Err(Fault::new("Unknown element-sibling declaring interface.")),
+        };
+        for (key,operation) in operations {
+            let getter=self.allocate_host_function_with_length(window,operation,0).map_err(Fault::new)?;
+            if let Some(Function::Host {receiver_required,..})=self.functions.get_mut(getter.id) {*receiver_required=true;}
+            self.store_property(self.function_properties[getter.id],"name".into(),Value::String(format!("get {key}")),Some((false,false,true)))?;
+            self.store_accessor_property(prototype,key.into(),Accessors {get:Some(getter.id),set:None},(true,true))?;
+        }
+        Ok(())
     }
     pub(super) fn validate_native_access(&self, handle: u32, host: &dyn Host) -> Result<(), Fault> {
         if let Some(owner) = host.native_access_owner(handle) {
@@ -244,6 +282,9 @@ impl Runtime {
             return self.read_foreign_window(handle, name, host);
         }
         if let Some(object) = self.host_ordinary(handle, name, host)? {
+            if self.host_native_fallback_required(handle, object, name, host)? {
+                return self.host_read_native_fallback(handle, object, name, host);
+            }
             return self.get_ordinary_property_with_receiver(
                 object,
                 name,
@@ -293,6 +334,35 @@ impl Runtime {
             );
         }
         self.checked_value(value)
+    }
+
+    #[inline(never)]
+    fn host_native_fallback_required(&mut self, handle:u32, object:Ordinary,
+        name:&str, host:&dyn Host) -> Result<bool,Fault>
+    {
+        Ok(host.ordinary_native_fallback(handle,name)
+            && !self.owns_property(self.ordinary_id(object)?, name)?)
+    }
+
+    #[inline(never)]
+    fn host_read_native_fallback(&mut self, handle:u32, object:Ordinary,
+        name:&str, host:&mut dyn Host) -> Result<Value,Fault>
+    {
+        // A named native value is not a fabricated ordinary own key.
+        // Keep this Value-producing branch out of ordinary own-accessor reads.
+        let value = self.host_get_checked(handle, name, host)?;
+        if !matches!(value, Value::Undefined) { return self.checked_value(value); }
+        self.get_ordinary_property_with_receiver(object, name, &Value::Host(handle), host)
+    }
+
+    pub(super) fn host_ordinary_has(&mut self, handle:u32, object:Ordinary,
+        name:&str, host:&mut dyn Host) -> Result<bool,Fault>
+    {
+        if host.ordinary_native_fallback(handle,name) {
+            if self.owns_property(self.ordinary_id(object)?,name)? {return Ok(true);}
+            if host.has(handle,name).map_err(Fault::new)? {return Ok(true);}
+        }
+        Ok(self.property_owner(object,name)?.is_some())
     }
 
     pub(super) fn host_write(

@@ -92,6 +92,10 @@ pub(crate) use script_images::MAX_IMAGE_REQUESTS;
 use script_images::ImagesState;
 #[path = "script_select_fragments.rs"]
 mod script_select_fragments;
+#[path = "script_element_siblings.rs"]
+mod script_element_siblings;
+#[path = "script_document_properties.rs"]
+mod script_document_properties;
 
 #[path = "script_inner_html.rs"]
 mod script_inner_html;
@@ -2408,7 +2412,8 @@ impl Bridge<'_> {
 }
 
 impl Host for Bridge<'_> {
-    fn expando_owner(&self,object:u32)->Option<u32> {self.ordinary_event_owner(object).or_else(||self.standalone_target_owner(object)).or_else(||(self.element_expando_receiver(object)||self.fragment_receiver(object)).then_some(WINDOW))}
+    fn expando_owner(&self,object:u32)->Option<u32> {self.ordinary_event_owner(object).or_else(||self.standalone_target_owner(object)).or_else(||(object==DOCUMENT||self.element_expando_receiver(object)||self.fragment_receiver(object)).then_some(WINDOW))}
+    fn ordinary_native_fallback(&self,object:u32,property:&str)->bool {object==DOCUMENT&&!self.document_native_property(property)}
     fn exposed_native_prototype(&self,object:u32)->bool {self.ordinary_event_owner(object).is_some()||self.standalone_target_owner(object).is_some()||self.video_interface_receiver(object)||self.fragment_receiver(object)}
     fn native_ancestry_inspection(&self,object:u32)->bool {self.event_receiver(object)||self.exposed_native_prototype(object)||self.namespace_receiver(object)}
     fn event_target_interface(&self,window:u32)->bool {window==WINDOW || self.frame_context(window).is_some()}
@@ -2434,7 +2439,9 @@ impl Host for Bridge<'_> {
                     else if self.media_interface_receiver(object) {(WINDOW,"HTMLMediaElement")}
                     else if tag(self.doc,node)=="img" {(IMAGE_FACTORY,"Image")} else {(WINDOW,"HTMLElement")}
                 } else {(WINDOW,"Element")}
-            } else if self.fragment_receiver(object) {(WINDOW,"DocumentFragment")} else {(WINDOW,"Node")})
+            } else if self.fragment_receiver(object) {(WINDOW,"DocumentFragment")}
+            else if matches!(self.doc.nodes[node].kind,NodeKind::Text(_)|NodeKind::Comment(_)) {(WINDOW,"CharacterData")}
+            else {(WINDOW,"Node")})
         } else if object==DOCUMENT || self.attr_receiver(object) {Some((WINDOW,"Node"))} else {None};
         let known=node.is_some() || matches!(object,DOCUMENT|CONSOLE|NAVIGATOR|PLUGINS|MIME_TYPES|DOCUMENT_IMAGES|LOCATION|PERFORMANCE|PERFORMANCE_TIMING|HISTORY)
             || self.attr_receiver(object) || self.event_receiver(object) || self.class_list_receiver(object) || self.named_map_receiver(object)
@@ -2469,6 +2476,7 @@ impl Host for Bridge<'_> {
     }
 
     fn owns_property(&self, object: u32, property: &str) -> bool {
+        if self.element_sibling_member(object,property) {return false;}
         if self.root_node_member(object,property) {return false;}
         if matches!(property,"nodeType"|"nodeName") && self.node_identity_receiver(object) {return false;}
         if self.video_interface_receiver(object)&&script_media::interface_member(property) {return false;}
@@ -2478,6 +2486,7 @@ impl Host for Bridge<'_> {
         if self.fragment_receiver(object) {return matches!(property,"childNodes"|"nodeValue"|"textContent"|"parentNode"|"parentElement"|"ownerDocument"|"isConnected"|"firstChild"|"lastChild"|"previousSibling"|"nextSibling") || self.dom_method(object,property).is_some();}
         if self.standalone_target_owner(object).is_some() {return false;}
         if property=="prototype"&&self.location_instance_owner(object).is_some(){return false;}
+        if object==DOCUMENT {return self.document_native_property(property);}
         if self.element_expando_receiver(object) {return self.element_native_property(object,property);}
         if self.attr_receiver(object) { return self.attr_native_member(property); }
         if self.constructed_event_receiver(object) { return self.event_native_member(object,property); }
@@ -2488,7 +2497,8 @@ impl Host for Bridge<'_> {
         self.location_instance_owner(object).is_some() || object == HISTORY || self.attr_receiver(object) || self.ordinary_event_owner(object).is_some() || self.named_map_receiver(object)
     }
     fn ordinary_lookup_tail_property(&self,object:u32,property:&str)->bool {
-        if self.root_node_member(object,property) {true}
+        if self.element_sibling_member(object,property) {true}
+        else if self.root_node_member(object,property) {true}
         else if matches!(property,"nodeType"|"nodeName") && self.node_identity_receiver(object) {true}
         else if self.event_receiver(object)&&property=="composedPath" {true}
         else if self.node_event_method(object,property) {true}
@@ -2515,6 +2525,7 @@ impl Host for Bridge<'_> {
     }
 
     fn readonly_property(&self, object: u32, property: &str) -> bool {
+        if self.element_sibling_member(object,property) {return true;}
         if self.ordinary_event_owner(object).is_some() {return false;}
         if self.media_element_receiver(object) && matches!(property,"currentSrc"|"videoWidth"|"videoHeight"|"duration"|"paused"|"ended"|"seeking"|"readyState"|"networkState") {return true;}
         if object==PERFORMANCE&&property=="timing"||object==PERFORMANCE_TIMING&&self.state.navigation_timing.is_some_and(|t|t.value(property).is_some()) {return true;}
@@ -2668,6 +2679,7 @@ impl Host for Bridge<'_> {
     }
 
     fn native_method_owner(&self, object:u32, method:&str) -> Option<u32> {
+        if self.event_target_interface(object)&&script_element_siblings::operation(method).is_some() {return Some(object);}
         if self.event_target_interface(object) && method=="DocumentFragment" {return Some(object);}
         if self.event_target_interface(object) && method==script_node_root::ROOT_METHOD {return Some(object);}
         if self.event_target_interface(object) && matches!(method,"\0Node.get.nodeType"|"\0Node.get.nodeName") {return Some(object);}
@@ -2815,7 +2827,7 @@ impl Host for Bridge<'_> {
         }
         if method=="pause" && self.media_element_receiver(object) && (!self.state.enabled || !self.doc.scripting_enabled) {return Err(("InvalidStateError","Scripting is disabled.".into()));}
         if object==WINDOW && method=="requestAnimationFrame" && !matches!(args.first(),Some(Value::Function(_))) {return Err(("TypeError","requestAnimationFrame requires a callable callback.".into()));}
-        if self.event_target_interface(object) && matches!(method,"Node"|"Element"|"HTMLElement"|"HTMLMediaElement"|"HTMLVideoElement") {return Err(("TypeError","Illegal constructor for this native interface.".into()));}
+        if self.event_target_interface(object) && matches!(method,"Node"|"Element"|"HTMLElement"|"CharacterData"|"HTMLMediaElement"|"HTMLVideoElement") {return Err(("TypeError","Illegal constructor for this native interface.".into()));}
         if method=="dispatchEvent"{return self.validate_dispatch(object,args);}
         if object == HISTORY && method == "replaceState" {
             if self.state.history.current.is_none() { self.history_target(args)?; }
@@ -3063,6 +3075,9 @@ impl Host for Bridge<'_> {
     }
 
     fn accepts_receiver(&self, object: u32, method: &str, receiver: u32) -> bool {
+        if self.event_target_interface(object) {
+            if let Some((family,_))=script_element_siblings::operation(method) {return self.element_sibling_family(receiver)==Some(family);}
+        }
         if object==DOCUMENT && method=="createDocumentFragment" {return receiver==DOCUMENT;}
         if matches!(method,"appendChild"|"insertBefore"|"replaceChild"|"removeChild") {
             let parent=|handle|node_index(handle).is_some_and(|node|self.dom_accessible(node)
@@ -3163,6 +3178,7 @@ impl Host for Bridge<'_> {
     }
 
     fn own_keys(&mut self, object: u32) -> Result<Vec<String>, String> {
+        if object==DOCUMENT {self.state.work(1)?;return Ok(Vec::new());}
         if self.standalone_target_owner(object).is_some() {self.state.work(1)?;return Ok(Vec::new());}
         if script_named_map::element(object).is_some() {
             self.named_map_get(object, "length")?;
@@ -3209,6 +3225,7 @@ impl Host for Bridge<'_> {
     }
 
     fn own_data(&mut self, object: u32, property: &str) -> Result<Option<Value>, String> {
+        if self.element_sibling_member(object,property) {self.state.work(1)?;return Ok(None);}
         if self.root_node_member(object,property) {self.state.work(1)?;return Ok(None);}
         if object==DOCUMENT && dom_tree::document_node_property(property) {self.state.work(1)?;return Ok(None);}
         if self.standalone_target_owner(object).is_some() {self.state.work(1)?;return Ok(None);}
@@ -3257,6 +3274,7 @@ impl Host for Bridge<'_> {
     }
 
     fn delete(&mut self, object: u32, property: &str) -> Result<bool, String> {
+        if self.element_sibling_member(object,property) {self.state.work(1)?;return Ok(true);}
         if self.root_node_member(object,property) {self.state.work(1)?;return Ok(true);}
         if object==DOCUMENT && dom_tree::document_node_property(property) {self.state.work(1)?;return Ok(true);}
         if script_named_map::element(object).is_some() {
@@ -3445,6 +3463,7 @@ impl Host for Bridge<'_> {
     }
 
     fn has(&mut self, object: u32, property: &str) -> Result<bool, String> {
+        if self.element_sibling_member(object,property) {self.state.work(1)?;return Ok(false);}
         if object==DOCUMENT && property=="createDocumentFragment" {self.state.work(1)?;return Ok(true);}
         if self.root_node_member(object,property) {self.state.work(1)?;return Ok(false);}
         if property=="dispatchEvent"&&self.dispatch_receiver(object){return Ok(true);}
@@ -4302,6 +4321,10 @@ impl Host for Bridge<'_> {
     }
 
     fn call(&mut self, object: u32, method: &str, args: &[Value]) -> Result<Value, String> {
+        if let Some((family,next))=script_element_siblings::operation(method) {
+            if self.element_sibling_family(object)!=Some(family) {return Err("Element sibling getter has an incompatible native receiver.".into());}
+            return self.element_sibling(object,next);
+        }
         if object==WINDOW && method=="DocumentFragment" {return self.create_dom_node(NodeKind::DocumentFragment);}
         if method==script_node_root::ROOT_METHOD {return self.get_root_node(object,args,None);}
         if let Some(property)=script_media::interface_getter(method) {
@@ -4903,6 +4926,34 @@ mod script_child_nodes_tests;
 #[cfg(test)]
 #[path = "script_document_node_tests.rs"]
 mod script_document_node_tests;
+
+#[cfg(test)]
+#[path = "script_element_sibling_tests.rs"]
+mod script_element_sibling_tests;
+
+#[cfg(test)]
+#[path = "script_element_sibling_protocol_tests.rs"]
+mod script_element_sibling_protocol_tests;
+
+#[cfg(test)]
+#[path = "script_element_sibling_security_tests.rs"]
+mod script_element_sibling_security_tests;
+
+#[cfg(test)]
+#[path = "script_document_own_properties_tests.rs"]
+mod script_document_own_properties_tests;
+
+#[cfg(test)]
+#[path = "script_document_own_descriptor_tests.rs"]
+mod script_document_own_descriptor_tests;
+
+#[cfg(test)]
+#[path = "script_document_prebound_methods_tests.rs"]
+mod script_document_prebound_methods_tests;
+
+#[cfg(test)]
+#[path = "script_document_dispatch_tests.rs"]
+mod script_document_dispatch_tests;
 
 #[cfg(test)]
 #[path = "script_comment_tests.rs"]

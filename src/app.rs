@@ -5692,6 +5692,10 @@ mod native_padding_tests;
 mod native_padding_detail_tests;
 
 #[cfg(test)]
+#[path="app_element_sibling_tests.rs"]
+mod element_sibling_tests;
+
+#[cfg(test)]
 #[path="app_document_fragment_tests.rs"]
 mod document_fragment_tests;
 
@@ -5729,3 +5733,6 @@ mod base_class_tests;
 #[cfg(test)]
 #[path = "app_derived_class_tests.rs"]
 mod derived_class_tests;
+#[cfg(test)]
+#[path = "app_document_properties_tests.rs"]
+mod document_properties_tests;

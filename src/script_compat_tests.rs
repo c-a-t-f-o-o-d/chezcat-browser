@@ -2119,7 +2119,7 @@ fn event_interface_diagnostic_invokes_no_coercion_or_event_lifecycle() {
     let before = (page.state.next_event, page.state.event.is_some(), page.state.listeners.len());
     let outcome = page.console_eval(&mut doc, &mut forms, "document.createEvent(request);");
     assert_eq!(outcome.errors, 1, "{}", page.report());
-    assert!(page.report().contains("Requested interface class=non-string"));
+    assert!(page.report().contains("Requested interface class=non-string"), "{}", page.report());
     assert_eq!((page.state.next_event, page.state.event.is_some(), page.state.listeners.len()), before);
     let outcome = page.console_eval(&mut doc, &mut forms, "if(conversions!==0||'createEvent' in document||typeof document.dispatchEvent!=='function'||typeof window.dispatchEvent!=='function')throw 'factory/dispatch isolation';");
     assert_eq!(outcome.errors, 0, "{}", page.report());
@@ -2547,7 +2547,12 @@ fn element_only_selector_methods_are_not_exposed_on_document() {
     ]);
     assert_eq!(outcome.errors, 2, "{}", page.report());
     assert_eq!(doc.title, "interfaces passed");
-    assert!(page.report().contains("Document method"));
+    // These are absent ordinary members, not native Document operations.
+    let report = page.report();
+    for member in ["matches", "closest"] {
+        assert!(report.contains(&format!("Actual value type: undefined. Attempted member \"{member}\".")), "{report}");
+    }
+    assert!(report.contains("Last escaped engine fault: stage=execute kind=TypeError"), "{report}");
 }
 
 #[test]
