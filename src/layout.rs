@@ -225,7 +225,8 @@ pub enum PaintItem {
         color: u32,
         alpha: u8,
     },
-    /// One circular radius, for a borderless block's color background only.
+    /// One circular radius on an opaque block color background, optionally
+    /// including one uniform solid border in the same boundary composite.
     /// The unnormalized radius is retained across final sizing/flex stretch.
     RoundedRect {
         x: i32,
@@ -235,6 +236,7 @@ pub enum PaintItem {
         color: u32,
         alpha: u8,
         radius: f32,
+        border: Option<crate::paint::UniformBorder>,
     },
     Text(usize),
     Control(usize),
@@ -2054,23 +2056,32 @@ impl Engine<'_> {
         let background = style
             .background
             .and_then(|color| self.rect(x, y, outer_width, 0, color));
-        // Borders, image layers, inline fragments and table decorations retain
-        // their existing bounded fallback. This slice rounds only the ordinary
-        // block color, without changing descendants, overflow or hit geometry.
-        if border == [0; 4] && style.background_image.is_none()
+        // An opaque background preserves the existing full-box hit/occlusion
+        // geometry. Transparent backgrounds, unequal sides, image layers,
+        // inline fragments and table decorations retain the square fallback.
+        let uniform = (border[0] > 0 && border == [border[0]; 4]
+            && style.border_solid == [true; 4] && colors == [colors[0]; 4]
+            && style.border_alpha == [style.border_alpha[0]; 4])
+            .then_some(crate::paint::UniformBorder {
+                width: border[0], color: colors[0], alpha: style.border_alpha[0],
+            });
+        let mut rounded_border = false;
+        if (border == [0; 4] || uniform.is_some()) && style.background_image.is_none()
             && matches!(style.display, Display::Block | Display::Flex | Display::InlineBlock)
         {
             if let (Some(item), Some(radius)) = (background, style.circular_radius()) {
                 if let PaintItem::Rect { color, alpha, .. } = self.layout.items[item] {
                     self.layout.items[item] = PaintItem::RoundedRect {
                         x, y, width: outer_width, height: 0, color, alpha, radius: radius * self.zoom,
+                        border: uniform,
                     };
+                    rounded_border = uniform.is_some();
                 }
             }
         }
         let background_image = self.background_image(index, style, x, y, outer_width, 0, border);
         let borders: [Option<usize>; 4] = std::array::from_fn(|side| {
-            if border[side] > 0 {
+            if border[side] > 0 && !rounded_border {
                 let item=self.rect(x, y, 0, 0, colors[side]);
                 if let Some(item)=item {if let PaintItem::Rect {alpha,..}=&mut self.layout.items[item] {*alpha=style.border_alpha[side];}}
                 item
