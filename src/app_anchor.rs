@@ -127,6 +127,7 @@ impl App {
         // No take_navigation peek: the source's queued author request remains
         // available to normal App polling, including when default is cancelled.
         self.apply_history_replacement();if outcome.layout_changed{self.reflow();}
+        self.apply_script_scroll();
         self.validate_control_focus();self.sync_editors();
         if outcome.errors!=0{self.status=format!("JavaScript subset: {} error(s). Ctrl+I shows details.",outcome.errors);self.failed=false;}
         if outcome.prevented||!self.anchor_source_unchanged(&hit,&scope){return Ok(AnchorDefault::Cancelled);}

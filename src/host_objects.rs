@@ -86,6 +86,12 @@ impl Runtime {
                     }
                 }
                 if name=="Element" {
+                    for (key, getter, setter) in [
+                        ("scrollLeft", "\0Element.get.scrollLeft", "\0Element.set.scrollLeft"),
+                        ("scrollTop", "\0Element.get.scrollTop", "\0Element.set.scrollTop"),
+                    ] {
+                        self.define_node_attribute(prototype, window, key, getter, Some(setter))?;
+                    }
                     self.define_element_sibling_getters(prototype,window,"Element")?;
                     self.define_readonly_node_getter(prototype, window, "assignedSlot", "\0Element.get.assignedSlot")?;
                     for (key,operation) in [("querySelector","\0Element.querySelector"),("querySelectorAll","\0Element.querySelectorAll")] {
@@ -330,18 +336,25 @@ impl Runtime {
         name: &'static str,
         operation: &'static str,
     ) -> Result<(), Fault> {
-        let getter = self.allocate_host_function_with_length(window, operation, 0)
-            .map_err(Fault::new)?;
-        if let Some(Function::Host { receiver_required, .. }) = self.functions.get_mut(getter.id) {
-            *receiver_required = true;
-        }
-        self.store_property(
-            self.function_properties[getter.id], "name".into(),
-            Value::String(format!("get {name}")), Some((false, false, true)),
-        )?;
+        self.define_node_attribute(prototype, window, name, operation, None)
+    }
+
+    fn define_node_attribute(&mut self, prototype: usize, window: u32, name: &'static str,
+        getter: &'static str, setter: Option<&'static str>) -> Result<(), Fault> {
+        let mut accessor = |operation, prefix, length| -> Result<usize, Fault> {
+            let f = self.allocate_host_function_with_length(window, operation, length).map_err(Fault::new)?;
+            if let Some(Function::Host { receiver_required, .. }) = self.functions.get_mut(f.id) {
+                *receiver_required = true;
+            }
+            self.store_property(self.function_properties[f.id], "name".into(),
+                Value::String(format!("{prefix} {name}")), Some((false, false, true)))?;
+            Ok(f.id)
+        };
+        let get = Some(accessor(getter, "get", 0)?);
+        let set = setter.map(|operation| accessor(operation, "set", 1)).transpose()?;
         self.store_accessor_property(
             prototype, name.into(),
-            Accessors { get: Some(getter.id), set: None }, (true, true),
+            Accessors { get, set }, (true, true),
         )
     }
 
@@ -598,13 +611,20 @@ impl Runtime {
         }
         // Ordinary inherited accessors can supply a setter even when this
         // native receiver cannot retain a new own data property.
-        let readonly = host.readonly_property(handle, &name);
-        if readonly || host.inherited_assignment(handle, &name) {
+        if host.inherited_assignment(handle, &name) {
+            // A form's named getter can mask this key during reads. Web IDL
+            // ignores named properties when looking up the assignment target.
+            self.ensure_native_expando(handle, host, true)?;
+            if let Some(&id) = self.host_objects.get(&handle) {
+                return self.assign_ordinary_property_with_receiver(Ordinary::Object(id), name, value, Value::Host(handle), host);
+            }
+            let base = self.native_instance_anchor(handle, host)?;
+            return self.assign_inherited_property(base, name, value, Value::Host(handle), host);
+        }
+        if host.readonly_property(handle, &name) {
             if let Some(base) = self.host_lookup_tail(handle, &name, host)? {
                 return self.assign_inherited_property(base, name, value, Value::Host(handle), host);
             }
-        }
-        if readonly {
             return if self.strict {
                 Err(Fault::exception(
                     "TypeError",

@@ -100,6 +100,8 @@ mod script_element_siblings;
 mod script_slottable;
 #[path = "script_offset_parent.rs"]
 mod script_offset_parent;
+#[path = "script_scroll_offsets.rs"]
+mod script_scroll_offsets;
 use script_slottable::Slottable;
 
 #[path = "script_element_selectors.rs"]
@@ -912,6 +914,10 @@ impl Page {
 
     pub fn set_geometry_scroll(&mut self, scroll: i32) {
         if let Some(geometry) = &mut self.state.geometry { geometry.set_scroll(scroll); }
+    }
+
+    pub fn take_viewport_scroll_request(&mut self) -> Option<i32> {
+        self.state.geometry.as_mut()?.take_scroll_request()
     }
 
     pub fn update_geometry(
@@ -2430,6 +2436,7 @@ impl Bridge<'_> {
         self.element_sibling_member(object, property)
             || self.assigned_slot_lookup(object, property)
             || self.offset_parent_member(object, property)
+            || self.scroll_offset_member(object, property)
             || self.text_prototype_property(object, property)
             || script_element_properties::ordinary_interface_member(property)
                 && self.concrete_html_interface(object).is_some()
@@ -2577,7 +2584,8 @@ impl Host for Bridge<'_> {
     }
 
     fn inherited_assignment(&self, object: u32, property: &str) -> bool {
-        script_element_properties::ordinary_interface_member(property)
+        script_scroll_offsets::axis(property).is_some() && self.element_selector_receiver(object)
+            || script_element_properties::ordinary_interface_member(property)
             && self.frame_concrete_html_interface(object).is_some()
     }
 
@@ -2628,12 +2636,16 @@ impl Host for Bridge<'_> {
         self.prepare_media_microtask(object,script_media::interface_operation(member).unwrap_or(member),args,setter)
     }
     fn native_setter_property(&self,object:u32,method:&str)->Option<&'static str>{
+        if let Some((name, true)) = script_scroll_offsets::accessor(method) {
+            return (self.element_selector_receiver(object) && !self.is_frame_handle(object)).then_some(name);
+        }
         self.media_interface_receiver(object).then(||script_media::interface_setter(method)).flatten()
     }
     fn finish_native_microtask(&mut self,ticket:u64)->bool{self.finish_media_microtask(ticket)}
     fn run_native_microtask(&mut self,ticket:u64)->Result<(),String>{self.run_media_microtask(ticket)}
 
     fn number_setter(&self, object: u32, property: &str) -> bool {
+        if script_scroll_offsets::axis(property).is_some() && self.element_selector_receiver(object) {return true;}
         if property=="currentTime" && self.media_interface_receiver(object) {return true;}
         node_index(object).is_some_and(|node| tag(self.doc, node) == "img")
             && matches!(property, "width" | "height")
@@ -2748,6 +2760,7 @@ impl Host for Bridge<'_> {
     }
 
     fn native_method_owner(&self, object:u32, method:&str) -> Option<u32> {
+        if script_scroll_offsets::accessor(method).is_some() && self.event_target_interface(object) {return Some(object);}
         if method == script_offset_parent::GETTER && self.event_target_interface(object) {return Some(object);}
         if object==WINDOW && method=="getComputedStyle" {return Some(WINDOW);}
         if self.computed_style_receiver(object) {return self.computed_style_owner(object);}
@@ -2879,6 +2892,7 @@ impl Host for Bridge<'_> {
     ) -> Result<(), (&'static str, String)> {
         if object==WINDOW && method=="getComputedStyle" || script_computed_style::index(object).is_some() {return self.validate_computed_call(object,method,args);}
         if method == script_offset_parent::GETTER {return self.validate_offset_parent(object);}
+        if script_scroll_offsets::accessor(method).is_some() {return self.validate_scroll_element(object);}
         if method=="NodeList" && self.event_target_interface(object) {return Err(("TypeError","Illegal constructor for this native interface.".into()));}
         if method=="\0NodeList.get.length"&&!self.node_list_receiver(object) {return Err(("TypeError","NodeList length getter requires a genuine accessible NodeList.".into()));}
         let method=if let Some(operation)=script_element_selectors::operation(method) {
@@ -3178,6 +3192,9 @@ impl Host for Bridge<'_> {
     }
 
     fn accepts_receiver(&self, object: u32, method: &str, receiver: u32) -> bool {
+        if script_scroll_offsets::accessor(method).is_some() && self.event_target_interface(object) {
+            return self.element_selector_receiver(receiver);
+        }
         if method == script_offset_parent::GETTER && self.event_target_interface(object) {
             return self.offset_parent_receiver(receiver);
         }
@@ -4210,6 +4227,11 @@ impl Host for Bridge<'_> {
     }
 
     fn set(&mut self, object: u32, property: &str, value: Value) -> Result<(), String> {
+        if let Some(axis) = script_scroll_offsets::axis(property).filter(|_| self.element_selector_receiver(object)) {
+            let Value::Number(number) = value else {return Err("Scroll offset requires numeric conversion.".into());};
+            self.element_scroll_offset(object, axis, Some(number))?;
+            return Ok(());
+        }
         if script_computed_style::index(object).is_some() {return Err("Computed style declarations are read-only.".into());}
         if self.button_set(object,property,&value)? {return Ok(());}
         if self.text_input_set(object,property,&value)? {return Ok(());}
@@ -4468,6 +4490,9 @@ impl Host for Bridge<'_> {
         }
         if let Some(interface) = Slottable::getter(method) {return self.assigned_slot(object, interface);}
         if method == script_offset_parent::GETTER {return self.offset_parent(object);}
+        if let Some((name, false)) = script_scroll_offsets::accessor(method) {
+            return self.element_scroll_offset(object, script_scroll_offsets::axis(name).unwrap(), None);
+        }
         if object == WINDOW && method == "Text" {
             let data = match args.first() {
                 None | Some(Value::Undefined) => String::new(),
@@ -5128,6 +5153,10 @@ mod script_container_object_realm_tests;
 #[cfg(test)]
 #[path = "script_offset_parent_tests.rs"]
 mod script_offset_parent_tests;
+
+#[cfg(test)]
+#[path = "script_scroll_offset_tests.rs"]
+mod script_scroll_offset_tests;
 
 #[cfg(test)]
 #[path = "script_node_list_iteration_tests.rs"]

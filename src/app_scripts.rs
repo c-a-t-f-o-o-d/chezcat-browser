@@ -312,13 +312,14 @@ impl App {
             return false;
         }
         let history_changed = self.apply_history_replacement();
+        let scrolled = self.apply_script_scroll();
         let Some(page) = &mut self.scripting else {
             return false;
         };
         let focus = page.take_focus_request();
         let navigation = page.take_navigation();
         let requests = page.take_dynamic_scripts();
-        let changed = history_changed || focus.is_some() || navigation.is_some() || !requests.is_empty();
+        let changed = history_changed || scrolled || focus.is_some() || navigation.is_some() || !requests.is_empty();
         if let Some(node) = focus {
             self.focus_control(node);
         }
