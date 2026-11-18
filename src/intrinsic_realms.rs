@@ -248,6 +248,7 @@ impl Runtime {
         self.intrinsic_realms.push(IntrinsicRealm {
             global_environment, roots: Roots::default(), promise_roots: (None, None),
         });
+        let first_object = self.objects.len();
         let result = self.with_intrinsic_realm(Some(id), |runtime| {
             runtime.deferred_intrinsics = (if deferred { 7 } else { 0 }) | 8 | 16;
             runtime.initialize_realm_intrinsics()
@@ -260,6 +261,11 @@ impl Runtime {
             self.intrinsic_realms.pop();
             for (function, realm) in self.functions.iter().zip(&mut self.function_realms) {
                 if !matches!(function, Function::Vacant) && *realm == Some(id) { *realm = previous; }
+            }
+            // Object identities are append-only. These unexposed bootstrap
+            // objects must not retain a tag that a later realm can reuse.
+            for object in &mut self.objects[first_object..] {
+                if object.realm == Some(id) { object.realm = previous; }
             }
             return Err(error);
         }
