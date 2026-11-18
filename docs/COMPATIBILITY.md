@@ -19,8 +19,8 @@
 
 This page retains the earlier evidence snapshot through source `a65d37c` on
 November 17, 2026, including PR #31, #32 and #34 results. The Bootstrap row adds
-later measurements on `3456e67` and `5c89eea`. PRs #53 and #55 integrated those
-changes into `main` by `0ef43d0`.
+later measurements on `3456e67`, `5c89eea` and `5c22afd`, followed by the combined
+`main` recheck on `25654fa`.
 The [catalogue](compatibility.json)
 retains its exact source-bound records and classification of 44 named families
 and formats; older records are not silently relabeled as newer runs. Source
@@ -38,7 +38,7 @@ changes after this snapshot require their own rechecks.
 | **jQuery 4.0.0, separate input app** | The exact optimized PR #34 candidate passes the unchanged offline App workflow through initialization, genuine trusted input and asynchronous timer text update | Limited to this pinned app; no AJAX/Deferred, every-version or full-framework claim | [PR #34](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/34), candidate `a9eadfa` |
 | **Foundation 6.9.0 generated CSS** | Unchanged JS-enabled fixture forms two columns at 1280 px and stacks at 640 px, with independent image pixels | Vue startup and optional Foundation JavaScript are separate; this is not complete styling | CP3 fixture and App geometry/pixel/hit controls |
 | **Vue 2.7.16 runtime** | Gets past the earlier literal-parser and concat boundaries at 1280/640; initial rendering/Foundation CSS pass | Object-prototype access at 11:3808; mount/input/async remain failed. Vue 3 has separate prerequisites | Unchanged W3 concat recheck |
-| **Bootstrap 5.3.9 + bundled Popper 2.11.8** | Cards render side by side at 1280 px and stack at 640 px. The load listener reaches the results of its Element selector call. | Spreading that NodeList at line 741, column 14 stops initialization before the dropdown can respond. | Modern fixture revision 2 on `3456e67` and `5c89eea`. [PR #53](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/53) and [#55](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/55) |
+| **Bootstrap 5.3.9 + bundled Popper 2.11.8** | The unchanged sample initializes with zero startup errors at 1280/640 on combined `main` `25654fa`. Loaded toggles measure 191×41 px. Cards render side by side at 1280 px and stack at 640 px. | The first trusted click rejects the dropdown selector at line 357, column 27 before the menu opens. | Modern fixture revision 2 on `25654fa`. The independent `5c22afd` feature run and earlier results remain in the catalogue. |
 | **Original CSS-variable box reduction** | PR #31 changes the box from 80×30 to 104×46, matching a literal control's opaque pixels, anchor hits and live reflow | Supported padding/border values only; alpha colors, calc(), CSSOM and full Bootstrap styling unproved | [PR #31](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/31), candidate `5cd5e52` |
 | **Reference browser** | Initial DOM and pixel captures exist for the original fixture | Interactions were not run; no reference-interaction denominator | Initial-state comparison only |
 
@@ -60,7 +60,20 @@ is older than the later DOM/string/anchor/text-input/Event/CSS-variable changes.
 | **Base Event property lookup** | Genuine ordinary string/symbol lookup and protected native state; enables the pinned modern input/timer workflow | AJAX/Deferred or general framework conformance |
 | **CSS custom properties** | Winning custom cascade, inherited computed values, bounded fallbacks/cycles and real box painting | Alpha colors, calc(), CSSOM or complete component styling |
 | **Element siblings** | Element and CharacterData sibling getters skip Text and Comment nodes and enforce document access checks. Bootstrap reads its next element sibling on `3456e67`. | Full CharacterData, unrestricted child-context access or Bootstrap initialization |
-| **Canonical Element selectors** | Scripts can borrow `Element.prototype.querySelector` and `querySelectorAll`. The latter returns a static NodeList, which Bootstrap tries to iterate on `5c89eea`. | Wider selector grammar, child Element queries, iterable NodeLists or dropdown interaction |
+| **Canonical Element selectors** | Scripts can borrow `Element.prototype.querySelector` and `querySelectorAll`. The latter returns a static NodeList. | Wider selector grammar, child Element queries or dropdown interaction |
+| **NodeList iteration** | Supported main-document NodeLists expose bounded indexed iteration. Bootstrap spreads its selector results and initializes at both widths on combined `main` `25654fa`. | Complete NodeList APIs or a working dropdown |
+| **Native button padding** | Supported padding changes native button boxes and caption placement. The separate Bootstrap comparison below records the visible result. | Complete native appearance or a combined main workflow result |
+
+The separate padding comparison uses loaded captures from `5c89eea` and
+`e94388c`. At both widths the unchanged Bootstrap toggle grows from 167×29 to
+191×41 px. Its caption shifts 12 px right and 6 px down, and the aligned original
+content crop matches. Caption attribution uses a 102 px content offset derived
+from source constants. Capture metadata did not independently calibrate that
+offset. The padding branch predates the NodeList merge and initialization fails
+on both compared builds. [PR #54](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/54)
+integrates padding in `main` at `25654fa`. A recheck on that combined main build
+initializes at both widths and records 191×41 px loaded toggles. The first trusted
+click still fails the dropdown selector at 357:27 before the menu opens.
 
 The text-input PR's original App checks cover trusted fill, Backspace/Delete,
 latest Reset defaults, neighboring pixels/hits, and a removed editor refusing
@@ -123,10 +136,13 @@ Vue's earlier undefined concat at 11:3613 is replaced by the later prototype
 boundary. Bootstrap's class failure at 599:3 is an earlier source-bound result.
 After the sibling prerequisite, `3456e67` reaches the missing canonical
 `Element.prototype.querySelectorAll` call at 741:27. On `5c89eea`, that operation
-exists and the next first failure is host NodeList iteration at 741:14. Load,
-initial rendering and responsive card layout pass at both widths. Initialization
-and input still fail. No
-reference browser was run for the separate modern cohort. Original records,
+exists and the next first failure is host NodeList iteration at 741:14. At that
+checkpoint initialization and input still fail. On `5c22afd`, NodeList iteration
+allows the unchanged sample to initialize with zero startup errors at both widths.
+The first trusted click then rejects
+`[data-bs-toggle="dropdown"]:not(.disabled):not(:disabled)` at 357:27 before the
+menu opens. Load, initial rendering and responsive card layout continue to pass.
+No reference browser was run for the separate modern cohort. Original records,
 including failed runs, are not overwritten by this presentation update.
 
 </details>
