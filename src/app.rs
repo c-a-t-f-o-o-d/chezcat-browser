@@ -5823,6 +5823,10 @@ mod css_variable_tests;
 mod css_radius_tests;
 
 #[cfg(test)]
+#[path = "app_css_line_height_tests.rs"]
+mod css_line_height_tests;
+
+#[cfg(test)]
 #[path = "app_css_root_selector_tests.rs"]
 mod css_root_selector_tests;
 

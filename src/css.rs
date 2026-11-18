@@ -22,6 +22,8 @@ mod radius;
 #[path="css_background_clip.rs"]
 mod background_clip;
 pub use background_clip::BackgroundClip;
+#[path="css_line_height.rs"]
+mod line_height;
 #[cfg(test)]
 #[path="css_root_selector_tests.rs"]
 mod root_selector_tests;
@@ -1092,6 +1094,7 @@ fn compute_cascade(
         position_known[index] = known;
         let mut has_radius = false;
         let mut sheet_background_clip = Some(BackgroundClip::BorderBox);
+        let mut sheet_line_height = parent.line_height;
         for (priority, declaration) in &applicable {
             if declaration.name == "transform" {
                 continue;
@@ -1099,8 +1102,17 @@ fn compute_cascade(
             if declaration.name == "position" { continue; }
             if let Some(meter) = meter.as_deref_mut() { meter.source(declaration.name.len().saturating_add(declaration.value.len()))?; }
             if radius::property(&declaration.name) { has_radius = true; continue; }
+            if declaration.name == "font" {
+                let value = declaration.value.trim().to_ascii_lowercase();
+                if apply_font(&mut style,&parent,declaration,&value) && !priority.1 {
+                    sheet_line_height = style.line_height;
+                }
+                continue;
+            }
             let mut apply_box = |budget: &mut custom_properties::Budget| {
-                if background_clip::apply(&mut style,&parent,declaration,priority.1,&mut sheet_background_clip,&variables[index],budget) {
+                if line_height::apply(&mut style,&parent,declaration,priority.1,&mut sheet_line_height,&variables[index],budget) {
+                    true
+                } else if background_clip::apply(&mut style,&parent,declaration,priority.1,&mut sheet_background_clip,&variables[index],budget) {
                     true
                 } else if custom_properties::apply_overflow(&mut style,&parent,declaration,&variables[index],budget,&mut overflow_known[index],parent_overflow_known) {
                     true
@@ -1127,6 +1139,7 @@ fn compute_cascade(
             root_font_size = style.font_size;
             style.root_font_size = root_font_size;
         }
+        style.line_height = line_height::computed(style.line_height,style.font_size,style.root_font_size);
         if has_radius {
             if let Some(meter) = meter.as_deref_mut() { meter.work(applicable.len())?; }
             let resolve_radius = |budget: &mut custom_properties::Budget| {
@@ -2943,6 +2956,44 @@ fn font_size_value(value:&str,parent:f32,root:f32)->Option<f32> {
     Some(size.clamp(1.0,256.0))
 }
 
+/// Apply the existing finite font shorthand once. Its line-height component
+/// participates in the same stylesheet checkpoint as the longhand.
+fn apply_font(style: &mut Style, parent: &Style, declaration: &Declaration, value: &str) -> bool {
+    if matches!(value, "inherit" | "unset") {
+        style.font_size = parent.font_size;
+        style.font_families = parent.font_families.clone();
+        style.font_weight = parent.font_weight;
+        style.bold = parent.bold;
+        style.italic = parent.italic;
+        style.line_height = parent.line_height;
+    } else if value == "initial" {
+        style.font_size = INITIAL_FONT_SIZE;
+        style.font_families = vec!["serif".into()];
+        style.font_weight = 400;
+        style.bold = false;
+        style.italic = false;
+        style.line_height = LineHeight::Factor(1.5);
+    } else if let Some((size, line, families, weight, italic)) =
+        font_shorthand(&declaration.value, parent.font_weight)
+    {
+        style.font_families = families;
+        style.font_weight = weight;
+        style.bold = weight >= 600;
+        style.italic = italic;
+        style.line_height = LineHeight::Factor(1.5);
+        apply(style,parent,&Declaration {
+            name: "font-size".into(), value: size, important: false,
+            stylesheet: declaration.stylesheet,
+        });
+        if let Some(line) = line {
+            if let Some(value) = line_height::literal(&line,parent.line_height) {
+                style.line_height = value;
+            }
+        }
+    } else { return false; }
+    true
+}
+
 fn apply(style: &mut Style, parent: &Style, declaration: &Declaration) {
     let value = declaration.value.trim().to_ascii_lowercase();
     match declaration.name.as_str() {
@@ -3122,51 +3173,7 @@ fn apply(style: &mut Style, parent: &Style, declaration: &Declaration) {
             }
         }
         "font" => {
-            if matches!(value.as_str(), "inherit" | "unset") {
-                style.font_size = parent.font_size;
-                style.font_families = parent.font_families.clone();
-                style.font_weight = parent.font_weight;
-                style.bold = parent.bold;
-                style.italic = parent.italic;
-                style.line_height = parent.line_height;
-            } else if value == "initial" {
-                style.font_size = 16.0;
-                style.font_families = vec!["serif".into()];
-                style.font_weight = 400;
-                style.bold = false;
-                style.italic = false;
-                style.line_height = LineHeight::Factor(1.5);
-            } else if let Some((size, line, families, weight, italic)) =
-                font_shorthand(&declaration.value, parent.font_weight)
-            {
-                style.font_families = families;
-                style.font_weight = weight;
-                style.bold = weight >= 600;
-                style.italic = italic;
-                style.line_height = LineHeight::Factor(1.5);
-                apply(
-                    style,
-                    parent,
-                    &Declaration {
-                        name: "font-size".into(),
-                        value: size,
-                        important: false,
-                        stylesheet: declaration.stylesheet,
-                    },
-                );
-                if let Some(line) = line {
-                    apply(
-                        style,
-                        parent,
-                        &Declaration {
-                            name: "line-height".into(),
-                            value: line,
-                            important: false,
-                            stylesheet: declaration.stylesheet,
-                        },
-                    );
-                }
-            }
+            apply_font(style,parent,declaration,&value);
         }
         "font-family" => {
             if matches!(value.as_str(), "inherit" | "unset") {
@@ -3220,17 +3227,7 @@ fn apply(style: &mut Style, parent: &Style, declaration: &Declaration) {
             }
         }
         "line-height" => {
-            if value == "normal" {
-                style.line_height = LineHeight::Factor(1.5);
-            } else if value == "inherit" {
-                style.line_height = parent.line_height;
-            } else if let Ok(number) = value.parse::<f32>() {
-                if number.is_finite() && number >= 0.0 {
-                    style.line_height = LineHeight::Factor(number.min(20.0));
-                }
-            } else if let Some(length) = parse_length(&value, false, false) {
-                style.line_height = LineHeight::Length(length);
-            }
+            if let Some(value) = line_height::literal(&value,parent.line_height) {style.line_height=value;}
         }
         "white-space" => match value.as_str() {
             "normal" => style.white_space = WhiteSpace::Normal,
