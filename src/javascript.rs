@@ -3731,7 +3731,7 @@ impl Runtime {
             job_failed_fatally: false,
             diagnostics: runtime_diagnostics::Data::default(),
             failed_window_realms: HashSet::new(),
-            deferred_intrinsics: (if defer_families { 7 } else { 0 }) | 8 | 16 | 32,
+            deferred_intrinsics: intrinsic_realms::startup_deferred_families(defer_families),
             failed_intrinsics: 0,
             array_to_string_intrinsic: None,
             deferred_native_methods: Vec::new(),

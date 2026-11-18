@@ -14,6 +14,18 @@ pub(super) const RECT_GLOBALS: &[&str] = &["DOMRectReadOnly", "DOMRect"];
 pub(super) const DOM_EXCEPTION_GLOBALS: &[&str] = &["DOMException"];
 pub(super) const IMAGE_DATA_GLOBALS: &[&str] = &["ImageData"];
 
+const BINARY: u8 = 1;
+const URL: u8 = 2;
+const TEXT: u8 = 4;
+const RECT: u8 = 8;
+const DOM_EXCEPTION: u8 = 16;
+const IMAGE_DATA: u8 = 32;
+pub(super) const ALL_DEFERRED: u8 = BINARY | URL | TEXT | RECT | DOM_EXCEPTION | IMAGE_DATA;
+
+pub(super) const fn startup_deferred_families(defer_core: bool) -> u8 {
+    if defer_core { ALL_DEFERRED } else { RECT | DOM_EXCEPTION | IMAGE_DATA }
+}
+
 macro_rules! roots {
     ($($field:ident: $kind:ty),* $(,)?) => {
         #[derive(Default)]
@@ -128,12 +140,12 @@ impl Runtime {
 
     pub(super) fn ensure_global_intrinsics(&mut self, name: &str) -> Result<(), Fault> {
         if self.deferred_intrinsics == 0 && self.failed_intrinsics == 0 { return Ok(()); }
-        let (bit, names) = if BINARY_GLOBALS.contains(&name) { (1, BINARY_GLOBALS) }
-            else if URL_GLOBALS.contains(&name) { (2, URL_GLOBALS) }
-            else if TEXT_GLOBALS.contains(&name) { (4, TEXT_GLOBALS) }
-             else if RECT_GLOBALS.contains(&name) { (8, RECT_GLOBALS) }
-            else if DOM_EXCEPTION_GLOBALS.contains(&name) { (16, DOM_EXCEPTION_GLOBALS) }
-            else if IMAGE_DATA_GLOBALS.contains(&name) { (32, IMAGE_DATA_GLOBALS) }
+        let (bit, names) = if BINARY_GLOBALS.contains(&name) { (BINARY, BINARY_GLOBALS) }
+            else if URL_GLOBALS.contains(&name) { (URL, URL_GLOBALS) }
+            else if TEXT_GLOBALS.contains(&name) { (TEXT, TEXT_GLOBALS) }
+            else if RECT_GLOBALS.contains(&name) { (RECT, RECT_GLOBALS) }
+            else if DOM_EXCEPTION_GLOBALS.contains(&name) { (DOM_EXCEPTION, DOM_EXCEPTION_GLOBALS) }
+            else if IMAGE_DATA_GLOBALS.contains(&name) { (IMAGE_DATA, IMAGE_DATA_GLOBALS) }
             else { return Ok(()); };
         if self.failed_intrinsics & bit != 0 {
             return Err(Fault::new("Deferred intrinsic family is unavailable after an earlier bounded initialization failure."));
@@ -143,12 +155,12 @@ impl Runtime {
         self.deferred_intrinsics &= !bit;
         let result = (|| {
             match bit {
-                1 => self.initialize_binary()?,
-                2 => self.initialize_url_api()?,
-                4 => { self.ensure_global_intrinsics("Uint8Array")?; self.initialize_text_encoding()?; }
-                8 => self.initialize_rect_api()?,
-                16 => self.initialize_dom_exception()?,
-                32 => self.initialize_image_data()?,
+                BINARY => self.initialize_binary()?,
+                URL => self.initialize_url_api()?,
+                TEXT => { self.ensure_global_intrinsics("Uint8Array")?; self.initialize_text_encoding()?; }
+                RECT => self.initialize_rect_api()?,
+                DOM_EXCEPTION => self.initialize_dom_exception()?,
+                IMAGE_DATA => self.initialize_image_data()?,
                 _ => unreachable!(),
             }
             for &name in names {
@@ -255,7 +267,7 @@ impl Runtime {
         });
         let first_object = self.objects.len();
         let result = self.with_intrinsic_realm(Some(id), |runtime| {
-            runtime.deferred_intrinsics = (if deferred { 7 } else { 0 }) | 8 | 16 | 32;
+            runtime.deferred_intrinsics = startup_deferred_families(deferred);
             runtime.initialize_realm_intrinsics()
         });
         if let Err(error) = result {
@@ -747,7 +759,7 @@ if(!caught||realmSecret!==91||Object.getPrototypeOf([])!==Array.prototype)throw 
         runtime.execute("var define=Object.defineProperty,marker=0,sentinel={};var descriptor={get value(){marker=1;throw sentinel;}};", &mut NoHost).unwrap();
         while runtime.functions.len() < MAX_FUNCTIONS { runtime.native_function(Builtin::IsNaN, "fixture").unwrap(); }
         runtime.execute("try{define(window,'URL',descriptor);throw 'missing';}catch(e){if(e!==sentinel||marker!==1)throw 'conversion order';}", &mut NoHost).unwrap();
-        assert_eq!(runtime.deferred_intrinsics, 31);
+        assert_eq!(runtime.deferred_intrinsics, ALL_DEFERRED);
 
         let mut runtime = Runtime::for_capacity_test();
         runtime.bind_browser_global(77).unwrap();
@@ -759,14 +771,14 @@ if(!caught||realmSecret!==91||Object.getPrototypeOf([])!==Array.prototype)throw 
     fn deferred_main_direct_binary_calls_initialize_the_receiving_realm() {
         let mut runtime = Runtime::for_capacity_test();
         runtime.execute("if(!Number.isFinite(1))throw 'number';", &mut NoHost).unwrap();
-        assert_eq!(runtime.deferred_intrinsics, 31);
+        assert_eq!(runtime.deferred_intrinsics, ALL_DEFERRED);
         let realm = runtime.allocate_realm_with_deferred_families(true).unwrap();
         let foreign = runtime.with_intrinsic_realm(Some(realm), |runtime| {
             runtime.construct_binary(binary_data::Constructor::Buffer, &[Value::Number(4.0)], &mut NoHost)
         }).unwrap();
-        assert_eq!(runtime.deferred_intrinsics, 31);
+        assert_eq!(runtime.deferred_intrinsics, ALL_DEFERRED);
         let view = runtime.construct_binary(binary_data::Constructor::View, &[foreign.clone()], &mut NoHost).unwrap();
-        assert_eq!(runtime.deferred_intrinsics, 30);
+        assert_eq!(runtime.deferred_intrinsics, ALL_DEFERRED & !BINARY);
         runtime.define_global("view", view).unwrap();
         runtime.execute("if(Object.getPrototypeOf(view)!==DataView.prototype||view.byteLength!==4)throw 'view realm';", &mut NoHost).unwrap();
 
@@ -790,7 +802,7 @@ if(!caught||realmSecret!==91||Object.getPrototypeOf([])!==Array.prototype)throw 
         for encoder in [true, false] {
             let mut runtime = Runtime::for_capacity_test();
             let codec = runtime.construct_text_encoding(encoder, &[], &mut NoHost).unwrap();
-            assert_eq!(runtime.deferred_intrinsics, 26);
+            assert_eq!(runtime.deferred_intrinsics, ALL_DEFERRED & !(BINARY | TEXT));
             assert_eq!(runtime.call_depth, 0);
             runtime.define_global("codec", codec).unwrap();
             let source = if encoder {
