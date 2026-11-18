@@ -87,13 +87,16 @@ impl Runtime {
                 }
                 if name=="Element" {
                     self.define_element_sibling_getters(prototype,window,"Element")?;
-                    self.define_assigned_slot_getter(prototype, window, "\0Element.get.assignedSlot")?;
+                    self.define_readonly_node_getter(prototype, window, "assignedSlot", "\0Element.get.assignedSlot")?;
                     for (key,operation) in [("querySelector","\0Element.querySelector"),("querySelectorAll","\0Element.querySelectorAll")] {
                         let method=self.allocate_host_function_with_length(window,operation,1).map_err(Fault::new)?;
                         if let Some(Function::Host {receiver_required,..})=self.functions.get_mut(method.id) {*receiver_required=true;}
                         self.store_property(self.function_properties[method.id],"name".into(),Value::String(key.into()),Some((false,false,true)))?;
                         self.store_property(prototype,key.into(),Value::Function(method.id),Some((true,true,true)))?;
                     }
+                }
+                if name == "HTMLElement" {
+                    self.define_readonly_node_getter(prototype, window, "offsetParent", "\0HTMLElement.get.offsetParent")?;
                 }
                 self.put_binding(self.global_environment,name.into(),Some(constructor),super::Declaration::Var,false)?;
                 self.global_attributes.insert(name.into(),(false,true,true));
@@ -310,7 +313,7 @@ impl Runtime {
             prototype, tag, Value::String("Text".into()),
             Some((false, false, true)),
         )?;
-        self.define_assigned_slot_getter(prototype, window, "\0Text.get.assignedSlot")?;
+        self.define_readonly_node_getter(prototype, window, "assignedSlot", "\0Text.get.assignedSlot")?;
         self.native_constructor_prototypes.insert((window, "Text"), prototype);
         self.put_binding(
             self.global_environment, "Text".into(), Some(constructor),
@@ -320,10 +323,11 @@ impl Runtime {
         Ok(())
     }
 
-    fn define_assigned_slot_getter(
+    fn define_readonly_node_getter(
         &mut self,
         prototype: usize,
         window: u32,
+        name: &'static str,
         operation: &'static str,
     ) -> Result<(), Fault> {
         let getter = self.allocate_host_function_with_length(window, operation, 0)
@@ -333,10 +337,10 @@ impl Runtime {
         }
         self.store_property(
             self.function_properties[getter.id], "name".into(),
-            Value::String("get assignedSlot".into()), Some((false, false, true)),
+            Value::String(format!("get {name}")), Some((false, false, true)),
         )?;
         self.store_accessor_property(
-            prototype, "assignedSlot".into(),
+            prototype, name.into(),
             Accessors { get: Some(getter.id), set: None }, (true, true),
         )
     }

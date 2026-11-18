@@ -98,6 +98,8 @@ mod script_select_fragments;
 mod script_element_siblings;
 #[path = "script_slottable.rs"]
 mod script_slottable;
+#[path = "script_offset_parent.rs"]
+mod script_offset_parent;
 use script_slottable::Slottable;
 
 #[path = "script_element_selectors.rs"]
@@ -2427,6 +2429,7 @@ impl Bridge<'_> {
     fn inherited_node_property(&self, object: u32, property: &str) -> bool {
         self.element_sibling_member(object, property)
             || self.assigned_slot_lookup(object, property)
+            || self.offset_parent_member(object, property)
             || self.text_prototype_property(object, property)
             || script_element_properties::ordinary_interface_member(property)
                 && self.concrete_html_interface(object).is_some()
@@ -2569,7 +2572,7 @@ impl Host for Bridge<'_> {
             let node = self.node(object)?;
             if !self.state.dom.connected.get(node).copied().unwrap_or(false) { return Ok([0.0; 4]); }
             self.state.geometry.as_mut().ok_or("Bounding rectangle requires the actual document renderer.")?
-                .bounding_rect(self.doc, self.forms, node, &mut self.state.host_work)
+                .bounding_rect(self.doc, self.forms, node, &mut self.state.host_work, &mut self.state.copy_work)
         })())
     }
 
@@ -2579,6 +2582,7 @@ impl Host for Bridge<'_> {
     }
 
     fn readonly_property(&self, object: u32, property: &str) -> bool {
+        if self.offset_parent_member(object, property) {return true;}
         if self.node_list_iteration_member(object,property) {return false;}
         if self.element_sibling_member(object,property) || self.assigned_slot_lookup(object,property) && self.slottable(object).is_some() {return true;}
         if self.ordinary_event_owner(object).is_some() {return false;}
@@ -2744,6 +2748,7 @@ impl Host for Bridge<'_> {
     }
 
     fn native_method_owner(&self, object:u32, method:&str) -> Option<u32> {
+        if method == script_offset_parent::GETTER && self.event_target_interface(object) {return Some(object);}
         if object==WINDOW && method=="getComputedStyle" {return Some(WINDOW);}
         if self.computed_style_receiver(object) {return self.computed_style_owner(object);}
         if self.event_target_interface(object)&&method=="\0NodeList.get.length" {return Some(object);}
@@ -2873,6 +2878,7 @@ impl Host for Bridge<'_> {
         args: &[Value],
     ) -> Result<(), (&'static str, String)> {
         if object==WINDOW && method=="getComputedStyle" || script_computed_style::index(object).is_some() {return self.validate_computed_call(object,method,args);}
+        if method == script_offset_parent::GETTER {return self.validate_offset_parent(object);}
         if method=="NodeList" && self.event_target_interface(object) {return Err(("TypeError","Illegal constructor for this native interface.".into()));}
         if method=="\0NodeList.get.length"&&!self.node_list_receiver(object) {return Err(("TypeError","NodeList length getter requires a genuine accessible NodeList.".into()));}
         let method=if let Some(operation)=script_element_selectors::operation(method) {
@@ -3172,6 +3178,9 @@ impl Host for Bridge<'_> {
     }
 
     fn accepts_receiver(&self, object: u32, method: &str, receiver: u32) -> bool {
+        if method == script_offset_parent::GETTER && self.event_target_interface(object) {
+            return self.offset_parent_receiver(receiver);
+        }
         if self.computed_style_receiver(object) {return self.computed_style_receiver(receiver);}
         if self.event_target_interface(object)&&method=="\0NodeList.get.length" {return self.node_list_receiver(receiver);}
         if self.event_target_interface(object)&&script_element_selectors::operation(method).is_some() {return self.element_selector_receiver(receiver);}
@@ -4095,6 +4104,7 @@ impl Host for Bridge<'_> {
                         is_root,
                         property,
                         &mut self.state.host_work,
+                        &mut self.state.copy_work,
                     )?
                 } else if offset {
                     return Err("Offset dimensions require an attached renderer for this connected Element.".into());
@@ -4457,6 +4467,7 @@ impl Host for Bridge<'_> {
             return self.element_sibling(object,next);
         }
         if let Some(interface) = Slottable::getter(method) {return self.assigned_slot(object, interface);}
+        if method == script_offset_parent::GETTER {return self.offset_parent(object);}
         if object == WINDOW && method == "Text" {
             let data = match args.first() {
                 None | Some(Value::Undefined) => String::new(),
@@ -5113,6 +5124,10 @@ mod script_container_object_string_tests;
 #[cfg(test)]
 #[path = "script_container_object_realm_tests.rs"]
 mod script_container_object_realm_tests;
+
+#[cfg(test)]
+#[path = "script_offset_parent_tests.rs"]
+mod script_offset_parent_tests;
 
 #[cfg(test)]
 #[path = "script_node_list_iteration_tests.rs"]

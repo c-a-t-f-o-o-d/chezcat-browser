@@ -634,7 +634,7 @@ impl Bridge<'_> {
             if property=="scrollHeight" {
                 if let Some(geometry)=&mut self.state.geometry {
                     let root=self.state.tree.document_element==Some(node);
-                    return geometry.read(self.doc,self.forms,node,root,property,&mut self.state.host_work).map(|value|Some(Value::Number(value)));
+                    return geometry.read(self.doc,self.forms,node,root,property,&mut self.state.host_work,&mut self.state.copy_work).map(|value|Some(Value::Number(value)));
                 }
             }
             return Err(self.unavailable_scroll(node,property));
