@@ -294,7 +294,7 @@ fn expand(text:&str,depth:usize,budget:&mut Budget,lookup:&mut impl FnMut(&str,&
 
 fn box_property(name:&str)->bool {
     matches!(name,"margin"|"margin-top"|"margin-right"|"margin-bottom"|"margin-left"|
-        "padding"|"padding-top"|"padding-right"|"padding-bottom"|"padding-left"|"border"|"border-width"|"border-style"|"border-color"|"background-color"|"background"|"color"|"font-size")
+        "padding"|"padding-top"|"padding-right"|"padding-bottom"|"padding-left"|"border"|"border-width"|"border-style"|"border-color"|"background-color"|"background"|"color"|"font-size"|"height")
         || ["top","right","bottom","left"].iter().any(|side|
             name==format!("border-{side}") || ["width","style","color"].iter().any(|part|name==format!("border-{side}-{part}")))
 }
@@ -302,6 +302,7 @@ fn border_value(value:&str)->bool {
     parse_border(value).is_some()
 }
 fn valid_box(name:&str,value:&str)->bool {
+    if name=="height" {return height_value(value,Length::Auto).is_some();}
     if name=="font-size" {return font_size_value(value,INITIAL_FONT_SIZE,INITIAL_FONT_SIZE).is_some();}
     if name=="color" {return value=="currentcolor" || color(value).is_some();}
     if matches!(name,"background-color"|"background") {
@@ -321,6 +322,7 @@ fn valid_box(name:&str,value:&str)->bool {
 }
 fn reset_box(style:&mut Style,parent:&Style,name:&str,inherit:bool) {
     let initial=Style::default(); let source=if inherit{parent}else{&initial};
+    if name=="height" {style.height=source.height;return;}
     if name=="color" {style.color=source.color;return;}
     if name=="font-size" {style.font_size=source.font_size;return;}
     if matches!(name,"background-color"|"background") {
