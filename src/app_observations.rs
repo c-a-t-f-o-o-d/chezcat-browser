@@ -39,6 +39,27 @@ mod tests {
     }
 
     #[test]
+    fn absent_attribute_removal_preserves_app_layout_pixels_and_allows_the_next_update() {
+        let mut app = fixture();
+        eval(&mut app, "var p=document.getElementById('p'), q=document.getElementById('q');q.value='edited';", 0);
+        let dom = app.observed_dom();
+        let layout = app.observations.layout.generation;
+        let before = app.draw();
+        let start = app.content_top() as usize * before.width;
+        eval(&mut app, r#"
+            p.removeAttribute('initial-state');p.removeAttribute('hidden');q.removeAttribute('value');
+            if(q.value!=='edited'||q.defaultValue!==''||p.textContent!=='Before')throw 'lost state';
+        "#, 0);
+        assert_eq!(app.observed_dom(), dom);
+        assert_eq!(app.observations.layout.generation, layout);
+        assert!(before.pixels[start..] == app.draw().pixels[start..]);
+        // A real content update after the same cleanup must still reach layout and paint.
+        eval(&mut app, "p.removeAttribute('initial-state');p.textContent='Updated';", 0);
+        assert!(app.page.runs.iter().any(|run| run.text == "Updated"));
+        assert!(before.pixels[start..] != app.draw().pixels[start..]);
+    }
+
+    #[test]
     fn stage_observations_correlate_dom_commits_layout_canvas_without_running_work() {
         let mut app = fixture();
         assert_eq!(app.observed_dom(), Some(0));

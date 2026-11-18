@@ -1633,7 +1633,13 @@
     "integrated_main": "95b2bbfb92ec231232a2f4672f4d0d3161f59330",
     "counter": "Trusted click displayed count 2. A timer completed with the title Proxy pass.",
     "vue_3_5_45": "Eight independent fixture checks passed. Mounting reached Object.prototype.hasOwnProperty.call on the proxy at upstream 5:428. The component did not render.",
-    "regressions": "The Vue 2.7.16 and Bootstrap 5.3.9 workflows passed at 1280x800 and 640x800."
+    "regressions": "The Vue 2.7.16 and Bootstrap 5.3.9 workflows passed at 1280x800 and 640x800.",
+    "own_query_followup": {
+      "source": "9081f6b40b0a585f1d850335681acb2f500b8066",
+      "integrated_main": "5be82b64870967734745aec24571406a01e60d86",
+      "mount": "The mounted hook ran. The initial count, native input, two buttons and blue component box rendered. The wrapper then stopped at removeAttribute on an absent attribute at upstream 8:4125.",
+      "interaction": "The full driver completed its native edit and clicks. Rendered count, name and phase remained at their initial values. No timer callback was observed."
+    }
   },
   "next": [
     "Continue from the first observed Vue 3.5.45 mount failure until trusted input visibly updates the mounted component on integrated source",
