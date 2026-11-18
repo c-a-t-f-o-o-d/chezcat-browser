@@ -683,14 +683,14 @@ impl Runtime {
         self.set_property(id, name, value)
     }
 
-    pub(super) fn assign_super_property(
+    pub(super) fn assign_inherited_property(
         &mut self, base: Ordinary, name: String, value: Value, receiver: Value, host: &mut dyn Host,
     ) -> Result<(), Fault> {
         self.property_name(&name)?;
         if let Some(owner) = self.property_owner(base, &name)? {
             if let Some(accessor) = self.objects[owner].properties.get(&name).and_then(|property| property.accessor) {
                 if accessor.set.is_none() {
-                    return if self.strict { Err(Fault::exception("TypeError", "The super property has no setter.")) } else { Ok(()) };
+                    return if self.strict { Err(Fault::exception("TypeError", "The inherited property has no setter.")) } else { Ok(()) };
                 }
                 self.call_accessor(accessor.set, receiver, &[value], host)?;
                 return Ok(());
@@ -701,11 +701,11 @@ impl Runtime {
                 || name == "length" && self.objects[owner].length.is_some() && !self.objects[owner].length_writable
                 || self.objects[owner].regexp.is_some() && !self.objects[owner].properties.contains_key(&name);
             if readonly {
-                return if self.strict { Err(Fault::exception("TypeError", "The super property is read-only.")) } else { Ok(()) };
+                return if self.strict { Err(Fault::exception("TypeError", "The inherited property is read-only.")) } else { Ok(()) };
             }
         }
         if matches!(receiver, Value::Host(_)) {
-            return Err(Fault::new("Super data writes to native host receivers are not implemented."));
+            return Err(Fault::new("Creating an own data property on this native receiver is not implemented."));
         }
         let Some(receiver) = Ordinary::from_value(&receiver) else {
             return if self.strict { Err(Fault::exception("TypeError", "A super data receiver must be an object.")) } else { Ok(()) };

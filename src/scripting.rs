@@ -96,6 +96,9 @@ use script_images::ImagesState;
 mod script_select_fragments;
 #[path = "script_element_siblings.rs"]
 mod script_element_siblings;
+#[path = "script_slottable.rs"]
+mod script_slottable;
+use script_slottable::Slottable;
 
 #[path = "script_element_selectors.rs"]
 mod script_element_selectors;
@@ -2419,6 +2422,15 @@ impl Bridge<'_> {
     }
 }
 
+impl Bridge<'_> {
+    /// Properties handled by ordinary lookup on the node's interface prototypes.
+    fn inherited_node_property(&self, object: u32, property: &str) -> bool {
+        self.element_sibling_member(object, property)
+            || self.assigned_slot_lookup(object, property)
+            || self.text_prototype_property(object, property)
+    }
+}
+
 impl Host for Bridge<'_> {
     fn expando_owner(&self,object:u32)->Option<u32> {self.ordinary_event_owner(object).or_else(||self.standalone_target_owner(object)).or_else(||(object==DOCUMENT||self.element_expando_receiver(object)||self.fragment_receiver(object)||self.node_list_receiver(object)).then_some(WINDOW))}
     fn ordinary_native_fallback(&self,object:u32,property:&str)->bool {object==DOCUMENT&&!self.document_native_property(property)}
@@ -2426,6 +2438,7 @@ impl Host for Bridge<'_> {
         self.ordinary_event_owner(object).is_some() || self.standalone_target_owner(object).is_some()
             || self.video_interface_receiver(object) || self.fragment_receiver(object)
             || self.node_list_receiver(object) || self.concrete_html_interface(object).is_some()
+            || self.slottable(object) == Some(Slottable::Text)
     }
     fn native_ancestry_inspection(&self,object:u32)->bool {self.event_receiver(object)||self.exposed_native_prototype(object)||self.namespace_receiver(object)}
     fn event_target_interface(&self,window:u32)->bool {window==WINDOW || self.frame_context(window).is_some()}
@@ -2455,7 +2468,8 @@ impl Host for Bridge<'_> {
                     else if tag(self.doc,node)=="img" {(IMAGE_FACTORY,"Image")} else {(WINDOW,"HTMLElement")}
                 } else {(WINDOW,"Element")}
             } else if self.fragment_receiver(object) {(WINDOW,"DocumentFragment")}
-            else if matches!(self.doc.nodes[node].kind,NodeKind::Text(_)|NodeKind::Comment(_)) {(WINDOW,"CharacterData")}
+            else if matches!(self.doc.nodes[node].kind,NodeKind::Text(_)) {(WINDOW,"Text")}
+            else if matches!(self.doc.nodes[node].kind,NodeKind::Comment(_)) {(WINDOW,"CharacterData")}
             else {(WINDOW,"Node")})
         } else if object==DOCUMENT || self.attr_receiver(object) {Some((WINDOW,"Node"))} else {None};
         let known=node.is_some() || matches!(object,DOCUMENT|CONSOLE|NAVIGATOR|PLUGINS|MIME_TYPES|DOCUMENT_IMAGES|LOCATION|PERFORMANCE|PERFORMANCE_TIMING|HISTORY)
@@ -2498,7 +2512,7 @@ impl Host for Bridge<'_> {
             return collection_index(property).is_some() || matches!(property,"item"|"forEach");
         }
         if self.element_selector_member(object,property) {return false;}
-        if self.element_sibling_member(object,property) {return false;}
+        if self.inherited_node_property(object,property) {return false;}
         if self.root_node_member(object,property) {return false;}
         if matches!(property,"nodeType"|"nodeName") && self.node_identity_receiver(object) {return false;}
         if self.video_interface_receiver(object)&&script_media::interface_member(property) {return false;}
@@ -2521,7 +2535,7 @@ impl Host for Bridge<'_> {
     fn ordinary_lookup_tail_property(&self,object:u32,property:&str)->bool {
         if self.node_list_receiver(object) {true}
         else if self.element_selector_member(object,property) {true}
-        else if self.element_sibling_member(object,property) {true}
+        else if self.inherited_node_property(object,property) {true}
         else if self.root_node_member(object,property) {true}
         else if matches!(property,"nodeType"|"nodeName") && self.node_identity_receiver(object) {true}
         else if self.event_receiver(object)&&property=="composedPath" {true}
@@ -2551,7 +2565,7 @@ impl Host for Bridge<'_> {
 
     fn readonly_property(&self, object: u32, property: &str) -> bool {
         if self.node_list_iteration_member(object,property) {return false;}
-        if self.element_sibling_member(object,property) {return true;}
+        if self.element_sibling_member(object,property) || self.assigned_slot_lookup(object,property) && self.slottable(object).is_some() {return true;}
         if self.ordinary_event_owner(object).is_some() {return false;}
         if self.media_element_receiver(object) && matches!(property,"currentSrc"|"videoWidth"|"videoHeight"|"duration"|"paused"|"ended"|"seeking"|"readyState"|"networkState") {return true;}
         if object==PERFORMANCE&&property=="timing"||object==PERFORMANCE_TIMING&&self.state.navigation_timing.is_some_and(|t|t.value(property).is_some()) {return true;}
@@ -2607,7 +2621,10 @@ impl Host for Bridge<'_> {
             || node_index(object).is_some_and(|node| self.html_spacing_property(node, property))
     }
 
-    fn argument_conversions(&self, object: u32, method: &str) -> &'static [(usize, bool)] {
+    fn argument_conversions(&self, object: u32, method: &str, args: &[Value]) -> &'static [(usize, bool)] {
+        if object == WINDOW && method == "Text" {
+            return if matches!(args.first(), None | Some(Value::Undefined)) { &[] } else { &[(0, true)] };
+        }
         if object==WINDOW && method=="getComputedStyle" {return &[(1,true)];}
         if self.computed_style_receiver(object) {return match method {"getPropertyValue"|"removeProperty"=>&[(0,true)],"setProperty"=>&[(0,true),(1,true),(2,true)],_=>&[]};}
         if script_element_selectors::operation(method).is_some() && self.element_selector_receiver(object) {
@@ -2717,7 +2734,7 @@ impl Host for Bridge<'_> {
         if self.event_target_interface(object)&&method=="\0NodeList.get.length" {return Some(object);}
         if self.event_target_interface(object)&&script_element_selectors::operation(method).is_some() {return Some(object);}
         if self.event_target_interface(object)&&script_element_siblings::operation(method).is_some() {return Some(object);}
-        if self.event_target_interface(object) && method=="DocumentFragment" {return Some(object);}
+        if self.event_target_interface(object) && (matches!(method, "DocumentFragment" | "Text") || Slottable::getter(method).is_some()) {return Some(object);}
         if self.event_target_interface(object) && method==script_node_root::ROOT_METHOD {return Some(object);}
         if self.event_target_interface(object) && matches!(method,"\0Node.get.nodeType"|"\0Node.get.nodeName") {return Some(object);}
         if self.node_list_receiver(object) && matches!(method,"item"|"forEach") {return Some(WINDOW);}
@@ -2847,6 +2864,9 @@ impl Host for Bridge<'_> {
             self.validate_element_selector_receiver(object)?;
             operation
         } else {method};
+        if self.event_target_interface(object) && method == "Text" {
+            return if object == WINDOW { Ok(()) } else { Err(("NotSupportedError", "Child Text allocation is not implemented.".into())) };
+        }
         if self.event_target_interface(object) && method=="DocumentFragment" {
             return if object==WINDOW {Ok(())} else {Err(("NotSupportedError","Child DocumentFragment allocation is not implemented.".into()))};
         }
@@ -3136,6 +3156,7 @@ impl Host for Bridge<'_> {
         if self.event_target_interface(object)&&method=="\0NodeList.get.length" {return self.node_list_receiver(receiver);}
         if self.event_target_interface(object)&&script_element_selectors::operation(method).is_some() {return self.element_selector_receiver(receiver);}
         if self.event_target_interface(object) {
+            if let Some(interface) = Slottable::getter(method) {return self.slottable(receiver) == Some(interface);}
             if let Some((family,_))=script_element_siblings::operation(method) {return self.element_sibling_family(receiver)==Some(family);}
         }
         if object==DOCUMENT && method=="createDocumentFragment" {return receiver==DOCUMENT;}
@@ -3296,7 +3317,7 @@ impl Host for Bridge<'_> {
     fn own_data(&mut self, object: u32, property: &str) -> Result<Option<Value>, String> {
         if self.node_list_iteration_member(object,property) {self.state.work(1)?;return Ok(None);}
         if self.element_selector_member(object,property) {self.state.work(1)?;return Ok(None);}
-        if self.element_sibling_member(object,property) {self.state.work(1)?;return Ok(None);}
+        if self.inherited_node_property(object,property) {self.state.work(1)?;return Ok(None);}
         if self.root_node_member(object,property) {self.state.work(1)?;return Ok(None);}
         if object==DOCUMENT && dom_tree::document_node_property(property) {self.state.work(1)?;return Ok(None);}
         if self.standalone_target_owner(object).is_some() {self.state.work(1)?;return Ok(None);}
@@ -3347,7 +3368,7 @@ impl Host for Bridge<'_> {
     fn delete(&mut self, object: u32, property: &str) -> Result<bool, String> {
         if self.node_list_iteration_member(object,property) {self.state.work(1)?;return Ok(true);}
         if self.element_selector_member(object,property) {self.state.work(1)?;return Ok(true);}
-        if self.element_sibling_member(object,property) {self.state.work(1)?;return Ok(true);}
+        if self.inherited_node_property(object,property) {self.state.work(1)?;return Ok(true);}
         if self.root_node_member(object,property) {self.state.work(1)?;return Ok(true);}
         if object==DOCUMENT && dom_tree::document_node_property(property) {self.state.work(1)?;return Ok(true);}
         if script_named_map::element(object).is_some() {
@@ -3539,7 +3560,7 @@ impl Host for Bridge<'_> {
         if script_computed_style::index(object).is_some() {self.state.work(1)?;return if self.computed_style_receiver(object) {Ok(script_computed_style::overflow_member(property)||self.method(object,property).is_some())} else {Err("Invalid computed declaration receiver.".into())};}
         if self.node_list_iteration_member(object,property) {self.state.work(1)?;return Ok(false);}
         if self.element_selector_member(object,property) {self.state.work(1)?;return Ok(false);}
-        if self.element_sibling_member(object,property) {self.state.work(1)?;return Ok(false);}
+        if self.inherited_node_property(object,property) {self.state.work(1)?;return Ok(false);}
         if object==DOCUMENT && property=="createDocumentFragment" {self.state.work(1)?;return Ok(true);}
         if self.root_node_member(object,property) {self.state.work(1)?;return Ok(false);}
         if property=="dispatchEvent"&&self.dispatch_receiver(object){return Ok(true);}
@@ -3835,6 +3856,7 @@ impl Host for Bridge<'_> {
         if script_computed_style::index(object).is_some() {return self.computed_style_get(object,property);}
         if self.node_list_iteration_member(object,property)&&property!="length" {return Ok(Value::Undefined);}
         if self.element_selector_member(object,property) {return Ok(Value::Undefined);}
+        if self.assigned_slot_lookup(object,property) || self.text_prototype_property(object,property) {return Ok(Value::Undefined);}
         if self.root_node_member(object,property) {return Ok(Value::Undefined);}
         if script_named_map::element(object).is_some() { return self.named_map_get(object, property); }
         if script_class_list::element(object).is_some() { return self.class_list_get(object,property); }
@@ -4413,6 +4435,14 @@ impl Host for Bridge<'_> {
         if let Some((family,next))=script_element_siblings::operation(method) {
             if self.element_sibling_family(object)!=Some(family) {return Err("Element sibling getter has an incompatible native receiver.".into());}
             return self.element_sibling(object,next);
+        }
+        if let Some(interface) = Slottable::getter(method) {return self.assigned_slot(object, interface);}
+        if object == WINDOW && method == "Text" {
+            let data = match args.first() {
+                None | Some(Value::Undefined) => String::new(),
+                Some(value) => self.text(value)?,
+            };
+            return self.create_dom_node(NodeKind::Text(data));
         }
         if object==WINDOW && method=="DocumentFragment" {return self.create_dom_node(NodeKind::DocumentFragment);}
         if method==script_node_root::ROOT_METHOD {return self.get_root_node(object,args,None);}
@@ -5011,6 +5041,18 @@ mod compatibility_tests;
 #[cfg(test)]
 #[path = "script_child_nodes_tests.rs"]
 mod script_child_nodes_tests;
+
+#[cfg(test)]
+#[path = "script_assigned_slot_tests.rs"]
+mod script_assigned_slot_tests;
+
+#[cfg(test)]
+#[path = "script_assigned_slot_realm_tests.rs"]
+mod script_assigned_slot_realm_tests;
+
+#[cfg(test)]
+#[path = "script_text_construction_tests.rs"]
+mod script_text_construction_tests;
 
 #[cfg(test)]
 #[path = "script_computed_style_tests.rs"]

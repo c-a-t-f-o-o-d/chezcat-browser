@@ -528,7 +528,7 @@ pub trait Host {
     /// Only genuine, bounded indexed native collections may enter the lazy
     /// Array iterator path. The returned owner must also match native access.
     fn indexed_iteration_owner(&self, _object: u32) -> Option<u32> { None }
-    fn argument_conversions(&self, _object: u32, _method: &str) -> &'static [(usize, bool)] {
+    fn argument_conversions(&self, _object: u32, _method: &str, _args: &[Value]) -> &'static [(usize, bool)] {
         &[]
     }
     /// Native interface references checked after ordered primitive conversion.
@@ -8341,7 +8341,7 @@ impl Runtime {
                 format!("{method} requires at least {required} argument(s)."),
             ));
         }
-        let conversions = host.argument_conversions(object, method);
+        let conversions = host.argument_conversions(object, method, args);
         let variadic = host.variadic_string_arguments(object, method);
         let mut converted;
         let args = if conversions.is_empty() && !variadic {
@@ -9712,7 +9712,7 @@ mod tests {
             fn method(&self, _: u32, name: &str) -> Option<&'static str> {
                 match name { "nullable" => Some("nullable"), "plain" => Some("plain"), _ => None }
             }
-            fn argument_conversions(&self, _: u32, _: &str) -> &'static [(usize, bool)] { &[(0, true)] }
+            fn argument_conversions(&self, _: u32, _: &str, _: &[Value]) -> &'static [(usize, bool)] { &[(0, true)] }
             fn nullable_string_argument(&self, _: u32, method: &str, index: usize) -> bool { method == "nullable" && index == 0 }
             fn required_arguments(&self, _: u32, _: &str) -> usize { 1 }
             fn call(&mut self, _: u32, _: &str, args: &[Value]) -> Result<Value, String> { Ok(args[0].clone()) }
