@@ -6,6 +6,10 @@ mod media;
 pub use media::{Hover, MediaEnvironment};
 #[path="css_custom_properties.rs"]
 mod custom_properties;
+#[path="css_computed_style.rs"]
+mod computed_style;
+pub(crate) use computed_style::{CascadeOutput, ComputedCustomProperties, ComputedStyleUnavailable, CssBudget};
+pub(crate) fn computed_custom_property_name(name: &str) -> bool { custom_properties::custom_name(name) }
 
 use crate::html::{Document, NodeKind};
 
@@ -668,6 +672,37 @@ pub(crate) fn compute_with_environment(
     checked: Option<&dyn Fn(usize)->Option<bool>>,
     environment: Option<MediaEnvironment>,
 ) -> Vec<Style> {
+    compute_with_environment_and_custom_properties(doc, external, checked, environment).styles
+}
+
+pub(crate) fn compute_with_environment_and_custom_properties(
+    doc: &Document,
+    external: &HashMap<usize, String>,
+    checked: Option<&dyn Fn(usize) -> Option<bool>>,
+    environment: Option<MediaEnvironment>,
+) -> CascadeOutput {
+    // Only an explicitly supplied script budget makes the shared core fallible.
+    compute_cascade(doc, external, checked, environment, None).expect("unbudgeted CSS cascade")
+}
+
+pub(crate) fn compute_with_environment_and_custom_properties_budgeted(
+    doc: &Document,
+    external: &HashMap<usize, String>,
+    checked: Option<&dyn Fn(usize) -> Option<bool>>,
+    environment: Option<MediaEnvironment>,
+    budget: &mut CssBudget<'_>,
+) -> Result<CascadeOutput, String> {
+    compute_cascade(doc, external, checked, environment, Some(budget))
+}
+
+fn compute_cascade(
+    doc: &Document,
+    external: &HashMap<usize, String>,
+    checked: Option<&dyn Fn(usize) -> Option<bool>>,
+    environment: Option<MediaEnvironment>,
+    mut meter: Option<&mut CssBudget<'_>>,
+) -> Result<CascadeOutput, String> {
+    if let Some(meter) = meter.as_deref_mut() { meter.document(doc, external)?; }
     let mut parents = vec![None; doc.nodes.len()];
     let mut previous_elements = vec![None; doc.nodes.len()];
     for (parent, node) in doc.nodes.iter().enumerate() {
@@ -687,7 +722,7 @@ pub(crate) fn compute_with_environment(
         parents: &parents,
         previous_elements: &previous_elements,
         checked,
-        charge_text: false,
+        charge_text: meter.is_some(),
     };
     // Script moves preserve arena identity, so a parent can have a later arena
     // index than its child. Visit the connected physical tree in preorder for
@@ -737,11 +772,16 @@ pub(crate) fn compute_with_environment(
 
     let mut computed = vec![Style::default(); doc.nodes.len()];
     let mut variables = vec![custom_properties::Variables::default(); doc.nodes.len()];
+    let mut eligible = vec![false; doc.nodes.len()];
+    let mut complete = true;
     let mut variable_budget = custom_properties::Budget::default();
     let mut budget = MAX_MATCH_STEPS;
     let mut root_font_size = INITIAL_FONT_SIZE;
     for &index in &order {
         let node = &doc.nodes[index];
+        if let Some(meter) = meter.as_deref_mut() {
+            if let Some(parent) = parents[index].and_then(|parent| computed.get(parent)) { meter.parent(parent)?; }
+        }
         let parent = parents[index]
             .and_then(|parent| computed.get(parent))
             .cloned()
@@ -768,6 +808,7 @@ pub(crate) fn compute_with_environment(
             computed[index] = parent;
             continue;
         };
+        eligible[index] = true;
         let mut style = Style::inherited(&parent);
         style.root_font_size = root_font_size;
         user_agent(
@@ -782,6 +823,7 @@ pub(crate) fn compute_with_environment(
         // Legacy HTML presentation is a zero-specificity author hint. Apply it
         // before stylesheets and inline declarations so ordinary CSS wins.
         if tag == "font" {
+            if let Some(meter) = meter.as_deref_mut() { meter.source(doc.attr(index, "face").map_or(0, str::len))?; }
             if let Some(families) = doc.attr(index, "face").and_then(font_families) {
                 style.font_families = families;
             }
@@ -860,15 +902,33 @@ pub(crate) fn compute_with_environment(
         let mut applicable = Vec::new();
         for (order, rule) in rules.iter().enumerate() {
             if budget == 0 {
+                complete = false;
                 break;
             }
+            let mut rule_budget = budget;
+            if let Some(meter) = meter.as_deref_mut() {
+                meter.work(1)?;
+                rule_budget = rule_budget.min(meter.remaining_work());
+            }
+            let before = rule_budget;
             let specificity = rule
                 .selectors
                 .iter()
-                .filter(|selector| matches_selector(selector, index, &match_context, &mut budget))
+                .filter(|selector| matches_selector(selector, index, &match_context, &mut rule_budget))
                 .map(|selector| selector.specificity)
                 .max();
+            let spent = before - rule_budget;
+            budget -= spent;
+            if let Some(meter) = meter.as_deref_mut() {
+                meter.work(spent)?;
+                if rule_budget == 0 && meter.remaining_work() == 0 { return Err("CSS selector job work limit reached.".into()); }
+            }
+            if budget == 0 { complete = false; }
             if let Some(specificity) = specificity {
+                if let Some(meter) = meter.as_deref_mut() {
+                    meter.work(rule.declarations.len())?;
+                    meter.copies(rule.declarations.len().saturating_mul(128))?;
+                }
                 for (declaration_order, declaration) in rule.declarations.iter().enumerate() {
                     applicable.push((
                         (
@@ -883,21 +943,32 @@ pub(crate) fn compute_with_environment(
                 }
             }
         }
+        if let Some(meter) = meter.as_deref_mut() { meter.source(doc.attr(index, "style").map_or(0, |text| prefix(text, 16_384).len()))?; }
         let inline = doc
             .attr(index, "style")
             .map(|text| parse_declarations(prefix(text, 16_384)))
             .unwrap_or_default();
         for (order, declaration) in inline.iter().enumerate() {
+            if let Some(meter) = meter.as_deref_mut() { meter.work(1)?; meter.copies(128)?; }
             applicable.push((
                 (declaration.important, true, (0, 0, 0), 0, order),
                 declaration,
             ));
         }
+        if let Some(meter) = meter.as_deref_mut() {
+            let count = applicable.len();
+            let comparisons = if count < 2 { 0 } else { count.saturating_mul(usize::BITS as usize - count.leading_zeros() as usize) };
+            meter.work(comparisons)?;
+        }
         applicable.sort_by_key(|(priority, _)| *priority);
-        variables[index] = custom_properties::Variables::cascade(&inherited_variables,
-            applicable.iter().map(|(_,declaration)|*declaration),&mut variable_budget);
+        let cascade = |budget: &mut custom_properties::Budget| custom_properties::Variables::cascade(&inherited_variables,
+            applicable.iter().map(|(_,declaration)|*declaration), budget);
+        variables[index] = if let Some(meter) = meter.as_deref_mut() { meter.variables(&mut variable_budget, cascade)? } else { cascade(&mut variable_budget) };
         for (_, declaration) in applicable {
-            if !custom_properties::apply_box(&mut style,&parent,declaration,&variables[index],&mut variable_budget) {
+            if let Some(meter) = meter.as_deref_mut() { meter.source(declaration.name.len().saturating_add(declaration.value.len()))?; }
+            let mut apply_box = |budget: &mut custom_properties::Budget| custom_properties::apply_box(&mut style,&parent,declaration,&variables[index],budget);
+            let applied = if let Some(meter) = meter.as_deref_mut() { meter.variables(&mut variable_budget, apply_box)? } else { apply_box(&mut variable_budget) };
+            if !applied {
                 apply(&mut style, &parent, declaration);
             }
         }
@@ -911,7 +982,7 @@ pub(crate) fn compute_with_environment(
         }
         computed[index] = style;
     }
-    computed
+    Ok(CascadeOutput { styles: computed, custom_properties: ComputedCustomProperties::new(variables, eligible, complete) })
 }
 
 fn prefix(text: &str, maximum: usize) -> &str {
@@ -4421,3 +4492,7 @@ mod color_variable_tests;
 #[cfg(test)]
 #[path="css_font_size_variable_tests.rs"]
 mod font_size_variable_tests;
+
+#[cfg(test)]
+#[path="css_computed_style_tests.rs"]
+mod computed_style_tests;

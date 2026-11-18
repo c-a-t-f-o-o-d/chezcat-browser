@@ -11,22 +11,40 @@ const MAX_OUTPUT: usize = 2048;
 const MAX_DEPTH: usize = 32;
 const MAX_REFERENCES: usize = 4096;
 
-pub(super) struct Budget { work: usize, copies: usize }
+pub(super) struct Budget {
+    work: usize, copies: usize,
+    used_work: usize, used_copies: usize,
+    failed_work: bool, failed_copies: bool,
+}
 impl Default for Budget {
-    fn default() -> Self { Self { work: 8 * 1024 * 1024, copies: 8 * 1024 * 1024 } }
+    fn default() -> Self { Self::with_remaining(8 * 1024 * 1024, 8 * 1024 * 1024) }
 }
 impl Budget {
+    fn with_remaining(work: usize, copies: usize) -> Self {
+        Self { work, copies, used_work: 0, used_copies: 0, failed_work: false, failed_copies: false }
+    }
+    pub(super) fn remaining(&self) -> (usize, usize) { (self.work, self.copies) }
+    pub(super) fn operation(&self, work: usize, copies: usize) -> Self {
+        Self::with_remaining(self.work.min(work), self.copies.min(copies))
+    }
+    pub(super) fn usage(&self) -> (usize, usize, bool, bool) {
+        (self.used_work, self.used_copies, self.failed_work, self.failed_copies)
+    }
+    pub(super) fn commit_operation(&mut self, operation: &Self) {
+        if operation.failed_work || operation.failed_copies { self.work = 0; self.copies = 0; }
+        else { self.work -= operation.used_work; self.copies -= operation.used_copies; }
+    }
     fn work(&mut self, amount: usize) -> Result<(), ()> {
         match self.work.checked_sub(amount) {
-            Some(remaining)=>{self.work=remaining;Ok(())},
-            None=>{self.work=0;self.copies=0;Err(())},
+            Some(remaining)=>{self.used_work += amount; self.work=remaining;Ok(())},
+            None=>{self.used_work += self.work; self.failed_work = true; self.work=0;self.copies=0;Err(())},
         }
     }
     fn copy(&mut self, amount: usize) -> Result<(), ()> {
         self.work(amount)?;
         match self.copies.checked_sub(amount) {
-            Some(remaining)=>{self.copies=remaining;Ok(())},
-            None=>{self.work=0;self.copies=0;Err(())},
+            Some(remaining)=>{self.used_copies += amount; self.copies=remaining;Ok(())},
+            None=>{self.used_copies += self.copies; self.failed_copies = true; self.work=0;self.copies=0;Err(())},
         }
     }
     fn text(&mut self, text: &str) -> Result<String, ()> { self.copy(text.len())?; Ok(text.to_owned()) }
@@ -123,6 +141,10 @@ pub(super) fn has_var(text: &str) -> bool {
 }
 
 impl Variables {
+    pub(super) fn read(&self, name: &str) -> Result<Option<&str>, ComputedStyleUnavailable> {
+        if self.blocked { return Err(ComputedStyleUnavailable); }
+        Ok(self.values.get(name).and_then(|value| value.as_deref()))
+    }
     pub(super) fn cascade<'a>(parent: &Self, declarations: impl Iterator<Item=&'a Declaration>, budget: &mut Budget) -> Self {
         Self::prepare(parent,declarations,budget).unwrap_or_else(|_|Self { blocked:true,..Self::default() })
     }
@@ -236,7 +258,7 @@ impl Resolver<'_,'_> {
             Raw::Tokens(text)=> {
                 // Split borrowing of immutable source and mutable memo/budget.
                 let text = self.budget.text(text)?;
-                let mut budget = Budget {work:0,copies:0}; std::mem::swap(&mut budget,self.budget);
+                let mut budget = Budget::with_remaining(0, 0); std::mem::swap(&mut budget,self.budget);
                 let result = expand(&text,depth,&mut budget,&mut |name,budget,depth| {
                     let Ok(next)=self.entries.binary_search_by(|(key,_)|key.as_str().cmp(name)) else{return Ok(None);};
                     std::mem::swap(budget,self.budget);
@@ -418,7 +440,7 @@ mod tests {
     #[test]
     fn custom_box_depth_count_output_map_and_job_allowances_fail_closed() {
         let decl=Declaration{name:"--x".into(),value:"2px".into(),important:false,stylesheet:None};
-        let mut exhausted=Budget{work:0,copies:0};
+        let mut exhausted=Budget::with_remaining(0,0);
         assert!(Variables::cascade(&Variables::default(),[&decl].into_iter(),&mut exhausted).blocked);
         let mut many=String::new();for index in 0..=MAX_NAMES {many.push_str(&format!("--n{index}:1px;"));}
         let declarations=parse_declarations(&many);assert!(Variables::cascade(&Variables::default(),declarations.iter(),&mut Budget::default()).blocked);
@@ -428,14 +450,14 @@ mod tests {
         let declarations=parse_declarations(&doubling);assert!(Variables::cascade(&Variables::default(),declarations.iter(),&mut Budget::default()).blocked);
         let mut large=String::new();for index in 0..40 {large.push_str(&format!("--n{index}:{};","x".repeat(2000)));}
         let declarations=parse_declarations(&large);assert!(Variables::cascade(&Variables::default(),declarations.iter(),&mut Budget::default()).blocked);
-        let mut budget=Budget{work:10000,copies:0};assert!(Variables::default().substitute("var(--missing,2px)",&mut budget).is_err());
+        let mut budget=Budget::with_remaining(10000,0);assert!(Variables::default().substitute("var(--missing,2px)",&mut budget).is_err());
     }
 
     #[test]
     fn background_variable_exhausted_and_blocked_allowances_reset_without_resource_growth() {
         let declaration=Declaration{name:"background-color".into(),value:"var(--missing,#0d6efd)".into(),important:false,stylesheet:None};
         let mut style=Style::default();style.background=Some(0xff0000);style.background_current_color=true;style.padding=[Length::Px(7.0);4];style.border_alpha=[51;4];
-        assert!(apply_box(&mut style,&Style::default(),&declaration,&Variables::default(),&mut Budget{work:0,copies:0}));
+        assert!(apply_box(&mut style,&Style::default(),&declaration,&Variables::default(),&mut Budget::with_remaining(0,0)));
         assert_eq!(style.background,None);assert!(!style.background_current_color);assert_eq!(style.padding,[Length::Px(7.0);4]);assert_eq!(style.border_alpha,[51;4]);
         let mut many=String::new();for index in 0..=MAX_NAMES {many.push_str(&format!("--n{index}:red;"));}
         let declarations=parse_declarations(&many);let blocked=Variables::cascade(&Variables::default(),declarations.iter(),&mut Budget::default());
@@ -445,7 +467,7 @@ mod tests {
         parent.background_image=Some(BackgroundImage{url:"ParentCase".repeat(128),stylesheet:Some(17)});parent.background_repeat=[false;2];parent.background_size=BackgroundSize::Cover;
         let inherit=Declaration{name:"background".into(),value:"var(--missing,inherit)".into(),important:false,stylesheet:None};
         style.background=Some(0xff0000);style.background_current_color=true;style.background_image=Some(BackgroundImage{url:"OldCase.ppm".into(),stylesheet:Some(9)});
-        assert!(apply_box(&mut style,&parent,&inherit,&Variables::default(),&mut Budget{work:10000,copies:64}));
+        assert!(apply_box(&mut style,&parent,&inherit,&Variables::default(),&mut Budget::with_remaining(10000,64)));
         assert_eq!(style.background,None);assert!(!style.background_current_color);assert_eq!(style.background_image,None);assert_eq!(style.background_repeat,[true;2]);assert_eq!(style.background_size,BackgroundSize::Auto);
         assert_eq!(parent.background_image.as_ref().unwrap().url,"ParentCase".repeat(128));
     }
@@ -458,11 +480,11 @@ mod tests {
         style.background_image=Some(BackgroundImage{url:"KeptCase.ppm".into(),stylesheet:Some(17)});style.background_size=BackgroundSize::Contain;
         style.padding=[Length::Px(7.0);4];style.border_color=[Some(0);4];style.border_alpha=[51;4];style.font_families=vec!["monospace".into()];style.font_size=19.0;
         let snapshot=style.clone();
-        assert!(apply_box(&mut style,&parent,&declaration,&Variables::default(),&mut Budget{work:0,copies:0}));assert_eq!(style.color,0x112233);
+        assert!(apply_box(&mut style,&parent,&declaration,&Variables::default(),&mut Budget::with_remaining(0,0)));assert_eq!(style.color,0x112233);
         let mut many=String::new();for index in 0..=MAX_NAMES {many.push_str(&format!("--n{index}:red;"));}
         let declarations=parse_declarations(&many);let blocked=Variables::cascade(&Variables::default(),declarations.iter(),&mut Budget::default());assert!(blocked.blocked);
         style.color=0xff0000;assert!(apply_box(&mut style,&parent,&declaration,&blocked,&mut Budget::default()));assert_eq!(style.color,0x112233,"Blocked maps cannot revive author red or use an unbudgeted white fallback");
-        style.color=0xff0000;assert!(apply_box(&mut style,&parent,&declaration,&Variables::default(),&mut Budget{work:10000,copies:0}));assert_eq!(style.color,0x112233);
+        style.color=0xff0000;assert!(apply_box(&mut style,&parent,&declaration,&Variables::default(),&mut Budget::with_remaining(10000,0)));assert_eq!(style.color,0x112233);
         assert_eq!(style.background,snapshot.background);assert_eq!(style.background_current_color,snapshot.background_current_color);assert_eq!(style.background_image,snapshot.background_image);assert_eq!(style.background_size,snapshot.background_size);
         assert_eq!(style.padding,snapshot.padding);assert_eq!(style.border_color,snapshot.border_color);assert_eq!(style.border_alpha,snapshot.border_alpha);assert_eq!(style.font_families,snapshot.font_families);assert_eq!(style.font_size,snapshot.font_size);
         assert_eq!(parent.color,0x112233);
@@ -475,7 +497,7 @@ mod tests {
         let mut style=Style::default();style.font_size=99.0;style.root_font_size=32.0;style.font_families=vec!["Geometry".into()];style.font_weight=700;style.italic=true;style.line_height=LineHeight::Factor(2.0);
         style.color=0x123456;style.background=Some(0x0d6efd);style.background_image=Some(BackgroundImage{url:"KeptCase.ppm".into(),stylesheet:Some(17)});style.padding=[Length::Px(7.0);4];style.border_alpha=[51;4];
         let snapshot=style.clone();
-        for mut budget in [Budget{work:0,copies:0},Budget{work:10000,copies:0}] {
+        for mut budget in [Budget::with_remaining(0,0),Budget::with_remaining(10000,0)] {
             style.font_size=99.0;assert!(apply_box(&mut style,&parent,&declaration,&Variables::default(),&mut budget));assert_eq!(style.font_size,18.0);
         }
         let mut many=String::new();for index in 0..=MAX_NAMES {many.push_str(&format!("--n{index}:24px;"));}
