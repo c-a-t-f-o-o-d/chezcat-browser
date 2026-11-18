@@ -150,21 +150,26 @@ impl Runtime {
             self.global_attributes.insert("CharacterData".into(),(false,true,true));
             self.native_constructor_prototypes.insert((window,"CharacterData"),character);
             self.define_text_interface(window, character)?;
-            // Fragment is a separate Node subtype, never an Element suffix.
-            let node=*self.native_constructor_prototypes.get(&(window,"Node")).ok_or_else(||Fault::new("Missing Node prototype."))?;
-            let Value::Function(node_constructor)=self.objects[node].properties["constructor"].value.as_value()?.clone() else {return Err(Fault::new("Invalid Node constructor."));};
-            let allocation=self.allocate_host_function_with_length(window,"DocumentFragment",0).map_err(Fault::new)?;
-            if let Some(Function::Host {constructible,..})=self.functions.get_mut(allocation.id) {*constructible=true;}
-            let fragment=self.new_object(None)?;
-            self.objects[fragment].prototype=Some(Ordinary::Object(node));
-            self.objects[self.function_properties[allocation.id]].prototype=Some(Ordinary::Function(node_constructor));
-            let constructor=Value::Function(allocation.id);
-            self.store_property(fragment,"constructor".into(),constructor.clone(),Some((false,true,true)))?;
-            self.store_property(self.function_properties[allocation.id],"prototype".into(),Value::Object(fragment),Some((false,false,false)))?;
-            self.store_symbol_property(fragment,self.symbol_to_string_tag.unwrap(),Value::String("DocumentFragment".into()),Some((false,false,true)))?;
-            self.put_binding(self.global_environment,"DocumentFragment".into(),Some(constructor),super::Declaration::Var,false)?;
-            self.global_attributes.insert("DocumentFragment".into(),(false,true,true));
-            self.native_constructor_prototypes.insert((window,"DocumentFragment"),fragment);
+            for name in ["DocumentFragment","Document"] {
+                let allocation=self.allocate_host_function_with_length(window,name,0).map_err(Fault::new)?;
+                if let Some(Function::Host {constructible,..})=self.functions.get_mut(allocation.id) {*constructible=true;}
+                let prototype=self.new_object(None)?;
+                self.objects[prototype].prototype=Some(Ordinary::Object(node));
+                self.objects[self.function_properties[allocation.id]].prototype=Some(Ordinary::Function(node_constructor));
+                let constructor=Value::Function(allocation.id);
+                self.store_property(prototype,"constructor".into(),constructor.clone(),Some((false,true,true)))?;
+                self.store_property(self.function_properties[allocation.id],"prototype".into(),Value::Object(prototype),Some((false,false,false)))?;
+                self.store_symbol_property(prototype,self.symbol_to_string_tag.unwrap(),Value::String(name.into()),Some((false,false,true)))?;
+                if name=="Document" {
+                    self.define_node_attribute(prototype,window,"documentElement","\0Document.get.documentElement",None)?;
+                    // HTML defines this Window property as an alias of the very same interface object.
+                    self.put_binding(self.global_environment,"HTMLDocument".into(),Some(constructor.clone()),super::Declaration::Var,false)?;
+                    self.global_attributes.insert("HTMLDocument".into(),(false,true,true));
+                }
+                self.put_binding(self.global_environment,name.into(),Some(constructor),super::Declaration::Var,false)?;
+                self.global_attributes.insert(name.into(),(false,true,true));
+                self.native_constructor_prototypes.insert((window,name),prototype);
+            }
             if let Some(key)=image {
                 let image=*self.native_constructor_prototypes.get(&key).ok_or_else(||Fault::new("Missing canonical Image prototype."))?;
                 self.objects[image].prototype=Some(Ordinary::Object(parent));

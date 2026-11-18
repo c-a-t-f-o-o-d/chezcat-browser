@@ -70,7 +70,7 @@ impl Worker {
         std::thread::Builder::new()
             .name("script-loader".into())
             .spawn(move || loop {
-                let job = {
+                let (job, source_limit) = {
                     let mut guard = shared.0.lock().unwrap();
                     while guard.queue.is_empty() && !guard.stopping {
                         guard = shared.1.wait(guard).unwrap();
@@ -80,10 +80,13 @@ impl Worker {
                     }
                     let job = guard.queue.pop_front().unwrap();
                     guard.active = Some(job.cancel.clone());
-                    job
+                    let remaining = crate::javascript::limits::BROWSER_CAPACITIES.retained_source
+                        .saturating_sub(guard.completed_bytes);
+                    let source_limit = job.request.source_limit.min(remaining);
+                    (job, source_limit)
                 };
                 let mut events = Vec::new();
-                let result = fetch(&job, &trust, cookies.clone(), &mut events);
+                let result = fetch(&job, source_limit, &trust, cookies.clone(), &mut events);
                 let wake = {
                     let mut guard = shared.0.lock().unwrap();
                     guard.active = None;
@@ -170,7 +173,8 @@ mod completion_tests {
     fn completion(source: &str) -> Completion {
         Completion { epoch: 1, request: DynamicScript {
             node: 1, target: Location::home(), origin: Location::home(), nonce: None,
-            policy: crate::csp::PolicySet::default(), same_origin_only: false, error: None,
+            policy: crate::csp::PolicySet::default(), same_origin_only: false,
+            source_limit: crate::javascript::limits::BROWSER_CAPACITIES.source_bytes, error: None,
         }, result: Ok(loader::Script { node: 1, source: source.into(), label: "bounded completion".into() }), events: Vec::new() }
     }
 
@@ -202,6 +206,7 @@ mod completion_tests {
 
 fn fetch(
     job: &Job,
+    source_limit: usize,
     trust: &crate::trust::Store,
     cookies: Arc<crate::cookies::Session>,
     events: &mut Vec<String>,
@@ -240,9 +245,11 @@ fn fetch(
     let pool = crate::http::Pool::new(&job.cancel, trust)
         .with_cookie_session(cookies, Some(origin.clone()))
         .with_network_trace(job.network.clone());
+    let wire_limit = crate::javascript::limits::BROWSER_CAPACITIES.source_bytes;
     let response = pool.fetch_classic_script(
         url,
-        loader::MAX_SCRIPT_BYTES,
+        wire_limit,
+        loader::script_input_limit(source_limit, wire_limit),
         origin,
         crate::http::FetchMode::Normal,
         job.request.same_origin_only,
@@ -259,10 +266,7 @@ fn fetch(
     if !loader::javascript_mime(&loader::media_type(&content_type)) {
         return Err("Dynamic external scripts require a JavaScript Content-Type.".into());
     }
-    let source = loader::decode_text(&response.body, &content_type, false)?;
-    if source.len() > loader::MAX_SCRIPT_BYTES {
-        return Err(format!("Decoded dynamic script source exceeds {} KiB.", crate::loader::MAX_SCRIPT_BYTES / 1024));
-    }
+    let source = loader::decode_script(response.body, &content_type, source_limit)?;
     events.push(format!(
         "DYNAMIC SCRIPT node {}: loaded {} bytes from {}",
         job.request.node,
