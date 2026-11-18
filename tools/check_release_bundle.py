@@ -171,8 +171,9 @@ class Guards(unittest.TestCase):
           ('stale-source',(valid+'Old containing commit: '+'a'*40+'\n').encode()),
           ('uppercase-stale-source',(valid+'Old containing commit: '+'A'*40+'\n').encode())]
         for label,payload in cases:
-            with self.subTest(case=label),tempfile.TemporaryDirectory(prefix='chezcat-snapshot-scope-') as folder:
-                previous=self.root;self.root=Path(folder)
+            with self.subTest(case=label):
+                previous=self.root
+                self.root=Path(tempfile.mkdtemp(prefix='snapshot-scope-',dir=self.temp.name))
                 try:
                     with patch.object(package,'ROOT',self.root),patch.object(package.publication,'ROOT',self.root):
                         self.fixture(scope_text=payload)
