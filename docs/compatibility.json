@@ -930,6 +930,141 @@
             "required_journeys_passed": 25,
             "scope": "Hosted integration on main. Candidate 13d7dae supplies the App interaction captures."
           }
+        },
+        "computed_position_measurement": {
+          "measured_source_commit": "c74503c6a0ab747785151aa9ad09b8db0e47c0c4",
+          "executable_sha256": "7436642cf9b7949c6aad1471465fcc44e8728bca71f59ec43fcd135ac32d3cf8",
+          "source_map_sha256": "24fc6bd1548595c87a6bb64cf9948c627e3dca51dd9d8d6f480a7e1fcf421258",
+          "dirty": false,
+          "measurement_manifest_sha256": "b56c9464e55c169e2ff726098724a27de377060c742ef1d20baee82c340a2054",
+          "build_record_sha256": "5fef02d1203cdb4f868bf9b3639ce9fbe62902969b800882028d406061ba2410",
+          "configuration_manifest_sha256": {
+            "1280": "885bc8026a177329209ab6953a3d4b6c08b79d78bda3c92cf105d501a4dec168",
+            "640": "6750b136a2541a78da0b50af4c736e79749bf987d8714b5787d6b26c0d86ec29"
+          },
+          "configurations": [
+            [
+              1280,
+              800
+            ],
+            [
+              640,
+              800
+            ]
+          ],
+          "stage_outcomes": {
+            "load": "Passed",
+            "parse": "Passed",
+            "initialization": "Passed",
+            "render": "Passed",
+            "input": "Failed",
+            "async": "Not applicable",
+            "framework_layout": "Passed"
+          },
+          "first_failed_stage": "input",
+          "configuration_denominator": 2,
+          "passed_configurations": 0,
+          "completed_http_200_responses_per_configuration": 6,
+          "first_root": "Element property \"offsetParent\" is not supported.",
+          "first_root_location": "Microtask checkpoint, Bootstrap5.3.9 bundle line1994,column12",
+          "integrated_main_commit": "e0195c2e389fa0ee2e24af257b77d8fe292fe1fa",
+          "pull_request": "https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/69",
+          "opened_marker_observed": true,
+          "choice_snapshot_present": true,
+          "trusted_amber_choice_callback_observed": true,
+          "menu_open_marker_remains_after_choice": true,
+          "successful_close_observed": false,
+          "measurement_scope": "Unchanged pinned Bootstrap App at 1280x800 and 640x800. The open state and trusted amber-choice callback are observed; the menu remains open after selection and both input checks fail."
+        },
+        "offset_parent_measurement": {
+          "measured_source_commit": "96666d399ce834dc5db98b19c43917eea7ad6b55",
+          "executable_sha256": "5a502ed99ed2b6b234227d89c17e8a2fa98e7924bf52da83e599a3784b1346a9",
+          "source_map_sha256": "90144267915af813049683488c26abd6faefd6a50c4085f144ceed8384ac7492",
+          "dirty": false,
+          "measurement_manifest_sha256": "e2faa5480a641de96eccb9f86a2ceadb333f0be59e0f4c697d63dd413c09e4b6",
+          "build_record_sha256": "b79c42c427b55c8b545f07061a97b43fadc8a9e139761e0ca5dd73ec5a7081ba",
+          "configuration_manifest_sha256": {
+            "1280": "f6bfb7163fae0e421a8947b346e8cf8f6c17d452fa9e834867323fc85aebce31",
+            "640": "92f1e22e5da4e56074f6ebe704de0b906efbbfeaa912bbe12efbf1ea3e835aac"
+          },
+          "configurations": [
+            [
+              1280,
+              800
+            ],
+            [
+              640,
+              800
+            ]
+          ],
+          "stage_outcomes": {
+            "load": "Passed",
+            "parse": "Passed",
+            "initialization": "Passed",
+            "render": "Passed",
+            "input": "Failed",
+            "async": "Not applicable",
+            "framework_layout": "Passed"
+          },
+          "first_failed_stage": "input",
+          "configuration_denominator": 2,
+          "passed_configurations": 0,
+          "completed_http_200_responses_per_configuration": 6,
+          "first_root": "Element property \"scrollLeft\" is not supported.",
+          "first_root_location": "Microtask checkpoint, Bootstrap5.3.9 bundle line3154,column19",
+          "integrated_main_commit": "3865a8ed855b453cfc4dab0a19d491f31dd71b41",
+          "pull_request": "https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/71",
+          "opened_marker_observed": true,
+          "choice_snapshot_present": true,
+          "trusted_amber_choice_callback_observed": true,
+          "menu_open_marker_remains_after_choice": true,
+          "successful_close_observed": false,
+          "measurement_scope": "Unchanged pinned Bootstrap App at 1280x800 and 640x800. The open state and trusted amber-choice callback are observed; the menu remains open after selection and both input checks fail."
+        },
+        "scroll_offsets_measurement": {
+          "measured_source_commit": "e7be7cd504cf4bb978541b3d7815b442b8bc0baa",
+          "executable_sha256": "498bb95950ebf8a9ec8edfe8275e5ad47cc5c1cd4f07458a082881428937a0a3",
+          "source_map_sha256": "93f978d06e46c976c1c6263ee5c3af4c913c797f8d6035ab2fbd54fd53551d8a",
+          "dirty": false,
+          "measurement_manifest_sha256": "86b7b1217d33f47b3d1cba02217db3f0622dc7a1c3fcf2f02fd846057ae7e6a7",
+          "build_record_sha256": "efaf876150b50c7cc2c6dd5ed1a677c617a1c3fad6900e1dd9f01d1c907bfd80",
+          "configuration_manifest_sha256": {
+            "1280": "58ddd9275646ff33996553c64ec69e6a69db10e2a8dea572715fb87e382d5c17",
+            "640": "d3fb5de41cce084b1cf2bfd5dd849553ae64f54bcac8a54cfa9091411753a4dd"
+          },
+          "configurations": [
+            [
+              1280,
+              800
+            ],
+            [
+              640,
+              800
+            ]
+          ],
+          "stage_outcomes": {
+            "load": "Passed",
+            "parse": "Passed",
+            "initialization": "Passed",
+            "render": "Passed",
+            "input": "Failed",
+            "async": "Not applicable",
+            "framework_layout": "Passed"
+          },
+          "first_failed_stage": "input",
+          "configuration_denominator": 2,
+          "passed_configurations": 0,
+          "completed_http_200_responses_per_configuration": 6,
+          "first_root": "Element property \"offsetLeft\" requires measured offset geometry. Receiver node=33; class=other; connected=true; created=false; geometry-attached=true. No coordinate was fabricated.",
+          "first_root_location": "Microtask checkpoint, Bootstrap5.3.9 bundle line1927,column10",
+          "integrated_main_commit": "13f5cd4f7aebf4d4a580287d6fdc5cd40bb56ecc",
+          "pull_request": "https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/72",
+          "opened_marker_observed": true,
+          "choice_snapshot_present": true,
+          "trusted_amber_choice_callback_observed": true,
+          "menu_open_marker_remains_after_choice": true,
+          "successful_close_observed": false,
+          "measurement_scope": "Unchanged pinned Bootstrap App at 1280x800 and 640x800 advances past the scroll-offset reads. The trusted amber-choice callback runs, the menu remains open after selection and both input checks fail."
         }
       }
     },

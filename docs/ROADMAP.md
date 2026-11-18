@@ -65,6 +65,9 @@ PR #64/#65 measurements on `a82267e` and `7b8a5fb` are integrated by `main` `bf0
 PR #67/#68 add Slottable and HTML-container object behavior. The `13d7dae`
 interaction captures identify the feature candidate. Candidate and integrated
 `main` `5309a68` CI each pass 2,695 normal tests and 25 journeys.
+PR #69/#71 integrate computed `position` and layout-backed `offsetParent`.
+Measured builds `c74503c` and `96666d3` retain open-menu and trusted Amber-choice
+evidence at 1280/640. The menu remains visible after selection.
 PR pages carry changing review and CI status. Branch-only results are not results
 for `main` or for the published alpha.2 binary.
 
@@ -96,6 +99,9 @@ only their initial HTML paint or absence of script errors.
 | ✅&nbsp;Merged | <code>CSS&#8209;04</code> | **Native button padding** | [PR #54](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/54) integrates padding for button, submit and reset controls in `main` at `25654fa`. The loaded Bootstrap toggle measures 191×41 px at both widths on that main build. |
 | ✅&nbsp;Merged | <code>CSS&#8209;05</code> | **Live computed custom-property reads** | [PR #62](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/62) integrates at `5c21400`. Measured feature build `63a2259` passes 2,657 normal tests and 25 journeys locally and in CI. The unchanged Bootstrap sample advances to Popper's `node.toString()` boundary on its first trusted click at both widths. |
 | ✅&nbsp;Merged | <code>CSS&#8209;06</code> | **Computed overflow and rectangular axis clipping** | [PR #65](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/65) integrates at `bf0c737`. Measured `7b8a5fb` advances the initialized Bootstrap sample to `assignedSlot` on its first trusted click at both widths. The menu remains closed. Element scrolling and scrollbar widgets remain unimplemented. |
+| ✅&nbsp;Merged | <code>CSS&#8209;07</code> | **Computed position and layout-backed offset parents** | [PR #69](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/69) advances measured `c74503c` to `offsetParent` at 1994:12. [PR #71](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/71) advances measured `96666d3` to `scrollLeft` at 3154:19. Both runs open the menu and execute the trusted Amber choice at 1280/640. The menu remains visible and input fails. |
+| ✅&nbsp;Merged | <code>CSS&#8209;08</code> | **Viewport and supported non-scrollable offsets** | [PR #72](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/72) integrates at `13f5cd4`. Qualified feature `e7be7cd` passes 2,732 normal tests and 25 journeys locally and in CI. Its Bootstrap captures at 1280/640 show the open menu and trusted Amber choice, with the menu still visible and first fault `offsetLeft` at 1927:10. Nested element scrolling remains outside this slice. |
+| ◻️&nbsp;Next | <code>CSS&#8209;09</code> | **Relative offset coordinates** | Extend PR #71's layout-backed offset-parent identity with measured `offsetLeft` and `offsetTop`. Verify border/padding origins and viewport-scroll independence against actual App pixels and hits, then recheck the unchanged dropdown. |
 
 ### JS & Frameworks — From startup to useful interaction
 
