@@ -48,7 +48,7 @@ remain at `36adf20`; these later changes do not update those binaries.
 | :--- | :--- | :--- |
 | **DOM identity and collections** | Genuine Document/Node accessors, stable live supported childNodes, checked native array-like apply/slice, Attr identity, text replacement and native-created Comment leaves | Parsed comments, full CharacterData, DocumentType/template-content and child-Document collections remain outside the finite scope |
 | **Node roots** | Genuine `Node.getRootNode()` for ordinary accessible connected/detached trees, Attr and supported same-origin child trees; ordered options conversion and owner/work checks | No Shadow DOM or fabricated child scope |
-| **Element selectors and siblings** | Scripts can borrow Element selector methods. `querySelectorAll` returns a static snapshot. Element and CharacterData sibling getters skip Text and Comment nodes. | Existing selector grammar, work budgets and document access checks apply. Child Element queries and NodeList iteration remain unsupported at this checkpoint. |
+| **Element selectors, siblings and NodeLists** | Scripts can borrow Element selector methods. `querySelectorAll` returns a static snapshot. Element and CharacterData sibling getters skip Text and Comment nodes. Supported main-document NodeLists have bounded indexed iteration. | Existing selector grammar, work budgets and document access checks apply. Child Element queries and complete NodeList APIs remain outside this scope. |
 | **Select fragments** | Conventional select/option/optgroup fragments; whole-subtree removal/reconnection retains identities, edited values, owner/order/disabled state and retires stale focus/hits | Rich select content, existing-select interior edits, explicit new select associations, and createElement(select) remain unsupported |
 | **Hidden inputs** | Fresh hidden-input admission, finite name/value/default reflection and whole-tree moves through native ownership; no box or focus target | Arbitrary existing input-type transitions and unrelated unsupported input kinds remain refused |
 | **Text-input fragments** | Default/explicit text INPUT fragments through staged native transactions; dirty/default values, caret/selection, Reset and focus retirement; finite BUTTON.type reads | Unsupported kinds, foreign/inert ancestry, new explicit form associations and exhausted limits reject atomically. This is not unrestricted innerHTML/form support |
@@ -62,10 +62,9 @@ remain at `36adf20`; these later changes do not update those binaries.
 passes the unchanged pinned jQuery 4.0.0 offline app through startup, genuine
 trusted input, and an asynchronous timer text update. This is one workflow, not
 AJAX/Deferred or full-framework support. Legacy jQuery and Vue retain their earlier
-recorded fragment and language boundaries. Bootstrap's later check on `5c89eea`
-reaches NodeList iteration after reading element siblings and calling the canonical
-selector. Initialization and dropdown input still fail at both widths. Public
-`main` includes both DOM changes at `0ef43d0`.
+recorded fragment and language boundaries. Bootstrap initializes with zero startup
+errors at both widths on combined `main` `25654fa`. Its first
+trusted click reaches a selector syntax boundary before the dropdown opens.
 See [compatibility outcomes](COMPATIBILITY.md) for exact versions and stages.
 
 ## Rendering and resources
@@ -78,6 +77,7 @@ See [compatibility outcomes](COMPATIBILITY.md) for exact versions and stages.
 | **CSS backgrounds** | One URL layer on ordinary block/inline-block boxes with ownership, cascade, repeat/position/size and shared resource lifecycle | Inline-fragment/replaced backgrounds and multiple layers remain incomplete |
 | **Fonts and images** | Selected original decoders and bounded resource/presentation paths | Format subsets and cross-origin font loading require specific contracts; conditional/dynamic/resize font fetching remains limited |
 | **Custom properties** | PR #31 integrates bounded, case-sensitive inherited variables for supported padding/border values, nested fallbacks, cycles, token boundaries and invalid-computed-value handling; original App pixels/hits/reflow match a literal control | Alpha colors, calc(), CSSOM and full Bootstrap component styling remain outside this qualification |
+| **Native button padding** | Button, submit and reset controls apply supported CSS padding to their boxes and caption placement. [PR #54](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/54) is integrated at `25654fa`. | Finite button-like control scope. Complete native appearance and authored border behavior remain separate. |
 | **GPU acceleration** | Not implemented | Planned measured graphics backend with software fallback; not a replacement decoder grant |
 
 <details>
