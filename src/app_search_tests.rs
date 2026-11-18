@@ -8,6 +8,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+#[path = "app/tests/linked_result_image.rs"]
+mod linked_result_image;
+
 struct Site {
     address: SocketAddr,
     stopped: Arc<AtomicBool>,
@@ -18,6 +21,14 @@ struct Site {
 
 impl Site {
     fn new(result_origin: Option<String>) -> Self {
+        Self::fixture(result_origin, false)
+    }
+
+    fn with_linked_result_image() -> Self {
+        Self::fixture(None, true)
+    }
+
+    fn fixture(result_origin: Option<String>, linked_result_image: bool) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap();
         let stopped = Arc::new(AtomicBool::new(false));
@@ -72,7 +83,21 @@ impl Site {
                         .unwrap()
                         .push((path.clone(), String::from_utf8(body).unwrap()));
                 }
-                let (status, extra, body) = if path == "/post-result?keep=1" {
+                if linked_result_image && path == "/thumb.ppm" {
+                    let body = linked_result_image::THUMBNAIL;
+                    let header = format!(
+                        "HTTP/1.1 200 Fixture\r\nContent-Type: image/x-portable-pixmap\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                        body.len(),
+                    );
+                    let _ = stream.write_all(header.as_bytes()).and_then(|_| stream.write_all(body));
+                    continue;
+                }
+                let linked_response = if linked_result_image {
+                    linked_result_image::response(&path)
+                } else { None };
+                let (status, extra, body) = if let Some(body) = linked_response {
+                    (200, String::new(), body)
+                } else if path == "/post-result?keep=1" {
                     (
                         200,
                         String::new(),
