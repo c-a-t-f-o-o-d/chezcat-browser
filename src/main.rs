@@ -8,6 +8,7 @@ mod audio_output;
 mod blocking;
 mod build_identity;
 mod canvas_2d_bitmap;
+mod canvas_color;
 mod compression;
 mod cookies;
 mod crypto_aead;

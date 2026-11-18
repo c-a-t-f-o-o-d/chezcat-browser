@@ -15,8 +15,10 @@ struct Snapshot {
     positions: Vec<Option<Position>>,
     transforms: Vec<Option<Transform>>,
     has_transform_geometry: bool,
+    canvas_foregrounds: HashMap<usize, u32>,
 }
 impl ComputedProperties {
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn new(
         variables: Vec<custom_properties::Variables>,
         eligible: Vec<bool>,
@@ -25,6 +27,7 @@ impl ComputedProperties {
         positions: Vec<Option<Position>>,
         transforms: Vec<Option<Transform>>,
         has_transform_geometry: bool,
+        canvas_foregrounds: HashMap<usize, u32>,
     ) -> Self {
         Self(Rc::new(Snapshot {
             variables,
@@ -34,6 +37,7 @@ impl ComputedProperties {
             positions,
             transforms,
             has_transform_geometry,
+            canvas_foregrounds,
         }))
     }
     pub(crate) fn read(
@@ -112,6 +116,10 @@ impl ComputedProperties {
     pub(crate) fn has_transform_geometry(&self) -> bool {
         self.0.has_transform_geometry
     }
+    pub(crate) fn canvas_foreground(&self, node: usize) -> Result<Option<u32>, ComputedStyleUnavailable> {
+        if !self.0.complete { return Err(ComputedStyleUnavailable); }
+        Ok(self.0.canvas_foregrounds.get(&node).copied())
+    }
     #[cfg(test)]
     pub(super) fn transform_storage_len(&self) -> usize { self.0.transforms.len() }
 }
@@ -127,6 +135,13 @@ pub(crate) struct CssBudget<'a> {
     copy_work: &'a mut usize,
 }
 impl<'a> CssBudget<'a> {
+    pub(super) fn canvas_foreground(&mut self, first: bool) -> Result<(), String> {
+        // Include sparse hash buckets, their control bytes, and initial capacity.
+        let entries = if first { 6 } else { 3 };
+        self.work(1)?;
+        self.copies(entries * std::mem::size_of::<(usize, u32)>())
+    }
+
     pub(crate) fn new(host_work: &'a mut usize, copy_work: &'a mut usize) -> Self {
         Self {
             host_work,
