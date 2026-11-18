@@ -15,6 +15,50 @@ pub(super) fn index(handle: u32) -> Option<usize> {
 }
 
 #[cfg(test)]
+mod canvas_tests {
+    use super::*;
+
+    #[test]
+    fn canvas_current_color_samples_the_live_cascade_only_when_setting_fill_style() {
+        let mut doc = crate::html::parse(
+            "<html><head><style>.harbor{color:#164063}.brass{color:#aa7722}</style></head>\
+             <body><div class=harbor id=parent><canvas id=sheet></canvas></div></body></html>",
+        );
+        doc.scripting_enabled = true;
+        let canvas = (0..doc.nodes.len()).find(|&node| doc.attr(node, "id") == Some("sheet")).unwrap();
+        let mut forms = Forms::new(&doc);
+        let mut page = Page::for_test();
+        page.set_geometry(crate::script_geometry::Geometry::new(
+            640, 480, 1.0, &HashMap::new(), HashMap::new(), &crate::fonts::Book::empty(),
+        ));
+        assert_eq!(page.start(&mut doc, &mut forms, &[]).errors, 0);
+        for source in [
+            "var sheet=document.getElementById('sheet'), container=document.getElementById('parent'), ctx=sheet.getContext('2d');\
+             ctx.fillStyle='currentColor';if(ctx.fillStyle!=='#164063')throw 'initial inherited class';",
+            "container.className='brass';if(ctx.fillStyle!=='#164063')throw 'stored color changed prematurely';\
+             ctx.fillStyle='currentColor';if(ctx.fillStyle!=='#aa7722')throw 'live inherited class';",
+            "sheet.setAttribute('style','color:#764291');if(ctx.fillStyle!=='#aa7722')throw 'stored class changed';\
+             ctx.fillStyle='currentColor';if(ctx.fillStyle!=='#764291')throw 'own foreground';",
+            "container.removeChild(sheet);ctx.fillStyle='currentColor';if(ctx.fillStyle!=='#000000')throw 'detached color';\
+             container.appendChild(sheet);ctx.fillStyle='currentColor';if(ctx.fillStyle!=='#764291')throw 'reattached color';",
+        ] {
+            let result = page.console_eval(&mut doc, &mut forms, source);
+            assert_eq!(result.errors, 0, "{source}\n{}", page.report());
+        }
+
+        page.begin_job();
+        let mut bridge = Bridge { doc: &mut doc, forms: &mut forms, state: &mut page.state };
+        bridge.state.copy_work = 0;
+        assert_eq!(bridge.canvas_current_color(canvas).unwrap(), Some(0xff76_4291), "cached scalar read");
+        bridge.state.geometry.as_mut().unwrap().invalidate();
+        assert!(bridge.canvas_current_color(canvas).unwrap_err().contains("limit"));
+        assert_eq!(bridge.state.copy_work, 0);
+        bridge.state.host_work = 0;
+        assert!(bridge.canvas_current_color(canvas).unwrap_err().contains("limit"));
+    }
+}
+
+#[cfg(test)]
 mod overflow_tests {
     use super::*;
 
@@ -337,6 +381,23 @@ impl Bridge<'_> {
             return Err("Computed declaration Element is inert or unavailable.".into());
         }
         Ok(self.state.dom.connected.get(node).copied().unwrap_or(false))
+    }
+
+    pub(super) fn canvas_current_color(&mut self, node: usize) -> Result<Option<u32>, String> {
+        self.state.work(1)?;
+        if !crate::html_canvas::element(self.doc, node) {
+            return Err("Canvas foreground requires a genuine HTML canvas.".into());
+        }
+        if !self.computed_node_connected(node)? {
+            // A detached HTML canvas resolves currentColor to opaque black.
+            return Ok(Some(0xff00_0000));
+        }
+        let snapshot = self.state.geometry.as_mut()
+            .ok_or("Canvas foreground requires the actual document renderer.")?
+            .computed_snapshot(self.doc, self.forms, &mut self.state.host_work, &mut self.state.copy_work)?;
+        let color = snapshot.canvas_foreground(node)
+            .map_err(|_| "Canvas foreground unavailable within the CSS cascade limits.")?;
+        Ok(color.map(|rgb| 0xff00_0000 | rgb))
     }
 
     pub(super) fn computed_style_get(&mut self, object: u32, name: &str) -> Result<Value, String> {

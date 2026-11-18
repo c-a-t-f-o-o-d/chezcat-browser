@@ -330,6 +330,13 @@ impl Runtime {
             "canvas",
             "\0CanvasRenderingContext2D.get.canvas",
         )?;
+        self.define_node_attribute(
+            prototype,
+            window,
+            "fillStyle",
+            "\0CanvasRenderingContext2D.get.fillStyle",
+            Some("\0CanvasRenderingContext2D.set.fillStyle"),
+        )?;
         for (name, operation) in [
             ("clearRect", "\0CanvasRenderingContext2D.clearRect"),
             ("fillRect", "\0CanvasRenderingContext2D.fillRect"),

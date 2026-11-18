@@ -4499,6 +4499,7 @@ mod select_tests;
 #[cfg(test)]
 mod tests {
     mod canvas_2d;
+    mod canvas_colors;
 
     use super::*;
     use std::io::{Read, Write};

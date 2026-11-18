@@ -6,13 +6,13 @@ const BASE: u32 = 0x8500_0000;
 const END: u32 = 0x8600_0000;
 const MAX_CONTEXTS: usize = 256;
 const PAGE_BITMAP_BYTES: usize = 64 * 1024 * 1024;
+const DEFAULT_FILL: u32 = 0xff00_0000;
 /// Drawing-state attributes must not become instance expandos that claim a
 /// new setting while subsequent rectangles continue using the default state.
 pub(super) fn unsupported_state(property: &str) -> bool {
     matches!(
         property,
-        "fillStyle"
-            | "strokeStyle"
+        "strokeStyle"
             | "globalAlpha"
             | "globalCompositeOperation"
             | "filter"
@@ -50,8 +50,13 @@ const SETTINGS: &[&str] = &[
     "willReadFrequently",
 ];
 
+struct Context {
+    surface: CanvasBitmap,
+    fill_style: u32,
+}
+
 pub(super) struct Contexts {
-    surfaces: HashMap<usize, CanvasBitmap>,
+    surfaces: HashMap<usize, Context>,
     remaining_bytes: usize,
 }
 
@@ -66,8 +71,9 @@ impl Default for Contexts {
 
 impl Contexts {
     pub(super) fn commit_resize(&mut self, node: usize, dimensions: Option<(u32, u32)>) {
-        if let (Some(surface), Some((width, height))) = (self.surfaces.get_mut(&node), dimensions) {
-            self.remaining_bytes += surface.reset(width, height);
+        if let (Some(context), Some((width, height))) = (self.surfaces.get_mut(&node), dimensions) {
+            self.remaining_bytes += context.surface.reset(width, height);
+            context.fill_style = DEFAULT_FILL;
             debug_assert!(self.remaining_bytes <= PAGE_BITMAP_BYTES);
         }
     }
@@ -75,7 +81,7 @@ impl Contexts {
 
 impl Page {
     pub(crate) fn canvas_bitmap(&self, node: usize) -> Option<&crate::image::Bitmap> {
-        self.state.canvas_contexts.surfaces.get(&node)?.bitmap()
+        self.state.canvas_contexts.surfaces.get(&node)?.surface.bitmap()
     }
 }
 
@@ -83,6 +89,8 @@ impl Page {
 pub(super) enum Operation {
     GetContext,
     Canvas,
+    GetFillStyle,
+    SetFillStyle,
     FillRect,
     ClearRect,
 }
@@ -92,6 +100,8 @@ impl Operation {
         match method {
             "\0HTMLCanvasElement.getContext" => Some(Self::GetContext),
             "\0CanvasRenderingContext2D.get.canvas" => Some(Self::Canvas),
+            "\0CanvasRenderingContext2D.get.fillStyle" => Some(Self::GetFillStyle),
+            "\0CanvasRenderingContext2D.set.fillStyle" => Some(Self::SetFillStyle),
             "\0CanvasRenderingContext2D.fillRect" => Some(Self::FillRect),
             "\0CanvasRenderingContext2D.clearRect" => Some(Self::ClearRect),
             _ => None,
@@ -100,16 +110,16 @@ impl Operation {
 
     pub(super) fn arity(self) -> usize {
         match self {
-            Self::GetContext => 1,
-            Self::Canvas => 0,
+            Self::GetContext | Self::SetFillStyle => 1,
+            Self::Canvas | Self::GetFillStyle => 0,
             Self::FillRect | Self::ClearRect => 4,
         }
     }
 
     pub(super) fn conversions(self) -> &'static [(usize, bool)] {
         match self {
-            Self::GetContext => &[(0, true)],
-            Self::Canvas => &[],
+            Self::GetContext | Self::SetFillStyle => &[(0, true)],
+            Self::Canvas | Self::GetFillStyle => &[],
             Self::FillRect | Self::ClearRect => &[(0, false), (1, false), (2, false), (3, false)],
         }
     }
@@ -204,10 +214,10 @@ impl Bridge<'_> {
         name: &crate::html::AttributeName,
         raw: Option<&str>,
     ) -> Result<Option<(u32, u32)>, String> {
-        let Some(surface) = self.state.canvas_contexts.surfaces.get(&node) else {
+        let Some(context) = self.state.canvas_contexts.surfaces.get(&node) else {
             return Ok(None);
         };
-        let (width, height) = surface.dimensions();
+        let (width, height) = context.surface.dimensions();
         let axis = if name.html_is("width") {
             "width"
         } else if name.html_is("height") {
@@ -270,13 +280,16 @@ impl Bridge<'_> {
                 .map_or(0, str::len)
                 .saturating_add(height.map_or(0, str::len)),
         )?;
-        let surface = CanvasBitmap::new(dimension(width, "width"), dimension(height, "height"));
+        let context = Context {
+            surface: CanvasBitmap::new(dimension(width, "width"), dimension(height, "height")),
+            fill_style: DEFAULT_FILL,
+        };
         self.state
             .canvas_contexts
             .surfaces
             .try_reserve(1)
             .map_err(|_| "Could not reserve a canvas context.")?;
-        self.state.canvas_contexts.surfaces.insert(node, surface);
+        self.state.canvas_contexts.surfaces.insert(node, context);
         Ok(Value::Host(handle))
     }
 
@@ -300,6 +313,28 @@ impl Bridge<'_> {
         if operation == Operation::Canvas {
             return Ok(Value::Host(node_handle(node)));
         }
+        if operation == Operation::GetFillStyle {
+            let color = self.state.canvas_contexts.surfaces[&node].fill_style;
+            let value = crate::canvas_color::serialize(color);
+            self.state.copies(value.len())?;
+            return Ok(Value::String(value));
+        }
+        if operation == Operation::SetFillStyle {
+            let Some(Value::String(value)) = args.first() else {
+                return Err("Canvas fillStyle requires a converted color string.".into());
+            };
+            self.state.work(value.len())?;
+            let color = match crate::canvas_color::parse(value) {
+                Some(crate::canvas_color::ParsedColor::Solid(color)) => color,
+                Some(crate::canvas_color::ParsedColor::CurrentColor) => self
+                    .canvas_current_color(node)?
+                    .ok_or("The canvas foreground color is unavailable.")?,
+                None => return Ok(Value::Undefined),
+            };
+            self.state.canvas_contexts.surfaces.get_mut(&node)
+                .ok_or("Unavailable canvas context.")?.fill_style = color;
+            return Ok(Value::Undefined);
+        }
         let [Value::Number(x), Value::Number(y), Value::Number(w), Value::Number(h), ..] = args
         else {
             return Err("Canvas rectangle operations require four converted numbers.".into());
@@ -307,19 +342,19 @@ impl Bridge<'_> {
         let rect = [*x, *y, *w, *h];
         let state = &mut *self.state;
         let contexts = &mut state.canvas_contexts;
-        let surface = contexts
+        let context = contexts
             .surfaces
             .get_mut(&node)
             .ok_or("Unavailable canvas context.")?;
         if operation == Operation::FillRect {
-            surface.fill_rect(
+            context.surface.fill_rect(
                 rect,
-                0xff00_0000,
+                context.fill_style,
                 &mut contexts.remaining_bytes,
                 &mut state.host_work,
             )?;
         } else {
-            surface.clear_rect(rect, &mut contexts.remaining_bytes, &mut state.host_work)?;
+            context.surface.clear_rect(rect, &mut contexts.remaining_bytes, &mut state.host_work)?;
         }
         Ok(Value::Undefined)
     }
@@ -394,8 +429,8 @@ mod tests {
             if(!illegal)throw 'constructor allocated a context';
             inner.caption='sheet';inner.canvas=b;
             if(Object.keys(inner).join(',')!=='caption'||inner.canvas!==a)throw 'author property and readonly backlink';
-            var denied=false;try{inner.fillStyle='red';}catch(e){denied=true;}
-            if(!denied||Object.hasOwn(inner,'fillStyle'))throw 'unsupported drawing state was stored';
+            var denied=false;try{inner.strokeStyle='red';}catch(e){denied=true;}
+            if(!denied||Object.hasOwn(inner,'strokeStyle'))throw 'unsupported drawing state was stored';
             var frame=document.createElement('iframe');frame.hidden=true;document.body.appendChild(frame);
             var child=frame.contentWindow, childProto=child.CanvasRenderingContext2D.prototype;
             var borrowed=childProto.fillRect;
@@ -417,6 +452,32 @@ mod tests {
         );
         assert_eq!(page.state.canvas_contexts.surfaces.len(), 2);
         assert!(page.canvas_bitmap(first).is_none());
+    }
+
+    #[test]
+    fn canvas_color_saved_accessors_check_the_receiver_before_converting_the_color() {
+        let (mut doc, mut forms, mut page, _) = fixture();
+        eval(&mut doc, &mut forms, &mut page, r#"
+            var a=document.getElementById('first'), ctx=a.getContext('2d');
+            var proto=CanvasRenderingContext2D.prototype;
+            var style=Object.getOwnPropertyDescriptor(proto,'fillStyle');
+            if(!style.enumerable || !style.configurable || style.get.length!==0 ||
+               style.set.length!==1 || Object.hasOwn(ctx,'fillStyle'))throw 'fillStyle descriptor';
+            var count=0, token={}, color={toString(){count++;throw token;}};
+            try{style.set.call(a,color);throw 'wrong receiver';}catch(e){if(!(e instanceof TypeError))throw e;}
+            if(count!==0)throw 'coercion before receiver check';
+            style.set.call(ctx,'red');
+            try{style.set.call(ctx,color);throw 'coercion completed';}catch(e){if(e!==token)throw e;}
+            if(count!==1 || style.get.call(ctx)!=='#ff0000')throw 'abrupt conversion changed state';
+            try{style.set.call(ctx,Symbol('color'));throw 'symbol accepted';}catch(e){if(!(e instanceof TypeError))throw e;}
+            var changed={toString(){a.width=a.width;return '#369';}};
+            style.set.call(ctx,changed);
+            if(style.get.call(ctx)!=='#336699')throw 'reentrant reset lost the final assignment';
+            a.setAttributeNS('urn:example','x:width','4');
+            if(style.get.call(ctx)!=='#336699')throw 'foreign attribute reset state';
+            a.setAttribute('width',a.getAttribute('width'));
+            if(style.get.call(ctx)!=='#000000')throw 'same-value content attribute kept drawing state';
+        "#);
     }
 
     #[test]

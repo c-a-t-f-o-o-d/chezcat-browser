@@ -856,6 +856,7 @@ fn compute_cascade(
     let mut complete = true;
     let mut overflow_known = vec![[true; 2]; doc.nodes.len()];
     let mut position_known = vec![true; doc.nodes.len()];
+    let mut canvas_foregrounds = HashMap::new();
     let mut transform_known = Vec::new();
     if has_transform_rules {
         if transform_meter.is_some() {
@@ -1188,6 +1189,13 @@ fn compute_cascade(
         {
             style.display = Display::Block;
         }
+        if crate::html_canvas::element(doc, index) {
+            let first = canvas_foregrounds.is_empty();
+            if let Some(meter) = meter.as_deref_mut() { meter.canvas_foreground(first)?; }
+            else if let Some(meter) = transform_meter.as_deref_mut() { meter.canvas_foreground(first)?; }
+            canvas_foregrounds.try_reserve(1).map_err(|_| "Canvas foreground snapshot reservation failed.")?;
+            canvas_foregrounds.insert(index, style.color);
+        }
         computed[index] = style;
     }
     let overflows = computed.iter().zip(overflow_known).map(|(style, known)| known.iter().all(|known| *known).then_some(style.overflow)).collect();
@@ -1201,7 +1209,7 @@ fn compute_cascade(
     if has_transform_declarations {
         has_transform_geometry |= !complete;
     }
-    Ok(CascadeOutput { styles: computed, computed_properties: ComputedProperties::new(variables, eligible, complete, overflows, positions, transforms, has_transform_geometry) })
+    Ok(CascadeOutput { styles: computed, computed_properties: ComputedProperties::new(variables, eligible, complete, overflows, positions, transforms, has_transform_geometry, canvas_foregrounds) })
 }
 
 fn prefix(text: &str, maximum: usize) -> &str {
@@ -3603,6 +3611,111 @@ fn border_color_value(value:&str)->Option<(Option<u32>,u8)> {
     color(value).map(|rgb|(Some(rgb),255))
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ParsedColor {
+    Solid(u32),
+    CurrentColor,
+}
+
+/// A solid color stores straight sRGB as 0xAARRGGBB. The caller resolves
+/// currentColor against the element when the color is assigned.
+pub(crate) fn parse_solid_color(value: &str) -> Option<ParsedColor> {
+    if value.len() > 2048 || !value.is_ascii() {
+        return None;
+    }
+    let value = value.trim_matches(color_whitespace).to_ascii_lowercase();
+    if value == "currentcolor" {
+        return Some(ParsedColor::CurrentColor);
+    }
+    if value == "transparent" {
+        return Some(ParsedColor::Solid(0));
+    }
+    if let Some(hex) = value.strip_prefix('#') {
+        if !hex.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            return None;
+        }
+        let number = u32::from_str_radix(hex, 16).ok()?;
+        let expand = |number: u32| {
+            ((number >> 8) & 15) * 0x110000
+                + ((number >> 4) & 15) * 0x1100
+                + (number & 15) * 0x11
+        };
+        let (rgb, alpha) = match hex.len() {
+            3 => (expand(number), 255),
+            4 => (expand(number >> 4), (number & 15) * 17),
+            6 => (number, 255),
+            8 => (number >> 8, number & 255),
+            _ => return None,
+        };
+        return Some(ParsedColor::Solid((alpha << 24) | rgb));
+    }
+    if let Some(body) = value
+        .strip_prefix("rgb(")
+        .or_else(|| value.strip_prefix("rgba("))
+    {
+        let body = body.strip_suffix(')')?;
+        let (rgb, alpha) = solid_rgb(body)?;
+        return Some(ParsedColor::Solid((u32::from(alpha) << 24) | rgb));
+    }
+    named_color(&value).map(|rgb| ParsedColor::Solid(0xff00_0000 | rgb))
+}
+
+fn color_whitespace(ch: char) -> bool {
+    matches!(ch, ' ' | '\t' | '\n' | '\r' | '\x0c')
+}
+
+fn solid_rgb(body: &str) -> Option<(u32, u8)> {
+    let (channels, alpha, legacy) = if body.contains(',') {
+        if body.contains('/') {
+            return None;
+        }
+        let mut fields = body.split(',').map(|part| part.trim_matches(color_whitespace));
+        let channels = [fields.next()?, fields.next()?, fields.next()?];
+        let alpha = fields.next();
+        if fields.next().is_some() {
+            return None;
+        }
+        (channels, alpha, true)
+    } else {
+        let mut sections = body.split('/');
+        let mut fields = sections
+            .next()?
+            .split(color_whitespace)
+            .filter(|part| !part.is_empty());
+        let channels = [fields.next()?, fields.next()?, fields.next()?];
+        let alpha = sections.next().map(|part| part.trim_matches(color_whitespace));
+        if fields.next().is_some() || sections.next().is_some() {
+            return None;
+        }
+        (channels, alpha, false)
+    };
+    // Legacy comma syntax requires all three channels to use the same unit.
+    if legacy && channels.iter().any(|part| part.ends_with('%') != channels[0].ends_with('%')) {
+        return None;
+    }
+    let mut rgb = 0;
+    for (channel, shift) in channels.into_iter().zip([16, 8, 0]) {
+        let number = if let Some(percent) = channel.strip_suffix('%') {
+            rgba_number(percent)?.clamp(0.0, 100.0) * 255.0 / 100.0
+        } else {
+            rgba_number(channel)?.clamp(0.0, 255.0)
+        };
+        rgb |= (number.round() as u32) << shift;
+    }
+    let alpha = match alpha {
+        None => 255,
+        Some(alpha) => {
+            let number = if let Some(percent) = alpha.strip_suffix('%') {
+                rgba_number(percent)?.clamp(0.0, 100.0) * 255.0 / 100.0
+            } else {
+                rgba_number(alpha)?.clamp(0.0, 1.0) * 255.0
+            };
+            number.round() as u8
+        }
+    };
+    Some((rgb, alpha))
+}
+
 fn parse_border(value:&str)->Option<(Length,bool,Option<u32>,u8)> {
     let mut width = Length::Px(3.0);
     let mut solid = false;
@@ -3661,6 +3774,10 @@ fn color(value: &str) -> Option<u32> {
         }
         return None;
     }
+    named_color(value)
+}
+
+fn named_color(value: &str) -> Option<u32> {
     Some(match value {
         "black" => 0x000000,
         "silver" => 0xc0c0c0,
