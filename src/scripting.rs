@@ -2492,6 +2492,7 @@ impl Bridge<'_> {
     /// Properties handled by ordinary lookup on the node's interface prototypes.
     fn inherited_node_property(&self, object: u32, property: &str) -> bool {
         self.element_sibling_member(object, property)
+            || self.document_inherited_property(object,property)
             || self.assigned_slot_lookup(object, property)
             || self.html_offset_member(object, property)
             || self.scroll_offset_member(object, property)
@@ -2504,15 +2505,18 @@ impl Bridge<'_> {
 
 impl Host for Bridge<'_> {
     fn expando_owner(&self,object:u32)->Option<u32> {self.ordinary_event_owner(object).or_else(||self.standalone_target_owner(object)).or_else(||(object==DOCUMENT||self.element_expando_receiver(object)||self.fragment_receiver(object)||self.node_list_receiver(object)).then_some(WINDOW))}
-    fn ordinary_native_fallback(&self,object:u32,property:&str)->bool {object==DOCUMENT&&!self.document_native_property(property)}
+    fn ordinary_native_fallback(&self,object:u32,property:&str)->bool {
+        object==DOCUMENT && (matches!(property,"constructor"|"__proto__") || !self.document_native_property(property))
+    }
     fn exposed_native_prototype(&self,object:u32)->bool {
-        self.ordinary_event_owner(object).is_some() || self.standalone_target_owner(object).is_some()
+        self.document_interface_receiver(object) || self.ordinary_event_owner(object).is_some() || self.standalone_target_owner(object).is_some()
             || self.video_interface_receiver(object) || self.fragment_receiver(object)
             || self.node_list_receiver(object) || self.concrete_html_interface(object).is_some()
             || self.slottable(object) == Some(Slottable::Text)
     }
     fn native_ancestry_inspection(&self,object:u32)->bool {self.event_receiver(object)||self.exposed_native_prototype(object)||self.namespace_receiver(object)}
     fn ordinary_inherited_enumeration(&self, object: u32) -> bool {
+        if self.document_interface_receiver(object) {return false;}
         // Container prototypes identify the objects, but their enumerable
         // native attributes still live outside the ordinary descriptor store.
         if let Some(interface) = self.concrete_html_interface(object) {
@@ -2552,7 +2556,8 @@ impl Host for Bridge<'_> {
             else if matches!(self.doc.nodes[node].kind,NodeKind::Text(_)) {(WINDOW,"Text")}
             else if matches!(self.doc.nodes[node].kind,NodeKind::Comment(_)) {(WINDOW,"CharacterData")}
             else {(WINDOW,"Node")})
-        } else if object==DOCUMENT || self.attr_receiver(object) {Some((WINDOW,"Node"))} else {None};
+        } else if object==DOCUMENT {Some((WINDOW,"Document"))}
+        else if self.attr_receiver(object) {Some((WINDOW,"Node"))} else {None};
         let known=node.is_some() || matches!(object,DOCUMENT|CONSOLE|NAVIGATOR|PLUGINS|MIME_TYPES|DOCUMENT_IMAGES|LOCATION|PERFORMANCE|PERFORMANCE_TIMING|HISTORY)
             || self.attr_receiver(object) || self.event_receiver(object) || self.class_list_receiver(object) || self.named_map_receiver(object)
             || node_list_index(object).is_some_and(|index|index<self.state.node_lists.len())
@@ -2586,6 +2591,7 @@ impl Host for Bridge<'_> {
     }
 
     fn owns_property(&self, object: u32, property: &str) -> bool {
+        if self.frame_document_prototype_lookup(object,property) {return false;}
         if self.node_list_receiver(object) {
             // Genuine main NodeLists retain protected native indexed slots and
             // existing item/forEach calls. Other properties use their ordinary
@@ -2614,7 +2620,7 @@ impl Host for Bridge<'_> {
         self.location_instance_owner(object).is_some() || object == HISTORY || self.attr_receiver(object) || self.ordinary_event_owner(object).is_some() || self.named_map_receiver(object)
     }
     fn ordinary_lookup_tail_property(&self,object:u32,property:&str)->bool {
-        if self.node_list_receiver(object) {true}
+        if self.node_list_receiver(object) || self.frame_document_prototype_lookup(object,property) {true}
         else if self.element_selector_member(object,property) {true}
         else if self.inherited_node_property(object,property) {true}
         else if self.node_tree_method_member(object,property) {true}
@@ -2848,7 +2854,7 @@ impl Host for Bridge<'_> {
         if self.event_target_interface(object)&&method=="\0NodeList.get.length" {return Some(object);}
         if self.event_target_interface(object)&&script_element_selectors::operation(method).is_some() {return Some(object);}
         if self.event_target_interface(object)&&script_element_siblings::operation(method).is_some() {return Some(object);}
-        if self.event_target_interface(object) && (matches!(method, "DocumentFragment" | "Text") || Slottable::getter(method).is_some()) {return Some(object);}
+        if self.event_target_interface(object) && (matches!(method, "Document" | "\0Document.get.documentElement" | "DocumentFragment" | "Text") || Slottable::getter(method).is_some()) {return Some(object);}
         if self.event_target_interface(object) && matches!(method, script_node_root::ROOT_METHOD | script_node_contains::CONTAINS_METHOD | script_clone_node::CLONE_METHOD) {return Some(object);}
         if self.event_target_interface(object) && matches!(method,"\0Node.get.nodeType"|"\0Node.get.nodeName") {return Some(object);}
         if self.node_list_receiver(object) && matches!(method,"item"|"forEach") {return Some(WINDOW);}
@@ -2995,6 +3001,9 @@ impl Host for Bridge<'_> {
         }
         if self.event_target_interface(object) && method=="DocumentFragment" {
             return if object==WINDOW {Ok(())} else {Err(("NotSupportedError","Child DocumentFragment allocation is not implemented.".into()))};
+        }
+        if self.event_target_interface(object) && method=="Document" {
+            return Err(("NotSupportedError","Allocation of an independent Document is not implemented.".into()));
         }
         if method==script_node_root::ROOT_METHOD {return self.validate_root_node_options(object,args);}
         if method == script_clone_node::CLONE_METHOD { return self.validate_clone_receiver(object); }
@@ -3293,6 +3302,7 @@ impl Host for Bridge<'_> {
     }
 
     fn accepts_receiver(&self, object: u32, method: &str, receiver: u32) -> bool {
+        if method=="\0Document.get.documentElement" && self.event_target_interface(object) {return self.document_interface_receiver(receiver);}
         if script_input_accessors::accessor(method).is_some() && self.event_target_interface(object) {
             return self.input_receiver(receiver);
         }
@@ -4621,6 +4631,10 @@ impl Host for Bridge<'_> {
             return self.create_dom_node(NodeKind::Text(data));
         }
         if object==WINDOW && method=="DocumentFragment" {return self.create_dom_node(NodeKind::DocumentFragment);}
+        if method=="\0Document.get.documentElement" {
+            if !self.document_interface_receiver(object) {return Err("Document getter requires a genuine accessible Document.".into());}
+            return self.get_with_caller(self.state.navigation_incumbent,object,"documentElement");
+        }
         if method==script_node_root::ROOT_METHOD {return self.get_root_node(object,args,None);}
         if method == script_clone_node::CLONE_METHOD { return self.clone_node(object, args.first().is_some_and(Value::truthy)); }
         if method == script_node_contains::CONTAINS_METHOD { return self.node_contains(object, args); }
