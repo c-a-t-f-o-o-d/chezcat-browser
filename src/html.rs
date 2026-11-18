@@ -272,9 +272,12 @@ fn parse_internal(input: &str, context: Option<&str>, scripting: bool) -> Result
         };
         position = tag.end;
 
+        let empty_table = checked && tag.name == "table";
         if checked {
             checked_select_tag(&stack, &document, &tag.name, tag.closing)?;
-            if matches!(tag.name.as_str(), "html" | "head" | "body" | "frameset" | "frame" | "table" | "caption" | "colgroup" | "col" | "tbody" | "thead" | "tfoot" | "tr" | "td" | "th" | "template" | "svg" | "math" | "picture" | "image" | "xmp" | "noembed" | "noframes" | "plaintext" | "listing") || tag.name == "noscript" && scripting {
+            if empty_table {
+                position = checked_empty_table_end(input, &tag, &stack, &document)?;
+            } else if matches!(tag.name.as_str(), "html" | "head" | "body" | "frameset" | "frame" | "caption" | "colgroup" | "col" | "tbody" | "thead" | "tfoot" | "tr" | "td" | "th" | "template" | "svg" | "math" | "picture" | "image" | "xmp" | "noembed" | "noframes" | "plaintext" | "listing") || tag.name == "noscript" && scripting {
                 return Err("HTML fragment structural, table/select or foreign-content recovery is not implemented.".into());
             }
             if !tag.closing {
@@ -407,7 +410,7 @@ fn parse_internal(input: &str, context: Option<&str>, scripting: bool) -> Result
                 svg_namespace::publish(&mut document.nodes[node..]);
                 svg.root = None;
             }
-        } else if !void {
+        } else if !void && !empty_table {
             // A trailing slash does not close a non-void HTML element.
             stack.push(node);
             if !checked && document.nodes[node].namespace == Namespace::Html &&
@@ -420,6 +423,23 @@ fn parse_internal(input: &str, context: Option<&str>, scripting: bool) -> Result
 
     if checked { document.scripting_enabled = scripting; }
     Ok(document)
+}
+
+// An immediately closed table has no table-mode children to insert. Consume
+// its real end token once, leaving both surrounding text runs in their parent.
+fn checked_empty_table_end(input: &str, open: &Tag, stack: &[usize], document: &Document) -> Result<usize, String> {
+    let flow = stack.iter().all(|&node| matches!(&document.nodes[node].kind,
+        NodeKind::Element { tag, .. } if matches!(tag.as_str(),
+            "body" | "main" | "div" | "section" | "article" | "header" | "footer" | "aside" | "nav" |
+            "blockquote" | "figure" | "figcaption" | "ul" | "ol" | "li" | "dl" | "dt" | "dd")));
+    if flow && open.clean_syntax && !open.closing && !open.self_closing && input[open.end..].starts_with("</") {
+        if let TagToken::Complete(end) = read_tag_mode(input, open.end, true) {
+            if end.name == "table" && end.clean_syntax && !end.self_closing && end.attrs.is_empty() {
+                return Ok(end.end);
+            }
+        }
+    }
+    Err("HTML fragment tables require ordinary flow and an immediately matching empty-table end tag.".into())
 }
 
 // This finite conventional select slice follows the current in-body select,
@@ -528,9 +548,10 @@ fn read_tag_mode(input: &str, start: usize, checked: bool) -> TagToken {
         position += 1;
     }
     let name = input[name_start..position].to_ascii_lowercase();
-    // The permissive document tokenizer also serves ordinary HTML. Only an
-    // admitted SVG spelling can use its stricter syntax evidence.
-    let mut clean_syntax = svg_namespace::basic_element(&name)
+    // Only explicitly supported SVG elements and checked empty tables use
+    // strict token evidence. Other elements retain the normal tokenizer rules.
+    let checked_table = checked && name == "table";
+    let mut clean_syntax = (svg_namespace::basic_element(&name) || checked_table)
         && bytes.get(position).is_some_and(|b| tag_space(*b, true) || matches!(b, b'/' | b'>'));
     let mut self_closing = false;
     if checked && bytes.get(position).is_some_and(|byte| !tag_space(*byte, true) && !matches!(*byte, b'/' | b'>')) { return TagToken::Unsupported("HTML fragment tag-name tokenization is not implemented for this boundary."); }
@@ -586,6 +607,9 @@ fn read_tag_mode(input: &str, start: usize, checked: bool) -> TagToken {
             continue;
         }
         let attribute = &input[attribute_start..position];
+        if checked_table && attribute.contains(['"', '\'', '<']) {
+            clean_syntax = false;
+        }
         while position < bytes.len() && tag_space(bytes[position], checked) {
             position += 1;
         }
@@ -630,7 +654,11 @@ fn read_tag_mode(input: &str, start: usize, checked: bool) -> TagToken {
         }
     }
 
-    TagToken::Incomplete
+    if checked_table {
+        TagToken::Unsupported("Incomplete HTML fragment table tag.")
+    } else {
+        TagToken::Incomplete
+    }
 }
 
 fn close_implied(stack: &mut Vec<usize>, document: &Document, incoming: &str) {

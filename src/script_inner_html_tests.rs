@@ -79,8 +79,57 @@ fn inner_html_context_and_parser_limits_do_not_commit_a_prefix() {
 }
 
 #[test]
+fn inner_html_empty_table_preserves_siblings_and_owner_in_flow() {
+    let (doc, _, page, outcome) = run("<form id=f><input id=editor value=seed></form><div id=root></div>", r#"
+var editor=document.getElementById('editor'),owner=document.getElementById('f');
+editor.value='edited';
+function verify(root) {
+  root.innerHTML='<span>prefix</span><table></table>';
+  var prefix=root.firstChild,table=prefix.nextSibling;
+  if(prefix.textContent!=='prefix'||table.nodeName!=='TABLE'||table.parentNode!==root||
+     table.ownerDocument!==document||table.firstChild!==null||table.nextSibling!==null)throw Error('empty table sibling');
+  root.innerHTML='  <TABLE id="grid" data-label="a&amp;b"></TaBlE > after';
+  table=root.firstChild.nextSibling;
+  if(root.firstChild.nodeType!==3||root.firstChild.textContent!=='  '||table.namespaceURI!=='http://www.w3.org/1999/xhtml'||
+     table.childNodes.length!==0||table.nextSibling.textContent!==' after'||table.getAttribute('data-label')!=='a&b'||
+     table.isConnected!==root.isConnected||root.innerHTML!=='  <table id="grid" data-label="a&amp;b"></table> after')throw Error('table round trip');
+}
+verify(document.createElement('div'));verify(document.getElementById('root'));
+if(editor!==document.getElementById('editor')||editor.ownerDocument!==document||editor.form!==owner||
+   editor.value!=='edited'||editor.defaultValue!=='seed')throw Error('neighbor');
+document.title='table-ok';
+"#);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    assert_eq!(doc.title, "table-ok");
+}
+
+#[test]
+fn inner_html_empty_table_requires_explicit_balanced_tokens_in_flow() {
+    for source in [
+        "<table>", "<table", "<table id='unfinished", "</table>", "<table/>", "<table/></table>",
+        "<table></tabl", "<table></table", "<table></table x>", "<table></table/>", "<table></table/ >",
+        "<table / ></table>", "<table>\n</table>", "<table>&#32;</table>", "<table>x</table>",
+        "<table><!--text--></table>", "<table><b>text</b></table>", "<table><tr><td>x</td></tr></table>",
+        "<table><table></table></table>", "<table></div></table>", "<p><table></table></p>",
+        "<div><b><table></table></b></div>", "<select><table></table></select>",
+        "<div><table></table></table></div>",
+    ] {
+        assert!(crate::html::parse_fragment(source, "div", true).is_err(), "{source}");
+    }
+    for context in ["table", "tbody", "tr", "td", "select", "p", "svg"] {
+        assert!(crate::html::parse_fragment("<table></table>", context, true).is_err(), "{context}");
+    }
+    let nested = crate::html::parse_fragment("<section><table></table><table></table></section>", "div", true).unwrap();
+    assert_eq!(nested.nodes[1].children.len(), 2);
+    assert!(crate::html::parse_fragment(&format!("{}<table></table>", "<div>".repeat(127)), "div", true).is_err());
+}
+
+#[test]
 fn inner_html_rejection_keeps_tree_forms_resources_and_retained_storage() {
-    let (mut doc, mut forms, mut page, outcome) = run("<html><body><form id=f><input id=control form=f value=original></form><div id=root><span id=old title=kept>old</span></div></body></html>", "document.getElementById('control').value='edited';");
+    let (mut doc, mut forms, mut page, outcome) = run(
+        "<html><body><form id=f><input id=control form=f value=original><div id=root><span id=old title=kept>old</span><input id=inside value=seed></div></form></body></html>",
+        "var outside=document.getElementById('control'),inside=document.getElementById('inside');outside.value='edited';inside.value='inside edited';"
+    );
     assert_eq!(outcome.errors, 0);
     let root = (0..doc.nodes.len()).find(|&n| doc.attr(n, "id") == Some("root")).unwrap();
     let mut bridge = Bridge { doc: &mut doc, forms: &mut forms, state: &mut page.state };
@@ -88,13 +137,14 @@ fn inner_html_rejection_keeps_tree_forms_resources_and_retained_storage() {
     let children = bridge.doc.nodes[root].children.clone();
     // Text INPUT admission has its own positive/negative transaction controls;
     // this rejection matrix retains an unsupported native input type witness.
-    for source in ["<input type=checkbox value=new>","<form></form>","<div id=f>collision</div>","<style>p{color:red}</style>","<link rel=stylesheet href=x>","<iframe></iframe>","<p onclick='x()'>handler</p>","<div><svg></svg></div>","<img srcset=x src=y>","<span>prefix</span><table></table>"] {
+    for source in ["<input type=checkbox value=new>","<form></form>","<div id=f>collision</div>","<style>p{color:red}</style>","<link rel=stylesheet href=x>","<iframe></iframe>","<p onclick='x()'>handler</p>","<div><svg></svg></div>","<img srcset=x src=y>","<span>prefix</span><table><tbody></tbody></table>","<img src='/pending.ppm'><table></table><table>content</table>","<table></table><link/>","<table></table><input type=checkbox>"] {
         assert!(bridge.set_inner_html(root, source).is_err(), "{source}");
         assert_eq!(bridge.doc.nodes.len(), before, "{source}");
         assert_eq!(bridge.doc.nodes[root].children, children, "{source}");
         assert!(!bridge.state.images.has_changes());
     }
     let retained = bridge.state.retained;
+    let previous_limit = bridge.state.retained_limit;
     bridge.state.retained_limit = retained;
     assert!(bridge.set_inner_html(root, "<img src='/must-not-fetch.ppm'>").is_err());
     assert!(bridge.state.images.entries.is_empty() && !bridge.state.images.has_changes());
@@ -103,7 +153,15 @@ fn inner_html_rejection_keeps_tree_forms_resources_and_retained_storage() {
     bridge.state.retained_limit = retained + 32;
     assert!(bridge.set_inner_html(root, &format!("<{}></{}>", "custom".repeat(20), "custom".repeat(20))).is_err());
     assert_eq!(bridge.state.retained, retained);
-    assert_eq!(bridge.forms.controls.values().next().unwrap().value.text(), "edited");
+    bridge.state.retained_limit = previous_limit;
+    let check = page.console_eval(&mut doc, &mut forms, r#"
+var form=document.getElementById('f'),holder=document.getElementById('root');
+if(outside!==document.getElementById('control')||outside.parentNode!==form||outside.form!==form||
+   outside.value!=='edited'||outside.defaultValue!=='original'||outside.ownerDocument!==document)throw Error('neighbor rollback');
+if(inside!==holder.lastChild||inside!==document.getElementById('inside')||inside.form!==form||
+   inside.value!=='inside edited'||inside.defaultValue!=='seed'||inside.ownerDocument!==document)throw Error('replacement rollback');
+"#);
+    assert_eq!(check.errors, 0, "{}", page.report());
 }
 
 #[test]
