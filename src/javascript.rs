@@ -48,6 +48,9 @@ mod function_demand_tests;
 #[cfg(test)]
 #[path = "new_target_tests.rs"]
 mod new_target_tests;
+#[cfg(test)]
+#[path = "script_preflight_tests.rs"]
+mod script_preflight_tests;
 #[path = "selected_if_statement.rs"]
 mod selected_if_statement;
 #[path = "transient_roots.rs"]
@@ -8717,6 +8720,19 @@ impl Runtime {
         this: Value,
         host: &mut dyn Host,
     ) -> Result<Value, Fault> {
+        let (index, ordinary) = self.preflight_call_value(&function, args, &this)?;
+        if ordinary {
+            return self.call_script_value(index, args, this, None, host);
+        }
+        self.call_non_script_value(index, args, this, host)
+    }
+
+    // Finish validation before entering Script's larger invocation setup frame.
+    // Constructors retain that entry's defensive guard and separate preflight.
+    #[inline(never)]
+    fn preflight_call_value(
+        &mut self, function: &Value, args: &[Value], this: &Value,
+    ) -> Result<(usize, bool), Fault> {
         self.step()?;
         if args.len() > self.limits.capacity.arguments {
             return Err(self.argument_limit_fault());
@@ -8730,12 +8746,13 @@ impl Runtime {
             return Err(self.string_limit_fault());
         }
         let Value::Function(index) = function else {
-            return Err(Self::not_callable_fault(&function));
+            return Err(Self::not_callable_fault(function));
         };
-        if self.is_ordinary_script_call(index) {
-            return self.call_script_value(index, args, this, None, host);
+        let ordinary = self.is_ordinary_script_call(*index);
+        if ordinary && self.call_depth >= MAX_CALL_DEPTH {
+            return Err(Fault::new("Function call limit reached (32)."));
         }
-        self.call_non_script_value(index, args, this, host)
+        Ok((*index, ordinary))
     }
 
     #[cold]
@@ -12665,6 +12682,7 @@ if(errors!==6)throw 'quantifier syntax';'brace-ok';
         // Large evaluator match arms must not reserve their scratch space on
         // every level of an unrelated member/binary/sequence expression.
         std::thread::Builder::new()
+            .name("hostile_nesting_stops_within_a_one_mib_thread_stack".into())
             .stack_size(1024 * 1024)
             .spawn(|| {
                 eprintln!("hostile nesting: recursion/flat-chain guards");
