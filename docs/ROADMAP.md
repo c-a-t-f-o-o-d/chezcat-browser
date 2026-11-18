@@ -24,7 +24,7 @@ of complete framework support.
 | :--- | :--- | :--- |
 | **Current prerelease** | [0.82.0-alpha.1](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.82.0-alpha.1), tagged at `f2e1823`. Both downloaded ZIPs, the publication record, checksums and extracted runtime passed verification. | [Publication workflow](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/runs/44400222193) |
 | **Previous prerelease** | [0.81.0-alpha.3](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.81.0-alpha.3), source `57cc1d5` | Explicit owner request and immutable tag and assets |
-| **Public `main`** | Integration baseline `6089546` includes the iframe interface, radio clones and implicit grid rows. Earlier PRs [#29](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/29), [#30](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/30), and [#32](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/32) add behavior beyond alpha.2 | Coherent PRs after applicable integration checks |
+| **Public `main`** | Through `9610baf`, includes the compressed-script allowance, Document interface, canvas dimensions, transparent 2D rectangles and solid fill colors beyond alpha.1 | Coherent PRs after applicable integration checks |
 | **Public feature branches** | Reviewable work in progress with its own check status | Meaningful implementation checkpoints, independently of releases |
 | **Development binaries** | Planned CI artifacts identified by source commit, not another GitHub Release | Delivery work `DX-02`; not advertised as available yet |
 
@@ -32,7 +32,7 @@ of complete framework support.
 flowchart LR
     BASE["Published 0.82.0-alpha.1"] --> DOM["DOM and resource loading"]
     DOM --> URL["Shared browser capabilities"]
-    URL --> INPUT["Compressed scripts, canvas dimensions and Document"]
+    URL --> INPUT["Compressed scripts, Document and canvas rectangles"]
     URL --> CSS["CSS variables and implicit grid rows"]
     INPUT --> APPS["Signed-out video search and playback goal<br/>Existing framework checks"]
     CSS --> APPS
@@ -57,7 +57,7 @@ wait for complete framework or video support.
 
 **Legend:** ✅ **Merged** · 🟡 **Under review** · ◻️ **Next / planned** · 🧊 **Deferred**
 
-The next development priority after `f2e1823` is signed-out video search and playback. Start with loading compressed scripts, reflecting canvas width and height, and exposing the standard `Document` interface. Evaluate search and playback separately as these prerequisites land.
+The development priority remains signed-out video search and playback. The larger compressed-script allowance, canvas dimensions and the Document interface have landed. Rectangle and solid-color App pixel checks pass on `f53ab3e` and `124686e`, integrated by `main` at `9610baf`. Independent readback still stops at missing `getImageData`. The owner's manual signed-out run remains pending, and search and playback need separate verification.
 
 Parked framework work includes the raw `onfocusin` attribute write in legacy jQuery and the `contentEditable` read before ReactDOM mounts. Single-column grid rows are integrated. Per-item inline alignment remains a layout follow-up. [Current source-bound scorecard](COMPATIBILITY.md)
 

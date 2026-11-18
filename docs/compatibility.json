@@ -1991,6 +1991,24 @@
       "result": "Default/parsed dimensions, IDL and Attr changes, detached ownership and saved accessors pass with retained native/literal pixels.",
       "next_fault": "getContext('2d') at 17:86. 2D drawing remains unproved."
     },
+    "canvas_rectangles": {
+      "pull_request": 125,
+      "measured_feature_source": "f53ab3ec6a7a0ce767602c25107740eb3f9321cc",
+      "integrated_main": "ca845b42cc5a9c781ca54125c49bd8109b285d03",
+      "executable_sha256": "f4a8aef4ce1b5b01ad62a01444d07d905073b149ecfd982055f7dbe11d3013a6",
+      "app_feature_stages_passed": 5,
+      "independent_controls_passed": 9,
+      "result": "The 80 by 48 App paints black rectangles, clears pixels, resets on same-width assignment and repaints with the saved context. Separate App controls check object-fit none and scale-down."
+    },
+    "canvas_solid_colors": {
+      "pull_request": 126,
+      "measured_feature_source": "124686ee77f4a972a288aa46178cc2553e009dfe",
+      "integrated_main": "9610bafc7e6fc0cabfbc03d5fa69b2f46a9523ec",
+      "executable_sha256": "3f779abac578c6d4faa33dbc3b43fac537685823080feb88655fdd3aca13b393",
+      "app_feature_stages_passed": 3,
+      "result": "The original App paints the expected opaque and translucent swatches and resets to black. The alpha blend over #204080 reads #704040 on screen.",
+      "next_fault": "A separate original App paints and preserves its edited field, then stops at undefined getImageData at 28:18."
+    },
     "unverified": [
       "Live signed-out shell",
       "Search",
