@@ -68,6 +68,37 @@ var read=F('node','return node.toString;'),invoke=F('method','node','return meth
 }
 
 #[test]
+fn dom_class_heritage_links_real_interface_objects_without_creating_elements() {
+    let (mut doc, mut forms, mut page) = fixture();
+    let neighbor = id(&doc, "neighbor");
+    let before_editor = editor(&forms, neighbor);
+    let before_nodes = format!("{:?}", doc.nodes);
+    run(&mut doc, &mut forms, &mut page, r#"
+var htmlBase = HTMLElement, foreignBase = w.HTMLElement;
+var ForeignPanel = F('return class Panel extends HTMLElement {};')();
+class Panel extends htmlBase { static label() { return 'panel'; } }
+class MixedPanel extends foreignBase {}
+if (htmlBase === foreignBase || Object.getPrototypeOf(Panel) !== htmlBase ||
+    Object.getPrototypeOf(Panel.prototype) !== htmlBase.prototype ||
+    Object.getPrototypeOf(MixedPanel) !== foreignBase ||
+    Object.getPrototypeOf(ForeignPanel.prototype) !== foreignBase.prototype ||
+    Object.getPrototypeOf(MixedPanel.prototype) !== foreignBase.prototype ||
+    Panel.label() !== 'panel' || Panel.prototype.constructor !== Panel)
+    throw 'incorrect interface heritage';
+var fromChild = F('C', 'try { new C(); } catch (e) { return Object.getPrototypeOf(e) === TypeError.prototype; } return false;');
+if (!fromChild(ForeignPanel)) throw 'expected the child interface construction error';
+var refused = false;
+try { new Panel(); } catch (e) { refused = Object.getPrototypeOf(e) === TypeError.prototype; }
+if (!refused) throw 'expected the local interface construction error';
+var result = {};
+class ExplicitReturn extends htmlBase { constructor() { return result; } }
+if (new ExplicitReturn() !== result || document.body instanceof Panel) throw 'unregistered class branded as an element';
+"#);
+    assert_eq!(format!("{:?}", doc.nodes), before_nodes);
+    assert_eq!(editor(&forms, neighbor), before_editor);
+}
+
+#[test]
 fn container_object_realms_blank_html_body_use_genuine_owner_interfaces_and_intrinsics() {
     let (mut doc, mut forms, mut page) = fixture();
     let nodes = format!("{:?}", doc.nodes);

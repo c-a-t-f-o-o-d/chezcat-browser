@@ -1,5 +1,5 @@
-//! Genuine finite Script/null classes. Heritage evaluates in the private TDZ
-//! scope; literal members then install ordinary descriptors without callbacks.
+//! Genuine finite Script/null and selected DOM-interface classes. Heritage
+//! evaluates in the private TDZ scope; literal members install descriptors.
 //! https://tc39.es/ecma262/#sec-runtime-semantics-classdefinitionevaluation
 use super::*;
 
@@ -25,8 +25,8 @@ impl Runtime {
                         return Err(Fault::exception("TypeError", "A class base must be a constructor or null."));
                     }
                     let Value::Function(base) = base else { unreachable!() };
-                    if !matches!(self.functions.get(base), Some(Function::Script { .. })) {
-                        return Err(Fault::new("Native, bound and builtin class bases are not implemented."));
+                    if !self.supported_class_base(base, host)? {
+                        return Err(Fault::new("This native, bound or builtin class base is not implemented."));
                     }
                     let prototype = self.get_ordinary_property_with_host(Ordinary::Function(base), "prototype", host)?;
                     self.push_transient_value(&prototype)?;

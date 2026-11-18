@@ -1,5 +1,5 @@
-//! Original finite Script-derived class acceptance. Native/builtin subclassing,
-//! fields, computed/private keys and other deferred syntax stay outside scope.
+//! Original finite derived-class acceptance, including selected nonallocating
+//! DOM-interface bases. Allocating native/builtin bases and deferred syntax stay out.
 use super::*;
 
 #[derive(Default)]
@@ -231,4 +231,148 @@ fn no_effects(source: &str) {
     assert!(runtime.execute(source,&mut host).is_err(),"unsupported context admitted: {source}");
     assert_eq!(runtime.binding_value(0,"effects").unwrap().to_number(),0.0,"{source}");
     assert_eq!((host.calls,host.writes),(0,0));
+}
+
+// Pure evaluator/metadata controls. Genuine document/owner/realm acceptance is
+// exercised separately through the actual Bridge; this host never creates nodes.
+#[derive(Default)]
+struct IllegalInterfaceHost {
+    validations: std::cell::Cell<usize>,
+    calls: usize,
+    writes: usize,
+}
+
+impl Host for IllegalInterfaceHost {
+    fn get(&mut self, _: u32, _: &str) -> Result<Value, String> {
+        Err("Unexpected native read.".into())
+    }
+    fn set(&mut self, _: u32, _: &str, _: Value) -> Result<(), String> {
+        self.writes += 1;
+        Err("Unexpected native write.".into())
+    }
+    fn validate_call(&self, object: u32, method: &str, _: &[Value])
+        -> Result<(), (&'static str, String)>
+    {
+        assert_eq!(object, 71);
+        assert!(matches!(method, "Node" | "Element" | "HTMLElement")
+            || ORDINARY_HTML_SUBCLASSES.iter().any(|&(_, name)| name == method));
+        self.validations.set(self.validations.get() + 1);
+        Err(("TypeError", "Illegal constructor for this native interface.".into()))
+    }
+    fn call(&mut self, _: u32, _: &str, _: &[Value]) -> Result<Value, String> {
+        self.calls += 1;
+        Err("An illegal interface must be refused before native creation.".into())
+    }
+}
+
+fn canonical_interface_runtime() -> Runtime {
+    let mut runtime = Runtime::for_test();
+    runtime.define_event_target_interface(71).unwrap();
+    runtime.define_node_interfaces(71, &[], None).unwrap();
+    runtime
+}
+
+#[test]
+fn derived_class_interface_declarations_link_real_metadata_without_construction() {
+    let mut runtime = canonical_interface_runtime();
+    let mut host = IllegalInterfaceHost::default();
+    let result = runtime.execute(r#"
+var bases = [Node, Element, HTMLElement, HTMLBodyElement, HTMLButtonElement,
+             HTMLDivElement, HTMLHtmlElement, HTMLUListElement];
+for (var Base of bases) {
+    var Derived = class extends Base { method() { return 19; } };
+    if (Object.getPrototypeOf(Derived) !== Base ||
+        Object.getPrototypeOf(Derived.prototype) !== Base.prototype ||
+        Derived.prototype.constructor !== Derived) throw 'genuine interface prototype links';
+    var ReturnObject = class extends Base { constructor() { return { plain: 23 }; } };
+    var object = new ReturnObject();
+    if (object.plain !== 23 || Object.getPrototypeOf(object) !== Object.prototype ||
+        object instanceof Base || object instanceof ReturnObject) throw 'ordinary object return';
+}
+'ok';
+"#, &mut host).unwrap();
+    assert_eq!(result.to_text(), "ok");
+    assert_eq!((host.validations.get(), host.calls, host.writes), (0, 0, 0));
+}
+
+#[test]
+fn derived_class_interface_super_keeps_typed_failure_arguments_and_uninitialized_this() {
+    let mut runtime = canonical_interface_runtime();
+    let mut host = IllegalInterfaceHost::default();
+    let result = runtime.execute(r#"
+var caught = 0, before = 0, argumentsRun = 0, after = 0, conversions = 0;
+var input = { toString() { conversions++; return 'unused'; }, valueOf() { conversions++; return 17; } };
+class Default extends HTMLElement {}
+class Explicit extends HTMLElement {
+    constructor() { before++; super((argumentsRun++, input)); after++; }
+}
+for (var Constructor of [HTMLElement, Default, Explicit]) {
+    try { new Constructor(); }
+    catch (e) { if (!(e instanceof TypeError)) throw e; caught++; }
+}
+class Recover extends HTMLElement {
+    constructor() {
+        try { super(); } catch (e) { if (!(e instanceof TypeError)) throw e; caught++; }
+        try { this; } catch (e) { if (!(e instanceof ReferenceError)) throw e; caught++; }
+        return { recovered: true, target: new.target };
+    }
+}
+var recovered = new Recover();
+if (!recovered.recovered || recovered.target !== Recover || caught !== 5 ||
+    before !== 1 || argumentsRun !== 1 || after !== 0 || conversions !== 0) throw 'illegal super completion';
+class ScriptBase {}
+class Live extends ScriptBase {}
+Object.setPrototypeOf(Live, HTMLElement);
+try { new Live(); } catch (e) { if (!(e instanceof TypeError)) throw e; caught++; }
+if (caught !== 6) throw 'live canonical native super target';
+'ok';
+"#, &mut host).unwrap();
+    assert_eq!(result.to_text(), "ok");
+    assert_eq!((host.validations.get(), host.calls, host.writes), (5, 0, 0));
+}
+
+#[test]
+fn derived_class_interface_eligibility_is_not_an_author_property_or_constructor_name() {
+    let mut runtime = canonical_interface_runtime();
+    let mut host = IllegalInterfaceHost::default();
+    runtime.define_host_constructor("Pretender", 72, "HTMLElement").unwrap();
+    runtime.execute(r#"
+var Actual = HTMLElement, originalConstructor = Actual.prototype.constructor;
+Object.defineProperty(Pretender, 'name', { value: 'HTMLElement', configurable: true });
+Pretender.illegal_interface_constructor = true;
+Pretender.interface_class_base = true;
+Pretender.prototype.constructor = Actual;
+Object.setPrototypeOf(Pretender, Actual);
+Actual.prototype.constructor = Pretender;
+HTMLElement = Pretender;
+class FromSavedActual extends Actual {}
+if (Object.getPrototypeOf(FromSavedActual) !== Actual ||
+    Object.getPrototypeOf(FromSavedActual.prototype) !== Actual.prototype) throw 'saved immutable interface identity';
+Actual.prototype.constructor = originalConstructor;
+HTMLElement = Actual;
+var Bound = Actual.bind(null);
+Bound.prototype = Actual.prototype;
+'ok';
+"#, &mut host).unwrap();
+    for (index, base) in ["Pretender", "Bound"].iter().enumerate() {
+        let source = format!("class Refused{index} extends {base} {{}};");
+        let error = runtime.execute(&source, &mut host).unwrap_err();
+        assert!(error.contains("class base is not implemented"), "{error}");
+    }
+    assert_eq!((host.validations.get(), host.calls, host.writes), (0, 0, 0));
+}
+
+#[test]
+fn derived_class_interface_allocating_and_other_native_interfaces_remain_unadmitted() {
+    for base in ["EventTarget", "Text", "DocumentFragment", "CharacterData", "NodeList"] {
+        let mut runtime = canonical_interface_runtime();
+        let mut host = IllegalInterfaceHost::default();
+        runtime.execute("var body = 0, after = 0;", &mut host).unwrap();
+        let source = format!("class Refused extends {base} {{constructor(){{body++;super();}}}}after++;");
+        let error = runtime.execute(&source, &mut host).unwrap_err();
+        assert!(error.contains("class base is not implemented"), "{base}: {error}");
+        assert_eq!(runtime.binding_value(0, "body").unwrap().to_number(), 0.0);
+        assert_eq!(runtime.binding_value(0, "after").unwrap().to_number(), 0.0);
+        assert_eq!((host.validations.get(), host.calls, host.writes), (0, 0, 0));
+    }
 }
