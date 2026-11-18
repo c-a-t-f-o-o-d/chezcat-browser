@@ -58,6 +58,8 @@ mod script_hidden_inputs;
 mod script_text_inputs;
 #[path = "script_input_accessors.rs"]
 mod script_input_accessors;
+#[path = "script_content_editable.rs"]
+mod script_content_editable;
 #[cfg(test)]
 #[path = "script_input_accessor_tests.rs"]
 mod script_input_accessor_tests;
@@ -2488,7 +2490,8 @@ impl Bridge<'_> {
 impl Bridge<'_> {
     /// Properties handled by ordinary lookup on the node's interface prototypes.
     fn inherited_node_property(&self, object: u32, property: &str) -> bool {
-        self.element_sibling_member(object, property)
+        self.content_editable_member(object, property)
+            || self.element_sibling_member(object, property)
             || self.assigned_slot_lookup(object, property)
             || self.html_offset_member(object, property)
             || self.scroll_offset_member(object, property)
@@ -2643,6 +2646,7 @@ impl Host for Bridge<'_> {
 
     fn inherited_assignment(&self, object: u32, property: &str) -> bool {
         script_scroll_offsets::axis(property).is_some() && self.element_selector_receiver(object)
+            || self.content_editable_attribute(object, property)
             || self.html_offset_attribute(object, property)
             || script_element_properties::ordinary_interface_member(property)
             && self.frame_concrete_html_interface(object).is_some()
@@ -2672,6 +2676,7 @@ impl Host for Bridge<'_> {
     }
 
     fn string_setter(&self, object: u32, property: &str) -> bool {
+        if self.content_editable_attribute(object,property) {return true;}
         if property == "value" && self.input_accessor_member(object, property) {return true;}
         if property == "transform" && (STYLE_BASE..DATASET_BASE).contains(&object) {return true;}
         if self.button_string_property(object,property) {return true;}
@@ -2697,6 +2702,7 @@ impl Host for Bridge<'_> {
         self.prepare_media_microtask(object,script_media::interface_operation(member).unwrap_or(member),args,setter)
     }
     fn native_setter_property(&self,object:u32,method:&str)->Option<&'static str>{
+        if method == script_content_editable::SET && self.content_editable_receiver(object) {return Some("contentEditable");}
         if let Some((name, true)) = script_input_accessors::accessor(method) {
             return self.input_receiver(object).then_some(name);
         }
@@ -2837,6 +2843,7 @@ impl Host for Bridge<'_> {
     }
 
     fn native_method_owner(&self, object:u32, method:&str) -> Option<u32> {
+        if script_content_editable::accessor(method) && self.event_target_interface(object) {return Some(object);}
         if script_input_accessors::accessor(method).is_some() && self.event_target_interface(object) {return Some(object);}
         if script_scroll_offsets::accessor(method).is_some() && self.event_target_interface(object) {return Some(object);}
         if Offset::getter(method).is_some() && self.event_target_interface(object) {return Some(object);}
@@ -2977,6 +2984,7 @@ impl Host for Bridge<'_> {
         method: &str,
         args: &[Value],
     ) -> Result<(), (&'static str, String)> {
+        if script_content_editable::accessor(method) {return self.validate_content_editable(object);}
         if object==WINDOW && method=="getComputedStyle" || script_computed_style::index(object).is_some() {return self.validate_computed_call(object,method,args);}
         if script_input_accessors::accessor(method).is_some() {return self.validate_input_accessor(object);}
         if let Some(offset) = Offset::getter(method) {return self.validate_html_offset(object, offset);}
@@ -3136,6 +3144,7 @@ impl Host for Bridge<'_> {
         property: &str,
         value: &Value,
     ) -> Result<(), (&'static str, String)> {
+        if self.content_editable_attribute(object,property) {return self.validate_content_editable_value(object,value);}
         if property=="currentTime" && self.media_interface_receiver(object) {
             if !self.state.enabled || !self.doc.scripting_enabled {
                 return Err(("InvalidStateError","Scripting is disabled.".into()));
@@ -3189,6 +3198,10 @@ impl Host for Bridge<'_> {
             }
         }
         Ok(())
+    }
+
+    fn setter_dom_exception(&self,object:u32,property:&str,kind:&str)->bool {
+        kind=="SyntaxError" && self.content_editable_attribute(object,property)
     }
 
     fn resolve_member_before_call(&self, object: u32) -> bool {
@@ -3290,6 +3303,7 @@ impl Host for Bridge<'_> {
     }
 
     fn accepts_receiver(&self, object: u32, method: &str, receiver: u32) -> bool {
+        if script_content_editable::accessor(method) && self.event_target_interface(object) {return self.content_editable_receiver(receiver);}
         if script_input_accessors::accessor(method).is_some() && self.event_target_interface(object) {
             return self.input_receiver(receiver);
         }
@@ -4002,6 +4016,7 @@ impl Host for Bridge<'_> {
 
     fn get(&mut self, object: u32, property: &str) -> Result<Value, String> {
         self.state.work(1)?;
+        if self.content_editable_member(object,property) {return Ok(Value::Undefined);}
         if script_computed_style::index(object).is_some() {return self.computed_style_get(object,property);}
         if self.node_list_iteration_member(object,property)&&property!="length" {return Ok(Value::Undefined);}
         if self.element_selector_member(object,property) {return Ok(Value::Undefined);}
@@ -4337,6 +4352,7 @@ impl Host for Bridge<'_> {
     }
 
     fn set(&mut self, object: u32, property: &str, value: Value) -> Result<(), String> {
+        if self.content_editable_attribute(object,property) {return self.content_editable_set(object,&value);}
         if let Some(axis) = script_scroll_offsets::axis(property).filter(|_| self.element_selector_receiver(object)) {
             let Value::Number(number) = value else {return Err("Scroll offset requires numeric conversion.".into());};
             self.element_scroll_offset(object, axis, Some(number))?;
@@ -4590,6 +4606,7 @@ impl Host for Bridge<'_> {
     }
 
     fn call(&mut self, object: u32, method: &str, args: &[Value]) -> Result<Value, String> {
+        if method == script_content_editable::GET {return self.content_editable_get(object);}
         if let Some((name, false)) = script_input_accessors::accessor(method) {
             self.validate_input_accessor(object).map_err(|(_, reason)| reason)?;
             return self.get(object, name);

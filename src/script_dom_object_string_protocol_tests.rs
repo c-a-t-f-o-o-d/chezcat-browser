@@ -1,6 +1,9 @@
 //! Ordinary concrete HTML interfaces, string tags, and owner-realm access.
 use super::*;
 
+#[path = "script_content_editable_tests.rs"]
+mod content_editable_tests;
+
 fn location(source: &str) -> crate::navigation::Location {
     crate::navigation::address(source, &crate::navigation::Location::home()).unwrap()
 }

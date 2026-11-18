@@ -1371,7 +1371,9 @@
         "input_interface_source": "7dda376481e725d0f5ab895d97c137d927404d5c",
         "input_interface_result": "The scheduled callback advanced to 27:75 and stopped while writing input.defaultChecked. The component did not mount. A separate App passed the native constructor, value and checked descriptor, dispatch and receiver checks.",
         "default_checked_source": "a7959b7cf29feb807682e547277eef60d76dbebf",
-        "default_checked_result": "The scheduled callback passed the input's defaultChecked assignment and stopped at 57:363 when testing the active element against window.HTMLIFrameElement. The component did not mount. The separate native App passed direct and saved Boolean access, invalid receiver and form reset checks."
+        "default_checked_result": "The scheduled callback passed the input's defaultChecked assignment and stopped at 57:363 when testing the active element against window.HTMLIFrameElement. The component did not mount. The separate native App passed direct and saved Boolean access, invalid receiver and form reset checks.",
+        "iframe_interface_source": "2f9fa8dfd69a454e74d1b0051fd875718b82434f",
+        "iframe_interface_result": "ReactDOM passed the active element's iframe identity check and then stopped at 58:228 on contentEditable. The component did not mount. A separate App verified parsed and detached frame identity, genuine same-origin frame access and distinct constructors in the two realms."
       }
     },
     {

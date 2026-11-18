@@ -523,6 +523,9 @@ pub trait Host {
     ) -> Result<(), (&'static str, String)> {
         Ok(())
     }
+    /// A native attribute can require a genuine DOMException for a specific
+    /// validation result. Existing non-DOM setter failures keep their brands.
+    fn setter_dom_exception(&self, _object:u32, _property:&str, _kind:&str)->bool {false}
     fn own_keys(&mut self, _object: u32) -> Result<Vec<String>, String> {
         Err("Enumerating this native host object is not implemented.".into())
     }
