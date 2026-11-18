@@ -4469,7 +4469,12 @@ impl Engine<'_> {
     }
 
     fn image_presentation(&self, node: usize, style: &Style) -> crate::paint::ImagePresentation {
-        let natural = self.image_sizes.get(&node).copied().unwrap_or((0, 0));
+        let natural = if let Some(&(width, height)) = self.canvas_sizes.get(&node) {
+            (width.bounded_value(32_768.0) as f32, height.bounded_value(32_768.0) as f32)
+        } else {
+            let (width, height) = self.image_sizes.get(&node).copied().unwrap_or_default();
+            (width.min(32_768) as f32, height.min(32_768) as f32)
+        };
         crate::paint::ImagePresentation {
             fit: style.object_fit,
             rendering: style.image_rendering,
@@ -4479,10 +4484,7 @@ impl Engine<'_> {
                     self.length(position.offset, 0, style).unwrap_or(0) as f32,
                 )
             }),
-            natural: (
-                natural.0.min(32_768) as f32 * self.zoom,
-                natural.1.min(32_768) as f32 * self.zoom,
-            ),
+            natural: (natural.0 * self.zoom, natural.1 * self.zoom),
         }
     }
 
