@@ -13,6 +13,8 @@ pub(crate) fn computed_custom_property_name(name: &str) -> bool { custom_propert
 #[path="css_overflow.rs"]
 mod overflow;
 pub use overflow::{Overflow, OverflowValue};
+#[path="css_position.rs"]
+mod position;
 
 use crate::html::{Document, NodeKind};
 
@@ -163,6 +165,8 @@ pub enum Position {
     Relative,
     Absolute,
     Fixed,
+    /// Computed sticky keyword; scroll-dependent clamping is not implemented.
+    Sticky,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -777,6 +781,7 @@ fn compute_cascade(
     let mut eligible = vec![false; doc.nodes.len()];
     let mut complete = true;
     let mut overflow_known = vec![[true; 2]; doc.nodes.len()];
+    let mut position_known = vec![true; doc.nodes.len()];
     let mut variable_budget = custom_properties::Budget::default();
     let mut budget = MAX_MATCH_STEPS;
     let mut root_font_size = INITIAL_FONT_SIZE;
@@ -791,6 +796,7 @@ fn compute_cascade(
             .unwrap_or_default();
         let inherited_variables = parents[index].and_then(|parent|variables.get(parent)).cloned().unwrap_or_default();
         let parent_overflow_known = parents[index].map_or([true; 2], |parent| overflow_known[parent]);
+        let parent_position_known = parents[index].map_or(true, |parent| position_known[parent]);
         variables[index] = inherited_variables.clone();
         if inert[index]
             || doc.scripting_enabled
@@ -968,7 +974,29 @@ fn compute_cascade(
         let cascade = |budget: &mut custom_properties::Budget| custom_properties::Variables::cascade(&inherited_variables,
             applicable.iter().map(|(_,declaration)|*declaration), budget);
         variables[index] = if let Some(meter) = meter.as_deref_mut() { meter.variables(&mut variable_budget, cascade)? } else { cascade(&mut variable_budget) };
+        if let Some(meter) = meter.as_deref_mut() {
+            // Source preflight and reverse winner lookup each inspect the
+            // applicable list, including entries for unrelated properties.
+            meter.work(applicable.len().saturating_mul(2))?;
+            for (_, declaration) in applicable.iter().filter(|(_, declaration)| declaration.name == "position") {
+                meter.source(declaration.name.len().saturating_add(declaration.value.len()))?;
+            }
+        }
+        let resolve_position = |budget: &mut custom_properties::Budget| {
+            let candidates = applicable.iter().rev()
+                .filter(|(_, declaration)| declaration.name == "position")
+                .map(|(priority, declaration)| (*declaration, priority.1));
+            position::cascade(parent.position, parent_position_known, candidates, &variables[index], budget)
+        };
+        let (computed_position, known) = if let Some(meter) = meter.as_deref_mut() {
+            meter.variables(&mut variable_budget, resolve_position)?
+        } else {
+            resolve_position(&mut variable_budget)
+        };
+        style.position = computed_position;
+        position_known[index] = known;
         for (_, declaration) in applicable {
+            if declaration.name == "position" { continue; }
             if let Some(meter) = meter.as_deref_mut() { meter.source(declaration.name.len().saturating_add(declaration.value.len()))?; }
             let mut apply_box = |budget: &mut custom_properties::Budget| {
                 if custom_properties::apply_overflow(&mut style,&parent,declaration,&variables[index],budget,&mut overflow_known[index],parent_overflow_known) {
@@ -995,7 +1023,8 @@ fn compute_cascade(
         computed[index] = style;
     }
     let overflows = computed.iter().zip(overflow_known).map(|(style, known)| known.iter().all(|known| *known).then_some(style.overflow)).collect();
-    Ok(CascadeOutput { styles: computed, computed_properties: ComputedProperties::new(variables, eligible, complete, overflows) })
+    let positions = computed.iter().zip(position_known).map(|(style, known)| known.then_some(style.position)).collect();
+    Ok(CascadeOutput { styles: computed, computed_properties: ComputedProperties::new(variables, eligible, complete, overflows, positions) })
 }
 
 fn prefix(text: &str, maximum: usize) -> &str {
@@ -2515,6 +2544,7 @@ fn parse_declarations_bounded(source:&str,maximum:usize)->Vec<Declaration> {
             let custom = name.starts_with("--");
             if !name.is_empty() && name.len() <= 64 && value.len() <= 2_048 && (!value.is_empty() || custom)
                 && (!custom || custom_properties::custom_name(&name))
+                && (name != "position" || position::valid_declaration(value))
                 && (!(custom || value.to_ascii_lowercase().contains("var(")) || custom_properties::valid_syntax(&value)) {
                 declarations.push(Declaration {
                     name,
@@ -2733,15 +2763,6 @@ fn apply(style: &mut Style, parent: &Style, declaration: &Declaration) {
             }
             "table-row" => style.display = Display::TableRow,
             "table-cell" => style.display = Display::TableCell,
-            _ => {}
-        },
-        "position" => match value.as_str() {
-            "static" => style.position = Position::Static,
-            "relative" => style.position = Position::Relative,
-            "absolute" => style.position = Position::Absolute,
-            "fixed" => style.position = Position::Fixed,
-            "inherit" => style.position = parent.position,
-            "initial" | "unset" => style.position = Position::Static,
             _ => {}
         },
         "overflow" | "overflow-x" | "overflow-y" => { overflow::apply(style, parent, &declaration.name, &value); }
@@ -4508,3 +4529,7 @@ mod computed_style_tests;
 #[cfg(test)]
 #[path="css_overflow_tests.rs"]
 mod overflow_tests;
+
+#[cfg(test)]
+#[path="css_position_tests.rs"]
+mod position_tests;

@@ -3577,7 +3577,7 @@ impl Host for Bridge<'_> {
     }
 
     fn has(&mut self, object: u32, property: &str) -> Result<bool, String> {
-        if script_computed_style::index(object).is_some() {self.state.work(1)?;return if self.computed_style_receiver(object) {Ok(script_computed_style::overflow_member(property)||self.method(object,property).is_some())} else {Err("Invalid computed declaration receiver.".into())};}
+        if script_computed_style::index(object).is_some() {self.state.work(1)?;return if self.computed_style_receiver(object) {Ok(script_computed_style::attribute_member(property)||self.method(object,property).is_some())} else {Err("Invalid computed declaration receiver.".into())};}
         if self.node_list_iteration_member(object,property) {self.state.work(1)?;return Ok(false);}
         if self.element_selector_member(object,property) {self.state.work(1)?;return Ok(false);}
         if self.inherited_node_property(object,property) {self.state.work(1)?;return Ok(false);}
@@ -5085,6 +5085,10 @@ mod script_computed_style_protocol_tests;
 #[cfg(test)]
 #[path = "script_computed_overflow_tests.rs"]
 mod script_computed_overflow_tests;
+
+#[cfg(test)]
+#[path = "script_computed_position_tests.rs"]
+mod script_computed_position_tests;
 
 #[cfg(test)]
 #[path = "script_selector_negation_tests.rs"]

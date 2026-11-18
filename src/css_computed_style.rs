@@ -12,6 +12,7 @@ struct Snapshot {
     eligible: Vec<bool>,
     complete: bool,
     overflows: Vec<Option<Overflow>>,
+    positions: Vec<Option<Position>>,
 }
 impl ComputedProperties {
     pub(super) fn new(
@@ -19,12 +20,14 @@ impl ComputedProperties {
         eligible: Vec<bool>,
         complete: bool,
         overflows: Vec<Option<Overflow>>,
+        positions: Vec<Option<Position>>,
     ) -> Self {
         Self(Rc::new(Snapshot {
             variables,
             eligible,
             complete,
             overflows,
+            positions,
         }))
     }
     pub(crate) fn read(
@@ -58,6 +61,25 @@ impl ComputedProperties {
         }
         self.0
             .overflows
+            .get(node)
+            .copied()
+            .flatten()
+            .map(Some)
+            .ok_or(ComputedStyleUnavailable)
+    }
+    pub(crate) fn read_position(
+        &self,
+        node: usize,
+    ) -> Result<Option<Position>, ComputedStyleUnavailable> {
+        let eligible = self.0.eligible.get(node).ok_or(ComputedStyleUnavailable)?;
+        if !eligible {
+            return Ok(None);
+        }
+        if !self.0.complete {
+            return Err(ComputedStyleUnavailable);
+        }
+        self.0
+            .positions
             .get(node)
             .copied()
             .flatten()
@@ -129,11 +151,12 @@ impl<'a> CssBudget<'a> {
         external: &HashMap<usize, String>,
     ) -> Result<(), String> {
         self.work(doc.nodes.len().saturating_mul(12))?;
-        self.copies(
-            doc.nodes
-                .len()
-                .saturating_mul(std::mem::size_of::<Style>() + 128),
-        )?;
+        self.copies(doc.nodes.len().saturating_mul(
+            std::mem::size_of::<Style>()
+                + 128
+                + std::mem::size_of::<Option<Position>>()
+                + std::mem::size_of::<bool>(),
+        ))?;
         for node in &doc.nodes {
             self.work(node.children.len())?;
             if let NodeKind::Element { tag, attrs, .. } = &node.kind {

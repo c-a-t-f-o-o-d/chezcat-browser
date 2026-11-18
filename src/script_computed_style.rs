@@ -1,4 +1,4 @@
-//! Finite live, read-only computed custom-property and overflow declarations.
+//! Live, read-only computed custom properties, overflow axes and position.
 //! CSSOM getComputedStyle is NewObject: handles retain only the genuine element
 //! and owner, never inline text, a stale cascade, or a second style resolver.
 use super::*;
@@ -122,35 +122,39 @@ pub(super) struct Declaration {
 }
 
 #[derive(Clone, Copy)]
-enum OverflowProperty {
-    Both,
-    X,
-    Y,
+enum ComputedProperty {
+    Position,
+    Overflow,
+    OverflowX,
+    OverflowY,
 }
-impl OverflowProperty {
+impl ComputedProperty {
     fn attribute(name: &str) -> Option<Self> {
         match name {
-            "overflow" => Some(Self::Both),
-            "overflowX" => Some(Self::X),
-            "overflowY" => Some(Self::Y),
+            "position" => Some(Self::Position),
+            "overflow" => Some(Self::Overflow),
+            "overflowX" => Some(Self::OverflowX),
+            "overflowY" => Some(Self::OverflowY),
             _ => None,
         }
     }
     fn css_name(name: &str) -> Option<Self> {
-        if name.eq_ignore_ascii_case("overflow") {
-            Some(Self::Both)
+        if name.eq_ignore_ascii_case("position") {
+            Some(Self::Position)
+        } else if name.eq_ignore_ascii_case("overflow") {
+            Some(Self::Overflow)
         } else if name.eq_ignore_ascii_case("overflow-x") {
-            Some(Self::X)
+            Some(Self::OverflowX)
         } else if name.eq_ignore_ascii_case("overflow-y") {
-            Some(Self::Y)
+            Some(Self::OverflowY)
         } else {
             None
         }
     }
 }
 
-pub(super) fn overflow_member(name: &str) -> bool {
-    OverflowProperty::attribute(name).is_some()
+pub(super) fn attribute_member(name: &str) -> bool {
+    ComputedProperty::attribute(name).is_some()
 }
 
 impl Bridge<'_> {
@@ -274,13 +278,13 @@ impl Bridge<'_> {
         if name.is_empty() {
             return Ok(Value::String(String::new()));
         }
-        if let Some(property) = OverflowProperty::css_name(name) {
+        if let Some(property) = ComputedProperty::css_name(name) {
             self.state.work(name.len() + 1)?;
-            return self.computed_overflow_value(node, property);
+            return self.computed_keyword_value(node, property);
         }
         if !crate::css::computed_custom_property_name(name) {
             return Err(
-                "Computed readback supports overflow and the admitted custom-property name grammar.".into(),
+                "Computed readback supports position, overflow, and the admitted custom-property names.".into(),
             );
         }
         self.state.work(
@@ -330,50 +334,55 @@ impl Bridge<'_> {
 
     pub(super) fn computed_style_get(&mut self, object: u32, name: &str) -> Result<Value, String> {
         let node = self.computed_declaration_node(object)?;
-        let property = OverflowProperty::attribute(name).ok_or_else(||format!(
-            "Computed declaration property {name:?} is not implemented; use the admitted overflow or custom-property reads."
-        ))?;
-        self.computed_overflow_value(node, property)
+        let property = ComputedProperty::attribute(name)
+            .ok_or_else(|| format!("Computed declaration property {name:?} is not implemented."))?;
+        self.computed_keyword_value(node, property)
     }
 
-    fn computed_overflow_value(
+    fn computed_keyword_value(
         &mut self,
         node: usize,
-        property: OverflowProperty,
+        property: ComputedProperty,
     ) -> Result<Value, String> {
         self.state.work(1)?;
         if !self.computed_node_connected(node)? {
             return Ok(Value::String(String::new()));
         }
-        let pair = self
+        let snapshot = self
             .state
             .geometry
             .as_mut()
             .ok_or("Computed style requires the actual document renderer.")?
-            .computed_overflow(
+            .computed_snapshot(
                 self.doc,
                 self.forms,
-                node,
                 &mut self.state.host_work,
                 &mut self.state.copy_work,
             )?;
-        let Some(pair) = pair else {
-            return Ok(Value::String(String::new()));
-        };
-        let (x, y) = (pair.x.as_css(), pair.y.as_css());
         let (first, second) = match property {
-            OverflowProperty::X => (x, None),
-            OverflowProperty::Y => (y, None),
-            OverflowProperty::Both => (x, (x != y).then_some(y)),
+            ComputedProperty::Position => {
+                let position = snapshot.read_position(node)
+                    .map_err(|_| "Computed position unavailable within the CSS cascade limits.")?;
+                (position.map_or("", |value| value.as_str()), None)
+            }
+            ComputedProperty::Overflow | ComputedProperty::OverflowX | ComputedProperty::OverflowY => {
+                let Some(pair) = snapshot.read_overflow(node)
+                    .map_err(|_| "Computed overflow unavailable within the CSS cascade limits.")?
+                else { return Ok(Value::String(String::new())); };
+                let (x, y) = (pair.x.as_css(), pair.y.as_css());
+                let first = if matches!(property, ComputedProperty::OverflowY) { y } else { x };
+                let second = (matches!(property, ComputedProperty::Overflow) && x != y).then_some(y);
+                (first, second)
+            }
         };
-        // Axis values are Copy enums and finite static literals. Determine and
-        // charge the exact CSSOM serialization before its first allocation.
+        // The cascade returns finite keywords. Charge the complete CSSOM
+        // serialization before allocating the string.
         let bytes = first.len() + second.map_or(0, |value| 1 + value.len());
         self.state.copies(bytes)?;
         let mut value = String::new();
         value
             .try_reserve_exact(bytes)
-            .map_err(|_| "Computed overflow string reservation failed.")?;
+            .map_err(|_| "Computed style string reservation failed.")?;
         value.push_str(first);
         if let Some(second) = second {
             value.push(' ');

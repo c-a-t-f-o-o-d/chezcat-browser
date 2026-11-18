@@ -173,7 +173,7 @@ impl Geometry {
         Ok(())
     }
 
-    fn computed_snapshot(
+    pub(crate) fn computed_snapshot(
         &mut self,
         doc: &Document,
         forms: &Forms,
@@ -195,19 +195,6 @@ impl Geometry {
         }
         *host_work = host_work.checked_sub(1).ok_or("DOM work limit reached during computed style lookup.")?;
         Ok(self.computed_properties.as_ref().expect("computed cascade was installed"))
-    }
-
-    pub(crate) fn computed_overflow(
-        &mut self,
-        doc: &Document,
-        forms: &Forms,
-        node: usize,
-        host_work: &mut usize,
-        copy_work: &mut usize,
-    ) -> Result<Option<crate::css::Overflow>, String> {
-        self.computed_snapshot(doc, forms, host_work, copy_work)?
-            .read_overflow(node)
-            .map_err(|_| "Computed overflow unavailable within the CSS cascade limits.".into())
     }
 
     pub(crate) fn computed_custom_property(
