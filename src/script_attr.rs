@@ -306,7 +306,12 @@ impl Bridge<'_> {
     pub(super) fn remove_attribute_ns(&mut self, object: u32, args: &[Value]) -> Result<Value, String> {
         let node = self.attr_element_node(object)?;
         let local = self.text(args.get(1).ok_or("removeAttributeNS requires two arguments.")?)?;
-        if let Some(slot) = self.attribute_slot(node, namespace(args)?, &local)? {
+        let slot = self.attribute_slot(node, namespace(args)?, &local)?;
+        self.remove_attribute_at(node, slot)
+    }
+
+    pub(super) fn remove_attribute_at(&mut self, node: usize, slot: Option<usize>) -> Result<Value, String> {
+        if let Some(slot) = slot {
             let name = self.copy_attribute_name(node, slot)?;
             self.public_attribute(node, name, None)?;
         }

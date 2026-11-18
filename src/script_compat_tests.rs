@@ -1080,6 +1080,120 @@ fn class_list_handle_band_never_collides_with_last_event_identity() {
 }
 
 #[test]
+fn absent_attribute_removal_observes_ordered_qualified_and_expanded_names() {
+    let (mut doc, mut forms, mut page, outcome) = page(
+        "<body><div id=p stable-marker=keep></div><svg><rect id='shape' width='18'/></svg><input id=edit value=seed></body>",
+        &[r#"
+var p=document.getElementById('p'), edit=document.getElementById('edit'), shape=document.getElementById('shape');
+var detached=document.createElement('div');
+var protectedAttr=p.getAttributeNode('stable-marker');edit.value='edited';
+p.setAttributeNS('urn:first','m:flag','one');p.setAttributeNS('urn:second','m:flag','two');
+p.setAttributeNS(null,'MixedCase','exact');
+var first=p.getAttributeNodeNS('urn:first','flag'), second=p.getAttributeNodeNS('urn:second','flag');
+var mixed=p.getAttributeNodeNS(null,'MixedCase');
+if(p.removeAttribute('flag')!==undefined||p.getAttribute('M:FLAG')!=='one')throw 'qualified lookup';
+p.removeAttributeNS('urn:first','M:FLAG');p.removeAttribute('MixedCase');
+if(first.ownerElement!==p||mixed.ownerElement!==p)throw 'lookalike removed';
+p.removeAttribute('M:FLAG');
+if(first.ownerElement!==null||first.value!=='one'||p.getAttributeNode('m:flag')!==second)throw 'first qualified match';
+p.removeAttributeNS('urn:first','flag');p.removeAttributeNS('urn:second','flag');
+if(second.ownerElement!==null||second.value!=='two'||p.hasAttribute('m:flag'))throw 'expanded match';
+if(shape.getAttribute('WIDTH')!==null||shape.hasAttribute('WIDTH')||shape.removeAttribute('WIDTH')!==undefined||
+   shape.getAttribute('width')!=='18')throw 'SVG case';
+"#]);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    let commits = page.state.dom_commits;
+    let retained = page.state.retained;
+    for source in ["p.removeAttribute('STABLE-MARKER');", "p.removeAttributeNS(null,'stable-marker');"] {
+        let result = page.console_eval(&mut doc, &mut forms, source);
+        assert_eq!(result.errors, 1, "{source}: {}", page.report());
+    }
+    let result = page.console_eval(&mut doc, &mut forms, r#"
+if(p.removeAttribute('pending-state')!==undefined||p.removeAttribute('')!==undefined||
+   p.removeAttribute('not an attribute')!==undefined||p.removeAttributeNS(null,'pending-state')!==undefined)throw 'missing result';
+if(detached.removeAttribute('pending-state')!==undefined||detached.parentNode!==null||detached.ownerDocument!==document)throw 'detached receiver';
+if(protectedAttr.ownerElement!==p||protectedAttr.value!=='keep'||p.getAttributeNode('stable-marker')!==protectedAttr||
+   mixed.ownerElement!==p||edit.value!=='edited'||edit.defaultValue!=='seed'||edit.ownerDocument!==document)throw 'state or ownership';
+"#);
+    assert_eq!(result.errors, 0, "{}", page.report());
+    assert!(!result.layout_changed);
+    assert_eq!(page.state.dom_commits, commits);
+    assert_eq!(page.state.retained, retained);
+}
+
+#[test]
+fn absent_attribute_removal_checks_receivers_coercion_and_resource_state() {
+    let (mut doc, mut forms, mut page, outcome) = page(
+        "<body><div id=p title=before></div><img id=i><script id=s></script><script id=loaded src=original.js></script><link id=l><input id=e></body>",
+        &[r#"
+var p=document.getElementById('p'), img=document.getElementById('i'), script=document.getElementById('s'), link=document.getElementById('l');
+var loaded=document.getElementById('loaded'), src=loaded.getAttributeNode('src');
+var calls=0, key={toString:function(){calls++;p.setAttribute('title','new');return 'TITLE';}}, old=p.getAttributeNode('title');
+var remove=p.removeAttribute;
+if(remove.call(p,key)!==undefined||calls!==1||old.ownerElement!==null||old.value!=='new')throw 'present after conversion';
+var added;
+remove.call(p,{toString:function(){p.setAttribute('data-inserted','fresh');added=p.getAttributeNode('data-inserted');return 'DATA-INSERTED';}});
+if(p.hasAttribute('data-inserted')||added.ownerElement!==null||added.value!=='fresh')throw 'lookup before key conversion';
+var caught=0, marker={};
+try{remove.call(document,key);}catch(e){if(e.name==='TypeError')caught++;}
+try{remove.call(p);}catch(e){if(e.name==='TypeError')caught++;}
+try{remove.call(p,Symbol());}catch(e){if(e.name==='TypeError')caught++;}
+try{remove.call(p,{toString:function(){throw marker;}});}catch(e){if(e===marker)caught++;}
+if(calls!==1||caught!==4)throw 'conversion or receiver checks';
+"#]);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    let commits = page.state.dom_commits;
+    let retained = page.state.retained;
+    let result = page.console_eval(&mut doc, &mut forms, r#"
+img.removeAttribute('src');script.removeAttribute('src');link.removeAttribute('href');
+document.getElementById('e').removeAttribute('disabled');
+"#);
+    assert_eq!(result.errors, 0, "{}", page.report());
+    assert!(!result.layout_changed);
+    let refusal = page.console_eval(&mut doc, &mut forms, "loaded.removeAttribute('src');");
+    assert_eq!(refusal.errors, 1, "{}", page.report());
+    let after = page.console_eval(&mut doc, &mut forms,
+        "if(src.ownerElement!==loaded||src.value!=='original.js'||loaded.getAttributeNode('src')!==src)throw 'protected resource changed';");
+    assert_eq!(after.errors, 0, "{}", page.report());
+    assert_eq!(page.state.dom_commits, commits);
+    assert_eq!(page.state.retained, retained);
+    assert!(page.take_dynamic_scripts().is_empty() && page.take_dynamic_stylesheets().is_empty());
+    let (changed, removed, requests) = page.take_image_changes();
+    assert!(changed.is_empty() && removed.is_empty() && requests.is_empty());
+    assert!(!page.has_host_tasks() && !page.has_navigation_request());
+}
+
+#[test]
+fn absent_attribute_removal_preserves_lookup_limits_and_foreign_boundaries() {
+    let (mut doc, mut forms, mut page, outcome) = page("<p id=p title=keep></p><math id=m title=old></math>", &[]);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    let node = (0..doc.nodes.len()).find(|&n| doc.attr(n,"id") == Some("p")).unwrap();
+    let foreign = (0..doc.nodes.len()).find(|&n| doc.attr(n,"id") == Some("m")).unwrap();
+    let missing = Value::String("missing".into());
+    page.begin_job();
+    let mut bridge = Bridge { doc: &mut doc, forms: &mut forms, state: &mut page.state };
+    let commits = bridge.state.dom_commits;
+    bridge.state.copy_work = 0;
+    assert!(bridge.call(node_handle(node), "removeAttribute", std::slice::from_ref(&missing)).is_err());
+    bridge.state.copy_work = bridge.state.limits.copy_bytes;
+    bridge.state.host_work = 0;
+    assert!(bridge.call(node_handle(node), "removeAttribute", std::slice::from_ref(&missing)).is_err());
+    bridge.state.host_work = bridge.state.limits.host_work;
+    let limit = bridge.state.limits.host.string_bytes;
+    bridge.state.limits.host.string_bytes = 2;
+    assert!(bridge.call(node_handle(node), "removeAttribute", std::slice::from_ref(&missing)).is_err());
+    bridge.state.limits.host.string_bytes = limit;
+    assert!(bridge.call(node_handle(foreign), "removeAttribute", std::slice::from_ref(&missing)).is_err());
+    assert!(bridge.call(node_handle(foreign), "removeAttributeNS", &[Value::Null, missing.clone()]).is_err());
+    assert!(matches!(bridge.call(node_handle(node), "removeAttribute", &[missing]), Ok(Value::Undefined)));
+    assert_eq!(bridge.doc.attr(node,"title"), Some("keep"));
+    assert_eq!(bridge.state.dom_commits, commits);
+    assert!(bridge.call(node_handle(foreign), "removeAttribute", &[Value::String("data-absent".into())]).is_ok());
+    assert!(bridge.call(node_handle(foreign), "removeAttribute", &[Value::String("TITLE".into())]).is_ok());
+    assert_eq!(bridge.doc.attr(foreign,"title"), None);
+}
+
+#[test]
 fn remove_attribute_ns_matches_exact_local_names_and_preserves_detached_attr_values() {
     let (doc,_,page,outcome) = page("<p id=p title=old x:y=colon xmlns:x=raw></p>", &[r#"
 var p=document.getElementById('p'),a=p.getAttributeNode('title'),c=p.getAttributeNode('x:y');

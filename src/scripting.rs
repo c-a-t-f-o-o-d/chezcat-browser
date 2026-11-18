@@ -4834,9 +4834,21 @@ impl Host for Bridge<'_> {
             let count = if method == "setAttribute" { 2 } else { 1 };
             if args.len() < count { return Err("Wrong number of attribute arguments.".into()); }
             let text = self.text(&args[0])?;
-            self.state.copies(text.len())?;
-            let qualified = text.to_ascii_lowercase();
+            let namespace = self.doc.nodes[node].namespace;
+            // HTML qualified-name lookup folds ASCII case. Proven SVG names
+            // are exact. Keep the existing setAttribute admission path.
+            let qualified = if namespace == crate::html::Namespace::Svg && method != "setAttribute" {
+                text
+            } else {
+                self.state.copies(text.len())?;
+                text.to_ascii_lowercase()
+            };
             let slot = self.raw_attribute_slot(node, &qualified)?;
+            // Uncertain foreign parser contexts retain their existing raw
+            // mutation policy; only known element namespaces prove absence.
+            if method == "removeAttribute" && namespace.element_uri().is_some() {
+                return self.remove_attribute_at(node, slot);
+            }
             if matches!(method, "getAttribute" | "hasAttribute") {
                 if method == "hasAttribute" { return Ok(Value::Bool(slot.is_some())); }
                 let Some(slot) = slot else { return Ok(Value::Null); };
