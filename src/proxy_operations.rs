@@ -2,6 +2,10 @@
 //! https://tc39.es/ecma262/#sec-proxy-object-internal-methods-and-internal-slots
 use super::{Fault, Host, Ordinary, PropertyKey, Runtime, Value};
 
+#[cfg(test)]
+#[path = "proxy_own_descriptor_tests.rs"]
+mod proxy_own_descriptor_tests;
+
 impl Runtime {
     // An unsupported internal method must stop before any ordinary algorithm
     // can enumerate, return a descriptor from, or change the wrapper's storage.
@@ -204,7 +208,7 @@ mod tests {
         let mut runtime = Runtime::for_test();
         runtime
             .execute(
-                "var k=Symbol(), t={x:1,0:7,length:1}, h={}, p=new Proxy(t,h);t[k]=3;",
+                "var k=Symbol(), t={x:1,0:7,length:1}, h={getOwnPropertyDescriptor:function(){throw 'unsupported trap was invoked';}}, p=new Proxy(t,h);t[k]=3;",
                 &mut NoHost,
             )
             .unwrap();
@@ -259,6 +263,8 @@ mod tests {
         }
         runtime.begin_job();
         runtime.execute(r#"
+            delete h.getOwnPropertyDescriptor;
+            if(!Object.hasOwn(p,'x') || Object.getOwnPropertyDescriptor(p,k).value!==3)throw 'nullish forwarding';
             if(t.x!==1||t[k]!==3||t[0]!==7||t.length!==1||!Object.isExtensible(t)||
                 Object.getPrototypeOf(t)!==Object.prototype||Object.hasOwn(t,'newKey'))throw 'target changed';
             if(p.valueOf()!==p||Object.is(p,t)||Array.isArray(p))throw 'identity';

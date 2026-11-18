@@ -261,7 +261,7 @@ impl Runtime {
         )
     }
 
-    fn proxy_descriptor_forward(
+    pub(super) fn proxy_descriptor_forward(
         &mut self,
         handler: usize,
         name: &str,
@@ -269,7 +269,7 @@ impl Runtime {
     ) -> Result<(), Fault> {
         if self.proxy_method(handler, name, host)?.is_some() {
             return Err(Fault::new(format!(
-                "Proxy {name} trap is not implemented; no property was defined."
+                "Proxy {name} trap is not implemented."
             )));
         }
         Ok(())

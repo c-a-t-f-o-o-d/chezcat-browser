@@ -18,6 +18,12 @@ enum DescriptorTarget {
     GlobalBinding,
 }
 
+enum OwnPropertyQuery {
+    Descriptor,
+    Present,
+    Enumerable,
+}
+
 struct PropertyDescriptor {
     value: Option<Value>,
     enumerable: Option<bool>,
@@ -890,6 +896,37 @@ impl Runtime {
         self.ordinary_required(value).map(Some)
     }
 
+    // The supported Proxy endpoints have ordinary stored own descriptors.
+    // Read the requested fields only after the live trap lookup, which can
+    // change or delete the property even if it returns null or undefined.
+    fn proxy_own_property(
+        &mut self,
+        proxy: usize,
+        key: &PropertyKey,
+        query: OwnPropertyQuery,
+        host: &mut dyn Host,
+    ) -> Result<Value, Fault> {
+        self.with_proxy_operation(proxy, &Value::Undefined, None, |runtime, target, handler| {
+            runtime.proxy_descriptor_forward(handler, "getOwnPropertyDescriptor", host)?;
+            match query {
+                OwnPropertyQuery::Descriptor => match key {
+                    PropertyKey::String(name) => {
+                        runtime.own_descriptor(Ordinary::Object(target), name)
+                    }
+                    PropertyKey::Symbol(symbol) => {
+                        runtime.own_symbol_descriptor(Ordinary::Object(target), *symbol)
+                    }
+                },
+                OwnPropertyQuery::Present => {
+                    Ok(Value::Bool(runtime.stored_descriptor_property(target, key).is_some()))
+                }
+                OwnPropertyQuery::Enumerable => Ok(Value::Bool(
+                    runtime.stored_descriptor_property(target, key).is_some_and(|p| p.enumerable),
+                )),
+            }
+        })
+    }
+
     pub(super) fn own_descriptor(&mut self, object: Ordinary, name: &str) -> Result<Value, Fault> {
         self.property_name(name)?;
         let id = self.ordinary_id(object)?;
@@ -1659,6 +1696,11 @@ impl Runtime {
                 }
                 let key = self.copy_value(args.get(1).unwrap_or(&Value::Undefined))?;
                 let key = self.property_key(key, host)?;
+                if let (Value::Object(id), "getOwnPropertyDescriptor") = (first, method) {
+                    if self.object(*id)?.proxy.is_some() {
+                        return self.proxy_own_property(*id, &key, OwnPropertyQuery::Descriptor, host);
+                    }
+                }
                 let key = match key {
                     PropertyKey::Symbol(key) => {
                         if method == "getOwnPropertyDescriptor" {
@@ -2087,7 +2129,14 @@ impl Runtime {
         let key = self.property_key(key, host)?;
         Self::require_property_receiver(&this)?;
         if let Value::Object(id) = &this {
-            self.reject_unsupported_proxy_operation(*id, "getOwnPropertyDescriptor")?;
+            if self.object(*id)?.proxy.is_some() {
+                let query = if method == "propertyIsEnumerable" {
+                    OwnPropertyQuery::Enumerable
+                } else {
+                    OwnPropertyQuery::Present
+                };
+                return self.proxy_own_property(*id, &key, query, host);
+            }
         }
         let key = match key {
             PropertyKey::Symbol(key) => {
