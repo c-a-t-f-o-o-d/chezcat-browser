@@ -522,6 +522,9 @@ pub trait Host {
     fn indexed_for_each(&self, _object: u32, _method: &str) -> bool {
         false
     }
+    /// Only genuine, bounded indexed native collections may enter the lazy
+    /// Array iterator path. The returned owner must also match native access.
+    fn indexed_iteration_owner(&self, _object: u32) -> Option<u32> { None }
     fn argument_conversions(&self, _object: u32, _method: &str) -> &'static [(usize, bool)] {
         &[]
     }

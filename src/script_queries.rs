@@ -17,6 +17,13 @@ pub(super) fn node_list_index(handle: u32) -> Option<usize> {
 }
 
 impl Bridge<'_> {
+    pub(super) fn node_list_iteration_member(&self,handle:u32,property:&str)->bool {
+        // Iteration members and length use normal ordinary prototype lookup.
+        // Existing item/forEach and protected native indices retain their
+        // guarded routes; this does not expose other native collections.
+        self.node_list_receiver(handle) && matches!(property,"constructor"|"length"|"keys"|"values"|"entries")
+    }
+
     pub(super) fn node_list_receiver(&self, handle: u32) -> bool {
         node_list_index(handle).is_some_and(|index| index < self.state.node_lists.len())
     }

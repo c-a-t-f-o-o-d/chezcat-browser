@@ -1722,6 +1722,8 @@ impl Runtime {
                         self.ensure_native_expando(*handle,host,false)?;
                         if self.is_browser_global(*handle) {
                             self.window_keys(false, false, host)?
+                        } else if host.indexed_iteration_owner(*handle).is_some() {
+                            self.indexed_host_keys(*handle,false,false,host)?
                         } else if let Some(&id) = self.host_objects.get(handle) {
                             self.own_string_keys(id, false)?
                         } else {
