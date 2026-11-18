@@ -42,6 +42,10 @@ mod native_padding_tests;
 #[path = "layout_offset_parent_tests.rs"]
 mod offset_parent_tests;
 
+#[cfg(test)]
+#[path = "layout_intrinsic_text_tests.rs"]
+mod intrinsic_text_tests;
+
 fn native_button_padding(kind: Option<Kind>) -> bool {
     matches!(kind, Some(Kind::Button | Kind::Submit | Kind::Reset))
 }
@@ -2610,8 +2614,49 @@ impl Engine<'_> {
         }
     }
 
+    fn collapsed_text_intrinsic(&self, text: &str, style: &Style) -> Intrinsic {
+        // Keep the font's one-million-character shaping ceiling across the
+        // complete text node, rather than restarting it for every word.
+        let text = if text.len() > crate::text::MAX_SHAPED_CHARACTERS {
+            let end = text.char_indices()
+                .nth(crate::text::MAX_SHAPED_CHARACTERS)
+                .map_or(text.len(), |(end, _)| end);
+            &text[..end]
+        } else {
+            text
+        };
+        let advance = self.space_width(style);
+        let font = self.font_spec(style);
+        let (mut preferred, mut minimum, mut seen_word) = (0i32, 0i32, false);
+        // text()/word() shape each collapsed word independently and round its
+        // advance before adding a separately rounded space. Differences of
+        // rounded positions in a whole-string shape can be one pixel shorter,
+        // making a shrink-to-fit box wrap its own max-content estimate.
+        for word in text.split_ascii_whitespace() {
+            let width = font.as_ref().map_or_else(
+                || (word.chars().count().min(MAX_HEIGHT as usize) as i32).saturating_mul(advance),
+                |font| font.measure(word),
+            );
+            if seen_word {
+                preferred = preferred.saturating_add(advance);
+            }
+            preferred = preferred.saturating_add(width);
+            minimum = minimum.max(width);
+            seen_word = true;
+        }
+        let preferred = preferred.min(MAX_WIDTH);
+        Intrinsic {
+            preferred,
+            minimum: if style.white_space == WhiteSpace::NoWrap {
+                preferred
+            } else {
+                minimum.min(MAX_WIDTH)
+            },
+        }
+    }
+
     /// Intrinsic widths are cached once per node. This is a bounded approximation
-    /// to CSS min/max-content, using our fixed-width font and supported boxes.
+    /// to CSS min/max-content using the renderer's fonts and supported boxes.
     fn intrinsic(&mut self, node: usize, depth: usize) -> Intrinsic {
         if depth > MAX_DEPTH || self.measure_visits >= 40_000 {
             return Intrinsic::default();
@@ -2627,37 +2672,29 @@ impl Engine<'_> {
         }
         let mut value = match &self.doc.nodes[node].kind {
             NodeKind::Comment(_) | NodeKind::DocumentFragment => Intrinsic::default(),
+            NodeKind::Text(text) if matches!(style.white_space, WhiteSpace::Normal | WhiteSpace::NoWrap) => {
+                self.collapsed_text_intrinsic(text, &style)
+            }
             NodeKind::Text(text) => {
                 let advance = self.space_width(&style);
                 let shaped = self.font_spec(&style).map(|font| font.shape(text));
-                let (mut line, mut word, mut longest, mut preferred, mut space) =
-                    (0i32, 0i32, 0i32, 0i32, false);
+                let (mut line, mut word, mut longest, mut preferred) =
+                    (0i32, 0i32, 0i32, 0i32);
                 for (i, character) in text.chars().enumerate() {
-                    if matches!(style.white_space, WhiteSpace::Pre | WhiteSpace::PreWrap)
-                        && matches!(character, '\r' | '\n')
-                    {
+                    if matches!(character, '\r' | '\n') {
                         longest = longest.max(word);
                         preferred = preferred.max(line);
                         line = 0;
                         word = 0;
-                        space = false;
-                    } else if matches!(character, ' ' | '\t' | '\r' | '\n' | '\u{000c}') {
+                    } else if matches!(character, ' ' | '\t' | '\u{000c}') {
                         longest = longest.max(word);
                         word = 0;
-                        if matches!(style.white_space, WhiteSpace::Normal | WhiteSpace::NoWrap) {
-                            space = line != 0;
+                        line = line.saturating_add(if character == '\t' {
+                            4 * advance
                         } else {
-                            line = line.saturating_add(if character == '\t' {
-                                4 * advance
-                            } else {
-                                advance
-                            });
-                        }
+                            advance
+                        });
                     } else {
-                        if space {
-                            line = line.saturating_add(advance);
-                            space = false;
-                        }
                         let width = shaped
                             .as_ref()
                             .map_or(advance, |shape| shape.x(i + 1) - shape.x(i));
@@ -2668,7 +2705,7 @@ impl Engine<'_> {
                 preferred = preferred.max(line).min(MAX_WIDTH);
                 Intrinsic {
                     preferred,
-                    minimum: if matches!(style.white_space, WhiteSpace::Pre | WhiteSpace::NoWrap) {
+                    minimum: if style.white_space == WhiteSpace::Pre {
                         preferred
                     } else {
                         longest.max(word).min(MAX_WIDTH)
