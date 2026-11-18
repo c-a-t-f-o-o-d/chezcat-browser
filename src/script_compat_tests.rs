@@ -1884,7 +1884,7 @@ fn attr_removal_and_setters_keep_resource_control_and_inert_policy() {
     assert_eq!(outcome.errors, 0, "{}", page.report());
     let nodes: Vec<_> = ["p", "image", "link", "inert"].iter().map(|id| (0..doc.nodes.len()).find(|&n| doc.attr(n, "id") == Some(*id)).unwrap()).collect();
     let mut bridge = Bridge { doc: &mut doc, forms: &mut forms, state: &mut page.state };
-    for (node, name) in [(nodes[0], "value"), (nodes[0], "onclick"), (nodes[1], "src"), (nodes[2], "href")] {
+    for (node, name) in [(nodes[0], "type"), (nodes[0], "onclick"), (nodes[1], "src"), (nodes[2], "href")] {
         let value = bridge.call(node_handle(node), "getAttributeNode", &[Value::String(name.into())]).unwrap();
         let Value::Host(handle) = value else { panic!("expected real Attr") };
         let original = bridge.doc.attr(node, name).unwrap().to_owned();
@@ -1896,6 +1896,15 @@ fn attr_removal_and_setters_keep_resource_control_and_inert_policy() {
         assert_eq!(bridge.state.attributes[script_attr::index(handle).unwrap()].owner, Some(node));
     }
     assert!(bridge.call(node_handle(nodes[3]), "getAttributeNode", &[Value::String("title".into())]).is_err());
+    let input = node_handle(nodes[0]);
+    let Value::Host(value) = bridge.call(input, "getAttributeNode", &[Value::String("value".into())]).unwrap() else { panic!("missing checkable value Attr") };
+    bridge.set(value, "value", Value::String("changed".into())).unwrap();
+    assert_eq!(bridge.doc.attr(nodes[0], "value"), Some("changed"));
+    assert_eq!(bridge.forms.controls[&nodes[0]].value.text(), "changed");
+    bridge.call(input, "removeAttributeNode", &[Value::Host(value)]).unwrap();
+    assert_eq!(bridge.doc.attr(nodes[0], "value"), None);
+    assert_eq!(bridge.forms.controls[&nodes[0]].value.text(), "on");
+    assert_eq!(bridge.state.attributes[script_attr::index(value).unwrap()].owner, None);
 }
 
 #[test]

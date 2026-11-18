@@ -6785,10 +6785,10 @@ window.addEventListener('load',()=>{order+='-load';});"#],
             &[
                 "document.getElementById('f').id='other';",
                 "document.getElementById('first').setAttribute('id','f');",
-                "document.getElementById('input').setAttribute('value','changed');",
+                "document.getElementById('input').setAttribute('form','other');",
                 "document.getElementById('first').setAttribute('onclick','alert(1)');",
                 "document.getElementById('first').style.background='url(https://example.test/)';",
-                "document.getElementById('first').setAttribute('class','ready'); document.getElementById('out').textContent=document.getElementById('input').value;",
+                "var box=document.getElementById('input');if(box.value!=='keep'||box.form!==document.getElementById('f'))throw 'refused mutation changed control';box.setAttribute('value','changed');document.getElementById('first').setAttribute('class','ready');document.getElementById('out').textContent=box.value;",
             ],
         );
         assert_eq!(result.errors, 5, "{}", page.report());
@@ -6796,9 +6796,10 @@ window.addEventListener('load',()=>{order+='-load';});"#],
             forms.controls[&id(&doc, "input")].owner,
             Some(id(&doc, "f"))
         );
-        assert_eq!(doc.attr(id(&doc, "input"), "value"), Some("keep"));
+        assert_eq!(doc.attr(id(&doc, "input"), "form"), Some("f"));
+        assert_eq!(doc.attr(id(&doc, "input"), "value"), Some("changed"));
         assert_eq!(doc.attr(id(&doc, "first"), "class"), Some("ready"));
-        assert_eq!(text(&doc, id(&doc, "out")), "keep");
+        assert_eq!(text(&doc, id(&doc, "out")), "changed");
     }
 
     #[test]
