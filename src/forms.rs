@@ -1490,6 +1490,8 @@ mod buttons;
 pub(crate) use buttons::{button_caption_node, button_caption_work, validate_button_caption, ButtonAttributePlan};
 pub(crate) use text_inputs::InputPlan;
 pub(crate) use select_fragments::{fragment_checkbox_input, fragment_text_input, textarea_content, SelectFormPlan};
+#[path = "forms_textarea_clones.rs"]
+mod textarea_clones;
 
 #[cfg(test)]
 mod tests {
