@@ -153,7 +153,7 @@ impl Forms {
         }
         let bytes = self.text_payload(None)?;
         let (control, retained_bytes) = match kind {
-            Kind::Checkbox if live.is_none() => select_fragments::checkbox_control(doc, node, name, initial)?,
+            Kind::Checkbox if live.is_none() => select_fragments::fragment_editor_control(doc, node, kind, name, initial)?,
             Kind::Text => text_control(doc, node, name, initial, live)?,
             _ => return Err("Unsupported created INPUT admission.".into()),
         };

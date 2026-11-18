@@ -1,5 +1,5 @@
-//! Whole conventional select and finite text/owned checkbox INPUT subtrees share the native form model. Existing
-//! editors and selectedness are retained; prospective parent metadata is staged.
+//! Stage form ownership for supported select, input, button and textarea subtrees.
+//! Moving a whole control preserves its existing editor and selectedness.
 use super::*;
 
 struct SelectView<'a> { document: &'a Document, fragment: Option<(&'a Document, usize)> }
@@ -11,6 +11,14 @@ impl SelectView<'_> {
     fn attr(&self, node: usize, name: &str) -> Option<&str> { let (doc, node) = self.source(node); doc.attr(node, name) }
 }
 impl Bridge<'_> {
+    pub(super) fn owned_native_textarea(&self, node: usize) -> bool {
+        forms::textarea_content(self.doc, node).is_some()
+            && self.forms.controls.get(&node).is_some_and(|control| control.kind == Kind::TextArea)
+    }
+    pub(super) fn textarea_default_property(&self, object: u32, property: &str) -> bool {
+        property == "defaultValue" && self.attr_element_receiver(object)
+            && node_index(object).is_some_and(|node| self.owned_native_textarea(node))
+    }
     pub(super) fn owned_native_checkbox(&self,node:usize)->bool {
         forms::fragment_checkbox_input(self.doc, node)
             && self.forms.controls.get(&node).is_some_and(|control|control.kind==Kind::Checkbox)
@@ -58,7 +66,7 @@ impl Bridge<'_> {
         let mut affected = Vec::new();
         affected.try_reserve(self.forms.controls.len()).map_err(|_| "Select affected-control reservation failed.")?;
         for (&node, control) in &self.forms.controls {
-            if !matches!(control.kind,Kind::Select|Kind::Hidden|Kind::Text) && !self.native_button(node) && !self.owned_native_checkbox(node) { continue; }
+            if !matches!(control.kind,Kind::Select|Kind::Hidden|Kind::Text) && !self.native_button(node) && !self.owned_native_checkbox(node) && !self.owned_native_textarea(node) { continue; }
             let mut ancestor = Some(node);
             for _ in 0..128 {
                 let Some(index) = ancestor else { break; };
@@ -68,7 +76,7 @@ impl Bridge<'_> {
             }
         }
         let new_control = fragment.is_some_and(|(doc, _)| (1..doc.nodes.len()).any(|node|
-            tag(doc, node) == "select" || forms::fragment_text_input(doc, node) || forms::fragment_checkbox_input(doc, node)));
+            matches!(tag(doc, node), "select" | "textarea") || forms::fragment_text_input(doc, node) || forms::fragment_checkbox_input(doc, node)));
         if affected.is_empty() && !new_control && created_inputs.is_empty() && created_buttons.is_empty() {
             return Ok(forms::SelectFormPlan { additions: std::collections::BTreeMap::new(), metadata: Vec::new(), retained_bytes: 0 });
         }
@@ -85,6 +93,10 @@ impl Bridge<'_> {
                 copy = copy.saturating_add(name).saturating_add(initial.saturating_mul(6));
             }
             self.state.copies(copy)?;
+        }
+        if affected.iter().any(|node| self.forms.controls[node].kind == Kind::TextArea)
+            || fragment.is_some_and(|(doc, _)| (1..doc.nodes.len()).any(|node| tag(doc, node) == "textarea")) {
+            self.state.work(self.forms.default_scan_work())?;
         }
         let mut plan = self.forms.prepare_selects(fragment)?;
         if !created_inputs.is_empty() { self.forms.add_created_text_inputs(self.doc,&created_inputs,&mut plan)?; }
@@ -119,9 +131,10 @@ impl Bridge<'_> {
             let kind = self.forms.controls.get(&node).or_else(|| plan.additions.get(&node)).map(|control| control.kind);
             let button = view.tag(node) == "button" && matches!(kind,Some(Kind::Button|Kind::Submit|Kind::Reset));
             let checkbox = view.tag(node)=="input" && kind==Some(Kind::Checkbox);
-            let input = matches!(kind, Some(Kind::Hidden | Kind::Text)) || button || checkbox;
-            if (kind == Some(Kind::Text) || button || checkbox) && view.attr(node, "form").is_some() {
-                return Err("Moving text/checkbox INPUTs or BUTTONs with explicit form association is not implemented; no tree was changed.".into());
+            let textarea = kind == Some(Kind::TextArea);
+            let input = matches!(kind, Some(Kind::Hidden | Kind::Text | Kind::TextArea)) || button || checkbox;
+            if (kind == Some(Kind::Text) || textarea || button || checkbox) && view.attr(node, "form").is_some() {
+                return Err("Moving this native control with explicit form association is not implemented; no tree was changed.".into());
             }
             let mut ancestor = Some(node);
             let mut connected = false;
@@ -139,13 +152,13 @@ impl Bridge<'_> {
                         return Err(if kind == Some(Kind::Hidden) {
                             "Hidden input connection requires known HTML ancestry; no tree was changed."
                         } else {
-                            "Text INPUT connection requires known HTML ancestry; no tree was changed."
+                            "Native control connection requires known HTML ancestry; no tree was changed."
                         }.into());
                     }
                 }
                 let name = view.tag(index);
                 if index != node && (matches!(name, "head" | "script" | "style" | "template" | "iframe" | "object" | "datalist")
-                    || button && matches!(name,"select"|"option"|"optgroup"|"button")
+                    || (button || textarea) && matches!(name,"select"|"option"|"optgroup"|"button")
                     || name == "noscript" && self.doc.scripting_enabled) {
                     return Err("Native select connection in an inert context is not implemented.".into());
                 }
