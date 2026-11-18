@@ -623,6 +623,58 @@ document.title='element-expando-ok';
 }
 
 #[test]
+fn html_label_ordinary_properties_survive_connection_and_native_input_edits() {
+    let (doc, _, page, outcome) = page("<html><body><label id=parsed><input id=editor value=seed></label></body></html>", &[r#"
+        var parsed = document.getElementById('parsed'), editor = document.getElementById('editor');
+        var created = document.createElement('label'), key = Symbol('label state');
+        editor.value = 'edited';
+        function check(label) {
+            if (label._patchState !== undefined || '_patchState' in label || Object.hasOwn(label, '_patchState'))
+                throw 'missing label property';
+            if (label.inheritedLabel !== label || Object.hasOwn(label, 'inheritedLabel'))
+                throw 'inherited receiver';
+            label._patchState = editor;
+            Object.defineProperty(label, key, { get: function () { return this._patchState; } });
+            if (label[key] !== editor || !Object.hasOwn(label, '_patchState') || label.getAttribute('_patchState') !== null)
+                throw 'own state or accessor receiver';
+            if (!delete label._patchState || label[key] !== undefined) throw 'deletion';
+        }
+        Object.defineProperty(HTMLElement.prototype, 'inheritedLabel', {
+            get: function () { return this; }, configurable: true
+        });
+        check(parsed);
+        check(created);
+        delete HTMLElement.prototype.inheritedLabel;
+        created.localState = parsed;
+        document.body.appendChild(created);
+        if (created.localState !== parsed || created.ownerDocument !== document || editor.parentNode !== parsed ||
+            editor.value !== 'edited' || editor.defaultValue !== 'seed') throw 'connection changed state';
+        document.title = 'Label properties retained';
+    "#]);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    assert_eq!(doc.title, "Label properties retained");
+}
+
+#[test]
+fn html_label_native_members_stay_reserved() {
+    let (mut doc, mut forms, mut scripts, initial) = page(
+        "<label id=lbl for=field></label><input id=field>",
+        &["var label = document.getElementById('lbl');"],
+    );
+    assert_eq!(initial.errors, 0, "{}", scripts.report());
+    for member in ["control", "form", "htmlFor"] {
+        let source = format!("Object.defineProperty(label, '{member}', {{value: 1}});");
+        let result = scripts.console_eval(&mut doc, &mut forms, &source);
+        assert_eq!(result.errors, 1, "{member}: {}", scripts.report());
+    }
+    let retained = scripts.console_eval(&mut doc, &mut forms, r#"
+        if (Object.hasOwn(label,'control') || Object.hasOwn(label,'form') || Object.hasOwn(label,'htmlFor') ||
+            label.getAttribute('for') !== 'field') throw 'label association changed';
+    "#);
+    assert_eq!(retained.errors, 0, "{}", scripts.report());
+}
+
+#[test]
 fn native_element_expandos_first_descriptor_symbol_and_inspection_paths_agree() {
     let (doc,_,page,outcome)=page("<div id=a></div><span id=b></span><p id=c></p><img id=i>",&[r#"
 var a=document.getElementById('a'),b=document.getElementById('b'),c=document.getElementById('c');
