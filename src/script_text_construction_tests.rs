@@ -63,6 +63,7 @@ if(a.data!=='chosen'||b.data!=='9'||c.data!=='37'||extra.data!=='kept'||order!==
 var hits=0,marker={},failed={toString:function(){hits++;throw marker;}};
 "#,
     );
+    run(&mut doc,&mut forms,&mut page,"var undefinedHits=0,convertedUndefined=new T({toString:function(){undefinedHits++;return undefined;}});if(convertedUndefined.data!=='undefined'||undefinedHits!==1)throw 'object result undefined is a DOMString, not the optional argument default';");
     let before = (
         doc.nodes.len(),
         page.state.dom.created.len(),
@@ -131,4 +132,100 @@ if(text.assignedSlot!==null||Object.hasOwn(text,'assignedSlot'))throw 'descripto
 var form=document.getElementById('form'),field=document.getElementById('field');if(form.assignedSlot!==field||field.form!==form||E.get.call(form)!==null||field.value!=='kept')throw 'legacy form named-control precedence';
 "#,
     );
+}
+
+#[test]
+fn text_construction_replacement_setters_keep_receiver_value_and_native_state() {
+    let mut doc=crate::html::parse("<!doctype html><body><span id=span>Parsed</span><slot id=slot name=chosen><span id=fallback>Fallback</span></slot><form id=owner><input id=neighbor value=original></form>");
+    doc.scripting_enabled = true;
+    let mut forms = Forms::new(&doc);
+    let mut page = Page::for_test();
+    let source = crate::navigation::address(
+        "https://text-construction.test/setters",
+        &crate::navigation::Location::home(),
+    )
+    .unwrap();
+    page.set_location(&source);
+    page.set_resource_base(&source);
+    assert_eq!(
+        page.start(&mut doc, &mut forms, &[]).errors,
+        0,
+        "{}",
+        page.report()
+    );
+    let find = |name: &str| {
+        (0..doc.nodes.len())
+            .find(|&node| doc.attr(node, "id") == Some(name))
+            .unwrap()
+    };
+    let (neighbor, owner, slot) = (find("neighbor"), find("owner"), find("slot"));
+    forms.script_set_value(neighbor, "edited neighbor").unwrap();
+    {
+        let e = &mut forms.controls.get_mut(&neighbor).unwrap().value;
+        e.cursor = 5;
+        e.anchor = 2;
+        e.offset = 1;
+    }
+    let native = |forms: &Forms| {
+        let c = &forms.controls[&neighbor];
+        (
+            c.value.text(),
+            c.value.cursor,
+            c.value.anchor,
+            c.value.offset,
+            c.dirty_value,
+            c.owner,
+        )
+    };
+    let before = native(&forms);
+    assert_eq!(before.5, Some(owner));
+    let commits = page.state.dom_commits;
+    run(
+        &mut doc,
+        &mut forms,
+        &mut page,
+        r#"
+var span=document.getElementById('span'),slot=document.getElementById('slot'),text=span.firstChild,TP=Text.prototype,EP=Element.prototype,TD=Object.getOwnPropertyDescriptor(TP,'assignedSlot'),ED=Object.getOwnPropertyDescriptor(EP,'assignedSlot');
+if(text.nodeType!==3||text.data!=='Parsed'||text.ownerDocument!==document||slot.nodeName!=='SLOT'||slot.getAttribute('name')!=='chosen'||text.assignedSlot!==null||slot.assignedSlot!==null)throw 'actual Text/light SLOT positives';
+var value={kept:37},textCalls=0,slotCalls=0,textReceiver,textValue,slotReceiver,slotValue;
+Object.defineProperty(TP,'assignedSlot',{configurable:true,set:function(input){textCalls++;textReceiver=this;textValue=input;}});
+Object.defineProperty(EP,'assignedSlot',{configurable:true,set:function(input){slotCalls++;slotReceiver=this;slotValue=input;}});
+text.assignedSlot=value;
+if(textCalls!==1||textReceiver!==text||textValue!==value||Object.hasOwn(text,'assignedSlot'))throw 'actual Text replacement setter bypassed';
+slot.assignedSlot=value;
+if(slotCalls!==1||slotReceiver!==slot||slotValue!==value||Object.hasOwn(slot,'assignedSlot'))throw 'ordinary SLOT replacement setter bypassed or created own value';
+if(Object.getOwnPropertyDescriptor(TP,'assignedSlot').get!==TD.get||Object.getOwnPropertyDescriptor(EP,'assignedSlot').get!==ED.get||text.assignedSlot!==null||slot.assignedSlot!==null)throw 'adding a setter replaced the existing getter';
+Object.defineProperty(TP,'assignedSlot',{get:undefined});Object.defineProperty(EP,'assignedSlot',{get:undefined});
+if(text.assignedSlot!==undefined||slot.assignedSlot!==undefined)throw 'explicit setter-only descriptor returned a value';
+if(TD.get.call(text)!==null||ED.get.call(slot)!==null||text.data!=='Parsed'||slot.getAttribute('name')!=='chosen'||document.getElementById('neighbor').value!=='edited neighbor')throw 'author setter changed native slots/raw/editor';
+Object.defineProperty(TP,'assignedSlot',TD);Object.defineProperty(EP,'assignedSlot',ED);
+if(text.assignedSlot!==null||slot.assignedSlot!==null||textCalls!==1||slotCalls!==1)throw 'canonical getter restoration';
+delete EP.assignedSlot;span.assignedSlot=value;
+var own=Object.getOwnPropertyDescriptor(span,'assignedSlot');if(!own||own.value!==value||!own.writable||!own.enumerable||!own.configurable||span.assignedSlot!==value||ED.get.call(span)!==null)throw 'backed SPAN ordinary value after getter deletion';
+Object.defineProperty(EP,'assignedSlot',ED);if(span.assignedSlot!==value||ED.get.call(span)!==null)throw 'restored prototype ignored ordinary own value';delete span.assignedSlot;
+if(span.assignedSlot!==null||text.assignedSlot!==null||slot.assignedSlot!==null||text.data!=='Parsed'||text.parentNode!==span)throw 'canonical state after own deletion';
+"#,
+    );
+    assert_eq!(native(&forms), before);
+    assert_eq!(forms.text_default_value(neighbor).unwrap(), "original");
+    assert_eq!(doc.attr(neighbor, "value"), Some("original"));
+    assert_eq!(doc.attr(slot, "name"), Some("chosen"));
+    assert_eq!(page.state.dom_commits, commits);
+    run(&mut doc, &mut forms, &mut page,
+        "delete TP.assignedSlot; Object.defineProperty(EP,'assignedSlot',{value:23,writable:true,configurable:true});");
+    for source in ["text.assignedSlot=41;", "slot.assignedSlot=41;"] {
+        let out = page.console_eval(&mut doc, &mut forms, source);
+        assert_eq!(out.errors, 1, "{source}\n{}", page.report());
+        assert!(page.report().contains("own data property"), "{}", page.report());
+    }
+    run(&mut doc, &mut forms, &mut page, r#"
+if(Object.hasOwn(text,'assignedSlot')||Object.hasOwn(slot,'assignedSlot')||Object.hasOwn(TP,'assignedSlot')||EP.assignedSlot!==23)throw 'unsupported instance write changed an interface';
+Object.defineProperty(TP,'assignedSlot',TD);Object.defineProperty(EP,'assignedSlot',ED);
+"#);
+    run(&mut doc, &mut forms, &mut page, "if(text.unrelatedTextProperty!==undefined)throw 'unexpected Text field';");
+    let out = page.console_eval(&mut doc, &mut forms, "text.unrelatedTextProperty=17;");
+    assert_eq!(out.errors, 1, "{}", page.report());
+    run(&mut doc,&mut forms,&mut page,"if(text.unrelatedTextProperty!==undefined||text.assignedSlot!==null||slot.assignedSlot!==null||text.data!=='Parsed'||document.getElementById('neighbor').value!=='edited neighbor')throw 'unrelated Text property refusal changed native state';");
+    assert_eq!(native(&forms), before);
+    assert_eq!(page.state.dom_commits, commits);
 }

@@ -593,6 +593,11 @@ impl Runtime {
             );
         }
         if host.readonly_property(handle, &name) {
+            // A configurable interface getter may have been replaced. Use the
+            // current descriptor even when the receiver cannot store expandos.
+            if let Some(base) = self.host_lookup_tail(handle, &name, host)? {
+                return self.assign_inherited_property(base, name, value, Value::Host(handle), host);
+            }
             return if self.strict {
                 Err(Fault::exception(
                     "TypeError",

@@ -12,7 +12,7 @@ impl Runtime {
     pub(super) fn write_super_property(&mut self, base: Option<Ordinary>, receiver: Value, name: Box<str>, value: Value, host: &mut dyn Host) -> Result<(), Fault> {
         self.reject_foreign_window(&receiver, host)?;
         let base = base.ok_or_else(|| Fault::exception("TypeError", "A null super base has no properties."))?;
-        self.assign_super_property(base, name.into_string(), value, receiver, host)
+        self.assign_inherited_property(base, name.into_string(), value, receiver, host)
     }
 
     #[inline(never)]
