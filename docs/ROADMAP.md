@@ -59,6 +59,8 @@ wait for complete framework or video support.
 Snapshot: November 17, 2026, using public `main` at `e97dc85` and the linked PRs.
 DOM-06 includes measurements on `3456e67`, `5c89eea` and `5c22afd`. These changes
 are included in the combined `main` recheck on `25654fa`.
+The later selector candidate `02cd0f8` is integrated in `main` at `991cba3`.
+Computed-style candidate `63a2259` is integrated in `main` at `5c21400` through PR #62.
 PR pages carry changing review and CI status. Branch-only results are not results
 for `main` or for the published alpha.2 binary.
 
@@ -74,7 +76,7 @@ workloads, without framework-specific substitutes.
 | ✅&nbsp;Merged | <code>DOM&#8209;03</code> | **Native text INPUT fragments and retained editor state** | [PR #32](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/32) integrated real editing/reset, dirty/default values, neighboring controls, ownership, atomic refusals, and focus retirement. Its pinned modern jQuery fixture passes startup; full interaction remains blocked. |
 | ◻️&nbsp;Next | <code>DOM&#8209;04</code> | **Native Event own-property behavior** | Reproduce the trusted-input failure reported by PR #32; implement normal property lookup without weakening branded access. Recheck the unchanged modern jQuery input/timer workflow. |
 | ◻️&nbsp;Next | <code>DOM&#8209;05</code> | **DocumentFragment and subsequent legacy DOM boundaries** | Reduce the next failure reported by PR #32, then verify fragment insertion, tree identity, form state, and rollback. Preserve the unchanged legacy workload and any next blocker. |
-| ✅&nbsp;Merged | <code>DOM&#8209;06</code> | **Element selectors, siblings and NodeList iteration** | The unchanged Bootstrap 5.3.9 sample initializes at 1280/640 on combined `main` `25654fa` after [PR #53](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/53), [#55](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/55) and [#59](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/59). Its first trusted click reaches a selector syntax boundary before the dropdown opens. |
+| ✅&nbsp;Merged | <code>DOM&#8209;06</code> | **Element selectors, siblings and NodeList iteration** | Bootstrap initializes at 1280/640. [PR #60](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/60) clears its dropdown selector boundary on measured `02cd0f8`, integrated in `main` at `991cba3`. The first trusted click then reaches missing `getComputedStyle`. |
 
 ### CSS — Visible layout and color correctness
 
@@ -87,6 +89,7 @@ only their initial HTML paint or absence of script errors.
 | ◻️&nbsp;Investigate | <code>CSS&#8209;02</code> | **Alpha colors, including `rgba()`** | Establish the current parser/compositing boundary with an original reduction. Verify computed values, alpha composition, clipping, and painted output against a reference; do not assume every spelling is absent or supported. |
 | ◻️&nbsp;Ongoing | <code>CSS&#8209;03</code> | **Image, font, sizing, and input-layout defects** | Rank reproducible visible failures by shared impact; keep real dimensions, resource outcomes, paint, and hit testing consistent. Select the next finite scope from evidence. |
 | ✅&nbsp;Merged | <code>CSS&#8209;04</code> | **Native button padding** | [PR #54](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/54) integrates padding for button, submit and reset controls in `main` at `25654fa`. The loaded Bootstrap toggle measures 191×41 px at both widths on that main build. |
+| ✅&nbsp;Merged | <code>CSS&#8209;05</code> | **Live computed custom-property reads** | [PR #62](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/62) integrates at `5c21400`. Measured feature build `63a2259` passes 2,657 normal tests and 25 journeys locally and in CI. The unchanged Bootstrap sample advances to Popper's `node.toString()` boundary on its first trusted click at both widths. |
 
 ### JS & Frameworks — From startup to useful interaction
 
