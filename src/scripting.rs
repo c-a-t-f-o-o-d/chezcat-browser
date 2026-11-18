@@ -103,6 +103,11 @@ mod script_offset_parent;
 use script_offset_parent::Offset;
 #[path = "script_scroll_offsets.rs"]
 mod script_scroll_offsets;
+#[path = "script_transform.rs"]
+mod script_transform;
+#[cfg(test)]
+#[path = "script_translate_tests.rs"]
+mod translate_tests;
 use script_slottable::Slottable;
 
 #[path = "script_element_selectors.rs"]
@@ -2378,6 +2383,10 @@ impl Bridge<'_> {
             return Err(format!("Inline style exceeds {} KiB.", self.state.limits.host.string_bytes / 1024).into());
         }
         self.state.copies(style.len())?;
+        if name == "transform" {
+            let value = script_transform::specified(style, self.state)?;
+            return self.string(&value);
+        }
         let value = crate::css::declaration_items(style)
             .filter_map(|item| item.split_once(':'))
             .filter(|(key, _)| key.trim().eq_ignore_ascii_case(name))
@@ -2396,6 +2405,19 @@ impl Bridge<'_> {
         priority: &str,
     ) -> Result<(), String> {
         validate_css_value(name, value, self.state.limits.host.string_bytes)?;
+        let specified;
+        let value = if name == "transform" && !value.is_empty() {
+            if value.trim().is_empty() || !priority.is_empty() && !priority.eq_ignore_ascii_case("important") {
+                return Ok(());
+            }
+            specified = match script_transform::normalize(value, self.state)? {
+                Ok(value) => value,
+                Err(crate::css::TransformSyntax::Invalid) => return Ok(()),
+                Err(crate::css::TransformSyntax::Unsupported) => return Err("This transform exceeds the supported translation grammar.".into()),
+            };
+            specified.as_str()
+        } else {value};
+        let priority = if name == "transform" && value.is_empty() {""} else {priority};
         if !priority.is_empty() && !priority.eq_ignore_ascii_case("important") {
             return Err("CSS priority must be empty or important.".into());
         }
@@ -2404,6 +2426,11 @@ impl Bridge<'_> {
             return Err(format!("Inline style exceeds {} KiB.", self.state.limits.host.string_bytes / 1024).into());
         }
         self.state.copies(existing.len())?;
+        if name == "transform" && value.is_empty()
+            && matches!(script_transform::declaration(existing, self.state)?, script_transform::Declaration::Absent)
+        {
+            return Ok(());
+        }
         let mut style = String::new();
         for item in crate::css::declaration_items(existing).filter(|item| !item.trim().is_empty()) {
             if item
@@ -2615,6 +2642,7 @@ impl Host for Bridge<'_> {
     }
 
     fn string_setter(&self, object: u32, property: &str) -> bool {
+        if property == "transform" && (STYLE_BASE..DATASET_BASE).contains(&object) {return true;}
         if self.button_string_property(object,property) {return true;}
         if self.fragment_receiver(object) && matches!(property,"nodeValue"|"textContent") {return true;}
         if self.hidden_input_property(object,property) {return true;}
@@ -2659,6 +2687,14 @@ impl Host for Bridge<'_> {
             return if matches!(args.first(), None | Some(Value::Undefined)) { &[] } else { &[(0, true)] };
         }
         if object==WINDOW && method=="getComputedStyle" {return &[(1,true)];}
+        if (STYLE_BASE..DATASET_BASE).contains(&object) {
+            return match method {
+                "setProperty" if matches!(args.get(1), Some(Value::Null)) => &[(0, true), (2, true)],
+                "setProperty" => &[(0, true), (1, true), (2, true)],
+                "getPropertyValue" | "removeProperty" => &[(0, true)],
+                _ => &[],
+            };
+        }
         if self.computed_style_receiver(object) {return match method {"getPropertyValue"|"removeProperty"=>&[(0,true)],"setProperty"=>&[(0,true),(1,true),(2,true)],_=>&[]};}
         if script_element_selectors::operation(method).is_some() && self.element_selector_receiver(object) {
             return if self.is_frame_handle(object) {&[]} else {&[(0,true)]};
@@ -2736,7 +2772,9 @@ impl Host for Bridge<'_> {
 
     fn method_length(&self, object:u32, method:&str) -> Option<usize> {
         if object==WINDOW && method=="getComputedStyle" {return Some(1);}
-        if self.computed_style_receiver(object) {return match method {"getPropertyValue"|"removeProperty"=>Some(1),"setProperty"=>Some(2),_=>None};}
+        if self.computed_style_receiver(object) || (STYLE_BASE..DATASET_BASE).contains(&object) {
+            return match method { "getPropertyValue" | "removeProperty" => Some(1), "setProperty" => Some(2), _ => None };
+        }
         if object==DOCUMENT && method=="createDocumentFragment" {return Some(0);}
         if method==script_node_root::ROOT_METHOD && self.root_node_receiver(object) {return Some(0);}
         if object==DOCUMENT && method=="createComment" {return Some(1);}
@@ -2791,6 +2829,7 @@ impl Host for Bridge<'_> {
     fn event_path_snapshot(&mut self,event:u32)->Result<Vec<u32>,String>{self.copy_event_path(event)}
 
     fn nullable_string_argument(&self, object: u32, method: &str, index: usize) -> bool {
+        if (STYLE_BASE..DATASET_BASE).contains(&object) && method == "setProperty" && index == 2 { return true; }
         if object==WINDOW && method=="getComputedStyle" && index==1 {return true;}
         if object==DOCUMENT && matches!(method,"createAttributeNS"|"createElementNS") && index==0 {return true;}
         if object == HISTORY && method == "replaceState" && index == 2 { return true; }
@@ -2816,7 +2855,8 @@ impl Host for Bridge<'_> {
     }
 
     fn null_string_setter(&self, object: u32, property: &str) -> bool {
-        property == "value" && self.hidden_input_property(object,property)
+        property == "transform" && (STYLE_BASE..DATASET_BASE).contains(&object)
+            || property == "value" && self.hidden_input_property(object,property)
             || property == "value" && self.text_input_default_property(object,property)
             || property == "innerHTML" && self.attr_element_receiver(object)
             || property == "border" && node_index(object).is_some_and(|node|
@@ -2825,7 +2865,9 @@ impl Host for Bridge<'_> {
 
     fn required_arguments(&self, object: u32, method: &str) -> usize {
         if object==WINDOW && method=="getComputedStyle" {return 1;}
-        if self.computed_style_receiver(object) {return if method=="setProperty" {2} else if matches!(method,"getPropertyValue"|"removeProperty") {1} else {0};}
+        if self.computed_style_receiver(object) || (STYLE_BASE..DATASET_BASE).contains(&object) {
+            return match method { "setProperty" => 2, "getPropertyValue" | "removeProperty" => 1, _ => 0 };
+        }
         if script_element_selectors::operation(method).is_some() && self.element_selector_receiver(object) {return 1;}
         if matches!(method,"Event"|"UIEvent"|"MouseEvent"|"CustomEvent")&&self.event_target_interface(object) {return 1;}
         if method=="getModifierState"&&self.mouse_receiver(object) {return 1;}
@@ -4735,10 +4777,11 @@ impl Host for Bridge<'_> {
             let node = self.style_node(object)?;
             if method == "setProperty" && (2..=3).contains(&args.len()) {
                 let name = self.text(&args[0])?;
-                let name = css_name(&name)?;
-                let value = self.text(&args[1])?;
+                let name = css_declaration_name(&name)?;
+                let value = if matches!(args[1], Value::Null) {String::new()} else {self.text(&args[1])?};
                 let priority = args
                     .get(2)
+                    .filter(|v| !matches!(v, Value::Null | Value::Undefined))
                     .map(|v| self.text(v))
                     .transpose()?
                     .unwrap_or_default();
@@ -4746,7 +4789,7 @@ impl Host for Bridge<'_> {
                 return Ok(Value::Undefined);
             }
             if matches!(method, "getPropertyValue" | "removeProperty") && args.len() == 1 {
-                let name = css_name(&self.text(&args[0])?)?;
+                let name = css_declaration_name(&self.text(&args[0])?)?;
                 let value = self.get_style(node, &name)?;
                 if method == "removeProperty" {
                     self.set_style(node, &name, "", "")?;
@@ -4946,6 +4989,10 @@ fn prefix(text: &str, maximum: usize) -> &str {
     }
     &text[..end]
 }
+fn css_declaration_name(name: &str) -> Result<String, String> {
+    if name.eq_ignore_ascii_case("transform") {return Ok("transform".into());}
+    css_name(name)
+}
 fn css_name(name: &str) -> Result<String, String> {
     if name.len() > 64 {
         return Err("CSS property name exceeds 64 bytes.".into());
@@ -4962,6 +5009,7 @@ fn css_name(name: &str) -> Result<String, String> {
     if !matches!(
         css.as_str(),
         "display"
+            | "transform"
             | "overflow"
             | "position"
             | "inset"
@@ -5085,8 +5133,11 @@ fn validate_style(style: &str, string_limit: usize) -> Result<(), String> {
         let (name, value) = item
             .split_once(':')
             .ok_or("Style declaration needs a colon.")?;
-        let name = css_name(name.trim())?;
-        validate_css_value(&name, value.trim(), string_limit)?;
+        let name = css_declaration_name(name.trim())?;
+        // Priority is separate grammar. Keep the ordinary value guard on
+        // everything before a genuine trailing priority marker.
+        let value = if name == "transform" { crate::css::declaration_priority(value).0 } else { value.trim() };
+        validate_css_value(&name, value, string_limit)?;
     }
     if !items.complete() { return Err("Inline style has an unterminated string or function.".into()); }
     Ok(())

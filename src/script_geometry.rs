@@ -38,6 +38,9 @@ pub struct Geometry {
     viewport_scroll_height:i32,
     viewport_scroll_unavailable:bool,
     rects: Vec<Option<layout::BorderRect>>,
+    visual_rects: Vec<Option<layout::VisualBorderRect>>,
+    visual_unavailable: Vec<bool>,
+    transform_translations: Vec<Option<[f64; 2]>>,
     scroll: i32,
     viewport_max_scroll: i32,
     pending_scroll: Option<i32>,
@@ -69,6 +72,9 @@ impl Geometry {
             viewport_scroll_height:0,
             viewport_scroll_unavailable:false,
             rects: Vec::new(),
+            visual_rects: Vec::new(),
+            visual_unavailable: Vec::new(),
+            transform_translations: Vec::new(),
             scroll: 0,
             viewport_max_scroll: 0,
             pending_scroll: None,
@@ -163,6 +169,9 @@ impl Geometry {
         self.offset_unavailable = layout.offset_unavailable.clone();
         self.offset_parents.clone_from(&layout.offset_parents);
         self.rects = layout.border_rects.clone();
+        self.visual_rects.clone_from(&layout.visual_border_rects);
+        self.visual_unavailable.clone_from(&layout.visual_unavailable);
+        self.transform_translations.clone_from(&layout.transform_translations);
     }
 
     fn ensure_layout(&mut self, doc: &Document, forms: &Forms, host_work: &mut usize, copy_work: &mut usize) -> Result<(), String> {
@@ -178,9 +187,8 @@ impl Geometry {
             let mut budget = crate::css::CssBudget::new(host_work, copy_work);
             budget.work(layout::offset_parent_work(doc))?;
             budget.copies(layout::offset_parent_storage(doc.nodes.len()))?;
-            self.remaining -= 1;
             let checked = |node| live_checked(forms, node);
-            let layout = layout::build_viewport_with_fonts(
+            let layout = layout::build_viewport_with_fonts_budgeted(
                 doc,
                 self.width,
                 self.height,
@@ -189,7 +197,9 @@ impl Geometry {
                 &self.images,
                 Some(&checked),
                 &self.fonts,
-            );
+                &mut budget,
+            )?;
+            self.remaining -= 1;
             self.update_scroll_range(layout.height);
             self.boxes = Some(layout.client_boxes);
             self.computed_properties = Some(layout.computed_properties);
@@ -199,6 +209,9 @@ impl Geometry {
             self.offset_unavailable = layout.offset_unavailable;
             self.offset_parents = layout.offset_parents;
             self.rects = layout.border_rects;
+            self.visual_rects = layout.visual_border_rects;
+            self.visual_unavailable = layout.visual_unavailable;
+            self.transform_translations = layout.transform_translations;
         }
         Ok(())
     }
@@ -261,7 +274,17 @@ impl Geometry {
 
     pub fn bounding_rect(&mut self, doc: &Document, forms: &Forms, node: usize, host_work: &mut usize, copy_work: &mut usize) -> Result<[f64; 4], String> {
         self.ensure_layout(doc, forms, host_work, copy_work)?;
-        if let Some(rect) = self.rects.get(node).copied().flatten() {
+        if !self.visual_rects.is_empty() {
+            if self.visual_unavailable.get(node).copied().unwrap_or(true) {
+                return Err(format!("Visual bounding rectangle requires a measured transform and border box. Receiver node={node}."));
+            }
+            if let Some(rect) = self.visual_rects.get(node).copied().flatten() {
+                let zoom = f64::from(self.zoom);
+                let y = if rect.fixed { rect.y } else { rect.y - f64::from(self.scroll) };
+                return Ok([rect.x / zoom, y / zoom, rect.width / zoom, rect.height / zoom]);
+            }
+            return Ok([0.0; 4]);
+        } else if let Some(rect) = self.rects.get(node).copied().flatten() {
             let zoom = f64::from(self.zoom);
             let y = if rect.fixed { f64::from(rect.y) } else { f64::from(rect.y) - f64::from(self.scroll) };
             return Ok([f64::from(rect.x) / zoom, y / zoom, f64::from(rect.width) / zoom, f64::from(rect.height) / zoom]);
@@ -270,6 +293,27 @@ impl Geometry {
             return Err(format!("Bounding rectangle requires unmeasured inline, replaced, table-row or unsupported layout fragments. Receiver node={node}."));
         }
         Ok([0.0; 4])
+    }
+
+    pub(crate) fn resolved_transform(
+        &mut self, doc: &Document, forms: &Forms, node: usize,
+        host_work: &mut usize, copy_work: &mut usize,
+    ) -> Result<Option<[f64; 2]>, String> {
+        if self.computed_properties.is_none() {
+            self.ensure_layout(doc, forms, host_work, copy_work)?;
+        }
+        let snapshot = self.computed_properties.as_ref().ok_or("Missing computed style snapshot.")?;
+        match snapshot.read_transform(node) {
+            Ok(Some(crate::css::Transform::None)) => return Ok(None),
+            Ok(Some(crate::css::Transform::Translate {
+                x: crate::css::Length::Px(x), y: crate::css::Length::Px(y),
+            })) => return Ok(Some([f64::from(x), f64::from(y)])),
+            Ok(Some(crate::css::Transform::Translate { .. })) => {}
+            _ => return Err("Computed transform unavailable within the CSS cascade limits.".into()),
+        }
+        self.ensure_layout(doc, forms, host_work, copy_work)?;
+        self.transform_translations.get(node).copied().flatten().map(Some)
+            .ok_or_else(|| "Computed translation requires a measured reference box.".into())
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -348,6 +392,36 @@ fn offset_parent_budget_refusal_preserves_the_available_rebuild() {
     assert_eq!((work, copies), (0, 0));
     assert_eq!(read(&mut geometry, &mut work, &mut copies).unwrap(), Some(id("outer")));
     assert_eq!(geometry.remaining, 0);
+}
+
+#[cfg(test)]
+#[test]
+fn translated_geometry_budget_refusal_preserves_the_rebuild_and_scroll_state() {
+    let doc = crate::html::parse("<html><body style='margin:0'><div id='box' style='width:80px;height:40px;transform:translate(25%,50%)'></div></body></html>");
+    let node = (0..doc.nodes.len()).find(|&node| doc.attr(node, "id") == Some("box")).unwrap();
+    let forms = Forms::new(&doc);
+    let fresh = || Geometry::new(320, 200, 1.0, &HashMap::new(), HashMap::new(), &Book::empty())
+        .with_limits(Limits { layouts_per_job: 1 });
+    let read = |g: &mut Geometry, work: &mut usize, copies: &mut usize| {
+        g.bounding_rect(&doc, &forms, node, work, copies)
+    };
+    let mut probe = fresh();
+    let (mut work, mut copies) = (1_000_000, 1_000_000);
+    assert_eq!(read(&mut probe, &mut work, &mut copies).unwrap(), [20.0, 20.0, 80.0, 40.0]);
+    let (needed_work, needed_copies) = (1_000_000 - work, 1_000_000 - copies);
+    for (mut work, mut copies) in [(needed_work - 1, needed_copies), (needed_work, needed_copies - 1)] {
+        let mut geometry = fresh();
+        geometry.set_scroll(17);
+        assert!(read(&mut geometry, &mut work, &mut copies).is_err());
+        assert!(geometry.boxes.is_none() && geometry.computed_properties.is_none());
+        assert!(geometry.visual_rects.is_empty() && geometry.transform_translations.is_empty());
+        assert_eq!((geometry.remaining, geometry.scroll, geometry.pending_scroll), (1, 17, None));
+        let (mut work, mut copies) = (needed_work, needed_copies);
+        assert_eq!(read(&mut geometry, &mut work, &mut copies).unwrap(), [20.0, 20.0, 80.0, 40.0]);
+        assert_eq!((work, copies, geometry.remaining, geometry.scroll), (0, 0, 0, 0));
+        assert_eq!(geometry.take_scroll_request(), Some(0));
+        assert_eq!(read(&mut geometry, &mut work, &mut copies).unwrap(), [20.0, 20.0, 80.0, 40.0]);
+    }
 }
 
 #[cfg(test)]

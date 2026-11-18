@@ -179,10 +179,13 @@ fn computed_custom_readback_incomplete_snapshot_is_indeterminate_and_names_share
         false,
         vec![Some(Overflow::default())],
         vec![Some(Position::Static)],
+        vec![Some(Transform::None)],
+        false,
     );
     assert_eq!(snapshot.read(0, "--absent"), Err(ComputedStyleUnavailable));
     assert_eq!(snapshot.read_overflow(0), Err(ComputedStyleUnavailable));
     assert_eq!(snapshot.read_position(0), Err(ComputedStyleUnavailable));
+    assert_eq!(snapshot.read_transform(0), Err(ComputedStyleUnavailable));
     for name in ["--bs-position", "--Case", "--é"] {
         assert!(computed_custom_property_name(name));
     }
