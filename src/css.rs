@@ -8,8 +8,11 @@ pub use media::{Hover, MediaEnvironment};
 mod custom_properties;
 #[path="css_computed_style.rs"]
 mod computed_style;
-pub(crate) use computed_style::{CascadeOutput, ComputedCustomProperties, ComputedStyleUnavailable, CssBudget};
+pub(crate) use computed_style::{CascadeOutput, ComputedProperties, ComputedStyleUnavailable, CssBudget};
 pub(crate) fn computed_custom_property_name(name: &str) -> bool { custom_properties::custom_name(name) }
+#[path="css_overflow.rs"]
+mod overflow;
+pub use overflow::{Overflow, OverflowValue};
 
 use crate::html::{Document, NodeKind};
 
@@ -273,9 +276,8 @@ pub enum LineHeight {
 pub struct Style {
     pub display: Display,
     pub position: Position,
-    /// The initial overflow subset clips both axes at the padding box.
-    /// Scroll containers and independent overflow-x/y are not implemented.
-    pub overflow_hidden: bool,
+    /// Computed physical axes; scrollbars and scroll APIs are separate.
+    pub overflow: Overflow,
     /// Physical offsets: top, right, bottom, left.
     pub inset: [Length; 4],
     pub color: u32,
@@ -336,7 +338,7 @@ impl Default for Style {
         Self {
             display: Display::Inline,
             position: Position::Static,
-            overflow_hidden: false,
+            overflow: Overflow::default(),
             inset: [Length::Auto; 4],
             color: 0x26364a,
             background: None,
@@ -672,10 +674,10 @@ pub(crate) fn compute_with_environment(
     checked: Option<&dyn Fn(usize)->Option<bool>>,
     environment: Option<MediaEnvironment>,
 ) -> Vec<Style> {
-    compute_with_environment_and_custom_properties(doc, external, checked, environment).styles
+    compute_with_environment_and_properties(doc, external, checked, environment).styles
 }
 
-pub(crate) fn compute_with_environment_and_custom_properties(
+pub(crate) fn compute_with_environment_and_properties(
     doc: &Document,
     external: &HashMap<usize, String>,
     checked: Option<&dyn Fn(usize) -> Option<bool>>,
@@ -685,7 +687,7 @@ pub(crate) fn compute_with_environment_and_custom_properties(
     compute_cascade(doc, external, checked, environment, None).expect("unbudgeted CSS cascade")
 }
 
-pub(crate) fn compute_with_environment_and_custom_properties_budgeted(
+pub(crate) fn compute_with_environment_and_properties_budgeted(
     doc: &Document,
     external: &HashMap<usize, String>,
     checked: Option<&dyn Fn(usize) -> Option<bool>>,
@@ -774,6 +776,7 @@ fn compute_cascade(
     let mut variables = vec![custom_properties::Variables::default(); doc.nodes.len()];
     let mut eligible = vec![false; doc.nodes.len()];
     let mut complete = true;
+    let mut overflow_known = vec![[true; 2]; doc.nodes.len()];
     let mut variable_budget = custom_properties::Budget::default();
     let mut budget = MAX_MATCH_STEPS;
     let mut root_font_size = INITIAL_FONT_SIZE;
@@ -787,6 +790,7 @@ fn compute_cascade(
             .cloned()
             .unwrap_or_default();
         let inherited_variables = parents[index].and_then(|parent|variables.get(parent)).cloned().unwrap_or_default();
+        let parent_overflow_known = parents[index].map_or([true; 2], |parent| overflow_known[parent]);
         variables[index] = inherited_variables.clone();
         if inert[index]
             || doc.scripting_enabled
@@ -966,7 +970,13 @@ fn compute_cascade(
         variables[index] = if let Some(meter) = meter.as_deref_mut() { meter.variables(&mut variable_budget, cascade)? } else { cascade(&mut variable_budget) };
         for (_, declaration) in applicable {
             if let Some(meter) = meter.as_deref_mut() { meter.source(declaration.name.len().saturating_add(declaration.value.len()))?; }
-            let mut apply_box = |budget: &mut custom_properties::Budget| custom_properties::apply_box(&mut style,&parent,declaration,&variables[index],budget);
+            let mut apply_box = |budget: &mut custom_properties::Budget| {
+                if custom_properties::apply_overflow(&mut style,&parent,declaration,&variables[index],budget,&mut overflow_known[index],parent_overflow_known) {
+                    true
+                } else {
+                    custom_properties::apply_box(&mut style,&parent,declaration,&variables[index],budget)
+                }
+            };
             let applied = if let Some(meter) = meter.as_deref_mut() { meter.variables(&mut variable_budget, apply_box)? } else { apply_box(&mut variable_budget) };
             if !applied {
                 apply(&mut style, &parent, declaration);
@@ -976,13 +986,16 @@ fn compute_cascade(
         // its used value is this element's final foreground, independent of
         // declaration order. Existing foreground and border policy is unchanged.
         if style.background_current_color {style.background=Some(style.color);}
+        style.overflow.computed_availability(&mut overflow_known[index]);
+        style.overflow = style.overflow.computed();
         if tag == "html" {
             root_font_size = style.font_size;
             style.root_font_size = root_font_size;
         }
         computed[index] = style;
     }
-    Ok(CascadeOutput { styles: computed, custom_properties: ComputedCustomProperties::new(variables, eligible, complete) })
+    let overflows = computed.iter().zip(overflow_known).map(|(style, known)| known.iter().all(|known| *known).then_some(style.overflow)).collect();
+    Ok(CascadeOutput { styles: computed, computed_properties: ComputedProperties::new(variables, eligible, complete, overflows) })
 }
 
 fn prefix(text: &str, maximum: usize) -> &str {
@@ -2731,12 +2744,7 @@ fn apply(style: &mut Style, parent: &Style, declaration: &Declaration) {
             "initial" | "unset" => style.position = Position::Static,
             _ => {}
         },
-        "overflow" => match value.as_str() {
-            "hidden" => style.overflow_hidden = true,
-            "visible" | "initial" | "unset" => style.overflow_hidden = false,
-            "inherit" => style.overflow_hidden = parent.overflow_hidden,
-            _ => {}
-        },
+        "overflow" | "overflow-x" | "overflow-y" => { overflow::apply(style, parent, &declaration.name, &value); }
         "inset" => {
             if value == "inherit" {
                 style.inset = parent.inset;
@@ -3870,14 +3878,14 @@ mod tests {
         let doc = crate::html::parse("<div id=parent style='overflow:hidden'><div id=normal>N</div><div id=inherited style='overflow:inherit'>I</div><div id=reset style='overflow:hidden;overflow:unset'>R</div><div id=invalid style='overflow:hidden;overflow:potato'>X</div></div>");
         let styles = super::compute(&doc, &std::collections::HashMap::new());
         for (id, expected) in [
-            ("parent", true),
-            ("normal", false),
-            ("inherited", true),
-            ("reset", false),
-            ("invalid", true),
+            ("parent", OverflowValue::Hidden),
+            ("normal", OverflowValue::Visible),
+            ("inherited", OverflowValue::Hidden),
+            ("reset", OverflowValue::Visible),
+            ("invalid", OverflowValue::Hidden),
         ] {
             let node = doc.nodes.iter().position(|node| matches!(&node.kind, crate::html::NodeKind::Element { id: Some(value), .. } if value == id)).unwrap();
-            assert_eq!(styles[node].overflow_hidden, expected, "{id}");
+            assert_eq!(styles[node].overflow, Overflow { x: expected, y: expected }, "{id}");
         }
     }
     use super::*;
@@ -4193,7 +4201,7 @@ mod tests {
         assert_eq!(changed[index("panel")].max_height, Some(Length::Px(0.0)));
         assert_ne!(changed[index("label")].color, 0x636363);
         assert_eq!(changed[index("other")].max_height, Some(Length::Rem(14.0)));
-        assert!(changed[index("panel")].overflow_hidden);
+        assert_eq!(changed[index("panel")].overflow, Overflow { x: OverflowValue::Hidden, y: OverflowValue::Hidden });
         assert_eq!(changed[on].margin[0], Length::Px(7.0));
         assert_eq!(changed[off].margin[0], Length::Px(0.0));
     }
@@ -4496,3 +4504,7 @@ mod font_size_variable_tests;
 #[cfg(test)]
 #[path="css_computed_style_tests.rs"]
 mod computed_style_tests;
+
+#[cfg(test)]
+#[path="css_overflow_tests.rs"]
+mod overflow_tests;

@@ -1,4 +1,4 @@
-//! Shared, immutable custom-property readback from the rendering cascade.
+//! Shared, immutable computed-property readback from the rendering cascade.
 use super::*;
 use std::rc::Rc;
 
@@ -6,22 +6,25 @@ use std::rc::Rc;
 pub(crate) struct ComputedStyleUnavailable;
 
 #[derive(Clone)]
-pub(crate) struct ComputedCustomProperties(Rc<Snapshot>);
+pub(crate) struct ComputedProperties(Rc<Snapshot>);
 struct Snapshot {
     variables: Vec<custom_properties::Variables>,
     eligible: Vec<bool>,
     complete: bool,
+    overflows: Vec<Option<Overflow>>,
 }
-impl ComputedCustomProperties {
+impl ComputedProperties {
     pub(super) fn new(
         variables: Vec<custom_properties::Variables>,
         eligible: Vec<bool>,
         complete: bool,
+        overflows: Vec<Option<Overflow>>,
     ) -> Self {
         Self(Rc::new(Snapshot {
             variables,
             eligible,
             complete,
+            overflows,
         }))
     }
     pub(crate) fn read(
@@ -42,11 +45,30 @@ impl ComputedCustomProperties {
             .ok_or(ComputedStyleUnavailable)?
             .read(name)
     }
+    pub(crate) fn read_overflow(
+        &self,
+        node: usize,
+    ) -> Result<Option<Overflow>, ComputedStyleUnavailable> {
+        let eligible = self.0.eligible.get(node).ok_or(ComputedStyleUnavailable)?;
+        if !eligible {
+            return Ok(None);
+        }
+        if !self.0.complete {
+            return Err(ComputedStyleUnavailable);
+        }
+        self.0
+            .overflows
+            .get(node)
+            .copied()
+            .flatten()
+            .map(Some)
+            .ok_or(ComputedStyleUnavailable)
+    }
 }
 
 pub(crate) struct CascadeOutput {
     pub styles: Vec<Style>,
-    pub custom_properties: ComputedCustomProperties,
+    pub computed_properties: ComputedProperties,
 }
 
 /// Borrow the current script job counters, including on an unsuccessful read.

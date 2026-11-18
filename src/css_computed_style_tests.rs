@@ -5,7 +5,7 @@ fn node(doc: &Document, id: &str) -> usize {
         .find(|&node| doc.attr(node, "id") == Some(id))
         .unwrap()
 }
-fn read<'a>(snapshot: &'a ComputedCustomProperties, node: usize, name: &str) -> &'a str {
+fn read<'a>(snapshot: &'a ComputedProperties, node: usize, name: &str) -> &'a str {
     snapshot.read(node, name).unwrap().unwrap().trim()
 }
 
@@ -17,9 +17,9 @@ fn computed_custom_readback_uses_real_external_inline_priority_and_resolved_inhe
         node(&doc, "sheet"),
         "#child{--external:present;--Priority:external!important}".into(),
     );
-    let result = compute_with_environment_and_custom_properties(&doc, &external, None, None);
+    let result = compute_with_environment_and_properties(&doc, &external, None, None);
     let child = node(&doc, "child");
-    let values = &result.custom_properties;
+    let values = &result.computed_properties;
     assert_eq!(read(values, child, "--Priority"), "inline");
     assert_eq!(read(values, child, "--external"), "present");
     assert_eq!(read(values, child, "--x"), "9px");
@@ -36,18 +36,18 @@ fn computed_custom_readback_uses_real_external_inline_priority_and_resolved_inhe
 #[test]
 fn computed_custom_readback_respects_initial_inherit_unset_and_ordinary_specificity() {
     let doc = crate::html::parse("<style>#parent{--v:parent} div{--v:tag} .choice{--v:class} #child{--v:id;--v:later} #initial{--v:initial} #inherit{--v:inherit} #unset{--v:unset}</style><div id=parent><div id=child class=choice></div><div id=initial></div><div id=inherit></div><div id=unset></div></div>");
-    let result = compute_with_environment_and_custom_properties(&doc, &HashMap::new(), None, None);
+    let result = compute_with_environment_and_properties(&doc, &HashMap::new(), None, None);
     assert_eq!(
-        read(&result.custom_properties, node(&doc, "child"), "--v"),
+        read(&result.computed_properties, node(&doc, "child"), "--v"),
         "later"
     );
     assert_eq!(
-        result.custom_properties.read(node(&doc, "initial"), "--v"),
+        result.computed_properties.read(node(&doc, "initial"), "--v"),
         Ok(None)
     );
     for id in ["inherit", "unset"] {
         assert_eq!(
-            read(&result.custom_properties, node(&doc, id), "--v"),
+            read(&result.computed_properties, node(&doc, id), "--v"),
             "parent"
         );
     }
@@ -68,17 +68,17 @@ fn computed_custom_readback_uses_actual_fractional_media_and_live_checkedness() 
             hover: Hover::Hover,
         });
         let state = |node| (node == check).then_some(live);
-        let result = compute_with_environment_and_custom_properties(
+        let result = compute_with_environment_and_properties(
             &doc,
             &HashMap::new(),
             Some(&state),
             environment,
         );
         assert_eq!(
-            read(&result.custom_properties, target, "--viewport"),
+            read(&result.computed_properties, target, "--viewport"),
             viewport
         );
-        assert_eq!(read(&result.custom_properties, target, "--check"), checked);
+        assert_eq!(read(&result.computed_properties, target, "--check"), checked);
     }
 }
 
@@ -96,18 +96,18 @@ fn computed_custom_readback_has_no_detached_or_inert_style_and_reports_blocked_m
             value: (0..257).map(|n| format!("--x{n}:value;")).collect(),
         });
     }
-    let result = compute_with_environment_and_custom_properties(&doc, &HashMap::new(), None, None);
-    assert_eq!(result.custom_properties.read(detached, "--v"), Ok(None));
+    let result = compute_with_environment_and_properties(&doc, &HashMap::new(), None, None);
+    assert_eq!(result.computed_properties.read(detached, "--v"), Ok(None));
     assert_eq!(
-        result.custom_properties.read(node(&doc, "inert"), "--v"),
+        result.computed_properties.read(node(&doc, "inert"), "--v"),
         Ok(None)
     );
     assert_eq!(
-        result.custom_properties.read(blocked, "--v"),
+        result.computed_properties.read(blocked, "--v"),
         Err(ComputedStyleUnavailable)
     );
     assert_eq!(
-        result.custom_properties.read(doc.nodes.len(), "--v"),
+        result.computed_properties.read(doc.nodes.len(), "--v"),
         Err(ComputedStyleUnavailable)
     );
 }
@@ -119,7 +119,7 @@ fn computed_custom_readback_shares_job_counters_and_never_returns_a_partial_budg
     let mut work = 64_000_000;
     let mut copies = 64 * 1024 * 1024;
     let start = work;
-    let result = compute_with_environment_and_custom_properties_budgeted(
+    let result = compute_with_environment_and_properties_budgeted(
         &doc,
         &external,
         None,
@@ -128,7 +128,7 @@ fn computed_custom_readback_shares_job_counters_and_never_returns_a_partial_budg
     )
     .unwrap();
     assert_eq!(
-        read(&result.custom_properties, node(&doc, "child"), "--alias"),
+        read(&result.computed_properties, node(&doc, "child"), "--alias"),
         "4px"
     );
     assert_eq!(
@@ -140,7 +140,7 @@ fn computed_custom_readback_shares_job_counters_and_never_returns_a_partial_budg
     assert!(used > doc.nodes.len());
     let mut shared_work = used * 2 - 1;
     let mut shared_copies = 64 * 1024 * 1024;
-    compute_with_environment_and_custom_properties_budgeted(
+    compute_with_environment_and_properties_budgeted(
         &doc,
         &external,
         None,
@@ -148,7 +148,7 @@ fn computed_custom_readback_shares_job_counters_and_never_returns_a_partial_budg
         &mut CssBudget::new(&mut shared_work, &mut shared_copies),
     )
     .unwrap();
-    assert!(compute_with_environment_and_custom_properties_budgeted(
+    assert!(compute_with_environment_and_properties_budgeted(
         &doc,
         &external,
         None,
@@ -159,7 +159,7 @@ fn computed_custom_readback_shares_job_counters_and_never_returns_a_partial_budg
     assert_eq!(shared_work, 0);
     let mut work = 64_000_000;
     let mut copies = 0;
-    assert!(compute_with_environment_and_custom_properties_budgeted(
+    assert!(compute_with_environment_and_properties_budgeted(
         &doc,
         &external,
         None,
@@ -173,12 +173,14 @@ fn computed_custom_readback_shares_job_counters_and_never_returns_a_partial_budg
 #[test]
 fn computed_custom_readback_incomplete_snapshot_is_indeterminate_and_names_share_the_finite_grammar(
 ) {
-    let snapshot = ComputedCustomProperties::new(
+    let snapshot = ComputedProperties::new(
         vec![custom_properties::Variables::default()],
         vec![true],
         false,
+        vec![Some(Overflow::default())],
     );
     assert_eq!(snapshot.read(0, "--absent"), Err(ComputedStyleUnavailable));
+    assert_eq!(snapshot.read_overflow(0), Err(ComputedStyleUnavailable));
     for name in ["--bs-position", "--Case", "--é"] {
         assert!(computed_custom_property_name(name));
     }
