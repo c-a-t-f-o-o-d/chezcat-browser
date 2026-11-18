@@ -305,6 +305,7 @@ pub struct BorderRect {
 }
 
 pub struct Layout {
+    pub(crate) custom_properties: css::ComputedCustomProperties,
     pub runs: Vec<TextRun>,
     pub items: Vec<PaintItem>,
     pub anchors: Vec<(String, i32)>,
@@ -597,6 +598,18 @@ struct Engine<'a> {
     inline_context: Option<usize>,
 }
 
+/// Scripts and renderer use the document's full media viewport. Standalone
+/// layouts know the dimensions, but have no primary-input device policy.
+pub(crate) fn viewport_style_environment(
+    doc: &Document, width: i32, height: i32, zoom: f32,
+) -> css::MediaEnvironment {
+    doc.media_environment.unwrap_or_else(|| {
+        let mut environment = css::MediaEnvironment::desktop_viewport(width, height, zoom);
+        environment.hover = css::Hover::Unknown;
+        environment
+    })
+}
+
 #[cfg(test)]
 pub fn layout(doc: &Document, width: i32) -> Layout {
     build(doc, width, 1.0, &HashMap::new(), &HashMap::new())
@@ -664,15 +677,11 @@ pub fn build_viewport_with_fonts(
     } else {
         1.0
     };
-    // Standalone layout knows its viewport but has no primary-input policy.
-    // A real App/loader Document supplies its full media viewport explicitly.
-    let environment=doc.media_environment.or_else(|| {
-        let mut env=css::MediaEnvironment::desktop_viewport(width,height,zoom);
-        env.hover=css::Hover::Unknown;
-        Some(env)
-    });
-    let styles=css::compute_with_environment(doc,external_styles,checked,environment);
+    let environment = viewport_style_environment(doc, width, height, zoom);
+    let css::CascadeOutput { styles, custom_properties } =
+        css::compute_with_environment_and_custom_properties(doc, external_styles, checked, Some(environment));
     let mut page = Layout {
+        custom_properties,
         runs: Vec::new(),
         items: Vec::new(),
         anchors: Vec::new(),

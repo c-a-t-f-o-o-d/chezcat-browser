@@ -37,6 +37,8 @@ mod script_node_root;
 mod script_document_fragments;
 #[path = "script_timezone.rs"]
 mod script_timezone;
+#[path = "script_computed_style.rs"]
+mod script_computed_style;
 use dom_tree::DomState;
 #[path = "script_attr.rs"]
 mod script_attr;
@@ -363,6 +365,7 @@ struct State {
     detached_images: HashSet<usize>,
     detached_nodes: HashSet<usize>,
     node_lists: Vec<queries::NodeList>,
+    computed_styles: Vec<script_computed_style::Declaration>,
     node_list_references: usize,
     attributes: Vec<script_attr::Attr>,
     declined_images: usize,
@@ -439,6 +442,7 @@ impl State {
             detached_images: HashSet::new(),
             detached_nodes: HashSet::new(),
             node_lists: Vec::new(),
+            computed_styles: Vec::new(),
             node_list_references: 0,
             attributes: Vec::new(),
             declined_images: 0,
@@ -798,11 +802,12 @@ impl Page {
             "clearTimeout",
             "requestAnimationFrame",
             "cancelAnimationFrame",
+            "getComputedStyle",
             "addEventListener",
             "removeEventListener",
             "dispatchEvent",
         ] {
-            if matches!(name, "setTimeout" | "clearTimeout" | "requestAnimationFrame" | "cancelAnimationFrame") {
+            if matches!(name, "setTimeout" | "clearTimeout" | "requestAnimationFrame" | "cancelAnimationFrame" | "getComputedStyle") {
                 runtime
                     .define_global_operation(
                         name,
@@ -2422,6 +2427,7 @@ impl Host for Bridge<'_> {
     fn event_target_interface(&self,window:u32)->bool {window==WINDOW || self.frame_context(window).is_some()}
     fn node_interface_constants(&self,window:u32)->Option<&'static [(&'static str,u16)]> {self.event_target_interface(window).then_some(dom_tree::NODE_CONSTANTS)}
     fn instance_ancestry(&self, object:u32) -> Option<crate::javascript::NativeAncestry> {
+        if let Some(window)=self.computed_style_owner(object) {return Some(crate::javascript::NativeAncestry {window,constructor:None});}
         if self.node_list_receiver(object) {return Some(crate::javascript::NativeAncestry {window:WINDOW,constructor:Some((WINDOW,"NodeList"))});}
         if let Some(window)=self.event_owner(object) {
             // Subclass immediate prototypes stay opaque; this is their genuine
@@ -2520,6 +2526,7 @@ impl Host for Bridge<'_> {
         else {self.ordinary_lookup_tail(object)}
     }
     fn native_access_owner(&self, object: u32) -> Option<u32> {
+        if let Some(owner)=self.computed_style_owner(object) {return Some(owner);}
         if let Some(owner)=self.event_owner(object) {return Some(owner);}
         if self.event_target_interface(object) {return Some(object);}
         if let Some(owner)=self.standalone_target_owner(object) {return Some(owner);}
@@ -2596,6 +2603,8 @@ impl Host for Bridge<'_> {
     }
 
     fn argument_conversions(&self, object: u32, method: &str) -> &'static [(usize, bool)] {
+        if object==WINDOW && method=="getComputedStyle" {return &[(1,true)];}
+        if self.computed_style_receiver(object) {return match method {"getPropertyValue"|"removeProperty"=>&[(0,true)],"setProperty"=>&[(0,true),(1,true),(2,true)],_=>&[]};}
         if script_element_selectors::operation(method).is_some() && self.element_selector_receiver(object) {
             return if self.is_frame_handle(object) {&[]} else {&[(0,true)]};
         }
@@ -2671,6 +2680,8 @@ impl Host for Bridge<'_> {
     }
 
     fn method_length(&self, object:u32, method:&str) -> Option<usize> {
+        if object==WINDOW && method=="getComputedStyle" {return Some(1);}
+        if self.computed_style_receiver(object) {return match method {"getPropertyValue"|"removeProperty"=>Some(1),"setProperty"=>Some(2),_=>None};}
         if object==DOCUMENT && method=="createDocumentFragment" {return Some(0);}
         if method==script_node_root::ROOT_METHOD && self.root_node_receiver(object) {return Some(0);}
         if object==DOCUMENT && method=="createComment" {return Some(1);}
@@ -2696,6 +2707,8 @@ impl Host for Bridge<'_> {
     }
 
     fn native_method_owner(&self, object:u32, method:&str) -> Option<u32> {
+        if object==WINDOW && method=="getComputedStyle" {return Some(WINDOW);}
+        if self.computed_style_receiver(object) {return self.computed_style_owner(object);}
         if self.event_target_interface(object)&&method=="\0NodeList.get.length" {return Some(object);}
         if self.event_target_interface(object)&&script_element_selectors::operation(method).is_some() {return Some(object);}
         if self.event_target_interface(object)&&script_element_siblings::operation(method).is_some() {return Some(object);}
@@ -2721,6 +2734,7 @@ impl Host for Bridge<'_> {
     fn event_path_snapshot(&mut self,event:u32)->Result<Vec<u32>,String>{self.copy_event_path(event)}
 
     fn nullable_string_argument(&self, object: u32, method: &str, index: usize) -> bool {
+        if object==WINDOW && method=="getComputedStyle" && index==1 {return true;}
         if object==DOCUMENT && matches!(method,"createAttributeNS"|"createElementNS") && index==0 {return true;}
         if object == HISTORY && method == "replaceState" && index == 2 { return true; }
         if self.named_map_receiver(object) { return method == "getNamedItemNS" && index == 0; }
@@ -2731,6 +2745,7 @@ impl Host for Bridge<'_> {
     fn validate_argument_prefix(&self, object: u32, method: &str, next_index: usize, args: &[Value])
         -> Result<(), (&'static str, String)> {
         if object==WINDOW && method=="cancelAnimationFrame" && (!self.state.enabled || !self.doc.scripting_enabled) {return Err(("SecurityError","Animation capability is unavailable while scripting is disabled.".into()));}
+        if object==WINDOW && method=="getComputedStyle" && next_index==1 {self.validate_computed_target(args.first())?;}
         self.validate_event_prefix(object, method, next_index, args)
     }
     fn native_reference_arguments(&self,object:u32,method:&str)->&'static [usize] {
@@ -2752,6 +2767,8 @@ impl Host for Bridge<'_> {
     }
 
     fn required_arguments(&self, object: u32, method: &str) -> usize {
+        if object==WINDOW && method=="getComputedStyle" {return 1;}
+        if self.computed_style_receiver(object) {return if method=="setProperty" {2} else if matches!(method,"getPropertyValue"|"removeProperty") {1} else {0};}
         if script_element_selectors::operation(method).is_some() && self.element_selector_receiver(object) {return 1;}
         if matches!(method,"Event"|"UIEvent"|"MouseEvent"|"CustomEvent")&&self.event_target_interface(object) {return 1;}
         if method=="getModifierState"&&self.mouse_receiver(object) {return 1;}
@@ -2818,6 +2835,7 @@ impl Host for Bridge<'_> {
         method: &str,
         args: &[Value],
     ) -> Result<(), (&'static str, String)> {
+        if object==WINDOW && method=="getComputedStyle" || script_computed_style::index(object).is_some() {return self.validate_computed_call(object,method,args);}
         if method=="NodeList" && self.event_target_interface(object) {return Err(("TypeError","Illegal constructor for this native interface.".into()));}
         if method=="\0NodeList.get.length"&&!self.node_list_receiver(object) {return Err(("TypeError","NodeList length getter requires a genuine accessible NodeList.".into()));}
         let method=if let Some(operation)=script_element_selectors::operation(method) {
@@ -3042,6 +3060,7 @@ impl Host for Bridge<'_> {
     }
 
     fn method(&self, object: u32, property: &str) -> Option<&'static str> {
+        if self.computed_style_receiver(object) {return match property {"getPropertyValue"=>Some("getPropertyValue"),"setProperty"=>Some("setProperty"),"removeProperty"=>Some("removeProperty"),_=>None};}
         if self.node_list_iteration_member(object,property) {return None;}
         // Named form controls use the native field path; other genuine
         // Elements use the canonical prototype. Neither may fall through to
@@ -3108,6 +3127,7 @@ impl Host for Bridge<'_> {
     }
 
     fn accepts_receiver(&self, object: u32, method: &str, receiver: u32) -> bool {
+        if self.computed_style_receiver(object) {return self.computed_style_receiver(receiver);}
         if self.event_target_interface(object)&&method=="\0NodeList.get.length" {return self.node_list_receiver(receiver);}
         if self.event_target_interface(object)&&script_element_selectors::operation(method).is_some() {return self.element_selector_receiver(receiver);}
         if self.event_target_interface(object) {
@@ -3199,6 +3219,11 @@ impl Host for Bridge<'_> {
 
     fn global_operation_receiver(&self, object: u32, method: &str, receiver: &Value)
         -> Option<Result<u32, (&'static str, String)>> {
+        if object==WINDOW && method=="getComputedStyle" {return Some(match receiver {
+            Value::Null|Value::Undefined|Value::Host(WINDOW)=>Ok(WINDOW),
+            Value::Host(handle) if self.frame_context(*handle).is_some()=>Err(("NotSupportedError","Computed style for a child Window has no renderer binding.".into())),
+            _=>Err(("TypeError","getComputedStyle requires a Window receiver.".into())),
+        });}
         if object != WINDOW || !matches!(method, "requestAnimationFrame" | "cancelAnimationFrame") { return None; }
         Some(match receiver {
             Value::Null | Value::Undefined | Value::Host(WINDOW) => Ok(WINDOW),
@@ -3506,6 +3531,7 @@ impl Host for Bridge<'_> {
     }
 
     fn has(&mut self, object: u32, property: &str) -> Result<bool, String> {
+        if script_computed_style::index(object).is_some() {self.state.work(1)?;return if self.computed_style_receiver(object) {Ok(self.method(object,property).is_some())} else {Err("Invalid computed declaration receiver.".into())};}
         if self.node_list_iteration_member(object,property) {self.state.work(1)?;return Ok(false);}
         if self.element_selector_member(object,property) {self.state.work(1)?;return Ok(false);}
         if self.element_sibling_member(object,property) {self.state.work(1)?;return Ok(false);}
@@ -3800,6 +3826,7 @@ impl Host for Bridge<'_> {
 
     fn get(&mut self, object: u32, property: &str) -> Result<Value, String> {
         self.state.work(1)?;
+        if script_computed_style::index(object).is_some() {return Err(format!("Computed declaration property {property:?} is not implemented; use getPropertyValue for custom properties."));}
         if self.node_list_iteration_member(object,property)&&property!="length" {return Ok(Value::Undefined);}
         if self.element_selector_member(object,property) {return Ok(Value::Undefined);}
         if self.root_node_member(object,property) {return Ok(Value::Undefined);}
@@ -4124,6 +4151,7 @@ impl Host for Bridge<'_> {
     }
 
     fn set(&mut self, object: u32, property: &str, value: Value) -> Result<(), String> {
+        if script_computed_style::index(object).is_some() {return Err("Computed style declarations are read-only.".into());}
         if self.button_set(object,property,&value)? {return Ok(());}
         if self.text_input_set(object,property,&value)? {return Ok(());}
         if self.hidden_input_set(object,property,&value)? {return Ok(());}
@@ -4368,6 +4396,8 @@ impl Host for Bridge<'_> {
     }
 
     fn call(&mut self, object: u32, method: &str, args: &[Value]) -> Result<Value, String> {
+        if object==WINDOW && method=="getComputedStyle" {return self.create_computed_style(args);}
+        if script_computed_style::index(object).is_some() {return if method=="getPropertyValue" {self.computed_property_value(object,args)} else {Err("Computed style declarations are read-only.".into())};}
         if method=="\0NodeList.get.length" {self.state.work(1)?;return self.node_list_get(object,"length");}
         let method=if let Some(operation)=script_element_selectors::operation(method) {
             self.validate_element_selector_receiver(object).map_err(|(_,message)|message)?;
@@ -4974,6 +5004,14 @@ mod compatibility_tests;
 #[cfg(test)]
 #[path = "script_child_nodes_tests.rs"]
 mod script_child_nodes_tests;
+
+#[cfg(test)]
+#[path = "script_computed_style_tests.rs"]
+mod script_computed_style_tests;
+
+#[cfg(test)]
+#[path = "script_computed_style_protocol_tests.rs"]
+mod script_computed_style_protocol_tests;
 
 #[cfg(test)]
 #[path = "script_selector_negation_tests.rs"]
