@@ -1367,7 +1367,9 @@
         "viewport": [1280, 800],
         "result": "The native input and paint controls passed. ReactDOM initialization stopped at 223:36 on listener-object registration before a component mounted.",
         "listener_source": "4ef9112f902249fde75d808aaa36038deace2432",
-        "listener_result": "ReactDOM passed its object-listener probe. A scheduled callback stopped on input.constructor at 23:83 during initialization. The component did not mount."
+        "listener_result": "ReactDOM passed its object-listener probe. A scheduled callback stopped on input.constructor at 23:83 during initialization. The component did not mount.",
+        "input_interface_source": "7dda376481e725d0f5ab895d97c137d927404d5c",
+        "input_interface_result": "The scheduled callback advanced to 27:75 and stopped while writing input.defaultChecked. The component did not mount. A separate App passed the native constructor, value and checked descriptor, dispatch and receiver checks."
       }
     },
     {

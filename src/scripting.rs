@@ -3951,7 +3951,7 @@ impl Host for Bridge<'_> {
                 .controls
                 .get(&node)
                 .is_some_and(|control| control.kind == Kind::Select),
-            "checked" => self.input_receiver(object),
+            "checked" | "defaultChecked" => self.input_receiver(object),
             _ => {
                 matches!(
                     property,
@@ -4258,6 +4258,9 @@ impl Host for Bridge<'_> {
             "form" if self.forms.controls.contains_key(&node) => Ok(self.forms.controls[&node]
                 .owner
                 .map_or(Value::Null, |owner| Value::Host(node_handle(owner)))),
+            "defaultChecked" if self.input_receiver(object) => {
+                Ok(Value::Bool(self.doc.attr(node, "checked").is_some()))
+            }
             "checked" | "value" | "selectedIndex" => {
                 let control = self
                     .forms
@@ -4485,6 +4488,9 @@ impl Host for Bridge<'_> {
             }
             "hidden" | "disabled" => {
                 self.attribute(node, property, value.truthy().then(String::new))
+            }
+            "defaultChecked" if self.input_receiver(object) => {
+                self.attribute(node, "checked", value.truthy().then(String::new))
             }
             "checked" => {
                 self.state.work(self.forms.controls.len())?;

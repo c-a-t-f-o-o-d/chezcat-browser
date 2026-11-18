@@ -250,6 +250,7 @@ impl Runtime {
                 for (key, getter, setter) in [
                     ("value", "\0HTMLInputElement.get.value", "\0HTMLInputElement.set.value"),
                     ("checked", "\0HTMLInputElement.get.checked", "\0HTMLInputElement.set.checked"),
+                    ("defaultChecked", "\0HTMLInputElement.get.defaultChecked", "\0HTMLInputElement.set.defaultChecked"),
                 ] {
                     self.define_node_attribute(prototype, window, key, getter, Some(setter))?;
                 }

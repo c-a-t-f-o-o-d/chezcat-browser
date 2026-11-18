@@ -136,6 +136,67 @@ fn input_checkedness_noncheckable_state_attributes_and_reset_preserve_editor_and
 }
 
 #[test]
+fn input_default_checked_reflects_presence_without_dirtying_live_controls() {
+    let (mut doc, mut forms, mut page) = fixture();
+    let neighbor = editor(&forms, id(&doc, "neighbor"));
+    eval(&mut doc, &mut forms, &mut page, r#"
+        var descriptor=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'defaultChecked');
+        if(!descriptor.enumerable||!descriptor.configurable||!('defaultChecked' in text)||
+           Object.getOwnPropertyDescriptor(text,'defaultChecked')!==undefined)throw 'input descriptor';
+        var getDefault=descriptor.get,setDefault=descriptor.set;
+        text.setAttribute('checked','raw');
+        if(!getDefault.call(text)||text.getAttribute('checked')!=='raw')throw 'raw read';
+        var retained=text.getAttributeNode('checked'),calls=0;
+        var truthy={valueOf:function(){calls++;throw 'conversion';},toString:function(){calls++;throw 'conversion';}};
+        if(setDefault.call(text,truthy)!==undefined||calls||text.getAttributeNode('checked')!==retained||
+            retained.value!==''||!text.checked)throw 'boolean reflection';
+        text.defaultChecked=0;
+        if(text.defaultChecked||text.checked||retained.ownerElement!==null)throw 'pristine removal';
+        box.checked=false;box.defaultChecked=false;box.defaultChecked=true;
+        if(box.checked||!box.defaultChecked||box.getAttribute('checked')!=='')throw 'dirty checkbox';
+        r2.defaultChecked=true;
+        if(!r1.defaultChecked||r1.checked||!r2.checked)throw 'pristine radio exclusion';
+        var wrong=0;
+        try{getDefault.call(document.body);}catch(e){if(e instanceof TypeError)wrong++;}
+        try{setDefault.call({},truthy);}catch(e){if(e instanceof TypeError)wrong++;}
+        if(wrong!==2||calls)throw 'receiver';
+    "#);
+    assert_eq!(editor(&forms, id(&doc, "neighbor")), neighbor);
+    assert!(!forms.controls[&id(&doc, "text")].dirty_checked);
+    forms.reset(id(&doc, "f"));
+    eval(&mut doc, &mut forms, &mut page,
+        "if(!box.checked||!box.defaultChecked||text.checked||text.defaultChecked)throw 'reset';");
+}
+
+#[test]
+fn input_default_checked_keeps_namespaces_and_fresh_type_choice_independent() {
+    let (mut doc, mut forms, mut page) = fixture();
+    let count = forms.controls.len();
+    eval(&mut doc, &mut forms, &mut page, r#"
+        var fresh=document.createElement('input');fresh.id='fresh-default';
+        fresh.setAttributeNS('urn:example:metadata','x:checked','metadata');
+        fresh.setAttributeNS(null,'CHECKED','uppercase');
+        if(fresh.defaultChecked||fresh.checked)throw 'foreign attribute';
+        fresh.defaultChecked='false';
+        if(!fresh.defaultChecked||!fresh.checked||fresh.getAttributeNS(null,'checked')!==''||
+            fresh.getAttributeNS(null,'CHECKED')!=='uppercase')throw 'null namespace';
+        fresh.defaultChecked=null;
+        if(fresh.checked||fresh.defaultChecked||fresh.getAttributeNS('urn:example:metadata','checked')!=='metadata')
+            throw 'independent removal';
+    "#);
+    assert_eq!(forms.controls.len(), count);
+    eval(&mut doc, &mut forms, &mut page,
+        "fresh.type='checkbox';if(fresh.value!=='on'||fresh.defaultChecked||fresh.checked)throw 'type choice';");
+    let node = id(&doc, "fresh-default");
+    page.state.host_work = 0;
+    assert!(Bridge { doc: &mut doc, forms: &mut forms, state: &mut page.state }
+        .set(node_handle(node), "defaultChecked", Value::Bool(true)).is_err());
+    assert!(doc.attr(node, "checked").is_none());
+    assert!(!forms.controls[&node].checked);
+    assert!(!forms.controls[&node].dirty_checked);
+}
+
+#[test]
 fn input_checkedness_checkbox_radio_defaults_and_native_activation_keep_special_behavior() {
     let (mut doc, mut forms, mut page) = fixture();
     let kept = editor(&forms, id(&doc, "neighbor"));

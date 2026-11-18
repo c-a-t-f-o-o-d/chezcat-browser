@@ -8,13 +8,15 @@ pub(super) fn accessor(operation: &str) -> Option<(&'static str, bool)> {
         "\0HTMLInputElement.set.value" => Some(("value", true)),
         "\0HTMLInputElement.get.checked" => Some(("checked", false)),
         "\0HTMLInputElement.set.checked" => Some(("checked", true)),
+        "\0HTMLInputElement.get.defaultChecked" => Some(("defaultChecked", false)),
+        "\0HTMLInputElement.set.defaultChecked" => Some(("defaultChecked", true)),
         _ => None,
     }
 }
 
 impl Bridge<'_> {
     pub(super) fn input_accessor_member(&self, object: u32, name: &str) -> bool {
-        matches!(name, "value" | "checked") && self.input_receiver(object)
+        matches!(name, "value" | "checked" | "defaultChecked") && self.input_receiver(object)
     }
 
     pub(super) fn validate_input_accessor(
