@@ -23,6 +23,10 @@ impl Bridge<'_> {
         forms::fragment_checkbox_input(self.doc, node)
             && self.forms.controls.get(&node).is_some_and(|control|control.kind==Kind::Checkbox)
     }
+    pub(super) fn owned_native_radio(&self,node:usize)->bool {
+        forms::native_radio_input(self.doc,node)
+            && self.forms.controls.get(&node).is_some_and(|control|control.kind==Kind::Radio)
+    }
     pub(super) fn owned_fragment_text_input(&self, node: usize) -> bool {
         forms::fragment_text_input(self.doc, node)
             && self.forms.controls.get(&node).is_some_and(|control| control.kind == Kind::Text)
@@ -66,7 +70,7 @@ impl Bridge<'_> {
         let mut affected = Vec::new();
         affected.try_reserve(self.forms.controls.len()).map_err(|_| "Select affected-control reservation failed.")?;
         for (&node, control) in &self.forms.controls {
-            if !matches!(control.kind,Kind::Select|Kind::Hidden|Kind::Text) && !self.native_button(node) && !self.owned_native_checkbox(node) && !self.owned_native_textarea(node) { continue; }
+            if !matches!(control.kind,Kind::Select|Kind::Hidden|Kind::Text) && !self.native_button(node) && !self.owned_native_checkbox(node) && !self.owned_native_radio(node) && !self.owned_native_textarea(node) { continue; }
             let mut ancestor = Some(node);
             for _ in 0..128 {
                 let Some(index) = ancestor else { break; };
@@ -78,7 +82,7 @@ impl Bridge<'_> {
         let new_control = fragment.is_some_and(|(doc, _)| (1..doc.nodes.len()).any(|node|
             matches!(tag(doc, node), "select" | "textarea") || forms::fragment_text_input(doc, node) || forms::fragment_checkbox_input(doc, node)));
         if affected.is_empty() && !new_control && created_inputs.is_empty() && created_buttons.is_empty() {
-            return Ok(forms::SelectFormPlan { additions: std::collections::BTreeMap::new(), metadata: Vec::new(), retained_bytes: 0 });
+            return Ok(forms::SelectFormPlan { additions: std::collections::BTreeMap::new(), metadata: Vec::new(), radio_checked: Vec::new(), retained_bytes: 0 });
         }
         let extra = fragment.map_or(0, |(doc, _)| doc.nodes.len().saturating_sub(1));
         if fragment.is_some_and(|(_, base)| base != self.doc.nodes.len()) { return Err("Select fragment identity base changed.".into()); }
@@ -131,9 +135,10 @@ impl Bridge<'_> {
             let kind = self.forms.controls.get(&node).or_else(|| plan.additions.get(&node)).map(|control| control.kind);
             let button = view.tag(node) == "button" && matches!(kind,Some(Kind::Button|Kind::Submit|Kind::Reset));
             let checkbox = view.tag(node)=="input" && kind==Some(Kind::Checkbox);
+            let radio = view.tag(node)=="input" && kind==Some(Kind::Radio);
             let textarea = kind == Some(Kind::TextArea);
-            let input = matches!(kind, Some(Kind::Hidden | Kind::Text | Kind::TextArea)) || button || checkbox;
-            if (kind == Some(Kind::Text) || textarea || button || checkbox) && view.attr(node, "form").is_some() {
+            let input = matches!(kind, Some(Kind::Hidden | Kind::Text | Kind::TextArea)) || button || checkbox || radio;
+            if (kind == Some(Kind::Text) || textarea || button || checkbox || radio) && view.attr(node, "form").is_some() {
                 return Err("Moving this native control with explicit form association is not implemented; no tree was changed.".into());
             }
             let mut ancestor = Some(node);
@@ -141,7 +146,9 @@ impl Bridge<'_> {
             let mut nearest_form = None;
             let mut disabled = view.attr(node, "disabled").is_some();
             let mut depth = 0;
+            let mut root = node;
             while let Some(index) = ancestor {
+                root = index;
                 self.state.work(1)?;
                 depth += 1;
                 if depth > 128 || index >= parents.len() { return Err("Select projected ancestry limit reached.".into()); }
@@ -183,9 +190,53 @@ impl Bridge<'_> {
             let owner = if let Some(id) = view.attr(node, "form") {
                 if connected { self.state.tree.ids.get(id).copied().filter(|&owner| tag(self.doc, owner) == "form") } else { None }
             } else { nearest_form };
-            plan.metadata.push((node, owner, disabled));
+            plan.metadata.push((node, owner, disabled, root));
         }
+        self.prepare_radio_move_groups(&mut plan)?;
         Ok(plan)
+    }
+
+    fn prepare_radio_move_groups(&mut self, plan: &mut forms::SelectFormPlan) -> Result<(),String> {
+        // Moving a whole radio preserves checkedness; joining a new group can
+        // uncheck its existing member. Resolve that privately, using projected
+        // roots/owners for every affected peer, before either tree or state is
+        // published. Native admission does not add radio HTML fragments here.
+        let mut changing = 0usize;
+        for &(node,owner,_,root) in &plan.metadata {
+            self.state.work(1)?;
+            if self.forms.controls.get(&node).is_some_and(|c|c.kind==Kind::Radio && c.checked
+                && !c.name.is_empty() && (c.owner != owner || c.group_root != root)) {
+                changing += 1;
+            }
+        }
+        if changing==0 {return Ok(());}
+        let mut projected = HashMap::new();
+        projected.try_reserve(plan.metadata.len()).map_err(|_|"Radio projected group reservation failed.")?;
+        let mut selected = HashMap::new();
+        selected.try_reserve(changing).map_err(|_|"Radio selected group reservation failed.")?;
+        plan.radio_checked.try_reserve(self.forms.controls.len()).map_err(|_|"Radio move checkedness reservation failed.")?;
+        for &(node,owner,_,root) in &plan.metadata {
+            self.state.work(1)?;
+            projected.insert(node,(owner,root));
+            if let Some(c)=self.forms.controls.get(&node).filter(|c|c.kind==Kind::Radio && c.checked
+                && !c.name.is_empty() && (c.owner!=owner || c.group_root!=root)) {
+                // The borrowed name is hashed, never copied or author-coerced.
+                self.state.work(c.name.len())?;
+                selected.insert((root,owner,c.name.as_str()),node);
+            }
+        }
+        for (&node,c) in &self.forms.controls {
+            self.state.work(1)?;
+            if c.kind==Kind::Radio && !c.name.is_empty() {
+                let (owner,root)=projected.get(&node).copied().unwrap_or((c.owner,c.group_root));
+                self.state.work(c.name.len())?;
+                if let Some(&winner)=selected.get(&(root,owner,c.name.as_str())) {
+                    let checked=node==winner;
+                    if checked!=c.checked {plan.radio_checked.push((node,checked));}
+                }
+            }
+        }
+        Ok(())
     }
 }
 

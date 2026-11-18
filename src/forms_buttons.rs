@@ -183,7 +183,7 @@ impl Forms {
             let retained = name.len().checked_add(initial.len()).and_then(|bytes|bytes.checked_add(caption.len()))
                 .and_then(|bytes|bytes.checked_add(value.chars.len().checked_mul(std::mem::size_of::<char>())?))
                 .ok_or("BUTTON retained payload overflow.")?;
-            let control = Control { owner: None, kind: button_kind(doc.attr(node,"type")), value, dirty_value: false,
+            let control = Control { owner: None, group_root: node, kind: button_kind(doc.attr(node,"type")), value, dirty_value: false,
                 name: copied(name)?, caption, disabled: doc.attr(node,"disabled").is_some(), readonly: false, required: false,
                 checked: false, dirty_checked: false, max_length: MAX_VALUE_UNITS,
                 tab_index: doc.attr(node,"tabindex").and_then(parse_tab_index).unwrap_or(0), select: None,

@@ -124,6 +124,9 @@ mod script_textarea_fragment_tests;
 #[cfg(test)]
 #[path = "script_textarea_clone_tests.rs"]
 mod script_textarea_clone_tests;
+#[cfg(test)]
+#[path = "script_created_radio_tests.rs"]
+mod script_created_radio_tests;
 #[path = "script_element_siblings.rs"]
 mod script_element_siblings;
 #[path = "script_slottable.rs"]

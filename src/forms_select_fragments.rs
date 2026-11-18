@@ -4,7 +4,8 @@ use super::*;
 
 pub(crate) struct SelectFormPlan {
     pub(crate) additions: BTreeMap<usize, Control>,
-    pub(crate) metadata: Vec<(usize, Option<usize>, bool)>,
+    pub(crate) metadata: Vec<(usize, Option<usize>, bool, usize)>,
+    pub(crate) radio_checked: Vec<(usize, bool)>,
     pub(crate) retained_bytes: usize,
 }
 impl SelectFormPlan {
@@ -12,10 +13,14 @@ impl SelectFormPlan {
         // BTreeMap has no fallible reserve API. New entries were constructed in
         // the private plan; append/update has no recoverable Result or reentry.
         forms.controls.append(&mut self.additions);
-        for (node, owner, disabled) in self.metadata {
+        for (node, owner, disabled, root) in self.metadata {
             let control = forms.controls.get_mut(&node).expect("Prepared select control");
             control.owner = owner;
             control.disabled = disabled;
+            control.group_root = root;
+        }
+        for (node, checked) in self.radio_checked {
+            forms.controls.get_mut(&node).expect("Prepared radio group member").checked = checked;
         }
     }
 }
@@ -39,6 +44,13 @@ pub(crate) fn fragment_checkbox_input(doc: &Document, node: usize) -> bool {
         item.namespace == crate::html::Namespace::Html && item.children.is_empty())
         && tag(doc, node) == "input"
         && doc.attr(node, "type").is_some_and(|value| value.eq_ignore_ascii_case("checkbox"))
+}
+
+pub(crate) fn native_radio_input(doc: &Document, node: usize) -> bool {
+    doc.nodes.get(node).is_some_and(|item|
+        item.namespace == crate::html::Namespace::Html && item.children.is_empty())
+        && tag(doc, node) == "input"
+        && doc.attr(node, "type").is_some_and(|value| value.eq_ignore_ascii_case("radio"))
 }
 
 /// The HTML RCDATA tokenizer produces either no child or one plain Text
@@ -77,7 +89,7 @@ pub(super) fn fragment_editor_control_with_value(doc: &Document, node: usize, ki
         .and_then(|bytes| bytes.checked_add(value.chars.len().checked_mul(std::mem::size_of::<char>())?))
         .ok_or("Native control retained payload overflow.")?;
     let checked = doc.attr(node, "checked").is_some();
-    Ok((Control { owner: None, kind, value, dirty_value,
+    Ok((Control { owner: None, group_root: node, kind, value, dirty_value,
         name: name.into(), caption, disabled: doc.attr(node, "disabled").is_some(),
         readonly: doc.attr(node, "readonly").is_some(), required: doc.attr(node, "required").is_some(), checked, dirty_checked: false,
         max_length: doc.attr(node, "maxlength").and_then(|value| value.parse().ok()).unwrap_or(MAX_VALUE_UNITS).min(MAX_VALUE_UNITS),
@@ -88,7 +100,7 @@ pub(super) fn fragment_editor_control_with_value(doc: &Document, node: usize, ki
 impl Forms {
     pub(crate) fn prepare_selects(&self, fragment: Option<(&Document, usize)>) -> Result<SelectFormPlan, String> {
         if self.limited { return Err("Native form limits already exceeded; no select was admitted.".into()); }
-        let mut plan = SelectFormPlan { additions: BTreeMap::new(), metadata: Vec::new(), retained_bytes: 0 };
+        let mut plan = SelectFormPlan { additions: BTreeMap::new(), metadata: Vec::new(), radio_checked: Vec::new(), retained_bytes: 0 };
         let mut options: usize = self.controls.values().filter_map(|control| control.select.as_ref()).map(|select| select.options.len()).sum();
         let mut bytes: usize = self.controls.values().map(|control| control.name.len()
             + control.initial.len().max(control.value.chars.iter().map(|ch| ch.len_utf8()).sum::<usize>())
@@ -159,7 +171,7 @@ impl Forms {
                     option.group = option.group.map(|node| node + base - 1);
                 }
                 for row in &mut selected.rows { if let SelectRow::Group { node, .. } = row { *node += base - 1; } }
-                let mut control = Control { owner: None, kind: Kind::Select, value: Editor::default(), dirty_value: false, name: name.into(),
+                let mut control = Control { owner: None, group_root: base + local - 1, kind: Kind::Select, value: Editor::default(), dirty_value: false, name: name.into(),
                     caption: String::new(), disabled: doc.attr(local, "disabled").is_some(), readonly: false,
                     required: doc.attr(local, "required").is_some(), checked: false, dirty_checked: false, max_length: MAX_VALUE_UNITS,
                     tab_index: doc.attr(local, "tabindex").and_then(parse_tab_index).unwrap_or(0),
@@ -180,6 +192,13 @@ impl Forms {
     // Arena IDs describe allocation, not current tree order. Traversing only
     // the connected document also excludes saved detached controls from submit.
     pub(super) fn submission_order(&self, doc: &Document) -> Result<Vec<usize>, String> {
+        self.control_tree_order(doc,if doc.nodes.is_empty() {&[]} else {&[0]})
+    }
+
+    pub(super) fn control_tree_order(&self, doc: &Document, roots: &[usize]) -> Result<Vec<usize>, String> {
+        if roots.len()>doc.nodes.len() || roots.iter().any(|&root|root>=doc.nodes.len()) {
+            return Err("Native control tree root is invalid; no values were changed.".into());
+        }
         let mut order = Vec::new();
         order.try_reserve(self.controls.len()).map_err(|_| "Submission order reservation failed.")?;
         let mut seen = Vec::new();
@@ -187,7 +206,7 @@ impl Forms {
         seen.resize(doc.nodes.len(), false);
         let mut stack = Vec::new();
         stack.try_reserve(doc.nodes.len()).map_err(|_| "Submission walk reservation failed.")?;
-        if !doc.nodes.is_empty() { stack.push(0); }
+        stack.extend(roots.iter().rev().copied());
         while let Some(node) = stack.pop() {
             if node >= doc.nodes.len() || seen[node] { return Err("Submission topology is invalid; nothing was submitted.".into()); }
             seen[node] = true;

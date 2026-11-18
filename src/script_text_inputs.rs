@@ -13,7 +13,7 @@ impl Bridge<'_> {
     pub(super) fn text_input_default_property(&self, object: u32, property: &str) -> bool {
         matches!(property, "name" | "defaultValue" | "value") && self.input_receiver(object)
             && node_index(object).is_some_and(|node| self.native_text_input(node) || self.fresh_text_input(node)
-                || property == "name" && self.owned_native_checkbox(node))
+                || property == "name" && (self.owned_native_checkbox(node) || self.owned_native_radio(node)))
     }
 
     pub(super) fn fresh_text_input(&self, node: usize) -> bool {
@@ -29,13 +29,15 @@ impl Bridge<'_> {
                 && self.doc.attr(node,"form").is_none())
     }
 
-    fn created_input_admission_guard(&mut self, node: usize) -> Result<(), String> {
+    fn created_input_admission_guard(&mut self, node: usize) -> Result<usize, String> {
         if !self.fresh_text_input(node) || self.doc.attr(node, "form").is_some() || !self.doc.nodes[node].children.is_empty() {
             return Err("Native INPUT admission requires a fresh detached empty default/text input without explicit form association.".into());
         }
         let mut ancestor = Some(node);
+        let mut root = node;
         for _ in 0..128 {
-            let Some(index) = ancestor else { return Ok(()); };
+            let Some(index) = ancestor else { return Ok(root); };
+            root = index;
             self.state.work(1)?;
             let fragment = self.doc.nodes.get(index).is_some_and(|entry|
                 entry.namespace == crate::html::Namespace::None && matches!(entry.kind,NodeKind::DocumentFragment))
@@ -52,17 +54,24 @@ impl Bridge<'_> {
 
     fn prepare_created_input_plan(&mut self, node: usize, attribute: Option<(&str, Option<&str>)>,
         live: Option<&str>) -> Result<forms::InputPlan, String> {
-        self.created_input_admission_guard(node)?;
-        let checkbox = matches!(attribute, Some(("type", Some(value))) if value.eq_ignore_ascii_case("checkbox"));
-        let kind = if checkbox { Kind::Checkbox } else { Kind::Text };
+        let root = self.created_input_admission_guard(node)?;
+        let kind = match attribute {
+            Some(("type", Some(value))) if value.eq_ignore_ascii_case("checkbox") => Kind::Checkbox,
+            Some(("type", Some(value))) if value.eq_ignore_ascii_case("radio") => Kind::Radio,
+            _ => Kind::Text,
+        };
         let name = match attribute { Some(("name", value)) => value.unwrap_or(""), _ => self.doc.attr(node,"name").unwrap_or("") };
-        let initial = match attribute { Some(("value", value)) => value.unwrap_or(""), _ => self.doc.attr(node,"value").unwrap_or(if checkbox { "on" } else { "" }) };
+        let initial = match attribute { Some(("value", value)) => value.unwrap_or(""), _ => self.doc.attr(node,"value").unwrap_or(if matches!(kind,Kind::Checkbox|Kind::Radio) { "on" } else { "" }) };
         let input = name.len().saturating_add(initial.len()).saturating_add(live.map_or(0,str::len));
         self.state.work(self.forms.default_scan_work().saturating_add(input).saturating_add(self.doc.nodes[node].children.len()))?;
         // Name/default copies, one sanitized four-byte editor, and the bounded
         // caption all precede allocation. Retained growth is committed with DOM.
         self.state.copies(name.len().saturating_add(initial.len().saturating_mul(6)).saturating_add(live.map_or(0,str::len).saturating_mul(4)))?;
-        self.forms.prepare_created_input(self.doc,node,kind,name,initial,live)
+        let mut plan = self.forms.prepare_created_input(self.doc,node,kind,name,initial,live)?;
+        if let forms::InputPlan::Admit { controls, .. } = &mut plan {
+            controls.get_mut(&node).ok_or("Missing prepared INPUT identity.")?.group_root = root;
+        }
+        Ok(plan)
     }
 
     pub(super) fn accepts_input_type(&self, node: usize, name: &crate::html::AttributeName, value: Option<&str>) -> bool {
@@ -70,6 +79,8 @@ impl Bridge<'_> {
         let raw = value.unwrap_or("");
         if raw.eq_ignore_ascii_case("checkbox") {
             self.fresh_text_input(node) || self.owned_native_checkbox(node)
+        } else if raw.eq_ignore_ascii_case("radio") {
+            self.fresh_text_input(node) || self.owned_native_radio(node)
         } else {
             (raw.is_empty() || raw.eq_ignore_ascii_case("text")) && (self.fresh_text_input(node) || self.owned_fragment_text_input(node))
         }
@@ -189,10 +200,10 @@ impl Bridge<'_> {
             return Ok(None);
         }
         if !(name.html_is("value") || name.html_is("name") || name.html_is("type")) { return Ok(None); }
-        if name.html_is("type") && value.is_some_and(|value| !value.is_empty() && !value.eq_ignore_ascii_case("text") && !value.eq_ignore_ascii_case("checkbox")) { return Ok(None); }
+        if name.html_is("type") && value.is_some_and(|value| !value.is_empty() && !value.eq_ignore_ascii_case("text") && !value.eq_ignore_ascii_case("checkbox") && !value.eq_ignore_ascii_case("radio")) { return Ok(None); }
         if self.fresh_text_input(node) { return self.prepare_created_input_plan(node,Some((&name.qualified,value)),None).map(Some); }
         if name.html_is("type") { return Ok(None); }
-        if !(self.native_text_input(node) || name.html_is("name") && self.owned_native_checkbox(node)) { return Ok(None); }
+        if !(self.native_text_input(node) || name.html_is("name") && (self.owned_native_checkbox(node) || self.owned_native_radio(node))) { return Ok(None); }
         let scanned=self.forms.default_scan_work();
         let input=value.map_or(0,str::len);
         self.state.work(scanned.saturating_add(input).saturating_add(self.forms.controls.len()))?;

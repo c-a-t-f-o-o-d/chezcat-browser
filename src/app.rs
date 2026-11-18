@@ -2168,6 +2168,7 @@ impl App {
                     c.kind == Kind::Radio
                         && c.checked
                         && c.owner == owner
+                        && c.group_root == control.group_root
                         && c.name == control.name
                         && (!control.name.is_empty() || **id == node)
                 })
@@ -2185,7 +2186,7 @@ impl App {
             match kind {
                 Kind::Checkbox => self.forms.controls.get_mut(&node).unwrap().checked = old_checked,
                 Kind::Radio => {
-                    if let Some(previous) = previous_radio {
+                    if let Some(previous) = previous_radio.filter(|&previous|self.forms.same_radio_group(previous,node)) {
                         // Restore this group's former selection. Script changes
                         // to unrelated controls are not part of default rollback.
                         self.forms.check_radio(previous);
@@ -2231,7 +2232,7 @@ impl App {
                     if self.script_event(owner, "reset", true) {
                         return;
                     }
-                    self.forms.reset(owner);
+                    if let Err(error)=self.forms.reset_in_document(&self.document,owner) {self.error(error);return;}
                     self.invalidate_script_geometry();
                     self.reflow();
                     self.sync_editors();

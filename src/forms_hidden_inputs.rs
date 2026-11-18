@@ -44,7 +44,7 @@ impl Forms {
             bytes.checked_add(editor.chars.len().saturating_mul(std::mem::size_of::<char>())))
             .ok_or("Hidden input copy size overflow.")?;
         let control = Control {
-            owner: existing.and_then(|control| control.owner), kind: Kind::Hidden,
+            owner: existing.and_then(|control| control.owner), group_root: existing.map_or(node, |control| control.group_root), kind: Kind::Hidden,
             value: editor, dirty_value: false, name: name.into(), caption: String::new(),
             disabled: existing.map_or(doc.attr(node,"disabled").is_some(), |control| control.disabled),
             readonly: doc.attr(node,"readonly").is_some(), required: doc.attr(node,"required").is_some(),
