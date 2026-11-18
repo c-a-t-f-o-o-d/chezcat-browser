@@ -12,10 +12,11 @@ import argparse,contextlib,hashlib,json,os,re,shutil,sys,tomllib
 ROOT=Path(__file__).resolve().parents[1]
 VERSION='0.1.0+metadata-fixture'
 INPUTS=('build.rs','src/build_identity.rs','src/license_acceptance.rs','src/crypto_hash.rs',
+        'tools/check_about_harness.py',
         'LICENSE','THIRD_PARTY_NOTICES.md','assets/chezcat.ico','resources/chezcat.rc',
         'resources/chezcat.res','resources/chezcat-x64.o')
 KEYS={'CHEZCAT_EMBEDDED_SOURCE_REVISION','CHEZCAT_EMBEDDED_SOURCE_ORIGIN',
-      'CHEZCAT_EMBEDDED_TREE_STATE','CHEZCAT_EMBEDDED_DECLARED_TAG'}
+      'CHEZCAT_EMBEDDED_TREE_STATE','CHEZCAT_EMBEDDED_DECLARED_TAG','CHEZCAT_EMBEDDED_MAIN_ORDINAL'}
 PROBE='''#[allow(dead_code)] mod crypto_hash;
 #[allow(dead_code)] mod license_acceptance;
 #[allow(dead_code)] mod build_identity;
@@ -25,7 +26,8 @@ IDENTITY={'GIT_AUTHOR_NAME':'Controlled metadata fixture','GIT_COMMITTER_NAME':'
           'GIT_AUTHOR_EMAIL':'fixture@users.noreply.github.com',
           'GIT_COMMITTER_EMAIL':'fixture@users.noreply.github.com'}
 CLEAR=('GIT_DIR','GIT_WORK_TREE','GIT_INDEX_FILE','GIT_OBJECT_DIRECTORY',
-       'GIT_ALTERNATE_OBJECT_DIRECTORIES','GIT_CONFIG_COUNT','CHEZCAT_DECLARED_BUILD_TAG',*KEYS)
+       'GIT_ALTERNATE_OBJECT_DIRECTORIES','GIT_COMMON_DIR','GIT_SHALLOW_FILE','GIT_NAMESPACE',
+       'GIT_CONFIG_COUNT','CHEZCAT_DECLARED_BUILD_TAG',*KEYS)
 
 def sha(path):return hashlib.sha256(path.read_bytes()).hexdigest()
 def write(path,text):path.parent.mkdir(parents=True,exist_ok=True);path.write_bytes(text.encode('utf-8'))
@@ -108,17 +110,20 @@ def main():
                 values[key]=value
         if set(values)!=KEYS:raise ValueError('Actual build script did not emit the exact expected metadata fields.')
         return values
-    def script_case(name,path,script_bin,origin,tree,revision='',missing_git=False):
+    def script_case(name,path,script_bin,origin,tree,revision='',missing_git=False,ordinal='',extra_env=None):
         env={'CARGO_MANIFEST_DIR':str(path),'CARGO_PKG_VERSION':VERSION,'CARGO_CFG_TARGET_OS':'windows','CARGO_CFG_TARGET_ARCH':'x86_64','CARGO_CFG_TARGET_ENV':'msvc'}
         if missing_git:env['PATH']=str(empty_path)
+        env.update(extra_env or {})
         data=emitted(execute(name,[script_bin],path,env));result['cases'][name]={'kind':'actual collector, not Cargo watcher proof','emitted':data,'missing_git_path':missing_git};save()
-        expected={'CHEZCAT_EMBEDDED_SOURCE_REVISION':revision,'CHEZCAT_EMBEDDED_SOURCE_ORIGIN':origin,'CHEZCAT_EMBEDDED_TREE_STATE':tree,'CHEZCAT_EMBEDDED_DECLARED_TAG':''}
+        expected={'CHEZCAT_EMBEDDED_SOURCE_REVISION':revision,'CHEZCAT_EMBEDDED_SOURCE_ORIGIN':origin,'CHEZCAT_EMBEDDED_TREE_STATE':tree,'CHEZCAT_EMBEDDED_DECLARED_TAG':'','CHEZCAT_EMBEDDED_MAIN_ORDINAL':ordinal}
         check(name,data==expected,{'expected':expected,'actual':data})
         return data
-    def probe(name,path,exe,revision,tree,missing_git=False):
+    def probe(name,path,exe,revision,tree,missing_git=False,ordinal=None):
         text=execute(name,[exe],path,{'PATH':str(empty_path)} if missing_git else {})
         expected_state={'clean':'Git working tree clean at build check','dirty':'Git working tree dirty at build check'}[tree]
-        check(name,f'ChezCat {VERSION}\n' in text and f'Source revision: {revision}\n' in text and f'Source state: {expected_state}\n' in text and 'Build: Development build\n' in text,{'expected_revision':revision,'expected_tree':tree,'actual_native_probe':text})
+        display=VERSION+('.' if '+' in VERSION else '+')+'dev.'+(str(ordinal)+'.' if ordinal is not None else '')+'g'+revision[:12]
+        kind='Development build' if ordinal is not None else 'Development build (public main ordinal unavailable)'
+        check(name,text.startswith(f'ChezCat {display}\n') and f'Source revision: {revision}\n' in text and f'Source state: {expected_state}\n' in text and f'Build: {kind}\n' in text,{'expected_revision':revision,'expected_tree':tree,'expected_ordinal':ordinal,'actual_native_probe':text})
         return text
     save()
     try:
@@ -195,7 +200,121 @@ def main():
         check('fixture-isolated-reference-update-creates-new-loose-ref',loose.is_file() and loose.read_text(encoding='utf-8').strip()==fourth)
         execute('cargo-isolated-fourth-reference-rebuild',command,cargo,timeout=180);probe('runtime-isolated-fourth-reference-is-current-clean',cargo,exe,fourth,'clean')
         probe('runtime-needs-no-git',cargo,exe,fourth,'clean',missing_git=True)
-        result['fixture_commits']={'first':first,'second':second,'third_empty':third,'fourth_reference_only':fourth,'unrelated_parent':parent_sha}
+        # Metadata-only changes must update an otherwise unchanged source S.
+        # No remote is contacted: this original fixture assigns local public
+        # tracking refs so the actual collector can prove its input rules.
+        public_origin='https://github.com/c-a-t-f-o-o-d/chezcat-browser.git'
+        local_git('cargo-public-origin',cargo,'remote','add','origin',public_origin)
+        local_git('cargo-public-main-ref',cargo,'update-ref','refs/remotes/origin/main',fourth)
+        execute('cargo-numbered-main-build',command,cargo,timeout=180);probe('runtime-numbered-main-source',cargo,exe,fourth,'clean',ordinal=4)
+        probe('runtime-numbered-main-without-runtime-git',cargo,exe,fourth,'clean',missing_git=True,ordinal=4)
+        local_git('cargo-main-ref-moves-before-source',cargo,'update-ref','refs/remotes/origin/main',second,fourth)
+        execute('cargo-main-ref-only-rebuild',command,cargo,timeout=180);probe('runtime-source-not-on-main-falls-back',cargo,exe,fourth,'clean')
+        local_git('cargo-main-ref-restored',cargo,'update-ref','refs/remotes/origin/main',fourth,second)
+        execute('cargo-main-ref-restored-rebuild',command,cargo,timeout=180);probe('runtime-main-ref-restored',cargo,exe,fourth,'clean',ordinal=4)
+        shallow=cargo/'.git/shallow';check('fixture-started-with-complete-history',not shallow.exists())
+        write(shallow,fourth+'\n')
+        execute('cargo-shallow-created-rebuild',command,cargo,timeout=180);probe('runtime-shallow-source-does-not-restart-numbering',cargo,exe,fourth,'clean')
+        shallow.unlink()
+        execute('cargo-shallow-removed-rebuild',command,cargo,timeout=180);probe('runtime-complete-history-restores-number',cargo,exe,fourth,'clean',ordinal=4)
+        local_git('cargo-pack-public-main',cargo,'pack-refs','--all')
+        main_loose=cargo/'.git/refs/remotes/origin/main'
+        check('fixture-public-main-is-packed',not main_loose.exists() and f'{fourth} refs/remotes/origin/main' in packed.read_text(encoding='utf-8'))
+        execute('cargo-packed-public-main-build',command,cargo,timeout=180);probe('runtime-packed-public-main',cargo,exe,fourth,'clean',ordinal=4)
+        packed_bytes=packed.read_bytes();old_record=f'{fourth} refs/remotes/origin/main'.encode();new_record=f'{second} refs/remotes/origin/main'.encode()
+        check('fixture-packed-main-record-is-unique',packed_bytes.count(old_record)==1)
+        packed.write_bytes(packed_bytes.replace(old_record,new_record))
+        execute('cargo-packed-main-only-rebuild',command,cargo,timeout=180);probe('runtime-packed-main-change-invalidates-number',cargo,exe,fourth,'clean')
+        packed.write_bytes(packed_bytes)
+        execute('cargo-packed-main-restored-rebuild',command,cargo,timeout=180);probe('runtime-packed-main-restores-number',cargo,exe,fourth,'clean',ordinal=4)
+        numbered_stat=exe.stat();numbered_sha=sha(exe)
+        execute('cargo-numbered-main-cached-build',command,cargo,timeout=180)
+        check('cargo-numbered-metadata-does-not-force-rebuild',sha(exe)==numbered_sha and exe.stat().st_mtime_ns==numbered_stat.st_mtime_ns)
+
+        graph=fixture('ordinal-graph');a=initialize(graph,'ordinal-graph')
+        local_git('ordinal-public-origin',graph,'remote','add','origin',public_origin)
+        local_git('ordinal-main-root',graph,'update-ref','refs/remotes/origin/main',a)
+        script_case('collector-public-root-is-one',graph,script_bin,'git','clean',a,ordinal='1')
+        local_git('ordinal-main-second',graph,'commit','--allow-empty','-m','Original public second checkpoint')
+        b=local_git('ordinal-second-source',graph,'rev-parse','HEAD');local_git('ordinal-main-second-ref',graph,'update-ref','refs/remotes/origin/main',b,a)
+        before_tip=script_case('collector-main-second-is-two',graph,script_bin,'git','clean',b,ordinal='2')
+        local_git('ordinal-feature-branch',graph,'checkout','-b','original-feature')
+        local_git('ordinal-feature-commit',graph,'commit','--allow-empty','-m','Original feature checkpoint')
+        feature=local_git('ordinal-feature-source',graph,'rev-parse','HEAD')
+        script_case('collector-unmerged-feature-has-no-main-ordinal',graph,script_bin,'git','clean',feature)
+        script_case('collector-ambient-number-is-not-proof',graph,script_bin,'git','clean',feature,extra_env={'CHEZCAT_EMBEDDED_MAIN_ORDINAL':'999'})
+        local_git('ordinal-return-main',graph,'checkout','metadata-control')
+        local_git('ordinal-merge-feature',graph,'merge','--no-ff','original-feature','-m','Original public feature integration')
+        merged=local_git('ordinal-merged-source',graph,'rev-parse','HEAD');local_git('ordinal-merged-main-ref',graph,'update-ref','refs/remotes/origin/main',merged,b)
+        script_case('collector-main-merge-counts-one-first-parent-step',graph,script_bin,'git','clean',merged,ordinal='3')
+        local_git('ordinal-checkout-merged-feature-head',graph,'checkout','original-feature')
+        local_git('ordinal-feature-really-is-main-ancestor',graph,'merge-base','--is-ancestor',feature,merged)
+        script_case('collector-merged-second-parent-is-not-main-path',graph,script_bin,'git','clean',feature)
+        local_git('ordinal-detached-historical-main',graph,'checkout','--detach',b)
+        after_tip=script_case('collector-historical-main-count-ends-at-source',graph,script_bin,'git','clean',b,ordinal='2')
+        check('local-and-detached-source-count-agree-after-main-advances',before_tip==after_tip)
+        script_case('collector-ambient-repository-cannot-supply-source-or-count',graph,script_bin,'git','clean',b,ordinal='2',
+                    extra_env={'GIT_DIR':str(parent/'.git'),'GIT_WORK_TREE':str(graph),'GIT_COMMON_DIR':str(parent/'.git')})
+        local_git('ordinal-hidden-assume-unchanged',graph,'update-index','--assume-unchanged','src/build_identity.rs')
+        script_case('collector-hidden-state-has-no-number',graph,script_bin,'git','unknown',b)
+        local_git('ordinal-clear-assume-unchanged',graph,'update-index','--no-assume-unchanged','src/build_identity.rs')
+        local_git('ordinal-hidden-skip-worktree',graph,'update-index','--skip-worktree','src/build_identity.rs')
+        script_case('collector-skip-worktree-has-no-number',graph,script_bin,'git','unknown',b)
+        local_git('ordinal-clear-skip-worktree',graph,'update-index','--no-skip-worktree','src/build_identity.rs')
+        write(graph/'original-untracked.txt','Original dirty-source ordinal control.\n')
+        script_case('collector-dirty-main-has-no-number',graph,script_bin,'git','dirty',b)
+        (graph/'original-untracked.txt').unlink()
+        local_git('ordinal-other-origin',graph,'remote','set-url','origin','https://example.invalid/other-source.git')
+        script_case('collector-other-origin-cannot-supply-public-number',graph,script_bin,'git','clean',b)
+        local_git('ordinal-restore-public-origin',graph,'remote','set-url','origin',public_origin)
+        local_git('ordinal-alternate-main-is-not-used',graph,'update-ref','refs/remotes/alternate/main',merged)
+        local_git('ordinal-local-main-is-not-used',graph,'update-ref','refs/heads/main',merged)
+        local_git('ordinal-remove-public-main',graph,'update-ref','-d','refs/remotes/origin/main',merged)
+        script_case('collector-missing-public-ref-cannot-use-other-ancestry',graph,script_bin,'git','clean',b)
+        local_git('ordinal-restore-public-main',graph,'update-ref','refs/remotes/origin/main',merged)
+        write(graph/'.git/shallow',b+'\n')
+        script_case('collector-shallow-history-never-starts-at-one',graph,script_bin,'git','clean',b)
+        script_case('collector-ambient-shallow-path-cannot-hide-incomplete-history',graph,script_bin,'git','clean',b,
+                    extra_env={'GIT_SHALLOW_FILE':str(out/'not-the-repository-shallow-file')})
+        (graph/'.git/shallow').unlink()
+        local_git('ordinal-local-replacement-parent',graph,'replace','--graft',b)
+        script_case('collector-replacement-refs-do-not-rewrite-public-count',graph,script_bin,'git','clean',b,ordinal='2')
+        local_git('ordinal-remove-local-replacement',graph,'replace','-d',b)
+        write(graph/'.git/info/grafts',b+'\n')
+        script_case('collector-graft-history-is-unverifiable',graph,script_bin,'git','clean',b)
+        (graph/'.git/info/grafts').unlink()
+        import check_about_harness as about_controls
+        clean_state='Git working tree clean at build check';dirty_state='Git working tree dirty at build check'
+        unavailable='Development build (public main ordinal unavailable)';license_hash=sha(root/'LICENSE')
+        prefix=VERSION+('.' if '+' in VERSION else '+')+'dev.'
+        def copy_payload(label,kind='Development build',revision=b,state=clean_state):
+            return f'ChezCat {label}\nBuild: {kind}\nSource revision: {revision}\nSource state: {state}\nLicense: CSAPUL {accept_license.VERSION}\nLicense SHA-256: {license_hash}\n'.encode('ascii')
+        accepted=about_controls.safe_identity(copy_payload(prefix+'2.g'+b[:12]),VERSION,accept_license.VERSION,license_hash,b,clean_state,2)
+        check('about-checker-verifies-source-bound-number',accepted['development_ordinal']==2 and accepted['product_version']==VERSION)
+        fallback=about_controls.safe_identity(copy_payload(prefix+'g'+feature[:12],unavailable,feature),VERSION,accept_license.VERSION,license_hash,feature,clean_state,None)
+        check('about-checker-keeps-feature-sha-fallback',fallback['development_ordinal'] is None and fallback['source_revision']==feature)
+        declared='Declared tagged build v'+VERSION+' (publication unverified)'
+        tagged=about_controls.safe_identity(copy_payload(VERSION,declared),VERSION,accept_license.VERSION,license_hash,b,clean_state,2)
+        check('about-checker-keeps-declared-cargo-version',tagged['display_version']==VERSION and tagged['development_ordinal'] is None)
+        invalid_copies={
+            'wrong-main-count':(copy_payload(prefix+'3.g'+b[:12]),clean_state),
+            'main-tip-sha-instead-of-source':(copy_payload(prefix+'2.g'+merged[:12]),clean_state),
+            'leading-zero-count':(copy_payload(prefix+'02.g'+b[:12]),clean_state),
+            'zero-count':(copy_payload(prefix+'0.g'+b[:12]),clean_state),
+            'overflow-count':(copy_payload(prefix+'18446744073709551616.g'+b[:12]),clean_state),
+            'dirty-number':(copy_payload(prefix+'2.g'+b[:12],state=dirty_state),dirty_state),
+            'lost-verifiable-number':(copy_payload(prefix+'g'+b[:12],unavailable),clean_state),
+            'arbitrary-extra-field':(copy_payload(prefix+'2.g'+b[:12])+b'Unexpected field: refused\n',clean_state),
+            'abbreviated-authoritative-source':(copy_payload(prefix+'2.g'+b[:12],revision=b[:12]),clean_state),
+            'dirty-declared-tag':(copy_payload(VERSION,declared,state=dirty_state),dirty_state),
+        }
+        for label,(payload,state) in invalid_copies.items():
+            refused=False
+            try:about_controls.safe_identity(payload,VERSION,accept_license.VERSION,license_hash,b,state,2)
+            except ValueError:refused=True
+            check('about-checker-refuses-'+label,refused)
+        result['fixture_commits']={'first':first,'second':second,'third_empty':third,'fourth_reference_only':fourth,'unrelated_parent':parent_sha,
+                                  'public_graph_root':a,'public_graph_second':b,'feature_second_parent':feature,'public_graph_merge':merged}
         check('canonical-inputs-unchanged',all(sha(root/name)==value for name,value in inputs.items()))
         check('canonical-executable-unchanged',before_exe==(sha(root/'ChezCat.exe') if (root/'ChezCat.exe').is_file() else None))
         result['passed']=bool(result['checks']) and all(result['checks'].values());save()

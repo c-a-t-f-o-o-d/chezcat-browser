@@ -2584,11 +2584,15 @@ document.title='DOM tree passed';
 #[test]
 fn named_form_controls_request_real_focus_and_keep_builtin_priorities() {
     let (doc, forms, mut page, outcome) = page(
-        "<html><head></head><body><form id=search name=f><input id=query name=q><input name=textContent><input name=querySelector></form><input id=external name=outside form=search><form name=body></form><form name=getElementById></form><form name=other><input name=q></form><template><form name=inert><input name=q></form></template></body></html>",
+        "<html><head></head><body><form id=search name=f><input id=query name=q><input name=textContent><input id=selector-shadow name=querySelector><input name=getElementsByTagName></form><input id=external name=outside form=search><form name=body></form><form name=getElementById></form><form name=other><input name=q></form><template><form name=inert><input name=q></form></template></body></html>",
         &[r#"
 if(document.f!==document.getElementById('search')||!('f' in document)||!('q' in document.f))throw 'named form';
 if(document.f.q!==document.getElementById('query')||document.f.query!==document.f.q||document.f.outside!==document.getElementById('external'))throw 'owned controls';
-if(document.body.tagName!=='BODY'||typeof document.getElementById!=='function'||typeof document.f.querySelector!=='function'||typeof document.f.textContent!=='string')throw 'native priority';
+// Selectors now use the canonical Element prototype; this genuine named field overrides it.
+var selectorField=document.getElementById('selector-shadow');
+if(document.f.querySelector!==selectorField||selectorField.form!==document.f||Element.prototype.querySelector.call(document.f,'#query')!==document.f.q)throw 'named selector versus canonical borrowed operation';
+// Keep the native-priority witness on the untouched per-instance tag-name method.
+if(document.body.tagName!=='BODY'||typeof document.getElementById!=='function'||typeof document.f.getElementsByTagName!=='function'||typeof document.f.textContent!=='string')throw 'native priority';
 if(document.missing!==undefined||document.inert!==undefined||document.f.missing!==undefined||'missing' in document.f)throw 'missing or inert name';
 document.f&&document.f.q.focus();document.title='named focus passed';
 "#],

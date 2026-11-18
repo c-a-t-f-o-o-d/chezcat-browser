@@ -73,8 +73,11 @@ fn bounded_git(root: &std::path::Path, args: &[&str], maximum: usize) -> Option<
     use std::sync::mpsc;
     use std::time::{Duration, Instant};
     let mut child = Command::new("git")
-        .args(["--no-optional-locks", "--literal-pathspecs", "-c", "core.fsmonitor=false", "-c", "core.untrackedCache=false"])
+        .args(["--no-optional-locks", "--literal-pathspecs", "--no-replace-objects", "--no-lazy-fetch", "-c", "core.fsmonitor=false", "-c", "core.untrackedCache=false"])
         .args(args).current_dir(root).env("GIT_TERMINAL_PROMPT", "0")
+        .env_remove("GIT_DIR").env_remove("GIT_WORK_TREE").env_remove("GIT_INDEX_FILE")
+        .env_remove("GIT_COMMON_DIR").env_remove("GIT_OBJECT_DIRECTORY").env_remove("GIT_ALTERNATE_OBJECT_DIRECTORIES")
+        .env_remove("GIT_SHALLOW_FILE").env_remove("GIT_NAMESPACE")
         .stdin(Stdio::null()).stderr(Stdio::null()).stdout(Stdio::piped()).spawn().ok()?;
     let Some(stdout)=child.stdout.take() else {let _=child.kill();let _=child.wait();return None;};
     let (send,receive)=mpsc::sync_channel(1);
@@ -134,12 +137,12 @@ fn watch_git_state(root:&std::path::Path)->bool {
         root.join(value)
     };
     let common=small_text(&git_dir.join("commondir"),4096).map_or_else(||git_dir.clone(),|text|git_dir.join(text.trim()));
-    // Cargo treats a missing watched file as perpetually changed. Watch the
-    // existing refs directory to observe creation/removal of loose refs, and
-    // only an existing packed-refs file; HEAD/index stay required inputs.
+    // Watch existing metadata directories: shallow/packed-refs, public-main
+    // refs or config can be created/removed without changing HEAD or index.
+    // Missing file watches would instead make every Cargo invocation rebuild.
     let refs=common.join("refs");
     let mut okay=watch(&git_dir.join("HEAD")) && watch(&git_dir.join("index"))
-        && refs.is_dir() && watch(&refs);
+        && common.is_dir() && watch(&common) && refs.is_dir() && watch(&refs);
     let packed=common.join("packed-refs");
     if packed.is_file() {okay &= watch(&packed);}
     if let Some(head)=small_text(&git_dir.join("HEAD"),4096) {
@@ -152,6 +155,31 @@ fn watch_git_state(root:&std::path::Path)->bool {
         }
     } else {okay=false;}
     okay
+}
+fn public_main_ordinal(root:&std::path::Path,source:build_identity::Source<'_>)->Option<u64> {
+    use build_identity::{SourceOrigin,TreeState};
+    if source.origin()!=SourceOrigin::Git || source.tree()!=TreeState::Clean {return None;}
+    let source=source.revision()?;
+    let text=|args:&[&str],maximum|bounded_git(root,args,maximum).and_then(|raw|String::from_utf8(raw).ok()).map(|text|text.trim().to_owned());
+    let remote=text(&["config","--get","remote.origin.url"],4096)?;
+    if !matches!(remote.as_str(),"https://github.com/c-a-t-f-o-o-d/chezcat-browser.git"|"https://github.com/c-a-t-f-o-o-d/chezcat-browser"|"git@github.com:c-a-t-f-o-o-d/chezcat-browser.git"|"ssh://git@github.com/c-a-t-f-o-o-d/chezcat-browser.git") {return None;}
+    if text(&["rev-parse","--is-shallow-repository"],16)?.as_str()!="false" {return None;}
+    let common=root.join(text(&["rev-parse","--git-common-dir"],4096)?);
+    if common.join("info/grafts").exists() {return None;}
+    let tip=text(&["rev-parse","--verify","refs/remotes/origin/main^{commit}"],128)?;
+    build_identity::revision(&tip)?;
+    // Only this public ref's first-parent chain is inspected. A merged feature
+    // head can be an ancestor without being a member of this path.
+    let history=text(&["rev-list","--first-parent","--reverse",&tip],8*1024*1024)?;
+    let mut count=0u64;let mut ordinal=None;let mut last=None;
+    for revision in history.lines() {
+        build_identity::revision(revision)?;count=count.checked_add(1)?;
+        if revision==source {if ordinal.replace(count).is_some() {return None;}}
+        last=Some(revision);
+    }
+    if last!=Some(tip.as_str()) || text(&["rev-parse","--verify","refs/remotes/origin/main^{commit}"],128)?!=tip
+        || text(&["rev-parse","--verify","HEAD"],128)?!=source {return None;}
+    ordinal
 }
 fn emit_build_identity() {
     use build_identity::{SourceOrigin, TreeState};
@@ -188,8 +216,12 @@ fn emit_build_identity() {
     let declared_tag=env::var("CHEZCAT_DECLARED_BUILD_TAG").ok();
     let identity=build_identity::Identity::new(build_identity::PRODUCT_VERSION,source,declared_tag.as_deref())
         .unwrap_or_else(|reason|panic!("{reason}"));
+    let ordinal=if declared_tag.is_none() {public_main_ordinal(&root,source)}else{None};
+    let ordinal=ordinal.map(|number|number.to_string());
+    let identity=identity.with_main_ordinal(ordinal.as_deref());
     println!("cargo:rustc-env=CHEZCAT_EMBEDDED_SOURCE_REVISION={}",identity.source().revision().unwrap_or(""));
     println!("cargo:rustc-env=CHEZCAT_EMBEDDED_SOURCE_ORIGIN={}",match source.origin(){SourceOrigin::Git=>"git",SourceOrigin::Exported=>"exported",SourceOrigin::Unknown=>"unknown"});
     println!("cargo:rustc-env=CHEZCAT_EMBEDDED_TREE_STATE={}",match source.tree(){TreeState::Clean=>"clean",TreeState::Dirty=>"dirty",TreeState::Unknown=>"unknown"});
     println!("cargo:rustc-env=CHEZCAT_EMBEDDED_DECLARED_TAG={}",declared_tag.as_deref().unwrap_or(""));
+    println!("cargo:rustc-env=CHEZCAT_EMBEDDED_MAIN_ORDINAL={}",identity.main_ordinal().map(|number|number.to_string()).unwrap_or_default());
 }
