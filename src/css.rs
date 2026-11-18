@@ -4089,7 +4089,13 @@ mod tests {
 
     #[test]
     fn positioning_offsets_are_atomic_bounded_and_not_inherited() {
-        let doc = parse("<style>#parent{position:relative;inset:1px 2% -3em auto}#override{position:absolute;inset:8px;inset:1px broken;left:-4px;top:nan;position:sticky}#inherit{position:inherit;inset:inherit}</style><div id=parent><span id=child>Child</span><span id=inherit>Inherited</span></div><div id=override>Override</div>");
+        let doc = parse(concat!(
+            "<style>#parent{position:relative;inset:1px 2% -3em auto}",
+            "#override{position:absolute;inset:8px;inset:1px broken;left:-4px;top:nan;position:sticky}",
+            "#inherit{position:inherit;inset:inherit}#invalid{position:absolute;position:sideways}</style>",
+            "<div id=parent><span id=child>Child</span><span id=inherit>Inherited</span></div>",
+            "<div id=override>Override</div><div id=invalid>Invalid keyword</div>",
+        ));
         let styles = compute(&doc, &HashMap::new());
         let by_id = |id: &str| {
             &styles[doc.nodes.iter().position(|node| matches!(&node.kind, NodeKind::Element { id: Some(actual), .. } if actual == id)).unwrap()]
@@ -4108,7 +4114,8 @@ mod tests {
         assert_eq!(by_id("child").inset, [Length::Auto; 4]);
         assert_eq!(by_id("inherit").position, Position::Relative);
         assert_eq!(by_id("inherit").inset, by_id("parent").inset);
-        assert_eq!(by_id("override").position, Position::Absolute);
+        assert_eq!(by_id("override").position, Position::Sticky);
+        assert_eq!(by_id("invalid").position, Position::Absolute);
         assert_eq!(
             by_id("override").inset,
             [
