@@ -27,6 +27,7 @@ pub struct Identity<'a> {
     product_version: &'a str,
     source: Source<'a>,
     kind: BuildKind<'a>,
+    main_ordinal: Option<u64>,
 }
 
 /// Git's full SHA-1 form is the source identity used by the current publication
@@ -79,13 +80,33 @@ impl<'a> Identity<'a> {
             if source.revision.is_none() || source.tree==TreeState::Dirty {return Err("A declared tag requires a known source revision without known dirty changes.");}
             BuildKind::DeclaredTag(tag)
         } else {BuildKind::Development};
-        Ok(Self{product_version,source,kind})
+        Ok(Self{product_version,source,kind,main_ordinal:None})
+    }
+    /// The build collector supplies this only after proving a complete public
+    /// main first-parent history through this exact source revision.
+    pub fn with_main_ordinal(mut self,text:Option<&str>)->Self {
+        self.main_ordinal=if self.kind==BuildKind::Development && self.source.origin==SourceOrigin::Git
+            && self.source.tree==TreeState::Clean && self.source.revision.is_some()
+        {text.filter(|value|numeric(value)).and_then(|value|value.parse::<u64>().ok()).filter(|&value|value>0)} else {None};
+        self
+    }
+    pub fn main_ordinal(self)->Option<u64> {self.main_ordinal}
+    /// This is a descriptive development label, never a Cargo/PE/license bump.
+    /// Existing Cargo build metadata keeps its single SemVer '+' separator.
+    pub fn display_version(self)->String {
+        if matches!(self.kind,BuildKind::DeclaredTag(_)) {return self.product_version.into();}
+        let suffix=match (self.source.revision,self.main_ordinal) {
+            (Some(revision),Some(number))=>format!("dev.{number}.g{}",&revision[..12]),
+            (Some(revision),None)=>format!("dev.g{}",&revision[..12]),
+            (None,_)=>"dev.unknown".into(),
+        };
+        format!("{}{}{suffix}",self.product_version,if self.product_version.contains('+') {'.'} else {'+'})
     }
     /// This fixed field list deliberately excludes executable/profile paths,
     /// URLs, usernames, timestamps, cookies, history and acceptance receipts.
     pub fn safe_copy(self)->String {
         let kind=match self.kind {
-            BuildKind::Development=>"Development build".to_owned(),
+            BuildKind::Development=>if self.main_ordinal.is_some() {"Development build"}else{"Development build (public main ordinal unavailable)"}.to_owned(),
             BuildKind::DeclaredTag(tag)=>format!("Declared tagged build {tag} (publication unverified)"),
         };
         let state=match (self.source.origin,self.source.tree) {
@@ -95,13 +116,14 @@ impl<'a> Identity<'a> {
             (SourceOrigin::Exported,_)=>"Exported source revision; modified state unverified",
             _=>"Source provenance unavailable",
         };
-        format!("ChezCat {}\nBuild: {kind}\nSource revision: {}\nSource state: {state}\nLicense: CSAPUL {}\nLicense SHA-256: {}\n",self.product_version,self.source.revision.unwrap_or("unknown"),crate::license_acceptance::LICENSE_VERSION,crate::license_acceptance::LICENSE_SHA256)
+        format!("ChezCat {}\nBuild: {kind}\nSource revision: {}\nSource state: {state}\nLicense: CSAPUL {}\nLicense SHA-256: {}\n",self.display_version(),self.source.revision.unwrap_or("unknown"),crate::license_acceptance::LICENSE_VERSION,crate::license_acceptance::LICENSE_SHA256)
     }
 }
 pub fn current()->Identity<'static> {
     let source=source(option_env!("CHEZCAT_EMBEDDED_SOURCE_REVISION"),option_env!("CHEZCAT_EMBEDDED_SOURCE_ORIGIN"),option_env!("CHEZCAT_EMBEDDED_TREE_STATE"));
     Identity::new(PRODUCT_VERSION,source,option_env!("CHEZCAT_EMBEDDED_DECLARED_TAG").filter(|tag|!tag.is_empty()))
-        .unwrap_or(Identity{product_version:PRODUCT_VERSION,source:Source::UNKNOWN,kind:BuildKind::Development})
+        .unwrap_or(Identity{product_version:PRODUCT_VERSION,source:Source::UNKNOWN,kind:BuildKind::Development,main_ordinal:None})
+        .with_main_ordinal(option_env!("CHEZCAT_EMBEDDED_MAIN_ORDINAL"))
 }
 pub fn license_text()->&'static str {crate::license_acceptance::LICENSE_TEXT}
 
@@ -129,7 +151,8 @@ mod tests {
     #[test]
     fn build_identity_product_preserves_prerelease_build_and_separate_license_values() {
         let identity=Identity::new("2.3.4-alpha.2+original.007",Source::UNKNOWN,None).unwrap();let text=identity.safe_copy();
-        assert!(text.starts_with("ChezCat 2.3.4-alpha.2+original.007\n"));assert!(text.contains(&format!("License: CSAPUL {}\n",crate::license_acceptance::LICENSE_VERSION)));assert_eq!(license_text(),crate::license_acceptance::LICENSE_TEXT);assert!(!THIRD_PARTY_NOTICES.is_empty());
+        assert_eq!(identity.version(),"2.3.4-alpha.2+original.007");
+        assert!(text.starts_with("ChezCat 2.3.4-alpha.2+original.007.dev.unknown\n"));assert!(text.contains(&format!("License: CSAPUL {}\n",crate::license_acceptance::LICENSE_VERSION)));assert_eq!(license_text(),crate::license_acceptance::LICENSE_TEXT);assert!(!THIRD_PARTY_NOTICES.is_empty());
         for invalid in ["1.2","01.2.3","1.2.3-alpha.01","1.2.3+","1.2.3-alpha..2","1.2.3\nprivate","v1.2.3","1.2.3+build+other"] {assert!(!product_version(invalid),"{invalid:?}");}
     }
     #[test]
@@ -150,5 +173,38 @@ mod tests {
     fn build_identity_tracked_inputs_refuse_hidden_flags_paths_and_line_injection() {
         assert_eq!(tracked_path(b"H src/original.rs"),Some("src/original.rs"));
         for record in [b"h src/hidden.rs".as_slice(),b"S src/skipped.rs",b"s src/both.rs",b"H ../private",b"H /private",b"H source\nother",b"H ",b"H src/\xff.rs"] {assert_eq!(tracked_path(record),None,"{record:?}");}
+    }
+    #[test]
+    fn build_identity_development_label_uses_exact_source_and_separate_base_version() {
+        let identity=Identity::new("2.3.4-alpha.2",source(Some(SHA),Some("git"),Some("clean")),None).unwrap().with_main_ordinal(Some("17"));
+        assert_eq!(identity.version(),"2.3.4-alpha.2");assert_eq!(identity.main_ordinal(),Some(17));
+        assert_eq!(identity.display_version(),"2.3.4-alpha.2+dev.17.g0123456789ab");
+        let text=identity.safe_copy();assert!(text.starts_with("ChezCat 2.3.4-alpha.2+dev.17.g0123456789ab\n"));
+        assert!(text.contains(&format!("Source revision: {SHA}\n")));assert!(text.contains("Build: Development build\n"));
+        let metadata=Identity::new("2.3.4-alpha.2+original.007",identity.source(),None).unwrap().with_main_ordinal(Some("17"));
+        assert_eq!(metadata.display_version(),"2.3.4-alpha.2+original.007.dev.17.g0123456789ab");assert!(product_version(&metadata.display_version()));
+    }
+    #[test]
+    fn build_identity_unavailable_or_untrusted_ordinals_keep_honest_sha_fallback() {
+        let clean=source(Some(SHA),Some("git"),Some("clean"));
+        for value in [None,Some(""),Some("0"),Some("01"),Some("-1"),Some("1\n"),Some("18446744073709551616")] {
+            let identity=Identity::new("2.3.4",clean,None).unwrap().with_main_ordinal(value);
+            assert_eq!(identity.main_ordinal(),None);assert_eq!(identity.display_version(),"2.3.4+dev.g0123456789ab");
+            assert!(identity.safe_copy().contains("Build: Development build (public main ordinal unavailable)\n"));
+        }
+        for provenance in [source(Some(SHA),Some("git"),Some("dirty")),source(Some(SHA),Some("git"),Some("unknown")),source(Some(SHA),Some("exported"),Some("unknown"))] {
+            let identity=Identity::new("2.3.4",provenance,None).unwrap().with_main_ordinal(Some("17"));
+            assert_eq!(identity.main_ordinal(),None);assert_eq!(identity.source(),provenance);assert_eq!(identity.display_version(),"2.3.4+dev.g0123456789ab");
+        }
+        let unknown=Identity::new("2.3.4",Source::UNKNOWN,None).unwrap().with_main_ordinal(Some("17"));
+        assert_eq!(unknown.display_version(),"2.3.4+dev.unknown");assert!(unknown.safe_copy().contains("Source revision: unknown\n"));
+    }
+    #[test]
+    fn build_identity_exact_declared_tag_keeps_base_and_cannot_gain_development_ordinal() {
+        let clean=source(Some(SHA),Some("git"),Some("clean"));
+        let identity=Identity::new("2.3.4-alpha.2",clean,Some("v2.3.4-alpha.2")).unwrap().with_main_ordinal(Some("17"));
+        assert_eq!(identity.main_ordinal(),None);assert_eq!(identity.display_version(),"2.3.4-alpha.2");
+        assert!(identity.safe_copy().starts_with("ChezCat 2.3.4-alpha.2\nBuild: Declared tagged build v2.3.4-alpha.2 (publication unverified)\n"));
+        assert!(Identity::new("2.3.4-alpha.2",source(Some(SHA),Some("git"),Some("dirty")),Some("v2.3.4-alpha.2")).is_err());
     }
 }
