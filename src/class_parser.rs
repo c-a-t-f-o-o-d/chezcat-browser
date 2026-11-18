@@ -138,7 +138,8 @@ impl Parser {
             self.program.templates.try_reserve(1).map_err(|_| self.unsupported("Unable to reserve bounded class constructor storage."))?;
             self.program.templates.push(Template {
                 source_start: start, source_end: end, dynamic_source: false,
-                arrow: false, asynchronous: false, constructible: true, class_constructor: true, class_element: true,
+                arrow: false, asynchronous: false, await_plan: Vec::new(),
+                constructible: true, class_constructor: true, class_element: true,
                 derived_constructor: heritage.is_some(), default_constructor: true, strict: true,
                 name: None, params: Vec::new(), rest: false,
                 trailing_parameter_comma: false, body: Vec::new(),

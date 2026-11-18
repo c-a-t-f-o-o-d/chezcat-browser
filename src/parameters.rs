@@ -106,6 +106,28 @@ impl Runtime {
 
     #[inline(never)]
     #[allow(clippy::too_many_arguments)]
+    pub(super) fn prepare_await_body(
+        &mut self, program: &Rc<Program>, template: usize, callee: usize,
+        parent: usize, args: &[Value], this: &Value, promise: usize, host: &mut dyn Host,
+    ) -> Result<(), Fault> {
+        let mut scopes = [None; 4];
+        let marker = self.transient_marker();
+        let inhibited = self.inhibit_transient_collection();
+        let prepared = self.prepare_script_call(program, template, callee, parent, args, this, host, &mut scopes);
+        self.finish_transient_inhibition(inhibited);
+        let result = match prepared {
+            Ok(env) => self.start_await_body(program, template, callee, env, this, promise, host),
+            Err(error) => self.finish_async_result(promise, Err(error), host),
+        };
+        self.restore_transient_marker(marker);
+        for scope in scopes.into_iter().rev().flatten() {
+            self.release_environment(scope);
+        }
+        result
+    }
+
+    #[inline(never)]
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn derived_script_parameters_and_body(
         &mut self,
         program: &Rc<Program>,

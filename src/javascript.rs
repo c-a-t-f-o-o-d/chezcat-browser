@@ -168,6 +168,13 @@ mod promises;
 #[cfg(test)]
 #[path = "async_function_execution_tests.rs"]
 mod async_function_execution_tests;
+#[path = "async_plan.rs"]
+mod async_plan;
+#[path = "async_execution.rs"]
+mod async_execution;
+#[cfg(test)]
+#[path = "await_execution_tests.rs"]
+mod await_execution_tests;
 pub(crate) use promises::{NativePromise, NativePromiseOutcome};
 #[path = "host_promise.rs"]
 mod host_promise;
@@ -1692,6 +1699,7 @@ struct Template {
     dynamic_source: bool,
     arrow: bool,
     asynchronous: bool,
+    await_plan: Vec<async_plan::Instruction>,
     constructible: bool,
     class_constructor: bool,
     class_element: bool,
@@ -1717,12 +1725,13 @@ struct Program {
     patterns: Vec<binding_patterns::Pattern>,
     body: Vec<StmtId>,
     chain_steps: usize,
+    await_plan_nodes: usize,
 }
 
 impl Program {
     fn node_count(&self) -> usize {
         self.exprs.len() + self.stmts.len() + self.chain_steps + self.patterns.len()
-            + self.classes.len() + self.class_members
+            + self.classes.len() + self.class_members + self.await_plan_nodes
     }
 }
 
@@ -1755,7 +1764,9 @@ struct Parser {
     labels: Vec<(String, StmtId, bool)>,
     allow_in: bool,
     functions: usize,
-    async_body: bool,
+    // Present only in an async function body. Nested function and parameter
+    // goals cannot claim a suspension point from the enclosing template.
+    await_count: Option<usize>,
     new_target_allowed: bool,
     super_property_allowed: bool,
     super_call_allowed: bool,
@@ -1828,6 +1839,7 @@ impl Parser {
                 patterns: Vec::new(),
                 body: Vec::new(),
                 chain_steps: 0,
+                await_plan_nodes: 0,
             },
             tokens,
             delimiter_ends,
@@ -1845,7 +1857,7 @@ impl Parser {
             labels: Vec::new(),
             allow_in: true,
             functions: 0,
-            async_body: false,
+            await_count: None,
             new_target_allowed,
             super_property_allowed,
             super_call_allowed,
@@ -1904,7 +1916,7 @@ impl Parser {
             self.depth = active_depth;
             self.enter()?;
             self.functions = body.function_depth;
-            self.async_body = self.program.templates[body.template].asynchronous;
+            self.await_count = self.program.templates[body.template].asynchronous.then_some(0);
             self.new_target_allowed = body.new_target_allowed;
             self.super_property_allowed = body.super_property_allowed;
             self.super_call_allowed = body.super_call_allowed;
@@ -1941,10 +1953,20 @@ impl Parser {
             let template = &mut self.program.templates[body.template];
             template.strict = strict;
             template.body = statements;
+            self.attach_await_plan(body.template, self.await_count.unwrap_or(0))?;
             self.depth -= 1;
             if self.expression_frames != 0 || self.if_branches != 0 {
                 return Err(self.unsupported("Undrained parser continuations after deferred body."));
             }
+        }
+        Ok(())
+    }
+
+    fn attach_await_plan(&mut self, template: usize, count: usize) -> Result<(), Fault> {
+        if count != 0 {
+            let plan = async_plan::compile(&self.program, template, count, self.capacity.ast_nodes)?;
+            self.program.await_plan_nodes += plan.len();
+            self.program.templates[template].await_plan = plan;
         }
         Ok(())
     }
@@ -2403,7 +2425,7 @@ impl Parser {
     fn function_with_super(&mut self, name: Option<String>, start: usize, asynchronous: bool,
         super_property_allowed: bool, super_call_allowed: bool) -> Result<usize, Fault> {
         self.enter()?;
-        let previous_async_body = std::mem::replace(&mut self.async_body, false);
+        let outer_await_count = self.await_count.take();
         let previous_new_target = std::mem::replace(&mut self.new_target_allowed, true);
         let previous_super_property = std::mem::replace(&mut self.super_property_allowed, super_property_allowed);
         let previous_super_call = std::mem::replace(&mut self.super_call_allowed, super_call_allowed);
@@ -2414,6 +2436,7 @@ impl Parser {
             dynamic_source: false,
             arrow: false,
             asynchronous,
+            await_plan: Vec::new(),
             constructible: !asynchronous,
             class_constructor: false,
             class_element: false,
@@ -2426,7 +2449,7 @@ impl Parser {
             trailing_parameter_comma,
             body: Vec::new(),
         })?;
-        self.async_body = previous_async_body;
+        self.await_count = outer_await_count;
         self.new_target_allowed = previous_new_target;
         self.super_property_allowed = previous_super_property;
         self.super_call_allowed = previous_super_call;
@@ -2494,7 +2517,7 @@ impl Parser {
         if asynchronous {
             self.current += 1;
         }
-        let previous_async_body = std::mem::replace(&mut self.async_body, false);
+        let outer_await_count = self.await_count.take();
         let (params, rest, trailing_parameter_comma) = if self.is("(") {
             self.parameters(true)?
         } else {
@@ -2518,6 +2541,7 @@ impl Parser {
                 dynamic_source: false,
                 arrow: true,
                 asynchronous,
+                await_plan: Vec::new(),
                 constructible: false,
                 class_constructor: false,
                 class_element: false,
@@ -2530,7 +2554,7 @@ impl Parser {
                 trailing_parameter_comma,
                 body: Vec::new(),
             })?;
-            self.async_body = previous_async_body;
+            self.await_count = outer_await_count;
             self.depth -= 1;
             return self.expr(ExprKind::Function(template), at);
         }
@@ -2542,7 +2566,7 @@ impl Parser {
         let labels = std::mem::take(&mut self.labels);
         let previous_in = self.allow_in;
         self.functions += 1;
-        self.async_body = asynchronous;
+        self.await_count = asynchronous.then_some(0);
         let expression = self.assignment_expression()?;
         let body = vec![self.stmt(StmtKind::Return(Some(expression)), at)?];
         let strict = self.strict;
@@ -2556,7 +2580,8 @@ impl Parser {
         self.labels = labels;
         self.breakables = breakables;
         self.allow_in = previous_in;
-        self.async_body = previous_async_body;
+        let count = self.await_count.unwrap_or(0);
+        self.await_count = outer_await_count;
         self.functions -= 1;
         self.depth -= 1;
         let template = self.program.templates.len();
@@ -2566,6 +2591,7 @@ impl Parser {
             dynamic_source: false,
             arrow: true,
             asynchronous,
+            await_plan: Vec::new(),
             constructible: false,
             class_constructor: false,
             class_element: false,
@@ -2578,6 +2604,7 @@ impl Parser {
             trailing_parameter_comma,
             body,
         });
+        self.attach_await_plan(template, count)?;
         self.expr(ExprKind::Function(template), at)
     }
 
@@ -2608,9 +2635,6 @@ impl Parser {
             let name = if self.is("(") { None } else { Some(self.name()?) };
             let template = self.function(name, at, asynchronous)?;
             return self.expr(ExprKind::Function(template), at);
-        }
-        if self.async_body && self.is("await") {
-            return Err(self.unsupported("Await expressions are not implemented."));
         }
         if self.is("class") {
             let kind = self.class_expression(at, false)?;
@@ -5034,19 +5058,23 @@ impl Runtime {
         let mut roots = vec![0];
         if let Some(context) = self.invocation { roots.push(context.environment); }
         roots.extend(self.intrinsic_realms.iter().map(|realm| realm.global_environment));
+        roots.extend(self.transient_roots.roots.iter().filter_map(|edge| match edge {
+            function_reachability::Edge::Environment(id) => Some(*id),
+            _ => None,
+        }));
+        self.promises.await_environment_roots(&mut roots);
         for function in &self.functions {
             if let Function::Script { environment, lexical_invocation, .. } = function {
                 roots.push(*environment);
                 if let Some(context) = lexical_invocation { roots.push(context.environment); }
             }
         }
-        roots.extend(self.objects.iter().filter_map(|object| {
-            object
-                .arguments
-                .as_ref()
-                .filter(|data| !data.mapped.is_empty())
-                .map(|data| data.environment)
-        }));
+        for object in &self.objects {
+            if let Some(data) = &object.promise { data.await_environment_roots(&mut roots); }
+            if let Some(arguments) = &object.arguments {
+                if !arguments.mapped.is_empty() { roots.push(arguments.environment); }
+            }
+        }
         while let Some(mut env) = roots.pop() {
             loop {
                 if live[env] {

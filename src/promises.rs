@@ -10,6 +10,10 @@ use super::{
 };
 use std::collections::VecDeque;
 use std::sync::Arc;
+#[path = "async_promise_reactions.rs"]
+mod async_reactions;
+use async_reactions::Reaction;
+use super::async_execution::Activation;
 
 const MAX_DIAGNOSTICS: usize = 32;
 
@@ -74,12 +78,6 @@ struct Capability {
     promise: Value,
     resolve: Value,
     reject: Value,
-}
-
-struct Reaction {
-    capability: Capability,
-    fulfill: Option<usize>,
-    reject: Option<usize>,
 }
 
 struct ResolvingPair {
@@ -165,6 +163,7 @@ enum Job {
         reject: bool,
     },
     Callback(usize),
+    Await { frame: Box<Activation>, value: Value, reject: bool },
     /// A native stable-state procedure owns no ECMAScript references. It runs
     /// in the host document, sharing FIFO order and all normal job allowances.
     Host(u64),
@@ -172,13 +171,14 @@ enum Job {
 
 impl Job {
     fn allocation_kind(&self) -> usize {
-        match self { Self::Callback(_) | Self::Host(_) => 0, Self::Reaction { .. } => 1, Self::Thenable { .. } => 2 }
+        match self { Self::Callback(_) | Self::Host(_) => 0, Self::Reaction { .. } | Self::Await { .. } => 1, Self::Thenable { .. } => 2 }
     }
 
     fn retained_bytes(&self) -> usize {
         std::mem::size_of::<Self>()
             + match self {
                 Self::Thenable { receiver, then, .. } => receiver.bytes() + then.bytes(),
+                Self::Await { frame, value, .. } => frame.retained_bytes() + value.bytes(),
                 Self::Reaction {
                     capability, value, ..
                 } => {
@@ -227,14 +227,21 @@ impl Capability {
 }
 
 impl Data {
-    pub(super) fn reachability_cost(&self) -> usize { 1 + self.reactions.len() * 5 }
+    pub(super) fn reachability_cost(&self) -> usize {
+        1 + self.reactions.iter().map(Reaction::reachability_cost).sum::<usize>()
+    }
+
+    pub(super) fn await_environment_roots(&self, roots: &mut Vec<usize>) {
+        for reaction in &self.reactions {
+            if let Reaction::Await(frame) = reaction { frame.environment_roots(roots); }
+        }
+    }
 
     pub(super) fn reachability_edges(&self, add: &mut impl FnMut(super::function_reachability::Edge)) {
         use super::function_reachability::Edge;
         match &self.state { State::Fulfilled(value) | State::Rejected(value) => Edge::value(value, add), State::Pending => {} }
         for reaction in &self.reactions {
-            reaction.capability.reachability_edges(add);
-            for id in [reaction.fulfill, reaction.reject].into_iter().flatten() { add(Edge::Function(id)); }
+            reaction.reachability_edges(add);
         }
     }
 }
@@ -252,8 +259,18 @@ impl Closure {
 }
 
 impl Arena {
+    pub(super) fn await_environment_roots(&self, roots: &mut Vec<usize>) {
+        for (_, job) in &self.jobs {
+            if let Job::Await { frame, .. } = job { frame.environment_roots(roots); }
+        }
+    }
+
     pub(super) fn reachability_cost(&self) -> usize {
-        2 + self.pairs.len() + self.capabilities.len() * 2 + self.groups.len() * 4 + self.jobs.len() * 5
+        let jobs: usize = self.jobs.iter().map(|(_, job)| match job {
+            Job::Await { frame, .. } => 1 + frame.reachability_cost(),
+            _ => 5,
+        }).sum();
+        2 + self.pairs.len() + self.capabilities.len() * 2 + self.groups.len() * 4 + jobs
     }
 
     pub(super) fn reachability_is_inactive(&self) -> bool {
@@ -278,6 +295,10 @@ impl Arena {
             match job {
                 Job::Host(_)=>{},
                 Job::Callback(id) => add(Edge::Function(*id)),
+                Job::Await { frame, value, .. } => {
+                    frame.reachability_edges(add);
+                    Edge::value(value, add);
+                }
                 Job::Thenable { promise, receiver, then } => {
                     add(Edge::Object(*promise)); Edge::value(receiver, add); Edge::value(then, add);
                 }
@@ -437,20 +458,31 @@ impl Runtime {
         let marker = self.transient_marker();
         let result = (|| {
             self.push_transient_root(super::function_reachability::Edge::Object(promise))?;
-            match self.script_parameters_and_body(program, template, callee, parent, args, this, host) {
-                Ok(value) => {
-                    self.push_transient_value(&value)?;
-                    self.resolve_promise(promise, value, host)?;
-                }
-                Err(error) => {
-                    let reason = self.promise_exception(error)?;
-                    self.promise_settle(promise, reason, true)?;
-                }
+            if program.templates[template].await_plan.is_empty() {
+                let completion = self.script_parameters_and_body(program, template, callee, parent, args, this, host);
+                self.finish_async_result(promise, completion, host)?;
+            } else {
+                self.prepare_await_body(program, template, callee, parent, args, this, promise, host)?;
             }
             Ok(Value::Object(promise))
         })();
         self.restore_transient_marker(marker);
         result
+    }
+
+    pub(super) fn finish_async_result(&mut self, promise: usize, completion: Result<Value, Fault>, host: &mut dyn Host) -> Result<(), Fault> {
+        match completion {
+            Ok(value) => {
+                let marker = self.root_marker();
+                let resolved = self.push_transient_value(&value).and_then(|()| self.resolve_promise(promise, value, host));
+                self.restore_root_marker(marker);
+                resolved
+            }
+            Err(error) => {
+                let reason = self.promise_exception(error)?;
+                self.promise_settle(promise, reason, true)
+            }
+        }
     }
 
     /// Export a genuine pending Promise with the active realm's intrinsic
@@ -632,7 +664,11 @@ impl Runtime {
             Job::Reaction { handler: Some(id), .. } | Job::Callback(id) => Some(*id),
             _ => None,
         };
-        let realm = if matches!(job,Job::Host(_)){None}else{callback.map_or(self.active_realm, |id| self.function_realms[id])};
+        let realm = match &job {
+            Job::Host(_) => None,
+            Job::Await { frame, .. } => frame.realm(),
+            _ => callback.map_or(self.active_realm, |id| self.function_realms[id]),
+        };
         self.promises.jobs.push_back((realm, job));
         Ok(())
     }
@@ -682,19 +718,9 @@ impl Runtime {
             State::Fulfilled(value.clone())
         };
         self.promises.reactions -= reactions.len();
-        self.value_bytes -= reactions.len() * std::mem::size_of::<Reaction>();
+        self.value_bytes -= reactions.iter().map(Reaction::retained_bytes).sum::<usize>();
         for reaction in reactions {
-            let handler = if reject {
-                reaction.reject
-            } else {
-                reaction.fulfill
-            };
-            self.promise_enqueue(Job::Reaction {
-                capability: reaction.capability,
-                handler,
-                value: value.clone(),
-                reject,
-            })?;
+            self.promise_enqueue(reaction.into_job(value.clone(), reject))?;
         }
         Ok(())
     }
@@ -824,39 +850,7 @@ impl Runtime {
             Value::Function(id) => Some(*id),
             _ => None,
         });
-        match &self.objects[promise].promise.as_ref().unwrap().state {
-            State::Pending => {
-                if self.promises.reactions >= self.limits.capacity.promises {
-                    return Err(Fault::new(format!("Promise reaction limit reached ({}).", self.limits.capacity.promises)));
-                }
-                self.promise_retain(std::mem::size_of::<Reaction>())?;
-                self.objects[promise]
-                    .promise
-                    .as_mut()
-                    .unwrap()
-                    .reactions
-                    .push(Reaction {
-                        capability,
-                        fulfill,
-                        reject: reject_handler,
-                    });
-                self.promises.reactions += 1;
-            }
-            State::Fulfilled(value) | State::Rejected(value) => {
-                let value = value.clone();
-                let reject = matches!(
-                    self.objects[promise].promise.as_ref().unwrap().state,
-                    State::Rejected(_)
-                );
-                self.promise_enqueue(Job::Reaction {
-                    capability,
-                    handler: if reject { reject_handler } else { fulfill },
-                    value,
-                    reject,
-                })?;
-            }
-        }
-        self.objects[promise].promise.as_mut().unwrap().handled = true;
+        self.observe_promise(promise, Reaction::Then { capability, fulfill, reject: reject_handler })?;
         Ok(returned)
     }
 
@@ -1379,6 +1373,14 @@ impl Runtime {
             match &job {
                 Job::Host(_)=>{},
                 Job::Callback(function) => self.push_transient_root(Edge::Function(*function))?,
+                Job::Await { frame, value, .. } => {
+                    let mut registered = Ok(());
+                    frame.reachability_edges(&mut |edge| {
+                        if registered.is_ok() { registered = self.push_transient_root(edge); }
+                    });
+                    registered?;
+                    self.push_transient_value(value)?;
+                }
                 Job::Thenable { promise, receiver, then } => {
                     self.push_transient_root(Edge::Object(*promise))?;
                     self.push_transient_value(receiver)?;
@@ -1405,6 +1407,7 @@ impl Runtime {
         self.step()?;
         match job {
             Job::Host(ticket)=>{host.run_native_microtask(ticket).map_err(Fault::new)?;}
+            Job::Await { frame, value, reject } => self.resume_await_body(frame, value, reject, host)?,
             Job::Callback(function) => {
                 self.call_value(Value::Function(function), &[], Value::Undefined, host)?;
             }
@@ -1532,7 +1535,7 @@ impl Runtime {
         }
         for object in &mut self.objects {
             if let Some(data) = &mut object.promise {
-                self.value_bytes -= data.reactions.len() * std::mem::size_of::<Reaction>();
+                self.value_bytes -= data.reactions.iter().map(Reaction::retained_bytes).sum::<usize>();
                 data.reactions = Vec::new();
                 data.reported = true;
             }

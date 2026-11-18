@@ -236,12 +236,12 @@ fn scratch_parser(source: &str, enclosing: usize) -> Parser {
         heap: limits::REGRESSION_HEAP,
         program: Program {
             source: source.into(), strict: false, exprs: Vec::new(), stmts: Vec::new(),
-            templates: Vec::new(), classes: Vec::new(), class_members: 0, patterns: Vec::new(), body: Vec::new(), chain_steps: 0,
+            templates: Vec::new(), classes: Vec::new(), class_members: 0, patterns: Vec::new(), body: Vec::new(), chain_steps: 0, await_plan_nodes: 0,
         },
         delimiter_ends: vec![usize::MAX; tokens.len()], tokens, deferred_bodies: Vec::new(),
         current: 0, depth: 0, expression_frames: enclosing, argument_entries: 0,
         if_branches: 0, strict: false, loops: Vec::new(), breakables: Vec::new(),
-        labels: Vec::new(), allow_in: false, functions: 0, async_body: false, new_target_allowed: false,
+        labels: Vec::new(), allow_in: false, functions: 0, await_count: None, new_target_allowed: false,
         super_property_allowed: false, super_call_allowed: false,
     }
 }
@@ -315,7 +315,7 @@ fn async_parser_preserves_contextual_calls_line_breaks_and_slash_goals() {
 }
 
 #[test]
-fn async_parser_rejects_await_before_execution_and_preserves_body_boundaries() {
+fn async_parser_recognizes_direct_await_and_preserves_body_boundaries() {
     for source in [
         "async function f(){return await x;}",
         "const f = async () => await x;",
@@ -323,8 +323,8 @@ fn async_parser_rejects_await_before_execution_and_preserves_body_boundaries() {
         "function ordinary(){const f = async function(){await x;};}",
         "async function f(){const nested = x => x; return await x;}",
     ] {
-        let fault = parse(source).err().unwrap();
-        assert!(fault.message.contains("Await expressions"), "{source}: {}", fault.display());
+        let program = parse(source).unwrap();
+        assert_eq!(program.templates.iter().filter(|t| !t.await_plan.is_empty()).count(), 1, "{source}");
     }
     for source in [
         "async function f(){function ordinary(){await x;}}",
@@ -333,10 +333,29 @@ fn async_parser_rejects_await_before_execution_and_preserves_body_boundaries() {
         "async function f(){const method = {m(){await x;}};}",
         "async function f(){function ordinary(x = await y){}}",
         "async function f(x = await x){}",
+        "async function f(){const nested = async (x = await y) => x;}",
     ] {
         let fault = parse(source).err().unwrap();
         assert!(fault.message.contains("Unsupported syntax \"await\""), "{source}: {}", fault.display());
     }
+}
+
+#[test]
+fn async_parser_await_uses_unary_precedence_and_existing_line_terminator_rules() {
+    let program = parse("async function f(p){return\nawait /* comment */\n /ok/.test(p);}").unwrap();
+    assert!(matches!(program.templates[0].await_plan.as_slice(), [
+        async_plan::Instruction::Statement(id),
+        async_plan::Instruction::Await { operand, action: async_plan::Resume::Discard, .. },
+    ] if matches!(program.stmts[*id].kind, StmtKind::Return(None))
+        && matches!(program.exprs[*operand].kind, ExprKind::Call(_, _))));
+    let program = parse("const f = async p => await (p.await ** 2);").unwrap();
+    assert!(matches!(program.templates[0].await_plan.as_slice(), [
+        async_plan::Instruction::Await { operand, action: async_plan::Resume::Return, .. },
+    ] if matches!(program.exprs[*operand].kind, ExprKind::Binary("**", _, _))));
+    let error = parse("async function f(p){return await p ** 2;}").err().unwrap();
+    assert!(error.message.contains("before ** must be parenthesized"));
+    let deep = format!("async function f(p){{return {}p;}}", "await ".repeat(MAX_PARSE_DEPTH + 2));
+    assert!(parse(&deep).err().unwrap().message.contains("nesting limit"));
 }
 
 #[test]
