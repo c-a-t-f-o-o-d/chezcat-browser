@@ -87,6 +87,7 @@ impl Runtime {
                 }
                 if name=="Element" {
                     self.define_element_sibling_getters(prototype,window,"Element")?;
+                    self.define_assigned_slot_getter(prototype, window, "\0Element.get.assignedSlot")?;
                     for (key,operation) in [("querySelector","\0Element.querySelector"),("querySelectorAll","\0Element.querySelectorAll")] {
                         let method=self.allocate_host_function_with_length(window,operation,1).map_err(Fault::new)?;
                         if let Some(Function::Host {receiver_required,..})=self.functions.get_mut(method.id) {*receiver_required=true;}
@@ -100,8 +101,8 @@ impl Runtime {
                 parent=prototype;
             }
             self.define_concrete_html_node_interfaces(window, parent)?;
-            // CharacterData is a separate genuine Node suffix. Specialized
-            // Text/Comment immediate prototypes remain outside this slice.
+            // CharacterData is a separate genuine Node suffix. Text gets its
+            // own Slottable prototype below; Comment retains this suffix.
             let node=self.native_constructor_prototypes[&(window,"Node")];
             let node_constructor=self.objects[node].properties["constructor"].value.as_value()?.clone();
             let Value::Function(node_constructor)=node_constructor else {return Err(Fault::new("Invalid CharacterData parent constructor."));};
@@ -118,6 +119,7 @@ impl Runtime {
             self.put_binding(self.global_environment,"CharacterData".into(),Some(constructor),super::Declaration::Var,false)?;
             self.global_attributes.insert("CharacterData".into(),(false,true,true));
             self.native_constructor_prototypes.insert((window,"CharacterData"),character);
+            self.define_text_interface(window, character)?;
             // Fragment is a separate Node subtype, never an Element suffix.
             let node=*self.native_constructor_prototypes.get(&(window,"Node")).ok_or_else(||Fault::new("Missing Node prototype."))?;
             let Value::Function(node_constructor)=self.objects[node].properties["constructor"].value.as_value()?.clone() else {return Err(Fault::new("Invalid Node constructor."));};
@@ -271,6 +273,72 @@ impl Runtime {
         self.global_attributes.insert("NodeList".into(),(false,true,true));
         self.native_constructor_prototypes.insert((window,"NodeList"),prototype);
         Ok(())
+    }
+
+    /// Text includes Slottable; CharacterData and Comment do not. Give Text
+    /// its genuine per-realm interface instead of adding the getter to their
+    /// shared suffix or manufacturing an own property on each Text instance.
+    fn define_text_interface(&mut self, window: u32, character_data: usize) -> Result<(), Fault> {
+        let parent_constructor = self.objects[character_data].properties
+            .get("constructor")
+            .ok_or_else(|| Fault::new("Missing CharacterData constructor."))?
+            .value.as_value()?.clone();
+        let Value::Function(parent_function) = parent_constructor else {
+            return Err(Fault::new("Invalid CharacterData constructor."));
+        };
+        let allocation = self.allocate_host_function_with_length(window, "Text", 0)
+            .map_err(Fault::new)?;
+        if let Some(Function::Host { constructible, .. }) = self.functions.get_mut(allocation.id) {
+            *constructible = true;
+        }
+        let prototype = self.new_object(None)?;
+        self.objects[prototype].prototype = Some(Ordinary::Object(character_data));
+        self.objects[self.function_properties[allocation.id]].prototype =
+            Some(Ordinary::Function(parent_function));
+        let constructor = Value::Function(allocation.id);
+        self.store_property(
+            prototype, "constructor".into(), constructor.clone(),
+            Some((false, true, true)),
+        )?;
+        self.store_property(
+            self.function_properties[allocation.id], "prototype".into(),
+            Value::Object(prototype), Some((false, false, false)),
+        )?;
+        let tag = self.symbol_to_string_tag
+            .ok_or_else(|| Fault::new("Missing Text class-tag symbol."))?;
+        self.store_symbol_property(
+            prototype, tag, Value::String("Text".into()),
+            Some((false, false, true)),
+        )?;
+        self.define_assigned_slot_getter(prototype, window, "\0Text.get.assignedSlot")?;
+        self.native_constructor_prototypes.insert((window, "Text"), prototype);
+        self.put_binding(
+            self.global_environment, "Text".into(), Some(constructor),
+            super::Declaration::Var, false,
+        )?;
+        self.global_attributes.insert("Text".into(), (false, true, true));
+        Ok(())
+    }
+
+    fn define_assigned_slot_getter(
+        &mut self,
+        prototype: usize,
+        window: u32,
+        operation: &'static str,
+    ) -> Result<(), Fault> {
+        let getter = self.allocate_host_function_with_length(window, operation, 0)
+            .map_err(Fault::new)?;
+        if let Some(Function::Host { receiver_required, .. }) = self.functions.get_mut(getter.id) {
+            *receiver_required = true;
+        }
+        self.store_property(
+            self.function_properties[getter.id], "name".into(),
+            Value::String("get assignedSlot".into()), Some((false, false, true)),
+        )?;
+        self.store_accessor_property(
+            prototype, "assignedSlot".into(),
+            Accessors { get: Some(getter.id), set: None }, (true, true),
+        )
     }
 
     fn define_element_sibling_getters(&mut self,prototype:usize,window:u32,family:&str)->Result<(),Fault> {

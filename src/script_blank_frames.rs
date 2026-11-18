@@ -51,6 +51,18 @@ fn document_node(index: usize, node: usize) -> u32 {
 }
 
 impl Bridge<'_> {
+    pub(super) fn frame_light_dom_element(&self, handle: u32) -> Result<(), String> {
+        let (index, offset) = frame_handle(handle).ok_or("Unknown child Element.")?;
+        self.frame_window_access(self.state.navigation_incumbent.or(Some(WINDOW)), window(index))?;
+        let frame = self.state.blank_frames.get(index).ok_or("Unknown child document.")?;
+        if !frame.connected || !self.frame_element_sibling_receiver(handle)
+            || frame.document.nodes[(offset - 3) as usize].namespace != crate::html::Namespace::Html
+        {
+            return Err("Child Element is outside the supported blank document.".into());
+        }
+        Ok(())
+    }
+
     pub(super) fn frame_element_sibling_receiver(&self,handle:u32)->bool {
         let Some((index,offset))=frame_handle(handle) else {return false;};
         if !matches!(offset,4..=6) {return false;}
