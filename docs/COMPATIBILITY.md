@@ -17,6 +17,8 @@
 > HTTP 200, successful parsing, zero startup errors, or one green test does not
 > establish a working website or support for every version of a framework.
 
+**Earlier source snapshots (November 17–18, 2026).**
+
 This page retains the earlier evidence snapshot through source `a65d37c` on
 November 17, 2026, including PR #31, #32 and #34 results. The Bootstrap row adds
 later measurements on `3456e67`, `5c89eea` and `5c22afd`, followed by the combined
@@ -43,6 +45,22 @@ changes after this snapshot require their own rechecks.
 · [Method](#measurement-method) · [Historical evidence](#historical-evidence)
 
 ## Current scorecard
+
+The integration baseline for 0.82.0-alpha.1 is `6089546`. The combined application run used `067ac5e`. The later W2 and ReactDOM runs used the feature revisions identified below. [Machine-readable records](compatibility.json)
+
+| Workload | Observed progress | Remaining boundary | Evidence |
+| :--- | :--- | :--- | :--- |
+| **Bootstrap 5.3.9 progress meter and action stack** | At 640 and 1280 px on `5298918`, the 240×16 meter matches the literal fill at 25% and 75%, with its caption on one line. At 640 px on `067ac5e`, the two 160×40 action links form one column. A trusted click changes the gap from 8 to 16 px. The second link receives its own trusted click. | The stack uses default grid placement. Explicit tracks and per-item inline alignment are outside this baseline. | [Implicit grid rows, PR #112](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/112) |
+| **jQuery 1.12.4 + Bootstrap 3.4.1** | At 1280×800 on `7608f4c`, W2 loads its pinned assets, paints the initial control and passes the deep radio-clone step. | jQuery initialization stops at 4743:4 while assigning the raw `onfocusin` attribute on a DIV. The dropdown, form and async stages remain blocked. | [Native radio clones, PR #115](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/115) |
+| **jQuery 4.0.0, separate input app** | At 1280×800 on integrated `067ac5e`, the application initializes, handles trusted input and displays its asynchronous timer update. | This case exercises the pinned input app. AJAX and Deferred have separate requirements. | [Workflow record](compatibility.json) |
+| **Bootstrap 5.3.9 + Popper 2.11.8 dropdown** | On `067ac5e`, the original cards render responsively at 1280×800 and 640×800. Trusted opening, Amber selection and closing pass at both sizes. | The responsive layout and dropdown are the measured component scope. | [Workflow record](compatibility.json) |
+| **React and ReactDOM 18.3.1, original 1280×800 app** | On `2f9fa8d`, both pinned production runtimes export successfully. The scheduled ReactDOM callback passes its `HTMLIFrameElement` test. The native editor and paint controls pass. | The callback stops at 58:228 reading `contentEditable`. The component does not mount. | [Iframe interface, PR #114](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/114) |
+| **Vue 2.7.16 runtime** | On `067ac5e`, the W3 app mounts, renders, accepts an edit and two clicks, and completes its asynchronous update. Foundation places the panels side by side at 1280 px and stacks them at 640 px. | The two W3 configurations use Foundation CSS with Vue 2.7.16. | [Workflow record](compatibility.json) |
+| **Vue 3.5.45 runtime, separate 1280×800 app** | On `067ac5e`, Vue mounts its blue 64×24 box, input and two buttons. Editing and clicking twice displays `count=2 name=Ada 雪 phase=ready`. The next-tick and timer callbacks display `phase=complete` and update the title. | All 17 actions completed, all five captured stages were fault-free, and the independent edited field retained its live and default values. | [Workflow record](compatibility.json) |
+
+### Earlier source-bound scorecard
+
+The following rows preserve the initial measurements and carry their original result boundaries.
 
 | Workload | Observed progress | Remaining boundary | Evidence |
 | :--- | :--- | :--- | :--- |

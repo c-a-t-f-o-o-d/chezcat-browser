@@ -60,6 +60,11 @@ are different states. Report only the state actually reached.
 | **v0.81.0-alpha.1** | Immutable validation candidate; runtime documentation-link failure stopped publication. Tag retained, no release assets published |
 | **Earlier published releases** | Keep their original source, assets, licensing and valid grants unchanged |
 
+The owner has requested **`v0.82.0-alpha.1`**, prepared from integrated source
+`6089546`. It remains an unpublished candidate until the exact-source tagged
+workflow, extracted-runtime checks and published-download comparisons succeed.
+The published baseline and links above retain their verified identities.
+
 The [alpha.2 release](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.81.0-alpha.2)
 was a one-time catch-up for finite B2 and integrated prerequisites. Its completed
 delivery does not authorize another release or retroactively include newer source.

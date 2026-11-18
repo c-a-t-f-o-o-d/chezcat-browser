@@ -43,6 +43,11 @@ milestone is not implemented support, a source merge is not a new downloadable
 release, and a model test is not a live-site outcome. Follow the exact source or
 build identity attached to each result.
 
+The owner-requested `0.82.0-alpha.1` candidate is being prepared from integrated
+source `6089546`. The verified downloadable baseline remains
+[v0.81.0-alpha.3](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.81.0-alpha.3)
+until the candidate's exact-source release and delivery checks pass.
+
 Named releases remain owner-request-only. Local/hosted checks and agent-owned
 failure diagnosis remain unchanged. This documentation refresh grants no new
 runtime, network, publication, or signing permissions.

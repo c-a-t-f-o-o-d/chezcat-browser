@@ -1,6 +1,104 @@
 {
   "schema": 1,
   "scope": "Finite source and local browser-workflow assessment, not full conformance or whole-family compatibility",
+  "source_baseline": {
+    "scope": "Latest source-bound workflow results for the integrated baseline. Earlier workflow and pack objects retain the build, stage and denominator of each original measurement.",
+    "integrated_source": "60895467068d87ed49a045751b20e47309a0ab58",
+    "previous_tag": "v0.81.0-alpha.3",
+    "previous_tag_source": "57cc1d53db3860012b229530d8b7695e3f007f63",
+    "combined_app_recheck": {
+      "measured_source": "067ac5edb64e26f39c2a3d816ecbb1cf0a023f3c",
+      "executable_sha256": "b843f2624082d27f35cd4b3b9f6a7c0234b87c865794afbe1b8ddd273fa89910",
+      "vue_3_5_45": {
+        "viewport": [
+          1280,
+          800
+        ],
+        "completed_actions": 17,
+        "fault_free_stages": 5,
+        "result": "Mounted component, trusted text edit and two clicks, next-tick and timer update, retained final state and independent editor."
+      },
+      "jquery_4_0_0": {
+        "viewport": [
+          1280,
+          800
+        ],
+        "result": "Initialization, trusted input and timer update passed."
+      },
+      "bootstrap_5_3_9_popper_2_11_8": {
+        "viewports": [
+          [
+            1280,
+            800
+          ],
+          [
+            640,
+            800
+          ]
+        ],
+        "result": "Responsive cards and trusted dropdown open, Amber choice and close passed at both widths."
+      },
+      "vue_2_7_16_foundation_6_9_0": {
+        "viewports": [
+          [
+            1280,
+            800
+          ],
+          [
+            640,
+            800
+          ]
+        ],
+        "result": "Mount, initial render, trusted input and two clicks, asynchronous update and responsive panel layout passed at both widths."
+      },
+      "bootstrap_action_stack": {
+        "viewport_width": 640,
+        "result": "Two 160 by 40 links in one implicit column. A trusted click changed the gap from 8 to 16 pixels. The second link received its trusted click."
+      }
+    },
+    "legacy_w2": {
+      "measured_source": "7608f4c5b2cbe093b236a409afeb11f753366b11",
+      "integrated_via_pr": 115,
+      "executable_sha256": "804abb7fd895580467329497dde862a0d9a1758c8f88a79884de0608b7de1ec0",
+      "viewport": [
+        1280,
+        800
+      ],
+      "first_failure": {
+        "script": "jquery-1.12.4.js",
+        "line": 4743,
+        "column": 4,
+        "operation": "DIV.setAttribute for the raw onfocusin attribute"
+      },
+      "stages": {
+        "load": "passed",
+        "initial_render": "passed",
+        "initialization": "failed",
+        "dropdown_and_form_input": "blocked",
+        "async": "blocked"
+      }
+    },
+    "react_18_3_1": {
+      "measured_source": "2f9fa8dfd69a454e74d1b0051fd875718b82434f",
+      "integrated_via_pr": 114,
+      "executable_sha256": "b5dc57721b14e9131b7fb9742082e1d8a87707bbdd36b33de1d479736b77237a",
+      "viewport": [
+        1280,
+        800
+      ],
+      "runtime_exports": true,
+      "iframe_instance_check_passed": true,
+      "mounted": false,
+      "first_failure": {
+        "script": "react-dom.production.min.js",
+        "stage": "scheduled callback",
+        "line": 58,
+        "column": 228,
+        "operation": "Read contentEditable on the active element"
+      },
+      "controls": "The independent trusted native editor, literal color change and retained neighbor passed."
+    }
+  },
   "reference": {
     "language": "ECMAScript 2025, edition 16",
     "language_url": "https://262.ecma-international.org/16.0/",
@@ -9,6 +107,7 @@
     "dom_source_sha256": "19a6d0b92549926f971a0d181d501b694a3129b7a3d3bbedccafaf30c26bd570"
   },
   "active_pack": {
+    "record_scope": "Historical Node root prerequisite and its original build. Current application stages are in source_baseline.",
     "id": "node-root",
     "contract_id": "CP8",
     "status": "Original prerequisite committed and independently reviewed; focused/App validation passed, full candidate/public integration pending",
@@ -1346,7 +1445,7 @@
     {
       "name": "jQuery",
       "role": "browser runtime",
-      "status": "Partial; selected legacy and modern workflows blocked",
+      "status": "The pinned 4.0.0 input and timer workflow passes. Legacy 1.12.4 initialization remains blocked.",
       "measured_versions": [
         "1.12.4",
         "4.0.0"
@@ -1359,7 +1458,7 @@
     {
       "name": "React",
       "role": "browser UI runtime",
-      "status": "ReactDOM initialization blocked on the measured browser app",
+      "status": "The runtimes export, and the scheduled ReactDOM callback stops before mounting the component.",
       "measured_versions": ["18.3.1"],
       "measurement": {
         "source": "c669dd9b3618913419e621d6cac3961e31d04db8",
@@ -1387,7 +1486,8 @@
     {
       "name": "Vue",
       "role": "browser UI runtime",
-      "status": "Partial"
+      "status": "Pinned 2.7.16 and 3.5.45 reactive application workflows passed on 067ac5e.",
+      "measured_versions": ["2.7.16", "3.5.45"]
     },
     {
       "name": "Svelte",
@@ -1407,7 +1507,7 @@
     {
       "name": "Bootstrap",
       "role": "compiled CSS plus browser JS",
-      "status": "Partial; selected CSS renders while JavaScript workflows remain blocked",
+      "status": "The pinned 5.3.9 dropdown passes at two widths. The 3.4.1 app remains blocked during legacy jQuery initialization.",
       "measured_versions": [
         "3.4.1",
         "5.3.9"
@@ -1689,8 +1789,8 @@
     "created_radio_result": "W2 created and appended a checked radio and stopped on its container's deep clone at 4509:23. The original native App passed grouping while detached and connected, trusted selection in both directions and form reset."
   },
   "next": [
-    "Advance the measured legacy jQuery initialization and recheck its trusted input and timer stages.",
-    "Retain class/object-prototype and modern Vue/React prerequisites as separate queued work; preserve source-bound App DOM/pixel/trusted-input and responsive rechecks"
+    "Recheck legacy jQuery initialization at its raw attribute write. Retain the trusted dropdown, form and timer stage checks.",
+    "Measure HTML contentEditable reflection for the scheduled ReactDOM callback and preserve the pinned Vue, jQuery and Bootstrap App controls."
   ],
   "selected_standard_controls": {
     "suite": "Selected Test262 slice mode runs",

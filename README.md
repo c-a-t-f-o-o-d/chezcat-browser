@@ -69,26 +69,35 @@ These are **implemented slices, not complete standards support**. The
 > unchanged. Named releases are created only on explicit owner request; ordinary
 > commits, PRs, CI runs, and development builds do not require a release.
 
+The owner-requested **`0.82.0-alpha.1` candidate**, based on integrated source
+`6089546`, is being prepared. The download links point to verified
+**`0.81.0-alpha.3`** assets while the candidate undergoes delivery checks.
+
 Commit-identified development downloads and a possible `dev` channel remain
 roadmap items, not advertised delivery options. The CI badge reports workflow
 status—not how well every website works.
 
 ## Development highlights
 
-*Snapshot: November 17, 2026 · public source through `e97dc85`.*
+*Snapshot: November 18, 2026 · integrated source through `6089546`.*
 
 | State | Improvement | Evidence and boundary |
 | :--- | :--- | :--- |
 | ✅ **Merged** | **Shared string and DOM primitives** | [PR #29](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/29): `String.prototype.concat`, hidden-input state, and genuine `Node.getRootNode()` behavior. |
 | ✅ **Merged** | **Anchor URL reflection** | [PR #30](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/30): scoped live HTTP(S) URL values used by ordinary page code. |
 | ✅ **Merged** | **Text-input fragments without lost edits** | [PR #32](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/32): staged native input creation, retained edited/default values, Reset behavior, and focus retirement. |
-| 🟡 **Under review** | **CSS variables in padding and borders** | [PR #31](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/31): inherited custom properties and measured box/pixel improvements; integration remains gated by verification. |
+| ✅ **Merged** | **CSS variables in padding and borders** | [PR #31](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/31): inherited custom properties and measured box/pixel improvements. |
+| ✅ **Merged** | **Async functions and arrows** | Original pages verify ordering, rejection handling, native input and visible updates as `await` resumes through the Promise job queue. |
+| ✅ **Merged** | **Weak collections and Proxy for ordinary objects** | Bounded WeakMap/WeakSet identity, selected non-callable Proxy traps, and receiver-aware Reflect.get/set retain explicit realm, allocation and native-access limits. |
+| ✅ **Merged** | **Native forms and DOM identity** | Created checkboxes/radios, checkbox/TEXTAREA fragments, independent TEXTAREA/radio clones, ordinary tree cloning and bounded SVG/iframe interface identity. |
+| ✅ **Merged** | **More shared CSS layout and paint** | Line-height/height variables, calculated physical box spacing, circular corners, background clipping and a bounded single-column implicit grid. |
 
-The pinned **jQuery 4.0.0 fixture now passes startup** in the PR #32 evidence;
-trusted input still encounters a native Event-property gap. Legacy jQuery reaches
-a separate `DocumentFragment` boundary. **Startup progress is not complete
-framework compatibility.** Linked PRs and compatibility records carry the precise
-scope and newer results.
+The recorded **jQuery 4.0.0** app passes startup, trusted input and a timer update.
+Separate **Vue 2.7.16** and **Vue 3.5.45** apps pass mount, input and asynchronous
+updates. The pinned Bootstrap 5.3.9 dropdown passes trusted open, choice and close
+at 640 and 1280 px. Legacy jQuery stops during attribute detection, and ReactDOM
+stops before the component mounts. The scorecard identifies the build and last
+successful interaction for each app. [Compatibility records](docs/COMPATIBILITY.md)
 
 ### Next: useful pages, then measured speed and stronger isolation
 
@@ -140,22 +149,22 @@ external TLS engine or a guarantee that every HTTPS site will connect. See
 <details>
 <summary><strong>🧩 JavaScript, DOM, events, and rendering</strong></summary>
 
-Finite shared primitives include live Document/Node child lists, genuine Comment
-leaves, text replacement, native array-like apply, generic string concatenation,
-and genuine roots for supported connected/detached trees. Conventional select
-fragments and supported hidden/text-input operations preserve native form state.
-Text input fragments retain edited/default values; unsupported input kinds and
-ownership cases still reject without publishing partial state.
+Finite shared primitives include live Document/Node child lists, genuine roots,
+ordinary tree cloning and outerHTML. Supported hidden/text-input operations,
+created checkboxes/radios and checkbox/TEXTAREA fragments preserve native form
+state. TEXTAREA and radio clones retain independent live/default state. Unsupported
+control, resource and ownership cases still reject without partial publication.
 
-Static noncomputed object-literal prototype setters are supported; wider
-prototype behavior and class semantics remain incomplete. Shadow DOM, arbitrary
-input-type transitions, modules, and broader host APIs remain gaps.
-Event/UIEvent/CustomEvent and finite MouseEvent interfaces preserve branded state;
-broader synthetic dispatch and keyboard/pointer behavior remain limited.
+Finite base/derived classes, supported async-function/arrow await forms, weak
+collections and ordinary-object Proxy/Reflect operations are implemented. Their
+syntax, traps and host coverage remain bounded. Shadow DOM, arbitrary input-type
+transitions, modules and broader host APIs remain gaps. Event/UIEvent/CustomEvent
+and finite MouseEvent interfaces preserve branded state. Listener objects resolve
+`handleEvent` at delivery. Broader event and keyboard/pointer behavior remains limited.
 
-The renderer is software-based. Responsive layout improvements are finite, and
-passing a layout fixture does not establish full framework styling. Google Search,
-Images, and Maps are not fully supported. Consult the
+The software renderer supports calculated spacing, custom properties, rounded boxes
+and implicit single-column grids. Support for Google Search, Images, and Maps
+remains partial. See the
 [capability matrix](docs/CAPABILITIES.md) and [compatibility results](docs/COMPATIBILITY.md).
 
 </details>
