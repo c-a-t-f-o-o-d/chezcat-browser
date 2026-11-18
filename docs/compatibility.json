@@ -1623,6 +1623,11 @@
       "remaining": "Mounted hook, component rendering, component input and async updates remain unreached."
     }
   },
+  "integrated_vue_and_legacy_recheck": {
+    "source": "8d6005d17990b52f18455e8a6d01e98999eb07d7",
+    "vue_3_5_45": "Runtime loaded and eight fixture checks passed at 1280x800. Trusted mounting stopped at Proxy construction at upstream 5:17410. The component did not render.",
+    "jquery_1_12_4": "W2 loaded and rendered initial content. The mixed fragment still stopped initialization at 4465:2 in native-control or resource admission."
+  },
   "next": [
     "Implement and measure the ordinary-object Proxy and receiver-aware property operations reached by the pinned Vue 3.5.45 app",
     "Retain class/object-prototype and modern Vue/React prerequisites as separate queued work; preserve source-bound App DOM/pixel/trusted-input and responsive rechecks"

@@ -87,6 +87,12 @@ impl Runtime {
             while let Some(object) = parent {
                 self.step()?;
                 let object = self.ordinary_id(object)?;
+                // A proxy may synthesize indexed values even when every
+                // preceding ordinary object has holes. Use live Get below.
+                if self.objects[object].proxy.is_some() {
+                    has_indices = true;
+                    break;
+                }
                 // A first stored key "0" proves the old scan's first match.
                 // No value/getter is read; captured zero length stays on the
                 // original path. Prepay the bounded key/node inspection.
@@ -380,6 +386,7 @@ impl Runtime {
         result
     }
     pub(super) fn array_delete_index(&mut self, id: usize, index: usize) -> Result<(), Fault> {
+        self.reject_unsupported_proxy_operation(id, "deleteProperty")?;
         let key = index.to_string();
         if self.typed_view(id).is_some_and(|view| index < view.length) {
             return Err(Fault::exception(

@@ -31,6 +31,14 @@ mod binding_character;
 mod intrinsic_realms;
 #[path = "reflect.rs"]
 mod reflect;
+#[path = "proxy_objects.rs"]
+mod proxy_objects;
+#[path = "proxy_operations.rs"]
+mod proxy_operations;
+#[path = "proxy_dispatch.rs"]
+mod proxy_dispatch;
+#[path = "proxy_traps.rs"]
+mod proxy_traps;
 #[path = "function_allocation.rs"]
 mod function_allocation;
 #[path = "function_arena.rs"]
@@ -3174,6 +3182,7 @@ struct Environment {
 #[derive(Clone, Copy)]
 enum Builtin {
     ThrowTypeError,
+    Proxy,
     ReflectGet,
     ReflectSet,
     Symbol(symbols::Op),
@@ -3286,6 +3295,7 @@ struct Property {
 }
 
 struct Object {
+    proxy: Option<proxy_objects::ProxyData>,
     date: Option<f64>,
     url: Option<url_api::Data>,
     rect: Option<rect_api::Data>,
@@ -3646,6 +3656,7 @@ impl Runtime {
             ("eval", Builtin::Eval),
             ("EvalError", Builtin::Error("EvalError")),
             ("RegExp", Builtin::RegExp),
+            ("Proxy", Builtin::Proxy),
             ("SyntaxError", Builtin::Error("SyntaxError")),
             ("Error", Builtin::Error("Error")),
             ("TypeError", Builtin::Error("TypeError")),
@@ -5587,6 +5598,7 @@ impl Runtime {
         }
         let id = self.objects.len();
         self.objects.push(Object {
+            proxy: None,
             date: None,
             url: None,
             rect: None,
@@ -6053,6 +6065,7 @@ impl Runtime {
     // nonenumerable virtual properties (array length / RegExp metadata) cannot
     // become enumerable and need no slot in assign/defineProperties snapshots.
     fn own_string_keys(&mut self, id: usize, enumerable_only: bool) -> Result<Vec<String>, Fault> {
+        self.reject_unsupported_proxy_operation(id, "ownKeys")?;
         let object = self.object(id)?;
         let indexed_length = self.typed_view(id).map_or_else(
             || self.string_object_length(id).unwrap_or(0),
@@ -6145,6 +6158,9 @@ impl Runtime {
         }
         let name = self.property_key(key, host)?;
         self.reject_foreign_window(&object, host)?;
+        if let Some(ordinary) = Ordinary::from_value(&object) {
+            return self.has_ordinary_key(ordinary, &name, host).map(Value::Bool);
+        }
         if let (Value::Host(handle), PropertyKey::String(name)) = (&object, &name) {
             if self.is_browser_global(*handle) { self.ensure_global_intrinsics(name)?; }
         }
@@ -6162,10 +6178,6 @@ impl Runtime {
             ));
         };
         let present = match object {
-            Value::Object(id) => self.property_owner(Ordinary::Object(id), &name)?.is_some(),
-            Value::Function(id) => self
-                .property_owner(Ordinary::Function(id), &name)?
-                .is_some(),
             Value::Host(handle) => {
                 if let Some(object) = self.host_ordinary(handle, &name, host)? {
                     self.host_ordinary_has(handle, object, &name, host)?
@@ -6318,7 +6330,7 @@ impl Runtime {
                 } else {
                     let key = (length - 1).to_string();
                     let value = self.get_property_with_host(id, &key, host)?;
-                    if self.objects[id]
+                    if self.objects[id].proxy.is_none() && self.objects[id]
                         .properties
                         .get(&key)
                         .is_some_and(|property| !property.configurable)
@@ -7820,6 +7832,10 @@ impl Runtime {
                 let new_target = if new_target == Some(index) { Some(target) } else { new_target };
                 return self.construct_value_with_target(Value::Function(target), &arguments, new_target, host);
             }
+            Some(Function::Native(Builtin::Proxy)) => self.new_ordinary_proxy(
+                args.first().unwrap_or(&Value::Undefined),
+                args.get(1).unwrap_or(&Value::Undefined),
+            ),
             Some(Function::Native(Builtin::Date(date::Op::Constructor))) => {
                 self.date_construct(args, host)
             }
@@ -8137,6 +8153,7 @@ impl Runtime {
                 Self::require_property_receiver(&object)?;
                 if let Some(backing) = self.symbol_backing(&object, host)? {
                     let id = self.ordinary_id(backing)?;
+                    self.reject_unsupported_proxy_operation(id, "deleteProperty")?;
                     if self.objects[id]
                         .symbol_properties
                         .get(&key)
@@ -8171,6 +8188,7 @@ impl Runtime {
             }
             Reference::Property(Value::Object(id), name) => {
                 self.property_name(&name)?;
+                self.reject_unsupported_proxy_operation(id, "deleteProperty")?;
                 let object = self.object(id)?;
                 if self
                     .typed_numeric_key(id, &name)?
@@ -8320,13 +8338,13 @@ impl Runtime {
                 // cannot change native Window prototypes through this store.
                 let (_, properties) = self.browser_global.unwrap();
                 return self
-                    .inherits_from(Ordinary::Object(properties), prototype)
+                    .inherits_from(Ordinary::Object(properties), prototype, host)
                     .map(Value::Bool);
             }
             self.reject_foreign_window(&Value::Host(handle),host)?;
             if host.native_ancestry_inspection(handle) {
                 let anchor=self.native_instance_anchor(handle,host)?;
-                return Ok(Value::Bool(anchor==prototype || self.inherits_from(anchor,prototype)?));
+                return Ok(Value::Bool(anchor==prototype || self.inherits_from(anchor,prototype,host)?));
             }
             if let Some(ancestry) = host.instance_ancestry(handle) {
                 let caller = self.browser_global.map(|(window,_)|window);
@@ -8334,14 +8352,14 @@ impl Runtime {
                     host.validate_window_access(caller,ancestry.window).map_err(Fault::new)?;
                 }
                 let anchor = self.native_ancestry_anchor(ancestry)?;
-                return Ok(Value::Bool(anchor==prototype || self.inherits_from(anchor,prototype)?));
+                return Ok(Value::Bool(anchor==prototype || self.inherits_from(anchor,prototype,host)?));
             }
             return Err(Fault::new(
                 "Native host prototype checks are not implemented.",
             ));
         }
         let object = Ordinary::from_value(&value).unwrap();
-        self.inherits_from(object, prototype).map(Value::Bool)
+        self.inherits_from(object, prototype, host).map(Value::Bool)
     }
 
     fn call_host(
@@ -8826,6 +8844,9 @@ impl Runtime {
         &mut self, index: usize, args: &[Value], this: Value, host: &mut dyn Host,
     ) -> Result<Value, Fault> {
         match self.functions.get(index) {
+            Some(Function::Native(Builtin::Proxy)) => {
+                return Err(Fault::exception("TypeError", "Proxy requires new."));
+            }
             Some(Function::Native(Builtin::ReflectGet)) => {
                 return self.reflect_get(args, host);
             }
@@ -9548,7 +9569,7 @@ impl Runtime {
             )),
             Builtin::EmptyFunction => Ok(Value::Undefined),
             Builtin::Function => self.function_constructor(args, host),
-            Builtin::ReflectGet | Builtin::ReflectSet
+            Builtin::Proxy | Builtin::ReflectGet | Builtin::ReflectSet
             | Builtin::ObjectStatic(_)
             | Builtin::ObjectMethod(_)
             | Builtin::FunctionMethod(_)
