@@ -79,7 +79,7 @@ impl Runtime {
             Builtin::DomException(operation) => operation.arity(),
             Builtin::EmptyFunction | Builtin::ThrowTypeError => 0,
             Builtin::RegExp | Builtin::ParseInt | Builtin::JsonParse | Builtin::ReflectGet => 2,
-            Builtin::JsonStringify => 3,
+            Builtin::JsonStringify | Builtin::ReflectSet => 3,
             Builtin::Math("random") => 0,
             Builtin::Math("atan2" | "hypot" | "imul" | "max" | "min" | "pow") => 2,
             Builtin::ObjectStatic(
@@ -711,6 +711,12 @@ impl Runtime {
             return if self.strict { Err(Fault::exception("TypeError", "A super data receiver must be an object.")) } else { Ok(()) };
         };
         let id = self.ordinary_id(receiver)?;
+        if self.uses_stored_property_descriptors(id) {
+            let set = self.set_stored_receiver_data(id, PropertyKey::String(name), |_| Ok(value))?;
+            return if !set && self.strict {
+                Err(Fault::exception("TypeError", "The super receiver property cannot be written."))
+            } else { Ok(()) };
+        }
         if self.objects[id].properties.get(&name).is_some_and(|property|
             property.accessor.is_some() || property.getter.is_some() || !property.writable)
             || self.string_object_index(id, &name).is_some()
@@ -1056,7 +1062,7 @@ impl Runtime {
         Ok(data)
     }
 
-    fn stored_descriptor_property(&self, id: usize, key: &PropertyKey) -> Option<&super::Property> {
+    pub(super) fn stored_descriptor_property(&self, id: usize, key: &PropertyKey) -> Option<&super::Property> {
         match key {
             PropertyKey::String(name) => self.objects[id].properties.get(name),
             PropertyKey::Symbol(key) => self.objects[id].symbol_properties.get(key),

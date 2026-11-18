@@ -3175,6 +3175,7 @@ struct Environment {
 enum Builtin {
     ThrowTypeError,
     ReflectGet,
+    ReflectSet,
     Symbol(symbols::Op),
     Binary(binary_data::Op),
     Collection(collections::Op),
@@ -8828,6 +8829,9 @@ impl Runtime {
             Some(Function::Native(Builtin::ReflectGet)) => {
                 return self.reflect_get(args, host);
             }
+            Some(Function::Native(Builtin::ReflectSet)) => {
+                return self.reflect_set(args, host);
+            }
             Some(Function::Bound(_)) => {
                 let (target, arguments, receiver) = self.bound_arguments(index, args, true)?;
                 return self.call_value(Value::Function(target), &arguments, receiver, host);
@@ -9544,7 +9548,7 @@ impl Runtime {
             )),
             Builtin::EmptyFunction => Ok(Value::Undefined),
             Builtin::Function => self.function_constructor(args, host),
-            Builtin::ReflectGet
+            Builtin::ReflectGet | Builtin::ReflectSet
             | Builtin::ObjectStatic(_)
             | Builtin::ObjectMethod(_)
             | Builtin::FunctionMethod(_)

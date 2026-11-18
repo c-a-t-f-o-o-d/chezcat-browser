@@ -1,6 +1,6 @@
 use super::*;
 
-struct NoHost;
+pub(super) struct NoHost;
 impl Host for NoHost {
     fn has(&mut self, handle: u32, _: &str) -> Result<bool, String> {
         assert_eq!(handle, 77, "unexpected native presence check");
@@ -22,7 +22,7 @@ impl Host for NoHost {
     }
 }
 
-fn succeeds(source: &str) {
+pub(super) fn succeeds(source: &str) {
     let mut runtime = Runtime::for_test();
     assert_eq!(
         runtime.execute(source, &mut NoHost).unwrap().to_text(),
@@ -51,7 +51,7 @@ fn reflect_get_namespace_descriptors_native_identity_and_author_mutation() {
         var tag = Object.getOwnPropertyDescriptor(Reflect, Symbol.toStringTag);
         if (tag.value !== 'Reflect' || tag.writable || tag.enumerable || !tag.configurable ||
             Object.prototype.toString.call(Reflect) !== '[object Reflect]') throw 'namespace tag';
-        if (Reflect.set !== undefined || Reflect.construct !== undefined || Reflect.ownKeys !== undefined)
+        if (Reflect.construct !== undefined || Reflect.ownKeys !== undefined)
             throw 'unimplemented surface';
         var failures = 0;
         try { new get({}, 'x'); } catch (e) { if (e.name === 'TypeError') failures++; }
@@ -400,8 +400,8 @@ fn reflect_get_native_default_receiver_access_revalidation_and_finite_substituti
     assert!(runtime.transient_registration_is_empty());
 }
 
-struct WindowReceiverHost {
-    same_origin: bool,
+pub(super) struct WindowReceiverHost {
+    pub(super) same_origin: bool,
 }
 impl Host for WindowReceiverHost {
     fn native_access_owner(&self, handle: u32) -> Option<u32> {
