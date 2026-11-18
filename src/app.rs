@@ -5733,6 +5733,10 @@ mod offset_parent_tests;
 mod offset_coordinate_tests;
 
 #[cfg(test)]
+#[path = "app_translate_transform_tests.rs"]
+mod translate_transform_tests;
+
+#[cfg(test)]
 #[path = "app_scroll_offset_tests.rs"]
 mod scroll_offset_tests;
 

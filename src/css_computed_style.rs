@@ -13,6 +13,8 @@ struct Snapshot {
     complete: bool,
     overflows: Vec<Option<Overflow>>,
     positions: Vec<Option<Position>>,
+    transforms: Vec<Option<Transform>>,
+    has_transform_geometry: bool,
 }
 impl ComputedProperties {
     pub(super) fn new(
@@ -21,6 +23,8 @@ impl ComputedProperties {
         complete: bool,
         overflows: Vec<Option<Overflow>>,
         positions: Vec<Option<Position>>,
+        transforms: Vec<Option<Transform>>,
+        has_transform_geometry: bool,
     ) -> Self {
         Self(Rc::new(Snapshot {
             variables,
@@ -28,6 +32,8 @@ impl ComputedProperties {
             complete,
             overflows,
             positions,
+            transforms,
+            has_transform_geometry,
         }))
     }
     pub(crate) fn read(
@@ -86,6 +92,28 @@ impl ComputedProperties {
             .map(Some)
             .ok_or(ComputedStyleUnavailable)
     }
+    pub(crate) fn read_transform(
+        &self,
+        node: usize,
+    ) -> Result<Option<Transform>, ComputedStyleUnavailable> {
+        let eligible = self.0.eligible.get(node).ok_or(ComputedStyleUnavailable)?;
+        if !eligible {
+            return Ok(None);
+        }
+        if !self.0.complete {
+            return Err(ComputedStyleUnavailable);
+        }
+        if self.0.transforms.is_empty() {
+            return Ok(Some(Transform::None));
+        }
+        self.0.transforms.get(node).copied().flatten()
+            .map(Some).ok_or(ComputedStyleUnavailable)
+    }
+    pub(crate) fn has_transform_geometry(&self) -> bool {
+        self.0.has_transform_geometry
+    }
+    #[cfg(test)]
+    pub(super) fn transform_storage_len(&self) -> usize { self.0.transforms.len() }
 }
 
 pub(crate) struct CascadeOutput {

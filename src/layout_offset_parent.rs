@@ -43,6 +43,8 @@ impl Engine<'_> {
         if count == 0 {
             return;
         }
+        let has_transforms = self.layout.computed_properties.has_transform_geometry();
+        let mut fixed_context = if has_transforms { vec![OffsetParent::None; count] } else { Vec::new() };
         let root = self.doc.nodes[0].children.iter().copied().find(|&node| {
             self.doc
                 .nodes
@@ -77,7 +79,11 @@ impl Engine<'_> {
         }) = stack.pop()
         {
             let entry = &self.doc.nodes[node];
+            let mut fixed = fixed_context.get(node).copied().unwrap_or(OffsetParent::None);
             let position = self.layout.computed_properties.read_position(node);
+            let transform = if has_transforms && self.transformable(node) {
+                self.layout.computed_properties.read_transform(node)
+            } else { Ok(Some(css::Transform::None)) };
             let has_box = self.layout.client_boxes[node].is_some() || self.inline_boxes[node];
             let no_box = !has_box && !self.layout.offset_unavailable[node];
             if matches!(entry.kind, NodeKind::Element { .. }) && node != 0 {
@@ -86,7 +92,7 @@ impl Engine<'_> {
                         OffsetParent::None
                     } else if has_box {
                         match position {
-                            Ok(Some(Position::Fixed)) => OffsetParent::None,
+                            Ok(Some(Position::Fixed)) => fixed,
                             Ok(Some(Position::Static)) => static_target,
                             Ok(Some(_)) => ordinary,
                             _ => OffsetParent::Unavailable,
@@ -102,10 +108,15 @@ impl Engine<'_> {
                 } else {
                     OffsetParent::Unavailable
                 };
-                // The implemented CSS position keywords establish absolute
-                // containing blocks; none establishes a fixed containing
-                // block. Author zoom, transforms and shadow trees are absent
-                // from this renderer. Browser zoom is uniform for this tree.
+                // Any applicable non-None transform, including identity,
+                // establishes both absolute and fixed containing blocks.
+                match transform {
+                    Ok(Some(value)) if value != css::Transform::None => {
+                        fixed = candidate;
+                    }
+                    Err(_) => { fixed = OffsetParent::Unavailable; }
+                    _ => {}
+                }
                 if Some(node) == body {
                     ordinary = candidate;
                     static_target = candidate;
@@ -124,6 +135,17 @@ impl Engine<'_> {
                             static_target = OffsetParent::Unavailable;
                         }
                     }
+                    match transform {
+                        Ok(Some(value)) if value != css::Transform::None => {
+                            ordinary = candidate;
+                            static_target = candidate;
+                        }
+                        Err(_) => {
+                            ordinary = OffsetParent::Unavailable;
+                            static_target = OffsetParent::Unavailable;
+                        }
+                        _ => {}
+                    }
                     if matches!(&entry.kind, NodeKind::Element { tag, .. } if matches!(tag.as_str(), "td" | "th" | "table"))
                     {
                         static_target = candidate;
@@ -136,6 +158,7 @@ impl Engine<'_> {
             for &child in entry.children.iter().rev() {
                 if child < count && !seen[child] && self.parents[child] == Some(node) {
                     seen[child] = true;
+                    if has_transforms { fixed_context[child] = fixed; }
                     stack.push(Frame {
                         node: child,
                         ordinary,

@@ -1,7 +1,10 @@
-//! Live, read-only computed custom properties, overflow axes and position.
+//! Live, read-only computed custom properties, overflow axes, position and transform.
 //! CSSOM getComputedStyle is NewObject: handles retain only the genuine element
 //! and owner, never inline text, a stale cascade, or a second style resolver.
 use super::*;
+
+#[path = "script_computed_transform.rs"]
+mod transform;
 
 const BASE: u32 = 0x8400_0000;
 const END: u32 = 0x8500_0000;
@@ -124,6 +127,7 @@ pub(super) struct Declaration {
 #[derive(Clone, Copy)]
 enum ComputedProperty {
     Position,
+    Transform,
     Overflow,
     OverflowX,
     OverflowY,
@@ -132,6 +136,7 @@ impl ComputedProperty {
     fn attribute(name: &str) -> Option<Self> {
         match name {
             "position" => Some(Self::Position),
+            "transform" => Some(Self::Transform),
             "overflow" => Some(Self::Overflow),
             "overflowX" => Some(Self::OverflowX),
             "overflowY" => Some(Self::OverflowY),
@@ -141,6 +146,8 @@ impl ComputedProperty {
     fn css_name(name: &str) -> Option<Self> {
         if name.eq_ignore_ascii_case("position") {
             Some(Self::Position)
+        } else if name.eq_ignore_ascii_case("transform") {
+            Some(Self::Transform)
         } else if name.eq_ignore_ascii_case("overflow") {
             Some(Self::Overflow)
         } else if name.eq_ignore_ascii_case("overflow-x") {
@@ -284,7 +291,7 @@ impl Bridge<'_> {
         }
         if !crate::css::computed_custom_property_name(name) {
             return Err(
-                "Computed readback supports position, overflow, and the admitted custom-property names.".into(),
+                "Computed readback supports position, overflow, transform, and the admitted custom-property names.".into(),
             );
         }
         self.state.work(
@@ -348,6 +355,9 @@ impl Bridge<'_> {
         if !self.computed_node_connected(node)? {
             return Ok(Value::String(String::new()));
         }
+        if matches!(property, ComputedProperty::Transform) {
+            return self.computed_transform_value(node);
+        }
         let snapshot = self
             .state
             .geometry
@@ -360,6 +370,7 @@ impl Bridge<'_> {
                 &mut self.state.copy_work,
             )?;
         let (first, second) = match property {
+            ComputedProperty::Transform => unreachable!("transform serialization uses actual resolved geometry"),
             ComputedProperty::Position => {
                 let position = snapshot.read_position(node)
                     .map_err(|_| "Computed position unavailable within the CSS cascade limits.")?;

@@ -26,6 +26,9 @@ mod scrolling;
 #[path = "layout_offset_parent.rs"]
 mod offset_parent;
 pub(crate) use offset_parent::{offset_parent_storage, offset_parent_work, OffsetParent};
+#[path = "layout_translate.rs"]
+mod translate;
+pub(crate) use translate::VisualBorderRect;
 
 #[cfg(test)]
 #[path = "layout_background_tests.rs"]
@@ -344,6 +347,10 @@ pub struct Layout {
     pub viewport_scroll_height:i32,
     pub viewport_scroll_unavailable:bool,
     pub border_rects: Vec<Option<BorderRect>>,
+    /// Empty vectors mean the raw rectangles are also the visual geometry.
+    pub(crate) visual_border_rects: Vec<Option<VisualBorderRect>>,
+    pub(crate) visual_unavailable: Vec<bool>,
+    pub(crate) transform_translations: Vec<Option<[f64; 2]>>,
     /// No padding-box record is insufficient to prove no inline CSS box.
     pub offset_unavailable: Vec<bool>,
     pub(crate) offset_parents: Vec<OffsetParent>,
@@ -624,6 +631,8 @@ struct Engine<'a> {
     decoration_cursor: usize,
     decoration_items: usize,
     inline_context: Option<usize>,
+    translated_ranks: Vec<usize>,
+    translated_owners: Option<(Vec<usize>, Vec<usize>)>,
 }
 
 /// Scripts and renderer use the document's full media viewport. Standalone
@@ -699,6 +708,25 @@ pub fn build_viewport_with_fonts(
     checked: Option<&dyn Fn(usize) -> Option<bool>>,
     fonts: &Book,
 ) -> Layout {
+    build_viewport_with_fonts_inner(doc, width, height, zoom, external_styles, image_sizes, checked, fonts, None)
+        .expect("Default rendering has no caller-budget refusal.")
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn build_viewport_with_fonts_budgeted(
+    doc: &Document, width: i32, height: i32, zoom: f32,
+    external_styles: &HashMap<usize, String>, image_sizes: &HashMap<usize, (usize, usize)>,
+    checked: Option<&dyn Fn(usize) -> Option<bool>>, fonts: &Book, budget: &mut css::CssBudget<'_>,
+) -> Result<Layout, String> {
+    build_viewport_with_fonts_inner(doc, width, height, zoom, external_styles, image_sizes, checked, fonts, Some(budget))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_viewport_with_fonts_inner(
+    doc: &Document, width: i32, height: i32, zoom: f32,
+    external_styles: &HashMap<usize, String>, image_sizes: &HashMap<usize, (usize, usize)>,
+    checked: Option<&dyn Fn(usize) -> Option<bool>>, fonts: &Book, mut budget: Option<&mut css::CssBudget<'_>>,
+) -> Result<Layout, String> {
     let width = width.clamp(1, 16_384);
     let zoom = if zoom.is_finite() {
         zoom.clamp(0.25, 5.0)
@@ -706,8 +734,23 @@ pub fn build_viewport_with_fonts(
         1.0
     };
     let environment = viewport_style_environment(doc, width, height, zoom);
-    let css::CascadeOutput { styles, computed_properties } =
-        css::compute_with_environment_and_properties(doc, external_styles, checked, Some(environment));
+    let cascade = match budget.as_deref_mut() {
+        Some(meter) => css::compute_with_environment_and_properties_transform_budgeted(
+            doc, external_styles, checked, Some(environment), meter,
+        )?,
+        None => css::compute_with_environment_and_properties(
+            doc, external_styles, checked, Some(environment),
+        ),
+    };
+    let css::CascadeOutput { styles, computed_properties } = cascade;
+    if let Some(meter) = budget.as_deref_mut() {
+        if computed_properties.has_transform_geometry() {
+            // Additional containing-block/fixed-family walks and the fixed
+            // ancestor context retained only for transform-bearing cascades.
+            meter.work(doc.nodes.len().saturating_mul(4 * MAX_DEPTH))?;
+            meter.copies(doc.nodes.len().saturating_mul(std::mem::size_of::<OffsetParent>()))?;
+        }
+    }
     let mut page = Layout {
         computed_properties,
         runs: Vec::new(),
@@ -723,6 +766,9 @@ pub fn build_viewport_with_fonts(
         viewport_scroll_height:0,
         viewport_scroll_unavailable:false,
         border_rects: vec![None; doc.nodes.len()],
+        visual_border_rects: Vec::new(),
+        visual_unavailable: Vec::new(),
+        transform_translations: Vec::new(),
         offset_unavailable: vec![true; doc.nodes.len()],
         offset_parents: vec![OffsetParent::Unavailable; doc.nodes.len()],
         fixed_runs: Vec::new(),
@@ -809,6 +855,8 @@ pub fn build_viewport_with_fonts(
         decoration_cursor: 0,
         decoration_items: 0,
         inline_context: None,
+        translated_ranks: Vec::new(),
+        translated_owners: None,
     };
     if !doc.nodes.is_empty() {
         engine.walk(0, None, 0);
@@ -822,6 +870,7 @@ pub fn build_viewport_with_fonts(
     engine.finish_offset_parents();
     engine.finish_border_rects(&fixed_boxes);
     engine.finish_scroll_heights(&fixed_boxes);
+    engine.apply_translations(budget.as_deref_mut(), &fixed_boxes)?;
     let atom_clips = engine.clip_overflow();
     // Flex children may move up as well as down after their single paint pass.
     // Recompute the final extent instead of retaining intermediate coordinates.
@@ -906,7 +955,7 @@ pub fn build_viewport_with_fonts(
         anchors: indices(&engine.layout.fixed_anchors),
         hits: indices(&engine.layout.fixed_hits),
     };
-    engine.layout
+    Ok(engine.layout)
 }
 
 impl Engine<'_> {
@@ -1012,16 +1061,15 @@ impl Engine<'_> {
     fn video(&self,node:usize)->bool {self.doc.nodes[node].namespace==crate::html::Namespace::Html&&matches!(&self.doc.nodes[node].kind,NodeKind::Element {tag,..} if tag=="video")}
 
     fn containing_block(&self, node: usize, positioned: bool) -> ContainingBlock {
-        if positioned && self.styles[node].position == Position::Fixed {
-            return self.viewport;
-        }
+        let fixed = positioned && self.styles[node].position == Position::Fixed;
+        if fixed && !self.layout.computed_properties.has_transform_geometry() { return self.viewport; }
         let mut parent = self.parents[node];
         for _ in 0..MAX_DEPTH {
             let Some(index) = parent else {
                 break;
             };
             let style = &self.styles[index];
-            if !positioned || style.position != Position::Static {
+            if !positioned || self.transform_establishes_cb(index) || !fixed && style.position != Position::Static {
                 if let Some(record) = &self.boxes[index] {
                     return if positioned {
                         ContainingBlock {
@@ -1352,7 +1400,7 @@ impl Engine<'_> {
         self.layout.fixed_hits = vec![false; self.atoms.len()];
         self.layout.positioned_items = vec![0; self.layout.items.len()];
         for (node, span) in self.spans.iter().enumerate() {
-            if self.styles[node].position == Position::Static
+            if (self.styles[node].position == Position::Static && !self.transform_establishes_cb(node))
                 || !matches!(self.doc.nodes[node].kind, NodeKind::Element { .. })
             {
                 continue;
@@ -1383,14 +1431,14 @@ impl Engine<'_> {
 
     fn clip_parent(&self, node: usize) -> Option<usize> {
         match self.styles[node].position {
-            Position::Fixed => None,
+            Position::Fixed => self.transformed_parent(node),
             Position::Absolute => {
                 // An absolute box escapes overflow on ancestors between it
                 // and its containing block (CSS 2.2 section 11.1).
                 let mut parent = self.parents[node];
                 for _ in 0..MAX_DEPTH {
                     let index = parent?;
-                    if self.styles[index].position != Position::Static {
+                    if self.styles[index].position != Position::Static || self.transform_establishes_cb(index) {
                         return Some(index);
                     }
                     parent = self.parents[index];
@@ -1425,6 +1473,7 @@ impl Engine<'_> {
     }
 
     fn clip_overflow(&mut self) -> Vec<Option<ClipRect>> {
+        if let Some(clips) = self.translated_clips() { return clips; }
         self.layout.item_clips = vec![None; self.layout.items.len()];
         let mut atoms = vec![None; self.atoms.len()];
         // Parent spans include normal-flow descendants. Later child spans
@@ -1501,7 +1550,7 @@ impl Engine<'_> {
     }
 
     fn order_positioned_paint(&mut self) {
-        if self.pending.is_empty() && self.relatives.is_empty() {
+        if self.pending.is_empty() && self.relatives.is_empty() && self.translated_ranks.is_empty() {
             return;
         }
         // Supported positioned boxes use the default auto/zero layer. Normal
@@ -1777,18 +1826,7 @@ impl Engine<'_> {
                 && self.positioning != Some(index)
             {
                 if self.pending.len() < MAX_POSITIONED {
-                    let mut parent = Some(index);
-                    let mut fixed = false;
-                    for _ in 0..MAX_DEPTH {
-                        let Some(node) = parent else {
-                            break;
-                        };
-                        if self.styles[node].position == Position::Fixed {
-                            fixed = true;
-                            break;
-                        }
-                        parent = self.parents[node];
-                    }
+                    let fixed = self.viewport_fixed(index);
                     self.pending.push(Pending {
                         node: index,
                         link,
@@ -4684,6 +4722,7 @@ impl Engine<'_> {
     }
 
     fn decoration_layer(&self, node: usize) -> (usize, bool) {
+        if let Some(&rank) = self.translated_ranks.get(node) { return (rank, self.viewport_fixed(node)); }
         let mut parent = Some(node);
         let (mut layer, mut fixed) = (0, false);
         for _ in 0..MAX_DEPTH {

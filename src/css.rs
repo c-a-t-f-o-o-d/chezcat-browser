@@ -15,6 +15,11 @@ mod overflow;
 pub use overflow::{Overflow, OverflowValue};
 #[path="css_position.rs"]
 mod position;
+#[path="css_translate.rs"]
+mod translate;
+pub use translate::Transform;
+pub(crate) use translate::{normalize_transform, TransformSyntax};
+pub(crate) use translate::source_cost as transform_source_cost;
 
 use crate::html::{Document, NodeKind};
 
@@ -45,7 +50,9 @@ impl StylesheetLimits {
         let remaining=self.rules.checked_sub(usage.rules).ok_or("Stylesheet rule accounting overflow.")?;
         let mut declarations_exhausted=false;
         let count=media::walk(source,remaining,None,|_,body,_| {
-            if parse_declarations_bounded(body,MAX_DECLARATIONS+1).len()>MAX_DECLARATIONS {declarations_exhausted=true;return false;}
+            // Admission counts declarations but does not execute the new
+            // transform grammar before a caller can reserve its work.
+            if parse_declarations_inner(body,MAX_DECLARATIONS+1,false,None).expect("unmetered admission").len()>MAX_DECLARATIONS {declarations_exhausted=true;return false;}
             true
         })?;
         if declarations_exhausted {return Err(format!("Complete stylesheet refused: per-block declaration allowance {MAX_DECLARATIONS} reached."));}
@@ -280,6 +287,8 @@ pub enum LineHeight {
 pub struct Style {
     pub display: Display,
     pub position: Position,
+    /// A non-none identity translation still establishes a containing block.
+    pub transform: Transform,
     /// Computed physical axes; scrollbars and scroll APIs are separate.
     pub overflow: Overflow,
     /// Physical offsets: top, right, bottom, left.
@@ -342,6 +351,7 @@ impl Default for Style {
         Self {
             display: Display::Inline,
             position: Position::Static,
+            transform: Transform::None,
             overflow: Overflow::default(),
             inset: [Length::Auto; 4],
             color: 0x26364a,
@@ -688,7 +698,7 @@ pub(crate) fn compute_with_environment_and_properties(
     environment: Option<MediaEnvironment>,
 ) -> CascadeOutput {
     // Only an explicitly supplied script budget makes the shared core fallible.
-    compute_cascade(doc, external, checked, environment, None).expect("unbudgeted CSS cascade")
+    compute_cascade(doc, external, checked, environment, None, None).expect("unbudgeted CSS cascade")
 }
 
 pub(crate) fn compute_with_environment_and_properties_budgeted(
@@ -698,7 +708,32 @@ pub(crate) fn compute_with_environment_and_properties_budgeted(
     environment: Option<MediaEnvironment>,
     budget: &mut CssBudget<'_>,
 ) -> Result<CascadeOutput, String> {
-    compute_cascade(doc, external, checked, environment, Some(budget))
+    compute_cascade(doc, external, checked, environment, Some(budget), None)
+}
+
+/// Preserve the established layout allowance while reserving the additional
+/// transform parser, cascade and snapshot work before it runs.
+pub(crate) fn compute_with_environment_and_properties_transform_budgeted(
+    doc: &Document,
+    external: &HashMap<usize, String>,
+    checked: Option<&dyn Fn(usize) -> Option<bool>>,
+    environment: Option<MediaEnvironment>,
+    budget: &mut CssBudget<'_>,
+) -> Result<CascadeOutput, String> {
+    compute_cascade(doc, external, checked, environment, None, Some(budget))
+}
+
+fn reserve_transform_storage(
+    nodes: usize, known: &mut Vec<bool>, meter: Option<&mut CssBudget<'_>>,
+) -> Result<(), String> {
+    if !known.is_empty() { return Ok(()); }
+    if let Some(meter) = meter {
+        meter.work(nodes)?;
+        meter.copies(nodes.saturating_mul(std::mem::size_of::<Option<Transform>>() + std::mem::size_of::<bool>()))?;
+    }
+    known.try_reserve_exact(nodes).map_err(|_| "Transform certainty storage reservation failed.")?;
+    known.resize(nodes, true);
+    Ok(())
 }
 
 fn compute_cascade(
@@ -707,6 +742,7 @@ fn compute_cascade(
     checked: Option<&dyn Fn(usize) -> Option<bool>>,
     environment: Option<MediaEnvironment>,
     mut meter: Option<&mut CssBudget<'_>>,
+    mut transform_meter: Option<&mut CssBudget<'_>>,
 ) -> Result<CascadeOutput, String> {
     if let Some(meter) = meter.as_deref_mut() { meter.document(doc, external)?; }
     let mut parents = vec![None; doc.nodes.len()];
@@ -766,12 +802,20 @@ fn compute_cascade(
         }
     }
     let mut rules = Vec::new();
+    let mut has_transform_rules = false;
     for (owner, source) in accepted_stylesheets(doc, external).0 {
         let first = rules.len();
-        let _=parse_sheet_with_media(&source,&mut rules,environment,doc.stylesheet_limits.rules);
+        // Preserve existing whole-sheet refusal/rollback. Only an exhausted
+        // transform job budget escapes this optional parser as a job failure.
+        if let Err(SheetParseFailure::TransformBudget(error)) =
+            parse_sheet_with_media_inner(&source,&mut rules,environment,doc.stylesheet_limits.rules,
+                transform_meter.as_deref_mut()) { return Err(error); }
         for rule in &mut rules[first..] {
             for declaration in &mut rule.declarations {
                 declaration.stylesheet = Some(owner);
+                if declaration.name == "transform" {
+                    has_transform_rules = true;
+                }
             }
         }
     }
@@ -782,6 +826,14 @@ fn compute_cascade(
     let mut complete = true;
     let mut overflow_known = vec![[true; 2]; doc.nodes.len()];
     let mut position_known = vec![true; doc.nodes.len()];
+    let mut transform_known = Vec::new();
+    if has_transform_rules {
+        if transform_meter.is_some() {
+            reserve_transform_storage(doc.nodes.len(), &mut transform_known, transform_meter.as_deref_mut())?;
+        } else {
+            reserve_transform_storage(doc.nodes.len(), &mut transform_known, meter.as_deref_mut())?;
+        }
+    }
     let mut variable_budget = custom_properties::Budget::default();
     let mut budget = MAX_MATCH_STEPS;
     let mut root_font_size = INITIAL_FONT_SIZE;
@@ -797,6 +849,7 @@ fn compute_cascade(
         let inherited_variables = parents[index].and_then(|parent|variables.get(parent)).cloned().unwrap_or_default();
         let parent_overflow_known = parents[index].map_or([true; 2], |parent| overflow_known[parent]);
         let parent_position_known = parents[index].map_or(true, |parent| position_known[parent]);
+        let parent_transform_known = parents[index].and_then(|parent| transform_known.get(parent)).copied().unwrap_or(true);
         variables[index] = inherited_variables.clone();
         if inert[index]
             || doc.scripting_enabled
@@ -815,7 +868,9 @@ fn compute_cascade(
             continue;
         }
         let NodeKind::Element { tag, .. } = &node.kind else {
-            computed[index] = parent;
+            let mut inherited = parent;
+            inherited.transform = Transform::None;
+            computed[index] = inherited;
             continue;
         };
         eligible[index] = true;
@@ -910,6 +965,7 @@ fn compute_cascade(
             }
         }
         let mut applicable = Vec::new();
+        let mut has_transform = false;
         for (order, rule) in rules.iter().enumerate() {
             if budget == 0 {
                 complete = false;
@@ -940,6 +996,7 @@ fn compute_cascade(
                     meter.copies(rule.declarations.len().saturating_mul(128))?;
                 }
                 for (declaration_order, declaration) in rule.declarations.iter().enumerate() {
+                    has_transform |= declaration.name == "transform";
                     applicable.push((
                         (
                             declaration.important,
@@ -954,11 +1011,18 @@ fn compute_cascade(
             }
         }
         if let Some(meter) = meter.as_deref_mut() { meter.source(doc.attr(index, "style").map_or(0, |text| prefix(text, 16_384).len()))?; }
-        let inline = doc
-            .attr(index, "style")
-            .map(|text| parse_declarations(prefix(text, 16_384)))
-            .unwrap_or_default();
+        let inline = if let Some(text) = doc.attr(index, "style") {
+            parse_declarations_inner(prefix(text, 16_384),MAX_DECLARATIONS,true,transform_meter.as_deref_mut())?
+        } else { Vec::new() };
         for (order, declaration) in inline.iter().enumerate() {
+            if declaration.name == "transform" {
+                has_transform = true;
+                if transform_meter.is_some() {
+                    reserve_transform_storage(doc.nodes.len(), &mut transform_known, transform_meter.as_deref_mut())?;
+                } else {
+                    reserve_transform_storage(doc.nodes.len(), &mut transform_known, meter.as_deref_mut())?;
+                }
+            }
             if let Some(meter) = meter.as_deref_mut() { meter.work(1)?; meter.copies(128)?; }
             applicable.push((
                 (declaration.important, true, (0, 0, 0), 0, order),
@@ -975,11 +1039,19 @@ fn compute_cascade(
             applicable.iter().map(|(_,declaration)|*declaration), budget);
         variables[index] = if let Some(meter) = meter.as_deref_mut() { meter.variables(&mut variable_budget, cascade)? } else { cascade(&mut variable_budget) };
         if let Some(meter) = meter.as_deref_mut() {
-            // Source preflight and reverse winner lookup each inspect the
-            // applicable list, including entries for unrelated properties.
-            meter.work(applicable.len().saturating_mul(2))?;
-            for (_, declaration) in applicable.iter().filter(|(_, declaration)| declaration.name == "position") {
+            // Source preflight and reverse winner lookups inspect the list
+            // for each independently computed position/transform consumer.
+            meter.work(applicable.len().saturating_mul(if has_transform { 4 } else { 2 }))?;
+            for (_, declaration) in applicable.iter().filter(|(_, declaration)| matches!(declaration.name.as_str(), "position" | "transform")) {
                 meter.source(declaration.name.len().saturating_add(declaration.value.len()))?;
+            }
+        }
+        if has_transform {
+            if let Some(meter) = transform_meter.as_deref_mut() {
+                meter.work(applicable.len().saturating_mul(2))?;
+                for (_, declaration) in applicable.iter().filter(|(_, declaration)| declaration.name == "transform") {
+                    meter.source(declaration.name.len().saturating_add(declaration.value.len()))?;
+                }
             }
         }
         let resolve_position = |budget: &mut custom_properties::Budget| {
@@ -995,7 +1067,10 @@ fn compute_cascade(
         };
         style.position = computed_position;
         position_known[index] = known;
-        for (_, declaration) in applicable {
+        for (_, declaration) in &applicable {
+            if declaration.name == "transform" {
+                continue;
+            }
             if declaration.name == "position" { continue; }
             if let Some(meter) = meter.as_deref_mut() { meter.source(declaration.name.len().saturating_add(declaration.value.len()))?; }
             let mut apply_box = |budget: &mut custom_properties::Budget| {
@@ -1020,11 +1095,40 @@ fn compute_cascade(
             root_font_size = style.font_size;
             style.root_font_size = root_font_size;
         }
+        // Computed transform lengths use final font metrics, so inherited em
+        // and rem translations retain the parent's absolute computed lengths.
+        let resolve_transform = |budget: &mut custom_properties::Budget| {
+            let candidates = applicable.iter().rev()
+                .filter(|(_, declaration)| declaration.name == "transform")
+                .map(|(priority, declaration)| (*declaration, priority.1));
+            translate::cascade(parent.transform, parent_transform_known, style.font_size,
+                style.root_font_size, candidates, &variables[index], budget)
+        };
+        let (computed_transform, known) = if !has_transform {
+            (Transform::None, true)
+        } else if let Some(meter) = transform_meter.as_deref_mut() {
+            meter.variables(&mut variable_budget, resolve_transform)?
+        } else if let Some(meter) = meter.as_deref_mut() {
+            meter.variables(&mut variable_budget, resolve_transform)?
+        } else {
+            resolve_transform(&mut variable_budget)
+        };
+        style.transform = computed_transform;
+        if !transform_known.is_empty() { transform_known[index] = known; }
         computed[index] = style;
     }
     let overflows = computed.iter().zip(overflow_known).map(|(style, known)| known.iter().all(|known| *known).then_some(style.overflow)).collect();
     let positions = computed.iter().zip(position_known).map(|(style, known)| known.then_some(style.position)).collect();
-    Ok(CascadeOutput { styles: computed, computed_properties: ComputedProperties::new(variables, eligible, complete, overflows, positions) })
+    let mut has_transform_geometry = false;
+    let has_transform_declarations = !transform_known.is_empty();
+    let transforms = computed.iter().zip(transform_known).zip(&eligible).map(|((style, known), eligible)| {
+        has_transform_geometry |= *eligible && (!known || !style.transform.is_none());
+        known.then_some(style.transform)
+    }).collect();
+    if has_transform_declarations {
+        has_transform_geometry |= !complete;
+    }
+    Ok(CascadeOutput { styles: computed, computed_properties: ComputedProperties::new(variables, eligible, complete, overflows, positions, transforms, has_transform_geometry) })
 }
 
 fn prefix(text: &str, maximum: usize) -> &str {
@@ -1221,12 +1325,23 @@ fn parse_sheet(source:&str,rules:&mut Vec<Rule>) {
 }
 
 fn parse_sheet_with_media(source:&str,rules:&mut Vec<Rule>,environment:Option<MediaEnvironment>,maximum_blocks:usize)->Result<(),String> {
+    parse_sheet_with_media_inner(source,rules,environment,maximum_blocks,None).map_err(|error| match error {
+        SheetParseFailure::TransformBudget(message) | SheetParseFailure::Rejected(message) => message,
+    })
+}
+enum SheetParseFailure { TransformBudget(String), Rejected(String) }
+fn parse_sheet_with_media_inner(source:&str,rules:&mut Vec<Rule>,environment:Option<MediaEnvironment>,maximum_blocks:usize,
+    mut transform_meter:Option<&mut CssBudget<'_>>)->Result<(),SheetParseFailure> {
     let first=rules.len();
     let mut allocation_failed=false;
+    let mut transform_failure=None;
     let result=media::walk(source,maximum_blocks,environment,|prelude,body,active| {
         if active && !prelude.trim_start().starts_with('@') {
             if let Some(selectors)=parse_selector_list(prelude, true) {
-                let declarations=parse_declarations(body);
+                let declarations=match parse_declarations_inner(body,MAX_DECLARATIONS,true,transform_meter.as_deref_mut()) {
+                    Ok(declarations)=>declarations,
+                    Err(error)=>{transform_failure=Some(error);return false;}
+                };
                 if !selectors.is_empty() && !declarations.is_empty() {
                     if rules.try_reserve(1).is_err() {allocation_failed=true;return false;}
                     rules.push(Rule{selectors,declarations});
@@ -1235,8 +1350,9 @@ fn parse_sheet_with_media(source:&str,rules:&mut Vec<Rule>,environment:Option<Me
         }
         true
     });
-    if let Err(error)=result {rules.truncate(first);return Err(error);}
-    if allocation_failed {rules.truncate(first);return Err("Stylesheet rule allocation failed.".into());}
+    if let Some(error)=transform_failure {rules.truncate(first);return Err(SheetParseFailure::TransformBudget(error));}
+    if let Err(error)=result {rules.truncate(first);return Err(SheetParseFailure::Rejected(error));}
+    if allocation_failed {rules.truncate(first);return Err(SheetParseFailure::Rejected("Stylesheet rule allocation failed.".into()));}
     Ok(())
 }
 
@@ -2533,6 +2649,10 @@ pub(crate) fn declaration_priority(value: &str) -> (&str, bool) {
     (value, false)
 }
 fn parse_declarations_bounded(source:&str,maximum:usize)->Vec<Declaration> {
+    parse_declarations_inner(source,maximum,true,None).expect("unmetered declarations")
+}
+fn parse_declarations_inner(source:&str,maximum:usize,validate_transform:bool,
+    mut transform_meter:Option<&mut CssBudget<'_>>)->Result<Vec<Declaration>,String> {
     let source = without_comments(source);
     let mut declarations = Vec::new();
     for item in declaration_items(&source) {
@@ -2546,6 +2666,12 @@ fn parse_declarations_bounded(source:&str,maximum:usize)->Vec<Declaration> {
                 && (!custom || custom_properties::custom_name(&name))
                 && (name != "position" || position::valid_declaration(value))
                 && (!(custom || value.to_ascii_lowercase().contains("var(")) || custom_properties::valid_syntax(&value)) {
+                if name == "transform" && validate_transform {
+                    if let Some(meter) = transform_meter.as_deref_mut() {
+                        meter.source(name.len().saturating_add(value.len()))?;
+                    }
+                    if !translate::valid_declaration(value) {continue;}
+                }
                 declarations.push(Declaration {
                     name,
                     value: value.to_owned(),
@@ -2558,7 +2684,7 @@ fn parse_declarations_bounded(source:&str,maximum:usize)->Vec<Declaration> {
             break;
         }
     }
-    declarations
+    Ok(declarations)
 }
 
 fn parse_length(value: &str, auto: bool, negative: bool) -> Option<Length> {
@@ -4540,3 +4666,7 @@ mod overflow_tests;
 #[cfg(test)]
 #[path="css_position_tests.rs"]
 mod position_tests;
+
+#[cfg(test)]
+#[path="css_translate_tests.rs"]
+mod translate_tests;
