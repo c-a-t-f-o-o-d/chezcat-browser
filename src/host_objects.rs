@@ -12,6 +12,11 @@ mod document_property_limits_tests;
 const WINDOW_TAG_RECORD: &str = "\0WindowTag";
 
 impl Runtime {
+    #[cfg(test)]
+    pub(crate) fn native_overlay_state_for_test(&self, handle:u32)->(Option<usize>,Option<u32>) {
+        (self.host_objects.get(&handle).copied(),self.native_expando_owners.get(&handle).copied())
+    }
+
     /// Publish the real interface only after its complete private prototype is ready.
     pub fn define_event_target_interface(&mut self, window:u32) -> Result<(),String> {
         let marker=self.inhibit_transient_collection();
@@ -122,6 +127,8 @@ impl Runtime {
                 self.native_constructor_prototypes.insert((window,name),prototype);
                 parent=prototype;
             }
+            let element=self.native_constructor_prototypes[&(window,"Element")];
+            self.define_svg_element_interface(window, element)?;
             self.define_concrete_html_node_interfaces(window, parent)?;
             // CharacterData is a separate genuine Node suffix. Text gets its
             // own Slottable prototype below; Comment retains this suffix.
@@ -168,6 +175,33 @@ impl Runtime {
         })();
         self.restore_transient_marker(marker);
         result.map_err(Fault::display)
+    }
+
+    /// SVG nodes expose only their proven Element/SVGElement ancestry suffix.
+    /// Their more-specific native prototypes and SVG mixins remain opaque.
+    fn define_svg_element_interface(&mut self, window:u32, element:usize)->Result<(),Fault> {
+        let parent_constructor=self.objects[element].properties["constructor"].value.as_value()?.clone();
+        let Value::Function(parent_function)=parent_constructor else {
+            return Err(Fault::new("Invalid SVGElement parent constructor."));
+        };
+        let allocation=self.allocate_host_function_with_length(window,"SVGElement",0)
+            .map_err(Fault::new)?;
+        if let Some(Function::Host {constructible,illegal_interface_constructor,..})=self.functions.get_mut(allocation.id) {
+            *constructible=true;
+            *illegal_interface_constructor=true;
+        }
+        let prototype=self.new_object(None)?;
+        self.objects[prototype].prototype=Some(Ordinary::Object(element));
+        self.objects[self.function_properties[allocation.id]].prototype=Some(Ordinary::Function(parent_function));
+        let constructor=Value::Function(allocation.id);
+        self.store_property(prototype,"constructor".into(),constructor.clone(),Some((false,true,true)))?;
+        self.store_property(self.function_properties[allocation.id],"prototype".into(),Value::Object(prototype),Some((false,false,false)))?;
+        let tag=self.symbol_to_string_tag.ok_or_else(||Fault::new("Missing SVGElement class-tag symbol."))?;
+        self.store_symbol_property(prototype,tag,Value::String("SVGElement".into()),Some((false,false,true)))?;
+        self.native_constructor_prototypes.insert((window,"SVGElement"),prototype);
+        self.put_binding(self.global_environment,"SVGElement".into(),Some(constructor),super::Declaration::Var,false)?;
+        self.global_attributes.insert("SVGElement".into(),(false,true,true));
+        Ok(())
     }
 
     /// The measured concrete HTML interfaces share the real HTMLElement

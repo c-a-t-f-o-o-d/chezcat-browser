@@ -5,6 +5,15 @@
 //! https://html.spec.whatwg.org/multipage/forms.html#dom-form-nameditem
 use super::*;
 
+pub(super) fn element_node_name(doc: &Document, node: usize) -> String {
+    let local = tag(doc, node);
+    if doc.nodes[node].namespace == crate::html::Namespace::Svg {
+        local.to_owned()
+    } else {
+        local.to_ascii_uppercase()
+    }
+}
+
 pub(super) fn native_node_member(name:&str)->bool {
     node_constant(name).is_some() || "constructor __proto__ nodeType nodeName baseURI isConnected ownerDocument parentNode parentElement childNodes firstChild lastChild previousSibling nextSibling nodeValue textContent getRootNode hasChildNodes normalize cloneNode isEqualNode isSameNode compareDocumentPosition contains lookupPrefix lookupNamespaceURI isDefaultNamespace insertBefore appendChild replaceChild removeChild addEventListener removeEventListener dispatchEvent".split_ascii_whitespace().any(|candidate|candidate==name)
 }
@@ -365,7 +374,7 @@ impl Bridge<'_> {
             self.dom_accessible(node) && self.anchor_url_property(node, property)) { return true; }
         if matches!(property,"localName"|"prefix"|"namespaceURI") {
             return self.attr_element_receiver(object) && node_index(object).is_some_and(|node|
-                self.doc.nodes[node].namespace==crate::html::Namespace::Html);
+                self.doc.nodes[node].namespace.element_uri().is_some());
         }
         if matches!(property, "offsetLeft" | "offsetTop" | "offsetWidth" | "offsetHeight" | "scrollWidth" | "scrollHeight") {
             return node_index(object).is_some_and(|node| self.dom_accessible(node)
@@ -516,7 +525,7 @@ impl Bridge<'_> {
             return Ok(Some(true));
         }
         if matches!(property,"localName"|"prefix"|"namespaceURI") {
-            if matches!(self.doc.nodes[node].kind,NodeKind::Element {..}) && self.doc.nodes[node].namespace!=crate::html::Namespace::Html {
+            if matches!(self.doc.nodes[node].kind,NodeKind::Element {..}) && self.doc.nodes[node].namespace.element_uri().is_none() {
                 return Err("Element naming requires known namespace provenance.".into());
             }
             return Ok(Some(matches!(self.doc.nodes[node].kind,NodeKind::Element {..})));
@@ -610,10 +619,10 @@ impl Bridge<'_> {
         }
         if matches!(property,"localName"|"prefix"|"namespaceURI") {
             if !matches!(self.doc.nodes[node].kind,NodeKind::Element {..}) {return Ok(Some(Value::Undefined));}
-            if self.doc.nodes[node].namespace!=crate::html::Namespace::Html {return Err("Element naming requires known namespace provenance.".into());}
+            let uri = self.doc.nodes[node].namespace.element_uri().ok_or("Element naming requires known namespace provenance.")?;
             return match property {
                 "prefix"=>Ok(Some(Value::Null)),
-                "namespaceURI"=>self.string("http://www.w3.org/1999/xhtml").map(Some),
+                "namespaceURI"=>self.string(uri).map(Some),
                 _=>{
                     let name=tag(self.doc,node);
                     if name.len()>self.state.limits.host.string_bytes {return Err("Element local name exceeds the host string bound.".into());}
@@ -669,7 +678,7 @@ impl Bridge<'_> {
                     } else if comment {
                         "#comment".into()
                     } else {
-                        tag(self.doc, node).to_ascii_uppercase()
+                        element_node_name(self.doc, node)
                     };
                     return self.string(&name).map(Some);
                 }
@@ -977,7 +986,7 @@ impl Bridge<'_> {
         if self.doc.nodes[parent].namespace != crate::html::Namespace::Html && !self.fragment_receiver(node_handle(parent))
             || matches!(tag(self.doc, parent), "script" | "link" | "iframe")
             || incoming_nodes.iter().chain(&outgoing_nodes).any(|&node|
-                self.doc.nodes[node].namespace == crate::html::Namespace::UnknownForeign
+                self.doc.nodes[node].namespace.is_foreign()
                     || matches!(tag(self.doc, node), "script" | "link" | "iframe")) {
             return Err("replaceChild in foreign, script, stylesheet or frame contexts is not implemented; no tree was changed.".into());
         }
@@ -1456,8 +1465,8 @@ impl Bridge<'_> {
 }
 
 // https://dom.spec.whatwg.org/#locate-a-namespace (null prefix only).
-// HTML elements have a null prefix and an immutable HTML namespace, regardless
-// of raw xmlns attributes. Unknown parser contexts must fail explicitly.
+// Supported HTML and SVG elements have a null prefix and keep their parser
+// namespace. Unsupported foreign parser contexts have no proven namespace.
 pub(super) fn default_namespace(
     doc: &Document, node: usize, parent: Option<usize>, state: &mut State,
 ) -> Result<Option<&'static str>, String> {
@@ -1483,8 +1492,8 @@ pub(super) fn default_namespace(
     } else { None };
     match element.map(|item| item.namespace) {
         None => Ok(None),
-        Some(crate::html::Namespace::Html) => Ok(Some("http://www.w3.org/1999/xhtml")),
-        Some(_) => Err("Namespace lookup for unsupported foreign parser context is unavailable.".into()),
+        Some(namespace) => namespace.element_uri().map(Some)
+            .ok_or_else(|| "Namespace lookup for unsupported foreign parser context is unavailable.".into()),
     }
 }
 
@@ -1516,6 +1525,40 @@ pub(super) fn node_constant(property: &str) -> Option<u16> {
 #[cfg(test)]
 mod namespaced_creation_tests {
     use super::*;
+    #[test]
+    fn svg_element_names_reflect_proven_namespace_and_preserve_fragment_replacement_guards() {
+        let mut doc = crate::html::parse(concat!(
+            "<html><body><circle id=htmlShape></circle><svg id=drawing>",
+            "<g><circle id=shape></circle></g></svg><div id=neighbor></div></body></html>"
+        ));
+        doc.scripting_enabled = true;
+        let mut forms = Forms::new(&doc);
+        let mut page = Page::for_test();
+        assert_eq!(page.start(&mut doc, &mut forms, &[]).errors, 0);
+        let read = page.console_eval(&mut doc, &mut forms, r#"
+            var shape=document.getElementById('shape'), ordinary=document.getElementById('htmlShape');
+            var drawing=document.getElementById('drawing'), svgNS='http://www.w3.org/2000/svg';
+            if (shape.namespaceURI!==svgNS || shape.localName!=='circle' || shape.prefix!==null ||
+                shape.nodeName!=='circle' || shape.tagName!=='circle' || !shape.isDefaultNamespace(svgNS))
+                throw 'SVG naming';
+            if (ordinary.namespaceURI!=='http://www.w3.org/1999/xhtml' || ordinary.tagName!=='CIRCLE' ||
+                ordinary.localName!=='circle' || ordinary.isDefaultNamespace(svgNS))
+                throw 'HTML naming';
+            shape.namespaceURI='changed';
+            if (shape.namespaceURI!==svgNS || !('namespaceURI' in shape)) throw 'immutable namespace';
+            var fragment=document.createDocumentFragment();
+            fragment.appendChild(document.createElement('div'));
+        "#);
+        assert_eq!(read.errors, 0, "{}", page.report());
+        let nodes = format!("{:?}", doc.nodes);
+        let commits = page.state.dom_commits;
+        let replacement = page.console_eval(&mut doc, &mut forms,
+            "document.body.replaceChild(fragment,drawing);");
+        assert_eq!(replacement.errors, 1, "foreign subtree batch replacement must fail atomically");
+        assert_eq!(format!("{:?}", doc.nodes), nodes);
+        assert_eq!(page.state.dom_commits, commits);
+    }
+
     fn start(source:&str)->(Document,Forms,Page,Outcome) {
         let mut doc=crate::html::parse("<html><head></head><body><p id='target'>Original</p></body></html>");doc.scripting_enabled=true;
         let mut forms=Forms::new(&doc);let mut page=Page::for_test();

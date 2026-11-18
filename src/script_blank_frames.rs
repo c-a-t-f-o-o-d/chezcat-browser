@@ -144,7 +144,8 @@ impl Bridge<'_> {
         Some(if matches!(node.kind,NodeKind::Element {..}) {
             if node.namespace==crate::html::Namespace::Html {
                 self.frame_concrete_html_interface(handle).unwrap_or("HTMLElement")
-            } else {"Element"}
+            } else if node.namespace==crate::html::Namespace::Svg {"SVGElement"}
+            else {"Element"}
         } else {"Node"})
     }
     pub(super) fn frame_location_owner(&self,handle:u32)->Option<u32>{let(index,offset)=frame_handle(handle)?;(offset==2&&self.state.blank_frames.get(index).is_some()).then(||window(index))}
