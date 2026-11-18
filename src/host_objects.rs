@@ -102,7 +102,13 @@ impl Runtime {
                     }
                 }
                 if name == "HTMLElement" {
-                    self.define_readonly_node_getter(prototype, window, "offsetParent", "\0HTMLElement.get.offsetParent")?;
+                    for (key, operation) in [
+                        ("offsetParent", "\0HTMLElement.get.offsetParent"),
+                        ("offsetLeft", "\0HTMLElement.get.offsetLeft"),
+                        ("offsetTop", "\0HTMLElement.get.offsetTop"),
+                    ] {
+                        self.define_readonly_node_getter(prototype, window, key, operation)?;
+                    }
                 }
                 self.put_binding(self.global_environment,name.into(),Some(constructor),super::Declaration::Var,false)?;
                 self.global_attributes.insert(name.into(),(false,true,true));

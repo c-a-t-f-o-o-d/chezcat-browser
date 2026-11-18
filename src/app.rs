@@ -5729,6 +5729,10 @@ mod overflow_axes_tests;
 mod offset_parent_tests;
 
 #[cfg(test)]
+#[path = "app_offset_coordinate_tests.rs"]
+mod offset_coordinate_tests;
+
+#[cfg(test)]
 #[path = "app_scroll_offset_tests.rs"]
 mod scroll_offset_tests;
 

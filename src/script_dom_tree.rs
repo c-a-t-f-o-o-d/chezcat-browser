@@ -218,7 +218,7 @@ impl Bridge<'_> {
 
     #[cold]
     #[inline(never)]
-    fn unavailable_offset(&self, node: usize, property: &str) -> String {
+    pub(super) fn unavailable_offset(&self, node: usize, property: &str) -> String {
         let class = match tag(self.doc, node) {
             "html" => "html", "head" => "head", "div" => "div", "span" => "span",
             "input" => "input", "textarea" => "textarea", "button" => "button", "a" => "anchor",
@@ -653,14 +653,9 @@ impl Bridge<'_> {
             return Ok(Some(Value::Number(f64::from(number))));
         }
         if property == "tabIndex" { return self.html_tab_index(node).map(|value| Some(Value::Number(f64::from(value)))); }
-        if matches!(property, "offsetLeft" | "offsetTop") {
-            if !matches!(self.doc.nodes[node].kind, NodeKind::Element { .. })
-                || self.doc.nodes[node].namespace != crate::html::Namespace::Html
-            { return Err("Offset lookup requires a known HTML Element.".into()); }
-            if tag(self.doc, node) == "body" || !self.state.dom.connected[node] {
-                return Ok(Some(Value::Number(0.0)));
-            }
-            return Err(self.unavailable_offset(node, property));
+        if matches!(property, "offsetLeft" | "offsetTop") && !self.form_named_control(object, property) {
+            let axis = if property == "offsetLeft" {crate::script_geometry::Axis::X} else {crate::script_geometry::Axis::Y};
+            return self.html_offset(object, Offset::Coordinate(axis)).map(Some);
         }
         let text = matches!(self.doc.nodes[node].kind, NodeKind::Text(_));
         let comment = matches!(self.doc.nodes[node].kind, NodeKind::Comment(_));

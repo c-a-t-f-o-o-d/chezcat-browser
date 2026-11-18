@@ -12,6 +12,9 @@ use crate::layout::{self, ClientBox, Layout};
 mod scroll_offsets;
 pub(crate) use scroll_offsets::Axis;
 
+#[path = "script_geometry_offset_coordinates.rs"]
+mod offset_coordinates;
+
 fn live_checked(forms: &Forms, node: usize) -> Option<bool> {
     forms.controls.get(&node)
         .filter(|control| matches!(control.kind, Kind::Checkbox | Kind::Radio))
