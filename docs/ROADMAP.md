@@ -2,7 +2,7 @@
 
 # 🐱 ChezCat Browser — Development Roadmap
 
-[![Published prerelease](https://img.shields.io/static/v1?label=Published&message=0.81.0-alpha.3&color=0e7490)](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.81.0-alpha.3)
+[![Published prerelease](https://img.shields.io/static/v1?label=Published&message=0.82.0-alpha.1&color=0e7490)](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.82.0-alpha.1)
 [![Development focus](https://img.shields.io/static/v1?label=Focus&message=Web%20compatibility&color=6d28d9)](#active--upcoming-milestones)
 [![Main verification](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/workflows/offline.yml/badge.svg?branch=main&event=push)](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/workflows/offline.yml)
 
@@ -18,10 +18,11 @@
 
 **Public source moves frequently. Named releases move only on owner request.**
 Milestone IDs below describe work, not reserved versions, deadlines, or promises
-of complete framework support. The authorized preparation target is `v0.82.0-alpha.1`.
+of complete framework support.
 
 | Channel | What it contains | When it changes |
 | :--- | :--- | :--- |
+| **Current prerelease** | [0.82.0-alpha.1](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.82.0-alpha.1), tagged at `f2e1823`. Both downloaded ZIPs, the publication record, checksums and extracted runtime passed verification. | [Publication workflow](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/runs/44400222193) |
 | **Previous prerelease** | [0.81.0-alpha.3](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.81.0-alpha.3), source `57cc1d5` | Explicit owner request and immutable tag and assets |
 | **Public `main`** | Integration baseline `6089546` includes the iframe interface, radio clones and implicit grid rows. Earlier PRs [#29](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/29), [#30](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/30), and [#32](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/32) add behavior beyond alpha.2 | Coherent PRs after applicable integration checks |
 | **Public feature branches** | Reviewable work in progress with its own check status | Meaningful implementation checkpoints, independently of releases |
@@ -29,11 +30,11 @@ of complete framework support. The authorized preparation target is `v0.82.0-alp
 
 ```mermaid
 flowchart LR
-    BASE["Previous release: alpha.3"] --> DOM["DOM / language prerequisites<br/>Integrated through PR 114"]
-    DOM --> URL["HTML interfaces and attributes"]
-    URL --> INPUT["Native radio clones and iframe identity<br/>Next: raw HTML attributes and contentEditable"]
+    BASE["Published 0.82.0-alpha.1"] --> DOM["DOM and resource loading"]
+    DOM --> URL["Shared browser capabilities"]
+    URL --> INPUT["Compressed scripts, canvas dimensions and Document"]
     URL --> CSS["CSS variables and implicit grid rows"]
-    INPUT --> APPS["Measured Vue, jQuery and Bootstrap apps"]
+    INPUT --> APPS["Signed-out video search and playback goal<br/>Existing framework checks"]
     CSS --> APPS
     APPS --> ISO["Sandboxed content processes<br/>Later readiness gate"]
     APPS --> GPU["Measured GPU acceleration<br/>Later readiness gate"]
@@ -56,7 +57,9 @@ wait for complete framework or video support.
 
 **Legend:** ✅ **Merged** · 🟡 **Under review** · ◻️ **Next / planned** · 🧊 **Deferred**
 
-Current integration baseline: `6089546`, November 18, 2026. The two active compatibility blockers are the raw `onfocusin` attribute on a DIV in legacy jQuery and the `contentEditable` read before ReactDOM mounts. Single-column grid rows are integrated. Per-item inline alignment remains a layout follow-up. [Current source-bound scorecard](COMPATIBILITY.md)
+The next development priority after `f2e1823` is signed-out video search and playback. Start with loading compressed scripts, reflecting canvas width and height, and exposing the standard `Document` interface. Evaluate search and playback separately as these prerequisites land.
+
+Parked framework work includes the raw `onfocusin` attribute write in legacy jQuery and the `contentEditable` read before ReactDOM mounts. Single-column grid rows are integrated. Per-item inline alignment remains a layout follow-up. [Current source-bound scorecard](COMPATIBILITY.md)
 
 Earlier snapshot: November 17, 2026, using public `main` at `e97dc85` and the linked PRs.
 DOM-06 includes measurements on `3456e67`, `5c89eea` and `5c22afd`. These changes
