@@ -62,6 +62,9 @@ are included in the combined `main` recheck on `25654fa`.
 The later selector candidate `02cd0f8` is integrated in `main` at `991cba3`.
 Computed-style candidate `63a2259` is integrated in `main` at `5c21400` through PR #62.
 PR #64/#65 measurements on `a82267e` and `7b8a5fb` are integrated by `main` `bf0c737`.
+PR #67/#68 add Slottable and HTML-container object behavior. The `13d7dae`
+interaction captures identify the feature candidate. Candidate and integrated
+`main` `5309a68` CI each pass 2,695 normal tests and 25 journeys.
 PR pages carry changing review and CI status. Branch-only results are not results
 for `main` or for the published alpha.2 binary.
 
@@ -77,8 +80,8 @@ workloads, without framework-specific substitutes.
 | ✅&nbsp;Merged | <code>DOM&#8209;03</code> | **Native text INPUT fragments and retained editor state** | [PR #32](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/32) integrated real editing/reset, dirty/default values, neighboring controls, ownership, atomic refusals, and focus retirement. Its pinned modern jQuery fixture passes startup; full interaction remains blocked. |
 | ◻️&nbsp;Next | <code>DOM&#8209;04</code> | **Native Event own-property behavior** | Reproduce the trusted-input failure reported by PR #32; implement normal property lookup without weakening branded access. Recheck the unchanged modern jQuery input/timer workflow. |
 | ◻️&nbsp;Next | <code>DOM&#8209;05</code> | **DocumentFragment and subsequent legacy DOM boundaries** | Reduce the next failure reported by PR #32, then verify fragment insertion, tree identity, form state, and rollback. Preserve the unchanged legacy workload and any next blocker. |
-| ✅&nbsp;Merged | <code>DOM&#8209;06</code> | **Element selectors, siblings and NodeList iteration** | Bootstrap initializes at 1280/640. [PR #60](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/60) clears its dropdown selector boundary on measured `02cd0f8`, integrated in `main` at `991cba3`. The first trusted click then reaches missing `getComputedStyle`. |
-| ✅&nbsp;Merged | <code>DOM&#8209;07</code> | **Ordinary DOM object stringification** | [PR #64](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/64) supplies guarded inherited stringification for the concrete BUTTON/UL slice. Measured `a82267e` advances Bootstrap's first click to computed overflow readback. |
+| ✅&nbsp;Merged | <code>DOM&#8209;06</code> | **Element selectors, siblings, Slottable and NodeList iteration** | Bootstrap initializes at 1280/640. [PR #60](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/60) clears its dropdown selector boundary on measured `02cd0f8`, integrated at `991cba3`. [PR #67](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/67) adds guarded Element/Text `assignedSlot` reads for ordinary trees. Measured `a6a2619` then reaches `node.toString()` at 1736:9. Shadow DOM remains unsupported. |
+| ✅&nbsp;Merged | <code>DOM&#8209;07</code> | **Ordinary DOM object stringification** | [PR #64](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/64)'s BUTTON/UL slice advanced `a82267e` to computed overflow. [PR #68](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/68) extends HTML-container interfaces. On `13d7dae` at 1280/640, the menu visibly opens and its trusted amber-choice callback runs. The menu stays open. The first microtask fault is computed `position` at 1990:5. |
 
 ### CSS — Visible layout and color correctness
 
