@@ -19,6 +19,9 @@ mod position;
 mod box_spacing;
 #[path="css_radius.rs"]
 mod radius;
+#[path="css_background_clip.rs"]
+mod background_clip;
+pub use background_clip::BackgroundClip;
 #[cfg(test)]
 #[path="css_root_selector_tests.rs"]
 mod root_selector_tests;
@@ -306,6 +309,8 @@ pub struct Style {
     /// Retain currentColor through explicit inheritance; background holds the
     /// used opaque color after this element's foreground cascade finishes.
     pub background_current_color: bool,
+    /// None retains an unsupported or resource-refused clip winner.
+    pub background_clip: Option<BackgroundClip>,
     pub background_image: Option<BackgroundImage>,
     /// Repeat the single background layer along the horizontal/vertical axes.
     pub background_repeat: [bool; 2],
@@ -368,6 +373,7 @@ impl Default for Style {
             color: 0x26364a,
             background: None,
             background_current_color: false,
+            background_clip: Some(BackgroundClip::BorderBox),
             background_image: None,
             background_repeat: [true; 2],
             background_position: [ObjectPosition::START; 2],
@@ -1085,7 +1091,8 @@ fn compute_cascade(
         style.position = computed_position;
         position_known[index] = known;
         let mut has_radius = false;
-        for (_, declaration) in &applicable {
+        let mut sheet_background_clip = Some(BackgroundClip::BorderBox);
+        for (priority, declaration) in &applicable {
             if declaration.name == "transform" {
                 continue;
             }
@@ -1093,7 +1100,9 @@ fn compute_cascade(
             if let Some(meter) = meter.as_deref_mut() { meter.source(declaration.name.len().saturating_add(declaration.value.len()))?; }
             if radius::property(&declaration.name) { has_radius = true; continue; }
             let mut apply_box = |budget: &mut custom_properties::Budget| {
-                if custom_properties::apply_overflow(&mut style,&parent,declaration,&variables[index],budget,&mut overflow_known[index],parent_overflow_known) {
+                if background_clip::apply(&mut style,&parent,declaration,priority.1,&mut sheet_background_clip,&variables[index],budget) {
+                    true
+                } else if custom_properties::apply_overflow(&mut style,&parent,declaration,&variables[index],budget,&mut overflow_known[index],parent_overflow_known) {
                     true
                 } else {
                     custom_properties::apply_box(&mut style,&parent,declaration,&variables[index],budget)
@@ -1102,6 +1111,10 @@ fn compute_cascade(
             let applied = if let Some(meter) = meter.as_deref_mut() { meter.variables(&mut variable_budget, apply_box)? } else { apply_box(&mut variable_budget) };
             if !applied {
                 apply(&mut style, &parent, declaration);
+            }
+            if !priority.1 && declaration.name == "background"
+                && (applied || background_clip::resets_background(&declaration.value.trim().to_ascii_lowercase())) {
+                sheet_background_clip = style.background_clip;
             }
         }
         // currentColor computes to itself, including across explicit inherit;
@@ -3082,6 +3095,7 @@ fn apply(style: &mut Style, parent: &Style, declaration: &Declaration) {
                 style.background = parent.background;
                 style.background_current_color = parent.background_current_color;
                 style.background_image = parent.background_image.clone();
+                style.background_clip = parent.background_clip;
                 style.background_repeat = parent.background_repeat;
                 style.background_position = parent.background_position;
                 style.background_size = parent.background_size;
@@ -3099,6 +3113,7 @@ fn apply(style: &mut Style, parent: &Style, declaration: &Declaration) {
                 if let Some(background) = background {
                     style.background = background;
                     style.background_current_color = value == "currentcolor";
+                    style.background_clip = Some(BackgroundClip::BorderBox);
                     style.background_image = None;
                     style.background_repeat = [true; 2];
                     style.background_position = [ObjectPosition::START; 2];

@@ -327,6 +327,7 @@ fn reset_box(style:&mut Style,parent:&Style,name:&str,inherit:bool) {
         style.background=source.background;
         style.background_current_color=source.background_current_color;
         if name=="background" {
+            style.background_clip=source.background_clip;
             style.background_image=source.background_image.clone();
             style.background_repeat=source.background_repeat;
             style.background_position=source.background_position;
@@ -370,7 +371,9 @@ pub(super) fn apply_box(style:&mut Style,parent:&Style,declaration:&Declaration,
     // substituted grammar is known. Failure uses unset (the parent's computed
     // color/font-size for inherited text properties, initial box components); it cannot
     // resurrect an earlier author declaration.
-    let result=variables.substitute(&declaration.value,budget).ok().flatten();
+    let substituted=variables.substitute(&declaration.value,budget);
+    let available=substituted.is_ok();
+    let result=substituted.ok().flatten();
     let value=result.as_deref().unwrap_or("").trim().to_ascii_lowercase();
     let inherited=matches!(declaration.name.as_str(),"color"|"font-size");
     if matches!(value.as_str(),"inherit"|"initial"|"unset") {
@@ -379,12 +382,14 @@ pub(super) fn apply_box(style:&mut Style,parent:&Style,declaration:&Declaration,
         if value=="inherit" && declaration.name=="background"
             && budget.copy(parent.background_image.as_ref().map_or(0,|image|image.url.len())).is_err() {
             reset_box(style,parent,&declaration.name,false);
+            style.background_clip=None;
             return true;
         }
         reset_box(style,parent,&declaration.name,value=="inherit" || (inherited && value=="unset"));
     } else if valid_box(&declaration.name,&value) {
         apply(style,parent,&Declaration {name:declaration.name.clone(),value,important:declaration.important,stylesheet:declaration.stylesheet});
     } else {reset_box(style,parent,&declaration.name,inherited);}
+    if !available && declaration.name=="background" {style.background_clip=None;}
     true
 }
 

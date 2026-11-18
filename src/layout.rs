@@ -237,6 +237,8 @@ pub enum PaintItem {
         alpha: u8,
         radius: f32,
         border: Option<crate::paint::UniformBorder>,
+        /// Used physical color-clip insets; outer bounds remain border bounds.
+        background_insets: [i32; 4],
     },
     Text(usize),
     Control(usize),
@@ -2056,9 +2058,8 @@ impl Engine<'_> {
         let background = style
             .background
             .and_then(|color| self.rect(x, y, outer_width, 0, color));
-        // An opaque background preserves the existing full-box hit/occlusion
-        // geometry. Transparent backgrounds, unequal sides, image layers,
-        // inline fragments and table decorations retain the square fallback.
+        // Keep the outer item bounds for geometry/hits. Color clipping changes
+        // only coverage, using the actual used border and padding dimensions.
         let uniform = (border[0] > 0 && border == [border[0]; 4]
             && style.border_solid == [true; 4] && colors == [colors[0]; 4]
             && style.border_alpha == [style.border_alpha[0]; 4])
@@ -2066,16 +2067,27 @@ impl Engine<'_> {
                 width: border[0], color: colors[0], alpha: style.border_alpha[0],
             });
         let mut rounded_border = false;
-        if (border == [0; 4] || uniform.is_some()) && style.background_image.is_none()
+        if style.background_image.is_none()
             && matches!(style.display, Display::Block | Display::Flex | Display::InlineBlock)
         {
-            if let (Some(item), Some(radius)) = (background, style.circular_radius()) {
+            let circular = if border == [0; 4] || uniform.is_some() { style.circular_radius() } else { None };
+            let radius = circular.unwrap_or(0.0) * self.zoom;
+            let insets = match style.background_clip {
+                Some(css::BackgroundClip::PaddingBox) => border,
+                Some(css::BackgroundClip::ContentBox) => std::array::from_fn(|side| border[side].saturating_add(padding[side])),
+                _ => [0; 4],
+            };
+            // Unequal rounded insets produce elliptical inner corners, outside
+            // this circular-color slice. Preserve their existing decoration.
+            let insets = if radius > 0.0 && insets != [insets[0]; 4] { [0; 4] } else { insets };
+            if let Some(item) = background.filter(|_| circular.is_some() || insets != [0; 4]) {
                 if let PaintItem::Rect { color, alpha, .. } = self.layout.items[item] {
                     self.layout.items[item] = PaintItem::RoundedRect {
-                        x, y, width: outer_width, height: 0, color, alpha, radius: radius * self.zoom,
-                        border: uniform,
+                        x, y, width: outer_width, height: 0, color, alpha, radius,
+                        border: if circular.is_some() { uniform } else { None },
+                        background_insets: insets,
                     };
-                    rounded_border = uniform.is_some();
+                    rounded_border = circular.is_some() && uniform.is_some();
                 }
             }
         }

@@ -26,6 +26,68 @@ fn rounded_coverage(px: f64, py: f64, width: f64, height: f64, radius: f64) -> u
 }
 
 impl Canvas {
+    /// Background color clipped to an actual inner box. Circular inner edges
+    /// require uniform insets; layout retains its prior fallback otherwise.
+    /// The border and clipped color are disjoint materials resolved against
+    /// the original destination once, including partially covered boundaries.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn fill_color_box(
+        &mut self, x: i32, y: i32, width: i32, height: i32, radius: f32,
+        background: u32, alpha: u8, insets: [i32; 4], border: Option<UniformBorder>,
+    ) {
+        if insets == [0; 4] {
+            if let Some(border) = border {
+                self.fill_rounded_border_rect(x, y, width, height, radius, background, border);
+            } else {
+                self.fill_rounded_rect_alpha(x, y, width, height, radius, background, alpha);
+            }
+            return;
+        }
+        if width <= 0 || height <= 0 || !radius.is_finite() { return; }
+        let insets = insets.map(|n| n.max(0));
+        let inner_width = width.saturating_sub(insets[1]).saturating_sub(insets[3]);
+        let inner_height = height.saturating_sub(insets[0]).saturating_sub(insets[2]);
+        let radius = f64::from(radius.max(0.0)).min(f64::from(width.min(height)) * 0.5);
+        let color_radius = (radius - f64::from(insets[0])).max(0.0);
+        let stroke = border.filter(|border| border.width > 0 && border.alpha > 0);
+        if stroke.is_none() {
+            self.fill_rounded_rect_alpha(x.saturating_add(insets[3]), y.saturating_add(insets[0]),
+                inner_width, inner_height, color_radius as f32, background, alpha);
+            return;
+        }
+        let border = stroke.unwrap();
+        let edge = f64::from(border.width);
+        let border_inner_width = f64::from(width) - 2.0 * edge;
+        let border_inner_height = f64::from(height) - 2.0 * edge;
+        let bounds = ClipRect::new(x, y, width, height).intersect(self.clip);
+        for row in bounds.top..bounds.bottom {
+            let py = (i64::from(row) - i64::from(y)) as f64 + 0.5;
+            for col in bounds.left..bounds.right {
+                let px = (i64::from(col) - i64::from(x)) as f64 + 0.5;
+                let outer = rounded_coverage(px, py, f64::from(width), f64::from(height), radius);
+                if outer == 0 { continue; }
+                let inner = if border_inner_width <= 0.0 || border_inner_height <= 0.0 { 0 } else {
+                    rounded_coverage(px - edge, py - edge, border_inner_width, border_inner_height,
+                        (radius - edge).max(0.0)).min(outer)
+                };
+                let color = if inner_width <= 0 || inner_height <= 0 { 0 } else {
+                    rounded_coverage(px - f64::from(insets[3]), py - f64::from(insets[0]),
+                        f64::from(inner_width), f64::from(inner_height), color_radius).min(inner)
+                };
+                let stroke_weight = (outer - inner) * u32::from(border.alpha);
+                let color_weight = color * u32::from(alpha);
+                let destination_weight = 65_025 - stroke_weight - color_weight;
+                let pixel = &mut self.pixels[row as usize * self.width + col as usize];
+                let channel = |shift: u32| {
+                    ((((*pixel >> shift) & 255) * destination_weight
+                        + ((background >> shift) & 255) * color_weight
+                        + ((border.color >> shift) & 255) * stroke_weight + 32_512) / 65_025) << shift
+                };
+                *pixel = channel(16) | channel(8) | channel(0);
+            }
+        }
+    }
+
     /// An opaque CSS color background continues underneath this uniform solid
     /// border. Resolve both materials against the original destination once,
     /// rather than source-over a partially covered stroke onto an already
@@ -139,6 +201,10 @@ impl Canvas {
 #[cfg(test)]
 #[path = "paint_rounded_border_tests.rs"]
 mod border_tests;
+
+#[cfg(test)]
+#[path = "paint_background_clip_tests.rs"]
+mod background_clip_tests;
 
 #[cfg(test)]
 mod tests {
