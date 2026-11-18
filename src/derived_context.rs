@@ -112,8 +112,8 @@ impl Runtime {
             return Err(Fault::exception("TypeError", "The super value is not a constructor."));
         }
         let Value::Function(constructor) = target.constructor else { unreachable!() };
-        if !matches!(self.functions.get(constructor), Some(Function::Script { program, template, .. }) if program.templates[*template].constructible) {
-            return Err(Fault::new("Only ordinary Script super constructors are implemented; native and bound bases remain unavailable."));
+        if !self.supported_class_base(constructor, host)? {
+            return Err(Fault::new("This native, bound or builtin super constructor is not implemented."));
         }
         let value = self.construct_value_with_target(Value::Function(constructor), args, Some(target.new_target), host)?;
         // Construct runs first. A duplicate super() must retain its real base

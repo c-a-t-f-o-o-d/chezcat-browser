@@ -60,7 +60,10 @@ impl Runtime {
                 let parent_constructor=self.objects[parent].properties.get("constructor").ok_or_else(||Fault::new("Missing native parent constructor."))?.value.as_value()?.clone();
                 let Value::Function(parent_function)=parent_constructor else {return Err(Fault::new("Invalid native parent constructor."));};
                 let allocation=self.allocate_host_function_with_length(window,name,0).map_err(Fault::new)?;
-                if let Some(Function::Host {constructible,..})=self.functions.get_mut(allocation.id) {*constructible=true;}
+                if let Some(Function::Host {constructible,illegal_interface_constructor,..})=self.functions.get_mut(allocation.id) {
+                    *constructible=true;
+                    *illegal_interface_constructor=true;
+                }
                 let prototype=self.new_object(None)?;
                 self.objects[prototype].prototype=Some(Ordinary::Object(parent));
                 self.objects[self.function_properties[allocation.id]].prototype=Some(Ordinary::Function(parent_function));
@@ -188,8 +191,9 @@ impl Runtime {
         for &(_, name) in super::ORDINARY_HTML_SUBCLASSES {
             let allocation = self.allocate_host_function_with_length(window, name, 0)
                 .map_err(Fault::new)?;
-            if let Some(Function::Host { constructible, .. }) = self.functions.get_mut(allocation.id) {
+            if let Some(Function::Host { constructible, illegal_interface_constructor, .. }) = self.functions.get_mut(allocation.id) {
                 *constructible = true;
+                *illegal_interface_constructor = true;
             }
             let prototype = self.new_object(None)?;
             self.objects[prototype].prototype = Some(Ordinary::Object(html_element));
@@ -219,6 +223,26 @@ impl Runtime {
             self.global_attributes.insert(name.into(), (false, true, true));
         }
         Ok(())
+    }
+
+    /// A class may inherit a genuine nonallocating interface even though
+    /// constructing an unregistered instance must throw. The capability is
+    /// immutable function metadata, not an author-writable name or prototype.
+    /// Keep native qualification off ordinary recursive Script call frames.
+    #[inline(never)]
+    pub(super) fn supported_class_base(&self, function:usize, host:&dyn Host)->Result<bool,Fault> {
+        match self.functions.get(function) {
+            Some(Function::Script { .. }) => Ok(true),
+            Some(Function::Host {
+                object, constructible:true, illegal_interface_constructor:true, ..
+            }) => {
+                // Saved same-origin constructors do not confer permanent
+                // access after the actual document/owner boundary changes.
+                self.validate_native_access(*object,host)?;
+                Ok(true)
+            }
+            _ => Ok(false),
+        }
     }
 
     /// Web IDL's class-string descriptor belongs to Window's interface

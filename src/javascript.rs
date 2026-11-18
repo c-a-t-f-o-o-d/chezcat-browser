@@ -3323,6 +3323,9 @@ enum Function {
         method: &'static str,
         receiver_required: bool,
         constructible: bool,
+        /// Engine-only eligibility for canonical interfaces whose actual
+        /// construction is preflight-refused. Never inferred from JS properties.
+        illegal_interface_constructor: bool,
     },
     Script {
         program: Rc<Program>,
@@ -3823,6 +3826,7 @@ impl Runtime {
             method,
             receiver_required: false,
             constructible: false,
+            illegal_interface_constructor: false,
         }).map_err(Fault::display)?;
         self.initialize_function_properties(allocation, method, length, false)
             .map_err(Fault::display)?;
@@ -8889,6 +8893,7 @@ impl Runtime {
                 method,
                 receiver_required,
                 constructible,
+                ..
             }) => {
                 if *constructible {
                     return Err(Fault::exception(
