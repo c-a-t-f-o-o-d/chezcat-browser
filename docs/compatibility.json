@@ -305,13 +305,13 @@
     {
       "id": "modern-bootstrap",
       "kind": "Unmodified Bootstrap5.3.9 CSS/bundle separate original responsive/dropdown app",
-      "status": "Tested selected workflow; blocked during initialization",
+      "status": "Tested selected workflow with initialization passed and dropdown input blocked",
       "build_provenance": {
-        "source_commit": "5c89eea82052ed6eff2cf77a5b3bf6a908cc2ab9",
-        "executable_sha256": "60362d47f72c8d21973aa2d5e8b1952b41f338c627f480e8d47804e105c2bdd1",
+        "source_commit": "5c22afd735d8353528e1e6f929ca84a594250f44",
+        "executable_sha256": "73ff4306530c8a8a21a474b93ce3f7869122cd7a3162f4dff05fe761d3125978",
         "dirty": false,
         "cargo_version": "0.81.0-alpha.2",
-        "source_map_sha256": "ef29880fcaa1c7d9f28986a365700f78df3b86211cdb90c5b3446a9f34d70da1"
+        "source_map_sha256": "4338c593129e420918e43f8c51dc54cd2337f51f31a78d0afd7ccea946e7b9f9"
       },
       "configurations": [
         [
@@ -328,28 +328,28 @@
       "profile": "--no-profile",
       "stage_outcomes": {
         "load": "Passed",
-        "parse": "Not established",
-        "initialization": "Failed",
+        "parse": "Passed",
+        "initialization": "Passed",
         "render": "Passed",
         "input": "Failed",
         "async": "Not applicable",
         "framework_layout": "Passed"
       },
-      "first_root": "Host-object iteration is not implemented.",
-      "first_root_location": "Bootstrap5.3.9 bundle line741,column14",
+      "first_root": "Invalid selector or selector syntax outside the supported subset: \"[data-bs-toggle=\\\"dropdown\\\"]:not(.disabled):not(:disabled)\"",
+      "first_root_location": "Bootstrap5.3.9 bundle line357,column27",
       "cascades_count_as_roots": false,
       "reference_browser": "Not run",
-      "measurement_scope": "One finite revision2 App invocation per selected Bootstrap configuration at 1280/640 using the actual clean build; this is not a new jQuery/cohort, full-framework, physical-desktop or release pass.",
-      "parse_scope": "Conservative runner reports Not established; the first explicit failure is retained without inferring all dormant paths parsed",
+      "measurement_scope": "One finite revision2 Bootstrap App invocation per selected configuration at 1280/640 on the actual clean build. Other workflows retain their own source records.",
+      "parse_scope": "The exact library initialization marker and zero startup errors establish the admitted parse stage. Dormant paths remain unassessed.",
       "dependencies": {
         "popper": "2.11.8, included in the pinned bundle",
-        "jquery": "Not loaded; independent workload"
+        "jquery": "Absent from this independent workload"
       },
-      "render_scope": "Unmodified Bootstrap CSS places original cards beside each other at1280 and stacks them at640; initial paired rendering and the independent original control pass while initialization and dropdown input fail.",
+      "render_scope": "Unmodified Bootstrap CSS places original cards beside each other at1280 and stacks them at640. Initial paired rendering and the independent original control pass.",
       "fixture_revision": 2,
-      "interaction_harness": "Revision2 action names exist. Load-listener errors prevent the required zero-error initialization and dropdown input results; this is distinct from revision1 missing-name HarnessBlocked behavior.",
+      "interaction_harness": "Revision2 action names exist. The initial snapshot has zero startup errors and the exact Bootstrap5.3.9 initialization marker. The first trusted click reaches the selector syntax refusal.",
       "observed_first_roots": [
-        "Host-object iteration is not implemented."
+        "Invalid selector or selector syntax outside the supported subset: \"[data-bs-toggle=\\\"dropdown\\\"]:not(.disabled):not(:disabled)\""
       ],
       "process_outcomes": [
         {
@@ -369,23 +369,23 @@
           "exit_code": 1
         }
       ],
-      "interaction_outcome": "DependencyBlocked by failed initialization; raw runner input stage remains Failed",
-      "build_provenance_note": "The retained caller build record cargo_version field contains package version 0.81.0-alpha.2; it is preserved verbatim and is not a cargo executable version.",
+      "interaction_outcome": "Trusted dropdown click attempted after successful initialization. Selector syntax refusal prevents the menu from opening and choosing an item.",
+      "build_provenance_note": "The retained caller build record cargo_version field contains package version 0.81.0-alpha.2. It does not identify the cargo executable version.",
       "integration": {
-        "pull_request": "https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/55",
-        "merged_main_commit": "0ef43d01acb84380bb1f0974f736a2e98c6acd26",
-        "scope": "Integration identity only; this workflow ran on the build_provenance source_commit, not on the later main merge."
+        "pull_request": "https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/59",
+        "merged_main_commit": "03edad1f2e2ff7de097a7ed3d9edec4ccf956dea",
+        "scope": "The workflow ran on the source_commit in build_provenance. PR #59 integrated the change at the recorded main merge."
       },
-      "first_failed_stage": "initialization",
+      "first_failed_stage": "input",
       "selected_workflows": [
         "bootstrap"
       ],
       "cohort_workflow_denominator": 2,
       "configuration_denominator": 2,
       "passed_configurations": 0,
-      "evidence_label": "20261118-canonical-selectors-modern-bootstrap",
-      "measurement_manifest_sha256": "04604f4a42fd59b13475c65342eca7b7555a8c65ab553e2adc09f84bcd00e97f",
-      "build_record_sha256": "8069b4ea3becd1fa4b57534d3f80b820b2d450c73ca7032f84322b5f4ecca1b5",
+      "evidence_label": "20261118-nodelist-bootstrap",
+      "measurement_manifest_sha256": "9b12a3988a18b5bd3198bfae012cb6e3a18b34aba839d034bfcfaad7932a71db",
+      "build_record_sha256": "0f1c1d50e656a2bb625b6aea69ef584b2881728f890505e81cb6111638193ca0",
       "integrity_checks": {
         "original_fixtures_unchanged": true,
         "inputs_unchanged": true,
@@ -394,6 +394,96 @@
         "helpers_unchanged": true
       },
       "previous_measurements": [
+        {
+          "status": "Tested selected workflow; blocked during initialization",
+          "build_provenance": {
+            "source_commit": "5c89eea82052ed6eff2cf77a5b3bf6a908cc2ab9",
+            "executable_sha256": "60362d47f72c8d21973aa2d5e8b1952b41f338c627f480e8d47804e105c2bdd1",
+            "dirty": false,
+            "cargo_version": "0.81.0-alpha.2",
+            "source_map_sha256": "ef29880fcaa1c7d9f28986a365700f78df3b86211cdb90c5b3446a9f34d70da1"
+          },
+          "configurations": [
+            [
+              1280,
+              800
+            ],
+            [
+              640,
+              800
+            ]
+          ],
+          "zoom": 100,
+          "javascript_enabled": true,
+          "profile": "--no-profile",
+          "stage_outcomes": {
+            "load": "Passed",
+            "parse": "Not established",
+            "initialization": "Failed",
+            "render": "Passed",
+            "input": "Failed",
+            "async": "Not applicable",
+            "framework_layout": "Passed"
+          },
+          "first_root": "Host-object iteration is not implemented.",
+          "first_root_location": "Bootstrap5.3.9 bundle line741,column14",
+          "cascades_count_as_roots": false,
+          "reference_browser": "Not run",
+          "measurement_scope": "One finite revision2 App invocation per selected Bootstrap configuration at 1280/640 using the actual clean build; this is not a new jQuery/cohort, full-framework, physical-desktop or release pass.",
+          "parse_scope": "Conservative runner reports Not established; the first explicit failure is retained without inferring all dormant paths parsed",
+          "dependencies": {
+            "popper": "2.11.8, included in the pinned bundle",
+            "jquery": "Not loaded; independent workload"
+          },
+          "render_scope": "Unmodified Bootstrap CSS places original cards beside each other at1280 and stacks them at640; initial paired rendering and the independent original control pass while initialization and dropdown input fail.",
+          "fixture_revision": 2,
+          "interaction_harness": "Revision2 action names exist. Load-listener errors prevent the required zero-error initialization and dropdown input results; this is distinct from revision1 missing-name HarnessBlocked behavior.",
+          "observed_first_roots": [
+            "Host-object iteration is not implemented."
+          ],
+          "process_outcomes": [
+            {
+              "viewport": [
+                1280,
+                800
+              ],
+              "state": "failed",
+              "exit_code": 1
+            },
+            {
+              "viewport": [
+                640,
+                800
+              ],
+              "state": "failed",
+              "exit_code": 1
+            }
+          ],
+          "interaction_outcome": "DependencyBlocked by failed initialization; raw runner input stage remains Failed",
+          "build_provenance_note": "The retained caller build record cargo_version field contains package version 0.81.0-alpha.2; it is preserved verbatim and is not a cargo executable version.",
+          "integration": {
+            "pull_request": "https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/55",
+            "merged_main_commit": "0ef43d01acb84380bb1f0974f736a2e98c6acd26",
+            "scope": "Integration identity only; this workflow ran on the build_provenance source_commit, not on the later main merge."
+          },
+          "first_failed_stage": "initialization",
+          "selected_workflows": [
+            "bootstrap"
+          ],
+          "cohort_workflow_denominator": 2,
+          "configuration_denominator": 2,
+          "passed_configurations": 0,
+          "evidence_label": "20261118-canonical-selectors-modern-bootstrap",
+          "measurement_manifest_sha256": "04604f4a42fd59b13475c65342eca7b7555a8c65ab553e2adc09f84bcd00e97f",
+          "build_record_sha256": "8069b4ea3becd1fa4b57534d3f80b820b2d450c73ca7032f84322b5f4ecca1b5",
+          "integrity_checks": {
+            "original_fixtures_unchanged": true,
+            "inputs_unchanged": true,
+            "executable_unchanged": true,
+            "build_record_unchanged": true,
+            "helpers_unchanged": true
+          }
+        },
         {
           "status": "Tested selected workflow; blocked during initialization",
           "build_provenance": {
@@ -599,7 +689,116 @@
           "interaction_harness": "Harness blocked: revision1 controls had IDs but lacked the name attributes selected by the App driver. Startup load/render/first script failures remain observed; no trusted input was executed.",
           "fixture_correction": "Revision2 adds unique action names and preflight controls; upstream assets, script apps and old raw records remain unchanged. New runtime result pending."
         }
-      ]
+      ],
+      "visual_observations": [
+        {
+          "kind": "Native button padding",
+          "before_build": {
+            "source_commit": "5c89eea82052ed6eff2cf77a5b3bf6a908cc2ab9",
+            "executable_sha256": "60362d47f72c8d21973aa2d5e8b1952b41f338c627f480e8d47804e105c2bdd1",
+            "dirty": false,
+            "source_map_sha256": "ef29880fcaa1c7d9f28986a365700f78df3b86211cdb90c5b3446a9f34d70da1",
+            "build_record_sha256": "8069b4ea3becd1fa4b57534d3f80b820b2d450c73ca7032f84322b5f4ecca1b5"
+          },
+          "after_build": {
+            "source_commit": "e94388cadafbbdd39e33c13f7b2852075c81f3d8",
+            "executable_sha256": "4ab6e3cffe15ca73eb643b3de094c805e562b7a2897cd02d7a70b387345fdacb",
+            "dirty": false,
+            "source_map_sha256": "b331a43d1c49ab7c8526da9fcc7867be29c58f77b56e193ea4a5b46e39fe5080",
+            "build_record_sha256": "85b11ab94d121b4227f60461956bed0df44bafb74d687666faf544d32977b88e"
+          },
+          "integration": {
+            "pull_request": "https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/54",
+            "merged_main_commit": "25654fa4e73cb4fca5fa10d9d1a6802249b8ded2"
+          },
+          "configurations": [
+            [
+              1280,
+              800
+            ],
+            [
+              640,
+              800
+            ]
+          ],
+          "toggle_size_before_px": [
+            167,
+            29
+          ],
+          "toggle_size_after_px": [
+            191,
+            41
+          ],
+          "caption_translation_px": [
+            12,
+            6
+          ],
+          "caption_extents_unchanged": true,
+          "aligned_original_content_crop_matches": true,
+          "caption_position_basis": {
+            "source_derived_content_offset_px": 102,
+            "source_constants": "BAR_HEIGHT68 plus default visible bookmark strip34",
+            "independently_calibrated_from_capture_metadata": false
+          },
+          "initialization": {
+            "before": "Failed",
+            "after": "Failed",
+            "first_root": "Host-object iteration is not implemented.",
+            "first_root_location": "Bootstrap5.3.9 bundle line741,column14"
+          },
+          "same_pinned_inputs_and_helpers": {
+            "fixture_identity_before": true,
+            "library_inputs": true,
+            "helpers_before": true
+          },
+          "measurement_scope": "Separate loaded-state padding comparison on 5c89eea and e94388c. The padding branch predates the NodeList merge. The later 5c22afd initialization result retains its own source identity.",
+          "comparison_sha256": "df27e36459653fa4d0a0ff4798942d41889629fd114c8edbeda27d04a411ce71",
+          "before_manifest_sha256": "04604f4a42fd59b13475c65342eca7b7555a8c65ab553e2adc09f84bcd00e97f",
+          "after_manifest_sha256": "8381681d3a75e8e3f71689c21dade5247725da5171b99341cc670dd4711ec544"
+        }
+      ],
+      "combined_main_measurement": {
+        "source_commit": "25654fa4e73cb4fca5fa10d9d1a6802249b8ded2",
+        "executable_sha256": "3989ef84653f93c797ed5a841db4521c58439a9d9da6602950cb8850f0e2da9b",
+        "source_map_sha256": "dedd04f75c372e673273a73ba8df2ffd4756447c5729a56cdc07c7544e605337",
+        "dirty": false,
+        "measurement_manifest_sha256": "a7b5c0a394190398306010c29cce05f86e5fbd8d19e789d06654fd8a4721ad13",
+        "build_record_sha256": "531e15c63a9eefaf265386f9d56171757db23a7ab34db47d8c761c051fa9d36e",
+        "configurations": [
+          [
+            1280,
+            800
+          ],
+          [
+            640,
+            800
+          ]
+        ],
+        "stage_outcomes": {
+          "load": "Passed",
+          "parse": "Passed",
+          "initialization": "Passed",
+          "render": "Passed",
+          "input": "Failed",
+          "async": "Not applicable",
+          "framework_layout": "Passed"
+        },
+        "loaded_toggle_size_px": [
+          191,
+          41
+        ],
+        "loaded_layout_sha256": {
+          "1280": "15997095ec32c9a95893be2f3319e93b7f553557fed9be00dce69f54c83169c4",
+          "640": "85b98bbbfd7386a45e7d34dd90790f56e841ea5563e823f6bfa7805a93efee8c"
+        },
+        "first_failed_stage": "input",
+        "first_root_location": "Bootstrap5.3.9 bundle line357,column27",
+        "first_click_boundary": "The same dropdown selector syntax refusal recorded on 5c22afd prevents the menu from opening.",
+        "configuration_denominator": 2,
+        "passed_configurations": 0,
+        "integrity_checks_passed": true,
+        "measurement_scope": "Bootstrap-only main recheck combining native padding and NodeList iteration. The independent 5c22afd feature record keeps its own build identity."
+      }
     },
     {
       "id": "reference",
