@@ -4020,7 +4020,12 @@ fn draw_control_text(
     color: u32,
 ) {
     let font = rect.text_font.as_ref().unwrap();
-    let (x, width, height) = (rect.x, rect.width, rect.height);
+    let padding = rect.padding;
+    let (x,y,width,height) = (
+        rect.x.saturating_add(padding[3]),y.saturating_add(padding[0]),
+        (rect.width-padding[1]-padding[3]).max(0),
+        (rect.height-padding[0]-padding[2]).max(0),
+    );
     let clip = canvas.clip();
     canvas.set_clip(Some(clip.intersect(crate::paint::ClipRect::new(
         x + 2,
@@ -4241,8 +4246,20 @@ fn draw_control(
         draw_control_text(canvas, rect, y, control, placeholder, focused, color);
         return;
     }
+    let padding = rect.padding;
+    let (x,y,width,height) = (
+        x.saturating_add(padding[3]),y.saturating_add(padding[0]),
+        (width-padding[1]-padding[3]).max(0),
+        (height-padding[0]-padding[2]).max(0),
+    );
     if height < GLYPH_HEIGHT * scale + 2 {
         return;
+    }
+    let clip = canvas.clip();
+    if padding != [0;4] {
+        canvas.set_clip(Some(clip.intersect(crate::paint::ClipRect::new(
+            x+2,y+2,(width-4).max(0),(height-4).max(0),
+        ))));
     }
     let advance = GLYPH_ADVANCE * scale;
     let cells = ((width - 12) / advance).max(0) as usize;
@@ -4313,6 +4330,7 @@ fn draw_control(
         let text_x = x + (width - caption.chars().count() as i32 * advance) / 2;
         canvas.text(text_x, text_y, &caption, scale, color);
     }
+    canvas.set_clip(Some(clip));
 }
 fn field_themed(
     canvas: &mut Canvas,
@@ -5664,6 +5682,14 @@ mod css_color_tests;
 #[cfg(test)]
 #[path="app_css_font_size_tests.rs"]
 mod css_font_size_tests;
+
+#[cfg(test)]
+#[path="app_native_padding_tests.rs"]
+mod native_padding_tests;
+
+#[cfg(test)]
+#[path="app_native_padding_detail_tests.rs"]
+mod native_padding_detail_tests;
 
 #[cfg(test)]
 #[path="app_document_fragment_tests.rs"]
