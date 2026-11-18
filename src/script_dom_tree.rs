@@ -23,7 +23,7 @@ pub(super) fn document_node_property(name:&str)->bool {
     matches!(name,"nodeType"|"nodeName"|"isConnected"|"ownerDocument"|"parentNode"|"parentElement"|"firstChild"|"lastChild"|"previousSibling"|"nextSibling")
 }
 
-const MAX_DOM_DEPTH: usize = 128;
+pub(super) const MAX_DOM_DEPTH: usize = 128;
 
 #[derive(Default)]
 pub(super) struct DomState {

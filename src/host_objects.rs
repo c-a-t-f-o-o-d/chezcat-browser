@@ -77,7 +77,7 @@ impl Runtime {
                 self.store_property(self.function_properties[allocation.id],"prototype".into(),Value::Object(prototype),Some((false,false,false)))?;
                 self.store_symbol_property(prototype,self.symbol_to_string_tag.unwrap(),Value::String(name.into()),Some((false,false,true)))?;
                 if name=="Node" {
-                    for (name, operation, length) in [("getRootNode", "\0Node.getRootNode", 0), ("contains", "\0Node.contains", 1)] {
+                    for (name, operation, length) in [("getRootNode", "\0Node.getRootNode", 0), ("contains", "\0Node.contains", 1), ("cloneNode", "\0Node.cloneNode", 0)] {
                         let method = self.allocate_host_function_with_length(window, operation, length).map_err(Fault::new)?;
                         if let Some(Function::Host { receiver_required, .. }) = self.functions.get_mut(method.id) {
                             *receiver_required = true;

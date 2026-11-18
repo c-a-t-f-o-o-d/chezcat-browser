@@ -1651,8 +1651,20 @@
     "final_title": "Vue3 asynchronous update complete",
     "controls": "All 17 original actions completed. Five paired captures and the retained final frame were fault-free. The neighboring input retained its edited value and original default."
   },
+  "integrated_async_interaction": {
+    "source": "c669dd9b3618913419e621d6cac3961e31d04db8",
+    "forms": ["async function", "async arrow"],
+    "actions_per_page": 23,
+    "result": "Both pages painted the pending, fulfilled and caught states. They retained the rejection identity through the later handler after one intentional unhandled rejection.",
+    "regressions": "Vue 3.5.45 retained mounted edits, clicks and timer updates. Vue 2.7.16 and Bootstrap 5.3.9 passed their existing two-width workflows."
+  },
+  "legacy_fragment_progress": {
+    "source": "22d0167af8ba48b371e2349aa46a38506d31cbb0",
+    "viewport": [1280, 800],
+    "result": "W2 passed load and initial rendering and advanced beyond mixed fragment construction. Initialization stopped on the detached NAV cloneNode call at 4481:3."
+  },
   "next": [
-    "Verify async functions, async arrows and await with visible offline page updates. On f0dc9ef, the separate original function and arrow scripts stopped during parsing.",
+    "Advance the measured legacy jQuery initialization and recheck its trusted input and timer stages.",
     "Retain class/object-prototype and modern Vue/React prerequisites as separate queued work; preserve source-bound App DOM/pixel/trusted-input and responsive rechecks"
   ],
   "selected_standard_controls": {
