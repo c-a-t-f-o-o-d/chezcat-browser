@@ -44,7 +44,7 @@ impl Bridge<'_> {
         if name.namespace.is_some() || !matches!(key,"type"|"name"|"value") { return Ok(false); }
         if key == "type" {
             if !value.as_deref().is_some_and(|value| value.eq_ignore_ascii_case("hidden")) {
-                return Err("Supported attributes: input type assignment is limited to hidden; no input was changed.".into());
+                return Err("Supported attributes exclude this native INPUT type transition; no input was changed.".into());
             }
             if self.forms.controls.get(&node).is_none()
                 && (!self.state.dom.created.contains(&node) || self.state.dom.connected[node]) {

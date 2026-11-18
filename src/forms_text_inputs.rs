@@ -1,21 +1,21 @@
-//! Prepared native text INPUT admission and reflection. Existing editors are
+//! Prepared native INPUT admission and reflection. Existing editors are
 //! updated in place; DOM callers publish these plans only after preflight.
 use super::*;
 
-pub(crate) enum TextInputPlan {
+pub(crate) enum InputPlan {
     Admit { controls: BTreeMap<usize, Control>, retained_bytes: usize },
     Name { node: usize, name: String },
     Live { node: usize, value: Option<Editor> },
     Default(TextDefaultPlan),
 }
-impl TextInputPlan {
+impl InputPlan {
     pub(crate) fn retained_bytes(&self) -> usize {
         match self { Self::Admit { retained_bytes, .. } => *retained_bytes, _ => 0 }
     }
     pub(crate) fn commit(self, forms: &mut Forms) {
         match self {
             Self::Admit { mut controls, .. } => forms.controls.append(&mut controls),
-            Self::Name { node, name } => forms.controls.get_mut(&node).expect("Prepared text INPUT").name = name,
+            Self::Name { node, name } => forms.controls.get_mut(&node).expect("Prepared INPUT").name = name,
             Self::Live { node, value } => {
                 let control = forms.controls.get_mut(&node).expect("Prepared text INPUT");
                 if let Some(value) = value { control.value = value; }
@@ -102,16 +102,16 @@ impl Forms {
         Ok(bytes)
     }
 
-    pub(crate) fn prepare_text_name(&self, node: usize, name: Option<&str>) -> Result<TextInputPlan, String> {
-        let control = self.controls.get(&node).filter(|control| control.kind == Kind::Text)
-            .ok_or("Name update requires a native text INPUT.")?;
+    pub(crate) fn prepare_input_name(&self, node: usize, name: Option<&str>) -> Result<InputPlan, String> {
+        let control = self.controls.get(&node).filter(|control| matches!(control.kind, Kind::Text | Kind::Checkbox))
+            .ok_or("Name update requires a native text or checkbox INPUT.")?;
         let name = name.unwrap_or("");
         let live = control.value.chars.iter().map(|ch| ch.len_utf8()).sum();
         self.text_payload(Some((node, name, live)))?;
-        Ok(TextInputPlan::Name { node, name: copy_text(name)? })
+        Ok(InputPlan::Name { node, name: copy_text(name)? })
     }
 
-    pub(crate) fn prepare_text_live(&self, node: usize, text: &str) -> Result<TextInputPlan, String> {
+    pub(crate) fn prepare_text_live(&self, node: usize, text: &str) -> Result<InputPlan, String> {
         let control = self.controls.get(&node).filter(|control| control.kind == Kind::Text)
             .ok_or("Value update requires a native text INPUT.")?;
         let mut units = 0usize;
@@ -122,23 +122,25 @@ impl Forms {
         if units > MAX_VALUE_UNITS { return Err("A form value is limited to 4096 UTF-16 units.".into()); }
         self.text_payload(Some((node, &control.name, bytes)))?;
         let same = control.value.chars.iter().copied().eq(text.chars().filter(|ch| !matches!(ch, '\r' | '\n')));
-        Ok(TextInputPlan::Live { node, value: if same { None } else { Some(text_editor(text)?) } })
+        Ok(InputPlan::Live { node, value: if same { None } else { Some(text_editor(text)?) } })
     }
 
-    pub(crate) fn prepare_created_text_input(&self, doc: &Document, node: usize,
-        attribute: Option<(&str, Option<&str>)>, live: Option<&str>) -> Result<TextInputPlan, String> {
+    pub(crate) fn prepare_created_input(&self, doc: &Document, node: usize,
+        kind: Kind, name: &str, initial: &str, live: Option<&str>) -> Result<InputPlan, String> {
         if self.controls.contains_key(&node) || self.controls.len() >= MAX_CONTROLS {
             return Err("Native form control limit reached or INPUT identity already admitted.".into());
         }
-        let name = match attribute { Some(("name", value)) => value.unwrap_or(""), _ => doc.attr(node, "name").unwrap_or("") };
-        let initial = match attribute { Some(("value", value)) => value.unwrap_or(""), _ => doc.attr(node, "value").unwrap_or("") };
         let bytes = self.text_payload(None)?;
-        let (control, retained_bytes) = text_control(doc, node, name, initial, live)?;
+        let (control, retained_bytes) = match kind {
+            Kind::Checkbox if live.is_none() => select_fragments::checkbox_control(doc, node, name, initial)?,
+            Kind::Text => text_control(doc, node, name, initial, live)?,
+            _ => return Err("Unsupported created INPUT admission.".into()),
+        };
         if bytes.checked_add(control_payload(&control)?).is_none_or(|bytes| bytes > MAX_TOTAL_VALUE_BYTES) {
             return Err("Combined form names, values and defaults exceed 128 KiB.".into());
         }
         let mut controls = BTreeMap::new(); controls.insert(node, control);
-        Ok(TextInputPlan::Admit { controls, retained_bytes })
+        Ok(InputPlan::Admit { controls, retained_bytes })
     }
 
     pub(crate) fn add_created_text_inputs(&self, doc: &Document, nodes: &[usize], plan: &mut SelectFormPlan) -> Result<(), String> {

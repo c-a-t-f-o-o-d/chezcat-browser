@@ -41,7 +41,10 @@ pub(crate) fn fragment_checkbox_input(doc: &Document, node: usize) -> bool {
         && doc.attr(node, "type").is_some_and(|value| value.eq_ignore_ascii_case("checkbox"))
 }
 
-fn checkbox_control(doc: &Document, node: usize, name: &str, initial: &str) -> Result<(Control, usize), String> {
+pub(super) fn checkbox_control(doc: &Document, node: usize, name: &str, initial: &str) -> Result<(Control, usize), String> {
+    if name.len() > MAX_QUERY || initial.encode_utf16().count() > MAX_VALUE_UNITS {
+        return Err("Checkbox INPUT name/value limit reached; no control was admitted.".into());
+    }
     let mut value = Editor::default();
     // Match the existing parsed native checkbox representation and Reset path.
     set_form_value(&mut value, initial, Kind::Checkbox);
@@ -87,7 +90,7 @@ impl Forms {
                     let name = doc.attr(local, "name").unwrap_or("");
                     bytes = bytes.checked_add(initial.len()).and_then(|bytes| bytes.checked_add(name.len()))
                         .ok_or("Fragment INPUT payload accounting overflow.")?;
-                    if initial.encode_utf16().count() > MAX_VALUE_UNITS || name.len() > MAX_QUERY || bytes > MAX_TOTAL_VALUE_BYTES {
+                    if bytes > MAX_TOTAL_VALUE_BYTES {
                         return Err("Fragment INPUT value, name or form payload limit reached; no control was admitted.".into());
                     }
                     let (control, extra) = if checkbox { checkbox_control(doc, local, name, initial)? }
