@@ -2519,6 +2519,8 @@ impl Host for Bridge<'_> {
                     else if self.video_interface_receiver(object) {(WINDOW,"HTMLVideoElement")}
                     else if self.media_interface_receiver(object) {(WINDOW,"HTMLMediaElement")}
                     else if tag(self.doc,node)=="img" {(IMAGE_FACTORY,"Image")} else {(WINDOW,"HTMLElement")}
+                } else if self.doc.nodes[node].namespace==crate::html::Namespace::Svg {
+                    (WINDOW,"SVGElement")
                 } else {(WINDOW,"Element")}
             } else if self.fragment_receiver(object) {(WINDOW,"DocumentFragment")}
             else if matches!(self.doc.nodes[node].kind,NodeKind::Text(_)) {(WINDOW,"Text")}
@@ -2985,7 +2987,7 @@ impl Host for Bridge<'_> {
         if method=="pause" && self.media_element_receiver(object) && (!self.state.enabled || !self.doc.scripting_enabled) {return Err(("InvalidStateError","Scripting is disabled.".into()));}
         if object==WINDOW && method=="requestAnimationFrame" && !matches!(args.first(),Some(Value::Function(_))) {return Err(("TypeError","requestAnimationFrame requires a callable callback.".into()));}
         if self.event_target_interface(object)
-            && (matches!(method,"Node"|"Element"|"HTMLElement"|"CharacterData"|"HTMLMediaElement"|"HTMLVideoElement")
+            && (matches!(method,"Node"|"Element"|"HTMLElement"|"SVGElement"|"CharacterData"|"HTMLMediaElement"|"HTMLVideoElement")
                 || crate::javascript::ORDINARY_HTML_SUBCLASSES.iter().any(|&(_, name)| name == method))
         {
             return Err(("TypeError","Illegal constructor for this native interface.".into()));
@@ -4159,7 +4161,7 @@ impl Host for Bridge<'_> {
             return Ok(value);
         }
         match property {
-            "tagName" | "nodeName" => self.string(&tag(self.doc, node).to_ascii_uppercase()),
+            "tagName" | "nodeName" => self.string(&dom_tree::element_node_name(self.doc, node)),
             "nodeType" => Ok(Value::Number(1.0)),
             "isConnected" => Ok(Value::Bool(self.state.tree.active[node])),
             "parentElement" => self.element_parent(node, false),
@@ -5215,6 +5217,10 @@ mod script_container_object_string_tests;
 #[cfg(test)]
 #[path = "script_container_object_realm_tests.rs"]
 mod script_container_object_realm_tests;
+
+#[cfg(test)]
+#[path = "script_svg_element_interface_tests.rs"]
+mod script_svg_element_interface_tests;
 
 #[cfg(test)]
 #[path = "script_offset_parent_tests.rs"]

@@ -60,7 +60,7 @@ impl Bridge<'_> {
                 if !seen.insert(node) {return Err("Fragment donor repeats a Node identity.".into());}
                 if node==parent {return Err("HierarchyRequestError: Fragment insertion would create a cycle.".into());}
                 if matches!(self.doc.nodes[node].kind,NodeKind::DocumentFragment)
-                    || self.doc.nodes[node].namespace==crate::html::Namespace::UnknownForeign
+                    || self.doc.nodes[node].namespace.is_foreign()
                     || matches!(tag(self.doc,node),"script"|"style"|"link"|"iframe") {
                     return Err("Fragment batch resource, nested-container or foreign insertion is not implemented; no tree was changed.".into());
                 }
@@ -78,7 +78,7 @@ impl Bridge<'_> {
         }
         if parent_depth.saturating_add(maximum_depth)>128 {return Err("Fragment insertion depth limit reached; no tree was changed.".into());}
         let outgoing=if let Some(old)=old {self.mutation_subtree(old)?.0} else {Vec::new()};
-        if outgoing.iter().any(|&node|self.doc.nodes[node].namespace==crate::html::Namespace::UnknownForeign
+        if outgoing.iter().any(|&node|self.doc.nodes[node].namespace.is_foreign()
             || matches!(tag(self.doc,node),"script"|"link"|"iframe")) {
             return Err("Fragment replacement cannot retire foreign or script/stylesheet/frame resources; no tree was changed.".into());
         }

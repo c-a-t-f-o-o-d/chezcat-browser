@@ -1,6 +1,6 @@
 //! A small HTML subset parser. It builds an arena of nodes without recursion.
 //!
-//! This is not a complete HTML tree builder: table recovery, foreign content,
+//! This is not a complete HTML tree builder: table recovery, general foreign content,
 //! and the full named-character-reference table are not implemented.
 //! Common Latin-1 and punctuation references use a hand-selected name table.
 //! Numeric references, legacy name matching, and attribute ambiguity follow
@@ -10,6 +10,9 @@
 
 use std::borrow::Cow;
 use std::collections::HashSet;
+
+#[path = "html_svg_namespace.rs"]
+mod svg_namespace;
 
 const MAX_NODES: usize = 20_000;
 const MAX_DEPTH: usize = 128; // Open-element stack, including the synthetic root.
@@ -69,7 +72,7 @@ impl Document {
 pub struct Node {
     pub kind: NodeKind,
     pub children: Vec<usize>,
-    /// Persistent provenance; foreign-content tree building is unsupported.
+    /// Persistent provenance from document parsing or a supported DOM creation path.
     pub namespace: Namespace,
 }
 
@@ -77,7 +80,22 @@ pub struct Node {
 pub enum Namespace {
     None,
     Html,
+    Svg,
     UnknownForeign,
+}
+
+impl Namespace {
+    pub(crate) fn element_uri(self) -> Option<&'static str> {
+        match self {
+            Self::Html => Some("http://www.w3.org/1999/xhtml"),
+            Self::Svg => Some("http://www.w3.org/2000/svg"),
+            Self::None | Self::UnknownForeign => None,
+        }
+    }
+
+    pub(crate) fn is_foreign(self) -> bool {
+        matches!(self, Self::Svg | Self::UnknownForeign)
+    }
 }
 
 #[derive(Debug)]
@@ -196,6 +214,7 @@ fn parse_internal(input: &str, context: Option<&str>, scripting: bool) -> Result
     // If unsupported foreign recovery escapes through an unrelated ancestor,
     // later elements cannot safely be classified from this subset's stack.
     let mut uncertain_foreign_recovery = false;
+    let mut svg = svg_namespace::Island::default();
     let mut ignore_fragment_lf = None;
 
     while position < input.len() {
@@ -203,6 +222,9 @@ fn parse_internal(input: &str, context: Option<&str>, scripting: bool) -> Result
         let rest = &input[position..];
         if !rest.starts_with('<') {
             let end = position + rest.find('<').unwrap_or(rest.len());
+            if svg.root.is_some() && !input[position..end].bytes().all(|b| tag_space(b, true)) {
+                svg.root = None;
+            }
             let appended = if checked {
                 let mut text = decode_entities(&input[position..end]);
                 if ignore_fragment_lf.take() == Some(parent) && text.starts_with('\n') { text.remove(0); }
@@ -218,6 +240,7 @@ fn parse_internal(input: &str, context: Option<&str>, scripting: bool) -> Result
         ignore_fragment_lf = None;
 
         if let Some(comment) = rest.strip_prefix("<!--") {
+            svg.root = None;
             if checked { return Err("HTML fragment comment nodes are not implemented.".into()); }
             position = match comment.find("-->") {
                 Some(end) => position + 4 + end + 3,
@@ -226,6 +249,7 @@ fn parse_internal(input: &str, context: Option<&str>, scripting: bool) -> Result
             continue;
         }
         if rest.starts_with("<!") || rest.starts_with("<?") {
+            svg.root = None;
             if checked { return Err("HTML fragment declaration/comment tokens are not implemented.".into()); }
             position += rest.find('>').map_or(rest.len(), |end| end + 1);
             continue;
@@ -236,6 +260,7 @@ fn parse_internal(input: &str, context: Option<&str>, scripting: bool) -> Result
             TagToken::Incomplete => break,
             TagToken::Unsupported(error) => return Err(error.into()),
             TagToken::NotATag => {
+                svg.root = None;
                 if checked && rest.starts_with("</") { return Err("HTML fragment bogus end-tag/comment recovery is not implemented.".into()); }
                 if !append_text(&mut document, parent, "<") {
                     if checked { return Err("HTML fragment node limit reached.".into()); }
@@ -271,6 +296,16 @@ fn parse_internal(input: &str, context: Option<&str>, scripting: bool) -> Result
         }
 
         if tag.closing {
+            if let Some(root) = svg.root {
+                let exact = tag.clean_syntax && tag.attrs.is_empty() && !tag.self_closing &&
+                    matches!(&document.nodes[parent].kind, NodeKind::Element { tag: open, .. } if open == &tag.name);
+                if !exact {
+                    svg.root = None;
+                } else if parent == root {
+                    svg_namespace::publish(&mut document.nodes[root..]);
+                    svg.root = None;
+                }
+            }
             if let Some(index) = stack.iter().rposition(|&node| {
                 matches!(&document.nodes[node].kind,
                     NodeKind::Element { tag: name, .. } if name == &tag.name)
@@ -297,13 +332,25 @@ fn parse_internal(input: &str, context: Option<&str>, scripting: bool) -> Result
         if was_foreign && document.nodes[parent].namespace != Namespace::UnknownForeign {
             uncertain_foreign_recovery = true;
         }
+        if svg.blocked_depth.is_some_and(|depth| stack.len() < depth) {
+            svg.blocked_depth = None;
+        }
+        let node = document.nodes.len();
+        let enters_svg = tag.name == "svg" && !checked && !uncertain_foreign_recovery &&
+            svg.blocked_depth.is_none() && (parent == 0 || document.nodes[parent].namespace == Namespace::Html);
+        let svg_empty = tag.self_closing && (enters_svg || svg.root.is_some()) && svg_namespace::basic_element(&tag.name);
+        if enters_svg {
+            svg.root = Some(node);
+        }
+        if svg.root.is_some() && !svg_namespace::supported_tag(&tag) {
+            svg.root = None;
+        }
         let raw = matches!(tag.name.as_str(), "script" | "style" | "title" | "textarea");
         let void = is_void(&tag.name);
-        if document.nodes.len() == MAX_NODES || (!raw && !void && stack.len() == MAX_DEPTH) {
+        if document.nodes.len() == MAX_NODES || (!raw && !void && !svg_empty && stack.len() == MAX_DEPTH) {
             if checked { return Err("HTML fragment node/depth limit reached.".into()); }
             break;
         }
-        let node = document.nodes.len();
         if matches!(tag.name.as_str(), "script" | "style" | "link") && tag.duplicate_attributes {
             document.nonce_unsafe_nodes.insert(node);
         }
@@ -355,9 +402,18 @@ fn parse_internal(input: &str, context: Option<&str>, scripting: bool) -> Result
             // CSS and classic JavaScript remain raw text. Their consumers apply
             // the resource/execution policy; neither is rendered as page text.
             position = after_end_tag;
+        } else if svg_empty {
+            if svg.root == Some(node) {
+                svg_namespace::publish(&mut document.nodes[node..]);
+                svg.root = None;
+            }
         } else if !void {
             // A trailing slash does not close a non-void HTML element.
             stack.push(node);
+            if !checked && document.nodes[node].namespace == Namespace::Html &&
+                svg.blocked_depth.is_none() && !svg_namespace::flow_context(&tag.name) {
+                svg.blocked_depth = Some(stack.len());
+            }
             if checked && tag.name == "pre" { ignore_fragment_lf = Some(node); }
         }
     }
@@ -437,6 +493,8 @@ struct Tag {
     href: Option<String>,
     attrs: Vec<(String, String)>,
     closing: bool,
+    self_closing: bool,
+    clean_syntax: bool,
     end: usize,
     duplicate_attributes: bool,
 }
@@ -470,6 +528,11 @@ fn read_tag_mode(input: &str, start: usize, checked: bool) -> TagToken {
         position += 1;
     }
     let name = input[name_start..position].to_ascii_lowercase();
+    // The permissive document tokenizer also serves ordinary HTML. Only an
+    // admitted SVG spelling can use its stricter syntax evidence.
+    let mut clean_syntax = svg_namespace::basic_element(&name)
+        && bytes.get(position).is_some_and(|b| tag_space(*b, true) || matches!(b, b'/' | b'>'));
+    let mut self_closing = false;
     if checked && bytes.get(position).is_some_and(|byte| !tag_space(*byte, true) && !matches!(*byte, b'/' | b'>')) { return TagToken::Unsupported("HTML fragment tag-name tokenization is not implemented for this boundary."); }
     let mut attrs: Vec<(String, String)> = Vec::new();
     let mut seen = HashSet::new();
@@ -495,11 +558,15 @@ fn read_tag_mode(input: &str, start: usize, checked: bool) -> TagToken {
                     .map(|(_, value)| value.clone()),
                 attrs,
                 closing,
+                self_closing,
+                clean_syntax: clean_syntax && !duplicate_attributes && !input[start..position].contains(['\0', '\x0b']),
                 end: position + 1,
                 duplicate_attributes,
             });
         }
         if bytes[position] == b'/' {
+            self_closing = bytes.get(position + 1) == Some(&b'>');
+            clean_syntax &= self_closing;
             position += 1;
             continue;
         }
@@ -514,6 +581,7 @@ fn read_tag_mode(input: &str, start: usize, checked: bool) -> TagToken {
         if position == attribute_start {
             if checked { return TagToken::Unsupported("HTML fragment attribute-name recovery is not implemented."); }
             // A stray '=' must still advance the parser.
+            clean_syntax = false;
             position += 1;
             continue;
         }
@@ -538,6 +606,7 @@ fn read_tag_mode(input: &str, start: usize, checked: bool) -> TagToken {
                 value = &input[value_start..position];
                 if position < bytes.len() {
                     position += 1;
+                    clean_syntax &= bytes.get(position).is_some_and(|b| tag_space(*b, true) || matches!(b, b'/' | b'>'));
                 }
             } else {
                 let value_start = position;
@@ -548,6 +617,7 @@ fn read_tag_mode(input: &str, start: usize, checked: bool) -> TagToken {
                     position += 1;
                 }
                 value = &input[value_start..position];
+                clean_syntax = clean_syntax && !value.is_empty() && !value.contains(['"', '\'', '<', '=', '`']);
             }
         }
 

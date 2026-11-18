@@ -69,7 +69,7 @@ impl Bridge<'_> {
                     .nodes
                     .get(*parent)
                     .ok_or("Invalid slottable parent.")?;
-                if parent.namespace == crate::html::Namespace::UnknownForeign {
+                if parent.namespace.is_foreign() {
                     return Err("Slottable parent namespace is unavailable.".into());
                 }
             }
