@@ -41,19 +41,36 @@ pub(crate) fn fragment_checkbox_input(doc: &Document, node: usize) -> bool {
         && doc.attr(node, "type").is_some_and(|value| value.eq_ignore_ascii_case("checkbox"))
 }
 
-pub(super) fn checkbox_control(doc: &Document, node: usize, name: &str, initial: &str) -> Result<(Control, usize), String> {
+/// The HTML RCDATA tokenizer produces either no child or one plain Text
+/// node. Only this shape can move as a unit with its existing native editor.
+pub(crate) fn textarea_content(doc: &Document, node: usize) -> Option<&str> {
+    let item = doc.nodes.get(node)?;
+    if item.namespace != crate::html::Namespace::Html || tag(doc, node) != "textarea" { return None; }
+    match item.children.as_slice() {
+        [] => Some(""),
+        [child] => {
+            let child = doc.nodes.get(*child)?;
+            match &child.kind {
+                NodeKind::Text(text) if child.namespace == crate::html::Namespace::None && child.children.is_empty() => Some(text),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
+pub(super) fn fragment_editor_control(doc: &Document, node: usize, kind: Kind, name: &str, initial: &str) -> Result<(Control, usize), String> {
     if name.len() > MAX_QUERY || initial.encode_utf16().count() > MAX_VALUE_UNITS {
-        return Err("Checkbox INPUT name/value limit reached; no control was admitted.".into());
+        return Err("Native control name/value limit reached; no control was admitted.".into());
     }
     let mut value = Editor::default();
-    // Match the existing parsed native checkbox representation and Reset path.
-    set_form_value(&mut value, initial, Kind::Checkbox);
-    let caption = caption(doc, node, Kind::Checkbox);
+    set_form_value(&mut value, initial, kind);
+    let caption = caption(doc, node, kind);
     let retained = name.len().checked_add(initial.len()).and_then(|bytes| bytes.checked_add(caption.len()))
         .and_then(|bytes| bytes.checked_add(value.chars.len().checked_mul(std::mem::size_of::<char>())?))
-        .ok_or("Checkbox INPUT retained payload overflow.")?;
+        .ok_or("Native control retained payload overflow.")?;
     let checked = doc.attr(node, "checked").is_some();
-    Ok((Control { owner: None, kind: Kind::Checkbox, value, dirty_value: false,
+    Ok((Control { owner: None, kind, value, dirty_value: false,
         name: name.into(), caption, disabled: doc.attr(node, "disabled").is_some(),
         readonly: doc.attr(node, "readonly").is_some(), required: doc.attr(node, "required").is_some(), checked,
         max_length: doc.attr(node, "maxlength").and_then(|value| value.parse().ok()).unwrap_or(MAX_VALUE_UNITS).min(MAX_VALUE_UNITS),
@@ -75,31 +92,43 @@ impl Forms {
         if let Some((doc, base)) = fragment {
             if base == 0 || base.checked_add(doc.nodes.len().saturating_sub(1)).is_none() { return Err("Select native identity range overflow.".into()); }
             for local in 1..doc.nodes.len() {
-                if tag(doc, local) == "input" {
+                let name = tag(doc, local);
+                if matches!(name, "input" | "textarea") {
+                    let textarea = name == "textarea";
                     let checkbox = fragment_checkbox_input(doc, local);
-                    if !fragment_text_input(doc, local) && !checkbox {
-                        return Err("New fragment INPUTs require absent, empty, text or checkbox type; no control was admitted.".into());
+                    let supported = if textarea { textarea_content(doc, local).is_some() }
+                        else { checkbox || fragment_text_input(doc, local) };
+                    if !supported {
+                        return Err("Fragment requires an ordinary HTML textarea or text/checkbox INPUT.".into());
                     }
                     if doc.attr(local, "form").is_some() {
-                        return Err("Explicit form association on a new fragment INPUT is not implemented.".into());
+                        return Err("Explicit form association on a new fragment control is not implemented.".into());
                     }
                     if self.controls.len().saturating_add(plan.additions.len()) >= MAX_CONTROLS {
-                        return Err("Native form control limit reached before INPUT admission.".into());
+                        return Err("Native form control limit reached before fragment editor admission.".into());
                     }
-                    let initial = doc.attr(local, "value").unwrap_or(if checkbox { "on" } else { "" });
+                    let normalized;
+                    let initial = if textarea {
+                        let (text, limited) = textarea_initial(doc, local);
+                        if limited { return Err("Fragment TEXTAREA default exceeds the native editor limit.".into()); }
+                        normalized = text;
+                        normalized.as_str()
+                    } else { doc.attr(local, "value").unwrap_or(if checkbox { "on" } else { "" }) };
                     let name = doc.attr(local, "name").unwrap_or("");
                     bytes = bytes.checked_add(initial.len()).and_then(|bytes| bytes.checked_add(name.len()))
-                        .ok_or("Fragment INPUT payload accounting overflow.")?;
+                        .ok_or("Fragment editor payload accounting overflow.")?;
                     if bytes > MAX_TOTAL_VALUE_BYTES {
-                        return Err("Fragment INPUT value, name or form payload limit reached; no control was admitted.".into());
+                        return Err("Fragment editor name or form payload limit reached; no control was admitted.".into());
                     }
-                    let (control, extra) = if checkbox { checkbox_control(doc, local, name, initial)? }
-                        else { text_inputs::text_control(doc, local, name, initial, None)? };
+                    let (control, extra) = if checkbox || textarea {
+                        let kind = if textarea { Kind::TextArea } else { Kind::Checkbox };
+                        fragment_editor_control(doc, local, kind, name, initial)?
+                    } else { text_inputs::text_control(doc, local, name, initial, None)? };
                     plan.retained_bytes = plan.retained_bytes.checked_add(extra).ok_or("Native fragment retained payload overflow.")?;
                     plan.additions.insert(base + local - 1, control);
                     continue;
                 }
-                if tag(doc, local) != "select" { continue; }
+                if name != "select" { continue; }
                 if doc.nodes[local].namespace != crate::html::Namespace::Html || kind(doc, local) != Some(Kind::Select) {
                     return Err("Dynamic select currently requires a conventional single-select control.".into());
                 }

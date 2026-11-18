@@ -110,6 +110,9 @@ pub(crate) use script_images::MAX_IMAGE_REQUESTS;
 use script_images::ImagesState;
 #[path = "script_select_fragments.rs"]
 mod script_select_fragments;
+#[cfg(test)]
+#[path = "script_textarea_fragment_tests.rs"]
+mod script_textarea_fragment_tests;
 #[path = "script_element_siblings.rs"]
 mod script_element_siblings;
 #[path = "script_slottable.rs"]
@@ -3889,6 +3892,7 @@ impl Host for Bridge<'_> {
             ) || !matches!(self.named_document_property(property)?, Value::Undefined));
         }
         if self.hidden_input_property(object,property) { return Ok(true); }
+        if self.textarea_default_property(object, property) { return Ok(true); }
         if self.button_property(object,property) { return Ok(true); }
         if self.text_input_default_property(object,property) || self.button_type_property(object,property) { return Ok(true); }
         if let Some(has) = self.dom_has(object, property)? {
@@ -4168,6 +4172,10 @@ impl Host for Bridge<'_> {
             };
         }
         if let Some(value) = self.hidden_input_get(object,property)? {return Ok(value);}
+        if self.textarea_default_property(object, property) {
+            let node = self.node(object)?;
+            return Ok(Value::String(self.text_content(node)?));
+        }
         if let Some(value) = self.button_get(object,property)? {return Ok(value);}
         if let Some(value) = self.text_input_metadata_get(object,property)? {return Ok(value);}
         if let Some(value) = self.dom_get(object, property)? {

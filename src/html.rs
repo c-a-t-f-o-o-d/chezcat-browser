@@ -275,6 +275,9 @@ fn parse_internal(input: &str, context: Option<&str>, scripting: bool) -> Result
         let empty_table = checked && tag.name == "table";
         if checked {
             checked_select_tag(&stack, &document, &tag.name, tag.closing)?;
+            if tag.name == "textarea" && (tag.closing || tag.self_closing || !tag.clean_syntax) {
+                return Err("HTML fragment TEXTAREA requires an ordinary start tag and a matching end tag.".into());
+            }
             if empty_table {
                 position = checked_empty_table_end(input, &tag, &stack, &document)?;
             } else if matches!(tag.name.as_str(), "html" | "head" | "body" | "frameset" | "frame" | "caption" | "colgroup" | "col" | "tbody" | "thead" | "tfoot" | "tr" | "td" | "th" | "template" | "svg" | "math" | "picture" | "image" | "xmp" | "noembed" | "noframes" | "plaintext" | "listing") || tag.name == "noscript" && scripting {
@@ -548,10 +551,10 @@ fn read_tag_mode(input: &str, start: usize, checked: bool) -> TagToken {
         position += 1;
     }
     let name = input[name_start..position].to_ascii_lowercase();
-    // Only explicitly supported SVG elements and checked empty tables use
+    // Only explicitly supported SVG elements and these checked fragments use
     // strict token evidence. Other elements retain the normal tokenizer rules.
-    let checked_table = checked && name == "table";
-    let mut clean_syntax = (svg_namespace::basic_element(&name) || checked_table)
+    let checked_native_fragment = checked && matches!(name.as_str(), "table" | "textarea");
+    let mut clean_syntax = (svg_namespace::basic_element(&name) || checked_native_fragment)
         && bytes.get(position).is_some_and(|b| tag_space(*b, true) || matches!(b, b'/' | b'>'));
     let mut self_closing = false;
     if checked && bytes.get(position).is_some_and(|byte| !tag_space(*byte, true) && !matches!(*byte, b'/' | b'>')) { return TagToken::Unsupported("HTML fragment tag-name tokenization is not implemented for this boundary."); }
@@ -607,7 +610,7 @@ fn read_tag_mode(input: &str, start: usize, checked: bool) -> TagToken {
             continue;
         }
         let attribute = &input[attribute_start..position];
-        if checked_table && attribute.contains(['"', '\'', '<']) {
+        if checked_native_fragment && attribute.contains(['"', '\'', '<']) {
             clean_syntax = false;
         }
         while position < bytes.len() && tag_space(bytes[position], checked) {
@@ -654,8 +657,8 @@ fn read_tag_mode(input: &str, start: usize, checked: bool) -> TagToken {
         }
     }
 
-    if checked_table {
-        TagToken::Unsupported("Incomplete HTML fragment table tag.")
+    if checked_native_fragment {
+        TagToken::Unsupported(if name == "table" { "Incomplete HTML fragment table tag." } else { "Incomplete HTML fragment TEXTAREA tag." })
     } else {
         TagToken::Incomplete
     }
@@ -750,12 +753,18 @@ fn raw_text_end_mode(input: &str, start: usize, name: &str, checked: bool) -> Re
                 .is_some_and(|byte| tag_space(*byte, checked) || matches!(byte, b'/' | b'>'))
         {
             return match read_tag_mode(input, opening, checked) {
+                TagToken::Complete(tag) if checked && name == "textarea"
+                    && (!tag.clean_syntax || tag.self_closing || !tag.attrs.is_empty()) =>
+                    Err("HTML fragment TEXTAREA end-tag recovery is not implemented.".into()),
                 TagToken::Complete(tag) => Ok((opening, tag.end)),
                 _ if checked => Err("HTML fragment raw-text end-tag recovery is not implemented.".into()),
                 _ => Ok((input.len(), input.len())),
             };
         }
         position = opening + 1;
+    }
+    if checked && name == "textarea" {
+        return Err("HTML fragment TEXTAREA requires a complete matching end tag.".into());
     }
     Ok((input.len(), input.len()))
 }

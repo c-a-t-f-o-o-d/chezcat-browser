@@ -1672,7 +1672,9 @@
     "clone_candidate": "8eb872c12dfcb74e8764a15892e6bd80170c64b0",
     "candidate_result": "The detached NAV clone succeeded. W2 stopped reading its outerHTML at the same upstream position. Initial render passed, and initialization, trusted choice and timer stages remained incomplete.",
     "serialization_candidate": "13f80a4fb7ab923c5c6709dabd2ac56b25a4503c",
-    "serialization_result": "W2 completed the cloned NAV markup read. It next stopped assigning the checkbox type to a fresh input at 4485:2."
+    "serialization_result": "W2 completed the cloned NAV markup read. It next stopped assigning the checkbox type to a fresh input at 4485:2.",
+    "created_checkbox_candidate": "5731c75e3391776182768cca275a3cf4b109752f",
+    "created_checkbox_result": "W2 passed the fresh checkbox setup and stopped at the textarea fragment assignment at 4492:2. The separate native checkbox workflow passed toggle and reset with the neighboring edit preserved."
   },
   "next": [
     "Advance the measured legacy jQuery initialization and recheck its trusted input and timer stages.",

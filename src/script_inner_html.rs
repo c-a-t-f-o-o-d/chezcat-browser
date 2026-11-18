@@ -131,12 +131,19 @@ impl Bridge<'_> {
                 let href = match &item.kind { NodeKind::Element {href, ..} => href.as_ref().map_or(0, String::len), _ => 0 };
                 bytes = bytes.checked_add(name.len()).and_then(|bytes| bytes.checked_add(href)).ok_or("HTML fragment retained size overflow.")?;
                 if item.namespace != crate::html::Namespace::Html
-                    || forms::kind(&staged, local).is_some() && name != "select" && !forms::fragment_text_input(&staged, local) && !forms::fragment_checkbox_input(&staged, local)
+                    || forms::kind(&staged, local).is_some() && name != "select" && !forms::fragment_text_input(&staged, local) && !forms::fragment_checkbox_input(&staged, local) && forms::textarea_content(&staged, local).is_none()
                     || name == "link" && !script_stylesheets::bare_fragment_link(&staged, local)
                     || matches!(name.as_str(), "form" | "fieldset" | "legend" | "style" | "base" | "meta" | "title" | "iframe" | "object" | "embed" | "source" | "audio" | "video") {
                     return Err("HTML fragment replacement of native controls/forms or unsupported resources is not implemented.".into());
                 }
                 self.state.work(attrs.len())?;
+                if let Some(text) = forms::textarea_content(&staged, local) {
+                    // Native admission collects and normalizes the RCDATA default
+                    // before copying it into the editor. Charge temporary work
+                    // here; the shared commit charges the retained control below.
+                    self.state.work(text.len().saturating_mul(3))?;
+                    self.state.copies(text.len().saturating_mul(2))?;
+                }
                 if attrs.iter().any(|attr| attr.name.qualified.starts_with("on")) { return Err("HTML fragment inline event-handler registration is not implemented.".into()); }
                 if let Some(style) = staged.attr(local, "style") { validate_style(style, self.state.limits.host.string_bytes)?; }
                 if let Some(id) = staged.attr(local, "id").filter(|id| !id.is_empty()) {
