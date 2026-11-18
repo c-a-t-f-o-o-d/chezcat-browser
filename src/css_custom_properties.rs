@@ -293,7 +293,8 @@ fn expand(text:&str,depth:usize,budget:&mut Budget,lookup:&mut impl FnMut(&str,&
 }
 
 fn box_property(name:&str)->bool {
-    matches!(name,"padding"|"padding-top"|"padding-right"|"padding-bottom"|"padding-left"|"border"|"border-width"|"border-style"|"border-color"|"background-color"|"background"|"color"|"font-size")
+    matches!(name,"margin"|"margin-top"|"margin-right"|"margin-bottom"|"margin-left"|
+        "padding"|"padding-top"|"padding-right"|"padding-bottom"|"padding-left"|"border"|"border-width"|"border-style"|"border-color"|"background-color"|"background"|"color"|"font-size")
         || ["top","right","bottom","left"].iter().any(|side|
             name==format!("border-{side}") || ["width","style","color"].iter().any(|part|name==format!("border-{side}-{part}")))
 }
@@ -306,8 +307,10 @@ fn valid_box(name:&str,value:&str)->bool {
     if matches!(name,"background-color"|"background") {
         return matches!(value,"transparent"|"none"|"currentcolor") || color(value).is_some();
     }
-    if name=="padding" {return lengths(value,false,false).is_some();}
-    if name.starts_with("padding-") {return parse_length(value,false,false).is_some();}
+    if matches!(name,"margin"|"padding") {return box_spacing::shorthand(value,name=="margin").is_some();}
+    if name.starts_with("margin-") || name.starts_with("padding-") {
+        return box_spacing::length(value,name.starts_with("margin-")).is_some();
+    }
     if name=="border" || ["top","right","bottom","left"].iter().any(|side|name==format!("border-{side}")) {return border_value(value);}
     let Some(parts)=border_parts(value) else{return false;};
     let valid=|part:&str| if name.ends_with("-width") {border_length(part).is_some()}
@@ -332,6 +335,7 @@ fn reset_box(style:&mut Style,parent:&Style,name:&str,inherit:bool) {
         return;
     }
     for (side,index) in [("top",0),("right",1),("bottom",2),("left",3)] {
+        if name=="margin" || name==format!("margin-{side}") {style.margin[index]=source.margin[index];}
         if name=="padding" || name==format!("padding-{side}") {style.padding[index]=source.padding[index];}
         let entire=name=="border" || name==format!("border-{side}");
         if entire || name=="border-width" || name==format!("border-{side}-width") {style.border_width[index]=source.border_width[index];}
