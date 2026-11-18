@@ -46,14 +46,18 @@ document.title='node-event-methods-ok';
 
 #[test]
 fn node_interface_suffix_keeps_concrete_tags_and_named_forms_truthful() {
-    let(mut doc,mut forms,mut page,outcome)=page("<html><body><div id='base'></div><form id='f'><input name='addEventListener'><input name='removeEventListener'><input name='dispatchEvent'></form></body></html>",&[r#"
-var d=document.getElementById('base'),f=document.getElementById('f');
+    let(mut doc,mut forms,mut page,outcome)=page("<html><body><div id='base'></div><section id='opaque'></section><form id='f'><input name='addEventListener'><input name='removeEventListener'><input name='dispatchEvent'></form></body></html>",&[r#"
+var d=document.getElementById('base'),opaque=document.getElementById('opaque'),f=document.getElementById('f');
 if(f.addEventListener.getAttribute('name')!=='addEventListener'||f.removeEventListener.getAttribute('name')!=='removeEventListener'||f.dispatchEvent.getAttribute('name')!=='dispatchEvent')throw 'named form precedence';
 var seen=0,e=document.createEvent('Event');e.initEvent('x',false,false);EventTarget.prototype.addEventListener.call(f,'x',function(){seen++;});EventTarget.prototype.dispatchEvent.call(f,e);if(seen!==1)throw 'borrowed form delivery';
 if(Node.prototype[Symbol.toStringTag]!=='Node'||Element.prototype[Symbol.toStringTag]!=='Element'||HTMLElement.prototype[Symbol.toStringTag]!=='HTMLElement')throw 'prototype tags';
+var DP=Object.getPrototypeOf(d);
+if(DP!==HTMLDivElement.prototype||Object.getPrototypeOf(DP)!==HTMLElement.prototype||d.constructor!==HTMLDivElement||!(d instanceof HTMLDivElement))throw 'genuine DIV concrete suffix';
+if(d[Symbol.toStringTag]!=='HTMLDivElement'||d.toString!==Object.prototype.toString||d.toString()!=='[object HTMLDivElement]'||Object.prototype.toString.call(d)!=='[object HTMLDivElement]')throw 'genuine DIV class tag and inherited stringifier';
 Object.defineProperty(d,Symbol.toStringTag,{value:'OwnAuthorTag',configurable:true});if(d[Symbol.toStringTag]!=='OwnAuthorTag')throw 'own symbol';delete d[Symbol.toStringTag];
+if(d[Symbol.toStringTag]!=='HTMLDivElement'||d.toString()!=='[object HTMLDivElement]')throw 'DIV own tag deletion restores concrete suffix';
 "#]);assert_eq!(outcome.errors,0,"{}",page.report());
-    for source in ["d[Symbol.toStringTag];","Object.getPrototypeOf(d);","d.constructor;"] {let out=page.console_eval(&mut doc,&mut forms,source);assert_eq!(out.errors,1,"{source}: {}",page.report());}
+    for source in ["opaque[Symbol.toStringTag];","Object.getPrototypeOf(opaque);","opaque.constructor;"] {let out=page.console_eval(&mut doc,&mut forms,source);assert_eq!(out.errors,1,"{source}: {}",page.report());}
 }
 
 fn shared_probe(source: &str) -> (Document,Forms,Page,Outcome) {

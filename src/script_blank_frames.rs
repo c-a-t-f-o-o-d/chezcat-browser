@@ -121,12 +121,31 @@ impl Bridge<'_> {
         let frame=self.state.blank_frames.get(index).ok_or("Event owner Window is unavailable.")?;
         Ok(now.saturating_duration_since(frame.clock_origin).as_millis() as f64)
     }
+    /// Classify only existing initial-blank Element handles. This metadata
+    /// does not authorize access; every caller still validates the real owner.
+    pub(super) fn frame_concrete_html_interface(&self, handle: u32) -> Option<&'static str> {
+        let (index, offset) = frame_handle(handle)?;
+        if !matches!(offset, 4..=6) { return None; }
+        let frame = self.state.blank_frames.get(index)?;
+        let node = (offset - 3) as usize;
+        let item = frame.document.nodes.get(node)?;
+        if item.namespace != crate::html::Namespace::Html
+            || !matches!(item.kind, NodeKind::Element { .. }) {
+            return None;
+        }
+        crate::javascript::ordinary_html_interface(tag(&frame.document, node))
+    }
+
     pub(super) fn frame_node_interface(&self,handle:u32)->Option<&'static str> {
         let(index,offset)=frame_handle(handle)?;let frame=self.state.blank_frames.get(index)?;
         if offset==1 {return Some("Node");}
         if !matches!(offset,4..=6) {return None;}
         let node=frame.document.nodes.get((offset-3) as usize)?;
-        Some(if matches!(node.kind,NodeKind::Element {..}) {if node.namespace==crate::html::Namespace::Html {"HTMLElement"} else {"Element"}} else {"Node"})
+        Some(if matches!(node.kind,NodeKind::Element {..}) {
+            if node.namespace==crate::html::Namespace::Html {
+                self.frame_concrete_html_interface(handle).unwrap_or("HTMLElement")
+            } else {"Element"}
+        } else {"Node"})
     }
     pub(super) fn frame_location_owner(&self,handle:u32)->Option<u32>{let(index,offset)=frame_handle(handle)?;(offset==2&&self.state.blank_frames.get(index).is_some()).then(||window(index))}
     pub(super) fn frame_instance_window(&self, handle:u32) -> Option<u32> {
@@ -319,6 +338,13 @@ impl Bridge<'_> {
         let (index, offset) = frame_handle(handle)?;
         let result = (|| {
             self.frame_window_access(caller, window(index))?;
+            if script_element_properties::ordinary_interface_member(property)
+                && self.frame_concrete_html_interface(handle).is_some() {
+                // These are inherited ordinary properties of the exact owner
+                // interface. A deleted/overridden property must not reappear
+                // as a fabricated immutable fact from this native getter.
+                return Ok(Value::Undefined);
+            }
             let frame = self.state.blank_frames.get(index).ok_or("Unknown blank-frame handle.")?;
             let value = match offset {
                 0 => match property {

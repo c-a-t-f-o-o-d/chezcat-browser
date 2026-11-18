@@ -2428,6 +2428,8 @@ impl Bridge<'_> {
         self.element_sibling_member(object, property)
             || self.assigned_slot_lookup(object, property)
             || self.text_prototype_property(object, property)
+            || script_element_properties::ordinary_interface_member(property)
+                && self.concrete_html_interface(object).is_some()
     }
 }
 
@@ -2441,6 +2443,14 @@ impl Host for Bridge<'_> {
             || self.slottable(object) == Some(Slottable::Text)
     }
     fn native_ancestry_inspection(&self,object:u32)->bool {self.event_receiver(object)||self.exposed_native_prototype(object)||self.namespace_receiver(object)}
+    fn ordinary_inherited_enumeration(&self, object: u32) -> bool {
+        // Container prototypes identify the objects, but their enumerable
+        // native attributes still live outside the ordinary descriptor store.
+        if let Some(interface) = self.concrete_html_interface(object) {
+            return matches!(interface, "HTMLButtonElement" | "HTMLUListElement");
+        }
+        self.exposed_native_prototype(object)
+    }
     fn event_target_interface(&self,window:u32)->bool {window==WINDOW || self.frame_context(window).is_some()}
     fn node_interface_constants(&self,window:u32)->Option<&'static [(&'static str,u16)]> {self.event_target_interface(window).then_some(dom_tree::NODE_CONSTANTS)}
     fn instance_ancestry(&self, object:u32) -> Option<crate::javascript::NativeAncestry> {
@@ -2561,6 +2571,11 @@ impl Host for Bridge<'_> {
             self.state.geometry.as_mut().ok_or("Bounding rectangle requires the actual document renderer.")?
                 .bounding_rect(self.doc, self.forms, node, &mut self.state.host_work)
         })())
+    }
+
+    fn inherited_assignment(&self, object: u32, property: &str) -> bool {
+        script_element_properties::ordinary_interface_member(property)
+            && self.frame_concrete_html_interface(object).is_some()
     }
 
     fn readonly_property(&self, object: u32, property: &str) -> bool {
@@ -2896,7 +2911,12 @@ impl Host for Bridge<'_> {
         }
         if method=="pause" && self.media_element_receiver(object) && (!self.state.enabled || !self.doc.scripting_enabled) {return Err(("InvalidStateError","Scripting is disabled.".into()));}
         if object==WINDOW && method=="requestAnimationFrame" && !matches!(args.first(),Some(Value::Function(_))) {return Err(("TypeError","requestAnimationFrame requires a callable callback.".into()));}
-        if self.event_target_interface(object) && matches!(method,"Node"|"Element"|"HTMLElement"|"CharacterData"|"HTMLMediaElement"|"HTMLVideoElement"|"HTMLButtonElement"|"HTMLUListElement") {return Err(("TypeError","Illegal constructor for this native interface.".into()));}
+        if self.event_target_interface(object)
+            && (matches!(method,"Node"|"Element"|"HTMLElement"|"CharacterData"|"HTMLMediaElement"|"HTMLVideoElement")
+                || crate::javascript::ORDINARY_HTML_SUBCLASSES.iter().any(|&(_, name)| name == method))
+        {
+            return Err(("TypeError","Illegal constructor for this native interface.".into()));
+        }
         if method=="dispatchEvent"{return self.validate_dispatch(object,args);}
         if object == HISTORY && method == "replaceState" {
             if self.state.history.current.is_none() { self.history_target(args)?; }
@@ -5081,6 +5101,14 @@ mod script_dom_object_string_tests;
 #[cfg(test)]
 #[path = "script_dom_object_string_protocol_tests.rs"]
 mod script_dom_object_string_protocol_tests;
+
+#[cfg(test)]
+#[path = "script_container_object_string_tests.rs"]
+mod script_container_object_string_tests;
+
+#[cfg(test)]
+#[path = "script_container_object_realm_tests.rs"]
+mod script_container_object_realm_tests;
 
 #[cfg(test)]
 #[path = "script_node_list_iteration_tests.rs"]
