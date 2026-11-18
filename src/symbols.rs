@@ -293,6 +293,25 @@ impl Runtime {
         }
     }
 
+    /// The Window global has an inherited Web IDL class string. Its own
+    /// descriptors still win, and all other keys use the ordinary owner chain.
+    pub(super) fn receiver_symbol_owner(
+        &mut self, receiver: &Value, object: Ordinary, key: usize, host: &dyn Host,
+    ) -> Result<Option<usize>, Fault> {
+        if let Value::Host(window) = receiver {
+            if self.symbol_to_string_tag == Some(key) && self.is_browser_global(*window) {
+                let id = self.ordinary_id(object)?;
+                if self.objects[id].symbol_properties.contains_key(&key) {
+                    return Ok(Some(id));
+                }
+                if let Some(tag) = self.bound_window_tag_backing(*window, host)? {
+                    return self.symbol_property_owner(tag, key);
+                }
+            }
+        }
+        self.symbol_property_owner(object, key)
+    }
+
     pub(super) fn get_symbol_property(
         &mut self,
         receiver: Value,
@@ -319,7 +338,7 @@ impl Runtime {
             && !self.objects[self.ordinary_id(object)?].symbol_properties.contains_key(&key) {
             return Err(Fault::new("Native concrete interface tags are not implemented for this ancestry-only receiver."));
         }
-        let Some(owner) = self.symbol_property_owner(object, key)? else {
+        let Some(owner) = self.receiver_symbol_owner(&receiver, object, key, host)? else {
             return Ok(Value::Undefined);
         };
         let property = &self.objects[owner].symbol_properties[&key];
@@ -368,7 +387,7 @@ impl Runtime {
                 )),
             },
         };
-        if let Some(owner) = self.symbol_property_owner(object, key)? {
+        if let Some(owner) = self.receiver_symbol_owner(&receiver, object, key, host)? {
             let property = &self.objects[owner].symbol_properties[&key];
             if let Some(accessor) = property.accessor {
                 if accessor.set.is_some() {
