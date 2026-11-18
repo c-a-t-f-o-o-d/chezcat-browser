@@ -29,6 +29,8 @@ mod binding_length;
 mod binding_character;
 #[path = "intrinsic_realms.rs"]
 mod intrinsic_realms;
+#[path = "reflect.rs"]
+mod reflect;
 #[path = "function_allocation.rs"]
 mod function_allocation;
 #[path = "function_arena.rs"]
@@ -3172,6 +3174,7 @@ struct Environment {
 #[derive(Clone, Copy)]
 enum Builtin {
     ThrowTypeError,
+    ReflectGet,
     Symbol(symbols::Op),
     Binary(binary_data::Op),
     Collection(collections::Op),
@@ -3676,6 +3679,7 @@ impl Runtime {
         let Value::Function(to_string) = self.get_property(self.array_prototype.unwrap(), "toString")? else { unreachable!() };
         self.array_to_string_intrinsic = Some(to_string);
         self.initialize_symbols()?;
+        self.initialize_reflect()?;
         self.initialize_number_statics()?;
         if self.deferred_intrinsics & 1 == 0 { self.initialize_binary()?; }
         else { self.reserve_deferred_global_orders(intrinsic_realms::BINARY_GLOBALS)?; }
@@ -8821,6 +8825,9 @@ impl Runtime {
         &mut self, index: usize, args: &[Value], this: Value, host: &mut dyn Host,
     ) -> Result<Value, Fault> {
         match self.functions.get(index) {
+            Some(Function::Native(Builtin::ReflectGet)) => {
+                return self.reflect_get(args, host);
+            }
             Some(Function::Bound(_)) => {
                 let (target, arguments, receiver) = self.bound_arguments(index, args, true)?;
                 return self.call_value(Value::Function(target), &arguments, receiver, host);
@@ -9537,7 +9544,8 @@ impl Runtime {
             )),
             Builtin::EmptyFunction => Ok(Value::Undefined),
             Builtin::Function => self.function_constructor(args, host),
-            Builtin::ObjectStatic(_)
+            Builtin::ReflectGet
+            | Builtin::ObjectStatic(_)
             | Builtin::ObjectMethod(_)
             | Builtin::FunctionMethod(_)
             | Builtin::ArrayMethod(_)

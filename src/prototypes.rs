@@ -78,7 +78,7 @@ impl Runtime {
             Builtin::Rect(operation) => operation.arity(),
             Builtin::DomException(operation) => operation.arity(),
             Builtin::EmptyFunction | Builtin::ThrowTypeError => 0,
-            Builtin::RegExp | Builtin::ParseInt | Builtin::JsonParse => 2,
+            Builtin::RegExp | Builtin::ParseInt | Builtin::JsonParse | Builtin::ReflectGet => 2,
             Builtin::JsonStringify => 3,
             Builtin::Math("random") => 0,
             Builtin::Math("atan2" | "hypot" | "imul" | "max" | "min" | "pow") => 2,
