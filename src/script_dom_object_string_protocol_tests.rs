@@ -134,6 +134,42 @@ if(rejected!==2||HTMLIFrameElement!==C||parsed.constructor!==C||stringify.call(f
 }
 
 #[test]
+fn iframe_interface_parsed_srcdoc_identity_keeps_instance_storage_restricted() {
+    let (mut doc, mut forms, mut page) = fixture_with("<iframe id=authored srcdoc='retained'></iframe>");
+    let node = id(&doc, "authored");
+    run(&mut doc, &mut forms, &mut page, r#"
+var authored=document.querySelector('iframe'),fresh=document.createElement('iframe'),C=HTMLIFrameElement;
+if(authored!==document.getElementById('authored')||!(authored instanceof C)||authored.constructor!==C||
+   Object.getPrototypeOf(authored)!==C.prototype||stringify.call(authored)!=='[object HTMLIFrameElement]'||
+   authored.srcdoc!=='retained'||authored.contentWindow!==null||authored.contentDocument!==null)
+    throw 'parsed frame identity or inert state';
+fresh.privateNote=7;
+if(Object.keys(fresh).length!==1||Object.getOwnPropertyDescriptor(fresh,'privateNote').value!==7||
+   Object.hasOwn(fresh,'srcdoc')||Object.getPrototypeOf(fresh)!==C.prototype)
+    throw 'created frame own storage or identity';
+"#);
+    let commits = page.state.dom_commits;
+    for source in [
+        "Object.hasOwn(authored,'srcdoc');",
+        "Object.getOwnPropertyDescriptor(authored,'privateNote');",
+        "Object.keys(authored);",
+        "for(var key in authored){}",
+        "authored.privateNote=1;",
+        "Object.defineProperty(authored,'privateNote',{value:1});",
+        "authored.srcdoc='changed';",
+    ] {
+        let outcome = page.console_eval(&mut doc, &mut forms, source);
+        assert_eq!(outcome.errors, 1, "{source}\n{}", page.report());
+        assert_eq!(page.runtime.native_overlay_state_for_test(node_handle(node)), (None, None));
+        assert_eq!(doc.attr(node, "srcdoc"), Some("retained"));
+        assert_eq!(page.state.dom_commits, commits);
+        assert!(page.state.blank_frames.is_empty());
+    }
+    run(&mut doc, &mut forms, &mut page,
+        "if(authored.constructor!==C||authored.contentWindow!==null||fresh.privateNote!==7)throw 'frame state after refusals';");
+}
+
+#[test]
 fn iframe_interface_blank_child_realm_uses_owner_identity_and_rechecks_saved_access() {
     let (mut doc, mut forms, mut page) = fixture();
     run(&mut doc, &mut forms, &mut page, r#"
@@ -164,6 +200,53 @@ if(!typed)throw 'child realm illegal constructor error';
     page.set_location(&location("https://dom-string.test/path/page"));
     run(&mut doc, &mut forms, &mut page,
         "if(!local()||read(owner)!==Parent||inChild(owner)||owner.contentWindow!==w)throw 'restored frame access';");
+}
+
+#[test]
+fn iframe_interface_unrepresented_fallback_refuses_child_handles_but_empty_frames_keep_live_lists() {
+    let (mut doc, mut forms, mut page) = fixture_with(concat!(
+        "<iframe id=plain>fallback</iframe><iframe id=markup><b id=buried>fallback</b></iframe>",
+        "<iframe id=empty></iframe><div id=after><b id=visible>neighbor</b></div>"
+    ));
+    run(&mut doc, &mut forms, &mut page, r#"
+var plain=document.getElementById('plain'),markup=document.getElementById('markup'),empty=document.getElementById('empty');
+var fresh=document.createElement('iframe'),after=document.getElementById('after');
+if(!(plain instanceof HTMLIFrameElement)||!(markup instanceof HTMLIFrameElement)||
+   document.getElementById('buried')!==null||markup.querySelector('*')!==null||
+   markup.getElementsByTagName('*').length!==0||after.querySelector('b')!==document.getElementById('visible'))
+    throw 'iframe host, hidden fallback or neighboring ordinary selection';
+if(('firstElementChild' in markup && markup.firstElementChild!==null)||
+   ('lastElementChild' in markup && markup.lastElementChild!==null)||
+   ('children' in markup && markup.children.length!==0))
+    throw 'iframe fallback exposed as element children';
+"#);
+    let lists = page.state.node_lists.len();
+    let retained = page.state.retained;
+    let commits = page.state.dom_commits;
+    for source in [
+        "plain.childNodes;", "plain.firstChild;", "plain.lastChild;",
+        "markup.childNodes;", "markup.firstChild;", "markup.lastChild;",
+    ] {
+        let outcome = page.console_eval(&mut doc, &mut forms, source);
+        assert_eq!(outcome.errors, 1, "{source}\n{}", page.report());
+        assert!(page.report().contains("Iframe fallback child topology"), "{}", page.report());
+        assert_eq!(page.state.node_lists.len(), lists);
+        assert_eq!(page.state.retained, retained);
+        assert_eq!(page.state.dom_commits, commits);
+        assert!(page.state.blank_frames.is_empty());
+    }
+    run(&mut doc, &mut forms, &mut page, r#"
+for(var iframe of [empty,fresh]){
+    var children=iframe.childNodes;
+    if(children!==iframe.childNodes||children.length!==0||children[0]!==undefined||children.item(0)!==null||
+       iframe.firstChild!==null||iframe.lastChild!==null)throw 'empty iframe child topology';
+}
+var saved=fresh.childNodes;fresh.hidden=true;document.body.appendChild(fresh);
+if(fresh.childNodes!==saved||saved.length!==0||fresh.firstChild!==null||!fresh.contentWindow||
+   markup.contentWindow!==null||markup.contentDocument!==null||after.childNodes[0]!==after.firstChild||
+   after.firstChild.firstChild.data!=='neighbor')throw 'blank child context or neighboring physical tree';
+"#);
+    assert_eq!(page.state.blank_frames.len(), 1);
 }
 
 #[test]

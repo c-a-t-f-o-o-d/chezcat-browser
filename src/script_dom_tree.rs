@@ -175,6 +175,19 @@ impl Page {
 }
 
 impl Bridge<'_> {
+    // Document parsing can retain markup-shaped iframe fallback instead of
+    // the single raw Text node required by HTML. Those arena entries have no
+    // public child identity. Empty iframes have a known, ordinary child list.
+    pub(super) fn check_iframe_child_topology(&self, node: usize) -> Result<(), String> {
+        let item = self.doc.nodes.get(node).ok_or("Invalid child topology owner.")?;
+        if !item.children.is_empty() && item.namespace == crate::html::Namespace::Html
+            && matches!(&item.kind, NodeKind::Element { tag, .. } if tag == "iframe")
+        {
+            return Err("Iframe fallback child topology requires raw-text document parsing.".into());
+        }
+        Ok(())
+    }
+
     pub(super) fn comment_receiver(&self, object:u32)->bool {
         node_index(object).is_some_and(|node|self.dom_accessible(node)
             && matches!(self.doc.nodes[node].kind,NodeKind::Comment(_)))
@@ -699,6 +712,7 @@ impl Bridge<'_> {
                 "parentNode" => return self.element_parent(node, true).map(Some),
                 "parentElement" => return self.element_parent(node, false).map(Some),
                 "firstChild" | "lastChild" => {
+                    self.check_iframe_child_topology(node)?;
                     self.state.work(self.doc.nodes[node].children.len())?;
                     let children = &self.doc.nodes[node].children;
                     let child = if property == "firstChild" {
