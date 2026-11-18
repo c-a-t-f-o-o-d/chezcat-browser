@@ -41,6 +41,12 @@ pub(super) fn inert_dom_tag(name: &str, scripting: bool) -> bool {
         || name == "noscript" && scripting
 }
 
+// Script and HTML iframe elements have an identity in the embedding document
+// even when their contents are excluded from ordinary element queries.
+pub(super) fn exposes_inert_host(name: &str, namespace: crate::html::Namespace) -> bool {
+    name == "script" || name == "iframe" && namespace == crate::html::Namespace::Html
+}
+
 fn common_node_property(name: &str) -> bool {
     matches!(
         name,
@@ -105,8 +111,10 @@ impl State {
             connected[node] = true;
             tree.parents[node] = parent;
             let name = tag(doc, node);
-            let inert = inert || name != "script" && inert_dom_tag(name, doc.scripting_enabled);
-            if !inert {
+            let inert_children = inert_dom_tag(name, doc.scripting_enabled);
+            // The embedding element belongs to this document. Indexing it
+            // leaves its fallback subtree inert and never creates a child window.
+            if !inert && (!inert_children || exposes_inert_host(name, doc.nodes[node].namespace)) {
                 tree.active[node] = true;
                 tree.order.push(node);
                 if name == "body" && tree.body.is_none() {
@@ -134,7 +142,7 @@ impl State {
                     .children
                     .iter()
                     .rev()
-                    .map(|&child| (child, Some(node), inert || name == "script")),
+                    .map(|&child| (child, Some(node), inert || inert_children)),
             );
         }
         // Saved handles and static NodeLists retain detached ordinary subtrees,
@@ -295,8 +303,10 @@ impl Bridge<'_> {
         for _ in 0..self.doc.nodes.len() {
             if current == 0 { return true; }
             let name = tag(self.doc, current);
-            if name == "script" && current != node
-                || name != "script" && inert_dom_tag(name, self.doc.scripting_enabled) { return false; }
+            if inert_dom_tag(name, self.doc.scripting_enabled)
+                && (current != node || !exposes_inert_host(name, self.doc.nodes[current].namespace)) {
+                return false;
+            }
             let Some(parent) = self.state.tree.parents.get(current).copied().flatten() else { return false; };
             let Some(parent_node) = self.doc.nodes.get(parent) else { return false; };
             if !parent_node.children.contains(&current) { return false; }

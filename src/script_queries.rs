@@ -143,7 +143,8 @@ impl Bridge<'_> {
         while let Some(node) = stack.pop() {
             self.state.work(1)?;
             let name = tag(self.doc, node);
-            if name != "script" && dom_tree::inert_dom_tag(name, self.doc.scripting_enabled) {
+            let inert_children = dom_tree::inert_dom_tag(name, self.doc.scripting_enabled);
+            if inert_children && !dom_tree::exposes_inert_host(name, self.doc.nodes[node].namespace) {
                 continue;
             }
             if !self.state.tree.active.get(node).copied().unwrap_or(false)
@@ -154,7 +155,7 @@ impl Bridge<'_> {
             if matches!(self.doc.nodes[node].kind, NodeKind::Element { .. }) {
                 candidates.push(node);
             }
-            if name != "script" {
+            if !inert_children {
                 stack.extend(self.doc.nodes[node].children.iter().rev().copied());
             }
         }

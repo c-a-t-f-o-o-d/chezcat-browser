@@ -401,6 +401,7 @@ pub(crate) const ORDINARY_HTML_SUBCLASSES: &[(&str, &str)] = &[
     ("button", "HTMLButtonElement"),
     ("div", "HTMLDivElement"),
     ("html", "HTMLHtmlElement"),
+    ("iframe", "HTMLIFrameElement"),
     ("input", "HTMLInputElement"),
     ("ul", "HTMLUListElement"),
 ];
