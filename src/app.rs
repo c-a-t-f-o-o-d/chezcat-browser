@@ -5703,6 +5703,10 @@ mod computed_custom_style_tests;
 mod overflow_axes_tests;
 
 #[cfg(test)]
+#[path = "app_computed_position_tests.rs"]
+mod computed_position_tests;
+
+#[cfg(test)]
 #[path="app_element_sibling_tests.rs"]
 mod element_sibling_tests;
 
