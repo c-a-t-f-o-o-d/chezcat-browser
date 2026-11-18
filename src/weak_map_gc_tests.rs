@@ -1,4 +1,4 @@
-//! Original reachability/retirement controls over real WeakMap storage.
+//! Reachability and retirement controls over real WeakMap and WeakSet storage.
 use super::*;
 
 struct NoHost;
@@ -63,7 +63,46 @@ fn weak_map_gc_plans_only_maps_that_have_entries() {
         0;
     "#, &mut NoHost).unwrap();
     let graph = runtime.mark_persistent_functions(&[], true).unwrap();
-    assert_eq!(graph.weak_maps, [object(&runtime, "kept")]);
+    assert_eq!(graph.weak_collections, [object(&runtime, "kept")]);
+}
+
+#[test]
+fn weak_set_membership_tracks_liveness_after_map_values_are_traced() {
+    let mut runtime = Runtime::new();
+    runtime.execute(r#"
+        var key = {}, member = {}, kept = new WeakSet([member]), gone = new WeakSet([key]);
+        var map = new WeakMap(), holder = {};
+        map.set(key, member);
+        holder.temp = function() { return 1; };
+        kept.add(holder.temp);
+        0;
+    "#, &mut NoHost).unwrap();
+    let kept = object(&runtime, "kept");
+    let gone = object(&runtime, "gone");
+    let member = object(&runtime, "member");
+    let Value::Function(temp) = runtime.own_property(object(&runtime, "holder"), "temp").unwrap() else {
+        panic!("expected function member");
+    };
+    runtime.execute("member=null;gone=null;holder.temp=null;0;", &mut NoHost).unwrap();
+    let graph = runtime.mark_scope_candidate_comparison(true).unwrap();
+    assert!(graph.objects[member]);
+    assert!(!graph.objects[gone] && !graph.functions[temp]);
+    let before = runtime.collection_entries;
+    let steps = runtime.steps;
+    runtime.steps = 0;
+    assert!(runtime.retire_proven_inactive_candidate(temp).is_err());
+    assert!(runtime.function_is_occupied(temp));
+    assert_eq!((slots(&runtime, kept), slots(&runtime, gone)), (2, 1));
+    assert_eq!(runtime.collection_entries, before);
+    runtime.steps = steps;
+    runtime.retire_proven_inactive_candidate(temp).unwrap();
+    assert_eq!(runtime.collection_entries, before - 2);
+    assert_eq!((slots(&runtime, kept), slots(&runtime, gone)), (1, 0));
+    let replacement = runtime.native_function(Builtin::IsNaN, "replacement").unwrap();
+    assert!(matches!(replacement, Value::Function(id) if id == temp));
+    runtime.define_global("replacement", replacement).unwrap();
+    assert_eq!(runtime.execute("kept.has(map.get(key)) && !kept.has(replacement);",
+        &mut NoHost).unwrap().to_text(), "true");
 }
 
 #[test]

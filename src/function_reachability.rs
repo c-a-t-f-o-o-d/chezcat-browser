@@ -52,7 +52,7 @@ struct Graph {
     environments: Vec<bool>,
     pending: Vec<Edge>,
     // IDs only, reserved before tracing. Weak payloads never become seed roots.
-    weak_maps: Vec<usize>,
+    weak_collections: Vec<usize>,
     invalid: bool,
 }
 
@@ -87,12 +87,12 @@ impl Graph {
             .map_err(|_| "Unable to allocate bounded reachability scratch.")?;
         let mut occupied_functions = bitmap(runtime.functions.len())?;
         for (id, function) in runtime.functions.iter().enumerate() { occupied_functions[id] = !matches!(function, Function::Vacant); }
-        if runtime.weak_map_count > runtime.objects.len() { return Err("Invalid WeakMap allocation count."); }
-        let mut weak_maps = Vec::new();
-        let nonempty_maps = runtime.weak_map_count.min(runtime.collection_entries);
-        weak_maps.try_reserve_exact(nonempty_maps).map_err(|_| "Unable to allocate bounded WeakMap reachability scratch.")?;
+        if runtime.weak_collection_count > runtime.objects.len() { return Err("Invalid weak collection allocation count."); }
+        let mut weak_collections = Vec::new();
+        let nonempty_weak_collections = runtime.weak_collection_count.min(runtime.collection_entries);
+        weak_collections.try_reserve_exact(nonempty_weak_collections).map_err(|_| "Unable to allocate bounded weak collection reachability scratch.")?;
         Ok(Self { objects: bitmap(runtime.objects.len())?, functions: bitmap(runtime.functions.len())?, occupied_functions,
-            environments: bitmap(runtime.environments.len())?, pending, weak_maps, invalid: false })
+            environments: bitmap(runtime.environments.len())?, pending, weak_collections, invalid: false })
     }
 
     fn weak_key_live(&self, key: collections::WeakKey) -> bool {
@@ -120,28 +120,28 @@ impl Graph {
 }
 
 impl Runtime {
-    fn prepare_weak_map_sweep(&self, graph: &Graph, meter: &mut Meter) -> Result<(usize, usize), Fault> {
+    fn prepare_weak_collection_sweep(&self, graph: &Graph, meter: &mut Meter) -> Result<(usize, usize), Fault> {
         let mut entries = 0usize;
         let mut bytes = 0usize;
         // Prepay both immutable planning and the later no-fail retain pass.
-        meter.charge(graph.weak_maps.len().saturating_mul(2)).map_err(Fault::new)?;
-        for &id in &graph.weak_maps {
+        meter.charge(graph.weak_collections.len().saturating_mul(2)).map_err(Fault::new)?;
+        for &id in &graph.weak_collections {
             let data = self.objects[id].collection.as_ref().unwrap();
             meter.charge(data.weak_slot_count().saturating_mul(4)).map_err(Fault::new)?;
             let (removed, refund) = data.weak_removal_totals(&|key| !graph.objects[id] || !graph.weak_key_live(key));
-            entries = entries.checked_add(removed).ok_or_else(|| Fault::new("Invalid WeakMap retirement accounting."))?;
-            bytes = bytes.checked_add(refund).ok_or_else(|| Fault::new("Invalid WeakMap retirement accounting."))?;
+            entries = entries.checked_add(removed).ok_or_else(|| Fault::new("Invalid weak collection retirement accounting."))?;
+            bytes = bytes.checked_add(refund).ok_or_else(|| Fault::new("Invalid weak collection retirement accounting."))?;
         }
         if entries > self.collection_entries || bytes > self.value_bytes {
-            return Err(Fault::new("WeakMap refunds exceed retained payload accounting."));
+            return Err(Fault::new("Weak collection refunds exceed retained payload accounting."));
         }
         Ok((entries, bytes))
     }
 
-    fn commit_weak_map_sweep(&mut self, graph: &Graph, refund: (usize, usize)) {
+    fn commit_weak_collection_sweep(&mut self, graph: &Graph, refund: (usize, usize)) {
         // All scans, refunds, deadlines and subsequent arena reservations have
         // been checked. Removing entries neither calls authors nor allocates.
-        for &id in &graph.weak_maps {
+        for &id in &graph.weak_collections {
             self.objects[id].collection.as_mut().unwrap()
                 .remove_weak_entries(&|key| !graph.objects[id] || !graph.weak_key_live(key));
         }
@@ -202,7 +202,7 @@ impl Runtime {
         self.steps = meter.remaining.unwrap();
         let graph = traced.map_err(Fault::new)?;
         let prepared = (|| {
-          let weak_refund = self.prepare_weak_map_sweep(&graph, &mut meter)?;
+          let weak_refund = self.prepare_weak_collection_sweep(&graph, &mut meter)?;
           // Prepay each preflight/commit scan before inspecting its contents.
           // Failure paths retain this spent work, even if a later reserve fails.
           meter.charge((self.functions.len() + self.environments.len()) * 2).map_err(Fault::new)?;
@@ -253,7 +253,7 @@ impl Runtime {
             self.steps = 0;
             return Err(Fault::new("Execution time limit reached during reachability."));
         }
-        self.commit_weak_map_sweep(&graph, weak_refund);
+        self.commit_weak_collection_sweep(&graph, weak_refund);
         for id in 0..self.functions.len() {
             if self.function_is_occupied(id) && !graph.functions[id] { self.vacate_function_slot_prepared(id, false, true); }
         }
@@ -274,9 +274,9 @@ impl Runtime {
         let graph = if self.scope_retirement_enabled() { self.mark_scope_candidate_comparison(true) }
             else { self.mark_root_graph(&[], true, true) }.map_err(Fault::new)?;
         if graph.functions.get(id).copied() != Some(false) { return Err(Fault::new("Candidate remains reachable.")); }
-        if self.weak_map_count == 0 { return self.retire_unreachable_script(id); }
+        if self.weak_collection_count == 0 { return self.retire_unreachable_script(id); }
         let mut meter = Meter { remaining: Some(self.steps), deadline: self.job_deadline };
-        let prepared = self.prepare_weak_map_sweep(&graph, &mut meter);
+        let prepared = self.prepare_weak_collection_sweep(&graph, &mut meter);
         self.steps = meter.remaining.unwrap();
         let refund = prepared?;
         let lexical_bytes = match &self.functions[id] {
@@ -293,7 +293,7 @@ impl Runtime {
         // The test helper can still refuse the requested slot. The prepared sweep
         // then runs synchronously, before any allocation can reuse that slot.
         self.retire_unreachable_script(id)?;
-        self.commit_weak_map_sweep(&graph, refund);
+        self.commit_weak_collection_sweep(&graph, refund);
         Ok(())
     }
 
@@ -430,8 +430,8 @@ impl Runtime {
         conservative_candidates: bool, transient: bool, keep_array_seeds: bool,
         include_scope_candidates: bool, meter: &mut Meter) -> Result<Graph, &'static str> {
         meter.charge(self.objects.len() + self.functions.len() * 4 + self.environments.len())?;
-        let nonempty_weak_map_limit = self.weak_map_count.min(self.collection_entries);
-        meter.charge(nonempty_weak_map_limit)?;
+        let nonempty_weak_collection_limit = self.weak_collection_count.min(self.collection_entries);
+        meter.charge(nonempty_weak_collection_limit)?;
         let mut graph = Graph::new(self)?;
         // Fixed-size intrinsic families include current and parked main blocks,
         // even when no child realm exists. Error-family maps have bounded keys.
@@ -463,15 +463,15 @@ impl Runtime {
         // reporting. This is intentionally broader than eventual precise roots.
         for (id, object) in self.objects.iter().enumerate() {
             meter.charge(1)?;
-            if self.weak_map_count != 0 && object.collection.as_ref().is_some_and(collections::Data::is_weak_map) {
+            if self.weak_collection_count != 0 && object.collection.as_ref().is_some_and(collections::Data::is_weak_collection) {
                 if object.collection.as_ref().unwrap().weak_slot_count() != 0 {
-                    if graph.weak_maps.len() >= nonempty_weak_map_limit {
-                        return Err("Invalid WeakMap entry accounting.");
+                    if graph.weak_collections.len() >= nonempty_weak_collection_limit {
+                        return Err("Invalid weak collection entry accounting.");
                     }
-                    graph.weak_maps.push(id);
+                    graph.weak_collections.push(id);
                 }
                 // Its ordinary properties/prototype follow normal roots, but
-                // weak entries must not seed the map, its keys or its values.
+                // weak entries must not seed the collection, its keys or its values.
                 continue;
             }
             let plain = (object.length.is_none() || !keep_array_seeds) && Self::plain_array_storage(object);
@@ -482,7 +482,7 @@ impl Runtime {
         self.reachability_intrinsic_edges(&mut |edge| graph.add(edge));
         loop {
             self.trace_strong_edges(&mut graph, meter)?;
-            if graph.weak_maps.is_empty() { break; }
+            if graph.weak_collections.is_empty() { break; }
             self.trace_weak_values(&mut graph, meter)?;
             if graph.pending.is_empty() { break; }
         }
@@ -553,11 +553,13 @@ impl Runtime {
 
     // A newly marked value may supply a key or map for the following pass.
     fn trace_weak_values(&self, graph: &mut Graph, meter: &mut Meter) -> Result<(), &'static str> {
-        meter.charge(graph.weak_maps.len())?;
-        for index in 0..graph.weak_maps.len() {
-            let id = graph.weak_maps[index];
+        meter.charge(graph.weak_collections.len())?;
+        for index in 0..graph.weak_collections.len() {
+            let id = graph.weak_collections[index];
             if !graph.objects[id] { continue; }
             let data = self.objects[id].collection.as_ref().unwrap();
+            // WeakSet membership has no value edge to trace.
+            if !data.is_weak_map() { continue; }
             meter.charge(data.weak_slot_count().saturating_mul(2))?;
             for (key, value) in data.weak_entries() {
                 if graph.weak_key_live(key) { Edge::value(value, &mut |edge| graph.add(edge)); }

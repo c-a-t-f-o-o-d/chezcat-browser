@@ -555,6 +555,28 @@ if(!caught||realmSecret!==91||Object.getPrototypeOf([])!==Array.prototype)throw 
     }
 
     #[test]
+    fn weak_set_members_and_borrowed_methods_cross_intrinsic_realms() {
+        let mut runtime = Runtime::for_capacity_test();
+        expose_test_realm(&mut runtime);
+        let result = runtime.execute(r#"
+            var ForeignSet = ChildFunction('return WeakSet;')();
+            var foreignKey = ChildFunction('return {};')(), localKey = {};
+            var foreignSet = new ForeignSet(), localSet = new WeakSet();
+            if (ForeignSet === WeakSet || ForeignSet.prototype === WeakSet.prototype ||
+                Object.getPrototypeOf(foreignSet) !== ForeignSet.prototype)
+                throw 'wrong realm prototype';
+            if (WeakSet.prototype.add.call(foreignSet, localKey) !== foreignSet ||
+                ForeignSet.prototype.add.call(localSet, foreignKey) !== localSet ||
+                !localSet.has(foreignKey) || !foreignSet.has(localKey) || localSet.has(localKey))
+                throw 'cross-realm membership';
+            try { ForeignSet.prototype.has.call(new WeakMap(), foreignKey); }
+            catch (e) { if (Object.getPrototypeOf(e) === ChildTypeError.prototype) 'foreign brand error'; }
+        "#, &mut NoHost).unwrap();
+        assert_eq!(result.to_text(), "foreign brand error");
+        assert_eq!((runtime.active_realm, runtime.global_environment), (None, 0));
+    }
+
+    #[test]
     fn detached_intrinsics_are_real_distinct_and_do_not_inherit_parent_mutation() {
         let mut runtime = Runtime::for_capacity_test();
         let parent_object = runtime.object_prototype.unwrap();
