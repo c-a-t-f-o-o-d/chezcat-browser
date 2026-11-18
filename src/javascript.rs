@@ -371,6 +371,24 @@ pub struct NativeAncestry {
     pub constructor:Option<(u32,&'static str)>,
 }
 
+/// Ordinary element interfaces installed directly on each realm's HTMLElement chain.
+pub(crate) const ORDINARY_HTML_SUBCLASSES: &[(&str, &str)] = &[
+    ("body", "HTMLBodyElement"),
+    ("button", "HTMLButtonElement"),
+    ("div", "HTMLDivElement"),
+    ("html", "HTMLHtmlElement"),
+    ("ul", "HTMLUListElement"),
+];
+
+/// Exact ordinary interfaces for supported HTML nodes, including elements
+/// whose immediate interface is HTMLElement itself.
+pub(crate) fn ordinary_html_interface(tag: &str) -> Option<&'static str> {
+    if tag == "main" {
+        return Some("HTMLElement");
+    }
+    ORDINARY_HTML_SUBCLASSES.iter().find(|(local, _)| *local == tag).map(|&(_, name)| name)
+}
+
 /// One callback from a host-owned synchronous event propagation plan. The host
 /// never receives interpreter access; the runtime keeps the current job/realm.
 pub struct EventCallback {pub function:Value,pub target:u32,pub event:u32}
@@ -416,6 +434,10 @@ pub trait Host {
     fn instance_ancestry(&self, _object:u32) -> Option<NativeAncestry> { None }
     /// Actual exposed immediate prototype, distinct from a read-only Object tail.
     fn exposed_native_prototype(&self, _object:u32) -> bool { false }
+    /// Whether the ordinary chain can supply inherited enumerable keys.
+    fn ordinary_inherited_enumeration(&self, object: u32) -> bool {
+        self.exposed_native_prototype(object)
+    }
     /// Proven ancestry suffix; does not claim an immediate prototype identity.
     fn native_ancestry_inspection(&self,object:u32)->bool {self.exposed_native_prototype(object)}
     /// Only real browser Window contexts may publish this native interface.
@@ -455,6 +477,11 @@ pub trait Host {
         true
     }
     fn readonly_property(&self, _object: u32, _property: &str) -> bool {
+        false
+    }
+    /// Support assignment through an inherited ordinary descriptor on a
+    /// native receiver that cannot retain new own properties.
+    fn inherited_assignment(&self, _object: u32, _property: &str) -> bool {
         false
     }
     /// Named DOMStringMap setters use ordinary ECMAScript ToString before the
@@ -6113,8 +6140,9 @@ impl Runtime {
             let PropertyKey::Symbol(key) = name else {
                 unreachable!()
             };
+            let own = self.symbol_backing(&object, host)?;
             return Ok(Value::Bool(
-                if let Some(backing) = self.symbol_backing(&object, host)? {
+                if let Some(backing) = self.symbol_lookup_base(&object, key, own, host)? {
                     self.receiver_symbol_owner(&object, backing, key, host)?.is_some()
                 } else {
                     false

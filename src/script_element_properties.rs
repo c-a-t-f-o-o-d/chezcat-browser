@@ -22,6 +22,10 @@ const ARIA: &str = "role ariaAtomic ariaAutoComplete ariaBrailleLabel ariaBraill
 const URL: &str = "href origin protocol username password host hostname port pathname search hash target download ping rel relList hreflang type referrerPolicy";
 const VALIDATION: &str = "form name type value disabled willValidate validity validationMessage labels checkValidity reportValidity setCustomValidity";
 const EDITING: &str = "defaultValue value selectionDirection selectionEnd selectionStart select setRangeText setSelectionRange maxLength minLength placeholder readOnly required autocomplete dirName";
+pub(super) fn ordinary_interface_member(name: &str) -> bool {
+    matches!(name, "toString" | "constructor" | "__proto__")
+}
+
 fn contains(names: &str, name: &str) -> bool {
     names
         .split_ascii_whitespace()
@@ -58,15 +62,14 @@ fn specific(tag: &str) -> &'static str {
 }
 impl Bridge<'_> {
     pub(super) fn concrete_html_interface(&self, object: u32) -> Option<&'static str> {
+        if let Some(name) = self.frame_concrete_html_interface(object) {
+            return Some(name);
+        }
         let node = node_index(object)?;
         if !self.class_list_element_receiver(object) {
             return None;
         }
-        match tag(self.doc, node) {
-            "button" => Some("HTMLButtonElement"),
-            "ul" => Some("HTMLUListElement"),
-            _ => None,
-        }
+        crate::javascript::ordinary_html_interface(tag(self.doc, node))
     }
 
     pub(super) fn element_expando_receiver(&self, object: u32) -> bool {
@@ -136,11 +139,6 @@ impl Bridge<'_> {
     }
 
     pub(super) fn element_native_property(&self, object: u32, name: &str) -> bool {
-        if matches!(name, "toString" | "constructor" | "__proto__")
-            && self.concrete_html_interface(object).is_some()
-        {
-            return false;
-        }
         if dom_tree::node_constant(name).is_some()
             || self.method(object, name).is_some()
             || contains(COMMON, name)

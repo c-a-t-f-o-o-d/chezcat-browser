@@ -293,6 +293,25 @@ impl Runtime {
         }
     }
 
+    /// Find inherited class-tag descriptors on proven interface prototypes,
+    /// including receivers without an own symbol store.
+    pub(super) fn symbol_lookup_base(
+        &mut self,
+        receiver: &Value,
+        key: usize,
+        own: Option<Ordinary>,
+        host: &mut dyn Host,
+    ) -> Result<Option<Ordinary>, Fault> {
+        if own.is_none() && Some(key) == self.symbol_to_string_tag {
+            if let Value::Host(handle) = receiver {
+                if host.exposed_native_prototype(*handle) {
+                    return self.native_instance_prototype(*handle, host).map(Some);
+                }
+            }
+        }
+        Ok(own)
+    }
+
     /// The Window global has an inherited Web IDL class string. Its own
     /// descriptors still win, and all other keys use the ordinary owner chain.
     pub(super) fn receiver_symbol_owner(
@@ -320,7 +339,8 @@ impl Runtime {
     ) -> Result<Value, Fault> {
         Self::require_property_receiver(&receiver)?;
         self.symbol(key)?;
-        let object = match self.symbol_backing(&receiver, host)? {
+        let own = self.symbol_backing(&receiver, host)?;
+        let object = match self.symbol_lookup_base(&receiver, key, own, host)? {
             Some(object) => Some(object),
             None => match receiver {
                 Value::Symbol(_) => self.symbol_prototype.map(Ordinary::Object),
@@ -375,7 +395,7 @@ impl Runtime {
     ) -> Result<(), Fault> {
         Self::require_property_receiver(&receiver)?;
         let backing = self.symbol_backing(&receiver, host)?;
-        let object = match backing {
+        let object = match self.symbol_lookup_base(&receiver, key, backing, host)? {
             Some(object) => object,
             None => match receiver {
                 Value::String(_) => Ordinary::Object(self.string_prototype.unwrap()),
@@ -414,6 +434,8 @@ impl Runtime {
         if let Some(object) = backing {
             let target = self.ordinary_id(object)?;
             self.store_symbol_property(target, key, value, None)
+        } else if matches!(receiver, Value::Host(_)) {
+            Err(Fault::new("Creating an own symbol property on this native receiver is not implemented."))
         } else if self.strict {
             Err(Fault::exception(
                 "TypeError",

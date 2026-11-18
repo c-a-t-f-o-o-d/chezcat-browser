@@ -166,7 +166,7 @@ impl Runtime {
         let tag_key = self.symbol_to_string_tag
             .ok_or_else(|| Fault::new("Missing interface class-tag symbol."))?;
 
-        for name in ["HTMLButtonElement", "HTMLUListElement"] {
+        for &(_, name) in super::ORDINARY_HTML_SUBCLASSES {
             let allocation = self.allocate_host_function_with_length(window, name, 0)
                 .map_err(Fault::new)?;
             if let Some(Function::Host { constructible, .. }) = self.functions.get_mut(allocation.id) {
@@ -592,12 +592,15 @@ impl Runtime {
                 host,
             );
         }
-        if host.readonly_property(handle, &name) {
-            // A configurable interface getter may have been replaced. Use the
-            // current descriptor even when the receiver cannot store expandos.
+        // Ordinary inherited accessors can supply a setter even when this
+        // native receiver cannot retain a new own data property.
+        let readonly = host.readonly_property(handle, &name);
+        if readonly || host.inherited_assignment(handle, &name) {
             if let Some(base) = self.host_lookup_tail(handle, &name, host)? {
                 return self.assign_inherited_property(base, name, value, Value::Host(handle), host);
             }
+        }
+        if readonly {
             return if self.strict {
                 Err(Fault::exception(
                     "TypeError",
@@ -661,7 +664,7 @@ impl Runtime {
         if host.indexed_iteration_owner(handle).is_some() {
             return self.indexed_host_keys(handle,inherited,true,host);
         }
-        if inherited && host.expando_owner(handle).is_some() && !host.exposed_native_prototype(handle) {
+        if inherited && host.expando_owner(handle).is_some() && !host.ordinary_inherited_enumeration(handle) {
             return Err(Fault::new("Inherited native Element enumeration is not implemented."));
         }
         let keys = if let Some(&id) = self.host_objects.get(&handle) {
