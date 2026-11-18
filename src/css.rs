@@ -15,6 +15,7 @@ const INITIAL_FONT_SIZE: f32 = 16.0;
 
 const MAX_DECLARATIONS: usize = 4096;
 const MAX_SELECTOR_BYTES: usize = 512;
+const MAX_SELECTOR_NESTING: usize = 8;
 const MAX_MATCH_STEPS: usize = 128_000_000;
 
 /// Host policy, shared by resource decoding, retention and the complete parser.
@@ -518,6 +519,8 @@ struct Compound {
     classes: Vec<String>,
     attributes: Vec<AttributeSelector>,
     checked: bool,
+    disabled: bool,
+    negations: Vec<Vec<Selector>>,
 }
 
 #[derive(Debug)]
@@ -1726,10 +1729,16 @@ fn sheet_blocks(source: &str, mut visit: impl FnMut(&str, &str) -> bool) {
 }
 
 fn parse_selector_list(source: &str, pseudo_targets: bool) -> Option<Vec<Selector>> {
+    parse_selector_list_at_depth(source,pseudo_targets,0)
+}
+
+fn parse_selector_list_at_depth(source:&str,pseudo_targets:bool,depth:usize)->Option<Vec<Selector>> {
+    if depth>MAX_SELECTOR_NESTING || source.len()>MAX_SELECTOR_BYTES*16 {return None;}
     let mut selectors = Vec::new();
     let mut start = 0;
     let mut bracket = false;
     let mut quote = None;
+    let mut parentheses=0usize;
     for (position, byte) in source.bytes().enumerate() {
         if let Some(expected) = quote {
             if byte == b'\\' {
@@ -1745,11 +1754,16 @@ fn parse_selector_list(source: &str, pseudo_targets: bool) -> Option<Vec<Selecto
             b']' if bracket => bracket = false,
             b'[' | b']' => return None,
             b'\'' | b'"' if bracket => quote = Some(byte),
-            b',' if !bracket => {
+            b'(' if !bracket => {
+                parentheses+=1;
+                if parentheses>MAX_SELECTOR_NESTING {return None;}
+            }
+            b')' if !bracket => {parentheses=parentheses.checked_sub(1)?;}
+            b',' if !bracket && parentheses==0 => {
                 if selectors.len() == 15 {
                     return None;
                 }
-                let selector=parse_selector(&source[start..position])?;
+                let selector=parse_selector_at_depth(&source[start..position],depth)?;
                 if !pseudo_targets && selector.target!=SelectorTarget::Element {return None;}
                 selectors.push(selector);
                 start = position + 1;
@@ -1757,16 +1771,21 @@ fn parse_selector_list(source: &str, pseudo_targets: bool) -> Option<Vec<Selecto
             _ => {}
         }
     }
-    if bracket || quote.is_some() {
+    if bracket || quote.is_some() || parentheses!=0 {
         return None;
     }
-    let selector=parse_selector(&source[start..])?;
+    let selector=parse_selector_at_depth(&source[start..],depth)?;
     if !pseudo_targets && selector.target!=SelectorTarget::Element {return None;}
     selectors.push(selector);
     Some(selectors)
 }
 
 fn parse_selector(source: &str) -> Option<Selector> {
+    parse_selector_at_depth(source,0)
+}
+
+fn parse_selector_at_depth(source:&str,depth:usize)->Option<Selector> {
+    if depth>MAX_SELECTOR_NESTING {return None;}
     let source = source.trim_matches(|character: char| character.is_ascii_whitespace());
     if source.is_empty() || source.len() > MAX_SELECTOR_BYTES {
         return None;
@@ -1785,6 +1804,8 @@ fn parse_selector(source: &str) -> Option<Selector> {
             classes: Vec::new(),
             attributes: Vec::new(),
             checked: false,
+            disabled: false,
+            negations: Vec::new(),
         };
         if bytes[position] == b'*' {
             position += 1;
@@ -1843,11 +1864,21 @@ fn parse_selector(source: &str) -> Option<Selector> {
                     while bytes.get(position).is_some_and(|b| ident(*b)) {
                         position += 1;
                     }
-                    if !source[start..position].eq_ignore_ascii_case("checked") {
+                    let name=&source[start..position];
+                    if name.eq_ignore_ascii_case("not") {
+                        let arguments=parse_negation_arguments(source,&mut position,depth)?;
+                        let maximum=arguments.iter().map(|selector|selector.specificity).max()?;
+                        specificity.0=specificity.0.checked_add(maximum.0)?;
+                        specificity.1=specificity.1.checked_add(maximum.1)?;
+                        specificity.2=specificity.2.checked_add(maximum.2)?;
+                        part.negations.push(arguments);
+                    } else if name.eq_ignore_ascii_case("checked") {
+                        part.checked=true;specificity.1+=1;
+                    } else if name.eq_ignore_ascii_case("disabled") {
+                        part.disabled=true;specificity.1+=1;
+                    } else {
                         return None;
                     }
-                    part.checked = true;
-                    specificity.1 += 1;
                 }
                 _ => break,
             }
@@ -1892,6 +1923,61 @@ fn parse_selector(source: &str) -> Option<Selector> {
         relations,
         specificity,
     })
+}
+
+// The same bounded selector grammar is admitted inside a strict :not list.
+// Pseudo-elements and malformed/unsupported members invalidate the whole list.
+fn parse_negation_arguments(
+    source: &str,
+    position: &mut usize,
+    depth: usize,
+) -> Option<Vec<Selector>> {
+    if depth == MAX_SELECTOR_NESTING || source.as_bytes().get(*position) != Some(&b'(') {
+        return None;
+    }
+    *position += 1;
+    let start = *position;
+    let mut parentheses = 1usize;
+    let mut bracket = false;
+    let mut quote = None;
+    while let Some(&byte) = source.as_bytes().get(*position) {
+        if let Some(expected) = quote {
+            if byte == b'\\' {
+                return None;
+            }
+            if byte == expected {
+                quote = None;
+            }
+        } else {
+            match byte {
+                b'[' if !bracket => bracket = true,
+                b']' if bracket => bracket = false,
+                b'[' | b']' => return None,
+                b'\'' | b'"' if bracket => quote = Some(byte),
+                b'(' if !bracket => {
+                    parentheses += 1;
+                    if parentheses > MAX_SELECTOR_NESTING {
+                        return None;
+                    }
+                }
+                b')' if !bracket => {
+                    parentheses -= 1;
+                    if parentheses == 0 {
+                        let arguments = parse_selector_list_at_depth(
+                            &source[start..*position],
+                            false,
+                            depth + 1,
+                        )?;
+                        *position += 1;
+                        return Some(arguments);
+                    }
+                }
+                _ => {}
+            }
+        }
+        *position += 1;
+    }
+    None
 }
 
 fn parse_attribute(source: &str, position: &mut usize) -> Option<AttributeSelector> {
@@ -2216,6 +2302,15 @@ fn matches_selector(
             {
                 return false;
             }
+        }
+        if compound.disabled {
+            let disabled=context.actually_disabled(node,budget);
+            if !disabled || *budget==0 {return false;}
+        }
+        for arguments in &compound.negations {
+            let excluded=arguments.iter().any(|argument|matches_selector(argument,node,context,budget));
+            // Exhaustion is not evidence that a negated selector failed.
+            if excluded || *budget==0 {return false;}
         }
         // A failed bounded attribute lookup must not be mistaken for an
         // absent HTML attribute and then overridden by live checkedness.
@@ -4130,7 +4225,7 @@ mod tests {
             "input:unknown",
             "input:checked()",
             "input::checked",
-            "input:not(:checked)",
+            "input:not(:checked,)",
             "input:checked +",
             "input + ~ div",
             "[type~=]",
@@ -4295,6 +4390,17 @@ mod tests {
 #[cfg(test)]
 #[path="css_media_tests.rs"]
 mod media_tests;
+
+#[path="css_selector_state.rs"]
+mod selector_state;
+
+#[cfg(test)]
+#[path="css_selector_negation_tests.rs"]
+mod selector_negation_tests;
+
+#[cfg(test)]
+#[path="css_selector_negation_protocol_tests.rs"]
+mod selector_negation_protocol_tests;
 
 #[cfg(test)]
 #[path="css_responsive_tests.rs"]

@@ -1341,28 +1341,86 @@ impl Forms {
 }
 
 fn disabled(doc: &Document, node: usize, parents: &[Option<usize>]) -> bool {
-    if doc.attr(node, "disabled").is_some() {
-        return true;
+    disabled_with_work(doc, node, parents, &mut |_| true).unwrap_or(true)
+}
+
+/// Shared native disabled/first-legend walk. Selector jobs supply their own
+/// work charge; native model construction retains its existing admission.
+pub(crate) fn disabled_with_work(
+    doc: &Document,
+    node: usize,
+    parents: &[Option<usize>],
+    work: &mut impl FnMut(usize) -> bool,
+) -> Option<bool> {
+    fn has_disabled(
+        doc: &Document,
+        node: usize,
+        work: &mut impl FnMut(usize) -> bool,
+    ) -> Option<bool> {
+        let entry = doc.nodes.get(node)?;
+        if let NodeKind::Element { attrs, .. } = &entry.kind {
+            if !work(attrs.len().saturating_mul(2).saturating_add(1)) {
+                return None;
+            }
+            for attribute in attrs {
+                if !work(attribute.name.qualified.len().div_ceil(64)) {
+                    return None;
+                }
+            }
+        } else if !work(1) {
+            return None;
+        }
+        Some(doc.attr(node, "disabled").is_some())
     }
-    let mut ancestor = parents[node];
-    while let Some(index) = ancestor {
-        if tag(doc, index) == "fieldset" && doc.attr(index, "disabled").is_some() {
-            let legend = doc.nodes[index]
-                .children
-                .iter()
-                .copied()
-                .find(|&id| tag(doc, id) == "legend");
+    if has_disabled(doc, node, work)? {
+        return Some(true);
+    }
+    let mut ancestor = *parents.get(node)?;
+    for _ in 0..doc.nodes.len() {
+        let Some(index) = ancestor else {
+            return Some(false);
+        };
+        if !work(1) {
+            return None;
+        }
+        let entry = doc.nodes.get(index)?;
+        if entry.namespace == crate::html::Namespace::Html
+            && tag(doc, index) == "fieldset"
+            && has_disabled(doc, index, work)?
+        {
+            let mut legend = None;
+            for &child in &entry.children {
+                if !work(1) {
+                    return None;
+                }
+                let item = doc.nodes.get(child)?;
+                if item.namespace == crate::html::Namespace::Html && tag(doc, child) == "legend" {
+                    legend = Some(child);
+                    break;
+                }
+            }
             let mut current = Some(node);
-            while current.is_some() && current != Some(index) && current != legend {
-                current = parents[current.unwrap()];
+            let mut complete = false;
+            for _ in 0..=doc.nodes.len() {
+                if current.is_none() || current == Some(index) || current == legend {
+                    complete = true;
+                    break;
+                }
+                if !work(1) {
+                    return None;
+                }
+                current = *parents.get(current?)?;
+            }
+            if !complete {
+                return None;
             }
             if legend.is_none() || current != legend {
-                return true;
+                return Some(true);
             }
         }
-        ancestor = parents[index];
+        ancestor = *parents.get(index)?;
     }
-    false
+    None
 }
 
 fn append_entry(name: &str, value: &str, output: &mut String, limit: usize) -> Result<(), String> {

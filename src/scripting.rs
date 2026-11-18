@@ -4951,6 +4951,14 @@ mod compatibility_tests;
 mod script_child_nodes_tests;
 
 #[cfg(test)]
+#[path = "script_selector_negation_tests.rs"]
+mod script_selector_negation_tests;
+
+#[cfg(test)]
+#[path = "script_selector_negation_protocol_tests.rs"]
+mod script_selector_negation_protocol_tests;
+
+#[cfg(test)]
 #[path = "script_document_node_tests.rs"]
 mod script_document_node_tests;
 
