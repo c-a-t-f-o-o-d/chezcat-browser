@@ -6,6 +6,15 @@
     "integrated_source": "60895467068d87ed49a045751b20e47309a0ab58",
     "previous_tag": "v0.81.0-alpha.3",
     "previous_tag_source": "57cc1d53db3860012b229530d8b7695e3f007f63",
+    "verified_publication": {
+      "tag": "v0.82.0-alpha.1",
+      "tag_source": "f2e1823266a7c08c89bce7293572d801da62053c",
+      "release_url": "https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.82.0-alpha.1",
+      "workflow_url": "https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/runs/44400222193",
+      "downloaded_and_verified": ["ChezCat-windows-x64.zip", "ChezCat-source.zip", "publication.json", "SHA256SUMS"],
+      "packaged_executable_sha256": "73784aa0c64166888b95c3859d0b8a3cdb555149934b5df09bd58f6e505aebfe",
+      "packaged_runtime_checks": "Startup, original App journey, version, wire User-Agent and About identity passed."
+    },
     "combined_app_recheck": {
       "measured_source": "067ac5edb64e26f39c2a3d816ecbb1cf0a023f3c",
       "executable_sha256": "b843f2624082d27f35cd4b3b9f6a7c0234b87c865794afbe1b8ddd273fa89910",
@@ -97,6 +106,21 @@
         "operation": "Read contentEditable on the active element"
       },
       "controls": "The independent trusted native editor, literal color change and retained neighbor passed."
+    },
+    "development_build_rechecks": {
+      "vue_3_5_45": {
+        "measured_source": "45f949117b4aadbe609578880a4414ff3c778d2f",
+        "executable_sha256": "0366e2c61d6ae87962e455612848f04bbc4776bf0ff1d1c0c4b803f755aa0411",
+        "completed_actions": 17,
+        "fault_free_stages": 5,
+        "result": "Mounted, edited through trusted input, completed both clicks and the next-tick and timer updates, and retained the independent editor."
+      },
+      "tagged_source": {
+        "measured_source": "f2e1823266a7c08c89bce7293572d801da62053c",
+        "build_kind": "development",
+        "legacy_w2_first_failure": {"script": "jquery-1.12.4.js", "line": 4743, "column": 4, "operation": "DIV.setAttribute for the raw onfocusin attribute during initialization"},
+        "react_18_3_1_first_failure": {"script": "react-dom.production.min.js", "line": 58, "column": 228, "operation": "Read activeElement.contentEditable before component mount"}
+      }
     }
   },
   "reference": {

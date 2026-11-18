@@ -143,9 +143,9 @@ they are not production dependencies and are not required by `verify_offline.py`
 
 ## Source and runtime identity
 
-The prepared `0.82.0-alpha.1` candidate starts from integrated source `6089546`.
-The release workflow verifies the final tag, packages and downloaded bytes.
-[Release checks](RELEASING.md)
+Published `0.82.0-alpha.1` identifies tagged source
+`f2e1823266a7c08c89bce7293572d801da62053c`. Its downloaded package, PE, HTTP User-Agent,
+CLI and About identities passed the [release checks](RELEASING.md#published-baseline).
 
 About shows the development build identity and source state. As a historical
 example, the verified clean integrated build at
@@ -155,7 +155,8 @@ history and the suffix identifies the source commit. A feature head outside that
 history, a dirty checkout or unavailable history uses `+dev.g<commit>` when the
 revision is known and `+dev.unknown` otherwise. Declared tagged builds display the
 base version and identify the declared tag with publication unverified. About
-shows clean, dirty or unknown source state separately.
+shows clean, dirty or unknown source state separately. That embedded label is not
+rewritten by later download verification.
 
 <details>
 <summary><strong>📦 Packaging boundaries and private-review exports</strong></summary>

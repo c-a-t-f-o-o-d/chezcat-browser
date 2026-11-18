@@ -17,7 +17,7 @@
 > contract, not complete standards or website support. Local tests, App journeys,
 > physical devices, and live services are different evidence scopes.
 
-**Integration baseline for 0.82.0-alpha.1** is `6089546`. The preceding prerelease is 0.81.0-alpha.3 at `57cc1d5`. [Source comparison](https://github.com/c-a-t-f-o-o-d/chezcat-browser/compare/57cc1d5...6089546)
+**Published prerelease 0.82.0-alpha.1** is tagged at `f2e1823` and includes the integrated features measured through `6089546`. The preceding prerelease is 0.81.0-alpha.3 at `57cc1d5`. [Release downloads](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.82.0-alpha.1) · [Source comparison](https://github.com/c-a-t-f-o-o-d/chezcat-browser/compare/v0.81.0-alpha.3...v0.82.0-alpha.1)
 
 **Earlier source snapshot:** public `main` at `a65d37c` (November 17, 2026). This includes
 PRs [#29](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/29),
@@ -77,7 +77,7 @@ remain at `36adf20`; these later changes do not update those binaries.
 | **Events** | Genuine owner-realm Event/UIEvent/MouseEvent/CustomEvent construction and branded state; real Event/UIEvent/CustomEvent dispatch/cancellation; finite trusted anchor click/auxclick; object listeners resolve their current `handleEvent` at delivery; dispatched base Events use genuine ordinary string/symbol property lookup with metered own storage and protected isTrusted | Synthetic Mouse dispatch, general pointer delivery, specialized keyboard interfaces and shadow retargeting remain gaps |
 | **Animation frames** | Replaceable/deletable/restorable main-window scheduling and cancellation through real callbacks and budgets | Child-frame schedulers remain unsupported |
 
-**Combined App recheck.** On `067ac5e`, Vue 3.5.45 completes all 17 actions and jQuery 4.0.0 handles trusted input and its timer. At both widths, Bootstrap 5.3.9 completes its dropdown interaction and Vue 2.7.16 completes its reactive update. On later builds legacy jQuery reaches a raw DOM attribute at 4743:4, and ReactDOM reaches `contentEditable` at 58:228 before mounting. [Measured sources and boundaries](COMPATIBILITY.md)
+**Framework App rechecks.** On `067ac5e`, Vue 3.5.45 completes all 17 actions and jQuery 4.0.0 handles trusted input and its timer. At both widths, Bootstrap 5.3.9 completes its dropdown interaction and Vue 2.7.16 completes its reactive update. Vue 3.5.45 also passes all 17 actions on `45f9491`. On a development build of tagged source `f2e1823`, jQuery 1.12.4 stops at its raw `onfocusin` write at 4743:4, and ReactDOM 18.3.1 stops at `activeElement.contentEditable` at 58:228 before mounting. [Measured sources and boundaries](COMPATIBILITY.md)
 
 **Earlier integration results.** PR #34's exact optimized candidate
 passes the unchanged pinned jQuery 4.0.0 offline app through startup, genuine
@@ -207,6 +207,8 @@ profile—not physical audibility or arbitrary-device compatibility.
 | **Hosted offline CI** | The recorded commit/configuration on its runner | Later source, release assets, devices or live services |
 | **Published release** | Actual source/tag, payload, extracted checks and downloaded bytes | Signing, exhaustive certification, reproduction or universal support |
 | **Physical/live check** | Explicit observed session and outcome | Results inferred from HTTP 200, titles, elapsed time or zero script errors |
+
+For 0.82.0-alpha.1, the downloaded runtime and source ZIPs, `publication.json` and `SHA256SUMS` passed verification. The extracted executable passed startup and its original App journey. Its version, HTTP User-Agent and About identity were also checked. [Publication workflow](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/runs/44400222193)
 
 The alpha.2 release has its own normal/optimized/hosted and scoped desktop evidence.
 Later source changes retain separate checks and do not retroactively change those

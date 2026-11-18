@@ -55,15 +55,15 @@ are different states. Report only the state actually reached.
 
 | Snapshot | Recorded outcome |
 | :--- | :--- |
+| **[v0.82.0-alpha.1](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.82.0-alpha.1)** | Published from `f2e1823266a7c08c89bce7293572d801da62053c`. All four downloads matched their public digests. Both archives and the release notes passed verification. The extracted browser started and completed the App input journey. [Tagged workflow](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/runs/44400222193) |
 | **[v0.81.0-alpha.3](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.81.0-alpha.3)** | Published from `57cc1d5`; runtime/source ZIPs, `publication.json` and `SHA256SUMS` all downloaded and verified, including extracted runtime checks |
 | **v0.81.0-alpha.2** | Published from `36adf20`, with runtime/source ZIPs, `publication.json`, `SHA256SUMS`, and downloaded/extracted verification |
 | **v0.81.0-alpha.1** | Immutable validation candidate; runtime documentation-link failure stopped publication. Tag retained, no release assets published |
 | **Earlier published releases** | Keep their original source, assets, licensing and valid grants unchanged |
 
-The owner has requested **`v0.82.0-alpha.1`**, prepared from integrated source
-`6089546`. It remains an unpublished candidate until the exact-source tagged
-workflow, extracted-runtime checks and published-download comparisons succeed.
-The published baseline and links above retain their verified identities.
+Independent checks of the downloaded alpha.1 runtime also verified PE identity,
+the actual on-wire HTTP User-Agent, CLI help, and displayed About information
+with its captured Copy payload. Earlier release rows retain their original identities.
 
 The [alpha.2 release](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.81.0-alpha.2)
 was a one-time catch-up for finite B2 and integrated prerequisites. Its completed
