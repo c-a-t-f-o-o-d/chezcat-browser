@@ -22,6 +22,13 @@ impl Bridge<'_> {
             && !self.state.dom.connected.get(node).copied().unwrap_or(true)
     }
 
+    pub(super) fn unadmitted_parentless_input_form(&self, object: u32) -> bool {
+        self.input_receiver(object) && node_index(object).is_some_and(|node|
+            self.fresh_text_input(node)
+                && self.state.tree.parents.get(node) == Some(&None)
+                && self.doc.attr(node,"form").is_none())
+    }
+
     fn created_input_admission_guard(&mut self, node: usize) -> Result<(), String> {
         if !self.fresh_text_input(node) || self.doc.attr(node, "form").is_some() || !self.doc.nodes[node].children.is_empty() {
             return Err("Native INPUT admission requires a fresh detached empty default/text input without explicit form association.".into());
@@ -118,6 +125,11 @@ impl Bridge<'_> {
     }
 
     pub(super) fn text_input_metadata_get(&mut self, object: u32, property: &str) -> Result<Option<Value>, String> {
+        if property == "form" && self.unadmitted_parentless_input_form(object) {
+            // With neither an ancestor nor an explicit association, the owner
+            // is known without allocating native value/checkedness state.
+            return Ok(Some(Value::Null));
+        }
         if property == "checked" && self.input_receiver(object) {
             let node = self.node(object)?;
             if self.fresh_text_input(node) {

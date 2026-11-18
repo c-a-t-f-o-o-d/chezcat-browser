@@ -3941,7 +3941,8 @@ impl Host for Bridge<'_> {
             return Ok(true);
         }
         Ok(match property {
-            "value" | "form" => self.forms.controls.contains_key(&node),
+            "value" => self.forms.controls.contains_key(&node),
+            "form" => self.forms.controls.contains_key(&node) || self.unadmitted_parentless_input_form(object),
             "selectedIndex" => self
                 .forms
                 .controls

@@ -199,6 +199,23 @@ fn input_checkedness_detached_fragment_hidden_metadata_and_failed_admission_keep
         "a pristine boolean read admitted a native editor"
     );
     assert!(!forms.controls.contains_key(&id(&doc, "read-first")));
+    let retained_before_form = page.state.retained;
+    eval(
+        &mut doc,
+        &mut forms,
+        &mut page,
+        r#"
+        if(readFirst.form!==null||!('form' in readFirst)||readFirst.parentNode!==null||
+           readFirst.isConnected||readFirst.ownerDocument!==document)throw 'fresh allocation-free form owner';
+    "#,
+    );
+    assert_eq!(
+        forms.controls.len(),
+        original_count,
+        "a form-owner read admitted a native editor"
+    );
+    assert!(!forms.controls.contains_key(&id(&doc, "read-first")));
+    assert_eq!(page.state.retained, retained_before_form);
     eval(
         &mut doc,
         &mut forms,
