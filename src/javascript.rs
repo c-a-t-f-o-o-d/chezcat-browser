@@ -6115,7 +6115,7 @@ impl Runtime {
             };
             return Ok(Value::Bool(
                 if let Some(backing) = self.symbol_backing(&object, host)? {
-                    self.symbol_property_owner(backing, key)?.is_some()
+                    self.receiver_symbol_owner(&object, backing, key, host)?.is_some()
                 } else {
                     false
                 },

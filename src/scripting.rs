@@ -2417,7 +2417,11 @@ impl Bridge<'_> {
 impl Host for Bridge<'_> {
     fn expando_owner(&self,object:u32)->Option<u32> {self.ordinary_event_owner(object).or_else(||self.standalone_target_owner(object)).or_else(||(object==DOCUMENT||self.element_expando_receiver(object)||self.fragment_receiver(object)||self.node_list_receiver(object)).then_some(WINDOW))}
     fn ordinary_native_fallback(&self,object:u32,property:&str)->bool {object==DOCUMENT&&!self.document_native_property(property)}
-    fn exposed_native_prototype(&self,object:u32)->bool {self.ordinary_event_owner(object).is_some()||self.standalone_target_owner(object).is_some()||self.video_interface_receiver(object)||self.fragment_receiver(object)||self.node_list_receiver(object)}
+    fn exposed_native_prototype(&self,object:u32)->bool {
+        self.ordinary_event_owner(object).is_some() || self.standalone_target_owner(object).is_some()
+            || self.video_interface_receiver(object) || self.fragment_receiver(object)
+            || self.node_list_receiver(object) || self.concrete_html_interface(object).is_some()
+    }
     fn native_ancestry_inspection(&self,object:u32)->bool {self.event_receiver(object)||self.exposed_native_prototype(object)||self.namespace_receiver(object)}
     fn event_target_interface(&self,window:u32)->bool {window==WINDOW || self.frame_context(window).is_some()}
     fn node_interface_constants(&self,window:u32)->Option<&'static [(&'static str,u16)]> {self.event_target_interface(window).then_some(dom_tree::NODE_CONSTANTS)}
@@ -2439,7 +2443,8 @@ impl Host for Bridge<'_> {
         let constructor=if let Some(node)=node {
             Some(if matches!(self.doc.nodes[node].kind,NodeKind::Element {..}) {
                 if self.doc.nodes[node].namespace==crate::html::Namespace::Html {
-                    if self.video_interface_receiver(object) {(WINDOW,"HTMLVideoElement")}
+                    if let Some(interface) = self.concrete_html_interface(object) {(WINDOW, interface)}
+                    else if self.video_interface_receiver(object) {(WINDOW,"HTMLVideoElement")}
                     else if self.media_interface_receiver(object) {(WINDOW,"HTMLMediaElement")}
                     else if tag(self.doc,node)=="img" {(IMAGE_FACTORY,"Image")} else {(WINDOW,"HTMLElement")}
                 } else {(WINDOW,"Element")}
@@ -2853,7 +2858,7 @@ impl Host for Bridge<'_> {
         }
         if method=="pause" && self.media_element_receiver(object) && (!self.state.enabled || !self.doc.scripting_enabled) {return Err(("InvalidStateError","Scripting is disabled.".into()));}
         if object==WINDOW && method=="requestAnimationFrame" && !matches!(args.first(),Some(Value::Function(_))) {return Err(("TypeError","requestAnimationFrame requires a callable callback.".into()));}
-        if self.event_target_interface(object) && matches!(method,"Node"|"Element"|"HTMLElement"|"CharacterData"|"HTMLMediaElement"|"HTMLVideoElement") {return Err(("TypeError","Illegal constructor for this native interface.".into()));}
+        if self.event_target_interface(object) && matches!(method,"Node"|"Element"|"HTMLElement"|"CharacterData"|"HTMLMediaElement"|"HTMLVideoElement"|"HTMLButtonElement"|"HTMLUListElement") {return Err(("TypeError","Illegal constructor for this native interface.".into()));}
         if method=="dispatchEvent"{return self.validate_dispatch(object,args);}
         if object == HISTORY && method == "replaceState" {
             if self.state.history.current.is_none() { self.history_target(args)?; }
@@ -3692,6 +3697,7 @@ impl Host for Bridge<'_> {
                     | "documentElement"
                     | "readyState"
                     | "referrer"
+                    | "defaultView"
                     | "compatMode"
                     | "prerendering"
                     | "getElementById"
@@ -3972,6 +3978,7 @@ impl Host for Bridge<'_> {
                     Ok(node.map_or(Value::Null, |node| Value::Host(node_handle(node))))
                 }
                 "readyState" => Ok(Value::String(self.state.ready.into())),
+                "defaultView" => Ok(Value::Host(WINDOW)),
                 // This browser does not send Referer or populate a document
                 // referrer. Expose the actual empty value of that policy.
                 "referrer" => Ok(Value::String(String::new())),
@@ -4982,6 +4989,14 @@ mod script_selector_negation_tests;
 #[cfg(test)]
 #[path = "script_selector_negation_protocol_tests.rs"]
 mod script_selector_negation_protocol_tests;
+
+#[cfg(test)]
+#[path = "script_dom_object_string_tests.rs"]
+mod script_dom_object_string_tests;
+
+#[cfg(test)]
+#[path = "script_dom_object_string_protocol_tests.rs"]
+mod script_dom_object_string_protocol_tests;
 
 #[cfg(test)]
 #[path = "script_node_list_iteration_tests.rs"]
