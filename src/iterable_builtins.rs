@@ -83,6 +83,7 @@ impl Runtime {
                     | Builtin::Boolean
                     | Builtin::String
                     | Builtin::Function
+                    | Builtin::AsyncFunction
                     | Builtin::RegExp
                     | Builtin::Error(_)
                     | Builtin::Collection(super::collections::Op::Constructor(_))

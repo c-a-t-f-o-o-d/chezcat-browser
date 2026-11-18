@@ -4,13 +4,13 @@ use super::*;
 
 impl Runtime {
     pub(super) fn function_source(&mut self, function: usize) -> Result<Value, Fault> {
-        let (program, span, dynamic) = match self.functions.get(function) {
+        let (program, span, dynamic, asynchronous) = match self.functions.get(function) {
             Some(Function::Script { program, template, .. }) => {
                 let template = &program.templates[*template];
-                (Some(Rc::clone(program)), template.source_start..template.source_end, template.dynamic_source)
+                (Some(Rc::clone(program)), template.source_start..template.source_end, template.dynamic_source, template.asynchronous)
             }
             Some(Function::Vacant) | None => return Err(Fault::new("Invalid callable source identity.")),
-            Some(_) => (None, 0..0, false),
+            Some(_) => (None, 0..0, false, false),
         };
         if let Some(program) = program {
             let source = program.source.get(span).ok_or_else(|| Fault::new("Invalid retained function source range."))?;
@@ -18,9 +18,11 @@ impl Runtime {
             let bytes = source.len().saturating_add(extra);
             self.function_source_output_work(bytes)?;
             let value = if dynamic {
-                let tail = source.strip_prefix("function").ok_or_else(|| Fault::new("Invalid dynamic function source range."))?;
+                let prefix = if asynchronous { "async function" } else { "function" };
+                let tail = source.strip_prefix(prefix).ok_or_else(|| Fault::new("Invalid dynamic function source range."))?;
                 let mut value = String::with_capacity(bytes);
-                value.push_str("function anonymous");
+                value.push_str(prefix);
+                value.push_str(" anonymous");
                 value.push_str(tail);
                 value
             } else { source.to_owned() };

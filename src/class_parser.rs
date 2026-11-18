@@ -98,7 +98,7 @@ impl Parser {
             if !self.is("(") {
                 return Err(self.unsupported("Class fields are not implemented; expected a method parameter list."));
             }
-            let template = self.function_with_super(None, method_start, true, is_constructor && heritage.is_some())?;
+            let template = self.function_with_super(None, method_start, false, true, is_constructor && heritage.is_some())?;
             let syntax = &self.program.templates[template];
             let names = syntax.parameter_names(&self.program);
             if names.iter().collect::<HashSet<_>>().len() != names.len() {
@@ -138,7 +138,7 @@ impl Parser {
             self.program.templates.try_reserve(1).map_err(|_| self.unsupported("Unable to reserve bounded class constructor storage."))?;
             self.program.templates.push(Template {
                 source_start: start, source_end: end, dynamic_source: false,
-                arrow: false, constructible: true, class_constructor: true, class_element: true,
+                arrow: false, asynchronous: false, constructible: true, class_constructor: true, class_element: true,
                 derived_constructor: heritage.is_some(), default_constructor: true, strict: true,
                 name: None, params: Vec::new(), rest: false,
                 trailing_parameter_comma: false, body: Vec::new(),
@@ -152,7 +152,7 @@ impl Parser {
         Ok(ExprKind::Class(index))
     }
 
-    fn next_is(&self, text: &str) -> bool {
+    pub(super) fn next_is(&self, text: &str) -> bool {
         match self.tokens.get(self.current + 1).map(|token| &token.kind) {
             Some(TokenKind::Word(word)) => word == text,
             Some(TokenKind::Punct(punct)) => *punct == text,

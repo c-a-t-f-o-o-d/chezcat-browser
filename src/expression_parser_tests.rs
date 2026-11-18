@@ -241,7 +241,7 @@ fn scratch_parser(source: &str, enclosing: usize) -> Parser {
         delimiter_ends: vec![usize::MAX; tokens.len()], tokens, deferred_bodies: Vec::new(),
         current: 0, depth: 0, expression_frames: enclosing, argument_entries: 0,
         if_branches: 0, strict: false, loops: Vec::new(), breakables: Vec::new(),
-        labels: Vec::new(), allow_in: false, functions: 0, new_target_allowed: false,
+        labels: Vec::new(), allow_in: false, functions: 0, async_body: false, new_target_allowed: false,
         super_property_allowed: false, super_call_allowed: false,
     }
 }
@@ -265,6 +265,78 @@ fn continuation_cleanup_releases_only_owned_slots_and_restores_in_context() {
     assert!(parser.assignment_expression().err().unwrap().message.contains("argument storage limit"));
     assert_eq!(parser.expression_frames, 7);
     assert_eq!(parser.argument_entries, MAX_AST);
+}
+
+#[test]
+fn async_parser_keeps_source_ranges_and_nested_function_kinds() {
+    let source = "async /* prefix */ function outer(x){function inner(){} return async y => y;}\n\
+                  const f = async function named(a){return a;};\n\
+                  const g = async(a, b) => {return a + b;}; const h = async => async;";
+    let program = parse(source).unwrap();
+    let mut templates = program.templates.iter().map(|template| {
+        (&source[template.source_start..template.source_end], template.asynchronous, template.arrow, template.constructible)
+    }).collect::<Vec<_>>();
+    templates.sort_unstable();
+    let mut expected = [
+        ("async /* prefix */ function outer(x){function inner(){} return async y => y;}", true, false, false),
+        ("function inner(){}", false, false, true),
+        ("async y => y", true, true, false),
+        ("async function named(a){return a;}", true, false, false),
+        ("async(a, b) => {return a + b;}", true, true, false),
+        ("async => async", false, true, false),
+    ];
+    expected.sort_unstable();
+    assert_eq!(templates.as_slice(), &expected);
+    assert!(matches!(&program.stmts[program.body[0]].kind, StmtKind::Function(name, id)
+        if name == "outer" && program.templates[*id].asynchronous));
+}
+
+#[test]
+fn async_parser_preserves_contextual_calls_line_breaks_and_slash_goals() {
+    let program = parse("async function f(){} /line/.test('line');\n\
+        const q = async function(){} / 2;\n\
+        async /* multiline\n */ function split(){} /next/.test('next');\n\
+        let async = obj.async; async(1); obj.async(2); async /* gap */ x => x;\n\
+        async\u{2028}x => x;").unwrap();
+    assert_eq!(program.templates.iter().filter(|t| t.asynchronous).count(), 3);
+    assert_eq!(program.exprs.iter().filter(|e| matches!(e.kind, ExprKind::RegExp(_))).count(), 2);
+    assert!(program.exprs.iter().any(|e| matches!(e.kind, ExprKind::Binary("/", _, _))));
+    assert!(program.exprs.iter().any(|e| matches!(&e.kind, ExprKind::Call(id, _)
+        if matches!(&program.exprs[*id].kind, ExprKind::Name(name) if name == "async"))));
+    parse("switch(x){case 0: async function local(){} break;}").unwrap();
+    parse("async function f(a, a){return new.target;}").unwrap();
+    for source in [
+        "async\n(a) => a", "async (x)\r\n=> x", "async x /*\n*/ => x",
+        "label: async function f(){}", "if (true) async function f(){}",
+        "const f = async (a,a) => a", "async function f(await){}",
+    ] {
+        assert!(parse(source).is_err(), "{source}");
+    }
+}
+
+#[test]
+fn async_parser_rejects_await_before_execution_and_preserves_body_boundaries() {
+    for source in [
+        "async function f(){return await x;}",
+        "const f = async () => await x;",
+        "const f = async () => {if (false) await x;};",
+        "function ordinary(){const f = async function(){await x;};}",
+        "async function f(){const nested = x => x; return await x;}",
+    ] {
+        let fault = parse(source).err().unwrap();
+        assert!(fault.message.contains("Await expressions"), "{source}: {}", fault.display());
+    }
+    for source in [
+        "async function f(){function ordinary(){await x;}}",
+        "async function f(){const ordinary = () => await x;}",
+        "async function f(){const ordinary = () => {await x;};}",
+        "async function f(){const method = {m(){await x;}};}",
+        "async function f(){function ordinary(x = await y){}}",
+        "async function f(x = await x){}",
+    ] {
+        let fault = parse(source).err().unwrap();
+        assert!(fault.message.contains("Unsupported syntax \"await\""), "{source}: {}", fault.display());
+    }
 }
 
 #[test]

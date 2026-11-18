@@ -424,6 +424,35 @@ impl Runtime {
         Ok(object)
     }
 
+    /// EvaluateAsyncFunctionBody creates its result in the callee's realm
+    /// before parameter initialization. Both parameter and body exceptions
+    /// reject this Promise, and host or resource failures still escape.
+    #[inline(never)]
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn async_function_body(
+        &mut self, program: &std::rc::Rc<super::Program>, template: usize,
+        callee: usize, parent: usize, args: &[Value], this: &Value, host: &mut dyn Host,
+    ) -> Result<Value, Fault> {
+        let promise = self.new_promise()?;
+        let marker = self.transient_marker();
+        let result = (|| {
+            self.push_transient_root(super::function_reachability::Edge::Object(promise))?;
+            match self.script_parameters_and_body(program, template, callee, parent, args, this, host) {
+                Ok(value) => {
+                    self.push_transient_value(&value)?;
+                    self.resolve_promise(promise, value, host)?;
+                }
+                Err(error) => {
+                    let reason = self.promise_exception(error)?;
+                    self.promise_settle(promise, reason, true)?;
+                }
+            }
+            Ok(Value::Object(promise))
+        })();
+        self.restore_transient_marker(marker);
+        result
+    }
+
     /// Export a genuine pending Promise with the active realm's intrinsic
     /// prototype, independently of the replaceable global Promise binding.
     pub(super) fn new_native_promise(&mut self) -> Result<(NativePromise, Value), Fault> {

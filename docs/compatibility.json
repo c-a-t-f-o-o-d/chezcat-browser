@@ -1641,9 +1641,18 @@
       "interaction": "The full driver completed its native edit and clicks. Rendered count, name and phase remained at their initial values. No timer callback was observed."
     }
   },
+  "integrated_vue_interaction": {
+    "source": "f0dc9ef0bf797dc8746bf87212e8768d0bab8c87",
+    "distribution": "Vue 3.5.45 runtime-only production browser global",
+    "viewport": [1280, 800],
+    "initial": "count=0 name= phase=ready",
+    "after_edit_and_two_clicks": "count=2 name=Ada 雪 phase=ready",
+    "after_nexttick_and_timer": "count=2 name=Ada 雪 phase=complete",
+    "final_title": "Vue3 asynchronous update complete",
+    "controls": "All 17 original actions completed. Five paired captures and the retained final frame were fault-free. The neighboring input retained its edited value and original default."
+  },
   "next": [
-    "Continue from the first observed Vue 3.5.45 mount failure until trusted input visibly updates the mounted component on integrated source",
-    "After that interaction, verify async functions, async arrows and await with visible offline page updates",
+    "Verify async functions, async arrows and await with visible offline page updates. On f0dc9ef, the separate original function and arrow scripts stopped during parsing.",
     "Retain class/object-prototype and modern Vue/React prerequisites as separate queued work; preserve source-bound App DOM/pixel/trusted-input and responsive rechecks"
   ],
   "selected_standard_controls": {
