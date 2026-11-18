@@ -650,6 +650,7 @@ struct Engine<'a> {
     labels: HashMap<usize, usize>,
     active_label: Option<usize>,
     intrinsics: Vec<Option<Intrinsic>>,
+    canvas_sizes: HashMap<usize, (crate::html_canvas::NaturalDimension, crate::html_canvas::NaturalDimension)>,
     measure_visits: usize,
     boxes: Vec<Option<BoxRecord>>,
     // Inline formatting establishes a box even when fragment dimensions are unavailable.
@@ -847,7 +848,25 @@ fn build_viewport_with_fonts_inner(
         });
     }
     let mut parents = vec![None; doc.nodes.len()];
+    let mut canvas_sizes = HashMap::new();
     for (parent, node) in doc.nodes.iter().enumerate() {
+        if doc.scripting_enabled && crate::html_canvas::element(doc, parent) {
+            let NodeKind::Element { attrs, .. } = &node.kind else { unreachable!() };
+            if let Some(meter) = budget.as_deref_mut() {
+                meter.work(attrs.len().saturating_mul(2))?;
+            }
+            let raw_width = doc.attr(parent, "width");
+            let raw_height = doc.attr(parent, "height");
+            if let Some(meter) = budget.as_deref_mut() {
+                meter.work(raw_width.map_or(1, str::len).saturating_add(raw_height.map_or(1, str::len)))?;
+                meter.copies(3 * std::mem::size_of::<(usize, (crate::html_canvas::NaturalDimension, crate::html_canvas::NaturalDimension))>())?;
+                canvas_sizes.try_reserve(1).map_err(|_| "Canvas natural-dimension storage reservation failed.")?;
+            }
+            canvas_sizes.insert(parent, (
+                crate::html_canvas::natural_dimension(raw_width, "width"),
+                crate::html_canvas::natural_dimension(raw_height, "height"),
+            ));
+        }
         for &child in &node.children {
             if child < parents.len() && child != 0 && parents[child].is_none() {
                 parents[child] = Some(parent);
@@ -871,6 +890,7 @@ fn build_viewport_with_fonts_inner(
         labels: forms::label_targets(doc),
         active_label: None,
         intrinsics: vec![None; doc.nodes.len()],
+        canvas_sizes,
         measure_visits: 0,
         boxes: (0..doc.nodes.len()).map(|_| None).collect(),
         inline_boxes: vec![false; doc.nodes.len()],
@@ -1106,9 +1126,13 @@ impl Engine<'_> {
     fn replaced_image(&self, node: usize) -> bool {
         matches!(&self.doc.nodes[node].kind, NodeKind::Element { tag, .. } if tag == "img")
             || self.video(node)
+            || self.canvas(node)
             || self.loaded_image_control(node)
     }
     fn video(&self,node:usize)->bool {self.doc.nodes[node].namespace==crate::html::Namespace::Html&&matches!(&self.doc.nodes[node].kind,NodeKind::Element {tag,..} if tag=="video")}
+    fn canvas(&self, node: usize) -> bool {
+        self.doc.scripting_enabled && crate::html_canvas::element(self.doc, node)
+    }
 
     fn containing_block(&self, node: usize, positioned: bool) -> ContainingBlock {
         let fixed = positioned && self.styles[node].position == Position::Fixed;
@@ -1277,7 +1301,7 @@ impl Engine<'_> {
                 )
             });
             let hint = |name| {
-                if image {
+                if image && !self.canvas(node) {
                     self.doc
                         .attr(node, name)
                         .and_then(|value| value.trim().parse::<f32>().ok())
@@ -1295,12 +1319,15 @@ impl Engine<'_> {
                     None
                 }
             };
+            let canvas_size = self.canvas(node).then(|| self.image_dimensions(node, &original, cb.width));
             let mut specified_width = self
                 .dimension(original.width, Some(cb.width), &original, edges[0])
-                .or_else(|| hint("width"));
+                .or_else(|| hint("width"))
+                .or_else(|| canvas_size.map(|size| size.0));
             let specified_height = self
                 .dimension(original.height, Some(cb.height), &original, edges[1])
-                .or_else(|| hint("height"));
+                .or_else(|| hint("height"))
+                .or_else(|| canvas_size.map(|size| size.1));
             if image && specified_width.is_none() {
                 if let (Some(height), Some(&(width, natural_height))) =
                     (specified_height, self.image_sizes.get(&node))
@@ -1976,7 +2003,7 @@ impl Engine<'_> {
                     self.separate("\n");
                     return;
                 }
-                if tag == "img" || self.video(index) {
+                if tag == "img" || self.video(index) || self.canvas(index) {
                     if style.display.block_level() {
                         self.finish_line(false, 0);
                         self.separate("\n");
@@ -2751,8 +2778,14 @@ impl Engine<'_> {
                     },
                 }
             }
-            NodeKind::Element { tag, .. } if tag == "img" || self.video(node) || self.loaded_image_control(node) => {
-                let width = if tag != "img" && !self.video(node) {
+            NodeKind::Element { tag, .. } if tag == "img" || self.video(node) || self.canvas(node) || self.loaded_image_control(node) => {
+                let width = if self.canvas(node) {
+                    let mut intrinsic_style = style.clone();
+                    if matches!(intrinsic_style.width, Length::Percent(_)) {
+                        intrinsic_style.width = Length::Auto;
+                    }
+                    self.image_dimensions(node, &intrinsic_style, 0).0
+                } else if tag != "img" && !self.video(node) {
                     let mut intrinsic_style = style.clone();
                     if matches!(intrinsic_style.width, Length::Percent(_)) {
                         intrinsic_style.width = Length::Auto;
@@ -3207,6 +3240,7 @@ impl Engine<'_> {
                 // The existing image renderer honors HTML dimensions as size
                 // hints. They also constrain flex sizing, including stretching.
                 let hint = |name| {
+                    if self.canvas(child) { return None; }
                     self.doc
                         .attr(child, name)
                         .and_then(|v| v.trim().parse::<f32>().ok())
@@ -4453,6 +4487,7 @@ impl Engine<'_> {
     }
 
     fn image_dimensions(&self, node: usize, style: &Style, available: i32) -> (i32, i32) {
+        if self.canvas(node) { return self.canvas_dimensions(node, style, available); }
         let natural = self.image_sizes.get(&node).copied();
         let attribute = |name| {
             self.doc
@@ -4521,6 +4556,34 @@ impl Engine<'_> {
         (width, height)
     }
 
+    fn canvas_dimensions(&self, node: usize, style: &Style, available: i32) -> (i32, i32) {
+        let &(natural_width, natural_height) = self.canvas_sizes.get(&node)
+            .expect("Every genuine context-none canvas has preflighted natural dimensions.");
+        let padding = self.edges(style.padding, available, style, false);
+        let border = self.border(style, available);
+        let horizontal = padding[1] + padding[3] + border[1] + border[3];
+        let vertical = padding[0] + padding[2] + border[0] + border[2];
+        let explicit_width = self.dimension(style.width, Some(available), style, horizontal);
+        let explicit_height = self.dimension(style.height, None, style, vertical);
+        let zoom = f64::from(self.zoom);
+        let natural_width_px = natural_width.bounded_value(f64::from(MAX_HEIGHT) / zoom) * zoom;
+        let natural_height_px = natural_height.bounded_value(f64::from(MAX_HEIGHT) / zoom) * zoom;
+        let unconstrained_width = explicit_width.map(f64::from).unwrap_or_else(|| {
+            explicit_height.and_then(|height| natural_width.scaled_ratio(natural_height, f64::from(height)))
+                .unwrap_or(natural_width_px)
+        }).round().clamp(0.0, f64::from(MAX_HEIGHT)) as i32;
+        let width = self.constrained(unconstrained_width, style.min_width, style.max_width, Some(available), style, horizontal)
+            .clamp(0, MAX_HEIGHT);
+        let height = explicit_height.map(f64::from).unwrap_or_else(|| {
+            if explicit_width.is_some() || width != unconstrained_width {
+                natural_height.scaled_ratio(natural_width, f64::from(width)).unwrap_or(natural_height_px)
+            } else { natural_height_px }
+        }).round().clamp(0.0, f64::from(MAX_HEIGHT)) as i32;
+        let height = self.constrained(height, style.min_height, style.max_height, None, style, vertical)
+            .clamp(0, MAX_WIDTH);
+        (width.min(MAX_WIDTH), height)
+    }
+
     fn image(&mut self, node: usize, style: &Style, link: Option<usize>, depth: usize) {
         if self.layout.items.len() >= MAX_ITEMS {
             return;
@@ -4530,7 +4593,7 @@ impl Engine<'_> {
         let padding = self.edges(style.padding, available, style, false);
         let border = self.border(style, available);
         let (width, height) = self.image_dimensions(node, style, available);
-        if width == 0 || height == 0 {
+        if !self.canvas(node) && (width == 0 || height == 0) {
             return;
         }
         let horizontal = padding[3] + border[3] + padding[1] + border[1];

@@ -38,6 +38,7 @@ fn specific(tag: &str) -> &'static str {
         "body" => "text link vLink aLink bgColor background onafterprint onbeforeprint onbeforeunload onhashchange onlanguagechange onmessage onmessageerror onoffline ononline onpagehide onpagereveal onpageshow onpageswap onpopstate onrejectionhandled onstorage onunhandledrejection onunload",
         "iframe" => "src srcdoc sandbox contentWindow contentDocument referrerPolicy allow allowFullscreen credentialless loading name width height align frameBorder longDesc marginHeight marginWidth scrolling csp browsingTopics privateToken featurePolicy getSVGDocument",
         "img" => "alt src srcset sizes crossOrigin useMap isMap width height naturalWidth naturalHeight complete currentSrc referrerPolicy decoding loading fetchPriority decode name lowsrc longDesc align hspace vspace border",
+        "canvas" => "width height getContext toDataURL toBlob transferControlToOffscreen",
         "a" => "text coords charset name rev shape",
         "area" => "alt coords shape noHref",
         "input" => "accept alt capture checked defaultChecked files height width src indeterminate list max min multiple pattern size step valueAsDate valueAsNumber useMap webkitdirectory webkitEntries stepDown stepUp showPicker formAction formEnctype formMethod formNoValidate formTarget popoverTargetElement popoverTargetAction alpha colorSpace align",
@@ -133,6 +134,7 @@ impl Bridge<'_> {
                         | "button"
                         | "label"
                         | "input"
+                        | "canvas"
                         | "textarea"
                         | "img"
                         | "video"

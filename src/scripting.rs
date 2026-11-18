@@ -58,6 +58,8 @@ mod script_hidden_inputs;
 mod script_text_inputs;
 #[path = "script_input_accessors.rs"]
 mod script_input_accessors;
+#[path = "script_canvas.rs"]
+mod script_canvas;
 #[cfg(test)]
 #[path = "script_input_accessor_tests.rs"]
 mod script_input_accessor_tests;
@@ -2497,6 +2499,7 @@ impl Bridge<'_> {
             || self.html_offset_member(object, property)
             || self.scroll_offset_member(object, property)
             || self.input_accessor_member(object, property)
+            || self.canvas_member(object, property)
             || self.text_prototype_property(object, property)
             || script_element_properties::ordinary_interface_member(property)
                 && self.concrete_html_interface(object).is_some()
@@ -2520,7 +2523,7 @@ impl Host for Bridge<'_> {
         // Container prototypes identify the objects, but their enumerable
         // native attributes still live outside the ordinary descriptor store.
         if let Some(interface) = self.concrete_html_interface(object) {
-            return matches!(interface, "HTMLButtonElement" | "HTMLUListElement" | "HTMLInputElement");
+            return matches!(interface, "HTMLButtonElement" | "HTMLUListElement" | "HTMLInputElement" | "HTMLCanvasElement");
         }
         self.exposed_native_prototype(object)
     }
@@ -2706,6 +2709,9 @@ impl Host for Bridge<'_> {
         self.prepare_media_microtask(object,script_media::interface_operation(member).unwrap_or(member),args,setter)
     }
     fn native_setter_property(&self,object:u32,method:&str)->Option<&'static str>{
+        if let Some((name, true)) = script_canvas::accessor(method) {
+            return self.canvas_receiver(object).then_some(name);
+        }
         if let Some((name, true)) = script_input_accessors::accessor(method) {
             return self.input_receiver(object).then_some(name);
         }
@@ -2718,6 +2724,7 @@ impl Host for Bridge<'_> {
     fn run_native_microtask(&mut self,ticket:u64)->Result<(),String>{self.run_media_microtask(ticket)}
 
     fn number_setter(&self, object: u32, property: &str) -> bool {
+        if self.canvas_member(object, property) {return true;}
         if script_scroll_offsets::axis(property).is_some() && self.element_selector_receiver(object) {return true;}
         if property=="currentTime" && self.media_interface_receiver(object) {return true;}
         node_index(object).is_some_and(|node| tag(self.doc, node) == "img")
@@ -2846,6 +2853,7 @@ impl Host for Bridge<'_> {
     }
 
     fn native_method_owner(&self, object:u32, method:&str) -> Option<u32> {
+        if script_canvas::accessor(method).is_some() && self.event_target_interface(object) {return Some(object);}
         if script_input_accessors::accessor(method).is_some() && self.event_target_interface(object) {return Some(object);}
         if script_scroll_offsets::accessor(method).is_some() && self.event_target_interface(object) {return Some(object);}
         if Offset::getter(method).is_some() && self.event_target_interface(object) {return Some(object);}
@@ -2988,6 +2996,7 @@ impl Host for Bridge<'_> {
     ) -> Result<(), (&'static str, String)> {
         if object==WINDOW && method=="getComputedStyle" || script_computed_style::index(object).is_some() {return self.validate_computed_call(object,method,args);}
         if script_input_accessors::accessor(method).is_some() {return self.validate_input_accessor(object);}
+        if script_canvas::accessor(method).is_some() {return self.validate_canvas_accessor(object);}
         if let Some(offset) = Offset::getter(method) {return self.validate_html_offset(object, offset);}
         if script_scroll_offsets::accessor(method).is_some() {return self.validate_scroll_element(object);}
         if method=="NodeList" && self.event_target_interface(object) {return Err(("TypeError","Illegal constructor for this native interface.".into()));}
@@ -3303,6 +3312,9 @@ impl Host for Bridge<'_> {
 
     fn accepts_receiver(&self, object: u32, method: &str, receiver: u32) -> bool {
         if method=="\0Document.get.documentElement" && self.event_target_interface(object) {return self.document_interface_receiver(receiver);}
+        if script_canvas::accessor(method).is_some() && self.event_target_interface(object) {
+            return self.canvas_receiver(receiver);
+        }
         if script_input_accessors::accessor(method).is_some() && self.event_target_interface(object) {
             return self.input_receiver(receiver);
         }
@@ -4460,6 +4472,9 @@ impl Host for Bridge<'_> {
             let value = self.text(&value)?;
             return self.attribute(node,"class",Some(value));
         }
+        if self.canvas_member(object, property) {
+            return self.canvas_dimension_set(object, property, &value);
+        }
         if property=="srcdoc" && self.iframe_srcdoc_property(node) {
             let text=self.text(&value)?;
             let bytes=text.len();
@@ -4603,6 +4618,9 @@ impl Host for Bridge<'_> {
     }
 
     fn call(&mut self, object: u32, method: &str, args: &[Value]) -> Result<Value, String> {
+        if let Some((name, false)) = script_canvas::accessor(method) {
+            return self.canvas_dimension_get(object, name);
+        }
         if let Some((name, false)) = script_input_accessors::accessor(method) {
             self.validate_input_accessor(object).map_err(|(_, reason)| reason)?;
             return self.get(object, name);
@@ -6914,3 +6932,11 @@ mod browser_budget_tests {
 #[cfg(test)]
 #[path = "script_timer_global_tests.rs"]
 mod timer_global_tests;
+
+#[cfg(test)]
+#[path = "script_canvas_dimension_tests.rs"]
+mod canvas_dimension_tests;
+
+#[cfg(test)]
+#[path = "script_canvas_protocol_tests.rs"]
+mod canvas_protocol_tests;
