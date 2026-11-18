@@ -88,7 +88,6 @@ impl Default for LoadOptions {
 pub(crate) const MAX_SCRIPTS: usize = crate::javascript::limits::BROWSER_CAPACITIES.programs;
 pub(crate) const MAX_STYLESHEETS: usize = 256;
 const MAX_RESOURCE_ATTEMPTS: usize = 8192;
-pub(crate) const MAX_SCRIPT_BYTES: usize = crate::javascript::limits::BROWSER_CAPACITIES.source_bytes;
 // Decoded-image counts stay independent from CSS/script request capacities.
 const MAX_UNIQUE_IMAGES: usize = 64;
 pub(crate) const MAX_DECODED_IMAGE_BYTES: usize = 64 * 1024 * 1024;
@@ -1286,6 +1285,7 @@ fn load_critical_resources(
             .map(|url| url.display());
         let mut trace_attempted = false;
         let result = (|| -> Result<String, String> {
+            let script_limit = capacity.source_bytes.min(capacity.retained_source.saturating_sub(script_bytes));
             if kind == "SCRIPT" {
                 if let Some(reason) = &loaded.scripting_blocked {
                     return Err(reason.clone());
@@ -1299,11 +1299,10 @@ fn load_critical_resources(
                 }
                 if reference.is_none() {
                     stats.begin_attempt(loaded.location.url.is_some())?;
-                    let source = script_text(&loaded.document, node, capacity)?;
+                    let source = script_text(&loaded.document, node, script_bytes, capacity)?;
                     loaded
                         .csp
                         .allows_inline(node, csp::nonce(&loaded.document, node), &source)?;
-                    check_script_size(source.len(), script_bytes, capacity)?;
                     script_bytes += source.len();
                     loaded.scripts.push(Script {
                         node,
@@ -1451,7 +1450,9 @@ fn load_critical_resources(
                     }
                 };
                 let response = if kind == "SCRIPT" {
-                    pool.fetch_classic_script(url, limit.min(remaining), origin, mode, same_origin_only, &guard)?
+                    let wire_limit = limit.min(remaining);
+                    pool.fetch_classic_script(url, wire_limit, script_input_limit(script_limit, wire_limit),
+                        origin, mode, same_origin_only, &guard)?
                 } else {
                     let fetched = match pool.fetch_stylesheet(url, limit.min(remaining), origin, mode, same_origin_only, &guard) {
                         Ok(fetched) => {
@@ -1518,7 +1519,7 @@ fn load_critical_resources(
                 let limit = if kind == "CSS" {
                     stylesheet_limits.sheet_bytes
                 } else {
-                    capacity.source_bytes
+                    script_input_limit(script_limit, capacity.source_bytes)
                 };
                 (
                     navigation::read_limited(path, limit)?,
@@ -1528,14 +1529,14 @@ fn load_critical_resources(
             };
             check_cancel(cancel)?;
             let resolved_name = resolved_location.display();
-            let source = decode_text(&bytes, &encoding, false)?;
             if kind == "CSS" {
+                let source = decode_text(&bytes, &encoding, false)?;
                 css_usage=stylesheet_limits.accept(&source,css_usage)?;
                 loaded.styles.insert(node, source);
                 style_bases.insert(node, resolved_location);
                 Ok(format!("loaded {resolved_name}"))
             } else {
-                check_script_size(source.len(), script_bytes, capacity)?;
+                let source = decode_script(bytes, &encoding, script_limit)?;
                 script_bytes += source.len();
                 loaded.scripts.push(Script {
                     node,
@@ -2368,14 +2369,11 @@ fn check_script(doc: &Document, node: usize) -> Result<(), String> {
     Ok(())
 }
 
-fn script_text(doc: &Document, node: usize, capacity: crate::javascript::limits::Capacities) -> Result<String, String> {
+fn script_text(doc: &Document, node: usize, previous: usize, capacity: crate::javascript::limits::Capacities) -> Result<String, String> {
     let mut source = String::new();
     for &child in &doc.nodes[node].children {
         if let NodeKind::Text(text) = &doc.nodes[child].kind {
-            check_script_size(text.len(), source.len(), capacity)?;
-            if text.len() > capacity.source_bytes.saturating_sub(source.len()) {
-                return Err(format!("A script source exceeds the {} KiB limit.", capacity.source_bytes / 1024));
-            }
+            check_script_size(source.len().saturating_add(text.len()), previous, capacity)?;
             source.push_str(text);
         }
     }
@@ -2500,6 +2498,18 @@ pub(crate) fn decode_text(
     if let Some(bytes) = bytes.strip_prefix(&[0xef, 0xbb, 0xbf]) {
         return Ok(String::from_utf8_lossy(bytes).into_owned());
     }
+    match text_encoding(bytes, content_type, sniff_html)? {
+        TextEncoding::Utf8 => Ok(String::from_utf8_lossy(bytes).into_owned()),
+        TextEncoding::Windows1252 => windows_1252(bytes, usize::MAX),
+    }
+}
+
+enum TextEncoding {
+    Utf8,
+    Windows1252,
+}
+
+fn text_encoding(bytes: &[u8], content_type: &str, sniff_html: bool) -> Result<TextEncoding, String> {
     let mut encoding = charset(content_type);
     if encoding.is_none() && sniff_html {
         let prefix = String::from_utf8_lossy(&bytes[..bytes.len().min(1024)]);
@@ -2530,26 +2540,75 @@ pub(crate) fn decode_text(
         }
     });
     match encoding.as_str() {
-        "utf-8" | "utf8" => Ok(String::from_utf8_lossy(bytes).into_owned()),
+        "utf-8" | "utf8" => Ok(TextEncoding::Utf8),
         "windows-1252" | "cp1252" | "iso-8859-1" | "iso8859-1" | "latin1" | "latin-1"
-        | "us-ascii" | "ascii" => {
-            const HIGH: [char; 32] = [
-                '€', '\u{fffd}', '‚', 'ƒ', '„', '…', '†', '‡', 'ˆ', '‰', 'Š', '‹', 'Œ', '\u{fffd}',
-                'Ž', '\u{fffd}', '\u{fffd}', '‘', '’', '“', '”', '•', '–', '—', '˜', '™', 'š', '›',
-                'œ', '\u{fffd}', 'ž', 'Ÿ',
-            ];
-            Ok(bytes
-                .iter()
-                .map(|b| {
-                    if (0x80..0xa0).contains(b) {
-                        HIGH[(b - 0x80) as usize]
-                    } else {
-                        char::from(*b)
-                    }
-                })
-                .collect())
-        }
+        | "us-ascii" | "ascii" => Ok(TextEncoding::Windows1252),
         _ => Err(format!("Text encoding {encoding} is not supported yet.")),
+    }
+}
+
+fn windows_1252(bytes: &[u8], limit: usize) -> Result<String, String> {
+    const HIGH: [char; 32] = [
+        '€', '\u{fffd}', '‚', 'ƒ', '„', '…', '†', '‡', 'ˆ', '‰', 'Š', '‹', 'Œ', '\u{fffd}',
+        'Ž', '\u{fffd}', '\u{fffd}', '‘', '’', '“', '”', '•', '–', '—', '˜', '™', 'š', '›',
+        'œ', '\u{fffd}', 'ž', 'Ÿ',
+    ];
+    let chars = bytes.iter().map(|&byte| match byte {
+        0x80..=0x9f => HIGH[(byte - 0x80) as usize],
+        _ => char::from(byte),
+    });
+    let length = chars.clone().map(char::len_utf8).sum::<usize>();
+    check_decoded_length(length, limit)?;
+    let mut text = String::with_capacity(length);
+    text.extend(chars);
+    Ok(text)
+}
+
+fn check_decoded_length(length: usize, limit: usize) -> Result<(), String> {
+    if length > limit {
+        return Err(format!("Decoded script source exceeds the remaining {limit} byte allowance."));
+    }
+    Ok(())
+}
+
+// The UTF-8 BOM is discarded during text decoding. Every other supported
+// conversion needs at least one UTF-8 byte per input byte.
+pub(crate) fn script_input_limit(source_limit: usize, resource_limit: usize) -> usize {
+    source_limit.saturating_add(3).min(resource_limit)
+}
+
+/// Transfer a UTF-8 response directly into the VM's source string. For other
+/// encodings, size the UTF-8 output before allocating it against the allowance.
+pub(crate) fn decode_script(mut bytes: Vec<u8>, content_type: &str, limit: usize) -> Result<String, String> {
+    let encoding = if bytes.starts_with(&[0xef, 0xbb, 0xbf]) {
+        bytes.drain(..3);
+        TextEncoding::Utf8
+    } else {
+        text_encoding(&bytes, content_type, false)?
+    };
+    if matches!(encoding, TextEncoding::Windows1252) && !bytes.is_ascii() {
+        return windows_1252(&bytes, limit);
+    }
+    match String::from_utf8(bytes) {
+        Ok(source) => {
+            check_decoded_length(source.len(), limit)?;
+            Ok(source)
+        }
+        Err(error) => {
+            let bytes = error.as_bytes();
+            let length = bytes.utf8_chunks().map(|chunk| {
+                chunk.valid().len() + if chunk.invalid().is_empty() { 0 } else { char::REPLACEMENT_CHARACTER.len_utf8() }
+            }).sum();
+            check_decoded_length(length, limit)?;
+            let mut source = String::with_capacity(length);
+            for chunk in bytes.utf8_chunks() {
+                source.push_str(chunk.valid());
+                if !chunk.invalid().is_empty() {
+                    source.push(char::REPLACEMENT_CHARACTER);
+                }
+            }
+            Ok(source)
+        }
     }
 }
 
@@ -2992,6 +3051,44 @@ mod tests {
         assert!(loaded.events.iter().any(|e| e.contains("2 MiB")));
     }
 
+    #[test]
+    fn classic_script_decoding_bounds_the_utf8_result_and_preserves_encoding_rules() {
+        for (bytes, content_type, expected) in [
+            (&b"plain"[..], "text/javascript;charset=utf-8", "plain"),
+            (&b"a\x80"[..], "text/javascript", "a€"),
+            (&b"\xef\xbb\xbfa\xff"[..], "text/javascript;charset=unsupported", "a�"),
+            (&b"a\xe2\x82b\xff"[..], "text/javascript;charset=utf8", "a�b�"),
+            (&b"a\xe9"[..], "text/javascript;charset=latin1", "aé"),
+        ] {
+            let decoded = decode_script(bytes.to_vec(), content_type, expected.len()).unwrap();
+            assert_eq!(decoded, expected);
+            assert_eq!(decoded, decode_text(bytes, content_type, false).unwrap());
+            assert!(decode_script(bytes.to_vec(), content_type, expected.len() - 1).is_err());
+        }
+        assert!(decode_script(b"plain".to_vec(), "charset=unsupported", 10).is_err());
+    }
+
+    #[test]
+    fn classic_script_rejected_files_and_inline_text_leave_room_for_later_scripts() {
+        let folder = Folder::new();
+        folder.file("first.js", "12345678");
+        folder.file("too-large.js", "12345");
+        folder.file("fits.js", "\u{feff}12");
+        let page = folder.page(concat!(
+            "<script src=first.js></script><script src=too-large.js></script>",
+            "<script>12345</script><script src=fits.js></script><script>12</script>"
+        ));
+        let mut capacity = crate::javascript::limits::REGRESSION_CAPACITIES;
+        capacity.source_bytes = 8;
+        capacity.retained_source = 12;
+        let loaded = local_with_options(&page, LoadOptions {
+            script_capacity: capacity, ..LoadOptions::default()
+        }).unwrap();
+        assert_eq!(loaded.skipped, 2, "{:?}", loaded.events);
+        let accepted: Vec<_> = loaded.scripts.iter().map(|script| script.source.as_str()).collect();
+        assert_eq!(accepted, ["12345678", "12", "12"]);
+    }
+
     struct Site {
         location: Location,
         requests: Arc<Mutex<Vec<String>>>,
@@ -3052,6 +3149,13 @@ mod tests {
                     stream.read_exact(&mut body).unwrap();
                     text.push_str(std::str::from_utf8(&body).unwrap());
                     seen.lock().unwrap().push(text);
+                    if path == "/two-byte-script.gz" {
+                        // Python gzip.compress(b"0;", mtime=0).
+                        let bytes = b"\x1f\x8b\x08\x00\x00\x00\x00\x00\x02\xff\x33\xb0\x06\x00\x28\xcd\x94\x2f\x02\x00\x00\x00";
+                        let _ = write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: text/javascript\r\nContent-Encoding: gzip\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", bytes.len());
+                        let _ = stream.write_all(bytes);
+                        continue;
+                    }
                     if path == "/assets/page-font.ttf" {
                         let bytes = crate::font::tests::fixture_font();
                         let _ = write!(stream,"HTTP/1.1 200 Test\r\nContent-Type: font/ttf\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",bytes.len());
@@ -3068,6 +3172,7 @@ mod tests {
                     let (mut status, mut mime, mut extra) =
                         (200, "text/html;charset=utf-8", String::new());
                     let body = match path.as_str() {
+                        "/script-source-remainder" => "<script>12;</script><script src=/two-byte-script.gz></script><script>1</script>".into(),
                         "/stylesheet-budget-mime" => "x".repeat(60),
                         "/stylesheet-budget-corp" => { mime="text/css"; extra="Cross-Origin-Resource-Policy: same-origin\r\n".into(); "x".repeat(60) },
                         "/stylesheet-budget-good" => { mime="text/css"; "#budget{width:73px}".into() },
@@ -3180,6 +3285,24 @@ mod tests {
                 assert_eq!(paths, [path, "/image-csp-hop"]);
                 assert!(loaded.events.iter().any(|line| line.contains("img-src/default-src blocked")), "{:?}", loaded.events);
             }
+        }
+    }
+
+    #[test]
+    fn classic_script_gzip_framing_does_not_consume_retained_source_bytes() {
+        let site = Site::new();
+        let location = navigation::resolve("/script-source-remainder", &site.location).unwrap();
+        for (retained_source, expected) in [(5, ["12;", "0;"]), (4, ["12;", "1"])] {
+            let mut capacity = crate::javascript::limits::REGRESSION_CAPACITIES;
+            capacity.source_bytes = 32;
+            capacity.retained_source = retained_source;
+            let loaded = load_with_options(&location, &AtomicBool::new(false), &|_| {},
+                &trust::Store::unconfigured(), http::FetchMode::Normal, LoadOptions {
+                    script_capacity: capacity, ..LoadOptions::default()
+                }).unwrap();
+            assert_eq!(loaded.scripts.iter().map(|s| s.source.as_str()).collect::<Vec<_>>(),
+                expected, "{:?}", loaded.events);
+            assert_eq!(loaded.skipped, 1);
         }
     }
 

@@ -155,6 +155,7 @@ physical desktop or complete live-page results.
 | Area | Current behavior | Boundary |
 | :--- | :--- | :--- |
 | **Transport** | Original HTTP/TLS/certificate handling, redirects, decompression, workers and timings | Protocol, parser, chain and admission gaps remain |
+| **Classic script sources** | Parser-loaded and dynamic external scripts accept up to 16 MiB per source. The loader bounds decompression and conversion to UTF-8 before execution. | A document admits up to 128 MiB of script source. Individual JavaScript strings retain their separate 8 MiB limit. Token, syntax-tree and execution limits also apply. |
 | **Dual-stack fallback** | Up to 256 resolver entries, per-family retention, eight bounded serial attempts, opposite-family time reservation and redacted diagnostics | Blocking OS DNS, up to one two-second connect before cancellation, and no concurrent Happy Eyeballs |
 | **Trust** | Reviewed conservative 98-authority Mozilla NSS subset; explicit PEM replacement with shared 1,024-root capacity | No OS-store discovery, automatic root updates, revocation/CT, full Firefox policy or security certification |
 | **Policy** | Original hostname for TLS/Host/origin; per-hop CSP, cookies, credentials, mixed-content, MIME and response-policy checks | A successful response is not a usable website or challenge clearance |

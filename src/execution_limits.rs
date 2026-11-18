@@ -64,7 +64,7 @@ pub const REGRESSION_CAPACITIES: Capacities = Capacities {
 
 pub const BROWSER_CAPACITIES: Capacities = Capacities {
     functions: 65_536, programs: 4096, environments: 65_536, bindings: 1_048_576,
-    arguments: 65_536, source_bytes: 8 * 1024 * 1024, string_bytes: 8 * 1024 * 1024,
+    arguments: 65_536, source_bytes: 16 * 1024 * 1024, string_bytes: 8 * 1024 * 1024,
     tokens: 2_097_152, ast_nodes: 2_097_152, retained_source: 128 * 1024 * 1024,
     retained_ast: 8_388_608, retained_regexp: 16 * 1024 * 1024,
     property_bytes: 8192, promises: 65_536, promise_jobs: 262_144,
