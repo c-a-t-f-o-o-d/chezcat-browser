@@ -2,7 +2,101 @@
 //! rectangles at radius zero use the unchanged square painting fast path.
 use super::*;
 
+#[derive(Clone, Copy, Debug)]
+pub struct UniformBorder {
+    pub width: i32,
+    pub color: u32,
+    pub alpha: u8,
+}
+
+fn rounded_coverage(px: f64, py: f64, width: f64, height: f64, radius: f64) -> u32 {
+    if px < 0.0 || py < 0.0 || px >= width || py >= height {
+        return 0;
+    }
+    // The corner distance alone is not a coverage function for square or
+    // central interiors. In particular, a zero inner radius must stay square.
+    if radius == 0.0 || (px >= radius && px <= width - radius)
+        || (py >= radius && py <= height - radius)
+    {
+        return 255;
+    }
+    let dx = (radius - px).max(px - (width - radius)).max(0.0);
+    let dy = (radius - py).max(py - (height - radius)).max(0.0);
+    ((radius + 0.5 - dx.hypot(dy)).clamp(0.0, 1.0) * 255.0).round() as u32
+}
+
 impl Canvas {
+    /// An opaque CSS color background continues underneath this uniform solid
+    /// border. Resolve both materials against the original destination once,
+    /// rather than source-over a partially covered stroke onto an already
+    /// partially covered background. No image/native/transparent-bg admission.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn fill_rounded_border_rect(
+        &mut self, x: i32, y: i32, width: i32, height: i32,
+        radius: f32, background: u32, border: UniformBorder,
+    ) {
+        if width <= 0 || height <= 0 || !radius.is_finite() {
+            return;
+        }
+        if border.width <= 0 || border.alpha == 0 {
+            self.fill_rounded_rect_alpha(x, y, width, height, radius, background, 255);
+            return;
+        }
+        let radius = f64::from(radius.max(0.0)).min(f64::from(width.min(height)) * 0.5);
+        if radius == 0.0 {
+            self.fill_rect(x, y, width, height, background);
+            let edge = border.width;
+            if i64::from(edge) * 2 >= i64::from(width.min(height)) {
+                self.fill_rect_alpha(x, y, width, height, border.color, border.alpha);
+            } else {
+                for (x, y, w, h) in [
+                    (x, y, width, edge),
+                    (x, y.saturating_add(height - edge), width, edge),
+                    (x, y.saturating_add(edge), edge, height - 2 * edge),
+                    (x.saturating_add(width - edge), y.saturating_add(edge), edge, height - 2 * edge),
+                ] {
+                    self.fill_rect_alpha(x, y, w, h, border.color, border.alpha);
+                }
+            }
+            return;
+        }
+        let bounds = ClipRect::new(x, y, width, height).intersect(self.clip);
+        if bounds.left >= bounds.right || bounds.top >= bounds.bottom {
+            return;
+        }
+        let edge = f64::from(border.width);
+        let inner_width = f64::from(width) - 2.0 * edge;
+        let inner_height = f64::from(height) - 2.0 * edge;
+        let inner_radius = (radius - edge).max(0.0);
+        for row in bounds.top..bounds.bottom {
+            let py = (i64::from(row) - i64::from(y)) as f64 + 0.5;
+            for col in bounds.left..bounds.right {
+                let px = (i64::from(col) - i64::from(x)) as f64 + 0.5;
+                let outer = rounded_coverage(px, py, f64::from(width), f64::from(height), radius);
+                if outer == 0 { continue; }
+                let inner = if inner_width <= 0.0 || inner_height <= 0.0 { 0 } else {
+                    rounded_coverage(px - edge, py - edge, inner_width, inner_height, inner_radius).min(outer)
+                };
+                let pixel = &mut self.pixels[row as usize * self.width + col as usize];
+                if inner == 255 {
+                    *pixel = background & 0x00ff_ffff;
+                    continue;
+                }
+                // Coverage is measured in 255ths; border alpha is independent.
+                // The three nonnegative material weights sum to 255*255.
+                let stroke = (outer - inner) * u32::from(border.alpha);
+                let background_weight = outer * 255 - stroke;
+                let destination_weight = (255 - outer) * 255;
+                let channel = |shift: u32| {
+                    ((((*pixel >> shift) & 255) * destination_weight
+                        + ((background >> shift) & 255) * background_weight
+                        + ((border.color >> shift) & 255) * stroke + 32_512) / 65_025) << shift
+                };
+                *pixel = channel(16) | channel(8) | channel(0);
+            }
+        }
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn fill_rounded_rect_alpha(
         &mut self, x: i32, y: i32, width: i32, height: i32,
@@ -41,6 +135,10 @@ impl Canvas {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "paint_rounded_border_tests.rs"]
+mod border_tests;
 
 #[cfg(test)]
 mod tests {

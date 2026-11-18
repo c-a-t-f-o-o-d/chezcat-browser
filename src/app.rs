@@ -3757,11 +3757,18 @@ impl App {
                         canvas.fill_rect_alpha(x, y, width, height, self.page_background_color(color), alpha);
                     }
                 }
-                PaintItem::RoundedRect { x, y, width, height, color, alpha, radius } => {
+                PaintItem::RoundedRect { x, y, width, height, color, alpha, radius, border } => {
                     let y = y + top - self.scroll;
                     if y < bottom && y.saturating_add(height) > top {
-                        canvas.fill_rounded_rect_alpha(x, y, width, height, radius,
-                            self.page_background_color(color), alpha);
+                        if let Some(border) = border {
+                            canvas.fill_rounded_border_rect(x, y, width, height, radius,
+                                self.page_background_color(color), crate::paint::UniformBorder {
+                                    color: self.page_background_color(border.color), ..border
+                                });
+                        } else {
+                            canvas.fill_rounded_rect_alpha(x, y, width, height, radius,
+                                self.page_background_color(color), alpha);
+                        }
                     }
                 }
                 PaintItem::Background { node, x, y, width, height, border, presentation, .. } => {
@@ -5782,6 +5789,10 @@ mod css_radius_tests;
 #[cfg(test)]
 #[path = "app_css_root_selector_tests.rs"]
 mod css_root_selector_tests;
+
+#[cfg(test)]
+#[path = "app_rounded_border_tests.rs"]
+mod rounded_border_tests;
 
 #[cfg(test)]
 #[path = "app_text_input_tests.rs"]

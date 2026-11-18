@@ -144,7 +144,7 @@ html,body{margin:0;padding:0;background:white}
 #moved{width:80px;height:40px;background:#1464dc;border-radius:8px;transform:translate(12px,5px)}
 #row{position:absolute;left:120px;top:20px;display:flex;align-items:stretch;width:80px;height:60px}
 #stretch{width:30px;background:#1464dc;border-radius:1000px}
-.bordered{position:absolute;top:20px;width:40px;height:24px;border:2px solid red;background:#1464dc}
+.bordered{position:absolute;top:20px;width:40px;height:24px;border:2px solid red;border-right-color:blue;background:#1464dc}
 #bordered{left:220px;border-radius:8px}#plain{left:280px;border-radius:0}
 #unsupported{position:absolute;left:340px;top:20px;width:40px;height:24px;background:#1464dc;border-radius:50%}
 #parent{position:absolute;left:340px;top:100px;width:40px;height:24px;background:#1464dc;border-radius:8px;overflow:hidden}
@@ -168,9 +168,11 @@ html,body{margin:0;padding:0;background:white}
     let bordered = rect(&app, "bordered");
     let plain = rect(&app, "plain");
     assert_eq!((bordered.width, bordered.height), (plain.width, plain.height));
+    assert_eq!(pixel(&app, &canvas, bordered.x + bordered.width - 1, bordered.y + bordered.height / 2), 0x0000ff);
+    assert_eq!(pixel(&app, &canvas, bordered.x + bordered.width / 2, bordered.y), 0xff0000);
     for y in 0..plain.height { for x in 0..plain.width {
         assert_eq!(pixel(&app, &canvas, bordered.x + x, bordered.y + y),
-            pixel(&app, &canvas, plain.x + x, plain.y + y), "Border painting retains its square fallback");
+            pixel(&app, &canvas, plain.x + x, plain.y + y), "Unequal border colors retain the square fallback");
     }}
     corners(&app, &canvas, "unsupported", 0x1464dc);
     assert_eq!(pixel(&app, &canvas, 340, 100), 0xff0000, "Radius does not introduce descendant clipping");
