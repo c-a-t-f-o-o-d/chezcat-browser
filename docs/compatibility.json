@@ -1661,7 +1661,9 @@
   "legacy_fragment_progress": {
     "source": "22d0167af8ba48b371e2349aa46a38506d31cbb0",
     "viewport": [1280, 800],
-    "result": "W2 passed load and initial rendering and advanced beyond mixed fragment construction. Initialization stopped on the detached NAV cloneNode call at 4481:3."
+    "result": "W2 passed load and initial rendering and advanced beyond mixed fragment construction. Initialization stopped on the detached NAV cloneNode call at 4481:3.",
+    "clone_candidate": "8eb872c12dfcb74e8764a15892e6bd80170c64b0",
+    "candidate_result": "The detached NAV clone succeeded. W2 stopped reading its outerHTML at the same upstream position. Initial render passed, and initialization, trusted choice and timer stages remained incomplete."
   },
   "next": [
     "Advance the measured legacy jQuery initialization and recheck its trusted input and timer stages.",

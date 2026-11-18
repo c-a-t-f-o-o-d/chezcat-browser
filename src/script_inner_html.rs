@@ -4,7 +4,7 @@
 use super::*;
 
 fn append(state: &mut State, out: &mut String, text: &str) -> Result<(), String> {
-    if out.len().checked_add(text.len()).is_none_or(|len| len > state.limits.host.string_bytes) { return Err("innerHTML serialization exceeds the host string limit.".into()); }
+    if out.len().checked_add(text.len()).is_none_or(|len| len > state.limits.host.string_bytes) { return Err("HTML serialization exceeds the host string limit.".into()); }
     state.copies(text.len())?;
     out.try_reserve(text.len()).map_err(|_| "HTML serialization reservation failed.")?;
     out.push_str(text);
@@ -27,12 +27,18 @@ fn raw_text(name: &str, scripting: bool) -> bool {
 }
 
 impl Bridge<'_> {
-    pub(super) fn inner_html(&mut self, node: usize) -> Result<Value, String> {
-        if self.doc.nodes[node].namespace != crate::html::Namespace::Html { return Err("innerHTML requires known HTML namespace provenance.".into()); }
+    // https://html.spec.whatwg.org/multipage/dynamic-markup-insertion.html#dom-element-outerhtml
+    pub(super) fn serialize_html(&mut self, node: usize, include_element: bool) -> Result<Value, String> {
+        if self.doc.nodes[node].namespace != crate::html::Namespace::Html { return Err("HTML serialization requires known HTML namespace provenance.".into()); }
         if tag(self.doc, node) == "template" { return Err("Template content serialization is not implemented.".into()); }
-        self.state.work(self.doc.nodes[node].children.len())?;
-        let raw = raw_text(tag(self.doc, node), self.doc.scripting_enabled);
-        let mut stack: Vec<_> = self.doc.nodes[node].children.iter().rev().map(|&child| (child, false, raw)).collect();
+        let mut stack: Vec<_> = if include_element {
+            vec![(node, false, false)]
+        } else {
+            let children = &self.doc.nodes[node].children;
+            self.state.work(children.len())?;
+            let raw = raw_text(tag(self.doc, node), self.doc.scripting_enabled);
+            children.iter().rev().map(|&child| (child, false, raw)).collect()
+        };
         let mut out = String::new();
         while let Some((node, end, raw)) = stack.pop() {
             self.state.work(1)?;
