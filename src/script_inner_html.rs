@@ -97,8 +97,12 @@ impl Bridge<'_> {
         let base = self.doc.nodes.len();
         let connected = self.state.dom.connected[node];
         let mut old = Vec::new();
-        for child in self.doc.nodes[node].children.clone() { old.extend(self.mutation_subtree(child)?.0); }
-        if old.iter().any(|&node| matches!(tag(self.doc, node), "link" | "iframe")) { return Err("HTML replacement of stylesheet/frame resource contexts is not implemented.".into()); }
+        for child in self.doc.nodes[node].children.clone() { old.extend(self.mutation_subtree_for_fragment(child, true)?.0); }
+        for &old in &old {
+            if tag(self.doc, old) == "iframe" || tag(self.doc, old) == "link" && !self.removable_fragment_link(old)? {
+                return Err("HTML replacement of stylesheet/frame resource contexts is not implemented.".into());
+            }
+        }
         let mut bytes = 0usize;
         let mut scripts = Vec::new();
         let mut images = Vec::new();
@@ -122,7 +126,8 @@ impl Bridge<'_> {
                 bytes = bytes.checked_add(name.len()).and_then(|bytes| bytes.checked_add(href)).ok_or("HTML fragment retained size overflow.")?;
                 if item.namespace != crate::html::Namespace::Html
                     || forms::kind(&staged, local).is_some() && name != "select" && !forms::fragment_text_input(&staged, local)
-                    || matches!(name.as_str(), "form" | "fieldset" | "legend" | "style" | "link" | "base" | "meta" | "title" | "iframe" | "object" | "embed" | "source" | "audio" | "video") {
+                    || name == "link" && !script_stylesheets::bare_fragment_link(&staged, local)
+                    || matches!(name.as_str(), "form" | "fieldset" | "legend" | "style" | "base" | "meta" | "title" | "iframe" | "object" | "embed" | "source" | "audio" | "video") {
                     return Err("HTML fragment replacement of native controls/forms or unsupported resources is not implemented.".into());
                 }
                 self.state.work(attrs.len())?;

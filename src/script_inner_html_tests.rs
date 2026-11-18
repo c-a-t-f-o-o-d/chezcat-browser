@@ -137,7 +137,7 @@ fn inner_html_rejection_keeps_tree_forms_resources_and_retained_storage() {
     let children = bridge.doc.nodes[root].children.clone();
     // Text INPUT admission has its own positive/negative transaction controls;
     // this rejection matrix retains an unsupported native input type witness.
-    for source in ["<input type=checkbox value=new>","<form></form>","<div id=f>collision</div>","<style>p{color:red}</style>","<link rel=stylesheet href=x>","<iframe></iframe>","<p onclick='x()'>handler</p>","<div><svg></svg></div>","<img srcset=x src=y>","<span>prefix</span><table><tbody></tbody></table>","<img src='/pending.ppm'><table></table><table>content</table>","<table></table><link/>","<table></table><input type=checkbox>"] {
+    for source in ["<input type=checkbox value=new>","<form></form>","<div id=f>collision</div>","<style>p{color:red}</style>","<link rel=stylesheet href=x>","<iframe></iframe>","<p onclick='x()'>handler</p>","<div><svg></svg></div>","<img srcset=x src=y>","<span>prefix</span><table><tbody></tbody></table>","<img src='/pending.ppm'><table></table><table>content</table>","<table></table><link rel=stylesheet href='/late.css'>","<table></table><input type=checkbox>"] {
         assert!(bridge.set_inner_html(root, source).is_err(), "{source}");
         assert_eq!(bridge.doc.nodes.len(), before, "{source}");
         assert_eq!(bridge.doc.nodes[root].children, children, "{source}");
