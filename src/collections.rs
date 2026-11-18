@@ -82,16 +82,23 @@ pub(super) enum Mode {
     Values,
     Entries,
 }
+#[derive(Clone, Copy)]
+enum IteratorSource {
+    Ordinary(usize),
+    IndexedHost { handle: u32, owner: u32 },
+}
 pub(super) struct IteratorData {
     pub family: Family,
-    source: Option<usize>,
+    source: Option<IteratorSource>,
     next: usize,
     mode: Mode,
     text: Option<String>,
 }
 impl IteratorData {
     pub(super) fn reachability_edges(&self, add: &mut impl FnMut(super::function_reachability::Edge)) {
-        if let Some(id) = self.source { add(super::function_reachability::Edge::Object(id)); }
+        if let Some(IteratorSource::Ordinary(id)) = self.source { add(super::function_reachability::Edge::Object(id)); }
+        // Approved Host sources retain their existing append-only native list.
+        // Native expando stores are already conservative reachability roots.
     }
 
     pub(super) fn tag(&self) -> &'static str {
@@ -111,14 +118,16 @@ pub(super) struct Roots {
     map_iterator: Option<usize>,
     set_iterator: Option<usize>,
     string_iterator: Option<usize>,
+    array_keys: Option<usize>,
     array_values: Option<usize>,
+    array_entries: Option<usize>,
 }
 
 impl Roots {
     pub(super) fn reachability_edges(&self, add: &mut impl FnMut(super::function_reachability::Edge)) {
         use super::function_reachability::Edge;
         for id in [self.map, self.set, self.array_iterator, self.map_iterator, self.set_iterator, self.string_iterator].into_iter().flatten() { add(Edge::Object(id)); }
-        if let Some(id) = self.array_values { add(Edge::Function(id)); }
+        for id in [self.array_keys,self.array_values,self.array_entries].into_iter().flatten() { add(Edge::Function(id)); }
     }
 }
 #[derive(Clone, Copy)]
@@ -221,6 +230,12 @@ impl Runtime {
             ("entries", Mode::Entries),
         ] {
             self.prototype_method(array, name, Builtin::Collection(Op::ArrayIterator(mode)))?;
+            let Value::Function(id)=self.get_property(array,name)? else {unreachable!()};
+            match mode {
+                Mode::Keys=>self.collection_roots.array_keys=Some(id),
+                Mode::Values=>self.collection_roots.array_values=Some(id),
+                Mode::Entries=>self.collection_roots.array_entries=Some(id),
+            }
         }
         let values = self.get_property(array, "values")?;
         let Value::Function(function) = values else {
@@ -425,6 +440,12 @@ impl Runtime {
         family: Family,
         mode: Mode,
     ) -> Result<usize, Fault> {
+        self.new_native_iterator_source(IteratorSource::Ordinary(source), family, mode)
+    }
+
+    fn new_native_iterator_source(&mut self, source: IteratorSource, family: Family, mode: Mode)
+        -> Result<usize, Fault>
+    {
         let id = self.new_object(None)?;
         self.objects[id].iterator = Some(IteratorData {
             family,
@@ -444,6 +465,13 @@ impl Runtime {
     }
     pub(super) fn arguments_iterator_method(&self) -> Value {
         Value::Function(self.collection_roots.array_values.unwrap())
+    }
+    pub(super) fn array_iterator_intrinsic(&self,mode:Mode)->Value {
+        Value::Function(match mode {
+            Mode::Keys=>self.collection_roots.array_keys,
+            Mode::Values=>self.collection_roots.array_values,
+            Mode::Entries=>self.collection_roots.array_entries,
+        }.unwrap())
     }
 
     pub(super) fn new_string_iterator(&mut self, text: String) -> Result<usize, Fault> {
@@ -501,7 +529,10 @@ impl Runtime {
             return Ok(None);
         };
         let pair = match family {
-            Family::Array => {
+            Family::Array => match source {
+                IteratorSource::IndexedHost { handle, owner } =>
+                    self.next_indexed_host_pair(id, handle, owner, next, mode, host)?,
+                IteratorSource::Ordinary(source) => {
                 let view = self.typed_view(source);
                 let length = if let Some(view) = view {
                     view.length
@@ -524,8 +555,12 @@ impl Runtime {
                     };
                     Some((key, value))
                 }
-            }
+                }
+            },
             Family::Map | Family::Set => {
+                let IteratorSource::Ordinary(source) = source else {
+                    return Err(Fault::new("Invalid native Map/Set iterator source."));
+                };
                 if let Some((order, key, value)) = self.next_collection_entry(source, next)? {
                     self.objects[id].iterator.as_mut().unwrap().next = order + 1;
                     Some((key, value))
@@ -553,6 +588,55 @@ impl Runtime {
             }
         }))
     }
+    // Keep native-source validation and indexed reads out of ordinary recursive
+    // call frames. No list is copied and no allowance is reset here.
+    #[inline(never)]
+    pub(super) fn validate_indexed_host_iteration(
+        &mut self, handle: u32, expected_owner: Option<u32>, host: &mut dyn Host,
+    ) -> Result<u32, Fault> {
+        let owner=host.indexed_iteration_owner(handle)
+            .ok_or_else(||Fault::new("Host-object iteration is not implemented."))?;
+        if expected_owner.is_some_and(|expected|expected!=owner)
+            || host.native_access_owner(handle)!=Some(owner) {
+            return Err(Fault::new("Native indexed iterator source owner changed or expired."));
+        }
+        self.validate_native_access(handle,host)?;
+        Ok(owner)
+    }
+
+    #[inline(never)]
+    fn new_indexed_host_iterator(&mut self, handle:u32, mode:Mode, host:&mut dyn Host)
+        -> Result<usize,Fault>
+    {
+        let owner=self.validate_indexed_host_iteration(handle,None,host)?;
+        // Array values/keys/entries read length only when next is requested.
+        self.new_native_iterator_source(IteratorSource::IndexedHost {handle,owner},Family::Array,mode)
+    }
+
+    #[inline(never)]
+    fn next_indexed_host_pair(
+        &mut self, iterator:usize, handle:u32, owner:u32, next:usize,
+        mode:Mode, host:&mut dyn Host,
+    ) -> Result<Option<(Value,Value)>,Fault> {
+        self.validate_indexed_host_iteration(handle,Some(owner),host)?;
+        let length_value=self.host_read(handle,"length",host)?;
+        // Same ToLength conversion as the existing ordinary array-like path,
+        // including observable primitive conversion and Symbol rejection.
+        let number=self.binary_number(&length_value,host)?;
+        let length=if number.is_nan()||number<=0.0 {0.0}
+            else {number.trunc().min(9007199254740991.0)};
+        if length>self.limits.heap.array_length as f64 {
+            return Err(Fault::new(format!("Native indexed iterator length limit reached ({}).",self.limits.heap.array_length)));
+        }
+        if next>=length as usize {return Ok(None);}
+        self.validate_indexed_host_iteration(handle,Some(owner),host)?;
+        // Commit the cursor before an indexed read can throw or reenter.
+        self.objects[iterator].iterator.as_mut().unwrap().next=next+1;
+        let value=if matches!(mode,Mode::Keys) {Value::Undefined}
+            else {self.host_read(handle,&next.to_string(),host)?};
+        Ok(Some((Value::Number(next as f64),value)))
+    }
+
     pub(super) fn construct_collection(
         &mut self,
         kind: Kind,
@@ -643,13 +727,11 @@ impl Runtime {
             )),
             Op::Size(kind) => self.collection_size(this, kind),
             Op::ArrayIterator(mode) => {
-                let Value::Object(source) = this else {
-                    return Err(Fault::new(
-                        "Array iterator methods currently require an ordinary object.",
-                    ));
-                };
-                self.new_native_iterator(source, Family::Array, mode)
-                    .map(Value::Object)
+                match this {
+                    Value::Object(source)=>self.new_native_iterator(source,Family::Array,mode),
+                    Value::Host(handle)=>self.new_indexed_host_iterator(handle,mode,host),
+                    _=>Err(Fault::new("Array iterator methods currently require an ordinary object or approved native indexed collection.")),
+                }.map(Value::Object)
             }
             Op::Next(family) => {
                 let Value::Object(id) = this else {

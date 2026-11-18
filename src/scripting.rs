@@ -2415,13 +2415,14 @@ impl Bridge<'_> {
 }
 
 impl Host for Bridge<'_> {
-    fn expando_owner(&self,object:u32)->Option<u32> {self.ordinary_event_owner(object).or_else(||self.standalone_target_owner(object)).or_else(||(object==DOCUMENT||self.element_expando_receiver(object)||self.fragment_receiver(object)).then_some(WINDOW))}
+    fn expando_owner(&self,object:u32)->Option<u32> {self.ordinary_event_owner(object).or_else(||self.standalone_target_owner(object)).or_else(||(object==DOCUMENT||self.element_expando_receiver(object)||self.fragment_receiver(object)||self.node_list_receiver(object)).then_some(WINDOW))}
     fn ordinary_native_fallback(&self,object:u32,property:&str)->bool {object==DOCUMENT&&!self.document_native_property(property)}
-    fn exposed_native_prototype(&self,object:u32)->bool {self.ordinary_event_owner(object).is_some()||self.standalone_target_owner(object).is_some()||self.video_interface_receiver(object)||self.fragment_receiver(object)}
+    fn exposed_native_prototype(&self,object:u32)->bool {self.ordinary_event_owner(object).is_some()||self.standalone_target_owner(object).is_some()||self.video_interface_receiver(object)||self.fragment_receiver(object)||self.node_list_receiver(object)}
     fn native_ancestry_inspection(&self,object:u32)->bool {self.event_receiver(object)||self.exposed_native_prototype(object)||self.namespace_receiver(object)}
     fn event_target_interface(&self,window:u32)->bool {window==WINDOW || self.frame_context(window).is_some()}
     fn node_interface_constants(&self,window:u32)->Option<&'static [(&'static str,u16)]> {self.event_target_interface(window).then_some(dom_tree::NODE_CONSTANTS)}
     fn instance_ancestry(&self, object:u32) -> Option<crate::javascript::NativeAncestry> {
+        if self.node_list_receiver(object) {return Some(crate::javascript::NativeAncestry {window:WINDOW,constructor:Some((WINDOW,"NodeList"))});}
         if let Some(window)=self.event_owner(object) {
             // Subclass immediate prototypes stay opaque; this is their genuine
             // implemented Event ancestry, as with the existing Node suffixes.
@@ -2479,6 +2480,12 @@ impl Host for Bridge<'_> {
     }
 
     fn owns_property(&self, object: u32, property: &str) -> bool {
+        if self.node_list_receiver(object) {
+            // Genuine main NodeLists retain protected native indexed slots and
+            // existing item/forEach calls. Other properties use their ordinary
+            // backing/prototype, including author length and iterator changes.
+            return collection_index(property).is_some() || matches!(property,"item"|"forEach");
+        }
         if self.element_selector_member(object,property) {return false;}
         if self.element_sibling_member(object,property) {return false;}
         if self.root_node_member(object,property) {return false;}
@@ -2501,7 +2508,8 @@ impl Host for Bridge<'_> {
         self.location_instance_owner(object).is_some() || object == HISTORY || self.attr_receiver(object) || self.ordinary_event_owner(object).is_some() || self.named_map_receiver(object)
     }
     fn ordinary_lookup_tail_property(&self,object:u32,property:&str)->bool {
-        if self.element_selector_member(object,property) {true}
+        if self.node_list_receiver(object) {true}
+        else if self.element_selector_member(object,property) {true}
         else if self.element_sibling_member(object,property) {true}
         else if self.root_node_member(object,property) {true}
         else if matches!(property,"nodeType"|"nodeName") && self.node_identity_receiver(object) {true}
@@ -2530,6 +2538,7 @@ impl Host for Bridge<'_> {
     }
 
     fn readonly_property(&self, object: u32, property: &str) -> bool {
+        if self.node_list_iteration_member(object,property) {return false;}
         if self.element_sibling_member(object,property) {return true;}
         if self.ordinary_event_owner(object).is_some() {return false;}
         if self.media_element_receiver(object) && matches!(property,"currentSrc"|"videoWidth"|"videoHeight"|"duration"|"paused"|"ended"|"seeking"|"readyState"|"networkState") {return true;}
@@ -2687,6 +2696,7 @@ impl Host for Bridge<'_> {
     }
 
     fn native_method_owner(&self, object:u32, method:&str) -> Option<u32> {
+        if self.event_target_interface(object)&&method=="\0NodeList.get.length" {return Some(object);}
         if self.event_target_interface(object)&&script_element_selectors::operation(method).is_some() {return Some(object);}
         if self.event_target_interface(object)&&script_element_siblings::operation(method).is_some() {return Some(object);}
         if self.event_target_interface(object) && method=="DocumentFragment" {return Some(object);}
@@ -2808,6 +2818,8 @@ impl Host for Bridge<'_> {
         method: &str,
         args: &[Value],
     ) -> Result<(), (&'static str, String)> {
+        if method=="NodeList" && self.event_target_interface(object) {return Err(("TypeError","Illegal constructor for this native interface.".into()));}
+        if method=="\0NodeList.get.length"&&!self.node_list_receiver(object) {return Err(("TypeError","NodeList length getter requires a genuine accessible NodeList.".into()));}
         let method=if let Some(operation)=script_element_selectors::operation(method) {
             self.validate_element_selector_receiver(object)?;
             operation
@@ -3006,7 +3018,9 @@ impl Host for Bridge<'_> {
     }
 
     fn ordinary_prototype(&self, object: u32) -> bool {
-        self.class_list_receiver(object) || node_list_index(object).is_some()
+        // NodeLists now have a genuine ordinary backing/canonical prototype;
+        // the legacy dataset-style descriptor route must not classify them.
+        self.class_list_receiver(object)
             || collection_handle_index(object).is_some()
             || (DATASET_BASE..EVENT_BASE).contains(&object)
     }
@@ -3028,6 +3042,7 @@ impl Host for Bridge<'_> {
     }
 
     fn method(&self, object: u32, property: &str) -> Option<&'static str> {
+        if self.node_list_iteration_member(object,property) {return None;}
         // Named form controls use the native field path; other genuine
         // Elements use the canonical prototype. Neither may fall through to
         // the old per-instance selector method factory below.
@@ -3093,6 +3108,7 @@ impl Host for Bridge<'_> {
     }
 
     fn accepts_receiver(&self, object: u32, method: &str, receiver: u32) -> bool {
+        if self.event_target_interface(object)&&method=="\0NodeList.get.length" {return self.node_list_receiver(receiver);}
         if self.event_target_interface(object)&&script_element_selectors::operation(method).is_some() {return self.element_selector_receiver(receiver);}
         if self.event_target_interface(object) {
             if let Some((family,_))=script_element_siblings::operation(method) {return self.element_sibling_family(receiver)==Some(family);}
@@ -3196,6 +3212,10 @@ impl Host for Bridge<'_> {
         node_list_index(object).is_some() && method == "forEach"
     }
 
+    fn indexed_iteration_owner(&self, object:u32)->Option<u32> {
+        self.node_list_receiver(object).then_some(WINDOW)
+    }
+
     fn own_keys(&mut self, object: u32) -> Result<Vec<String>, String> {
         if object==DOCUMENT {self.state.work(1)?;return Ok(Vec::new());}
         if self.standalone_target_owner(object).is_some() {self.state.work(1)?;return Ok(Vec::new());}
@@ -3244,6 +3264,7 @@ impl Host for Bridge<'_> {
     }
 
     fn own_data(&mut self, object: u32, property: &str) -> Result<Option<Value>, String> {
+        if self.node_list_iteration_member(object,property) {self.state.work(1)?;return Ok(None);}
         if self.element_selector_member(object,property) {self.state.work(1)?;return Ok(None);}
         if self.element_sibling_member(object,property) {self.state.work(1)?;return Ok(None);}
         if self.root_node_member(object,property) {self.state.work(1)?;return Ok(None);}
@@ -3294,6 +3315,7 @@ impl Host for Bridge<'_> {
     }
 
     fn delete(&mut self, object: u32, property: &str) -> Result<bool, String> {
+        if self.node_list_iteration_member(object,property) {self.state.work(1)?;return Ok(true);}
         if self.element_selector_member(object,property) {self.state.work(1)?;return Ok(true);}
         if self.element_sibling_member(object,property) {self.state.work(1)?;return Ok(true);}
         if self.root_node_member(object,property) {self.state.work(1)?;return Ok(true);}
@@ -3484,6 +3506,7 @@ impl Host for Bridge<'_> {
     }
 
     fn has(&mut self, object: u32, property: &str) -> Result<bool, String> {
+        if self.node_list_iteration_member(object,property) {self.state.work(1)?;return Ok(false);}
         if self.element_selector_member(object,property) {self.state.work(1)?;return Ok(false);}
         if self.element_sibling_member(object,property) {self.state.work(1)?;return Ok(false);}
         if object==DOCUMENT && property=="createDocumentFragment" {self.state.work(1)?;return Ok(true);}
@@ -3777,6 +3800,7 @@ impl Host for Bridge<'_> {
 
     fn get(&mut self, object: u32, property: &str) -> Result<Value, String> {
         self.state.work(1)?;
+        if self.node_list_iteration_member(object,property)&&property!="length" {return Ok(Value::Undefined);}
         if self.element_selector_member(object,property) {return Ok(Value::Undefined);}
         if self.root_node_member(object,property) {return Ok(Value::Undefined);}
         if script_named_map::element(object).is_some() { return self.named_map_get(object, property); }
@@ -4344,6 +4368,7 @@ impl Host for Bridge<'_> {
     }
 
     fn call(&mut self, object: u32, method: &str, args: &[Value]) -> Result<Value, String> {
+        if method=="\0NodeList.get.length" {self.state.work(1)?;return self.node_list_get(object,"length");}
         let method=if let Some(operation)=script_element_selectors::operation(method) {
             self.validate_element_selector_receiver(object).map_err(|(_,message)|message)?;
             operation
@@ -4957,6 +4982,14 @@ mod script_selector_negation_tests;
 #[cfg(test)]
 #[path = "script_selector_negation_protocol_tests.rs"]
 mod script_selector_negation_protocol_tests;
+
+#[cfg(test)]
+#[path = "script_node_list_iteration_tests.rs"]
+mod script_node_list_iteration_tests;
+
+#[cfg(test)]
+#[path = "script_node_list_iteration_protocol_tests.rs"]
+mod script_node_list_iteration_protocol_tests;
 
 #[cfg(test)]
 #[path = "script_document_node_tests.rs"]
