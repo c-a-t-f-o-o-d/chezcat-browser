@@ -2,6 +2,8 @@
 //! No JavaScript evaluation, direct form mutation or direct link navigation.
 use super::{App, Focus, PlatformAction};
 use crate::scripting::KeyboardInput;
+use crate::scripting::AnchorMouseInput;
+use super::anchor::{AnchorDefault,AnchorTrigger};
 use std::io::Write;
 use std::path::Path;
 use std::time::Duration;
@@ -268,9 +270,33 @@ impl App {
         if x < 0 || x >= self.width || y < self.content_top() || y >= self.content_bottom()
             || self.page.link_at(x, page_y) != Some(expected.as_str()) { return Err("Rendered link is not a visible hit target.".into()); }
         writeln!(log, "Pointer link text={:?} href={expected:?} x={x} y={y}", run.text).map_err(|e| e.to_string())?;
-        self.pointer_down(x, y, false);
-        self.pointer_up(x, y);
-        Ok(())
+        let(action,hit)=self.primary_anchor_down(x,y,false);
+        if !matches!(action,PlatformAction::None) {
+            self.pointer_cancel();
+            return Err("The single-App link driver cannot realize this native press action.".into());
+        }
+        // The software driver's coordinate system is the App canvas. It does
+        // not query or claim a physical desktop/window position.
+        let input=AnchorMouseInput {screen_x:f64::from(x),screen_y:f64::from(y),..AnchorMouseInput::default()};
+        writeln!(log,"Primary link input button=0 modifiers=none software_screen_x={x} software_screen_y={y}")
+            .map_err(|error|{self.pointer_cancel();error.to_string()})?;
+        let(action,default)=self.release_anchor_pointer(hit,x,y,false,input);
+        if !matches!(action,PlatformAction::None) {
+            return Err("The single-App link driver cannot realize this native release action.".into());
+        }
+        match default {
+            Some(AnchorDefault::Cancelled)=>writeln!(log,"Primary link outcome=cancelled").map_err(|e|e.to_string()),
+            Some(AnchorDefault::Download)=>writeln!(log,"Primary link outcome=download").map_err(|e|e.to_string()),
+            Some(AnchorDefault::Link(target,AnchorTrigger::Pointer(actual)))=>{
+                if actual.button!=0 || actual.ctrl || actual.shift {
+                    return Err("The single-App link driver cannot realize a non-current tab/window destination.".into());
+                }
+                self.open_link_target(target);
+                writeln!(log,"Primary link outcome=current").map_err(|e|e.to_string())
+            },
+            Some(AnchorDefault::Link(_,AnchorTrigger::Context))=>Err("The link driver did not issue a context-menu command.".into()),
+            None=>Err("The original rendered link press was not eligible or its release was refused.".into()),
+        }
     }
 
     fn prepare_input_snapshot(&self) -> InputSnapshot {
@@ -323,6 +349,10 @@ impl App {
     }
 
 }
+
+#[cfg(test)]
+#[path = "app_link_driver_tests.rs"]
+mod link_driver_tests;
 
 #[cfg(test)]
 mod tests {
