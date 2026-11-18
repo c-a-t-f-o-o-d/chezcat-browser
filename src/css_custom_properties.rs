@@ -342,6 +342,24 @@ fn reset_box(style:&mut Style,parent:&Style,name:&str,inherit:bool) {
         }
     }
 }
+/// Preserve invalid-at-computed-value behavior while distinguishing a refused
+/// finite substitution from a genuinely missing/cyclic or invalid value.
+pub(super) fn apply_overflow(style:&mut Style,parent:&Style,declaration:&Declaration,variables:&Variables,budget:&mut Budget,
+    known:&mut [bool;2],parent_known:[bool;2])->bool {
+    if !overflow::property(&declaration.name) { return false; }
+    if !has_var(&declaration.value) {
+        overflow::apply_with_availability(style,parent,&declaration.name,declaration.value.trim(),known,parent_known);
+        return true;
+    }
+    let result = variables.substitute(&declaration.value,budget);
+    let available = result.is_ok();
+    if !result.ok().flatten().is_some_and(|value| overflow::apply_with_availability(style,parent,&declaration.name,value.trim(),known,parent_known)) {
+        overflow::apply_with_availability(style,parent,&declaration.name,"initial",known,parent_known);
+        if !available { overflow::set_availability(&declaration.name,known,[false;2]); }
+    }
+    true
+}
+
 pub(super) fn apply_box(style:&mut Style,parent:&Style,declaration:&Declaration,variables:&Variables,budget:&mut Budget)->bool {
     if !box_property(&declaration.name) || !has_var(&declaration.value) {return false;}
     // A var()-bearing declaration participates in the cascade before its

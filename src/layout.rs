@@ -36,12 +36,30 @@ fn native_button_padding(kind: Option<Kind>) -> bool {
     matches!(kind, Some(Kind::Button | Kind::Submit | Kind::Reset))
 }
 
-fn clipped_bottom(x: i32, y: i32, width: i32, height: i32, clip: Option<ClipRect>) -> Option<i32> {
+/// Use page-space limits for an open axis. Actual paint buffers and hit
+/// rectangles intersect this clip with their finite bounds before drawing.
+fn overflow_clip(mut padding: ClipRect, overflow: css::Overflow) -> Option<ClipRect> {
+    match (overflow.clips_x(), overflow.clips_y()) {
+        (false, false) => return None,
+        (true, true) => {}
+        (true, false) => {
+            padding.top = i32::MIN;
+            padding.bottom = i32::MAX;
+        }
+        (false, true) => {
+            padding.left = i32::MIN;
+            padding.right = i32::MAX;
+        }
+    }
+    Some(padding)
+}
+
+fn clipped_bottom(bounds: ClipRect, clip: Option<ClipRect>) -> Option<i32> {
     // Preserve zero-width layout extents when they are not clipped.
     let Some(clip) = clip else {
-        return Some(y.saturating_add(height));
+        return Some(bounds.bottom);
     };
-    let area = ClipRect::new(x, y, width, height).intersect(clip);
+    let area = bounds.intersect(clip);
     (area.left < area.right && area.top < area.bottom).then_some(area.bottom)
 }
 
@@ -125,7 +143,7 @@ struct Pending {
     x: i32,
     y: i32,
     fixed: bool,
-    bottom: Option<i32>,
+    placed_bounds: Option<ClipRect>,
 }
 
 #[derive(Clone, Copy)]
@@ -305,7 +323,7 @@ pub struct BorderRect {
 }
 
 pub struct Layout {
-    pub(crate) custom_properties: css::ComputedCustomProperties,
+    pub(crate) computed_properties: css::ComputedProperties,
     pub runs: Vec<TextRun>,
     pub items: Vec<PaintItem>,
     pub anchors: Vec<(String, i32)>,
@@ -678,10 +696,10 @@ pub fn build_viewport_with_fonts(
         1.0
     };
     let environment = viewport_style_environment(doc, width, height, zoom);
-    let css::CascadeOutput { styles, custom_properties } =
-        css::compute_with_environment_and_custom_properties(doc, external_styles, checked, Some(environment));
+    let css::CascadeOutput { styles, computed_properties } =
+        css::compute_with_environment_and_properties(doc, external_styles, checked, Some(environment));
     let mut page = Layout {
-        custom_properties,
+        computed_properties,
         runs: Vec::new(),
         items: Vec::new(),
         anchors: Vec::new(),
@@ -800,7 +818,7 @@ pub fn build_viewport_with_fonts(
         .enumerate()
         .filter(|(index, _)| !engine.layout.fixed_hits[*index])
         .filter_map(|(index, atom)| {
-            clipped_bottom(atom.x, atom.y, atom.width, atom.height, atom_clips[index])
+            clipped_bottom(ClipRect::new(atom.x, atom.y, atom.width, atom.height), atom_clips[index])
         })
         .chain(
             engine
@@ -810,13 +828,13 @@ pub fn build_viewport_with_fonts(
                 .filter(|(node, _)| !fixed_boxes[*node])
                 .filter_map(|(node, b)| b.as_ref().map(|b| (node, b)))
                 .filter_map(|(node, b)| {
-                    clipped_bottom(
+                    let bounds = ClipRect::new(
                         b.x,
                         b.y,
                         b.width + b.padding[1] + b.padding[3] + b.border[1] + b.border[3],
                         b.height + b.padding[0] + b.padding[2] + b.border[0] + b.border[2],
-                        engine.ancestor_clip(node),
-                    )
+                    );
+                    clipped_bottom(bounds, engine.ancestor_clip(node))
                 }),
         )
         .chain(
@@ -825,15 +843,7 @@ pub fn build_viewport_with_fonts(
                 .iter()
                 .filter(|pending| !pending.fixed)
                 .filter_map(|pending| {
-                    pending
-                        .bottom
-                        .and_then(|bottom| match engine.ancestor_clip(pending.node) {
-                            Some(clip) if clip.left >= clip.right || clip.top >= clip.bottom => {
-                                None
-                            }
-                            Some(clip) => Some(bottom.min(clip.bottom)),
-                            None => Some(bottom),
-                        })
+                    clipped_bottom(pending.placed_bounds?, engine.ancestor_clip(pending.node))
                 }),
         )
         .chain(
@@ -850,10 +860,7 @@ pub fn build_viewport_with_fonts(
                             height,
                             ..
                         } => clipped_bottom(
-                            *x,
-                            *y,
-                            *width,
-                            *height,
+                            ClipRect::new(*x, *y, *width, *height),
                             engine.ancestor_clip(decoration.node),
                         ),
                         _ => None,
@@ -1313,7 +1320,8 @@ impl Engine<'_> {
             if let Some(span) = self.spans[node] {
                 self.move_span(span, x, y);
             }
-            self.pending[cursor - 1].bottom = Some(y.saturating_add(outer_height));
+            self.pending[cursor - 1].placed_bounds =
+                Some(ClipRect::new(x, y, width.saturating_add(edges[0]), outer_height));
             self.styles[node] = original;
             self.positioning = previous_positioning;
             self.active_label = previous_label;
@@ -1387,15 +1395,15 @@ impl Engine<'_> {
             let Some(parent) = self.clip_parent(node) else {
                 break;
             };
-            if self.styles[parent].overflow_hidden {
-                if let Some(b) = &self.boxes[parent] {
-                    let padding = ClipRect::new(
-                        b.x + b.border[3],
-                        b.y + b.border[0],
-                        b.width + b.padding[1] + b.padding[3],
-                        b.height + b.padding[0] + b.padding[2],
-                    );
-                    clip = Some(clip.map_or(padding, |old| old.intersect(padding)));
+            if let Some(b) = &self.boxes[parent] {
+                let padding = ClipRect::new(
+                    b.x.saturating_add(b.border[3]),
+                    b.y.saturating_add(b.border[0]),
+                    b.width.saturating_add(b.padding[1]).saturating_add(b.padding[3]),
+                    b.height.saturating_add(b.padding[0]).saturating_add(b.padding[2]),
+                );
+                if let Some(bounds) = overflow_clip(padding, self.styles[parent].overflow) {
+                    clip = Some(clip.map_or(bounds, |old| old.intersect(bounds)));
                 }
             }
             node = parent;
@@ -1776,7 +1784,7 @@ impl Engine<'_> {
                         x: self.flow.x,
                         y: self.flow.y,
                         fixed,
-                        bottom: None,
+                        placed_bounds: None,
                     });
                 }
                 self.visits += 1;
@@ -5035,6 +5043,24 @@ mod tests {
         assert_eq!(flex.link_at(145, 80), Some("flex"));
         assert_eq!(flex.link_at(205, 80), None);
         assert_eq!(flex.link_at(145, 101), None);
+    }
+
+    #[test]
+    fn overflow_axes_nested_clips_intersect_across_paint_and_link_hits() {
+        let doc = parse(concat!(
+            "<body style='margin:0'><div style='width:80px;height:90px;overflow:clip visible'>",
+            "<div style='width:120px;height:60px;overflow:visible clip'>",
+            "<a href=inside style='display:block;width:120px;height:90px;background:red'></a>",
+            "</div></div></body>"
+        ));
+        let page = layout(&doc, 300);
+        let item = page.items.iter().position(|item| {
+            matches!(item, PaintItem::Rect { color: 0xff0000, .. })
+        }).unwrap();
+        assert_eq!(page.paint_clip(item), Some(ClipRect::new(0, 0, 80, 60)));
+        assert_eq!(page.link_at(79, 59), Some("inside"));
+        assert_eq!(page.link_at(80, 59), None);
+        assert_eq!(page.link_at(79, 60), None);
     }
 
     #[test]

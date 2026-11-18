@@ -26,7 +26,7 @@ pub struct Geometry {
     images: HashMap<usize, (usize, usize)>,
     fonts: Book,
     boxes: Option<Vec<Option<ClientBox>>>,
-    custom_properties: Option<crate::css::ComputedCustomProperties>,
+    computed_properties: Option<crate::css::ComputedProperties>,
     scroll_heights:Vec<Option<i32>>,
     viewport_scroll_height:i32,
     viewport_scroll_unavailable:bool,
@@ -54,7 +54,7 @@ impl Geometry {
             images,
             fonts: fonts.clone(),
             boxes: None,
-            custom_properties: None,
+            computed_properties: None,
             scroll_heights:Vec::new(),
             viewport_scroll_height:0,
             viewport_scroll_unavailable:false,
@@ -96,7 +96,7 @@ impl Geometry {
 
     pub fn invalidate(&mut self) {
         self.boxes = None;
-        self.custom_properties = None;
+        self.computed_properties = None;
     }
 
     /// The document keeps running while a resource/source report is visible.
@@ -132,7 +132,7 @@ impl Geometry {
     ) {
         self.update(width, height, zoom, images);
         self.boxes = Some(layout.client_boxes.clone());
-        self.custom_properties = Some(layout.custom_properties.clone());
+        self.computed_properties = Some(layout.computed_properties.clone());
         self.scroll_heights=layout.scroll_heights.clone();
         self.viewport_scroll_height=layout.viewport_scroll_height;
         self.viewport_scroll_unavailable=layout.viewport_scroll_unavailable;
@@ -163,7 +163,7 @@ impl Geometry {
                 &self.fonts,
             );
             self.boxes = Some(layout.client_boxes);
-            self.custom_properties = Some(layout.custom_properties);
+            self.computed_properties = Some(layout.computed_properties);
             self.scroll_heights=layout.scroll_heights;
             self.viewport_scroll_height=layout.viewport_scroll_height;
             self.viewport_scroll_unavailable=layout.viewport_scroll_unavailable;
@@ -171,6 +171,43 @@ impl Geometry {
             self.rects = layout.border_rects;
         }
         Ok(())
+    }
+
+    fn computed_snapshot(
+        &mut self,
+        doc: &Document,
+        forms: &Forms,
+        host_work: &mut usize,
+        copy_work: &mut usize,
+    ) -> Result<&crate::css::ComputedProperties, String> {
+        if self.computed_properties.is_none() {
+            if self.remaining == 0 {
+                return Err(format!("DOM geometry layout limit reached ({} rebuilds per job).", self.limits.layouts_per_job));
+            }
+            self.remaining -= 1;
+            let environment = layout::viewport_style_environment(doc, self.width, self.height, self.zoom);
+            let checked = |node| live_checked(forms, node);
+            let mut budget = crate::css::CssBudget::new(host_work, copy_work);
+            let cascade = crate::css::compute_with_environment_and_properties_budgeted(
+                doc, &self.styles, Some(&checked), Some(environment), &mut budget,
+            )?;
+            self.computed_properties = Some(cascade.computed_properties);
+        }
+        *host_work = host_work.checked_sub(1).ok_or("DOM work limit reached during computed style lookup.")?;
+        Ok(self.computed_properties.as_ref().expect("computed cascade was installed"))
+    }
+
+    pub(crate) fn computed_overflow(
+        &mut self,
+        doc: &Document,
+        forms: &Forms,
+        node: usize,
+        host_work: &mut usize,
+        copy_work: &mut usize,
+    ) -> Result<Option<crate::css::Overflow>, String> {
+        self.computed_snapshot(doc, forms, host_work, copy_work)?
+            .read_overflow(node)
+            .map_err(|_| "Computed overflow unavailable within the CSS cascade limits.".into())
     }
 
     pub(crate) fn computed_custom_property(
@@ -182,21 +219,7 @@ impl Geometry {
         host_work: &mut usize,
         copy_work: &mut usize,
     ) -> Result<Option<String>, String> {
-        if self.custom_properties.is_none() {
-            if self.remaining == 0 {
-                return Err(format!("DOM geometry layout limit reached ({} rebuilds per job).", self.limits.layouts_per_job));
-            }
-            self.remaining -= 1;
-            let environment = layout::viewport_style_environment(doc, self.width, self.height, self.zoom);
-            let checked = |node| live_checked(forms, node);
-            let mut budget = crate::css::CssBudget::new(host_work, copy_work);
-            let cascade = crate::css::compute_with_environment_and_custom_properties_budgeted(
-                doc, &self.styles, Some(&checked), Some(environment), &mut budget,
-            )?;
-            self.custom_properties = Some(cascade.custom_properties);
-        }
-        *host_work = host_work.checked_sub(1).ok_or("DOM work limit reached during computed style lookup.")?;
-        let snapshot = self.custom_properties.as_ref().expect("computed cascade was installed");
+        let snapshot = self.computed_snapshot(doc, forms, host_work, copy_work)?;
         let Some(value) = snapshot.read(node, name)
             .map_err(|_| "Computed style unavailable within the CSS cascade limits.")?
         else {
@@ -301,7 +324,7 @@ fn computed_style_geometry_shares_rebuilds_and_only_charges_the_returned_value_o
 
     geometry.set_stylesheet(sheet, Some("#box{--token:changed;width:65px}"));
     assert!(read(&mut geometry, &mut work, &mut copies).is_err());
-    assert!(geometry.custom_properties.is_none());
+    assert!(geometry.computed_properties.is_none());
     geometry.begin_job();
     assert_eq!(geometry.read(&doc, &forms, node, false, "clientWidth", &mut work).unwrap(), 65.0);
     assert_eq!(geometry.remaining, 0);

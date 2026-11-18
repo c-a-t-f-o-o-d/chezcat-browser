@@ -3531,7 +3531,7 @@ impl Host for Bridge<'_> {
     }
 
     fn has(&mut self, object: u32, property: &str) -> Result<bool, String> {
-        if script_computed_style::index(object).is_some() {self.state.work(1)?;return if self.computed_style_receiver(object) {Ok(self.method(object,property).is_some())} else {Err("Invalid computed declaration receiver.".into())};}
+        if script_computed_style::index(object).is_some() {self.state.work(1)?;return if self.computed_style_receiver(object) {Ok(script_computed_style::overflow_member(property)||self.method(object,property).is_some())} else {Err("Invalid computed declaration receiver.".into())};}
         if self.node_list_iteration_member(object,property) {self.state.work(1)?;return Ok(false);}
         if self.element_selector_member(object,property) {self.state.work(1)?;return Ok(false);}
         if self.element_sibling_member(object,property) {self.state.work(1)?;return Ok(false);}
@@ -3826,7 +3826,7 @@ impl Host for Bridge<'_> {
 
     fn get(&mut self, object: u32, property: &str) -> Result<Value, String> {
         self.state.work(1)?;
-        if script_computed_style::index(object).is_some() {return Err(format!("Computed declaration property {property:?} is not implemented; use getPropertyValue for custom properties."));}
+        if script_computed_style::index(object).is_some() {return self.computed_style_get(object,property);}
         if self.node_list_iteration_member(object,property)&&property!="length" {return Ok(Value::Undefined);}
         if self.element_selector_member(object,property) {return Ok(Value::Undefined);}
         if self.root_node_member(object,property) {return Ok(Value::Undefined);}
@@ -5012,6 +5012,10 @@ mod script_computed_style_tests;
 #[cfg(test)]
 #[path = "script_computed_style_protocol_tests.rs"]
 mod script_computed_style_protocol_tests;
+
+#[cfg(test)]
+#[path = "script_computed_overflow_tests.rs"]
+mod script_computed_overflow_tests;
 
 #[cfg(test)]
 #[path = "script_selector_negation_tests.rs"]

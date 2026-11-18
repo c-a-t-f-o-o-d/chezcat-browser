@@ -107,13 +107,16 @@ impl Engine<'_> {
                 .find(|node| matches!(self.doc.nodes[*node].kind, NodeKind::Element { .. }))
         }) {
             if self.layout.client_boxes[root].is_some() {
-                self.layout.viewport_scroll_unavailable = self.styles[root].overflow_hidden;
-                if !self.styles[root].overflow_hidden
+                let overflow = self.styles[root].overflow;
+                self.layout.viewport_scroll_unavailable = overflow.clips_x() || overflow.clips_y();
+                if !self.layout.viewport_scroll_unavailable
                     && self.doc.nodes[root].namespace == crate::html::Namespace::Html
                     && matches!(&self.doc.nodes[root].kind,NodeKind::Element {tag,..} if tag=="html")
                 {
                     if let Some(body)=self.doc.nodes[root].children.iter().copied().find(|node|self.doc.nodes[*node].namespace==crate::html::Namespace::Html && matches!(&self.doc.nodes[*node].kind,NodeKind::Element {tag,..} if tag=="body")){
-                        self.layout.viewport_scroll_unavailable=self.layout.client_boxes[body].is_some() && self.styles[body].overflow_hidden;
+                        let overflow = self.styles[body].overflow;
+                        self.layout.viewport_scroll_unavailable = self.layout.client_boxes[body].is_some()
+                            && (overflow.clips_x() || overflow.clips_y());
                     }
                 }
             }
@@ -152,9 +155,9 @@ impl Engine<'_> {
                             *height = (*height).max(area.bottom.saturating_sub(top));
                         }
                     }
-                    if self.styles[parent].overflow_hidden {
-                        area =
-                            area.intersect(ClipRect::new(left, top, client.width, client.height));
+                    let padding = ClipRect::new(left, top, client.width, client.height);
+                    if let Some(bounds) = overflow_clip(padding, self.styles[parent].overflow) {
+                        area = area.intersect(bounds);
                         if area.left >= area.right || area.top >= area.bottom {
                             return;
                         }
@@ -217,6 +220,24 @@ mod tests {
         let (doc,page)=measure("<div id=p style='height:40px'><div style='position:absolute;top:300px;height:30px;width:20px'></div></div>");
         assert_eq!(height(&doc, &page, "p"), 40);
         assert_eq!(page.viewport_scroll_height, 330);
+    }
+
+    #[test]
+    fn overflow_axes_propagate_vertical_extent_only_within_the_horizontal_clip() {
+        for (rule, child_left, expected_viewport) in [
+            ("clip visible", 10, 120),
+            ("clip visible", 90, 40),
+            ("visible clip", 90, 40),
+            ("visible", 90, 120),
+        ] {
+            let (doc, page) = measure(&format!(
+                "<div id=p style='position:relative;width:80px;height:40px;overflow:{rule}'>\
+                 <div style='position:absolute;left:{child_left}px;top:100px;width:20px;height:20px'></div></div>"
+            ));
+            assert_eq!(height(&doc, &page, "p"), 120, "{rule} at {child_left}");
+            assert_eq!(page.viewport_scroll_height, expected_viewport, "{rule} at {child_left}");
+            assert_eq!(page.height, expected_viewport + 16, "painted page and its tail for {rule} at {child_left}");
+        }
     }
     #[test]
     fn scroll_height_own_margin_border_and_negative_regions_do_not_inflate() {

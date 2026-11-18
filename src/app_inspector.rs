@@ -2568,14 +2568,7 @@ fn selected_details(app: &App) -> Vec<String> {
             format!("  margin: {}", lengths(&style.margin)),
             format!("  padding: {}", lengths(&style.padding)),
             format!("  border-width: {}", lengths(&style.border_width)),
-            format!(
-                "  overflow: {}",
-                if style.overflow_hidden {
-                    "hidden"
-                } else {
-                    "visible"
-                }
-            ),
+            format!("  overflow: {}", style.overflow.to_css()),
             format!("  flex-direction: {:?}", style.flex_direction),
             format!("  flex-wrap: {}", style.flex_wrap),
             format!("  flex-grow: {}", style.flex_grow),

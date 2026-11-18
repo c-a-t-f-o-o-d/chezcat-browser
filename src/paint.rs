@@ -51,6 +51,9 @@ impl ClipRect {
     }
 
     pub fn translate_y(self, delta: i32) -> Self {
+        if self.top == i32::MIN && self.bottom == i32::MAX {
+            return self;
+        }
         Self {
             top: self.top.saturating_add(delta),
             bottom: self.bottom.saturating_add(delta),
