@@ -49,6 +49,12 @@ impl Runtime {
             .ok_or_else(|| Fault::new("Invalid symbol identity."))
     }
 
+    /// CanBeHeldWeakly admits unregistered symbols, including well-known keys.
+    /// Registry symbols retain their document-wide registry identity instead.
+    pub(super) fn weak_symbol_key(&self, id: usize) -> Result<bool, Fault> {
+        Ok(!self.symbol(id)?.registered)
+    }
+
     fn new_symbol(
         &mut self,
         description: Option<String>,

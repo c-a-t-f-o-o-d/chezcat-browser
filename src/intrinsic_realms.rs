@@ -530,6 +530,31 @@ if(!caught||realmSecret!==91||Object.getPrototypeOf([])!==Array.prototype)throw 
     }
 
     #[test]
+    fn weak_map_keys_and_borrowed_methods_cross_intrinsic_realms() {
+        let mut runtime = Runtime::for_capacity_test();
+        expose_test_realm(&mut runtime);
+        let result = runtime.execute(r#"
+            var ForeignMap = ChildFunction('return WeakMap;')();
+            var foreignKey = ChildFunction('return {};')();
+            var localKey = {}, localMap = new WeakMap(), foreignMap = new ForeignMap();
+            if (ForeignMap === WeakMap || ForeignMap.prototype === WeakMap.prototype)
+                throw 'shared constructors or prototypes';
+            if (Object.getPrototypeOf(foreignMap) !== ForeignMap.prototype)
+                throw 'wrong instance prototype';
+            WeakMap.prototype.set.call(foreignMap, localKey, foreignKey);
+            ForeignMap.prototype.set.call(localMap, foreignKey, localKey);
+            if (foreignMap.get(localKey) !== foreignKey || localMap.get(foreignKey) !== localKey)
+                throw 'cross-realm identity';
+            if (foreignMap.has(foreignKey) || localMap.has(localKey))
+                throw 'entries leaked between maps';
+            try { ForeignMap.prototype.get.call({}, foreignKey); }
+            catch (e) { if (Object.getPrototypeOf(e) === ChildTypeError.prototype) 'foreign brand error'; }
+        "#, &mut NoHost).unwrap();
+        assert_eq!(result.to_text(), "foreign brand error");
+        assert_eq!((runtime.active_realm, runtime.global_environment), (None, 0));
+    }
+
+    #[test]
     fn detached_intrinsics_are_real_distinct_and_do_not_inherit_parent_mutation() {
         let mut runtime = Runtime::for_capacity_test();
         let parent_object = runtime.object_prototype.unwrap();

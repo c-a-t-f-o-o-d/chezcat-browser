@@ -10,6 +10,13 @@ use super::{
 };
 use std::collections::{BTreeMap, HashMap};
 
+#[path = "weak_map.rs"]
+mod weak_map;
+pub(super) use weak_map::WeakKey;
+#[cfg(test)]
+#[path = "weak_map_api_tests.rs"]
+mod weak_map_api_tests;
+
 const MAX_ENTRIES: usize = 4096;
 const MAX_DOCUMENT_ENTRIES: usize = 16384;
 
@@ -17,13 +24,14 @@ const MAX_DOCUMENT_ENTRIES: usize = 16384;
 pub(super) enum Kind {
     Map,
     Set,
+    WeakMap,
 }
 impl Kind {
     fn name(self) -> &'static str {
-        if self == Self::Map {
-            "Map"
-        } else {
-            "Set"
+        match self {
+            Self::Map => "Map",
+            Self::Set => "Set",
+            Self::WeakMap => "WeakMap",
         }
     }
 }
@@ -50,10 +58,15 @@ pub(super) struct Data {
     sequence: usize,
 }
 impl Data {
-    pub(super) fn reachability_cost(&self) -> usize { self.ordered.len() * 2 }
+    pub(super) fn reachability_cost(&self) -> usize {
+        if self.is_weak_map() { 0 } else { self.ordered.len() * 2 }
+    }
 
     pub(super) fn reachability_edges(&self, add: &mut impl FnMut(super::function_reachability::Edge)) {
         use super::function_reachability::Edge;
+        // Weak values are activated only by the collector's ephemeron fixpoint;
+        // neither side of a weak entry is an unconditional strong edge.
+        if self.is_weak_map() { return; }
         for entry in self.ordered.values() { Edge::value(&entry.key, add); Edge::value(&entry.value, add); }
     }
 
@@ -66,7 +79,9 @@ impl Data {
         }
     }
     pub(super) fn tag(&self) -> &'static str {
-        self.kind.name()
+        // WeakMap branding comes from its ordinary @@toStringTag descriptor.
+        // Deleting that descriptor restores Object.prototype.toString's tag.
+        if self.is_weak_map() { "Object" } else { self.kind.name() }
     }
 }
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -114,6 +129,7 @@ impl IteratorData {
 pub(super) struct Roots {
     map: Option<usize>,
     set: Option<usize>,
+    weak_map: Option<usize>,
     array_iterator: Option<usize>,
     map_iterator: Option<usize>,
     set_iterator: Option<usize>,
@@ -126,7 +142,7 @@ pub(super) struct Roots {
 impl Roots {
     pub(super) fn reachability_edges(&self, add: &mut impl FnMut(super::function_reachability::Edge)) {
         use super::function_reachability::Edge;
-        for id in [self.map, self.set, self.array_iterator, self.map_iterator, self.set_iterator, self.string_iterator].into_iter().flatten() { add(Edge::Object(id)); }
+        for id in [self.map, self.set, self.weak_map, self.array_iterator, self.map_iterator, self.set_iterator, self.string_iterator].into_iter().flatten() { add(Edge::Object(id)); }
         for id in [self.array_keys,self.array_values,self.array_entries].into_iter().flatten() { add(Edge::Function(id)); }
     }
 }
@@ -201,6 +217,7 @@ impl Runtime {
                 self.store_property(prototype, "keys".into(), values, Some((false, true, true)))?;
             }
         }
+        self.initialize_weak_map()?;
         let iterator_prototype = self.new_object(None)?;
         let identity = self.native_function(
             Builtin::Iterator(super::iterator_protocol::Op::Self_),
@@ -657,20 +674,26 @@ impl Runtime {
         args: &[Value],
         host: &mut dyn Host,
     ) -> Result<Value, Fault> {
+        let weak_count = if kind == Kind::WeakMap {
+            Some(self.weak_map_count.checked_add(1)
+                .ok_or_else(|| Fault::new("WeakMap identity count overflow."))?)
+        } else { None };
         let id = self.new_object(None)?;
         self.objects[id].collection = Some(Data::new(kind));
-        self.objects[id].prototype = if kind == Kind::Map {
-            self.collection_roots.map
-        } else {
-            self.collection_roots.set
-        }
-        .map(Ordinary::Object);
+        // Native construction inhibits transient collection through iterator
+        // getters/adders/close. Objects remain append-only even if these throw.
+        if let Some(count) = weak_count { self.weak_map_count = count; }
+        self.objects[id].prototype = match kind {
+            Kind::Map => self.collection_roots.map,
+            Kind::Set => self.collection_roots.set,
+            Kind::WeakMap => self.collection_roots.weak_map,
+        }.map(Ordinary::Object);
         let source = args.first().unwrap_or(&Value::Undefined);
         if matches!(source, Value::Null | Value::Undefined) {
             return Ok(Value::Object(id));
         }
         let adder =
-            self.get_property_with_host(id, if kind == Kind::Map { "set" } else { "add" }, host)?;
+            self.get_property_with_host(id, if kind == Kind::Set { "add" } else { "set" }, host)?;
         if !matches!(adder, Value::Function(_)) {
             return Err(Fault::exception(
                 "TypeError",
@@ -681,7 +704,7 @@ impl Runtime {
         let mut iterator = self.loop_iterator(source, true, host)?;
         while let Some(value) = self.loop_next(&mut iterator, host)? {
             let completion = (|| {
-                let values = if kind == Kind::Map {
+                let values = if kind != Kind::Set {
                     let object = self.ordinary_required(&value)?;
                     vec![
                         self.get_ordinary_property_with_host(object, "0", host)?,
@@ -759,6 +782,9 @@ impl Runtime {
                 Ok(Value::Object(result))
             }
             Op::Method(kind, method) => {
+                if kind == Kind::WeakMap {
+                    return self.weak_map_method(method, args, this, host);
+                }
                 let id = self.collection_receiver(&this, kind)?;
                 let key = args.first().unwrap_or(&Value::Undefined);
                 match method {
