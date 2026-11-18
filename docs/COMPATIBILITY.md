@@ -51,6 +51,7 @@ changes after this snapshot require their own rechecks.
 | **jQuery 4.0.0, separate input app** | The exact optimized PR #34 candidate passes the unchanged offline App workflow through initialization, genuine trusted input and asynchronous timer text update | Limited to this pinned app; no AJAX/Deferred, every-version or full-framework claim | [PR #34](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/34), candidate `a9eadfa` |
 | **Foundation 6.9.0 generated CSS** | Unchanged JS-enabled fixture forms two columns at 1280 px and stacks at 640 px, with independent image pixels | Vue startup and optional Foundation JavaScript are separate; this is not complete styling | CP3 fixture and App geometry/pixel/hit controls |
 | **Vue 2.7.16 runtime** | Gets past the earlier literal-parser and concat boundaries at 1280/640; initial rendering/Foundation CSS pass | Object-prototype access at 11:3808; mount/input/async remain failed. Vue 3 has separate prerequisites | Unchanged W3 concat recheck |
+| **Vue 3.5.45 runtime, separate 1280×800 app** | On `57cc1d5` and `acd5703`, startup first stopped at missing `WeakSet` at 5:5880 in the upstream distribution. Native WeakSet on measured `4bd4c71` advances startup to a class declaration extending `HTMLElement` at 7:46929. The independent trusted click paints 1,536 green pixels and preserves the edited neighboring input. | The mount button receives a trusted click, but the Vue runtime stops before exporting. Component mount, rendering, input and async updates remain unreached. | [WeakSet PR #81](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/81), integrated at `8f24b29`. |
 | **Bootstrap 5.3.9 + Popper 2.11.8, selector checkpoint** | The unchanged sample initializes and renders responsive cards at 1280/640 on selector candidate `02cd0f8`. | The first trusted click reaches missing `getComputedStyle` at 3734:21 before a menu choice. | [PR #60](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/60) integrated in `main` at `991cba3`. The measurement retains candidate identity `02cd0f8`. |
 | **Bootstrap 5.3.9 + Popper 2.11.8, computed-style checkpoint** | Measured feature build `63a2259` passes initialization, initial rendering and responsive layout at both widths. Its local and CI gates pass 2,657 normal tests and 25 journeys. | The first trusted click fails Popper's `node.toString()` at 1736:9 before a menu choice. | [PR #62](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/62) integrated in `main` at `5c21400`. Earlier source-bound observations remain in the catalogue. |
 | **Bootstrap 5.3.9 + Popper 2.11.8, overflow checkpoint** | Measured `7b8a5fb` passes initialization, initial rendering and responsive layout at 1280/640. | The first trusted click reaches unsupported `assignedSlot` at 1979:7. The menu remains closed and the choice snapshot is absent. | [PR #65](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/65) integrated at `bf0c737`. The preceding `a82267e` observation is retained separately. |
@@ -97,9 +98,10 @@ to their loaded colors. The DOM records `Bootstrap dropdown open`, then
 beside each other at 1280 and stacked at 640. These are transition measurements,
 not a claim that the final image equals the initial or a reference browser.
 
-A separate original native App probe on the same `ec7db2f` source still reaches
-missing `WeakMap` at 11:92. It is the next shared prerequisite; it is not a
-Bootstrap failure or evidence of modern Vue/React mounting.
+A separate original App probe stopped at missing `WeakMap` at 11:92 on
+`ec7db2f`. On measured `acd5703`, a trusted click sets the visible count to 4
+and one timer completes with the title `WeakMap pass`.
+[WeakMap PR #78](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/78) integrated at `5c8fe78`.
 
 The separate padding comparison uses loaded captures from `5c89eea` and
 `e94388c`. At both widths the unchanged Bootstrap toggle grows from 167×29 to
