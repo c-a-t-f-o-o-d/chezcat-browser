@@ -143,8 +143,13 @@ they are not production dependencies and are not required by `verify_offline.py`
 
 ## Source and runtime identity
 
-About shows the development build identity and source state. The verified clean
-integrated build at `4d72251915d6f2c9e74c38721ddc7fd3f2f63d5f` displays
+The prepared `0.82.0-alpha.1` candidate starts from integrated source `6089546`.
+The release workflow verifies the final tag, packages and downloaded bytes.
+[Release checks](RELEASING.md)
+
+About shows the development build identity and source state. As a historical
+example, the verified clean integrated build at
+`4d72251915d6f2c9e74c38721ddc7fd3f2f63d5f` displays
 `0.81.0-alpha.2+dev.55.g4d72251915d6`. The number comes from verified public main
 history and the suffix identifies the source commit. A feature head outside that
 history, a dirty checkout or unavailable history uses `+dev.g<commit>` when the
