@@ -855,6 +855,34 @@
             "normal_tests_passed": 2657,
             "required_journeys_passed": 25
           }
+        },
+        "dom_object_string_measurement": {
+          "measured_source_commit": "a82267e8a8770a92991d7e7b8b39b4e89ad706fd",
+          "executable_sha256": "933d9a3569332383cf78e8effe8aae67532f20295580f26822110e14e8480f14",
+          "source_map_sha256": "f36ffdbfa91f4fdfa2ab49cded087baa575a2934cbd4c4ad3f5d256deec76f6b",
+          "dirty": false,
+          "measurement_manifest_sha256": "8aca1479b72426839afa3d418065727f447159007af1456afbc6cb2111382f27",
+          "build_record_sha256": "487a97fc41f969a42574c3329669ec1dd3f51519157302200e0ca9f0a11444af",
+          "first_root": "Computed declaration property \"overflow\" is not implemented; use getPropertyValue for custom properties.",
+          "first_root_location": "Bootstrap5.3.9 bundle line2475,column20",
+          "integrated_main_commit": "852c28cc5f8b1b01934259258a4520ed88ef8712",
+          "pull_request": "https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/64",
+          "opened_marker_observed": false,
+          "choice_snapshot_present": false
+        },
+        "overflow_axes_measurement": {
+          "measured_source_commit": "7b8a5fbcc43d44d30835a31b7e70a674cecab5a3",
+          "executable_sha256": "56eb3c471b89268d7a58896ea819ded719a0211336bb540a6c779ddc659d8a1d",
+          "source_map_sha256": "f8aa66edc538aac6e50222776e442c2568b7b42c0edf01b2c0a064b3cc21da89",
+          "dirty": false,
+          "measurement_manifest_sha256": "a9224b861f8526f4d5d9cbf3ea074ccf288fa7dc9fadbc522cd5cc906fff1387",
+          "build_record_sha256": "f50b58feea012d438007ffe9190cb2502d734c341b57aa685ba6180edab71327",
+          "first_root": "Element property \"assignedSlot\" is not supported.",
+          "first_root_location": "Bootstrap5.3.9 bundle line1979,column7",
+          "integrated_main_commit": "bf0c7379c60a1ea07f0cd32e71cead71be5cc253",
+          "pull_request": "https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/65",
+          "opened_marker_observed": false,
+          "choice_snapshot_present": false
         }
       }
     },
