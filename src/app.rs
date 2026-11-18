@@ -2188,7 +2188,7 @@ impl App {
                     if let Some(previous) = previous_radio {
                         // Restore this group's former selection. Script changes
                         // to unrelated controls are not part of default rollback.
-                        let _ = self.forms.script_set_checked(previous, true);
+                        self.forms.check_radio(previous);
                     } else {
                         self.forms.controls.get_mut(&node).unwrap().checked = false;
                     }
@@ -5849,6 +5849,9 @@ mod created_button_tests;
 #[cfg(test)]
 #[path="app_checkbox_move_tests.rs"]
 mod checkbox_move_tests;
+#[cfg(test)]
+#[path = "app_input_checkedness_tests.rs"]
+mod input_checkedness_tests;
 
 #[cfg(test)]
 #[path = "app_base_class_tests.rs"]

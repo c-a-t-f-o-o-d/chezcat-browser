@@ -1365,7 +1365,9 @@
         "source": "c669dd9b3618913419e621d6cac3961e31d04db8",
         "distributions": "Official React and ReactDOM 18.3.1 production UMD files",
         "viewport": [1280, 800],
-        "result": "The native input and paint controls passed. ReactDOM initialization stopped at 223:36 on listener-object registration before a component mounted."
+        "result": "The native input and paint controls passed. ReactDOM initialization stopped at 223:36 on listener-object registration before a component mounted.",
+        "listener_source": "4ef9112f902249fde75d808aaa36038deace2432",
+        "listener_result": "ReactDOM passed its object-listener probe. A scheduled callback stopped on input.constructor at 23:83 during initialization. The component did not mount."
       }
     },
     {
