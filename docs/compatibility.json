@@ -1956,5 +1956,45 @@
         "Broader accessibility"
       ]
     }
-  ]
+  ],
+  "original_script_and_interface_probes": {
+    "scope": "Original offline App probes. Measurements retain their feature-source identities.",
+    "baseline_source": "f2e1823266a7c08c89bce7293572d801da62053c",
+    "integrated_main": "83385ca",
+    "integrated_pull_requests": [
+      121,
+      122
+    ],
+    "document": {
+      "source": "1ff9c51ae45c89da314d7c11a16d35ad4f950d07",
+      "executable_sha256": "9d19345c293b257141fed7e9bd32fc3944f0d0f29c4292c9868cd82ccdc50f56",
+      "app_feature_stages_passed": 6,
+      "independent_controls_passed": 7,
+      "result": "Main/child Document constructors and Node prototype chains, per-realm HTMLDocument alias, borrowed documentElement getter and wrong-receiver checks pass. Native/literal pixels remain unchanged."
+    },
+    "compressed_scripts": {
+      "source": "e66b0ad1ca26b0b8afe43e71fb18f4f5d974bde4",
+      "executable_sha256": "6f52e3acbd608d39fc35c52febd9aec19852a218fb901b2d9a3bd462ea4d0569",
+      "per_script_cap_bytes": 16777216,
+      "visible_effect_source_bytes": 8388609,
+      "retained_decoder_refusal_source_bytes": 16777217,
+      "result": "The previously refused 8 MiB + 1 byte gzip script is admitted, compiles and paints its marker. The 16 MiB + 1 byte source remains refused. Native controls and continuation pass.",
+      "script_policy_cases_passed": 27,
+      "script_policy_case_scope": "27 total policy cases include two exact 16 MiB cases covering parser and dynamic TLS loading."
+    },
+    "canvas_dimensions": {
+      "pull_request": 123,
+      "measured_feature_source": "3e7366a4e0c6478fc03727fa1bd2f6ecf01abd56",
+      "executable_sha256": "6fee16c358b531c21e978c3c8e7194b8ba18c42f518dd6c1567a3eb09a47aacd",
+      "app_feature_stages_passed": 5,
+      "independent_controls_passed": 7,
+      "result": "Default/parsed dimensions, IDL and Attr changes, detached ownership and saved accessors pass with retained native/literal pixels.",
+      "next_fault": "getContext('2d') at 17:86. 2D drawing remains unproved."
+    },
+    "unverified": [
+      "Live signed-out shell",
+      "Search",
+      "Playback"
+    ]
+  }
 }
