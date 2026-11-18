@@ -7,6 +7,10 @@ use super::{Accessors, Fault, Function, Host, Ordinary, Runtime, Value};
 #[path = "host_document_property_limits_tests.rs"]
 mod document_property_limits_tests;
 
+// This is a rooted descriptor record, not an interface prototype object and
+// never a string-visible constructor or a substitute for WindowProperties.
+const WINDOW_TAG_RECORD: &str = "\0WindowTag";
+
 impl Runtime {
     /// Publish the real interface only after its complete private prototype is ready.
     pub fn define_event_target_interface(&mut self, window:u32) -> Result<(),String> {
@@ -95,6 +99,7 @@ impl Runtime {
                 self.native_constructor_prototypes.insert((window,name),prototype);
                 parent=prototype;
             }
+            self.define_concrete_html_node_interfaces(window, parent)?;
             // CharacterData is a separate genuine Node suffix. Specialized
             // Text/Comment immediate prototypes remain outside this slice.
             let node=self.native_constructor_prototypes[&(window,"Node")];
@@ -134,10 +139,110 @@ impl Runtime {
                 self.store_symbol_property(image,self.symbol_to_string_tag.unwrap(),Value::String("HTMLImageElement".into()),Some((false,false,true)))?;
             }
             self.define_node_list_iteration_interface(window)?;
+            self.define_bound_window_tag_record(window)?;
             Ok(())
         })();
         self.restore_transient_marker(marker);
         result.map_err(Fault::display)
+    }
+
+    /// The measured concrete HTML interfaces share the real HTMLElement
+    /// suffix, while keeping their own canonical constructor and class tag.
+    /// Registration runs in each owner's realm, including blank child realms.
+    fn define_concrete_html_node_interfaces(
+        &mut self,
+        window: u32,
+        html_element: usize,
+    ) -> Result<(), Fault> {
+        let parent_constructor = self.objects[html_element].properties
+            .get("constructor")
+            .ok_or_else(|| Fault::new("Missing HTMLElement constructor."))?
+            .value.as_value()?.clone();
+        let Value::Function(parent_function) = parent_constructor else {
+            return Err(Fault::new("Invalid HTMLElement constructor."));
+        };
+        let tag_key = self.symbol_to_string_tag
+            .ok_or_else(|| Fault::new("Missing interface class-tag symbol."))?;
+
+        for name in ["HTMLButtonElement", "HTMLUListElement"] {
+            let allocation = self.allocate_host_function_with_length(window, name, 0)
+                .map_err(Fault::new)?;
+            if let Some(Function::Host { constructible, .. }) = self.functions.get_mut(allocation.id) {
+                *constructible = true;
+            }
+            let prototype = self.new_object(None)?;
+            self.objects[prototype].prototype = Some(Ordinary::Object(html_element));
+            self.objects[self.function_properties[allocation.id]].prototype =
+                Some(Ordinary::Function(parent_function));
+            let constructor = Value::Function(allocation.id);
+            self.store_property(
+                prototype, "constructor".into(), constructor.clone(),
+                Some((false, true, true)),
+            )?;
+            self.store_property(
+                self.function_properties[allocation.id], "prototype".into(),
+                Value::Object(prototype), Some((false, false, false)),
+            )?;
+            self.store_symbol_property(
+                prototype, tag_key, Value::String(name.into()),
+                Some((false, false, true)),
+            )?;
+
+            // Existing native constructor roots keep both prototype chains
+            // alive across realm parking, deferred calls and collection.
+            self.native_constructor_prototypes.insert((window, name), prototype);
+            self.put_binding(
+                self.global_environment, name.into(), Some(constructor),
+                super::Declaration::Var, false,
+            )?;
+            self.global_attributes.insert(name.into(), (false, true, true));
+        }
+        Ok(())
+    }
+
+    /// Web IDL's class-string descriptor belongs to Window's interface
+    /// prototype, not the global itself. Until the full Window prototype and
+    /// named-properties exotic are implemented, retain only this descriptor
+    /// as private provenance for the existing bound Window. It is consulted
+    /// for the inherited symbol only; it cannot affect named/string lookup.
+    fn define_bound_window_tag_record(&mut self, window: u32) -> Result<(), Fault> {
+        if !self.is_browser_global(window) { return Ok(()); }
+        if self.native_constructor_prototypes.contains_key(&(window, WINDOW_TAG_RECORD)) {
+            return Ok(());
+        }
+        let key = self.symbol_to_string_tag
+            .ok_or_else(|| Fault::new("Missing Window class-tag symbol."))?;
+        let descriptor = self.new_object(None)?;
+        self.objects[descriptor].prototype = None;
+        self.store_symbol_property(
+            descriptor, key, Value::String("Window".into()),
+            Some((false, false, true)),
+        )?;
+        self.native_constructor_prototypes.insert((window, WINDOW_TAG_RECORD), descriptor);
+        Ok(())
+    }
+
+    /// Resolve only an already bound, accessible Window's inherited tag
+    /// descriptor. Callers check own global symbol properties first and
+    /// consult Object.prototype only after this record. Metadata lookup never
+    /// initializes a realm or authorizes prototype/string-property access.
+    pub(super) fn bound_window_tag_backing(
+        &mut self,
+        window: u32,
+        host: &dyn Host,
+    ) -> Result<Option<Ordinary>, Fault> {
+        let Some(&realm) = self.window_realms.get(&window) else { return Ok(None); };
+        self.validate_native_access(window, host)?;
+        let caller = self.native_access_caller
+            .unwrap_or_else(|| self.browser_global.map(|(handle, _)| handle));
+        if caller != Some(window) {
+            host.validate_window_access(caller, window).map_err(Fault::new)?;
+        }
+        self.with_intrinsic_realm(realm, |runtime| {
+            if !runtime.is_browser_global(window) { return Ok(None); }
+            Ok(runtime.native_constructor_prototypes.get(&(window, WINDOW_TAG_RECORD))
+                .copied().map(Ordinary::Object))
+        })
     }
 
     fn define_node_list_iteration_interface(&mut self,window:u32)->Result<(),Fault> {

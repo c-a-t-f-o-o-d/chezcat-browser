@@ -1931,7 +1931,14 @@ impl Runtime {
             return Ok(Value::Undefined);
         }
         if method == "toString" {
-            if Ordinary::from_value(&this).is_some() || matches!(&this,Value::Host(handle) if host.exposed_native_prototype(*handle)) {
+            let tagged_host = match &this {
+                Value::Host(handle) if host.exposed_native_prototype(*handle) => true,
+                Value::Host(handle) if self.is_browser_global(*handle) => {
+                    self.bound_window_tag_backing(*handle, host)?.is_some()
+                }
+                _ => false,
+            };
+            if Ordinary::from_value(&this).is_some() || tagged_host {
                 if let Value::Host(handle)=this {self.validate_native_access(handle,host)?;}
                 if let Some(key) = self.symbol_to_string_tag {
                     let receiver = self.copy_value(&this)?;
@@ -1987,7 +1994,7 @@ impl Runtime {
                         "Object"
                     }
                 }
-                Value::Host(handle) if host.exposed_native_prototype(*handle)=>"Object",
+                Value::Host(_) if tagged_host => "Object",
                 Value::Host(_) => {
                     return Err(Fault::new("Native host object tags are not implemented."))
                 }

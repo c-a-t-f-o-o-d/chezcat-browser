@@ -798,6 +798,64 @@
         "passed_configurations": 0,
         "integrity_checks_passed": true,
         "measurement_scope": "Bootstrap-only main recheck combining native padding and NodeList iteration. The independent 5c22afd feature record keeps its own build identity."
+      },
+      "recent_dropdown_measurements": {
+        "configurations": [
+          [
+            1280,
+            800
+          ],
+          [
+            640,
+            800
+          ]
+        ],
+        "stage_outcomes": {
+          "load": "Passed",
+          "parse": "Passed",
+          "initialization": "Passed",
+          "render": "Passed",
+          "input": "Failed",
+          "async": "Not applicable",
+          "framework_layout": "Passed"
+        },
+        "first_failed_stage": "input",
+        "passed_configurations": 0,
+        "integrity_checks_passed": true,
+        "confirmed_main": {
+          "measured_source_commit": "02cd0f88e7bd173e5a407f6552fecc0efbd75161",
+          "executable_sha256": "d563fc731fa4d819125492675a8591c797e9c441582ece23b7b4b1328a23e391",
+          "source_map_sha256": "647b3d7a591badc893cdeb461dc7d9509aeaadaf9bb45115872f562b338e028d",
+          "dirty": false,
+          "measurement_manifest_sha256": "e9d0b8b1363da622547b7fc805110dffdafa8cc18dc447ca37a4d0c420eb7822",
+          "build_record_sha256": "b666ecbe6ef960bbacb021242fd8b75c012114984fe8e997f444d1f5382d747c",
+          "first_root": "getComputedStyle is not defined.",
+          "first_root_location": "Bootstrap5.3.9 bundle line3734,column21",
+          "integrated_main_commit": "991cba365f680534cc19cc7349e165a136f56b93",
+          "pull_request": "https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/60"
+        },
+        "computed_style_measurement": {
+          "measured_source_commit": "63a225977adc051236d714378a65f1f0e52d6eb1",
+          "executable_sha256": "4a19bae2637c8b859ea816994e7d32875dd2df895fc2c0614b0de09cf0c0598a",
+          "source_map_sha256": "cf7c0303cac149c35c75da857cee05a346c0c6eeefa4841af3e525d2c0fb4571",
+          "dirty": false,
+          "measurement_manifest_sha256": "222b088c281d3a87decd16c49c2c81092714c232c4c07c1e774068d4d6467d07",
+          "build_record_sha256": "b6121445d518b52aaed072487d693b774329ef30182d6beb5530667a50f3d1ef",
+          "first_root": "DOM method \"toString\" is not supported.",
+          "first_root_location": "Bootstrap5.3.9 bundle line1736,column9",
+          "branch": "feat/computed-style-readback",
+          "pull_request": "https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/62",
+          "integration_status": "Integrated through PR #62",
+          "local_validation": {
+            "normal_tests_passed": 2657,
+            "required_journeys_passed": 25
+          },
+          "integrated_main_commit": "5c2140095f6eaf479db8f2070c2ccbc401e62764",
+          "hosted_validation": {
+            "normal_tests_passed": 2657,
+            "required_journeys_passed": 25
+          }
+        }
       }
     },
     {

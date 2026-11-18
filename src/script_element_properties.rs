@@ -57,6 +57,18 @@ fn specific(tag: &str) -> &'static str {
     }
 }
 impl Bridge<'_> {
+    pub(super) fn concrete_html_interface(&self, object: u32) -> Option<&'static str> {
+        let node = node_index(object)?;
+        if !self.class_list_element_receiver(object) {
+            return None;
+        }
+        match tag(self.doc, node) {
+            "button" => Some("HTMLButtonElement"),
+            "ul" => Some("HTMLUListElement"),
+            _ => None,
+        }
+    }
+
     pub(super) fn element_expando_receiver(&self, object: u32) -> bool {
         self.class_list_element_receiver(object)
             && node_index(object).is_some_and(|node| {
@@ -124,6 +136,11 @@ impl Bridge<'_> {
     }
 
     pub(super) fn element_native_property(&self, object: u32, name: &str) -> bool {
+        if matches!(name, "toString" | "constructor" | "__proto__")
+            && self.concrete_html_interface(object).is_some()
+        {
+            return false;
+        }
         if dom_tree::node_constant(name).is_some()
             || self.method(object, name).is_some()
             || contains(COMMON, name)

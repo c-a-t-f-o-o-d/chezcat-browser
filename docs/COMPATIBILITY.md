@@ -20,7 +20,9 @@
 This page retains the earlier evidence snapshot through source `a65d37c` on
 November 17, 2026, including PR #31, #32 and #34 results. The Bootstrap row adds
 later measurements on `3456e67`, `5c89eea` and `5c22afd`, followed by the combined
-`main` recheck on `25654fa`.
+`main` recheck on `25654fa`. The latest rows separate selector candidate `02cd0f8`,
+integrated in `main` at `991cba3`, from measured computed-style build `63a2259`,
+integrated through PR #62 at `5c21400`.
 The [catalogue](compatibility.json)
 retains its exact source-bound records and classification of 44 named families
 and formats; older records are not silently relabeled as newer runs. Source
@@ -38,7 +40,8 @@ changes after this snapshot require their own rechecks.
 | **jQuery 4.0.0, separate input app** | The exact optimized PR #34 candidate passes the unchanged offline App workflow through initialization, genuine trusted input and asynchronous timer text update | Limited to this pinned app; no AJAX/Deferred, every-version or full-framework claim | [PR #34](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/34), candidate `a9eadfa` |
 | **Foundation 6.9.0 generated CSS** | Unchanged JS-enabled fixture forms two columns at 1280 px and stacks at 640 px, with independent image pixels | Vue startup and optional Foundation JavaScript are separate; this is not complete styling | CP3 fixture and App geometry/pixel/hit controls |
 | **Vue 2.7.16 runtime** | Gets past the earlier literal-parser and concat boundaries at 1280/640; initial rendering/Foundation CSS pass | Object-prototype access at 11:3808; mount/input/async remain failed. Vue 3 has separate prerequisites | Unchanged W3 concat recheck |
-| **Bootstrap 5.3.9 + bundled Popper 2.11.8** | The unchanged sample initializes with zero startup errors at 1280/640 on combined `main` `25654fa`. Loaded toggles measure 191×41 px. Cards render side by side at 1280 px and stack at 640 px. | The first trusted click rejects the dropdown selector at line 357, column 27 before the menu opens. | Modern fixture revision 2 on `25654fa`. The independent `5c22afd` feature run and earlier results remain in the catalogue. |
+| **Bootstrap 5.3.9 + Popper 2.11.8, selector checkpoint** | The unchanged sample initializes and renders responsive cards at 1280/640 on selector candidate `02cd0f8`. | The first trusted click reaches missing `getComputedStyle` at 3734:21 before a menu choice. | [PR #60](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/60) integrated in `main` at `991cba3`. The measurement retains candidate identity `02cd0f8`. |
+| **Bootstrap 5.3.9 + Popper 2.11.8, computed-style checkpoint** | Measured feature build `63a2259` passes initialization, initial rendering and responsive layout at both widths. Its local and CI gates pass 2,657 normal tests and 25 journeys. | The first trusted click fails Popper's `node.toString()` at 1736:9 before a menu choice. | [PR #62](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/62) integrated in `main` at `5c21400`. Earlier source-bound observations remain in the catalogue. |
 | **Original CSS-variable box reduction** | PR #31 changes the box from 80×30 to 104×46, matching a literal control's opaque pixels, anchor hits and live reflow | Supported padding/border values only; alpha colors, calc(), CSSOM and full Bootstrap styling unproved | [PR #31](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/31), candidate `5cd5e52` |
 | **Reference browser** | Initial DOM and pixel captures exist for the original fixture | Interactions were not run; no reference-interaction denominator | Initial-state comparison only |
 
@@ -60,9 +63,10 @@ is older than the later DOM/string/anchor/text-input/Event/CSS-variable changes.
 | **Base Event property lookup** | Genuine ordinary string/symbol lookup and protected native state; enables the pinned modern input/timer workflow | AJAX/Deferred or general framework conformance |
 | **CSS custom properties** | Winning custom cascade, inherited computed values, bounded fallbacks/cycles and real box painting | Alpha colors, calc(), CSSOM or complete component styling |
 | **Element siblings** | Element and CharacterData sibling getters skip Text and Comment nodes and enforce document access checks. Bootstrap reads its next element sibling on `3456e67`. | Full CharacterData, unrestricted child-context access or Bootstrap initialization |
-| **Canonical Element selectors** | Scripts can borrow `Element.prototype.querySelector` and `querySelectorAll`. The latter returns a static NodeList. | Wider selector grammar, child Element queries or dropdown interaction |
+| **Canonical Element selectors** | Scripts can borrow `Element.prototype.querySelector` and `querySelectorAll`. The latter returns a static NodeList. `02cd0f8` also clears the recorded dropdown selector boundary. | Wider selector grammar, child Element queries or dropdown interaction |
 | **NodeList iteration** | Supported main-document NodeLists expose bounded indexed iteration. Bootstrap spreads its selector results and initializes at both widths on combined `main` `25654fa`. | Complete NodeList APIs or a working dropdown |
 | **Native button padding** | Supported padding changes native button boxes and caption placement. The separate Bootstrap comparison below records the visible result. | Complete native appearance or a combined main workflow result |
+| **Computed custom styles** | Live read-only custom-property values on measured `63a2259`, integrated at `5c21400`, advance the unchanged Bootstrap click into Popper at both widths. | Full CSSOM or a working dropdown |
 
 The separate padding comparison uses loaded captures from `5c89eea` and
 `e94388c`. At both widths the unchanged Bootstrap toggle grows from 167×29 to
@@ -73,7 +77,7 @@ offset. The padding branch predates the NodeList merge and initialization fails
 on both compared builds. [PR #54](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/54)
 integrates padding in `main` at `25654fa`. A recheck on that combined main build
 initializes at both widths and records 191×41 px loaded toggles. The first trusted
-click still fails the dropdown selector at 357:27 before the menu opens.
+click on that build fails the dropdown selector at 357:27 before the menu opens.
 
 The text-input PR's original App checks cover trusted fill, Backspace/Delete,
 latest Reset defaults, neighboring pixels/hits, and a removed editor refusing
@@ -142,6 +146,9 @@ allows the unchanged sample to initialize with zero startup errors at both width
 The first trusted click then rejects
 `[data-bs-toggle="dropdown"]:not(.disabled):not(:disabled)` at 357:27 before the
 menu opens. Load, initial rendering and responsive card layout continue to pass.
+On selector candidate `02cd0f8`, the first click advances to missing
+`getComputedStyle` at 3734:21. Measured feature build `63a2259` advances further to
+Popper's `node.toString()` at 1736:9. Both later runs still fail dropdown input.
 No reference browser was run for the separate modern cohort. Original records,
 including failed runs, are not overwritten by this presentation update.
 

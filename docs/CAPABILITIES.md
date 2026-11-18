@@ -62,9 +62,12 @@ remain at `36adf20`; these later changes do not update those binaries.
 passes the unchanged pinned jQuery 4.0.0 offline app through startup, genuine
 trusted input, and an asynchronous timer text update. This is one workflow, not
 AJAX/Deferred or full-framework support. Legacy jQuery and Vue retain their earlier
-recorded fragment and language boundaries. Bootstrap initializes with zero startup
-errors at both widths on combined `main` `25654fa`. Its first
-trusted click reaches a selector syntax boundary before the dropdown opens.
+recorded fragment and language boundaries. Bootstrap initializes at both widths.
+Selector candidate `02cd0f8`, integrated in `main` at `991cba3`, reaches missing
+`getComputedStyle` on its first trusted click. PR #62 integrates computed-style
+support at `5c21400`. Its measured feature build `63a2259` advances to Popper's
+`node.toString()` boundary. Dropdown input
+remains failed in both measurements.
 See [compatibility outcomes](COMPATIBILITY.md) for exact versions and stages.
 
 ## Rendering and resources
@@ -77,6 +80,7 @@ See [compatibility outcomes](COMPATIBILITY.md) for exact versions and stages.
 | **CSS backgrounds** | One URL layer on ordinary block/inline-block boxes with ownership, cascade, repeat/position/size and shared resource lifecycle | Inline-fragment/replaced backgrounds and multiple layers remain incomplete |
 | **Fonts and images** | Selected original decoders and bounded resource/presentation paths | Format subsets and cross-origin font loading require specific contracts; conditional/dynamic/resize font fetching remains limited |
 | **Custom properties** | PR #31 integrates bounded, case-sensitive inherited variables for supported padding/border values, nested fallbacks, cycles, token boundaries and invalid-computed-value handling; original App pixels/hits/reflow match a literal control | Alpha colors, calc(), CSSOM and full Bootstrap component styling remain outside this qualification |
+| **Computed custom styles** | [PR #62](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/62), integrated at `5c21400`, provides live read-only custom-property values through the renderer. | Full CSSOM, computed pseudo-element declarations and child Element renderer bindings remain outside this slice. |
 | **Native button padding** | Button, submit and reset controls apply supported CSS padding to their boxes and caption placement. [PR #54](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/54) is integrated at `25654fa`. | Finite button-like control scope. Complete native appearance and authored border behavior remain separate. |
 | **GPU acceleration** | Not implemented | Planned measured graphics backend with software fallback; not a replacement decoder grant |
 
