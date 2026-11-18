@@ -577,6 +577,19 @@ fn textarea_initial(doc: &Document, node: usize) -> (String, bool) {
 }
 
 fn set_form_value(editor: &mut Editor, text: &str, kind: Kind) {
+    if matches!(kind, Kind::Checkbox | Kind::Radio) {
+        // Default/on values retain the raw content attribute, including CR/LF.
+        // Their cache is not a single-line text editor or a textarea API value.
+        let mut units = 0;
+        editor.chars = text.chars().take_while(|ch| {
+            units += ch.len_utf16();
+            units <= MAX_VALUE_UNITS
+        }).collect();
+        editor.cursor = editor.chars.len();
+        editor.anchor = editor.cursor;
+        editor.offset = 0;
+        return;
+    }
     // Textarea API values normalize CR/CRLF to LF. Single-line inputs remove
     // CR/LF, while tabs remain part of either value. Submission normalizes LF
     // back to CRLF through the existing URL-encoded form serializer.
@@ -1692,6 +1705,83 @@ mod tests {
         assert_eq!(forms.controls[&first].value.text(), "");
         assert_eq!(forms.text_default_value(first).unwrap().len(), MAX_VALUE_UNITS);
         assert!(forms.controls[&first].dirty_value);
+    }
+
+    #[test]
+    fn checkable_value_replacement_at_payload_cap_shrinks_and_refuses_growth_atomically() {
+        let source = format!(
+            "<form id=f>{}<input id=c type=checkbox checked value='{}'><input id=neighbor value=n></form>",
+            (0..31).map(|_| format!("<input value='{}'>", "x".repeat(MAX_VALUE_UNITS))).collect::<String>(),
+            "c".repeat(MAX_VALUE_UNITS - 1),
+        );
+        let doc = html::parse(&source);
+        let mut forms = Forms::new(&doc);
+        let node = node_id(&doc, "c");
+        let neighbor = node_id(&doc, "neighbor");
+        assert!(!forms.limited);
+        assert_eq!(forms.text_payload(None).unwrap(), MAX_TOTAL_VALUE_BYTES);
+        forms.script_set_checked(node, false).unwrap();
+        forms.script_set_value(neighbor, "n").unwrap();
+        forms.controls.get_mut(&neighbor).unwrap().value.cursor = 0;
+        forms.controls.get_mut(&neighbor).unwrap().value.anchor = 1;
+        let initial = forms.controls[&node].initial.clone();
+        let caption = forms.controls[&node].caption.clone();
+        let identity = (forms.controls[&node].owner, forms.controls[&node].group_root);
+
+        // One extra byte exceeds the aggregate cap despite fitting the
+        // individual value limit; the larger value also exceeds that limit.
+        for size in [MAX_VALUE_UNITS, MAX_VALUE_UNITS + 1] {
+            assert!(forms.prepare_checkable_value(node, Some(&"g".repeat(size))).is_err());
+            assert_eq!(forms.controls[&node].initial, initial);
+            assert_eq!(forms.controls[&node].value.text(), initial);
+            assert_eq!(forms.controls[&node].caption, caption);
+            assert_eq!((forms.controls[&node].owner, forms.controls[&node].group_root), identity);
+            assert!(!forms.controls[&node].checked && forms.controls[&node].initially_checked);
+            assert!(forms.controls[&node].dirty_checked && !forms.controls[&node].dirty_value);
+            assert_eq!(forms.text_payload(None).unwrap(), MAX_TOTAL_VALUE_BYTES);
+        }
+        let plan = forms.prepare_checkable_value(node, Some("s")).unwrap();
+        assert_eq!(forms.controls[&node].initial, initial, "Preparation is private");
+        plan.commit(&mut forms);
+        assert_eq!(forms.controls[&node].initial, "s");
+        assert_eq!(forms.controls[&node].value.text(), "s");
+        assert_eq!(forms.controls[&node].caption, "s");
+        assert_eq!(forms.text_payload(None).unwrap(), MAX_TOTAL_VALUE_BYTES - (MAX_VALUE_UNITS - 2));
+        assert!(!forms.controls[&node].checked && forms.controls[&node].initially_checked);
+        assert!(forms.controls[&node].dirty_checked && !forms.controls[&node].dirty_value);
+        assert_eq!((forms.controls[&node].owner, forms.controls[&node].group_root), identity);
+        let neighbor = &forms.controls[&neighbor];
+        assert_eq!(neighbor.initial, "n");
+        assert_eq!(neighbor.value.text(), "n");
+        assert_eq!((neighbor.value.cursor, neighbor.value.anchor, neighbor.value.offset), (0, 1, 0));
+        assert!(neighbor.dirty_value);
+    }
+
+    #[test]
+    fn checkable_value_native_reset_preserves_raw_cr_lf_and_checked_defaults() {
+        let doc = html::parse(
+            "<form id=f><input id=c type=checkbox checked value='a&#13;&#10;b&#13;c&#10;d'>\
+             <input id=r type=radio checked value='a&#13;&#10;b&#13;c&#10;d'></form>",
+        );
+        let mut forms = Forms::new(&doc);
+        let owner = node_id(&doc, "f");
+        let nodes = [node_id(&doc, "c"), node_id(&doc, "r")];
+        for node in nodes {
+            assert_eq!(doc.attr(node, "value"), Some("a\r\nb\rc\nd"));
+            assert_eq!(forms.controls[&node].initial, "a\r\nb\rc\nd");
+            assert_eq!(forms.controls[&node].value.text(), "a\r\nb\rc\nd");
+            forms.script_set_checked(node, false).unwrap();
+            forms.prepare_checkable_value(node, Some("next\r\nraw\rline\n")).unwrap().commit(&mut forms);
+            assert!(!forms.controls[&node].checked && forms.controls[&node].dirty_checked);
+        }
+        forms.reset_in_document(&doc, owner).unwrap();
+        for node in nodes {
+            let control = &forms.controls[&node];
+            assert_eq!(control.initial, "next\r\nraw\rline\n");
+            assert_eq!(control.value.text(), "next\r\nraw\rline\n");
+            assert!(control.checked && control.initially_checked);
+            assert!(!control.dirty_checked && !control.dirty_value);
+        }
     }
 
     #[test]

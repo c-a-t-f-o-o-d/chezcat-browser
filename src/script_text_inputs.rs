@@ -13,7 +13,7 @@ impl Bridge<'_> {
     pub(super) fn text_input_default_property(&self, object: u32, property: &str) -> bool {
         matches!(property, "name" | "defaultValue" | "value") && self.input_receiver(object)
             && node_index(object).is_some_and(|node| self.native_text_input(node) || self.fresh_text_input(node)
-                || property == "name" && (self.owned_native_checkbox(node) || self.owned_native_radio(node)))
+                || self.owned_native_checkbox(node) || self.owned_native_radio(node))
     }
 
     pub(super) fn fresh_text_input(&self, node: usize) -> bool {
@@ -114,7 +114,7 @@ impl Bridge<'_> {
         if !self.text_input_default_property(object,property) { return Ok(false); }
         let node = self.node(object)?;
         let text = if property == "value" && matches!(value,Value::Null) { String::new() } else { self.text(value)? };
-        if property != "value" {
+        if property != "value" || self.owned_native_checkbox(node) || self.owned_native_radio(node) {
             self.attribute(node,if property == "name" { "name" } else { "value" },Some(text))?;
         } else {
             let plan = if self.fresh_text_input(node) { self.prepare_created_input_plan(node,None,Some(&text))? } else {
@@ -153,18 +153,23 @@ impl Bridge<'_> {
         if self.text_input_default_property(object,property) {
             let node=self.node(object)?;
             let fresh = self.fresh_text_input(node);
-            let size = if property == "value" && !fresh {
+            let checkable = self.owned_native_checkbox(node) || self.owned_native_radio(node);
+            let live_editor = property == "value" && !fresh && !checkable;
+            let raw = self.doc.attr(node, if property == "name" { "name" } else { "value" })
+                .unwrap_or(if checkable && property == "value" { "on" } else { "" });
+            let size = if live_editor {
                 self.forms.controls[&node].value.chars.iter().map(|ch| ch.len_utf8()).sum()
-            } else { self.doc.attr(node,if property == "name" { "name" } else { "value" }).map_or(0,str::len) };
+            } else { raw.len() };
             if size>self.state.limits.host.string_bytes {return Err("Text INPUT result exceeds the DOM string allowance.".into());}
             // A read may materialize native state, but a failed result-copy or
             // admission check must never publish that state.
             self.state.copies(size)?;
+            let text = if live_editor {
+                self.forms.controls[&node].value.text()
+            } else if fresh && property == "value" {
+                raw.chars().filter(|ch| !matches!(ch,'\r'|'\n')).collect()
+            } else { raw.to_owned() };
             let plan = if fresh { Some(self.prepare_created_input_plan(node,None,None)?) } else { None };
-            let text = if property == "value" {
-                if fresh { self.doc.attr(node,"value").unwrap_or("").chars().filter(|ch| !matches!(ch,'\r'|'\n')).collect() }
-                else { self.forms.controls[&node].value.text() }
-            } else { self.doc.attr(node,if property == "name" { "name" } else { "value" }).unwrap_or("").to_owned() };
             if let Some(plan) = plan { self.state.replace_bytes(0,plan.retained_bytes())?; plan.commit(self.forms); }
             return Ok(Some(Value::String(text)));
         }
@@ -203,6 +208,14 @@ impl Bridge<'_> {
         if name.html_is("type") && value.is_some_and(|value| !value.is_empty() && !value.eq_ignore_ascii_case("text") && !value.eq_ignore_ascii_case("checkbox") && !value.eq_ignore_ascii_case("radio")) { return Ok(None); }
         if self.fresh_text_input(node) { return self.prepare_created_input_plan(node,Some((&name.qualified,value)),None).map(Some); }
         if name.html_is("type") { return Ok(None); }
+        if name.html_is("value") && (self.owned_native_checkbox(node) || self.owned_native_radio(node)) {
+            let bytes = value.map_or(2,str::len);
+            self.state.work(self.forms.default_scan_work().saturating_add(bytes).saturating_add(self.forms.controls.len()))?;
+            // Raw initial text, the four-byte editor, and the bounded caption
+            // are prepared privately before the attribute's own preflight.
+            self.state.copies(bytes.checked_mul(6).ok_or("Checkable INPUT value copy accounting overflow.")?)?;
+            return self.forms.prepare_checkable_value(node,value).map(Some);
+        }
         if !(self.native_text_input(node) || name.html_is("name") && (self.owned_native_checkbox(node) || self.owned_native_radio(node))) { return Ok(None); }
         let scanned=self.forms.default_scan_work();
         let input=value.map_or(0,str::len);
