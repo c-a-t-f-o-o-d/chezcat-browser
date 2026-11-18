@@ -5707,3 +5707,6 @@ mod base_class_tests;
 #[cfg(test)]
 #[path = "app_derived_class_tests.rs"]
 mod derived_class_tests;
+#[cfg(test)]
+#[path = "app_document_properties_tests.rs"]
+mod document_properties_tests;

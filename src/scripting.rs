@@ -94,6 +94,8 @@ use script_images::ImagesState;
 mod script_select_fragments;
 #[path = "script_element_siblings.rs"]
 mod script_element_siblings;
+#[path = "script_document_properties.rs"]
+mod script_document_properties;
 
 #[path = "script_inner_html.rs"]
 mod script_inner_html;
@@ -2410,7 +2412,8 @@ impl Bridge<'_> {
 }
 
 impl Host for Bridge<'_> {
-    fn expando_owner(&self,object:u32)->Option<u32> {self.ordinary_event_owner(object).or_else(||self.standalone_target_owner(object)).or_else(||(self.element_expando_receiver(object)||self.fragment_receiver(object)).then_some(WINDOW))}
+    fn expando_owner(&self,object:u32)->Option<u32> {self.ordinary_event_owner(object).or_else(||self.standalone_target_owner(object)).or_else(||(object==DOCUMENT||self.element_expando_receiver(object)||self.fragment_receiver(object)).then_some(WINDOW))}
+    fn ordinary_native_fallback(&self,object:u32,property:&str)->bool {object==DOCUMENT&&!self.document_native_property(property)}
     fn exposed_native_prototype(&self,object:u32)->bool {self.ordinary_event_owner(object).is_some()||self.standalone_target_owner(object).is_some()||self.video_interface_receiver(object)||self.fragment_receiver(object)}
     fn native_ancestry_inspection(&self,object:u32)->bool {self.event_receiver(object)||self.exposed_native_prototype(object)||self.namespace_receiver(object)}
     fn event_target_interface(&self,window:u32)->bool {window==WINDOW || self.frame_context(window).is_some()}
@@ -2483,6 +2486,7 @@ impl Host for Bridge<'_> {
         if self.fragment_receiver(object) {return matches!(property,"childNodes"|"nodeValue"|"textContent"|"parentNode"|"parentElement"|"ownerDocument"|"isConnected"|"firstChild"|"lastChild"|"previousSibling"|"nextSibling") || self.dom_method(object,property).is_some();}
         if self.standalone_target_owner(object).is_some() {return false;}
         if property=="prototype"&&self.location_instance_owner(object).is_some(){return false;}
+        if object==DOCUMENT {return self.document_native_property(property);}
         if self.element_expando_receiver(object) {return self.element_native_property(object,property);}
         if self.attr_receiver(object) { return self.attr_native_member(property); }
         if self.constructed_event_receiver(object) { return self.event_native_member(object,property); }
@@ -3174,6 +3178,7 @@ impl Host for Bridge<'_> {
     }
 
     fn own_keys(&mut self, object: u32) -> Result<Vec<String>, String> {
+        if object==DOCUMENT {self.state.work(1)?;return Ok(Vec::new());}
         if self.standalone_target_owner(object).is_some() {self.state.work(1)?;return Ok(Vec::new());}
         if script_named_map::element(object).is_some() {
             self.named_map_get(object, "length")?;
@@ -4933,6 +4938,22 @@ mod script_element_sibling_protocol_tests;
 #[cfg(test)]
 #[path = "script_element_sibling_security_tests.rs"]
 mod script_element_sibling_security_tests;
+
+#[cfg(test)]
+#[path = "script_document_own_properties_tests.rs"]
+mod script_document_own_properties_tests;
+
+#[cfg(test)]
+#[path = "script_document_own_descriptor_tests.rs"]
+mod script_document_own_descriptor_tests;
+
+#[cfg(test)]
+#[path = "script_document_prebound_methods_tests.rs"]
+mod script_document_prebound_methods_tests;
+
+#[cfg(test)]
+#[path = "script_document_dispatch_tests.rs"]
+mod script_document_dispatch_tests;
 
 #[cfg(test)]
 #[path = "script_comment_tests.rs"]
