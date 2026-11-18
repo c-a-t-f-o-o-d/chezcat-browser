@@ -48,8 +48,8 @@ remain at `36adf20`; these later changes do not update those binaries.
 | :--- | :--- | :--- |
 | **DOM identity and collections** | Genuine Document/Node accessors, stable live supported childNodes, checked native array-like apply/slice, Attr identity, text replacement and native-created Comment leaves | Parsed comments, full CharacterData, DocumentType/template-content and child-Document collections remain outside the finite scope |
 | **Node roots** | Genuine `Node.getRootNode()` for ordinary accessible connected/detached trees, Attr and supported same-origin child trees; ordered options conversion and owner/work checks | No Shadow DOM or fabricated child scope |
-| **DOM object stringification** | Concrete BUTTON/UL prototypes inherit genuine `Object.prototype.toString` with their class tags and existing owner guards, integrated through [PR #64](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/64). | Finite concrete interfaces with existing Window behavior. Wider native interfaces and constructors remain separate. |
-| **Element selectors, siblings and NodeLists** | Scripts can borrow Element selector methods. `querySelectorAll` returns a static snapshot. Element and CharacterData sibling getters skip Text and Comment nodes. Supported main-document NodeLists have bounded indexed iteration. | Existing selector grammar, work budgets and document access checks apply. Child Element queries and complete NodeList APIs remain outside this scope. |
+| **DOM object stringification** | BUTTON, UL, DIV, BODY and HTML inherit `Object.prototype.toString` through their own interfaces. MAIN uses `HTMLElement.prototype`. [PR #64](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/64) · [PR #68](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/68) | In supported child documents, HTML and BODY use prototypes from their own realm. |
+| **Element selectors, siblings, Slottable and NodeLists** | Scripts can borrow Element selectors. `querySelectorAll` returns a static snapshot. Element/CharacterData sibling getters skip Text/Comment nodes. [PR #67](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/67) adds branded Element/Text `assignedSlot` getters returning null in supported ordinary trees. Main-document NodeLists have bounded indexed iteration. | Existing grammar, work and document access checks apply. Shadow DOM, child Element queries and complete NodeList APIs remain outside this scope. |
 | **Select fragments** | Conventional select/option/optgroup fragments; whole-subtree removal/reconnection retains identities, edited values, owner/order/disabled state and retires stale focus/hits | Rich select content, existing-select interior edits, explicit new select associations, and createElement(select) remain unsupported |
 | **Hidden inputs** | Fresh hidden-input admission, finite name/value/default reflection and whole-tree moves through native ownership; no box or focus target | Arbitrary existing input-type transitions and unrelated unsupported input kinds remain refused |
 | **Text-input fragments** | Default/explicit text INPUT fragments through staged native transactions; dirty/default values, caret/selection, Reset and focus retirement; finite BUTTON.type reads | Unsupported kinds, foreign/inert ancestry, new explicit form associations and exhausted limits reject atomically. This is not unrestricted innerHTML/form support |
@@ -64,9 +64,11 @@ passes the unchanged pinned jQuery 4.0.0 offline app through startup, genuine
 trusted input, and an asynchronous timer text update. This is one workflow, not
 AJAX/Deferred or full-framework support. Legacy jQuery and Vue retain their earlier
 recorded fragment and language boundaries. Bootstrap initializes at both widths.
-PR #64's measured `a82267e` advances to computed overflow at 2475:20. PR #65's
-measured `7b8a5fb` advances to `assignedSlot` at 1979:7. Both changes are integrated
-by `main` `bf0c737`. The menu remains closed and dropdown input still fails.
+After PR #67/#68, measured candidate `13d7dae` visibly paints the open menu and
+runs its trusted amber-choice callback at 1280/640. The menu stays open. The first
+microtask fault is computed `position` at 1990:5, and dropdown input remains failed.
+Candidate and integrated `main` `5309a68` CI each pass 2,695 normal tests and 25
+journeys. The App captures identify the candidate source.
 See [compatibility outcomes](COMPATIBILITY.md) for exact versions and stages.
 
 ## Rendering and resources

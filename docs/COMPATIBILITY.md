@@ -24,6 +24,9 @@ later measurements on `3456e67`, `5c89eea` and `5c22afd`, followed by the combin
 integrated in `main` at `991cba3`, from measured computed-style build `63a2259`,
 integrated through PR #62 at `5c21400`.
 PR #64/#65 add measurements on `a82267e` and `7b8a5fb`, integrated by `bf0c737`.
+PR #67/#68 retain Slottable measurement `a6a2619` and HTML-container candidate
+`13d7dae`, integrated by `main` `5309a68`. Candidate and main CI each pass 2,695
+normal tests and 25 journeys. The interaction captures below use `13d7dae`.
 The [catalogue](compatibility.json)
 retains its exact source-bound records and classification of 44 named families
 and formats; older records are not silently relabeled as newer runs. Source
@@ -44,6 +47,7 @@ changes after this snapshot require their own rechecks.
 | **Bootstrap 5.3.9 + Popper 2.11.8, selector checkpoint** | The unchanged sample initializes and renders responsive cards at 1280/640 on selector candidate `02cd0f8`. | The first trusted click reaches missing `getComputedStyle` at 3734:21 before a menu choice. | [PR #60](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/60) integrated in `main` at `991cba3`. The measurement retains candidate identity `02cd0f8`. |
 | **Bootstrap 5.3.9 + Popper 2.11.8, computed-style checkpoint** | Measured feature build `63a2259` passes initialization, initial rendering and responsive layout at both widths. Its local and CI gates pass 2,657 normal tests and 25 journeys. | The first trusted click fails Popper's `node.toString()` at 1736:9 before a menu choice. | [PR #62](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/62) integrated in `main` at `5c21400`. Earlier source-bound observations remain in the catalogue. |
 | **Bootstrap 5.3.9 + Popper 2.11.8, overflow checkpoint** | Measured `7b8a5fb` passes initialization, initial rendering and responsive layout at 1280/640. | The first trusted click reaches unsupported `assignedSlot` at 1979:7. The menu remains closed and the choice snapshot is absent. | [PR #65](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/65) integrated at `bf0c737`. The preceding `a82267e` observation is retained separately. |
+| **Bootstrap 5.3.9 + Popper 2.11.8, Slottable/container checkpoint** | At 1280/640 on `13d7dae`, initialization/render/responsive layout pass, the menu visibly paints open, and its trusted amber-choice callback runs. | The menu stays visibly open after selection. The first microtask fault is computed `position` at 1990:5. Input remains failed, with 0/2 configurations passing. | [PR #67](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/67) measurement `a6a2619` first reached `node.toString()` at 1736:9. [PR #68](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/68)'s later candidate `13d7dae` supplies the partial interaction evidence, distinct from integrated `main` `5309a68` CI and published alpha.2. |
 | **Original CSS-variable box reduction** | PR #31 changes the box from 80×30 to 104×46, matching a literal control's opaque pixels, anchor hits and live reflow | Supported padding/border values only; alpha colors, calc(), CSSOM and full Bootstrap styling unproved | [PR #31](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/31), candidate `5cd5e52` |
 | **Reference browser** | Initial DOM and pixel captures exist for the original fixture | Interactions were not run; no reference-interaction denominator | Initial-state comparison only |
 
@@ -69,7 +73,7 @@ is older than the later DOM/string/anchor/text-input/Event/CSS-variable changes.
 | **NodeList iteration** | Supported main-document NodeLists expose bounded indexed iteration. Bootstrap spreads its selector results and initializes at both widths on combined `main` `25654fa`. | Complete NodeList APIs or a working dropdown |
 | **Native button padding** | Supported padding changes native button boxes and caption placement. The separate Bootstrap comparison below records the visible result. | Complete native appearance or a combined main workflow result |
 | **Computed custom styles** | Live read-only custom-property values on measured `63a2259`, integrated at `5c21400`, advance the unchanged Bootstrap click into Popper at both widths. | Full CSSOM or a working dropdown |
-| **DOM object stringification** | Guarded inherited `Object.prototype.toString` for concrete BUTTON/UL nodes lets `a82267e` advance to computed overflow at 2475:20. | Wider native interfaces or a working dropdown |
+| **DOM object stringification and Slottable** | PR #67 adds ordinary-tree Element/Text `assignedSlot` getters. PR #68 adds ordinary object stringification for DIV, BODY and HTML through their own interfaces. MAIN uses HTMLElement. `13d7dae` paints the open menu and runs the trusted choice at both widths. | The close step is still open. The catalogue retains earlier measured failures. |
 | **Computed overflow** | Resolved physical axes share the rendering cascade and rectangular paint/hit clipping. `7b8a5fb` advances to `assignedSlot` at 1979:7. | Initial element scroll positions only. Element scrolling and scrollbar widgets remain unimplemented. |
 
 The separate padding comparison uses loaded captures from `5c89eea` and

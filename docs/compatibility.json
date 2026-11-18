@@ -883,6 +883,53 @@
           "pull_request": "https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/65",
           "opened_marker_observed": false,
           "choice_snapshot_present": false
+        },
+        "slottable_measurement": {
+          "measured_source_commit": "a6a26197660d97a661d0dd4eeeef80b6ae01df26",
+          "executable_sha256": "8f6b3f775dc27b3257e19e26f67fa67f2ddd238fbf8bd8cde9d19a76efb059e5",
+          "source_map_sha256": "ef319e7a214a7cddca85a21e46dc81aa008cc0386909e89cef0551e3961d574d",
+          "dirty": false,
+          "measurement_manifest_sha256": "651085d125cd550bed51227c2d0709ce84f1a08ad997eb923a42c90b9b432fe8",
+          "build_record_sha256": "edf3ec24d4d4c98d8df190865c6c532a23b1f6783a8e7ea9a5170aeb6bc10ce2",
+          "first_root": "DOM method \"toString\" is not supported.",
+          "first_root_location": "Bootstrap5.3.9 bundle line1736,column9",
+          "integrated_main_commit": "fce7b09f71b8426db31c9f754f71a78c66a1154c",
+          "pull_request": "https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/67",
+          "opened_marker_observed": false,
+          "choice_snapshot_present": false
+        },
+        "html_container_object_measurement": {
+          "measured_source_commit": "13d7dae75b44e53a37e9112b7084ca08a1e1da50",
+          "executable_sha256": "7154855fb48d257ff663fb8a6d2e90a788678264e659b8470b2c270034fb994c",
+          "source_map_sha256": "50c8250250268aad029fbde8efd6a21dc2b0940330fc6a04eaa78aaf7a7033f2",
+          "dirty": false,
+          "measurement_manifest_sha256": "87bd6b1d988881dd3fce27a343126656b8cebfcca7444919acf051bd876a6fb4",
+          "build_record_sha256": "6353683948df365eb5d053665570369b96861a4a12b1f1859900982c2e3f66a1",
+          "first_root": "Computed declaration property \"position\" is not implemented; use the admitted overflow or custom-property reads.",
+          "first_root_location": "Microtask checkpoint, Bootstrap5.3.9 bundle line1990,column5",
+          "integrated_main_commit": "5309a68954c4f91a9ea5953f9fdeec22083e315f",
+          "pull_request": "https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/68",
+          "opened_marker_observed": true,
+          "choice_snapshot_present": true,
+          "menu_visibly_painted": true,
+          "trusted_amber_choice_callback_observed": true,
+          "menu_remains_visibly_open_after_choice": true,
+          "successful_close_observed": false,
+          "measurement_scope": "The candidate App painted the menu open and ran the trusted choice at 1280x800 and 640x800. The menu stayed open after selection. Both input checks failed.",
+          "local_validation": {
+            "normal_tests_passed": 2695,
+            "required_journeys_passed": 25
+          },
+          "hosted_validation": {
+            "normal_tests_passed": 2695,
+            "required_journeys_passed": 25
+          },
+          "integrated_main_hosted_validation": {
+            "source_commit": "5309a68954c4f91a9ea5953f9fdeec22083e315f",
+            "normal_tests_passed": 2695,
+            "required_journeys_passed": 25,
+            "scope": "Hosted integration on main. Candidate 13d7dae supplies the App interaction captures."
+          }
         }
       }
     },
