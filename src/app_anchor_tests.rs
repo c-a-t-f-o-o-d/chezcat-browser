@@ -167,6 +167,8 @@ impl Site {
         let listener=std::net::TcpListener::bind("127.0.0.1:0").unwrap();listener.set_nonblocking(true).unwrap();let address=listener.local_addr().unwrap();let requests=Arc::new(Mutex::new(Vec::new()));let stop=Arc::new(AtomicBool::new(false));let(received,stopped)=(requests.clone(),stop.clone());
         let source=format!("<!doctype html><base href='http://127.0.0.1:{}/base/'><title>HTTP source</title><style>body{{margin:0}}a{{display:block;width:160px;height:32px}}</style><body><a id=a href=target>Original HTTP anchor</a><script>var a=document.getElementById('a');{handler}</script></body>",address.port());
         let worker=std::thread::spawn(move||{let mut peers=Vec::new();while !stopped.load(Ordering::Relaxed){match listener.accept(){Ok((mut stream,_))=>{let received=received.clone();let source=source.clone();peers.push(std::thread::spawn(move||{
+            // The listener polls for shutdown. Each accepted peer performs timed blocking I/O.
+            stream.set_nonblocking(false).unwrap();
             stream.set_read_timeout(Some(Duration::from_secs(8))).unwrap();stream.set_write_timeout(Some(Duration::from_secs(8))).unwrap();let mut bytes=Vec::new();let mut byte=[0u8;1];while !bytes.ends_with(b"\r\n\r\n"){if bytes.len()>16384||stream.read_exact(&mut byte).is_err(){return;}bytes.push(byte[0]);}let header=String::from_utf8_lossy(&bytes);let mut first=header.lines().next().unwrap().split_whitespace();let method=first.next().unwrap().to_owned();let path=first.next().unwrap().to_owned();let cookie=header.lines().find_map(|line|line.split_once(':').filter(|(name,_)|name.eq_ignore_ascii_case("cookie")).map(|(_,value)|value.trim().to_owned())).unwrap_or_default();let length=header.lines().find_map(|line|line.split_once(':').filter(|(name,_)|name.eq_ignore_ascii_case("content-length")).map(|(_,value)|value.trim().parse::<usize>().unwrap())).unwrap_or(0);assert!(length<=32768);let mut body=vec![0;length];if stream.read_exact(&mut body).is_err(){return;}received.lock().unwrap().push(Request{method,path:path.clone(),cookie,body});
             let(status,extra,body)=match path.as_str(){"/source"=>("200 OK","",source),"/base/target"=>("302 Found","Location: /final\r\n",String::new()),"/script-target"=>("200 OK","","<title>Author navigation</title><p>Script target</p>".into()),_=>("200 OK","","<title>Captured target</title><p>Target</p>".into())};let header=format!("HTTP/1.1 {status}\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n{extra}\r\n",body.len());let _=stream.write_all(header.as_bytes());let _=stream.write_all(body.as_bytes());
         }));},Err(error)if error.kind()==std::io::ErrorKind::WouldBlock=>std::thread::sleep(Duration::from_millis(1)),Err(error)=>panic!("{error}")}}for peer in peers{peer.join().unwrap();}});
@@ -204,5 +206,28 @@ fn anchor_app_same_site_source_sends_strict_on_new_chain_despite_prior_cross_sit
 
 #[test]
 fn anchor_app_local_opaque_initiator_overrides_destination_prior_web_origin(){
-    let site=Site::new("");let files=Files::new();let mut source=files.page("");let url=crate::url::parse(&format!("http://{}/local-target",site.address)).unwrap().0;eval(&mut source,&format!("a.setAttribute('href','{}');",url.display()));let target=take_link(activate(&mut source,"a",input(0)));assert!(target.initiator.is_none());let mut destination=App::new();destination.open_address(&format!("http://{}/previous",site.address));destination.wait_for_load();assert_eq!(destination.document.title,"Captured target");destination.cookies.set_http(&url,"destination_strict=must_not_leak; SameSite=Strict; Path=/").unwrap();destination.open_link_target(target);destination.wait_for_load();assert!(!destination.failed,"{}",destination.status);assert_eq!(destination.location.url.as_ref(),Some(&url));assert_eq!(destination.document.title,"Captured target");assert!(!destination.cookie_same_site);let request=site.logs().into_iter().find(|request|request.path=="/local-target").unwrap();assert_eq!(request.method,"GET");assert!(!request.cookie.contains("destination_strict="),"Opaque source origin fell back to destination's prior web origin");
+    let site = Site::new("");
+    let files = Files::new();
+    let mut source = files.page("");
+    let url = crate::url::parse(&format!("http://{}/local-target", site.address)).unwrap().0;
+    eval(&mut source, &format!("a.setAttribute('href','{}');", url.display()));
+    let target = take_link(activate(&mut source, "a", input(0)));
+    assert!(target.initiator.is_none());
+
+    let mut destination = App::new();
+    destination.open_address(&format!("http://{}/previous", site.address));
+    destination.wait_for_load();
+    assert!(!destination.failed, "Prior page failed: {}; received paths: {:?}", destination.status,
+        site.logs().iter().map(|request| request.path.as_str()).collect::<Vec<_>>());
+    assert_eq!(destination.document.title, "Captured target");
+    destination.cookies.set_http(&url, "destination_strict=must_not_leak; SameSite=Strict; Path=/").unwrap();
+    destination.open_link_target(target);
+    destination.wait_for_load();
+    assert!(!destination.failed, "{}", destination.status);
+    assert_eq!(destination.location.url.as_ref(), Some(&url));
+    assert_eq!(destination.document.title, "Captured target");
+    assert!(!destination.cookie_same_site);
+    let request = site.logs().into_iter().find(|request| request.path == "/local-target").unwrap();
+    assert_eq!(request.method, "GET");
+    assert!(!request.cookie.contains("destination_strict="), "Opaque source origin fell back to destination's prior web origin");
 }

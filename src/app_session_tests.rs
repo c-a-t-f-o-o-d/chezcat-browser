@@ -5,7 +5,7 @@ use std::io::{Read,Write};
 use std::net::{TcpListener,SocketAddr};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool,Ordering};
-use std::sync::Condvar;
+use std::sync::{mpsc,Condvar};
 use std::thread;
 
 struct Temp(PathBuf);
@@ -107,14 +107,45 @@ fn session_core_bounded_overflow_poll_serves_real_inactive_timers_without_hot_lo
     for (id,name) in [(one,"One"),(two,"Two"),(three,"Three")] {session.with_tab(id,|app|assert_eq!(app.document.title,format!("{name} done"))).unwrap();}
 }
 
-struct Site {address:SocketAddr,stopped:Arc<AtomicBool>,requests:Arc<Mutex<Vec<String>>>,held:Arc<Mutex<Vec<String>>>,finished:Arc<Mutex<Vec<String>>>,gate:Arc<(Mutex<bool>,Condvar)>,worker:Option<thread::JoinHandle<()>>}
+#[derive(Debug,PartialEq)]
+enum PeerRead { Accepted, PrefixConsumed, Failed, Held }
+
+struct SplitHeader {
+    prefix_len:usize,
+    prefix_written:mpsc::Receiver<()>,
+    notice:mpsc::Sender<PeerRead>,
+}
+
+struct Site {address:SocketAddr,stopped:Arc<AtomicBool>,requests:Arc<Mutex<Vec<String>>>,held:Arc<Mutex<Vec<String>>>,finished:Arc<Mutex<Vec<String>>>,read_errors:Arc<Mutex<Vec<String>>>,gate:Arc<(Mutex<bool>,Condvar)>,worker:Option<thread::JoinHandle<()>>}
 impl Site {
-    fn new(kind:&'static str)->Self{
+    fn new(kind:&'static str)->Self{Self::with_split_header(kind,None)}
+    fn with_split_header(kind:&'static str,mut probe:Option<SplitHeader>)->Self{
         let listener=TcpListener::bind("127.0.0.1:0").unwrap();let address=listener.local_addr().unwrap();listener.set_nonblocking(true).unwrap();
         let stopped=Arc::new(AtomicBool::new(false));let requests=Arc::new(Mutex::new(Vec::new()));let held=Arc::new(Mutex::new(Vec::new()));let finished=Arc::new(Mutex::new(Vec::new()));let gate=Arc::new((Mutex::new(false),Condvar::new()));
+        let read_errors=Arc::new(Mutex::new(Vec::new()));let errors=read_errors.clone();
         let(stop,seen,holding,done,release)=(stopped.clone(),requests.clone(),held.clone(),finished.clone(),gate.clone());let worker=thread::spawn(move||{
-            let mut peers=Vec::new();while !stop.load(Ordering::Relaxed){match listener.accept(){Ok((mut stream,_))=>{assert!(peers.len()<32,"Fixture connection bound exceeded.");let seen=seen.clone();let holding=holding.clone();let done=done.clone();let release=release.clone();peers.push(thread::spawn(move||{
-                stream.set_read_timeout(Some(Duration::from_secs(15))).unwrap();stream.set_write_timeout(Some(Duration::from_secs(15))).unwrap();let mut request=Vec::new();let mut byte=[0u8;1];while !request.ends_with(b"\r\n\r\n"){if request.len()>=8192||stream.read_exact(&mut byte).is_err(){return;}request.push(byte[0]);}
+            let mut peers=Vec::new();while !stop.load(Ordering::Relaxed){match listener.accept(){Ok((mut stream,_))=>{assert!(peers.len()<32,"Fixture connection bound exceeded.");let seen=seen.clone();let holding=holding.clone();let done=done.clone();let release=release.clone();let errors=errors.clone();let probe=probe.take();peers.push(thread::spawn(move||{
+                // Only the listener polls. An accepted Winsock peer inherits its nonblocking mode.
+                stream.set_nonblocking(false).unwrap();
+                stream.set_read_timeout(Some(Duration::from_secs(15))).unwrap();stream.set_write_timeout(Some(Duration::from_secs(15))).unwrap();
+                if let Some(probe)=&probe {
+                    if probe.notice.send(PeerRead::Accepted).is_err() || probe.prefix_written.recv_timeout(Duration::from_secs(15)).is_err(){return;}
+                }
+                let mut request=Vec::new();let mut byte=[0u8;1];
+                while !request.ends_with(b"\r\n\r\n") {
+                    let read=if request.len()==8192 {Err(std::io::ErrorKind::InvalidData)} else {stream.read_exact(&mut byte).map_err(|e|e.kind())};
+                    if let Err(kind)=read {
+                        let prefix=String::from_utf8_lossy(&request[..request.len().min(128)]);
+                        let path=prefix.lines().next().and_then(|line|line.split_whitespace().nth(1));
+                        errors.lock().unwrap().push(format!("header bytes={}, path={path:?}, error={kind:?}",request.len()));
+                        if let Some(probe)=&probe {let _=probe.notice.send(PeerRead::Failed);}
+                        return;
+                    }
+                    request.push(byte[0]);
+                    if let Some(probe)=&probe {
+                        if request.len()==probe.prefix_len {let _=probe.notice.send(PeerRead::PrefixConsumed);}
+                    }
+                }
                 let text=String::from_utf8_lossy(&request);let path=text.lines().next().and_then(|line|line.split_whitespace().nth(1)).unwrap_or("/").to_owned();seen.lock().unwrap().push(path.clone());
                 let (mime,body)=if path=="/" {
                     let content=match kind {"sheet"=>"<script>var sheet=document.createElement('link');sheet.rel='stylesheet';sheet.href='/held.css';sheet.onload=function(){document.title='LATE';};document.head.appendChild(sheet);</script>","script"=>"<script>var s=document.createElement('script');s.src='/held.js';document.body.appendChild(s);</script>","image"=>"<img src='/held.ppm' onload=\"document.title='LATE'\">","background"=>"<style>#box{background-image:url('/held.ppm')}</style>",_=>""};
@@ -126,6 +157,7 @@ impl Site {
                 let header=format!("HTTP/1.1 200 OK\r\nContent-Type: {mime}\r\nContent-Length: {}\r\nConnection: close\r\nContent-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self'; object-src 'none'\r\n\r\n",body.len());let _=stream.write_all(header.as_bytes());
                 if path.starts_with("/held."){
                     holding.lock().unwrap().push(path.clone());
+                    if let Some(probe)=&probe {let _=probe.notice.send(PeerRead::Held);}
                     let(open,_)=release.1.wait_timeout_while(release.0.lock().unwrap(),Duration::from_secs(30),|open|!*open).unwrap();
                     // Timeout is fixture failure, never implicit publication.
                     if !*open{return;}drop(open);
@@ -134,15 +166,52 @@ impl Site {
                 done.lock().unwrap().push(path);
             }));},Err(error) if error.kind()==std::io::ErrorKind::WouldBlock=>thread::sleep(Duration::from_millis(1)),Err(error)=>panic!("{error}")}}
             for peer in peers{peer.join().unwrap();}
-        });Self{address,stopped,requests,held,finished,gate,worker:Some(worker)}
+        });Self{address,stopped,requests,held,finished,read_errors,gate,worker:Some(worker)}
     }
     fn url(&self,path:&str)->String{format!("http://{}{path}",self.address)}
     fn seen(&self,path:&str)->bool{self.requests.lock().unwrap().iter().any(|p|p==path)}
     fn held(&self,path:&str)->bool{self.held.lock().unwrap().iter().any(|p|p==path)}
     fn finished(&self,path:&str)->bool{self.finished.lock().unwrap().iter().any(|p|p==path)}
+    fn observations(&self)->String {
+        format!("requests={:?}, held={:?}, finished={:?}, read errors={:?}",
+            self.requests.lock().unwrap(),self.held.lock().unwrap(),self.finished.lock().unwrap(),self.read_errors.lock().unwrap())
+    }
     fn release(&self){*self.gate.0.lock().unwrap()=true;self.gate.1.notify_all();}
 }
 impl Drop for Site{fn drop(&mut self){self.release();self.stopped.store(true,Ordering::Relaxed);if let Some(worker)=self.worker.take(){worker.join().unwrap();}}}
+
+#[test]
+fn session_held_peer_reads_split_image_request_before_holding_and_releasing_body() {
+    let path="/held.ppm";
+    let prefix=b"GET /held.ppm HTTP/1.1\r\nHost: localhost\r\n";
+    let (prefix_written,admit_read)=mpsc::channel();
+    let (notice,events)=mpsc::channel();
+    let site=Site::with_split_header("image",Some(SplitHeader {prefix_len:prefix.len(),prefix_written:admit_read,notice}));
+    let mut client=std::net::TcpStream::connect(site.address).unwrap();
+    let timeout=Duration::from_secs(5);
+    client.set_read_timeout(Some(timeout)).unwrap();
+    client.set_write_timeout(Some(timeout)).unwrap();
+    assert_eq!(events.recv_timeout(timeout),Ok(PeerRead::Accepted),"{}",site.observations());
+    client.write_all(prefix).unwrap();
+    prefix_written.send(()).unwrap();
+    assert_eq!(events.recv_timeout(timeout),Ok(PeerRead::PrefixConsumed),"{}",site.observations());
+    // The peer has consumed exactly the first fragment. Withhold the final
+    // blank line and observe its next real socket read before completing it.
+    assert_eq!(events.recv_timeout(Duration::from_millis(200)),Err(mpsc::RecvTimeoutError::Timeout),"{}",site.observations());
+    assert!(!site.seen(path)&&!site.held(path)&&!site.finished(path),"{}",site.observations());
+    client.write_all(b"\r\n").unwrap();
+    assert_eq!(events.recv_timeout(timeout),Ok(PeerRead::Held),"{}",site.observations());
+    let expected=b"HTTP/1.1 200 OK\r\nContent-Type: image/x-portable-pixmap\r\nContent-Length: 23\r\nConnection: close\r\nContent-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self'; object-src 'none'\r\n\r\n";
+    let mut header=vec![0;expected.len()];
+    client.read_exact(&mut header).unwrap();
+    assert_eq!(header.as_slice(),expected);
+    assert!(site.seen(path)&&site.held(path)&&!site.finished(path),"{}",site.observations());
+    site.release();
+    let mut body=Vec::new();
+    client.take(24).read_to_end(&mut body).unwrap();
+    assert_eq!(body,b"P6\n2 2\n255\n\0\0\xff\0\0\xff\0\0\xff\0\0\xff");
+    assert!(site.finished(path),"{}",site.observations());
+}
 
 #[test]
 fn session_core_close_consumes_held_script_stylesheet_image_and_background_owners(){
@@ -154,7 +223,7 @@ fn session_core_close_consumes_held_script_stylesheet_image_and_background_owner
             // Deliberately let the parser resource arrive before the UI polls
             // its queued first paint. Request arrival is not document commit.
             let deadline=Instant::now()+Duration::from_secs(15);
-            while !site.held(resource){assert!(Instant::now()<deadline,"{kind}: parser resource did not arrive.");thread::sleep(Duration::from_millis(2));}
+            while !site.held(resource){assert!(Instant::now()<deadline,"{kind}: parser resource did not arrive. {}",site.observations());thread::sleep(Duration::from_millis(2));}
         }
         until(&mut session,|session|site.held(resource)&&session.with_tab(closing,|app|!app.failed&&app.document.title=="Held owner").unwrap());
         session.with_tab(closing,|app|assert_eq!(app.document.title,"Held owner")).unwrap();
