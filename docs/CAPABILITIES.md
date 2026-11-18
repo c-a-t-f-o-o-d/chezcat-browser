@@ -69,6 +69,11 @@ runs its trusted amber-choice callback at 1280/640. The menu stays open. The fir
 microtask fault is computed `position` at 1990:5, and dropdown input remains failed.
 Candidate and integrated `main` `5309a68` CI each pass 2,695 normal tests and 25
 journeys. The App captures identify the candidate source.
+Integrated PR #69/#71 add computed `position` and layout-backed `offsetParent`.
+Measured `c74503c` reaches `offsetParent` at 1994:12, then `96666d3` reaches
+`scrollLeft` at 3154:19. Both runs open the menu and execute its trusted
+Amber-choice callback at 1280/640. The menu remains visible after selection,
+and dropdown input remains failed.
 See [compatibility outcomes](COMPATIBILITY.md) for exact versions and stages.
 
 ## Rendering and resources
@@ -83,6 +88,8 @@ See [compatibility outcomes](COMPATIBILITY.md) for exact versions and stages.
 | **Custom properties** | PR #31 integrates bounded, case-sensitive inherited variables for supported padding/border values, nested fallbacks, cycles, token boundaries and invalid-computed-value handling; original App pixels/hits/reflow match a literal control | Alpha colors, calc(), CSSOM and full Bootstrap component styling remain outside this qualification |
 | **Computed custom styles** | [PR #62](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/62), integrated at `5c21400`, provides live read-only custom-property values through the renderer. | Full CSSOM, computed pseudo-element declarations and child Element renderer bindings remain outside this slice. |
 | **Computed overflow** | [PR #65](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/65) supplies live `overflow`, `overflowX` and `overflowY` reads from the rendering cascade, including `getPropertyValue`. Rectangular axis clips govern painting and hit bounds. | Clipping is qualified at initial element scroll positions. Element scrolling and scrollbar widgets remain unimplemented. |
+| **Computed position and offset parents** | Integrated [PR #69](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/69) supplies live computed `position` through named reads and `getPropertyValue`. [PR #71](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/71) returns supported HTMLElement `offsetParent` identities from the actual layout tree. | Existing document access and work checks apply. General child-element geometry and full CSSOM remain outside this slice. |
+| **Viewport scroll offsets** | [PR #72](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/72), integrated at `13f5cd4`, adds standard-root vertical scroll reads/writes and zero offsets for supported non-scrollable axes. Qualified feature `e7be7cd` passes 2,732 normal tests and 25 journeys locally and in CI. | Nested element scrolling and scrollbar widgets remain outside this slice. On the measured feature at both Bootstrap widths, the chosen menu remains visible with first fault `offsetLeft` at 1927:10. |
 | **Native button padding** | Button, submit and reset controls apply supported CSS padding to their boxes and caption placement. [PR #54](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/54) is integrated at `25654fa`. | Finite button-like control scope. Complete native appearance and authored border behavior remain separate. |
 | **GPU acceleration** | Not implemented | Planned measured graphics backend with software fallback; not a replacement decoder grant |
 
