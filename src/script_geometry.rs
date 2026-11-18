@@ -37,6 +37,7 @@ pub struct Geometry {
     scroll_heights:Vec<Option<i32>>,
     viewport_scroll_height:i32,
     viewport_scroll_unavailable:bool,
+    incomplete_grid_nodes: Vec<bool>,
     rects: Vec<Option<layout::BorderRect>>,
     visual_rects: Vec<Option<layout::VisualBorderRect>>,
     visual_unavailable: Vec<bool>,
@@ -71,6 +72,7 @@ impl Geometry {
             scroll_heights:Vec::new(),
             viewport_scroll_height:0,
             viewport_scroll_unavailable:false,
+            incomplete_grid_nodes: Vec::new(),
             rects: Vec::new(),
             visual_rects: Vec::new(),
             visual_unavailable: Vec::new(),
@@ -167,6 +169,7 @@ impl Geometry {
         self.viewport_scroll_height=layout.viewport_scroll_height;
         self.viewport_scroll_unavailable=layout.viewport_scroll_unavailable;
         self.offset_unavailable = layout.offset_unavailable.clone();
+        self.incomplete_grid_nodes.clone_from(&layout.incomplete_grid_nodes);
         self.offset_parents.clone_from(&layout.offset_parents);
         self.rects = layout.border_rects.clone();
         self.visual_rects.clone_from(&layout.visual_border_rects);
@@ -207,6 +210,7 @@ impl Geometry {
             self.viewport_scroll_height=layout.viewport_scroll_height;
             self.viewport_scroll_unavailable=layout.viewport_scroll_unavailable;
             self.offset_unavailable = layout.offset_unavailable;
+            self.incomplete_grid_nodes = layout.incomplete_grid_nodes;
             self.offset_parents = layout.offset_parents;
             self.rects = layout.border_rects;
             self.visual_rects = layout.visual_border_rects;
@@ -332,6 +336,9 @@ impl Geometry {
             return Ok((f64::from(pixels)/f64::from(self.zoom)).round());
         }
 
+        if self.incomplete_grid_nodes.get(node) == Some(&true) {
+            return Err(format!("Client and offset dimensions require completed grid tracks. Receiver node={node}."));
+        }
         let client = self
             .boxes
             .as_ref()

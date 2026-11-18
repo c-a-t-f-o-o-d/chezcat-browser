@@ -162,6 +162,7 @@ pub enum Display {
     Inline,
     InlineBlock,
     Flex,
+    Grid,
     Table,
     TableRowGroup,
     TableRow,
@@ -174,6 +175,7 @@ impl Display {
             self,
             Self::Block
                 | Self::Flex
+                | Self::Grid
                 | Self::Table
                 | Self::TableRowGroup
                 | Self::TableRow
@@ -1179,6 +1181,13 @@ fn compute_cascade(
         };
         style.transform = computed_transform;
         if !transform_known.is_empty() { transform_known[index] = known; }
+        // Grid children establish independent formatting contexts. Retain the
+        // computed blockification for geometry and transform applicability too.
+        if parent.display == Display::Grid && matches!(style.display,
+            Display::Inline | Display::InlineBlock | Display::TableRowGroup | Display::TableRow | Display::TableCell)
+        {
+            style.display = Display::Block;
+        }
         computed[index] = style;
     }
     let overflows = computed.iter().zip(overflow_known).map(|(style, known)| known.iter().all(|known| *known).then_some(style.overflow)).collect();
@@ -3023,6 +3032,7 @@ fn apply(style: &mut Style, parent: &Style, declaration: &Declaration) {
             "inline" => style.display = Display::Inline,
             "inline-block" => style.display = Display::InlineBlock,
             "flex" => style.display = Display::Flex,
+            "grid" => style.display = Display::Grid,
             "table" => style.display = Display::Table,
             "table-row-group" | "table-header-group" | "table-footer-group" => {
                 style.display = Display::TableRowGroup
