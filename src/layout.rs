@@ -28,6 +28,14 @@ mod scrolling;
 #[path = "layout_background_tests.rs"]
 mod background_tests;
 
+#[cfg(test)]
+#[path = "layout_native_padding_tests.rs"]
+mod native_padding_tests;
+
+fn native_button_padding(kind: Option<Kind>) -> bool {
+    matches!(kind, Some(Kind::Button | Kind::Submit | Kind::Reset))
+}
+
 fn clipped_bottom(x: i32, y: i32, width: i32, height: i32, clip: Option<ClipRect>) -> Option<i32> {
     // Preserve zero-width layout extents when they are not clipped.
     let Some(clip) = clip else {
@@ -256,6 +264,9 @@ pub struct ControlBox {
     pub text_font: Option<FontSpec>,
     pub color: u32,
     pub background: Option<u32>,
+    /// Authored native button-family padding, in zoomed top/right/bottom/left pixels.
+    /// Other native control consumers retain their existing geometry paths.
+    pub padding: [i32; 4],
     pub image: Option<ImageControl>,
 }
 
@@ -941,7 +952,7 @@ impl Engine<'_> {
                 top: border[0],
                 right: border[1],
                 bottom: border[2],
-                padding: [0; 4],
+                padding: control.padding,
             });
         }
         // Confirm only genuine no-box cases. Unmeasured inline fragments or
@@ -1117,7 +1128,7 @@ impl Engine<'_> {
             let control = forms::kind(self.doc, node).is_some();
             let image = self.replaced_image(node);
             let replaced = control || image;
-            let padding = if control && !image {
+            let padding = if control && !image && !native_button_padding(forms::kind(self.doc,node)) {
                 [0; 4]
             } else {
                 self.edges(original.padding, cb.width, &original, false)
@@ -2730,9 +2741,9 @@ impl Engine<'_> {
         if matches!(self.doc.nodes[node].kind, NodeKind::Element { .. }) {
             let padding = self.edges(style.padding, 0, &style, false);
             let border = self.border(&style, 0);
-            let edges = if forms::kind(self.doc, node).is_some() && !self.loaded_image_control(node)
-            {
-                0
+            let kind = forms::kind(self.doc,node);
+            let edges = if kind.is_some() && !self.loaded_image_control(node) {
+                if native_button_padding(kind) {padding[1] + padding[3]} else {0}
             } else {
                 padding[1] + padding[3] + border[1] + border[3]
             };
@@ -3023,7 +3034,9 @@ impl Engine<'_> {
             let control = forms::kind(self.doc, child).is_some();
             let replaced = control || image;
             let edges = if control && !image {
-                [0, 0]
+                if native_button_padding(forms::kind(self.doc,child)) {
+                    [padding[1] + padding[3],padding[0] + padding[2]]
+                } else {[0, 0]}
             } else {
                 [
                     padding[1] + padding[3] + border[1] + border[3],
@@ -3937,6 +3950,10 @@ impl Engine<'_> {
         let available = (self.flow.right - self.flow.left).max(1);
         let scale = self.scale(style);
         let margin = self.edges(style.margin, available, style, true);
+        let button_padding = native_button_padding(Some(kind));
+        let padding = if button_padding {self.edges(style.padding,available,style,false)} else {[0;4]};
+        let horizontal = padding[1] + padding[3];
+        let vertical = padding[0] + padding[2];
         let toggle = matches!(kind, Kind::Checkbox | Kind::Radio);
         let default_width = if toggle {
             (GLYPH_HEIGHT + 4) * scale
@@ -3968,19 +3985,20 @@ impl Engine<'_> {
                 + if kind == Kind::Select { 36 } else { 20 }
         };
         let mut width = self
-            .length(style.width, available, style)
+            .dimension(style.width, Some(available), style, horizontal)
             .unwrap_or(default_width)
             .clamp(0, MAX_WIDTH);
         if let Some(maximum) = style
             .max_width
-            .and_then(|v| self.length(v, available, style))
+            .and_then(|v| self.dimension(v, Some(available), style, horizontal))
         {
             width = width.min(maximum.max(0));
         }
         // Intrinsic controls fit the column. An explicit CSS width may overflow it.
         if style.width == Length::Auto {
-            width = width.min(available);
+            width = width.min((available-horizontal).max(0));
         }
+        let width = width.saturating_add(horizontal).clamp(0,MAX_WIDTH);
         let default_height = if kind == Kind::TextArea {
             let rows = self
                 .doc
@@ -3997,10 +4015,12 @@ impl Engine<'_> {
             self.font_spec(style)
                 .map_or((GLYPH_HEIGHT + 6) * scale, |font| font.height() + 10)
         };
-        let height = self
-            .length(style.height, 0, style)
+        let content_height = if button_padding && vertical != 0 {
+            self.dimension(style.height,None,style,vertical)
+        } else {self.length(style.height,0,style)};
+        let height = content_height
             .unwrap_or(default_height)
-            .clamp(0, MAX_WIDTH);
+            .clamp(0, MAX_WIDTH).saturating_add(vertical).clamp(0,MAX_WIDTH);
         if width == 0 || height == 0 {
             return;
         }
@@ -4030,6 +4050,7 @@ impl Engine<'_> {
             text_font: self.font_spec(style),
             color: style.color,
             background: style.background,
+            padding,
             image: None,
         });
         self.used_margins.insert(node,margin);
@@ -4156,6 +4177,7 @@ impl Engine<'_> {
             text_font: self.font_spec(style),
             color: style.color,
             background: style.background,
+            padding: [0;4],
             image: Some(ImageControl {
                 x: border[3] + padding[3],
                 y: border[0] + padding[0],
