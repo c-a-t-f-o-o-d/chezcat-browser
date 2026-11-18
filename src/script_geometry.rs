@@ -8,6 +8,12 @@ use crate::forms::{Forms, Kind};
 use crate::html::Document;
 use crate::layout::{self, ClientBox, Layout};
 
+fn live_checked(forms: &Forms, node: usize) -> Option<bool> {
+    forms.controls.get(&node)
+        .filter(|control| matches!(control.kind, Kind::Checkbox | Kind::Radio))
+        .map(|control| control.checked)
+}
+
 #[derive(Clone,Copy,Debug,PartialEq,Eq)]
 pub struct Limits {pub layouts_per_job:usize}
 impl Default for Limits {fn default()->Self{Self {layouts_per_job:1024}}}
@@ -20,6 +26,7 @@ pub struct Geometry {
     images: HashMap<usize, (usize, usize)>,
     fonts: Book,
     boxes: Option<Vec<Option<ClientBox>>>,
+    custom_properties: Option<crate::css::ComputedCustomProperties>,
     scroll_heights:Vec<Option<i32>>,
     viewport_scroll_height:i32,
     viewport_scroll_unavailable:bool,
@@ -47,6 +54,7 @@ impl Geometry {
             images,
             fonts: fonts.clone(),
             boxes: None,
+            custom_properties: None,
             scroll_heights:Vec::new(),
             viewport_scroll_height:0,
             viewport_scroll_unavailable:false,
@@ -88,6 +96,7 @@ impl Geometry {
 
     pub fn invalidate(&mut self) {
         self.boxes = None;
+        self.custom_properties = None;
     }
 
     /// The document keeps running while a resource/source report is visible.
@@ -123,6 +132,7 @@ impl Geometry {
     ) {
         self.update(width, height, zoom, images);
         self.boxes = Some(layout.client_boxes.clone());
+        self.custom_properties = Some(layout.custom_properties.clone());
         self.scroll_heights=layout.scroll_heights.clone();
         self.viewport_scroll_height=layout.viewport_scroll_height;
         self.viewport_scroll_unavailable=layout.viewport_scroll_unavailable;
@@ -141,13 +151,7 @@ impl Geometry {
             }
             self.remaining -= 1;
             *host_work -= doc.nodes.len();
-            let checked = |node| {
-                forms
-                    .controls
-                    .get(&node)
-                    .filter(|control| matches!(control.kind, Kind::Checkbox | Kind::Radio))
-                    .map(|control| control.checked)
-            };
+            let checked = |node| live_checked(forms, node);
             let layout = layout::build_viewport_with_fonts(
                 doc,
                 self.width,
@@ -159,6 +163,7 @@ impl Geometry {
                 &self.fonts,
             );
             self.boxes = Some(layout.client_boxes);
+            self.custom_properties = Some(layout.custom_properties);
             self.scroll_heights=layout.scroll_heights;
             self.viewport_scroll_height=layout.viewport_scroll_height;
             self.viewport_scroll_unavailable=layout.viewport_scroll_unavailable;
@@ -166,6 +171,43 @@ impl Geometry {
             self.rects = layout.border_rects;
         }
         Ok(())
+    }
+
+    pub(crate) fn computed_custom_property(
+        &mut self,
+        doc: &Document,
+        forms: &Forms,
+        node: usize,
+        name: &str,
+        host_work: &mut usize,
+        copy_work: &mut usize,
+    ) -> Result<Option<String>, String> {
+        if self.custom_properties.is_none() {
+            if self.remaining == 0 {
+                return Err(format!("DOM geometry layout limit reached ({} rebuilds per job).", self.limits.layouts_per_job));
+            }
+            self.remaining -= 1;
+            let environment = layout::viewport_style_environment(doc, self.width, self.height, self.zoom);
+            let checked = |node| live_checked(forms, node);
+            let mut budget = crate::css::CssBudget::new(host_work, copy_work);
+            let cascade = crate::css::compute_with_environment_and_custom_properties_budgeted(
+                doc, &self.styles, Some(&checked), Some(environment), &mut budget,
+            )?;
+            self.custom_properties = Some(cascade.custom_properties);
+        }
+        *host_work = host_work.checked_sub(1).ok_or("DOM work limit reached during computed style lookup.")?;
+        let snapshot = self.custom_properties.as_ref().expect("computed cascade was installed");
+        let Some(value) = snapshot.read(node, name)
+            .map_err(|_| "Computed style unavailable within the CSS cascade limits.")?
+        else {
+            return Ok(None);
+        };
+        if value.len() > *copy_work {
+            *copy_work = 0;
+            return Err("DOM string work limit reached while copying a computed property.".into());
+        }
+        *copy_work -= value.len();
+        Ok(Some(value.to_owned()))
     }
 
     pub fn bounding_rect(&mut self, doc: &Document, forms: &Forms, node: usize, host_work: &mut usize) -> Result<[f64; 4], String> {
@@ -232,4 +274,36 @@ fn valid_zoom(zoom: f32) -> f32 {
     } else {
         1.0
     }
+}
+
+#[cfg(test)]
+#[test]
+fn computed_style_geometry_shares_rebuilds_and_only_charges_the_returned_value_on_cache_hits() {
+    let doc = crate::html::parse("<link id=sheet rel=stylesheet href=theme.css><div id=box></div>");
+    let forms = Forms::new(&doc);
+    let id = |name| (0..doc.nodes.len()).find(|&node| doc.attr(node, "id") == Some(name)).unwrap();
+    let node = id("box");
+    let sheet = id("sheet");
+    let sheets = HashMap::from([(sheet, "#box{--token:ready;width:42px}".to_owned())]);
+    let mut geometry = Geometry::new(640, 480, 1.0, &sheets, HashMap::new(), &Book::empty())
+        .with_limits(Limits { layouts_per_job: 1 });
+    let (mut work, mut copies) = (1_000_000, 1_000_000);
+    let read = |geometry: &mut Geometry, work: &mut usize, copies: &mut usize| {
+        geometry.computed_custom_property(&doc, &forms, node, "--token", work, copies)
+    };
+    assert_eq!(read(&mut geometry, &mut work, &mut copies).unwrap().as_deref(), Some("ready"));
+    assert!(geometry.boxes.is_none());
+    assert_eq!(geometry.remaining, 0);
+    let (mut lookup, mut exact_copy) = (1, 5);
+    assert_eq!(read(&mut geometry, &mut lookup, &mut exact_copy).unwrap().as_deref(), Some("ready"));
+    assert_eq!((lookup, exact_copy), (0, 0));
+    assert!(geometry.read(&doc, &forms, node, false, "clientWidth", &mut work).is_err());
+
+    geometry.set_stylesheet(sheet, Some("#box{--token:changed;width:65px}"));
+    assert!(read(&mut geometry, &mut work, &mut copies).is_err());
+    assert!(geometry.custom_properties.is_none());
+    geometry.begin_job();
+    assert_eq!(geometry.read(&doc, &forms, node, false, "clientWidth", &mut work).unwrap(), 65.0);
+    assert_eq!(geometry.remaining, 0);
+    assert_eq!(read(&mut geometry, &mut work, &mut copies).unwrap().as_deref(), Some("changed"));
 }

@@ -1567,6 +1567,9 @@ impl App {
         self.base_location = loaded.base;
         self.base_is_document_url = loaded.base_is_document_url;
         self.document = loaded.document;
+        // The viewport may have changed since loading began. Startup scripts
+        // can synchronously request styles before the first reflow.
+        self.document.media_environment = Some(self.css_media_environment());
         self.document.scripting_enabled = self.scripts_enabled && self.scripting_blocked.is_none();
         self.forms = Forms::new(&self.document);
         self.raw = loaded.raw;
@@ -5690,6 +5693,10 @@ mod native_padding_tests;
 #[cfg(test)]
 #[path="app_native_padding_detail_tests.rs"]
 mod native_padding_detail_tests;
+
+#[cfg(test)]
+#[path = "app_computed_custom_style_tests.rs"]
+mod computed_custom_style_tests;
 
 #[cfg(test)]
 #[path="app_element_sibling_tests.rs"]
