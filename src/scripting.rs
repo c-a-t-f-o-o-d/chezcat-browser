@@ -33,6 +33,11 @@ mod dom_tree;
 mod script_position;
 #[path = "script_node_root.rs"]
 mod script_node_root;
+#[path = "script_clone_node.rs"]
+mod script_clone_node;
+#[cfg(test)]
+#[path = "script_clone_node_tests.rs"]
+mod script_clone_node_tests;
 #[path = "script_node_contains.rs"]
 mod script_node_contains;
 #[cfg(test)]
@@ -2784,6 +2789,7 @@ impl Host for Bridge<'_> {
         }
         if object==DOCUMENT && method=="createDocumentFragment" {return Some(0);}
         if method==script_node_root::ROOT_METHOD && self.root_node_receiver(object) {return Some(0);}
+        if method == script_clone_node::CLONE_METHOD { return Some(0); }
         if method == script_node_contains::CONTAINS_METHOD { return Some(1); }
         if object==DOCUMENT && method=="createComment" {return Some(1);}
         if matches!(method,"load"|"pause"|"play") && self.media_element_receiver(object) {return Some(0);}
@@ -2816,7 +2822,7 @@ impl Host for Bridge<'_> {
         if self.event_target_interface(object)&&script_element_selectors::operation(method).is_some() {return Some(object);}
         if self.event_target_interface(object)&&script_element_siblings::operation(method).is_some() {return Some(object);}
         if self.event_target_interface(object) && (matches!(method, "DocumentFragment" | "Text") || Slottable::getter(method).is_some()) {return Some(object);}
-        if self.event_target_interface(object) && matches!(method, script_node_root::ROOT_METHOD | script_node_contains::CONTAINS_METHOD) {return Some(object);}
+        if self.event_target_interface(object) && matches!(method, script_node_root::ROOT_METHOD | script_node_contains::CONTAINS_METHOD | script_clone_node::CLONE_METHOD) {return Some(object);}
         if self.event_target_interface(object) && matches!(method,"\0Node.get.nodeType"|"\0Node.get.nodeName") {return Some(object);}
         if self.node_list_receiver(object) && matches!(method,"item"|"forEach") {return Some(WINDOW);}
         if self.event_target_interface(object)&&(method.starts_with("\0CustomEvent.")||method=="initCustomEvent") {return Some(object);}
@@ -2960,6 +2966,7 @@ impl Host for Bridge<'_> {
             return if object==WINDOW {Ok(())} else {Err(("NotSupportedError","Child DocumentFragment allocation is not implemented.".into()))};
         }
         if method==script_node_root::ROOT_METHOD {return self.validate_root_node_options(object,args);}
+        if method == script_clone_node::CLONE_METHOD { return self.validate_clone_receiver(object); }
         if method == script_node_contains::CONTAINS_METHOD { return self.validate_node_contains(object, args); }
         let method=script_media::interface_operation(method).unwrap_or(method);
         if matches!(method,"load"|"pause")&&self.media_interface_receiver(object)&&!self.media_element_receiver(object) {
@@ -3267,6 +3274,7 @@ impl Host for Bridge<'_> {
             if parent(object) {return parent(receiver);}
         }
         if self.event_target_interface(object) && method==script_node_root::ROOT_METHOD {return self.root_node_receiver(receiver);}
+        if self.event_target_interface(object) && method == script_clone_node::CLONE_METHOD { return self.root_node_receiver(receiver); }
         if self.event_target_interface(object) && method == script_node_contains::CONTAINS_METHOD {
             return self.root_node_receiver(receiver) || self.frame_contains_node(receiver).is_some();
         }
@@ -4560,6 +4568,7 @@ impl Host for Bridge<'_> {
         }
         if object==WINDOW && method=="DocumentFragment" {return self.create_dom_node(NodeKind::DocumentFragment);}
         if method==script_node_root::ROOT_METHOD {return self.get_root_node(object,args,None);}
+        if method == script_clone_node::CLONE_METHOD { return self.clone_node(object, args.first().is_some_and(Value::truthy)); }
         if method == script_node_contains::CONTAINS_METHOD { return self.node_contains(object, args); }
         if let Some(property)=script_media::interface_getter(method) {
             self.state.work(1)?;
