@@ -136,9 +136,14 @@ impl Bridge<'_> {
         crate::javascript::ordinary_html_interface(tag(&frame.document, node))
     }
 
+    pub(super) fn active_frame_document(&self,handle:u32)->bool {
+        frame_handle(handle).is_some_and(|(index,offset)| offset==1
+            && self.state.blank_frames.get(index).is_some_and(|frame|frame.connected))
+    }
+
     pub(super) fn frame_node_interface(&self,handle:u32)->Option<&'static str> {
         let(index,offset)=frame_handle(handle)?;let frame=self.state.blank_frames.get(index)?;
-        if offset==1 {return Some("Node");}
+        if offset==1 {return Some(if frame.connected {"Document"}else{"Node"});}
         if !matches!(offset,4..=6) {return None;}
         let node=frame.document.nodes.get((offset-3) as usize)?;
         Some(if matches!(node.kind,NodeKind::Element {..}) {

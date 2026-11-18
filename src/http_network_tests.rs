@@ -240,7 +240,7 @@ fn document_download_limit_is_selected_from_real_headers_without_replay() {
         wire.extend_from_slice(&content);
         let response = read_response_traced(
             wire.as_slice(),
-            MAX_BODY_BYTES,
+            BodyLimits::uniform(MAX_BODY_BYTES),
             &cancel,
             Instant::now() + Duration::from_secs(3),
             true,
