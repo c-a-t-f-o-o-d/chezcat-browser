@@ -1065,7 +1065,84 @@
           "menu_open_marker_remains_after_choice": true,
           "successful_close_observed": false,
           "measurement_scope": "Unchanged pinned Bootstrap App at 1280x800 and 640x800 advances past the scroll-offset reads. The trusted amber-choice callback runs, the menu remains open after selection and both input checks fail."
-        }
+        },
+        "integrated_contains_measurement": {
+          "measured_source_commit": "ec7db2f61cddb78c457b2966b72e1e362b89e66a",
+          "integrated_main_commit": "ec7db2f61cddb78c457b2966b72e1e362b89e66a",
+          "executable_sha256": "92b031217ebe627704d2bf068ecfd78818b125bcb250d5dc942f768fcaffc5f1",
+          "source_map_sha256": "cc44d99fe413d30cfc14a4dab8057bc56e6a4d4741c08dda3ee1c2bd9913882b",
+          "dirty": false,
+          "measurement_manifest_sha256": "c5b5b39f7156e1f95e9efcc1f022dcb3fb713c1a789cf6bfc91f6048070b1a26",
+          "build_record_sha256": "c4c555accb8a89768f1186b544298ad3846cbba87de1cb7002e5e9adf43ad2b3",
+          "configuration_manifest_sha256": {
+            "1280": "e5803b3a9af0f9b3d09a3b92223454e204a6b7b3930cec654d498c530388297a",
+            "640": "0f7813fda7ef57fc96d261158d14f5f63372eebf641b4e760974087d1705b0bd"
+          },
+          "pixel_measurement_sha256": "2ce98b474b8d0d4d657af2a37bea7c13c7cc6bac5f2478ac8c20132830c1c649",
+          "configurations": [
+            [1280, 800],
+            [640, 800]
+          ],
+          "zoom": 100,
+          "javascript_enabled": true,
+          "profile": "--no-profile",
+          "stage_outcomes": {
+            "load": "Passed",
+            "parse": "Passed",
+            "initialization": "Passed",
+            "render": "Passed",
+            "input": "Passed",
+            "async": "Not applicable",
+            "framework_layout": "Passed"
+          },
+          "first_failed_stage": null,
+          "first_root": null,
+          "configuration_denominator": 2,
+          "passed_configurations": 2,
+          "pull_requests": [
+            "https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/74",
+            "https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/75",
+            "https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/76"
+          ],
+          "integrity_checks_passed": true,
+          "opened_marker_observed": true,
+          "trusted_amber_choice_callback_observed": true,
+          "successful_close_observed": true,
+          "menu_open_marker_remains_after_choice": false,
+          "script_errors_per_stage": 0,
+          "menu_control_rectangles": {
+            "640": [44, 291, 225, 39],
+            "1280": [64, 232, 225, 39]
+          },
+          "menu_crop_sha256_at_both_widths": {
+            "loaded": "f8ae43118a9546c10906f6061246067c16837216bf4041af96785070653fd6cf",
+            "opened": "74167c348ee4886a673dde80ec05f8a17b2e0dddb1746b003efc08bffaebb837",
+            "chosen": "ddf3ae7eec6a44aa3f55b37c9659df182f20fd0d88ac828365d2c04a8dc31777"
+          },
+          "pixel_deltas_per_configuration": {
+            "opened_from_loaded": 8760,
+            "chosen_from_opened": 8763,
+            "returned_to_loaded": 7631
+          },
+          "responsive_positions": {
+            "640": {
+              "BootstrapA": [60, 122],
+              "BootstrapB": [60, 181]
+            },
+            "1280": {
+              "BootstrapA": [80, 122],
+              "BootstrapB": [650, 122]
+            }
+          },
+          "measurement_scope": "Unchanged pinned Bootstrap 5.3.9 / Popper 2.11.8 App: trusted open, Amber selection and close, paired DOM/pixels and responsive cards pass at both widths.",
+          "limits": "One selected offline app; async not applicable; reference interaction not run; no final/initial or reference pixel equality claim.",
+          "next_shared_prerequisite": {
+            "name": "WeakMap",
+            "first_root_location": "Original native App probe line11,column92",
+            "scope": "Same source, separate original prerequisite probe; modern Vue/React mounting unproved."
+          }
+        },
+        "latest_measurement": "integrated_contains_measurement"
       }
     },
     {
@@ -1511,9 +1588,8 @@
     "Later clean Node/modern revision2 diagnostic results retain a distinct build/source map; revision1 startup/HarnessBlocked records and earlier dirty W2/W3 records remain separate, with no full regression or CI inferred"
   ],
   "next": [
-    "Freeze and complete normal full-regression/PR/CI integration for concat, hidden-input and genuine Node root prerequisites; no new release",
-    "Reduce measured anchor URL reflection and native INPUT fragments: modern jQuery href assignment7963:1 and legacy input-containing innerHTML2684:2",
-    "Reduce the concrete CSS custom-property padding/border candidate, with rgba a separate gap; retain class/prototype and modern Vue/React prerequisites until actionable"
+    "Reduce the separate original native App WeakMap prerequisite measured on integrated ec7db2f at11:92; modern Vue/React mounting remains unproved",
+    "Retain class/object-prototype and modern Vue/React prerequisites as separate queued work; preserve source-bound App DOM/pixel/trusted-input and responsive rechecks"
   ],
   "selected_standard_controls": {
     "suite": "Selected Test262 slice mode runs",

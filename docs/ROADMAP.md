@@ -68,6 +68,11 @@ interaction captures identify the feature candidate. Candidate and integrated
 PR #69/#71 integrate computed `position` and layout-backed `offsetParent`.
 Measured builds `c74503c` and `96666d3` retain open-menu and trusted Amber-choice
 evidence at 1280/640. The menu remains visible after selection.
+Those captures remain historical. Integrated source
+`ec7db2f61cddb78c457b2966b72e1e362b89e66a` includes PR #74/#75/#76 and passes the
+unchanged dropdown's trusted open, Amber selection and close at both widths,
+with paired DOM/pixels, responsive cards and zero script errors. A separate
+original native App probe on this source reaches missing `WeakMap` at 11:92.
 PR pages carry changing review and CI status. Branch-only results are not results
 for `main` or for the published alpha.2 binary.
 
@@ -85,6 +90,7 @@ workloads, without framework-specific substitutes.
 | ◻️&nbsp;Next | <code>DOM&#8209;05</code> | **DocumentFragment and subsequent legacy DOM boundaries** | Reduce the next failure reported by PR #32, then verify fragment insertion, tree identity, form state, and rollback. Preserve the unchanged legacy workload and any next blocker. |
 | ✅&nbsp;Merged | <code>DOM&#8209;06</code> | **Element selectors, siblings, Slottable and NodeList iteration** | Bootstrap initializes at 1280/640. [PR #60](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/60) clears its dropdown selector boundary on measured `02cd0f8`, integrated at `991cba3`. [PR #67](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/67) adds guarded Element/Text `assignedSlot` reads for ordinary trees. Measured `a6a2619` then reaches `node.toString()` at 1736:9. Shadow DOM remains unsupported. |
 | ✅&nbsp;Merged | <code>DOM&#8209;07</code> | **Ordinary DOM object stringification** | [PR #64](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/64)'s BUTTON/UL slice advanced `a82267e` to computed overflow. [PR #68](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/68) extends HTML-container interfaces. On `13d7dae` at 1280/640, the menu visibly opens and its trusted amber-choice callback runs. The menu stays open. The first microtask fault is computed `position` at 1990:5. |
+| ✅&nbsp;Merged | <code>DOM&#8209;08</code> | **Genuine Node containment** | [PR #76](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/76) adds inclusive physical Node ancestry with Attr and receiver/origin distinctions. Integrated `ec7db2f` completes the pinned Bootstrap open/choice/close workflow at 1280/640. |
 
 ### CSS — Visible layout and color correctness
 
@@ -101,7 +107,8 @@ only their initial HTML paint or absence of script errors.
 | ✅&nbsp;Merged | <code>CSS&#8209;06</code> | **Computed overflow and rectangular axis clipping** | [PR #65](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/65) integrates at `bf0c737`. Measured `7b8a5fb` advances the initialized Bootstrap sample to `assignedSlot` on its first trusted click at both widths. The menu remains closed. Element scrolling and scrollbar widgets remain unimplemented. |
 | ✅&nbsp;Merged | <code>CSS&#8209;07</code> | **Computed position and layout-backed offset parents** | [PR #69](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/69) advances measured `c74503c` to `offsetParent` at 1994:12. [PR #71](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/71) advances measured `96666d3` to `scrollLeft` at 3154:19. Both runs open the menu and execute the trusted Amber choice at 1280/640. The menu remains visible and input fails. |
 | ✅&nbsp;Merged | <code>CSS&#8209;08</code> | **Viewport and supported non-scrollable offsets** | [PR #72](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/72) integrates at `13f5cd4`. Qualified feature `e7be7cd` passes 2,732 normal tests and 25 journeys locally and in CI. Its Bootstrap captures at 1280/640 show the open menu and trusted Amber choice, with the menu still visible and first fault `offsetLeft` at 1927:10. Nested element scrolling remains outside this slice. |
-| ◻️&nbsp;Next | <code>CSS&#8209;09</code> | **Relative offset coordinates** | Extend PR #71's layout-backed offset-parent identity with measured `offsetLeft` and `offsetTop`. Verify border/padding origins and viewport-scroll independence against actual App pixels and hits, then recheck the unchanged dropdown. |
+| ✅&nbsp;Merged | <code>CSS&#8209;09</code> | **Relative offset coordinates** | [PR #74](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/74) adds measured `offsetLeft`/`offsetTop` with border/padding origins and scroll independence. Untransformed offset geometry stays separate from visual translations. |
+| ✅&nbsp;Merged | <code>CSS&#8209;10</code> | **Bounded translation rendering** | [PR #75](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/75) connects translations to visual rectangles, paint/hits/clips and absolute/fixed containing blocks. With PR #76, integrated `ec7db2f` has true open/close DOM/pixel evidence and responsive cards at both widths. Wider transforms remain outside this slice. |
 
 ### JS & Frameworks — From startup to useful interaction
 
@@ -112,6 +119,7 @@ A passing startup probe is a step, not a working application.
 | :--- | :--- | :--- | :--- |
 | ◻️&nbsp;Planned | <code>JS&#8209;01</code> | **Object-prototype access used by the Vue workload** | Reduce the recorded Vue 2.7.16 boundary and implement shared semantics with receiver, realm, ordering, and access checks. Recheck mount, input, and asynchronous updates separately. |
 | ◻️&nbsp;Planned | <code>JS&#8209;02</code> | **Class syntax and semantics used by modern applications** | Define a coherent parser/runtime slice from the recorded Bootstrap 5.3.9 failure. Test behavior, not merely parsing; preserve explicit limits for unfinished class features. |
+| ◻️&nbsp;Next | <code>JS&#8209;03</code> | **WeakMap prerequisite** | The separate original native App probe on `ec7db2f` reaches missing `WeakMap` at 11:92. Implement the shared bounded capability and recheck that probe; modern Vue/React mounting remains unproved. |
 | ◻️&nbsp;Dependency&#8209;gated | <code>FW&#8209;01</code> | **One modern Vue or React application** | Pin an official distribution and compatible dependencies. First record a genuine baseline; completion requires mounting, a user-driven state change, visible DOM/pixel output, and relevant asynchronous behavior. |
 | ◻️&nbsp;Continuing | <code>FW&#8209;02</code> | **Modern and legacy cohort coverage** | Keep existing legacy samples and separate modern jQuery/Bootstrap cases. Add materially different generations when evidence makes them useful; never infer support for every version from one sample. |
 

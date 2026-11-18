@@ -48,6 +48,7 @@ remain at `36adf20`; these later changes do not update those binaries.
 | :--- | :--- | :--- |
 | **DOM identity and collections** | Genuine Document/Node accessors, stable live supported childNodes, checked native array-like apply/slice, Attr identity, text replacement and native-created Comment leaves | Parsed comments, full CharacterData, DocumentType/template-content and child-Document collections remain outside the finite scope |
 | **Node roots** | Genuine `Node.getRootNode()` for ordinary accessible connected/detached trees, Attr and supported same-origin child trees; ordered options conversion and owner/work checks | No Shadow DOM or fabricated child scope |
+| **Node containment** | Integrated [PR #76](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/76) adds genuine inclusive `Node.contains`, physical ancestry, Attr distinction and checked receiver/argument ownership. | Ordinary trees and supported same-origin child Nodes only; no shadow-tree or cross-origin access grant. |
 | **DOM object stringification** | BUTTON, UL, DIV, BODY and HTML inherit `Object.prototype.toString` through their own interfaces. MAIN uses `HTMLElement.prototype`. [PR #64](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/64) · [PR #68](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/68) | In supported child documents, HTML and BODY use prototypes from their own realm. |
 | **Element selectors, siblings, Slottable and NodeLists** | Scripts can borrow Element selectors. `querySelectorAll` returns a static snapshot. Element/CharacterData sibling getters skip Text/Comment nodes. [PR #67](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/67) adds branded Element/Text `assignedSlot` getters returning null in supported ordinary trees. Main-document NodeLists have bounded indexed iteration. | Existing grammar, work and document access checks apply. Shadow DOM, child Element queries and complete NodeList APIs remain outside this scope. |
 | **Select fragments** | Conventional select/option/optgroup fragments; whole-subtree removal/reconnection retains identities, edited values, owner/order/disabled state and retires stale focus/hits | Rich select content, existing-select interior edits, explicit new select associations, and createElement(select) remain unsupported |
@@ -74,6 +75,13 @@ Measured `c74503c` reaches `offsetParent` at 1994:12, then `96666d3` reaches
 `scrollLeft` at 3154:19. Both runs open the menu and execute its trusted
 Amber-choice callback at 1280/640. The menu remains visible after selection,
 and dropdown input remains failed.
+Those observations remain bound to their earlier builds. On integrated
+`ec7db2f61cddb78c457b2966b72e1e362b89e66a`, PR #74/#75/#76 complete the pinned
+Bootstrap dropdown: trusted open, Amber selection and true close pass with
+paired DOM/pixels and responsive cards at 1280/640, with zero script errors.
+No async workflow or reference interaction was selected. A separate original
+App probe still reaches missing `WeakMap` at 11:92; modern Vue/React mounting
+remains unproved.
 See [compatibility outcomes](COMPATIBILITY.md) for exact versions and stages.
 
 ## Rendering and resources
@@ -90,6 +98,8 @@ See [compatibility outcomes](COMPATIBILITY.md) for exact versions and stages.
 | **Computed overflow** | [PR #65](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/65) supplies live `overflow`, `overflowX` and `overflowY` reads from the rendering cascade, including `getPropertyValue`. Rectangular axis clips govern painting and hit bounds. | Clipping is qualified at initial element scroll positions. Element scrolling and scrollbar widgets remain unimplemented. |
 | **Computed position and offset parents** | Integrated [PR #69](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/69) supplies live computed `position` through named reads and `getPropertyValue`. [PR #71](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/71) returns supported HTMLElement `offsetParent` identities from the actual layout tree. | Existing document access and work checks apply. General child-element geometry and full CSSOM remain outside this slice. |
 | **Viewport scroll offsets** | [PR #72](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/72), integrated at `13f5cd4`, adds standard-root vertical scroll reads/writes and zero offsets for supported non-scrollable axes. Qualified feature `e7be7cd` passes 2,732 normal tests and 25 journeys locally and in CI. | Nested element scrolling and scrollbar widgets remain outside this slice. On the measured feature at both Bootstrap widths, the chosen menu remains visible with first fault `offsetLeft` at 1927:10. |
+| **Offset coordinates** | Integrated [PR #74](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/74) derives supported `offsetLeft`/`offsetTop` from first border boxes and actual offset-parent padding edges, preserving scroll independence. | Unmeasured fragments/parent boxes refuse explicitly; offsets retain untransformed geometry. |
+| **Translations** | Integrated [PR #75](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/75) adds bounded 2D translations, nested composition, visual DOMRects, consistent paint/hits/clips and transformed absolute/fixed containing blocks, including identity translation. | Wider transforms and unmeasured reference geometry remain outside this slice; fallback uncertainty is explicit. |
 | **Native button padding** | Button, submit and reset controls apply supported CSS padding to their boxes and caption placement. [PR #54](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/54) is integrated at `25654fa`. | Finite button-like control scope. Complete native appearance and authored border behavior remain separate. |
 | **GPU acceleration** | Not implemented | Planned measured graphics backend with software fallback; not a replacement decoder grant |
 
