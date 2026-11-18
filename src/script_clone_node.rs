@@ -43,6 +43,7 @@ impl Bridge<'_> {
         // All checks and copies finish before the first new handle is published.
         let mut plan = vec![(root, None, 1usize)];
         let mut staged = Vec::new();
+        let mut textareas = Vec::new();
         let mut bytes = 0usize;
         let mut nonce_count = 0usize;
         while staged.len() < plan.len() {
@@ -64,10 +65,18 @@ impl Bridge<'_> {
             let mut metadata_bytes = 0;
             if let NodeKind::Element { tag, href, attrs, .. } = &item.kind {
                 self.state.work(attrs.len())?;
-                if item.namespace != crate::html::Namespace::Html || !ordinary_clone_element(tag)
+                let textarea = tag == "textarea" && self.owned_native_textarea(source);
+                if item.namespace != crate::html::Namespace::Html || !(ordinary_clone_element(tag) || textarea)
                     || attrs.iter().any(|attr| attr.name.namespace.is_none()
                         && (attr.name.qualified.starts_with("on") || attr.name.html_is("is"))) {
                     return Err("Cloning this element or its native state is not implemented.".into());
+                }
+                if textarea {
+                    if self.forms.controls.len().saturating_add(textareas.len()) >= forms::MAX_CONTROLS {
+                        return Err("Native form control limit reached before textarea cloning.".into());
+                    }
+                    textareas.try_reserve(1).map_err(|_| "Textarea clone plan reservation failed.")?;
+                    textareas.push((source, base + offset));
                 }
                 metadata_bytes = tag.len() + href.as_ref().map_or(0, String::len);
             }
@@ -97,6 +106,17 @@ impl Bridge<'_> {
             });
         }
 
+        let form_plan = if textareas.is_empty() { None } else {
+            let retained_limit = self.state.retained_limit.saturating_sub(self.state.retained)
+                .saturating_sub(bytes);
+            let state = &mut *self.state;
+            Some(self.forms.prepare_textarea_clones(self.doc, &textareas, deep, retained_limit, |work, copies| {
+                state.work(work)?;
+                state.copies(copies)
+            })?)
+        };
+        let bytes = bytes.checked_add(form_plan.as_ref().map_or(0, |plan| plan.retained_bytes))
+            .ok_or("DOM/native textarea clone size overflow.")?;
         let count = staged.len();
         self.doc.nodes.try_reserve(count).map_err(|_| "DOM clone node reservation failed.")?;
         self.doc.nonce_unsafe_nodes.try_reserve(nonce_count).map_err(|_| "DOM clone nonce reservation failed.")?;
@@ -116,6 +136,7 @@ impl Bridge<'_> {
             self.state.dom.connected.push(false);
             if copy.unsafe_nonce { self.doc.nonce_unsafe_nodes.insert(node); }
         }
+        if let Some(plan) = form_plan { plan.commit(self.forms); }
         Ok(Value::Host(node_handle(base)))
     }
 }

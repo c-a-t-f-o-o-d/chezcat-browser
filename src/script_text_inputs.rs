@@ -22,6 +22,13 @@ impl Bridge<'_> {
             && !self.state.dom.connected.get(node).copied().unwrap_or(true)
     }
 
+    pub(super) fn unadmitted_parentless_input_form(&self, object: u32) -> bool {
+        self.input_receiver(object) && node_index(object).is_some_and(|node|
+            self.fresh_text_input(node)
+                && self.state.tree.parents.get(node) == Some(&None)
+                && self.doc.attr(node,"form").is_none())
+    }
+
     fn created_input_admission_guard(&mut self, node: usize) -> Result<(), String> {
         if !self.fresh_text_input(node) || self.doc.attr(node, "form").is_some() || !self.doc.nodes[node].children.is_empty() {
             return Err("Native INPUT admission requires a fresh detached empty default/text input without explicit form association.".into());
@@ -69,6 +76,17 @@ impl Bridge<'_> {
     }
 
     pub(super) fn text_input_set(&mut self, object: u32, property: &str, value: &Value) -> Result<bool, String> {
+        if property == "checked" && self.input_receiver(object) {
+            let node = self.node(object)?;
+            if self.fresh_text_input(node) {
+                let mut plan = self.prepare_created_input_plan(node,None,None)?;
+                plan.set_created_checked(value.truthy())?;
+                self.state.replace_bytes(0,plan.retained_bytes())?;
+                plan.commit(self.forms);
+                self.state.layout_changed();
+                return Ok(true);
+            }
+        }
         if property == "type" && self.input_receiver(object) {
             let node = self.node(object)?;
             let text = self.text(value)?;
@@ -107,6 +125,20 @@ impl Bridge<'_> {
     }
 
     pub(super) fn text_input_metadata_get(&mut self, object: u32, property: &str) -> Result<Option<Value>, String> {
+        if property == "form" && self.unadmitted_parentless_input_form(object) {
+            // With neither an ancestor nor an explicit association, the owner
+            // is known without allocating native value/checkedness state.
+            return Ok(Some(Value::Null));
+        }
+        if property == "checked" && self.input_receiver(object) {
+            let node = self.node(object)?;
+            if self.fresh_text_input(node) {
+                // An untouched detached INPUT has no dirty state to retain.
+                // Observing its default must not admit a text editor or make
+                // its otherwise supported initial type selection unavailable.
+                return Ok(Some(Value::Bool(self.doc.attr(node,"checked").is_some())));
+            }
+        }
         if self.text_input_default_property(object,property) {
             let node=self.node(object)?;
             let fresh = self.fresh_text_input(node);
@@ -144,6 +176,18 @@ impl Bridge<'_> {
 
     pub(super) fn prepare_input_attribute(&mut self, node: usize, name: &crate::html::AttributeName,
         value: Option<&str>) -> Result<Option<forms::InputPlan>, String> {
+        if name.html_is("checked") && self.input_receiver(node_handle(node)) {
+            if let Some(control) = self.forms.controls.get(&node) {
+                let present = value.is_some();
+                let synchronize = self.doc.attr(node,"checked").is_some() != present;
+                if control.kind == Kind::Radio && !control.dirty_checked && synchronize && present {
+                    self.state.work(self.forms.controls.len())?;
+                    self.state.copies(self.forms.controls.values().map(|c| c.name.len()).sum())?;
+                } else { self.state.work(1)?; }
+                return Ok(Some(forms::InputPlan::Checked { node, present, synchronize }));
+            }
+            return Ok(None);
+        }
         if !(name.html_is("value") || name.html_is("name") || name.html_is("type")) { return Ok(None); }
         if name.html_is("type") && value.is_some_and(|value| !value.is_empty() && !value.eq_ignore_ascii_case("text") && !value.eq_ignore_ascii_case("checkbox")) { return Ok(None); }
         if self.fresh_text_input(node) { return self.prepare_created_input_plan(node,Some((&name.qualified,value)),None).map(Some); }

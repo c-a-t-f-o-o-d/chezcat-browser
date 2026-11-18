@@ -65,17 +65,24 @@ pub(super) fn fragment_editor_control(doc: &Document, node: usize, kind: Kind, n
     }
     let mut value = Editor::default();
     set_form_value(&mut value, initial, kind);
+    fragment_editor_control_with_value(doc, node, kind, name, initial.into(), value, false)
+}
+
+/// Shared native metadata assembly. A clone supplies its separately copied
+/// live editor and dirty flag instead of deriving them from its new default.
+pub(super) fn fragment_editor_control_with_value(doc: &Document, node: usize, kind: Kind,
+    name: &str, initial: String, value: Editor, dirty_value: bool) -> Result<(Control, usize), String> {
     let caption = caption(doc, node, kind);
     let retained = name.len().checked_add(initial.len()).and_then(|bytes| bytes.checked_add(caption.len()))
         .and_then(|bytes| bytes.checked_add(value.chars.len().checked_mul(std::mem::size_of::<char>())?))
         .ok_or("Native control retained payload overflow.")?;
     let checked = doc.attr(node, "checked").is_some();
-    Ok((Control { owner: None, kind, value, dirty_value: false,
+    Ok((Control { owner: None, kind, value, dirty_value,
         name: name.into(), caption, disabled: doc.attr(node, "disabled").is_some(),
-        readonly: doc.attr(node, "readonly").is_some(), required: doc.attr(node, "required").is_some(), checked,
+        readonly: doc.attr(node, "readonly").is_some(), required: doc.attr(node, "required").is_some(), checked, dirty_checked: false,
         max_length: doc.attr(node, "maxlength").and_then(|value| value.parse().ok()).unwrap_or(MAX_VALUE_UNITS).min(MAX_VALUE_UNITS),
         tab_index: doc.attr(node, "tabindex").and_then(parse_tab_index).unwrap_or(0), select: None,
-        button_element: false, initial: initial.into(), initially_checked: checked, image_point: (0, 0) }, retained))
+        button_element: false, initial, initially_checked: checked, image_point: (0, 0) }, retained))
 }
 
 impl Forms {
@@ -154,7 +161,7 @@ impl Forms {
                 for row in &mut selected.rows { if let SelectRow::Group { node, .. } = row { *node += base - 1; } }
                 let mut control = Control { owner: None, kind: Kind::Select, value: Editor::default(), dirty_value: false, name: name.into(),
                     caption: String::new(), disabled: doc.attr(local, "disabled").is_some(), readonly: false,
-                    required: doc.attr(local, "required").is_some(), checked: false, max_length: MAX_VALUE_UNITS,
+                    required: doc.attr(local, "required").is_some(), checked: false, dirty_checked: false, max_length: MAX_VALUE_UNITS,
                     tab_index: doc.attr(local, "tabindex").and_then(parse_tab_index).unwrap_or(0),
                     select: Some(selected), button_element: false, initial: String::new(), initially_checked: false, image_point: (0, 0) };
                 let initial = control.select.as_ref().unwrap().selected;

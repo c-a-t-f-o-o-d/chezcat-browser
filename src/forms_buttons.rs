@@ -185,7 +185,7 @@ impl Forms {
                 .ok_or("BUTTON retained payload overflow.")?;
             let control = Control { owner: None, kind: button_kind(doc.attr(node,"type")), value, dirty_value: false,
                 name: copied(name)?, caption, disabled: doc.attr(node,"disabled").is_some(), readonly: false, required: false,
-                checked: false, max_length: MAX_VALUE_UNITS,
+                checked: false, dirty_checked: false, max_length: MAX_VALUE_UNITS,
                 tab_index: doc.attr(node,"tabindex").and_then(parse_tab_index).unwrap_or(0), select: None,
                 button_element: true, initial: copied(initial)?, initially_checked: false, image_point: (0,0) };
             plan.retained_bytes = plan.retained_bytes.checked_add(retained).ok_or("Native BUTTON retained payload overflow.")?;

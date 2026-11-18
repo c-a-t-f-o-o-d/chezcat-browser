@@ -246,6 +246,14 @@ impl Runtime {
                 prototype, tag_key, Value::String(name.into()),
                 Some((false, false, true)),
             )?;
+            if name == "HTMLInputElement" {
+                for (key, getter, setter) in [
+                    ("value", "\0HTMLInputElement.get.value", "\0HTMLInputElement.set.value"),
+                    ("checked", "\0HTMLInputElement.get.checked", "\0HTMLInputElement.set.checked"),
+                ] {
+                    self.define_node_attribute(prototype, window, key, getter, Some(setter))?;
+                }
+            }
 
             // Existing native constructor roots keep both prototype chains
             // alive across realm parking, deferred calls and collection.

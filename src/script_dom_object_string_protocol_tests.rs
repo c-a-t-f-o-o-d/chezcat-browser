@@ -79,6 +79,56 @@ fn run(doc: &mut Document, forms: &mut Forms, page: &mut Page, source: &str) {
 }
 
 #[test]
+fn input_interface_identity_preserves_native_editor_and_follows_ordinary_descriptors() {
+    let (mut doc, mut forms, mut page) = fixture();
+    run(&mut doc, &mut forms, &mut page, r#"
+var C = window.HTMLInputElement, P = C.prototype;
+var fresh = document.createElement('input'), d = Object.getOwnPropertyDescriptor(P,'constructor');
+if (neighbor.constructor !== C || fresh.constructor !== C || Object.getPrototypeOf(neighbor) !== P
+    || Object.getPrototypeOf(fresh) !== P || Object.getPrototypeOf(P) !== HTMLElement.prototype
+    || Object.getPrototypeOf(C) !== HTMLElement || !(neighbor instanceof C) || button instanceof C)
+    throw 'wrong input interface';
+if (!d || d.value !== C || d.enumerable || !d.writable || !d.configurable
+    || Object.getOwnPropertyDescriptor(neighbor,'constructor') !== undefined
+    || stringify.call(neighbor) !== '[object HTMLInputElement]') throw 'input interface descriptors';
+var rejected = 0;
+for (var invoke of [function(){ C(); },function(){ new C(); }]) {
+    try { invoke(); } catch(e) { if(e.name === 'TypeError') rejected++; else throw e; }
+}
+if (rejected !== 2) throw 'illegal direct interface construction';
+P.constructor = button.constructor;
+if (fresh.constructor !== button.constructor || neighbor.constructor !== button.constructor
+    || !(neighbor instanceof C)) throw 'input constructor did not follow ordinary lookup';
+Object.defineProperty(P,'constructor',d);
+if (neighbor.constructor !== C || neighbor.value !== 'edited neighbor'
+    || neighbor.defaultValue !== 'original') throw 'restored constructor or editor';
+"#);
+}
+
+#[test]
+fn input_interface_identity_uses_current_owner_and_distinct_realm_prototypes() {
+    let (mut doc, mut forms, mut page) = fixture();
+    run(&mut doc, &mut forms, &mut page, r#"
+var f = document.createElement('iframe');
+f.hidden = true;
+document.body.appendChild(f);
+var w = f.contentWindow, childInput = w.Function('return HTMLInputElement;')();
+var read = w.Function('element','return element.constructor;');
+if (childInput === HTMLInputElement || childInput.prototype === HTMLInputElement.prototype
+    || Object.getPrototypeOf(childInput) !== w.HTMLElement || read(neighbor) !== HTMLInputElement)
+    throw 'input interface realm identity';
+"#);
+    page.set_location(&location("https://other-dom-string.test/changed"));
+    let denied = page.console_eval(&mut doc, &mut forms, "read(neighbor);");
+    assert_eq!(denied.errors, 1, "{}", page.report());
+    assert!(page.report().contains("same-origin"), "{}", page.report());
+    kept(&doc, &forms, &mut page);
+    page.set_location(&location("https://dom-string.test/path/page"));
+    run(&mut doc, &mut forms, &mut page,
+        "if (read(neighbor) !== HTMLInputElement) throw 'restored owner access';");
+}
+
+#[test]
 fn dom_object_string_protocol_concrete_prototypes_tag_descriptors_and_ordinary_overrides() {
     let (mut doc, mut forms, mut page) = fixture();
     let commits = page.state.dom_commits;

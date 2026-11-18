@@ -56,6 +56,14 @@ mod script_attr;
 mod script_hidden_inputs;
 #[path = "script_text_inputs.rs"]
 mod script_text_inputs;
+#[path = "script_input_accessors.rs"]
+mod script_input_accessors;
+#[cfg(test)]
+#[path = "script_input_accessor_tests.rs"]
+mod script_input_accessor_tests;
+#[cfg(test)]
+#[path = "script_input_checkedness_tests.rs"]
+mod script_input_checkedness_tests;
 #[path = "script_buttons.rs"]
 mod script_buttons;
 #[path = "script_attribute_names.rs"]
@@ -113,6 +121,9 @@ mod script_select_fragments;
 #[cfg(test)]
 #[path = "script_textarea_fragment_tests.rs"]
 mod script_textarea_fragment_tests;
+#[cfg(test)]
+#[path = "script_textarea_clone_tests.rs"]
+mod script_textarea_clone_tests;
 #[path = "script_element_siblings.rs"]
 mod script_element_siblings;
 #[path = "script_slottable.rs"]
@@ -2481,6 +2492,7 @@ impl Bridge<'_> {
             || self.assigned_slot_lookup(object, property)
             || self.html_offset_member(object, property)
             || self.scroll_offset_member(object, property)
+            || self.input_accessor_member(object, property)
             || self.text_prototype_property(object, property)
             || script_element_properties::ordinary_interface_member(property)
                 && self.concrete_html_interface(object).is_some()
@@ -2501,7 +2513,7 @@ impl Host for Bridge<'_> {
         // Container prototypes identify the objects, but their enumerable
         // native attributes still live outside the ordinary descriptor store.
         if let Some(interface) = self.concrete_html_interface(object) {
-            return matches!(interface, "HTMLButtonElement" | "HTMLUListElement");
+            return matches!(interface, "HTMLButtonElement" | "HTMLUListElement" | "HTMLInputElement");
         }
         self.exposed_native_prototype(object)
     }
@@ -2660,6 +2672,7 @@ impl Host for Bridge<'_> {
     }
 
     fn string_setter(&self, object: u32, property: &str) -> bool {
+        if property == "value" && self.input_accessor_member(object, property) {return true;}
         if property == "transform" && (STYLE_BASE..DATASET_BASE).contains(&object) {return true;}
         if self.button_string_property(object,property) {return true;}
         if self.fragment_receiver(object) && matches!(property,"nodeValue"|"textContent") {return true;}
@@ -2684,6 +2697,9 @@ impl Host for Bridge<'_> {
         self.prepare_media_microtask(object,script_media::interface_operation(member).unwrap_or(member),args,setter)
     }
     fn native_setter_property(&self,object:u32,method:&str)->Option<&'static str>{
+        if let Some((name, true)) = script_input_accessors::accessor(method) {
+            return self.input_receiver(object).then_some(name);
+        }
         if let Some((name, true)) = script_scroll_offsets::accessor(method) {
             return (self.element_selector_receiver(object) && !self.is_frame_handle(object)).then_some(name);
         }
@@ -2821,6 +2837,7 @@ impl Host for Bridge<'_> {
     }
 
     fn native_method_owner(&self, object:u32, method:&str) -> Option<u32> {
+        if script_input_accessors::accessor(method).is_some() && self.event_target_interface(object) {return Some(object);}
         if script_scroll_offsets::accessor(method).is_some() && self.event_target_interface(object) {return Some(object);}
         if Offset::getter(method).is_some() && self.event_target_interface(object) {return Some(object);}
         if object==WINDOW && method=="getComputedStyle" {return Some(WINDOW);}
@@ -2878,7 +2895,8 @@ impl Host for Bridge<'_> {
     }
 
     fn null_string_setter(&self, object: u32, property: &str) -> bool {
-        property == "transform" && (STYLE_BASE..DATASET_BASE).contains(&object)
+        property == "value" && self.input_accessor_member(object, property)
+            || property == "transform" && (STYLE_BASE..DATASET_BASE).contains(&object)
             || property == "value" && self.hidden_input_property(object,property)
             || property == "value" && self.text_input_default_property(object,property)
             || property == "innerHTML" && self.attr_element_receiver(object)
@@ -2960,6 +2978,7 @@ impl Host for Bridge<'_> {
         args: &[Value],
     ) -> Result<(), (&'static str, String)> {
         if object==WINDOW && method=="getComputedStyle" || script_computed_style::index(object).is_some() {return self.validate_computed_call(object,method,args);}
+        if script_input_accessors::accessor(method).is_some() {return self.validate_input_accessor(object);}
         if let Some(offset) = Offset::getter(method) {return self.validate_html_offset(object, offset);}
         if script_scroll_offsets::accessor(method).is_some() {return self.validate_scroll_element(object);}
         if method=="NodeList" && self.event_target_interface(object) {return Err(("TypeError","Illegal constructor for this native interface.".into()));}
@@ -3271,6 +3290,9 @@ impl Host for Bridge<'_> {
     }
 
     fn accepts_receiver(&self, object: u32, method: &str, receiver: u32) -> bool {
+        if script_input_accessors::accessor(method).is_some() && self.event_target_interface(object) {
+            return self.input_receiver(receiver);
+        }
         if script_scroll_offsets::accessor(method).is_some() && self.event_target_interface(object) {
             return self.element_selector_receiver(receiver);
         }
@@ -3922,17 +3944,14 @@ impl Host for Bridge<'_> {
             return Ok(true);
         }
         Ok(match property {
-            "value" | "form" => self.forms.controls.contains_key(&node),
+            "value" => self.forms.controls.contains_key(&node),
+            "form" => self.forms.controls.contains_key(&node) || self.unadmitted_parentless_input_form(object),
             "selectedIndex" => self
                 .forms
                 .controls
                 .get(&node)
                 .is_some_and(|control| control.kind == Kind::Select),
-            "checked" => self
-                .forms
-                .controls
-                .get(&node)
-                .is_some_and(|control| matches!(control.kind, Kind::Checkbox | Kind::Radio)),
+            "checked" => self.input_receiver(object),
             _ => {
                 matches!(
                     property,
@@ -4256,10 +4275,10 @@ impl Host for Bridge<'_> {
                         ))
                     }
                     "checked" => {
-                        if matches!(control.kind, Kind::Checkbox | Kind::Radio) {
+                        if self.input_receiver(object) {
                             Ok(Value::Bool(control.checked))
                         } else {
-                            Err("checked is supported on checkbox/radio controls.".into())
+                            Err("checked requires an input element.".into())
                         }
                     }
                     _ => {
@@ -4565,6 +4584,10 @@ impl Host for Bridge<'_> {
     }
 
     fn call(&mut self, object: u32, method: &str, args: &[Value]) -> Result<Value, String> {
+        if let Some((name, false)) = script_input_accessors::accessor(method) {
+            self.validate_input_accessor(object).map_err(|(_, reason)| reason)?;
+            return self.get(object, name);
+        }
         if object==WINDOW && method=="getComputedStyle" {return self.create_computed_style(args);}
         if script_computed_style::index(object).is_some() {return if method=="getPropertyValue" {self.computed_property_value(object,args)} else {Err("Computed style declarations are read-only.".into())};}
         if method=="\0NodeList.get.length" {self.state.work(1)?;return self.node_list_get(object,"length");}
@@ -6265,7 +6288,10 @@ var checks=[
  'referrer' in document, document.referrer==='', 'cookie' in document, document.cookie==='',
  !('onload' in document), 'onload' in window, 'onclick' in p,
  'textContent' in p, !('value' in p), 'value' in name,
- 'checked' in box, !('checked' in name), 'querySelector' in p,
+ 'checked' in box, 'checked' in name, 'querySelector' in p,
+ !('checked' in p), Object.getOwnPropertyDescriptor(name,'checked')===undefined,
+ typeof Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'checked').get==='function',
+ name.checked===false, box.checked===false,
  'color' in p.style, 'getPropertyValue' in p.style, !('madeUpProperty' in p.style),
  'log' in console, !('table' in console)
 ];

@@ -135,6 +135,28 @@ impl App {
         // follows the same original live node, never a replacement coordinate hit.
         self.anchor_default_target(hit.node,AnchorTrigger::Pointer(input))
     }
+    /// Complete one captured native/software release. SessionUi retains its
+    /// outer window/tab token checks; the single-App driver uses this same
+    /// source-owned gesture/dispatch seam, never the legacy direct-follow path.
+    pub(crate) fn release_anchor_pointer(&mut self,hit:Option<AnchorHit>,x:i32,y:i32,
+        moved:bool,input:AnchorMouseInput)->(PlatformAction,Option<AnchorDefault>) {
+        if let Some(hit)=hit {
+            if self.anchor_hit_valid(&hit,x,y,moved,input.button) {
+                let page_y=y-self.content_top()+self.scroll;
+                self.observe_link_hit(x,y,page_y,Some(hit.node),true);
+                self.pointer_cancel();
+                let default=match self.activate_anchor(hit,x,y,false,input) {
+                    Ok(default)=>Some(default),
+                    Err(error)=>{self.anchor_default_error(error);None},
+                };
+                return (PlatformAction::None,default);
+            }
+            if !moved {self.pointer_cancel();return (PlatformAction::None,None);}
+        }
+        // A missing/stale capture cannot acquire a new link on release.
+        if input.button==0 {(self.pointer_up_without_link_default(x,y),None)}
+        else {self.pointer_cancel();(PlatformAction::None,None)}
+    }
     /// Browser-owned Open commands revalidate their exact original menu target.
     /// Authored download retains source ownership; no DOM click is fabricated.
     pub(crate) fn open_anchor_context(&mut self,context:AnchorContext)->Result<AnchorDefault,String>{

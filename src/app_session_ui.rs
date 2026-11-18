@@ -296,16 +296,9 @@ impl SessionUi {
         let moved=press.moved||(i64::from(x)-i64::from(press.x)).abs()>4||(i64::from(y)-i64::from(press.y)).abs()>4;
         let mut request=None;
         let default=session.with_tab(tab,|app|{
-            if let Some(hit)=press.anchor{
-                if app.anchor_hit_valid(&hit,x,y-STRIP_HEIGHT,moved,input.button){
-                    app.pointer_cancel();return match app.activate_anchor(hit,x,y-STRIP_HEIGHT,false,input){Ok(default)=>Some(default),Err(error)=>{app.anchor_default_error(error);None}};
-                }
-                if !moved{app.pointer_cancel();return None;}
-            }
-            // Always finish primary non-link behavior with legacy link default
-            // disabled. Missing/stale capture can never acquire a new target.
-            if input.button==0{let action=app.pointer_up_without_link_default(x,y-STRIP_HEIGHT);request=Self::route(id,tab,app,action);}
-            else{app.pointer_cancel();}None
+            let(action,default)=app.release_anchor_pointer(press.anchor,x,y-STRIP_HEIGHT,moved,input);
+            request=Self::route(id,tab,app,action);
+            default
         })?;
         if let Some(AnchorDefault::Link(target,_))=default{return self.admit_link(session,id,tab,target,Self::link_disposition(input));}
         Ok(Outcome{request,repaint:true,..Outcome::default()})

@@ -1365,7 +1365,9 @@
         "source": "c669dd9b3618913419e621d6cac3961e31d04db8",
         "distributions": "Official React and ReactDOM 18.3.1 production UMD files",
         "viewport": [1280, 800],
-        "result": "The native input and paint controls passed. ReactDOM initialization stopped at 223:36 on listener-object registration before a component mounted."
+        "result": "The native input and paint controls passed. ReactDOM initialization stopped at 223:36 on listener-object registration before a component mounted.",
+        "listener_source": "4ef9112f902249fde75d808aaa36038deace2432",
+        "listener_result": "ReactDOM passed its object-listener probe. A scheduled callback stopped on input.constructor at 23:83 during initialization. The component did not mount."
       }
     },
     {
@@ -1674,7 +1676,9 @@
     "serialization_candidate": "13f80a4fb7ab923c5c6709dabd2ac56b25a4503c",
     "serialization_result": "W2 completed the cloned NAV markup read. It next stopped assigning the checkbox type to a fresh input at 4485:2.",
     "created_checkbox_candidate": "5731c75e3391776182768cca275a3cf4b109752f",
-    "created_checkbox_result": "W2 passed the fresh checkbox setup and stopped at the textarea fragment assignment at 4492:2. The separate native checkbox workflow passed toggle and reset with the neighboring edit preserved."
+    "created_checkbox_result": "W2 passed the fresh checkbox setup and stopped at the textarea fragment assignment at 4492:2. The separate native checkbox workflow passed toggle and reset with the neighboring edit preserved.",
+    "textarea_source": "01597d85a454256d44755e0858ad8ece4eeee720",
+    "textarea_result": "W2 passed textarea fragment installation and stopped on the deep container clone at 4493:29. An independent app read the decoded textarea default, preserved the neighboring editor and reproduced the clone refusal."
   },
   "next": [
     "Advance the measured legacy jQuery initialization and recheck its trusted input and timer stages.",
