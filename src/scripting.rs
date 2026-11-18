@@ -61,6 +61,9 @@ mod script_input_accessors;
 #[cfg(test)]
 #[path = "script_input_accessor_tests.rs"]
 mod script_input_accessor_tests;
+#[cfg(test)]
+#[path = "script_input_checkedness_tests.rs"]
+mod script_input_checkedness_tests;
 #[path = "script_buttons.rs"]
 mod script_buttons;
 #[path = "script_attribute_names.rs"]
@@ -3940,11 +3943,7 @@ impl Host for Bridge<'_> {
                 .controls
                 .get(&node)
                 .is_some_and(|control| control.kind == Kind::Select),
-            "checked" => self
-                .forms
-                .controls
-                .get(&node)
-                .is_some_and(|control| matches!(control.kind, Kind::Checkbox | Kind::Radio)),
+            "checked" => self.input_receiver(object),
             _ => {
                 matches!(
                     property,
@@ -4264,10 +4263,10 @@ impl Host for Bridge<'_> {
                         ))
                     }
                     "checked" => {
-                        if matches!(control.kind, Kind::Checkbox | Kind::Radio) {
+                        if self.input_receiver(object) {
                             Ok(Value::Bool(control.checked))
                         } else {
-                            Err("checked is supported on checkbox/radio controls.".into())
+                            Err("checked requires an input element.".into())
                         }
                     }
                     _ => {
@@ -6277,7 +6276,10 @@ var checks=[
  'referrer' in document, document.referrer==='', 'cookie' in document, document.cookie==='',
  !('onload' in document), 'onload' in window, 'onclick' in p,
  'textContent' in p, !('value' in p), 'value' in name,
- 'checked' in box, !('checked' in name), 'querySelector' in p,
+ 'checked' in box, 'checked' in name, 'querySelector' in p,
+ !('checked' in p), Object.getOwnPropertyDescriptor(name,'checked')===undefined,
+ typeof Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'checked').get==='function',
+ name.checked===false, box.checked===false,
  'color' in p.style, 'getPropertyValue' in p.style, !('madeUpProperty' in p.style),
  'log' in console, !('table' in console)
 ];

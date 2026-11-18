@@ -336,6 +336,12 @@ fn input_accessor_existing_native_mode_and_resource_limits_refuse_without_state_
         r#"
         var longValue='x';while(longValue.length<8192)longValue+=longValue;
         var file=document.getElementById('file'),area=document.getElementById('area');
+        if(getChecked.call(text)!==false||Object.getOwnPropertyDescriptor(text,'checked')!==undefined)
+            throw 'genuine inherited noncheckable checkedness';
+        setChecked.call(text,true);
+        if(!getChecked.call(text)||text.getAttribute('checked')!==null||text.value!=='default')
+            throw 'noncheckable native boolean state';
+        setChecked.call(text,false);
     "#,
     );
     let text_before = editor(&forms, id(&doc, "text"));
@@ -345,8 +351,8 @@ fn input_accessor_existing_native_mode_and_resource_limits_refuse_without_state_
     for source in [
         "setValue.call(text,longValue);",
         "setValue.call(file,'not a file');",
-        "setChecked.call(text,true);",
-        "getChecked.call(text);",
+        "setChecked.call(area,true);",
+        "getChecked.call(area);",
         "setValue.call(area,'textarea has a separate interface');",
         "box.innerHTML='<input>';",
         "text.type='file';",

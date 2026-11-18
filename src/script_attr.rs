@@ -372,7 +372,8 @@ impl Bridge<'_> {
         let anchor_attribute = self.doc.nodes[node].namespace == crate::html::Namespace::Html
             && tag(self.doc, node) == "a" && matches!(key, "href" | "download");
         let input_attribute = matches!(key,"name"|"value") && (self.native_text_input(node) || self.fresh_text_input(node))
-            || key == "name" && self.owned_native_checkbox(node);
+            || key == "name" && self.owned_native_checkbox(node)
+            || key == "checked" && self.input_receiver(node_handle(node));
         let button_attribute = matches!(key,"name"|"value"|"type") && (self.native_button(node) || self.fresh_button(node));
         // Nonce text follows existing CSP snapshots/queues; changing metadata
         // does not rerun a parsed script. Attribution reporting is unavailable:

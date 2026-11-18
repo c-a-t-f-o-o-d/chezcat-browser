@@ -7,6 +7,7 @@ pub(crate) enum InputPlan {
     Name { node: usize, name: String },
     Live { node: usize, value: Option<Editor> },
     Default(TextDefaultPlan),
+    Checked { node: usize, present: bool, synchronize: bool },
 }
 impl InputPlan {
     pub(crate) fn retained_bytes(&self) -> usize {
@@ -22,7 +23,26 @@ impl InputPlan {
                 control.dirty_value = true;
             }
             Self::Default(plan) => plan.commit(forms),
+            Self::Checked { node, present, synchronize } => {
+                let control = forms.controls.get_mut(&node).expect("Prepared INPUT checkedness");
+                control.initially_checked = present;
+                if synchronize && !control.dirty_checked {
+                    control.checked = present;
+                    if present && control.kind == Kind::Radio { forms.check_radio(node); }
+                }
+            }
         }
+    }
+
+    pub(crate) fn set_created_checked(&mut self, checked: bool) -> Result<(), String> {
+        let Self::Admit { controls, .. } = self else {
+            return Err("Checkedness admission requires a prepared new INPUT.".into());
+        };
+        if controls.len() != 1 { return Err("Checkedness admission requires exactly one new INPUT.".into()); }
+        let control = controls.values_mut().next().unwrap();
+        control.checked = checked;
+        control.dirty_checked = true;
+        Ok(())
     }
 }
 
@@ -61,10 +81,11 @@ pub(super) fn text_control(doc: &Document, node: usize, name: &str, initial: &st
         .ok_or("Text INPUT retained payload overflow.")?;
     Ok((Control { owner: None, kind: Kind::Text, value, dirty_value: live.is_some(),
         name: copy_text(name)?, caption, disabled: doc.attr(node, "disabled").is_some(),
-        readonly: doc.attr(node, "readonly").is_some(), required: doc.attr(node, "required").is_some(), checked: false,
+        readonly: doc.attr(node, "readonly").is_some(), required: doc.attr(node, "required").is_some(),
+        checked: doc.attr(node, "checked").is_some(), dirty_checked: false,
         max_length: doc.attr(node, "maxlength").and_then(|value| value.parse().ok()).unwrap_or(MAX_VALUE_UNITS).min(MAX_VALUE_UNITS),
         tab_index: doc.attr(node, "tabindex").and_then(parse_tab_index).unwrap_or(0), select: None,
-        button_element: false, initial: copy_text(initial)?, initially_checked: false, image_point: (0, 0) }, retained))
+        button_element: false, initial: copy_text(initial)?, initially_checked: doc.attr(node, "checked").is_some(), image_point: (0, 0) }, retained))
 }
 
 pub(super) fn control_payload(control: &Control) -> Result<usize, String> {

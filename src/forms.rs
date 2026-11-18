@@ -432,6 +432,7 @@ pub struct Control {
     pub readonly: bool,
     pub required: bool,
     pub checked: bool,
+    pub dirty_checked: bool,
     pub max_length: usize,
     pub tab_index: i32,
     pub select: Option<SelectState>,
@@ -819,6 +820,7 @@ impl Forms {
                 readonly: doc.attr(node, "readonly").is_some(),
                 required: doc.attr(node, "required").is_some(),
                 checked,
+                dirty_checked: false,
                 max_length: doc
                     .attr(node, "maxlength")
                     .and_then(|s| s.parse().ok())
@@ -906,8 +908,8 @@ impl Forms {
             return;
         }
         match control.kind {
-            Kind::Checkbox => control.checked = !control.checked,
-            Kind::Radio => self.check_radio(node),
+            Kind::Checkbox => { control.checked = !control.checked; control.dirty_checked = true; },
+            Kind::Radio => { control.dirty_checked |= !control.checked; self.check_radio(node); },
             _ => {}
         }
     }
@@ -980,9 +982,10 @@ impl Forms {
             .get(&node)
             .ok_or("This element is not a supported form control.")?
             .kind;
-        if !matches!(kind, Kind::Checkbox | Kind::Radio) {
-            return Err("The checked property requires a checkbox or radio input.".into());
+        if matches!(kind, Kind::TextArea | Kind::Select) || self.controls[&node].button_element {
+            return Err("The checked property requires an input element.".into());
         }
+        self.controls.get_mut(&node).unwrap().dirty_checked = true;
         if kind == Kind::Radio && checked {
             self.check_radio(node);
         } else {
@@ -1012,7 +1015,7 @@ impl Forms {
         }
     }
 
-    fn check_radio(&mut self, node: usize) {
+    pub(crate) fn check_radio(&mut self, node: usize) {
         let Some(control) = self.controls.get(&node) else {
             return;
         };
@@ -1049,6 +1052,7 @@ impl Forms {
                     control.dirty_value = false;
                 }
                 control.checked = control.initially_checked;
+                control.dirty_checked = false;
                 if control.kind == Kind::Radio && control.checked {
                     radios.push(node);
                 }

@@ -48,10 +48,11 @@ impl Forms {
             value: editor, dirty_value: false, name: name.into(), caption: String::new(),
             disabled: existing.map_or(doc.attr(node,"disabled").is_some(), |control| control.disabled),
             readonly: doc.attr(node,"readonly").is_some(), required: doc.attr(node,"required").is_some(),
-            checked: existing.is_some_and(|control| control.checked),
+            checked: existing.map_or(doc.attr(node,"checked").is_some(), |control| control.checked),
+            dirty_checked: existing.is_some_and(|control| control.dirty_checked),
             max_length: existing.map_or(MAX_VALUE_UNITS, |control| control.max_length),
             tab_index: existing.map_or(0, |control| control.tab_index), select: None,
-            button_element: false, initial: text.into(), initially_checked: existing.is_some_and(|control| control.initially_checked),
+            button_element: false, initial: text.into(), initially_checked: existing.map_or(doc.attr(node,"checked").is_some(), |control| control.initially_checked),
             image_point: (0,0),
         };
         let mut controls = BTreeMap::new();

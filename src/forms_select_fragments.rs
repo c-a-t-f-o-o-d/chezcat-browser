@@ -55,7 +55,7 @@ pub(super) fn checkbox_control(doc: &Document, node: usize, name: &str, initial:
     let checked = doc.attr(node, "checked").is_some();
     Ok((Control { owner: None, kind: Kind::Checkbox, value, dirty_value: false,
         name: name.into(), caption, disabled: doc.attr(node, "disabled").is_some(),
-        readonly: doc.attr(node, "readonly").is_some(), required: doc.attr(node, "required").is_some(), checked,
+        readonly: doc.attr(node, "readonly").is_some(), required: doc.attr(node, "required").is_some(), checked, dirty_checked: false,
         max_length: doc.attr(node, "maxlength").and_then(|value| value.parse().ok()).unwrap_or(MAX_VALUE_UNITS).min(MAX_VALUE_UNITS),
         tab_index: doc.attr(node, "tabindex").and_then(parse_tab_index).unwrap_or(0), select: None,
         button_element: false, initial: initial.into(), initially_checked: checked, image_point: (0, 0) }, retained))
@@ -125,7 +125,7 @@ impl Forms {
                 for row in &mut selected.rows { if let SelectRow::Group { node, .. } = row { *node += base - 1; } }
                 let mut control = Control { owner: None, kind: Kind::Select, value: Editor::default(), dirty_value: false, name: name.into(),
                     caption: String::new(), disabled: doc.attr(local, "disabled").is_some(), readonly: false,
-                    required: doc.attr(local, "required").is_some(), checked: false, max_length: MAX_VALUE_UNITS,
+                    required: doc.attr(local, "required").is_some(), checked: false, dirty_checked: false, max_length: MAX_VALUE_UNITS,
                     tab_index: doc.attr(local, "tabindex").and_then(parse_tab_index).unwrap_or(0),
                     select: Some(selected), button_element: false, initial: String::new(), initially_checked: false, image_point: (0, 0) };
                 let initial = control.select.as_ref().unwrap().selected;
