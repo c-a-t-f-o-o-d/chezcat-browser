@@ -1369,7 +1369,9 @@
         "listener_source": "4ef9112f902249fde75d808aaa36038deace2432",
         "listener_result": "ReactDOM passed its object-listener probe. A scheduled callback stopped on input.constructor at 23:83 during initialization. The component did not mount.",
         "input_interface_source": "7dda376481e725d0f5ab895d97c137d927404d5c",
-        "input_interface_result": "The scheduled callback advanced to 27:75 and stopped while writing input.defaultChecked. The component did not mount. A separate App passed the native constructor, value and checked descriptor, dispatch and receiver checks."
+        "input_interface_result": "The scheduled callback advanced to 27:75 and stopped while writing input.defaultChecked. The component did not mount. A separate App passed the native constructor, value and checked descriptor, dispatch and receiver checks.",
+        "default_checked_source": "a7959b7cf29feb807682e547277eef60d76dbebf",
+        "default_checked_result": "The scheduled callback passed the input's defaultChecked assignment and stopped at 57:363 when testing the active element against window.HTMLIFrameElement. The component did not mount. The separate native App passed direct and saved Boolean access, invalid receiver and form reset checks."
       }
     },
     {

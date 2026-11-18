@@ -41,6 +41,12 @@ pub(super) fn inert_dom_tag(name: &str, scripting: bool) -> bool {
         || name == "noscript" && scripting
 }
 
+// Script and HTML iframe elements have an identity in the embedding document
+// even when their contents are excluded from ordinary element queries.
+pub(super) fn exposes_inert_host(name: &str, namespace: crate::html::Namespace) -> bool {
+    name == "script" || name == "iframe" && namespace == crate::html::Namespace::Html
+}
+
 fn common_node_property(name: &str) -> bool {
     matches!(
         name,
@@ -105,8 +111,10 @@ impl State {
             connected[node] = true;
             tree.parents[node] = parent;
             let name = tag(doc, node);
-            let inert = inert || name != "script" && inert_dom_tag(name, doc.scripting_enabled);
-            if !inert {
+            let inert_children = inert_dom_tag(name, doc.scripting_enabled);
+            // The embedding element belongs to this document. Indexing it
+            // leaves its fallback subtree inert and never creates a child window.
+            if !inert && (!inert_children || exposes_inert_host(name, doc.nodes[node].namespace)) {
                 tree.active[node] = true;
                 tree.order.push(node);
                 if name == "body" && tree.body.is_none() {
@@ -134,7 +142,7 @@ impl State {
                     .children
                     .iter()
                     .rev()
-                    .map(|&child| (child, Some(node), inert || name == "script")),
+                    .map(|&child| (child, Some(node), inert || inert_children)),
             );
         }
         // Saved handles and static NodeLists retain detached ordinary subtrees,
@@ -167,6 +175,19 @@ impl Page {
 }
 
 impl Bridge<'_> {
+    // Document parsing can retain markup-shaped iframe fallback instead of
+    // the single raw Text node required by HTML. Those arena entries have no
+    // public child identity. Empty iframes have a known, ordinary child list.
+    pub(super) fn check_iframe_child_topology(&self, node: usize) -> Result<(), String> {
+        let item = self.doc.nodes.get(node).ok_or("Invalid child topology owner.")?;
+        if !item.children.is_empty() && item.namespace == crate::html::Namespace::Html
+            && matches!(&item.kind, NodeKind::Element { tag, .. } if tag == "iframe")
+        {
+            return Err("Iframe fallback child topology requires raw-text document parsing.".into());
+        }
+        Ok(())
+    }
+
     pub(super) fn comment_receiver(&self, object:u32)->bool {
         node_index(object).is_some_and(|node|self.dom_accessible(node)
             && matches!(self.doc.nodes[node].kind,NodeKind::Comment(_)))
@@ -295,8 +316,10 @@ impl Bridge<'_> {
         for _ in 0..self.doc.nodes.len() {
             if current == 0 { return true; }
             let name = tag(self.doc, current);
-            if name == "script" && current != node
-                || name != "script" && inert_dom_tag(name, self.doc.scripting_enabled) { return false; }
+            if inert_dom_tag(name, self.doc.scripting_enabled)
+                && (current != node || !exposes_inert_host(name, self.doc.nodes[current].namespace)) {
+                return false;
+            }
             let Some(parent) = self.state.tree.parents.get(current).copied().flatten() else { return false; };
             let Some(parent_node) = self.doc.nodes.get(parent) else { return false; };
             if !parent_node.children.contains(&current) { return false; }
@@ -689,6 +712,7 @@ impl Bridge<'_> {
                 "parentNode" => return self.element_parent(node, true).map(Some),
                 "parentElement" => return self.element_parent(node, false).map(Some),
                 "firstChild" | "lastChild" => {
+                    self.check_iframe_child_topology(node)?;
                     self.state.work(self.doc.nodes[node].children.len())?;
                     let children = &self.doc.nodes[node].children;
                     let child = if property == "firstChild" {

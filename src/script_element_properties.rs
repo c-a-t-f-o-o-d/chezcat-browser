@@ -76,8 +76,14 @@ impl Bridge<'_> {
     pub(super) fn element_expando_receiver(&self, object: u32) -> bool {
         self.class_list_element_receiver(object)
             && node_index(object).is_some_and(|node| {
+                let name = tag(self.doc, node);
+                if name == "iframe" {
+                    // Parsed inactive frames expose their interface identity.
+                    // Only script-created frames have ordinary own-property storage.
+                    return self.state.dom.created.contains(&node);
+                }
                 matches!(
-                    tag(self.doc, node),
+                    name,
                     "html"
                         | "head"
                         | "body"
@@ -130,7 +136,6 @@ impl Bridge<'_> {
                         | "textarea"
                         | "img"
                         | "video"
-                        | "iframe"
                         | "script"
                         | "style"
                         | "link"

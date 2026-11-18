@@ -47,6 +47,7 @@ impl Bridge<'_> {
         if tag(self.doc, root) == "template" {
             return Err("Template childNodes requires the unimplemented template contents tree.".into());
         }
+        self.check_iframe_child_topology(root)?;
         self.state.work(1)?;
         if let Some(&handle) = self.state.dom.child_lists.get(&root) { return Ok(Value::Host(handle)); }
         let handle = self.reserve_node_list("identity")?;
@@ -100,6 +101,7 @@ impl Bridge<'_> {
             // returning its handle, including before cross-realm native access.
             self.state.rebuild(self.doc)?;
             self.state.work(1)?;
+            self.check_iframe_child_topology(root)?;
             let children = &self.doc.nodes.get(root).ok_or("Invalid childNodes owner.")?.children;
             if property == "length" { return Ok(Value::Number(children.len() as f64)); }
             return Ok(collection_index(property).and_then(|index| children.get(index))
@@ -143,7 +145,8 @@ impl Bridge<'_> {
         while let Some(node) = stack.pop() {
             self.state.work(1)?;
             let name = tag(self.doc, node);
-            if name != "script" && dom_tree::inert_dom_tag(name, self.doc.scripting_enabled) {
+            let inert_children = dom_tree::inert_dom_tag(name, self.doc.scripting_enabled);
+            if inert_children && !dom_tree::exposes_inert_host(name, self.doc.nodes[node].namespace) {
                 continue;
             }
             if !self.state.tree.active.get(node).copied().unwrap_or(false)
@@ -154,7 +157,7 @@ impl Bridge<'_> {
             if matches!(self.doc.nodes[node].kind, NodeKind::Element { .. }) {
                 candidates.push(node);
             }
-            if name != "script" {
+            if !inert_children {
                 stack.extend(self.doc.nodes[node].children.iter().rev().copied());
             }
         }

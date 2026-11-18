@@ -1,6 +1,4 @@
-//! Bounded ordinary-property and owner controls for the concrete BUTTON/UL slice.
-//! These derive real prototypes from real elements; no new global constructor
-//! API, child DOM storage, implicit URL stringifier or framework shim is assumed.
+//! Ordinary concrete HTML interfaces, string tags, and owner-realm access.
 use super::*;
 
 fn location(source: &str) -> crate::navigation::Location {
@@ -13,13 +11,17 @@ fn id(doc: &Document, name: &str) -> usize {
         .unwrap()
 }
 fn fixture() -> (Document, Forms, Page) {
-    let mut doc = crate::html::parse(concat!(
+    fixture_with("")
+}
+fn fixture_with(extra: &str) -> (Document, Forms, Page) {
+    let markup = concat!(
         "<!doctype html><title>Original DOM string protocol</title><body>",
         "<form id=form><button id=button type=button>Original button</button>",
         "<input id=neighbor name=keep value=original></form>",
         "<ul id=list><li>Original item</li></ul><section id=opaque>Retained opaque element</section>",
         "<a id=anchor href='../destination?q=one#part'>Original link</a>"
-    ));
+    );
+    let mut doc = crate::html::parse(&[markup, extra].concat());
     doc.scripting_enabled = true;
     let mut forms = Forms::new(&doc);
     let mut page = Page::for_test();
@@ -76,6 +78,195 @@ fn run(doc: &mut Document, forms: &mut Forms, page: &mut Page, source: &str) {
     let out = page.console_eval(doc, forms, source);
     assert_eq!(out.errors, 0, "{source}\n{}", page.report());
     kept(doc, forms, page);
+}
+
+#[test]
+fn iframe_interface_parsed_and_created_elements_share_an_ordinary_canonical_prototype() {
+    let (mut doc, mut forms, mut page) = fixture_with(
+        "<iframe id=parsed hidden>fallback</iframe><template><iframe id=inactive></iframe></template>",
+    );
+    run(&mut doc, &mut forms, &mut page, r#"
+var C=window.HTMLIFrameElement,P=C.prototype,parsed=document.getElementById('parsed'),fresh=document.createElement('iframe');
+if(parsed===null||document.querySelector('iframe')!==parsed||!parsed.isConnected||fresh.isConnected||
+   parsed.contentWindow!==null||parsed.contentDocument!==null||document.getElementById('inactive')!==null)
+    throw 'iframe host discovery or browsing context';
+if(typeof C!=='function'||C.name!=='HTMLIFrameElement'||C.length!==0||Object.getPrototypeOf(C)!==HTMLElement||
+   Object.getPrototypeOf(P)!==HTMLElement.prototype||neighbor instanceof C||document.body instanceof C)
+    throw 'frame constructor or ancestry';
+var tagDescriptor=Object.getOwnPropertyDescriptor(P,tag),constructorDescriptor=Object.getOwnPropertyDescriptor(P,'constructor');
+var protoDescriptor=Object.getOwnPropertyDescriptor(C,'prototype');
+if(protoDescriptor.value!==P||protoDescriptor.writable||protoDescriptor.enumerable||protoDescriptor.configurable||
+   constructorDescriptor.value!==C||!constructorDescriptor.writable||constructorDescriptor.enumerable||!constructorDescriptor.configurable||
+   tagDescriptor.value!=='HTMLIFrameElement'||tagDescriptor.writable||tagDescriptor.enumerable||!tagDescriptor.configurable)
+    throw 'frame interface descriptor flags';
+for(var frame of [parsed,fresh]){
+    if(Object.getPrototypeOf(frame)!==P||frame.constructor!==C||!(frame instanceof C)||!(frame instanceof HTMLElement)||
+       !P.isPrototypeOf(frame)||Object.hasOwn(frame,'constructor')||stringify.call(frame)!=='[object HTMLIFrameElement]')
+        throw 'frame object identity';
+}
+"#);
+    let commits = page.state.dom_commits;
+    let nodes = doc.nodes.len();
+    run(&mut doc, &mut forms, &mut page, r#"
+var originalGlobal=Object.getOwnPropertyDescriptor(window,'HTMLIFrameElement');
+window.HTMLIFrameElement=HTMLInputElement;
+if(window.HTMLIFrameElement!==HTMLInputElement||parsed.constructor!==C||!(fresh instanceof C)||fresh instanceof window.HTMLIFrameElement)
+    throw 'global replacement changed original interface';
+Object.defineProperty(window,'HTMLIFrameElement',originalGlobal);
+var seen=null;
+Object.defineProperty(P,'constructor',{configurable:true,get:function(){seen=this;return neighbor;}});
+if(parsed.constructor!==neighbor||seen!==parsed||fresh.constructor!==neighbor||seen!==fresh||!(parsed instanceof C))
+    throw 'inherited frame constructor getter';
+Object.defineProperty(P,'constructor',constructorDescriptor);
+Object.defineProperty(P,tag,{configurable:true,value:'FrameMarker'});
+if(stringify.call(fresh)!=='[object FrameMarker]')throw 'live frame prototype tag';
+Object.defineProperty(P,tag,tagDescriptor);
+var rejected=0;
+for(var invoke of [function(){C();},function(){new C();}]){
+    try{invoke();}catch(error){if(!(error instanceof TypeError))throw error;rejected++;}
+}
+if(rejected!==2||HTMLIFrameElement!==C||parsed.constructor!==C||stringify.call(fresh)!=='[object HTMLIFrameElement]')
+    throw 'illegal construction or interface restoration';
+"#);
+    assert_eq!(doc.nodes.len(), nodes);
+    assert_eq!(page.state.dom_commits, commits);
+    assert!(page.state.blank_frames.is_empty());
+}
+
+#[test]
+fn iframe_interface_parsed_srcdoc_identity_keeps_instance_storage_restricted() {
+    let (mut doc, mut forms, mut page) = fixture_with("<iframe id=authored srcdoc='retained'></iframe>");
+    let node = id(&doc, "authored");
+    run(&mut doc, &mut forms, &mut page, r#"
+var authored=document.querySelector('iframe'),fresh=document.createElement('iframe'),C=HTMLIFrameElement;
+if(authored!==document.getElementById('authored')||!(authored instanceof C)||authored.constructor!==C||
+   Object.getPrototypeOf(authored)!==C.prototype||stringify.call(authored)!=='[object HTMLIFrameElement]'||
+   authored.srcdoc!=='retained'||authored.contentWindow!==null||authored.contentDocument!==null)
+    throw 'parsed frame identity or inert state';
+fresh.privateNote=7;
+if(Object.keys(fresh).length!==1||Object.getOwnPropertyDescriptor(fresh,'privateNote').value!==7||
+   Object.hasOwn(fresh,'srcdoc')||Object.getPrototypeOf(fresh)!==C.prototype)
+    throw 'created frame own storage or identity';
+"#);
+    let commits = page.state.dom_commits;
+    for source in [
+        "Object.hasOwn(authored,'srcdoc');",
+        "Object.getOwnPropertyDescriptor(authored,'privateNote');",
+        "Object.keys(authored);",
+        "for(var key in authored){}",
+        "authored.privateNote=1;",
+        "Object.defineProperty(authored,'privateNote',{value:1});",
+        "authored.srcdoc='changed';",
+    ] {
+        let outcome = page.console_eval(&mut doc, &mut forms, source);
+        assert_eq!(outcome.errors, 1, "{source}\n{}", page.report());
+        assert_eq!(page.runtime.native_overlay_state_for_test(node_handle(node)), (None, None));
+        assert_eq!(doc.attr(node, "srcdoc"), Some("retained"));
+        assert_eq!(page.state.dom_commits, commits);
+        assert!(page.state.blank_frames.is_empty());
+    }
+    run(&mut doc, &mut forms, &mut page,
+        "if(authored.constructor!==C||authored.contentWindow!==null||fresh.privateNote!==7)throw 'frame state after refusals';");
+}
+
+#[test]
+fn iframe_interface_blank_child_realm_uses_owner_identity_and_rechecks_saved_access() {
+    let (mut doc, mut forms, mut page) = fixture();
+    run(&mut doc, &mut forms, &mut page, r#"
+var owner=document.createElement('iframe');owner.hidden=true;document.body.appendChild(owner);
+var w=owner.contentWindow,F=w.Function,Child=w.HTMLIFrameElement,Parent=HTMLIFrameElement;
+var local=F('return window.HTMLIFrameElement===HTMLIFrameElement && !(document.body instanceof HTMLIFrameElement);');
+var read=F('node','return node.constructor;'),inChild=F('node','return node instanceof HTMLIFrameElement;');
+if(!local()||Child!==F('return HTMLIFrameElement;')()||Child===Parent||Child.prototype===Parent.prototype||
+   Object.getPrototypeOf(Child)!==w.HTMLElement||Object.getPrototypeOf(Child.prototype)!==w.HTMLElement.prototype||
+   owner.contentDocument!==w.document||owner instanceof Child||inChild(owner)||!(owner instanceof Parent)||read(owner)!==Parent)
+    throw 'child realm or element owner mismatch';
+var typed=false;
+try{new Child();}catch(error){typed=Object.getPrototypeOf(error)===w.TypeError.prototype;}
+if(!typed)throw 'child realm illegal constructor error';
+"#);
+    let frames = page.state.blank_frames.len();
+    let commits = page.state.dom_commits;
+    assert_eq!(frames, 1);
+    page.set_location(&location("https://other-dom-string.test/changed"));
+    for source in ["read(owner);", "inChild(owner);", "new Child();"] {
+        let out = page.console_eval(&mut doc, &mut forms, source);
+        assert_eq!(out.errors, 1, "{source}\n{}", page.report());
+        assert!(page.report().contains("same-origin"), "{}", page.report());
+        assert_eq!(page.state.dom_commits, commits);
+        assert_eq!(page.state.blank_frames.len(), frames);
+        kept(&doc, &forms, &mut page);
+    }
+    page.set_location(&location("https://dom-string.test/path/page"));
+    run(&mut doc, &mut forms, &mut page,
+        "if(!local()||read(owner)!==Parent||inChild(owner)||owner.contentWindow!==w)throw 'restored frame access';");
+}
+
+#[test]
+fn iframe_interface_unrepresented_fallback_refuses_child_handles_but_empty_frames_keep_live_lists() {
+    let (mut doc, mut forms, mut page) = fixture_with(concat!(
+        "<iframe id=plain>fallback</iframe><iframe id=markup><b id=buried>fallback</b></iframe>",
+        "<iframe id=empty></iframe><div id=after><b id=visible>neighbor</b></div>"
+    ));
+    run(&mut doc, &mut forms, &mut page, r#"
+var plain=document.getElementById('plain'),markup=document.getElementById('markup'),empty=document.getElementById('empty');
+var fresh=document.createElement('iframe'),after=document.getElementById('after');
+if(!(plain instanceof HTMLIFrameElement)||!(markup instanceof HTMLIFrameElement)||
+   document.getElementById('buried')!==null||markup.querySelector('*')!==null||
+   markup.getElementsByTagName('*').length!==0||after.querySelector('b')!==document.getElementById('visible'))
+    throw 'iframe host, hidden fallback or neighboring ordinary selection';
+if(('firstElementChild' in markup && markup.firstElementChild!==null)||
+   ('lastElementChild' in markup && markup.lastElementChild!==null)||
+   ('children' in markup && markup.children.length!==0))
+    throw 'iframe fallback exposed as element children';
+"#);
+    let lists = page.state.node_lists.len();
+    let retained = page.state.retained;
+    let commits = page.state.dom_commits;
+    for source in [
+        "plain.childNodes;", "plain.firstChild;", "plain.lastChild;",
+        "markup.childNodes;", "markup.firstChild;", "markup.lastChild;",
+    ] {
+        let outcome = page.console_eval(&mut doc, &mut forms, source);
+        assert_eq!(outcome.errors, 1, "{source}\n{}", page.report());
+        assert!(page.report().contains("Iframe fallback child topology"), "{}", page.report());
+        assert_eq!(page.state.node_lists.len(), lists);
+        assert_eq!(page.state.retained, retained);
+        assert_eq!(page.state.dom_commits, commits);
+        assert!(page.state.blank_frames.is_empty());
+    }
+    run(&mut doc, &mut forms, &mut page, r#"
+for(var iframe of [empty,fresh]){
+    var children=iframe.childNodes;
+    if(children!==iframe.childNodes||children.length!==0||children[0]!==undefined||children.item(0)!==null||
+       iframe.firstChild!==null||iframe.lastChild!==null)throw 'empty iframe child topology';
+}
+var saved=fresh.childNodes;fresh.hidden=true;document.body.appendChild(fresh);
+if(fresh.childNodes!==saved||saved.length!==0||fresh.firstChild!==null||!fresh.contentWindow||
+   markup.contentWindow!==null||markup.contentDocument!==null||after.childNodes[0]!==after.firstChild||
+   after.firstChild.firstChild.data!=='neighbor')throw 'blank child context or neighboring physical tree';
+"#);
+    assert_eq!(page.state.blank_frames.len(), 1);
+}
+
+#[test]
+fn iframe_interface_inspection_preserves_existing_frame_activation_limits() {
+    let (mut doc, mut forms, mut page) = fixture();
+    run(&mut doc, &mut forms, &mut page, r#"
+var candidate=document.createElement('iframe');candidate.hidden=true;candidate.srcdoc='<p>retained</p>';
+if(!(candidate instanceof HTMLIFrameElement)||candidate.srcdoc!=='<p>retained</p>'||
+   candidate.contentDocument!==null||candidate.contentWindow!==null)throw 'unconnected frame inspection';
+"#);
+    let commits = page.state.dom_commits;
+    let out = page.console_eval(&mut doc, &mut forms, "document.body.appendChild(candidate);");
+    assert_eq!(out.errors, 1, "{}", page.report());
+    run(&mut doc, &mut forms, &mut page, r#"
+if(candidate.parentNode!==null||candidate.contentWindow!==null||candidate.contentDocument!==null||
+   candidate.srcdoc!=='<p>retained</p>'||candidate.constructor!==HTMLIFrameElement)
+    throw 'refused insertion changed frame identity or native state';
+"#);
+    assert_eq!(page.state.dom_commits, commits);
+    assert!(page.state.blank_frames.is_empty());
 }
 
 #[test]
