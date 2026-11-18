@@ -72,6 +72,12 @@ mod script_anchor_url;
 pub use script_anchor_mouse::AnchorMouseInput;
 #[path = "script_dispatch.rs"]
 mod script_dispatch;
+#[cfg(test)]
+#[path = "script_listener_object_tests.rs"]
+mod script_listener_object_tests;
+#[cfg(test)]
+#[path = "script_listener_object_realm_tests.rs"]
+mod script_listener_object_realm_tests;
 #[path = "script_navigation.rs"]
 mod page_navigation;
 pub use page_navigation::Navigation;
@@ -205,7 +211,7 @@ struct Listener {
     serial: u32,
     target: u32,
     event: String,
-    function: Value,
+    callback: Value,
     property: bool,
     options: ListenerOptions,
 }
@@ -715,7 +721,7 @@ impl State {
         &mut self,
         target: u32,
         event: &str,
-        function: Value,
+        callback: Value,
         property: bool,
         options: ListenerOptions,
     ) -> Result<(), String> {
@@ -725,7 +731,7 @@ impl State {
                 .iter_mut()
                 .find(|l| l.target == target && l.event == event && l.property)
             {
-                old.function = function;
+                old.callback = callback;
                 return Ok(());
             }
         } else if self.listeners.iter().any(|l| {
@@ -733,7 +739,7 @@ impl State {
                 && l.event == event
                 && !l.property
                 && l.options.capture == options.capture
-                && same_function(&l.function, &function)
+                && same_event_listener(&l.callback, &callback)
         }) {
             return Ok(());
         }
@@ -752,7 +758,7 @@ impl State {
             serial,
             target,
             event: name,
-            function,
+            callback,
             property,
             options,
         });
@@ -1675,8 +1681,8 @@ impl Page {
                 if let Some(active) = &mut self.state.event {
                     active.passive = listener.options.passive;
                 }
-                let result = self.runtime.invoke(
-                    listener.function,
+                let result = self.runtime.invoke_event_listener(
+                    listener.callback,
                     &[Value::Host(handle)],
                     Value::Host(current),
                     &mut Bridge {
@@ -2285,7 +2291,7 @@ impl Bridge<'_> {
                 .listeners
                 .iter()
                 .find(|l| l.target == object && l.event == event && l.property)
-                .map_or(Value::Null, |l| l.function.clone()),
+                .map_or(Value::Null, |l| l.callback.clone()),
         ))
     }
 
@@ -2354,11 +2360,8 @@ impl Bridge<'_> {
         if matches!(args[1], Value::Null | Value::Undefined) {
             return Ok(Value::Undefined);
         }
-        if !matches!(args[1], Value::Function(_)) {
-            return Err(
-                "Event listener objects with handleEvent are not implemented; use a function."
-                    .into(),
-            );
+        if !matches!(args[1], Value::Function(_) | Value::Object(_) | Value::Host(_)) {
+            return Err("An EventListener callback must be an object or null.".into());
         }
         if method == "addEventListener" {
             self.state
@@ -2369,7 +2372,7 @@ impl Bridge<'_> {
                     && l.event == event
                     && !l.property
                     && l.options.capture == options.capture
-                    && same_function(&l.function, &args[1]))
+                    && same_event_listener(&l.callback, &args[1]))
             });
         }
         Ok(Value::Undefined)
@@ -2690,6 +2693,7 @@ impl Host for Bridge<'_> {
     }
 
     fn argument_conversions(&self, object: u32, method: &str, args: &[Value]) -> &'static [(usize, bool)] {
+        if matches!(method, "addEventListener" | "removeEventListener") { return &[(0, true)]; }
         if object == WINDOW && method == "Text" {
             return if matches!(args.first(), None | Some(Value::Undefined)) { &[] } else { &[(0, true)] };
         }
@@ -2853,6 +2857,7 @@ impl Host for Bridge<'_> {
         self.validate_event_prefix(object, method, next_index, args)
     }
     fn native_reference_arguments(&self,object:u32,method:&str)->&'static [usize] {
+        if matches!(method, "addEventListener" | "removeEventListener") { return &[1]; }
         if method == script_node_contains::CONTAINS_METHOD { return &[0]; }
         if method=="initMouseEvent" && self.mouse_receiver(object) {&[3,14]}
         else if method=="initUIEvent" && self.ui_receiver(object) {&[3]}
@@ -2873,6 +2878,7 @@ impl Host for Bridge<'_> {
     }
 
     fn required_arguments(&self, object: u32, method: &str) -> usize {
+        if matches!(method, "addEventListener" | "removeEventListener") { return 2; }
         if method == script_node_contains::CONTAINS_METHOD { return 1; }
         if object==WINDOW && method=="getComputedStyle" {return 1;}
         if self.computed_style_receiver(object) || (STYLE_BASE..DATASET_BASE).contains(&object) {
@@ -2993,6 +2999,14 @@ impl Host for Bridge<'_> {
             return Err(("TypeError","Illegal constructor for this native interface.".into()));
         }
         if method=="dispatchEvent"{return self.validate_dispatch(object,args);}
+        if matches!(method, "addEventListener" | "removeEventListener") {
+            if !self.dispatch_receiver(object) {
+                return Err(("TypeError", "Listener receiver must be a supported EventTarget.".into()));
+            }
+            if !matches!(args.get(1), Some(Value::Object(_) | Value::Function(_) | Value::Host(_) | Value::Null | Value::Undefined)) {
+                return Err(("TypeError", "An EventListener callback must be an object or null.".into()));
+            }
+        }
         if object == HISTORY && method == "replaceState" {
             if self.state.history.current.is_none() { self.history_target(args)?; }
             if matches!(args.first(), Some(Value::Function(_) | Value::Symbol(_))) { return Err(("DataCloneError", "This History value cannot be serialized for storage.".into())); }
@@ -4929,8 +4943,12 @@ fn tag(doc: &Document, node: usize) -> &str {
         _ => "",
     }
 }
-fn same_function(a: &Value, b: &Value) -> bool {
-    matches!((a,b), (Value::Function(a), Value::Function(b)) if a == b)
+fn same_event_listener(a: &Value, b: &Value) -> bool {
+    match (a, b) {
+        (Value::Function(a), Value::Function(b)) | (Value::Object(a), Value::Object(b)) => a == b,
+        (Value::Host(a), Value::Host(b)) => a == b,
+        _ => false,
+    }
 }
 fn keyboard_property(property: &str) -> bool {
     matches!(

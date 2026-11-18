@@ -1359,7 +1359,14 @@
     {
       "name": "React",
       "role": "browser UI runtime",
-      "status": "Not assessed"
+      "status": "ReactDOM initialization blocked on the measured browser app",
+      "measured_versions": ["18.3.1"],
+      "measurement": {
+        "source": "c669dd9b3618913419e621d6cac3961e31d04db8",
+        "distributions": "Official React and ReactDOM 18.3.1 production UMD files",
+        "viewport": [1280, 800],
+        "result": "The native input and paint controls passed. ReactDOM initialization stopped at 223:36 on listener-object registration before a component mounted."
+      }
     },
     {
       "name": "AngularJS1.x",

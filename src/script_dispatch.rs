@@ -458,14 +458,14 @@ impl Bridge<'_> {
             }
             if let Some(&serial) = frame.snapshot.get(frame.listener) {
                 frame.listener += 1;
-                let Some((function, target, options, property)) = self
+                let Some((callback, target, options, property)) = self
                     .state
                     .listeners
                     .iter()
                     .find(|listener| listener.serial == serial)
                     .map(|listener| {
                         (
-                            listener.function.clone(),
+                            listener.callback.clone(),
                             listener.target,
                             listener.options,
                             listener.property,
@@ -482,7 +482,7 @@ impl Bridge<'_> {
                 frame.property = property;
                 event.passive = options.passive;
                 return Ok(Some(crate::javascript::EventCallback {
-                    function,
+                    callback,
                     target,
                     event: event.handle,
                 }));

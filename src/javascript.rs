@@ -131,6 +131,8 @@ mod async_function_intrinsics;
 mod host_objects;
 #[path = "event_interface.rs"]
 mod event_interface;
+#[path = "event_listener.rs"]
+mod event_listener;
 #[path = "media_interface.rs"]
 mod media_interface;
 #[path = "runtime_diagnostics.rs"]
@@ -413,7 +415,7 @@ pub(crate) fn ordinary_html_interface(tag: &str) -> Option<&'static str> {
 
 /// One callback from a host-owned synchronous event propagation plan. The host
 /// never receives interpreter access; the runtime keeps the current job/realm.
-pub struct EventCallback {pub function:Value,pub target:u32,pub event:u32}
+pub struct EventCallback {pub callback:Value,pub target:u32,pub event:u32}
 
 pub(crate) enum NativePromiseFailure {
     Dom(&'static str, &'static str),
@@ -3361,6 +3363,8 @@ struct Property {
 }
 
 struct Object {
+    /// Creation provenance, independent of author-mutable prototype links.
+    realm: Option<usize>,
     proxy: Option<proxy_objects::ProxyData>,
     date: Option<f64>,
     url: Option<url_api::Data>,
@@ -4219,6 +4223,10 @@ impl Runtime {
         self.pin_exported_value(&this);
         for value in args { self.pin_exported_value(value); }
         let result = self.call_value(function, args, this, host);
+        self.finish_invocation(result)
+    }
+
+    fn finish_invocation(&mut self, result: Result<Value, Fault>) -> Result<Value, String> {
         self.record_entry_result(true, &result);
         if result.as_ref().is_err_and(|error| error.exception.is_none()) {
             self.job_failed_fatally = true;
@@ -5682,6 +5690,7 @@ impl Runtime {
         }
         let id = self.objects.len();
         self.objects.push(Object {
+            realm: self.active_realm,
             proxy: None,
             date: None,
             url: None,
@@ -8546,7 +8555,7 @@ impl Runtime {
                     let Some(callback)=host.next_event_callback(token).map_err(Fault::new)? else {return Ok(());};
                     // This is nested in the caller's JavaScript stack. Do not
                     // use invoke(), begin a fresh job or drain microtasks here.
-                    match self.call_value(callback.function,&[Value::Host(callback.event)],Value::Host(callback.target),host) {
+                    match self.call_event_listener(callback.callback,&[Value::Host(callback.event)],Value::Host(callback.target),host) {
                         Ok(value)=>host.event_callback_result(token,matches!(value,Value::Bool(false))),
                         Err(fault) if fault.exception.is_some()=>host.event_callback_error(token,&fault.display()),
                         Err(fault)=>return Err(fault),
