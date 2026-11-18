@@ -33,6 +33,7 @@ pub struct Geometry {
     rects: Vec<Option<layout::BorderRect>>,
     scroll: i32,
     offset_unavailable: Vec<bool>,
+    offset_parents: Vec<layout::OffsetParent>,
     remaining: usize,
     limits:Limits,
 }
@@ -61,6 +62,7 @@ impl Geometry {
             rects: Vec::new(),
             scroll: 0,
             offset_unavailable: Vec::new(),
+            offset_parents: Vec::new(),
             remaining: Limits::default().layouts_per_job,
             limits:Limits::default(),
         }
@@ -137,10 +139,11 @@ impl Geometry {
         self.viewport_scroll_height=layout.viewport_scroll_height;
         self.viewport_scroll_unavailable=layout.viewport_scroll_unavailable;
         self.offset_unavailable = layout.offset_unavailable.clone();
+        self.offset_parents.clone_from(&layout.offset_parents);
         self.rects = layout.border_rects.clone();
     }
 
-    fn ensure_layout(&mut self, doc: &Document, forms: &Forms, host_work: &mut usize) -> Result<(), String> {
+    fn ensure_layout(&mut self, doc: &Document, forms: &Forms, host_work: &mut usize, copy_work: &mut usize) -> Result<(), String> {
         if self.boxes.is_none() {
             if self.remaining == 0 {
                 return Err(format!("DOM geometry layout limit reached ({} rebuilds per job).",self.limits.layouts_per_job));
@@ -149,8 +152,11 @@ impl Geometry {
                 *host_work = 0;
                 return Err("DOM work limit reached during geometry layout.".into());
             }
-            self.remaining -= 1;
             *host_work -= doc.nodes.len();
+            let mut budget = crate::css::CssBudget::new(host_work, copy_work);
+            budget.work(layout::offset_parent_work(doc))?;
+            budget.copies(layout::offset_parent_storage(doc.nodes.len()))?;
+            self.remaining -= 1;
             let checked = |node| live_checked(forms, node);
             let layout = layout::build_viewport_with_fonts(
                 doc,
@@ -168,6 +174,7 @@ impl Geometry {
             self.viewport_scroll_height=layout.viewport_scroll_height;
             self.viewport_scroll_unavailable=layout.viewport_scroll_unavailable;
             self.offset_unavailable = layout.offset_unavailable;
+            self.offset_parents = layout.offset_parents;
             self.rects = layout.border_rects;
         }
         Ok(())
@@ -220,8 +227,17 @@ impl Geometry {
         Ok(Some(value.to_owned()))
     }
 
-    pub fn bounding_rect(&mut self, doc: &Document, forms: &Forms, node: usize, host_work: &mut usize) -> Result<[f64; 4], String> {
-        self.ensure_layout(doc, forms, host_work)?;
+    pub(crate) fn offset_parent(&mut self, doc: &Document, forms: &Forms, node: usize, work: &mut usize, copies: &mut usize) -> Result<Option<usize>, String> {
+        self.ensure_layout(doc, forms, work, copies)?;
+        match self.offset_parents.get(node) {
+            Some(layout::OffsetParent::Element(parent)) => Ok(Some(*parent)),
+            Some(layout::OffsetParent::None) => Ok(None),
+            _ => Err("offsetParent requires complete box and containing-block information.".into()),
+        }
+    }
+
+    pub fn bounding_rect(&mut self, doc: &Document, forms: &Forms, node: usize, host_work: &mut usize, copy_work: &mut usize) -> Result<[f64; 4], String> {
+        self.ensure_layout(doc, forms, host_work, copy_work)?;
         if let Some(rect) = self.rects.get(node).copied().flatten() {
             let zoom = f64::from(self.zoom);
             let y = if rect.fixed { f64::from(rect.y) } else { f64::from(rect.y) - f64::from(self.scroll) };
@@ -236,9 +252,9 @@ impl Geometry {
     #[allow(clippy::too_many_arguments)]
     pub fn read(
         &mut self, doc: &Document, forms: &Forms, node: usize, is_root: bool,
-        property: &str, host_work: &mut usize,
+        property: &str, host_work: &mut usize, copy_work: &mut usize,
     ) -> Result<f64, String> {
-        self.ensure_layout(doc, forms, host_work)?;
+        self.ensure_layout(doc, forms, host_work, copy_work)?;
         if property=="scrollHeight" {
             if is_root &&self.viewport_scroll_unavailable{return Err("Root scroll height requires unsupported viewport overflow propagation.".into());}
             if self.scroll_heights.get(node).copied().flatten().is_none() && self.boxes.as_ref().and_then(|boxes|boxes.get(node)).is_some_and(Option::is_some) {return Err(format!("Scroll height requires unsupported scrolling-area origin geometry. Receiver node={node}."));}
@@ -288,6 +304,31 @@ fn valid_zoom(zoom: f32) -> f32 {
 
 #[cfg(test)]
 #[test]
+fn offset_parent_budget_refusal_preserves_the_available_rebuild() {
+    let doc = crate::html::parse("<html><body><div id=outer style='position:relative'><button id=b>B</button></div></body></html>");
+    let forms = Forms::new(&doc);
+    let id = |name| (0..doc.nodes.len()).find(|&n| doc.attr(n, "id") == Some(name)).unwrap();
+    let mut geometry = Geometry::new(640, 480, 1.0, &HashMap::new(), HashMap::new(), &Book::empty())
+        .with_limits(Limits { layouts_per_job: 1 });
+    let work_required = doc.nodes.len() + layout::offset_parent_work(&doc);
+    let bytes_required = layout::offset_parent_storage(doc.nodes.len());
+    let read = |geometry: &mut Geometry, work: &mut usize, copies: &mut usize| {
+        geometry.offset_parent(&doc, &forms, id("b"), work, copies)
+    };
+    for (mut work, mut copies) in [(work_required - 1, bytes_required), (work_required, bytes_required - 1)] {
+        assert!(read(&mut geometry, &mut work, &mut copies).is_err());
+        assert!(geometry.boxes.is_none());
+        assert_eq!(geometry.remaining, 1);
+    }
+    let (mut work, mut copies) = (work_required, bytes_required);
+    assert_eq!(read(&mut geometry, &mut work, &mut copies).unwrap(), Some(id("outer")));
+    assert_eq!((work, copies), (0, 0));
+    assert_eq!(read(&mut geometry, &mut work, &mut copies).unwrap(), Some(id("outer")));
+    assert_eq!(geometry.remaining, 0);
+}
+
+#[cfg(test)]
+#[test]
 fn computed_style_geometry_shares_rebuilds_and_only_charges_the_returned_value_on_cache_hits() {
     let doc = crate::html::parse("<link id=sheet rel=stylesheet href=theme.css><div id=box></div>");
     let forms = Forms::new(&doc);
@@ -307,13 +348,13 @@ fn computed_style_geometry_shares_rebuilds_and_only_charges_the_returned_value_o
     let (mut lookup, mut exact_copy) = (1, 5);
     assert_eq!(read(&mut geometry, &mut lookup, &mut exact_copy).unwrap().as_deref(), Some("ready"));
     assert_eq!((lookup, exact_copy), (0, 0));
-    assert!(geometry.read(&doc, &forms, node, false, "clientWidth", &mut work).is_err());
+    assert!(geometry.read(&doc, &forms, node, false, "clientWidth", &mut work, &mut copies).is_err());
 
     geometry.set_stylesheet(sheet, Some("#box{--token:changed;width:65px}"));
     assert!(read(&mut geometry, &mut work, &mut copies).is_err());
     assert!(geometry.computed_properties.is_none());
     geometry.begin_job();
-    assert_eq!(geometry.read(&doc, &forms, node, false, "clientWidth", &mut work).unwrap(), 65.0);
+    assert_eq!(geometry.read(&doc, &forms, node, false, "clientWidth", &mut work, &mut copies).unwrap(), 65.0);
     assert_eq!(geometry.remaining, 0);
     assert_eq!(read(&mut geometry, &mut work, &mut copies).unwrap().as_deref(), Some("changed"));
 }

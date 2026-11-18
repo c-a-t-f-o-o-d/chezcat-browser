@@ -35,6 +35,20 @@ pub struct Document {
 }
 
 impl Document {
+    /// HTML's body element is the first HTML body or frameset directly below
+    /// the document's HTML root. Callers supply the known root element.
+    pub(crate) fn body_element(&self, root: usize) -> Option<usize> {
+        let element = self.nodes.get(root)?;
+        if element.namespace != Namespace::Html
+            || !matches!(&element.kind, NodeKind::Element { tag, .. } if tag == "html") {
+            return None;
+        }
+        element.children.iter().copied().find(|&id| self.nodes.get(id).is_some_and(|child| {
+            child.namespace == Namespace::Html
+                && matches!(&child.kind, NodeKind::Element { tag, .. } if matches!(tag.as_str(), "body" | "frameset"))
+        }))
+    }
+
     pub fn attr(&self, node: usize, name: &str) -> Option<&str> {
         // HTML consumers accept a case-insensitive query, but only the exact
         // lower-case null-namespace attribute drives native HTML behavior.

@@ -23,6 +23,9 @@ const MAX_FLEX_WORK: usize = 4_000_000;
 const MAX_POSITIONED: usize = 2_048;
 #[path="layout_scroll.rs"]
 mod scrolling;
+#[path = "layout_offset_parent.rs"]
+mod offset_parent;
+pub(crate) use offset_parent::{offset_parent_storage, offset_parent_work, OffsetParent};
 
 #[cfg(test)]
 #[path = "layout_background_tests.rs"]
@@ -31,6 +34,10 @@ mod background_tests;
 #[cfg(test)]
 #[path = "layout_native_padding_tests.rs"]
 mod native_padding_tests;
+
+#[cfg(test)]
+#[path = "layout_offset_parent_tests.rs"]
+mod offset_parent_tests;
 
 fn native_button_padding(kind: Option<Kind>) -> bool {
     matches!(kind, Some(Kind::Button | Kind::Submit | Kind::Reset))
@@ -339,6 +346,7 @@ pub struct Layout {
     pub border_rects: Vec<Option<BorderRect>>,
     /// No padding-box record is insufficient to prove no inline CSS box.
     pub offset_unavailable: Vec<bool>,
+    pub(crate) offset_parents: Vec<OffsetParent>,
     fixed_runs: Vec<bool>,
     fixed_items: Vec<bool>,
     fixed_controls: Vec<bool>,
@@ -598,6 +606,8 @@ struct Engine<'a> {
     intrinsics: Vec<Option<Intrinsic>>,
     measure_visits: usize,
     boxes: Vec<Option<BoxRecord>>,
+    // Inline formatting establishes a box even when fragment dimensions are unavailable.
+    inline_boxes: Vec<bool>,
     used_margins:HashMap<usize,[i32;4]>,
     placed_boxes: Vec<usize>,
     flex_work: usize,
@@ -714,6 +724,7 @@ pub fn build_viewport_with_fonts(
         viewport_scroll_unavailable:false,
         border_rects: vec![None; doc.nodes.len()],
         offset_unavailable: vec![true; doc.nodes.len()],
+        offset_parents: vec![OffsetParent::Unavailable; doc.nodes.len()],
         fixed_runs: Vec::new(),
         fixed_items: Vec::new(),
         fixed_controls: Vec::new(),
@@ -775,6 +786,7 @@ pub fn build_viewport_with_fonts(
         intrinsics: vec![None; doc.nodes.len()],
         measure_visits: 0,
         boxes: (0..doc.nodes.len()).map(|_| None).collect(),
+        inline_boxes: vec![false; doc.nodes.len()],
         used_margins:HashMap::new(),
         placed_boxes: Vec::new(),
         flex_work: MAX_FLEX_WORK,
@@ -807,6 +819,7 @@ pub fn build_viewport_with_fonts(
     engine.place_positioned();
     let fixed_boxes = engine.mark_fixed();
     engine.finish_client_boxes();
+    engine.finish_offset_parents();
     engine.finish_border_rects(&fixed_boxes);
     engine.finish_scroll_heights(&fixed_boxes);
     let atom_clips = engine.clip_overflow();
@@ -1866,6 +1879,7 @@ impl Engine<'_> {
                     return;
                 }
                 if tag == "br" {
+                    self.inline_boxes[index] = true;
                     if let Some(id) = id {
                         self.anchor(index, id, self.flow.y);
                     }
@@ -3705,6 +3719,7 @@ impl Engine<'_> {
     }
 
     fn inline(&mut self, index: usize, style: &Style, link: Option<usize>, depth: usize) {
+        self.inline_boxes[index] = true;
         let parent_white_space = self.flow.white_space;
         self.flow.white_space = style.white_space;
         let available = (self.flow.right - self.flow.left).max(1);
