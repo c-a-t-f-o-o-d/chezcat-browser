@@ -125,6 +125,8 @@ mod expression_parser_tests;
 mod environment_lifetime_tests;
 #[path = "function_constructor.rs"]
 mod function_constructor;
+#[path = "async_function_intrinsics.rs"]
+mod async_function_intrinsics;
 #[path = "host_objects.rs"]
 mod host_objects;
 #[path = "event_interface.rs"]
@@ -163,6 +165,9 @@ mod primitive_conversion;
 mod primitive_wrappers;
 #[path = "promises.rs"]
 mod promises;
+#[cfg(test)]
+#[path = "async_function_execution_tests.rs"]
+mod async_function_execution_tests;
 pub(crate) use promises::{NativePromise, NativePromiseOutcome};
 #[path = "host_promise.rs"]
 mod host_promise;
@@ -1054,7 +1059,14 @@ impl LexGoal {
                     self.end_expression = false;
                     self.statement = false;
                 } else if word == "function" && !property {
-                    self.function_head = Some(!(self.statement || newline && self.end_expression));
+                    // A contextual async prefix keeps the statement position it
+                    // had before the word, just like a possible label there.
+                    let declaration = if !newline && self.previous == "async" && !self.previous_is_property {
+                        self.previous_is_label
+                    } else {
+                        self.statement || newline && self.end_expression
+                    };
+                    self.function_head = Some(!declaration);
                     self.end_expression = false;
                     self.statement = false;
                 } else if !property
@@ -1679,6 +1691,7 @@ struct Template {
     source_end: usize,
     dynamic_source: bool,
     arrow: bool,
+    asynchronous: bool,
     constructible: bool,
     class_constructor: bool,
     class_element: bool,
@@ -1742,6 +1755,7 @@ struct Parser {
     labels: Vec<(String, StmtId, bool)>,
     allow_in: bool,
     functions: usize,
+    async_body: bool,
     new_target_allowed: bool,
     super_property_allowed: bool,
     super_call_allowed: bool,
@@ -1831,6 +1845,7 @@ impl Parser {
             labels: Vec::new(),
             allow_in: true,
             functions: 0,
+            async_body: false,
             new_target_allowed,
             super_property_allowed,
             super_call_allowed,
@@ -1889,6 +1904,7 @@ impl Parser {
             self.depth = active_depth;
             self.enter()?;
             self.functions = body.function_depth;
+            self.async_body = self.program.templates[body.template].asynchronous;
             self.new_target_allowed = body.new_target_allowed;
             self.super_property_allowed = body.super_property_allowed;
             self.super_call_allowed = body.super_call_allowed;
@@ -2133,7 +2149,7 @@ impl Parser {
         for (_, _, is_loop) in &mut self.labels[previous_labels..] {
             *is_loop = iteration;
         }
-        if labelled && (self.is("let") || self.is("const") || self.is("function") || self.is("class")) {
+        if labelled && (self.is("let") || self.is("const") || self.is("function") || self.is("class") || self.async_function_ahead()) {
             return Err(self.error("Use a block for a labelled lexical or function declaration."));
         }
         let result = self.statement_inner(id);
@@ -2212,9 +2228,11 @@ impl Parser {
             });
             let value = self.expr(ExprKind::Class(class), at)?;
             StmtKind::Declare(Declaration::Let, vec![(pattern, Some(value))])
-        } else if self.eat("function") {
+        } else if self.is("function") || self.async_function_ahead() {
+            let asynchronous = self.eat("async");
+            self.need("function")?;
             let name = self.name()?;
-            let function = self.function(None, at)?;
+            let function = self.function(None, at, asynchronous)?;
             StmtKind::Function(name, function)
         } else if self.eat("if") {
             self.if_statement(id)?
@@ -2374,13 +2392,18 @@ impl Parser {
         Ok((params, rest, trailing))
     }
 
-    fn function(&mut self, name: Option<String>, start: usize) -> Result<usize, Fault> {
-        self.function_with_super(name, start, false, false)
+    fn async_function_ahead(&self) -> bool {
+        self.is("async") && self.next_is("function") && !self.tokens[self.current + 1].newline
     }
 
-    fn function_with_super(&mut self, name: Option<String>, start: usize,
+    fn function(&mut self, name: Option<String>, start: usize, asynchronous: bool) -> Result<usize, Fault> {
+        self.function_with_super(name, start, asynchronous, false, false)
+    }
+
+    fn function_with_super(&mut self, name: Option<String>, start: usize, asynchronous: bool,
         super_property_allowed: bool, super_call_allowed: bool) -> Result<usize, Fault> {
         self.enter()?;
+        let previous_async_body = std::mem::replace(&mut self.async_body, false);
         let previous_new_target = std::mem::replace(&mut self.new_target_allowed, true);
         let previous_super_property = std::mem::replace(&mut self.super_property_allowed, super_property_allowed);
         let previous_super_call = std::mem::replace(&mut self.super_call_allowed, super_call_allowed);
@@ -2390,7 +2413,8 @@ impl Parser {
             source_end: start,
             dynamic_source: false,
             arrow: false,
-            constructible: true,
+            asynchronous,
+            constructible: !asynchronous,
             class_constructor: false,
             class_element: false,
             derived_constructor: false,
@@ -2402,6 +2426,7 @@ impl Parser {
             trailing_parameter_comma,
             body: Vec::new(),
         })?;
+        self.async_body = previous_async_body;
         self.new_target_allowed = previous_new_target;
         self.super_property_allowed = previous_super_property;
         self.super_call_allowed = previous_super_call;
@@ -2446,6 +2471,10 @@ impl Parser {
         let mut at = self.current;
         let word = |token: &Token| matches!(&token.kind, TokenKind::Word(name) if !reserved(name));
         let punct = |token: Option<&Token>, text| matches!(token.map(|t| &t.kind), Some(TokenKind::Punct(value)) if *value == text);
+        // In `async => ...`, async itself is the ordinary binding name.
+        if self.is("async") && !self.next_is("=>") && !tokens[at + 1].newline {
+            at += 1;
+        }
         if word(&tokens[at]) {
             return punct(tokens.get(at + 1), "=>");
         }
@@ -2461,6 +2490,11 @@ impl Parser {
     fn arrow(&mut self) -> Result<ExprId, Fault> {
         let at = self.at();
         self.enter()?;
+        let asynchronous = self.is("async") && !self.next_is("=>");
+        if asynchronous {
+            self.current += 1;
+        }
+        let previous_async_body = std::mem::replace(&mut self.async_body, false);
         let (params, rest, trailing_parameter_comma) = if self.is("(") {
             self.parameters(true)?
         } else {
@@ -2483,6 +2517,7 @@ impl Parser {
                 source_end: at,
                 dynamic_source: false,
                 arrow: true,
+                asynchronous,
                 constructible: false,
                 class_constructor: false,
                 class_element: false,
@@ -2495,6 +2530,7 @@ impl Parser {
                 trailing_parameter_comma,
                 body: Vec::new(),
             })?;
+            self.async_body = previous_async_body;
             self.depth -= 1;
             return self.expr(ExprKind::Function(template), at);
         }
@@ -2506,6 +2542,7 @@ impl Parser {
         let labels = std::mem::take(&mut self.labels);
         let previous_in = self.allow_in;
         self.functions += 1;
+        self.async_body = asynchronous;
         let expression = self.assignment_expression()?;
         let body = vec![self.stmt(StmtKind::Return(Some(expression)), at)?];
         let strict = self.strict;
@@ -2519,6 +2556,7 @@ impl Parser {
         self.labels = labels;
         self.breakables = breakables;
         self.allow_in = previous_in;
+        self.async_body = previous_async_body;
         self.functions -= 1;
         self.depth -= 1;
         let template = self.program.templates.len();
@@ -2527,6 +2565,7 @@ impl Parser {
             source_end: self.tokens[self.current - 1].end,
             dynamic_source: false,
             arrow: true,
+            asynchronous,
             constructible: false,
             class_constructor: false,
             class_element: false,
@@ -2563,6 +2602,16 @@ impl Parser {
     }
     fn primary(&mut self) -> Result<ExprId, Fault> {
         let at = self.at();
+        if self.is("function") || self.async_function_ahead() {
+            let asynchronous = self.eat("async");
+            self.need("function")?;
+            let name = if self.is("(") { None } else { Some(self.name()?) };
+            let template = self.function(name, at, asynchronous)?;
+            return self.expr(ExprKind::Function(template), at);
+        }
+        if self.async_body && self.is("await") {
+            return Err(self.unsupported("Await expressions are not implemented."));
+        }
         if self.is("class") {
             let kind = self.class_expression(at, false)?;
             return self.expr(kind, at);
@@ -2591,14 +2640,6 @@ impl Parser {
                     "false" => ExprKind::Literal(Value::Bool(false)),
                     "null" => ExprKind::Literal(Value::Null),
                     "this" => ExprKind::This,
-                    "function" => {
-                        let name = if self.is("(") {
-                            None
-                        } else {
-                            Some(self.name()?)
-                        };
-                        ExprKind::Function(self.function(name, at)?)
-                    }
                     _ if !reserved(&word) => ExprKind::Name(word),
                     _ => {
                         return Err(Fault::new(format!("Unsupported syntax {word:?}."))
@@ -2723,7 +2764,7 @@ impl Parser {
                 {
                     return Err(self.error("A setter parameter cannot be followed by a comma."));
                 }
-                let template = self.function_with_super(None, position, true, false)?;
+                let template = self.function_with_super(None, position, false, true, false)?;
                 let params = &self.program.templates[template].params;
                 let kind = accessor.unwrap_or(Kind::Method);
                 if kind == Kind::Getter && !params.is_empty() {
@@ -2899,7 +2940,7 @@ impl Parser {
                 }
                 let statement = self.statement()?;
                 if !self.strict
-                    && matches!(self.program.stmts[statement].kind, StmtKind::Function(_, _))
+                    && matches!(self.program.stmts[statement].kind, StmtKind::Function(_, id) if !self.program.templates[id].asynchronous)
                 {
                     return Err(self.unsupported(
                         "Sloppy switch function declarations (Annex B) are not implemented.",
@@ -3215,6 +3256,7 @@ enum Builtin {
     IsNaN,
     Math(&'static str),
     Function,
+    AsyncFunction,
     EmptyFunction,
     ObjectStatic(&'static str),
     ObjectMethod(&'static str),
@@ -3435,6 +3477,7 @@ pub struct Runtime {
     text_roots: text_encoding::Roots,
     object_prototype: Option<usize>,
     function_prototype: Option<usize>,
+    async_function_roots: async_function_intrinsics::Roots,
     array_prototype: Option<usize>,
     active_array_joins: Vec<usize>,
     regexp_prototype: Option<usize>,
@@ -3580,6 +3623,7 @@ impl Runtime {
             text_roots: text_encoding::Roots::default(),
             object_prototype: None,
             function_prototype: None,
+            async_function_roots: async_function_intrinsics::Roots::default(),
             array_prototype: None,
             active_array_joins: Vec::new(),
             regexp_prototype: None,
@@ -3683,6 +3727,9 @@ impl Runtime {
             let value = self.native_function(builtin, name)?;
             if name == "RegExp" {
                 if let Value::Function(id) = &value { self.regexp_constructor = Some(*id); }
+            }
+            if name == "Function" {
+                if let Value::Function(id) = &value { self.async_function_roots.function_constructor = Some(*id); }
             }
             self
                 .put_binding(self.global_environment, name.into(), Some(value), Declaration::Var, false)?;
@@ -4619,6 +4666,11 @@ impl Runtime {
         &mut self, program: &Rc<Program>, template: usize, environment: usize, this: &Value,
     ) -> Result<Value, Fault> {
         self.step()?;
+        let async_prototype = if program.templates[template].asynchronous {
+            Some(self.async_function_prototype()?)
+        } else {
+            None
+        };
         if self.function_arena.occupied == self.limits.capacity.functions {
             return Err(self.function_limit_fault("script"));
         }
@@ -4664,6 +4716,10 @@ impl Runtime {
             program.templates[template].parameter_length(),
             program.templates[template].constructible,
         )?;
+        if let Some(prototype) = async_prototype {
+            let properties = self.function_properties[index];
+            self.objects[properties].prototype = Some(Ordinary::Object(prototype));
+        }
         Ok(Value::Function(index))
     }
     fn prepare(
@@ -7904,6 +7960,7 @@ impl Runtime {
                 )
             }
             Some(Function::Native(Builtin::Function)) => self.function_constructor(args, host),
+            Some(Function::Native(Builtin::AsyncFunction)) => self.async_function_constructor(args, new_target, host),
             Some(Function::Host {
                 object,
                 method,
@@ -9091,9 +9148,11 @@ impl Runtime {
         let previous_strict = self.strict;
         self.transient_roots.owned_call_depth += 1;
         self.strict = program.templates[template].strict;
-        let result = (|| {
+        let result = if program.templates[template].asynchronous {
+            self.async_function_body(&program, template, index, parent, args, &this, host)
+        } else {
             self.script_parameters_and_body(&program, template, index, parent, args, &this, host)
-        })();
+        };
         self.call_depth -= 1;
         self.transient_roots.owned_call_depth -= 1;
         self.strict = previous_strict;
@@ -9569,6 +9628,7 @@ impl Runtime {
             )),
             Builtin::EmptyFunction => Ok(Value::Undefined),
             Builtin::Function => self.function_constructor(args, host),
+            Builtin::AsyncFunction => self.async_function_constructor(args, None, host),
             Builtin::Proxy | Builtin::ReflectGet | Builtin::ReflectSet
             | Builtin::ObjectStatic(_)
             | Builtin::ObjectMethod(_)

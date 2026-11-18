@@ -35,6 +35,7 @@ roots! {
     text_roots: text_encoding::Roots,
     object_prototype: Option<usize>,
     function_prototype: Option<usize>,
+    async_function_roots: super::async_function_intrinsics::Roots,
     array_prototype: Option<usize>,
     regexp_prototype: Option<usize>,
     regexp_constructor: Option<usize>,
@@ -102,6 +103,7 @@ impl Runtime {
                 for &id in roots.native_constructor_prototypes.values() { add(Edge::Object(id)); }
                 roots.binary_roots.reachability_edges(add);
                 roots.collection_roots.reachability_edges(add);
+                roots.async_function_roots.reachability_edges(add);
                 roots.text_roots.reachability_edges(add);
                 roots.url_roots.reachability_edges(add);
                 roots.rect_roots.reachability_edges(add);

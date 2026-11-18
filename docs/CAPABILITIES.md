@@ -34,6 +34,7 @@ remain at `36adf20`; these later changes do not update those binaries.
 
 | Capability | Implemented slice | Important limits |
 | :--- | :--- | :--- |
+| **Async functions and arrows** | Declarations, expressions and arrows run their synchronous bodies and return a fresh Promise from the function’s realm. A returned thenable is assimilated, and an exception from the body or a parameter initializer rejects the Promise. | This slice supports bodies without `await`. Dynamic compilation uses the existing script policy and resource limits. |
 | **Native shell** | Tabs/windows, tab-pinned inspectors, guarded primary/middle links and foreground/background/new-window context actions | Named contexts, script-opened windows, wider accessibility, and locked-desktop presentation remain gaps |
 | **Navigation** | HTTP(S)/files, explicit URL/file intent, encoded address searches, Google/Bing/DuckDuckGo/None providers, local result/destination/one-Back/second-query journeys | Live outcomes are response/session-dependent; failed navigation is distinct from the retained page |
 | **Profile and storage** | Settings, bookmarks, optional history, staged downloads, guarded local roots, memory-only cookies | No general site storage, service workers, or persistent cookies; local files are not encrypted vaults |
