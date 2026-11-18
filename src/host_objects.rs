@@ -255,6 +255,14 @@ impl Runtime {
                     self.define_node_attribute(prototype, window, key, getter, Some(setter))?;
                 }
             }
+            if name == "HTMLCanvasElement" {
+                for (key, getter, setter) in [
+                    ("width", "\0HTMLCanvasElement.get.width", "\0HTMLCanvasElement.set.width"),
+                    ("height", "\0HTMLCanvasElement.get.height", "\0HTMLCanvasElement.set.height"),
+                ] {
+                    self.define_node_attribute(prototype, window, key, getter, Some(setter))?;
+                }
+            }
 
             // Existing native constructor roots keep both prototype chains
             // alive across realm parking, deferred calls and collection.

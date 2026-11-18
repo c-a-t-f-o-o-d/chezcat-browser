@@ -399,6 +399,7 @@ pub struct NativeAncestry {
 pub(crate) const ORDINARY_HTML_SUBCLASSES: &[(&str, &str)] = &[
     ("body", "HTMLBodyElement"),
     ("button", "HTMLButtonElement"),
+    ("canvas", "HTMLCanvasElement"),
     ("div", "HTMLDivElement"),
     ("html", "HTMLHtmlElement"),
     ("iframe", "HTMLIFrameElement"),

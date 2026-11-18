@@ -3787,6 +3787,12 @@ impl App {
                     height,
                     presentation,
                 } => {
+                    // A canvas with no rendering context is transparent black.
+                    // Its CSS decoration and actual box are retained by layout;
+                    // it must never paint the missing-image placeholder.
+                    if crate::html_canvas::element(&self.document, node) {
+                        continue;
+                    }
                     let y = y + top - self.scroll;
                     if y >= bottom || y.saturating_add(height) <= top {
                         continue;
