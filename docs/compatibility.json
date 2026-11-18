@@ -1676,7 +1676,9 @@
     "serialization_candidate": "13f80a4fb7ab923c5c6709dabd2ac56b25a4503c",
     "serialization_result": "W2 completed the cloned NAV markup read. It next stopped assigning the checkbox type to a fresh input at 4485:2.",
     "created_checkbox_candidate": "5731c75e3391776182768cca275a3cf4b109752f",
-    "created_checkbox_result": "W2 passed the fresh checkbox setup and stopped at the textarea fragment assignment at 4492:2. The separate native checkbox workflow passed toggle and reset with the neighboring edit preserved."
+    "created_checkbox_result": "W2 passed the fresh checkbox setup and stopped at the textarea fragment assignment at 4492:2. The separate native checkbox workflow passed toggle and reset with the neighboring edit preserved.",
+    "textarea_source": "01597d85a454256d44755e0858ad8ece4eeee720",
+    "textarea_result": "W2 passed textarea fragment installation and stopped on the deep container clone at 4493:29. An independent app read the decoded textarea default, preserved the neighboring editor and reproduced the clone refusal."
   },
   "next": [
     "Advance the measured legacy jQuery initialization and recheck its trusted input and timer stages.",
@@ -1783,6 +1785,14 @@
       "scope": "Finite static colon literal prototype setters with existing chain guards and actual App input/text-pixel controls; broader prototype access remains unsupported"
     }
   ],
+  "bootstrap_progress_meter": {
+    "source": "ab77c36b51612bfeae01f25c546c93accd4f8427",
+    "bootstrap": "5.3.9",
+    "viewport_widths": [640, 1280],
+    "result": "At 25 and 75 percent the entire 240 by 16 pixel meter matches the literal control. The trusted click grows the fill from 60 to 180 pixels.",
+    "caption_comparison_source": "9494eb489ad0af86a2f1d5b1204710f8f80bee87",
+    "caption_comparison": "The automatic caption measures 104 by 48 pixels and wraps. Identical text at an explicit width of 220 pixels occupies one 24 pixel line. A constrained 80 pixel control wraps at both viewport widths."
+  },
   "completed_capability_packs": [
     {
       "id": "CP3",

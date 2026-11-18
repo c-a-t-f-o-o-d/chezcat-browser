@@ -4,6 +4,8 @@ use crate::fonts::{Book, Face};
 use crate::paint::{Canvas, GLYPH_ADVANCE, GLYPH_HEIGHT};
 use std::sync::Arc;
 
+pub(crate) const MAX_SHAPED_CHARACTERS: usize = 1_000_000;
+
 #[derive(Clone, Debug)]
 pub struct FontSpec {
     book: Book,
@@ -126,7 +128,7 @@ impl FontSpec {
 
     pub fn measure(&self, text: &str) -> i32 {
         let mut pen = Pen::default();
-        for character in text.chars().take(1_000_000) {
+        for character in text.chars().take(MAX_SHAPED_CHARACTERS) {
             self.advance_pen(&mut pen, character);
         }
         pen.x.round() as i32
@@ -137,7 +139,7 @@ impl FontSpec {
         let mut glyphs: Vec<Glyph> = Vec::new();
         let mut positions = vec![0];
         let mut x = 0.0f32;
-        for character in text.chars().take(1_000_000) {
+        for character in text.chars().take(MAX_SHAPED_CHARACTERS) {
             let face = self.face(character);
             let id = face
                 .as_ref()
