@@ -1587,8 +1587,32 @@
     "Hidden-input W2 uses its own actual dirty development build; an unregistered Node draft does not establish a Node.getRootNode implementation or workflow result",
     "Later clean Node/modern revision2 diagnostic results retain a distinct build/source map; revision1 startup/HarnessBlocked records and earlier dirty W2/W3 records remain separate, with no full regression or CI inferred"
   ],
+  "weak_collection_app_measurements": {
+    "original_weakmap_probe": {
+      "measured_source": "acd57035cf95725600e48da0477bbbb3641b4e5f",
+      "integrated_main": "5c8fe787259cb8611ab650c1f3e9b5a536bb878c",
+      "pull_request": "https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/78",
+      "result": "A trusted click updates the visible count to 4. One timer completes with page title WeakMap pass."
+    },
+    "vue_runtime": {
+      "distribution": "Vue 3.5.45 runtime-only production browser global",
+      "asset_sha256": "3decf87d416625675c52bd38e928521ba192277a26c5172ab4545a4e98ffddc3",
+      "viewport": [1280, 800],
+      "baseline_sources": [
+        "57cc1d53db3860012b229530d8b7695e3f007f63",
+        "acd57035cf95725600e48da0477bbbb3641b4e5f"
+      ],
+      "baseline_first_fault": "WeakSet is not defined at upstream 5:5880",
+      "weakset_measured_source": "4bd4c71e8548013d5aa6b82007c163c0b7fe35dd",
+      "weakset_integrated_main": "8f24b299b1f608ebfe06b4797bb1a7a6e9e8e72d",
+      "pull_request": "https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/81",
+      "first_fault_after_weakset": "A class declaration extending HTMLElement stops upstream evaluation at 7:46929.",
+      "independent_controls": "A trusted literal click paints 1536 green pixels and preserves the edited neighboring input, its default value and document ownership.",
+      "framework_stages": "The trusted mount attempt runs after startup fails. The runtime export, mounted hook, component rendering, input and asynchronous updates remain unreached."
+    }
+  },
   "next": [
-    "Reduce the separate original native App WeakMap prerequisite measured on integrated ec7db2f at11:92; modern Vue/React mounting remains unproved",
+    "Implement the measured native HTMLElement class heritage prerequisite and recheck the pinned Vue 3.5.45 app",
     "Retain class/object-prototype and modern Vue/React prerequisites as separate queued work; preserve source-bound App DOM/pixel/trusted-input and responsive rechecks"
   ],
   "selected_standard_controls": {
