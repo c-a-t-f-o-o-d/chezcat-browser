@@ -17,6 +17,9 @@ pub use overflow::{Overflow, OverflowValue};
 mod position;
 #[path="css_radius.rs"]
 mod radius;
+#[cfg(test)]
+#[path="css_root_selector_tests.rs"]
+mod root_selector_tests;
 #[path="css_translate.rs"]
 mod translate;
 pub use translate::Transform;
@@ -548,6 +551,7 @@ struct Compound {
     ids: Vec<String>,
     classes: Vec<String>,
     attributes: Vec<AttributeSelector>,
+    root: bool,
     checked: bool,
     disabled: bool,
     negations: Vec<Vec<Selector>>,
@@ -2055,6 +2059,7 @@ fn parse_selector_at_depth(source:&str,depth:usize)->Option<Selector> {
             ids: Vec::new(),
             classes: Vec::new(),
             attributes: Vec::new(),
+            root: false,
             checked: false,
             disabled: false,
             negations: Vec::new(),
@@ -2124,6 +2129,8 @@ fn parse_selector_at_depth(source:&str,depth:usize)->Option<Selector> {
                         specificity.1=specificity.1.checked_add(maximum.1)?;
                         specificity.2=specificity.2.checked_add(maximum.2)?;
                         part.negations.push(arguments);
+                    } else if name.eq_ignore_ascii_case("root") {
+                        part.root=true;specificity.1+=1;
                     } else if name.eq_ignore_ascii_case("checked") {
                         part.checked=true;specificity.1+=1;
                     } else if name.eq_ignore_ascii_case("disabled") {
@@ -2484,6 +2491,24 @@ fn matches_selector(
             return false;
         };
         let compound = &selector.parts[part];
+        if compound.root {
+            // :root is the document element, not every parentless element or
+            // every HTML-tagged node. The parser's node0 is a synthetic Element;
+            // fragment/context arenas must not acquire document-root semantics.
+            // Existing parent/sibling tables identify the first real Element in
+            // physical document order without another walk or retained vector.
+            // https://drafts.csswg.org/selectors/#the-root-pseudo
+            let document = context.doc.nodes.first().is_some_and(|root| {
+                root.namespace == crate::html::Namespace::None
+                    && matches!(&root.kind, NodeKind::Element { tag, .. } if tag == "#document")
+            });
+            if !document || node == 0
+                || context.parents.get(node) != Some(&Some(0))
+                || context.previous_elements.get(node) != Some(&None)
+            {
+                return false;
+            }
+        }
         if compound
             .tag
             .as_ref()
