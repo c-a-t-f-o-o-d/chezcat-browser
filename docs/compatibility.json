@@ -1682,7 +1682,9 @@
     "textarea_source": "01597d85a454256d44755e0858ad8ece4eeee720",
     "textarea_result": "W2 passed textarea fragment installation and stopped on the deep container clone at 4493:29. An independent app read the decoded textarea default, preserved the neighboring editor and reproduced the clone refusal.",
     "textarea_clone_source": "f26eeecbd66af187fbd7f830d37731fd3ff897d2",
-    "textarea_clone_result": "W2 installed and cloned the textarea fragment, read its default and stopped at the fresh input radio type assignment at 4501:2. An independent App edited deep and shallow clones and reset their distinct defaults while preserving the source and neighboring editor."
+    "textarea_clone_result": "W2 installed and cloned the textarea fragment, read its default and stopped at the fresh input radio type assignment at 4501:2. An independent App edited deep and shallow clones and reset their distinct defaults while preserving the source and neighboring editor.",
+    "created_radio_source": "bfc6b267b15e833ec9cbc17541e0a805cf93a787",
+    "created_radio_result": "W2 created and appended a checked radio and stopped on its container's deep clone at 4509:23. The original native App passed grouping while detached and connected, trusted selection in both directions and form reset."
   },
   "next": [
     "Advance the measured legacy jQuery initialization and recheck its trusted input and timer stages.",

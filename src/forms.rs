@@ -1537,6 +1537,8 @@ pub(crate) use text_inputs::InputPlan;
 pub(crate) use select_fragments::{fragment_checkbox_input, native_radio_input, fragment_text_input, textarea_content, SelectFormPlan};
 #[path = "forms_textarea_clones.rs"]
 mod textarea_clones;
+#[path = "forms_radio_clones.rs"]
+mod radio_clones;
 
 #[cfg(test)]
 mod tests {

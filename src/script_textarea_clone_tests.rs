@@ -302,7 +302,7 @@ fn snapshot(doc: &Document, forms: &Forms, page: &Page) -> Snapshot {
 #[test]
 fn textarea_clone_later_unsupported_child_rolls_back_plain_and_native_staging() {
     for later in [
-        "<input type=radio>",
+        "<input type=checkbox>",
         "<script type=application/json>{}</script>",
     ] {
         let (mut doc, mut forms, mut page) = fixture(&format!(
