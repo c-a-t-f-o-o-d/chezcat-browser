@@ -5780,6 +5780,10 @@ mod css_variable_tests;
 mod css_radius_tests;
 
 #[cfg(test)]
+#[path = "app_css_root_selector_tests.rs"]
+mod css_root_selector_tests;
+
+#[cfg(test)]
 #[path = "app_text_input_tests.rs"]
 mod text_input_tests;
 
