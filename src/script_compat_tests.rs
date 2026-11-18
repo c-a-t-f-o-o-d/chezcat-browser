@@ -1,6 +1,27 @@
 use super::*;
 
 #[test]
+fn reflect_get_real_window_and_native_element_receiver() {
+    let (doc, _, page, result) = page("<html><body><div id='target'></div></body></html>", &[r#"
+        var target = document.getElementById('target'), saved = Reflect.get;
+        var owner = { get name() { return this.localName; } };
+        if (saved(owner, 'name', target) !== 'div' || saved(target, 'ownerDocument') !== document)
+            throw 'native receiver and direct native read';
+        var namespace = window.Reflect;
+        if (!('Reflect' in window) || namespace !== Reflect || !delete window.Reflect)
+            throw 'window namespace';
+        if ('Reflect' in window || typeof Reflect !== 'undefined' ||
+            Object.getOwnPropertyDescriptor(window, 'Reflect') !== undefined)
+            throw 'deleted window namespace';
+        if (saved(owner, 'name', target) !== 'div') throw 'saved operation';
+        window.Reflect = namespace;
+        document.title = 'Window reflection passed';
+    "#]);
+    assert_eq!(result.errors, 0, "{}", page.report());
+    assert_eq!(doc.title, "Window reflection passed");
+}
+
+#[test]
 fn base_node_interfaces_link_real_ancestry_and_author_element_polyfills() {
     let(doc,_,page,outcome)=page("<html><body><div id='base'>Text</div><svg id='vector'></svg></body></html>",&[r#"
 var d=document.getElementById('base');d.beforeInterfaceRead=1;

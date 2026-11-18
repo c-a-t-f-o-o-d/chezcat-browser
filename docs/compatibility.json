@@ -1611,8 +1611,20 @@
       "framework_stages": "The trusted mount attempt runs after startup fails. The runtime export, mounted hook, component rendering, input and asynchronous updates remain unreached."
     }
   },
+  "vue_app_rechecks": {
+    "measured_source": "1561f4dbb3c03139a2723a2e2b2db214b3c348e1",
+    "executable_sha256": "0268a91a122c331ff4121e0f9ba5b34cdbcdfb42a3fffcd3b539d9727bfa1dab",
+    "integrated_main": "270aba853e813dbe686194e81f5dff96a4e96080",
+    "vue_2_7_16": "W3 passed load, mount, initial render, reactive input, two clicks, asynchronous update and responsive generated CSS at 1280x800 and 640x800.",
+    "vue_3_5_45": {
+      "class_heritage_measured_source": "45799d9bebb6aa339862a86cc0a741a0a640fd06",
+      "class_heritage_result": "All three scripts ran. The trusted mount reached the missing SVGElement interface at upstream 8:4340.",
+      "svg_element_result": "All three scripts ran. The trusted mount reached new Proxy at upstream 5:17410. All eight independent controls passed.",
+      "remaining": "Mounted hook, component rendering, component input and async updates remain unreached."
+    }
+  },
   "next": [
-    "Implement the measured native HTMLElement class heritage prerequisite and recheck the pinned Vue 3.5.45 app",
+    "Implement and measure the ordinary-object Proxy and receiver-aware property operations reached by the pinned Vue 3.5.45 app",
     "Retain class/object-prototype and modern Vue/React prerequisites as separate queued work; preserve source-bound App DOM/pixel/trusted-input and responsive rechecks"
   ],
   "selected_standard_controls": {

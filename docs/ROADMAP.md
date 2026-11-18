@@ -117,10 +117,10 @@ A passing startup probe is a step, not a working application.
 
 | State | ID | Deliverable & scope | Completion evidence |
 | :--- | :--- | :--- | :--- |
-| ◻️&nbsp;Planned | <code>JS&#8209;01</code> | **Object-prototype access used by the Vue workload** | Reduce the recorded Vue 2.7.16 boundary and implement shared semantics with receiver, realm, ordering, and access checks. Recheck mount, input, and asynchronous updates separately. |
-| ◻️&nbsp;Next | <code>JS&#8209;02</code> | **Class inheritance from native HTML interfaces** | Vue 3.5.45 reaches a declaration extending `HTMLElement` at 7:46929 on `4bd4c71`. Verify class definition, prototype inheritance and construction separately, then recheck the same app. |
+| ✅&nbsp;Verified | <code>JS&#8209;01</code> | **Object-prototype access used by the Vue workload** | On `1561f4d`, Vue 2.7.16 mounts, updates from input and two clicks, and completes its asynchronous update at both W3 widths. |
+| ✅&nbsp;Merged | <code>JS&#8209;02</code> | **Class inheritance from native HTML interfaces** | The Vue 3.5.45 runtime loads and exports on `45799d9`. The original probe verifies both class prototype links and the typed failure for unregistered construction. [PR #84](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/84) |
 | ✅&nbsp;Merged | <code>JS&#8209;03</code> | **Weak collections** | On `acd5703`, the original WeakMap probe reaches count 4 and completes its timer. On `4bd4c71`, Vue passes its earlier missing WeakSet at 5:5880. [PR #78](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/78) integrated at `5c8fe78` and [PR #81](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/81) at `8f24b29`. |
-| ◻️&nbsp;Dependency&#8209;gated | <code>FW&#8209;01</code> | **One modern Vue or React application** | The pinned Vue 3.5.45 app reaches its mount button, but startup stops before Vue exports. Recheck mounting, user-driven state changes, visible DOM/pixels and async updates as startup advances. |
+| ◻️&nbsp;Dependency&#8209;gated | <code>FW&#8209;01</code> | **One modern Vue or React application** | On `1561f4d`, Vue 3.5.45 loads. Its trusted mount reaches ordinary-object Proxy construction. Recheck component rendering, user input and async updates as the required property operations become available. |
 | ◻️&nbsp;Continuing | <code>FW&#8209;02</code> | **Modern and legacy cohort coverage** | Keep existing legacy samples and separate modern jQuery/Bootstrap cases. Add materially different generations when evidence makes them useful; never infer support for every version from one sample. |
 
 Exact versions, build identities, stage results, and first failures belong in
