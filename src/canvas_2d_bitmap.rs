@@ -14,6 +14,67 @@ pub(crate) struct CanvasBitmap {
     bitmap: Option<Bitmap>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ReadbackError {
+    ZeroSize,
+    TooLarge,
+    DestinationLength,
+}
+
+/// An output rectangle independent of raster allocation or CSS presentation.
+/// The caller supplies the real VM buffer limit, before reserving its output.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ReadbackRect {
+    x: i64,
+    y: i64,
+    pub width: u32,
+    pub height: u32,
+    bytes: usize,
+}
+
+impl ReadbackRect {
+    pub(crate) fn new(
+        x: i32,
+        y: i32,
+        width: i32,
+        height: i32,
+        max_bytes: usize,
+    ) -> Result<Self, ReadbackError> {
+        if width == 0 || height == 0 {
+            return Err(ReadbackError::ZeroSize);
+        }
+        // Widen before negation/addition, including i32::MIN. Negative extents
+        // move the origin; they do not reverse the row or pixel order.
+        let (mut x, mut y) = (i64::from(x), i64::from(y));
+        let (mut width, mut height) = (i64::from(width), i64::from(height));
+        if width < 0 {
+            x += width;
+            width = -width;
+        }
+        if height < 0 {
+            y += height;
+            height = -height;
+        }
+        let bytes = (width as u64)
+            .checked_mul(height as u64)
+            .and_then(|pixels| pixels.checked_mul(4))
+            .and_then(|bytes| usize::try_from(bytes).ok())
+            .filter(|&bytes| bytes <= max_bytes)
+            .ok_or(ReadbackError::TooLarge)?;
+        Ok(Self {
+            x,
+            y,
+            width: width as u32,
+            height: height as u32,
+            bytes,
+        })
+    }
+
+    pub(crate) fn byte_len(self) -> usize {
+        self.bytes
+    }
+}
+
 #[derive(Clone, Copy)]
 struct Bounds {
     left: f64,
@@ -92,6 +153,54 @@ impl CanvasBitmap {
     /// None represents a fully transparent surface without pixel allocation.
     pub(crate) fn bitmap(&self) -> Option<&Bitmap> {
         self.bitmap.as_ref()
+    }
+
+    /// Copy natural bitmap pixels as straight RGBA, with transparent black
+    /// outside the surface or before backing allocation. The host must validate
+    /// native access/origin cleanliness and debit output storage and work first.
+    /// No CSS background, scaling, paint clip or external image is sampled.
+    pub(crate) fn copy_rgba(
+        &self,
+        rect: ReadbackRect,
+        dst: &mut [u8],
+    ) -> Result<(), ReadbackError> {
+        let expected = (rect.width as usize)
+            .checked_mul(rect.height as usize)
+            .and_then(|pixels| pixels.checked_mul(4));
+        if rect.width == 0
+            || rect.height == 0
+            || expected != Some(rect.bytes)
+            || dst.len() != rect.bytes
+        {
+            return Err(ReadbackError::DestinationLength);
+        }
+        let Some(bitmap) = &self.bitmap else {
+            dst.fill(0);
+            return Ok(());
+        };
+        let row_bytes = rect.width as usize * 4;
+        for (row, output) in dst.chunks_exact_mut(row_bytes).enumerate() {
+            let y = rect.y + row as i64;
+            if y < 0 || y >= bitmap.height as i64 {
+                output.fill(0);
+                continue;
+            }
+            for (column, rgba) in output.chunks_exact_mut(4).enumerate() {
+                let x = rect.x + column as i64;
+                let pixel = if x >= 0 && x < bitmap.width as i64 {
+                    bitmap.pixels[y as usize * bitmap.width + x as usize]
+                } else {
+                    0
+                };
+                rgba.copy_from_slice(&[
+                    (pixel >> 16) as u8,
+                    (pixel >> 8) as u8,
+                    pixel as u8,
+                    (pixel >> 24) as u8,
+                ]);
+            }
+        }
+        Ok(())
     }
 
     /// Logical retained pixel bytes, using the existing Bitmap accounting.
@@ -243,6 +352,104 @@ impl CanvasBitmap {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn canvas_bitmap_readback_rect_normalizes_and_checks_exact_output_bound() {
+        let rect = ReadbackRect::new(3, 2, -2, -1, 8).unwrap();
+        assert_eq!(rect, ReadbackRect::new(1, 1, 2, 1, 8).unwrap());
+        assert_eq!((rect.width, rect.height, rect.byte_len()), (2, 1, 8));
+        for (width, height) in [(0, 1), (1, 0), (0, 0)] {
+            assert_eq!(
+                ReadbackRect::new(0, 0, width, height, usize::MAX),
+                Err(ReadbackError::ZeroSize)
+            );
+        }
+        assert_eq!(
+            ReadbackRect::new(0, 0, 2, 1, 7),
+            Err(ReadbackError::TooLarge)
+        );
+        assert_eq!(
+            ReadbackRect::new(i32::MIN, i32::MIN, i32::MIN, i32::MIN, usize::MAX),
+            Err(ReadbackError::TooLarge)
+        );
+        let binary_limit = 4 * 1024 * 1024;
+        assert_eq!(
+            ReadbackRect::new(0, 0, 1024, 1024, binary_limit)
+                .unwrap()
+                .byte_len(),
+            binary_limit
+        );
+        assert_eq!(
+            ReadbackRect::new(0, 0, 1024, 1025, binary_limit),
+            Err(ReadbackError::TooLarge)
+        );
+    }
+
+    #[test]
+    fn canvas_bitmap_readback_copies_rgba_in_row_order_and_clears_every_exterior_edge() {
+        let mut surface = CanvasBitmap::new(3, 2);
+        let (mut bytes, mut work) = (24, 1000);
+        for (x, y, color) in [
+            (0.0, 0.0, 0xff11_2233),
+            (1.0, 0.0, 0x8040_2010),
+            (2.0, 0.0, 0xffab_cdef),
+            (0.0, 1.0, 0xff00_ff00),
+            (2.0, 1.0, 0x4000_00ff),
+        ] {
+            surface
+                .fill_rect([x, y, 1.0, 1.0], color, &mut bytes, &mut work)
+                .unwrap();
+        }
+        let rect = ReadbackRect::new(-1, -1, 5, 4, 80).unwrap();
+        let mut output = [99; 80];
+        let counters = (bytes, work, surface.retained_bytes());
+        surface.copy_rgba(rect, &mut output).unwrap();
+        assert_eq!(
+            output,
+            [
+                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 17, 34, 51,
+                255, 64, 32, 16, 128, 171, 205, 239, 255, 0, 0, 0, 0, 0, 0, 0, 0, 0, 255, 0, 255,
+                0, 0, 0, 0, 0, 0, 255, 64, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                0, 0, 0, 0, 0,
+            ]
+        );
+        assert_eq!((bytes, work, surface.retained_bytes()), counters);
+        let mut negative = [0; 16];
+        surface
+            .copy_rgba(ReadbackRect::new(2, 2, -2, -2, 16).unwrap(), &mut negative)
+            .unwrap();
+        assert_eq!(
+            negative,
+            [17, 34, 51, 255, 64, 32, 16, 128, 0, 255, 0, 255, 0, 0, 0, 0]
+        );
+        output[24] = 0;
+        assert_eq!(surface.bitmap().unwrap().pixels[0], 0xff11_2233);
+        surface
+            .clear_rect([0.0, 0.0, 3.0, 2.0], &mut bytes, &mut work)
+            .unwrap();
+        assert_eq!(&negative[..4], &[17, 34, 51, 255]);
+    }
+
+    #[test]
+    fn canvas_bitmap_readback_transparent_unallocated_and_bad_destination_are_atomic() {
+        let surface = CanvasBitmap::new(u32::MAX, u32::MAX);
+        for (x, y) in [(0, 0), (i32::MIN, i32::MAX), (i32::MAX, i32::MIN)] {
+            let mut output = [99; 4];
+            surface
+                .copy_rgba(ReadbackRect::new(x, y, 1, 1, 4).unwrap(), &mut output)
+                .unwrap();
+            assert_eq!(output, [0; 4]);
+        }
+        assert_eq!(surface.retained_bytes(), 0);
+        for len in [3, 5] {
+            let mut output = vec![99; len];
+            assert_eq!(
+                surface.copy_rgba(ReadbackRect::new(0, 0, 1, 1, 4).unwrap(), &mut output),
+                Err(ReadbackError::DestinationLength)
+            );
+            assert_eq!(output, vec![99; len]);
+        }
+    }
 
     #[test]
     fn canvas_bitmap_lazy_clipped_fill_clear_and_independent_storage() {

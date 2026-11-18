@@ -12,6 +12,7 @@ pub(super) const URL_GLOBALS: &[&str] = &["URL", "URLSearchParams"];
 pub(super) const TEXT_GLOBALS: &[&str] = &["TextEncoder", "TextDecoder"];
 pub(super) const RECT_GLOBALS: &[&str] = &["DOMRectReadOnly", "DOMRect"];
 pub(super) const DOM_EXCEPTION_GLOBALS: &[&str] = &["DOMException"];
+pub(super) const IMAGE_DATA_GLOBALS: &[&str] = &["ImageData"];
 
 macro_rules! roots {
     ($($field:ident: $kind:ty),* $(,)?) => {
@@ -42,6 +43,7 @@ roots! {
     date_prototype: Option<usize>,
     url_roots: url_api::Roots,
     rect_roots: rect_api::Roots,
+    image_data_prototype: Option<usize>,
     dom_exception_roots: dom_exception::Roots,
     string_prototype: Option<usize>,
     number_prototype: Option<usize>,
@@ -107,6 +109,7 @@ impl Runtime {
                 roots.text_roots.reachability_edges(add);
                 roots.url_roots.reachability_edges(add);
                 roots.rect_roots.reachability_edges(add);
+                if let Some(id) = roots.image_data_prototype { add(Edge::Object(id)); }
                 roots.dom_exception_roots.reachability_edges(add);
             }};
         }
@@ -130,6 +133,7 @@ impl Runtime {
             else if TEXT_GLOBALS.contains(&name) { (4, TEXT_GLOBALS) }
              else if RECT_GLOBALS.contains(&name) { (8, RECT_GLOBALS) }
             else if DOM_EXCEPTION_GLOBALS.contains(&name) { (16, DOM_EXCEPTION_GLOBALS) }
+            else if IMAGE_DATA_GLOBALS.contains(&name) { (32, IMAGE_DATA_GLOBALS) }
             else { return Ok(()); };
         if self.failed_intrinsics & bit != 0 {
             return Err(Fault::new("Deferred intrinsic family is unavailable after an earlier bounded initialization failure."));
@@ -144,6 +148,7 @@ impl Runtime {
                 4 => { self.ensure_global_intrinsics("Uint8Array")?; self.initialize_text_encoding()?; }
                 8 => self.initialize_rect_api()?,
                 16 => self.initialize_dom_exception()?,
+                32 => self.initialize_image_data()?,
                 _ => unreachable!(),
             }
             for &name in names {
@@ -250,7 +255,7 @@ impl Runtime {
         });
         let first_object = self.objects.len();
         let result = self.with_intrinsic_realm(Some(id), |runtime| {
-            runtime.deferred_intrinsics = (if deferred { 7 } else { 0 }) | 8 | 16;
+            runtime.deferred_intrinsics = (if deferred { 7 } else { 0 }) | 8 | 16 | 32;
             runtime.initialize_realm_intrinsics()
         });
         if let Err(error) = result {
