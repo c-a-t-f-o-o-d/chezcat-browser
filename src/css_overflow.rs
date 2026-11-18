@@ -24,7 +24,7 @@ impl OverflowValue {
     pub fn clips(self) -> bool {
         self != Self::Visible
     }
-    fn scrollable(self) -> bool {
+    pub(crate) fn scrollable(self) -> bool {
         matches!(self, Self::Hidden | Self::Auto | Self::Scroll)
     }
     fn computed(self) -> Self {

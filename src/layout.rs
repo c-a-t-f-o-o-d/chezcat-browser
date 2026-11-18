@@ -29,6 +29,9 @@ pub(crate) use offset_parent::{offset_parent_storage, offset_parent_work, Offset
 #[path = "layout_translate.rs"]
 mod translate;
 pub(crate) use translate::VisualBorderRect;
+#[path = "layout_grid.rs"]
+mod grid;
+use grid::GridGroup;
 
 #[cfg(test)]
 #[path = "layout_background_tests.rs"]
@@ -45,6 +48,10 @@ mod offset_parent_tests;
 #[cfg(test)]
 #[path = "layout_intrinsic_text_tests.rs"]
 mod intrinsic_text_tests;
+
+#[cfg(test)]
+#[path = "layout_implicit_grid_tests.rs"]
+mod implicit_grid_tests;
 
 fn native_button_padding(kind: Option<Kind>) -> bool {
     matches!(kind, Some(Kind::Button | Kind::Submit | Kind::Reset))
@@ -128,6 +135,11 @@ struct FlexGroup {
     lines: Vec<std::ops::Range<usize>>,
 }
 
+enum FormattingContext {
+    Flex(FlexGroup),
+    Grid(GridGroup),
+}
+
 struct TableRow {
     node: usize,
     cells: Vec<usize>,
@@ -146,7 +158,13 @@ struct BoxRecord {
     background_image: Option<usize>,
     borders: [Option<usize>; 4],
     hit_box: Option<usize>,
-    flex: Option<FlexGroup>,
+    formatting: Option<FormattingContext>,
+}
+
+impl BoxRecord {
+    fn grid_complete(&self) -> bool {
+        !matches!(&self.formatting, Some(FormattingContext::Grid(group)) if !group.complete)
+    }
 }
 
 struct Pending {
@@ -365,6 +383,7 @@ pub struct Layout {
     pub scroll_heights: Vec<Option<i32>>,
     pub viewport_scroll_height:i32,
     pub viewport_scroll_unavailable:bool,
+    pub(crate) incomplete_grid_nodes: Vec<bool>,
     pub border_rects: Vec<Option<BorderRect>>,
     /// Empty vectors mean the raw rectangles are also the visual geometry.
     pub(crate) visual_border_rects: Vec<Option<VisualBorderRect>>,
@@ -638,6 +657,7 @@ struct Engine<'a> {
     used_margins:HashMap<usize,[i32;4]>,
     placed_boxes: Vec<usize>,
     flex_work: usize,
+    grid_budget: grid::GridBudget,
     viewport: ContainingBlock,
     parents: Vec<Option<usize>>,
     spans: Vec<Option<Span>>,
@@ -785,6 +805,7 @@ fn build_viewport_with_fonts_inner(
         scroll_heights:vec![None;doc.nodes.len()],
         viewport_scroll_height:0,
         viewport_scroll_unavailable:false,
+        incomplete_grid_nodes: Vec::new(),
         border_rects: vec![None; doc.nodes.len()],
         visual_border_rects: Vec::new(),
         visual_unavailable: Vec::new(),
@@ -856,6 +877,7 @@ fn build_viewport_with_fonts_inner(
         used_margins:HashMap::new(),
         placed_boxes: Vec::new(),
         flex_work: MAX_FLEX_WORK,
+        grid_budget: grid::GridBudget::new(budget.as_deref()),
         viewport: ContainingBlock {
             x: 0,
             y: 0,
@@ -885,11 +907,17 @@ fn build_viewport_with_fonts_inner(
     engine.cache_decorations();
     engine.apply_relative();
     engine.place_positioned();
+    if let Some(meter) = budget.as_deref_mut() {
+        engine.grid_budget.settle(meter)?;
+    }
     let fixed_boxes = engine.mark_fixed();
     engine.finish_client_boxes();
     engine.finish_offset_parents();
     engine.finish_border_rects(&fixed_boxes);
     engine.finish_scroll_heights(&fixed_boxes);
+    if engine.grid_budget.incomplete {
+        engine.withhold_incomplete_grid_geometry(budget.as_deref_mut())?;
+    }
     engine.apply_translations(budget.as_deref_mut(), &fixed_boxes)?;
     let atom_clips = engine.clip_overflow();
     // Flex children may move up as well as down after their single paint pass.
@@ -982,6 +1010,7 @@ impl Engine<'_> {
     fn finish_border_rects(&mut self, fixed_boxes: &[bool]) {
         for (node, record) in self.boxes.iter().enumerate() {
             if let Some(record) = record {
+                if !record.grid_complete() { continue; }
                 self.layout.border_rects[node] = Some(BorderRect {
                     x: record.x, y: record.y,
                     width: record.width + record.padding[1] + record.padding[3] + record.border[1] + record.border[3],
@@ -1015,6 +1044,7 @@ impl Engine<'_> {
         // Read the final sizes, after flex stretching and positioned layout.
         for (node, record) in self.boxes.iter().enumerate() {
             if let Some(record) = record {
+                if !record.grid_complete() { continue; }
                 self.layout.client_boxes[node] = Some(ClientBox {
                     width: record.width + record.padding[3] + record.padding[1],
                     height: record.height + record.padding[0] + record.padding[2],
@@ -2072,7 +2102,7 @@ impl Engine<'_> {
             });
         let mut rounded_border = false;
         if style.background_image.is_none()
-            && matches!(style.display, Display::Block | Display::Flex | Display::InlineBlock)
+            && matches!(style.display, Display::Block | Display::Flex | Display::Grid | Display::InlineBlock)
         {
             let circular = if border == [0; 4] || uniform.is_some() { style.circular_radius() } else { None };
             let radius = circular.unwrap_or(0.0) * self.zoom;
@@ -2191,8 +2221,12 @@ impl Engine<'_> {
         let atom_start = self.atoms.len();
         let vertical = border[0] + padding[0] + padding[2] + border[2];
         let specified_height = self.dimension(style.height, None, style, vertical);
-        let flex = if style.display == Display::Flex {
-            Some(self.flex(index, style, link, depth, width, specified_height))
+        let formatting = if style.display == Display::Flex {
+            Some(FormattingContext::Flex(self.flex(index, style, link, depth, width, specified_height)))
+        } else if style.display == Display::Grid {
+            let group = self.grid(index, style, link, depth, width, specified_height);
+            self.grid_budget.incomplete |= !group.complete;
+            Some(FormattingContext::Grid(group))
         } else if style.display == Display::Table {
             self.table(index, style, link, depth, width);
             None
@@ -2256,12 +2290,12 @@ impl Engine<'_> {
             background_image,
             borders,
             hit_box,
-            flex,
+            formatting,
         });
         self.used_margins.insert(index,margin);
         self.placed_boxes.push(index);
         // A min/max-height constraint can establish a different final flex size.
-        if style.display == Display::Flex && content_height != natural_height {
+        if matches!(style.display, Display::Flex | Display::Grid) && content_height != natural_height {
             self.resize_box(index, content_height, depth);
         }
         self.flow = previous;
@@ -2659,11 +2693,16 @@ impl Engine<'_> {
     /// to CSS min/max-content using the renderer's fonts and supported boxes.
     fn intrinsic(&mut self, node: usize, depth: usize) -> Intrinsic {
         if depth > MAX_DEPTH || self.measure_visits >= 40_000 {
+            if self.grid_budget.measuring { self.grid_budget.measurement_complete = false; }
             return Intrinsic::default();
         }
         if matches!(self.doc.nodes[node].kind, NodeKind::Comment(_) | NodeKind::DocumentFragment) { return Intrinsic::default(); }
         if let Some(value) = self.intrinsics[node] {
             return value;
+        }
+        if self.grid_budget.measuring && (!self.grid_budget.measurement_complete || !self.grid_intrinsic_cost(node)) {
+            self.grid_budget.measurement_complete = false;
+            return Intrinsic::default();
         }
         self.measure_visits += 1;
         let style = self.styles[node].clone();
@@ -2807,7 +2846,7 @@ impl Engine<'_> {
                         {
                             continue;
                         }
-                        if style.display == Display::Flex
+                        if matches!(style.display, Display::Flex | Display::Grid)
                             && matches!(&self.doc.nodes[child].kind, NodeKind::Text(text) if text.chars().all(|c| matches!(c, ' ' | '\t' | '\r' | '\n' | '\u{000c}')))
                         {
                             continue;
@@ -2837,7 +2876,7 @@ impl Engine<'_> {
                             };
                             count += 1;
                         } else if style.display == Display::Flex
-                            || (child_style.display.block_level()
+                            || ((style.display == Display::Grid || child_style.display.block_level())
                                 && matches!(self.doc.nodes[child].kind, NodeKind::Element { .. }))
                         {
                             preferred = preferred.max(line).max(outer);
@@ -2927,7 +2966,9 @@ impl Engine<'_> {
             value.preferred = value.preferred.saturating_add(edges).min(MAX_WIDTH);
             value.minimum = value.minimum.saturating_add(edges).min(MAX_WIDTH);
         }
-        self.intrinsics[node] = Some(value);
+        if !self.grid_budget.measuring || self.grid_budget.measurement_complete {
+            self.intrinsics[node] = Some(value);
+        }
         value
     }
 
@@ -3399,15 +3440,23 @@ impl Engine<'_> {
             }
         }
         if depth < MAX_DEPTH {
-            if let Some(group) = &mut record.flex {
-                self.position_flex(
-                    group,
-                    record.x + record.border[3] + record.padding[3],
-                    record.y + record.border[0] + record.padding[0],
-                    record.width,
-                    Some(record.height),
-                    depth + 1,
-                );
+            if let Some(formatting) = &mut record.formatting {
+                match formatting {
+                    FormattingContext::Flex(group) => {
+                        self.position_flex(
+                            group,
+                            record.x + record.border[3] + record.padding[3],
+                            record.y + record.border[0] + record.padding[0],
+                            record.width,
+                            Some(record.height),
+                            depth + 1,
+                        );
+                    }
+                    FormattingContext::Grid(group) => {
+                        self.position_grid(group, node, Some(record.height), depth + 1);
+                        self.grid_budget.incomplete |= !group.complete;
+                    }
+                }
             }
         }
         self.boxes[node] = Some(record);

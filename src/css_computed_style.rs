@@ -157,8 +157,12 @@ impl<'a> CssBudget<'a> {
             }
         }
     }
-    pub(super) fn remaining_work(&self) -> usize {
+    pub(crate) fn remaining_work(&self) -> usize {
         *self.host_work
+    }
+
+    pub(crate) fn remaining_copies(&self) -> usize {
+        *self.copy_work
     }
 
     // Parsing is finite: selectors have at most 16 alternatives / 12 parts,

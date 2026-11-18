@@ -1787,7 +1787,10 @@
     "viewport_widths": [640, 1280],
     "result": "At 25 and 75 percent the entire 240 by 16 pixel meter matches the literal control. The trusted click grows the fill from 60 to 180 pixels.",
     "caption_comparison_source": "9494eb489ad0af86a2f1d5b1204710f8f80bee87",
-    "caption_comparison": "The automatic caption measures 104 by 48 pixels and wraps. Identical text at an explicit width of 220 pixels occupies one 24 pixel line. A constrained 80 pixel control wraps at both viewport widths."
+    "caption_comparison": "The automatic caption measures 104 by 48 pixels and wraps. Identical text at an explicit width of 220 pixels occupies one 24 pixel line. A constrained 80 pixel control wraps at both viewport widths.",
+    "caption_fix_source": "5298918c6f98df3cc871c6ca1e1def381815f77d",
+    "caption_fix_result": "At both widths the automatic caption occupies one 105 by 24 pixel line. Both 220 by 64 pixel crops match the explicit twin. The constrained control still wraps.",
+    "action_stack_on_caption_source": "At 640 pixels, the d-grid links remain side by side after gap-2 changes to gap-3. The literal and flex stacks match pixel for pixel with 8 and 16 pixel vertical gaps."
   },
   "completed_capability_packs": [
     {
