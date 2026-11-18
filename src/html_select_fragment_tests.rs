@@ -67,12 +67,18 @@ fn select_fragment_contexts_are_explicit_and_never_use_an_escapable_markup_wrapp
 
 #[test]
 fn select_fragment_nonconventional_recovery_resources_and_existing_bounds_still_refuse() {
+    let siblings = parse_fragment("<select><option>x</select><table></table>", "div", true).unwrap();
+    let children = &siblings.nodes[0].children;
+    assert_eq!(children.len(), 2);
+    assert_eq!(node_tag(&siblings, children[0]), "select");
+    assert_eq!(node_tag(&siblings, children[1]), "table");
+    assert!(siblings.nodes[children[1]].children.is_empty());
     for source in ["<option>orphan</option>", "<optgroup><option>orphan</optgroup>",
         "<select><option>outer<select><option>inner</select></select>",
         "<select><div>rich descendant</div></select>", "<select><option><b>rich</b></option></select>",
         "<select><script>injected()</script></select>", "<select><input value=x></select>",
         "<select><option>x</div>", "<select><optgroup></option></select>",
-        "<select><option>x</select><table></table>", "<select></select><svg></svg>",
+        "<select><option>x</select><table><tr></tr></table>", "<select></select><svg></svg>",
         "<select><option>x<!--unsupported--></option></select>"] {
         assert!(parse_fragment(source, "div", true).is_err(), "{source}");
     }
