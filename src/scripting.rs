@@ -33,6 +33,11 @@ mod dom_tree;
 mod script_position;
 #[path = "script_node_root.rs"]
 mod script_node_root;
+#[path = "script_node_contains.rs"]
+mod script_node_contains;
+#[cfg(test)]
+#[path = "script_node_contains_tests.rs"]
+mod node_contains_tests;
 #[path = "script_document_fragments.rs"]
 mod script_document_fragments;
 #[path = "script_timezone.rs"]
@@ -2561,7 +2566,7 @@ impl Host for Bridge<'_> {
         }
         if self.element_selector_member(object,property) {return false;}
         if self.inherited_node_property(object,property) {return false;}
-        if self.root_node_member(object,property) {return false;}
+        if self.node_tree_method_member(object,property) {return false;}
         if matches!(property,"nodeType"|"nodeName") && self.node_identity_receiver(object) {return false;}
         if self.video_interface_receiver(object)&&script_media::interface_member(property) {return false;}
         if self.event_receiver(object)&&property=="composedPath" {return false;}
@@ -2584,7 +2589,7 @@ impl Host for Bridge<'_> {
         if self.node_list_receiver(object) {true}
         else if self.element_selector_member(object,property) {true}
         else if self.inherited_node_property(object,property) {true}
-        else if self.root_node_member(object,property) {true}
+        else if self.node_tree_method_member(object,property) {true}
         else if matches!(property,"nodeType"|"nodeName") && self.node_identity_receiver(object) {true}
         else if self.event_receiver(object)&&property=="composedPath" {true}
         else if self.node_event_method(object,property) {true}
@@ -2777,6 +2782,7 @@ impl Host for Bridge<'_> {
         }
         if object==DOCUMENT && method=="createDocumentFragment" {return Some(0);}
         if method==script_node_root::ROOT_METHOD && self.root_node_receiver(object) {return Some(0);}
+        if method == script_node_contains::CONTAINS_METHOD { return Some(1); }
         if object==DOCUMENT && method=="createComment" {return Some(1);}
         if matches!(method,"load"|"pause"|"play") && self.media_element_receiver(object) {return Some(0);}
         if method=="dispatchEvent"&&self.dispatch_receiver(object){return Some(1);}
@@ -2808,7 +2814,7 @@ impl Host for Bridge<'_> {
         if self.event_target_interface(object)&&script_element_selectors::operation(method).is_some() {return Some(object);}
         if self.event_target_interface(object)&&script_element_siblings::operation(method).is_some() {return Some(object);}
         if self.event_target_interface(object) && (matches!(method, "DocumentFragment" | "Text") || Slottable::getter(method).is_some()) {return Some(object);}
-        if self.event_target_interface(object) && method==script_node_root::ROOT_METHOD {return Some(object);}
+        if self.event_target_interface(object) && matches!(method, script_node_root::ROOT_METHOD | script_node_contains::CONTAINS_METHOD) {return Some(object);}
         if self.event_target_interface(object) && matches!(method,"\0Node.get.nodeType"|"\0Node.get.nodeName") {return Some(object);}
         if self.node_list_receiver(object) && matches!(method,"item"|"forEach") {return Some(WINDOW);}
         if self.event_target_interface(object)&&(method.starts_with("\0CustomEvent.")||method=="initCustomEvent") {return Some(object);}
@@ -2845,6 +2851,7 @@ impl Host for Bridge<'_> {
         self.validate_event_prefix(object, method, next_index, args)
     }
     fn native_reference_arguments(&self,object:u32,method:&str)->&'static [usize] {
+        if method == script_node_contains::CONTAINS_METHOD { return &[0]; }
         if method=="initMouseEvent" && self.mouse_receiver(object) {&[3,14]}
         else if method=="initUIEvent" && self.ui_receiver(object) {&[3]}
         else {&[]}
@@ -2864,6 +2871,7 @@ impl Host for Bridge<'_> {
     }
 
     fn required_arguments(&self, object: u32, method: &str) -> usize {
+        if method == script_node_contains::CONTAINS_METHOD { return 1; }
         if object==WINDOW && method=="getComputedStyle" {return 1;}
         if self.computed_style_receiver(object) || (STYLE_BASE..DATASET_BASE).contains(&object) {
             return match method { "setProperty" => 2, "getPropertyValue" | "removeProperty" => 1, _ => 0 };
@@ -2950,6 +2958,7 @@ impl Host for Bridge<'_> {
             return if object==WINDOW {Ok(())} else {Err(("NotSupportedError","Child DocumentFragment allocation is not implemented.".into()))};
         }
         if method==script_node_root::ROOT_METHOD {return self.validate_root_node_options(object,args);}
+        if method == script_node_contains::CONTAINS_METHOD { return self.validate_node_contains(object, args); }
         let method=script_media::interface_operation(method).unwrap_or(method);
         if matches!(method,"load"|"pause")&&self.media_interface_receiver(object)&&!self.media_element_receiver(object) {
             return Err(("NotSupportedError","This media element has no implemented player binding.".into()));
@@ -3176,7 +3185,7 @@ impl Host for Bridge<'_> {
         // the old per-instance selector method factory below.
         if matches!(property,"querySelector"|"querySelectorAll") && self.element_selector_receiver(object) {return None;}
         if object==DOCUMENT && property=="createDocumentFragment" {return Some("createDocumentFragment");}
-        if self.root_node_member(object,property) {return None;}
+        if self.node_tree_method_member(object,property) {return None;}
         if self.media_element_receiver(object) {match property {"load"=>return Some("load"),"pause"=>return Some("pause"),"play"=>return Some("play"),_=>{}}}
         if matches!(property,"addEventListener"|"removeEventListener"|"dispatchEvent") && self.form_named_control(object,property) {return None;}
         if self.node_event_method(object,property) {return None;}
@@ -3256,6 +3265,9 @@ impl Host for Bridge<'_> {
             if parent(object) {return parent(receiver);}
         }
         if self.event_target_interface(object) && method==script_node_root::ROOT_METHOD {return self.root_node_receiver(receiver);}
+        if self.event_target_interface(object) && method == script_node_contains::CONTAINS_METHOD {
+            return self.root_node_receiver(receiver) || self.frame_contains_node(receiver).is_some();
+        }
         if self.event_target_interface(object)&&(method.starts_with("\0CustomEvent.")||method=="initCustomEvent") {return self.custom_receiver(receiver);}
         if self.event_target_interface(object)&&method.starts_with("\0Video.") {return self.video_interface_receiver(receiver);}
         if self.event_target_interface(object)&&method.starts_with("\0Media.") {return self.media_interface_receiver(receiver);}
@@ -3408,7 +3420,7 @@ impl Host for Bridge<'_> {
         if self.node_list_iteration_member(object,property) {self.state.work(1)?;return Ok(None);}
         if self.element_selector_member(object,property) {self.state.work(1)?;return Ok(None);}
         if self.inherited_node_property(object,property) {self.state.work(1)?;return Ok(None);}
-        if self.root_node_member(object,property) {self.state.work(1)?;return Ok(None);}
+        if self.node_tree_method_member(object,property) {self.state.work(1)?;return Ok(None);}
         if object==DOCUMENT && dom_tree::document_node_property(property) {self.state.work(1)?;return Ok(None);}
         if self.standalone_target_owner(object).is_some() {self.state.work(1)?;return Ok(None);}
         if script_named_map::element(object).is_some() { return self.named_map_own_data(object, property); }
@@ -3459,7 +3471,7 @@ impl Host for Bridge<'_> {
         if self.node_list_iteration_member(object,property) {self.state.work(1)?;return Ok(true);}
         if self.element_selector_member(object,property) {self.state.work(1)?;return Ok(true);}
         if self.inherited_node_property(object,property) {self.state.work(1)?;return Ok(true);}
-        if self.root_node_member(object,property) {self.state.work(1)?;return Ok(true);}
+        if self.node_tree_method_member(object,property) {self.state.work(1)?;return Ok(true);}
         if object==DOCUMENT && dom_tree::document_node_property(property) {self.state.work(1)?;return Ok(true);}
         if script_named_map::element(object).is_some() {
             return if collection_index(property).is_some() { self.named_map_has(object, property).map(|present| !present) }
@@ -3652,7 +3664,7 @@ impl Host for Bridge<'_> {
         if self.element_selector_member(object,property) {self.state.work(1)?;return Ok(false);}
         if self.inherited_node_property(object,property) {self.state.work(1)?;return Ok(false);}
         if object==DOCUMENT && property=="createDocumentFragment" {self.state.work(1)?;return Ok(true);}
-        if self.root_node_member(object,property) {self.state.work(1)?;return Ok(false);}
+        if self.node_tree_method_member(object,property) {self.state.work(1)?;return Ok(false);}
         if property=="dispatchEvent"&&self.dispatch_receiver(object){return Ok(true);}
         self.state.work(1)?;
         if script_named_map::element(object).is_some() { return self.named_map_has(object, property); }
@@ -3947,7 +3959,7 @@ impl Host for Bridge<'_> {
         if self.node_list_iteration_member(object,property)&&property!="length" {return Ok(Value::Undefined);}
         if self.element_selector_member(object,property) {return Ok(Value::Undefined);}
         if self.assigned_slot_lookup(object,property) || self.text_prototype_property(object,property) {return Ok(Value::Undefined);}
-        if self.root_node_member(object,property) {return Ok(Value::Undefined);}
+        if self.node_tree_method_member(object,property) {return Ok(Value::Undefined);}
         if script_named_map::element(object).is_some() { return self.named_map_get(object, property); }
         if script_class_list::element(object).is_some() { return self.class_list_get(object,property); }
         if let Some(result) = self.created_event_get(object, property) { return result; }
@@ -4546,6 +4558,7 @@ impl Host for Bridge<'_> {
         }
         if object==WINDOW && method=="DocumentFragment" {return self.create_dom_node(NodeKind::DocumentFragment);}
         if method==script_node_root::ROOT_METHOD {return self.get_root_node(object,args,None);}
+        if method == script_node_contains::CONTAINS_METHOD { return self.node_contains(object, args); }
         if let Some(property)=script_media::interface_getter(method) {
             self.state.work(1)?;
             if property!="controls" {self.require_bound_media(object)?;}

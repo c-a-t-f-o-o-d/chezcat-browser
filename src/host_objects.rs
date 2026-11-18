@@ -69,10 +69,14 @@ impl Runtime {
                 self.store_property(self.function_properties[allocation.id],"prototype".into(),Value::Object(prototype),Some((false,false,false)))?;
                 self.store_symbol_property(prototype,self.symbol_to_string_tag.unwrap(),Value::String(name.into()),Some((false,false,true)))?;
                 if name=="Node" {
-                    let root=self.allocate_host_function_with_length(window,"\0Node.getRootNode",0).map_err(Fault::new)?;
-                    if let Some(Function::Host {receiver_required,..})=self.functions.get_mut(root.id) {*receiver_required=true;}
-                    self.store_property(self.function_properties[root.id],"name".into(),Value::String("getRootNode".into()),Some((false,false,true)))?;
-                    self.store_property(prototype,"getRootNode".into(),Value::Function(root.id),Some((true,true,true)))?;
+                    for (name, operation, length) in [("getRootNode", "\0Node.getRootNode", 0), ("contains", "\0Node.contains", 1)] {
+                        let method = self.allocate_host_function_with_length(window, operation, length).map_err(Fault::new)?;
+                        if let Some(Function::Host { receiver_required, .. }) = self.functions.get_mut(method.id) {
+                            *receiver_required = true;
+                        }
+                        self.store_property(self.function_properties[method.id], "name".into(), Value::String(name.into()), Some((false,false,true)))?;
+                        self.store_property(prototype, name.into(), Value::Function(method.id), Some((true,true,true)))?;
+                    }
                     for (key,operation) in [("nodeType","\0Node.get.nodeType"),("nodeName","\0Node.get.nodeName")] {
                         let getter=self.allocate_host_function_with_length(window,operation,0).map_err(Fault::new)?;
                         if let Some(Function::Host {receiver_required,..})=self.functions.get_mut(getter.id) {*receiver_required=true;}

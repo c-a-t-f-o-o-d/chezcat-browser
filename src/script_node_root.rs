@@ -12,9 +12,16 @@ use super::*;
 pub(super) const ROOT_METHOD: &str = "\0Node.getRootNode";
 
 impl Bridge<'_> {
-    pub(super) fn root_node_member(&self, object: u32, name: &str) -> bool {
-        name == "getRootNode" && self.root_node_receiver(object)
-            && !self.form_named_control(object, name)
+    pub(super) fn node_tree_method_member(&self, object: u32, name: &str) -> bool {
+        let member = match name {
+            "getRootNode" => self.root_node_receiver(object),
+            // Prototype selection depends on the genuine Node interface. The
+            // VM guards property access from its current realm, and the call
+            // rechecks the incumbent before accessing either document.
+            "contains" => self.root_node_receiver(object) || self.frame_contains_node(object).is_some(),
+            _ => return false,
+        };
+        member && !self.form_named_control(object, name)
     }
 
     pub(super) fn root_node_receiver(&self, object: u32) -> bool {
