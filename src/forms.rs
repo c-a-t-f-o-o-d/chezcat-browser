@@ -1489,7 +1489,7 @@ mod text_inputs;
 mod buttons;
 pub(crate) use buttons::{button_caption_node, button_caption_work, validate_button_caption, ButtonAttributePlan};
 pub(crate) use text_inputs::TextInputPlan;
-pub(crate) use select_fragments::{fragment_text_input, SelectFormPlan};
+pub(crate) use select_fragments::{fragment_checkbox_input, fragment_text_input, SelectFormPlan};
 
 #[cfg(test)]
 mod tests {

@@ -125,7 +125,7 @@ impl Bridge<'_> {
                 let href = match &item.kind { NodeKind::Element {href, ..} => href.as_ref().map_or(0, String::len), _ => 0 };
                 bytes = bytes.checked_add(name.len()).and_then(|bytes| bytes.checked_add(href)).ok_or("HTML fragment retained size overflow.")?;
                 if item.namespace != crate::html::Namespace::Html
-                    || forms::kind(&staged, local).is_some() && name != "select" && !forms::fragment_text_input(&staged, local)
+                    || forms::kind(&staged, local).is_some() && name != "select" && !forms::fragment_text_input(&staged, local) && !forms::fragment_checkbox_input(&staged, local)
                     || name == "link" && !script_stylesheets::bare_fragment_link(&staged, local)
                     || matches!(name.as_str(), "form" | "fieldset" | "legend" | "style" | "base" | "meta" | "title" | "iframe" | "object" | "embed" | "source" | "audio" | "video") {
                     return Err("HTML fragment replacement of native controls/forms or unsupported resources is not implemented.".into());

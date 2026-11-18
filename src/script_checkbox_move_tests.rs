@@ -129,12 +129,11 @@ fn checkbox_move_forbidden_contexts_and_explicit_form_association_remain_atomic(
 }
 
 #[test]
-fn checkbox_move_keeps_new_registration_innerhtml_and_type_transitions_refused() {
+fn checkbox_move_keeps_unregistered_creation_type_transitions_and_unsupported_fragments_refused() {
     let(mut doc,mut forms,mut page)=fixture("<input id=check type=checkbox name=choice value=yes checked>",
         "var check=document.getElementById('check'),shell=document.getElementById('shell'),fresh=document.createElement('input'),attr=document.createAttribute('type');attr.value='checkbox';document.getElementById('neighbor').value='neighbor edited';check.checked=false;");
     let kept=Kept::new(&doc,&mut forms);page.state.rebuild(&doc).unwrap();let before=Snapshot::capture(&doc,&forms,&page);
-    for source in ["fresh.type='checkbox';","fresh.setAttribute('type','checkbox');","fresh.setAttributeNS(null,'type','checkbox');","fresh.setAttributeNode(attr);","document.getElementById('neighbor').type='checkbox';","check.type='text';","check.type='hidden';","shell.innerHTML='<input type=checkbox>';",
-        r#"shell.innerHTML="  <link/><table></table><a href='/a'>a</a><input type='checkbox'/>";"#,
+    for source in ["fresh.type='checkbox';","fresh.setAttribute('type','checkbox');","fresh.setAttributeNS(null,'type','checkbox');","fresh.setAttributeNode(attr);","document.getElementById('neighbor').type='checkbox';","check.type='text';","check.type='hidden';",
         "shell.innerHTML='<link rel=stylesheet href=/must-not-fetch.css><a href=/a>a</a>';","shell.innerHTML='<input type=radio>';"] {
         let result=page.console_eval(&mut doc,&mut forms,source);assert_eq!(result.errors,1,"{source}\n{}",page.report());
         assert_eq!(Snapshot::capture(&doc,&forms,&page),before,"{source}");kept.assert(&doc,&forms,false,Some("a"),false);no_resources(&mut page);

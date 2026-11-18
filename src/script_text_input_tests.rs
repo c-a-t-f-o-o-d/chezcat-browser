@@ -96,7 +96,7 @@ fn text_input_failed_default_and_fragment_transactions_are_atomic() {
     assert_eq!(doc.attr(node,"value"),Some("before"));assert_eq!(forms.text_default_value(node).unwrap(),"before");
     assert_eq!(forms.controls[&node].value.text(),"edited");assert_eq!(page.state.retained,retained);
     page.state.retained_limit=page.state.limits.host.retained_bytes;
-    for source in ["box.innerHTML='<input type=checkbox>';","document.getElementById('foreign').innerHTML='<input>';","input.innerHTML='<span>inside</span>';"] {
+    for source in ["box.innerHTML='<input type=checkbox><input type=radio>';","document.getElementById('foreign').innerHTML='<input>';","input.innerHTML='<span>inside</span>';"] {
         let nodes=doc.nodes.len();let controls=forms.controls.len();
         let result=page.console_eval(&mut doc,&mut forms,source);
         assert_eq!(result.errors,1,"{source}\n{}",page.report());

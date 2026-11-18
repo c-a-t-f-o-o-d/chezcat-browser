@@ -12,10 +12,7 @@ impl SelectView<'_> {
 }
 impl Bridge<'_> {
     pub(super) fn owned_native_checkbox(&self,node:usize)->bool {
-        self.doc.nodes.get(node).is_some_and(|item|
-            item.namespace==crate::html::Namespace::Html && item.children.is_empty())
-            && tag(self.doc,node)=="input"
-            && self.doc.attr(node,"type").is_some_and(|value|value.eq_ignore_ascii_case("checkbox"))
+        forms::fragment_checkbox_input(self.doc, node)
             && self.forms.controls.get(&node).is_some_and(|control|control.kind==Kind::Checkbox)
     }
     pub(super) fn owned_fragment_text_input(&self, node: usize) -> bool {
@@ -71,7 +68,7 @@ impl Bridge<'_> {
             }
         }
         let new_control = fragment.is_some_and(|(doc, _)| (1..doc.nodes.len()).any(|node|
-            tag(doc, node) == "select" || forms::fragment_text_input(doc, node)));
+            tag(doc, node) == "select" || forms::fragment_text_input(doc, node) || forms::fragment_checkbox_input(doc, node)));
         if affected.is_empty() && !new_control && created_inputs.is_empty() && created_buttons.is_empty() {
             return Ok(forms::SelectFormPlan { additions: std::collections::BTreeMap::new(), metadata: Vec::new(), retained_bytes: 0 });
         }
@@ -190,3 +187,7 @@ mod text_fragment_tests;
 #[cfg(test)]
 #[path="script_checkbox_move_tests.rs"]
 mod checkbox_move_tests;
+
+#[cfg(test)]
+#[path="script_checkbox_fragment_tests.rs"]
+mod checkbox_fragment_tests;

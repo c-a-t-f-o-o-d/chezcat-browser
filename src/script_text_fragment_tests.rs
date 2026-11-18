@@ -89,7 +89,7 @@ fn text_fragment_unsupported_types_contexts_and_associations_refuse_atomically()
     let original = controls(&forms);
     {
         let mut bridge = Bridge { doc: &mut doc, forms: &mut forms, state: &mut page.state };
-        for source in ["<input type=hidden>", "<input type=checkbox>", "<input type=radio>", "<input type=search>", "<input type=file>", "<input type=unknown>", "<input type=' text '>", "<input form=a>", "<input onclick='x=1'>", "<svg><input></svg>", "<input><link rel=stylesheet href=x>"] {
+        for source in ["<input type=hidden>", "<input type=radio>", "<input type=search>", "<input type=file>", "<input type=unknown>", "<input type=' text '>", "<input form=a>", "<input onclick='x=1'>", "<svg><input></svg>", "<input><link rel=stylesheet href=x>"] {
             assert!(bridge.set_inner_html(host, source).is_err(), "{source}");
             assert_eq!(bridge.doc.nodes.len(), node_count);
             assert_eq!(bridge.doc.nodes[host].children, children);
