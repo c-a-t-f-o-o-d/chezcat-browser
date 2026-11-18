@@ -9,13 +9,13 @@
 *From network bytes to page pixels—networking, JavaScript, DOM, layout,
 rendering, and selected media decoding.*
 
-[![Published prerelease](https://img.shields.io/static/v1?label=Published&message=0.81.0-alpha.2&color=0e7490&style=flat-square)](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.81.0-alpha.2)
+[![Published prerelease](https://img.shields.io/static/v1?label=Published&message=0.81.0-alpha.3&color=0e7490&style=flat-square)](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.81.0-alpha.3)
 [![Windows x64](https://img.shields.io/static/v1?label=Platform&message=Windows%20x64&color=2563eb&style=flat-square)](docs/BUILDING.md)
 [![Production Cargo dependencies](https://img.shields.io/static/v1?label=Production%20Cargo%20dependencies&message=0&color=6d28d9&style=flat-square)](docs/ARCHITECTURE.md)
 [![Main verification](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/workflows/offline.yml/badge.svg?branch=main&event=push)](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/workflows/offline.yml)
 [![License](https://img.shields.io/static/v1?label=License&message=CSAPUL%201.1&color=64748b&style=flat-square)](LICENSE)
 
-**[📦 Download](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.81.0-alpha.2)** · **[🗺️ Roadmap](docs/ROADMAP.md)** · **[🔨 Build](#build)** · **[🧪 Compatibility](docs/COMPATIBILITY.md)** · **[📖 Documentation](#documentation)**
+**[📦 Download](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.81.0-alpha.3)** · **[🗺️ Roadmap](docs/ROADMAP.md)** · **[🔨 Build](#build)** · **[🧪 Compatibility](docs/COMPATIBILITY.md)** · **[📖 Documentation](#documentation)**
 
 </div>
 
@@ -60,12 +60,12 @@ These are **implemented slices, not complete standards support**. The
 
 | You want… | Start here | What you are getting |
 | :--- | :--- | :--- |
-| **A fixed downloadable snapshot** | [📦 0.81.0-alpha.2](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.81.0-alpha.2) | A published prerelease with runtime/source ZIPs, notices, checksums, and its own source identity. |
+| **A fixed downloadable snapshot** | [📦 0.81.0-alpha.3](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.81.0-alpha.3) | A published prerelease with runtime/source ZIPs, notices, checksums, and its own source identity. |
 | **Newer integrated development** | Public `main` + [build instructions](#build) | Source changes that may not exist in the published executable. Check the current CI result. |
 | **Work under review** | [🔎 Open pull requests](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pulls) | Feature-branch work with its own results and remaining checks; not necessarily in `main`. |
 
 > [!IMPORTANT]
-> **New source does not update an old download.** Published alpha.2 assets remain
+> **New source does not update an old download.** Published release assets remain
 > unchanged. Named releases are created only on explicit owner request; ordinary
 > commits, PRs, CI runs, and development builds do not require a release.
 
