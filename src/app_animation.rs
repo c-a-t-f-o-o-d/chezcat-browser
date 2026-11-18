@@ -208,7 +208,7 @@ impl App {
         let images = self.poll_image_frames_at(Instant::now());
         let media=self.poll_media_timer_at(Instant::now());
         let audio=self.poll_audio_timer_at(Instant::now());
-        pause_changed || scripts || images || media || audio
+        self.apply_script_scroll() || pause_changed || scripts || images || media || audio
     }
 }
 

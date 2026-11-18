@@ -8,6 +8,10 @@ use crate::forms::{Forms, Kind};
 use crate::html::Document;
 use crate::layout::{self, ClientBox, Layout};
 
+#[path = "script_geometry_scroll_offsets.rs"]
+mod scroll_offsets;
+pub(crate) use scroll_offsets::Axis;
+
 fn live_checked(forms: &Forms, node: usize) -> Option<bool> {
     forms.controls.get(&node)
         .filter(|control| matches!(control.kind, Kind::Checkbox | Kind::Radio))
@@ -32,6 +36,8 @@ pub struct Geometry {
     viewport_scroll_unavailable:bool,
     rects: Vec<Option<layout::BorderRect>>,
     scroll: i32,
+    viewport_max_scroll: i32,
+    pending_scroll: Option<i32>,
     offset_unavailable: Vec<bool>,
     offset_parents: Vec<layout::OffsetParent>,
     remaining: usize,
@@ -61,6 +67,8 @@ impl Geometry {
             viewport_scroll_unavailable:false,
             rects: Vec::new(),
             scroll: 0,
+            viewport_max_scroll: 0,
+            pending_scroll: None,
             offset_unavailable: Vec::new(),
             offset_parents: Vec::new(),
             remaining: Limits::default().layouts_per_job,
@@ -74,6 +82,16 @@ impl Geometry {
     pub fn with_limits(mut self,limits:Limits)->Self{self.limits=limits;self.remaining=limits.layouts_per_job;self}
 
     pub fn set_scroll(&mut self, scroll: i32) { self.scroll = scroll.max(0); }
+
+    pub(crate) fn take_scroll_request(&mut self) -> Option<i32> { self.pending_scroll.take() }
+
+    fn update_scroll_range(&mut self, layout_height: i32) {
+        self.viewport_max_scroll = layout_height.saturating_sub(self.height).max(0);
+        if self.scroll > self.viewport_max_scroll {
+            self.scroll = self.viewport_max_scroll;
+            self.pending_scroll = Some(self.scroll);
+        }
+    }
 
     pub fn css_scroll_y(&self) -> f64 { f64::from(self.scroll)/f64::from(self.zoom) }
 
@@ -133,6 +151,7 @@ impl Geometry {
         layout: &Layout,
     ) {
         self.update(width, height, zoom, images);
+        self.update_scroll_range(layout.height);
         self.boxes = Some(layout.client_boxes.clone());
         self.computed_properties = Some(layout.computed_properties.clone());
         self.scroll_heights=layout.scroll_heights.clone();
@@ -168,6 +187,7 @@ impl Geometry {
                 Some(&checked),
                 &self.fonts,
             );
+            self.update_scroll_range(layout.height);
             self.boxes = Some(layout.client_boxes);
             self.computed_properties = Some(layout.computed_properties);
             self.scroll_heights=layout.scroll_heights;

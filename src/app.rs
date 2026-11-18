@@ -769,6 +769,10 @@ impl App {
             && self.inspector.network_visible()
     }
     pub fn poll_load(&mut self) -> bool {
+        let changed = self.poll_load_once();
+        self.apply_script_scroll() || changed
+    }
+    fn poll_load_once(&mut self) -> bool {
         let pause_changed=if self.scripting.as_ref().is_some_and(|p|p.has_media_tasks()) {self.flush_embedded_video()} else {false};
         self.inspector.invalidate();
         let script_changed = self.poll_dynamic_scripts()
@@ -1654,6 +1658,7 @@ impl App {
         };
     }
     fn show_script_errors(&mut self) {
+        self.apply_script_scroll();
         // Committed media effects survive a producer error. Apply their issue
         // time before selection or a fresh snapshot can replace the projection.
         self.apply_media_pause();
@@ -1735,7 +1740,9 @@ impl App {
         }
         self.selection = None;
         self.drag = Drag::None;
-        self.set_scroll(self.scroll.clamp(0, self.max_scroll()));
+        if !self.apply_script_scroll() {
+            self.set_scroll(self.scroll.clamp(0, self.max_scroll()));
+        }
         self.update_find(false);
         self.validate_control_focus();
     }
@@ -1773,6 +1780,19 @@ impl App {
     }
     pub fn max_scroll(&self) -> i32 {
         (self.page.height - self.viewport_height()).max(0)
+    }
+    fn apply_script_scroll(&mut self) -> bool {
+        let Some(target) = self.scripting.as_mut().and_then(|page| page.take_viewport_scroll_request()) else {
+            return false;
+        };
+        if self.view == View::Page {
+            self.set_scroll(target);
+        } else {
+            // Source and Resources have their own viewport. Update the saved
+            // page position for restoration when the document is shown again.
+            self.page_scroll = target;
+        }
+        true
     }
     fn set_scroll(&mut self, scroll: i32) {
         let scroll = scroll.clamp(0, self.max_scroll());
@@ -1899,6 +1919,7 @@ impl App {
         report
     }
     fn toggle_view(&mut self, requested: View) {
+        self.apply_script_scroll();
         self.invalidate_platform_requests();
         let view = if self.view == requested {
             View::Page
@@ -2642,6 +2663,7 @@ impl App {
         if outcome.layout_changed {
             self.reflow();
         }
+        self.apply_script_scroll();
         self.validate_control_focus();
         self.sync_editors();
         if outcome.errors > 0 {
@@ -5705,6 +5727,10 @@ mod overflow_axes_tests;
 #[cfg(test)]
 #[path = "app_offset_parent_tests.rs"]
 mod offset_parent_tests;
+
+#[cfg(test)]
+#[path = "app_scroll_offset_tests.rs"]
+mod scroll_offset_tests;
 
 #[cfg(test)]
 #[path = "app_computed_position_tests.rs"]
