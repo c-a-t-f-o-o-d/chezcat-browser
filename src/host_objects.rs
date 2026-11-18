@@ -130,6 +130,7 @@ impl Runtime {
             let element=self.native_constructor_prototypes[&(window,"Element")];
             self.define_svg_element_interface(window, element)?;
             self.define_concrete_html_node_interfaces(window, parent)?;
+            self.define_canvas_2d_interface(window)?;
             // CharacterData is a separate genuine Node suffix. Text gets its
             // own Slottable prototype below; Comment retains this suffix.
             let node=self.native_constructor_prototypes[&(window,"Node")];
@@ -267,6 +268,13 @@ impl Runtime {
                 ] {
                     self.define_node_attribute(prototype, window, key, getter, Some(setter))?;
                 }
+                self.define_canvas_operation(
+                    prototype,
+                    window,
+                    "getContext",
+                    "\0HTMLCanvasElement.getContext",
+                    1,
+                )?;
             }
 
             // Existing native constructor roots keep both prototype chains
@@ -279,6 +287,95 @@ impl Runtime {
             self.global_attributes.insert(name.into(), (false, true, true));
         }
         Ok(())
+    }
+
+    /// A rendering context is an independent Web IDL object, not a Node or
+    /// EventTarget. Each owner realm supplies its actual ordinary prototype;
+    /// only a genuine host context can satisfy the methods' receiver checks.
+    fn define_canvas_2d_interface(&mut self, window: u32) -> Result<(), Fault> {
+        let allocation = self
+            .allocate_host_function_with_length(window, "CanvasRenderingContext2D", 0)
+            .map_err(Fault::new)?;
+        if let Some(Function::Host { constructible, .. }) = self.functions.get_mut(allocation.id) {
+            // The bridge rejects construction as an illegal constructor. This
+            // does not opt another native family into class-base support.
+            *constructible = true;
+        }
+        let prototype = self.new_object(None)?;
+        let constructor = Value::Function(allocation.id);
+        self.store_property(
+            prototype,
+            "constructor".into(),
+            constructor.clone(),
+            Some((false, true, true)),
+        )?;
+        self.store_property(
+            self.function_properties[allocation.id],
+            "prototype".into(),
+            Value::Object(prototype),
+            Some((false, false, false)),
+        )?;
+        let tag = self
+            .symbol_to_string_tag
+            .ok_or_else(|| Fault::new("Missing canvas context class-tag symbol."))?;
+        self.store_symbol_property(
+            prototype,
+            tag,
+            Value::String("CanvasRenderingContext2D".into()),
+            Some((false, false, true)),
+        )?;
+        self.define_readonly_node_getter(
+            prototype,
+            window,
+            "canvas",
+            "\0CanvasRenderingContext2D.get.canvas",
+        )?;
+        for (name, operation) in [
+            ("clearRect", "\0CanvasRenderingContext2D.clearRect"),
+            ("fillRect", "\0CanvasRenderingContext2D.fillRect"),
+        ] {
+            self.define_canvas_operation(prototype, window, name, operation, 4)?;
+        }
+        self.native_constructor_prototypes
+            .insert((window, "CanvasRenderingContext2D"), prototype);
+        self.put_binding(
+            self.global_environment,
+            "CanvasRenderingContext2D".into(),
+            Some(constructor),
+            super::Declaration::Var,
+            false,
+        )?;
+        self.global_attributes
+            .insert("CanvasRenderingContext2D".into(), (false, true, true));
+        Ok(())
+    }
+
+    fn define_canvas_operation(
+        &mut self,
+        prototype: usize,
+        window: u32,
+        name: &'static str,
+        operation: &'static str,
+        length: usize,
+    ) -> Result<(), Fault> {
+        let method = self
+            .allocate_host_function_with_length(window, operation, length)
+            .map_err(Fault::new)?;
+        if let Some(Function::Host { receiver_required, .. }) = self.functions.get_mut(method.id) {
+            *receiver_required = true;
+        }
+        self.store_property(
+            self.function_properties[method.id],
+            "name".into(),
+            Value::String(name.into()),
+            Some((false, false, true)),
+        )?;
+        self.store_property(
+            prototype,
+            name.into(),
+            Value::Function(method.id),
+            Some((true, true, true)),
+        )
     }
 
     /// A class may inherit a genuine nonallocating interface even though

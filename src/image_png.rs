@@ -4,6 +4,7 @@
 //! ancillary metadata never causes requests or code.
 //! Format reference: https://www.w3.org/TR/png-3/
 
+use super::source_over as over;
 use super::{
     be32, dimensions, pixel, reserved, Animation, Bitmap, DecodedImage, ImageFrame, ImageResult,
     MAX_ANIMATION_FRAMES, MAX_ANIMATION_PIXELS, MAX_INPUT_BYTES,
@@ -585,27 +586,6 @@ impl PngAnimation {
         self.processed += 1;
         Ok(())
     }
-}
-
-/// Straight-alpha source-over. Work in integer premultiplied numerators, then
-/// unpremultiply only once; fully transparent colors never leak into the result.
-fn over(source: u32, target: u32) -> u32 {
-    let source_alpha = source >> 24;
-    if source_alpha == 255 {
-        return source;
-    }
-    if source_alpha == 0 {
-        return target;
-    }
-    let target_alpha = target >> 24;
-    let inverse = 255 - source_alpha;
-    let alpha = source_alpha * 255 + target_alpha * inverse;
-    let channel = |shift: u32| -> u32 {
-        let source = (source >> shift) & 255u32;
-        let target = (target >> shift) & 255u32;
-        (source * source_alpha * 255 + target * target_alpha * inverse + alpha / 2) / alpha
-    };
-    (((alpha + 127) / 255) << 24) | (channel(16) << 16) | (channel(8) << 8) | channel(0)
 }
 
 pub(super) fn decode_asset(

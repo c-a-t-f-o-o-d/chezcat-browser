@@ -639,6 +639,7 @@ pub trait Host {
         &self,
         _object: u32,
         _method: &str,
+        _args: &[Value],
     ) -> Option<(usize, &'static [&'static str])> {
         None
     }
@@ -8611,7 +8612,7 @@ impl Runtime {
             return Ok(Value::Undefined);
         }
         let mut fields = None;
-        if let Some((index, names)) = host.dictionary_argument(object, method) {
+        if let Some((index, names)) = host.dictionary_argument(object, method, args) {
             if let Some(value @ (Value::Object(_) | Value::Host(_) | Value::Function(_))) =
                 args.get(index)
             {

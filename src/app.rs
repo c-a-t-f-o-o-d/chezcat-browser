@@ -3787,14 +3787,16 @@ impl App {
                     height,
                     presentation,
                 } => {
-                    // A canvas with no rendering context is transparent black.
-                    // Its CSS decoration and actual box are retained by layout;
-                    // it must never paint the missing-image placeholder.
-                    if crate::html_canvas::element(&self.document, node) {
-                        continue;
-                    }
                     let y = y + top - self.scroll;
                     if y >= bottom || y.saturating_add(height) <= top {
+                        continue;
+                    }
+                    if crate::html_canvas::element(&self.document, node) {
+                        if self.view == View::Page {
+                            if let Some(bitmap) = self.scripting.as_ref().and_then(|page| page.canvas_bitmap(node)) {
+                                canvas.fitted_image(crate::paint::ClipRect::new(x, y, width, height), bitmap, presentation);
+                            }
+                        }
                         continue;
                     }
                     if self.view == View::Page {
@@ -4496,6 +4498,8 @@ mod select_tests;
 
 #[cfg(test)]
 mod tests {
+    mod canvas_2d;
+
     use super::*;
     use std::io::{Read, Write};
     use std::net::TcpListener;
