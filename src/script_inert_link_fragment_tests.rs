@@ -221,7 +221,7 @@ fn inert_link_fragment_mixed_native_batch_and_later_resource_failure_are_atomic(
         "<link href=''>",
         "<link nonce=''>",
         "<link style='color:red'>",
-        "<link/><table></table><a href=/a>a</a><input type=checkbox>",
+        "<link/><table></table><a href=/a>a</a><input type=radio>",
         "<link><img src=/must-not-fetch.ppm><link rel=stylesheet href=/late.css>",
         "<link><img src=/must-not-fetch.ppm><iframe></iframe>",
     ] {

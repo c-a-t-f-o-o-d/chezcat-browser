@@ -26,12 +26,36 @@ fn select_bytes(control: &Control) -> usize {
     })
 }
 
-/// This fragment slice admits only default, empty-type and explicit text INPUTs.
-/// Forms::kind also recognizes other types; that is not fragment admission.
+/// Accepted text INPUT spellings. Forms::kind also recognizes other types.
 pub(crate) fn fragment_text_input(doc: &Document, node: usize) -> bool {
     doc.nodes.get(node).is_some_and(|item| item.namespace == crate::html::Namespace::Html)
         && tag(doc, node) == "input"
         && doc.attr(node, "type").is_none_or(|value| value.is_empty() || value.eq_ignore_ascii_case("text"))
+}
+
+/// New checkbox admission is separate from the text and hidden INPUT families.
+pub(crate) fn fragment_checkbox_input(doc: &Document, node: usize) -> bool {
+    doc.nodes.get(node).is_some_and(|item|
+        item.namespace == crate::html::Namespace::Html && item.children.is_empty())
+        && tag(doc, node) == "input"
+        && doc.attr(node, "type").is_some_and(|value| value.eq_ignore_ascii_case("checkbox"))
+}
+
+fn checkbox_control(doc: &Document, node: usize, name: &str, initial: &str) -> Result<(Control, usize), String> {
+    let mut value = Editor::default();
+    // Match the existing parsed native checkbox representation and Reset path.
+    set_form_value(&mut value, initial, Kind::Checkbox);
+    let caption = caption(doc, node, Kind::Checkbox);
+    let retained = name.len().checked_add(initial.len()).and_then(|bytes| bytes.checked_add(caption.len()))
+        .and_then(|bytes| bytes.checked_add(value.chars.len().checked_mul(std::mem::size_of::<char>())?))
+        .ok_or("Checkbox INPUT retained payload overflow.")?;
+    let checked = doc.attr(node, "checked").is_some();
+    Ok((Control { owner: None, kind: Kind::Checkbox, value, dirty_value: false,
+        name: name.into(), caption, disabled: doc.attr(node, "disabled").is_some(),
+        readonly: doc.attr(node, "readonly").is_some(), required: doc.attr(node, "required").is_some(), checked,
+        max_length: doc.attr(node, "maxlength").and_then(|value| value.parse().ok()).unwrap_or(MAX_VALUE_UNITS).min(MAX_VALUE_UNITS),
+        tab_index: doc.attr(node, "tabindex").and_then(parse_tab_index).unwrap_or(0), select: None,
+        button_element: false, initial: initial.into(), initially_checked: checked, image_point: (0, 0) }, retained))
 }
 
 impl Forms {
@@ -49,8 +73,9 @@ impl Forms {
             if base == 0 || base.checked_add(doc.nodes.len().saturating_sub(1)).is_none() { return Err("Select native identity range overflow.".into()); }
             for local in 1..doc.nodes.len() {
                 if tag(doc, local) == "input" {
-                    if !fragment_text_input(doc, local) {
-                        return Err("New fragment INPUTs currently require absent, empty or text type; no control was admitted.".into());
+                    let checkbox = fragment_checkbox_input(doc, local);
+                    if !fragment_text_input(doc, local) && !checkbox {
+                        return Err("New fragment INPUTs require absent, empty, text or checkbox type; no control was admitted.".into());
                     }
                     if doc.attr(local, "form").is_some() {
                         return Err("Explicit form association on a new fragment INPUT is not implemented.".into());
@@ -58,14 +83,15 @@ impl Forms {
                     if self.controls.len().saturating_add(plan.additions.len()) >= MAX_CONTROLS {
                         return Err("Native form control limit reached before INPUT admission.".into());
                     }
-                    let initial = doc.attr(local, "value").unwrap_or("");
+                    let initial = doc.attr(local, "value").unwrap_or(if checkbox { "on" } else { "" });
                     let name = doc.attr(local, "name").unwrap_or("");
                     bytes = bytes.checked_add(initial.len()).and_then(|bytes| bytes.checked_add(name.len()))
-                        .ok_or("Text INPUT payload accounting overflow.")?;
+                        .ok_or("Fragment INPUT payload accounting overflow.")?;
                     if initial.encode_utf16().count() > MAX_VALUE_UNITS || name.len() > MAX_QUERY || bytes > MAX_TOTAL_VALUE_BYTES {
-                        return Err("Text INPUT value, name or form payload limit reached; no control was admitted.".into());
+                        return Err("Fragment INPUT value, name or form payload limit reached; no control was admitted.".into());
                     }
-                    let (control, extra) = text_inputs::text_control(doc, local, name, initial, None)?;
+                    let (control, extra) = if checkbox { checkbox_control(doc, local, name, initial)? }
+                        else { text_inputs::text_control(doc, local, name, initial, None)? };
                     plan.retained_bytes = plan.retained_bytes.checked_add(extra).ok_or("Native fragment retained payload overflow.")?;
                     plan.additions.insert(base + local - 1, control);
                     continue;
