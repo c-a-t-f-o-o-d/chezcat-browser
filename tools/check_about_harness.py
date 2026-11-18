@@ -6,6 +6,7 @@ Retained legal text identity and changed software pixels are separate checks;
 this is not proof of native clipboard delivery or every rendered legal glyph.
 """
 import argparse
+import os
 from datetime import datetime, timezone
 import hashlib
 import importlib
@@ -36,14 +37,21 @@ def digest(data):
     return hashlib.sha256(data).hexdigest()
 
 
+def git_metadata(repo, args, limit):
+    # Development verification only. Neither this checker nor the collector
+    # fetches missing objects; the installed runtime never invokes Git.
+    environment = {key:value for key,value in os.environ.items() if key not in (
+        'GIT_DIR','GIT_WORK_TREE','GIT_INDEX_FILE','GIT_COMMON_DIR','GIT_OBJECT_DIRECTORY',
+        'GIT_ALTERNATE_OBJECT_DIRECTORIES','GIT_SHALLOW_FILE','GIT_NAMESPACE')}
+    row = subprocess.run(['git', '--no-optional-locks', '--no-replace-objects', '--no-lazy-fetch',
+        '-c', 'core.fsmonitor=false', '-c', 'core.untrackedCache=false', *args], cwd=repo,
+        stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=3, check=False, env=environment)
+    require(row.returncode == 0 and len(row.stdout) <= limit, 'Unavailable bounded source metadata')
+    return row.stdout
+
+
 def source_context(repo):
-    # Development verification only. The installed runtime never needs Git.
-    def git(args, limit):
-        row = subprocess.run(['git', '--no-optional-locks', '-c', 'core.fsmonitor=false',
-            '-c', 'core.untrackedCache=false', *args], cwd=repo, stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=3, check=False)
-        require(row.returncode == 0 and len(row.stdout) <= limit, 'Unavailable bounded source metadata')
-        return row.stdout
+    git = lambda args, limit: git_metadata(repo, args, limit)
     try:
         top = Path(git(['rev-parse', '--show-toplevel'], 4096).decode().strip()).resolve()
         require(top == repo, 'Parent repository is not this source checkout')
@@ -56,6 +64,30 @@ def source_context(repo):
         raw = path.read_bytes() if path.is_file() and path.stat().st_size <= 128 else b''
         text = raw.decode('ascii', errors='replace').strip()
         return (text, 'Exported source revision; modified state unverified') if re.fullmatch('[0-9a-f]{40}', text) else (None, None)
+
+
+def public_main_ordinal(repo, source):
+    try:
+        require(source is not None and re.fullmatch('[0-9a-f]{40}', source), 'Unknown ordinal source')
+        git = lambda args, limit: git_metadata(repo, args, limit).decode('utf-8').strip()
+        require(Path(git(['rev-parse', '--show-toplevel'], 4096)).resolve() == repo, 'Parent source repository')
+        require(git(['config', '--get', 'remote.origin.url'], 4096) in (
+            'https://github.com/c-a-t-f-o-o-d/chezcat-browser.git', 'https://github.com/c-a-t-f-o-o-d/chezcat-browser',
+            'git@github.com:c-a-t-f-o-o-d/chezcat-browser.git', 'ssh://git@github.com/c-a-t-f-o-o-d/chezcat-browser.git'), 'Not the public source remote')
+        require(git(['rev-parse', '--is-shallow-repository'], 16) == 'false', 'Incomplete source history')
+        common = repo / git(['rev-parse', '--git-common-dir'], 4096)
+        require(not (common/'info/grafts').exists(), 'Rewritten source ancestry')
+        tip = git(['rev-parse', '--verify', 'refs/remotes/origin/main^{commit}'], 128)
+        require(re.fullmatch('[0-9a-f]{40}', tip), 'Invalid public main ref')
+        # Independently count the tail through S in newest-first output. Do not
+        # substitute main's current total or ordinary ancestor membership.
+        chain = git(['rev-list', '--first-parent', tip], 8*1024*1024).splitlines()
+        require(chain and chain[0] == tip and all(re.fullmatch('[0-9a-f]{40}', item) for item in chain), 'Incomplete first-parent output')
+        require(chain.count(source) == 1, 'Source is not on public main first-parent history')
+        require(git(['rev-parse', '--verify', 'refs/remotes/origin/main^{commit}'], 128) == tip, 'Public main changed during inspection')
+        return len(chain) - chain.index(source)
+    except (OSError, ValueError, UnicodeError, subprocess.SubprocessError):
+        return None
 
 
 def read_snapshot(output, label, helper):
@@ -94,30 +126,46 @@ def read_snapshot(output, label, helper):
             'hashes': {kind: digest(path.read_bytes()) for kind, path in paths.items()}, **extra}
 
 
-def safe_identity(data, version, license_version, license_hash, expected_source, expected_state):
+def safe_identity(data, version, license_version, license_hash, expected_source, expected_state, expected_ordinal=None):
     require(len(data) <= 2048 and data.endswith(b'\n') and b'\r' not in data, 'Safe-copy encoding/size differs')
     lines = data.decode('ascii').splitlines()
-    require(len(lines) == 6 and lines[0] == 'ChezCat ' + version, 'Full product version differs')
+    require(len(lines) == 6 and lines[0].startswith('ChezCat '), 'Product display label differs')
+    display = lines[0][len('ChezCat '):]
     prefixes = ['Build: ', 'Source revision: ', 'Source state: ', 'License: ', 'License SHA-256: ']
     require(all(line.startswith(prefix) for line, prefix in zip(lines[1:], prefixes)), 'Safe-copy field allowlist differs')
     values = [line[len(prefix):] for line, prefix in zip(lines[1:], prefixes)]
     kind, revision, state, terms, terms_hash = values
-    require(kind in ('Development build', 'Declared tagged build v' + version + ' (publication unverified)'), 'Invalid build kind')
+    unavailable = 'Development build (public main ordinal unavailable)'
+    declared = 'Declared tagged build v' + version + ' (publication unverified)'
+    require(kind in ('Development build', unavailable, declared), 'Invalid build kind')
     require(revision == 'unknown' or re.fullmatch('[0-9a-f]{40}', revision), 'Invalid embedded source revision')
     states = {'Git working tree clean at build check', 'Git working tree dirty at build check',
         'Git working-tree state unknown', 'Exported source revision; modified state unverified', 'Source provenance unavailable'}
     require(state in states and (revision != 'unknown' or state == 'Source provenance unavailable'), 'Invalid embedded source state')
-    require(kind == 'Development build' or (revision != 'unknown' and state != 'Git working tree dirty at build check'), 'False declared build state')
+    require(kind != declared or (revision != 'unknown' and state != 'Git working tree dirty at build check'), 'False declared build state')
     require(expected_source is not None and revision == expected_source, 'Embedded source does not match selected source')
     if expected_state is not None:
         require(state == expected_state, 'Embedded tree state differs from unchanged build checkout')
+    suffix = version + ('.' if '+' in version else '+') + 'dev.'
+    ordinal = None
+    if kind == declared:
+        require(display == version, 'Declared tag changed the Cargo version')
+    elif kind == unavailable:
+        require(display == suffix + ('unknown' if revision == 'unknown' else 'g' + revision[:12]), 'Invalid SHA-only development fallback')
+        require(expected_state is None or state != 'Git working tree clean at build check' or expected_ordinal is None,
+                'Complete clean public-main build lost its ordinal')
+    else:
+        match = re.fullmatch(re.escape(suffix) + r'([1-9][0-9]*)\.g' + re.escape(revision[:12]), display)
+        require(match is not None and state == 'Git working tree clean at build check', 'Invalid numeric development label')
+        ordinal = int(match.group(1))
+        require(ordinal <= 2**64-1 and ordinal == expected_ordinal, 'Ordinal does not end at the embedded public-main source')
     require(terms == 'CSAPUL ' + license_version and terms_hash == license_hash, 'Separate exact license identity differs')
     # The closed format already forbids additional fields; these controls also
     # make page/location leakage immediately legible in a failed private run.
     for forbidden in ('C:\\', '/Users/', 'http://', 'https://', '@', 'profile', 'receipt',
                       'history', 'Original A1 retained', 'about-retained.html'):
         require(forbidden not in data.decode('ascii'), 'Non-build material entered safe copy')
-    return {'product_version': version, 'build': kind, 'source_revision': revision,
+    return {'product_version': version, 'display_version': display, 'development_ordinal': ordinal, 'build': kind, 'source_revision': revision,
             'source_state': state, 'license_version': license_version, 'license_sha256': license_hash}
 
 
@@ -176,7 +224,8 @@ def main():
             and all(stage['document'].get(key) == baseline['document'].get(key) for key in ('document','dom_commit','navigation_queued','navigation_committed'))
             and stage['layout']['layout'] == baseline['layout']['layout']
             and stage['canvas']['scroll'] == baseline['canvas']['scroll'] for stage in stages.values())
-        identity = safe_identity(stages['build']['about'], version, accept.VERSION, digest(legal['License']), source, expected_state)
+        identity = safe_identity(stages['build']['about'], version, accept.VERSION, digest(legal['License']), source, expected_state,
+                                 public_main_ordinal(repo, source))
         record['observed_identity'] = identity
         checks['build_full_version_source_and_separate_license_identity'] = True
         for label in ('build','build-return','copy'):

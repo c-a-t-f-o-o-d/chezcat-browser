@@ -785,9 +785,15 @@ and menu input paths. Keep the underlying document/source, history, scroll and
 resource workers owned by the same page; About Escape closes the panel rather
 than issuing Stop. Closing returns to that page without reload or navigation.
 
-Display the embedded full product SemVer, including prerelease, source revision
-when known, source origin/clean-dirty-unknown state and build kind. Keep product
-and license versions separate. Metadata is a build-time description: an exported
+Display the Cargo base version with a development label `+dev.N.g<12-character-SHA>`
+when the clean embedded source is on the complete public main first-parent path;
+N counts that path through the embedded source, not through a newer main tip.
+Existing Cargo build metadata appends `.dev...` instead of a second `+`.
+Unavailable ordinals use a SHA-only development label (or `dev.unknown`) and an
+explicit unavailable status. Keep the full source SHA and honest
+origin/clean-dirty-unknown state authoritative. Declared tagged builds display
+the exact Cargo version; Cargo, PE and license versions remain separate and
+unchanged. Metadata is a build-time description: an exported
 revision does not establish an unchanged tree, and a declared tagged build is
 explicitly publication-unverified. It authenticates no publisher, remote tag,
 release, executable or signature. About performs no runtime Git or network work.
