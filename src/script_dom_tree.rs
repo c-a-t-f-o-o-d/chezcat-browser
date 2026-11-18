@@ -567,7 +567,7 @@ impl Bridge<'_> {
             }
             return Ok(Some(self.html_image_map_property(node)));
         }
-        if property == "innerHTML" && matches!(self.doc.nodes[node].kind, NodeKind::Element { .. }) { return Ok(Some(true)); }
+        if matches!(property, "innerHTML" | "outerHTML") && matches!(self.doc.nodes[node].kind, NodeKind::Element { .. }) { return Ok(Some(true)); }
         if common_node_property(property) || self.dom_method(object, property).is_some() {
             return Ok(Some(true));
         }
@@ -611,7 +611,9 @@ impl Bridge<'_> {
         if property=="src"&&tag(self.doc,node)=="script"&&self.doc.nodes[node].namespace==crate::html::Namespace::Html {return self.image_source(node).map(Some);}
         if property=="href"&&tag(self.doc,node)=="link"&&self.doc.nodes[node].namespace==crate::html::Namespace::Html {return self.reflected_url(node,"href").map(Some);}
         if matches!(property,"dir"|"lang"|"align"|"useMap") {return self.html_text_reflection_get(node,property).map(Some);}
-        if property == "innerHTML" && matches!(self.doc.nodes[node].kind, NodeKind::Element { .. }) { return self.inner_html(node).map(Some); }
+        if matches!(property, "innerHTML" | "outerHTML") && matches!(self.doc.nodes[node].kind, NodeKind::Element { .. }) {
+            return self.serialize_html(node, property == "outerHTML").map(Some);
+        }
         if property == "attributes" {
             if !matches!(self.doc.nodes[node].kind, NodeKind::Element { .. }) { return Ok(Some(Value::Undefined)); }
             if self.doc.nodes[node].namespace != crate::html::Namespace::Html { return Err("Attribute map requires known namespace provenance.".into()); }
@@ -1298,6 +1300,9 @@ impl Bridge<'_> {
             let text = self.text(value)?;
             self.set_inner_html(node, &text)?;
             return Ok(true);
+        }
+        if property == "outerHTML" && matches!(self.doc.nodes[node].kind, NodeKind::Element { .. }) {
+            return Err("outerHTML replacement is not implemented.".into());
         }
         if self.stylesheet_set(node, property, value)? {
             return Ok(true);

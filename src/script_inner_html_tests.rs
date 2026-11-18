@@ -11,6 +11,53 @@ fn run(markup: &str, source: &str) -> (Document, Forms, Page, Outcome) {
 }
 
 #[test]
+fn outer_html_serializes_the_element_and_its_current_tree() {
+    let (_, _, page, outcome) = run("<html><body><input id=editor value=seed></body></html>", r#"
+        var nav = document.createElement('nav'), copy = nav.cloneNode(true);
+        if (!('outerHTML' in nav) || copy.outerHTML !== '<nav></nav>' || nav.innerHTML !== '')
+            throw 'empty outer and inner';
+        nav.setAttribute('title','A & B');
+        nav.setAttributeNS('urn:example', 'm:word', '"');
+        nav.appendChild(document.createComment('marker'));
+        nav.appendChild(document.createTextNode('<雪>'));
+        nav.appendChild(document.createElement('br'));
+        var children = '<!--marker-->&lt;雪&gt;<br>';
+        if (nav.outerHTML !== '<nav title="A &amp; B" m:word="&quot;">'+children+'</nav>' ||
+            nav.innerHTML !== children || copy.outerHTML !== '<nav></nav>' ||
+            'outerHTML' in nav.firstChild) throw 'detached serialization';
+        document.body.appendChild(nav);
+        var edit = document.getElementById('editor');
+        edit.value = 'retained edit';
+        if (edit.outerHTML !== '<input id="editor" value="seed">' || edit.value !== 'retained edit' ||
+            nav.outerHTML !== nav.cloneNode(true).outerHTML) throw 'actual attributes and children';
+    "#);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+}
+
+#[test]
+fn outer_html_accounts_for_root_bytes_and_preserves_failed_reads_and_writes() {
+    let (mut doc, mut forms, mut page, initial) = run(
+        "<html><body><div id=holder><span>read</span></div></body></html>", "");
+    assert_eq!(initial.errors, 0);
+    let node = (0..doc.nodes.len()).find(|&n| doc.attr(n, "id") == Some("holder")).unwrap();
+    let child = doc.nodes[node].children[0];
+    let count = doc.nodes.len();
+    let retained = page.state.retained;
+    let limit = page.state.limits.host.string_bytes;
+    let mut bridge = Bridge { doc: &mut doc, forms: &mut forms, state: &mut page.state };
+    bridge.state.limits.host.string_bytes = "<span>read</span>".len();
+    assert_eq!(bridge.serialize_html(node, false).unwrap().to_text(), "<span>read</span>");
+    assert!(bridge.serialize_html(node, true).unwrap_err().contains("string limit"));
+    bridge.state.limits.host.string_bytes = limit;
+    assert!(bridge.dom_set(node_handle(node), "outerHTML", &Value::String("<em>new</em>".into()))
+        .unwrap_err().contains("replacement"));
+    assert_eq!(bridge.doc.nodes[node].children, [child]);
+    assert_eq!(bridge.doc.nodes.len(), count);
+    assert_eq!(bridge.state.retained, retained);
+    assert_eq!(bridge.serialize_html(node, true).unwrap().to_text(), "<div id=\"holder\"><span>read</span></div>");
+}
+
+#[test]
 fn inner_html_serializes_actual_children_namespaces_and_raw_text() {
     let (doc, _, page, outcome) = run("<html><body><div id=root><p id=p title='a &quot; &amp; &lt; &gt;'>Café&nbsp;<b>real</b><br>tail</p><script>var text='<>&';</script></div></body></html>", r#"
 var root=document.getElementById('root'),p=document.getElementById('p');
