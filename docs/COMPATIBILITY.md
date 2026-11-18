@@ -30,6 +30,10 @@ normal tests and 25 journeys. The interaction captures below use `13d7dae`.
 PR #69/#71 integrate computed `position` and layout-backed `offsetParent`.
 Their measured builds `c74503c` and `96666d3` retain open-menu and trusted-choice
 evidence at both widths, with the next errors recorded separately below.
+PR #74/#75/#76 add offset coordinates, bounded translations and genuine
+`Node.contains`. The unchanged Bootstrap dropdown passes on integrated source
+`ec7db2f61cddb78c457b2966b72e1e362b89e66a`: trusted opening, Amber selection and
+closing have paired DOM/pixel evidence at 1280/640.
 The [catalogue](compatibility.json)
 retains its exact source-bound records and classification of 44 named families
 and formats; older records are not silently relabeled as newer runs. Source
@@ -54,6 +58,7 @@ changes after this snapshot require their own rechecks.
 | **Bootstrap 5.3.9 + Popper 2.11.8, computed-position checkpoint** | On measured `c74503c` at 1280/640, initialization/render/responsive layout pass, the menu opens and the trusted Amber-choice callback runs. | The menu remains visible after selection. The first microtask fault is `offsetParent` at 1994:12. Input remains failed at both widths. | [PR #69](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/69) integrates live computed `position` reads from the rendering cascade. |
 | **Bootstrap 5.3.9 + Popper 2.11.8, offset-parent checkpoint** | On measured `96666d3` at 1280/640, initialization/render/responsive layout pass, the menu opens and the trusted Amber-choice callback runs. | The menu remains visible after selection. The first microtask fault is `scrollLeft` at 3154:19. Input remains failed at both widths. | [PR #71](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/71) integrates layout-backed `offsetParent` identities. |
 | **Bootstrap 5.3.9 + Popper 2.11.8, scroll-offset checkpoint** | Qualified feature `e7be7cd` passes 2,732 normal tests and 25 journeys locally and in CI. At 1280/640 the unchanged sample initializes, renders responsively, opens its menu and runs the trusted Amber choice. | The chosen menu remains visible. The first microtask fault is `offsetLeft` at 1927:10. Input remains failed at both widths. | [PR #72](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/72) integrates at `main` `13f5cd4`. These captures retain feature source `e7be7cd`. Relative offset coordinates are the next capability after PR #71's offset-parent identities. |
+| **Bootstrap 5.3.9 + Popper 2.11.8, integrated dropdown** | On clean integrated `ec7db2f`, load, startup, initial render, trusted open/Amber-choice/close and responsive cards pass at 1280×800 and 640×800, with zero script errors: 2/2 selected configurations. Open and closed states have paired DOM and pixel evidence. | One pinned offline app; async is not applicable and reference interaction was not run. Whole-framework support remains unproved. | Integrated [PR #74](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/74) offsets, [PR #75](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/75) translations and [PR #76](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/76) contains. Exact build and capture digests are in the [catalogue](compatibility.json). |
 | **Original CSS-variable box reduction** | PR #31 changes the box from 80×30 to 104×46, matching a literal control's opaque pixels, anchor hits and live reflow | Supported padding/border values only; alpha colors, calc(), CSSOM and full Bootstrap styling unproved | [PR #31](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/31), candidate `5cd5e52` |
 | **Reference browser** | Initial DOM and pixel captures exist for the original fixture | Interactions were not run; no reference-interaction denominator | Initial-state comparison only |
 
@@ -83,6 +88,18 @@ is older than the later DOM/string/anchor/text-input/Event/CSS-variable changes.
 | **Computed overflow** | Resolved physical axes share the rendering cascade and rectangular paint/hit clipping. `7b8a5fb` advances to `assignedSlot` at 1979:7. | Initial element scroll positions only. Element scrolling and scrollbar widgets remain unimplemented. |
 | **Computed position and offset parents** | Integrated PR #69/#71 expose live computed `position` and supported layout-backed HTMLElement `offsetParent` identities. Measured `c74503c` reaches `offsetParent`, then `96666d3` reaches `scrollLeft`. | The menu remains visible after trusted selection at both widths. Scroll offsets and a completed dropdown workflow are not established by these runs. |
 | **Viewport scroll offsets** | PR #72 integrates at `13f5cd4`. Its qualified feature `e7be7cd` reads and writes the standard-document root's vertical scroll and returns zero for supported non-scrollable axes. Real App scrolling, pixels and hits are tested. | Nested element scrolling and scrollbar widgets remain outside this slice. The measured dropdown still reaches an unimplemented relative offset coordinate. |
+| **Offsets, translations and contains** | PR #74/#75/#76 preserve raw offset geometry, add bounded translated paint/hits and visual rectangles, and use genuine inclusive Node ancestry. Together, integrated `ec7db2f` completes the pinned dropdown at both widths. | Wider transforms, nested scrolling and whole-framework conformance remain outside this result. |
+
+The integrated menu crop is 225×39 px at both widths. Opening changes 8,760
+pixels; selection/closing changes 8,763 from the open state, with 7,631 returning
+to their loaded colors. The DOM records `Bootstrap dropdown open`, then
+`Bootstrap dropdown closed` and `Bootstrap trusted choice amber`. The cards are
+beside each other at 1280 and stacked at 640. These are transition measurements,
+not a claim that the final image equals the initial or a reference browser.
+
+A separate original native App probe on the same `ec7db2f` source still reaches
+missing `WeakMap` at 11:92. It is the next shared prerequisite; it is not a
+Bootstrap failure or evidence of modern Vue/React mounting.
 
 The separate padding comparison uses loaded captures from `5c89eea` and
 `e94388c`. At both widths the unchanged Bootstrap toggle grows from 167×29 to

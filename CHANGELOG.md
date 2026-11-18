@@ -15,32 +15,66 @@
 > original gaps and release-time procedures do not override the current roadmap
 > or imply that later source changes are present in an old download.
 
-## Unreleased
+## 0.81.0-alpha.3
 
-Integrated development through `a65d37c` on November 17, 2026 includes:
+A consolidated source catch-up since alpha.2, including the shared browser
+capabilities used by the selected Bootstrap dropdown workflow.
 
-- [PR #29](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/29): bounded
-  String.prototype.concat, finite hidden-input state, genuine Node.getRootNode
-  and independent legacy/modern compatibility fixtures.
-- [PR #30](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/30): scoped live
-  anchor HTTP(S) URL reflection.
-- [PR #32](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/32): staged native
-  text INPUT fragments, retained dirty/default values, Reset and focus retirement.
-  Its modern jQuery fixture initializes; the later Event correction below covers
-  the pinned trusted-input/timer workflow.
-- [PR #33](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/33): refreshed
-  README/roadmap presentation and explicit current CI/release boundaries.
-- [PR #31](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/31): bounded
-  inherited CSS custom properties for supported padding/border values, with
-  original pixel, hit-target and reflow evidence; broader styling remains partial.
-- [PR #34](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/34): ordinary
-  string/symbol property lookup for dispatched base Events, retaining native
-  state and access guards. The unchanged pinned modern jQuery app passes startup,
-  trusted input and asynchronous timer text update; no full-framework claim.
+At integrated source
+[`ec7db2f`](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/ec7db2f61cddb78c457b2966b72e1e362b89e66a),
+the unchanged pinned Bootstrap 5.3.9 / Popper 2.11.8 fixture initializes at
+1280 and 640 pixels. Cards form two columns at the wider viewport and stack at
+the narrower one. Trusted input opens the dropdown, selects amber, updates the
+visible state and closes the menu, with no recorded script fault. This is a
+selected offline workflow result; broader framework and live-site support remain
+unproved.
 
-These changes are newer than the fixed alpha.2 assets. No next release version or
-publication date is reserved. Named releases remain owner-request-only; current
-local/hosted checks and agent-owned failure diagnosis remain in place.
+- Extend shared DOM operations with atomic DocumentFragment insertion, canonical
+  Element queries, static/live NodeList iteration, sibling traversal, bounded
+  selector negation and HTML disabledness, and live Node.contains ancestry.
+  Ordinary-tree assignedSlot, Text construction and concrete DOM object strings
+  retain genuine node identities and existing owner/realm checks.
+- Extend hidden-input state, native text INPUT/BUTTON creation and reflection,
+  and movement of existing checkboxes through real trees and fragments. Staged publication
+  preserves edited/default values, selection, Reset, ownership and neighboring
+  controls, with atomic refusal for unsupported mutations. Anchor HTTP(S) URL
+  reflection retains raw attributes, effective bases and navigation guards.
+- Add bounded String.prototype.concat, ordinary object-prototype access, finite
+  base and Script-derived class construction, super and lexical new.target.
+  Ordinary Document and dispatched base-Event properties retain their native
+  access boundaries. The pinned modern jQuery app passes startup, trusted input
+  and its asynchronous timer text update.
+- Resolve bounded CSS custom properties for supported padding, borders,
+  background, foreground and font-size values. Composite supported RGBA borders
+  over the painted backdrop and honor native button padding, with actual App
+  pixel, geometry and hit-target controls.
+- Add live computed custom-property, overflow, position and transform readback;
+  real offsetParent and parent-relative offsetLeft/offsetTop; and viewport vertical
+  scroll offset access. Bounded CSS translations share cascade, layout, painting,
+  clipping and input geometry, including identity transforms and containing
+  blocks. Offset coordinates remain based on untransformed layout.
+- Repair document-worker completion and expose development source identity in
+  build information. Keep source-bound local/hosted checks and explicit resource,
+  allocation, origin and ownership limits across these additions.
+
+Earlier integrated source checkpoints:
+[PR #29](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/29),
+[PR #30](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/30),
+[PR #31](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/31),
+[PR #32](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/32),
+[PR #33](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/33) and
+[PR #34](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/34).
+
+CSS syntax, DOM/CSSOM coverage and child-frame geometry remain finite. Transform
+support covers admitted translations, including translate3d with zero z; general
+rotation, scaling and 3D transforms remain unsupported. Nested element scrolling
+and scrollbar widgets remain outside this slice. These results do not establish
+complete modern/legacy jQuery, Vue or React support.
+
+Versioned source notes do not establish publication. Exact-source release gates
+and delivered-asset checks remain required; publication.json and SHA256SUMS
+identify the eventual release source and bytes. No installer or automatic update
+mechanism is added.
 
 ## 0.81.0-alpha.2
 

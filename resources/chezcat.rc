@@ -18,11 +18,11 @@ BEGIN
         BLOCK "040904b0"
         BEGIN
             VALUE "FileDescription", "ChezCat web browser\0"
-            VALUE "FileVersion", "0.81.0-alpha.2\0"
+            VALUE "FileVersion", "0.81.0-alpha.3\0"
             VALUE "InternalName", "ChezCat\0"
             VALUE "OriginalFilename", "ChezCat.exe\0"
             VALUE "ProductName", "ChezCat\0"
-            VALUE "ProductVersion", "0.81.0-alpha.2\0"
+            VALUE "ProductVersion", "0.81.0-alpha.3\0"
         END
     END
     BLOCK "VarFileInfo"

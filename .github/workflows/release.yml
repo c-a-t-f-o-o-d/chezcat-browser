@@ -64,6 +64,7 @@ jobs:
           package.approve_license(os.environ['LICENSE_SHA256'], tag, commit)
           with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as out:
               out.write('source_commit=' + commit + '\n')
+              out.write('declared_build_tag=' + tag + '\n')
       # This owner-only job records the owner's maintainer-run authorization.
       # It neither supplies external contributor assent nor uploads the receipt.
       - name: Explicit owner-authorized acceptance for this maintainer release run
@@ -77,6 +78,8 @@ jobs:
         run: python tools/check_public_ci_summary.py
       - name: Normal suite, optimized build, PE and all local journeys
         id: normal
+        env:
+          CHEZCAT_DECLARED_BUILD_TAG: ${{ steps.identity.outputs.declared_build_tag }}
         run: python tools/verify_offline.py
       - name: Public-safe native failure summary
         if: failure() && steps.normal.outcome == 'failure'
