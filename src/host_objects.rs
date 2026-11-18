@@ -81,7 +81,15 @@ impl Runtime {
                         }
                     }
                 }
-                if name=="Element" {self.define_element_sibling_getters(prototype,window,"Element")?;}
+                if name=="Element" {
+                    self.define_element_sibling_getters(prototype,window,"Element")?;
+                    for (key,operation) in [("querySelector","\0Element.querySelector"),("querySelectorAll","\0Element.querySelectorAll")] {
+                        let method=self.allocate_host_function_with_length(window,operation,1).map_err(Fault::new)?;
+                        if let Some(Function::Host {receiver_required,..})=self.functions.get_mut(method.id) {*receiver_required=true;}
+                        self.store_property(self.function_properties[method.id],"name".into(),Value::String(key.into()),Some((false,false,true)))?;
+                        self.store_property(prototype,key.into(),Value::Function(method.id),Some((true,true,true)))?;
+                    }
+                }
                 self.put_binding(self.global_environment,name.into(),Some(constructor),super::Declaration::Var,false)?;
                 self.global_attributes.insert(name.into(),(false,true,true));
                 self.native_constructor_prototypes.insert((window,name),prototype);
