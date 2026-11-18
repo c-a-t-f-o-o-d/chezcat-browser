@@ -8407,6 +8407,10 @@ impl Runtime {
             if let Some(Value::Host(handle))=args.get(index) {self.validate_native_access(*handle,host)?;}
         }
         if host.synchronous_event_dispatch(object,method) {host.prepare_event_dispatch().map_err(Fault::new)?;}
+        // Conversion may run author code in a different realm. Preflight
+        // checks must see this call's incumbent, even after a refused call.
+        host.native_operation_caller(self.native_access_caller
+            .unwrap_or_else(|| self.browser_global.map(|(window, _)| window)));
         if let Err((kind,message))=host.validate_call(object,method,args) {
             // Finite media controls distinguish genuine class identity from an
             // unavailable player without forging a successful empty player.

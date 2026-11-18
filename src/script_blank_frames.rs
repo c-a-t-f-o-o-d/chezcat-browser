@@ -155,6 +155,45 @@ impl Bridge<'_> {
             .then(||window(index))
     }
 
+    pub(super) fn frame_contains_node(&self, handle: u32) -> Option<(u32, usize)> {
+        let (index, offset) = frame_handle(handle)?;
+        let node = match offset { 1 => 0, 4..=6 => (offset - 3) as usize, _ => return None };
+        let frame = self.state.blank_frames.get(index)?;
+        frame.document.nodes.get(node).map(|_| (window(index), node))
+    }
+
+    pub(super) fn contains_child_document(&self, owner: u32) -> Result<&Document, String> {
+        let (index, 0) = frame_handle(owner).ok_or("Unknown child document owner.")? else {
+            return Err("Expected the owning child Window.".into());
+        };
+        self.frame_window_access(self.state.navigation_incumbent.or(Some(WINDOW)), owner)?;
+        let frame = self.state.blank_frames.get(index).ok_or("Unknown child document.")?;
+        if !frame.connected {
+            return Err("Retained child document teardown is unavailable.".into());
+        }
+        Ok(&frame.document)
+    }
+
+    pub(super) fn contains_node_identity(
+        &self, handle: u32,
+    ) -> Result<script_node_contains::ContainsNode, (&'static str, String)> {
+        use script_node_contains::ContainsNode;
+        let caller = self.state.navigation_incumbent;
+        if let Some((owner, node)) = self.frame_contains_node(handle) {
+            self.frame_window_access(caller.or(Some(WINDOW)), owner)
+                .map_err(|message| ("SecurityError", message))?;
+            self.contains_child_document(owner).map_err(|message| ("NotSupportedError", message))?;
+            return Ok(ContainsNode::Child { owner, node });
+        }
+        if caller.is_some_and(|window| window != WINDOW) {
+            self.frame_window_access(caller, WINDOW).map_err(|message| ("SecurityError", message))?;
+        }
+        if handle == DOCUMENT { return Ok(ContainsNode::Main(0)); }
+        if self.attr_receiver(handle) { return Ok(ContainsNode::Attr); }
+        node_index(handle).filter(|&node| self.dom_accessible(node)).map(ContainsNode::Main)
+            .ok_or_else(|| ("TypeError", "Node.contains requires a genuine accessible Node.".into()))
+    }
+
     pub(super) fn frame_position_path(&mut self, handle: u32) -> Option<Result<super::script_position::PositionPath, String>> {
         let (index, offset) = frame_handle(handle)?;
         Some((|| {
