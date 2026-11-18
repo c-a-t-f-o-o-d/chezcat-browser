@@ -15,6 +15,8 @@ mod overflow;
 pub use overflow::{Overflow, OverflowValue};
 #[path="css_position.rs"]
 mod position;
+#[path="css_box_spacing.rs"]
+mod box_spacing;
 #[path="css_radius.rs"]
 mod radius;
 #[cfg(test)]
@@ -33,6 +35,7 @@ use crate::html::{Document, NodeKind};
 const INITIAL_FONT_SIZE: f32 = 16.0;
 
 const MAX_DECLARATIONS: usize = 4096;
+const MAX_GROUPED_BOX_BYTES: usize = 2048;
 const MAX_SELECTOR_BYTES: usize = 512;
 const MAX_SELECTOR_NESTING: usize = 8;
 const MAX_MATCH_STEPS: usize = 128_000_000;
@@ -2759,6 +2762,10 @@ fn parse_length(value: &str, auto: bool, negative: bool) -> Option<Length> {
     if !number.is_finite() || (!negative && number < 0.0) || (unit.is_empty() && number != 0.0) {
         return None;
     }
+    length_with_unit(number, unit)
+}
+
+fn length_with_unit(number: f32, unit: &str) -> Option<Length> {
     let number = number.clamp(-10_000.0, 10_000.0);
     Some(match unit {
         "%" => Length::Percent(number),
@@ -2766,7 +2773,8 @@ fn parse_length(value: &str, auto: bool, negative: bool) -> Option<Length> {
         "rem" => Length::Rem(number),
         "pt" => Length::Px(number * (96.0 / 72.0)),
         "pc" => Length::Px(number * 16.0),
-        _ => Length::Px(number),
+        "px" | "" => Length::Px(number),
+        _ => return None,
     })
 }
 
@@ -3241,12 +3249,12 @@ fn apply(style: &mut Style, parent: &Style, declaration: &Declaration) {
             }
         }
         "margin" => {
-            if let Some(values) = lengths(&value, true, true) {
+            if let Some(values) = box_spacing::shorthand(&value, true) {
                 style.margin = values;
             }
         }
         "padding" => {
-            if let Some(values) = lengths(&value, false, false) {
+            if let Some(values) = box_spacing::shorthand(&value, false) {
                 style.padding = values;
             }
         }
@@ -3437,11 +3445,11 @@ fn apply(style: &mut Style, parent: &Style, declaration: &Declaration) {
         name => {
             for (side, index) in [("top", 0), ("right", 1), ("bottom", 2), ("left", 3)] {
                 if name == format!("margin-{side}") {
-                    if let Some(value) = parse_length(&value, true, true) {
+                    if let Some(value) = box_spacing::length(&value, true) {
                         style.margin[index] = value;
                     }
                 } else if name == format!("padding-{side}") {
-                    if let Some(value) = parse_length(&value, false, false) {
+                    if let Some(value) = box_spacing::length(&value, false) {
                         style.padding[index] = value;
                     }
                 } else if name == format!("border-{side}") {
@@ -3485,7 +3493,7 @@ fn apply_border(style: &mut Style, side: Option<usize>, value: &str) {
 // rgba() at its internal spaces would turn a single color into several tokens.
 // The existing declaration/output limit also bounds this finite scanner.
 fn border_parts(value:&str)->Option<Vec<&str>> {
-    if value.len()>2048 {return None;}
+    if value.len()>MAX_GROUPED_BOX_BYTES {return None;}
     let mut result=Vec::new();let mut start=None;let mut depth=0usize;
     for (index,ch) in value.char_indices() {
         if ch.is_ascii_whitespace() && depth==0 {

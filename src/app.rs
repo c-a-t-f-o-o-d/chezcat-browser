@@ -4501,6 +4501,46 @@ mod tests {
     static SERIAL: AtomicUsize = AtomicUsize::new(0);
 
     #[test]
+    fn calculated_box_gutters_match_literal_geometry_paint_and_link_hits() {
+        let files = Fixture::new();
+        let path = files.write("gutters.html", r##"<!doctype html><html><head><style>
+            html,body{margin:0;padding:0;background:white}
+            .row{width:200px;display:flex;--gutter:1.5rem}
+            .column{width:100px;box-sizing:border-box}
+            .literal .column{padding-left:12px;padding-right:12px}
+            .calculated .column{padding-left:calc(var(--gutter) * .5);padding-right:calc(.5 * var(--gutter))}
+            a{display:block;height:20px;background:#336699}
+            </style></head><body>
+            <div class="literal row"><div class=column><a id=a href="#a"></a></div><div class=column><a id=b href="#b"></a></div></div>
+            <div class="calculated row"><div class=column><a id=c href="#c"></a></div><div class=column><a id=d href="#d"></a></div></div>
+            </body></html>"##);
+        let mut app = App::new();
+        app.resize(640, 480);
+        app.open(&path);
+        assert!(!app.failed && !app.is_loading(), "{}", app.status);
+        let canvas = app.draw();
+        for (ids, top) in [(["a", "b"], 0), (["c", "d"], 20)] {
+            let nodes = ids.map(|id| (0..app.document.nodes.len())
+                .find(|&n| app.document.attr(n, "id") == Some(id)).unwrap());
+            for (&node, x) in nodes.iter().zip([12, 112]) {
+                let r = app.page.border_rects[node].unwrap();
+                assert_eq!((r.x, r.y, r.width, r.height), (x, top, 76, 20));
+            }
+            let y = top + 10;
+            for x in 0..200 {
+                let expected_link = match x {
+                    12..=87 => Some(nodes[0]),
+                    112..=187 => Some(nodes[1]),
+                    _ => None,
+                };
+                let pixel = canvas.pixels[(app.content_top() + y) as usize * canvas.width + x as usize];
+                assert_eq!(pixel, if expected_link.is_some() { 0x336699 } else { 0xffffff }, "x={x}, y={y}");
+                assert_eq!(app.page.link_node_at(x, y), expected_link, "x={x}, y={y}");
+            }
+        }
+    }
+
+    #[test]
     fn responsive_density_and_object_fit_reach_layout_paint_links_and_image_controls() {
         let files = Fixture::new();
         let picture="data:image/x-portable-pixmap,P3%204%202%20255%20255%200%200%200%20255%200%200%200%20255%20255%20255%20255%200%200%200%20255%20255%200%20255%200%20255%200%20255%20255";
