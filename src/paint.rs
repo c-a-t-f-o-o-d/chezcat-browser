@@ -8,6 +8,8 @@ const MAX_CANVAS_PIXELS: usize = 64 * 1024 * 1024;
 
 #[path = "paint_area.rs"]
 mod area;
+#[path = "paint_radius.rs"]
+mod radius;
 
 #[cfg(test)]
 #[path = "paint_resample_tests.rs"]

@@ -66,7 +66,7 @@ enum Value {
 
 // A CSS number, not Rust's wider floating-point spelling grammar. The suffix
 // remains separate, so an exponent cannot consume the 'e' in an em unit.
-fn number_end(source: &str) -> Option<usize> {
+pub(super) fn number_end(source: &str) -> Option<usize> {
     let bytes = source.as_bytes();
     let mut end = usize::from(matches!(bytes.first(), Some(b'+') | Some(b'-')));
     let start = end;
@@ -102,7 +102,7 @@ fn number_end(source: &str) -> Option<usize> {
     Some(end)
 }
 
-fn length(source: &str, percentage: bool) -> Result<Length, TransformSyntax> {
+pub(super) fn length(source: &str, percentage: bool) -> Result<Length, TransformSyntax> {
     let source = trim(source);
     if source.contains('(') {
         math_value(source)?;

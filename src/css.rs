@@ -15,6 +15,8 @@ mod overflow;
 pub use overflow::{Overflow, OverflowValue};
 #[path="css_position.rs"]
 mod position;
+#[path="css_radius.rs"]
+mod radius;
 #[path="css_translate.rs"]
 mod translate;
 pub use translate::Transform;
@@ -325,6 +327,9 @@ pub struct Style {
     /// Border-only straight alpha. Other CSS color consumers remain opaque.
     pub border_alpha: [u8; 4],
     pub border_solid: [bool; 4],
+    /// Clockwise from top-left. None preserves an unsupported winning radius.
+    /// The current paint consumer admits equal circular absolute values only.
+    pub border_radius: [Option<Length>; 4],
     pub width: Length,
     pub max_width: Option<Length>,
     pub height: Length,
@@ -382,6 +387,7 @@ impl Default for Style {
             border_color: [None; 4],
             border_alpha: [255; 4],
             border_solid: [false; 4],
+            border_radius: [Some(Length::Px(0.0)); 4],
             width: Length::Auto,
             max_width: None,
             height: Length::Auto,
@@ -405,6 +411,10 @@ impl Default for Style {
 }
 
 impl Style {
+    pub(crate) fn circular_radius(&self) -> Option<f32> {
+        radius::uniform(self.border_radius)
+    }
+
     fn inherited(parent: &Self) -> Self {
         Self {
             color: parent.color,
@@ -1067,12 +1077,14 @@ fn compute_cascade(
         };
         style.position = computed_position;
         position_known[index] = known;
+        let mut has_radius = false;
         for (_, declaration) in &applicable {
             if declaration.name == "transform" {
                 continue;
             }
             if declaration.name == "position" { continue; }
             if let Some(meter) = meter.as_deref_mut() { meter.source(declaration.name.len().saturating_add(declaration.value.len()))?; }
+            if radius::property(&declaration.name) { has_radius = true; continue; }
             let mut apply_box = |budget: &mut custom_properties::Budget| {
                 if custom_properties::apply_overflow(&mut style,&parent,declaration,&variables[index],budget,&mut overflow_known[index],parent_overflow_known) {
                     true
@@ -1094,6 +1106,17 @@ fn compute_cascade(
         if tag == "html" {
             root_font_size = style.font_size;
             style.root_font_size = root_font_size;
+        }
+        if has_radius {
+            if let Some(meter) = meter.as_deref_mut() { meter.work(applicable.len())?; }
+            let resolve_radius = |budget: &mut custom_properties::Budget| {
+                radius::cascade(parent.border_radius, style.font_size, style.root_font_size,
+                    applicable.iter().rev().map(|(priority, declaration)| (*declaration, priority.1)),
+                    &variables[index], budget)
+            };
+            style.border_radius = if let Some(meter) = meter.as_deref_mut() {
+                meter.variables(&mut variable_budget, resolve_radius)?
+            } else { resolve_radius(&mut variable_budget) };
         }
         // Computed transform lengths use final font metrics, so inherited em
         // and rem translations retain the parent's absolute computed lengths.
