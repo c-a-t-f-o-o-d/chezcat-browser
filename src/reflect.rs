@@ -86,16 +86,19 @@ impl Runtime {
         }
     }
 
-    fn reflect_get_symbol(
+    pub(super) fn reflect_get_symbol(
         &mut self,
         object: Ordinary,
         key: usize,
         receiver: &Value,
         host: &mut dyn Host,
     ) -> Result<Value, Fault> {
-        let Some(owner) = self.symbol_property_owner(object, key)? else {
+        let Some(owner) = self.symbol_dispatch_owner(object, key)? else {
             return Ok(Value::Undefined);
         };
+        if self.objects[owner].proxy.is_some() {
+            return self.proxy_get(owner, PropertyKey::Symbol(key), receiver, host);
+        }
         let property = &self.objects[owner].symbol_properties[&key];
         if let Some(accessor) = property.accessor {
             let receiver = if accessor.get.is_some() {
@@ -179,7 +182,7 @@ impl Runtime {
         }
         let key = self.copy_value(args.get(1).unwrap_or(&Value::Undefined))?;
         let key = self.property_key(key, host)?;
-        let Some(mut current) = base else {
+        let Some(base) = base else {
             self.reject_foreign_window(target, host)?;
             return Err(Fault::new(
                 "Reflect.set on a native target is not implemented.",
@@ -188,9 +191,18 @@ impl Runtime {
         let value = args.get(2).unwrap_or(&Value::Undefined);
         let receiver = args.get(3).unwrap_or(target);
         self.reject_foreign_window(receiver, host)?;
+        Ok(Value::Bool(self.reflect_set_key(base, key, value, receiver, host)?))
+    }
+
+    #[inline(never)]
+    pub(super) fn reflect_set_key(&mut self, mut current: Ordinary, key: PropertyKey, value: &Value,
+                                 receiver: &Value, host: &mut dyn Host) -> Result<bool, Fault> {
         loop {
             self.step()?;
             let id = self.ordinary_id(current)?;
+            if self.objects[id].proxy.is_some() {
+                return self.proxy_set(id, key, value, receiver, host);
+            }
             if !self.uses_stored_property_descriptors(id) {
                 return Err(Fault::new(
                     "Reflect.set on this exotic prototype or target is not implemented.",
@@ -199,14 +211,14 @@ impl Runtime {
             if let Some(property) = self.stored_descriptor_property(id, &key) {
                 if let Some(accessor) = property.accessor {
                     let Some(setter) = accessor.set else {
-                        return Ok(Value::Bool(false));
+                        return Ok(false);
                     };
                     let receiver = self.copy_value(receiver)?;
                     self.call_accessor(Some(setter), receiver, std::slice::from_ref(value), host)?;
-                    return Ok(Value::Bool(true));
+                    return Ok(true);
                 }
                 if property.getter.is_some() || !property.writable {
-                    return Ok(Value::Bool(false));
+                    return Ok(false);
                 }
                 break;
             }
@@ -221,18 +233,21 @@ impl Runtime {
             ));
         }
         let Some(receiver) = Ordinary::from_value(receiver) else {
-            return Ok(Value::Bool(false));
+            return Ok(false);
         };
         let id = self.ordinary_id(receiver)?;
+        if self.objects[id].proxy.is_some() {
+            return self.proxy_receiver_set_data(id, key, value, host);
+        }
         if !self.uses_stored_property_descriptors(id) {
             return Err(Fault::new(
                 "Reflect.set on this exotic data receiver is not implemented.",
             ));
         }
-        Ok(Value::Bool(self.set_stored_receiver_data(
+        self.set_stored_receiver_data(
             id,
             key,
             |runtime| runtime.copy_value(value),
-        )?))
+        )
     }
 }

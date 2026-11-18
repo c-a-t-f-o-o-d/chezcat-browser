@@ -10,7 +10,7 @@
 #[cfg(test)]
 use super::MAX_STRING_BYTES;
 use super::{
-    Accessors, Builtin, Fault, Host, NativeGetter, Ordinary, Property, Runtime, Value,
+    Accessors, Builtin, Fault, Host, NativeGetter, Ordinary, Property, PropertyKey, Runtime, Value,
 };
 #[cfg(test)]
 use super::{MAX_OBJECT_PROPERTIES, MAX_PROPERTIES, MAX_RETAINED_VALUES};
@@ -279,7 +279,7 @@ impl Runtime {
         Ok(None)
     }
 
-    pub(super) fn symbol_property_owner(
+    pub(super) fn symbol_dispatch_owner(
         &mut self,
         mut object: Ordinary,
         key: usize,
@@ -289,7 +289,7 @@ impl Runtime {
             self.step()?;
             let id = self.ordinary_id(object)?;
             let data = self.object(id)?;
-            if data.symbol_properties.contains_key(&key) {
+            if data.proxy.is_some() || data.symbol_properties.contains_key(&key) {
                 return Ok(Some(id));
             }
             let Some(parent) = data.prototype else {
@@ -323,6 +323,13 @@ impl Runtime {
     pub(super) fn receiver_symbol_owner(
         &mut self, receiver: &Value, object: Ordinary, key: usize, host: &dyn Host,
     ) -> Result<Option<usize>, Fault> {
+        let owner = self.receiver_symbol_dispatch_owner(receiver, object, key, host)?;
+        self.ordinary_descriptor_owner(owner)
+    }
+
+    fn receiver_symbol_dispatch_owner(
+        &mut self, receiver: &Value, object: Ordinary, key: usize, host: &dyn Host,
+    ) -> Result<Option<usize>, Fault> {
         if let Value::Host(window) = receiver {
             if self.symbol_to_string_tag == Some(key) && self.is_browser_global(*window) {
                 let id = self.ordinary_id(object)?;
@@ -330,11 +337,11 @@ impl Runtime {
                     return Ok(Some(id));
                 }
                 if let Some(tag) = self.bound_window_tag_backing(*window, host)? {
-                    return self.symbol_property_owner(tag, key);
+                    return self.symbol_dispatch_owner(tag, key);
                 }
             }
         }
-        self.symbol_property_owner(object, key)
+        self.symbol_dispatch_owner(object, key)
     }
 
     pub(super) fn get_symbol_property(
@@ -364,9 +371,12 @@ impl Runtime {
             && !self.objects[self.ordinary_id(object)?].symbol_properties.contains_key(&key) {
             return Err(Fault::new("Native concrete interface tags are not implemented for this ancestry-only receiver."));
         }
-        let Some(owner) = self.receiver_symbol_owner(&receiver, object, key, host)? else {
+        let Some(owner) = self.receiver_symbol_dispatch_owner(&receiver, object, key, host)? else {
             return Ok(Value::Undefined);
         };
+        if self.objects[owner].proxy.is_some() {
+            return self.proxy_get(owner, PropertyKey::Symbol(key), &receiver, host);
+        }
         let property = &self.objects[owner].symbol_properties[&key];
         if let Some(accessor) = property.accessor {
             return self.call_accessor(accessor.get, receiver, &[], host);
@@ -413,7 +423,10 @@ impl Runtime {
                 )),
             },
         };
-        if let Some(owner) = self.receiver_symbol_owner(&receiver, object, key, host)? {
+        if let Some(owner) = self.receiver_symbol_dispatch_owner(&receiver, object, key, host)? {
+            if self.objects[owner].proxy.is_some() {
+                return self.assign_via_proxy(owner, PropertyKey::Symbol(key), &value, &receiver, host);
+            }
             let property = &self.objects[owner].symbol_properties[&key];
             if let Some(accessor) = property.accessor {
                 if accessor.set.is_some() {
@@ -572,6 +585,7 @@ impl Runtime {
         id: usize,
         enumerable_only: bool,
     ) -> Result<Vec<usize>, Fault> {
+        self.reject_unsupported_proxy_operation(id, "ownKeys")?;
         let count = self.object(id)?.symbol_properties.len();
         self.work_as(count.saturating_mul(std::mem::size_of::<(usize, usize)>()), super::WorkKind::PropertyEnumeration)?;
         let mut keys = self.objects[id]

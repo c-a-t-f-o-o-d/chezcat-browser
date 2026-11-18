@@ -5,7 +5,7 @@
 //! ECMAScript references: OrdinaryGet/SetPrototypeOf, OrdinaryHasInstance,
 //! Object.create/getPrototypeOf/setPrototypeOf, and ordinary property descriptors.
 //! Accessors use the original receiver and share the normal execution budgets.
-//! Proxies remain an explicit limitation.
+//! Proxy prototype queries use the live internal method in proxy_operations.
 
 use super::{
     strict_equal, Accessors, Builtin, Fault, Function, Host, Ordinary, PropertyKey, Runtime,
@@ -78,7 +78,7 @@ impl Runtime {
             Builtin::Rect(operation) => operation.arity(),
             Builtin::DomException(operation) => operation.arity(),
             Builtin::EmptyFunction | Builtin::ThrowTypeError => 0,
-            Builtin::RegExp | Builtin::ParseInt | Builtin::JsonParse | Builtin::ReflectGet => 2,
+            Builtin::Proxy | Builtin::RegExp | Builtin::ParseInt | Builtin::JsonParse | Builtin::ReflectGet => 2,
             Builtin::JsonStringify | Builtin::ReflectSet => 3,
             Builtin::Math("random") => 0,
             Builtin::Math("atan2" | "hypot" | "imul" | "max" | "min" | "pow") => 2,
@@ -468,7 +468,9 @@ impl Runtime {
     }
 
     pub(super) fn ordinary_prototype(&self, value: Ordinary) -> Result<Option<Ordinary>, Fault> {
-        Ok(self.object(self.ordinary_id(value)?)?.prototype)
+        let id = self.ordinary_id(value)?;
+        self.reject_unsupported_proxy_operation(id, "getPrototypeOf without an execution context")?;
+        Ok(self.objects[id].prototype)
     }
 
     pub(super) fn owns_property(&self, id: usize, name: &str) -> Result<bool, Fault> {
@@ -497,13 +499,24 @@ impl Runtime {
 
     pub(super) fn property_owner(
         &mut self,
+        value: Ordinary,
+        name: &str,
+    ) -> Result<Option<usize>, Fault> {
+        let owner = self.property_dispatch_owner(value, name)?;
+        self.ordinary_descriptor_owner(owner)
+    }
+
+    // A proxy intercepts a lookup even if its target lacks an own key. Only
+    // callers with a live receiver and execution context may dispatch the trap.
+    pub(super) fn property_dispatch_owner(
+        &mut self,
         mut value: Ordinary,
         name: &str,
     ) -> Result<Option<usize>, Fault> {
         loop {
             self.step()?;
             let id = self.ordinary_id(value)?;
-            if self.owns_property(id, name)? {
+            if self.objects[id].proxy.is_some() || self.owns_property(id, name)? {
                 return Ok(Some(id));
             }
             // Integer-indexed exotic objects do not consult their prototype
@@ -567,9 +580,13 @@ impl Runtime {
         host: &mut dyn Host,
     ) -> Result<Value, Fault> {
         self.property_name(name)?;
-        let Some(owner) = self.property_owner(object, name)? else {
+        let Some(owner) = self.property_dispatch_owner(object, name)? else {
             return Ok(Value::Undefined);
         };
+        if self.objects[owner].proxy.is_some() {
+            self.work(name.len())?;
+            return self.proxy_get(owner, PropertyKey::String(name.to_owned()), receiver, host);
+        }
         if let Some(accessor) = self.objects[owner]
             .properties
             .get(name)
@@ -626,7 +643,10 @@ impl Runtime {
             }
             return Ok(());
         }
-        if let Some(owner) = self.property_owner(object, &name)? {
+        if let Some(owner) = self.property_dispatch_owner(object, &name)? {
+            if self.objects[owner].proxy.is_some() {
+                return self.assign_via_proxy(owner, PropertyKey::String(name), &value, &receiver, host);
+            }
             if let Some(accessor) = self.objects[owner]
                 .properties
                 .get(&name)
@@ -687,7 +707,10 @@ impl Runtime {
         &mut self, base: Ordinary, name: String, value: Value, receiver: Value, host: &mut dyn Host,
     ) -> Result<(), Fault> {
         self.property_name(&name)?;
-        if let Some(owner) = self.property_owner(base, &name)? {
+        if let Some(owner) = self.property_dispatch_owner(base, &name)? {
+            if self.objects[owner].proxy.is_some() {
+                return self.assign_via_proxy(owner, PropertyKey::String(name), &value, &receiver, host);
+            }
             if let Some(accessor) = self.objects[owner].properties.get(&name).and_then(|property| property.accessor) {
                 if accessor.set.is_none() {
                     return if self.strict { Err(Fault::exception("TypeError", "The inherited property has no setter.")) } else { Ok(()) };
@@ -711,6 +734,10 @@ impl Runtime {
             return if self.strict { Err(Fault::exception("TypeError", "A super data receiver must be an object.")) } else { Ok(()) };
         };
         let id = self.ordinary_id(receiver)?;
+        if self.objects[id].proxy.is_some() {
+            let set = self.proxy_receiver_set_data(id, PropertyKey::String(name), &value, host)?;
+            return self.proxy_assignment_result(set);
+        }
         if self.uses_stored_property_descriptors(id) {
             let set = self.set_stored_receiver_data(id, PropertyKey::String(name), |_| Ok(value))?;
             return if !set && self.strict {
@@ -753,6 +780,7 @@ impl Runtime {
     ) -> Result<(), Fault> {
         self.step()?;
         let id = self.ordinary_id(object)?;
+        self.reject_unsupported_proxy_operation(id, "setPrototypeOf")?;
         if self.objects[id].prototype == prototype {
             return Ok(());
         }
@@ -777,7 +805,13 @@ impl Runtime {
                     "A prototype chain cannot contain a cycle.",
                 ));
             }
-            current = self.ordinary_prototype(parent)?;
+            // OrdinarySetPrototypeOf stops its cycle check at an exotic
+            // [[GetPrototypeOf]]. Installing a proxy never calls its trap.
+            let parent_id = self.ordinary_id(parent)?;
+            if self.objects[parent_id].proxy.is_some() {
+                break;
+            }
+            current = self.objects[parent_id].prototype;
         }
         self.objects[id].prototype = prototype;
         Ok(())
@@ -787,14 +821,16 @@ impl Runtime {
         &mut self,
         object: Ordinary,
         prototype: Ordinary,
+        host: &mut dyn Host,
     ) -> Result<bool, Fault> {
-        let mut current = self.ordinary_prototype(object)?;
+        let sought = prototype.value();
+        let mut current = self.prototype_with_host(object, &sought, host)?;
         while let Some(parent) = current {
             self.step()?;
             if parent == prototype {
                 return Ok(true);
             }
-            current = self.ordinary_prototype(parent)?;
+            current = self.prototype_with_host(parent, &sought, host)?;
         }
         Ok(false)
     }
@@ -857,6 +893,7 @@ impl Runtime {
     pub(super) fn own_descriptor(&mut self, object: Ordinary, name: &str) -> Result<Value, Fault> {
         self.property_name(name)?;
         let id = self.ordinary_id(object)?;
+        self.reject_unsupported_proxy_operation(id, "getOwnPropertyDescriptor")?;
         if !self.owns_property(id, name)? {
             return Ok(Value::Undefined);
         }
@@ -936,6 +973,7 @@ impl Runtime {
 
     fn own_symbol_descriptor(&mut self, object: Ordinary, key: usize) -> Result<Value, Fault> {
         let id = self.ordinary_id(object)?;
+        self.reject_unsupported_proxy_operation(id, "getOwnPropertyDescriptor")?;
         let Some(property) = self.objects[id].symbol_properties.get(&key) else {
             return Ok(Value::Undefined);
         };
@@ -998,6 +1036,7 @@ impl Runtime {
             Fault::new("Symbol properties of this native object are not implemented.")
         })?;
         let id = self.ordinary_id(object)?;
+        self.reject_unsupported_proxy_operation(id, "defineProperty")?;
         self.define_stored_property(id, PropertyKey::Symbol(key), descriptor)
     }
 
@@ -1237,6 +1276,7 @@ impl Runtime {
     ) -> Result<(), Fault> {
         self.property_name(&name)?;
         let id = self.ordinary_id(object)?;
+        self.reject_unsupported_proxy_operation(id, "defineProperty")?;
         if let Some(index) = self.string_object_index(id, &name) {
             let mut compatible = !descriptor.is_accessor()
                 && descriptor.enumerable != Some(false)
@@ -1407,6 +1447,7 @@ impl Runtime {
             });
         };
         let id = self.ordinary_id(object)?;
+        self.reject_unsupported_proxy_operation(id, method)?;
         self.work(
             self.objects[id]
                 .properties
@@ -1562,7 +1603,7 @@ impl Runtime {
                     Value::Symbol(_) => self.symbol_prototype.map(Ordinary::Object),
                     _ => {
                         let object = self.ordinary_required(first)?;
-                        self.ordinary_prototype(object)?
+                        self.prototype_with_host(object, &Value::Undefined, host)?
                     }
                 };
                 Ok(prototype.map_or(Value::Null, Ordinary::value))
@@ -1915,7 +1956,7 @@ impl Runtime {
             } else {
                 let object = if let Some(object) = Ordinary::from_value(&this) { object }
                     else { Ordinary::from_value(&self.box_primitive(this)?).unwrap() };
-                self.ordinary_prototype(object)?
+                self.prototype_with_host(object, &Value::Undefined, host)?
             };
             return Ok(prototype.map_or(Value::Null, Ordinary::value));
         }
@@ -2012,7 +2053,7 @@ impl Runtime {
                 let anchor=self.native_instance_anchor(*handle,host)?;
                 if matches!(this,Value::Null|Value::Undefined) {return Err(Fault::exception("TypeError","Cannot convert null or undefined to an object."));}
                 let Some(prototype)=Ordinary::from_value(&this) else {return Ok(Value::Bool(false));};
-                return Ok(Value::Bool(anchor==prototype || self.inherits_from(anchor,prototype)?));
+                return Ok(Value::Bool(anchor==prototype || self.inherits_from(anchor,prototype,host)?));
             }
             let Some(value) = args.first().and_then(Ordinary::from_value) else {
                 if matches!(args.first(), Some(Value::Host(_))) {
@@ -2031,7 +2072,7 @@ impl Runtime {
             let Some(prototype) = Ordinary::from_value(&this) else {
                 return Ok(Value::Bool(false));
             };
-            return self.inherits_from(value, prototype).map(Value::Bool);
+            return self.inherits_from(value, prototype, host).map(Value::Bool);
         }
         if method == "valueOf" {
             Self::require_property_receiver(&this)?;
@@ -2045,6 +2086,9 @@ impl Runtime {
         let key = self.copy_value(args.first().unwrap_or(&Value::Undefined))?;
         let key = self.property_key(key, host)?;
         Self::require_property_receiver(&this)?;
+        if let Value::Object(id) = &this {
+            self.reject_unsupported_proxy_operation(*id, "getOwnPropertyDescriptor")?;
+        }
         let key = match key {
             PropertyKey::Symbol(key) => {
                 let owned = if let Some(object) = self.symbol_backing(&this, host)? {
@@ -2244,7 +2288,7 @@ impl Runtime {
     }
 }
 
-fn same_value(left: &Value, right: &Value) -> bool {
+pub(super) fn same_value(left: &Value, right: &Value) -> bool {
     match (left, right) {
         (Value::Symbol(a), Value::Symbol(b)) => a == b,
         (Value::Number(a), Value::Number(b)) => {

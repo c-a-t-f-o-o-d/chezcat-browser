@@ -70,6 +70,7 @@ impl Runtime {
                 Some(Function::Host { constructible, .. }) => return Ok(*constructible),
                 Some(Function::Native(
                     Builtin::Object
+                    | Builtin::Proxy
                     | Builtin::Date(super::date::Op::Constructor)
                     | Builtin::Url(super::url_api::Op::Constructor(_))
                     | Builtin::Rect(super::rect_api::Op::Constructor(_))

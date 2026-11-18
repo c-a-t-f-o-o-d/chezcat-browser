@@ -22,6 +22,9 @@ mod base_class_lifetime_tests;
 #[cfg(test)]
 #[path = "weak_map_gc_tests.rs"]
 mod weak_map_gc_tests;
+#[cfg(test)]
+#[path = "proxy_object_gc_tests.rs"]
+mod proxy_object_gc_tests;
 
 #[derive(Clone, Copy, Debug)]
 pub(super) enum Edge { Object(usize), Function(usize), Environment(usize) }
@@ -407,6 +410,7 @@ impl Runtime {
         object.date.is_none() && object.url.is_none() && object.rect.is_none() && object.dom_exception.is_none() && object.primitive.is_none()
             && object.promise.is_none() && object.arguments.is_none() && object.binary.is_none() && object.collection.is_none()
             && object.iterator.is_none() && object.text.is_none() && object.regexp.is_none() && object.error_name.is_none()
+            && object.proxy.is_none()
     }
 
     fn trace_root_graph_array_policy(&self, exported: &[Value], include_registered_exports: bool,
@@ -474,6 +478,9 @@ impl Runtime {
                 // weak entries must not seed the collection, its keys or its values.
                 continue;
             }
+            // A wrapper is not an opaque native root. Its target/handler edges
+            // exist only after the wrapper is independently reached.
+            if object.proxy.is_some() { continue; }
             let plain = (object.length.is_none() || !keep_array_seeds) && Self::plain_array_storage(object);
             if object.promise.is_some() || conservative_candidates && !plain { graph.add(Edge::Object(id)); }
         }
@@ -527,7 +534,12 @@ impl Runtime {
                     let object = &self.objects[id];
                     meter.charge(32 + (object.properties.len() + object.symbol_properties.len()) * 4
                         + object.collection.as_ref().map_or(0, collections::Data::reachability_cost)
-                        + object.promise.as_ref().map_or(0, promises::Data::reachability_cost))?;
+                        + object.promise.as_ref().map_or(0, promises::Data::reachability_cost)
+                        + if object.proxy.is_some() { 2 } else { 0 })?;
+                    if let Some(proxy) = object.proxy {
+                        add(Edge::Object(proxy.target));
+                        add(Edge::Object(proxy.handler));
+                    }
                     if let Some(prototype) = object.prototype {
                         add(match prototype { Ordinary::Object(id) => Edge::Object(id), Ordinary::Function(id) => Edge::Function(id) });
                     }
