@@ -1798,7 +1798,11 @@
     "caption_comparison": "The automatic caption measures 104 by 48 pixels and wraps. Identical text at an explicit width of 220 pixels occupies one 24 pixel line. A constrained 80 pixel control wraps at both viewport widths.",
     "caption_fix_source": "5298918c6f98df3cc871c6ca1e1def381815f77d",
     "caption_fix_result": "At both widths the automatic caption occupies one 105 by 24 pixel line. Both 220 by 64 pixel crops match the explicit twin. The constrained control still wraps.",
-    "action_stack_on_caption_source": "At 640 pixels, the d-grid links remain side by side after gap-2 changes to gap-3. The literal and flex stacks match pixel for pixel with 8 and 16 pixel vertical gaps."
+    "action_stack_on_caption_source": "At 640 pixels, the d-grid links remain side by side after gap-2 changes to gap-3. The literal and flex stacks match pixel for pixel with 8 and 16 pixel vertical gaps.",
+    "implicit_grid_source": "e11acce392d6b8c8e0deec56e8b08a7639d312f2",
+    "implicit_grid_integrated_recheck": "067ac5edb64e26f39c2a3d816ecbb1cf0a023f3c",
+    "implicit_grid_result": "The two 160 by 40 action links and their 8 and 16 pixel row gaps match both control crops. A trusted click reaches the second link.",
+    "inline_alignment_on_grid_source": "A fixed 64 pixel link in a 192 pixel column stays at the start for center and end alignment. The initial paint matches the reported geometry, and the trusted click reaches the link at its painted location."
   },
   "completed_capability_packs": [
     {

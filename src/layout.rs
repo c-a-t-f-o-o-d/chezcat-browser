@@ -53,6 +53,10 @@ mod intrinsic_text_tests;
 #[path = "layout_implicit_grid_tests.rs"]
 mod implicit_grid_tests;
 
+#[cfg(test)]
+#[path = "layout_grid_alignment_tests.rs"]
+mod grid_alignment_tests;
+
 fn native_button_padding(kind: Option<Kind>) -> bool {
     matches!(kind, Some(Kind::Button | Kind::Submit | Kind::Reset))
 }

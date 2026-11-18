@@ -24,6 +24,9 @@ mod background_clip;
 pub use background_clip::BackgroundClip;
 #[path="css_line_height.rs"]
 mod line_height;
+#[path = "css_grid_alignment.rs"]
+mod grid_alignment;
+pub use grid_alignment::Justify;
 #[cfg(test)]
 #[path="css_height_variable_tests.rs"]
 mod height_variable_tests;
@@ -361,6 +364,8 @@ pub struct Style {
     pub align_content: FlexPack,
     pub align_items: FlexAlign,
     pub align_self: Option<FlexAlign>,
+    pub justify_items: Justify,
+    pub justify_self: Justify,
     pub flex_grow: f32,
     pub flex_shrink: f32,
     pub flex_basis: Length,
@@ -420,6 +425,8 @@ impl Default for Style {
             align_content: FlexPack::Stretch,
             align_items: FlexAlign::Stretch,
             align_self: None,
+            justify_items: Justify::Normal,
+            justify_self: Justify::Auto,
             flex_grow: 0.0,
             flex_shrink: 1.0,
             flex_basis: Length::Auto,
@@ -1100,6 +1107,7 @@ fn compute_cascade(
         let mut has_radius = false;
         let mut sheet_background_clip = Some(BackgroundClip::BorderBox);
         let mut sheet_line_height = parent.line_height;
+        let mut sheet_grid_alignment = (style.justify_items, style.justify_self);
         for (priority, declaration) in &applicable {
             if declaration.name == "transform" {
                 continue;
@@ -1115,7 +1123,9 @@ fn compute_cascade(
                 continue;
             }
             let mut apply_box = |budget: &mut custom_properties::Budget| {
-                if line_height::apply(&mut style,&parent,declaration,priority.1,&mut sheet_line_height,&variables[index],budget) {
+                if grid_alignment::apply(&mut style,&parent,declaration,priority.1,&mut sheet_grid_alignment,&variables[index],budget) {
+                    true
+                } else if line_height::apply(&mut style,&parent,declaration,priority.1,&mut sheet_line_height,&variables[index],budget) {
                     true
                 } else if background_clip::apply(&mut style,&parent,declaration,priority.1,&mut sheet_background_clip,&variables[index],budget) {
                     true

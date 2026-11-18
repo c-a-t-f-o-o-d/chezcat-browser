@@ -153,14 +153,12 @@ impl Engine<'_> {
                 .charge(0, children.saturating_mul(std::mem::size_of::<usize>()))
     }
 
-    fn grid_min_content(&mut self, child: usize, depth: usize) -> Option<i32> {
+    fn grid_intrinsic_size(&mut self, child: usize, depth: usize) -> Option<Intrinsic> {
         self.grid_budget.measuring = true;
         self.grid_budget.measurement_complete = true;
         let intrinsic = self.intrinsic(child, depth);
         self.grid_budget.measuring = false;
-        self.grid_budget
-            .measurement_complete
-            .then_some(intrinsic.minimum)
+        self.grid_budget.measurement_complete.then_some(intrinsic)
     }
 
     fn grid_skips(&self, node: usize) -> bool {
@@ -222,15 +220,249 @@ impl Engine<'_> {
                 } else if style.min_width == Length::Auto && style.overflow.x.scrollable() {
                     edges
                 } else {
-                    self.grid_min_content(child, depth + 1)?
+                    self.grid_intrinsic_size(child, depth + 1)?.minimum
                 };
                 minimum.saturating_add(margin[1] + margin[3])
             } else {
-                self.grid_min_content(child, depth + 1)?
+                self.grid_intrinsic_size(child, depth + 1)?.minimum
             };
             column = column.max(minimum).min(MAX_WIDTH);
         }
         Some(column)
+    }
+
+    fn grid_item_justify(&self, child: usize, parent: &Style) -> css::Justify {
+        match self.styles[child].justify_self {
+            css::Justify::Auto => parent.justify_items,
+            value => value,
+        }
+    }
+
+    fn grid_anonymous_width(
+        &mut self,
+        nodes: &[usize],
+        style: &Style,
+        width: i32,
+    ) -> Result<i32, ()> {
+        use css::Justify;
+        if matches!(style.justify_items, Justify::Normal | Justify::Stretch) {
+            return Ok(width);
+        }
+        if !matches!(
+            style.justify_items,
+            Justify::Start | Justify::Center | Justify::End
+        ) || !matches!(style.white_space, WhiteSpace::Normal | WhiteSpace::NoWrap)
+        {
+            return Err(());
+        }
+        if !self.grid_work(nodes.len()) {
+            return Err(());
+        }
+        let bytes = nodes
+            .iter()
+            .try_fold(0usize, |bytes, &node| {
+                bytes.checked_add(match &self.doc.nodes[node].kind {
+                    NodeKind::Text(text) => text.len(),
+                    _ => 0,
+                })
+            })
+            .ok_or(())?;
+        if !self.grid_work(bytes) || !self.grid_budget.charge(0, bytes) {
+            return Err(());
+        }
+        let mut text = String::new();
+        text.try_reserve_exact(bytes).map_err(|_| ())?;
+        for &node in nodes {
+            if let NodeKind::Text(value) = &self.doc.nodes[node].kind {
+                text.push_str(value);
+            }
+        }
+        let size = self.collapsed_text_intrinsic(&text, style);
+        Ok(width
+            .max(size.minimum)
+            .min(size.preferred)
+            .clamp(0, MAX_WIDTH))
+    }
+
+    // Compute only the used width. Retain the author's box-sizing, height and
+    // percentage edge references while the ordinary renderer builds the item.
+    fn grid_item_width(
+        &mut self,
+        child: usize,
+        parent: &Style,
+        width: i32,
+        depth: usize,
+    ) -> Result<Option<Length>, ()> {
+        use css::Justify;
+        let align = self.grid_item_justify(child, parent);
+        if align == Justify::Unavailable {
+            return Err(());
+        }
+        let style = &self.styles[child];
+        if style.width != Length::Auto {
+            return Ok(None);
+        }
+        let auto_margin = style.margin[1] == Length::Auto || style.margin[3] == Length::Auto;
+        let replaced = self.replaced_image(child) || forms::kind(self.doc, child).is_some();
+        let stretch = matches!(align, Justify::Stretch) || align == Justify::Normal && !replaced;
+        if replaced && (align != Justify::Stretch || auto_margin) {
+            return Ok(None);
+        }
+        if stretch && !auto_margin && !replaced && align != Justify::Stretch {
+            return Ok(None);
+        }
+        if !self.grid_work(1) {
+            return Err(());
+        }
+        let intrinsic = if stretch && !auto_margin {
+            None
+        } else {
+            Some(self.grid_intrinsic_size(child, depth + 1).ok_or(())?)
+        };
+        let style = &self.styles[child];
+        let padding = self.edges(style.padding, width, style, false);
+        let border = self.border(style, width);
+        let kind = forms::kind(self.doc, child);
+        let edges = if kind.is_some() && !self.loaded_image_control(child) {
+            if native_button_padding(kind) {
+                padding[1] + padding[3]
+            } else {
+                0
+            }
+        } else {
+            padding[1] + padding[3] + border[1] + border[3]
+        };
+        let margin = self.edges(style.margin, width, style, true);
+        let room = width.saturating_sub(margin[1] + margin[3] + edges).max(0);
+        let desired = intrinsic.map_or(room, |size| {
+            room.max((size.minimum - edges).max(0))
+                .min((size.preferred - edges).max(0))
+        });
+        let desired = self
+            .constrained(
+                desired,
+                style.min_width,
+                style.max_width,
+                Some(width),
+                style,
+                edges,
+            )
+            .min(MAX_WIDTH);
+        Ok(Some(Length::Px(
+            (desired + if style.border_box { edges } else { 0 }) as f32 / self.zoom,
+        )))
+    }
+
+    fn grid_span_work(span: Span) -> usize {
+        let (a, b) = (span.start, span.end);
+        (b.runs - a.runs)
+            .saturating_add(b.items - a.items)
+            .saturating_add(b.atoms - a.atoms)
+            .saturating_add(b.controls - a.controls)
+            .saturating_add(b.anchors - a.anchors)
+            .saturating_add(b.boxes - a.boxes)
+            .saturating_add(b.pending - a.pending)
+            .saturating_add(b.decorations - a.decorations)
+    }
+
+    fn grid_item_inline_position(
+        &mut self,
+        child: usize,
+        parent: &Style,
+        left: i32,
+        width: i32,
+        span: Span,
+    ) -> bool {
+        use css::Justify;
+        let align = self.grid_item_justify(child, parent);
+        if align == Justify::Unavailable {
+            return false;
+        }
+        let style = &self.styles[child];
+        let auto_left = style.margin[3] == Length::Auto;
+        let auto_right = style.margin[1] == Length::Auto;
+        if align == Justify::Normal
+            && style.justify_self == Justify::Auto
+            && parent.justify_items == Justify::Normal
+            && !auto_left
+            && !auto_right
+        {
+            return true;
+        }
+        if !self.grid_work(
+            Self::grid_span_work(span)
+                .saturating_mul(2)
+                .saturating_add(1),
+        ) {
+            return false;
+        }
+        let bounds = if let Some(record) = &self.boxes[child] {
+            Some((
+                record.x,
+                record.width
+                    + record.padding[1]
+                    + record.padding[3]
+                    + record.border[1]
+                    + record.border[3],
+            ))
+        } else if let Some(control) = self.layout.controls[span.start.controls..span.end.controls]
+            .iter()
+            .find(|c| c.node == child)
+        {
+            Some((control.x, control.width))
+        } else {
+            self.layout.items[span.start.items..span.end.items]
+                .iter()
+                .find_map(|item| {
+                    if let PaintItem::Image { node, x, width, .. } = item {
+                        if *node == child {
+                            return self.layout.client_boxes[child].map(|client| {
+                                (
+                                    *x - client.padding[3] - client.left,
+                                    *width + client.width + client.left + client.right,
+                                )
+                            });
+                        }
+                    }
+                    None
+                })
+        };
+        let Some((actual_left, border_width)) = bounds else {
+            // A zero-sized replaced item has no paint box. Other unknown boxes
+            // retain their bounded fallback and decline complete grid geometry.
+            return self.replaced_image(child) || forms::kind(self.doc, child).is_some();
+        };
+        let style = &self.styles[child];
+        let mut margin = self.edges(style.margin, width, style, true);
+        let spare = width
+            .saturating_sub(border_width)
+            .saturating_sub(margin[1] + margin[3]);
+        let offset = if auto_left || auto_right {
+            if spare > 0 {
+                if auto_left {
+                    margin[3] = if auto_right { spare / 2 } else { spare };
+                }
+                if auto_right {
+                    margin[1] = if auto_left { spare - margin[3] } else { spare };
+                }
+            }
+            0
+        } else {
+            match align {
+                Justify::Center => (f64::from(spare) / 2.0).round() as i32,
+                Justify::End => spare,
+                _ => 0,
+            }
+        };
+        let desired = left
+            .saturating_add(margin[3])
+            .saturating_add(offset)
+            .clamp(-MAX_HEIGHT, MAX_HEIGHT);
+        if desired != actual_left {
+            self.move_span(span, desired.saturating_sub(actual_left), 0);
+        }
+        self.used_margins.insert(child, margin);
+        true
     }
 
     pub(super) fn grid(
@@ -340,11 +572,22 @@ impl Engine<'_> {
             }
             let offset = group.natural_height;
             let item_top = top.saturating_add(offset).clamp(-MAX_HEIGHT, MAX_HEIGHT);
+            let item_width = if element {
+                width
+            } else {
+                match self.grid_anonymous_width(&children[start_child..cursor], style, width) {
+                    Ok(value) => value,
+                    Err(()) => {
+                        group.complete = false;
+                        width
+                    }
+                }
+            };
             let prior = std::mem::replace(
                 &mut self.flow,
                 Flow::new(
                     left,
-                    left.saturating_add(width.max(1)),
+                    left.saturating_add(item_width.max(1)),
                     item_top,
                     style.align,
                     style.white_space,
@@ -352,15 +595,41 @@ impl Engine<'_> {
             );
             self.separate("\n");
             let start = self.mark();
+            let original_width = self.styles[child].width;
+            if element {
+                match self.grid_item_width(child, style, width, depth) {
+                    Ok(Some(value)) => self.styles[child].width = value,
+                    Ok(None) => {}
+                    Err(()) => group.complete = false,
+                }
+            }
             for &child in &children[start_child..cursor] {
                 self.walk(child, link, depth + 1);
             }
+            self.styles[child].width = original_width;
             self.finish_line(false, 0);
             let natural_height = self.flow.y.saturating_sub(item_top).max(0);
             let span = Span {
                 start,
                 end: self.mark(),
             };
+            if element && !self.grid_item_inline_position(child, style, left, width, span) {
+                group.complete = false;
+            } else if !element && item_width != width {
+                let spare = width.saturating_sub(item_width);
+                let dx = match style.justify_items {
+                    css::Justify::Center => (f64::from(spare) / 2.0).round() as i32,
+                    css::Justify::End => spare,
+                    _ => 0,
+                };
+                if dx != 0 {
+                    if self.grid_work(Self::grid_span_work(span)) {
+                        self.move_span(span, dx, 0);
+                    } else {
+                        group.complete = false;
+                    }
+                }
+            }
             if element
                 && self.boxes[child]
                     .as_ref()
