@@ -3413,6 +3413,8 @@ pub struct Runtime {
     retained_binary: usize,
     collection_roots: collections::Roots,
     collection_entries: usize,
+    // Object identities are append-only. Zero skips weak-entry work during collection.
+    weak_map_count: usize,
     text_roots: text_encoding::Roots,
     object_prototype: Option<usize>,
     function_prototype: Option<usize>,
@@ -3557,6 +3559,7 @@ impl Runtime {
             retained_binary: 0,
             collection_roots: collections::Roots::default(),
             collection_entries: 0,
+            weak_map_count: 0,
             text_roots: text_encoding::Roots::default(),
             object_prototype: None,
             function_prototype: None,

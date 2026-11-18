@@ -46,6 +46,7 @@ remain at `36adf20`; these later changes do not update those binaries.
 
 | Capability | Implemented slice | Important limits |
 | :--- | :--- | :--- |
+| **WeakMap** | The constructor accepts supported iterable pairs. `get`, `set`, `has` and `delete` use object, function or unregistered symbol identity. Native object keys retain their document access checks. | During callable collection, an entry retains its value while both the map and its key are reachable. Native and symbol identities may remain live for the document. The existing per-collection and document entry limits apply. |
 | **DOM identity and collections** | Genuine Document/Node accessors, stable live supported childNodes, checked native array-like apply/slice, Attr identity, text replacement and native-created Comment leaves | Parsed comments, full CharacterData, DocumentType/template-content and child-Document collections remain outside the finite scope |
 | **Node roots** | Genuine `Node.getRootNode()` for ordinary accessible connected/detached trees, Attr and supported same-origin child trees; ordered options conversion and owner/work checks | No Shadow DOM or fabricated child scope |
 | **Node containment** | Integrated [PR #76](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/76) adds genuine inclusive `Node.contains`, physical ancestry, Attr distinction and checked receiver/argument ownership. | Ordinary trees and supported same-origin child Nodes only; no shadow-tree or cross-origin access grant. |
