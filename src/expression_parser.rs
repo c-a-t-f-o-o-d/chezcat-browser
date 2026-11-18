@@ -306,6 +306,12 @@ impl Parser {
         } else if context.goal.minimum <= 1 && self.pattern_ahead() {
             let pattern = self.binding_pattern(false)?;
             Phase::Infix(self.expr(ExprKind::Pattern(pattern), context.at)?)
+        } else if context.goal.prefixes && self.await_count.is_some() && self.is("await") {
+            let expression = self.prefix_expression("await", context.at)?;
+            // The operand may have introduced a nested async template. Its
+            // count was restored before the outer unary expression completed.
+            *self.await_count.as_mut().expect("async body") += 1;
+            Phase::Infix(expression)
         } else if context.goal.prefixes && prefix_operator(&self.token().kind).is_some() {
             let op = prefix_operator(&self.token().kind).unwrap();
             Phase::Infix(self.prefix_expression(op, context.at)?)
