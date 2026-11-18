@@ -25,6 +25,9 @@ pub use background_clip::BackgroundClip;
 #[path="css_line_height.rs"]
 mod line_height;
 #[cfg(test)]
+#[path="css_height_variable_tests.rs"]
+mod height_variable_tests;
+#[cfg(test)]
 #[path="css_root_selector_tests.rs"]
 mod root_selector_tests;
 #[path="css_translate.rs"]
@@ -1140,6 +1143,11 @@ fn compute_cascade(
             style.root_font_size = root_font_size;
         }
         style.line_height = line_height::computed(style.line_height,style.font_size,style.root_font_size);
+        // Height inherits its computed length, not a parent's em/rem token.
+        // Percentages and auto retain their containing-block/used-value role.
+        if matches!(style.height, Length::Em(_) | Length::Rem(_)) {
+            style.height = Length::Px(style.height.resolve(0.0,style.font_size,style.root_font_size).unwrap());
+        }
         if has_radius {
             if let Some(meter) = meter.as_deref_mut() { meter.work(applicable.len())?; }
             let resolve_radius = |budget: &mut custom_properties::Budget| {
@@ -2938,6 +2946,18 @@ fn flex_shorthand(value: &str) -> Option<(f32, f32, Length)> {
     ))
 }
 
+// Shared finite height grammar for literal and substituted longhands. Separate
+// tokens cannot form a dimension, including var(--number)px after substitution.
+fn height_value(value: &str, parent: Length) -> Option<Length> {
+    let value = value.trim();
+    if value.eq_ignore_ascii_case("inherit") { return Some(parent); }
+    if value.eq_ignore_ascii_case("initial") || value.eq_ignore_ascii_case("unset") {
+        return Some(Length::Auto);
+    }
+    if !value.is_ascii() || value.bytes().any(|byte|byte.is_ascii_whitespace()) { return None; }
+    parse_length(value,true,false)
+}
+
 // Shared finite font-size grammar for literal and substituted longhands.
 // Font-size em/% use the parent's computed size; rem uses the current root
 // metric (the initial root metric while computing the root's own font-size).
@@ -3283,7 +3303,7 @@ fn apply(style: &mut Style, parent: &Style, declaration: &Declaration) {
             }
         }
         "height" => {
-            if let Some(value) = parse_length(&value, true, false) {
+            if let Some(value) = height_value(&value, parent.height) {
                 style.height = value;
             }
         }
