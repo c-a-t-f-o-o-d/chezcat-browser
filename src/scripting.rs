@@ -94,6 +94,9 @@ use script_images::ImagesState;
 mod script_select_fragments;
 #[path = "script_element_siblings.rs"]
 mod script_element_siblings;
+
+#[path = "script_element_selectors.rs"]
+mod script_element_selectors;
 #[path = "script_document_properties.rs"]
 mod script_document_properties;
 
@@ -2476,6 +2479,7 @@ impl Host for Bridge<'_> {
     }
 
     fn owns_property(&self, object: u32, property: &str) -> bool {
+        if self.element_selector_member(object,property) {return false;}
         if self.element_sibling_member(object,property) {return false;}
         if self.root_node_member(object,property) {return false;}
         if matches!(property,"nodeType"|"nodeName") && self.node_identity_receiver(object) {return false;}
@@ -2497,7 +2501,8 @@ impl Host for Bridge<'_> {
         self.location_instance_owner(object).is_some() || object == HISTORY || self.attr_receiver(object) || self.ordinary_event_owner(object).is_some() || self.named_map_receiver(object)
     }
     fn ordinary_lookup_tail_property(&self,object:u32,property:&str)->bool {
-        if self.element_sibling_member(object,property) {true}
+        if self.element_selector_member(object,property) {true}
+        else if self.element_sibling_member(object,property) {true}
         else if self.root_node_member(object,property) {true}
         else if matches!(property,"nodeType"|"nodeName") && self.node_identity_receiver(object) {true}
         else if self.event_receiver(object)&&property=="composedPath" {true}
@@ -2582,6 +2587,9 @@ impl Host for Bridge<'_> {
     }
 
     fn argument_conversions(&self, object: u32, method: &str) -> &'static [(usize, bool)] {
+        if script_element_selectors::operation(method).is_some() && self.element_selector_receiver(object) {
+            return if self.is_frame_handle(object) {&[]} else {&[(0,true)]};
+        }
         if matches!(method,"Event"|"UIEvent"|"MouseEvent"|"CustomEvent")&&self.event_target_interface(object) {return &[(0,true)];}
         if method=="getModifierState"&&self.mouse_receiver(object) {return &[(0,true)];}
         if object==WINDOW && method=="cancelAnimationFrame" {return &[(0,false)];}
@@ -2679,6 +2687,7 @@ impl Host for Bridge<'_> {
     }
 
     fn native_method_owner(&self, object:u32, method:&str) -> Option<u32> {
+        if self.event_target_interface(object)&&script_element_selectors::operation(method).is_some() {return Some(object);}
         if self.event_target_interface(object)&&script_element_siblings::operation(method).is_some() {return Some(object);}
         if self.event_target_interface(object) && method=="DocumentFragment" {return Some(object);}
         if self.event_target_interface(object) && method==script_node_root::ROOT_METHOD {return Some(object);}
@@ -2733,6 +2742,7 @@ impl Host for Bridge<'_> {
     }
 
     fn required_arguments(&self, object: u32, method: &str) -> usize {
+        if script_element_selectors::operation(method).is_some() && self.element_selector_receiver(object) {return 1;}
         if matches!(method,"Event"|"UIEvent"|"MouseEvent"|"CustomEvent")&&self.event_target_interface(object) {return 1;}
         if method=="getModifierState"&&self.mouse_receiver(object) {return 1;}
         if object==WINDOW && matches!(method,"requestAnimationFrame"|"cancelAnimationFrame") {return 1;}
@@ -2798,6 +2808,10 @@ impl Host for Bridge<'_> {
         method: &str,
         args: &[Value],
     ) -> Result<(), (&'static str, String)> {
+        let method=if let Some(operation)=script_element_selectors::operation(method) {
+            self.validate_element_selector_receiver(object)?;
+            operation
+        } else {method};
         if self.event_target_interface(object) && method=="DocumentFragment" {
             return if object==WINDOW {Ok(())} else {Err(("NotSupportedError","Child DocumentFragment allocation is not implemented.".into()))};
         }
@@ -3014,6 +3028,10 @@ impl Host for Bridge<'_> {
     }
 
     fn method(&self, object: u32, property: &str) -> Option<&'static str> {
+        // Named form controls use the native field path; other genuine
+        // Elements use the canonical prototype. Neither may fall through to
+        // the old per-instance selector method factory below.
+        if matches!(property,"querySelector"|"querySelectorAll") && self.element_selector_receiver(object) {return None;}
         if object==DOCUMENT && property=="createDocumentFragment" {return Some("createDocumentFragment");}
         if self.root_node_member(object,property) {return None;}
         if self.media_element_receiver(object) {match property {"load"=>return Some("load"),"pause"=>return Some("pause"),"play"=>return Some("play"),_=>{}}}
@@ -3075,6 +3093,7 @@ impl Host for Bridge<'_> {
     }
 
     fn accepts_receiver(&self, object: u32, method: &str, receiver: u32) -> bool {
+        if self.event_target_interface(object)&&script_element_selectors::operation(method).is_some() {return self.element_selector_receiver(receiver);}
         if self.event_target_interface(object) {
             if let Some((family,_))=script_element_siblings::operation(method) {return self.element_sibling_family(receiver)==Some(family);}
         }
@@ -3225,6 +3244,7 @@ impl Host for Bridge<'_> {
     }
 
     fn own_data(&mut self, object: u32, property: &str) -> Result<Option<Value>, String> {
+        if self.element_selector_member(object,property) {self.state.work(1)?;return Ok(None);}
         if self.element_sibling_member(object,property) {self.state.work(1)?;return Ok(None);}
         if self.root_node_member(object,property) {self.state.work(1)?;return Ok(None);}
         if object==DOCUMENT && dom_tree::document_node_property(property) {self.state.work(1)?;return Ok(None);}
@@ -3274,6 +3294,7 @@ impl Host for Bridge<'_> {
     }
 
     fn delete(&mut self, object: u32, property: &str) -> Result<bool, String> {
+        if self.element_selector_member(object,property) {self.state.work(1)?;return Ok(true);}
         if self.element_sibling_member(object,property) {self.state.work(1)?;return Ok(true);}
         if self.root_node_member(object,property) {self.state.work(1)?;return Ok(true);}
         if object==DOCUMENT && dom_tree::document_node_property(property) {self.state.work(1)?;return Ok(true);}
@@ -3463,6 +3484,7 @@ impl Host for Bridge<'_> {
     }
 
     fn has(&mut self, object: u32, property: &str) -> Result<bool, String> {
+        if self.element_selector_member(object,property) {self.state.work(1)?;return Ok(false);}
         if self.element_sibling_member(object,property) {self.state.work(1)?;return Ok(false);}
         if object==DOCUMENT && property=="createDocumentFragment" {self.state.work(1)?;return Ok(true);}
         if self.root_node_member(object,property) {self.state.work(1)?;return Ok(false);}
@@ -3755,6 +3777,7 @@ impl Host for Bridge<'_> {
 
     fn get(&mut self, object: u32, property: &str) -> Result<Value, String> {
         self.state.work(1)?;
+        if self.element_selector_member(object,property) {return Ok(Value::Undefined);}
         if self.root_node_member(object,property) {return Ok(Value::Undefined);}
         if script_named_map::element(object).is_some() { return self.named_map_get(object, property); }
         if script_class_list::element(object).is_some() { return self.class_list_get(object,property); }
@@ -4321,6 +4344,10 @@ impl Host for Bridge<'_> {
     }
 
     fn call(&mut self, object: u32, method: &str, args: &[Value]) -> Result<Value, String> {
+        let method=if let Some(operation)=script_element_selectors::operation(method) {
+            self.validate_element_selector_receiver(object).map_err(|(_,message)|message)?;
+            operation
+        } else {method};
         if let Some((family,next))=script_element_siblings::operation(method) {
             if self.element_sibling_family(object)!=Some(family) {return Err("Element sibling getter has an incompatible native receiver.".into());}
             return self.element_sibling(object,next);
@@ -4938,6 +4965,18 @@ mod script_element_sibling_protocol_tests;
 #[cfg(test)]
 #[path = "script_element_sibling_security_tests.rs"]
 mod script_element_sibling_security_tests;
+
+#[cfg(test)]
+#[path = "script_element_selector_prototype_tests.rs"]
+mod script_element_selector_prototype_tests;
+
+#[cfg(test)]
+#[path = "script_element_selector_protocol_tests.rs"]
+mod script_element_selector_protocol_tests;
+
+#[cfg(test)]
+#[path = "script_element_selector_security_tests.rs"]
+mod script_element_selector_security_tests;
 
 #[cfg(test)]
 #[path = "script_document_own_properties_tests.rs"]
