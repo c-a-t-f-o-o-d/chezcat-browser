@@ -2010,7 +2010,7 @@ impl Bridge<'_> {
     }
 
     fn attribute_named(&mut self, node: usize, name: crate::html::AttributeName, value: Option<String>) -> Result<(), String> {
-        let text_input = self.prepare_text_input_attribute(node, &name, value.as_deref())?;
+        let input = self.prepare_input_attribute(node, &name, value.as_deref())?;
         let button = self.prepare_button_attribute(node, &name, value.as_deref())?;
         let media_source=name.html_is("src")&&self.media_element_receiver(node_handle(node));let media_change=media_source&&value.is_some();
         if media_change&&!self.media_source_prepared(){return Err("Media source change requires its reserved stable-state task.".into());}
@@ -2065,7 +2065,7 @@ impl Bridge<'_> {
         } else { None };
         let retained_value = if detached_attr.is_some() { slot.map_or(0, |slot| attrs[slot].value.len()) } else { 0 };
         if name.html_is("id") { self.state.copies(value.as_ref().map_or(0, String::len))?; }
-        let native_bytes = text_input.as_ref().map_or(0, forms::TextInputPlan::retained_bytes);
+        let native_bytes = input.as_ref().map_or(0, forms::InputPlan::retained_bytes);
         let new_bytes = new.checked_add(retained_value).and_then(|bytes|bytes.checked_add(native_bytes))
             .ok_or("Attribute/native INPUT retained payload overflow.")?;
         self.state.replace_bytes(old, new_bytes)?;
@@ -2093,7 +2093,7 @@ impl Bridge<'_> {
         if disabled {
             self.forms.refresh_disabled(self.doc);
         }
-        if let Some(plan) = text_input { plan.commit(self.forms); }
+        if let Some(plan) = input { plan.commit(self.forms); }
         if let Some(plan) = button { plan.commit(self.forms); }
         if slot.is_some() || new != 0 { self.state.dom_committed(); }
         if self.state.tree.active.get(node).copied().unwrap_or(false) {

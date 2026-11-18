@@ -514,9 +514,9 @@ fn created_text_input_fragment_internal_fresh_payload_splice_checks_combined_ret
     let one_native = 2 + 3 + 3 + 3 * std::mem::size_of::<char>();
     let mut bridge = Bridge { doc: &mut doc, forms: &mut forms, state: &mut page.state };
     bridge.doc.nodes[donor].namespace = crate::html::Namespace::UnknownForeign;
-    assert!(bridge.prepare_created_text_plan(inputs[0], None, None).is_err(), "A fragment kind cannot bypass unknown foreign provenance");
+    assert!(bridge.prepare_created_input_plan(inputs[0], None, None).is_err(), "A fragment kind cannot bypass unknown foreign provenance");
     bridge.doc.nodes[donor].namespace = crate::html::Namespace::None;
-    let staged = bridge.prepare_created_text_plan(inputs[0], None, None).unwrap();
+    let staged = bridge.prepare_created_input_plan(inputs[0], None, None).unwrap();
     assert_eq!(staged.retained_bytes(), one_native, "Fresh admission accepts a genuine detached fragment ancestor");
     drop(staged);
     assert_eq!(controls(bridge.forms), original);

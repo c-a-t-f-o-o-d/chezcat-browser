@@ -1,5 +1,8 @@
-//! Original existing-native-checkbox moves; no new INPUT admission or parser mode.
+//! Original native checkbox moves and shared form-state assertions.
 use super::*;
+
+#[path="script_created_checkbox_tests.rs"]
+mod created;
 
 fn id(doc:&Document,name:&str)->usize {(0..doc.nodes.len()).find(|&node|doc.attr(node,"id")==Some(name)).unwrap()}
 fn current()->crate::navigation::Location {
@@ -129,9 +132,9 @@ fn checkbox_move_forbidden_contexts_and_explicit_form_association_remain_atomic(
 }
 
 #[test]
-fn checkbox_move_keeps_unregistered_creation_type_transitions_and_unsupported_fragments_refused() {
+fn checkbox_move_keeps_active_input_type_transitions_and_unsupported_fragments_refused() {
     let(mut doc,mut forms,mut page)=fixture("<input id=check type=checkbox name=choice value=yes checked>",
-        "var check=document.getElementById('check'),shell=document.getElementById('shell'),fresh=document.createElement('input'),attr=document.createAttribute('type');attr.value='checkbox';document.getElementById('neighbor').value='neighbor edited';check.checked=false;");
+        "var check=document.getElementById('check'),shell=document.getElementById('shell'),fresh=document.createElement('input'),attr=document.createAttribute('type');attr.value='checkbox';fresh.value='detached editor';document.getElementById('neighbor').value='neighbor edited';check.checked=false;");
     let kept=Kept::new(&doc,&mut forms);page.state.rebuild(&doc).unwrap();let before=Snapshot::capture(&doc,&forms,&page);
     for source in ["fresh.type='checkbox';","fresh.setAttribute('type','checkbox');","fresh.setAttributeNS(null,'type','checkbox');","fresh.setAttributeNode(attr);","document.getElementById('neighbor').type='checkbox';","check.type='text';","check.type='hidden';",
         "shell.innerHTML='<link rel=stylesheet href=/must-not-fetch.css><a href=/a>a</a>';","shell.innerHTML='<input type=radio>';"] {
