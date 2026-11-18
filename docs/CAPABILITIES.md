@@ -47,6 +47,7 @@ remain at `36adf20`; these later changes do not update those binaries.
 | Capability | Implemented slice | Important limits |
 | :--- | :--- | :--- |
 | **WeakMap** | The constructor accepts supported iterable pairs. `get`, `set`, `has` and `delete` use object, function or unregistered symbol identity. Native object keys retain their document access checks. | During callable collection, an entry retains its value while both the map and its key are reachable. Native and symbol identities may remain live for the document. The existing per-collection and document entry limits apply. |
+| **WeakSet** | The constructor accepts a supported iterable. `add`, `has` and `delete` track object, function and unregistered symbol identity. Each realm supplies its own constructor and prototype. | Membership alone does not keep a callable alive. Native and symbol identities may remain live for the document. The same entry limits and native access checks apply as for WeakMap. |
 | **DOM identity and collections** | Genuine Document/Node accessors, stable live supported childNodes, checked native array-like apply/slice, Attr identity, text replacement and native-created Comment leaves | Parsed comments, full CharacterData, DocumentType/template-content and child-Document collections remain outside the finite scope |
 | **Node roots** | Genuine `Node.getRootNode()` for ordinary accessible connected/detached trees, Attr and supported same-origin child trees; ordered options conversion and owner/work checks | No Shadow DOM or fabricated child scope |
 | **Node containment** | Integrated [PR #76](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/76) adds genuine inclusive `Node.contains`, physical ancestry, Attr distinction and checked receiver/argument ownership. | Ordinary trees and supported same-origin child Nodes only; no shadow-tree or cross-origin access grant. |
@@ -80,9 +81,9 @@ Those observations remain bound to their earlier builds. On integrated
 `ec7db2f61cddb78c457b2966b72e1e362b89e66a`, PR #74/#75/#76 complete the pinned
 Bootstrap dropdown: trusted open, Amber selection and true close pass with
 paired DOM/pixels and responsive cards at 1280/640, with zero script errors.
-No async workflow or reference interaction was selected. A separate original
-App probe still reaches missing `WeakMap` at 11:92; modern Vue/React mounting
-remains unproved.
+On `acd5703`, the original WeakMap App probe reaches count 4 after a trusted
+click and displays its completion title after one timer. On that source the
+Vue 3.5.45 runtime stops at its first use of `WeakSet` before mounting.
 See [compatibility outcomes](COMPATIBILITY.md) for exact versions and stages.
 
 ## Rendering and resources
