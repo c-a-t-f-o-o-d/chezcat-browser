@@ -307,12 +307,11 @@
       "kind": "Unmodified Bootstrap5.3.9 CSS/bundle separate original responsive/dropdown app",
       "status": "Tested selected workflow; blocked during initialization",
       "build_provenance": {
-        "source_commit": "be579b17243e0bf3f0452aa2de1516641e2f820a",
+        "source_commit": "5c89eea82052ed6eff2cf77a5b3bf6a908cc2ab9",
+        "executable_sha256": "60362d47f72c8d21973aa2d5e8b1952b41f338c627f480e8d47804e105c2bdd1",
         "dirty": false,
-        "executable_sha256": "e44ce342e2630551e994f8da36cb506dcd7b06a720755931824b4df9ac7e4944",
-        "source_map_sha256": "af53f8d25a41f5192c5560fcc5135bbc8b1647b13788ec64fa0c2007b8932b7a",
-        "cargo_version": "cargo 1.99.1 (5f94df478 2026-08-27)",
-        "profile": "existing development profile; not release/full validation"
+        "cargo_version": "0.81.0-alpha.2",
+        "source_map_sha256": "ef29880fcaa1c7d9f28986a365700f78df3b86211cdb90c5b3446a9f34d70da1"
       },
       "configurations": [
         [
@@ -336,20 +335,223 @@
         "async": "Not applicable",
         "framework_layout": "Passed"
       },
-      "first_root": "Unsupported syntax \"class\".",
-      "first_root_location": "Bootstrap5.3.9 bundle line599,column3",
+      "first_root": "Host-object iteration is not implemented.",
+      "first_root_location": "Bootstrap5.3.9 bundle line741,column14",
       "cascades_count_as_roots": false,
       "reference_browser": "Not run",
-      "measurement_scope": "One bounded revision2 local App invocation per selected configuration, using an actual clean diagnostic development build; no full regression/hosted CI/release or whole-library pass",
+      "measurement_scope": "One finite revision2 App invocation per selected Bootstrap configuration at 1280/640 using the actual clean build; this is not a new jQuery/cohort, full-framework, physical-desktop or release pass.",
       "parse_scope": "Conservative runner reports Not established; the first explicit failure is retained without inferring all dormant paths parsed",
       "dependencies": {
         "popper": "2.11.8, included in the pinned bundle",
         "jquery": "Not loaded; independent workload"
       },
-      "render_scope": "Unmodified Bootstrap CSS places original cards beside each other at1280 and stacks them at640; correctly named dropdown choice remains unrendered after failed initialization",
+      "render_scope": "Unmodified Bootstrap CSS places original cards beside each other at1280 and stacks them at640; initial paired rendering and the independent original control pass while initialization and dropdown input fail.",
       "fixture_revision": 2,
-      "interaction_harness": "Revision2 action names exist; class syntax prevents initialization, leaving the menu choice unrendered. This is distinct from revision1 missing-name HarnessBlocked behavior",
+      "interaction_harness": "Revision2 action names exist. Load-listener errors prevent the required zero-error initialization and dropdown input results; this is distinct from revision1 missing-name HarnessBlocked behavior.",
+      "observed_first_roots": [
+        "Host-object iteration is not implemented."
+      ],
+      "process_outcomes": [
+        {
+          "viewport": [
+            1280,
+            800
+          ],
+          "state": "failed",
+          "exit_code": 1
+        },
+        {
+          "viewport": [
+            640,
+            800
+          ],
+          "state": "failed",
+          "exit_code": 1
+        }
+      ],
+      "interaction_outcome": "DependencyBlocked by failed initialization; raw runner input stage remains Failed",
+      "build_provenance_note": "The retained caller build record cargo_version field contains package version 0.81.0-alpha.2; it is preserved verbatim and is not a cargo executable version.",
+      "integration": {
+        "pull_request": "https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/55",
+        "merged_main_commit": "0ef43d01acb84380bb1f0974f736a2e98c6acd26",
+        "scope": "Integration identity only; this workflow ran on the build_provenance source_commit, not on the later main merge."
+      },
+      "first_failed_stage": "initialization",
+      "selected_workflows": [
+        "bootstrap"
+      ],
+      "cohort_workflow_denominator": 2,
+      "configuration_denominator": 2,
+      "passed_configurations": 0,
+      "evidence_label": "20261118-canonical-selectors-modern-bootstrap",
+      "measurement_manifest_sha256": "04604f4a42fd59b13475c65342eca7b7555a8c65ab553e2adc09f84bcd00e97f",
+      "build_record_sha256": "8069b4ea3becd1fa4b57534d3f80b820b2d450c73ca7032f84322b5f4ecca1b5",
+      "integrity_checks": {
+        "original_fixtures_unchanged": true,
+        "inputs_unchanged": true,
+        "executable_unchanged": true,
+        "build_record_unchanged": true,
+        "helpers_unchanged": true
+      },
       "previous_measurements": [
+        {
+          "status": "Tested selected workflow; blocked during initialization",
+          "build_provenance": {
+            "source_commit": "3456e670a20e0da90f38b878fa5f745e5d98ca69",
+            "executable_sha256": "545d767512ef81cbdeec757fce3e9492f07faef9ba73e79dd168fa291eabb4b3",
+            "dirty": false,
+            "cargo_version": "0.81.0-alpha.2",
+            "source_map_sha256": "200399d23b2e3e1d9a36eda1ec338f32dd2b4cea83f26d5699e433506eabdbea"
+          },
+          "configurations": [
+            [
+              1280,
+              800
+            ],
+            [
+              640,
+              800
+            ]
+          ],
+          "zoom": 100,
+          "javascript_enabled": true,
+          "profile": "--no-profile",
+          "stage_outcomes": {
+            "load": "Passed",
+            "parse": "Not established",
+            "initialization": "Failed",
+            "render": "Passed",
+            "input": "Failed",
+            "async": "Not applicable",
+            "framework_layout": "Passed"
+          },
+          "first_root": "Cannot access a property of null or undefined.",
+          "first_root_location": "Bootstrap5.3.9 bundle line741,column27",
+          "cascades_count_as_roots": false,
+          "reference_browser": "Not run",
+          "measurement_scope": "One finite revision2 App invocation per selected Bootstrap configuration at 1280/640 using the actual clean build; this is not a new jQuery/cohort, full-framework, physical-desktop or release pass.",
+          "parse_scope": "Conservative runner reports Not established; the first explicit failure is retained without inferring all dormant paths parsed",
+          "dependencies": {
+            "popper": "2.11.8, included in the pinned bundle",
+            "jquery": "Not loaded; independent workload"
+          },
+          "render_scope": "Unmodified Bootstrap CSS places original cards beside each other at1280 and stacks them at640; initial paired rendering and the independent original control pass while initialization and dropdown input fail.",
+          "fixture_revision": 2,
+          "interaction_harness": "Revision2 action names exist. Load-listener errors prevent the required zero-error initialization and dropdown input results; this is distinct from revision1 missing-name HarnessBlocked behavior.",
+          "observed_first_roots": [
+            "Cannot access a property of null or undefined."
+          ],
+          "process_outcomes": [
+            {
+              "viewport": [
+                1280,
+                800
+              ],
+              "state": "failed",
+              "exit_code": 1
+            },
+            {
+              "viewport": [
+                640,
+                800
+              ],
+              "state": "failed",
+              "exit_code": 1
+            }
+          ],
+          "interaction_outcome": "DependencyBlocked by failed initialization; raw runner input stage remains Failed",
+          "build_provenance_note": "The retained caller build record cargo_version field contains package version 0.81.0-alpha.2; it is preserved verbatim and is not a cargo executable version.",
+          "integration": {
+            "pull_request": "https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/53",
+            "merged_main_commit": "24084f21ee71c643f75d95228aa6c3629df8c4b8",
+            "scope": "Integration identity only; this workflow ran on the build_provenance source_commit, not on the later main merge."
+          },
+          "first_failed_stage": "initialization",
+          "selected_workflows": [
+            "bootstrap"
+          ],
+          "cohort_workflow_denominator": 2,
+          "configuration_denominator": 2,
+          "passed_configurations": 0,
+          "evidence_label": "20261118-element-siblings-modern-bootstrap",
+          "measurement_manifest_sha256": "167b439fbc62f8c40df4b9a0fd3c88eaea5f367380745c1413f1810788638160",
+          "build_record_sha256": "10693724c3ff23bb53a779866ab5b1847a1df1d2ba43f73e9503f2ec8b848110",
+          "integrity_checks": {
+            "original_fixtures_unchanged": true,
+            "inputs_unchanged": true,
+            "executable_unchanged": true,
+            "build_record_unchanged": true,
+            "helpers_unchanged": true
+          }
+        },
+        {
+          "status": "Tested selected workflow; blocked during initialization",
+          "build_provenance": {
+            "source_commit": "be579b17243e0bf3f0452aa2de1516641e2f820a",
+            "dirty": false,
+            "executable_sha256": "e44ce342e2630551e994f8da36cb506dcd7b06a720755931824b4df9ac7e4944",
+            "source_map_sha256": "af53f8d25a41f5192c5560fcc5135bbc8b1647b13788ec64fa0c2007b8932b7a",
+            "cargo_version": "cargo 1.99.1 (5f94df478 2026-08-27)",
+            "profile": "existing development profile; not release/full validation"
+          },
+          "configurations": [
+            [
+              1280,
+              800
+            ],
+            [
+              640,
+              800
+            ]
+          ],
+          "zoom": 100,
+          "javascript_enabled": true,
+          "profile": "--no-profile",
+          "stage_outcomes": {
+            "load": "Passed",
+            "parse": "Not established",
+            "initialization": "Failed",
+            "render": "Passed",
+            "input": "Failed",
+            "async": "Not applicable",
+            "framework_layout": "Passed"
+          },
+          "first_root": "Unsupported syntax \"class\".",
+          "first_root_location": "Bootstrap5.3.9 bundle line599,column3",
+          "cascades_count_as_roots": false,
+          "reference_browser": "Not run",
+          "measurement_scope": "One bounded revision2 local App invocation per selected configuration, using an actual clean diagnostic development build; no full regression/hosted CI/release or whole-library pass",
+          "parse_scope": "Conservative runner reports Not established; the first explicit failure is retained without inferring all dormant paths parsed",
+          "dependencies": {
+            "popper": "2.11.8, included in the pinned bundle",
+            "jquery": "Not loaded; independent workload"
+          },
+          "render_scope": "Unmodified Bootstrap CSS places original cards beside each other at1280 and stacks them at640; correctly named dropdown choice remains unrendered after failed initialization",
+          "fixture_revision": 2,
+          "interaction_harness": "Revision2 action names exist; class syntax prevents initialization, leaving the menu choice unrendered. This is distinct from revision1 missing-name HarnessBlocked behavior",
+          "observed_first_roots": [
+            "Unsupported syntax \"class\"."
+          ],
+          "process_outcomes": [
+            {
+              "viewport": [
+                1280,
+                800
+              ],
+              "state": "failed",
+              "exit_code": 1
+            },
+            {
+              "viewport": [
+                640,
+                800
+              ],
+              "state": "failed",
+              "exit_code": 1
+            }
+          ],
+          "interaction_outcome": "DependencyBlocked by failed initialization; raw runner input stage remains Failed"
+        },
         {
           "status": "Tested selected workflow; blocked during initialization",
           "build_provenance": {
@@ -397,29 +599,7 @@
           "interaction_harness": "Harness blocked: revision1 controls had IDs but lacked the name attributes selected by the App driver. Startup load/render/first script failures remain observed; no trusted input was executed.",
           "fixture_correction": "Revision2 adds unique action names and preflight controls; upstream assets, script apps and old raw records remain unchanged. New runtime result pending."
         }
-      ],
-      "observed_first_roots": [
-        "Unsupported syntax \"class\"."
-      ],
-      "process_outcomes": [
-        {
-          "viewport": [
-            1280,
-            800
-          ],
-          "state": "failed",
-          "exit_code": 1
-        },
-        {
-          "viewport": [
-            640,
-            800
-          ],
-          "state": "failed",
-          "exit_code": 1
-        }
-      ],
-      "interaction_outcome": "DependencyBlocked by failed initialization; raw runner input stage remains Failed"
+      ]
     },
     {
       "id": "reference",
