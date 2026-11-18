@@ -51,6 +51,57 @@ fn document_node(index: usize, node: usize) -> u32 {
 }
 
 impl Bridge<'_> {
+    pub(super) fn frame_element_sibling_receiver(&self,handle:u32)->bool {
+        let Some((index,offset))=frame_handle(handle) else {return false;};
+        if !matches!(offset,4..=6) {return false;}
+        self.state.blank_frames.get(index).and_then(|frame|frame.document.nodes.get((offset-3) as usize))
+            .is_some_and(|node|matches!(node.kind,NodeKind::Element {..}))
+    }
+
+    pub(super) fn frame_element_sibling(&mut self,handle:u32,next:bool)->Result<Value,String> {
+        let(index,offset)=frame_handle(handle).ok_or("Unknown blank sibling receiver.")?;
+        self.frame_window_access(self.state.navigation_incumbent.or(Some(WINDOW)),window(index))?;
+        if !self.frame_element_sibling_receiver(handle) {return Err("Blank element sibling getter requires a genuine Element.".into());}
+        let nodes=self.state.blank_frames.get(index).ok_or("Unknown blank sibling context.")?.document.nodes.len();
+        self.state.work(nodes.saturating_mul(2))?;
+        let edges=self.state.blank_frames[index].document.nodes.iter().map(|node|node.children.len()).sum::<usize>();
+        self.state.work(edges.saturating_mul(3))?;
+        let frame=self.state.blank_frames.get(index).ok_or("Unknown blank sibling context.")?;
+        if !frame.connected {return Err("Retained child sibling browsing-context teardown is not implemented.".into());}
+        let node=(offset-3) as usize;
+        if frame.document.nodes[node].namespace!=crate::html::Namespace::Html {return Err("Blank sibling receiver has unknown namespace provenance.".into());}
+        let mut parent=None;
+        for (id,item) in frame.document.nodes.iter().enumerate() {
+            if item.children.contains(&node) {
+                if parent.replace(id).is_some() {return Err("Repeated blank sibling parent.".into());}
+            }
+        }
+        let Some(parent)=parent else {return Ok(Value::Null);};
+        let siblings=&frame.document.nodes[parent].children;
+        let mut position=None;
+        for (at,&child) in siblings.iter().enumerate() {
+            if child>=frame.document.nodes.len() {return Err("Invalid blank sibling child index.".into());}
+            if child==node && position.replace(at).is_some() {return Err("Repeated blank sibling receiver.".into());}
+        }
+        let at=position.ok_or("Blank sibling receiver is absent from its parent.")?;
+        let count=if next {siblings.len()-at-1}else{at};
+        for skip in 0..count {
+            let child=siblings[if next {at+1+skip}else{at-1-skip}];
+            let item=&frame.document.nodes[child];
+            if item.namespace==crate::html::Namespace::UnknownForeign {return Err("Blank sibling has unknown namespace provenance.".into());}
+            match item.kind {
+                NodeKind::Element {..}=>{
+                    let result=document_node(index,child);
+                    if !self.frame_element_sibling_receiver(result) {return Err("Blank sibling identity is outside supported handles.".into());}
+                    return Ok(Value::Host(result));
+                },
+                NodeKind::Text(_)|NodeKind::Comment(_)=>{},
+                NodeKind::DocumentFragment=>return Err("Invalid blank sibling container.".into()),
+            }
+        }
+        Ok(Value::Null)
+    }
+
     pub(super) fn event_timestamp(&self,owner:u32,now:Instant)->Result<f64,String> {
         if owner==WINDOW {return Ok(self.state.clock_ms(now));}
         let(index,offset)=frame_handle(owner).ok_or("Unknown Event owner Window.")?;
