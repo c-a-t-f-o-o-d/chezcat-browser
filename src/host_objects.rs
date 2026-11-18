@@ -133,10 +133,39 @@ impl Runtime {
                 self.objects[image].prototype=Some(Ordinary::Object(parent));
                 self.store_symbol_property(image,self.symbol_to_string_tag.unwrap(),Value::String("HTMLImageElement".into()),Some((false,false,true)))?;
             }
+            self.define_node_list_iteration_interface(window)?;
             Ok(())
         })();
         self.restore_transient_marker(marker);
         result.map_err(Fault::display)
+    }
+
+    fn define_node_list_iteration_interface(&mut self,window:u32)->Result<(),Fault> {
+        // This finite interface promotes indexed iteration and length only.
+        // The existing guarded item/forEach paths remain; forEach is not yet
+        // the Array intrinsic alias specified for a complete IDL iterable.
+        let allocation=self.allocate_host_function_with_length(window,"NodeList",0).map_err(Fault::new)?;
+        if let Some(Function::Host {constructible,..})=self.functions.get_mut(allocation.id) {*constructible=true;}
+        let constructor=Value::Function(allocation.id);
+        let prototype=self.new_object(None)?;
+        self.store_property(prototype,"constructor".into(),constructor.clone(),Some((false,true,true)))?;
+        self.store_property(self.function_properties[allocation.id],"prototype".into(),Value::Object(prototype),Some((false,false,false)))?;
+        self.store_symbol_property(prototype,self.symbol_to_string_tag.unwrap(),Value::String("NodeList".into()),Some((false,false,true)))?;
+        // Web IDL indexed value iterables use these exact realm intrinsics.
+        for (key,mode) in [("keys",super::collections::Mode::Keys),("values",super::collections::Mode::Values),("entries",super::collections::Mode::Entries)] {
+            let method=self.array_iterator_intrinsic(mode);
+            self.store_property(prototype,key.into(),method,Some((true,true,true)))?;
+        }
+        let values=self.array_iterator_intrinsic(super::collections::Mode::Values);
+        self.store_symbol_property(prototype,self.symbol_iterator.unwrap(),values,Some((false,true,true)))?;
+        let getter=self.allocate_host_function_with_length(window,"\0NodeList.get.length",0).map_err(Fault::new)?;
+        if let Some(Function::Host {receiver_required,..})=self.functions.get_mut(getter.id) {*receiver_required=true;}
+        self.store_property(self.function_properties[getter.id],"name".into(),Value::String("get length".into()),Some((false,false,true)))?;
+        self.store_accessor_property(prototype,"length".into(),Accessors {get:Some(getter.id),set:None},(true,true))?;
+        self.put_binding(self.global_environment,"NodeList".into(),Some(constructor),super::Declaration::Var,false)?;
+        self.global_attributes.insert("NodeList".into(),(false,true,true));
+        self.native_constructor_prototypes.insert((window,"NodeList"),prototype);
+        Ok(())
     }
 
     fn define_element_sibling_getters(&mut self,prototype:usize,window:u32,family:&str)->Result<(),Fault> {
@@ -451,6 +480,9 @@ impl Runtime {
         // slots before any string/symbol read. Publish the metered store for
         // own inspection too; ensure still requires explicit owner/provenance.
         self.ensure_native_expando(handle,host,host.exposed_native_prototype(handle))?;
+        if host.indexed_iteration_owner(handle).is_some() {
+            return self.indexed_host_keys(handle,inherited,true,host);
+        }
         if inherited && host.expando_owner(handle).is_some() && !host.exposed_native_prototype(handle) {
             return Err(Fault::new("Inherited native Element enumeration is not implemented."));
         }
@@ -471,6 +503,36 @@ impl Runtime {
         for key in &keys {
             self.property_name(key)?;
         }
+        Ok(keys)
+    }
+
+    /// Only the approved indexed family merges native own slots and its real
+    /// ordinary backing. Other Host key/inspection policies remain guarded.
+    #[inline(never)]
+    pub(super) fn indexed_host_keys(&mut self,handle:u32,inherited:bool,enumerable_only:bool,host:&mut dyn Host)
+        ->Result<Vec<String>,Fault>
+    {
+        self.validate_indexed_host_iteration(handle,None,host)?;
+        let native=host.own_keys(handle).map_err(Fault::new)?;
+        let ordinary=if let Some(&id)=self.host_objects.get(&handle) {
+            if inherited {self.inherited_keys(Ordinary::Object(id))?}
+            else {self.own_string_keys(id,enumerable_only)?}
+        } else {Vec::new()};
+        let mut seen=std::collections::BTreeSet::new();
+        let mut keys=Vec::new();
+        for key in native.into_iter().chain(ordinary) {
+            self.property_name(&key)?;
+            self.work_as(key.len().saturating_mul(2).saturating_add(std::mem::size_of::<String>()*2),super::WorkKind::PropertyEnumeration)?;
+            if !seen.insert(key.clone()) {continue;}
+            if keys.len()==self.limits.heap.object_properties {
+                return Err(Fault::new(format!("Property enumeration limit reached ({} keys).",self.limits.heap.object_properties)));
+            }
+            keys.try_reserve(1).map_err(|_|Fault::new("Native indexed key merge reservation failed."))?;
+            keys.push(key);
+        }
+        // NodeList's native own indices already arrive in ascending order.
+        // Keep the backing/prototype traversal order after them: hoisting a
+        // prototype numeric name ahead of an own string would break for-in.
         Ok(keys)
     }
 

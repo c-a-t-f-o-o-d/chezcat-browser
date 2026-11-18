@@ -26,10 +26,10 @@ impl Runtime {
         source: &Value,
         host: &mut dyn Host,
     ) -> Result<Option<Value>, Fault> {
-        // Native handles do not acquire iteration or expando capabilities just
-        // because the caller can install a Symbol property elsewhere.
-        if matches!(source, Value::Host(_)) {
-            return Err(Fault::new("Host-object iteration is not implemented."));
+        // Approval and origin validation precede even an observable iterator
+        // getter. Unrelated native handles keep the explicit refusal.
+        if let Value::Host(handle) = source {
+            self.validate_indexed_host_iteration(*handle, None, host)?;
         }
         let receiver = self.copy_value(source)?;
         let method = self.get_symbol_property(receiver, self.symbol_iterator.unwrap(), host)?;
@@ -61,8 +61,8 @@ impl Runtime {
         method: Value,
         host: &mut dyn Host,
     ) -> Result<Record, Fault> {
-        if matches!(source, Value::Host(_)) {
-            return Err(Fault::new("Host-object iteration is not implemented."));
+        if let Value::Host(handle) = &source {
+            self.validate_indexed_host_iteration(*handle, None, host)?;
         }
         let iterator = self.call_value(method, &[], source, host)?;
         let object = self.iterator_ordinary(&iterator)?;
