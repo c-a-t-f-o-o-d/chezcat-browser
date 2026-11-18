@@ -847,6 +847,12 @@ impl Bridge<'_> {
     }
 
     pub(super) fn mutation_subtree(&mut self, root: usize) -> Result<(Vec<usize>, usize), String> {
+        self.mutation_subtree_for_fragment(root, false)
+    }
+
+    /// Only innerHTML opts in to traversal of an old bare LINK. Its separate
+    /// precommit stylesheet-state check must pass before children are replaced.
+    pub(super) fn mutation_subtree_for_fragment(&mut self, root: usize, bare_links: bool) -> Result<(Vec<usize>, usize), String> {
         let mut nodes = Vec::new();
         let mut stack = vec![(root, 1usize)];
         let mut depth = 0;
@@ -888,6 +894,7 @@ impl Bridge<'_> {
                 || name == "noscript" && self.doc.scripting_enabled
                 || name == "script" && !self.dom_script(node)
                 || name == "link" && !self.dom_stylesheet(node)
+                    && !(bare_links && script_stylesheets::bare_fragment_link(self.doc, node))
             {
                 let frame = if name == "iframe" {
                     let source = match self.doc.attr(node, "src").map(str::trim) {

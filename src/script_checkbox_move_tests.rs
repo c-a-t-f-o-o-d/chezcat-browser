@@ -135,7 +135,7 @@ fn checkbox_move_keeps_new_registration_innerhtml_and_type_transitions_refused()
     let kept=Kept::new(&doc,&mut forms);page.state.rebuild(&doc).unwrap();let before=Snapshot::capture(&doc,&forms,&page);
     for source in ["fresh.type='checkbox';","fresh.setAttribute('type','checkbox');","fresh.setAttributeNS(null,'type','checkbox');","fresh.setAttributeNode(attr);","document.getElementById('neighbor').type='checkbox';","check.type='text';","check.type='hidden';","shell.innerHTML='<input type=checkbox>';",
         r#"shell.innerHTML="  <link/><table></table><a href='/a'>a</a><input type='checkbox'/>";"#,
-        "shell.innerHTML='<link/><a href=/a>a</a>';","shell.innerHTML='<input type=radio>';"] {
+        "shell.innerHTML='<link rel=stylesheet href=/must-not-fetch.css><a href=/a>a</a>';","shell.innerHTML='<input type=radio>';"] {
         let result=page.console_eval(&mut doc,&mut forms,source);assert_eq!(result.errors,1,"{source}\n{}",page.report());
         assert_eq!(Snapshot::capture(&doc,&forms,&page),before,"{source}");kept.assert(&doc,&forms,false,Some("a"),false);no_resources(&mut page);
     }

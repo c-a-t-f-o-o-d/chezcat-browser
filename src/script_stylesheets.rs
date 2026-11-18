@@ -49,6 +49,26 @@ pub(super) struct StylesheetState {
     pub in_flight: usize,
 }
 
+/// The fragment slice admits no LINK attributes, including seemingly inert
+/// metadata. Later author mutations use the normal checked stylesheet path.
+pub(super) fn bare_fragment_link(doc: &Document, node: usize) -> bool {
+    doc.nodes.get(node).is_some_and(|item|
+        item.namespace == crate::html::Namespace::Html && item.children.is_empty()
+            && matches!(&item.kind, NodeKind::Element {tag, attrs, ..} if tag == "link" && attrs.is_empty()))
+}
+
+impl StylesheetState {
+    /// A keyless retired entry still owns generation/cancellation history and
+    /// possibly a worker completion outside `pending`. Never erase that state
+    /// through fragment replacement. A pristine empty entry has never issued
+    /// a request, including when an inert attribute change created the entry.
+    fn permits_bare_fragment_removal(&self, node: usize) -> bool {
+        !self.removed.contains(&node) && !self.pending.iter().any(|request| request.node == node)
+            && self.entries.get(&node).is_none_or(|entry|
+                entry.key.is_none() && entry.generation == 0 && !entry.cancel.load(Ordering::Acquire))
+    }
+}
+
 pub(super) fn link_attribute(property: &str) -> Option<&'static str> {
     Some(match property {
         "href" => "href",
@@ -163,6 +183,11 @@ impl Page {
 }
 
 impl Bridge<'_> {
+    pub(super) fn removable_fragment_link(&mut self, node: usize) -> Result<bool, String> {
+        self.state.work(1 + self.state.stylesheets.pending.len())?;
+        Ok(bare_fragment_link(self.doc, node) && self.state.stylesheets.permits_bare_fragment_removal(node))
+    }
+
     pub(super) fn stylesheet_get(
         &mut self,
         node: usize,
@@ -369,6 +394,10 @@ impl Bridge<'_> {
         Ok(())
     }
 }
+
+#[cfg(test)]
+#[path = "script_inert_link_fragment_tests.rs"]
+mod inert_fragment_tests;
 
 #[cfg(test)]
 mod source_lifetime_tests {
