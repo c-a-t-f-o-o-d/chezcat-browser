@@ -3228,7 +3228,7 @@ impl App {
                     width,
                     height,
                     ..
-                } if inside(x, y, width, height) => {
+                } | PaintItem::RoundedRect { x, y, width, height, .. } if inside(x, y, width, height) => {
                     if self.page.paint_is_positioned(item_index) {
                         return None;
                     }
@@ -3755,6 +3755,13 @@ impl App {
                     let y = y + top - self.scroll;
                     if y < bottom && y.saturating_add(height) > top {
                         canvas.fill_rect_alpha(x, y, width, height, self.page_background_color(color), alpha);
+                    }
+                }
+                PaintItem::RoundedRect { x, y, width, height, color, alpha, radius } => {
+                    let y = y + top - self.scroll;
+                    if y < bottom && y.saturating_add(height) > top {
+                        canvas.fill_rounded_rect_alpha(x, y, width, height, radius,
+                            self.page_background_color(color), alpha);
                     }
                 }
                 PaintItem::Background { node, x, y, width, height, border, presentation, .. } => {
@@ -5767,6 +5774,10 @@ mod hidden_input_tests;
 #[cfg(test)]
 #[path = "app_css_variable_tests.rs"]
 mod css_variable_tests;
+
+#[cfg(test)]
+#[path = "app_css_radius_tests.rs"]
+mod css_radius_tests;
 
 #[cfg(test)]
 #[path = "app_text_input_tests.rs"]

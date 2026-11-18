@@ -225,6 +225,17 @@ pub enum PaintItem {
         color: u32,
         alpha: u8,
     },
+    /// One circular radius, for a borderless block's color background only.
+    /// The unnormalized radius is retained across final sizing/flex stretch.
+    RoundedRect {
+        x: i32,
+        y: i32,
+        width: i32,
+        height: i32,
+        color: u32,
+        alpha: u8,
+        radius: f32,
+    },
     Text(usize),
     Control(usize),
     /// A block decoration, independent of replaced-image atoms and intrinsic size.
@@ -413,6 +424,7 @@ impl Layout {
             }
             match &mut self.items[index] {
                 PaintItem::Rect { y, .. }
+                | PaintItem::RoundedRect { y, .. }
                 | PaintItem::Background { y, .. }
                 | PaintItem::Image { y, .. }
                 | PaintItem::HitBox { y, .. } => *y += delta,
@@ -469,7 +481,7 @@ impl Layout {
             if self.paint_clip(index).is_some_and(|clip|!clip.contains(x,y)){continue;}
             let rect=match item {
                 PaintItem::Image {node:owner,x:left,y:top,width,height,..}=>{if ClipRect::new(*left,*top,*width,*height).contains(x,y){return *owner==node;}continue;},
-                PaintItem::Rect {x,y,width,height,..} | PaintItem::Background {x,y,width,height,..}=>ClipRect::new(*x,*y,*width,*height),
+                PaintItem::Rect {x,y,width,height,..} | PaintItem::RoundedRect {x,y,width,height,..} | PaintItem::Background {x,y,width,height,..}=>ClipRect::new(*x,*y,*width,*height),
                 PaintItem::HitBox {x,y,width,height,link,control}=>{if link.is_none()&&control.is_none(){continue;}ClipRect::new(*x,*y,*width,*height)},
                 PaintItem::Text(i)=>{let r=&self.runs[*i];ClipRect::new(r.x,r.y,r.width(),r.height())},
                 PaintItem::Control(i)=>{let r=&self.controls[*i];ClipRect::new(r.x,r.y,r.width,r.height)},
@@ -1603,6 +1615,7 @@ impl Engine<'_> {
                     height,
                     ..
                 }
+                | PaintItem::RoundedRect { x, y, width, height, .. }
                 | PaintItem::Background { x, y, width, height, .. } => (
                     HitRegion {
                         x: *x,
@@ -2041,6 +2054,20 @@ impl Engine<'_> {
         let background = style
             .background
             .and_then(|color| self.rect(x, y, outer_width, 0, color));
+        // Borders, image layers, inline fragments and table decorations retain
+        // their existing bounded fallback. This slice rounds only the ordinary
+        // block color, without changing descendants, overflow or hit geometry.
+        if border == [0; 4] && style.background_image.is_none()
+            && matches!(style.display, Display::Block | Display::Flex | Display::InlineBlock)
+        {
+            if let (Some(item), Some(radius)) = (background, style.circular_radius()) {
+                if let PaintItem::Rect { color, alpha, .. } = self.layout.items[item] {
+                    self.layout.items[item] = PaintItem::RoundedRect {
+                        x, y, width: outer_width, height: 0, color, alpha, radius: radius * self.zoom,
+                    };
+                }
+            }
+        }
         let background_image = self.background_image(index, style, x, y, outer_width, 0, border);
         let borders: [Option<usize>; 4] = std::array::from_fn(|side| {
             if border[side] > 0 {
@@ -2519,6 +2546,7 @@ impl Engine<'_> {
         for item in &mut self.layout.items[span.start.items..span.end.items] {
             match item {
                 PaintItem::Rect { x, y, .. }
+                | PaintItem::RoundedRect { x, y, .. }
                 | PaintItem::Background { x, y, .. }
                 | PaintItem::Image { x, y, .. }
                 | PaintItem::HitBox { x, y, .. } => {
@@ -4609,6 +4637,8 @@ impl Engine<'_> {
             width: rw,
             height: rh,
             ..
+        } | PaintItem::RoundedRect {
+            x: rx, y: ry, width: rw, height: rh, ..
         } = &mut self.layout.items[item]
         {
             *rx = x;

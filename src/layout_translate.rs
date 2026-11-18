@@ -29,6 +29,7 @@ struct Frame {
 fn shift_item(item: &mut PaintItem, delta: [i32; 2]) {
     match item {
         PaintItem::Rect { x, y, .. }
+        | PaintItem::RoundedRect { x, y, .. }
         | PaintItem::Background { x, y, .. }
         | PaintItem::Image { x, y, .. }
         | PaintItem::HitBox { x, y, .. } => {
