@@ -60,6 +60,9 @@ mod script_text_inputs;
 mod script_input_accessors;
 #[path = "script_canvas.rs"]
 mod script_canvas;
+#[path = "script_canvas_context.rs"]
+mod script_canvas_context;
+use script_canvas_context::Operation as CanvasOperation;
 #[cfg(test)]
 #[path = "script_input_accessor_tests.rs"]
 mod script_input_accessor_tests;
@@ -414,6 +417,7 @@ struct State {
     detached_nodes: HashSet<usize>,
     node_lists: Vec<queries::NodeList>,
     computed_styles: Vec<script_computed_style::Declaration>,
+    canvas_contexts: script_canvas_context::Contexts,
     node_list_references: usize,
     attributes: Vec<script_attr::Attr>,
     declined_images: usize,
@@ -491,6 +495,7 @@ impl State {
             detached_nodes: HashSet::new(),
             node_lists: Vec::new(),
             computed_styles: Vec::new(),
+            canvas_contexts: script_canvas_context::Contexts::default(),
             node_list_references: 0,
             attributes: Vec::new(),
             declined_images: 0,
@@ -2077,6 +2082,9 @@ impl Bridge<'_> {
         if name.html_is("disabled") {
             self.charge_disabled_refresh(node, value.is_some())?;
         }
+        let canvas_resize = if slot.is_some() || value.is_some() {
+            self.prepare_canvas_resize(node, &name, value.as_deref())?
+        } else { None };
         let NodeKind::Element { attrs, .. } = &mut self.doc.nodes[node].kind else { unreachable!() };
         if slot.is_none() && value.is_some() { attrs.try_reserve(1).map_err(|_| "Attribute storage reservation failed.")?; }
         let factor = if name.html_is("id") { 2 } else { 1 };
@@ -2120,7 +2128,10 @@ impl Bridge<'_> {
         }
         if let Some(plan) = input { plan.commit(self.forms); }
         if let Some(plan) = button { plan.commit(self.forms); }
-        if slot.is_some() || new != 0 { self.state.dom_committed(); }
+        if slot.is_some() || new != 0 {
+            self.state.canvas_contexts.commit_resize(node, canvas_resize);
+            self.state.dom_committed();
+        }
         if self.state.tree.active.get(node).copied().unwrap_or(false) {
             self.state.layout_changed();
         }
@@ -2499,6 +2510,7 @@ impl Bridge<'_> {
             || self.scroll_offset_member(object, property)
             || self.input_accessor_member(object, property)
             || self.canvas_member(object, property)
+            || property == "getContext" && self.canvas_receiver(object)
             || self.text_prototype_property(object, property)
             || script_element_properties::ordinary_interface_member(property)
                 && self.concrete_html_interface(object).is_some()
@@ -2506,10 +2518,11 @@ impl Bridge<'_> {
 }
 
 impl Host for Bridge<'_> {
-    fn expando_owner(&self,object:u32)->Option<u32> {self.ordinary_event_owner(object).or_else(||self.standalone_target_owner(object)).or_else(||(object==DOCUMENT||self.element_expando_receiver(object)||self.fragment_receiver(object)||self.node_list_receiver(object)).then_some(WINDOW))}
+    fn expando_owner(&self,object:u32)->Option<u32> {self.ordinary_event_owner(object).or_else(||self.standalone_target_owner(object)).or_else(||(object==DOCUMENT||self.element_expando_receiver(object)||self.fragment_receiver(object)||self.node_list_receiver(object)||self.canvas_context_receiver(object)).then_some(WINDOW))}
     fn ordinary_native_fallback(&self,object:u32,property:&str)->bool {object==DOCUMENT&&!self.document_native_property(property)}
     fn exposed_native_prototype(&self,object:u32)->bool {
         self.ordinary_event_owner(object).is_some() || self.standalone_target_owner(object).is_some()
+            || self.canvas_context_receiver(object)
             || self.video_interface_receiver(object) || self.fragment_receiver(object)
             || self.node_list_receiver(object) || self.concrete_html_interface(object).is_some()
             || self.slottable(object) == Some(Slottable::Text)
@@ -2526,6 +2539,9 @@ impl Host for Bridge<'_> {
     fn event_target_interface(&self,window:u32)->bool {window==WINDOW || self.frame_context(window).is_some()}
     fn node_interface_constants(&self,window:u32)->Option<&'static [(&'static str,u16)]> {self.event_target_interface(window).then_some(dom_tree::NODE_CONSTANTS)}
     fn instance_ancestry(&self, object:u32) -> Option<crate::javascript::NativeAncestry> {
+        if self.canvas_context_receiver(object) {
+            return Some(crate::javascript::NativeAncestry { window: WINDOW, constructor: Some((WINDOW, "CanvasRenderingContext2D")) });
+        }
         if let Some(window)=self.computed_style_owner(object) {return Some(crate::javascript::NativeAncestry {window,constructor:None});}
         if self.node_list_receiver(object) {return Some(crate::javascript::NativeAncestry {window:WINDOW,constructor:Some((WINDOW,"NodeList"))});}
         if let Some(window)=self.event_owner(object) {
@@ -2589,6 +2605,7 @@ impl Host for Bridge<'_> {
     }
 
     fn owns_property(&self, object: u32, property: &str) -> bool {
+        if self.canvas_context_receiver(object) { return script_canvas_context::unsupported_state(property); }
         if self.node_list_receiver(object) {
             // Genuine main NodeLists retain protected native indexed slots and
             // existing item/forEach calls. Other properties use their ordinary
@@ -2617,7 +2634,8 @@ impl Host for Bridge<'_> {
         self.location_instance_owner(object).is_some() || object == HISTORY || self.attr_receiver(object) || self.ordinary_event_owner(object).is_some() || self.named_map_receiver(object)
     }
     fn ordinary_lookup_tail_property(&self,object:u32,property:&str)->bool {
-        if self.node_list_receiver(object) {true}
+        if self.canvas_context_receiver(object) { !script_canvas_context::unsupported_state(property) }
+        else if self.node_list_receiver(object) {true}
         else if self.element_selector_member(object,property) {true}
         else if self.inherited_node_property(object,property) {true}
         else if self.node_tree_method_member(object,property) {true}
@@ -2629,6 +2647,7 @@ impl Host for Bridge<'_> {
         else {self.ordinary_lookup_tail(object)}
     }
     fn native_access_owner(&self, object: u32) -> Option<u32> {
+        if self.canvas_context_receiver(object) {return Some(WINDOW);}
         if let Some(owner)=self.computed_style_owner(object) {return Some(owner);}
         if let Some(owner)=self.event_owner(object) {return Some(owner);}
         if self.event_target_interface(object) {return Some(object);}
@@ -2727,6 +2746,9 @@ impl Host for Bridge<'_> {
     }
 
     fn argument_conversions(&self, object: u32, method: &str, args: &[Value]) -> &'static [(usize, bool)] {
+        if let Some(operation) = CanvasOperation::parse(method) {
+            return if operation.accepts(self, object) { operation.conversions() } else { &[] };
+        }
         if matches!(method, "addEventListener" | "removeEventListener") { return &[(0, true)]; }
         if object == WINDOW && method == "Text" {
             return if matches!(args.first(), None | Some(Value::Undefined)) { &[] } else { &[(0, true)] };
@@ -2816,6 +2838,7 @@ impl Host for Bridge<'_> {
     }
 
     fn method_length(&self, object:u32, method:&str) -> Option<usize> {
+        if let Some(operation) = CanvasOperation::parse(method) { return Some(operation.arity()); }
         if object==WINDOW && method=="getComputedStyle" {return Some(1);}
         if self.computed_style_receiver(object) || (STYLE_BASE..DATASET_BASE).contains(&object) {
             return match method { "getPropertyValue" | "removeProperty" => Some(1), "setProperty" => Some(2), _ => None };
@@ -2847,6 +2870,7 @@ impl Host for Bridge<'_> {
     }
 
     fn native_method_owner(&self, object:u32, method:&str) -> Option<u32> {
+        if CanvasOperation::parse(method).is_some() && self.event_target_interface(object) {return Some(object);}
         if script_canvas::accessor(method).is_some() && self.event_target_interface(object) {return Some(object);}
         if script_input_accessors::accessor(method).is_some() && self.event_target_interface(object) {return Some(object);}
         if script_scroll_offsets::accessor(method).is_some() && self.event_target_interface(object) {return Some(object);}
@@ -2916,6 +2940,7 @@ impl Host for Bridge<'_> {
     }
 
     fn required_arguments(&self, object: u32, method: &str) -> usize {
+        if let Some(operation) = CanvasOperation::parse(method) { return operation.arity(); }
         if matches!(method, "addEventListener" | "removeEventListener") { return 2; }
         if method == script_node_contains::CONTAINS_METHOD { return 1; }
         if object==WINDOW && method=="getComputedStyle" {return 1;}
@@ -2988,12 +3013,16 @@ impl Host for Bridge<'_> {
         method: &str,
         args: &[Value],
     ) -> Result<(), (&'static str, String)> {
+        if let Some(operation) = CanvasOperation::parse(method) {
+            return if operation.accepts(self, object) { Ok(()) }
+                else { Err(("TypeError", "Canvas operation requires its genuine native receiver.".into())) };
+        }
         if object==WINDOW && method=="getComputedStyle" || script_computed_style::index(object).is_some() {return self.validate_computed_call(object,method,args);}
         if script_input_accessors::accessor(method).is_some() {return self.validate_input_accessor(object);}
         if script_canvas::accessor(method).is_some() {return self.validate_canvas_accessor(object);}
         if let Some(offset) = Offset::getter(method) {return self.validate_html_offset(object, offset);}
         if script_scroll_offsets::accessor(method).is_some() {return self.validate_scroll_element(object);}
-        if method=="NodeList" && self.event_target_interface(object) {return Err(("TypeError","Illegal constructor for this native interface.".into()));}
+        if matches!(method,"NodeList"|"CanvasRenderingContext2D") && self.event_target_interface(object) {return Err(("TypeError","Illegal constructor for this native interface.".into()));}
         if method=="\0NodeList.get.length"&&!self.node_list_receiver(object) {return Err(("TypeError","NodeList length getter requires a genuine accessible NodeList.".into()));}
         let method=if let Some(operation)=script_element_selectors::operation(method) {
             self.validate_element_selector_receiver(object)?;
@@ -3148,6 +3177,9 @@ impl Host for Bridge<'_> {
         property: &str,
         value: &Value,
     ) -> Result<(), (&'static str, String)> {
+        if self.canvas_context_receiver(object) && script_canvas_context::unsupported_state(property) {
+            return Err(("NotSupportedError", format!("Canvas 2D drawing state {property:?} is not implemented.")));
+        }
         if property=="currentTime" && self.media_interface_receiver(object) {
             if !self.state.enabled || !self.doc.scripting_enabled {
                 return Err(("InvalidStateError","Scripting is disabled.".into()));
@@ -3204,6 +3236,7 @@ impl Host for Bridge<'_> {
     }
 
     fn resolve_member_before_call(&self, object: u32) -> bool {
+        if self.canvas_context_receiver(object) {return true;}
         if self.event_receiver(object) {return true;}
         if self.standalone_target_owner(object).is_some() {return true;}
         if object == HISTORY || self.attr_receiver(object) || self.constructed_event_receiver(object) || self.named_map_receiver(object) || self.media_element_receiver(object) { return true; }
@@ -3223,6 +3256,7 @@ impl Host for Bridge<'_> {
         // Authorize this protocol explicitly for this realm's Window, Document
         // and real DOM nodes; other native capabilities keep the default deny.
         matches!(object, WINDOW | DOCUMENT)
+            || self.canvas_context_receiver(object)
             || self.class_list_receiver(object)
             || self.attr_receiver(object)
             || self.constructed_event_receiver(object)
@@ -3302,6 +3336,9 @@ impl Host for Bridge<'_> {
     }
 
     fn accepts_receiver(&self, object: u32, method: &str, receiver: u32) -> bool {
+        if let Some(operation) = CanvasOperation::parse(method) {
+            return self.event_target_interface(object) && operation.accepts(self, receiver);
+        }
         if script_canvas::accessor(method).is_some() && self.event_target_interface(object) {
             return self.canvas_receiver(receiver);
         }
@@ -3434,6 +3471,7 @@ impl Host for Bridge<'_> {
     }
 
     fn own_keys(&mut self, object: u32) -> Result<Vec<String>, String> {
+        if self.canvas_context_receiver(object) {self.state.work(1)?;return Ok(Vec::new());}
         if object==DOCUMENT {self.state.work(1)?;return Ok(Vec::new());}
         if self.standalone_target_owner(object).is_some() {self.state.work(1)?;return Ok(Vec::new());}
         if script_named_map::element(object).is_some() {
@@ -3481,6 +3519,7 @@ impl Host for Bridge<'_> {
     }
 
     fn own_data(&mut self, object: u32, property: &str) -> Result<Option<Value>, String> {
+        if self.canvas_context_receiver(object) {self.state.work(1)?;return Ok(None);}
         if self.node_list_iteration_member(object,property) {self.state.work(1)?;return Ok(None);}
         if self.element_selector_member(object,property) {self.state.work(1)?;return Ok(None);}
         if self.inherited_node_property(object,property) {self.state.work(1)?;return Ok(None);}
@@ -3532,6 +3571,7 @@ impl Host for Bridge<'_> {
     }
 
     fn delete(&mut self, object: u32, property: &str) -> Result<bool, String> {
+        if self.canvas_context_receiver(object) {self.state.work(1)?;return Ok(true);}
         if self.node_list_iteration_member(object,property) {self.state.work(1)?;return Ok(true);}
         if self.element_selector_member(object,property) {self.state.work(1)?;return Ok(true);}
         if self.inherited_node_property(object,property) {self.state.work(1)?;return Ok(true);}
@@ -3584,7 +3624,11 @@ impl Host for Bridge<'_> {
         &self,
         object: u32,
         method: &str,
+        args: &[Value],
     ) -> Option<(usize, &'static [&'static str])> {
+        if CanvasOperation::parse(method) == Some(CanvasOperation::GetContext) {
+            return self.canvas_context_dictionary(object, args);
+        }
         if method==script_node_root::ROOT_METHOD && self.root_node_receiver(object) {return Some((0,&["composed"]));}
         if method=="Event"&&self.event_target_interface(object) {return Some((1,&["bubbles","cancelable","composed"]));}
         if method=="CustomEvent"&&self.event_target_interface(object) {return Some((1,&["bubbles","cancelable","composed","detail"]));}
@@ -3603,10 +3647,16 @@ impl Host for Bridge<'_> {
     }
 
     fn dictionary_member_conversion(&self,object:u32,method:&str,member:&str)->Option<bool>{
+        if CanvasOperation::parse(method) == Some(CanvasOperation::GetContext) {
+            return matches!(member, "colorSpace" | "colorType").then_some(true);
+        }
         (self.event_target_interface(object)&&(matches!(method,"UIEvent"|"MouseEvent")&&member=="detail"
             || method=="MouseEvent"&&matches!(member,"button"|"buttons"|"clientX"|"clientY"|"screenX"|"screenY"))).then_some(false)
     }
     fn validate_dictionary_member(&self,object:u32,method:&str,member:&str,value:&Value)->Result<(),(&'static str,String)>{
+        if CanvasOperation::parse(method) == Some(CanvasOperation::GetContext) {
+            return script_canvas_context::option_validation(member,value);
+        }
         if matches!(method,"UIEvent"|"MouseEvent")&&member=="view"&&self.event_target_interface(object) {
             self.ui_view_argument(object,Some(value))?;
         }
@@ -3627,6 +3677,9 @@ impl Host for Bridge<'_> {
         args: &[Value],
         fields: Option<&[(&str, Value)]>,
     ) -> Result<Value, String> {
+        if let Some(operation) = CanvasOperation::parse(method) {
+            return self.canvas_context_call(object, operation, args, fields);
+        }
         if method==script_node_root::ROOT_METHOD {return self.get_root_node(object,args,fields);}
         if method=="Event"&&self.event_target_interface(object) {return self.construct_base_event(object,args,fields);}
         if method=="CustomEvent"&&self.event_target_interface(object) {return self.construct_custom_event(object,args,fields);}
@@ -3723,6 +3776,7 @@ impl Host for Bridge<'_> {
     }
 
     fn has(&mut self, object: u32, property: &str) -> Result<bool, String> {
+        if self.canvas_context_receiver(object) {self.state.work(1)?;return Ok(false);}
         if script_computed_style::index(object).is_some() {self.state.work(1)?;return if self.computed_style_receiver(object) {Ok(script_computed_style::attribute_member(property)||self.method(object,property).is_some())} else {Err("Invalid computed declaration receiver.".into())};}
         if self.node_list_iteration_member(object,property) {self.state.work(1)?;return Ok(false);}
         if self.element_selector_member(object,property) {self.state.work(1)?;return Ok(false);}
@@ -4016,6 +4070,13 @@ impl Host for Bridge<'_> {
     }
 
     fn get(&mut self, object: u32, property: &str) -> Result<Value, String> {
+        if self.canvas_context_receiver(object) {
+            self.state.work(1)?;
+            if script_canvas_context::unsupported_state(property) {
+                return Err(format!("Canvas 2D drawing state {property:?} is not implemented."));
+            }
+            return Ok(Value::Undefined);
+        }
         self.state.work(1)?;
         if script_computed_style::index(object).is_some() {return self.computed_style_get(object,property);}
         if self.node_list_iteration_member(object,property)&&property!="length" {return Ok(Value::Undefined);}
@@ -4352,6 +4413,9 @@ impl Host for Bridge<'_> {
     }
 
     fn set(&mut self, object: u32, property: &str, value: Value) -> Result<(), String> {
+        if self.canvas_context_receiver(object) {
+            return Err(format!("Setting native Canvas 2D property {property:?} is not implemented."));
+        }
         if let Some(axis) = script_scroll_offsets::axis(property).filter(|_| self.element_selector_receiver(object)) {
             let Value::Number(number) = value else {return Err("Scroll offset requires numeric conversion.".into());};
             self.element_scroll_offset(object, axis, Some(number))?;
@@ -4608,6 +4672,9 @@ impl Host for Bridge<'_> {
     }
 
     fn call(&mut self, object: u32, method: &str, args: &[Value]) -> Result<Value, String> {
+        if let Some(operation) = CanvasOperation::parse(method) {
+            return self.canvas_context_call(object, operation, args, None);
+        }
         if let Some((name, false)) = script_canvas::accessor(method) {
             return self.canvas_dimension_get(object, name);
         }

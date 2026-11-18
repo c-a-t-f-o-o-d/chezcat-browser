@@ -946,7 +946,7 @@ fn host_validation_dictionary_and_failed_hoist_exports_remain_roots() {
         fn validate_call(&self, _: u32, _: &str, args: &[Value]) -> Result<(), (&'static str, String)> {
             if matches!(self.mode, "call" | "object") { self.held.borrow_mut().push(args[0].clone()); Err(("TypeError", "retained rejected argument".into())) } else { Ok(()) }
         }
-        fn dictionary_argument(&self, _: u32, _: &str) -> Option<(usize, &'static [&'static str])> { (self.mode == "dictionary").then_some((0, &["callback"])) }
+        fn dictionary_argument(&self, _: u32, _: &str, _: &[Value]) -> Option<(usize, &'static [&'static str])> { (self.mode == "dictionary").then_some((0, &["callback"])) }
         fn call_with_dictionary(&mut self, _: u32, _: &str, _: &[Value], fields: Option<&[(&str, Value)]>) -> Result<Value, String> {
             self.held.borrow_mut().push(fields.unwrap()[0].1.clone()); Ok(Value::Undefined)
         }

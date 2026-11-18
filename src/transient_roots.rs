@@ -225,7 +225,7 @@ mod tests {
         fn get(&mut self, _: u32, _: &str) -> Result<Value, String> { Err("unexpected get".into()) }
         fn set(&mut self, _: u32, _: &str, _: Value) -> Result<(), String> { Err("unexpected set".into()) }
         fn call(&mut self, _: u32, _: &str, _: &[Value]) -> Result<Value, String> { Ok(Value::Undefined) }
-        fn dictionary_argument(&self, _: u32, _: &str) -> Option<(usize, &'static [&'static str])> { Some((0, &["first", "second"])) }
+        fn dictionary_argument(&self, _: u32, _: &str, _: &[Value]) -> Option<(usize, &'static [&'static str])> { Some((0, &["first", "second"])) }
         fn call_with_dictionary(&mut self, _: u32, _: &str, _: &[Value], fields: Option<&[(&str, Value)]>) -> Result<Value, String> {
             let fields = fields.expect("dictionary fields");
             assert!(matches!(fields[0], ("first", Value::Function(_))));

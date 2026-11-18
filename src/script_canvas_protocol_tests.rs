@@ -92,7 +92,7 @@ fn canvas_dimensions_numeric_conversion_raw_attribute_identity_and_namespace() {
 }
 
 #[test]
-fn canvas_dimensions_descriptors_brand_order_shadows_and_no_context_claim() {
+fn canvas_dimensions_descriptors_brand_order_shadows_and_context_lookup() {
     let (mut doc, mut forms, mut page) = fixture();
     run(&mut doc, &mut forms, &mut page, r#"
         if(Object.getPrototypeOf(canvas)!==proto||!(canvas instanceof HTMLCanvasElement)||
@@ -134,8 +134,10 @@ fn canvas_dimensions_descriptors_brand_order_shadows_and_no_context_claim() {
         if(canvas.width!==12)throw 'canonical restoration';
     "#);
     let before = format!("{:?}", doc.nodes);
-    let outcome = page.console_eval(&mut doc, &mut forms, "canvas.getContext('2d');");
-    assert_eq!(outcome.errors, 1, "{}", page.report());
+    run(&mut doc, &mut forms, &mut page, r#"
+        if(canvas.getContext('unsupported')!==null || canvas.getContext('2d').canvas!==canvas)
+            throw 'context lookup after descriptor restoration';
+    "#);
     assert_eq!(format!("{:?}", doc.nodes), before);
     kept(&doc, &forms);
 }
