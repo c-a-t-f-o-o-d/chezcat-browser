@@ -42,6 +42,7 @@ fn specific(tag: &str) -> &'static str {
         "area" => "alt coords shape noHref",
         "input" => "accept alt capture checked defaultChecked files height width src indeterminate list max min multiple pattern size step valueAsDate valueAsNumber useMap webkitdirectory webkitEntries stepDown stepUp showPicker formAction formEnctype formMethod formNoValidate formTarget popoverTargetElement popoverTargetAction alpha colorSpace align",
         "button" => "formAction formEnctype formMethod formNoValidate formTarget popoverTargetElement popoverTargetAction command commandForElement",
+        "label" => "control form htmlFor",
         "textarea" => "cols rows wrap textLength",
         "script" => "src type noModule async defer crossOrigin text integrity referrerPolicy blocking fetchPriority charset event htmlFor readyState",
         "link" => "disabled href crossOrigin rel relList media hreflang type as referrerPolicy sizes imageSrcset imageSizes integrity blocking fetchPriority color charset rev target sheet",
@@ -124,6 +125,7 @@ impl Bridge<'_> {
                         | "sub"
                         | "sup"
                         | "button"
+                        | "label"
                         | "input"
                         | "textarea"
                         | "img"
