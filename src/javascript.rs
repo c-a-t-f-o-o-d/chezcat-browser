@@ -10017,13 +10017,33 @@ fn bounded_index(value: f64, length: usize) -> usize {
     }
 }
 
-fn logical_short_circuits(operator: &str, left: &Value) -> bool {
-    match operator {
-        "&&" => !left.truthy(),
-        "||" => left.truthy(),
-        "??" => !matches!(left, Value::Null | Value::Undefined),
-        _ => false,
+enum LogicalOperand {
+    Nullish,
+    Falsy,
+    Truthy,
+}
+
+impl LogicalOperand {
+    fn classify(value: &Value) -> Self {
+        match value {
+            Value::Null | Value::Undefined => Self::Nullish,
+            value if value.truthy() => Self::Truthy,
+            _ => Self::Falsy,
+        }
     }
+
+    fn short_circuits(&self, operator: &str) -> bool {
+        match operator {
+            "&&" => !matches!(self, Self::Truthy),
+            "||" => matches!(self, Self::Truthy),
+            "??" => !matches!(self, Self::Nullish),
+            _ => false,
+        }
+    }
+}
+
+fn logical_short_circuits(operator: &str, left: &Value) -> bool {
+    LogicalOperand::classify(left).short_circuits(operator)
 }
 
 fn strict_equal(left: &Value, right: &Value) -> bool {
