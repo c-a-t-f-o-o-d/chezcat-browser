@@ -144,6 +144,16 @@ impl Runtime {
             Value::Symbol(key),
             Some((false, false, false)),
         )?;
+        let key = if let Some(key) = self.symbol_async_iterator {
+            key
+        } else {
+            let Value::Symbol(key) = self.new_symbol(Some("Symbol.asyncIterator".into()), false)? else {
+                unreachable!()
+            };
+            key
+        };
+        self.symbol_async_iterator = Some(key);
+        self.store_property(owner, "asyncIterator".into(), Value::Symbol(key), Some((false, false, false)))?;
         let key = if let Some(key) = self.symbol_to_string_tag { key } else {
             let Value::Symbol(key) = self.new_symbol(Some("Symbol.toStringTag".into()), false)? else { unreachable!() };
             key
