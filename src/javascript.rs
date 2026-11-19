@@ -3319,6 +3319,7 @@ enum Builtin {
     Boolean,
     ParseInt,
     ParseFloat,
+    IsFinite,
     IsNaN,
     Math(&'static str),
     Function,
@@ -3791,6 +3792,7 @@ impl Runtime {
             ("Boolean", Builtin::Boolean),
             ("parseInt", Builtin::ParseInt),
             ("parseFloat", Builtin::ParseFloat),
+            ("isFinite", Builtin::IsFinite),
             ("isNaN", Builtin::IsNaN),
             ("Function", Builtin::Function),
         ] {
@@ -9820,6 +9822,7 @@ impl Runtime {
             } else {
                 self.binary_number(value, host)?
             })),
+            Builtin::IsFinite => Ok(Value::Bool(self.binary_number(value, host)?.is_finite())),
             Builtin::IsNaN => Ok(Value::Bool(self.binary_number(value, host)?.is_nan())),
             Builtin::ParseFloat => {
                 let value = self.copy_value(value)?;
@@ -10139,6 +10142,74 @@ test.record(log);
         assert!(error.contains("...\"."), "{error}");
         assert!(!error.contains('\u{1}'));
         assert!(error.len() < 512, "{error}");
+    }
+
+    #[test]
+    fn global_is_finite_accepts_numeric_inputs_for_a_timeline_position() {
+        assert_eq!(result(r#"
+var playhead=0;
+function seek(position) {
+    if (!isFinite(position)) return false;
+    playhead=Number(position);
+    return true;
+}
+if (!seek('125.5') || playhead!==125.5 || seek(Infinity) || seek('125ms') || playhead!==125.5)
+    throw 'finite playhead updates';
+for (var value of [0,-0,1e308,null,false,true,'','  ','0x1f','0b10','-2.5e3',[],[7],new Number(4)]) {
+    if (isFinite(value)!==true) throw 'expected a finite number after conversion';
+}
+for (var value of [NaN,Infinity,-Infinity,undefined,'1e999','6tail',{},[1,2]]) {
+    if (isFinite(value)!==false) throw 'expected a nonfinite result';
+}
+if (isFinite()!==false || Number.isFinite('3') || Number.isFinite(null) || !Number.isFinite(3))
+    throw 'missing argument and strict Number predicate';
+'ok';
+"#), "ok");
+    }
+
+    #[test]
+    fn global_is_finite_uses_one_live_number_conversion_and_preserves_abrupt_values() {
+        assert_eq!(result(r#"
+var finite=isFinite, seen='', ignored={valueOf:function(){throw 'unused';}}, probe={};
+Object.defineProperty(probe,Symbol.toPrimitive,{get:function(){
+    seen+='get/';
+    return function(hint){if(this!==probe)throw 'wrong this';seen+=hint;return '6';};
+}});
+if (Number.isFinite(probe) || seen!=='' || !finite.call(ignored,probe,ignored) || seen!=='get/number')
+    throw 'number hint, receiver, or argument count';
+var fallback={valueOf:function(){
+    seen+='v';this.toString=function(){seen+='s';return '3';};return this;
+}};
+if (!finite(fallback) || seen!=='get/numbervs') throw 'live fallback order';
+var marker={},caught=false;
+try {finite({valueOf:function(){throw marker;},toString:function(){throw 'unreachable';}});}
+catch(e){caught=e===marker;}
+if(!caught) throw 'thrown identity';
+caught=false;try {finite(Symbol('offset'));} catch(e){caught=e instanceof TypeError;}
+if(!caught || Number.isFinite(Symbol('offset'))) throw 'symbol conversion';
+'ok';
+"#), "ok");
+    }
+
+    #[test]
+    fn global_is_finite_uses_existing_host_conversion_and_job_budgets() {
+        let (mut runtime, mut host) = test_runtime();
+        runtime.execute("var caught=false,finished=false;", &mut host).unwrap();
+        let error = runtime.execute(
+            "try{isFinite(test);}catch(e){caught=true;}finally{finished=true;}", &mut host,
+        ).unwrap_err();
+        assert!(error.contains("No conversion permission or hook read was granted"), "{error}");
+        runtime.begin_job();
+        assert_eq!(runtime.execute("!caught&&!finished;", &mut host).unwrap().to_text(), "true");
+
+        // The caller already owns this String. Constrain the remaining work at the
+        // native entry so that the argument copy itself must respect the limit.
+        runtime.begin_job();
+        runtime.constrain_job(usize::MAX, 1, usize::MAX, Instant::now() + Duration::from_secs(5));
+        let error = runtime.builtin(Builtin::IsFinite, &[Value::String("1234".into())], &mut host).unwrap_err();
+        assert!(error.exception.is_none() && error.message.contains("String/copy work limit"), "{}", error.message);
+        runtime.begin_job();
+        assert_eq!(runtime.execute("isFinite('20');", &mut host).unwrap().to_text(), "true");
     }
 
     #[test]
