@@ -5,8 +5,8 @@
 //! Common Latin-1 and punctuation references use a hand-selected name table.
 //! Numeric references, legacy name matching, and attribute ambiguity follow
 //! https://html.spec.whatwg.org/multipage/parsing.html#character-reference-state
-//! An unfinished tag consumes the rest of the input. Reaching either tree limit
-//! returns the prefix already parsed, rather than flattening deeper content.
+//! An unfinished tag consumes the rest of the input. Loaded documents report
+//! tree capacity exhaustion before commit. Small internal parses keep a prefix.
 
 use std::borrow::Cow;
 use std::collections::HashSet;
@@ -15,6 +15,7 @@ use std::collections::HashSet;
 mod svg_namespace;
 
 const MAX_NODES: usize = 20_000;
+pub(crate) const MAX_LOADED_DOCUMENT_NODES: usize = 262_144;
 const MAX_DEPTH: usize = 128; // Open-element stack, including the synthetic root.
 
 #[derive(Debug)]
@@ -161,7 +162,23 @@ pub enum NodeKind {
 }
 
 pub fn parse(input: &str) -> Document {
-    parse_internal(input, None, false).expect("Document parsing retains its bounded prefix behavior.")
+    parse_internal(input, None, false, None).expect("Document parsing retains its bounded prefix behavior.")
+}
+
+#[derive(Clone, Copy)]
+struct LoadedTree<'a> {
+    nodes: usize,
+    check_cancel: &'a dyn Fn() -> Result<(), String>,
+}
+
+pub(crate) fn parse_loaded_document(
+    input: &str,
+    check_cancel: &dyn Fn() -> Result<(), String>,
+) -> Result<Document, String> {
+    parse_internal(input, None, false, Some(LoadedTree {
+        nodes: MAX_LOADED_DOCUMENT_NODES,
+        check_cancel,
+    }))
 }
 
 /// Checked fragment subset. The context sets the tokenizer state directly;
@@ -171,11 +188,24 @@ pub(crate) fn parse_fragment(input: &str, context: &str, scripting: bool) -> Res
     if !matches!(context, "div" | "span" | "p" | "a" | "section" | "article" | "main" | "header" | "footer" | "aside" | "nav" | "li" | "ul" | "ol" | "dl" | "dt" | "dd" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6" | "em" | "b" | "strong" | "i" | "u" | "small" | "label" | "pre" | "blockquote" | "body" | "title" | "textarea" | "script" | "style" | "xmp" | "iframe" | "noembed" | "noframes" | "plaintext" | "select" | "optgroup" | "option") {
         return Err("HTML fragment parsing for this element context is not implemented.".into());
     }
-    parse_internal(input, Some(context), scripting)
+    parse_internal(input, Some(context), scripting, None)
 }
 
-fn parse_internal(input: &str, context: Option<&str>, scripting: bool) -> Result<Document, String> {
+fn parse_internal(
+    input: &str,
+    context: Option<&str>,
+    scripting: bool,
+    loaded: Option<LoadedTree<'_>>,
+) -> Result<Document, String> {
     let checked = context.is_some();
+    if let Some(loaded) = loaded { (loaded.check_cancel)()?; }
+    let node_limit = loaded.map_or(MAX_NODES, |loaded| loaded.nodes);
+    let fail_on_capacity = checked || loaded.is_some();
+    let node_limit_error = || if checked {
+        "HTML fragment node limit reached.".into()
+    } else {
+        format!("HTML document node limit reached ({node_limit} nodes).")
+    };
     // HTML input preprocessing happens before tokenization, so an LF produced
     // by a numeric reference remains distinct from a literal source CR.
     let normalized = if input.contains('\r') {
@@ -208,7 +238,7 @@ fn parse_internal(input: &str, context: Option<&str>, scripting: bool) -> Result
     };
     if context.is_some_and(|name| matches!(name, "title" | "textarea" | "script" | "style" | "xmp" | "iframe" | "noembed" | "noframes" | "plaintext")) {
         let text = if matches!(context, Some("title" | "textarea")) { decode_entities(input) } else { input.to_owned() }.replace('\0', "\u{fffd}");
-        if !append_text_value(&mut document, 0, text) { return Err("HTML fragment node limit reached.".into()); }
+        if !append_text_value(&mut document, 0, text, node_limit) { return Err(node_limit_error()); }
         document.scripting_enabled = scripting;
         return Ok(document);
     }
@@ -220,8 +250,13 @@ fn parse_internal(input: &str, context: Option<&str>, scripting: bool) -> Result
     let mut uncertain_foreign_recovery = false;
     let mut svg = svg_namespace::Island::default();
     let mut ignore_fragment_lf = None;
+    let mut tokens = 0u8;
 
     while position < input.len() {
+        if tokens == 0 {
+            if let Some(loaded) = loaded { (loaded.check_cancel)()?; }
+        }
+        tokens = tokens.wrapping_add(1);
         let parent = *stack.last().unwrap();
         let rest = &input[position..];
         if !rest.starts_with('<') {
@@ -232,10 +267,10 @@ fn parse_internal(input: &str, context: Option<&str>, scripting: bool) -> Result
             let appended = if checked {
                 let mut text = decode_entities(&input[position..end]);
                 if ignore_fragment_lf.take() == Some(parent) && text.starts_with('\n') { text.remove(0); }
-                append_text_value(&mut document, parent, text)
-            } else { append_text(&mut document, parent, &input[position..end]) };
+                append_text_value(&mut document, parent, text, node_limit)
+            } else { append_text(&mut document, parent, &input[position..end], node_limit) };
             if !appended {
-                if checked { return Err("HTML fragment node limit reached.".into()); }
+                if fail_on_capacity { return Err(node_limit_error()); }
                 break;
             }
             position = end;
@@ -266,8 +301,8 @@ fn parse_internal(input: &str, context: Option<&str>, scripting: bool) -> Result
             TagToken::NotATag => {
                 svg.root = None;
                 if checked && rest.starts_with("</") { return Err("HTML fragment bogus end-tag/comment recovery is not implemented.".into()); }
-                if !append_text(&mut document, parent, "<") {
-                    if checked { return Err("HTML fragment node limit reached.".into()); }
+                if !append_text(&mut document, parent, "<", node_limit) {
+                    if fail_on_capacity { return Err(node_limit_error()); }
                     break;
                 }
                 position += 1;
@@ -357,8 +392,16 @@ fn parse_internal(input: &str, context: Option<&str>, scripting: bool) -> Result
         }
         let raw = matches!(tag.name.as_str(), "script" | "style" | "title" | "textarea");
         let void = is_void(&tag.name);
-        if document.nodes.len() == MAX_NODES || (!raw && !void && !svg_empty && stack.len() == MAX_DEPTH) {
+        let nesting_full = !raw && !void && !svg_empty && stack.len() == MAX_DEPTH;
+        if document.nodes.len() == node_limit || nesting_full {
             if checked { return Err("HTML fragment node/depth limit reached.".into()); }
+            if fail_on_capacity {
+                return Err(if nesting_full {
+                    format!("HTML document nesting limit reached ({MAX_DEPTH} open nodes).")
+                } else {
+                    node_limit_error()
+                });
+            }
             break;
         }
         if matches!(tag.name.as_str(), "script" | "style" | "link") && tag.duplicate_attributes {
@@ -399,14 +442,14 @@ fn parse_internal(input: &str, context: Option<&str>, scripting: bool) -> Result
                         .collect::<Vec<_>>()
                         .join(" ");
                 }
-                if !append_text_value(&mut document, node, content) {
-                    if checked { return Err("HTML fragment node limit reached.".into()); }
+                if !append_text_value(&mut document, node, content, node_limit) {
+                    if fail_on_capacity { return Err(node_limit_error()); }
                     break;
                 }
             } else if matches!(tag.name.as_str(), "style" | "script")
-                && !append_text_value(&mut document, node, input[position..content_end].to_owned())
+                && !append_text_value(&mut document, node, input[position..content_end].to_owned(), node_limit)
             {
-                if checked { return Err("HTML fragment node limit reached.".into()); }
+                if fail_on_capacity { return Err(node_limit_error()); }
                 break;
             }
             // CSS and classic JavaScript remain raw text. Their consumers apply
@@ -429,6 +472,7 @@ fn parse_internal(input: &str, context: Option<&str>, scripting: bool) -> Result
     }
 
     if checked { document.scripting_enabled = scripting; }
+    if let Some(loaded) = loaded { (loaded.check_cancel)()?; }
     Ok(document)
 }
 
@@ -487,11 +531,11 @@ fn fragment_formatting(name: &str) -> bool {
     matches!(name, "a" | "b" | "i" | "em" | "strong" | "u" | "small" | "big" | "code" | "font" | "nobr" | "s" | "strike" | "tt")
 }
 
-fn append_text(document: &mut Document, parent: usize, source: &str) -> bool {
-    append_text_value(document, parent, decode_entities(source))
+fn append_text(document: &mut Document, parent: usize, source: &str, node_limit: usize) -> bool {
+    append_text_value(document, parent, decode_entities(source), node_limit)
 }
 
-fn append_text_value(document: &mut Document, parent: usize, text: String) -> bool {
+fn append_text_value(document: &mut Document, parent: usize, text: String, node_limit: usize) -> bool {
     if text.is_empty() {
         return true;
     }
@@ -501,7 +545,7 @@ fn append_text_value(document: &mut Document, parent: usize, text: String) -> bo
             return true;
         }
     }
-    if document.nodes.len() == MAX_NODES {
+    if document.nodes.len() == node_limit {
         return false;
     }
     let node = document.nodes.len();
@@ -1318,6 +1362,37 @@ mod tests {
         let wide = parse(&"<br>".repeat(MAX_NODES * 2));
         assert_eq!(wide.nodes.len(), MAX_NODES);
         assert_eq!(wide.nodes[0].children.len(), MAX_NODES - 1);
+    }
+
+    #[test]
+    fn loaded_document_keeps_the_tail_beyond_the_internal_node_bound() {
+        let source = format!("{}<p id=tail>wide document</p>", "<br>".repeat(MAX_NODES));
+        let doc = parse_loaded_document(&source, &|| Ok(())).unwrap();
+        assert_eq!(doc.nodes.len(), MAX_NODES + 3);
+        assert_eq!(doc.attr(MAX_NODES + 1, "id"), Some("tail"));
+    }
+
+    #[test]
+    fn loaded_document_reports_limits_and_cancellation_instead_of_returning_a_prefix() {
+        let loaded = Some(LoadedTree { nodes: 3, check_cancel: &|| Ok(()) });
+        assert_eq!(parse_internal("<br><br>", None, false, loaded).unwrap().nodes.len(), 3);
+        for source in ["<br><br><br>", "<br><br>tail", "<br><textarea>tail</textarea>"] {
+            assert_eq!(
+                parse_internal(source, None, false, loaded).unwrap_err(),
+                "HTML document node limit reached (3 nodes)."
+            );
+        }
+        let deep = "<div>".repeat(MAX_DEPTH);
+        assert!(parse_loaded_document(&deep, &|| Ok(())).unwrap_err()
+            .starts_with("HTML document nesting limit reached"));
+
+        let checks = std::cell::Cell::new(0);
+        let wide = "<br>".repeat(512);
+        let error = parse_loaded_document(&wide, &|| {
+            checks.set(checks.get() + 1);
+            if checks.get() == 3 { Err("Cancelled".into()) } else { Ok(()) }
+        }).unwrap_err();
+        assert_eq!(error, "Cancelled");
     }
 }
 

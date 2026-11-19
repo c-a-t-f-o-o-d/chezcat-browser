@@ -193,6 +193,10 @@ const NODE_BASE: u32 = 1024;
 const STYLE_BASE: u32 = 1_000_000;
 const DATASET_BASE: u32 = 1_500_000;
 const EVENT_BASE: u32 = 2_000_000;
+const _: () = assert!(
+    crate::html::MAX_LOADED_DOCUMENT_NODES + crate::javascript::limits::BROWSER.host.extra_nodes
+        <= (DATASET_BASE - STYLE_BASE) as usize
+);
 #[cfg(test)]
 const MAX_LISTENERS: usize = 64;
 #[cfg(test)]
