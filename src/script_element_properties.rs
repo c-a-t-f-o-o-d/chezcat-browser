@@ -76,13 +76,9 @@ impl Bridge<'_> {
     }
 
     pub(super) fn element_expando_receiver(&self, object: u32) -> bool {
-        self.class_list_element_receiver(object)
-            && node_index(object).is_some_and(|node| {
-                // Form named properties have their own lookup semantics.
-                // Inactive parsed frames retain their existing guarded scope.
-                !self.form_receiver(object)
-                    && (tag(self.doc, node) != "iframe" || self.state.dom.created.contains(&node))
-            })
+        // Form named properties have their own lookup semantics. An iframe
+        // element belongs to this document independently of its child context.
+        self.class_list_element_receiver(object) && !self.form_receiver(object)
     }
 
     pub(super) fn html_element_receiver(&self, object: u32) -> bool {

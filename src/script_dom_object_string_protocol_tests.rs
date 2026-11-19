@@ -336,39 +336,60 @@ if(rejected!==2||HTMLIFrameElement!==C||parsed.constructor!==C||stringify.call(f
 }
 
 #[test]
-fn iframe_interface_parsed_srcdoc_identity_keeps_instance_storage_restricted() {
-    let (mut doc, mut forms, mut page) = fixture_with("<iframe id=authored srcdoc='retained'></iframe>");
+fn iframe_interface_parsed_wrapper_has_ordinary_properties_without_a_child_context() {
+    let (mut doc, mut forms, mut page) = fixture_with(concat!(
+        "<iframe id=authored hidden srcdoc='retained'></iframe>",
+        "<fixture-app id=app></fixture-app>",
+    ));
     let node = id(&doc, "authored");
     run(&mut doc, &mut forms, &mut page, r#"
 var authored=document.querySelector('iframe'),fresh=document.createElement('iframe'),C=HTMLIFrameElement;
 if(authored!==document.getElementById('authored')||!(authored instanceof C)||authored.constructor!==C||
    Object.getPrototypeOf(authored)!==C.prototype||stringify.call(authored)!=='[object HTMLIFrameElement]'||
+   authored.ownerDocument!==document||authored.nextElementSibling!==document.getElementById('app')||
    authored.srcdoc!=='retained'||authored.contentWindow!==null||authored.contentDocument!==null)
     throw 'parsed frame identity or inert state';
 fresh.privateNote=7;
 if(Object.keys(fresh).length!==1||Object.getOwnPropertyDescriptor(fresh,'privateNote').value!==7||
    Object.hasOwn(fresh,'srcdoc')||Object.getPrototypeOf(fresh)!==C.prototype)
     throw 'created frame own storage or identity';
+if(authored.bootstrapState!==undefined||'bootstrapState' in authored||Object.hasOwn(authored,'srcdoc')||
+   Object.getOwnPropertyDescriptor(authored,'privateNote')!==undefined||Object.keys(authored).length)
+    throw 'ordinary absence or native own slots';
+var marker=Symbol('marker');
+Object.defineProperty(C.prototype,'wrapperOwner',{
+    get:function(){return this.ownerDocument;},configurable:true
+});
+authored.privateNote=1;
+authored[marker]=authored;
+Object.defineProperty(authored,'bootstrapState',{value:'ready',configurable:true});
+if(authored.wrapperOwner!==document||Object.hasOwn(authored,'wrapperOwner')||
+   Object.keys(authored).join(',')!=='privateNote'||authored[marker]!==authored||
+   Object.getOwnPropertyDescriptor(authored,'bootstrapState').value!=='ready'||
+   !delete authored.bootstrapState||'bootstrapState' in authored)
+    throw 'ordinary parsed iframe properties';
+delete C.prototype.wrapperOwner;
 "#);
     let commits = page.state.dom_commits;
+    let overlay = page.runtime.native_overlay_state_for_test(node_handle(node));
+    assert!(overlay.0.is_some());
     for source in [
-        "Object.hasOwn(authored,'srcdoc');",
-        "Object.getOwnPropertyDescriptor(authored,'privateNote');",
-        "Object.keys(authored);",
-        "for(var key in authored){}",
-        "authored.privateNote=1;",
-        "Object.defineProperty(authored,'privateNote',{value:1});",
         "authored.srcdoc='changed';",
+        "authored.src='https://example.test/forbidden';",
+        "authored.setAttribute('srcdoc','changed');",
+        "Object.defineProperty(authored,'contentWindow',{value:window});",
+        "Object.defineProperty(authored,'contentDocument',{value:document});",
     ] {
         let outcome = page.console_eval(&mut doc, &mut forms, source);
         assert_eq!(outcome.errors, 1, "{source}\n{}", page.report());
-        assert_eq!(page.runtime.native_overlay_state_for_test(node_handle(node)), (None, None));
+        assert_eq!(page.runtime.native_overlay_state_for_test(node_handle(node)), overlay);
         assert_eq!(doc.attr(node, "srcdoc"), Some("retained"));
+        assert_eq!(doc.attr(node, "src"), None);
         assert_eq!(page.state.dom_commits, commits);
         assert!(page.state.blank_frames.is_empty());
     }
     run(&mut doc, &mut forms, &mut page,
-        "if(authored.constructor!==C||authored.contentWindow!==null||fresh.privateNote!==7)throw 'frame state after refusals';");
+        "if(authored.constructor!==C||authored.contentWindow!==null||authored.contentDocument!==null||authored.privateNote!==1||fresh.privateNote!==7)throw 'frame state after refusals';");
 }
 
 #[test]

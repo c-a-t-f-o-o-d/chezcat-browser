@@ -1521,8 +1521,9 @@ if(Object.keys(f).length||Object.getOwnPropertyNames(f).length||f.getAttribute('
     bridge.set(node_handle(node),"srcdoc",Value::String("reflected".into())).unwrap();
     bridge.call(node_handle(node),"setAttribute",&[Value::String("srcdoc".into()),Value::String("changed".into())]).unwrap();
     assert!(bridge.inherited_keys(node_handle(node)).is_err());
-    assert!(bridge.own_data(node_handle(inert),"srcdoc").is_err());
-    assert!(bridge.own_keys(node_handle(inert)).is_err());
+    assert!(bridge.own_data(node_handle(inert),"srcdoc").unwrap().is_none());
+    assert!(bridge.own_keys(node_handle(inert)).unwrap().is_empty());
+    assert!(bridge.set(node_handle(inert),"srcdoc",Value::String("forbidden".into())).is_err());
     assert!(bridge.state.blank_frames.is_empty());
     assert_eq!(bridge.doc.attr(node,"srcdoc"),Some("changed"));
     assert_eq!(bridge.doc.attr(inert,"srcdoc"),Some("authored"));
