@@ -607,19 +607,8 @@ impl Runtime {
                     Ok(Self::await_control(control))
                 }
                 Instruction::Declare { statement, index } => {
-                    let StmtKind::Declare(kind, declarations) = &frame.program.stmts[statement].kind else {
-                        unreachable!("declarator instruction requires a declaration");
-                    };
-                    let result = (|| {
-                        let mode = self.declaration_mode(*kind, environment)?;
-                        self.evaluate_declarator(
-                            &frame.program, declarations[index], *kind, mode, environment, &frame.this, host,
-                        )?;
-                        Ok(Progress::Continue)
-                    })();
-                    result.map_err(|error: Fault| {
-                        error.at(&frame.program.source, frame.program.stmts[statement].at)
-                    })
+                    self.evaluate_resumption_declarator(&frame.program, statement, index, environment, &frame.this, host)?;
+                    Ok(Progress::Continue)
                 }
                 Instruction::Evaluate { statement, expression, action } => {
                     let result = (|| {

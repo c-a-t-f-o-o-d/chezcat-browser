@@ -27,6 +27,41 @@ impl Host for NoHost {
 }
 
 #[test]
+fn generator_yield_declarators_resume_in_order_without_initializing_the_suffix_early() {
+    let mut runtime = Runtime::for_test();
+    let source = r#"
+var trace='', read, reason={}, caught;
+function note(label,value){trace+=label+'|';return value;}
+function relay(value){if(value===reason)throw value;trace+='call:'+value+'|';return value;}
+function* sequence(){
+    read=()=>last;
+    let first=note('first',1), second=relay(yield first), third=note('third',second+1), last=relay(yield third);
+    return first+second+third+last;
+}
+function* failure(){
+    try{var first=note('before',1), middle=relay(yield first), last=note('unreachable',2);}
+    catch(error){caught=error;}
+    return last;
+}
+var working=sequence(), denied=false;
+if(working.next().value!==1||trace!=='first|')throw 'prefix declaration order';
+try{read();}catch(error){if(error.name!=='ReferenceError')throw error;denied=true;}
+if(!denied||working.next(3).value!==4||trace!=='first|call:3|third|')
+    throw 'first resumption ran a later initializer';
+var result=working.next(6);
+if(!result.done||result.value!==14||read()!==6||trace!=='first|call:3|third|call:6|')
+    throw 'declaration ran twice or initialized the wrong binding';
+var broken=failure();
+if(broken.next().value!==1||broken.next(reason).value!==undefined||caught!==reason||
+    !trace.endsWith('call:6|before|'))throw 'failed initializer ran its suffix';
+'ok';
+"#;
+    assert_eq!(runtime.execute(source, &mut NoHost::default()).unwrap().to_text(), "ok");
+    assert_eq!((runtime.call_depth, runtime.eval_depth), (0, 0));
+    assert!(runtime.transient_registration_is_empty());
+}
+
+#[test]
 fn generator_yield_branch_resumes_only_the_selected_sequence() {
     let mut runtime = Runtime::for_test();
     let source = r#"
