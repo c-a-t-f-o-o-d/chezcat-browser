@@ -1776,6 +1776,7 @@ enum StmtKind {
     },
     Return(Option<ExprId>),
     Yield(Option<ExprId>),
+    YieldFrom(ExprId),
     Throw(ExprId),
     Try(
         StmtId,
@@ -2241,18 +2242,17 @@ impl Parser {
         self.enter()?;
         let at = self.at();
         self.need("yield")?;
-        let value = if self.token().newline() || self.is(";") || self.is("}")
+        let kind = if self.token().newline() || self.is(";") || self.is("}")
             || matches!(self.token().kind, TokenKind::End)
         {
-            None
+            StmtKind::Yield(None)
+        } else if self.eat("*") {
+            StmtKind::YieldFrom(self.assignment_with_in()?)
         } else {
-            if self.is("*") {
-                return Err(self.unsupported("Delegated yield is not implemented."));
-            }
-            Some(self.assignment_with_in()?)
+            StmtKind::Yield(Some(self.assignment_with_in()?))
         };
         self.semi()?;
-        let statement = self.stmt(StmtKind::Yield(value), at)?;
+        let statement = self.stmt(kind, at)?;
         self.depth -= 1;
         Ok(statement)
     }
@@ -6715,7 +6715,9 @@ impl Runtime {
                 Some(expr) => self.eval(program, *expr, env, this, host)?,
                 None => Value::Undefined,
             })),
-            StmtKind::Yield(_) => unreachable!("yield statements require an owned generator frame"),
+            StmtKind::Yield(_) | StmtKind::YieldFrom(_) => {
+                unreachable!("yield statements require an owned generator frame")
+            }
             StmtKind::Break(target) => Ok(Control::Break(*target, None)),
             StmtKind::Continue(target) => Ok(Control::Continue(*target, None)),
         }

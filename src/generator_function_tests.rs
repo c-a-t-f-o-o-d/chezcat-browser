@@ -27,6 +27,76 @@ impl Host for NoHost {
 }
 
 #[test]
+fn generator_yield_delegation_forwards_results_and_completions() {
+    let mut runtime = Runtime::for_test();
+    let source = r#"
+var marker={}, reads=0, tail=0;
+function source(mode){
+    var args=[], gets=0, closes=0, received, index=0;
+    var first={done:false,get value(){reads++;return 10;}};
+    var returned={done:false,value:'held return'};
+    var iterator={
+        get next(){
+            gets++;
+            return function(value){
+                if(this!==iterator||arguments.length!==1)throw 'next receiver or arity';
+                args.push(value);
+                if(index++===0)return first;
+                return {done:true,get value(){reads++;return 'done';}};
+            };
+        }
+    };
+    if(mode!=='no return')iterator.return=function(value){
+        if(this!==iterator)throw 'return receiver';
+        closes++;
+        if(mode==='no throw'&&arguments.length!==0)throw 'close passed an argument';
+        received=value;
+        if(mode==='return yield')return returned;
+        return {done:true,value:'closed'};
+    };
+    if(mode==='handles throw')iterator.throw=function(value){
+        if(this!==iterator||arguments.length!==1)throw 'throw receiver or arity';
+        received=value;
+        return {done:true,value:'handled'};
+    };
+    return {
+        [Symbol.iterator](){return iterator;},
+        first,returned,iterator,args,
+        get gets(){return gets;},get closes(){return closes;},get received(){return received;}
+    };
+}
+function* outer(input){yield* input;tail++;return 'tail';}
+var normal=source('normal'), drive=outer(normal);
+if(normal.gets||drive.next(1)!==normal.first||reads||normal.args[0]!==undefined)
+    throw 'first result identity or premature read';
+Object.defineProperty(normal.iterator,'next',{value:function(){throw 'next read again';}});
+var completion=drive.next(4);
+if(!completion.done||completion.value!=='tail'||normal.args[1]!==4||normal.gets!==1||reads!==1)
+    throw 'next forwarding, cached method or completion';
+var hold=source('return yield'), resumed=outer(hold);
+resumed.next();
+if(resumed.return(7)!==hold.returned||hold.received!==7||hold.closes!==1||
+    resumed.next(8).value!=='tail'||hold.args[1]!==8)throw 'return result did not suspend';
+var recovery=source('handles throw'), catcher=outer(recovery);
+catcher.next();
+if(catcher.throw(marker).value!=='tail'||recovery.received!==marker||recovery.closes)
+    throw 'forwarded throw completion';
+var missing=source('no throw'), closed=outer(missing), caught=false;
+closed.next();
+try{closed.throw(marker);}catch(error){if(error.name!=='TypeError')throw error;caught=true;}
+if(!caught||missing.closes!==1||!closed.next().done)throw 'missing throw did not close';
+var absent=source('no return'), stopping=outer(absent);
+stopping.next();
+var stopped=stopping.return(marker);
+if(!stopped.done||stopped.value!==marker||!stopping.next().done||tail!==3||reads!==2)
+    throw 'missing return, unexpected tail, or value read';
+'ok';
+"#;
+    assert_eq!(runtime.execute(source, &mut NoHost::default()).unwrap().to_text(), "ok");
+    assert!(runtime.transient_registration_is_empty());
+}
+
+#[test]
 fn generator_yield_statements_resume_without_replaying_prefixes_or_running_abandoned_bodies() {
     let mut runtime = Runtime::for_test();
     let source = r#"

@@ -8,11 +8,18 @@
 
 use super::{Builtin, Fault, Function, Host, Ordinary, Runtime, Value, MAX_CALL_DEPTH};
 use super::function_reachability::Edge;
+use super::generator_functions::Op as GeneratorOp;
 
 pub(super) struct Record {
     iterator: Value,
     next: Value,
     done: bool,
+}
+
+pub(super) enum Delegated {
+    Yield(Value),
+    Done,
+    Return(Value),
 }
 
 impl Record {
@@ -202,6 +209,60 @@ impl Runtime {
         result
     }
 
+    fn iterator_control_method(
+        &mut self, record: &Record, name: &str, host: &mut dyn Host,
+    ) -> Result<Option<Value>, Fault> {
+        let object = self.iterator_ordinary(&record.iterator)?;
+        let method = self.get_ordinary_property_with_host(object, name, host)?;
+        match method {
+            Value::Null | Value::Undefined => Ok(None),
+            Value::Function(_) => Ok(Some(method)),
+            _ => Err(Fault::exception("TypeError", format!("Iterator {name} is not callable."))),
+        }
+    }
+
+    #[inline(never)]
+    pub(super) fn delegate_iterator(
+        &mut self, record: &mut Record, operation: GeneratorOp, input: &Value, host: &mut dyn Host,
+    ) -> Result<Delegated, Fault> {
+        // The record and original result object remain borrowed across
+        // IteratorComplete/IteratorValue getters and iterator callbacks.
+        let marker = self.inhibit_transient_collection();
+        let result = (|| {
+            self.step()?;
+            let method = match operation {
+                GeneratorOp::Next => self.copy_value(&record.next)?,
+                GeneratorOp::Return => {
+                    let Some(method) = self.iterator_control_method(record, "return", host)? else {
+                        record.done = true;
+                        return self.copy_value(input).map(Delegated::Return);
+                    };
+                    method
+                }
+                GeneratorOp::Throw => {
+                    let Some(method) = self.iterator_control_method(record, "throw", host)? else {
+                        self.iterator_close_unpublished(record, Ok(()), host)?;
+                        return Err(Fault::exception("TypeError", "Delegated iterator has no throw method."));
+                    };
+                    method
+                }
+            };
+            let receiver = self.copy_value(&record.iterator)?;
+            let input = self.copy_value(input)?;
+            let result = self.call_value(method, &[input], receiver, host)?;
+            let object = self.iterator_ordinary(&result)?;
+            if !self.get_ordinary_property_with_host(object, "done", host)?.truthy() {
+                return Ok(Delegated::Yield(result));
+            }
+            record.done = true;
+            let value = self.get_ordinary_property_with_host(object, "value", host)?;
+            if matches!(operation, GeneratorOp::Return) { Ok(Delegated::Return(value)) }
+            else { Ok(Delegated::Done) }
+        })();
+        self.restore_transient_marker(marker);
+        result
+    }
+
     fn iterator_close_unpublished<T>(
         &mut self,
         record: &mut Record,
@@ -219,17 +280,9 @@ impl Runtime {
         }
         record.done = true;
         let closed = (|| {
-            let object = self.iterator_ordinary(&record.iterator)?;
-            let method = self.get_ordinary_property_with_host(object, "return", host)?;
-            if matches!(method, Value::Null | Value::Undefined) {
+            let Some(method) = self.iterator_control_method(record, "return", host)? else {
                 return Ok(());
-            }
-            if !matches!(method, Value::Function(_)) {
-                return Err(Fault::exception(
-                    "TypeError",
-                    "Iterator return is not callable.",
-                ));
-            }
+            };
             let receiver = self.copy_value(&record.iterator)?;
             let result = self.call_value(method, &[], receiver, host)?;
             // No property of the returned object is read, including native
