@@ -1,4 +1,4 @@
-//! Ordinary expando families and reserved native interface names.
+//! Ordinary element properties and reserved native interface names.
 //! Custom keys use VM descriptors; native interfaces keep host routing.
 //! https://dom.spec.whatwg.org/#interface-element
 //! https://html.spec.whatwg.org/multipage/dom.html#htmlelement
@@ -77,73 +77,10 @@ impl Bridge<'_> {
     pub(super) fn element_expando_receiver(&self, object: u32) -> bool {
         self.class_list_element_receiver(object)
             && node_index(object).is_some_and(|node| {
-                let name = tag(self.doc, node);
-                if name == "iframe" {
-                    // Parsed inactive frames expose their interface identity.
-                    // Only script-created frames have ordinary own-property storage.
-                    return self.state.dom.created.contains(&node);
-                }
-                matches!(
-                    name,
-                    "html"
-                        | "head"
-                        | "body"
-                        | "div"
-                        | "span"
-                        | "p"
-                        | "a"
-                        | "area"
-                        | "b"
-                        | "i"
-                        | "em"
-                        | "strong"
-                        | "small"
-                        | "s"
-                        | "u"
-                        | "mark"
-                        | "main"
-                        | "article"
-                        | "section"
-                        | "header"
-                        | "footer"
-                        | "aside"
-                        | "nav"
-                        | "h1"
-                        | "h2"
-                        | "h3"
-                        | "h4"
-                        | "h5"
-                        | "h6"
-                        | "br"
-                        | "wbr"
-                        | "hr"
-                        | "ul"
-                        | "ol"
-                        | "li"
-                        | "dl"
-                        | "dt"
-                        | "dd"
-                        | "blockquote"
-                        | "pre"
-                        | "code"
-                        | "kbd"
-                        | "samp"
-                        | "var"
-                        | "sub"
-                        | "sup"
-                        | "button"
-                        | "label"
-                        | "input"
-                        | "canvas"
-                        | "textarea"
-                        | "img"
-                        | "video"
-                        | "script"
-                        | "style"
-                        | "link"
-                        | "meta"
-                        | "title"
-                ) || crate::javascript::valid_custom_element_name(name)
+                // Form named properties have their own lookup semantics.
+                // Inactive parsed frames retain their existing guarded scope.
+                !self.form_receiver(object)
+                    && (tag(self.doc, node) != "iframe" || self.state.dom.created.contains(&node))
             })
     }
 
@@ -164,7 +101,11 @@ impl Bridge<'_> {
         node_index(object).is_some_and(|node| {
             let tag = tag(self.doc, node);
             contains(specific(tag), name)
+                || matches!(name, "value" | "form" | "disabled") && self.forms.controls.contains_key(&node)
+                || tag == "select" && (name == "selectedIndex" || collection_index(name).is_some())
+                || matches!(tag, "option" | "optgroup" | "fieldset") && name == "disabled"
                 || self.html_text_reflection(node,name).is_some()
+                || name == "border" && self.html_border_property(node)
                 || self.html_spacing_property(node, name)
                 || matches!(tag, "a" | "area") && contains(URL, name)
                 || matches!(tag, "input" | "button" | "textarea") && contains(VALIDATION, name)
