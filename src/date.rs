@@ -559,7 +559,13 @@ impl Runtime {
                     other => clip(other.script_number()?),
                 }
             }
-            _ => return Err(local_time_fault()),
+            _ => {
+                let calendar = self.date_calendar(args, host)?;
+                // Local timezone offsets cannot bring a value more than a
+                // day outside the Date range back into the clipped range.
+                if calendar.abs() > MAX_TIME + DAY_MS { f64::NAN }
+                else { self.date_from_local_calendar(calendar, host)? }
+            }
         };
         self.date_object(value)
     }
@@ -723,19 +729,25 @@ impl Runtime {
         let result = make_date((local/DAY_MS).floor(), make_time(
             (within/3_600_000.0).floor(), (within.rem_euclid(3_600_000.0)/60_000.0).floor(),
             second, millisecond.unwrap_or(local.rem_euclid(1000.0))));
-        let utc = if result.is_nan() { f64::NAN } else {
-            let utc = host.date_to_utc(result).map_err(Fault::new)?;
-            if utc.is_infinite() || utc.is_finite() && utc.fract() != 0.0 {
-                return Err(Fault::new("Host timezone did not return integral UTC milliseconds."));
-            }
-            utc
-        };
-        let value = clip(utc);
+        let value = self.date_from_local_calendar(result, host)?;
         self.objects[object].date = Some(value);
         Ok(value)
     }
 
+    fn date_from_local_calendar(&self, calendar: f64, host: &mut dyn Host) -> Result<f64, Fault> {
+        if !calendar.is_finite() { return Ok(f64::NAN); }
+        let utc = host.date_to_utc(calendar).map_err(Fault::new)?;
+        if utc.is_infinite() || utc.is_finite() && utc.fract() != 0.0 {
+            return Err(Fault::new("Host timezone did not return integral UTC milliseconds."));
+        }
+        Ok(clip(utc))
+    }
+
     fn date_utc(&mut self, args: &[Value], host: &mut dyn Host) -> Result<f64, Fault> {
+        self.date_calendar(args, host).map(clip)
+    }
+
+    fn date_calendar(&mut self, args: &[Value], host: &mut dyn Host) -> Result<f64, Fault> {
         let mut values = [f64::NAN, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0];
         for (index, value) in args.iter().take(7).enumerate() {
             values[index] = self.binary_number(value, host)?;
@@ -746,10 +758,10 @@ impl Runtime {
         } else {
             year
         };
-        Ok(clip(make_date(
+        Ok(make_date(
             make_day(values[0], values[1], values[2]),
             make_time(values[3], values[4], values[5], values[6]),
-        )))
+        ))
     }
 
     fn date_set_utc(
@@ -1145,6 +1157,40 @@ if(new Date(NaN).toUTCString()!=='Invalid Date'||new Date(NaN).toString()!=='Inv
     }
     fn local_succeeds(source: &str, host: &mut LocalHost) {
         assert_eq!(Runtime::for_test().execute(source, host).unwrap().to_text(), "ok");
+    }
+
+    #[test]
+    fn dates_local_calendar_constructor_coerces_normalizes_and_uses_the_host_inverse() {
+        let mut host = LocalHost { offset: 19_800_000.0, ..LocalHost::default() };
+        local_succeeds(r#"
+var order='';
+function argument(name, value){return {valueOf:function(){order+=name;return value;}};}
+var date=new Date(argument('y',99.9),argument('m',13),argument('d',0),
+    argument('h',25.5),argument('n',2),argument('s',3),argument('x',4),argument('unused',5));
+if(order!=='ymdhnsx'||date.toISOString()!=='2000-01-31T19:32:03.004Z')
+    throw 'coercion or local calendar';
+if(new Date(1970,1).toUTCString()!=='Sat, 31 Jan 1970 18:30:00 GMT')
+    throw 'local defaults';
+if(!isNaN(new Date(1970,undefined))||!isNaN(new Date(1970,1,undefined))||
+   !isNaN(new Date(1e8,0)))throw 'invalid calendar';
+var marker={};order='';
+try{new Date(argument('a',NaN),{valueOf:function(){throw marker;}},argument('bad',1));}
+catch(error){if(error!==marker||order!=='a')throw 'abrupt conversion';}
+if(Date.UTC(1970,1)!==Date.parse('1970-02-01T00:00:00Z'))throw 'UTC calendar changed';'ok';
+"#, &mut host);
+        assert_eq!((host.reads, host.writes), (0, 2));
+    }
+
+    #[test]
+    fn dates_local_calendar_constructor_keeps_fold_and_gap_disambiguation() {
+        let mut host = LocalHost { central: true, ..LocalHost::default() };
+        local_succeeds(r#"
+if(new Date(2024,10,3,1,30).toISOString()!=='2024-11-03T06:30:00.000Z')
+    throw 'fold earlier';
+if(new Date(2024,2,10,2,30).toISOString()!=='2024-03-10T08:30:00.000Z')
+    throw 'gap earlier offset';'ok';
+"#, &mut host);
+        assert_eq!(host.writes, 2);
     }
 
     #[test]
