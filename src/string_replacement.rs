@@ -82,10 +82,11 @@ impl Runtime {
             Some(self.replacement_string_value(replacement, host)?)
         };
         let input: Vec<_> = text.encode_utf16().collect();
-        let global = if let Some(id) = regex {
-            self.object(id)?.regexp.as_ref().unwrap().flags.global
+        let (global, unicode) = if let Some(id) = regex {
+            let flags = self.object(id)?.regexp.as_ref().unwrap().flags;
+            (flags.global, flags.unicode)
         } else {
-            all
+            (all, false)
         };
         if let Some(id) = regex.filter(|_| global) {
             self.set_property_throw(id, "lastIndex".into(), Value::Number(0.0))?;
@@ -114,16 +115,16 @@ impl Runtime {
                 // spend the shared job allowance, including across recursion.
                 self.work(bytes)?;
                 let empty_end = (found.start() == found.end()).then_some(found.end());
-                search_from = found.end().max(found.start() + 1);
+                search_from = empty_end.map_or(found.end(), |index| regexp::advance_string_index(&input, index, unicode));
                 matches.push(found);
                 if !global {
                     break;
                 }
-                if let (Some(end), Some(id)) = (empty_end, regex) {
+                if let (Some(_), Some(id)) = (empty_end, regex) {
                     self.set_property_throw(
                         id,
                         "lastIndex".into(),
-                        Value::Number((end + 1) as f64),
+                        Value::Number(search_from as f64),
                     )?;
                 }
             }
@@ -178,15 +179,18 @@ impl Runtime {
             let replace = self.replacement_text(&template, &found, &input)?;
             self.append_string(&mut output, &replace)?;
             cursor = found.end();
-            search_from = found.end().max(found.start() + 1);
+            let empty = found.start() == found.end();
+            search_from = if empty {
+                regexp::advance_string_index(&input, found.end(), unicode)
+            } else { found.end() };
             if !global {
                 break;
             }
-            if found.start() == found.end() && regex.is_some() {
+            if empty && regex.is_some() {
                 self.set_property_throw(
                     regex.unwrap(),
                     "lastIndex".into(),
-                    Value::Number((found.end() + 1) as f64),
+                    Value::Number(search_from as f64),
                 )?;
             }
         }

@@ -173,7 +173,8 @@ impl Runtime {
             }
             matches.push(self.string_from_units(&input[found.start()..found.end()])?);
             if found.start() == found.end() {
-                self.set_property_throw(id, "lastIndex".into(), Value::Number((found.end() + 1) as f64))?;
+                let next = regexp::advance_string_index(input, found.end(), expression.flags.unicode);
+                self.set_property_throw(id, "lastIndex".into(), Value::Number(next as f64))?;
             }
         }
         if matches.is_empty() { Ok(Value::Null) } else { self.array_from_values(&matches) }
