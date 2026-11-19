@@ -4,6 +4,7 @@ use super::*;
 pub(super) const PROPERTIES: &[&str] = &[
     "align-items",
     "align-self",
+    "animation-timing-function",
     "background",
     "background-color",
     "background-image",
@@ -80,7 +81,9 @@ pub(super) fn method(name: &str) -> Option<&'static str> {
 }
 
 pub(super) fn same_name(raw: &str, expected: &str) -> bool {
-    if expected.starts_with("--") {
+    if expected == "animation-timing-function" {
+        crate::css::easing_trim(raw).eq_ignore_ascii_case(expected)
+    } else if expected.starts_with("--") {
         raw.trim() == expected
     } else {
         raw.trim().eq_ignore_ascii_case(expected)
@@ -89,7 +92,7 @@ pub(super) fn same_name(raw: &str, expected: &str) -> bool {
 
 fn skip_trivia(mut raw: &str) -> Option<&str> {
     loop {
-        raw = raw.trim_start_matches(|ch: char| ch.is_ascii_whitespace());
+        raw = raw.trim_start_matches([' ', '\t', '\r', '\n', '\u{c}']);
         let Some(after) = raw.strip_prefix("/*") else {
             return Some(raw);
         };
@@ -121,12 +124,13 @@ pub(super) fn winner<'a>(style: &'a str, name: &str) -> Option<(usize, &'a str)>
         } else {
             raw
         };
-        let (specified, priority) = crate::css::declaration_priority(value);
+        let (specified, priority) = if name == "animation-timing-function" { crate::css::easing_priority(value) } else { crate::css::declaration_priority(value) };
         if matches!(name, "color" | "background-color")
             && !crate::css::inline_color_value(specified)
         {
             continue;
         }
+        if name == "animation-timing-function" && !crate::css::inline_easing_value(specified) { continue; }
         if !important || priority {
             winner = Some((index, raw));
             important = priority;
@@ -196,7 +200,31 @@ pub(super) fn replace(
     Ok(Some(result))
 }
 
+#[derive(Clone, Copy)]
+pub(super) enum EasingText { Specified, Cssom }
+
+pub(super) fn normalize_easing(value: &str, state: &mut State, kind: EasingText) -> Result<Option<String>, String> {
+    let (work, copies) = crate::css::easing_source_cost(value.len());
+    state.work(work)?;
+    state.copies(copies)?;
+    Ok(match kind {
+        EasingText::Specified => crate::css::specified_easing(value),
+        EasingText::Cssom => crate::css::normalize_easing(value),
+    })
+}
+
+pub(super) fn easing_declaration(style: &str, state: &mut State, kind: EasingText) -> Result<Option<(String, bool)>, String> {
+    state.work(1 + style.len().saturating_mul(128))?;
+    state.copies(style.len())?;
+    let Some((_, raw)) = winner(style, "animation-timing-function") else { return Ok(None); };
+    let clean;
+    let raw = if raw.contains("/*") { clean = crate::css::without_comments(raw); clean.as_str() } else { raw };
+    let (value, important) = crate::css::easing_priority(raw);
+    Ok(normalize_easing(value, state, kind)?.map(|value| (value, important)))
+}
+
 impl Bridge<'_> {
+
     pub(super) fn inline_names(&mut self, node: usize) -> Result<Vec<String>, String> {
         let raw = self.doc.attr(node, "style").unwrap_or("");
         if raw.len() > self.state.limits.host.string_bytes {

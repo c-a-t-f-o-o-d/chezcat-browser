@@ -51,6 +51,9 @@ mod script_timezone;
 mod script_computed_style;
 #[path = "script_inline_style.rs"]
 mod script_inline_style;
+#[cfg(test)]
+#[path = "script_inline_easing_tests.rs"]
+mod script_inline_easing_tests;
 use dom_tree::DomState;
 #[path = "script_attr.rs"]
 mod script_attr;
@@ -2432,10 +2435,15 @@ impl Bridge<'_> {
             let value = script_transform::specified(style, self.state)?;
             return self.string(&value);
         }
+        if name == "animation-timing-function" {
+            let value = script_inline_style::easing_declaration(style, self.state, script_inline_style::EasingText::Cssom)?.map_or_else(String::new, |(value, _)| value);
+            return self.string(&value);
+        }
         let raw = script_inline_style::winner(style, name).map_or("", |(_, value)| value);
         let clean;
         let raw = if raw.contains("/*") { clean = crate::css::without_comments(raw); &clean } else { raw };
-        let value = crate::css::declaration_priority(raw).0.to_owned();
+        let raw = crate::css::declaration_priority(raw).0;
+        let value = raw.to_owned();
         self.string(&value)
     }
 
@@ -2461,8 +2469,12 @@ impl Bridge<'_> {
                 Err(crate::css::TransformSyntax::Unsupported) => return Err("This transform exceeds the supported translation grammar.".into()),
             };
             specified.as_str()
+        } else if name == "animation-timing-function" && !value.is_empty() {
+            if !priority.is_empty() && !priority.eq_ignore_ascii_case("important") { return Ok(()); }
+            specified = match script_inline_style::normalize_easing(value, self.state, script_inline_style::EasingText::Specified)? { Some(value) => value, None => return Ok(()) };
+            specified.as_str()
         } else {value};
-        let priority = if name == "transform" && value.is_empty() {""} else {priority};
+        let priority = if matches!(name, "transform" | "animation-timing-function") && value.is_empty() {""} else {priority};
         if !priority.is_empty() && !priority.eq_ignore_ascii_case("important") {
             return Err("CSS priority must be empty or important.".into());
         }
@@ -2471,12 +2483,18 @@ impl Bridge<'_> {
             return Err(format!("Inline style exceeds {} KiB.", self.state.limits.host.string_bytes / 1024).into());
         }
         self.state.copies(existing.len())?;
+        if name == "animation-timing-function" && !value.is_empty() {
+            if let Some((prior, important)) = script_inline_style::easing_declaration(existing, self.state, script_inline_style::EasingText::Specified)? {
+                if prior == value && important == priority.eq_ignore_ascii_case("important") { return Ok(()); }
+            }
+        }
         if name == "transform" && value.is_empty()
             && matches!(script_transform::declaration(existing, self.state)?, script_transform::Declaration::Absent)
         {
             return Ok(());
         }
         self.state.work(1 + existing.len().saturating_mul(2))?;
+        if name == "animation-timing-function" { self.state.work(existing.len().saturating_mul(128))?; }
         self.state.copies(existing.len().saturating_add(name.len()).saturating_add(value.len()).saturating_add(14))?;
         let Some(style) = script_inline_style::replace(existing, name, value.trim(), priority, self.state.limits.host.string_bytes)? else { return Ok(()); };
         self.attribute(node, "style", Some(style))
@@ -2695,7 +2713,7 @@ impl Host for Bridge<'_> {
 
     fn string_setter(&self, object: u32, property: &str) -> bool {
         if property == "value" && self.input_accessor_member(object, property) {return true;}
-        if property == "transform" && (STYLE_BASE..DATASET_BASE).contains(&object) {return true;}
+        if matches!(property, "transform" | "animationTimingFunction" | "animation-timing-function") && (STYLE_BASE..DATASET_BASE).contains(&object) {return true;}
         if self.button_string_property(object,property) {return true;}
         if self.fragment_receiver(object) && matches!(property,"nodeValue"|"textContent") {return true;}
         if self.hidden_input_property(object,property) {return true;}
@@ -2931,7 +2949,7 @@ impl Host for Bridge<'_> {
 
     fn null_string_setter(&self, object: u32, property: &str) -> bool {
         property == "value" && self.input_accessor_member(object, property)
-            || property == "transform" && (STYLE_BASE..DATASET_BASE).contains(&object)
+            || matches!(property, "transform" | "animationTimingFunction" | "animation-timing-function") && (STYLE_BASE..DATASET_BASE).contains(&object)
             || property == "value" && self.hidden_input_property(object,property)
             || property == "value" && self.text_input_default_property(object,property)
             || property == "innerHTML" && self.attr_element_receiver(object)
@@ -5299,10 +5317,22 @@ fn validate_style(style: &str, string_limit: usize) -> Result<(), String> {
         let (name, value) = item
             .split_once(':')
             .ok_or("Style declaration needs a colon.")?;
-        let name = if name.trim().eq_ignore_ascii_case("transform") { "transform".to_owned() } else { css_name(name.trim())? };
+        let raw_name = name;
+        let name = if crate::css::easing_trim(raw_name).eq_ignore_ascii_case("animation-timing-function") {
+            "animation-timing-function".to_owned()
+        } else if name.trim().eq_ignore_ascii_case("transform") {
+            "transform".to_owned()
+        } else {
+            let name = css_name(name.trim())?;
+            if name == "animation-timing-function" {
+                return Err("Raw easing declarations require the CSS animation-timing-function property name.".into());
+            }
+            name
+        };
         // Priority is separate grammar. Keep the ordinary value guard on
         // everything before a genuine trailing priority marker.
-        let value = if name == "transform" { crate::css::declaration_priority(value).0 } else { value.trim() };
+        let value = if name == "animation-timing-function" { crate::css::easing_priority(value).0 }
+            else if name == "transform" { crate::css::declaration_priority(value).0 } else { value.trim() };
         validate_css_value(&name, value, string_limit)?;
     }
     if !items.complete() { return Err("Inline style has an unterminated string or function.".into()); }
