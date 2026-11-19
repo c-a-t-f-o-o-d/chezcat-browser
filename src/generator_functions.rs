@@ -455,12 +455,10 @@ impl Runtime {
                     continue;
                 }
                 Instruction::Evaluate { statement, expression, action } => {
-                    self.evaluate_generator_expression(frame, statement, expression, action, host)?;
-                    continue;
+                    self.evaluate_generator_expression(frame, statement, expression, action, host)?
                 }
                 Instruction::BranchFalse { statement, condition, target } => {
-                    self.evaluate_generator_expression(frame, statement, condition, Resume::BranchFalse(target), host)?;
-                    continue;
+                    self.evaluate_generator_expression(frame, statement, condition, Resume::BranchFalse(target), host)?
                 }
                 Instruction::BranchOnValueFalse(target) => {
                     self.step()?;
@@ -523,12 +521,15 @@ impl Runtime {
     #[inline(never)]
     fn evaluate_generator_expression(
         &mut self, frame: &mut Activation, statement: StmtId, expression: ExprId, action: Resume, host: &mut dyn Host,
-    ) -> Result<(), Fault> {
+    ) -> Result<Control, Fault> {
         self.step()?;
         let value = self.eval(&frame.program, expression, frame.environment(), &frame.this, host)
             .map_err(|error| error.at(&frame.program.source, frame.program.stmts[statement].at))?;
+        if matches!(action, Resume::Return) {
+            return Ok(Control::Return(value));
+        }
         Self::apply_generator_expression_action(frame, action, LogicalOperand::classify(&value));
-        Ok(())
+        Ok(Control::Normal(None))
     }
 
     fn apply_generator_expression_action(frame: &mut Activation, action: Resume, operand: LogicalOperand) {

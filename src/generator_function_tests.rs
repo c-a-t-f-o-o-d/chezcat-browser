@@ -98,6 +98,41 @@ if(broken.next().value!==1||broken.next(reason).value!==undefined||caught!==reas
 }
 
 #[test]
+fn generator_yield_in_return_sequence_preserves_value_and_cleanup() {
+    let mut runtime = Runtime::for_test();
+    let source = r#"
+var trace='', chosen={}, replacement={};
+function relay(value){trace+='call:'+value+'|';}
+function finish(){trace+='suffix|';return chosen;}
+function* inner(){try{yield 3;return 4;}finally{trace+='inner|';}}
+function* sequence(override){
+    try{return (relay(yield* inner()), trace+='between|', finish());}
+    finally{trace+='outer|';if(override)return replacement;}
+}
+var first=sequence(false);
+if(first.next().value!==3||trace!=='')throw 'return suffix ran before suspension';
+var done=first.next();
+if(!done.done||done.value!==chosen||trace!=='inner|call:4|between|suffix|outer|')
+    throw 'return sequence completion';
+trace='';
+var overridden=sequence(true);
+overridden.next();
+if(overridden.next().value!==replacement||!trace.endsWith('suffix|outer|'))
+    throw 'finally did not replace computed return';
+trace='';
+var cancelled=sequence(false);
+cancelled.next();
+var interrupted=cancelled.return(9);
+if(!interrupted.done||interrupted.value!==9||trace!=='inner|outer|')
+    throw 'interrupted return sequence ran its suffix';
+'ok';
+"#;
+    assert_eq!(runtime.execute(source, &mut NoHost::default()).unwrap().to_text(), "ok");
+    assert_eq!((runtime.call_depth, runtime.eval_depth), (0, 0));
+    assert!(runtime.transient_registration_is_empty());
+}
+
+#[test]
 fn generator_yield_respects_short_circuit_expression_statements() {
     let mut runtime = Runtime::for_test();
     let source = r#"

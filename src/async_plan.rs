@@ -263,7 +263,11 @@ fn visit_expression(
                     part = ExpressionPart::Value(left, Resume::Discard);
                     continue;
                 }
-                ExprKind::Binary(operator @ ("&&" | "||" | "??"), left, right) => {
+                // The generator's short-circuit slot stores the operand class.
+                // Returning a logical expression needs its actual value.
+                ExprKind::Binary(operator @ ("&&" | "||" | "??"), left, right)
+                    if !generator || !matches!(action, Resume::Return) =>
+                {
                     push(&mut pending, ExpressionPart::LogicalEnd)?;
                     push(&mut pending, ExpressionPart::Value(right, action))?;
                     push(&mut pending, ExpressionPart::LogicalTest(operator, action))?;
@@ -321,9 +325,11 @@ fn visit_expression(
     }
 }
 
-fn expression_size(program: &Program, expression: ExprId, generator: bool) -> Result<(usize, usize), Fault> {
+fn expression_size(
+    program: &Program, expression: ExprId, action: Resume, generator: bool,
+) -> Result<(usize, usize), Fault> {
     let (mut instructions, mut sites) = (0, 0);
-    visit_expression(program, expression, Resume::Discard, generator, |part| {
+    visit_expression(program, expression, action, generator, |part| {
         match part {
             ExpressionPart::Value(expression, action) => {
                 instructions += 1;
@@ -350,14 +356,14 @@ fn statement_size(program: &Program, id: StmtId) -> Result<(usize, usize), Fault
     if let StmtKind::Declare(_, declarations) = &program.stmts[id].kind {
         let (mut instructions, mut sites) = (0, 0);
         for &(_, initial) in declarations {
-            let (length, awaits) = initial.map(|expression| expression_size(program, expression, false))
+            let (length, awaits) = initial.map(|expression| expression_size(program, expression, Resume::Discard, false))
                 .transpose()?.unwrap_or((1, 0));
             instructions += if awaits == 0 { 1 } else { length };
             sites += awaits;
         }
         Ok((instructions, sites))
-    } else if let Some((expression, _)) = statement_expression(program, id) {
-        expression_size(program, expression, false)
+    } else if let Some((expression, action)) = statement_expression(program, id) {
+        expression_size(program, expression, action, false)
     } else {
         Ok((1, 0))
     }
@@ -491,7 +497,10 @@ fn split_statements(program: &Program, template: &Template, expected: usize) -> 
         if eligible {
             let (length, suspensions) = if generator {
                 match kind {
-                    StmtKind::Expr(expression) => expression_size(program, *expression, true)?,
+                    StmtKind::Expr(_) | StmtKind::Return(Some(_)) => {
+                        let (expression, action) = statement_expression(program, id).expect("expression statement");
+                        expression_size(program, expression, action, true)?
+                    }
                     StmtKind::Yield(_) | StmtKind::YieldFrom(_) => (1, 1),
                     StmtKind::Declare(kind, declarations) => {
                         let sites = declarations.iter()
@@ -522,7 +531,7 @@ fn split_statements(program: &Program, template: &Template, expected: usize) -> 
             let before = sites;
             let mut condition_extra = 0;
             if let (false, StmtKind::If(condition, _, _)) = (generator, kind) {
-                let (length, awaits) = expression_size(program, *condition, false)?;
+                let (length, awaits) = expression_size(program, *condition, Resume::BranchFalse(0), false)?;
                 if awaits != 0 {
                     sites += awaits;
                     condition_extra = length - 1;
@@ -740,8 +749,8 @@ pub(super) fn compile(program: &Program, template: usize, expected_suspensions: 
                                 continue;
                             }
                         } else if let Some(expression) = initial {
-                            if expression_size(program, expression, false)?.1 != 0 {
-                                let action = Resume::Initialize { kind: *kind, pattern };
+                            let action = Resume::Initialize { kind: *kind, pattern };
+                            if expression_size(program, expression, action, false)?.1 != 0 {
                                 emit_expression(program, id, expression, action, false, &mut code)?;
                                 continue;
                             }
@@ -756,7 +765,7 @@ pub(super) fn compile(program: &Program, template: usize, expected_suspensions: 
                 }
                 StmtKind::If(condition, yes, no) => {
                     let start = code.len();
-                    if generator || expression_size(program, *condition, false)?.1 == 0 {
+                    if generator || expression_size(program, *condition, Resume::BranchFalse(0), false)?.1 == 0 {
                         push(&mut code, Instruction::BranchFalse { statement: id, condition: *condition, target: 0 })?;
                     } else {
                         emit_expression(program, id, *condition, Resume::BranchFalse(0), false, &mut code)?;
