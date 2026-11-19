@@ -700,6 +700,20 @@ document.title='element-expando-first-ok';
 }
 
 #[test]
+fn unsupported_element_lookup_reports_native_receiver_provenance() {
+    let (_, _, page, outcome) = page("<table id=secret-marker></table>",
+        &["document.getElementById('secret-marker').ordinaryProbe;"]);
+    assert_eq!(outcome.errors, 1, "{}", page.report());
+    let report = page.report();
+    let line = report.lines().find(|line| line.contains("Element property \"ordinaryProbe\" is not supported"))
+        .expect("native lookup diagnostic");
+    assert!(line.contains("tag=table"), "{line}");
+    assert!(line.contains("namespace=http://www.w3.org/1999/xhtml"), "{line}");
+    assert!(line.contains("owner=main document"), "{line}");
+    assert!(!line.contains("secret-marker"), "{line}");
+}
+
+#[test]
 fn create_html_document_builds_an_independent_inert_native_tree() {
     let (doc, _, page, outcome) = page("<html><head><title>Main</title></head><body></body></html>", &[r#"
 var impl=document.implementation;

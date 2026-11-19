@@ -7591,7 +7591,7 @@ impl Runtime {
         let exception = error.exception.take().expect("catchable exception");
         let value = match *exception {
             Exception::Value(value) => value,
-            Exception::Error(kind) => self.error_object(kind, Some(error.message.clone()))?,
+            Exception::Error(kind) => self.materialize_native_error(kind, error.message.clone(), error.location.take())?,
         };
         let catch_env = self.new_environment(env, false)?;
         let marker = self.transient_marker();
