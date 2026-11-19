@@ -85,6 +85,7 @@ impl Runtime {
                     | Builtin::String
                     | Builtin::Function
                     | Builtin::AsyncFunction
+                    | Builtin::GeneratorFunction
                     | Builtin::RegExp
                     | Builtin::Error(_)
                     | Builtin::Collection(super::collections::Op::Constructor(_))

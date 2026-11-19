@@ -90,7 +90,7 @@ impl Runtime {
         new_target: Option<usize>,
         host: &mut dyn Host,
     ) -> Result<Value, Fault> {
-        self.dynamic_function_constructor(args, true, new_target, host)
+        self.dynamic_function_constructor(args, FunctionKind::Async, new_target, host)
     }
 
     pub(super) fn dynamic_async_function_prototype(

@@ -1,7 +1,7 @@
 //! Original finite base-class syntax. Method bodies reuse the bounded deferred
 //! function parser; no class source is rewritten or executed during parsing.
 //! https://tc39.es/ecma262/#sec-class-definitions
-use super::{number_text, object_literals::Kind, ExprId, ExprKind, Fault, Parser, Template, TokenKind};
+use super::{number_text, object_literals::Kind, ExprId, ExprKind, Fault, FunctionKind, Parser, Template, TokenKind};
 use std::collections::HashSet;
 
 #[derive(Clone)]
@@ -117,7 +117,7 @@ impl Parser {
             if !self.is("(") {
                 return Err(self.unsupported("Class fields are not implemented; expected a method parameter list."));
             }
-            let template = self.function_with_super(None, method_start, asynchronous, true, is_constructor && heritage.is_some())?;
+            let template = self.function_with_super(None, method_start, FunctionKind::from_async(asynchronous), true, is_constructor && heritage.is_some())?;
             let syntax = &self.program.templates[template];
             let names = syntax.parameter_names(&self.program);
             if names.iter().collect::<HashSet<_>>().len() != names.len() {
@@ -157,7 +157,7 @@ impl Parser {
             self.program.templates.try_reserve(1).map_err(|_| self.unsupported("Unable to reserve bounded class constructor storage."))?;
             self.program.templates.push(Template {
                 source_start: start, source_end: end, dynamic_source: false,
-                arrow: false, asynchronous: false, await_plan: Vec::new(),
+                arrow: false, kind: FunctionKind::Ordinary, await_plan: Vec::new(),
                 constructible: true, class_constructor: true, class_element: true,
                 derived_constructor: heritage.is_some(), default_constructor: true, strict: true,
                 name: None, params: Vec::new(), rest: false,

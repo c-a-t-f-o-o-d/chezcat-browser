@@ -34,6 +34,7 @@ impl Runtime {
             || object.binary.is_some()
             || object.collection.is_some()
             || object.iterator.is_some()
+            || object.generator.is_some()
             || object.text.is_some()
             || object.regexp.is_some()
             || object.error_name.is_some()
