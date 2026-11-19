@@ -2,7 +2,7 @@
 //! instruction never evaluates the prefix again. Synchronous subtrees use
 //! the ordinary evaluator and its native access checks.
 use super::async_plan::{followup_receiver, ArgumentAwait, FollowupCalls, Instruction, LiteralAwait, Resume};
-use super::expression_evaluator::PreparedPlainArguments;
+use super::expression_evaluator::{argument_prefix_retained_bytes, PreparedPlainArguments};
 use super::function_reachability::Edge;
 use super::*;
 
@@ -107,9 +107,11 @@ struct PendingCall {
 
 struct PendingMethod {
     call: ExprId,
+    index: usize,
     receiver: Value,
     key: PropertyKey,
     function: Option<Value>,
+    prefix: Vec<Value>,
 }
 
 impl PendingMethod {
@@ -118,6 +120,7 @@ impl PendingMethod {
             .saturating_add(self.receiver.bytes())
             .saturating_add(property_key_bytes(&self.key))
             .saturating_add(self.function.as_ref().map_or(0, Value::bytes))
+            .saturating_add(argument_prefix_retained_bytes(&self.prefix))
     }
 }
 
@@ -213,6 +216,7 @@ impl Activation {
                 + 2 * usize::from(self.pending_assignment().is_some()))
             .saturating_add(self.assignments.len().saturating_mul(2))
             .saturating_add(self.pending_argument_call().map_or(0, |call| 1 + call.prefix.len()))
+            .saturating_add(self.pending_method().map_or(0, |method| method.prefix.len()))
     }
 
     pub(super) fn reachability_edges(&self, add: &mut impl FnMut(Edge)) {
@@ -237,6 +241,7 @@ impl Activation {
             if let Some(function) = &method.function {
                 Edge::value(function, add);
             }
+            for value in &method.prefix { Edge::value(value, add); }
         }
         if let Some(literal) = self.pending_literal() {
             add(Edge::Object(literal.object));
@@ -565,9 +570,9 @@ impl Runtime {
                             value
                         };
                         let value = if let Some(method) = method {
-                            let PendingMethod { call, receiver, key, function } = *method;
+                            let PendingMethod { call, index, receiver, key, function, prefix } = *method;
                             let result = self.eval_resumed_member_argument(
-                                &frame.program, call, (receiver, key, function), value,
+                                &frame.program, call, (receiver, key, function), (index, prefix), value,
                                 frame.environment()?, &frame.this, host,
                             )?;
                             self.push_transient_value(&result)?;
@@ -1061,14 +1066,14 @@ impl Runtime {
     fn prepare_await_method(
         &mut self,
         frame: &Activation,
-        call: ExprId,
+        site: ArgumentAwait,
         retained: usize,
         host: &mut dyn Host,
     ) -> Result<Box<PendingMethod>, Fault> {
-        let ExprKind::Call(method, _) = frame.program.exprs[call].kind else {
+        let ExprKind::Call(method, arguments) = &frame.program.exprs[site.call].kind else {
             unreachable!("prepared method needs a call expression");
         };
-        let ExprKind::Member(receiver, key) = frame.program.exprs[method].kind else {
+        let ExprKind::Member(receiver, key) = frame.program.exprs[*method].kind else {
             unreachable!("suspended member call needs a member expression");
         };
         let environment = frame.environment()?;
@@ -1080,7 +1085,10 @@ impl Runtime {
         if let Some(function) = &function {
             self.push_transient_value(function)?;
         }
-        let method = PendingMethod { call, receiver, key, function };
+        let prefix = self.eval_await_argument_prefix(
+            &frame.program, &arguments[..site.index], environment, &frame.this, host,
+        )?;
+        let method = PendingMethod { call: site.call, index: site.index, receiver, key, function, prefix };
         let bytes = method.retained_bytes();
         self.await_storage(retained.saturating_add(bytes), bytes)?;
         Ok(Box::new(method))
@@ -1442,9 +1450,11 @@ mod tests {
                 argument_call: None,
                 method: Some(Box::new(PendingMethod {
                     call: 0,
+                    index: 0,
                     receiver: Value::Function(19),
                     key: PropertyKey::String("invoke".into()),
                     function: Some(Value::Function(20)),
+                    prefix: Vec::new(),
                 })),
                 followup_call: None,
                 member_key: None,

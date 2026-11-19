@@ -129,7 +129,8 @@ enum ResumedExpression {
     PlainArgument(PreparedPlainArguments, Value),
     MemberArgument {
         target: (Value, PropertyKey, Option<Value>),
-        first: Value,
+        arguments: (usize, Vec<Value>),
+        value: Value,
     },
 }
 
@@ -143,13 +144,14 @@ pub(super) struct PreparedPlainArguments {
 
 impl PreparedPlainArguments {
     pub(super) fn retained_bytes(&self) -> usize {
-        self.prefix.iter().fold(
-            std::mem::size_of::<Self>()
-                .saturating_add(self.function.bytes())
-                .saturating_add(self.prefix.capacity().saturating_mul(std::mem::size_of::<Value>())),
-            |bytes, value| bytes.saturating_add(value.bytes()),
-        )
+        std::mem::size_of::<Self>().saturating_add(self.function.bytes())
+            .saturating_add(argument_prefix_retained_bytes(&self.prefix))
     }
+}
+
+pub(super) fn argument_prefix_retained_bytes(prefix: &Vec<Value>) -> usize {
+    prefix.iter().fold(prefix.capacity().saturating_mul(std::mem::size_of::<Value>()),
+        |bytes, value| bytes.saturating_add(value.bytes()))
 }
 
 impl Target {
@@ -367,11 +369,12 @@ impl Runtime {
         self.eval_resumed(program, id, ResumedExpression::Value(value), env, this, host)
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn eval_resumed_member_argument(
         &mut self, program: &Rc<Program>, id: ExprId, target: (Value, PropertyKey, Option<Value>),
-        first: Value, env: usize, this: &Value, host: &mut dyn Host,
+        arguments: (usize, Vec<Value>), value: Value, env: usize, this: &Value, host: &mut dyn Host,
     ) -> Result<Value, Fault> {
-        self.eval_resumed(program, id, ResumedExpression::MemberArgument { target, first }, env, this, host)
+        self.eval_resumed(program, id, ResumedExpression::MemberArgument { target, arguments, value }, env, this, host)
     }
 
     pub(super) fn eval_resumed_plain_argument(
@@ -639,26 +642,22 @@ impl Runtime {
                 };
                 (state, value)
             }
-            ResumedExpression::MemberArgument { target: (receiver, key, function), first } => {
+            ResumedExpression::MemberArgument { target: (receiver, key, function), arguments: (index, prefix), value } => {
                 let ExprKind::Call(_, arguments) = &program.exprs[id].kind else {
                     unreachable!("a resumed member argument needs a call");
                 };
+                self.install_resumed_argument_prefix(scratch, prefix)?;
                 let call = Call {
                     target: Target::Member { receiver, key, function },
-                    arguments, index: 0, start: 0, after: AfterCall::Value,
+                    arguments, index, start: 0, after: AfterCall::Value,
                 };
-                (State::Argument(call), first)
+                (State::Argument(call), value)
             }
             ResumedExpression::PlainArgument(prepared, value) => {
                 let ExprKind::Call(_, arguments) = &program.exprs[id].kind else {
                     unreachable!("a resumed plain argument needs a call");
                 };
-                let slots = self.evaluation_argument_slots.saturating_add(prepared.prefix.capacity());
-                if slots > self.argument_scratch_limit()? {
-                    return Err(Fault::new("Evaluation scratch storage limit reached."));
-                }
-                self.evaluation_argument_slots = slots;
-                scratch.arguments = prepared.prefix;
+                self.install_resumed_argument_prefix(scratch, prepared.prefix)?;
                 let target = Target::Value { function: prepared.function, direct_eval: prepared.direct_eval };
                 let call = Call { target, arguments, index: prepared.index, start: 0, after: AfterCall::Value };
                 (State::Argument(call), value)
@@ -666,6 +665,16 @@ impl Runtime {
         };
         scratch.frames[0].state = state;
         *completed = Some(Completion::Value(value));
+        Ok(())
+    }
+
+    fn install_resumed_argument_prefix(&mut self, scratch: &mut Scratch<'_>, prefix: Vec<Value>) -> Result<(), Fault> {
+        let slots = self.evaluation_argument_slots.saturating_add(prefix.capacity());
+        if slots > self.argument_scratch_limit()? {
+            return Err(Fault::new("Evaluation scratch storage limit reached."));
+        }
+        self.evaluation_argument_slots = slots;
+        scratch.arguments = prefix;
         Ok(())
     }
 
