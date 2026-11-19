@@ -22,6 +22,7 @@ pub(super) enum Instruction {
     EnterBlock(StmtId),
     LeaveBlock,
     EnterSwitch { statement: StmtId, leave: usize },
+    LeaveSwitch,
     EnterForOf { statement: StmtId, after: usize },
     NextForOf(StmtId),
     BranchFalse { statement: StmtId, condition: ExprId, target: usize },
@@ -526,7 +527,7 @@ fn emit_expression(
 }
 
 enum Visit {
-    Statement { id: StmtId, eligible: bool, switch_parent: Option<StmtId> },
+    Statement { id: StmtId, eligible: bool },
     Finish { id: StmtId, before: usize, condition_extra: usize },
 }
 
@@ -539,14 +540,14 @@ fn split_statements(program: &Program, template: &Template, expected: usize) -> 
     let generator = template.kind == FunctionKind::Generator;
     let mut pending = Vec::new();
     for &id in template.body.iter().rev() {
-        push(&mut pending, Visit::Statement { id, eligible: true, switch_parent: None })?;
+        push(&mut pending, Visit::Statement { id, eligible: true })?;
     }
     let mut split = HashSet::new();
     let mut jumps = Vec::new();
     let mut sites = 0;
     let mut instructions = template.body.len();
     while let Some(visit) = pending.pop() {
-        let (id, eligible, switch_parent) = match visit {
+        let (id, eligible) = match visit {
             Visit::Finish { id, before, condition_extra } => {
                 if sites > before {
                     split.try_reserve(1).map_err(|_| storage_error())?;
@@ -571,7 +572,7 @@ fn split_statements(program: &Program, template: &Template, expected: usize) -> 
                 }
                 continue;
             }
-            Visit::Statement { id, eligible, switch_parent } => (id, eligible, switch_parent),
+            Visit::Statement { id, eligible } => (id, eligible),
         };
         let kind = &program.stmts[id].kind;
         if eligible {
@@ -600,8 +601,7 @@ fn split_statements(program: &Program, template: &Template, expected: usize) -> 
             }
             push(&mut pending, Visit::Finish { id, before, condition_extra })?;
         }
-        let parent = matches!(kind, StmtKind::Switch { .. }).then_some(id);
-        let mut child = |id, eligible| push(&mut pending, Visit::Statement { id, eligible, switch_parent: parent });
+        let mut child = |id, eligible| push(&mut pending, Visit::Statement { id, eligible });
         match kind {
             StmtKind::Block(body) | StmtKind::Switch { body, .. } => {
                 for &item in body.iter().rev() { child(item, children_eligible)?; }
@@ -627,8 +627,9 @@ fn split_statements(program: &Program, template: &Template, expected: usize) -> 
                 child(*body, children_eligible)?;
             }
             StmtKind::Break(target) | StmtKind::Continue(target) => {
-                let direct_switch_break = matches!(kind, StmtKind::Break(_)) && switch_parent == Some(*target);
-                push(&mut jumps, (id, *target, direct_switch_break))?;
+                let switch_break = matches!(kind, StmtKind::Break(_))
+                    && matches!(program.stmts[*target].kind, StmtKind::Switch { .. });
+                push(&mut jumps, (id, *target, switch_break))?;
             }
             _ => {}
         }
@@ -639,10 +640,10 @@ fn split_statements(program: &Program, template: &Template, expected: usize) -> 
         return Err(Fault::new(message)
             .at(&program.source, template.source_start));
     }
-    // Direct case breaks and iterator loop jumps have their own exits.
+    // Switch breaks and iterator loop jumps have their own exits.
     // Other split ancestors still need explicit subtree unwinding.
-    for (id, target, direct_switch_break) in jumps {
-        if split.contains(&target) && !direct_switch_break && lexical_for_of(program, target).is_none() {
+    for (id, target, switch_break) in jumps {
+        if split.contains(&target) && !switch_break && lexical_for_of(program, target).is_none() {
             let message = if generator { "A jump to a statement split by yield is not implemented." }
                 else { "A jump to a statement split by await is not implemented." };
             return Err(Fault::new(message)
@@ -658,7 +659,6 @@ enum Emit {
     Else { branch: Range<usize>, alternative: StmtId },
     FinishBranch(Range<usize>),
     FinishJump(usize),
-    SwitchBreak(usize),
     FinishSwitch(usize),
     FinishFor { statement: StmtId, start: usize, test: bool, advance: Option<ExprId> },
     FinishForOf(usize),
@@ -697,7 +697,6 @@ pub(super) fn compile(program: &Program, template: usize, expected_suspensions: 
     let mut code = Vec::new();
     code.try_reserve_exact(instructions).map_err(|_| storage_error())?;
     let mut pending = Vec::new();
-    let mut switch_breaks = Vec::new();
     for &id in template.body.iter().rev() { push(&mut pending, Emit::Statement(id))?; }
     // Container statements emit bounded control instructions. Split expressions
     // emit instructions for their leaves and branches, within the same AST limit.
@@ -723,23 +722,11 @@ pub(super) fn compile(program: &Program, template: usize, expected_suspensions: 
                 code[jump] = Instruction::Jump(code.len());
                 continue;
             }
-            Emit::SwitchBreak(owner) => {
-                push(&mut switch_breaks, (owner, code.len()))?;
-                push(&mut code, Instruction::Jump(0))?;
-                continue;
-            }
             Emit::FinishSwitch(owner) => {
                 let leave = code.len();
                 let Instruction::EnterSwitch { leave: exit, .. } = &mut code[owner] else { unreachable!() };
                 *exit = leave;
-                while let Some(&(current, jump)) = switch_breaks.last() {
-                    if current != owner {
-                        break;
-                    }
-                    code[jump] = Instruction::Jump(leave);
-                    switch_breaks.pop();
-                }
-                push(&mut code, Instruction::LeaveBlock)?;
+                push(&mut code, Instruction::LeaveSwitch)?;
                 continue;
             }
             Emit::FinishFor { statement, start, test, advance } => {
@@ -866,11 +853,7 @@ pub(super) fn compile(program: &Program, template: usize, expected_suspensions: 
                     let mut entries = cases.iter().enumerate().rev().peekable();
                     for offset in (0..=body.len()).rev() {
                         if let Some(&item) = body.get(offset) {
-                            let task = match program.stmts[item].kind {
-                                StmtKind::Break(target) if target == id => Emit::SwitchBreak(owner),
-                                _ => Emit::Statement(item),
-                            };
-                            push(&mut pending, task)?;
+                            push(&mut pending, Emit::Statement(item))?;
                         }
                         while let Some(&(case, (_, entry))) = entries.peek() {
                             if *entry != offset {
@@ -897,7 +880,6 @@ pub(super) fn compile(program: &Program, template: usize, expected_suspensions: 
         }
     }
     debug_assert_eq!(code.len(), instructions);
-    debug_assert!(switch_breaks.is_empty());
     Ok(code)
 }
 
@@ -995,9 +977,6 @@ mod tests {
         }
         let source = "async function go(p){exit:{try{await p;}catch(e){break exit;}}}";
         let error = parse(source).err().expect("jump to split ancestor was accepted");
-        assert!(error.message.contains("jump to a statement split by await"), "{}", error.display());
-        let error = parse("async function go(p){switch(0){case 0:await p;{break;}}}")
-            .err().expect("a break inside a nested case block was accepted");
         assert!(error.message.contains("jump to a statement split by await"), "{}", error.display());
         let error = parse("async function go(p){for(;;){await p;continue;}}")
             .err().expect("jump to a split loop was accepted");

@@ -9,6 +9,7 @@ use super::*;
 enum ExitScope {
     Try(TryScope),
     ForOf(Box<ForOfScope>),
+    Switch { statement: StmtId, after: usize, environments: usize },
 }
 
 struct ForOfScope {
@@ -698,6 +699,13 @@ impl Runtime {
                     self.enter_await_switch(frame, statement, leave, environment, host)
                         .map_err(|error| error.at(&frame.program.source, frame.program.stmts[statement].at))
                 }
+                Instruction::LeaveSwitch => {
+                    let Some(ExitScope::Switch { environments, .. }) = frame.exit_scopes.pop() else {
+                        return Err(Fault::new("Invalid async switch exit."));
+                    };
+                    self.unwind_await_environments(frame, environments);
+                    Ok(Progress::Continue)
+                }
                 Instruction::EnterForOf { statement, after } => {
                     self.enter_await_for_of(frame, statement, after, environment, host)
                         .map_err(|error| error.at(&frame.program.source, frame.program.stmts[statement].at))
@@ -1165,7 +1173,11 @@ impl Runtime {
         let value = self.eval(&program, *discriminant, environment, &frame.this, host)?;
         self.push_transient_value(&value)?;
         self.reserve_await_environment(frame)?;
+        self.reserve_await_exit_scope(frame)?;
         let scope = self.new_environment(environment, false)?;
+        frame.exit_scopes.push(ExitScope::Switch {
+            statement, after: leave + 1, environments: frame.environments.len(),
+        });
         frame.environments.push(scope);
         self.push_transient_root(Edge::Environment(scope))?;
         self.prepare(&program, body, scope, false, host)?;
@@ -1344,6 +1356,14 @@ impl Runtime {
             };
             let scope = match scope {
                 ExitScope::Try(scope) => scope,
+                ExitScope::Switch { statement, after, environments } => {
+                    self.unwind_await_environments(frame, environments);
+                    if matches!(completion, Ok(Control::Break(target, _)) if target == statement) {
+                        frame.next = after;
+                        return Ok(Progress::Continue);
+                    }
+                    continue;
+                }
                 ExitScope::ForOf(mut iterator) => {
                     self.unwind_await_environments(frame, iterator.environments);
                     if matches!(completion, Ok(Control::Continue(target, _)) if target == iterator.statement) {
