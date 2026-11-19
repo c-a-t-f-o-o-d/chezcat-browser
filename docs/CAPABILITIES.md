@@ -183,6 +183,7 @@ physical desktop or complete live-page results.
 | Area | Current behavior | Boundary |
 | :--- | :--- | :--- |
 | **Transport** | Original HTTP/TLS/certificate handling, redirects, decompression, workers and timings | Protocol, parser, chain and admission gaps remain |
+| **Local HTML source** | Opens regular local UTF-8 HTML files up to 32 MiB and retains the decoded source for inspection. | Plain-text viewing retains its separate 1 MiB bound. HTML tree node and depth bounds still apply. |
 | **Classic script sources** | Parser-loaded and dynamic external scripts admit up to 32 MiB per source and 256 MiB of source per document. The loader bounds decompression and UTF-8 conversion. | Token records grow on demand within 256 MiB. Delimiter links use the token records. Compilation also shares a 768 MiB accounting budget for source copies, token payloads, and syntax storage, and checks the current job deadline. |
 | **Script syntax and retention** | A script can compile up to 6,291,456 syntax nodes, with up to 16,777,216 retained across a document. | These limits apply alongside the compilation budget and bounded native stack. They describe charged storage and work. JavaScript strings retain their separate 8 MiB limit. |
 | **Dual-stack fallback** | Up to 256 resolver entries, per-family retention, eight bounded serial attempts, opposite-family time reservation and redacted diagnostics | Blocking OS DNS, up to one two-second connect before cancellation, and no concurrent Happy Eyeballs |

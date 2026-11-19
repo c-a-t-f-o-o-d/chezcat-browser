@@ -88,6 +88,8 @@ impl Default for LoadOptions {
 pub(crate) const MAX_SCRIPTS: usize = crate::javascript::limits::BROWSER_CAPACITIES.programs;
 pub(crate) const MAX_STYLESHEETS: usize = 256;
 const MAX_RESOURCE_ATTEMPTS: usize = 8192;
+const MAX_LOCAL_HTML_BYTES: usize = 32 * 1024 * 1024;
+const MAX_LOCAL_PLAIN_TEXT_BYTES: usize = 1024 * 1024;
 // Decoded-image counts stay independent from CSS/script request capacities.
 const MAX_UNIQUE_IMAGES: usize = 64;
 pub(crate) const MAX_DECODED_IMAGE_BYTES: usize = 64 * 1024 * 1024;
@@ -905,8 +907,10 @@ fn load_request_progressively(
             path,
             if image_document {
                 image::MAX_INPUT_BYTES
+            } else if plain {
+                MAX_LOCAL_PLAIN_TEXT_BYTES
             } else {
-                1_048_576
+                MAX_LOCAL_HTML_BYTES
             },
         )?};
         if muxed {
@@ -939,24 +943,29 @@ fn load_request_progressively(
                 document_image.as_ref().map(|asset| asset.bitmap.as_ref()),
             )
         } else {
-            String::from_utf8(bytes)
-                .map_err(|_| "Local HTML/plain-text documents must contain UTF-8 text.".to_owned())?
-                .trim_start_matches('\u{feff}')
-                .to_owned()
+            let mut source = String::from_utf8(bytes)
+                .map_err(|_| "Local HTML/plain-text documents must contain UTF-8 text.".to_owned())?;
+            let bom_bytes = source.len() - source.trim_start_matches('\u{feff}').len();
+            if bom_bytes != 0 {
+                source.drain(..bom_bytes);
+            }
+            source
         }
     } else {
         include_str!("../pages/start.html").to_owned()
     };
     check_cancel(cancel)?;
+    let plain_markup;
     let markup = if plain {
-        format!(
+        plain_markup = format!(
             "<title>Plain text</title><body><pre style='white-space:pre-wrap'>{}</pre></body>",
             escape(&raw)
-        )
+        );
+        &plain_markup
     } else {
-        raw.clone()
+        &raw
     };
-    let mut document = html::parse(&markup);
+    let mut document = html::parse(markup);
     document.media_environment=options.media_environment;
     let media_node = document_media.as_ref().and_then(|_|document.nodes.iter().enumerate().find_map(|(node,item)|
         (item.namespace==html::Namespace::Html && matches!(&item.kind,NodeKind::Element {tag,..} if tag=="img") && document.attr(node,"id")==Some("media-frame")).then_some(node)));
@@ -2634,6 +2643,21 @@ pub(crate) fn decode_script(mut bytes: Vec<u8>, content_type: &str, limit: usize
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn local_html_above_one_mib_retains_source_and_parses_the_tail() {
+        let folder = Folder::new();
+        let markup = format!(
+            "<!doctype html><!--{}--><title>Full local source</title><p id=tail>Reached the tail</p>",
+            "original local source ".repeat(50_000)
+        );
+        assert!(markup.len() > 1024 * 1024);
+        let page = folder.page(&format!("\u{feff}\u{feff}{markup}"));
+        let loaded = local(&page).unwrap();
+        assert!(loaded.raw == markup);
+        assert_eq!(loaded.document.title, "Full local source");
+        assert!((0..loaded.document.nodes.len()).any(|node| loaded.document.attr(node, "id") == Some("tail")));
+    }
+
     #[test]
     fn shared_stylesheet_initial_inline_order_and_noscript_follow_renderer_admission() {
         let folder=Folder::new();folder.file("small.css","#target{width:77px}");
