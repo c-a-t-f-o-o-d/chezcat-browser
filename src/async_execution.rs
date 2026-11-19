@@ -449,6 +449,24 @@ impl Runtime {
                     )?;
                     Self::await_control(completion)
                 }
+                Instruction::GuardAwait { statement, left, operator, action } => {
+                    let result = (|| {
+                        let value = self.eval(&frame.program, left, environment, &frame.this, host)?;
+                        if !logical_short_circuits(operator, &value) {
+                            return Ok(Progress::Continue);
+                        }
+                        debug_assert!(matches!(
+                            frame.program.templates[frame.template].await_plan.get(frame.next),
+                            Some(Instruction::Await { .. })
+                        ));
+                        frame.next += 1;
+                        self.push_transient_value(&value)?;
+                        self.await_resume_action(frame, action, value, host)
+                    })();
+                    result.map_err(|error: Fault| {
+                        error.at(&frame.program.source, frame.program.stmts[statement].at)
+                    })
+                }
                 Instruction::Await {
                     statement,
                     operand,

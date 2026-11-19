@@ -7,8 +7,8 @@
 
 use super::optional_chaining::{CallTarget, Completion, Step};
 use super::{
-    Argument, ExprId, ExprKind, Fault, Host, Program, PropertyKey, Reference, Runtime, Value, MAX_EVALUATION_FRAMES,
-    MAX_EVALUATION_FRAME_SLOTS,
+    logical_short_circuits, Argument, ExprId, ExprKind, Fault, Host, Program, PropertyKey, Reference,
+    Runtime, Value, MAX_EVALUATION_FRAMES, MAX_EVALUATION_FRAME_SLOTS,
 };
 use std::rc::Rc;
 use super::function_reachability::Edge;
@@ -696,8 +696,7 @@ impl Runtime {
             },
             State::BinaryLeft { op, right } => {
                 let left = value(completion);
-                if (op == "&&" && !left.truthy()) || (op == "||" && left.truthy())
-                    || (op == "??" && !matches!(left, Value::Null | Value::Undefined)) {
+                if logical_short_circuits(op, &left) {
                     return Ok(done(left));
                 }
                 Ok(Transition::Child(Request::Value(right), State::BinaryRight { op, left }))
