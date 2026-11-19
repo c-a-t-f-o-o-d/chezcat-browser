@@ -32,6 +32,60 @@ fn checkpoint(runtime: &mut Runtime) {
 }
 
 #[test]
+fn await_execution_switch_resumes_fallthrough_and_break_in_one_case_scope() {
+    let mut runtime = Runtime::for_test();
+    succeeds(&mut runtime, r#"
+var trace='', release, result, fallback, tdz=false, retained;
+var gate=new Promise(function(resolve){release=resolve;});
+function choose(tag,visible){trace+='disc:'+tag+':'+visible+'|';return tag;}
+function check(tag){trace+='test:'+tag+'|';return tag;}
+async function run(tag){
+    let visible='outer';
+    switch(choose(tag,visible)){
+        default:trace+='default|';
+        case check('a'):
+            let visible='inner';
+            retained=()=>visible;
+            await gate;
+            trace+=visible+'|';
+        case check('b'):
+            trace+='fall:'+visible+'|';
+            break;
+        case check('c'):
+            throw 'fell past break';
+    }
+    return visible;
+}
+async function temporal(){
+    try{
+        switch(0){case name:let name=0;await gate;}
+    }catch(error){if(error.name!=='ReferenceError')throw error;tdz=true;}
+}
+run('a').then(value=>result=value);
+temporal();
+if(trace!=='disc:a:outer|test:a|'||result!==undefined||!tdz||retained()!=='inner')
+    throw 'initial selection or scope';
+'ok';
+"#);
+    checkpoint(&mut runtime);
+    runtime.begin_job();
+    succeeds(&mut runtime, "release();'ok';");
+    checkpoint(&mut runtime);
+    succeeds(&mut runtime, r#"
+if(result!=='outer'||trace!=='disc:a:outer|test:a|inner|fall:inner|'||retained()!=='inner')
+    throw 'fallthrough or break replayed selection';
+run('miss').then(value=>fallback=value);
+'ok';
+"#);
+    checkpoint(&mut runtime);
+    succeeds(&mut runtime, r#"
+if(fallback!=='outer'||!trace.endsWith('disc:miss:outer|test:a|test:b|test:c|default|inner|fall:inner|'))
+    throw 'default selected before later case tests';
+'ok';
+"#);
+}
+
+#[test]
 fn await_execution_for_of_body_retains_the_iterator_and_closes_on_abrupt_exit() {
     let mut runtime = Runtime::for_capacity_test();
     succeeds(&mut runtime, r#"

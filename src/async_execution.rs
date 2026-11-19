@@ -660,6 +660,10 @@ impl Runtime {
                     self.release_environment(scope);
                     Ok(Progress::Continue)
                 }
+                Instruction::EnterSwitch { statement, leave } => {
+                    self.enter_await_switch(frame, statement, leave, environment, host)
+                        .map_err(|error| error.at(&frame.program.source, frame.program.stmts[statement].at))
+                }
                 Instruction::EnterForOf(statement) => {
                     self.enter_await_for_of(frame, statement, environment, host)
                         .map_err(|error| error.at(&frame.program.source, frame.program.stmts[statement].at))
@@ -950,6 +954,26 @@ impl Runtime {
                 .map_err(|_| Fault::new("Unable to allocate bounded async control stack."))?;
         }
         Ok(())
+    }
+
+    #[inline(never)]
+    fn enter_await_switch(
+        &mut self, frame: &mut Activation, statement: StmtId, leave: usize, environment: usize, host: &mut dyn Host,
+    ) -> Result<Progress, Fault> {
+        let program = Rc::clone(&frame.program);
+        let StmtKind::Switch { discriminant, cases, body } = &program.stmts[statement].kind else {
+            return Err(Fault::new("Invalid async switch instruction."));
+        };
+        let value = self.eval(&program, *discriminant, environment, &frame.this, host)?;
+        self.push_transient_value(&value)?;
+        self.reserve_await_environment(frame)?;
+        let scope = self.new_environment(environment, false)?;
+        frame.environments.push(scope);
+        self.push_transient_root(Edge::Environment(scope))?;
+        self.prepare(&program, body, scope, false, host)?;
+        let selected = self.select_switch_case(&program, cases, &value, scope, &frame.this, host)?;
+        frame.next = selected.map_or(leave, |index| frame.next + index);
+        Ok(Progress::Continue)
     }
 
     #[inline(never)]
