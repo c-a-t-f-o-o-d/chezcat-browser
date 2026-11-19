@@ -293,6 +293,45 @@ if(trace!=='outer:next0|inner:next0|cleanup:start|cleanup:1:8|inner:close|outer:
 }
 
 #[test]
+fn await_execution_nested_switch_break_runs_finally_and_leaves_the_case_scope() {
+    let mut runtime = Runtime::for_test();
+    succeeds(&mut runtime, r#"
+var trace='', release, done;
+var gate=new Promise(resolve=>release=resolve);
+async function route(){
+    let scope='outer';
+    try{
+        switch(1){
+            case 1:
+                let scope='case';
+                try{
+                    let exit=await gate;
+                    if(exit){trace+=scope+'|';break;}
+                    trace+='body|';
+                }finally{trace+='inner:'+scope+'|';}
+                trace+='case-tail|';
+            default:
+                trace+='default|';
+        }
+        trace+=scope+'|';
+        return scope;
+    }finally{trace+='outer-finally|';}
+}
+route().then(value=>done=value);
+if(trace||done)throw 'early switch continuation';
+'ok';
+"#);
+    checkpoint(&mut runtime);
+    runtime.begin_job();
+    succeeds(&mut runtime, "release(true);'ok';");
+    checkpoint(&mut runtime);
+    succeeds(&mut runtime, r#"
+if(trace!=='case|inner:case|outer|outer-finally|'||done!=='outer')throw 'switch unwinding';
+'ok';
+"#);
+}
+
+#[test]
 fn await_execution_switch_resumes_fallthrough_and_break_in_one_case_scope() {
     let mut runtime = Runtime::for_test();
     succeeds(&mut runtime, r#"
