@@ -3919,6 +3919,41 @@ var third=document.createElement('script');third.async=false;third.crossOrigin='
 }
 
 #[test]
+fn loaded_svg_naming_under_custom_html_uses_namespace_separate_from_drawing_and_handlers() {
+    let html = r#"<html><body><fixture-shell><fixture-icon>
+<svg id="glyph" viewBox="0 0 24 24" preserveAspectRatio="xMidYMid" style="width:24px" aria-hidden="true" focusable="false">
+<defs><g><path id="stroke" d="M1 2 L5 6" pathLength="8" fill="url(#unimplemented)" onclick="document.title='unexpected handler'"/></g></defs></svg>
+<math id="uncertain"></math></fixture-icon></fixture-shell></body></html>"#;
+    let (mut doc, mut forms, mut page, result) = page(html, &[r#"
+var v=document.getElementById('glyph'), s=document.getElementById('stroke');
+var icon=v.parentElement, ns='http://www.w3.org/2000/svg';
+if(v.localName!=='svg'||v.nodeName!=='svg'||v.namespaceURI!==ns||v.prefix!==null||
+   !(v instanceof SVGElement)||v instanceof HTMLElement||v.ownerDocument!==document||
+   s.localName!=='path'||s.namespaceURI!==ns||s.parentNode.localName!=='g'||
+   s.parentNode.parentNode.localName!=='defs'||icon.localName!=='fixture-icon'||
+   icon.parentElement.localName!=='fixture-shell'||icon.parentElement.namespaceURI===ns)
+    throw 'loaded SVG namespace and topology';
+if(v.getAttribute('viewBox')!=='0 0 24 24'||v.getAttribute('viewbox')!==null||
+   v.getAttribute('preserveAspectRatio')!=='xMidYMid'||v.getAttribute('style')!=='width:24px'||
+   v.getAttribute('aria-hidden')!=='true'||v.getAttribute('focusable')!=='false'||
+   s.getAttribute('pathLength')!=='8'||s.getAttribute('fill')!=='url(#unimplemented)'||
+   s.getAttribute('onclick')===null)
+    throw 'raw naming independent from drawing support';
+document.title='loaded SVG naming verified';
+"#]);
+    assert_eq!(result.errors, 0, "{}", page.report());
+    assert_eq!(doc.title, "loaded SVG naming verified");
+    assert!(page.state.listeners.is_empty());
+    let failure = page.console_eval(&mut doc, &mut forms, "document.getElementById('uncertain').localName;");
+    assert_eq!(failure.errors, 1);
+    assert!(page.report().contains("Receiver tag=math, namespace=unknown parser context, owner=main document, parent=fixture-icon, grandparent=fixture-shell."));
+    assert!(page.take_dynamic_scripts().is_empty() && page.take_dynamic_stylesheets().is_empty());
+    let (added, removed, changed) = page.take_image_changes();
+    assert!(added.is_empty() && removed.is_empty() && changed.is_empty());
+    assert!(!page.has_navigation_request());
+}
+
+#[test]
 fn template_svg_insertion_keeps_the_original_checked_foreign_nodes() {
     let (doc, _, mut page, result) = page("<html><head><title>Fixture</title></head><body><main id=app></main></body></html>", &[r#"
 var template=document.createElement('template'), panel=document.getElementById('app');

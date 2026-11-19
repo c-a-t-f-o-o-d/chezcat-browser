@@ -1371,6 +1371,9 @@ impl Page {
                 self.state.error("inline handler scan", &error);
                 break;
             }
+            if doc.nodes[node].namespace != crate::html::Namespace::Html {
+                continue;
+            }
             for name in [
                 "onclick",
                 "onauxclick",

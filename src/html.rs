@@ -218,6 +218,17 @@ pub(crate) fn parse_fragment(input: &str, context: &str, scripting: bool) -> Res
     parse_internal(input, Some(context), scripting, None, None)
 }
 
+/// HTML's autonomous custom-element names start with an ASCII lowercase
+/// letter and use the DOM local-name grammar.
+/// https://html.spec.whatwg.org/multipage/custom-elements.html#valid-custom-element-name
+pub(crate) fn valid_custom_element_name(name: &str) -> bool {
+    name.as_bytes().first().is_some_and(u8::is_ascii_lowercase)
+        && name.contains('-')
+        && !name.bytes().any(|b| matches!(b, b'A'..=b'Z' | 0 | b'\t' | b'\n' | 0x0c | b'\r' | b' ' | b'/' | b'>'))
+        && !matches!(name, "annotation-xml" | "color-profile" | "font-face" | "font-face-src"
+            | "font-face-uri" | "font-face-format" | "font-face-name" | "missing-glyph")
+}
+
 fn parse_internal(
     input: &str,
     context: Option<&str>,
@@ -459,7 +470,7 @@ fn parse_internal(
         let enters_svg = tag.name == "svg" && (!checked || template_svg) && !uncertain_foreign_recovery &&
             svg.blocked_depth.is_none() && (parent == 0 || document.nodes[parent].namespace == Namespace::Html);
         let svg_empty = tag.self_closing && (enters_svg || svg.root.is_some()) &&
-            if template_svg { svg_namespace::template_element(&tag.name) } else { svg_namespace::basic_element(&tag.name) };
+            svg_namespace::shape_element(&tag.name);
         if enters_svg {
             svg.root = Some(node);
         }
@@ -678,8 +689,8 @@ fn read_tag_mode(input: &str, start: usize, checked: bool) -> TagToken {
     let name = input[name_start..position].to_ascii_lowercase();
     // Only explicitly supported SVG elements and these checked fragments use
     // strict token evidence. Other elements retain the normal tokenizer rules.
-    let checked_native_fragment = checked && matches!(name.as_str(), "table" | "textarea" | "defs");
-    let mut clean_syntax = (svg_namespace::basic_element(&name) || checked_native_fragment)
+    let checked_native_fragment = checked && matches!(name.as_str(), "table" | "textarea");
+    let mut clean_syntax = (svg_namespace::shape_element(&name) || checked_native_fragment)
         && bytes.get(position).is_some_and(|b| tag_space(*b, true) || matches!(b, b'/' | b'>'));
     let mut self_closing = false;
     if checked && bytes.get(position).is_some_and(|byte| !tag_space(*byte, true) && !matches!(*byte, b'/' | b'>')) { return TagToken::Unsupported("HTML fragment tag-name tokenization is not implemented for this boundary."); }

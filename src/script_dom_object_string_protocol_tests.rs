@@ -123,7 +123,7 @@ if (element.attachShadow !== undefined || 'shadowRoot' in element || 'getHTML' i
 
 #[test]
 fn autonomous_element_identity_uses_the_html_and_dom_name_rules() {
-    use crate::javascript::valid_custom_element_name;
+    use crate::html::valid_custom_element_name;
     for name in ["a-", "data-panel", "x-α", "note-🙂", "x-@", "x-=", "x-:", "x-\u{b}"] {
         assert!(valid_custom_element_name(name), "{name:?}");
     }
