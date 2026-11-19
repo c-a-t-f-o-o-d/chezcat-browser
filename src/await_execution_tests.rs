@@ -568,6 +568,42 @@ choose(Promise.resolve(0)).then(value=>branch=value);
 }
 
 #[test]
+fn await_execution_array_element_preserves_holes_spread_and_order() {
+    let mut runtime = Runtime::for_test();
+    succeeds(&mut runtime, r#"
+var trace='', release, reject, result, caught, token={}, reason={};
+var gate=new Promise(resolve=>release=resolve);
+var failed=new Promise((resolve,fail)=>reject=fail);
+function mark(label,value){trace+=label+'|';return value;}
+function relay(value){return mark('call',value);}
+async function make(){
+    return [, ...mark('spread',[token,2]), relay(await mark('operand',gate)),mark('after',4),,];
+}
+async function stop(){
+    try{return [mark('reject-prefix',1),await failed,mark('skipped',2)];}
+    catch(error){caught=error;}
+}
+make().then(value=>result=value);
+stop();
+if(trace!=='spread|operand|reject-prefix|'||result||caught)throw 'array prefix';
+'ok';
+"#);
+    checkpoint(&mut runtime);
+    runtime.begin_job();
+    succeeds(&mut runtime, "reject(reason);release(token);'ok';");
+    checkpoint(&mut runtime);
+    succeeds(&mut runtime, r#"
+var descriptor=Object.getOwnPropertyDescriptor(result,'3');
+if(trace!=='spread|operand|reject-prefix|call|after|'||caught!==reason||
+    !Array.isArray(result)||result.length!==6||Object.hasOwn(result,0)||Object.hasOwn(result,5)||
+    result[1]!==token||result[2]!==2||descriptor.value!==token||result[4]!==4||
+    !descriptor.writable||!descriptor.configurable||!descriptor.enumerable)
+    throw 'array slots, suffix, or rejection';
+'ok';
+"#);
+}
+
+#[test]
 fn await_execution_object_members_before_and_after_a_suspending_value_keep_order() {
     let mut runtime = Runtime::for_test();
     succeeds(&mut runtime, r#"
@@ -1801,7 +1837,7 @@ fn await_execution_unsupported_positions_reject_before_effects_even_in_dead_code
         "while(false){await p;}",
         "try{}catch(reason){await p;}finally{}",
         "try{}catch{}finally{await p;}",
-        "var values=[await p];",
+        "var values=[...await p];",
         "var value={entry:await p,another:await p};",
         "await (await p);",
     ] {

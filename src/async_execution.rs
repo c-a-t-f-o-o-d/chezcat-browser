@@ -79,13 +79,22 @@ struct PendingAwait {
 
 struct PendingLiteral {
     object: usize,
-    key: PropertyKey,
     site: LiteralAwait,
+    target: PendingLiteralTarget,
+}
+
+enum PendingLiteralTarget {
+    Property(PropertyKey),
+    Element(usize),
 }
 
 impl PendingLiteral {
     fn retained_bytes(&self) -> usize {
-        std::mem::size_of::<Self>().saturating_add(property_key_bytes(&self.key))
+        let key_bytes = match &self.target {
+            PendingLiteralTarget::Property(key) => property_key_bytes(key),
+            PendingLiteralTarget::Element(_) => 0,
+        };
+        std::mem::size_of::<Self>().saturating_add(key_bytes)
     }
 }
 
@@ -574,13 +583,7 @@ impl Runtime {
                         };
                         let value = apply_logical_not(value, negations);
                         let value = if let Some(literal) = literal {
-                            let PendingLiteral { object, key, site } = *literal;
-                            self.define_literal_member(object, key, value, object_literals::Kind::Data)?;
-                            let remaining = &site.members(&frame.program)[site.member + 1..];
-                            self.eval_object_literal_members(
-                                &frame.program, object, remaining, frame.environment()?, &frame.this, host,
-                            )?;
-                            Value::Object(object)
+                            self.finish_await_literal(frame, *literal, value, host)?
                         } else {
                             value
                         };
@@ -931,23 +934,61 @@ impl Runtime {
         host: &mut dyn Host,
     ) -> Result<Box<PendingLiteral>, Fault> {
         self.step()?;
-        let object = self.new_object(None)?;
+        let expression = &frame.program.exprs[site.expression].kind;
+        let object = self.new_object(matches!(expression, ExprKind::Array(_)).then_some(0))?;
         self.push_transient_root(Edge::Object(object))?;
-        let members = site.members(&frame.program);
         let environment = frame.environment()?;
-        self.eval_object_literal_members(
-            &frame.program, object, &members[..site.member], environment, &frame.this, host,
-        )?;
-        let object_literals::Member::Property { key, .. } = members[site.member] else {
-            unreachable!("compiled async literal member");
+        let target = match expression {
+            ExprKind::Object(members) => {
+                self.eval_object_literal_members(
+                    &frame.program, object, &members[..site.member], environment, &frame.this, host,
+                )?;
+                let object_literals::Member::Property { key, .. } = members[site.member] else {
+                    unreachable!("compiled async literal property");
+                };
+                let key = self.eval(&frame.program, key, environment, &frame.this, host)?;
+                self.push_transient_value(&key)?;
+                PendingLiteralTarget::Property(self.property_key(key, host)?)
+            }
+            ExprKind::Array(elements) => {
+                let index = self.eval_array_literal_elements(
+                    &frame.program, object, 0, &elements[..site.member], environment, &frame.this, host,
+                )?;
+                self.step()?;
+                self.check_array_literal_index(index)?;
+                PendingLiteralTarget::Element(index)
+            }
+            _ => unreachable!("compiled async literal"),
         };
-        let key = self.eval(&frame.program, key, environment, &frame.this, host)?;
-        self.push_transient_value(&key)?;
-        let key = self.property_key(key, host)?;
-        let literal = PendingLiteral { object, key, site };
+        let literal = PendingLiteral { object, site, target };
         let bytes = literal.retained_bytes();
         self.await_storage(retained.saturating_add(bytes), bytes)?;
         Ok(Box::new(literal))
+    }
+
+    #[inline(never)]
+    fn finish_await_literal(
+        &mut self, frame: &Activation, literal: PendingLiteral, value: Value, host: &mut dyn Host,
+    ) -> Result<Value, Fault> {
+        let PendingLiteral { object, site, target } = literal;
+        let environment = frame.environment()?;
+        match (&frame.program.exprs[site.expression].kind, target) {
+            (ExprKind::Object(members), PendingLiteralTarget::Property(key)) => {
+                self.define_literal_member(object, key, value, object_literals::Kind::Data)?;
+                self.eval_object_literal_members(
+                    &frame.program, object, &members[site.member + 1..], environment, &frame.this, host,
+                )?;
+            }
+            (ExprKind::Array(elements), PendingLiteralTarget::Element(index)) => {
+                self.define_array_literal_element(object, index, value)?;
+                let length = self.eval_array_literal_elements(
+                    &frame.program, object, index + 1, &elements[site.member + 1..], environment, &frame.this, host,
+                )?;
+                self.set_array_length(object, length)?;
+            }
+            _ => unreachable!("compiled async literal target"),
+        }
+        Ok(Value::Object(object))
     }
 
     #[inline(never)]
@@ -1359,7 +1400,7 @@ mod tests {
                 chain: None,
                 literal: Some(Box::new(PendingLiteral {
                     object: 27,
-                    key: PropertyKey::String("entry".into()),
+                    target: PendingLiteralTarget::Property(PropertyKey::String("entry".into())),
                     site: LiteralAwait { expression: 0, member: 0 },
                 })),
                 negations: 0,

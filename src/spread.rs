@@ -76,44 +76,53 @@ impl Runtime {
         host: &mut dyn Host,
     ) -> Result<Value, Fault> {
         let object = self.new_object(Some(0))?;
-        let mut index = 0;
+        let length = self.eval_array_literal_elements(program, object, 0, elements, env, this, host)?;
+        // A trailing hole extends length without creating an own property.
+        self.set_array_length(object, length)?;
+        Ok(Value::Object(object))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn eval_array_literal_elements(
+        &mut self, program: &Rc<Program>, object: usize, mut index: usize, elements: &[Option<Argument>],
+        env: usize, this: &Value, host: &mut dyn Host,
+    ) -> Result<usize, Fault> {
         for element in elements {
             self.step()?;
             let Some(element) = element else {
-                if index == self.limits.heap.array_length {
-                    return Err(Fault::new(format!("Array length limit reached ({}).", self.limits.heap.array_length)));
-                }
+                self.check_array_literal_index(index)?;
                 index += 1;
                 continue;
             };
-            if !element.spread && index == self.limits.heap.array_length {
-                return Err(Fault::new(format!("Array length limit reached ({}).", self.limits.heap.array_length)));
+            if !element.spread {
+                self.check_array_literal_index(index)?;
             }
             let value = self.eval(program, element.expression, env, this, host)?;
             if element.spread {
                 let mut iterator = self.spread_iterator(value, host)?;
                 while let Some(value) = self.iterator_next(&mut iterator, host)? {
-                    if index == self.limits.heap.array_length {
-                        return Err(Fault::new(format!("Array length limit reached ({}).", self.limits.heap.array_length)));
-                    }
-                    // This fresh array is not exposed until evaluation ends.
-                    // Define own data properties, bypassing inherited setters.
-                    self.store_property(
-                        object,
-                        index.to_string(),
-                        value,
-                        Some((true, true, true)),
-                    )?;
+                    self.check_array_literal_index(index)?;
+                    self.define_array_literal_element(object, index, value)?;
                     index += 1;
                 }
             } else {
-                self.store_property(object, index.to_string(), value, Some((true, true, true)))?;
+                self.define_array_literal_element(object, index, value)?;
                 index += 1;
             }
         }
-        // A trailing hole extends length without creating an own property.
-        self.set_array_length(object, index)?;
-        Ok(Value::Object(object))
+        Ok(index)
+    }
+
+    pub(super) fn check_array_literal_index(&self, index: usize) -> Result<(), Fault> {
+        if index >= self.limits.heap.array_length {
+            return Err(Fault::new(format!("Array length limit reached ({}).", self.limits.heap.array_length)));
+        }
+        Ok(())
+    }
+
+    pub(super) fn define_array_literal_element(&mut self, object: usize, index: usize, value: Value) -> Result<(), Fault> {
+        // Define an own data property even when the prototype has a setter.
+        self.store_property(object, index.to_string(), value, Some((true, true, true)))
     }
 }
 
