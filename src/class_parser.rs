@@ -14,10 +14,16 @@ pub(super) struct Class {
 
 #[derive(Clone)]
 pub(super) struct Member {
-    pub(super) name: String,
+    pub(super) key: MemberKey,
     pub(super) template: usize,
     pub(super) kind: Kind,
     pub(super) is_static: bool,
+}
+
+#[derive(Clone)]
+pub(super) enum MemberKey {
+    Literal(String),
+    Computed(ExprId),
 }
 
 impl Parser {
@@ -75,20 +81,28 @@ impl Parser {
             } else {
                 Kind::Method
             };
-            if self.is("[") {
-                return Err(self.unsupported("Computed class keys are not implemented."));
-            }
             if self.is("*") {
                 return Err(self.unsupported("Generator class methods are not implemented."));
             }
             if self.is("async") && !self.next_is("(") {
                 return Err(self.unsupported("Async class methods are not implemented."));
             }
-            let key = self.class_literal_key()?;
-            if is_static && key == "prototype" {
+            let key = if self.eat("[") {
+                let prior_awaits = self.await_count;
+                let expression = self.assignment_with_in()?;
+                if self.await_count != prior_awaits {
+                    return Err(self.unsupported("Await in a computed class key is not implemented."));
+                }
+                self.need("]")?;
+                MemberKey::Computed(expression)
+            } else {
+                MemberKey::Literal(self.class_literal_key()?)
+            };
+            let literal = match &key { MemberKey::Literal(name) => Some(name.as_str()), MemberKey::Computed(_) => None };
+            if is_static && literal == Some("prototype") {
                 return Err(self.error("A static class member cannot be named prototype."));
             }
-            let is_constructor = !is_static && key == "constructor";
+            let is_constructor = !is_static && literal == Some("constructor");
             if is_constructor && kind != Kind::Method {
                 return Err(self.error("A class constructor cannot be an accessor."));
             }
@@ -122,7 +136,7 @@ impl Parser {
             } else {
                 self.class_node_capacity(members.len().saturating_add(1))?;
                 members.try_reserve(1).map_err(|_| self.unsupported("Unable to reserve bounded class member storage."))?;
-                members.push(Member { name: key, template, kind, is_static });
+                members.push(Member { key, template, kind, is_static });
             }
         }
         self.need("}")?;

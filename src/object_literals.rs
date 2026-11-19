@@ -68,45 +68,54 @@ impl Runtime {
                 *home_object = Some(Ordinary::Object(object));
             }
             self.literal_function_name(function, &key, kind)?;
-            if matches!(kind, Kind::Getter | Kind::Setter) {
-                // Repeated accessor definitions replace only their own half.
-                // A preceding data property starts a fresh accessor pair.
-                let previous = match &key {
-                    PropertyKey::String(name) => self.objects[object].properties.get(name),
-                    PropertyKey::Symbol(symbol) => {
-                        self.objects[object].symbol_properties.get(symbol)
-                    }
-                };
-                let mut accessor =
-                    previous
-                        .and_then(|property| property.accessor)
-                        .unwrap_or(Accessors {
-                            get: None,
-                            set: None,
-                        });
-                if kind == Kind::Getter {
-                    accessor.get = Some(function);
-                } else {
-                    accessor.set = Some(function);
+        }
+        self.define_member_property(object, key, value, kind, true)
+    }
+
+    pub(super) fn define_member_property(
+        &mut self, object: usize, key: PropertyKey, value: Value, kind: Kind, enumerable: bool,
+    ) -> Result<(), Fault> {
+        if matches!(kind, Kind::Getter | Kind::Setter) {
+            let Value::Function(function) = value else {
+                return Err(Fault::new("Invalid accessor definition."));
+            };
+            // Repeated accessor definitions replace only their own half.
+            // A preceding data property starts a fresh accessor pair.
+            let previous = match &key {
+                PropertyKey::String(name) => self.objects[object].properties.get(name),
+                PropertyKey::Symbol(symbol) => {
+                    self.objects[object].symbol_properties.get(symbol)
                 }
-                return match key {
-                    PropertyKey::String(name) => {
-                        self.store_accessor_property(object, name, accessor, (true, true))
-                    }
-                    PropertyKey::Symbol(symbol) => {
-                        self.store_symbol_accessor_property(object, symbol, accessor, (true, true))
-                    }
-                };
+            };
+            let mut accessor =
+                previous
+                    .and_then(|property| property.accessor)
+                    .unwrap_or(Accessors {
+                        get: None,
+                        set: None,
+                    });
+            if kind == Kind::Getter {
+                accessor.get = Some(function);
+            } else {
+                accessor.set = Some(function);
             }
+            return match key {
+                PropertyKey::String(name) => {
+                    self.store_accessor_property(object, name, accessor, (enumerable, true))
+                }
+                PropertyKey::Symbol(symbol) => {
+                    self.store_symbol_accessor_property(object, symbol, accessor, (enumerable, true))
+                }
+            };
         }
         // Literal definitions create data properties, even after an accessor
         // or over an inherited setter. Ordinary assignment would be incorrect.
         match key {
             PropertyKey::String(name) => {
-                self.store_property(object, name, value, Some((true, true, true)))
+                self.store_property(object, name, value, Some((enumerable, true, true)))
             }
             PropertyKey::Symbol(symbol) => {
-                self.store_symbol_property(object, symbol, value, Some((true, true, true)))
+                self.store_symbol_property(object, symbol, value, Some((enumerable, true, true)))
             }
         }
     }
