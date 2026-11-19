@@ -288,6 +288,77 @@ mod tests {
     }
 
     #[test]
+    fn element_inline_style_property_distinguishes_own_accessors_data_and_native_handles() {
+        let (mut doc, mut forms, mut page) = fixture();
+        let outcome = page.console_eval(&mut doc, &mut forms, r#"
+var root=document.documentElement, detached=document.createElement('div'), neighbor=document.getElementById('tile');
+var proto=HTMLElement.prototype, descriptor=Object.getOwnPropertyDescriptor(proto,'style'), get=descriptor.get;
+if(!descriptor.enumerable||!descriptor.configurable||get.name!=='get style'||get.length!==0||
+   descriptor.set.name!=='set style'||descriptor.set.length!==1||Object.hasOwn(Element.prototype,'style'))
+    throw 'HTML interface descriptor';
+var rootStyle=root.style, kept=detached.style, other=neighbor.style;
+if(detached.ownerDocument!==document||detached.parentNode!==null||rootStyle===kept||kept===other||
+   get.call(detached)!==kept||get.call(root)!==rootStyle||Object.hasOwn(detached,'style')||!('style' in root))
+    throw 'native declaration identity and owner';
+var reads=0,writes=0,memo={};
+function ownGet(){if(this!==root)throw 'wrong getter receiver';reads++;return memo;}
+function ownSet(value){if(this!==root||value!==memo)throw 'wrong setter receiver';writes++;}
+Object.defineProperty(root,'style',{get:ownGet,set:ownSet,enumerable:true,configurable:true});
+var own=Object.getOwnPropertyDescriptor(root,'style');
+if(own.get!==ownGet||own.set!==ownSet||!own.configurable||!own.enumerable||
+   !Object.hasOwn(root,'style')||Object.keys(root).indexOf('style')<0||reads!==0)throw 'inspection invoked getter';
+root.style=memo;
+if(writes!==1||root.style!==memo||reads!==1||get.call(root)!==rootStyle||neighbor.style!==other)
+    throw 'ordinary accessor and saved native getter';
+rootStyle.color='red';
+if(!delete root.style||Object.hasOwn(root,'style')||root.style!==rootStyle||root.style.color!=='red')
+    throw 'delete restores inherited handle and live CSS';
+Object.defineProperty(detached,'style',{value:13,writable:true,configurable:true});
+detached.style=27;
+if(detached.style!==27||Object.getOwnPropertyDescriptor(detached,'style').enumerable||
+   get.call(detached)!==kept||detached.getAttribute('style')!==null)throw 'ordinary data storage';
+if(!delete detached.style||detached.style!==kept||root.style!==rootStyle||neighbor.style!==other)
+    throw 'restored independent declarations';
+var getterRuns=0;
+Object.defineProperty(proto,'style',{get:function(){getterRuns++;return this;},configurable:true});
+if(root.style!==root||detached.style!==detached||getterRuns!==2||get.call(detached)!==kept)
+    throw 'replacement prototype and saved getter';
+delete proto.style;
+if('style' in detached||detached.style!==undefined)throw 'deleted inherited property remained visible';
+Object.defineProperty(proto,'style',descriptor);
+if(detached.style!==kept||get.call(neighbor)!==other)throw 'restored prototype';
+"#);
+        assert_eq!(outcome.errors, 0, "{}", page.report());
+    }
+
+    #[test]
+    fn element_inline_style_property_preserves_native_brands_and_protected_names() {
+        let (mut doc, mut forms, mut page) = fixture();
+        let setup = page.console_eval(&mut doc, &mut forms, r#"
+var p=document.getElementById('tile'),native=p.style,keep=p.getAttribute('style');
+var desc=Object.getOwnPropertyDescriptor(HTMLElement.prototype,'style'),calls=0;
+for(var receiver of [document,document.createTextNode('x'),native,Object.create(HTMLElement.prototype)]){
+  var caught=false;try{desc.get.call(receiver);}catch(e){caught=e instanceof TypeError;}
+  if(!caught)throw 'getter requires a genuine HTMLElement';
+  caught=false;try{desc.set.call(receiver,{toString:function(){calls++;return '';}});}catch(e){caught=e instanceof TypeError;}
+  if(!caught||calls!==0)throw 'setter brand must precede conversion';
+}
+"#);
+        assert_eq!(setup.errors, 0, "{}", page.report());
+        for refused in [
+            "p.style='color:blue';",
+            "Object.defineProperty(p,'ownerDocument',{get:function(){return null;}});",
+            "Object.defineProperty(p,'onclick',{value:17});",
+        ] {
+            let outcome = page.console_eval(&mut doc, &mut forms, refused);
+            assert_eq!(outcome.errors, 1, "{refused}: {}", page.report());
+        }
+        let outcome = page.console_eval(&mut doc, &mut forms,
+            "if(p.ownerDocument!==document||p.style!==native||Object.hasOwn(p,'style')||p.getAttribute('style')!==keep)throw 'protected native state';");
+        assert_eq!(outcome.errors, 0, "{}", page.report());
+    }
+
+    #[test]
     fn inline_style_enumeration_inherited_members_and_live_own_indices() {
         let (mut doc, mut forms, mut page) = fixture();
         let result = page.console_eval(&mut doc, &mut forms, r#"

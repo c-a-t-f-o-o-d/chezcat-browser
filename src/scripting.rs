@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 
 use crate::forms::{self, Forms, Kind};
 use crate::html::{Document, Node, NodeKind};
-use crate::javascript::{Host, Runtime, Value};
+use crate::javascript::{Host, Runtime, Value, ELEMENT_STYLE_GET, ELEMENT_STYLE_SET};
 
 #[path = "script_promises.rs"]
 mod script_promises;
@@ -2502,7 +2502,8 @@ impl Bridge<'_> {
 impl Bridge<'_> {
     /// Properties handled by ordinary lookup on the node's interface prototypes.
     fn inherited_node_property(&self, object: u32, property: &str) -> bool {
-        self.element_sibling_member(object, property)
+        property == "style" && self.element_expando_receiver(object)
+            || self.element_sibling_member(object, property)
             || self.document_inherited_property(object,property)
             || self.assigned_slot_lookup(object, property)
             || self.html_offset_member(object, property)
@@ -2885,6 +2886,8 @@ impl Host for Bridge<'_> {
     }
 
     fn native_method_owner(&self, object:u32, method:&str) -> Option<u32> {
+        if matches!(method, ELEMENT_STYLE_GET | ELEMENT_STYLE_SET)
+            && self.event_target_interface(object) { return Some(object); }
         if script_inline_style::handle(object) && script_inline_style::method(method).is_some() {return Some(WINDOW);}
         if CanvasOperation::parse(method).is_some() && self.event_target_interface(object) {return Some(object);}
         if script_canvas::accessor(method).is_some() && self.event_target_interface(object) {return Some(object);}
@@ -3030,6 +3033,15 @@ impl Host for Bridge<'_> {
         method: &str,
         args: &[Value],
     ) -> Result<(), (&'static str, String)> {
+        if matches!(method, ELEMENT_STYLE_GET | ELEMENT_STYLE_SET) {
+            if !self.html_element_receiver(object) {
+                return Err(("TypeError", "The style accessor requires an HTMLElement.".into()));
+            }
+            if self.is_frame_handle(object) {
+                return Err(("NotSupportedError", "Inline CSS declarations on child document nodes are unavailable.".into()));
+            }
+            return Ok(());
+        }
         if let Some(operation) = CanvasOperation::parse(method) {
             return if operation.accepts(self, object) { Ok(()) }
                 else { Err(("TypeError", "Canvas operation requires its genuine native receiver.".into())) };
@@ -3360,6 +3372,9 @@ impl Host for Bridge<'_> {
     }
 
     fn accepts_receiver(&self, object: u32, method: &str, receiver: u32) -> bool {
+        if matches!(method, ELEMENT_STYLE_GET | ELEMENT_STYLE_SET) {
+            return self.event_target_interface(object) && self.html_element_receiver(receiver);
+        }
         if script_inline_style::handle(object) && script_inline_style::method(method).is_some() {
             return script_inline_style::handle(receiver) && self.attr_element_receiver(node_handle((receiver - STYLE_BASE) as usize));
         }
@@ -3377,7 +3392,7 @@ impl Host for Bridge<'_> {
             return self.element_selector_receiver(receiver);
         }
         if Offset::getter(method).is_some() && self.event_target_interface(object) {
-            return self.html_offset_receiver(receiver);
+            return self.html_element_receiver(receiver);
         }
         if self.computed_style_receiver(object) {return self.computed_style_receiver(receiver);}
         if self.event_target_interface(object)&&method=="\0NodeList.get.length" {return self.node_list_receiver(receiver);}
@@ -4723,6 +4738,16 @@ impl Host for Bridge<'_> {
     }
 
     fn call(&mut self, object: u32, method: &str, args: &[Value]) -> Result<Value, String> {
+        if matches!(method, ELEMENT_STYLE_GET | ELEMENT_STYLE_SET) {
+            self.state.work(1)?;
+            let node = self.node(object)?;
+            if method == ELEMENT_STYLE_GET {
+                return Ok(Value::Host(STYLE_BASE + node as u32));
+            }
+            // Web IDL forwards this write to the native declaration's cssText.
+            // Whole declaration replacement is outside the checked property setter.
+            return Err("Setting HTMLElement.style requires CSSStyleDeclaration.cssText replacement, which is unavailable.".into());
+        }
         if let Some(operation) = CanvasOperation::parse(method) {
             return self.canvas_context_call(object, operation, args, None);
         }
