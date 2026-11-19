@@ -158,6 +158,7 @@ pub(super) struct Activation {
     expression_value: Option<Value>,
     comparison_operands: Vec<Value>,
     assignments: Vec<Reference>,
+    plain_calls: Vec<Box<PreparedPlainArguments>>,
 }
 
 impl Activation {
@@ -183,6 +184,10 @@ impl Activation {
             .saturating_add(self.pending_literal().map_or(0, PendingLiteral::retained_bytes))
             .saturating_add(references)
             .saturating_add(self.assignments.capacity().saturating_mul(std::mem::size_of::<Reference>()))
+            .saturating_add(self.plain_calls.iter().fold(
+                self.plain_calls.capacity().saturating_mul(std::mem::size_of::<Box<PreparedPlainArguments>>()),
+                |bytes, call| bytes.saturating_add(call.retained_bytes()),
+            ))
             .saturating_add(
                 self.environments
                     .capacity()
@@ -218,6 +223,7 @@ impl Activation {
             .saturating_add(self.assignments.len().saturating_mul(2))
             .saturating_add(self.pending_argument_call().map_or(0, |call| 1 + call.prefix.len()))
             .saturating_add(self.pending_method().map_or(0, |method| method.prefix.len()))
+            .saturating_add(self.plain_calls.iter().fold(0usize, |cost, call| cost.saturating_add(1 + call.prefix.len())))
     }
 
     pub(super) fn reachability_edges(&self, add: &mut impl FnMut(Edge)) {
@@ -234,6 +240,10 @@ impl Activation {
             Edge::value(&call.function, add);
         }
         if let Some(call) = self.pending_argument_call() {
+            Edge::value(&call.function, add);
+            for value in &call.prefix { Edge::value(value, add); }
+        }
+        for call in &self.plain_calls {
             Edge::value(&call.function, add);
             for value in &call.prefix { Edge::value(value, add); }
         }
@@ -373,6 +383,7 @@ impl Runtime {
             expression_value: None,
             comparison_operands: Vec::new(),
             assignments: Vec::new(),
+            plain_calls: Vec::new(),
         });
         self.drive_await_body(frame, None, host)
     }
@@ -475,6 +486,7 @@ impl Runtime {
                     // a handler can start another one.
                     frame.assignments.clear();
                     frame.comparison_operands.clear();
+                    frame.plain_calls.clear();
                     frame.expression_value = None;
                     self.unwind_await_exit_scopes(&mut frame, Err(error), host)
                 }
@@ -663,6 +675,25 @@ impl Runtime {
                     result.map_err(|error: Fault| {
                         error.at(&frame.program.source, frame.program.stmts[statement].at)
                     })
+                }
+                Instruction::CapturePlainCall { statement, site } => {
+                    let result = (|| {
+                        self.reserve_await_plain_call(frame)?;
+                        let call = self.prepare_await_argument_call(frame, site, frame.retained_bytes(), host)?;
+                        frame.plain_calls.push(call);
+                        Ok(Progress::Continue)
+                    })();
+                    result.map_err(|error: Fault| error.at(&frame.program.source, frame.program.stmts[statement].at))
+                }
+                Instruction::InvokePlainCall { statement, action } => {
+                    let result = (|| {
+                        let argument = frame.take_expression_value()?;
+                        let call = frame.plain_calls.pop().ok_or_else(|| Fault::new("Async expression has no captured call."))?;
+                        let value = self.eval_resumed_plain_argument(&frame.program, *call, argument, environment, &frame.this, host)?;
+                        self.push_transient_value(&value)?;
+                        self.await_resume_action(frame, action, value, host)
+                    })();
+                    result.map_err(|error: Fault| error.at(&frame.program.source, frame.program.stmts[statement].at))
                 }
                 Instruction::WriteAssignment { statement, action } => {
                     let result = (|| {
@@ -919,6 +950,20 @@ impl Runtime {
                 (frame.assignments.len() + 1).saturating_mul(slot))?;
             frame.assignments.try_reserve_exact(1)
                 .map_err(|_| Fault::new("Unable to allocate bounded async assignment stack."))?;
+        }
+        Ok(())
+    }
+
+    fn reserve_await_plain_call(&mut self, frame: &mut Activation) -> Result<(), Fault> {
+        if frame.plain_calls.len() >= MAX_EVALUATION_FRAMES {
+            return Err(Fault::new("Async call nesting limit reached (4096)."));
+        }
+        if frame.plain_calls.len() == frame.plain_calls.capacity() {
+            let slot = std::mem::size_of::<Box<PreparedPlainArguments>>();
+            self.await_storage(frame.retained_bytes().saturating_add(slot),
+                (frame.plain_calls.len() + 1).saturating_mul(slot))?;
+            frame.plain_calls.try_reserve_exact(1)
+                .map_err(|_| Fault::new("Unable to allocate bounded async call stack."))?;
         }
         Ok(())
     }
@@ -1477,6 +1522,7 @@ mod tests {
             expression_value: Some(Value::Function(21)),
             comparison_operands: vec![Value::Function(29), Value::String("left".into())],
             assignments: vec![Reference::ComputedProperty(Value::Object(25), Value::Function(26))],
+            plain_calls: Vec::new(),
             pending: Some(PendingAwait {
                 statement: 0,
                 action: Resume::Discard,
