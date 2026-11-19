@@ -48,6 +48,8 @@ fn selected_if_tail_matches_original_completions_labels_steps_and_fault_location
         "var x=eval('17;if(true);');if(x!==undefined)throw 'selected empty';x;",
         "function f(){try{if(true)if(false)return 0;else return 23;}finally{if(true);}}f();",
         "var answer=0;try{if(true)if(false);else throw 29;}catch(e){answer=e;}finally{if(false)answer=99;}answer;",
+        "var answer=0;if(false);else if(true)try{throw 29;}catch(e){answer=e;}finally{answer++;}answer;",
+        "function f(){if(true)try{return 17;}finally{return 29;}return 0;}f();",
         "if(false);else\nif(true)\n missingName();",
     ] {
         for allowance in (0..=120).chain(std::iter::once(10_000)) {

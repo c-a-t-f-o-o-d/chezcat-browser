@@ -73,7 +73,9 @@ impl Runtime {
                 StmtKind::Return(Some(expression)) => Some((expression, true)),
                 _ => None,
             };
-            let result = if let Some((expression, returning)) = expression {
+            let result = if matches!(program.stmts[current].kind, StmtKind::Try(_, _, _)) {
+                self.try_statement(program, current, env, this, host)
+            } else if let Some((expression, returning)) = expression {
                 self.step().and_then(|_| {
                     #[cfg(test)]
                     let value = if self.recursive_evaluation_oracle {
