@@ -1,11 +1,13 @@
 //! Owned resumption points for a bounded set of async statement forms.
 use super::*;
+use std::ops::Range;
 
 #[derive(Clone, Copy)]
 pub(super) enum Resume {
     Discard,
     Return,
     Initialize { kind: Declaration, pattern: binding_patterns::Id },
+    BranchFalse(usize),
 }
 
 #[derive(Clone, Copy)]
@@ -145,14 +147,14 @@ fn emit_expression(
 
 enum Visit {
     Statement { id: StmtId, eligible: bool },
-    Finish { id: StmtId, before: usize },
+    Finish { id: StmtId, before: usize, condition_extra: usize },
 }
 
 // Count await sites in supported statement and expression forms. Each
 // statement belongs to one template. Ineligible subtrees still contribute
 // jump targets, but never await sites; nested function bodies are separate
 // roots. The parser's independent expression count catches *all* embedded
-// awaits, including conditions, pattern defaults and unselected branches.
+// awaits, including unsupported conditions, pattern defaults and unselected branches.
 fn split_statements(program: &Program, template: &Template, expected: usize) -> Result<(HashSet<StmtId>, usize), Fault> {
     let mut pending = Vec::new();
     for &id in template.body.iter().rev() {
@@ -164,13 +166,13 @@ fn split_statements(program: &Program, template: &Template, expected: usize) -> 
     let mut instructions = template.body.len();
     while let Some(visit) = pending.pop() {
         let (id, eligible) = match visit {
-            Visit::Finish { id, before } => {
+            Visit::Finish { id, before, condition_extra } => {
                 if sites > before {
                     split.try_reserve(1).map_err(|_| storage_error())?;
                     split.insert(id);
                     // Each statement already accounts for one instruction.
                     // Opening a container adds its children and control flow.
-                    instructions += match &program.stmts[id].kind {
+                    instructions += condition_extra + match &program.stmts[id].kind {
                         StmtKind::Block(body) => body.len() + 1,
                         StmtKind::If(_, _, Some(_)) => 3,
                         StmtKind::If(_, _, None) => 1,
@@ -196,7 +198,16 @@ fn split_statements(program: &Program, template: &Template, expected: usize) -> 
         let children_eligible = eligible && matches!(kind,
             StmtKind::Block(_) | StmtKind::If(_, _, _) | StmtKind::Try(_, _, _));
         if children_eligible {
-            push(&mut pending, Visit::Finish { id, before: sites })?;
+            let before = sites;
+            let mut condition_extra = 0;
+            if let StmtKind::If(condition, _, _) = kind {
+                let (length, awaits) = expression_size(program, *condition)?;
+                if awaits != 0 {
+                    sites += awaits;
+                    condition_extra = length - 1;
+                }
+            }
+            push(&mut pending, Visit::Finish { id, before, condition_extra })?;
         }
         let mut child = |id, eligible| push(&mut pending, Visit::Statement { id, eligible });
         match kind {
@@ -243,10 +254,24 @@ fn split_statements(program: &Program, template: &Template, expected: usize) -> 
 enum Emit {
     Statement(StmtId),
     LeaveBlock,
-    Else { branch: usize, alternative: StmtId },
-    FinishBranch(usize),
+    Else { branch: Range<usize>, alternative: StmtId },
+    FinishBranch(Range<usize>),
     FinishJump(usize),
     FinishTry(usize),
+}
+
+fn set_branch_target(code: &mut [Instruction], destination: usize) {
+    for instruction in code {
+        match instruction {
+            Instruction::BranchFalse { target, .. }
+            | Instruction::Await { action: Resume::BranchFalse(target), .. }
+            | Instruction::GuardAwait { action: Resume::BranchFalse(target), .. }
+            | Instruction::Evaluate { action: Resume::BranchFalse(target), .. } => {
+                *target = destination;
+            }
+            _ => {}
+        }
+    }
 }
 
 pub(super) fn compile(program: &Program, template: usize, expected_await_count: usize, ast_limit: usize) -> Result<Vec<Instruction>, Fault> {
@@ -270,16 +295,14 @@ pub(super) fn compile(program: &Program, template: usize, expected_await_count: 
                 let jump = code.len();
                 push(&mut code, Instruction::Jump(0))?;
                 let start = code.len();
-                let Instruction::BranchFalse { target, .. } = &mut code[branch] else { unreachable!() };
-                *target = start;
+                set_branch_target(&mut code[branch], start);
                 push(&mut pending, Emit::FinishJump(jump))?;
                 push(&mut pending, Emit::Statement(alternative))?;
                 continue;
             }
             Emit::FinishBranch(branch) => {
                 let end = code.len();
-                let Instruction::BranchFalse { target, .. } = &mut code[branch] else { unreachable!() };
-                *target = end;
+                set_branch_target(&mut code[branch], end);
                 continue;
             }
             Emit::FinishJump(jump) => {
@@ -318,8 +341,13 @@ pub(super) fn compile(program: &Program, template: usize, expected_await_count: 
                     for &item in body.iter().rev() { push(&mut pending, Emit::Statement(item))?; }
                 }
                 StmtKind::If(condition, yes, no) => {
-                    let branch = code.len();
-                    push(&mut code, Instruction::BranchFalse { statement: id, condition: *condition, target: 0 })?;
+                    let start = code.len();
+                    if expression_size(program, *condition)?.1 == 0 {
+                        push(&mut code, Instruction::BranchFalse { statement: id, condition: *condition, target: 0 })?;
+                    } else {
+                        emit_expression(program, id, *condition, Resume::BranchFalse(0), &mut code)?;
+                    }
+                    let branch = start..code.len();
                     let next = match no {
                         Some(no) => Emit::Else { branch, alternative: *no },
                         None => Emit::FinishBranch(branch),
@@ -375,7 +403,7 @@ mod tests {
             "return use(...await p);",
             "return (use(), 1 + await p);",
             "return (await p) && use(await p);",
-            "if(await p){}",
+            "if(1+await p){}",
             "return await p + 1;",
             "let a=await p,b=1+await p;",
             "let {value=await p}=await p;",
@@ -415,6 +443,7 @@ mod tests {
             ("async function f(p){let a,b=await p,c=4;}", 3),
             ("async function f(p){return yes() && use(await p);}", 2),
             ("async function f(p){return yes() && use(await p).ready;}", 2),
+            ("async function f(p){if(yes() && use(await p).ready){noop();}}", 3),
         ] {
             let mut runtime = Runtime::for_test();
             let program = runtime.register_program(source, false).unwrap();
