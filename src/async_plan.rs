@@ -549,12 +549,10 @@ fn split_statements(program: &Program, template: &Template, expected: usize) -> 
                 continue;
             }
         }
-        let children_eligible = eligible && if generator {
-            matches!(kind, StmtKind::Block(_) | StmtKind::If(..) | StmtKind::Try(_, _, _))
-        } else {
-            matches!(kind, StmtKind::Block(_) | StmtKind::If(_, _, _) | StmtKind::Try(_, _, _)
-                | StmtKind::For(None, _, _, _) | StmtKind::Switch { .. }) || lexical_for_of(program, id).is_some()
-        };
+        let children_eligible = eligible && (
+            matches!(kind, StmtKind::Block(_) | StmtKind::If(..) | StmtKind::Try(_, _, _) | StmtKind::For(None, _, _, _))
+                || (!generator && (matches!(kind, StmtKind::Switch { .. }) || lexical_for_of(program, id).is_some()))
+        );
         if children_eligible {
             let before = sites;
             let mut condition_extra = 0;
