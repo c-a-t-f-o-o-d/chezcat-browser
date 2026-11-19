@@ -32,6 +32,41 @@ fn checkpoint(runtime: &mut Runtime) {
 }
 
 #[test]
+fn await_execution_sequence_keeps_prefix_suffix_and_final_value_in_order() {
+    let mut runtime = Runtime::for_test();
+    succeeds(&mut runtime, r#"
+var trace='', releaseFirst, releaseSecond, reject, reason={}, final=0, caught=0;
+var first=new Promise(function(resolve){releaseFirst=resolve;});
+var second=new Promise(function(resolve){releaseSecond=resolve;});
+var failed=new Promise(function(resolve,fail){reject=fail;});
+function receive(value){trace+='received:'+value+'|';return 99;}
+async function run(){
+    try {
+        let result=(trace+='before|',receive(await first),(trace+='between|',await second),trace+='after|',7);
+        return (trace+='return|', await Promise.resolve(result));
+    } finally { trace+='finally|'; }
+}
+async function skip(){
+    try { receive(await failed),trace+='late|'; }
+    catch(e){if(e!==reason)throw e;caught++;}
+}
+run().then(function(value){final=value;});
+skip();
+if(trace!=='before|'||final||caught)throw 'prefix timing';
+'ok';
+"#);
+    checkpoint(&mut runtime);
+    runtime.begin_job();
+    succeeds(&mut runtime, "releaseFirst(4);reject(reason);'ok';");
+    checkpoint(&mut runtime);
+    succeeds(&mut runtime, "if(trace!=='before|received:4|between|'||final||caught!==1)throw 'pause or rejection';'ok';");
+    runtime.begin_job();
+    succeeds(&mut runtime, "releaseSecond(8);'ok';");
+    checkpoint(&mut runtime);
+    succeeds(&mut runtime, "if(trace!=='before|received:4|between|after|return|finally|'||final!==7)throw 'order or final value';'ok';");
+}
+
+#[test]
 fn await_execution_try_finally_keeps_completion_order_identity_and_roots() {
     let mut runtime = Runtime::for_capacity_test();
     succeeds(&mut runtime, r#"

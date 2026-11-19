@@ -11,6 +11,7 @@ pub(super) enum Resume {
 #[derive(Clone, Copy)]
 pub(super) enum Instruction {
     Statement(StmtId),
+    Evaluate { statement: StmtId, expression: ExprId, action: Resume },
     EnterBlock(StmtId),
     LeaveBlock,
     BranchFalse { statement: StmtId, condition: ExprId, target: usize },
@@ -30,8 +31,8 @@ fn push<T>(items: &mut Vec<T>, value: T) -> Result<(), Fault> {
     Ok(())
 }
 
-fn await_site(program: &Program, id: StmtId) -> Option<(ExprId, Option<ExprId>, Resume)> {
-    let (expression, action) = match &program.stmts[id].kind {
+fn statement_expression(program: &Program, id: StmtId) -> Option<(ExprId, Resume)> {
+    Some(match &program.stmts[id].kind {
         StmtKind::Expr(expression) => (*expression, Resume::Discard),
         StmtKind::Return(Some(expression)) => (*expression, Resume::Return),
         StmtKind::Declare(kind, declarations) => {
@@ -39,7 +40,10 @@ fn await_site(program: &Program, id: StmtId) -> Option<(ExprId, Option<ExprId>, 
             (*expression, Resume::Initialize { kind: *kind, pattern: *pattern })
         }
         _ => return None,
-    };
+    })
+}
+
+fn await_expression(program: &Program, expression: ExprId) -> Option<(ExprId, Option<ExprId>)> {
     let (expression, callee) = match &program.exprs[expression].kind {
         ExprKind::Call(callee, arguments) if matches!(&program.exprs[*callee].kind, ExprKind::Name(_)) => {
             let [Argument { expression, spread: false }] = arguments.as_slice() else { return None };
@@ -48,7 +52,25 @@ fn await_site(program: &Program, id: StmtId) -> Option<(ExprId, Option<ExprId>, 
         _ => (expression, None),
     };
     let ExprKind::Unary("await", operand) = program.exprs[expression].kind else { return None };
-    Some((operand, callee, action))
+    Some((operand, callee))
+}
+
+fn visit_sequence(
+    program: &Program,
+    mut expression: ExprId,
+    mut visit: impl FnMut(ExprId, bool) -> Result<(), Fault>,
+) -> Result<(), Fault> {
+    let mut pending = Vec::new();
+    loop {
+        if let ExprKind::Sequence(left, right) = program.exprs[expression].kind {
+            push(&mut pending, right)?;
+            expression = left;
+        } else {
+            visit(expression, pending.is_empty())?;
+            let Some(next) = pending.pop() else { return Ok(()) };
+            expression = next;
+        }
+    }
 }
 
 enum Visit {
@@ -91,11 +113,21 @@ fn split_statements(program: &Program, template: &Template, expected: usize) -> 
             Visit::Statement { id, eligible } => (id, eligible),
         };
         let kind = &program.stmts[id].kind;
-        if eligible && await_site(program, id).is_some() {
-            sites += 1;
-            split.try_reserve(1).map_err(|_| storage_error())?;
-            split.insert(id);
-            continue;
+        let expression = if eligible { statement_expression(program, id) } else { None };
+        if let Some((expression, _)) = expression {
+            let before = sites;
+            let mut expressions = 0;
+            visit_sequence(program, expression, |expression, _| {
+                expressions += 1;
+                sites += usize::from(await_expression(program, expression).is_some());
+                Ok(())
+            })?;
+            if sites > before {
+                instructions += expressions - 1;
+                split.try_reserve(1).map_err(|_| storage_error())?;
+                split.insert(id);
+                continue;
+            }
         }
         let children_eligible = eligible && matches!(kind,
             StmtKind::Block(_) | StmtKind::If(_, _, _) | StmtKind::Try(_, _, _));
@@ -164,8 +196,8 @@ pub(super) fn compile(program: &Program, template: usize, expected_await_count: 
     code.try_reserve_exact(instructions).map_err(|_| storage_error())?;
     let mut pending = Vec::new();
     for &id in template.body.iter().rev() { push(&mut pending, Emit::Statement(id))?; }
-    // Each statement emits at most three instructions and is visited at most
-    // once per pass. Storage scales with the parser's existing AST limit.
+    // Container statements emit bounded control instructions. A split comma
+    // expression emits one instruction per leaf, within the same AST limit.
     while let Some(task) = pending.pop() {
         let id = match task {
             Emit::Statement(id) => id,
@@ -200,8 +232,16 @@ pub(super) fn compile(program: &Program, template: usize, expected_await_count: 
         };
         if !split.contains(&id) {
             push(&mut code, Instruction::Statement(id))?;
-        } else if let Some((operand, callee, action)) = await_site(program, id) {
-            push(&mut code, Instruction::Await { statement: id, operand, callee, action })?;
+        } else if let Some((expression, action)) = statement_expression(program, id) {
+            visit_sequence(program, expression, |expression, last| {
+                let action = if last { action } else { Resume::Discard };
+                let instruction = if let Some((operand, callee)) = await_expression(program, expression) {
+                    Instruction::Await { statement: id, operand, callee, action }
+                } else {
+                    Instruction::Evaluate { statement: id, expression, action }
+                };
+                push(&mut code, instruction)
+            })?;
         } else {
             match &program.stmts[id].kind {
                 StmtKind::Block(body) => {
@@ -264,6 +304,7 @@ mod tests {
             "if(false){use(1,await p);}",
             "return receiver.method(await p);",
             "return use(...await p);",
+            "return (use(), 1 + await p);",
             "if(await p){}",
             "return await p + 1;",
             "let a=await p,b=1;",
@@ -298,18 +339,22 @@ mod tests {
 
     #[test]
     fn async_plan_instructions_share_the_ast_capacity_and_retention_budget() {
-        let source = "async function f(p){if(p){await p;}}";
-        let mut runtime = Runtime::for_test();
-        let program = runtime.register_program(source, false).unwrap();
-        let required = program.node_count();
-        assert_eq!(program.await_plan_nodes, 4);
-        assert_eq!(runtime.retained_ast, required);
-        let parse_at = |ast_nodes| {
-            let capacity = limits::Capacities { ast_nodes, ..limits::REGRESSION_CAPACITIES };
-            Parser::parse_context_with_capacity(source, &mut MAX_REGEXP_WORK.clone(), false, 0, capacity, limits::REGRESSION_HEAP)
-        };
-        assert_eq!(parse_at(required).unwrap().node_count(), required);
-        let error = parse_at(required - 1).err().unwrap();
-        assert!(error.message.contains("compiling await plan"), "{}", error.display());
+        for (source, instructions) in [
+            ("async function f(p){if(p){await p;}}", 4),
+            ("async function f(p){return (before(), await p, after());}", 3),
+        ] {
+            let mut runtime = Runtime::for_test();
+            let program = runtime.register_program(source, false).unwrap();
+            let required = program.node_count();
+            assert_eq!(program.await_plan_nodes, instructions);
+            assert_eq!(runtime.retained_ast, required);
+            let parse_at = |ast_nodes| {
+                let capacity = limits::Capacities { ast_nodes, ..limits::REGRESSION_CAPACITIES };
+                Parser::parse_context_with_capacity(source, &mut MAX_REGEXP_WORK.clone(), false, 0, capacity, limits::REGRESSION_HEAP)
+            };
+            assert_eq!(parse_at(required).unwrap().node_count(), required);
+            let error = parse_at(required - 1).err().unwrap();
+            assert!(error.message.contains("compiling await plan"), "{}", error.display());
+        }
     }
 }

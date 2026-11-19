@@ -338,6 +338,16 @@ impl Runtime {
                         self.statement(&frame.program, statement, environment, &frame.this, host)?;
                     Self::await_control(control)
                 }
+                Instruction::Evaluate { statement, expression, action } => {
+                    let result = (|| {
+                        let value = self.eval(&frame.program, expression, environment, &frame.this, host)?;
+                        self.push_transient_value(&value)?;
+                        self.await_resume_action(frame, action, value, host)
+                    })();
+                    result.map_err(|error: Fault| {
+                        error.at(&frame.program.source, frame.program.stmts[statement].at)
+                    })
+                }
                 Instruction::EnterBlock(statement) => {
                     if frame.environments.len() >= MAX_EVAL_DEPTH {
                         return Err(Fault::new("Async lexical nesting limit reached (128)."));
