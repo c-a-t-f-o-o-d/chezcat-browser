@@ -10,6 +10,7 @@ mod custom_properties;
 mod computed_style;
 pub(crate) use computed_style::{CascadeOutput, ComputedProperties, ComputedStyleUnavailable, CssBudget};
 pub(crate) fn computed_custom_property_name(name: &str) -> bool { custom_properties::custom_name(name) }
+pub(crate) fn inline_custom_value(value: &str) -> bool { value.len() <= 2048 && custom_properties::valid_syntax(value) }
 #[path="css_overflow.rs"]
 mod overflow;
 pub use overflow::{Overflow, OverflowValue};
@@ -1369,7 +1370,7 @@ fn user_agent(style: &mut Style, tag: &str, link: bool, hidden: bool) {
     }
 }
 
-fn without_comments(source: &str) -> String {
+pub(crate) fn without_comments(source: &str) -> String {
     let bytes = source.as_bytes();
     let mut output = Vec::with_capacity(bytes.len());
     let mut position = 0;
@@ -2718,6 +2719,81 @@ fn matches_selector(
 fn parse_declarations(source: &str) -> Vec<Declaration> {
     parse_declarations_bounded(source,MAX_DECLARATIONS)
 }
+
+/// CSSOM specified order keeps the winning occurrence, including its original
+/// position. Use the renderer's declaration tokenizer and custom-name grammar.
+pub(crate) fn inline_declaration_names(source: &str, supported: &[&str], meter: Option<&mut CssBudget<'_>>) -> Result<Vec<String>, String> {
+    use std::collections::BTreeMap;
+    let declarations = parse_declarations_inner(source, MAX_DECLARATIONS + 1, true, meter)?;
+    if declarations.len() > MAX_DECLARATIONS { return Err("Inline CSS declaration limit reached.".into()); }
+    let mut winners: BTreeMap<String, (usize, bool)> = BTreeMap::new();
+    let mut order = 0;
+    for decl in declarations {
+        let name = decl.name.as_str();
+        if !name.starts_with("--") && supported.binary_search(&name).is_err() { continue; }
+        let value = decl.value.to_ascii_lowercase();
+        let variable = value.contains("var(");
+        let wide = matches!(value.as_str(), "inherit" | "initial" | "unset" | "revert" | "revert-layer");
+        let expanded: &[&str] = match name {
+            "margin" | "padding" => {
+                if !variable && !wide && box_spacing::shorthand(&value, name == "margin").is_none() { continue; }
+                if name == "margin" { &["margin-top","margin-right","margin-bottom","margin-left"] }
+                else { &["padding-top","padding-right","padding-bottom","padding-left"] }
+            }
+            "inset" => {
+                if !variable && !wide && lengths(&value, true, true).is_none() { continue; }
+                &["top","right","bottom","left"]
+            }
+            "flex" => {
+                if !variable && !wide && flex_shorthand(&value).is_none() { continue; }
+                &["flex-grow","flex-shrink","flex-basis"]
+            }
+            "gap" => {
+                if !variable && !wide && gap_values(&value).is_none() { continue; }
+                &["row-gap", "column-gap"]
+            }
+            // These shorthands reset additional longhands outside the inline
+            // bridge. A partial expansion would expose incorrect indices.
+            "background" | "border" | "border-color" | "border-width" | "border-style" |
+            "font" | "overflow" | "text-decoration" => {
+                return Err(format!("Indexed inline CSS does not support the full {name} shorthand expansion."));
+            }
+            "color" | "background-color" if !inline_color_value(&value) => continue,
+            "width" | "height" | "min-width" | "min-height" if !variable && !wide && parse_length(&value, true, false).is_none() => continue,
+            "max-width" | "max-height" if !variable && !wide && value != "none" && parse_length(&value, false, false).is_none() => continue,
+            "top" | "right" | "bottom" | "left" if !variable && !wide && parse_length(&value, true, true).is_none() => continue,
+            "row-gap" | "column-gap" if !variable && !wide && value != "normal" && parse_length(&value, false, false).is_none() => continue,
+            s if s.starts_with("margin-") && !variable && !wide && box_spacing::length(&value, true).is_none() => continue,
+            s if s.starts_with("padding-") && !variable && !wide && box_spacing::length(&value, false).is_none() => continue,
+            _ => std::slice::from_ref(&name),
+        };
+        for &longhand in expanded {
+            if !winners.get(longhand).is_some_and(|(_, important)| *important && !decl.important) {
+                winners.insert(longhand.into(), (order, decl.important));
+            }
+            order += 1;
+        }
+        if winners.len() > MAX_DECLARATIONS { return Err("Expanded inline CSS declaration limit reached.".into()); }
+    }
+    let mut names: Vec<_> = winners.into_iter().collect();
+    names.sort_unstable_by_key(|(_, (order, _))| *order);
+    Ok(names.into_iter().map(|(name, _)| name).collect())
+}
+
+pub(crate) fn inline_color_value(value: &str) -> bool {
+    let value = value.trim().to_ascii_lowercase();
+    matches!(value.as_str(), "inherit" | "initial" | "unset" | "revert" | "revert-layer")
+        || value.contains("var(") && custom_properties::valid_syntax(&value)
+        || parse_solid_color(&value).is_some()
+}
+
+fn gap_values(value: &str) -> Option<[Length; 2]> {
+    let mut parts = value.split_ascii_whitespace();
+    let length = |part: &str| if part == "normal" {Some(Length::Px(0.0))} else {parse_length(part, false, false)};
+    let row = length(parts.next()?)?;
+    let column = match parts.next() { Some(part) => length(part)?, None => row };
+    parts.next().is_none().then_some([row, column])
+}
 // Shared raw declaration boundaries for the parser and native style bridge.
 // This preserves quoted/parenthesized URL payloads without allocating a split
 // snapshot or inventing a second interpretation of semicolons.
@@ -2728,13 +2804,14 @@ pub(crate) struct DeclarationItems<'a> {
     quote: char,
     depth: usize,
     escaped: bool,
+    open_comment: bool,
     finished: bool,
 }
 pub(crate) fn declaration_items(source: &str) -> DeclarationItems<'_> {
-    DeclarationItems { source, chars: source.char_indices(), start: 0, quote: '\0', depth: 0, escaped: false, finished: false }
+    DeclarationItems { source, chars: source.char_indices(), start: 0, quote: '\0', depth: 0, escaped: false, open_comment: false, finished: false }
 }
 impl DeclarationItems<'_> {
-    pub(crate) fn complete(&self) -> bool { self.finished && self.quote == '\0' && self.depth == 0 && !self.escaped }
+    pub(crate) fn complete(&self) -> bool { self.finished && self.quote == '\0' && self.depth == 0 && !self.escaped && !self.open_comment }
 }
 impl<'a> Iterator for DeclarationItems<'a> {
     type Item = &'a str;
@@ -2752,6 +2829,16 @@ impl<'a> Iterator for DeclarationItems<'a> {
                 continue;
             }
             if matches!(character, '\'' | '"') { self.quote = character; continue; }
+            if character == '/' && self.chars.as_str().starts_with('*') {
+                self.chars.next();
+                self.open_comment = true;
+                while let Some((_, next)) = self.chars.next() {
+                    if next == '*' && self.chars.as_str().starts_with('/') {
+                        self.chars.next(); self.open_comment = false; break;
+                    }
+                }
+                continue;
+            }
             if matches!(character,'('| '[' | '{') { self.depth += 1; }
             if matches!(character,')'| ']' | '}') { self.depth = self.depth.saturating_sub(1); }
             if character != ';' || self.depth != 0 { continue; }
@@ -3447,22 +3534,7 @@ fn apply(style: &mut Style, parent: &Style, declaration: &Declaration) {
             }
         }
         "gap" => {
-            let values: Option<Vec<_>> = value
-                .split_ascii_whitespace()
-                .take(3)
-                .map(|part| {
-                    if part == "normal" {
-                        Some(Length::Px(0.0))
-                    } else {
-                        parse_length(part, false, false)
-                    }
-                })
-                .collect();
-            match values.as_deref() {
-                Some([row]) => style.gap = [*row, *row],
-                Some([row, column]) => style.gap = [*row, *column],
-                _ => {}
-            }
+            if let Some(gap) = gap_values(&value) { style.gap = gap; }
         }
         "row-gap" | "column-gap" => {
             if let Some(value) = if value == "normal" {
