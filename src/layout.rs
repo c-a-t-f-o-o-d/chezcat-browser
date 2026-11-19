@@ -646,6 +646,11 @@ struct DecorationGroup {
     items: Vec<PaintItem>,
 }
 
+struct TextInlineBox {
+    node: usize,
+    edges: [i32; 4],
+}
+
 struct Engine<'a> {
     fonts: &'a Book,
     doc: &'a Document,
@@ -668,6 +673,7 @@ struct Engine<'a> {
     boxes: Vec<Option<BoxRecord>>,
     // Inline formatting establishes a box even when fragment dimensions are unavailable.
     inline_boxes: Vec<bool>,
+    text_inline_boxes: Vec<TextInlineBox>,
     used_margins:HashMap<usize,[i32;4]>,
     placed_boxes: Vec<usize>,
     flex_work: usize,
@@ -939,6 +945,7 @@ fn build_viewport_with_fonts_inner(
         measure_visits: 0,
         boxes: (0..doc.nodes.len()).map(|_| None).collect(),
         inline_boxes: vec![false; doc.nodes.len()],
+        text_inline_boxes: Vec::new(),
         used_margins:HashMap::new(),
         placed_boxes: Vec::new(),
         flex_work: MAX_FLEX_WORK,
@@ -986,7 +993,13 @@ fn build_viewport_with_fonts_inner(
     if engine.grid_budget.incomplete {
         engine.withhold_incomplete_grid_geometry(budget.as_deref_mut())?;
     }
-    engine.apply_translations(budget.as_deref_mut(), &fixed_boxes)?;
+    let inline_rects = engine.measure_text_inline_rects(budget.as_deref_mut())?;
+    engine.apply_translations(budget.as_deref_mut(), &fixed_boxes, &inline_rects)?;
+    // Inline client geometry is a readback. Flow and overflow still use the
+    // existing layout boxes, paint fragments and hit regions.
+    for (node, rect) in inline_rects {
+        engine.layout.border_rects[node].get_or_insert(rect);
+    }
     engine.prepare_opacity(budget.as_deref_mut())?;
     let atom_clips = engine.clip_overflow();
     // Flex children may move up as well as down after their single paint pass.
@@ -1108,6 +1121,42 @@ impl Engine<'_> {
                 fixed: self.layout.fixed_controls.get(index).copied().unwrap_or(false),
             });
         }
+    }
+
+    fn measure_text_inline_rects(
+        &self, mut budget: Option<&mut css::CssBudget<'_>>,
+    ) -> Result<HashMap<usize, BorderRect>, String> {
+        let count = self.text_inline_boxes.len();
+        if let Some(meter) = budget.as_deref_mut() {
+            meter.work(count)?;
+            meter.copies(count.saturating_mul(
+                std::mem::size_of::<TextInlineBox>() + std::mem::size_of::<(usize, BorderRect)>() * 2,
+            ))?;
+        }
+        let mut rects = HashMap::new();
+        rects.try_reserve(count).map_err(|_| "Could not reserve inline client rectangles.")?;
+        for &TextInlineBox { node, edges: [top, right, bottom, left] } in &self.text_inline_boxes {
+            if self.layout.incomplete_grid_nodes.get(node) == Some(&true) { continue; }
+            let Some(span) = self.spans[node] else { continue; };
+            let atoms = &self.atoms[span.start.atoms..span.end.atoms];
+            let Some(first) = atoms.first() else { continue; };
+            let last = atoms.last().unwrap();
+            if let Some(meter) = budget.as_deref_mut() { meter.work(atoms.len())?; }
+            // Inline decoration and hit testing use these same final line
+            // positions. Horizontal edges belong to the first and last line.
+            let mut bounds = (i32::MAX, i32::MAX, i32::MIN, i32::MIN);
+            for atom in atoms {
+                bounds.0 = bounds.0.min(atom.x - if atom.line == first.line { left } else { 0 });
+                bounds.1 = bounds.1.min(atom.y - top);
+                bounds.2 = bounds.2.max(atom.x + atom.width + if atom.line == last.line { right } else { 0 });
+                bounds.3 = bounds.3.max(atom.y + atom.height + bottom);
+            }
+            rects.insert(node, BorderRect {
+                x: bounds.0, y: bounds.1, width: bounds.2 - bounds.0, height: bounds.3 - bounds.1,
+                fixed: self.layout.fixed_hits[span.start.atoms],
+            });
+        }
+        Ok(rects)
     }
 
     fn finish_client_boxes(&mut self) {
@@ -4018,6 +4067,21 @@ impl Engine<'_> {
             .x
             .saturating_add(padding[1] + border[1] + margin[1])
             .clamp(-MAX_HEIGHT, MAX_HEIGHT);
+        // A direct text inline uses its own font and line atoms throughout.
+        // Nested inline boxes require their own fragment and baseline metrics.
+        if self.doc.scripting_enabled && start < self.atoms.len() && !self.finished()
+            && self.doc.nodes[index].namespace == crate::html::Namespace::Html
+            && self.doc.nodes[index].children.iter().all(|&child| {
+                self.doc.nodes.get(child).is_some_and(|child| {
+                    matches!(child.kind, NodeKind::Text(_) | NodeKind::Comment(_) | NodeKind::ProcessingInstruction { .. })
+                })
+            })
+        {
+            self.text_inline_boxes.push(TextInlineBox {
+                node: index,
+                edges: std::array::from_fn(|i| padding[i] + border[i]),
+            });
+        }
         if self.decorations.len() < 8_192
             && (style.background.is_some()
                 || border.iter().any(|width| *width > 0)
