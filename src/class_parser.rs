@@ -81,11 +81,13 @@ impl Parser {
             } else {
                 Kind::Method
             };
+            let asynchronous = kind == Kind::Method && self.is("async") && !self.next_is("(")
+                && !self.tokens[self.current + 1].newline();
+            if asynchronous {
+                self.current += 1;
+            }
             if self.is("*") {
                 return Err(self.unsupported("Generator class methods are not implemented."));
-            }
-            if self.is("async") && !self.next_is("(") {
-                return Err(self.unsupported("Async class methods are not implemented."));
             }
             let key = if self.eat("[") {
                 let prior_awaits = self.await_count;
@@ -106,13 +108,16 @@ impl Parser {
             if is_constructor && kind != Kind::Method {
                 return Err(self.error("A class constructor cannot be an accessor."));
             }
+            if is_constructor && asynchronous {
+                return Err(self.error("A class constructor cannot be async."));
+            }
             if is_constructor && constructor.is_some() {
                 return Err(self.error("A class cannot have duplicate constructors."));
             }
             if !self.is("(") {
                 return Err(self.unsupported("Class fields are not implemented; expected a method parameter list."));
             }
-            let template = self.function_with_super(None, method_start, false, true, is_constructor && heritage.is_some())?;
+            let template = self.function_with_super(None, method_start, asynchronous, true, is_constructor && heritage.is_some())?;
             let syntax = &self.program.templates[template];
             let names = syntax.parameter_names(&self.program);
             if names.iter().collect::<HashSet<_>>().len() != names.len() {
