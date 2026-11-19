@@ -54,6 +54,7 @@ enum Key {
     Null,
     Bool(bool),
     Number(u64),
+    BigInt(std::sync::Arc<str>),
     String(String),
     StringUnits(Vec<u16>),
     Symbol(usize),
@@ -349,6 +350,7 @@ impl Runtime {
             } else {
                 value.to_bits()
             }),
+            Value::BigInt(value) => Key::BigInt(value.clone()),
             Value::String(value) => Key::String(value.clone()),
             Value::StringUnits(units) => Key::StringUnits(units.clone()),
             Value::Symbol(id) => Key::Symbol(*id),

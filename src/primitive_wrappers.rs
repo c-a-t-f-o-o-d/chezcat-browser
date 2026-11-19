@@ -11,6 +11,7 @@ use super::{Fault, Host, NativeGetter, Ordinary, Runtime, Value};
 #[derive(Clone)]
 pub(super) enum Data {
     Number(f64),
+    BigInt(std::sync::Arc<str>),
     Boolean(bool),
     Symbol(usize),
     String { value: String, length: usize },
@@ -20,6 +21,7 @@ impl Data {
     fn value(&self) -> Value {
         match self {
             Self::Number(value) => Value::Number(*value),
+            Self::BigInt(value) => Value::BigInt(value.clone()),
             Self::Boolean(value) => Value::Bool(*value),
             Self::Symbol(value) => Value::Symbol(*value),
             Self::String { value, .. } => Value::String(value.clone()),
@@ -29,6 +31,7 @@ impl Data {
     pub(super) fn tag(&self) -> &'static str {
         match self {
             Self::Number(_) => "Number",
+            Self::BigInt(_) => "BigInt",
             Self::Boolean(_) => "Boolean",
             Self::Symbol(_) => "Symbol",
             Self::String { .. } => "String",
@@ -47,6 +50,7 @@ impl Runtime {
     pub(super) fn wrapped_primitive(&mut self, value: &Value) -> Result<Option<Value>, Fault> {
         let bytes = match self.wrapped_data(value) {
             Some(Data::String { value, .. }) => value.len(),
+            Some(Data::BigInt(value)) => value.len(),
             _ => 0,
         };
         self.work(bytes)?;
@@ -56,6 +60,7 @@ impl Runtime {
     pub(super) fn box_primitive(&mut self, value: Value) -> Result<Value, Fault> {
         let (primitive, prototype) = match value {
             Value::Number(value) => (Data::Number(value), self.number_prototype),
+            Value::BigInt(value) => (Data::BigInt(value), self.big_int_prototype),
             Value::Bool(value) => (Data::Boolean(value), self.boolean_prototype),
             Value::Symbol(value) => {
                 self.symbol(value)?;
@@ -70,7 +75,16 @@ impl Runtime {
                 ));
             }
         };
+        let bytes = match &primitive {
+            Data::BigInt(value) => value.len(),
+            _ => 0,
+        };
+        let retained = self.value_bytes.saturating_add(bytes);
+        if retained > self.limits.heap.retained_values {
+            return Err(Fault::new(format!("Retained value limit reached ({} bytes).", self.limits.heap.retained_values)));
+        }
         let object = self.new_object(None)?;
+        self.value_bytes = retained;
         self.objects[object].primitive = Some(primitive);
         self.objects[object].prototype = prototype.map(Ordinary::Object);
         Ok(Value::Object(object))
@@ -86,6 +100,7 @@ impl Runtime {
         self.property_name(&name)?;
         let prototype = match &receiver {
             Value::Number(_) => self.number_prototype,
+            Value::BigInt(_) => self.big_int_prototype,
             Value::Bool(_) => self.boolean_prototype,
             Value::Symbol(_) => self.symbol_prototype,
             Value::String(_) | Value::StringUnits(_) => {

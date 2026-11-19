@@ -686,12 +686,20 @@ impl Runtime {
         value: &Value,
         host: &mut dyn Host,
     ) -> Result<f64, Fault> {
+        self.binary_numeric_primitive(value, host)?.script_number()
+    }
+
+    pub(super) fn binary_numeric_primitive(
+        &mut self,
+        value: &Value,
+        host: &mut dyn Host,
+    ) -> Result<Value, Fault> {
         self.step()?;
         self.work(value.bytes())?;
         let value = self.copy_value(value)?;
         let primitive = self.primitive_with_hint(value, false, host)?;
         self.work(primitive.bytes())?;
-        primitive.script_number()
+        Ok(primitive)
     }
     fn binary_index(&mut self, value: Option<&Value>, host: &mut dyn Host) -> Result<usize, Fault> {
         let number = self.binary_number(value.unwrap_or(&Value::Undefined), host)?;

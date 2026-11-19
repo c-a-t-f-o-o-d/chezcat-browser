@@ -60,6 +60,7 @@ roots! {
     dom_exception_roots: dom_exception::Roots,
     string_prototype: Option<usize>,
     number_prototype: Option<usize>,
+    big_int_prototype: Option<usize>,
     boolean_prototype: Option<usize>,
     error_prototypes: BTreeMap<&'static str, usize>,
     browser_global: Option<(u32, usize)>,
@@ -111,7 +112,8 @@ impl Runtime {
             ($roots:expr) => {{
                 let roots = $roots;
                 for id in [roots.symbol_prototype, roots.object_prototype, roots.array_prototype, roots.regexp_prototype,
-                    roots.date_prototype, roots.string_prototype, roots.number_prototype, roots.boolean_prototype].into_iter().flatten() { add(Edge::Object(id)); }
+                    roots.date_prototype, roots.string_prototype, roots.number_prototype, roots.big_int_prototype,
+                    roots.boolean_prototype].into_iter().flatten() { add(Edge::Object(id)); }
                 for id in [roots.function_prototype, roots.regexp_constructor, roots.arguments_thrower, roots.array_to_string_intrinsic].into_iter().flatten() { add(Edge::Function(id)); }
                 for &id in roots.error_prototypes.values() { add(Edge::Object(id)); }
                 if let Some((_, id)) = roots.browser_global { add(Edge::Object(id)); }

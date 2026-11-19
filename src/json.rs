@@ -630,6 +630,7 @@ impl Runtime {
                 self.append_string(output, &text)
             }
             Value::String(value) => self.json_quote(output, &value),
+            Value::BigInt(_) => Err(Fault::exception("TypeError", "JSON.stringify cannot serialize a BigInt.")),
             Value::StringUnits(units) => self.json_quote_chars(output, char::decode_utf16(units)),
             Value::Host(_) => Err(Fault::new(
                 "JSON serialization of host objects is not implemented.",
@@ -678,7 +679,7 @@ impl Runtime {
                 "JSON serialization of host objects is not implemented.",
             ));
         }
-        if matches!(value, Value::Object(_) | Value::Function(_)) {
+        if matches!(value, Value::Object(_) | Value::Function(_) | Value::BigInt(_)) {
             let hook =
                 self.read_reference(&Reference::Property(value.clone(), "toJSON".into()), host)?;
             if matches!(hook, Value::Function(_)) {
@@ -700,6 +701,7 @@ impl Runtime {
                 Ok(Value::Number(self.binary_number(&value, host)?))
             }
             Some(super::primitive_wrappers::Data::Boolean(value)) => Ok(Value::Bool(*value)),
+            Some(super::primitive_wrappers::Data::BigInt(value)) => Ok(Value::BigInt(value.clone())),
             Some(super::primitive_wrappers::Data::String { .. }) => {
                 let primitive = self.primitive_with_hint(value, true, host)?;
                 self.checked_value(Value::String(primitive.script_text()?))

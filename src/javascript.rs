@@ -47,6 +47,8 @@ mod function_allocation;
 mod function_arena;
 #[path = "number_radix.rs"]
 mod number_radix;
+#[path = "bigint.rs"]
+mod bigint;
 #[path = "number_to_fixed.rs"]
 mod number_to_fixed;
 #[cfg(test)]
@@ -317,6 +319,7 @@ pub enum Value {
     Null,
     Bool(bool),
     Number(f64),
+    BigInt(std::sync::Arc<str>),
     String(String),
     /// Exact UTF-16 when at least one code unit is unpaired.
     StringUnits(Vec<u16>),
@@ -334,6 +337,7 @@ impl Value {
             Self::Undefined | Self::Null => false,
             Self::Bool(value) => *value,
             Self::Number(value) => *value != 0.0 && !value.is_nan(),
+            Self::BigInt(value) => value.as_ref() != "0",
             Self::String(value) => !value.is_empty(),
             Self::StringUnits(_) => true,
             Self::Symbol(_) | Self::Function(_) | Self::Object(_) | Self::Host(_) => true,
@@ -348,6 +352,7 @@ impl Value {
             Self::Null => "null".into(),
             Self::Bool(value) => value.to_string(),
             Self::Number(value) => number_text(*value),
+            Self::BigInt(value) => value.to_string(),
             Self::String(value) => value.clone(),
             Self::StringUnits(_) => "[string containing unpaired UTF-16]".into(),
             Self::Symbol(_) => "[symbol]".into(),
@@ -360,6 +365,7 @@ impl Value {
     pub fn to_number(&self) -> f64 {
         match self {
             Self::Undefined
+            | Self::BigInt(_)
             | Self::Symbol(_)
             | Self::Function(_)
             | Self::Object(_)
@@ -376,6 +382,7 @@ impl Value {
         match self {
             Self::String(value) => value.len(),
             Self::StringUnits(value) => value.len().saturating_mul(2),
+            Self::BigInt(value) => value.len(),
             _ => 0,
         }
     }
@@ -386,6 +393,7 @@ impl Value {
             Self::Null => "null",
             Self::Bool(_) => "boolean",
             Self::Number(_) => "number",
+            Self::BigInt(_) => "bigint",
             Self::String(_) | Self::StringUnits(_) => "string",
             Self::Symbol(_) => "symbol",
             Self::Function(_) => "function",
@@ -416,6 +424,9 @@ impl Value {
 
     fn script_number(&self) -> Result<f64, Fault> {
         self.primitive()?;
+        if matches!(self, Self::BigInt(_)) {
+            return Err(Fault::exception("TypeError", "Cannot implicitly convert BigInt to Number."));
+        }
         Ok(self.to_number())
     }
 }
@@ -3669,6 +3680,8 @@ enum Builtin {
     String,
     StringFromCharCode,
     Number,
+    BigInt,
+    BigIntMethod(bool),
     Boolean,
     ParseInt,
     ParseFloat,
@@ -3935,6 +3948,7 @@ pub struct Runtime {
     dom_exception_roots: dom_exception::Roots,
     string_prototype: Option<usize>,
     number_prototype: Option<usize>,
+    big_int_prototype: Option<usize>,
     boolean_prototype: Option<usize>,
     error_prototypes: BTreeMap<&'static str, usize>,
     browser_global: Option<(u32, usize)>,
@@ -4086,6 +4100,7 @@ impl Runtime {
             dom_exception_roots: dom_exception::Roots::default(),
             string_prototype: None,
             number_prototype: None,
+            big_int_prototype: None,
             boolean_prototype: None,
             error_prototypes: BTreeMap::new(),
             browser_global: None,
@@ -4170,6 +4185,7 @@ impl Runtime {
             ("String", Builtin::String),
             ("Symbol", Builtin::Symbol(symbols::Op::Constructor)),
             ("Number", Builtin::Number),
+            ("BigInt", Builtin::BigInt),
             ("Boolean", Builtin::Boolean),
             ("parseInt", Builtin::ParseInt),
             ("parseFloat", Builtin::ParseFloat),
@@ -4191,6 +4207,7 @@ impl Runtime {
         let Value::Function(to_string) = self.get_property(self.array_prototype.unwrap(), "toString")? else { unreachable!() };
         self.array_to_string_intrinsic = Some(to_string);
         self.initialize_symbols()?;
+        self.initialize_big_int()?;
         self.initialize_reflect()?;
         self.initialize_number_statics()?;
         if self.deferred_intrinsics & 1 == 0 { self.initialize_binary()?; }
@@ -6535,6 +6552,7 @@ impl Runtime {
             | Value::Null
             | Value::Bool(_)
             | Value::Number(_)
+            | Value::BigInt(_)
             | Value::Symbol(_) => Ok(Vec::new()),
         }
     }
@@ -7951,6 +7969,7 @@ impl Runtime {
                             Value::Null | Value::Object(_) | Value::Host(_) => "object",
                             Value::Bool(_) => "boolean",
                             Value::Number(_) => "number",
+                            Value::BigInt(_) => "bigint",
                             Value::String(_) | Value::StringUnits(_) => "string",
                             Value::Symbol(_) => "symbol",
                             Value::Function(_) => "function",
@@ -8576,6 +8595,9 @@ impl Runtime {
                 object,
                 host,
             ),
+            Value::BigInt(_) => self.get_ordinary_property_with_receiver(
+                Ordinary::Object(self.big_int_prototype.unwrap()), property, object, host,
+            ),
             Value::Bool(_) => self.get_ordinary_property_with_receiver(
                 Ordinary::Object(self.boolean_prototype.unwrap()),
                 property,
@@ -8628,7 +8650,7 @@ impl Runtime {
             }
             Reference::Property(Value::Object(object), property) => self.assign_ordinary_property(Ordinary::Object(object), property, value, host),
             Reference::Property(Value::Function(function), property) => self.assign_ordinary_property(Ordinary::Function(function), property, value, host),
-            Reference::Property(receiver @ (Value::String(_) | Value::StringUnits(_) | Value::Number(_) | Value::Bool(_) | Value::Symbol(_)), property) => self.assign_primitive_property(receiver, property, value, host),
+            Reference::Property(receiver @ (Value::String(_) | Value::StringUnits(_) | Value::Number(_) | Value::BigInt(_) | Value::Bool(_) | Value::Symbol(_)), property) => self.assign_primitive_property(receiver, property, value, host),
             Reference::Property(_, _) => Err(Fault::new(
                 "Properties can only be assigned on ordinary objects, arrays or supported host objects.",
             )),
@@ -8728,7 +8750,7 @@ impl Runtime {
                     .filter(|index| index.to_string() == name);
                 name != "length" && !index.is_some_and(|index| receiver.string_length().is_some_and(|length| index < length))
             }
-            Reference::Property(Value::Number(_) | Value::Bool(_) | Value::Symbol(_), _) => true,
+            Reference::Property(Value::Number(_) | Value::BigInt(_) | Value::Bool(_) | Value::Symbol(_), _) => true,
             Reference::Property(_, _) => {
                 return Err(Fault::new(
                     "Deleting native host properties is not implemented.",
@@ -9096,7 +9118,7 @@ impl Runtime {
                     Value::Object(_) | Value::Function(_) | Value::Host(_)
                 ) && matches!(
                     other,
-                    Value::Number(_) | Value::String(_) | Value::StringUnits(_) | Value::Bool(_) | Value::Symbol(_)
+                    Value::Number(_) | Value::BigInt(_) | Value::String(_) | Value::StringUnits(_) | Value::Bool(_) | Value::Symbol(_)
                 )
             };
             let left = if converts(&left, &right) {
@@ -9110,7 +9132,14 @@ impl Runtime {
                 right
             };
             self.work_as(left.bytes().saturating_add(right.bytes()), WorkKind::BinaryInspection)?;
-            return Ok(Value::Bool(loose_equal(&left, &right)? == (op == "==")));
+            let equal = if matches!(left, Value::BigInt(_)) || matches!(right, Value::BigInt(_)) {
+                !matches!(left, Value::Undefined | Value::Null | Value::Symbol(_))
+                    && !matches!(right, Value::Undefined | Value::Null | Value::Symbol(_))
+                    && self.big_int_order(&left, &right)?.is_some_and(std::cmp::Ordering::is_eq)
+            } else {
+                loose_equal(&left, &right)?
+            };
+            return Ok(Value::Bool(equal == (op == "==")));
         }
         // Both operands have already been evaluated. Addition and comparisons
         // convert both primitives before testing their types. Other numeric
@@ -9154,6 +9183,8 @@ impl Runtime {
                 Some(left.encode_utf16().cmp(right.encode_utf16()))
             } else if left.is_string() && right.is_string() {
                 Some(self.string_units_for_value(&left)?.cmp(&self.string_units_for_value(&right)?))
+            } else if matches!(left, Value::BigInt(_)) || matches!(right, Value::BigInt(_)) {
+                self.big_int_order(&left, &right)?
             } else {
                 left.script_number()?.partial_cmp(&right.script_number()?)
             };
@@ -9455,6 +9486,7 @@ impl Runtime {
                 | Builtin::StringMethod(_)
                 | Builtin::StringFromCharCode
                 | Builtin::PrimitiveMethod(_, _)
+                | Builtin::BigIntMethod(_)
                 | Builtin::ErrorToString),
             )) => {
                 return self.prototype_builtin(*builtin, args, this, host);
@@ -10142,6 +10174,7 @@ impl Runtime {
             | Builtin::StringMethod(_)
             | Builtin::StringFromCharCode
             | Builtin::PrimitiveMethod(_, _)
+            | Builtin::BigIntMethod(_)
             | Builtin::ErrorToString => {
                 Err(Fault::new("Prototype methods need an execution context."))
             }
@@ -10218,8 +10251,18 @@ impl Runtime {
             Builtin::Number => Ok(Value::Number(if args.is_empty() {
                 0.0
             } else {
-                self.binary_number(value, host)?
+                let primitive = self.binary_numeric_primitive(value, host)?;
+                if let Value::BigInt(text) = primitive {
+                    self.work_as(text.len(), WorkKind::NumberScratch)?;
+                    text.parse::<f64>().expect("canonical BigInt digits")
+                } else {
+                    primitive.script_number()?
+                }
             })),
+            Builtin::BigInt => {
+                let value = self.copy_value(value)?;
+                self.big_int(value, host)
+            }
             Builtin::IsFinite => Ok(Value::Bool(self.binary_number(value, host)?.is_finite())),
             Builtin::IsNaN => Ok(Value::Bool(self.binary_number(value, host)?.is_nan())),
             Builtin::ParseFloat => {
@@ -10330,6 +10373,7 @@ fn strict_equal(left: &Value, right: &Value) -> bool {
         (Value::Undefined, Value::Undefined) | (Value::Null, Value::Null) => true,
         (Value::Bool(a), Value::Bool(b)) => a == b,
         (Value::Number(a), Value::Number(b)) => a == b,
+        (Value::BigInt(a), Value::BigInt(b)) => a == b,
         (Value::String(a), Value::String(b)) => a == b,
         (Value::StringUnits(a), Value::StringUnits(b)) => a == b,
         (Value::Symbol(a), Value::Symbol(b)) => a == b,
