@@ -22,13 +22,6 @@ struct ClassicForScope {
     bindings: Vec<String>,
 }
 
-impl ClassicForScope {
-    fn binding_bytes(bindings: &Vec<String>) -> usize {
-        bindings.iter().fold(bindings.capacity().saturating_mul(std::mem::size_of::<String>()),
-            |bytes, name| bytes.saturating_add(name.capacity()))
-    }
-}
-
 struct ForOfScope {
     record: iterator_protocol::Record,
     environments: usize,
@@ -223,7 +216,7 @@ impl Activation {
                     .saturating_add(scope.record.retained_bytes())
             }))
             .saturating_add(self.exit_scopes.iter().fold(0usize, |bytes, scope| match scope {
-                ExitScope::ClassicFor(scope) => bytes.saturating_add(ClassicForScope::binding_bytes(&scope.bindings)),
+                ExitScope::ClassicFor(scope) => bytes.saturating_add(classic_for_binding_bytes(&scope.bindings)),
                 _ => bytes,
             }))
     }
@@ -1328,7 +1321,7 @@ impl Runtime {
             frame.environments.push(environment);
             self.push_transient_root(Edge::Environment(environment))?;
             let bindings = self.initialize_classic_for(&frame.program, initial, environment, &frame.this, host)?;
-            let bytes = ClassicForScope::binding_bytes(&bindings);
+            let bytes = classic_for_binding_bytes(&bindings);
             self.await_storage(frame.retained_bytes().saturating_add(bytes), bytes)?;
             let Some(ExitScope::ClassicFor(scope)) = frame.exit_scopes.last_mut() else {
                 unreachable!("compiled async classic loop scope");

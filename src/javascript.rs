@@ -3750,6 +3750,11 @@ enum Function {
     },
 }
 
+fn classic_for_binding_bytes(bindings: &Vec<String>) -> usize {
+    bindings.iter().fold(bindings.capacity().saturating_mul(std::mem::size_of::<String>()),
+        |bytes, name| bytes.saturating_add(name.capacity()))
+}
+
 enum Control {
     Normal(Option<Value>),
     Return(Value),

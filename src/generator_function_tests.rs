@@ -232,6 +232,51 @@ if(infinite.next().value!==4||infinite.next(7).value!==7||
 }
 
 #[test]
+fn generator_yield_classic_for_initializer_owns_each_iteration_and_unwinds() {
+    let mut runtime = Runtime::for_test();
+    let source = r#"
+var trace='', readers=[];
+function mark(label,value){trace+=label+'|';return value;}
+function collect(value){mark('collect:'+value);}
+function* sequence(){
+    let i=90;
+    try{
+        for(let i=mark('init',0);i<2;i=mark('step:'+i,i+1)){
+            readers.push(()=>i);
+            collect(yield mark('offer:'+i,i));
+        }
+        return i;
+    }finally{mark('finally');}
+}
+var active=sequence();
+if(trace!==''||active.next().value!==0||trace!=='init|offer:0|')throw 'first yield and initializer';
+if(active.next('one').value!==1||trace!=='init|offer:0|collect:one|step:0|offer:1|')throw 'resumption';
+var result=active.next('two');
+if(!result.done||result.value!==90||readers[0]()!==0||readers[1]()!==1||
+    !trace.endsWith('collect:two|step:1|finally|'))throw 'iteration bindings and normal completion';
+trace='';
+var early=sequence();
+early.next();
+if(early.return(8).value!==8||!early.next().done||trace!=='init|offer:0|finally|')throw 'return cleanup';
+trace='';
+var throwing=sequence(), marker={}, caught=false;
+throwing.next();
+try{throwing.throw(marker);}catch(e){caught=e===marker;}
+if(!caught||!throwing.next().done||trace!=='init|offer:0|finally|')throw 'throw cleanup';
+function* fixed(){
+    let ran=false;
+    for(const value=9;!ran;ran=true)collect(yield value);
+}
+var once=fixed();
+if(once.next().value!==9||!once.next(3).done)throw 'const initializer';
+'ok';
+"#;
+    assert_eq!(runtime.execute(source, &mut NoHost::default()).unwrap().to_text(), "ok");
+    assert_eq!((runtime.call_depth, runtime.eval_depth), (0, 0));
+    assert!(runtime.transient_registration_is_empty());
+}
+
+#[test]
 fn generator_yield_conditional_initializer_selects_one_branch_and_keeps_tdz() {
     let mut runtime = Runtime::for_test();
     let source = r#"

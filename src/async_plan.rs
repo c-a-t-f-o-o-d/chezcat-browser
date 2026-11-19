@@ -684,7 +684,8 @@ fn split_statements(program: &Program, template: &Template, expected: usize) -> 
                         StmtKind::If(_, _, None) => 1,
                         StmtKind::For(initial, condition, advance, _) => {
                             1 + usize::from(condition.is_some()) + usize::from(advance.is_some())
-                                + 2 * usize::from(!generator) + usize::from(for_let_initializer(program, *initial))
+                                + 2 * usize::from(!generator || initial.is_some())
+                                + usize::from(for_let_initializer(program, *initial))
                         }
                         StmtKind::ForOf(..) => 4,
                         StmtKind::Try(_, catch, finally) => {
@@ -711,7 +712,7 @@ fn split_statements(program: &Program, template: &Template, expected: usize) -> 
         }
         let children_eligible = eligible && (
             matches!(kind, StmtKind::Block(_) | StmtKind::If(..) | StmtKind::Try(_, _, _))
-                || matches!(kind, StmtKind::For(initial, _, _, _) if !generator || initial.is_none())
+                || matches!(kind, StmtKind::For(..))
                 || lexical_for_of(program, id).is_some()
                 || (!generator && matches!(kind, StmtKind::Switch { .. }))
         );
@@ -962,7 +963,7 @@ pub(super) fn compile(program: &Program, template: usize, expected_suspensions: 
                     push(&mut pending, Emit::Statement(*yes))?;
                 }
                 StmtKind::For(initial, condition, advance, body) => {
-                    let entry = if generator {
+                    let entry = if generator && initial.is_none() {
                         None
                     } else {
                         let entry = code.len();
