@@ -626,7 +626,7 @@ impl Bridge<'_> {
                 }
                 NodeKind::DocumentFragment => return Err("Nested fragment serialization is unavailable.".into()),
                 NodeKind::Element { tag, attrs, .. } => {
-                    if node.namespace != crate::html::Namespace::Html {
+                    if !matches!(node.namespace, crate::html::Namespace::Html | crate::html::Namespace::Svg) {
                         return Err("Template serialization of foreign elements is unavailable.".into());
                     }
                     if end {
@@ -728,7 +728,7 @@ impl Bridge<'_> {
             if local == 0 { continue; }
             payload = payload.saturating_add(node_bytes(node));
             if let NodeKind::Element { tag, href, attrs, .. } = &node.kind {
-                if node.namespace != crate::html::Namespace::Html || tag == "template" {
+                if !matches!(node.namespace, crate::html::Namespace::Html | crate::html::Namespace::Svg) || tag == "template" {
                     return Err("Template fragment parsing of foreign or nested template markup is unavailable.".into());
                 }
                 self.state.work(attrs.len())?;

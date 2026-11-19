@@ -3919,6 +3919,42 @@ var third=document.createElement('script');third.async=false;third.crossOrigin='
 }
 
 #[test]
+fn template_svg_keeps_checked_inert_namespaces_and_rolls_back_unsafe_markup() {
+    let (mut doc, mut forms, mut page, result) = page("<html><body><main id=app></main></body></html>", &[r#"
+var template=document.createElement('template'), uri='http://www.w3.org/2000/svg';
+template.innerHTML='<fixture-atlas><svg xmlns="http://www.w3.org/2000/svg"><defs><g id="mark"><path d="M1 2 L3 4"/></g><g id="next"><rect x="1" y="2" width="3" height="4"/></g></defs></svg><span id="tail"></span></fixture-atlas>';
+var content=template.content, host=content.firstChild, svg=host.firstChild, defs=svg.firstChild;
+var mark=defs.firstChild, path=mark.firstChild, owner=content.ownerDocument;
+if(svg.nodeName!=='svg'||!(svg instanceof SVGElement)||svg.namespaceURI!==uri||
+   defs.namespaceURI!==uri||mark.namespaceURI!==uri||path.namespaceURI!==uri||
+   path.getAttribute('d')!=='M1 2 L3 4'||mark.nextSibling.getAttribute('id')!=='next'||
+   host.lastChild.namespaceURI!=='http://www.w3.org/1999/xhtml'||path.ownerDocument!==owner||
+   owner.defaultView!==null||path.isConnected||document.querySelector('svg')!==null)
+    throw 'actual private SVG topology';
+var copy=content.cloneNode(true).firstChild.firstChild;
+if(copy===svg||copy.namespaceURI!==uri||copy.firstChild.firstChild.firstChild===path||
+   template.innerHTML.indexOf('<defs><g id="mark"><path')<0)
+    throw 'retained SVG serialization or clone';
+"#]);
+    assert_eq!(result.errors, 0, "{}", page.report());
+    let retained = page.state.retained;
+    for markup in [
+        "<svg><foreignObject><div></div></foreignObject></svg>",
+        "<svg><path onclick='trigger()'/></svg>",
+        "<svg><path fill='url(#foreign)'/></svg>",
+        "<svg><image href='/guard'/></svg>",
+        "<svg><g></svg>",
+        "<svg><g/>",
+    ] {
+        let result = page.console_eval(&mut doc, &mut forms, &format!("template.innerHTML=\"{markup}\";"));
+        assert_eq!(result.errors, 1, "{markup}");
+        assert_eq!(page.state.retained, retained, "{markup}");
+    }
+    let result = page.console_eval(&mut doc, &mut forms, "if(template.content!==content||content.firstChild!==host||path.parentNode!==mark||path.ownerDocument!==owner)throw 'rollback';");
+    assert_eq!(result.errors, 0, "{}", page.report());
+}
+
+#[test]
 fn template_fragment_promotes_original_nodes_and_checks_stylesheet_policy() {
     for blocked in [false, true] {
         let html = "<html><head><title>Original</title></head><body><iframe hidden></iframe><main id=app>Fixture</main></body></html>";

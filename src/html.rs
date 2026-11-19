@@ -226,6 +226,7 @@ fn parse_internal(
     mut inert_doctype: Option<&mut Option<usize>>,
 ) -> Result<Document, String> {
     let checked = context.is_some();
+    let template_svg = context == Some("template");
     let mut saw_inert_doctype = false;
     if let Some(loaded) = loaded { (loaded.check_cancel)()?; }
     let node_limit = loaded.map_or(MAX_NODES, |loaded| loaded.nodes);
@@ -291,6 +292,7 @@ fn parse_internal(
         if !rest.starts_with('<') {
             let end = position + rest.find('<').unwrap_or(rest.len());
             if svg.root.is_some() && !input[position..end].bytes().all(|b| tag_space(b, true)) {
+                if template_svg { return Err("Template SVG only admits whitespace between supported shapes.".into()); }
                 svg.root = None;
             }
             let appended = if checked {
@@ -359,6 +361,9 @@ fn parse_internal(
             TagToken::Incomplete => break,
             TagToken::Unsupported(error) => return Err(error.into()),
             TagToken::NotATag => {
+                if template_svg && svg.root.is_some() {
+                    return Err("Template SVG contains a malformed tag.".into());
+                }
                 svg.root = None;
                 if checked && rest.starts_with("</") { return Err("HTML fragment bogus end-tag/comment recovery is not implemented.".into()); }
                 if !append_text(&mut document, parent, "<", node_limit) {
@@ -372,6 +377,8 @@ fn parse_internal(
         position = tag.end;
 
         let empty_table = checked && tag.name == "table";
+        let starts_template_svg = template_svg && tag.name == "svg" && !tag.closing;
+        let inside_template_svg = template_svg && svg.root.is_some();
         if checked {
             checked_select_tag(&stack, &document, &tag.name, tag.closing)?;
             if tag.name == "textarea" && (tag.closing || tag.self_closing || !tag.clean_syntax) {
@@ -379,8 +386,15 @@ fn parse_internal(
             }
             if empty_table {
                 position = checked_empty_table_end(input, &tag, &stack, &document)?;
-            } else if matches!(tag.name.as_str(), "html" | "head" | "body" | "frameset" | "frame" | "caption" | "colgroup" | "col" | "tbody" | "thead" | "tfoot" | "tr" | "td" | "th" | "template" | "svg" | "math" | "picture" | "image" | "xmp" | "noembed" | "noframes" | "plaintext" | "listing") || tag.name == "noscript" && scripting {
+            } else if matches!(tag.name.as_str(), "html" | "head" | "body" | "frameset" | "frame" | "caption" | "colgroup" | "col" | "tbody" | "thead" | "tfoot" | "tr" | "td" | "th" | "template" | "math" | "picture" | "image" | "xmp" | "noembed" | "noframes" | "plaintext" | "listing")
+                || tag.name == "svg" && !(starts_template_svg || inside_template_svg)
+                || tag.name == "noscript" && scripting {
                 return Err("HTML fragment structural, table/select or foreign-content recovery is not implemented.".into());
+            }
+            if (starts_template_svg || inside_template_svg) && !tag.closing
+                && !svg_namespace::supported_template_tag(&tag)
+            {
+                return Err("Template SVG contains an unsupported element or attribute.".into());
             }
             if !tag.closing {
                 let heading = |name: &str| matches!(name, "h1" | "h2" | "h3" | "h4" | "h5" | "h6");
@@ -405,6 +419,7 @@ fn parse_internal(
                 let exact = tag.clean_syntax && tag.attrs.is_empty() && !tag.self_closing &&
                     matches!(&document.nodes[parent].kind, NodeKind::Element { tag: open, .. } if open == &tag.name);
                 if !exact {
+                    if template_svg { return Err("Template SVG requires matching end tags.".into()); }
                     svg.root = None;
                 } else if parent == root {
                     svg_namespace::publish(&mut document.nodes[root..]);
@@ -441,13 +456,14 @@ fn parse_internal(
             svg.blocked_depth = None;
         }
         let node = document.nodes.len();
-        let enters_svg = tag.name == "svg" && !checked && !uncertain_foreign_recovery &&
+        let enters_svg = tag.name == "svg" && (!checked || template_svg) && !uncertain_foreign_recovery &&
             svg.blocked_depth.is_none() && (parent == 0 || document.nodes[parent].namespace == Namespace::Html);
-        let svg_empty = tag.self_closing && (enters_svg || svg.root.is_some()) && svg_namespace::basic_element(&tag.name);
+        let svg_empty = tag.self_closing && (enters_svg || svg.root.is_some()) &&
+            if template_svg { svg_namespace::template_element(&tag.name) } else { svg_namespace::basic_element(&tag.name) };
         if enters_svg {
             svg.root = Some(node);
         }
-        if svg.root.is_some() && !svg_namespace::supported_tag(&tag) {
+        if !template_svg && svg.root.is_some() && !svg_namespace::supported_tag(&tag) {
             svg.root = None;
         }
         let raw = matches!(tag.name.as_str(), "script" | "style" | "title" | "textarea");
@@ -531,6 +547,7 @@ fn parse_internal(
         }
     }
 
+    if template_svg && svg.root.is_some() { return Err("Template SVG requires an explicit close.".into()); }
     if checked { document.scripting_enabled = scripting; }
     if let Some(loaded) = loaded { (loaded.check_cancel)()?; }
     Ok(document)
@@ -661,7 +678,7 @@ fn read_tag_mode(input: &str, start: usize, checked: bool) -> TagToken {
     let name = input[name_start..position].to_ascii_lowercase();
     // Only explicitly supported SVG elements and these checked fragments use
     // strict token evidence. Other elements retain the normal tokenizer rules.
-    let checked_native_fragment = checked && matches!(name.as_str(), "table" | "textarea");
+    let checked_native_fragment = checked && matches!(name.as_str(), "table" | "textarea" | "defs");
     let mut clean_syntax = (svg_namespace::basic_element(&name) || checked_native_fragment)
         && bytes.get(position).is_some_and(|b| tag_space(*b, true) || matches!(b, b'/' | b'>'));
     let mut self_closing = false;

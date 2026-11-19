@@ -20,7 +20,19 @@ pub(super) fn basic_element(name: &str) -> bool {
 }
 
 pub(super) fn supported_tag(tag: &Tag) -> bool {
-    tag.clean_syntax && basic_element(&tag.name) && tag.attrs.iter().all(|(key, value)| match key.as_str() {
+    basic_element(&tag.name) && supported_attributes(tag)
+}
+
+pub(super) fn template_element(name: &str) -> bool {
+    basic_element(name) || name == "defs"
+}
+
+pub(super) fn supported_template_tag(tag: &Tag) -> bool {
+    template_element(&tag.name) && !tag.duplicate_attributes && supported_attributes(tag)
+}
+
+fn supported_attributes(tag: &Tag) -> bool {
+    tag.clean_syntax && tag.attrs.iter().all(|(key, value)| match key.as_str() {
         "id" | "class" | "width" | "height" | "x" | "y" | "cx" | "cy" | "r" | "rx" | "ry" |
         "x1" | "y1" | "x2" | "y2" | "d" | "points" | "stroke-width" => true,
         "fill" | "stroke" => value.strip_prefix('#').map_or_else(
