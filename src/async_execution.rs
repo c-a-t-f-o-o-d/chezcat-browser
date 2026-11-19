@@ -70,7 +70,8 @@ pub(super) struct Activation {
     environments: Vec<usize>,
     try_scopes: Vec<TryScope>,
     pending: Option<PendingAwait>,
-    branch_input: Option<Value>,
+    expression_value: Option<Value>,
+    assignments: Vec<Reference>,
 }
 
 impl Activation {
@@ -79,12 +80,16 @@ impl Activation {
     }
 
     pub(super) fn retained_bytes(&self) -> usize {
+        let references = self.assignment_references().fold(0usize, |bytes, reference| {
+            bytes.saturating_add(assignment_reference_bytes(reference))
+        });
         std::mem::size_of::<Self>()
             .saturating_add(self.this.bytes())
-            .saturating_add(self.branch_input.as_ref().map_or(0, Value::bytes))
+            .saturating_add(self.expression_value.as_ref().map_or(0, Value::bytes))
             .saturating_add(self.pending_call().map_or(0, |call| call.function.bytes()))
             .saturating_add(self.pending_method().map_or(0, PendingMethod::retained_bytes))
-            .saturating_add(self.pending_assignment().map_or(0, assignment_reference_bytes))
+            .saturating_add(references)
+            .saturating_add(self.assignments.capacity().saturating_mul(std::mem::size_of::<Reference>()))
             .saturating_add(
                 self.environments
                     .capacity()
@@ -104,16 +109,17 @@ impl Activation {
             .len()
             .saturating_add(self.try_scopes.len())
             .saturating_add(5 + usize::from(self.pending_call().is_some())
-                + usize::from(self.branch_input.is_some())
+                + usize::from(self.expression_value.is_some())
                 + 2 * usize::from(self.pending_method().is_some())
                 + 2 * usize::from(self.pending_assignment().is_some()))
+            .saturating_add(self.assignments.len().saturating_mul(2))
     }
 
     pub(super) fn reachability_edges(&self, add: &mut impl FnMut(Edge)) {
         add(Edge::Function(self.callee));
         add(Edge::Object(self.outer));
         Edge::value(&self.this, add);
-        if let Some(value) = &self.branch_input {
+        if let Some(value) = &self.expression_value {
             Edge::value(value, add);
         }
         if let Some(call) = self.pending_call() {
@@ -125,7 +131,7 @@ impl Activation {
                 Edge::value(function, add);
             }
         }
-        if let Some(reference) = self.pending_assignment() {
+        for reference in self.assignment_references() {
             Edge::reference(reference, add);
         }
         if let Some(context) = self.invocation {
@@ -141,8 +147,10 @@ impl Activation {
         if let Some(context) = self.invocation {
             roots.push(context.environment);
         }
-        if let Some(Reference::Binding(scope, _)) = self.pending_assignment() {
-            roots.push(*scope);
+        for reference in self.assignment_references() {
+            if let Reference::Binding(scope, _) = reference {
+                roots.push(*scope);
+            }
         }
     }
 
@@ -161,12 +169,16 @@ impl Activation {
         self.pending.as_ref().and_then(|pending| pending.method.as_deref())
     }
 
-    fn take_branch_input(&mut self) -> Result<Value, Fault> {
-        self.branch_input.take().ok_or_else(|| Fault::new("Async branch has no input."))
+    fn take_expression_value(&mut self) -> Result<Value, Fault> {
+        self.expression_value.take().ok_or_else(|| Fault::new("Async expression has no pending value."))
     }
 
     fn pending_assignment(&self) -> Option<&Reference> {
         self.pending.as_ref().and_then(|pending| pending.assignment.as_ref())
+    }
+
+    fn assignment_references(&self) -> impl Iterator<Item = &Reference> {
+        self.assignments.iter().chain(self.pending_assignment())
     }
 }
 
@@ -212,7 +224,8 @@ impl Runtime {
             environments,
             try_scopes: Vec::new(),
             pending: None,
-            branch_input: None,
+            expression_value: None,
+            assignments: Vec::new(),
         });
         self.drive_await_body(frame, None, host)
     }
@@ -310,7 +323,13 @@ impl Runtime {
                 Ok(Progress::Return(value)) => {
                     self.unwind_await_try_scopes(&mut frame, Ok(Control::Return(value)), host)
                 }
-                Err(error) => self.unwind_await_try_scopes(&mut frame, Err(error), host),
+                Err(error) => {
+                    // An abrupt result abandons the current expression before
+                    // a handler can start another one.
+                    frame.assignments.clear();
+                    frame.expression_value = None;
+                    self.unwind_await_try_scopes(&mut frame, Err(error), host)
+                }
                 other => other,
             };
             match result {
@@ -327,8 +346,10 @@ impl Runtime {
                             if let Some(context) = frame.invocation {
                                 self.capture_await_environment(context.environment)?;
                             }
-                            if let Some(Reference::Binding(scope, _)) = frame.pending_assignment() {
-                                self.capture_await_environment(*scope)?;
+                            for reference in frame.assignment_references() {
+                                if let Reference::Binding(scope, _) = reference {
+                                    self.capture_await_environment(*scope)?;
+                                }
                             }
                             self.suspend_await(promise, frame)
                         })();
@@ -430,9 +451,7 @@ impl Runtime {
                             value
                         };
                         let value = if let Some(reference) = assignment {
-                            let result = self.copy_value(&value)?;
-                            self.write_reference(reference, value, host)?;
-                            result
+                            self.finish_await_assignment(reference, value, host)?
                         } else {
                             value
                         };
@@ -480,6 +499,29 @@ impl Runtime {
                         error.at(&frame.program.source, frame.program.stmts[statement].at)
                     })
                 }
+                Instruction::CaptureAssignment { statement, target } => {
+                    let result = (|| {
+                        self.reserve_await_assignment(frame)?;
+                        let reference = self.prepare_await_assignment(frame, target, host)?;
+                        frame.assignments.push(reference);
+                        Ok(Progress::Continue)
+                    })();
+                    result.map_err(|error: Fault| {
+                        error.at(&frame.program.source, frame.program.stmts[statement].at)
+                    })
+                }
+                Instruction::WriteAssignment { statement, action } => {
+                    let result = (|| {
+                        let value = frame.take_expression_value()?;
+                        let reference = frame.assignments.pop()
+                            .ok_or_else(|| Fault::new("Async assignment has no captured target."))?;
+                        let value = self.finish_await_assignment(reference, value, host)?;
+                        self.await_resume_action(frame, action, value, host)
+                    })();
+                    result.map_err(|error: Fault| {
+                        error.at(&frame.program.source, frame.program.stmts[statement].at)
+                    })
+                }
                 Instruction::EnterBlock(statement) => {
                     self.reserve_await_environment(frame)?;
                     let StmtKind::Block(body) = &frame.program.stmts[statement].kind else {
@@ -515,7 +557,7 @@ impl Runtime {
                     Ok(Progress::Continue)
                 }
                 Instruction::BranchOnValueFalse(target) => {
-                    if !frame.take_branch_input()?.truthy() {
+                    if !frame.take_expression_value()?.truthy() {
                         frame.next = target;
                     }
                     Ok(Progress::Continue)
@@ -562,7 +604,7 @@ impl Runtime {
                 }
                 Instruction::Logical { statement, operator, target, action } => {
                     let result = (|| {
-                        let value = frame.take_branch_input()?;
+                        let value = frame.take_expression_value()?;
                         if !logical_short_circuits(operator, &value) {
                             return Ok(Progress::Continue);
                         }
@@ -639,6 +681,28 @@ impl Runtime {
         result
     }
 
+    fn reserve_await_assignment(&mut self, frame: &mut Activation) -> Result<(), Fault> {
+        if frame.assignments.len() >= MAX_EVALUATION_FRAMES {
+            return Err(Fault::new("Async assignment nesting limit reached (4096)."));
+        }
+        if frame.assignments.len() == frame.assignments.capacity() {
+            let slot = std::mem::size_of::<Reference>();
+            self.await_storage(frame.retained_bytes().saturating_add(slot),
+                (frame.assignments.len() + 1).saturating_mul(slot))?;
+            frame.assignments.try_reserve_exact(1)
+                .map_err(|_| Fault::new("Unable to allocate bounded async assignment stack."))?;
+        }
+        Ok(())
+    }
+
+    fn finish_await_assignment(
+        &mut self, reference: Reference, value: Value, host: &mut dyn Host,
+    ) -> Result<Value, Fault> {
+        let result = self.copy_value(&value)?;
+        self.write_reference(reference, value, host)?;
+        Ok(result)
+    }
+
     #[inline(never)]
     fn prepare_await_assignment(
         &mut self,
@@ -697,9 +761,9 @@ impl Runtime {
         match action {
             Resume::Discard => Ok(Progress::Continue),
             Resume::Return => Ok(Progress::Return(value)),
-            Resume::StoreBranchInput => {
-                debug_assert!(frame.branch_input.is_none());
-                frame.branch_input = Some(value);
+            Resume::StoreExpressionValue => {
+                debug_assert!(frame.expression_value.is_none());
+                frame.expression_value = Some(value);
                 Ok(Progress::Continue)
             }
             Resume::BranchFalse(target) => {
@@ -847,7 +911,8 @@ mod tests {
                 catch_entry: None,
                 environments: 1,
             }],
-            branch_input: Some(Value::Function(21)),
+            expression_value: Some(Value::Function(21)),
+            assignments: vec![Reference::ComputedProperty(Value::Object(25), Value::Function(26))],
             pending: Some(PendingAwait {
                 statement: 0,
                 action: Resume::Discard,
@@ -865,12 +930,13 @@ mod tests {
         };
         let mut edges = Vec::new();
         frame.reachability_edges(&mut |edge| edges.push(edge));
-        for function in [11, 13, 17, 19, 20, 21] {
+        for function in [11, 13, 17, 19, 20, 21, 26] {
             assert!(edges
                 .iter()
                 .any(|edge| matches!(edge, Edge::Function(id) if *id == function)));
         }
         assert!(edges.iter().any(|edge| matches!(edge, Edge::Object(12))));
+        assert!(edges.iter().any(|edge| matches!(edge, Edge::Object(25))));
         for environment in [14, 15, 16, 18] {
             assert!(edges
                 .iter()
@@ -887,6 +953,7 @@ mod tests {
                 + frame.this.bytes()
                 + "target".len()
                 + std::mem::size_of::<PendingMethod>() + "invoke".len()
+                + frame.assignments.capacity() * std::mem::size_of::<Reference>()
                 + frame.environments.capacity() * std::mem::size_of::<usize>()
                 + frame.try_scopes.capacity() * std::mem::size_of::<TryScope>()
         );
