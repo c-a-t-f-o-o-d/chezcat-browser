@@ -1,0 +1,279 @@
+//! Original String reverse-search controls. No library or page-specific code.
+use super::*;
+
+#[derive(Default)]
+struct NoHost {
+    gets: usize,
+    sets: usize,
+    calls: usize,
+}
+impl Host for NoHost {
+    fn get(&mut self, _: u32, _: &str) -> Result<Value, String> {
+        self.gets += 1;
+        Err("No native reads".into())
+    }
+    fn set(&mut self, _: u32, _: &str, _: Value) -> Result<(), String> {
+        self.sets += 1;
+        Err("No native writes".into())
+    }
+    fn call(&mut self, _: u32, _: &str, _: &[Value]) -> Result<Value, String> {
+        self.calls += 1;
+        Err("No native calls".into())
+    }
+}
+fn succeeds(source: &str) {
+    Runtime::for_test()
+        .execute(source, &mut NoHost::default())
+        .unwrap();
+}
+
+#[test]
+fn string_last_index_of_original_primitive_property_name_and_prefix_search() {
+    succeeds(
+        r#"
+var names={foreground:1,'prefix-mode':2,'suffix-prefix':3},count=0;
+for(var name in names){if(typeof name!=='string')throw 'ordinary property-name prefix';count++;}
+if(count!==3||'prefix-mode'.indexOf('prefix')!==0||'suffix-prefix'.indexOf('prefix')!==7)
+    throw 'existing literal String search controls';
+if('prefix-mode'.lastIndexOf('prefix',0)!==0||'suffix-prefix'.lastIndexOf('prefix',0)!==-1
+   ||'foreground'.lastIndexOf('prefix',0)!==-1)throw 'primitive String prefix search';
+if('ababa'.lastIndexOf('aba')!==2||'ababa'.lastIndexOf('aba',1)!==0)
+    throw 'reverse overlapping candidate starts';
+"#,
+    );
+}
+
+#[test]
+fn string_last_index_of_position_defaults_clamping_empty_pattern_and_utf16_offsets() {
+    succeeds(
+        r#"
+var f=String.prototype.lastIndexOf,tests=[
+['abcabc'.lastIndexOf('abc'),3],['abcabc'.lastIndexOf('abc',undefined),3],
+['abcabc'.lastIndexOf('abc',NaN),3],['abcabc'.lastIndexOf('abc',Infinity),3],
+['abcabc'.lastIndexOf('abc',-Infinity),0],['abcabc'.lastIndexOf('abc',-10),0],
+['abcabc'.lastIndexOf('abc',null),0],['abcabc'.lastIndexOf('abc',false),0],
+['abcabc'.lastIndexOf('abc',2.9),0],['abcabc'.lastIndexOf('abc',3.9),3],
+['abcabc'.lastIndexOf('bc',-0),-1],['abcabc'.lastIndexOf('bc',true),1],
+['abc'.lastIndexOf(''),3],['abc'.lastIndexOf('',NaN),3],['abc'.lastIndexOf('',1.9),1],
+['abc'.lastIndexOf('',-Infinity),0],['abc'.lastIndexOf('',Infinity),3],
+[''.lastIndexOf(''),0],[''.lastIndexOf('x'),-1],['ab'.lastIndexOf('abc'),-1],
+['undefinedxundefined'.lastIndexOf(),10],['anullbnull'.lastIndexOf(null),6],
+['A😀B😀C'.lastIndexOf('😀'),4],['A😀B😀C'.lastIndexOf('😀',3),1],
+['😀a😀'.lastIndexOf('😀',2),0],['😀a😀'.lastIndexOf('a'),2],
+['😀a😀'.lastIndexOf('',Infinity),5],['éé'.lastIndexOf('é'),1],
+[f.call(12121,'12'),2],[f.call(true,'r'),1],[f.call(new String('abcabc'),'bc'),4],
+[f.call({toString:function(){return 'abcabc';}},'abc'),3]
+];for(var i=0;i<tests.length;i++)if(tests[i][0]!==tests[i][1])throw 'case '+i;
+var boxed=new String('original');boxed.toString=function(){return 'fixedfixed';};
+if(f.call(boxed,'fixed')!==5)throw 'generic boxed conversion override';
+"#,
+    );
+}
+
+#[test]
+fn string_last_index_of_coercions_are_live_ordered_once_and_reentrant() {
+    succeeds(
+        r#"
+var f=String.prototype.lastIndexOf,order='',receiverGets=0,searchGets=0,positionGets=0;
+var receiver={},search={},position={valueOf:function(){throw 'stale numeric hook';}};
+Object.defineProperty(receiver,Symbol.toPrimitive,{get:function(){receiverGets++;return function(h){order+='receiver:'+h+';';return 'ababa';};}});
+Object.defineProperty(search,Symbol.toPrimitive,{get:function(){searchGets++;return function(h){
+    order+='search:'+h+';';receiver.toString=function(){throw 'receiver was converted twice';};
+    Object.defineProperty(position,Symbol.toPrimitive,{get:function(){positionGets++;return function(h){
+        order+='position:'+h+';';if(f.call('nested','ed')!==4)throw 'nested saved method';return 2;
+    };}});
+    String.prototype.lastIndexOf=function(){return 99;};return 'aba';
+};}});
+if(f.call(receiver,search,position)!==2||order!=='receiver:string;search:string;position:number;')throw order;
+if(receiverGets!==1||searchGets!==1||positionGets!==1)throw 'coercion getter count';
+if('ababa'.lastIndexOf('aba')!==99||f.call('ababa','aba')!==2)throw 'live prototype mutation versus saved intrinsic';
+String.prototype.lastIndexOf=f;
+var converted=0;
+if('abc'.lastIndexOf({toString:function(){converted++;return '';}},{valueOf:function(){converted++;return NaN;}})!==3||converted!==2)
+    throw 'empty pattern still converts search then numeric position';
+"#,
+    );
+}
+
+#[test]
+fn string_last_index_of_preserves_abrupt_identity_and_converts_position_before_early_results() {
+    succeeds(
+        r#"
+var f=String.prototype.lastIndexOf,marker={},later=0,caught=false;
+var probe={toString:function(){later++;return 'x';}},pos={valueOf:function(){later++;return 0;}};
+for(var receiver of [null,undefined,Symbol('receiver')]){
+    caught=false;try{f.call(receiver,probe,pos);}catch(e){caught=e instanceof TypeError;}
+    if(!caught||later!==0)throw 'invalid receiver touched later arguments';
+}
+caught=false;try{f.call({toString:function(){throw marker;}},probe,pos);}catch(e){caught=e===marker;}
+if(!caught||later!==0)throw 'receiver throw identity';
+caught=false;try{f.call('abc',{toString:function(){throw marker;}},pos);}catch(e){caught=e===marker;}
+if(!caught||later!==0)throw 'search throw identity';
+caught=false;try{f.call('abc',Symbol('needle'),pos);}catch(e){caught=e instanceof TypeError;}
+if(!caught||later!==0)throw 'Symbol needle touched position';
+caught=false;try{f.call('',{toString:function(){later++;return 'too long';}},{valueOf:function(){later++;throw marker;}});}catch(e){caught=e===marker;}
+if(!caught||later!==2)throw 'too-long search skipped position or lost throw identity';
+caught=false;try{f.call('','',Symbol('position'));}catch(e){caught=e instanceof TypeError;}
+if(!caught)throw 'empty result skipped invalid numeric position';
+if(f.call('abc','a',0,{toString:function(){throw 'extra converted';}})!==0)throw 'extra argument';
+var regexp=/q/,reads=0;
+Object.defineProperty(regexp,Symbol.match,{get:function(){reads++;throw 'IsRegExp must not run';}});
+if(f.call('|/q/|',regexp)!==1||reads!==0)throw 'ordinary RegExp ToString without IsRegExp';
+"#,
+    );
+}
+
+#[test]
+fn string_last_index_of_native_metadata_and_real_prototype_replace_delete_getter() {
+    succeeds(
+        r#"
+var f=String.prototype.lastIndexOf,d=Object.getOwnPropertyDescriptor(String.prototype,'lastIndexOf');
+if(f!==String.prototype.lastIndexOf||f.name!=='lastIndexOf'||f.length!==1||d.value!==f||d.enumerable||!d.writable||!d.configurable)
+    throw 'canonical native method metadata';
+if(Object.hasOwn(f,'prototype')||Function.prototype.toString.call(f).indexOf('[native code]')<0)throw 'native identity';
+var caught=false;try{new f();}catch(e){caught=e instanceof TypeError;}if(!caught)throw 'constructible method';
+String.prototype.lastIndexOf=function(){return 17;};if('abc'.lastIndexOf('a')!==17)throw 'replacement';
+if(!delete String.prototype.lastIndexOf||'lastIndexOf' in String.prototype||'abc'.lastIndexOf!==undefined)throw 'deletion';
+var reads=0,actual;
+Object.defineProperty(String.prototype,'lastIndexOf',{get:function(){'use strict';reads++;actual=this;return f;},configurable:true});
+if('ababa'.lastIndexOf('aba')!==2||reads!==1||actual!=='ababa')throw 'ordinary inherited getter receiver';
+Object.defineProperty(String.prototype,'lastIndexOf',{value:f,writable:true,configurable:true});
+if('ababa'.lastIndexOf('aba')!==2)throw 'restore';
+"#,
+    );
+}
+
+#[test]
+fn string_last_index_of_native_conversion_refusal_precedes_hooks_and_stays_fatal() {
+    let mut runtime = Runtime::for_test();
+    let mut host = NoHost::default();
+    runtime.define_global("native", Value::Host(9)).unwrap();
+    runtime.execute("var count=0,caught=false,finalized=false;var probe={toString:function(){count++;return 'x';}};",&mut host).unwrap();
+    let error=runtime.execute("try{String.prototype.lastIndexOf.call(native,probe);}catch(e){caught=true;}finally{finalized=true;}",&mut host).unwrap_err();
+    assert!(
+        error.contains("No conversion permission or hook read was granted"),
+        "{error}"
+    );
+    assert_eq!((host.gets, host.sets, host.calls), (0, 0, 0));
+    runtime.begin_job();
+    assert_eq!(
+        runtime
+            .execute("count===0&&!caught&&!finalized;", &mut host)
+            .unwrap()
+            .to_text(),
+        "true"
+    );
+    assert_eq!(
+        runtime
+            .execute("'ababa'.lastIndexOf('aba');", &mut host)
+            .unwrap()
+            .to_text(),
+        "2"
+    );
+}
+
+#[test]
+fn string_last_index_of_search_work_scalar_caps_and_fresh_job_recovery() {
+    use std::time::{Duration, Instant};
+    let mut runtime = Runtime::for_test();
+    let mut host = NoHost::default();
+    let cap = runtime.limits.capacity.string_bytes;
+    runtime.limits.capacity.string_bytes = 4;
+    let error = runtime
+        .string_last_index_of("abc", &[Value::String("longer".into())], &mut host)
+        .unwrap_err();
+    assert!(error.exception.is_none());
+    assert!(
+        error.message.contains("String limit reached"),
+        "{}",
+        error.message
+    );
+    runtime.limits.capacity.string_bytes = cap;
+    runtime.begin_job();
+    runtime.constrain_job(
+        usize::MAX,
+        0,
+        usize::MAX,
+        Instant::now() + Duration::from_secs(10),
+    );
+    let error = runtime
+        .string_last_index_of("abc", &[Value::String("b".into())], &mut host)
+        .unwrap_err();
+    assert!(error.exception.is_none());
+    assert!(
+        error.message.contains("String/copy work limit"),
+        "{}",
+        error.message
+    );
+    assert_eq!(runtime.copy_bytes, 0);
+    runtime.begin_job();
+    runtime.constrain_job(
+        usize::MAX,
+        256,
+        usize::MAX,
+        Instant::now() + Duration::from_secs(10),
+    );
+    let mut calls = 0;
+    loop {
+        match runtime.string_last_index_of("ababa", &[Value::String("aba".into())], &mut host) {
+            Ok(value) => {
+                assert_eq!(value.to_text(), "2");
+                calls += 1;
+                assert!(calls < 64);
+            }
+            Err(error) => {
+                assert!(error.exception.is_none());
+                assert!(
+                    error.message.contains("String/copy work limit"),
+                    "{}",
+                    error.message
+                );
+                break;
+            }
+        }
+    }
+    assert!(calls > 0);
+    assert_eq!(runtime.copy_bytes, 0);
+    // A small repeated-prefix miss must pay each actual candidate comparison.
+    runtime.begin_job();
+    runtime.constrain_job(
+        usize::MAX,
+        180,
+        usize::MAX,
+        Instant::now() + Duration::from_secs(10),
+    );
+    let error = runtime
+        .string_last_index_of(
+            "aaaaaaaaaaaaaaaa",
+            &[Value::String("aaaaaaab".into())],
+            &mut host,
+        )
+        .unwrap_err();
+    assert!(error.exception.is_none());
+    assert!(
+        error.message.contains("String/copy work limit"),
+        "{}",
+        error.message
+    );
+    assert_eq!(runtime.copy_bytes, 0);
+    runtime.begin_job();
+    runtime.steps = 0;
+    let error = runtime
+        .string_last_index_of("abc", &[Value::String("b".into())], &mut host)
+        .unwrap_err();
+    assert!(error.exception.is_none());
+    assert!(
+        error.message.contains("Execution step limit"),
+        "{}",
+        error.message
+    );
+    runtime.begin_job();
+    assert_eq!(
+        runtime
+            .execute("'😀a😀'.lastIndexOf('😀',2);", &mut host)
+            .unwrap()
+            .to_text(),
+        "0"
+    );
+    assert_eq!((host.gets, host.sets, host.calls), (0, 0, 0));
+}
