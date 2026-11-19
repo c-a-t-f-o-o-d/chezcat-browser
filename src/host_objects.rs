@@ -207,7 +207,8 @@ impl Runtime {
             self.put_binding(self.global_environment,"CharacterData".into(),Some(constructor),super::Declaration::Var,false)?;
             self.global_attributes.insert("CharacterData".into(),(false,true,true));
             self.native_constructor_prototypes.insert((window,"CharacterData"),character);
-            self.define_text_interface(window, character)?;
+            self.define_character_data_interface(window, character, "Text")?;
+            self.define_character_data_interface(window, character, "Comment")?;
             for name in ["DocumentFragment","Document"] {
                 let allocation=self.allocate_host_function_with_length(window,name,0).map_err(Fault::new)?;
                 if let Some(Function::Host {constructible,..})=self.functions.get_mut(allocation.id) {*constructible=true;}
@@ -537,10 +538,9 @@ impl Runtime {
         Ok(())
     }
 
-    /// Text includes Slottable; CharacterData and Comment do not. Give Text
-    /// its genuine per-realm interface instead of adding the getter to their
-    /// shared suffix or manufacturing an own property on each Text instance.
-    fn define_text_interface(&mut self, window: u32, character_data: usize) -> Result<(), Fault> {
+    fn define_character_data_interface(
+        &mut self, window: u32, character_data: usize, name: &'static str,
+    ) -> Result<(), Fault> {
         let parent_constructor = self.objects[character_data].properties
             .get("constructor")
             .ok_or_else(|| Fault::new("Missing CharacterData constructor."))?
@@ -548,7 +548,7 @@ impl Runtime {
         let Value::Function(parent_function) = parent_constructor else {
             return Err(Fault::new("Invalid CharacterData constructor."));
         };
-        let allocation = self.allocate_host_function_with_length(window, "Text", 0)
+        let allocation = self.allocate_host_function_with_length(window, name, 0)
             .map_err(Fault::new)?;
         if let Some(Function::Host { constructible, .. }) = self.functions.get_mut(allocation.id) {
             *constructible = true;
@@ -567,18 +567,20 @@ impl Runtime {
             Value::Object(prototype), Some((false, false, false)),
         )?;
         let tag = self.symbol_to_string_tag
-            .ok_or_else(|| Fault::new("Missing Text class-tag symbol."))?;
+            .ok_or_else(|| Fault::new("Missing CharacterData class-tag symbol."))?;
         self.store_symbol_property(
-            prototype, tag, Value::String("Text".into()),
+            prototype, tag, Value::String(name.into()),
             Some((false, false, true)),
         )?;
-        self.define_readonly_node_getter(prototype, window, "assignedSlot", "\0Text.get.assignedSlot")?;
-        self.native_constructor_prototypes.insert((window, "Text"), prototype);
+        if name == "Text" {
+            self.define_readonly_node_getter(prototype, window, "assignedSlot", "\0Text.get.assignedSlot")?;
+        }
+        self.native_constructor_prototypes.insert((window, name), prototype);
         self.put_binding(
-            self.global_environment, "Text".into(), Some(constructor),
+            self.global_environment, name.into(), Some(constructor),
             super::Declaration::Var, false,
         )?;
-        self.global_attributes.insert("Text".into(), (false, true, true));
+        self.global_attributes.insert(name.into(), (false, true, true));
         Ok(())
     }
 

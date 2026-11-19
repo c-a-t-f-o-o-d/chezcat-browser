@@ -32,6 +32,39 @@ document.title='real-comment-kind-ok';
 }
 
 #[test]
+fn comment_constructor_and_factory_use_the_same_native_interface() {
+    let (doc, _, page) = fixture("<html><head></head><body><div id=p></div></body></html>", r#"
+var C = window.Comment, P = C.prototype, calls = 0;
+var value = {toString:function(){calls++;return 'snow 雪🙂';}};
+if (C.name !== 'Comment' || C.length !== 0 || Object.getPrototypeOf(C) !== CharacterData ||
+    Object.getPrototypeOf(P) !== CharacterData.prototype || P.constructor !== C) throw 'Comment interface ancestry';
+var c = new C(value, {toString:function(){throw 'unexpected extra conversion';}});
+var made = document.createComment('factory'), cloned = c.cloneNode();
+for (var item of [c, made, cloned]) {
+    if (Object.getPrototypeOf(item) !== P || !(item instanceof C) || !(item instanceof CharacterData) ||
+        !(item instanceof Node) || item instanceof Text || item.ownerDocument !== document ||
+        item.nodeType !== 8 || item.nodeName !== '#comment' || item.parentNode !== null ||
+        Object.prototype.toString.call(item) !== '[object Comment]' || 'assignedSlot' in item) throw 'genuine Comment nodes';
+}
+if (c === cloned || c.data !== 'snow 雪🙂' || c.length !== 8 || cloned.data !== c.data ||
+    new C().data !== '' || new C(undefined).data !== '' || new C(null).data !== 'null') throw 'Comment conversion';
+var errors = 0, failure = {}, caught;
+try { C(value); } catch (e) { if (e instanceof TypeError) errors++; else throw e; }
+try { new C(Symbol()); } catch (e) { if (e instanceof TypeError) errors++; else throw e; }
+try { new C({toString:function(){throw failure;}}); } catch (e) { caught = e; }
+if (errors !== 2 || calls !== 1 || caught !== failure) throw 'conversion before allocation';
+var parent = document.getElementById('p');
+parent.appendChild(c);
+c.nodeValue = 'edited';
+if (parent.firstChild !== c || c.textContent !== 'edited' || parent.textContent !== '') throw 'native Comment mutation';
+document.title = 'verified-comment-interface';
+"#);
+    assert_eq!(doc.title, "verified-comment-interface");
+    assert_eq!(doc.nodes.iter().filter(|node| matches!(node.kind, NodeKind::Comment(_))).count(), 6);
+    assert!(!page.has_host_tasks());
+}
+
+#[test]
 fn comment_data_nullable_setters_and_readonly_length_preserve_comment_kind() {
     let (doc,_,_)=fixture("<html><head></head><body></body></html>",r#"
 var c=document.createComment(''),calls=0;

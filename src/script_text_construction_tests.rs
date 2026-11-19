@@ -213,14 +213,17 @@ if(span.assignedSlot!==null||text.assignedSlot!==null||slot.assignedSlot!==null|
     assert_eq!(page.state.dom_commits, commits);
     run(&mut doc, &mut forms, &mut page,
         "delete TP.assignedSlot; Object.defineProperty(EP,'assignedSlot',{value:23,writable:true,configurable:true});");
-    for source in ["text.assignedSlot=41;", "slot.assignedSlot=41;"] {
-        let out = page.console_eval(&mut doc, &mut forms, source);
-        assert_eq!(out.errors, 1, "{source}\n{}", page.report());
-        assert!(page.report().contains("own data property"), "{}", page.report());
-    }
+    let out = page.console_eval(&mut doc, &mut forms, "text.assignedSlot=41;");
+    assert_eq!(out.errors, 1, "{}", page.report());
+    assert!(page.report().contains("own data property"), "{}", page.report());
     run(&mut doc, &mut forms, &mut page, r#"
-if(Object.hasOwn(text,'assignedSlot')||Object.hasOwn(slot,'assignedSlot')||Object.hasOwn(TP,'assignedSlot')||EP.assignedSlot!==23)throw 'unsupported instance write changed an interface';
+slot.assignedSlot=41;
+var slotOwn=Object.getOwnPropertyDescriptor(slot,'assignedSlot');
+if(!slotOwn||slotOwn.value!==41||!slotOwn.writable||!slotOwn.enumerable||!slotOwn.configurable||
+   Object.hasOwn(text,'assignedSlot')||Object.hasOwn(TP,'assignedSlot')||EP.assignedSlot!==23)throw 'SLOT ordinary write changed native Text or interfaces';
+delete slot.assignedSlot;
 Object.defineProperty(TP,'assignedSlot',TD);Object.defineProperty(EP,'assignedSlot',ED);
+if(slot.assignedSlot!==null||text.assignedSlot!==null)throw 'native getter restoration';
 "#);
     run(&mut doc, &mut forms, &mut page, "if(text.unrelatedTextProperty!==undefined)throw 'unexpected Text field';");
     let out = page.console_eval(&mut doc, &mut forms, "text.unrelatedTextProperty=17;");
