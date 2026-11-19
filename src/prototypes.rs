@@ -805,10 +805,10 @@ impl Runtime {
                 "The object is not extensible.",
             ));
         }
-        if self.immutable_object_prototype(id) {
+        if self.objects[id].immutable_prototype || self.immutable_object_prototype(id) {
             return Err(Fault::exception(
                 "TypeError",
-                "Object.prototype has an immutable prototype.",
+                "This object has an immutable prototype.",
             ));
         }
         let mut current = prototype;
@@ -1523,6 +1523,9 @@ impl Runtime {
                 && (!frozen
                     || (!has_elements && (object.length.is_none() || !object.length_writable)));
             return Ok(Value::Bool(result));
+        }
+        if self.objects[id].window_named_properties {
+            return Err(Fault::exception("TypeError", "WindowProperties must remain extensible."));
         }
         self.objects[id].extensible = false;
         if method == "preventExtensions" {

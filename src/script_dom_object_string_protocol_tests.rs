@@ -109,10 +109,14 @@ fn autonomous_element_identity_preserves_namespace_owner_and_native_guards() {
         let handle = node_handle(id(&doc, name));
         let bridge = Bridge { doc: &mut doc, forms: &mut forms, state: &mut page.state };
         assert_eq!(bridge.concrete_html_interface(handle), None, "{name}");
-        assert!(!bridge.element_expando_receiver(handle), "{name}");
+        assert_eq!(bridge.element_expando_receiver(handle), name == "reserved", "{name}");
     }
     run(&mut doc, &mut forms, &mut page, r#"
 var notice=document.getElementById('custom'), C=HTMLElement, proto=C.prototype;
+var reserved=document.getElementById('reserved');
+if (reserved.entry !== undefined) throw 'ordinary missing key on a reserved HTML tag';
+reserved.entry = 4;
+if (reserved.entry !== 4 || !Object.hasOwn(reserved,'entry')) throw 'ordinary own key on a reserved HTML tag';
 var label=Symbol('notice');
 Object.defineProperty(notice,'entry',{value:3,configurable:true});
 notice[label]=notice;

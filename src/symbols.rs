@@ -502,6 +502,11 @@ impl Runtime {
         self.step()?;
         self.symbol(key)?;
         let object = self.object(id)?;
+        if object.window_named_properties {
+            return if self.strict || attributes.is_some() {
+                Err(Fault::exception("TypeError", "Cannot define an own property on WindowProperties."))
+            } else { Ok(()) };
+        }
         let previous = object.symbol_properties.get(&key);
         if attributes.is_none() && previous.is_some_and(|property| !property.writable) {
             return if self.strict {

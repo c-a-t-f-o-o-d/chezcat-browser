@@ -10,10 +10,6 @@ use super::{Accessors, Fault, Function, Host, Ordinary, Runtime, Value,
 #[path = "host_document_property_limits_tests.rs"]
 mod document_property_limits_tests;
 
-// This is a rooted descriptor record, not an interface prototype object and
-// never a string-visible constructor or a substitute for WindowProperties.
-const WINDOW_TAG_RECORD: &str = "\0WindowTag";
-
 impl Runtime {
     pub(crate) fn define_inert_document_interfaces(
         &mut self, window: u32, implementation_get: &'static str,
@@ -252,7 +248,7 @@ impl Runtime {
                 self.store_symbol_property(image,self.symbol_to_string_tag.unwrap(),Value::String("HTMLImageElement".into()),Some((false,false,true)))?;
             }
             self.define_node_list_iteration_interface(window)?;
-            self.define_bound_window_tag_record(window)?;
+            self.define_window_interface(window)?;
             Ok(())
         })();
         self.restore_transient_marker(marker);
@@ -482,32 +478,47 @@ impl Runtime {
         }
     }
 
-    /// Web IDL's class-string descriptor belongs to Window's interface
-    /// prototype, not the global itself. Until the full Window prototype and
-    /// named-properties exotic are implemented, retain only this descriptor
-    /// as private provenance for the existing bound Window. It is consulted
-    /// for the inherited symbol only; it cannot affect named/string lookup.
-    fn define_bound_window_tag_record(&mut self, window: u32) -> Result<(), Fault> {
-        if !self.is_browser_global(window) { return Ok(()); }
-        if self.native_constructor_prototypes.contains_key(&(window, WINDOW_TAG_RECORD)) {
+    fn define_window_interface(&mut self, window: u32) -> Result<(), Fault> {
+        let Some((handle, global_properties)) = self.browser_global else { return Ok(()); };
+        if handle != window || self.native_constructor_prototypes.contains_key(&(window, "Window")) {
             return Ok(());
         }
-        let key = self.symbol_to_string_tag
-            .ok_or_else(|| Fault::new("Missing Window class-tag symbol."))?;
-        let descriptor = self.new_object(None)?;
-        self.objects[descriptor].prototype = None;
-        self.store_symbol_property(
-            descriptor, key, Value::String("Window".into()),
-            Some((false, false, true)),
-        )?;
-        self.native_constructor_prototypes.insert((window, WINDOW_TAG_RECORD), descriptor);
+        let event_target = self.native_constructor_prototypes[&(window, "EventTarget")];
+        let Value::Function(parent) = self.objects[event_target].properties["constructor"].value.as_value()?.clone() else {
+            return Err(Fault::new("Invalid Window parent interface."));
+        };
+        let allocation = self.allocate_host_function_with_length(window, "Window", 0).map_err(Fault::new)?;
+        if let Some(Function::Host { constructible, illegal_interface_constructor, .. }) =
+            self.functions.get_mut(allocation.id)
+        {
+            *constructible = true;
+            *illegal_interface_constructor = true;
+        }
+        let constructor = Value::Function(allocation.id);
+        let prototype = self.new_object(None)?;
+        let named_properties = self.new_object(None)?;
+        self.objects[prototype].prototype = Some(Ordinary::Object(named_properties));
+        self.objects[named_properties].prototype = Some(Ordinary::Object(event_target));
+        self.objects[self.function_properties[allocation.id]].prototype = Some(Ordinary::Function(parent));
+        self.store_property(prototype, "constructor".into(), constructor.clone(), Some((false, true, true)))?;
+        self.store_property(self.function_properties[allocation.id], "prototype".into(),
+            Value::Object(prototype), Some((false, false, false)))?;
+        let tag = self.symbol_to_string_tag.ok_or_else(|| Fault::new("Missing Window class-tag symbol."))?;
+        for (object, value) in [(prototype, "Window"), (named_properties, "WindowProperties")] {
+            self.store_symbol_property(object, tag, Value::String(value.into()), Some((false, false, true)))?;
+            self.objects[object].immutable_prototype = true;
+        }
+        self.objects[named_properties].window_named_properties = true;
+        self.objects[event_target].immutable_prototype = true;
+        self.put_binding(self.global_environment, "Window".into(), Some(constructor),
+            super::Declaration::Var, false)?;
+        self.global_attributes.insert("Window".into(), (false, true, true));
+        self.native_constructor_prototypes.insert((window, "Window"), prototype);
+        self.objects[global_properties].prototype = Some(Ordinary::Object(prototype));
         Ok(())
     }
 
-    /// Resolve only an already bound, accessible Window's inherited tag
-    /// descriptor. Callers check own global symbol properties first and
-    /// consult Object.prototype only after this record. Metadata lookup never
-    /// initializes a realm or authorizes prototype/string-property access.
+    /// Tag lookup keeps the native caller check on the already bound Window.
     pub(super) fn bound_window_tag_backing(
         &mut self,
         window: u32,
@@ -522,7 +533,7 @@ impl Runtime {
         }
         self.with_intrinsic_realm(realm, |runtime| {
             if !runtime.is_browser_global(window) { return Ok(None); }
-            Ok(runtime.native_constructor_prototypes.get(&(window, WINDOW_TAG_RECORD))
+            Ok(runtime.native_constructor_prototypes.get(&(window, "Window"))
                 .copied().map(Ordinary::Object))
         })
     }
