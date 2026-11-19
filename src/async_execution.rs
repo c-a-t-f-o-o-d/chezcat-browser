@@ -17,11 +17,19 @@ struct PendingAwait {
     action: Resume,
     call: Option<PendingCall>,
     member_key: Option<ExprId>,
+    assignment: Option<Reference>,
 }
 
 struct PendingCall {
     function: Value,
     direct_eval: bool,
+}
+
+fn name_reference_bytes(reference: &Reference) -> usize {
+    match reference {
+        Reference::Binding(_, name) | Reference::Global(name) | Reference::Missing(name) => name.len(),
+        _ => unreachable!("async assignment admits only an identifier reference"),
+    }
 }
 
 pub(super) struct Activation {
@@ -49,6 +57,7 @@ impl Activation {
         std::mem::size_of::<Self>()
             .saturating_add(self.this.bytes())
             .saturating_add(self.pending_call().map_or(0, |call| call.function.bytes()))
+            .saturating_add(self.pending_assignment().map_or(0, name_reference_bytes))
             .saturating_add(
                 self.environments
                     .capacity()
@@ -67,7 +76,8 @@ impl Activation {
         self.environments
             .len()
             .saturating_add(self.try_scopes.len())
-            .saturating_add(5 + usize::from(self.pending_call().is_some()))
+            .saturating_add(5 + usize::from(self.pending_call().is_some())
+                + usize::from(self.pending_assignment().is_some()))
     }
 
     pub(super) fn reachability_edges(&self, add: &mut impl FnMut(Edge)) {
@@ -76,6 +86,9 @@ impl Activation {
         Edge::value(&self.this, add);
         if let Some(call) = self.pending_call() {
             Edge::value(&call.function, add);
+        }
+        if let Some(reference) = self.pending_assignment() {
+            Edge::reference(reference, add);
         }
         if let Some(context) = self.invocation {
             add(Edge::Environment(context.environment));
@@ -90,6 +103,9 @@ impl Activation {
         if let Some(context) = self.invocation {
             roots.push(context.environment);
         }
+        if let Some(Reference::Binding(scope, _)) = self.pending_assignment() {
+            roots.push(*scope);
+        }
     }
 
     fn environment(&self) -> Result<usize, Fault> {
@@ -101,6 +117,10 @@ impl Activation {
 
     fn pending_call(&self) -> Option<&PendingCall> {
         self.pending.as_ref().and_then(|pending| pending.call.as_ref())
+    }
+
+    fn pending_assignment(&self) -> Option<&Reference> {
+        self.pending.as_ref().and_then(|pending| pending.assignment.as_ref())
     }
 }
 
@@ -260,6 +280,9 @@ impl Runtime {
                             if let Some(context) = frame.invocation {
                                 self.capture_await_environment(context.environment)?;
                             }
+                            if let Some(Reference::Binding(scope, _)) = frame.pending_assignment() {
+                                self.capture_await_environment(*scope)?;
+                            }
                             self.suspend_await(promise, frame)
                         })();
                         self.restore_root_marker(marker);
@@ -303,7 +326,7 @@ impl Runtime {
         let result = (|| {
             if let Some((value, reject)) = resumed {
                 self.push_transient_value(&value)?;
-                let PendingAwait { statement, action, call, member_key } = frame
+                let PendingAwait { statement, action, call, member_key, assignment } = frame
                     .pending
                     .take()
                     .ok_or_else(|| Fault::new("Async activation has no pending await."))?;
@@ -327,6 +350,13 @@ impl Runtime {
                             self.push_transient_value(&key)?;
                             let result = self.read_reference(&Reference::ComputedProperty(value, key), host)?;
                             self.push_transient_value(&result)?;
+                            result
+                        } else {
+                            value
+                        };
+                        let value = if let Some(reference) = assignment {
+                            let result = self.copy_value(&value)?;
+                            self.write_reference(reference, value, host)?;
                             result
                         } else {
                             value
@@ -484,9 +514,27 @@ impl Runtime {
                     operand,
                     callee,
                     member_key,
+                    assignment,
                     action,
                 } => {
                     let result = (|| {
+                        let assignment = if let Some(target) = assignment {
+                            let ExprKind::Name(name) = &frame.program.exprs[target].kind else {
+                                unreachable!("async assignment target must be an identifier");
+                            };
+                            self.await_storage(
+                                frame.retained_bytes().saturating_add(name.len()), name.len(),
+                            )?;
+                            let reference = self.reference(
+                                &frame.program, target, environment, &frame.this, host,
+                            )?;
+                            if let Reference::Binding(scope, _) = &reference {
+                                self.push_transient_root(Edge::Environment(*scope))?;
+                            }
+                            Some(reference)
+                        } else {
+                            None
+                        };
                         if member_key.is_some() {
                             self.step()?; // Ordinary member reference construction.
                         }
@@ -494,7 +542,9 @@ impl Runtime {
                             let function = self.eval(&frame.program, callee, environment, &frame.this, host)?;
                             self.push_transient_value(&function)?;
                             self.await_storage(
-                                frame.retained_bytes().saturating_add(function.bytes()),
+                                frame.retained_bytes()
+                                    .saturating_add(assignment.as_ref().map_or(0, name_reference_bytes))
+                                    .saturating_add(function.bytes()),
                                 function.bytes(),
                             )?;
                             let direct_eval = matches!(&frame.program.exprs[callee].kind, ExprKind::Name(name) if name == "eval");
@@ -506,7 +556,7 @@ impl Runtime {
                             self.eval(&frame.program, operand, environment, &frame.this, host)?;
                         self.push_transient_value(&value)?;
                         let promise = self.promise_for_await(value, host)?;
-                        frame.pending = Some(PendingAwait { statement, action, call, member_key });
+                        frame.pending = Some(PendingAwait { statement, action, call, member_key, assignment });
                         Ok(Progress::Suspend(promise))
                     })();
                     result.map_err(|error: Fault| {
@@ -646,6 +696,7 @@ mod tests {
                 action: Resume::Discard,
                 call: Some(PendingCall { function: Value::Function(17), direct_eval: false }),
                 member_key: None,
+                assignment: Some(Reference::Binding(18, "target".into())),
             }),
         };
         let mut edges = Vec::new();
@@ -656,20 +707,21 @@ mod tests {
                 .any(|edge| matches!(edge, Edge::Function(id) if *id == function)));
         }
         assert!(edges.iter().any(|edge| matches!(edge, Edge::Object(12))));
-        for environment in [14, 15, 16] {
+        for environment in [14, 15, 16, 18] {
             assert!(edges
                 .iter()
                 .any(|edge| matches!(edge, Edge::Environment(id) if *id == environment)));
         }
         let mut environments = Vec::new();
         frame.environment_roots(&mut environments);
-        assert_eq!(environments, [15, 16, 14]);
+        assert_eq!(environments, [15, 16, 14, 18]);
         assert_eq!(frame.realm(), Some(2));
         assert!(frame.reachability_cost() >= edges.len());
         assert_eq!(
             frame.retained_bytes(),
             std::mem::size_of::<Activation>()
                 + frame.this.bytes()
+                + "target".len()
                 + frame.environments.capacity() * std::mem::size_of::<usize>()
                 + frame.try_scopes.capacity() * std::mem::size_of::<TryScope>()
         );
