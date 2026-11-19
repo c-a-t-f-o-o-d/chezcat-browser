@@ -1111,7 +1111,7 @@ var second=new MutationObserver(function(records){
 var types=0;
 try {first.observe(text,{characterData:false,characterDataOldValue:true});} catch(e){if(e instanceof TypeError)types++;}
 try {first.observe(navigator,{characterData:true});} catch(e){if(e instanceof TypeError)types++;}
-try {first.observe(document,{attributes:true});} catch(e){if(e.name==='NotSupportedError')types++;}
+try {first.observe(document.implementation.createHTMLDocument('inert'),{attributes:true});} catch(e){if(e.name==='NotSupportedError')types++;}
 try {MutationObserver.prototype.takeRecords.call({});} catch(e){if(e instanceof TypeError)types++;}
 try {new MutationRecord();} catch(e){if(e instanceof TypeError)types++;}
 if(types!==5)throw 'validation';
@@ -1204,6 +1204,67 @@ queueMicrotask(function(){
 "#]);
     assert_eq!(outcome.errors, 0, "{}", page.report());
     assert_eq!(doc.title, "verified-child-list-microtasks");
+}
+
+#[test]
+fn mutation_observer_attribute_filters_keep_real_namespaces_and_old_values() {
+    let (mut doc, mut forms, mut page, outcome) = page(
+        "<html><head></head><body><form id=p><input id=neighbor form=p value=kept></form></body></html>", &[r#"
+var p=document.getElementById('p'), seen='', observed=new MutationObserver(function(){throw 'unexpected undrained records';});
+var all=new MutationObserver(function(){throw 'unexpected unfiltered callback';});
+var filter={
+    [Symbol.iterator]:function(){
+        seen+='iterator|';var used=false;
+        return {next:function(){
+            if(used){seen+='done|';return {done:true};}
+            used=true;seen+='next|';return {value:{toString:function(){seen+='convert|';return 'data-x';}},done:false};
+        }};
+    }
+};
+observed.observe(document,{
+    get attributeFilter(){seen+='filter|';return filter;},
+    get attributeOldValue(){seen+='old|';return true;},subtree:true,
+});
+observed.observe(p,{attributes:true,attributeFilter:['data-x']});
+all.observe(p,{attributes:true});
+if(seen!=='filter|iterator|next|convert|done|old|')throw 'ordered filter iterable and DOMString conversion';
+p.setAttribute('DATA-X','one');
+p.setAttribute('data-x','two');
+p.setAttributeNS('urn:fixture','demo:data-x','ns-one');
+p.setAttributeNS('urn:fixture','demo:data-x','ns-two');
+p.removeAttributeNS('urn:fixture','data-x');
+p.removeAttribute('data-x');
+p.removeAttribute('data-missing');
+p.setAttribute('data-other','kept');
+var current=observed.takeRecords(), every=all.takeRecords();
+if(current.length!==3||every.length!==7||current[0].attributeName!=='data-x'||
+    current[0].oldValue!==null||current[1].oldValue!=='one'||current[2].oldValue!=='two')
+    throw 'filter deduplication and null-namespace old values';
+for(var i=0;i<every.length;i++){
+    var record=every[i];
+    if(!(record instanceof MutationRecord)||record.type!=='attributes'||record.target!==p||
+        record.oldValue!==null||record.addedNodes.length!==0||record.removedNodes.length!==0||
+        record.previousSibling!==null||record.nextSibling!==null)throw 'genuine attribute record slots';
+    var uri=i>=2&&i<=4?'urn:fixture':null;
+    if(record.attributeNamespace!==uri||record.attributeName!==(i===6?'data-other':'data-x'))throw 'expanded native names';
+}
+if(p.getAttribute('data-x')!==null||p.getAttributeNS('urn:fixture','data-x')!==null||
+    p.getAttribute('data-other')!=='kept'||document.getElementById('neighbor').value!=='kept')throw 'unchanged native editor';
+var errors=0;
+try { observed.observe(p,{attributes:false,attributeFilter:['x']}); } catch(e) { if(e instanceof TypeError)errors++;else throw e; }
+try { observed.observe(p,{attributeFilter:'data-x'}); } catch(e) { if(e instanceof TypeError)errors++;else throw e; }
+if(errors!==2)throw 'option validation';
+document.title='verified-mutation-attributes';
+"#]);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    assert_eq!(doc.title, "verified-mutation-attributes");
+    let commits = page.state.dom_commits;
+    let refused = page.console_eval(&mut doc, &mut forms, "p.setAttribute('id','other');");
+    assert_eq!(refused.errors, 1);
+    assert_eq!(page.state.dom_commits, commits);
+    let recovered = page.console_eval(&mut doc, &mut forms,
+        "if(observed.takeRecords().length!==0||all.takeRecords().length!==0||p.id!=='p')throw 'failed write queued or mutated';");
+    assert_eq!(recovered.errors, 0, "{}", page.report());
 }
 
 #[test]

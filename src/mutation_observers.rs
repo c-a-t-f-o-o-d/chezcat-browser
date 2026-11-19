@@ -37,6 +37,7 @@ pub(super) struct Arena {
     records: HashMap<usize, Record>,
     registrations: usize,
     child_list_registrations: usize,
+    attribute_registrations: usize,
     pending_records: usize,
     queued: bool,
 }
@@ -48,19 +49,31 @@ struct Observer {
     scheduled: bool,
 }
 
-#[derive(Clone, Copy)]
 struct Registration {
     observer: usize,
     character_data: bool,
     child_list: bool,
+    attributes: bool,
     subtree: bool,
     old_value: bool,
+    attribute_old_value: bool,
+    attribute_filter: Option<Vec<String>>,
+}
+
+impl Registration {
+    fn retained_bytes(&self) -> usize {
+        self.attribute_filter.as_ref().map_or(0, |filter| {
+            filter.capacity().saturating_mul(std::mem::size_of::<String>())
+                .saturating_add(filter.iter().map(String::capacity).sum::<usize>())
+        })
+    }
 }
 
 struct Record {
     target: u32,
     old_value: Value,
     child_list: Option<Rc<NativeChildListChange>>,
+    attribute: Option<Rc<NativeAttributeChange>>,
     added_nodes: Option<u32>,
     removed_nodes: Option<u32>,
 }
@@ -71,7 +84,11 @@ impl Record {
             std::mem::size_of::<NativeChildListChange>().saturating_add(
                 change.added.capacity().saturating_add(change.removed.capacity())
                     .saturating_mul(std::mem::size_of::<u32>())));
-        std::mem::size_of::<Self>().saturating_add(self.old_value.bytes()).saturating_add(child_references)
+        let attribute_bytes = self.attribute.as_ref().map_or(0, |change|
+            std::mem::size_of::<NativeAttributeChange>().saturating_add(change.local_name.capacity())
+                .saturating_add(change.namespace.as_ref().map_or(0, String::capacity)));
+        std::mem::size_of::<Self>().saturating_add(self.old_value.bytes())
+            .saturating_add(child_references).saturating_add(attribute_bytes)
     }
 }
 
@@ -193,6 +210,8 @@ impl Runtime {
                     registrations.retain(|registration| {
                         if registration.observer != id { return true; }
                         self.mutations.child_list_registrations -= usize::from(registration.child_list);
+                        self.mutations.attribute_registrations -= usize::from(registration.attributes);
+                        self.value_bytes -= registration.retained_bytes();
                         false
                     });
                     self.mutations.registrations -= 1;
@@ -218,18 +237,16 @@ impl Runtime {
         if !matches!(options, Value::Undefined | Value::Null | Value::Host(_) | Value::Object(_) | Value::Function(_)) {
             return Err(Fault::exception("TypeError", "MutationObserver options must be a dictionary."));
         }
-        let mut option = |name| {
-            if matches!(options, Value::Undefined | Value::Null) { Ok(Value::Undefined) }
-            else { self.read_property(options, name, host) }
-        };
-        let filter = option("attributeFilter")?;
-        let attribute_old = option("attributeOldValue")?;
-        let attributes = option("attributes")?;
-        let character = option("characterData")?;
-        let old = option("characterDataOldValue")?;
-        let children = option("childList")?.truthy();
-        let subtree = option("subtree")?.truthy();
-        let has_filter = !matches!(filter, Value::Undefined);
+        let filter = self.mutation_option(options, "attributeFilter", host)?;
+        let attribute_filter = if matches!(filter, Value::Undefined) { None }
+            else { Some(self.attribute_filter_strings(filter, host)?) };
+        let attribute_old = self.mutation_option(options, "attributeOldValue", host)?;
+        let attributes = self.mutation_option(options, "attributes", host)?;
+        let character = self.mutation_option(options, "characterData", host)?;
+        let old = self.mutation_option(options, "characterDataOldValue", host)?;
+        let children = self.mutation_option(options, "childList", host)?.truthy();
+        let subtree = self.mutation_option(options, "subtree", host)?.truthy();
+        let has_filter = attribute_filter.is_some();
         let attributes = if matches!(attributes, Value::Undefined) {
             has_filter || !matches!(attribute_old, Value::Undefined)
         } else { attributes.truthy() };
@@ -240,24 +257,35 @@ impl Runtime {
         {
             return Err(Fault::exception("TypeError", "MutationObserver options select inconsistent or empty mutation types."));
         }
-        if attributes {
-            let error = self.native_dom_exception("NotSupportedError", "Attribute observation is unavailable.")?;
-            return Err(Fault::thrown(error));
-        }
         let tree_target = host.mutation_child_list_target(*target);
-        if (children || subtree) && !tree_target || character && !supported_target && !(subtree && tree_target) && !children {
+        if (children || attributes || subtree) && !tree_target
+            || character && !supported_target && !(subtree && tree_target) && !(children || attributes)
+        {
             let error = self.native_dom_exception("NotSupportedError", "This Node does not support the requested observations.")?;
             return Err(Fault::thrown(error));
         }
-        let requested = Registration { observer: id, character_data: character, child_list: children,
-            subtree, old_value: old.truthy() };
+        let requested = Registration {
+            observer: id, character_data: character, child_list: children, attributes, subtree,
+            old_value: old.truthy(), attribute_old_value: attribute_old.truthy(), attribute_filter,
+        };
+        let bytes = requested.retained_bytes();
         if let Some(registration) = self.mutations.targets.get_mut(target)
             .and_then(|registrations| registrations.iter_mut().find(|registration| registration.observer == id))
         {
+            let retained = self.value_bytes.saturating_sub(registration.retained_bytes()).saturating_add(bytes);
+            if retained > self.limits.heap.retained_values {
+                return Err(Fault::new("MutationObserver attribute-filter retained limit reached."));
+            }
             self.mutations.child_list_registrations -= usize::from(registration.child_list);
-            self.mutations.child_list_registrations += usize::from(requested.child_list);
+            self.mutations.child_list_registrations += usize::from(children);
+            self.mutations.attribute_registrations -= usize::from(registration.attributes);
+            self.mutations.attribute_registrations += usize::from(attributes);
             *registration = requested;
+            self.value_bytes = retained;
             return Ok(());
+        }
+        if self.value_bytes.saturating_add(bytes) > self.limits.heap.retained_values {
+            return Err(Fault::new("MutationObserver attribute-filter retained limit reached."));
         }
         if self.mutations.registrations >= MAX_REGISTRATIONS {
             return Err(Fault::new("MutationObserver registration limit reached."));
@@ -281,23 +309,80 @@ impl Runtime {
         registrations.push(requested);
         observer.targets.push(*target);
         self.mutations.registrations += 1;
-        self.mutations.child_list_registrations += usize::from(requested.child_list);
+        self.mutations.child_list_registrations += usize::from(children);
+        self.mutations.attribute_registrations += usize::from(attributes);
+        self.value_bytes += bytes;
         Ok(())
     }
 
-    fn matching_observers(&mut self, target: u32, child_list: bool, host: &dyn Host)
+    fn mutation_option(&mut self, options: &Value, name: &str, host: &mut dyn Host) -> Result<Value, Fault> {
+        if matches!(options, Value::Undefined | Value::Null) { Ok(Value::Undefined) }
+        else { self.read_property(options, name, host) }
+    }
+
+    fn attribute_filter_strings(&mut self, input: Value, host: &mut dyn Host) -> Result<Vec<String>, Fault> {
+        if !matches!(input, Value::Object(_) | Value::Function(_) | Value::Host(_)) {
+            return Err(Fault::exception("TypeError", "MutationObserver attributeFilter requires an iterable object."));
+        }
+        let Some(method) = self.iterator_method(&input, host)? else {
+            return Err(Fault::exception("TypeError", "MutationObserver attributeFilter is not iterable."));
+        };
+        let mut iterator = self.iterator_from_method(input, method, host)?;
+        let mut strings = Vec::new();
+        let mut bytes = 0usize;
+        while let Some(value) = self.iterator_next(&mut iterator, host)? {
+            let converted = (|| {
+                if strings.len() >= self.limits.capacity.arguments {
+                    return Err(Fault::new("MutationObserver attribute-filter item limit reached."));
+                }
+                let value = self.primitive_with_hint(value, true, host)?;
+                self.work(value.bytes())?;
+                let text = value.script_text()?;
+                bytes = bytes.saturating_add(text.capacity()).saturating_add(std::mem::size_of::<String>());
+                if bytes > self.limits.heap.retained_values {
+                    return Err(Fault::new("MutationObserver attribute-filter retained limit reached."));
+                }
+                strings.try_reserve(1).map_err(|_| Fault::new("Cannot reserve MutationObserver attribute filter."))?;
+                Ok(text)
+            })();
+            match converted {
+                Ok(text) => strings.push(text),
+                Err(error) => return self.iterator_close(&mut iterator, Err(error), host),
+            }
+        }
+        Ok(strings)
+    }
+
+    fn matching_observers(&mut self, target: u32, child_list: bool,
+        attribute: Option<&NativeAttributeChange>, host: &dyn Host)
         -> Result<BTreeMap<usize, bool>, Fault>
     {
         let mut interested = BTreeMap::new();
         let mut current = Some(target);
         while let Some(node) = current {
-            let count = self.mutations.targets.get(&node).map_or(0, Vec::len);
-            self.work(count.saturating_add(1))?;
+            let registrations = self.mutations.targets.get(&node);
+            let count = registrations.map_or(0, Vec::len);
+            let filter_work = if let Some(change) = attribute.filter(|change| change.namespace.is_none()) {
+                registrations.into_iter().flatten().filter(|registration| node == target || registration.subtree)
+                    .filter_map(|registration| registration.attribute_filter.as_ref())
+                    .map(|filter| filter.len().saturating_mul(change.local_name.len().saturating_add(1)))
+                    .fold(0usize, usize::saturating_add)
+            } else { 0 };
+            self.work(count.saturating_add(filter_work).saturating_add(1))?;
             if let Some(registrations) = self.mutations.targets.get(&node) {
                 for registration in registrations {
-                    let matches = if child_list { registration.child_list } else { registration.character_data };
-                    if matches && (node == target || registration.subtree) {
-                        *interested.entry(registration.observer).or_insert(false) |= registration.old_value;
+                    if node != target && !registration.subtree { continue; }
+                    let (matches, old) = if let Some(change) = attribute {
+                        let passes_filter = registration.attribute_filter.as_ref().is_none_or(|filter|
+                            change.namespace.is_none() && filter.iter().any(|name| name == &change.local_name));
+                        (registration.attributes && passes_filter, registration.attribute_old_value)
+                    } else if child_list {
+                        (registration.child_list, false)
+                    } else {
+                        (registration.character_data, registration.old_value)
+                    };
+                    if matches {
+                        *interested.entry(registration.observer).or_insert(false) |= old;
                     }
                 }
             }
@@ -311,7 +396,7 @@ impl Runtime {
     ) -> Result<Option<PreparedChange>, Fault> {
         if self.mutations.targets.is_empty() { return Ok(None); }
         let Some(generation) = host.character_data_write_generation(target, property) else { return Ok(None) };
-        let observers = self.matching_observers(target, false, host)?;
+        let observers = self.matching_observers(target, false, None, host)?;
         if observers.is_empty() { return Ok(None); }
         let old = if observers.values().any(|&old_value| old_value) {
             self.host_get_checked(target, "data", host)?
@@ -320,7 +405,7 @@ impl Runtime {
         entries.try_reserve_exact(observers.len()).map_err(|_| Fault::new("Cannot reserve mutation records."))?;
         for (observer, old_value) in observers {
             let record = Record { target, old_value: if old_value { self.copy_value(&old)? } else { Value::Null },
-                child_list: None, added_nodes: None, removed_nodes: None };
+                child_list: None, attribute: None, added_nodes: None, removed_nodes: None };
             entries.push((observer, record));
         }
         self.prepare_mutation_records(target, generation, entries)
@@ -335,15 +420,38 @@ impl Runtime {
         if changes.is_empty() { return Ok(None); }
         let mut entries = Vec::new();
         for change in changes {
-            let observers = self.matching_observers(change.target, true, host)?;
+            let observers = self.matching_observers(change.target, true, None, host)?;
             entries.try_reserve(observers.len()).map_err(|_| Fault::new("Cannot reserve child-list records."))?;
             let change = Rc::new(change);
             for (observer, _) in observers {
                 entries.push((observer, Record {
-                    target: change.target, old_value: Value::Null, child_list: Some(Rc::clone(&change)),
+                    target: change.target, old_value: Value::Null, child_list: Some(Rc::clone(&change)), attribute: None,
                     added_nodes: None, removed_nodes: None,
                 }));
             }
+        }
+        self.prepare_mutation_records(target, generation, entries)
+    }
+
+    pub(super) fn prepare_attribute_write(&mut self, target: u32, method: &str, args: &[Value], host: &mut dyn Host)
+        -> Result<Option<PreparedChange>, Fault>
+    {
+        if self.mutations.attribute_registrations == 0 { return Ok(None); }
+        let Some(generation) = host.mutation_tree_generation() else { return Ok(None); };
+        let Some(mut change) = host.mutation_attribute_change(target, method, args).map_err(Fault::new)? else {
+            return Ok(None);
+        };
+        let observers = self.matching_observers(target, false, Some(&change), host)?;
+        if observers.is_empty() { return Ok(None); }
+        let old = change.old_value.take().map_or(Value::Null, Value::String);
+        let change = Rc::new(change);
+        let mut entries = Vec::new();
+        entries.try_reserve_exact(observers.len()).map_err(|_| Fault::new("Cannot reserve attribute records."))?;
+        for (observer, retain_old) in observers {
+            entries.push((observer, Record {
+                target, old_value: if retain_old { self.copy_value(&old)? } else { Value::Null },
+                child_list: None, attribute: Some(Rc::clone(&change)), added_nodes: None, removed_nodes: None,
+            }));
         }
         self.prepare_mutation_records(target, generation, entries)
     }
@@ -388,7 +496,7 @@ impl Runtime {
         self.finish_mutation_records(pending, committed)
     }
 
-    pub(super) fn finish_child_list_write(
+    pub(super) fn finish_tree_observation(
         &mut self, pending: Option<PreparedChange>, host: &dyn Host,
     ) -> Result<(), Fault> {
         let Some(pending) = pending else { return Ok(()) };
@@ -452,7 +560,16 @@ impl Runtime {
             .ok_or_else(|| Fault::exception("TypeError", "Incompatible MutationRecord receiver."))?;
         self.validate_native_access(record.target, host)?;
         match field {
-            "type" => Ok(Value::String(if record.child_list.is_some() { "childList" } else { "characterData" }.into())),
+            "type" => Ok(Value::String(if record.child_list.is_some() { "childList" }
+                else if record.attribute.is_some() { "attributes" } else { "characterData" }.into())),
+            "attributeName" | "attributeNamespace" => {
+                let name = record.attribute.as_ref().and_then(|change| if field == "attributeName" {
+                    Some(change.local_name.as_str())
+                } else { change.namespace.as_deref() });
+                let value = name.map_or(Value::Null, |name| Value::String(name.into()));
+                self.work(value.bytes())?;
+                Ok(value)
+            }
             "previousSibling" => Ok(record.child_list.as_ref().and_then(|change| change.previous).map_or(Value::Null, Value::Host)),
             "nextSibling" => Ok(record.child_list.as_ref().and_then(|change| change.next).map_or(Value::Null, Value::Host)),
             "target" => Ok(Value::Host(record.target)),

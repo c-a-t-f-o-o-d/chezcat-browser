@@ -496,6 +496,12 @@ pub struct NativeChildListChange {
     pub next: Option<u32>,
 }
 
+pub struct NativeAttributeChange {
+    pub local_name: String,
+    pub namespace: Option<String>,
+    pub old_value: Option<String>,
+}
+
 pub trait Host {
     fn tree_walker_document(&self, _document: u32) -> bool { false }
     fn tree_walker_node_type(&self, _node: u32) -> Option<u32> { None }
@@ -506,6 +512,8 @@ pub trait Host {
     fn mutation_tree_generation(&self) -> Option<u64> { None }
     fn mutation_child_list_changes(&mut self, _target: u32, _method: &str, _args: &[Value])
         -> Result<Vec<NativeChildListChange>, String> { Ok(Vec::new()) }
+    fn mutation_attribute_change(&mut self, _target: u32, _method: &str, _args: &[Value])
+        -> Result<Option<NativeAttributeChange>, String> { Ok(None) }
     fn mutation_node_list(&mut self, _nodes: &[u32]) -> Result<u32, String> {
         Err("MutationRecord nodes are unavailable.".into())
     }
@@ -9022,9 +9030,13 @@ impl Runtime {
         let ticket=self.prepare_host_microtask(host,object,method,args,false)?;
         host.native_operation_caller(self.native_access_caller
             .unwrap_or_else(|| self.browser_global.map(|(window, _)| window)));
-        let observation = self.prepare_child_list_write(object, method, args, host)?;
+        let observation = if matches!(method, "setAttribute" | "removeAttribute" | "setAttributeNS" | "removeAttributeNS") {
+            self.prepare_attribute_write(object, method, args, host)?
+        } else {
+            self.prepare_child_list_write(object, method, args, host)?
+        };
         let result=host.call_with_dictionary(object, method, args, fields.as_deref()).map_err(Fault::new);
-        self.finish_child_list_write(observation, host)?;
+        self.finish_tree_observation(observation, host)?;
         if let Ok(value)=&result {self.finish_new_event_result(object,method,value,host)?;}
         if self.drain_native_promise_effects(host)?!=0 {
             self.defer_host_microtask_after_effects(ticket)?;
