@@ -26,7 +26,7 @@ pub(super) struct Activation {
     callee: usize,
     environment: usize,
     next: usize,
-    condition: Option<bool>,
+    expression_operand: Option<LogicalOperand>,
     delegate: Option<Record>,
     pending_call: Option<Box<PendingCall>>,
     scopes: [Option<usize>; 4],
@@ -241,7 +241,7 @@ impl Runtime {
         let result = prepared.and_then(|environment| {
             let frame = Activation {
                 program: Rc::clone(program), template, callee, environment, next: 0, delegate: None, scopes,
-                pending_call: None, condition: None,
+                pending_call: None, expression_operand: None,
                 lexical_scopes: Vec::new(), try_scopes: Vec::new(),
                 this: self.copy_value(this)?,
                 invocation: self.invocation, realm: self.active_realm, native_caller: self.native_access_caller,
@@ -464,8 +464,17 @@ impl Runtime {
                 }
                 Instruction::BranchOnValueFalse(target) => {
                     self.step()?;
-                    if !frame.condition.take().expect("compiled generator branch condition") {
+                    let operand = frame.expression_operand.take().expect("compiled generator branch operand");
+                    if !matches!(operand, LogicalOperand::Truthy) {
                         frame.next = target;
+                    }
+                    continue;
+                }
+                Instruction::Logical { operator, target, action, .. } => {
+                    let operand = frame.expression_operand.take().expect("compiled generator logical operand");
+                    if operand.short_circuits(operator) {
+                        frame.next = target;
+                        Self::apply_generator_expression_action(frame, action, operand);
                     }
                     continue;
                 }
@@ -518,17 +527,21 @@ impl Runtime {
         self.step()?;
         let value = self.eval(&frame.program, expression, frame.environment(), &frame.this, host)
             .map_err(|error| error.at(&frame.program.source, frame.program.stmts[statement].at))?;
+        Self::apply_generator_expression_action(frame, action, LogicalOperand::classify(&value));
+        Ok(())
+    }
+
+    fn apply_generator_expression_action(frame: &mut Activation, action: Resume, operand: LogicalOperand) {
         match action {
-            Resume::StoreExpressionValue => frame.condition = Some(value.truthy()),
+            Resume::StoreExpressionValue => frame.expression_operand = Some(operand),
             Resume::Discard => {}
             Resume::BranchFalse(target) => {
-                if !value.truthy() {
+                if !matches!(operand, LogicalOperand::Truthy) {
                     frame.next = target;
                 }
             }
             _ => unreachable!("compiled generator expression action"),
         }
-        Ok(())
     }
 
     #[inline(never)]

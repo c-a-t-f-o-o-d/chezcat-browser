@@ -98,6 +98,44 @@ if(broken.next().value!==1||broken.next(reason).value!==undefined||caught!==reas
 }
 
 #[test]
+fn generator_yield_respects_short_circuit_expression_statements() {
+    let mut runtime = Runtime::for_test();
+    let source = r#"
+var trace='';
+function read(value){trace+='read|';return value;}
+function relay(value){trace+='call:'+value+'|';}
+function* inner(value){trace+='inner:'+value+'|';yield value;return value*10;}
+function* run(andLeft, orLeft, nullLeft){
+    try{
+        let first=yielded();
+        function yielded(){return 1;}
+        if(first){
+            read(andLeft) && relay(yield* inner(1));
+            read(orLeft) || relay(yield 2);
+            (read(nullLeft) && 3) ?? relay(yield* inner(3));
+        }
+    }finally{trace+='finally|';}
+}
+var skipped=run(0,true,false);
+if(!skipped.next().done||trace!=='read|read|read|finally|')throw 'short-circuited operands ran';
+trace='';
+var selected=run({},0,null);
+if(selected.next().value!==1||trace!=='read|inner:1|')throw 'and prefix';
+if(selected.next().value!==2||trace!=='read|inner:1|call:10|read|')throw 'or prefix';
+if(selected.next(7).value!==3||!trace.endsWith('call:7|read|inner:3|'))throw 'nullish prefix';
+if(!selected.next().done||!trace.endsWith('call:30|finally|'))throw 'nullish completion';
+trace='';
+var cancelled=run(true,false,null);
+cancelled.next();
+if(cancelled.return(9).value!==9||trace!=='read|inner:1|finally|')throw 'abrupt short-circuit continuation';
+'ok';
+"#;
+    assert_eq!(runtime.execute(source, &mut NoHost::default()).unwrap().to_text(), "ok");
+    assert_eq!((runtime.call_depth, runtime.eval_depth), (0, 0));
+    assert!(runtime.transient_registration_is_empty());
+}
+
+#[test]
 fn generator_yield_branch_resumes_only_the_selected_sequence() {
     let mut runtime = Runtime::for_test();
     let source = r#"

@@ -263,7 +263,7 @@ fn visit_expression(
                     part = ExpressionPart::Value(left, Resume::Discard);
                     continue;
                 }
-                ExprKind::Binary(operator @ ("&&" | "||" | "??"), left, right) if !generator => {
+                ExprKind::Binary(operator @ ("&&" | "||" | "??"), left, right) => {
                     push(&mut pending, ExpressionPart::LogicalEnd)?;
                     push(&mut pending, ExpressionPart::Value(right, action))?;
                     push(&mut pending, ExpressionPart::LogicalTest(operator, action))?;
