@@ -1332,6 +1332,7 @@
       "sources": [
         "src/javascript.rs",
         "src/expression_parser.rs",
+        "src/identifier_names.rs",
         "tools/check_javascript.py"
       ]
     },
@@ -1416,6 +1417,7 @@
       "status": "Partial",
       "sources": [
         "src/css.rs",
+        "src/css_attribute_substrings.rs",
         "src/css_media.rs",
         "src/layout.rs",
         "src/layout_scroll.rs",

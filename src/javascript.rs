@@ -23,6 +23,8 @@ mod array_ops;
 mod base64;
 #[path = "binary_data.rs"]
 mod binary_data;
+#[path = "canvas_readback.rs"]
+pub(crate) mod canvas_readback;
 #[path = "binding_length.rs"]
 mod binding_length;
 #[path = "binding_character.rs"]
@@ -108,10 +110,14 @@ mod collections;
 mod date;
 #[path = "rect_api.rs"]
 mod rect_api;
+#[path = "image_data_api.rs"]
+mod image_data_api;
 #[path = "dom_exception.rs"]
 mod dom_exception;
 #[path = "expression_parser.rs"]
 mod expression_parser;
+#[path = "identifier_names.rs"]
+mod identifier_names;
 #[path = "expression_evaluator.rs"]
 mod expression_evaluator;
 #[cfg(test)]
@@ -453,6 +459,13 @@ pub trait Host {
     fn native_access_owner(&self, _object: u32) -> Option<u32> { None }
     /// Real renderer border-box snapshot, when the host implements this method.
     fn bounding_rect_snapshot(&mut self, _object: u32) -> Option<Result<[f64; 4], String>> { None }
+    fn canvas_readback_source(
+        &mut self,
+        _object: u32,
+        _output_bytes: usize,
+    ) -> Result<&crate::canvas_2d_bitmap::CanvasBitmap, String> {
+        Err("Canvas pixels are unavailable.".into())
+    }
     /// Real ordinary expando storage for an explicitly proven native family.
     fn expando_owner(&self, _object:u32) -> Option<u32> { None }
     /// Preserve a native named-read/presence fallback after ordinary own keys.
@@ -930,6 +943,7 @@ impl FaultLocation {
 #[derive(Clone, Debug)]
 enum TokenKind {
     Word(String),
+    EscapedWord(String),
     Number(f64),
     String(String),
     Template(String, template_literals::Part),
@@ -943,13 +957,6 @@ struct Token {
     at: usize,
     end: usize,
     newline: bool,
-}
-
-fn identifier_start(ch: char) -> bool {
-    ch.is_ascii_alphabetic() || matches!(ch, '_' | '$')
-}
-fn identifier_part(ch: char) -> bool {
-    identifier_start(ch) || ch.is_ascii_digit()
 }
 
 fn reserved(name: &str) -> bool {
@@ -1054,24 +1061,25 @@ impl LexGoal {
         let body = self.function_body.take();
         let switch_body = std::mem::take(&mut self.switch_body);
         match token {
-            TokenKind::Word(word) => {
+            TokenKind::Word(word) | TokenKind::EscapedWord(word) => {
+                let keyword = if matches!(token, TokenKind::Word(_)) { word.as_str() } else { "" };
                 let property = matches!(self.previous.as_str(), "." | "?.");
                 let label = !reserved(word)
                     && (self.statement || newline && self.end_expression)
                     && !property;
                 let jump_end = !property
-                    && (matches!(word.as_str(), "break" | "continue" | "return")
+                    && (matches!(keyword, "break" | "continue" | "return")
                         || !newline
                             && self.jump_end
                             && matches!(self.previous.as_str(), "break" | "continue"));
                 if !property
-                    && matches!(word.as_str(), "case" | "default")
+                    && matches!(keyword, "case" | "default")
                     && matches!(self.delimiters.last(), Some(LexDelimiter::SwitchBlock))
                 {
                     self.case_expressions.push((self.delimiters.len(), 0));
                     self.end_expression = false;
                     self.statement = false;
-                } else if word == "function" && !property {
+                } else if keyword == "function" && !property {
                     // A contextual async prefix keeps the statement position it
                     // had before the word, just like a possible label there.
                     let declaration = if !newline && self.previous == "async" && !self.previous_is_property {
@@ -1083,11 +1091,11 @@ impl LexGoal {
                     self.end_expression = false;
                     self.statement = false;
                 } else if !property
-                    && (word == "of"
+                    && (keyword == "of"
                         && self.end_expression
                         && matches!(self.delimiters.last(), Some(LexDelimiter::ForControl))
                         || matches!(
-                            word.as_str(),
+                            keyword,
                             "return"
                                 | "throw"
                                 | "typeof"
@@ -1107,7 +1115,7 @@ impl LexGoal {
                     self.statement = false;
                 } else if !property
                     && matches!(
-                        word.as_str(),
+                        keyword,
                         "else" | "do" | "try" | "finally" | "break" | "continue"
                     )
                 {
@@ -1117,7 +1125,7 @@ impl LexGoal {
                     self.end_expression = true;
                     self.statement = false;
                 }
-                self.previous = word.clone();
+                self.previous = keyword.to_owned();
                 self.previous_is_property = property;
                 self.previous_is_label = label;
                 self.jump_end = jump_end;
@@ -1293,8 +1301,11 @@ fn regexp_literal(
             let pattern_end = *at;
             *at += 1;
             let flags_start = *at;
-            while source[*at..].chars().next().is_some_and(identifier_part) {
-                *at += 1;
+            while let Some(flag) = source[*at..].chars().next().filter(|&ch| identifier_names::part(ch)) {
+                *at += flag.len_utf8();
+            }
+            if source[*at..].starts_with('\\') {
+                return Err(Fault::exception("SyntaxError", "A regexp flag cannot contain an escape.").at(source, *at));
             }
             return regexp::Regex::compile(
                 &source[pattern_start..pattern_end],
@@ -1413,12 +1424,8 @@ fn tokenize_with_capacity(source: &str, regexp_budget: &mut usize, capacity: lim
                 return Err(Fault::new(format!("Retained regexp limit reached ({} MiB).", capacity.retained_regexp / (1024 * 1024))).at(source, start));
             }
             TokenKind::RegExp(expression)
-        } else if identifier_start(ch) {
-            at += 1;
-            while at < source.len() && identifier_part(source[at..].chars().next().unwrap()) {
-                at += 1;
-            }
-            TokenKind::Word(source[start..at].into())
+        } else if identifier_names::start(ch) || ch == '\\' {
+            identifier_names::read(source, &mut at)?
         } else if ch.is_ascii_digit()
             || (ch == '.' && bytes.get(at + 1).is_some_and(u8::is_ascii_digit))
         {
@@ -1456,8 +1463,13 @@ fn tokenize_with_capacity(source: &str, regexp_budget: &mut usize, capacity: lim
                     Fault::exception("SyntaxError", "Invalid number literal.").at(source, start)
                 })?
             };
+            if source[at..].starts_with('\\')
+                || source[at..].chars().next().is_some_and(|ch| !ch.is_ascii() && identifier_names::part(ch))
+            {
+                return Err(Fault::exception("SyntaxError", "An identifier cannot immediately follow a numeric literal.").at(source, at));
+            }
             if at < source.len()
-                && (identifier_part(source[at..].chars().next().unwrap())
+                && (identifier_names::part(source[at..].chars().next().unwrap())
                     || source[at..].starts_with('.'))
             {
                 return Err(Fault::new("Invalid or unsupported numeric literal.").at(source, start));
@@ -1548,6 +1560,8 @@ fn tokenize_with_capacity(source: &str, regexp_budget: &mut usize, capacity: lim
                 );
             }
             TokenKind::String(value)
+        } else if !ch.is_ascii() && identifier_names::part(ch) {
+            return Err(Fault::exception("SyntaxError", "This character can only continue an identifier.").at(source, start));
         } else {
             let Some(punct) = [
                 ">>>=", "**=", "&&=", "||=", "??=", "<<=", ">>=", "===", "!==", ">>>", "...", "=>",
@@ -2012,14 +2026,14 @@ impl Parser {
         }
     }
     fn name(&mut self) -> Result<String, Fault> {
-        if let TokenKind::Word(word) = &self.token().kind {
+        if let TokenKind::Word(word) | TokenKind::EscapedWord(word) = &self.token().kind {
             if !reserved(word) {
                 let word = word.clone();
                 self.current += 1;
                 return Ok(word);
             }
         }
-        Err(self.error("Expected an ASCII identifier."))
+        Err(self.error("Expected an identifier."))
     }
     fn enter(&mut self) -> Result<(), Fault> {
         self.depth += 1;
@@ -2188,7 +2202,7 @@ impl Parser {
     }
 
     fn label_ahead(&self) -> bool {
-        matches!(&self.token().kind, TokenKind::Word(name) if !reserved(name))
+        matches!(&self.token().kind, TokenKind::Word(name) | TokenKind::EscapedWord(name) if !reserved(name))
             && matches!(
                 self.tokens.get(self.current + 1).map(|token| &token.kind),
                 Some(TokenKind::Punct(":"))
@@ -2198,7 +2212,7 @@ impl Parser {
     fn jump_target(&mut self, continued: bool) -> Result<StmtId, Fault> {
         let name = if !self.token().newline {
             match &self.token().kind {
-                TokenKind::Word(word) if !reserved(word) => Some(self.name()?),
+                TokenKind::Word(word) | TokenKind::EscapedWord(word) if !reserved(word) => Some(self.name()?),
                 _ => None,
             }
         } else {
@@ -2498,7 +2512,7 @@ impl Parser {
     fn arrow_ahead(&self) -> bool {
         let tokens = &self.tokens;
         let mut at = self.current;
-        let word = |token: &Token| matches!(&token.kind, TokenKind::Word(name) if !reserved(name));
+        let word = |token: &Token| matches!(&token.kind, TokenKind::Word(name) | TokenKind::EscapedWord(name) if !reserved(name));
         let punct = |token: Option<&Token>, text| matches!(token.map(|t| &t.kind), Some(TokenKind::Punct(value)) if *value == text);
         // In `async => ...`, async itself is the ordinary binding name.
         if self.is("async") && !self.next_is("=>") && !tokens[at + 1].newline {
@@ -2663,6 +2677,13 @@ impl Parser {
                 self.current += 1;
                 ExprKind::RegExp(expression)
             }
+            TokenKind::EscapedWord(name) => {
+                if reserved(&name) {
+                    return Err(self.error("A reserved word cannot be used as an identifier reference."));
+                }
+                self.current += 1;
+                ExprKind::Name(name)
+            }
             TokenKind::Word(word) => {
                 self.current += 1;
                 match word.as_str() {
@@ -2710,6 +2731,7 @@ impl Parser {
                 self.tokens.get(self.current + 1).map(|token| &token.kind),
                 Some(
                     TokenKind::Word(_)
+                        | TokenKind::EscapedWord(_)
                         | TokenKind::String(_)
                         | TokenKind::Number(_)
                         | TokenKind::Punct("[")
@@ -2741,7 +2763,7 @@ impl Parser {
                 (key, None)
             } else {
                 let (name, shorthand) = match self.token().kind.clone() {
-                    TokenKind::Word(name) => {
+                    TokenKind::Word(name) | TokenKind::EscapedWord(name) => {
                         let shorthand = (!reserved(&name)).then(|| name.clone());
                         (name, shorthand)
                     }
@@ -3266,6 +3288,7 @@ enum Builtin {
     Date(date::Op),
     Url(url_api::Op),
     Rect(rect_api::Op),
+    ImageData(image_data_api::Op),
     DomException(dom_exception::Op),
     Eval,
     JsonParse,
@@ -3517,6 +3540,7 @@ pub struct Runtime {
     date_prototype: Option<usize>,
     url_roots: url_api::Roots,
     rect_roots: rect_api::Roots,
+    image_data_prototype: Option<usize>,
     dom_exception_roots: dom_exception::Roots,
     string_prototype: Option<usize>,
     number_prototype: Option<usize>,
@@ -3663,6 +3687,7 @@ impl Runtime {
             date_prototype: None,
             url_roots: url_api::Roots::default(),
             rect_roots: rect_api::Roots::default(),
+            image_data_prototype: None,
             dom_exception_roots: dom_exception::Roots::default(),
             string_prototype: None,
             number_prototype: None,
@@ -3717,7 +3742,7 @@ impl Runtime {
             job_failed_fatally: false,
             diagnostics: runtime_diagnostics::Data::default(),
             failed_window_realms: HashSet::new(),
-            deferred_intrinsics: (if defer_families { 7 } else { 0 }) | 8 | 16,
+            deferred_intrinsics: intrinsic_realms::startup_deferred_families(defer_families),
             failed_intrinsics: 0,
             array_to_string_intrinsic: None,
             deferred_native_methods: Vec::new(),
@@ -3786,6 +3811,8 @@ impl Runtime {
         else { self.reserve_deferred_global_orders(intrinsic_realms::RECT_GLOBALS)?; }
         if self.deferred_intrinsics & 16 == 0 { self.initialize_dom_exception()?; }
         else { self.reserve_deferred_global_orders(intrinsic_realms::DOM_EXCEPTION_GLOBALS)?; }
+        if self.deferred_intrinsics & 32 == 0 { self.initialize_image_data()?; }
+        else { self.reserve_deferred_global_orders(intrinsic_realms::IMAGE_DATA_GLOBALS)?; }
         for (name, value) in [
             ("undefined", Value::Undefined),
             ("NaN", Value::Number(f64::NAN)),
@@ -3986,8 +4013,8 @@ impl Runtime {
     pub fn define_global(&mut self, name: &str, value: Value) -> Result<(), String> {
         if name.len() > 256
             || name.is_empty()
-            || !name.chars().next().is_some_and(identifier_start)
-            || !name.chars().all(identifier_part)
+            || !name.chars().next().is_some_and(identifier_names::start)
+            || !name.chars().all(identifier_names::part)
             || reserved(name)
         {
             return Err(Fault::new("Invalid global identifier.").display());
@@ -7942,6 +7969,9 @@ impl Runtime {
             Some(Function::Native(Builtin::Rect(rect_api::Op::Constructor(mutable)))) => {
                 self.rect_construct(*mutable, args, host)
             }
+            Some(Function::Native(Builtin::ImageData(image_data_api::Op::Constructor))) => {
+                self.image_data_construct(args, host)
+            }
             Some(Function::Native(Builtin::DomException(dom_exception::Op::Constructor))) => {
                 self.dom_exception_construct(args,host)
             }
@@ -8524,13 +8554,22 @@ impl Runtime {
                     converted[index] = self.checked_value(if string_hint {
                         Value::String(primitive.script_text()?)
                     } else {
-                        Value::Number(primitive.script_number()?)
+                        let number = primitive.script_number()?;
+                        Value::Number(if method == canvas_readback::METHOD {
+                            canvas_readback::enforce_long(number)?
+                        } else {
+                            number
+                        })
                     })?;
                 }
             }
             &converted
         };
-        for value in args { self.pin_exported_value(value); }
+        // Readback consumes converted arguments inside this transient call. Its
+        // native pixel source receives no script object or function handles.
+        if method != canvas_readback::METHOD {
+            for value in args { self.pin_exported_value(value); }
+        }
         for &index in host.native_reference_arguments(object,method) {
             if let Some(Value::Host(handle))=args.get(index) {self.validate_native_access(*handle,host)?;}
         }
@@ -8636,6 +8675,9 @@ impl Runtime {
                 }
                 fields = Some(values);
             }
+        }
+        if method == canvas_readback::METHOD {
+            return self.canvas_image_data(object, args, fields.as_deref(), host);
         }
         if let Some(fields) = &fields { for (_, value) in fields { self.pin_exported_value(value); } }
         let ticket=self.prepare_host_microtask(host,object,method,args,false)?;
@@ -8967,6 +9009,9 @@ impl Runtime {
             }
             Some(Function::Native(Builtin::Rect(operation))) => {
                 return self.rect_builtin(*operation, args, this, host);
+            }
+            Some(Function::Native(Builtin::ImageData(operation))) => {
+                return self.image_data_builtin(*operation, this);
             }
             Some(Function::Native(Builtin::DomException(operation))) => {
                 return self.dom_exception_builtin(*operation,this);
@@ -9659,6 +9704,7 @@ impl Runtime {
             | Builtin::Date(_)
             | Builtin::Url(_)
             | Builtin::Rect(_)
+            | Builtin::ImageData(_)
             | Builtin::DomException(_)
             | Builtin::Binary(_)
             | Builtin::Collection(_)

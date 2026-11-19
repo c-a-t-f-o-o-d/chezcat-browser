@@ -2687,6 +2687,13 @@ impl Host for Bridge<'_> {
                 .bounding_rect(self.doc, self.forms, node, &mut self.state.host_work, &mut self.state.copy_work)
         })())
     }
+    fn canvas_readback_source(
+        &mut self,
+        object: u32,
+        output_bytes: usize,
+    ) -> Result<&crate::canvas_2d_bitmap::CanvasBitmap, String> {
+        self.canvas_pixels_for_readback(object, output_bytes)
+    }
 
     fn inherited_assignment(&self, object: u32, property: &str) -> bool {
         script_scroll_offsets::axis(property).is_some() && self.element_selector_receiver(object)
@@ -3655,6 +3662,9 @@ impl Host for Bridge<'_> {
         if CanvasOperation::parse(method) == Some(CanvasOperation::GetContext) {
             return self.canvas_context_dictionary(object, args);
         }
+        if method == crate::javascript::canvas_readback::METHOD {
+            return Some((4, &["colorSpace", "pixelFormat"]));
+        }
         if method==script_node_root::ROOT_METHOD && self.root_node_receiver(object) {return Some((0,&["composed"]));}
         if method=="Event"&&self.event_target_interface(object) {return Some((1,&["bubbles","cancelable","composed"]));}
         if method=="CustomEvent"&&self.event_target_interface(object) {return Some((1,&["bubbles","cancelable","composed","detail"]));}
@@ -3673,6 +3683,7 @@ impl Host for Bridge<'_> {
     }
 
     fn dictionary_member_conversion(&self,object:u32,method:&str,member:&str)->Option<bool>{
+        if method == crate::javascript::canvas_readback::METHOD { return Some(true); }
         if CanvasOperation::parse(method) == Some(CanvasOperation::GetContext) {
             return matches!(member, "colorSpace" | "colorType").then_some(true);
         }
@@ -3680,6 +3691,9 @@ impl Host for Bridge<'_> {
             || method=="MouseEvent"&&matches!(member,"button"|"buttons"|"clientX"|"clientY"|"screenX"|"screenY"))).then_some(false)
     }
     fn validate_dictionary_member(&self,object:u32,method:&str,member:&str,value:&Value)->Result<(),(&'static str,String)>{
+        if method == crate::javascript::canvas_readback::METHOD {
+            return crate::javascript::canvas_readback::validate_setting(member, value);
+        }
         if CanvasOperation::parse(method) == Some(CanvasOperation::GetContext) {
             return script_canvas_context::option_validation(member,value);
         }

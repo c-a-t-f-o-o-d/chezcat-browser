@@ -20,6 +20,7 @@ actual notices below; source visibility alone does not establish exclusive title
 | Selected Test262 tests/harness | Retain tools/reference/test262/LICENSE and hash manifest; upstream BSD notice remains intact |
 | Rust standard library/compiler runtime notices | notices/rust/COPYRIGHT-library.html and the accompanying license collection are refreshed from pinned Rust1.99.1; broader historical notices remain retained |
 | Historical GCC/MinGW runtime notices | Preserve notices/ files; these do not establish current MSVC redistribution rights |
+| Unicode identifier properties | The generated ranges in src/unicode_identifier_ranges.rs derive from Unicode 17.0.0 DerivedCoreProperties.txt, © 2025 Unicode, Inc. The Unicode License V3 is included in notices/Unicode-data-license.txt. |
 | Windows APIs/static CRT | APIs/toolchain are dependencies; verify applicable current Microsoft redistribution terms before binary release |
 | Mozilla NSS certificate data and generated trust subset | Retain trust/mozilla/certdata.txt notices, LICENSE-MPL-2.0.txt, PROVENANCE.json, policy.json and selection.json; upstream MPL-2.0 terms remain separate. The original verifier and conservative data subset do not reproduce the complete Firefox trust policy |
 | Original local fixtures and generated artwork | Retain generator/provenance records. Generated output does not prove exclusive copyright; individual asset and reference provenance still requires confirmation |
