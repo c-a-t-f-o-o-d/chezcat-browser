@@ -124,6 +124,15 @@ fn assignment_reference_bytes(reference: &Reference) -> usize {
     }
 }
 
+fn apply_logical_not(value: Value, negations: usize) -> Value {
+    if negations == 0 {
+        value
+    } else {
+        // After the first ToBoolean, pairs of negations cancel.
+        Value::Bool(value.truthy() == (negations % 2 == 0))
+    }
+}
+
 pub(super) struct Activation {
     program: Rc<Program>,
     template: usize,
@@ -572,12 +581,7 @@ impl Runtime {
                         } else {
                             value
                         };
-                        let value = if negations == 0 {
-                            value
-                        } else {
-                            // After the first ToBoolean, pairs of negations cancel.
-                            Value::Bool(value.truthy() == (negations % 2 == 0))
-                        };
+                        let value = apply_logical_not(value, negations);
                         let value = if let Some(literal) = literal {
                             let PendingLiteral { object, key } = *literal;
                             self.define_literal_member(object, key, value, object_literals::Kind::Data)?;
@@ -737,6 +741,17 @@ impl Runtime {
                     result.map_err(|error: Fault| {
                         error.at(&frame.program.source, frame.program.stmts[statement].at)
                     })
+                }
+                Instruction::BeginLogicalNot(negations) => {
+                    for _ in 1..negations {
+                        self.step()?;
+                    }
+                    Ok(Progress::Continue)
+                }
+                Instruction::FinishLogicalNot { statement, negations, action } => {
+                    let value = apply_logical_not(frame.take_expression_value()?, negations);
+                    self.await_resume_action(frame, action, value, host)
+                        .map_err(|error| error.at(&frame.program.source, frame.program.stmts[statement].at))
                 }
                 Instruction::CaptureComparison(statement) => {
                     self.capture_await_comparison(frame)
