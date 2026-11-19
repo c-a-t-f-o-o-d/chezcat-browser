@@ -705,19 +705,7 @@ impl Runtime {
         new_target: Option<usize>,
         host: &mut dyn Host,
     ) -> Result<Value, Fault> {
-        let prototype = if let Some(target) = new_target {
-            let prototype = self.get_ordinary_property_with_host(Ordinary::Function(target), "prototype", host)?;
-            if let Some(prototype) = Ordinary::from_value(&prototype) {
-                Some(prototype)
-            } else if matches!(prototype, Value::Host(_)) {
-                return Err(Fault::new("Native host object collection prototypes are not implemented."));
-            } else {
-                let realm = self.function_realms[target];
-                self.with_intrinsic_realm(realm, |runtime| Ok(runtime.collection_roots.prototype(kind)))?
-            }
-        } else {
-            self.collection_roots.prototype(kind)
-        };
+        let prototype = self.builtin_instance_prototype(new_target, |runtime| runtime.collection_roots.prototype(kind), host)?;
         let weak_count = if kind.is_weak() {
             Some(self.weak_collection_count.checked_add(1)
                 .ok_or_else(|| Fault::new("Weak collection identity count overflow."))?)

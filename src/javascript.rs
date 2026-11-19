@@ -5923,14 +5923,22 @@ impl Runtime {
         kind: &'static str,
         message: Option<String>,
     ) -> Result<Value, Fault> {
+        let id = self.new_error_object(kind, self.error_prototype(kind))?;
+        if let Some(message) = message {
+            self.store_property(id, "message".into(), Value::String(message), Some((false, true, true)))?;
+        }
+        Ok(Value::Object(id))
+    }
+
+    fn error_prototype(&self, kind: &str) -> Option<Ordinary> {
+        self.error_prototypes.get(kind).or_else(|| self.error_prototypes.get("Error"))
+            .copied().map(Ordinary::Object)
+    }
+
+    fn new_error_object(&mut self, kind: &'static str, prototype: Option<Ordinary>) -> Result<usize, Fault> {
         let id = self.new_object(None)?;
         self.objects[id].error_name = Some(kind);
-        self.objects[id].prototype = self
-            .error_prototypes
-            .get(kind)
-            .or_else(|| self.error_prototypes.get("Error"))
-            .copied()
-            .map(Ordinary::Object);
+        self.objects[id].prototype = prototype;
         if !self.error_prototypes.contains_key(kind) {
             self.store_property(
                 id,
@@ -5939,13 +5947,18 @@ impl Runtime {
                 Some((false, true, true)),
             )?;
         }
-        if let Some(message) = message {
-            self.set_property_throw(id, "message".into(), Value::String(message))?;
-            self.objects[id]
-                .properties
-                .get_mut("message")
-                .unwrap()
-                .enumerable = false;
+        Ok(id)
+    }
+
+    fn construct_error(
+        &mut self, kind: &'static str, args: &[Value], new_target: Option<usize>, host: &mut dyn Host,
+    ) -> Result<Value, Fault> {
+        let prototype = self.builtin_instance_prototype(new_target, |runtime| runtime.error_prototype(kind), host)?;
+        let id = self.new_error_object(kind, prototype)?;
+        if let Some(value) = args.first().filter(|value| !matches!(value, Value::Undefined)) {
+            let value = self.copy_value(value)?;
+            let message = self.primitive_with_hint(value, true, host)?.script_text()?;
+            self.store_property(id, "message".into(), Value::String(message), Some((false, true, true)))?;
         }
         Ok(Value::Object(id))
     }
@@ -8384,9 +8397,13 @@ impl Runtime {
                 }
                 self.regexp_factory(args)
             }
-            Some(Function::Native(
-                builtin @ (Builtin::Object | Builtin::Array | Builtin::Error(_)),
-            )) => self.builtin(*builtin, args, host),
+            Some(Function::Native(Builtin::Error(kind))) => {
+                let kind = *kind;
+                let bytes = args.first().map_or(0, Value::bytes);
+                self.work_as(bytes.saturating_mul(2), WorkKind::NativeInput)?;
+                self.construct_error(kind, args, new_target, host)
+            }
+            Some(Function::Native(builtin @ (Builtin::Object | Builtin::Array))) => self.builtin(*builtin, args, host),
             Some(Function::Native(builtin @ (Builtin::Number | Builtin::Boolean))) => {
                 let value = self.builtin(*builtin, args, host)?;
                 self.box_primitive(value)
@@ -8437,6 +8454,23 @@ impl Runtime {
                 "The value is not a constructor.",
             )),
         }
+    }
+
+    fn builtin_instance_prototype(
+        &mut self, new_target: Option<usize>, intrinsic: impl FnOnce(&Self) -> Option<Ordinary>,
+        host: &mut dyn Host,
+    ) -> Result<Option<Ordinary>, Fault> {
+        let Some(target) = new_target else { return Ok(intrinsic(self)); };
+        let prototype = self.get_ordinary_property_with_host(Ordinary::Function(target), "prototype", host)?;
+        if let Some(prototype) = Ordinary::from_value(&prototype) {
+            return Ok(Some(prototype));
+        }
+        if matches!(prototype, Value::Host(_)) {
+            return Err(Fault::new("Native host object class prototypes are not implemented."));
+        }
+        // A primitive prototype selects the corresponding intrinsic of
+        // newTarget's realm, which can differ from the builtin's realm.
+        self.with_intrinsic_realm(self.function_realms[target], |runtime| Ok(intrinsic(runtime)))
     }
 
     fn script_constructor_receiver(&mut self, constructor: usize, host: &mut dyn Host) -> Result<usize, Fault> {
@@ -10206,15 +10240,7 @@ impl Runtime {
                 self.decode_uri(&value.script_text()?, component)
             }
             Builtin::Base64(encode) => self.base64_builtin(encode, args, host),
-            Builtin::Error(kind) => {
-                let message = if matches!(value, Value::Undefined) {
-                    None
-                } else {
-                    let value = self.copy_value(value)?;
-                    Some(self.primitive_with_hint(value, true, host)?.script_text()?)
-                };
-                self.error_object(kind, message)
-            }
+            Builtin::Error(kind) => self.construct_error(kind, args, None, host),
             Builtin::Object => match value {
                 Value::Null | Value::Undefined => self.new_object(None).map(Value::Object),
                 Value::Object(_) | Value::Function(_) | Value::Host(_) => self.copy_value(value),

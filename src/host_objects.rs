@@ -482,7 +482,7 @@ impl Runtime {
     pub(super) fn supported_class_base(&self, function:usize, host:&dyn Host)->Result<bool,Fault> {
         match self.functions.get(function) {
             Some(Function::Script { .. }
-                | Function::Native(Builtin::Collection(collections::Op::Constructor(_)))) => Ok(true),
+                | Function::Native(Builtin::Collection(collections::Op::Constructor(_)) | Builtin::Error(_))) => Ok(true),
             Some(Function::Host {
                 object, constructible:true, illegal_interface_constructor:true, ..
             }) => {

@@ -1,4 +1,4 @@
-//! Class definitions with Script/null, selected DOM-interface and collection bases.
+//! Class definitions with Script/null, selected DOM-interface, collection and Error bases.
 //! Heritage and computed member names evaluate in the private TDZ scope.
 //! https://tc39.es/ecma262/#sec-runtime-semantics-classdefinitionevaluation
 use super::*;
