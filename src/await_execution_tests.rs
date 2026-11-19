@@ -32,6 +32,67 @@ fn checkpoint(runtime: &mut Runtime) {
 }
 
 #[test]
+fn await_execution_for_of_continue_unwinds_inner_scopes_and_preserves_target_iterator() {
+    let mut runtime = Runtime::for_test();
+    succeeds(&mut runtime, r#"
+var trace='', release, clean, result;
+var gate=new Promise(function(resolve){release=resolve;});
+var cleanup=new Promise(function(resolve){clean=resolve;});
+function sequence(label,values){
+    return {[Symbol.iterator](){
+        let index=0;
+        return {
+            next(){
+                trace+=label+':next'+index+'|';
+                return index<values.length ? {done:false,value:values[index++]} : {done:true};
+            },
+            return(){trace+=label+':close|';return {};}
+        };
+    }};
+}
+async function run(){
+    outer: for(let item of sequence('outer',[1,2,3,4])){
+        if(item===1){
+            for(let child of sequence('inner',[8,9])){
+                try{
+                    await gate;
+                    continue outer;
+                }finally{
+                    trace+='cleanup:start|';
+                    await cleanup;
+                    trace+='cleanup:'+item+':'+child+'|';
+                }
+            }
+            throw 'continue reached the rest of the outer body';
+        }
+        await gate;
+        if(item===2)continue;
+        trace+='break:'+item+'|';
+        break;
+    }
+    return 'done';
+}
+run().then(value=>result=value);
+if(trace!=='outer:next0|inner:next0|'||result!==undefined)throw 'iterators did not suspend';
+'ok';
+"#);
+    runtime.begin_job();
+    succeeds(&mut runtime, "release();'ok';");
+    checkpoint(&mut runtime);
+    succeeds(&mut runtime, r#"
+if(trace!=='outer:next0|inner:next0|cleanup:start|'||result!==undefined)throw 'jump escaped suspended cleanup';
+clean();
+'ok';
+"#);
+    checkpoint(&mut runtime);
+    succeeds(&mut runtime, r#"
+if(trace!=='outer:next0|inner:next0|cleanup:start|cleanup:1:8|inner:close|outer:next1|outer:next2|break:3|outer:close|'||
+    result!=='done')throw 'iterator jump ordering or close';
+'ok';
+"#);
+}
+
+#[test]
 fn await_execution_switch_resumes_fallthrough_and_break_in_one_case_scope() {
     let mut runtime = Runtime::for_test();
     succeeds(&mut runtime, r#"

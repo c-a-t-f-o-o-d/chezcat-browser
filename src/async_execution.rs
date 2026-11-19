@@ -13,6 +13,9 @@ enum ExitScope {
 struct ForOfScope {
     record: iterator_protocol::Record,
     environments: usize,
+    statement: StmtId,
+    next: usize,
+    after: usize,
 }
 
 struct TryScope {
@@ -28,14 +31,15 @@ enum TryPhase {
 }
 
 enum FinallyCompletion {
-    Return(Value),
+    Abrupt(Control),
     Throw(Fault),
 }
 
 impl FinallyCompletion {
     fn value(&self) -> Option<&Value> {
         match self {
-            Self::Return(value) => Some(value),
+            Self::Abrupt(Control::Return(value)) => Some(value),
+            Self::Abrupt(Control::Normal(value) | Control::Break(_, value) | Control::Continue(_, value)) => value.as_ref(),
             Self::Throw(fault) => match fault.exception.as_deref() {
                 Some(Exception::Value(value)) => Some(value),
                 _ => None,
@@ -287,7 +291,7 @@ impl Activation {
 
 enum Progress {
     Continue,
-    Return(Value),
+    Abrupt(Control),
     Suspend(usize),
 }
 
@@ -423,8 +427,8 @@ impl Runtime {
         loop {
             let result = self.await_instruction(&mut frame, resumed.take(), host);
             let result = match result {
-                Ok(Progress::Return(value)) => {
-                    self.unwind_await_exit_scopes(&mut frame, Ok(Control::Return(value)), host)
+                Ok(Progress::Abrupt(control)) => {
+                    self.unwind_await_exit_scopes(&mut frame, Ok(control), host)
                 }
                 Err(error) => {
                     // An abrupt result abandons the current expression before
@@ -465,7 +469,7 @@ impl Runtime {
                     self.unwind_await_environments(&mut frame, 1);
                     let marker = self.publish_await_activation(&frame)?;
                     let result = match completion {
-                        Ok(Progress::Return(value)) => self
+                        Ok(Progress::Abrupt(Control::Return(value))) => self
                             .push_transient_value(&value)
                             .and_then(|()| self.finish_async_result(frame.outer, Ok(value), host)),
                         Err(error) => {
@@ -583,7 +587,7 @@ impl Runtime {
             }
             let code = &frame.program.templates[frame.template].await_plan;
             let Some(instruction) = code.get(frame.next).copied() else {
-                return Ok(Progress::Return(Value::Undefined));
+                return Ok(Progress::Abrupt(Control::Return(Value::Undefined)));
             };
             frame.next += 1;
             let environment = frame.environment()?;
@@ -591,7 +595,7 @@ impl Runtime {
                 Instruction::Statement(statement) => {
                     let control =
                         self.statement(&frame.program, statement, environment, &frame.this, host)?;
-                    Self::await_control(control)
+                    Ok(Self::await_control(control))
                 }
                 Instruction::Declare { statement, index } => {
                     let StmtKind::Declare(kind, declarations) = &frame.program.stmts[statement].kind else {
@@ -664,12 +668,12 @@ impl Runtime {
                     self.enter_await_switch(frame, statement, leave, environment, host)
                         .map_err(|error| error.at(&frame.program.source, frame.program.stmts[statement].at))
                 }
-                Instruction::EnterForOf(statement) => {
-                    self.enter_await_for_of(frame, statement, environment, host)
+                Instruction::EnterForOf { statement, after } => {
+                    self.enter_await_for_of(frame, statement, after, environment, host)
                         .map_err(|error| error.at(&frame.program.source, frame.program.stmts[statement].at))
                 }
-                Instruction::NextForOf { statement, after } => {
-                    self.next_await_for_of(frame, statement, after, environment, host)
+                Instruction::NextForOf(statement) => {
+                    self.next_await_for_of(frame, statement, environment, host)
                         .map_err(|error| error.at(&frame.program.source, frame.program.stmts[statement].at))
                 }
                 Instruction::BranchFalse {
@@ -902,7 +906,7 @@ impl Runtime {
     ) -> Result<Progress, Fault> {
         match action {
             Resume::Discard => Ok(Progress::Continue),
-            Resume::Return => Ok(Progress::Return(value)),
+            Resume::Return => Ok(Progress::Abrupt(Control::Return(value))),
             Resume::StoreExpressionValue => {
                 debug_assert!(frame.expression_value.is_none());
                 frame.expression_value = Some(value);
@@ -931,13 +935,10 @@ impl Runtime {
         }
     }
 
-    fn await_control(control: Control) -> Result<Progress, Fault> {
+    fn await_control(control: Control) -> Progress {
         match control {
-            Control::Normal(_) => Ok(Progress::Continue),
-            Control::Return(value) => Ok(Progress::Return(value)),
-            _ => Err(Fault::new(
-                "Unexpected control completion across an await boundary.",
-            )),
+            Control::Normal(_) => Progress::Continue,
+            abrupt => Progress::Abrupt(abrupt),
         }
     }
 
@@ -978,7 +979,7 @@ impl Runtime {
 
     #[inline(never)]
     fn enter_await_for_of(
-        &mut self, frame: &mut Activation, statement: StmtId, environment: usize, host: &mut dyn Host,
+        &mut self, frame: &mut Activation, statement: StmtId, after: usize, environment: usize, host: &mut dyn Host,
     ) -> Result<Progress, Fault> {
         let Some((kind, pattern, expression)) = async_plan::lexical_for_of(&frame.program, statement) else {
             return Err(Fault::new("Invalid async for-of binding."));
@@ -1000,21 +1001,21 @@ impl Runtime {
         let bytes = std::mem::size_of::<ForOfScope>().saturating_add(record.retained_bytes());
         self.await_storage(frame.retained_bytes().saturating_add(bytes), bytes)?;
         frame.exit_scopes.push(ExitScope::ForOf(Box::new(ForOfScope {
-            record, environments: frame.environments.len(),
+            record, environments: frame.environments.len(), statement, next: frame.next, after,
         })));
         Ok(Progress::Continue)
     }
 
     #[inline(never)]
     fn next_await_for_of(
-        &mut self, frame: &mut Activation, statement: StmtId, after: usize, environment: usize, host: &mut dyn Host,
+        &mut self, frame: &mut Activation, statement: StmtId, environment: usize, host: &mut dyn Host,
     ) -> Result<Progress, Fault> {
         let Some(ExitScope::ForOf(iterator)) = frame.exit_scopes.last_mut() else {
             return Err(Fault::new("Async for-of has no active iterator."));
         };
         let Some(value) = self.iterator_next(&mut iterator.record, host)? else {
+            frame.next = iterator.after;
             frame.exit_scopes.pop();
-            frame.next = after;
             return Ok(Progress::Continue);
         };
         self.step()?;
@@ -1050,7 +1051,7 @@ impl Runtime {
             &frame.program, scope.statement, Ok(Control::Normal(None)),
             environment, &frame.this, host,
         )?;
-        Self::await_control(completion)
+        Ok(Self::await_control(completion))
     }
 
     #[inline(never)]
@@ -1063,9 +1064,8 @@ impl Runtime {
     ) -> Result<Progress, Fault> {
         let pending = match completion {
             Ok(Control::Normal(_)) => None,
-            Ok(Control::Return(value)) => Some(FinallyCompletion::Return(value)),
+            Ok(abrupt) => Some(FinallyCompletion::Abrupt(abrupt)),
             Err(error) => Some(FinallyCompletion::Throw(error)),
-            Ok(other) => return Self::await_control(other),
         };
         let pending = if let Some(pending) = pending {
             let bytes = pending.retained_bytes();
@@ -1092,7 +1092,7 @@ impl Runtime {
         frame.next = scope.after;
         match completion.map(|completion| *completion) {
             None => Ok(Progress::Continue),
-            Some(FinallyCompletion::Return(value)) => Ok(Progress::Return(value)),
+            Some(FinallyCompletion::Abrupt(control)) => Ok(Progress::Abrupt(control)),
             Some(FinallyCompletion::Throw(error)) => Err(error),
         }
     }
@@ -1149,9 +1149,19 @@ impl Runtime {
                 ExitScope::Try(scope) => scope,
                 ExitScope::ForOf(mut iterator) => {
                     self.unwind_await_environments(frame, iterator.environments);
+                    if matches!(completion, Ok(Control::Continue(target, _)) if target == iterator.statement) {
+                        frame.next = iterator.next;
+                        frame.exit_scopes.push(ExitScope::ForOf(iterator));
+                        return Ok(Progress::Continue);
+                    }
+                    let break_here = matches!(completion, Ok(Control::Break(target, _)) if target == iterator.statement);
                     let marker = self.publish_await_activation(frame)?;
                     completion = self.iterator_close(&mut iterator.record, completion, host);
                     self.restore_root_marker(marker);
+                    if break_here && completion.is_ok() {
+                        frame.next = iterator.after;
+                        return Ok(Progress::Continue);
+                    }
                     continue;
                 }
             };
@@ -1193,7 +1203,12 @@ impl Runtime {
                 break;
             }
         }
-        completion.and_then(Self::await_control)
+        match completion {
+            Ok(Control::Break(..) | Control::Continue(..)) => {
+                Err(Fault::new("Unexpected control completion across an await boundary."))
+            }
+            other => other.map(Self::await_control),
+        }
     }
 }
 
@@ -1224,7 +1239,9 @@ mod tests {
                 statement: 0,
                 after: 2,
                 environments: 1,
-                phase: TryPhase::Finally(Some(Box::new(FinallyCompletion::Return(Value::Function(28))))),
+                phase: TryPhase::Finally(Some(Box::new(FinallyCompletion::Abrupt(
+                    Control::Return(Value::Function(28)),
+                )))),
             })],
             expression_value: Some(Value::Function(21)),
             assignments: vec![Reference::ComputedProperty(Value::Object(25), Value::Function(26))],
