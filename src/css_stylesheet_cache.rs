@@ -134,7 +134,9 @@ pub(super) fn prepare(
             }
         }
     }
-    let (sources, errors, _) = admit_stylesheets(doc, sources);
+    let deadline = meter.as_deref().and_then(CssBudget::deadline)
+        .or_else(|| transform_meter.as_deref().and_then(CssBudget::deadline));
+    let (sources, errors, _) = admit_stylesheets(doc, sources, deadline)?;
     let mut rules = Vec::new();
     let mut complete = errors.is_empty();
     let mut has_transform = false;
@@ -146,8 +148,9 @@ pub(super) fn prepare(
             environment,
             doc.stylesheet_limits.rules,
             transform_meter.as_deref_mut(),
+            deadline,
         ) {
-            Err(SheetParseFailure::TransformBudget(error)) => return Err(error),
+            Err(SheetParseFailure::Budget(error)) => return Err(error),
             Err(_) => complete = false,
             Ok(()) => {}
         }

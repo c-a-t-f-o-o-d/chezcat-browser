@@ -91,6 +91,26 @@ fn stylesheet_cache_geometry_sync_keeps_parse_reuse_across_live_invalidations_wi
 }
 
 #[test]
+fn stylesheet_cache_geometry_expired_job_leaves_the_cold_cascade_unpublished() {
+    let doc = crate::html::parse("<link id=sheet rel=stylesheet><div id=box></div>");
+    let node = id(&doc, "box");
+    let forms = Forms::new(&doc);
+    let sheets = HashMap::from([(id(&doc, "sheet"), "#box{opacity:.625}".into())]);
+    let mut geometry = Geometry::new(640, 480, 1.0, &sheets, HashMap::new(), &Book::empty());
+    let (mut work, mut copies) = (100_000, 8_000_000);
+    geometry.set_execution_deadline(Instant::now());
+    let result = geometry.computed_snapshot(&doc, &forms, &mut work, &mut copies);
+    assert_eq!(result.err().as_deref(), Some("CSS computation time limit reached."));
+    assert!(geometry.computed_properties.is_none());
+    assert!(geometry.stylesheet_cache.is_none());
+
+    geometry.begin_job();
+    geometry.set_execution_deadline(Instant::now() + std::time::Duration::from_secs(10));
+    let result = geometry.computed_snapshot(&doc, &forms, &mut work, &mut copies).unwrap();
+    assert_eq!(result.read_opacity(node).unwrap(), Some(0.625));
+}
+
+#[test]
 fn stylesheet_cache_geometry_viewport_change_reparses_current_media_and_keeps_live_values() {
     let doc = crate::html::parse("<link id=sheet rel=stylesheet><div id=box></div>");
     let sheet = id(&doc, "sheet");

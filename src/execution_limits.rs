@@ -125,6 +125,10 @@ pub struct Limits {
     pub startup_seconds: u64,
 }
 
+// Admit the full CSS document's source charge with 256 Mi work units for
+// selector matching, cascade, document structure and other native work.
+const BROWSER_HOST_WORK: usize = crate::css::FULL_STYLESHEET_SOURCE_WORK + 256 * 1024 * 1024;
+
 /// Default for every browser script, callback, timer and microtask checkpoint.
 /// Copy bytes are cumulative charged work, not reserved or retained memory.
 pub const BROWSER: Limits = Limits {
@@ -135,11 +139,11 @@ pub const BROWSER: Limits = Limits {
     copy_bytes: 16 * 1024 * 1024 * 1024,
     regexp_work: 256_000_000,
     job_seconds: 30,
-    host_work: 64_000_000,
+    host_work: BROWSER_HOST_WORK,
     startup_steps: 4_000_000_000,
     startup_copy: 64 * 1024 * 1024 * 1024,
     startup_regexp: 1_024_000_000,
-    startup_host_work: 256_000_000,
+    startup_host_work: BROWSER_HOST_WORK * 4,
     startup_seconds: 120,
 };
 

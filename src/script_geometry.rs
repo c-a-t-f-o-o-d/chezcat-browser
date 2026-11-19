@@ -2,6 +2,7 @@
 //! Scripts may force synchronous layouts after mutations; repeated reads
 //! reuse measurements. No guessed screen dimensions or external renderer.
 use std::collections::HashMap;
+use std::time::Instant;
 
 use crate::fonts::Book;
 use crate::forms::{Forms, Kind};
@@ -29,6 +30,7 @@ pub struct Limits {pub layouts_per_job:usize}
 impl Default for Limits {fn default()->Self{Self {layouts_per_job:1024}}}
 
 pub struct Geometry {
+    execution_deadline: Option<Instant>,
     width: i32,
     height: i32,
     zoom: f32,
@@ -65,6 +67,7 @@ impl Geometry {
         fonts: &Book,
     ) -> Self {
         Self {
+            execution_deadline: None,
             width: width.clamp(1, 16_384),
             height: height.clamp(1, 16_384),
             zoom: valid_zoom(zoom),
@@ -94,6 +97,10 @@ impl Geometry {
 
     pub fn begin_job(&mut self) {
         self.remaining = self.limits.layouts_per_job;
+    }
+
+    pub(crate) fn set_execution_deadline(&mut self, deadline: Instant) {
+        self.execution_deadline = Some(deadline);
     }
     pub fn with_limits(mut self,limits:Limits)->Self{self.limits=limits;self.remaining=limits.layouts_per_job;self}
 
@@ -193,7 +200,8 @@ impl Geometry {
                 return Err("DOM work limit reached during geometry layout.".into());
             }
             *host_work -= doc.nodes.len();
-            let mut budget = crate::css::CssBudget::new(host_work, copy_work);
+            let mut budget = crate::css::CssBudget::new(host_work, copy_work)
+                .with_deadline(self.execution_deadline);
             budget.work(layout::offset_parent_work(doc))?;
             budget.copies(layout::offset_parent_storage(doc.nodes.len()))?;
             let checked = |node| live_checked(forms, node);
@@ -242,7 +250,8 @@ impl Geometry {
             self.remaining -= 1;
             let environment = layout::viewport_style_environment(doc, self.width, self.height, self.zoom);
             let checked = |node| live_checked(forms, node);
-            let mut budget = crate::css::CssBudget::new(host_work, copy_work);
+            let mut budget = crate::css::CssBudget::new(host_work, copy_work)
+                .with_deadline(self.execution_deadline);
             let cascade = crate::css::compute_with_environment_and_properties_budgeted_cached(
                 doc, &self.styles, Some(&checked), Some(environment), &mut budget, self.stylesheet_cache.as_ref(),
             )?;

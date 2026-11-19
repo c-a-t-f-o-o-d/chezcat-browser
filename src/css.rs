@@ -1,5 +1,6 @@
 //! A bounded CSS subset for block, inline and basic flex layout.
 use std::collections::HashMap;
+use std::time::Instant;
 #[path="css_stylesheet_cache.rs"]
 mod stylesheet_cache;
 #[path="css_rule_candidates.rs"]
@@ -14,6 +15,7 @@ mod custom_properties;
 #[path="css_computed_style.rs"]
 mod computed_style;
 pub(crate) use computed_style::{CascadeOutput, ComputedProperties, ComputedStyleUnavailable, CssBudget};
+use computed_style::check_css_deadline;
 pub(crate) fn computed_custom_property_name(name: &str) -> bool { custom_properties::custom_name(name) }
 pub(crate) fn inline_custom_value(value: &str) -> bool { value.len() <= 2048 && custom_properties::valid_syntax(value) }
 #[path="css_overflow.rs"]
@@ -64,13 +66,18 @@ const MAX_GROUPED_BOX_BYTES: usize = 2048;
 const MAX_SELECTOR_BYTES: usize = 512;
 const MAX_SELECTOR_NESTING: usize = 8;
 const MAX_MATCH_STEPS: usize = 128_000_000;
+const STYLESHEET_DOCUMENT_BYTES: usize = 64 * 1024 * 1024;
+const SOURCE_WORK_CHUNK: usize = 64;
+const SOURCE_WORK_PER_CHUNK: usize = 512;
+pub(crate) const FULL_STYLESHEET_SOURCE_WORK: usize =
+    STYLESHEET_DOCUMENT_BYTES / SOURCE_WORK_CHUNK * SOURCE_WORK_PER_CHUNK;
 
 /// Host policy, shared by resource decoding, retention and the complete parser.
 /// These are allowances, never sizes used for maximum-sized preallocation.
 #[derive(Clone,Copy,Debug,PartialEq,Eq)]
 pub struct StylesheetLimits { pub sheet_bytes:usize, pub document_bytes:usize, pub rules:usize }
 impl Default for StylesheetLimits {
-    fn default()->Self {Self{sheet_bytes:8*1024*1024,document_bytes:64*1024*1024,rules:65_536}}
+    fn default()->Self {Self{sheet_bytes:8*1024*1024,document_bytes:STYLESHEET_DOCUMENT_BYTES,rules:65_536}}
 }
 #[derive(Clone,Copy,Debug,Default,PartialEq,Eq)]
 pub struct StylesheetUsage {pub bytes:usize,pub rules:usize}
@@ -149,19 +156,22 @@ fn stylesheet_sources_with<'a>(doc:&'a Document,external:&'a HashMap<usize,Strin
     Ok(sources)
 }
 
-fn admit_stylesheets<'a>(doc:&Document,sources:Vec<SheetCandidate<'a>>) -> (Vec<(usize,std::borrow::Cow<'a,str>)>,Vec<String>,StylesheetUsage) {
+fn admit_stylesheets<'a>(doc:&Document,sources:Vec<SheetCandidate<'a>>,deadline:Option<Instant>) -> Result<(Vec<(usize,std::borrow::Cow<'a,str>)>,Vec<String>,StylesheetUsage),String> {
     let mut accepted=Vec::new();let mut errors=Vec::new();let mut usage=StylesheetUsage::default();
     for candidate in sources {
+        check_css_deadline(deadline)?;
         let (node,source)=match candidate {SheetCandidate::Source(node,source)=>(node,source),SheetCandidate::Error(error)=>{errors.push(error);continue;}};
         match doc.stylesheet_limits.accept(&source,usage) {
             Ok(next)=>{usage=next;accepted.push((node,source));},
             Err(error)=>errors.push(format!("CSS node {node}: {error}")),
         }
     }
-    (accepted,errors,usage)
+    check_css_deadline(deadline)?;
+    Ok((accepted,errors,usage))
 }
 fn accepted_stylesheets_with<'a>(doc:&'a Document,external:&'a HashMap<usize,String>,replacement:Option<(usize,&'a str)>) -> (Vec<(usize,std::borrow::Cow<'a,str>)>,Vec<String>,StylesheetUsage) {
-    admit_stylesheets(doc,stylesheet_sources_with(doc,external,replacement,None).expect("unbudgeted stylesheet source collection"))
+    let sources = stylesheet_sources_with(doc,external,replacement,None).expect("unbudgeted stylesheet source collection");
+    admit_stylesheets(doc,sources,None).expect("unbudgeted stylesheet admission")
 }
 pub(crate) fn accepted_stylesheets<'a>(doc:&'a Document,external:&'a HashMap<usize,String>)->(Vec<(usize,std::borrow::Cow<'a,str>)>,Vec<String>,StylesheetUsage) {accepted_stylesheets_with(doc,external,None)}
 pub fn check_stylesheet_candidate(doc:&Document,external:&HashMap<usize,String>,node:usize,source:&str)->Result<(),String> {
@@ -1323,6 +1333,8 @@ fn compute_cascade(
     if has_transform_declarations {
         has_transform_geometry |= !complete;
     }
+    check_css_deadline(meter.as_deref().and_then(CssBudget::deadline)
+        .or_else(|| transform_meter.as_deref().and_then(CssBudget::deadline)))?;
     Ok(CascadeOutput { styles: computed, computed_properties: ComputedProperties::new(variables, eligible, complete, overflows, positions, transforms, has_transform_geometry, canvas_foregrounds, opacities), stylesheet_cache:prepared.cache })
 }
 
@@ -1520,22 +1532,30 @@ fn parse_sheet(source:&str,rules:&mut Vec<Rule>) {
 }
 
 fn parse_sheet_with_media(source:&str,rules:&mut Vec<Rule>,environment:Option<MediaEnvironment>,maximum_blocks:usize)->Result<(),String> {
-    parse_sheet_with_media_inner(source,rules,environment,maximum_blocks,None).map_err(|error| match error {
-        SheetParseFailure::TransformBudget(message) | SheetParseFailure::Rejected(message) => message,
+    parse_sheet_with_media_inner(source,rules,environment,maximum_blocks,None,None).map_err(|error| match error {
+        SheetParseFailure::Budget(message) | SheetParseFailure::Rejected(message) => message,
     })
 }
-enum SheetParseFailure { TransformBudget(String), Rejected(String) }
+enum SheetParseFailure { Budget(String), Rejected(String) }
 fn parse_sheet_with_media_inner(source:&str,rules:&mut Vec<Rule>,environment:Option<MediaEnvironment>,maximum_blocks:usize,
-    mut transform_meter:Option<&mut CssBudget<'_>>)->Result<(),SheetParseFailure> {
+    mut transform_meter:Option<&mut CssBudget<'_>>,deadline:Option<Instant>)->Result<(),SheetParseFailure> {
     let first=rules.len();
     let mut allocation_failed=false;
-    let mut transform_failure=None;
+    let mut budget_failure=None;
+    let mut blocks=0u8;
     let result=media::walk(source,maximum_blocks,environment,|prelude,body,active| {
+        if blocks==0 {
+            if let Err(error)=check_css_deadline(deadline) {
+                budget_failure=Some(error);
+                return false;
+            }
+        }
+        blocks=blocks.wrapping_add(1);
         if active && !prelude.trim_start().starts_with('@') {
             if let Some(selectors)=parse_selector_list(prelude, true) {
                 let declarations=match parse_declarations_inner(body,MAX_DECLARATIONS,true,transform_meter.as_deref_mut()) {
                     Ok(declarations)=>declarations,
-                    Err(error)=>{transform_failure=Some(error);return false;}
+                    Err(error)=>{budget_failure=Some(error);return false;}
                 };
                 if !selectors.is_empty() && !declarations.is_empty() {
                     if rules.try_reserve(1).is_err() {allocation_failed=true;return false;}
@@ -1545,7 +1565,10 @@ fn parse_sheet_with_media_inner(source:&str,rules:&mut Vec<Rule>,environment:Opt
         }
         true
     });
-    if let Some(error)=transform_failure {rules.truncate(first);return Err(SheetParseFailure::TransformBudget(error));}
+    if let Some(error)=budget_failure.or_else(|| check_css_deadline(deadline).err()) {
+        rules.truncate(first);
+        return Err(SheetParseFailure::Budget(error));
+    }
     if let Err(error)=result {rules.truncate(first);return Err(SheetParseFailure::Rejected(error));}
     if allocation_failed {rules.truncate(first);return Err(SheetParseFailure::Rejected("Stylesheet rule allocation failed.".into()));}
     Ok(())
