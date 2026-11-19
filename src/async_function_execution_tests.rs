@@ -32,6 +32,71 @@ fn checkpoint(runtime: &mut Runtime) {
 }
 
 #[test]
+fn for_await_async_iterator_suspends_steps_and_closes_before_finally() {
+    let mut runtime = Runtime::for_test();
+    succeeds(&mut runtime, r#"
+var trace='', reads=0, steps=0, close, delivered, wrapped=Promise.resolve(17);
+var iterator={return:function(){
+    if(this!==iterator || arguments.length!==0)throw 'close receiver';
+    trace+='close|';
+    return new Promise(function(resolve){close=resolve;});
+}};
+Object.defineProperty(iterator,'next',{get:function(){
+    reads++;
+    return function(){
+        if(this!==iterator || arguments.length!==0)throw 'next receiver';
+        trace+='next|';
+        steps++;
+        return Promise.resolve({done:false,value:steps===1?wrapped:23});
+    };
+}});
+var source={[Symbol.asyncIterator]:function(){if(this!==source)throw 'method receiver';return iterator;}};
+async function walk(){
+    try {
+        for await (const value of source) {
+            if(steps===1){if(value!==wrapped)throw 'native async values stay intact';trace+='first|';continue;}
+            if(value!==23)throw 'second value';
+            trace+='second|';
+            break;
+        }
+        trace+='after|';
+    } finally { trace+='finally|'; }
+    return 42;
+}
+walk().then(function(value){delivered=value;trace+='resolved|';});
+if(trace!=='next|'||reads!==1||delivered!==undefined)throw 'step did not suspend';
+'ok';
+"#);
+    checkpoint(&mut runtime);
+    succeeds(&mut runtime, "if(trace!=='next|first|next|second|close|'||reads!==1||delivered!==undefined)throw trace;close({});'ok';");
+    checkpoint(&mut runtime);
+    succeeds(&mut runtime, "if(trace!=='next|first|next|second|close|after|finally|resolved|'||delivered!==42)throw trace;'ok';");
+}
+
+#[test]
+fn for_await_async_iterator_preserves_throw_and_skips_closing_failed_step() {
+    let mut runtime = Runtime::for_test();
+    succeeds(&mut runtime, r#"
+var fault={}, stepFault={}, recorded='', closes=0;
+function source(failing){return {
+    [Symbol.asyncIterator]:function(){return this;},
+    next:function(){return failing?Promise.reject(stepFault):Promise.resolve({value:1,done:false});},
+    return:function(){closes++;return Promise.reject('close failure');}
+};}
+async function original(){try{for await(let value of source(false)){throw fault;}}
+    catch(error){if(error===fault)recorded+='original|';else throw error;}}
+async function badStep(){try{for await(let value of source(true)){throw 'unreachable';}}
+    catch(error){if(error===stepFault)recorded+='step|';else throw error;}}
+async function badClose(){try{for await(let value of source(false)){break;}}
+    catch(error){if(error==='close failure')recorded+='close|';else throw error;}}
+original();badStep();badClose();
+'ok';
+"#);
+    checkpoint(&mut runtime);
+    succeeds(&mut runtime, "if(recorded!=='step|original|close|'||closes!==2)throw recorded;'ok';");
+}
+
+#[test]
 fn async_function_execution_prefix_this_arguments_defaults_and_lexical_arrow() {
     let mut runtime = Runtime::for_test();
     succeeds(

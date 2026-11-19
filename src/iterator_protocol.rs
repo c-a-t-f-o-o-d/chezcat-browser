@@ -13,7 +13,7 @@ use super::generator_functions::Op as GeneratorOp;
 pub(super) struct Record {
     iterator: Value,
     next: Value,
-    done: bool,
+    pub(super) done: bool,
 }
 
 pub(super) enum Delegated {
@@ -45,13 +45,27 @@ impl Runtime {
         source: &Value,
         host: &mut dyn Host,
     ) -> Result<Option<Value>, Fault> {
+        self.iterator_method_for(source, self.symbol_iterator.unwrap(), host)
+    }
+
+    pub(super) fn async_iterator_method(
+        &mut self,
+        source: &Value,
+        host: &mut dyn Host,
+    ) -> Result<Option<Value>, Fault> {
+        self.iterator_method_for(source, self.symbol_async_iterator.unwrap(), host)
+    }
+
+    fn iterator_method_for(
+        &mut self, source: &Value, key: usize, host: &mut dyn Host,
+    ) -> Result<Option<Value>, Fault> {
         // Approval and origin validation precede even an observable iterator
         // getter. Unrelated native handles keep the explicit refusal.
         if let Value::Host(handle) = source {
             self.validate_indexed_host_iteration(*handle, None, host)?;
         }
         let receiver = self.copy_value(source)?;
-        let method = self.get_symbol_property(receiver, self.symbol_iterator.unwrap(), host)?;
+        let method = self.get_symbol_property(receiver, key, host)?;
         match method {
             Value::Undefined | Value::Null => Ok(None),
             Value::Function(_) => Ok(Some(method)),
@@ -102,6 +116,35 @@ impl Runtime {
         Ordinary::from_value(value).ok_or_else(|| {
             Fault::exception("TypeError", "Iterator operation must return an object.")
         })
+    }
+
+    pub(super) fn iterator_next_result(
+        &mut self, record: &Record, host: &mut dyn Host,
+    ) -> Result<Value, Fault> {
+        let method = self.copy_value(&record.next)?;
+        let receiver = self.copy_value(&record.iterator)?;
+        self.call_value(method, &[], receiver, host)
+    }
+
+    pub(super) fn iterator_result_value(
+        &mut self, result: &Value, host: &mut dyn Host,
+    ) -> Result<Option<Value>, Fault> {
+        let object = self.iterator_ordinary(result)?;
+        if self.get_ordinary_property_with_host(object, "done", host)?.truthy() {
+            Ok(None)
+        } else {
+            self.get_ordinary_property_with_host(object, "value", host).map(Some)
+        }
+    }
+
+    pub(super) fn iterator_return_result(
+        &mut self, record: &Record, host: &mut dyn Host,
+    ) -> Result<Option<Value>, Fault> {
+        let Some(method) = self.iterator_control_method(record, "return", host)? else {
+            return Ok(None);
+        };
+        let receiver = self.copy_value(&record.iterator)?;
+        self.call_value(method, &[], receiver, host).map(Some)
     }
 
     pub(super) fn iterator_next(

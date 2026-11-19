@@ -1946,7 +1946,7 @@ enum StmtKind {
     DoWhile(StmtId, ExprId),
     For(Option<StmtId>, Option<ExprId>, Option<ExprId>, StmtId),
     ForIn(StmtId, ExprId, StmtId),
-    ForOf(StmtId, ExprId, StmtId),
+    ForOf(StmtId, ExprId, StmtId, bool),
     Switch {
         discriminant: ExprId,
         cases: Vec<(Option<ExprId>, usize)>,
@@ -3231,6 +3231,10 @@ impl Parser {
         Ok(ExprKind::Array(elements))
     }
     fn for_head(&mut self, id: StmtId, at: usize) -> Result<StmtKind, Fault> {
+        let asynchronous = self.eat("await");
+        if asynchronous && self.await_count.is_none() {
+            return Err(self.error("for await requires an async function body."));
+        }
         let kind = {
             self.need("(")?;
             let async_head = self.is("async");
@@ -3248,6 +3252,7 @@ impl Parser {
             if self.is("in") || self.is("of") {
                 let of = self.eat("of");
                 if !of {
+                    if asynchronous { return Err(self.error("for await requires an of clause.")); }
                     self.need("in")?;
                 }
                 let initial = initial.ok_or_else(|| {
@@ -3271,7 +3276,7 @@ impl Parser {
                     {
                         if let ExprKind::Name(name) = &self.program.exprs[*expression].kind {
                             self.strict_binding(name, self.strict)?;
-                            if of && async_head && name == "async" {
+                            if of && !asynchronous && async_head && name == "async" {
                                 return Err(self.error("An unparenthesized async identifier cannot be a for-of target."));
                             }
                         }
@@ -3288,11 +3293,13 @@ impl Parser {
                 self.need(")")?;
                 let body = self.loop_body(id)?;
                 if of {
-                    StmtKind::ForOf(initial, source, body)
+                    if asynchronous { *self.await_count.as_mut().expect("async body") += 1; }
+                    StmtKind::ForOf(initial, source, body, asynchronous)
                 } else {
                     StmtKind::ForIn(initial, source, body)
                 }
             } else {
+                if asynchronous { return Err(self.error("for await requires an of clause.")); }
                 self.need(";")?;
                 let condition = if self.is(";") {
                     None
@@ -3447,7 +3454,7 @@ fn collect_var_names_with_work(
                 pending.extend(initial);
                 pending.push(*body);
             }
-            StmtKind::ForIn(initial, _, body) | StmtKind::ForOf(initial, _, body) => {
+            StmtKind::ForIn(initial, _, body) | StmtKind::ForOf(initial, _, body, _) => {
                 pending.push(*initial);
                 pending.push(*body);
             }
@@ -3542,7 +3549,7 @@ fn validate_program(program: &Program) -> Result<(), Fault> {
             | StmtKind::DoWhile(body, _)
             | StmtKind::For(_, _, _, body)
             | StmtKind::ForIn(_, _, body)
-            | StmtKind::ForOf(_, _, body) => validate_body(program, *body)?,
+            | StmtKind::ForOf(_, _, body, _) => validate_body(program, *body)?,
             StmtKind::Try(_, Some((Some(pattern), body)), _) => {
                 let StmtKind::Block(body) = &program.stmts[*body].kind else {
                     unreachable!()
@@ -3563,7 +3570,7 @@ fn validate_program(program: &Program) -> Result<(), Fault> {
         }
         if let StmtKind::For(Some(initial), _, _, body)
         | StmtKind::ForIn(initial, _, body)
-        | StmtKind::ForOf(initial, _, body) = &statement.kind
+        | StmtKind::ForOf(initial, _, body, _) = &statement.kind
         {
             if let StmtKind::Declare(Declaration::Let | Declaration::Const, declarations) =
                 &program.stmts[*initial].kind
@@ -6951,9 +6958,10 @@ impl Runtime {
                 self.while_statement(program, id, env, this, host)
             }
             StmtKind::For(_, _, _, _) => self.for_statement(program, id, env, this, host),
-            StmtKind::ForIn(_, _, _) | StmtKind::ForOf(_, _, _) => {
+            StmtKind::ForIn(_, _, _) | StmtKind::ForOf(_, _, _, false) => {
                 self.for_each_statement(program, id, env, this, host)
             }
+            StmtKind::ForOf(_, _, _, true) => Err(Fault::new("Async iterator loop requires a resumption plan.")),
             StmtKind::Switch { .. } => self.switch_statement(program, id, env, this, host),
             StmtKind::Throw(expression) => {
                 let value = self.eval(program, *expression, env, this, host)?;
@@ -7339,7 +7347,7 @@ impl Runtime {
     ) -> Result<Control, Fault> {
         let (initial, source, body, of) = match &program.stmts[id].kind {
             StmtKind::ForIn(initial, source, body) => (initial, source, body, false),
-            StmtKind::ForOf(initial, source, body) => (initial, source, body, true),
+            StmtKind::ForOf(initial, source, body, false) => (initial, source, body, true),
             _ => unreachable!(),
         };
         let lexical = match &program.stmts[*initial].kind {

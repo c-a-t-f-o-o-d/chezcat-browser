@@ -80,7 +80,7 @@ fn statement_expression(program: &Program, id: StmtId) -> Option<(ExprId, Resume
 }
 
 pub(super) fn lexical_for_of(program: &Program, id: StmtId) -> Option<(Declaration, binding_patterns::Id, ExprId)> {
-    let StmtKind::ForOf(initial, source, _) = program.stmts[id].kind else {
+    let StmtKind::ForOf(initial, source, _, _) = program.stmts[id].kind else {
         return None;
     };
     let StmtKind::Declare(kind @ (Declaration::Let | Declaration::Const), declarations) =
@@ -718,6 +718,7 @@ fn split_statements(program: &Program, template: &Template, expected: usize) -> 
         );
         if children_eligible {
             let before = sites;
+            if matches!(kind, StmtKind::ForOf(_, _, _, true)) { sites += 1; }
             let mut condition_extra = 0;
             if let (false, StmtKind::If(condition, _, _)) = (generator, kind) {
                 let (length, awaits) = expression_size(program, *condition, Resume::BranchFalse(0), false)?;
@@ -749,7 +750,7 @@ fn split_statements(program: &Program, template: &Template, expected: usize) -> 
                 if let Some(initial) = initial { child(*initial, false)?; }
                 child(*body, children_eligible)?;
             }
-            StmtKind::ForIn(initial, _, body) | StmtKind::ForOf(initial, _, body) => {
+            StmtKind::ForIn(initial, _, body) | StmtKind::ForOf(initial, _, body, _) => {
                 child(*initial, false)?;
                 child(*body, children_eligible)?;
             }
@@ -982,7 +983,7 @@ pub(super) fn compile(program: &Program, template: usize, expected_suspensions: 
                     })?;
                     push(&mut pending, Emit::Statement(*body))?;
                 }
-                StmtKind::ForOf(_, _, body) => {
+                StmtKind::ForOf(_, _, body, _) => {
                     let entry = code.len();
                     push(&mut code, Instruction::EnterForOf { statement: id, after: 0 })?;
                     push(&mut code, Instruction::NextForOf(id))?;
