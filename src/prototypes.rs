@@ -433,6 +433,7 @@ impl Runtime {
             "toUpperCase",
             "includes",
             "indexOf",
+            "lastIndexOf",
             "startsWith",
             "endsWith",
             "search",
