@@ -27,6 +27,47 @@ impl Host for NoHost {
 }
 
 #[test]
+fn generator_yield_declaration_initializes_hoisted_and_lexical_bindings_on_resume() {
+    let mut runtime = Runtime::for_test();
+    let source = r#"
+var readVar, readConst, failure={}, caught, finalized=0;
+function relay(value){if(value===failure)throw value;return value;}
+function* inner(){yield 2;return 7;}
+function* variable(){
+    readVar=()=>value;
+    try{var value=relay(yield* inner());}
+    finally{finalized++;}
+    return value;
+}
+function* lexical(){
+    readConst=()=>value;
+    const {value}=relay(yield 3);
+    return value;
+}
+function* failed(){
+    try{var value=relay(yield 4);}
+    catch(error){caught=error;}
+    return value;
+}
+var first=variable();
+if(first.next().value!==2||readVar()!==undefined||finalized)throw 'hoisted var prefix';
+var result=first.next();
+if(!result.done||result.value!==7||readVar()!==7||finalized!==1)throw 'var initializer';
+var second=lexical(), denied=false;
+if(second.next().value!==3)throw 'lexical suspension';
+try{readConst();}catch(error){if(error.name!=='ReferenceError')throw error;denied=true;}
+if(!denied||second.next({value:9}).value!==9||readConst()!==9)throw 'const pattern or TDZ';
+var third=failed();
+third.next();
+if(third.next(failure).value!==undefined||caught!==failure)throw 'failed initializer changed binding';
+'ok';
+"#;
+    assert_eq!(runtime.execute(source, &mut NoHost::default()).unwrap().to_text(), "ok");
+    assert_eq!((runtime.call_depth, runtime.eval_depth), (0, 0));
+    assert!(runtime.transient_registration_is_empty());
+}
+
+#[test]
 fn generator_yield_assignment_keeps_the_original_reference_and_skips_failed_writes() {
     let mut runtime = Runtime::for_test();
     let source = r#"
