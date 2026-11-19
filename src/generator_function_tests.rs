@@ -98,6 +98,46 @@ if(broken.next().value!==1||broken.next(reason).value!==undefined||caught!==reas
 }
 
 #[test]
+fn generator_yield_conditional_initializer_selects_one_branch_and_keeps_tdz() {
+    let mut runtime = Runtime::for_test();
+    let source = r#"
+var trace='', read, marker={};
+function mark(label,value){trace+=label+'|';return value;}
+function relay(value){trace+='call|';return value;}
+function* items(){yield 5;return {value:marker};}
+function* run(flag){
+    try{
+        let before=mark('before',1), {value}=mark('choice',flag)
+            ? relay(yield* items()) : mark('other',{value:marker}),
+            after=mark('after',2);
+        return before+after===3&&value===marker;
+    }finally{trace+='finally|';}
+}
+function* captures(flag){
+    read=()=>value;
+    let value=flag ? relay(yield 6) : marker;
+    return value;
+}
+var selected=run(true);
+if(selected.next().value!==5||trace!=='before|choice|')throw 'selected initializer prefix';
+if(selected.next().value!==true||trace!=='before|choice|call|after|finally|')
+    throw 'selected initializer order or destructuring';
+trace='';
+var skipped=run(false);
+if(skipped.next().value!==true||trace!=='before|choice|other|after|finally|')
+    throw 'unchosen yield suspended';
+var reference=captures(true), tdz=false;
+if(reference.next().value!==6)throw 'missing yield';
+try{read();}catch(error){if(error.name!=='ReferenceError')throw error;tdz=true;}
+if(!tdz||reference.next(marker).value!==marker||read()!==marker)throw 'incorrect initialization';
+'ok';
+"#;
+    assert_eq!(runtime.execute(source, &mut NoHost::default()).unwrap().to_text(), "ok");
+    assert_eq!((runtime.call_depth, runtime.eval_depth), (0, 0));
+    assert!(runtime.transient_registration_is_empty());
+}
+
+#[test]
 fn generator_yield_in_return_sequence_preserves_value_and_cleanup() {
     let mut runtime = Runtime::for_test();
     let source = r#"

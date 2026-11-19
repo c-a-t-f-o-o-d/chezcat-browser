@@ -525,10 +525,14 @@ impl Runtime {
         self.step()?;
         let value = self.eval(&frame.program, expression, frame.environment(), &frame.this, host)
             .map_err(|error| error.at(&frame.program.source, frame.program.stmts[statement].at))?;
-        if matches!(action, Resume::Return) {
-            return Ok(Control::Return(value));
+        match action {
+            Resume::Return => return Ok(Control::Return(value)),
+            Resume::Initialize { kind, pattern } => {
+                self.initialize_generator_declaration(frame, kind, pattern, value, host)
+                    .map_err(|error| error.at(&frame.program.source, frame.program.stmts[statement].at))?;
+            }
+            _ => Self::apply_generator_expression_action(frame, action, LogicalOperand::classify(&value)),
         }
-        Self::apply_generator_expression_action(frame, action, LogicalOperand::classify(&value));
         Ok(Control::Normal(None))
     }
 
@@ -626,13 +630,27 @@ impl Runtime {
                     self.write_reference(reference, result, host)
                 }
                 Destination::Initialize { kind, pattern } => {
-                    self.push_transient_value(&result)?;
-                    let mode = self.declaration_mode(kind, environment)?;
-                    self.initialize_pattern(&frame.program, pattern, result, mode, environment, &frame.this, host)
+                    self.initialize_generator_declaration(frame, kind, pattern, result, host)
                 }
             }
         })();
         self.restore_root_marker(marker);
+        result
+    }
+
+    #[inline(never)]
+    fn initialize_generator_declaration(
+        &mut self, frame: &Activation, kind: Declaration, pattern: binding_patterns::Id,
+        value: Value, host: &mut dyn Host,
+    ) -> Result<(), Fault> {
+        let environment = frame.environment();
+        let marker = self.transient_marker();
+        let result = (|| {
+            self.push_transient_value(&value)?;
+            let mode = self.declaration_mode(kind, environment)?;
+            self.initialize_pattern(&frame.program, pattern, value, mode, environment, &frame.this, host)
+        })();
+        self.restore_transient_marker(marker);
         result
     }
 

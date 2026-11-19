@@ -105,10 +105,15 @@ impl<T> GeneratorCallDestination<T> {
     }
 }
 
-fn generator_declarator_yield(
-    program: &Program, kind: Declaration, (pattern, initial): (binding_patterns::Id, Option<ExprId>),
+fn generator_expression_yield(
+    program: &Program, expression: ExprId, action: Resume,
 ) -> Option<GeneratorCallYield> {
-    generator_call_yield(program, initial?, GeneratorCallDestination::Initialize { kind, pattern })
+    let destination = match action {
+        Resume::Discard => GeneratorCallDestination::Discard,
+        Resume::Initialize { kind, pattern } => GeneratorCallDestination::Initialize { kind, pattern },
+        _ => return None,
+    };
+    generator_call_yield(program, expression, destination)
 }
 
 fn generator_call_yield(
@@ -264,9 +269,9 @@ fn visit_expression(
                     continue;
                 }
                 // The generator's short-circuit slot stores the operand class.
-                // Returning a logical expression needs its actual value.
+                // Returning or initializing needs the actual value.
                 ExprKind::Binary(operator @ ("&&" | "||" | "??"), left, right)
-                    if !generator || !matches!(action, Resume::Return) =>
+                    if !generator || !matches!(action, Resume::Return | Resume::Initialize { .. }) =>
                 {
                     push(&mut pending, ExpressionPart::LogicalEnd)?;
                     push(&mut pending, ExpressionPart::Value(right, action))?;
@@ -334,8 +339,7 @@ fn expression_size(
             ExpressionPart::Value(expression, action) => {
                 instructions += 1;
                 sites += usize::from(if generator {
-                    matches!(action, Resume::Discard)
-                        && generator_call_yield(program, expression, GeneratorCallDestination::Discard).is_some()
+                    generator_expression_yield(program, expression, action).is_some()
                 } else {
                     await_expression(program, expression).is_some()
                 });
@@ -352,20 +356,27 @@ fn expression_size(
     Ok((instructions, sites))
 }
 
-fn statement_size(program: &Program, id: StmtId) -> Result<(usize, usize), Fault> {
-    if let StmtKind::Declare(_, declarations) = &program.stmts[id].kind {
-        let (mut instructions, mut sites) = (0, 0);
-        for &(_, initial) in declarations {
-            let (length, awaits) = initial.map(|expression| expression_size(program, expression, Resume::Discard, false))
-                .transpose()?.unwrap_or((1, 0));
-            instructions += if awaits == 0 { 1 } else { length };
-            sites += awaits;
+fn statement_size(program: &Program, id: StmtId, generator: bool) -> Result<(usize, usize), Fault> {
+    match &program.stmts[id].kind {
+        StmtKind::Yield(_) | StmtKind::YieldFrom(_) if generator => Ok((1, 1)),
+        StmtKind::Declare(kind, declarations) => {
+            let (mut instructions, mut sites) = (0, 0);
+            for &(pattern, initial) in declarations {
+                let action = Resume::Initialize { kind: *kind, pattern };
+                let (length, suspensions) = initial.map(|expression| expression_size(program, expression, action, generator))
+                    .transpose()?.unwrap_or((1, 0));
+                instructions += if suspensions == 0 { 1 } else { length };
+                sites += suspensions;
+            }
+            Ok((instructions, sites))
         }
-        Ok((instructions, sites))
-    } else if let Some((expression, action)) = statement_expression(program, id) {
-        expression_size(program, expression, action, false)
-    } else {
-        Ok((1, 0))
+        _ => {
+            if let Some((expression, action)) = statement_expression(program, id) {
+                expression_size(program, expression, action, generator)
+            } else {
+                Ok((1, 0))
+            }
+        }
     }
 }
 
@@ -377,10 +388,7 @@ fn emit_expression(
     visit_expression(program, expression, action, generator, |part| {
         let instruction = match part {
             ExpressionPart::Value(expression, action) if generator => {
-                let call = matches!(action, Resume::Discard)
-                    .then(|| generator_call_yield(program, expression, GeneratorCallDestination::Discard))
-                    .flatten();
-                if let Some(call) = call {
+                if let Some(call) = generator_expression_yield(program, expression, action) {
                     Instruction::Yield { statement: id, call: Some(call) }
                 } else {
                     Instruction::Evaluate { statement: id, expression, action }
@@ -495,24 +503,7 @@ fn split_statements(program: &Program, template: &Template, expected: usize) -> 
         };
         let kind = &program.stmts[id].kind;
         if eligible {
-            let (length, suspensions) = if generator {
-                match kind {
-                    StmtKind::Expr(_) | StmtKind::Return(Some(_)) => {
-                        let (expression, action) = statement_expression(program, id).expect("expression statement");
-                        expression_size(program, expression, action, true)?
-                    }
-                    StmtKind::Yield(_) | StmtKind::YieldFrom(_) => (1, 1),
-                    StmtKind::Declare(kind, declarations) => {
-                        let sites = declarations.iter()
-                            .filter(|&&declarator| generator_declarator_yield(program, *kind, declarator).is_some())
-                            .count();
-                        (declarations.len(), sites)
-                    }
-                    _ => (1, 0),
-                }
-            } else {
-                statement_size(program, id)?
-            };
+            let (length, suspensions) = statement_size(program, id, generator)?;
             if suspensions != 0 {
                 instructions += length - 1;
                 sites += suspensions;
@@ -743,15 +734,10 @@ pub(super) fn compile(program: &Program, template: usize, expected_suspensions: 
                 StmtKind::Yield(_) | StmtKind::YieldFrom(_) => push(&mut code, Instruction::Yield { statement: id, call: None })?,
                 StmtKind::Declare(kind, declarations) => {
                     for (index, &(pattern, initial)) in declarations.iter().enumerate() {
-                        if generator {
-                            if let Some(call) = generator_declarator_yield(program, *kind, (pattern, initial)) {
-                                push(&mut code, Instruction::Yield { statement: id, call: Some(call) })?;
-                                continue;
-                            }
-                        } else if let Some(expression) = initial {
+                        if let Some(expression) = initial {
                             let action = Resume::Initialize { kind: *kind, pattern };
-                            if expression_size(program, expression, action, false)?.1 != 0 {
-                                emit_expression(program, id, expression, action, false, &mut code)?;
+                            if expression_size(program, expression, action, generator)?.1 != 0 {
+                                emit_expression(program, id, expression, action, generator, &mut code)?;
                                 continue;
                             }
                         }
