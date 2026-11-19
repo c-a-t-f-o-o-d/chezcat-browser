@@ -657,7 +657,8 @@ fn split_statements(program: &Program, template: &Template, expected: usize) -> 
         }
         let children_eligible = eligible && (
             matches!(kind, StmtKind::Block(_) | StmtKind::If(..) | StmtKind::Try(_, _, _) | StmtKind::For(None, _, _, _))
-                || (!generator && (matches!(kind, StmtKind::Switch { .. }) || lexical_for_of(program, id).is_some()))
+                || lexical_for_of(program, id).is_some()
+                || (!generator && matches!(kind, StmtKind::Switch { .. }))
         );
         if children_eligible {
             let before = sites;
@@ -713,7 +714,7 @@ fn split_statements(program: &Program, template: &Template, expected: usize) -> 
     // Switch breaks and iterator loop jumps have their own exits.
     // Other split ancestors still need explicit subtree unwinding.
     for (id, target, switch_break) in jumps {
-        if split.contains(&target) && !switch_break && lexical_for_of(program, target).is_none() {
+        if split.contains(&target) && !switch_break && (generator || lexical_for_of(program, target).is_none()) {
             let message = if generator { "A jump to a statement split by yield is not implemented." }
                 else { "A jump to a statement split by await is not implemented." };
             return Err(Fault::new(message)
