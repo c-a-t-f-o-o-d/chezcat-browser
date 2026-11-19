@@ -700,12 +700,54 @@ document.title='element-expando-first-ok';
 }
 
 #[test]
+fn ordinary_properties_follow_verified_html_elements_and_keep_native_control_slots() {
+    let (mut doc, mut forms, mut page, outcome) = page(
+        "<div id=known></div><table id=table></table><form id=f><input name=probe id=field>+         <select id=select name=choice><option value=a>one</option><option value=b selected>two</option></select></form>",
+        &[r#"
+var div=document.getElementById('known'), table=document.getElementById('table');
+var select=document.getElementById('select'), form=document.getElementById('f'), field=document.getElementById('field');
+var receivers=[div,table,select], token=Symbol('ordinary property');
+Object.defineProperty(HTMLElement.prototype,'receiverProbe',{configurable:true,get:function(){return this.id;}});
+for(var i=0;i<receivers.length;i++){
+    var e=receivers[i];
+    if(e.missingProbe!==undefined||'missingProbe' in e||e.receiverProbe!==e.id||
+        Object.hasOwn(e,'receiverProbe'))throw 'ordinary inheritance';
+    Object.defineProperty(e,'ownProbe',{value:e.id,writable:true,enumerable:true,configurable:true});
+    e[token]=i;
+    if(Object.getOwnPropertyDescriptor(e,'ownProbe').value!==e.id||e[token]!==i||
+        Object.getOwnPropertySymbols(e)[0]!==token)throw 'ordinary descriptors';
+    delete e.ownProbe;delete e[token];
+    if(e.ownProbe!==undefined||Object.hasOwn(e,token))throw 'ordinary deletion';
+}
+if(select.value!=='b'||select.selectedIndex!==1||select.form!==form||form.probe!==field||
+    Object.hasOwn(select,'selectedIndex'))throw 'native control readback';
+select.selectedIndex=0;
+if(select.value!=='a'||select.selectedIndex!==0||form.probe!==field)throw 'native control write';
+delete HTMLElement.prototype.receiverProbe;
+document.title='verified-html-ordinary-properties';
+"#],
+    );
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    assert_eq!(doc.title, "verified-html-ordinary-properties");
+    for operation in [
+        "Object.defineProperty(select,'selectedIndex',{value:99});",
+        "Object.defineProperty(select,'0',{value:99});",
+    ] {
+        let denied = page.console_eval(&mut doc, &mut forms, operation);
+        assert_eq!(denied.errors, 1, "{}", page.report());
+    }
+    let restored = page.console_eval(&mut doc, &mut forms,
+        "if(select.selectedIndex!==0||select.value!=='a'||form.probe!==field)throw 'native slots changed';");
+    assert_eq!(restored.errors, 0, "{}", page.report());
+}
+
+#[test]
 fn unsupported_element_lookup_reports_native_receiver_provenance() {
     let (_, _, page, outcome) = page("<table id=secret-marker></table>",
-        &["document.getElementById('secret-marker').ordinaryProbe;"]);
+        &["document.getElementById('secret-marker').getBoxQuads;"]);
     assert_eq!(outcome.errors, 1, "{}", page.report());
     let report = page.report();
-    let line = report.lines().find(|line| line.contains("Element property \"ordinaryProbe\" is not supported"))
+    let line = report.lines().find(|line| line.contains("Element property \"getBoxQuads\" is not supported"))
         .expect("native lookup diagnostic");
     assert!(line.contains("tag=table"), "{line}");
     assert!(line.contains("namespace=http://www.w3.org/1999/xhtml"), "{line}");
@@ -1249,7 +1291,7 @@ word.setAttribute('data-words','left\tready\nlast\fend\rtrail');if(!word.matches
 fn unavailable_animation_feature_reads_are_absent_without_advertising_or_running_animation() {
     let (mut doc,mut forms,mut page,outcome)=page("<html><body><div id=d></div><form id=f><input name=animate id=control></form><video id=video></video><x-custom id=custom></x-custom><unlisted id=opaque></unlisted><svg id=foreign></svg></body></html>",&[r#"
 var d=document.getElementById('d'),created=document.createElement('span'),video=document.getElementById('video'),calls=0;
-for(var element of [document.documentElement,document.body,d,created,video,document.getElementById('custom')]){
+for(var element of [document.documentElement,document.body,d,created,video,document.getElementById('custom'),document.getElementById('opaque')]){
  if(element.animate!==undefined||typeof element.animate!=='undefined'||'animate' in element)throw 'absent animation';
  if(element.animate)calls++;
  var caught=false;try{element.animate([]);}catch(e){caught=e instanceof TypeError;}if(!caught)throw 'missing method call';
@@ -1263,7 +1305,8 @@ document.title='animation-absence-ok';
         let outcome=page.console_eval(&mut doc,&mut forms,operation);assert_eq!(outcome.errors,1,"{operation}: {}",page.report());assert_eq!(page.state.dom_commits,commits);assert_eq!(doc.nodes.len(),nodes);assert!(!page.has_host_tasks());
     }
     let mut bridge=Bridge {doc:&mut doc,forms:&mut forms,state:&mut page.state};
-    for id in ["foreign","opaque"] {let node=bridge.doc.nodes.iter().enumerate().find_map(|(n,_)|(bridge.doc.attr(n,"id")==Some(id)).then_some(n)).unwrap();assert!(bridge.get(node_handle(node),"animate").is_err(),"{id} must retain its unsupported boundary");}
+    let foreign=bridge.doc.nodes.iter().enumerate().find_map(|(n,_)|(bridge.doc.attr(n,"id")==Some("foreign")).then_some(n)).unwrap();
+    assert!(bridge.get(node_handle(foreign),"animate").is_err(),"foreign animation capability remains unavailable");
 }
 
 #[test]
