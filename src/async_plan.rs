@@ -85,18 +85,41 @@ pub(super) struct GeneratorCallYield {
     pub(super) callee: ExprId,
     pub(super) operand: Option<ExprId>,
     pub(super) delegate: bool,
-    pub(super) target: Option<ExprId>,
+    pub(super) destination: GeneratorCallDestination<ExprId>,
+}
+
+#[derive(Clone, Copy)]
+pub(super) enum GeneratorCallDestination<T> {
+    Discard,
+    Assign(T),
+    Initialize { kind: Declaration, pattern: binding_patterns::Id },
+}
+
+impl<T> GeneratorCallDestination<T> {
+    pub(super) fn assignment(&self) -> Option<&T> {
+        match self {
+            Self::Assign(target) => Some(target),
+            _ => None,
+        }
+    }
 }
 
 pub(super) fn generator_call_yield(program: &Program, statement: StmtId) -> Option<GeneratorCallYield> {
-    let StmtKind::Expr(expression) = program.stmts[statement].kind else { return None };
-    let (call, target) = match program.exprs[expression].kind {
-        ExprKind::Assign("=", target, right)
-            if matches!(program.exprs[target].kind, ExprKind::Name(_) | ExprKind::Member(..)) =>
-        {
-            (right, Some(target))
+    use GeneratorCallDestination::{Assign, Discard, Initialize};
+    let (call, destination) = match &program.stmts[statement].kind {
+        StmtKind::Expr(expression) => match program.exprs[*expression].kind {
+            ExprKind::Assign("=", target, right)
+                if matches!(program.exprs[target].kind, ExprKind::Name(_) | ExprKind::Member(..)) =>
+            {
+                (right, Assign(target))
+            }
+            _ => (*expression, Discard),
+        },
+        StmtKind::Declare(kind, declarations) => {
+            let [(pattern, Some(initial))] = declarations.as_slice() else { return None };
+            (*initial, Initialize { kind: *kind, pattern: *pattern })
         }
-        _ => (expression, None),
+        _ => return None,
     };
     let ExprKind::Call(callee, arguments) = &program.exprs[call].kind else { return None };
     if !matches!(program.exprs[*callee].kind, ExprKind::Name(_)) {
@@ -104,7 +127,7 @@ pub(super) fn generator_call_yield(program: &Program, statement: StmtId) -> Opti
     }
     let [Argument { expression, spread: false }] = arguments.as_slice() else { return None };
     let ExprKind::Yield { operand, delegate } = program.exprs[*expression].kind else { return None };
-    Some(GeneratorCallYield { callee: *callee, operand, delegate, target })
+    Some(GeneratorCallYield { callee: *callee, operand, delegate, destination })
 }
 
 struct AwaitSite {

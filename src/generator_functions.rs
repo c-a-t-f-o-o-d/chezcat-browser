@@ -2,7 +2,7 @@
 //! https://tc39.es/ecma262/#sec-generatorfunction-definitions
 //! https://tc39.es/ecma262/#sec-generator-objects
 use super::function_reachability::Edge;
-use super::async_plan::Instruction;
+use super::async_plan::{GeneratorCallDestination as Destination, Instruction};
 use super::iterator_protocol::{Delegated, Record};
 use super::*;
 
@@ -46,13 +46,13 @@ struct TryScope {
 struct PendingCall {
     function: Value,
     direct_eval: bool,
-    assignment: Option<Reference>,
+    destination: Destination<Reference>,
 }
 
 impl PendingCall {
     fn retained_bytes(&self) -> usize {
         std::mem::size_of::<Self>().saturating_add(self.function.bytes())
-            .saturating_add(self.assignment.as_ref().map_or(0, Reference::assignment_bytes))
+            .saturating_add(self.destination.assignment().map_or(0, Reference::assignment_bytes))
     }
 }
 
@@ -89,7 +89,7 @@ impl Activation {
         }
         if let Some(call) = &self.pending_call {
             Edge::value(&call.function, add);
-            if let Some(reference) = &call.assignment {
+            if let Some(reference) = call.destination.assignment() {
                 Edge::reference(reference, add);
             }
         }
@@ -107,7 +107,7 @@ impl State {
         match self {
             Self::SuspendedStart(frame) | Self::SuspendedYield(frame) => {
                 6 + frame.lexical_scopes.len() + 2 * usize::from(frame.delegate.is_some())
-                    + frame.pending_call.as_ref().map_or(0, |call| 1 + 2 * usize::from(call.assignment.is_some()))
+                    + frame.pending_call.as_ref().map_or(0, |call| 1 + 2 * usize::from(call.destination.assignment().is_some()))
             }
             _ => 0,
         }
@@ -118,7 +118,7 @@ impl State {
             roots.extend(frame.scopes.into_iter().flatten());
             roots.extend(frame.lexical_scopes.iter().copied());
             if let Some(Reference::Binding(environment, _)) = frame.pending_call.as_ref()
-                .and_then(|call| call.assignment.as_ref())
+                .and_then(|call| call.destination.assignment())
             {
                 roots.push(*environment);
             }
@@ -493,7 +493,7 @@ impl Runtime {
             let (operand, delegate) = match frame.program.stmts[statement].kind {
                 StmtKind::Yield(operand) => (operand, false),
                 StmtKind::YieldFrom(operand) => (Some(operand), true),
-                StmtKind::Expr(_) => {
+                StmtKind::Expr(_) | StmtKind::Declare(..) => {
                     let call = async_plan::generator_call_yield(&frame.program, statement)
                         .expect("compiled generator call argument");
                     self.capture_generator_call(frame, &call, host)?;
@@ -519,18 +519,23 @@ impl Runtime {
     fn capture_generator_call(
         &mut self, frame: &mut Activation, site: &async_plan::GeneratorCallYield, host: &mut dyn Host,
     ) -> Result<(), Fault> {
-        let assignment = if let Some(target) = site.target {
-            self.step()?;
-            let reference = self.reference(&frame.program, target, frame.environment(), &frame.this, host)?;
-            self.push_transient_reference(&reference)?;
-            Some(reference)
-        } else {
-            None
+        let destination = match site.destination {
+            Destination::Discard => Destination::Discard,
+            Destination::Assign(target) => {
+                self.step()?;
+                let reference = self.reference(&frame.program, target, frame.environment(), &frame.this, host)?;
+                self.push_transient_reference(&reference)?;
+                Destination::Assign(reference)
+            }
+            Destination::Initialize { kind, pattern } => {
+                self.step()?;
+                Destination::Initialize { kind, pattern }
+            }
         };
         let function = self.eval(&frame.program, site.callee, frame.environment(), &frame.this, host)?;
         self.push_transient_value(&function)?;
         let direct_eval = matches!(&frame.program.exprs[site.callee].kind, ExprKind::Name(name) if name == "eval");
-        let call = PendingCall { function, direct_eval, assignment };
+        let call = PendingCall { function, direct_eval, destination };
         let bytes = call.retained_bytes();
         self.check_generator_retention(bytes)?;
         frame.pending_call = Some(Box::new(call));
@@ -542,21 +547,29 @@ impl Runtime {
     fn finish_generator_argument(&mut self, frame: &mut Activation, value: Value, host: &mut dyn Host) -> Result<(), Fault> {
         let Some(call) = frame.pending_call.take() else { return Ok(()) };
         self.value_bytes -= call.retained_bytes();
-        let PendingCall { function, direct_eval, assignment } = *call;
-        let direct = direct_eval.then_some((frame.environment(), &frame.this));
+        let PendingCall { function, direct_eval, destination } = *call;
+        let environment = frame.environment();
+        let direct = direct_eval.then_some((environment, &frame.this));
         let marker = self.root_marker();
         let result = (|| {
             self.push_transient_value(&function)?;
             self.push_transient_value(&value)?;
-            if let Some(reference) = &assignment {
+            if let Some(reference) = destination.assignment() {
                 self.push_transient_reference(reference)?;
             }
             let result = self.invoke_plain_call(function, &[value], direct, host)?;
-            if let Some(reference) = assignment {
-                self.push_transient_value(&result)?;
-                self.write_reference(reference, result, host)?;
+            match destination {
+                Destination::Discard => Ok(()),
+                Destination::Assign(reference) => {
+                    self.push_transient_value(&result)?;
+                    self.write_reference(reference, result, host)
+                }
+                Destination::Initialize { kind, pattern } => {
+                    self.push_transient_value(&result)?;
+                    let mode = self.declaration_mode(kind, environment)?;
+                    self.initialize_pattern(&frame.program, pattern, result, mode, environment, &frame.this, host)
+                }
             }
-            Ok(())
         })();
         self.restore_root_marker(marker);
         result
