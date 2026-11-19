@@ -17,7 +17,7 @@ pub(super) enum Instruction {
     Jump(usize),
     PushCatch { statement: StmtId, after: usize },
     PopCatch,
-    Await { statement: StmtId, operand: ExprId, action: Resume },
+    Await { statement: StmtId, operand: ExprId, callee: Option<ExprId>, action: Resume },
 }
 
 fn storage_error() -> Fault {
@@ -30,7 +30,7 @@ fn push<T>(items: &mut Vec<T>, value: T) -> Result<(), Fault> {
     Ok(())
 }
 
-fn direct_await(program: &Program, id: StmtId) -> Option<(ExprId, Resume)> {
+fn await_site(program: &Program, id: StmtId) -> Option<(ExprId, Option<ExprId>, Resume)> {
     let (expression, action) = match &program.stmts[id].kind {
         StmtKind::Expr(expression) => (*expression, Resume::Discard),
         StmtKind::Return(Some(expression)) => (*expression, Resume::Return),
@@ -40,10 +40,15 @@ fn direct_await(program: &Program, id: StmtId) -> Option<(ExprId, Resume)> {
         }
         _ => return None,
     };
-    match program.exprs[expression].kind {
-        ExprKind::Unary("await", operand) => Some((operand, action)),
-        _ => None,
-    }
+    let (expression, callee) = match &program.exprs[expression].kind {
+        ExprKind::Call(callee, arguments) if matches!(&program.exprs[*callee].kind, ExprKind::Name(_)) => {
+            let [Argument { expression, spread: false }] = arguments.as_slice() else { return None };
+            (*expression, Some(*callee))
+        }
+        _ => (expression, None),
+    };
+    let ExprKind::Unary("await", operand) = program.exprs[expression].kind else { return None };
+    Some((operand, callee, action))
 }
 
 enum Visit {
@@ -51,7 +56,7 @@ enum Visit {
     Finish { id: StmtId, before: usize },
 }
 
-// Count only whole-statement await sites in supported containers. Each
+// Count await sites in supported statement and expression forms. Each
 // statement belongs to one template. Ineligible subtrees still contribute
 // jump targets, but never await sites; nested function bodies are separate
 // roots. The parser's independent expression count catches *all* embedded
@@ -86,7 +91,7 @@ fn split_statements(program: &Program, template: &Template, expected: usize) -> 
             Visit::Statement { id, eligible } => (id, eligible),
         };
         let kind = &program.stmts[id].kind;
-        if eligible && direct_await(program, id).is_some() {
+        if eligible && await_site(program, id).is_some() {
             sites += 1;
             split.try_reserve(1).map_err(|_| storage_error())?;
             split.insert(id);
@@ -195,8 +200,8 @@ pub(super) fn compile(program: &Program, template: usize, expected_await_count: 
         };
         if !split.contains(&id) {
             push(&mut code, Instruction::Statement(id))?;
-        } else if let Some((operand, action)) = direct_await(program, id) {
-            push(&mut code, Instruction::Await { statement: id, operand, action })?;
+        } else if let Some((operand, callee, action)) = await_site(program, id) {
+            push(&mut code, Instruction::Await { statement: id, operand, callee, action })?;
         } else {
             match &program.stmts[id].kind {
                 StmtKind::Block(body) => {
@@ -256,7 +261,9 @@ mod tests {
     #[test]
     fn async_plan_rejects_unreachable_embedded_await_and_cross_scope_jumps_during_parse() {
         for body in [
-            "if(false){use(await p);}",
+            "if(false){use(1,await p);}",
+            "return receiver.method(await p);",
+            "return use(...await p);",
             "if(await p){}",
             "return await p + 1;",
             "let a=await p,b=1;",

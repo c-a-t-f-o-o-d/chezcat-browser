@@ -32,6 +32,38 @@ fn checkpoint(runtime: &mut Runtime) {
 }
 
 #[test]
+fn await_execution_call_argument_keeps_the_resolved_function_through_collection() {
+    let mut runtime = Runtime::for_capacity_test();
+    succeeds(&mut runtime, r#"
+var trace='', release, observed=0, rejected=0, reason={};
+var gate=new Promise(function(resolve){release=resolve;});
+async function work(seed){
+    var dispatch=function(value){'use strict';if(this!==undefined)throw 'receiver';trace+='call|';return seed+value;};
+    function input(){trace+='operand|';dispatch=function(){throw 'callee read twice';};return gate;}
+    var result=dispatch(await input());
+    return result;
+}
+async function rejectCall(){
+    function unused(){throw 'called on rejection';}
+    try{return unused(await Promise.reject(reason));}catch(e){if(e!==reason)throw e;rejected++;}
+}
+work(3).then(function(value){observed=value;});
+rejectCall();
+if(trace!=='operand|'||observed||rejected)throw 'synchronous invocation';
+'ok';
+"#);
+    checkpoint(&mut runtime);
+    runtime.begin_job();
+    succeeds(&mut runtime, "var trash={};for(var i=0;i<900;i++)trash.fn=function(){return i;};trash=null;'ok';");
+    assert!(runtime.function_arena.retired > 0);
+    succeeds(&mut runtime, "if(trace!=='operand|'||observed||rejected!==1)throw 'pending call or rejection';'ok';");
+    runtime.begin_job();
+    succeeds(&mut runtime, "release(4);if(observed)throw 'synchronous resumption';'ok';");
+    checkpoint(&mut runtime);
+    succeeds(&mut runtime, "if(trace!=='operand|call|'||observed!==7)throw 'call replay or lost callee';'ok';");
+}
+
+#[test]
 fn await_execution_pending_gates_resume_across_jobs_in_fifo_without_replay() {
     let mut runtime = Runtime::for_test();
     succeeds(
@@ -391,7 +423,7 @@ if(prefix!==1||entered!==0)throw 'fatal pending prefix';
 #[test]
 fn await_execution_unsupported_positions_reject_before_effects_even_in_dead_code() {
     for body in [
-        "if(false){consume(await p);}",
+        "if(false){consume(1,await p);}",
         "if(await p){}",
         "return await p+1;",
         "let first=await p,second=1;",

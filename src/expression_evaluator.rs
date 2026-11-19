@@ -930,9 +930,7 @@ impl Runtime {
     ) -> Result<Value, Fault> {
         match target {
             Target::Value { function, direct_eval } => {
-                if direct_eval && self.is_eval(&function) {
-                    self.string_eval(arguments.first().unwrap_or(&Value::Undefined), Some((env, this)), host)
-                } else { self.call_value(function, arguments, Value::Undefined, host) }
+                self.invoke_plain_call(function, arguments, direct_eval.then_some((env, this)), host)
             }
             Target::Member { receiver, key, function } => self.invoke_member_call(receiver, key, function, arguments, host),
             Target::Chain(target) => self.invoke_chain_call(target, arguments, host),
