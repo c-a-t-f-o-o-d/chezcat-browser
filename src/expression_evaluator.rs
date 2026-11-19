@@ -317,7 +317,8 @@ impl Runtime {
         // through its native guard and share the heap-frame quota.
         if matches!(&program.exprs[id].kind, ExprKind::Literal(_) | ExprKind::Name(_)
             | ExprKind::This | ExprKind::NewTarget | ExprKind::RegExp(_)
-            | ExprKind::Array(_) | ExprKind::Object(_) | ExprKind::TemplateLiteral(..)) {
+            | ExprKind::Array(_) | ExprKind::Object(_) | ExprKind::TemplateLiteral(..)
+            | ExprKind::TemplateObject(_)) {
             if self.evaluation_frames >= MAX_EVALUATION_FRAMES {
                 return Err(Fault::new("Pending evaluation limit reached (4096)."));
             }
@@ -411,6 +412,7 @@ impl Runtime {
             ExprKind::Array(elements) => self.eval_array_literal(program, elements, env, this, host),
             ExprKind::Object(properties) => self.eval_object_literal(program, properties, env, this, host),
             ExprKind::TemplateLiteral(head, spans) => self.eval_template(program, head, spans, env, this, host),
+            ExprKind::TemplateObject(site) => self.eval_template_object(program, site),
             ExprKind::Pattern(_) => Err(Fault::new("A destructuring target is not an expression.")),
             _ => unreachable!("continuation expression routed to an immediate helper"),
         }
