@@ -96,12 +96,12 @@ pub(super) fn prepare(
     mut meter: Option<&mut CssBudget<'_>>,
     mut transform_meter: Option<&mut CssBudget<'_>>,
 ) -> Result<ParsedSheets, String> {
-    let sources = if previous.is_none() {
-        stylesheet_sources_with(doc, external, None, None)?
-    } else if let Some(budget) = meter.as_deref_mut() {
+    let sources = if let Some(budget) = meter.as_deref_mut() {
         stylesheet_sources_with(doc, external, None, Some(budget))?
-    } else {
+    } else if previous.is_some() {
         stylesheet_sources_with(doc, external, None, transform_meter.as_deref_mut())?
+    } else {
+        stylesheet_sources_with(doc, external, None, None)?
     };
     if let Some(previous) = previous {
         let matched = if let Some(budget) = meter.as_deref_mut() {
@@ -124,10 +124,14 @@ pub(super) fn prepare(
                 has_transform: previous.0.has_transform,
             });
         }
-        // A cold fully budgeted call reserved these sources before collecting.
-        // A failed cache probe has only paid for collection/comparison so far.
-        if let Some(budget) = meter.as_deref_mut() {
-            budget.document_sources(doc, external)?;
+    }
+    // Collection already charged its traversal and any inline copies. Reserve
+    // admission and parsing only for sheets supplied to this cascade.
+    if let Some(budget) = meter.as_deref_mut() {
+        for candidate in &sources {
+            if let SheetCandidate::Source(_, source) = candidate {
+                budget.source(source.len())?;
+            }
         }
     }
     let (sources, errors, _) = admit_stylesheets(doc, sources);

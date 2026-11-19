@@ -371,6 +371,42 @@ fn stylesheet_cache_hits_recascade_dom_checkedness_and_inherited_variables() {
 }
 
 #[test]
+fn stylesheet_cache_cold_and_changed_sources_only_charge_active_sheets() {
+    let large = large_sheet();
+    let mut doc = crate::html::parse(&format!(
+        "<link rel=stylesheet id=live><link rel=stylesheet id=inactive media=print>+         <style id=blocked>{large}</style><template><style>{large}</style></template>+         <div id=box></div>"
+    ));
+    let active = id(&doc, "live");
+    let inactive = id(&doc, "inactive");
+    let blocked = id(&doc, "blocked");
+    let node = id(&doc, "box");
+    doc.withheld_inline_styles.insert(blocked);
+    let mut external = HashMap::from([(active, "#box{opacity:.25}".into()), (inactive, large)]);
+    let first = compute_with_environment_and_properties_budgeted_cached(
+        &doc, &external, None, None, &mut CssBudget::new(&mut 100_000, &mut 8_000_000), None,
+    ).unwrap();
+    assert_eq!(opacity(&first, node), 0.25);
+    let cache = first.stylesheet_cache.as_ref().unwrap();
+
+    external.insert(active, "#box{opacity:.75}".into());
+    let second = compute_with_environment_and_properties_budgeted_cached(
+        &doc, &external, None, None,
+        &mut CssBudget::new(&mut 100_000, &mut 8_000_000), Some(cache),
+    ).unwrap();
+    assert_eq!(opacity(&second, node), 0.75);
+    assert!(!cache.shares_rules(second.stylesheet_cache.as_ref().unwrap()));
+
+    doc.withheld_inline_styles.remove(&blocked);
+    let mut work = 100_000;
+    let denied = compute_with_environment_and_properties_budgeted_cached(
+        &doc, &external, None, None, &mut CssBudget::new(&mut work, &mut 8_000_000),
+        second.stylesheet_cache.as_ref(),
+    );
+    assert_eq!(denied.err().as_deref(), Some("CSS computation work limit reached."));
+    assert_eq!(work, 0);
+}
+
+#[test]
 fn stylesheet_cache_failed_miss_and_refused_later_sheet_do_not_publish_partial_cache() {
     let mut doc = crate::html::parse(
         "<link id=a rel=stylesheet><link id=b rel=stylesheet><div id=box></div>",
