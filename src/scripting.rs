@@ -105,6 +105,9 @@ mod script_dispatch;
 mod script_abort;
 #[path = "script_message_channel.rs"]
 mod script_message_channel;
+#[path = "script_media_query_list.rs"]
+mod script_media_query_list;
+use crate::javascript::{MEDIA_QUERY_LIST, MEDIA_QUERY_MATCHES, MEDIA_QUERY_MEDIA};
 #[cfg(test)]
 #[path = "script_listener_object_tests.rs"]
 mod script_listener_object_tests;
@@ -472,6 +475,7 @@ struct State {
     created_events: Vec<script_created_events::CreatedEvent>,
     standalone_targets: Vec<u32>,
     message_channels: script_message_channel::State,
+    media_queries: Vec<String>,
     abort_signals: Vec<script_abort::Record>,
     synthetic_dispatches: Vec<script_dispatch::Dispatch>,
     #[cfg(test)]
@@ -555,6 +559,7 @@ impl State {
             created_events: Vec::new(),
             standalone_targets: Vec::new(),
             message_channels: script_message_channel::State::default(),
+            media_queries: Vec::new(),
             abort_signals: Vec::new(),
             synthetic_dispatches: Vec::new(),
             #[cfg(test)]
@@ -916,11 +921,12 @@ impl Page {
             "requestAnimationFrame",
             "cancelAnimationFrame",
             "getComputedStyle",
+            "matchMedia",
             "addEventListener",
             "removeEventListener",
             "dispatchEvent",
         ] {
-            if matches!(name, "setTimeout" | "clearTimeout" | "requestAnimationFrame" | "cancelAnimationFrame" | "getComputedStyle") {
+            if matches!(name, "setTimeout" | "clearTimeout" | "requestAnimationFrame" | "cancelAnimationFrame" | "getComputedStyle" | "matchMedia") {
                 runtime
                     .define_global_operation(
                         name,
@@ -985,6 +991,7 @@ impl Page {
             .expect("fixed image constructor");
         state.native_functions.insert("Image", image);
         runtime.define_event_target_interface(WINDOW).expect("fixed EventTarget interface");
+        runtime.define_media_query_interface(WINDOW).expect("fixed MediaQueryList interface");
         runtime.define_abort_interfaces(WINDOW).expect("fixed abort interfaces");
         runtime.define_dom_parser_interface(WINDOW, script_inert_documents::parser::PARSE).expect("fixed DOMParser interface");
         runtime.define_event_interface(WINDOW).expect("fixed Event interface");
@@ -2780,6 +2787,9 @@ impl Host for Bridge<'_> {
         if let Some(interface) = self.message_instance(object) {
             return Some(crate::javascript::NativeAncestry {window:WINDOW,constructor:Some((WINDOW,interface))});
         }
+        if self.media_query_owner(object).is_some() {
+            return Some(crate::javascript::NativeAncestry {window:WINDOW,constructor:Some((WINDOW,MEDIA_QUERY_LIST))});
+        }
         if let Some((window, interface)) = self.abort_instance(object) {
             return Some(crate::javascript::NativeAncestry { window, constructor: Some((window, interface)) });
         }
@@ -3045,6 +3055,7 @@ impl Host for Bridge<'_> {
             return if matches!(args.first(), None | Some(Value::Undefined)) { &[] } else { &[(0, true)] };
         }
         if object==WINDOW && method=="getComputedStyle" {return &[(1,true)];}
+        if object==WINDOW && method=="matchMedia" {return &[(0,true)];}
         if (STYLE_BASE..DATASET_BASE).contains(&object) {
             return match method {
                 "item" => &[(0, false)],
@@ -3166,6 +3177,7 @@ impl Host for Bridge<'_> {
     }
 
     fn native_method_owner(&self, object:u32, method:&str) -> Option<u32> {
+        if object==WINDOW && matches!(method,"matchMedia"|MEDIA_QUERY_MATCHES|MEDIA_QUERY_MEDIA) {return Some(WINDOW);}
         if object == WINDOW && crate::javascript::message_channel_interface::operation(method) { return Some(WINDOW); }
         if object == WINDOW && matches!(method, script_inert_documents::parser::CONSTRUCTOR | script_inert_documents::parser::PARSE) {
             return Some(WINDOW);
@@ -3283,6 +3295,7 @@ impl Host for Bridge<'_> {
         if matches!(method, "addEventListener" | "removeEventListener") { return 2; }
         if method == script_node_contains::CONTAINS_METHOD { return 1; }
         if object==WINDOW && method=="getComputedStyle" {return 1;}
+        if object==WINDOW && method=="matchMedia" {return 1;}
         if self.computed_style_receiver(object) || (STYLE_BASE..DATASET_BASE).contains(&object) {
             return match method { "setProperty" => 2, "getPropertyValue" | "removeProperty" => 1, _ => 0 };
         }
@@ -3352,6 +3365,13 @@ impl Host for Bridge<'_> {
         method: &str,
         args: &[Value],
     ) -> Result<(), (&'static str, String)> {
+        if method == MEDIA_QUERY_LIST && object == WINDOW {
+            return Err(("TypeError", "Illegal MediaQueryList constructor.".into()));
+        }
+        if method=="matchMedia" {
+            if object==WINDOW && matches!(args.first(), Some(Value::String(_))) {return Ok(());}
+            return Err(("TypeError","matchMedia requires a CSS media query string.".into()));
+        }
         if crate::javascript::message_channel_interface::operation(method) {
             return self.validate_message_call(object, method, args);
         }
@@ -3738,6 +3758,9 @@ impl Host for Bridge<'_> {
     }
 
     fn accepts_receiver(&self, object: u32, method: &str, receiver: u32) -> bool {
+        if matches!(method, MEDIA_QUERY_MATCHES | MEDIA_QUERY_MEDIA) {
+            return object==WINDOW && self.media_query_owner(receiver).is_some();
+        }
         if crate::javascript::message_channel_interface::operation(method) {
             return object == WINDOW && self.matches_message_receiver(receiver, method);
         }
@@ -3905,6 +3928,11 @@ impl Host for Bridge<'_> {
 
     fn global_operation_receiver(&self, object: u32, method: &str, receiver: &Value)
         -> Option<Result<u32, (&'static str, String)>> {
+        if object==WINDOW && method=="matchMedia" {return Some(match receiver {
+            Value::Null|Value::Undefined|Value::Host(WINDOW)=>Ok(WINDOW),
+            Value::Host(handle) if self.frame_context(*handle).is_some()=>Err(("NotSupportedError","Child Window media query evaluation is unavailable.".into())),
+            _=>Err(("TypeError","matchMedia requires a Window receiver.".into())),
+        });}
         if object==WINDOW && method=="getComputedStyle" {return Some(match receiver {
             Value::Null|Value::Undefined|Value::Host(WINDOW)=>Ok(WINDOW),
             Value::Host(handle) if self.frame_context(*handle).is_some()=>Err(("NotSupportedError","Computed style for a child Window has no renderer binding.".into())),
@@ -5192,6 +5220,8 @@ impl Host for Bridge<'_> {
     }
 
     fn call(&mut self, object: u32, method: &str, args: &[Value]) -> Result<Value, String> {
+        if object==WINDOW && method=="matchMedia" {return self.create_media_query(args);}
+        if matches!(method, MEDIA_QUERY_MATCHES | MEDIA_QUERY_MEDIA) {return self.media_query_get(object,method);}
         if crate::javascript::message_channel_interface::operation(method) {
             return self.message_call(object, method, args);
         }

@@ -10,6 +10,14 @@ pub(crate) use stylesheet_cache::StylesheetCache;
 #[path="css_media.rs"]
 mod media;
 pub use media::{Hover, MediaEnvironment};
+
+pub(crate) fn serialize_media_query_list(source: &str) -> String {
+    media::serialize_list(source)
+}
+
+pub(crate) fn media_query_list_matches(query: &str, environment: Option<MediaEnvironment>) -> bool {
+    query.is_empty() || media::matches(query, environment)
+}
 #[path="css_custom_properties.rs"]
 mod custom_properties;
 #[path="css_computed_style.rs"]

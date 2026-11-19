@@ -37,9 +37,14 @@ fn word(text: &str) -> Option<(&str, &str)> {
 /// conjunctions and simple parenthesized features. No general CSS evaluator.
 pub(super) fn matches(source: &str, environment: Option<MediaEnvironment>) -> bool {
     let environment = environment.filter(|env| env.valid());
+    let mut any = false;
+    list_items(source, |item| any |= query(item, environment).unwrap_or(false));
+    any
+}
+
+fn list_items(source: &str, mut visit: impl FnMut(&str)) {
     let mut start = 0;
     let mut depth = 0usize;
-    let mut any = false;
     let mut quote = 0u8;
     let mut escaped = false;
     for (at, byte) in source.bytes().enumerate() {
@@ -51,16 +56,59 @@ pub(super) fn matches(source: &str, environment: Option<MediaEnvironment>) -> bo
         }
         match byte {
             b'\'' | b'"' => quote = byte,
-            b'(' => { depth = match depth.checked_add(1) { Some(value) => value, None => return false }; }
+            b'(' => { depth += 1; }
             b')' => { depth = depth.saturating_sub(1); }
             b',' if depth == 0 => {
-                any |= query(trim(&source[start..at]), environment).unwrap_or(false);
+                visit(trim(&source[start..at]));
                 start = at + 1;
             }
             _ => {}
         }
     }
-    any || depth == 0 && quote == 0 && query(trim(&source[start..]), environment).unwrap_or(false)
+    visit(if depth == 0 && quote == 0 { trim(&source[start..]) } else { "" });
+}
+
+pub(super) fn serialize_list(source: &str) -> String {
+    if trim(source).is_empty() { return String::new(); }
+    let mut output = String::new();
+    // The viewport here is only used to recognize the shared finite grammar.
+    // Every live matches read uses the document's actual CSS environment.
+    let syntax_environment = Some(MediaEnvironment::desktop_viewport(1, 1, 1.0));
+    list_items(source, |item| {
+        if !output.is_empty() { output.push_str(", "); }
+        if query(item, syntax_environment).is_none() {
+            output.push_str("not all");
+            return;
+        }
+        let mut rest = item;
+        let mut prior = false;
+        while let Some((prefix, feature)) = rest.split_once('(') {
+            for word in prefix.split_ascii_whitespace() {
+                if prior { output.push(' '); }
+                output.push_str(&word.to_ascii_lowercase());
+                prior = true;
+            }
+            if prior { output.push(' '); }
+            let (body, next) = feature.split_once(')').unwrap();
+            output.push('(');
+            if let Some((name, value)) = body.split_once(':') {
+                output.push_str(&trim(name).to_ascii_lowercase());
+                output.push_str(": ");
+                output.push_str(&trim(value).to_ascii_lowercase());
+            } else {
+                output.push_str(&trim(body).to_ascii_lowercase());
+            }
+            output.push(')');
+            prior = true;
+            rest = next;
+        }
+        for word in rest.split_ascii_whitespace() {
+            if prior { output.push(' '); }
+            output.push_str(&word.to_ascii_lowercase());
+            prior = true;
+        }
+    });
+    output
 }
 
 fn query(mut text: &str, environment: Option<MediaEnvironment>) -> Option<bool> {
@@ -106,10 +154,17 @@ fn query(mut text: &str, environment: Option<MediaEnvironment>) -> Option<bool> 
 }
 
 fn feature(text: &str, environment: Option<MediaEnvironment>) -> Option<bool> {
+    // The renderer preserves author colors. It has no forced-palette mode.
+    if trim(text).eq_ignore_ascii_case("forced-colors") { return Some(false); }
     let (name, value) = text.split_once(':')?;
     let name = trim(name);
     let value = trim(value);
     if name.is_empty() || value.is_empty() || !name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-') || value.contains(':') { return None; }
+    if name.eq_ignore_ascii_case("forced-colors") {
+        if value.eq_ignore_ascii_case("none") { return Some(true); }
+        if value.eq_ignore_ascii_case("active") { return Some(false); }
+        return None;
+    }
     if name.eq_ignore_ascii_case("hover") {
         let expected = if value.eq_ignore_ascii_case("hover") { Hover::Hover }
             else if value.eq_ignore_ascii_case("none") { Hover::None } else { return None };

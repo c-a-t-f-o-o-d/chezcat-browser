@@ -176,7 +176,7 @@ impl Bridge<'_> {
         }
         let channels = &self.state.message_channels;
         let count = channels.port_count();
-        let occupied = self.state.abort_signals.len().saturating_add(self.state.standalone_targets.len()).saturating_add(count);
+        let occupied = self.event_target_count();
         if occupied.saturating_add(2) > self.state.limits.host.event_targets || count >= ARENA as usize {
             return Err("MessagePort target limit reached.".into());
         }
