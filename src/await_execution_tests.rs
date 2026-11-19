@@ -32,6 +32,61 @@ fn checkpoint(runtime: &mut Runtime) {
 }
 
 #[test]
+fn await_execution_first_member_argument_resumes_trailing_arguments_in_order() {
+    let mut runtime = Runtime::for_test();
+    succeeds(&mut runtime, r#"
+var trace='', release, reject, reason={}, result=0, skipped=0, invalid=0;
+var gate=new Promise(function(resolve){release=resolve;});
+var failed=new Promise(function(resolve,fail){reject=fail;});
+function mark(label,value){trace+=label+'|';return value;}
+var owner={base:5,get run(){
+    trace+='getter|';
+    return function(first,second,third,fourth){
+        if(this!==owner)throw 'receiver';trace+='call|';return this.base+first+second+third+fourth;
+    };
+}};
+function relay(value){trace+='relay|';return value+1;}
+function never(){throw 'argument evaluated after rejection';}
+var missing={run:7};
+async function work(){return owner.run(relay(await gate),mark('later',2),...mark('spread',[3,4]));}
+async function skip(){
+    try{return owner.run(await failed,never());}catch(error){if(error!==reason)throw error;skipped++;}
+}
+async function bad(){
+    try{return missing.run(await Promise.resolve(0),mark('bad-argument',1));}
+    catch(error){if(error.name!=='TypeError')throw error;invalid++;}
+}
+work().then(value=>result=value);
+skip();bad();
+if(trace!=='getter|getter|'||result||skipped||invalid)throw 'arguments ran before suspension';
+'ok';
+"#);
+    checkpoint(&mut runtime);
+    succeeds(&mut runtime, "if(trace!=='getter|getter|bad-argument|'||invalid!==1||skipped||result)throw 'callability or pending call';'ok';");
+    runtime.begin_job();
+    succeeds(&mut runtime, "reject(reason);release(4);'ok';");
+    checkpoint(&mut runtime);
+    succeeds(&mut runtime, "if(trace!=='getter|getter|bad-argument|relay|later|spread|call|'||result!==19||skipped!==1)throw 'argument order or result';'ok';");
+}
+
+#[test]
+fn await_execution_first_member_argument_shares_argument_limit_and_cleanup() {
+    let mut runtime = Runtime::for_test();
+    succeeds(&mut runtime, &format!(r#"
+var ran=0, argumentsToSpread=new Array({MAX_ARGUMENTS}).fill(1), receiver={{run(){{ran++;}}}};
+async function work(){{return receiver.run(await Promise.resolve(1),...argumentsToSpread);}}
+work();
+'ok';
+"#));
+    let error = runtime.microtask_checkpoint(&mut NoHost).unwrap_err();
+    assert!(error.contains("Call argument limit"), "{error}");
+    assert!(runtime.transient_registration_is_empty());
+    assert_eq!(runtime.evaluation_argument_slots, 0);
+    runtime.begin_job();
+    succeeds(&mut runtime, "if(ran)throw 'overlimit call ran';'ok';");
+}
+
+#[test]
 fn await_execution_resumed_method_receiver_precedes_key_and_arguments() {
     let mut runtime = Runtime::for_test();
     succeeds(&mut runtime, r#"

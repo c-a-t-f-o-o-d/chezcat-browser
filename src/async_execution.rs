@@ -30,6 +30,7 @@ struct PendingCall {
 }
 
 struct PendingMethod {
+    call: ExprId,
     receiver: Value,
     key: PropertyKey,
     function: Option<Value>,
@@ -414,8 +415,11 @@ impl Runtime {
                             value
                         };
                         let value = if let Some(method) = method {
-                            let PendingMethod { receiver, key, function } = *method;
-                            let result = self.invoke_member_call(receiver, key, function, &[value], host)?;
+                            let PendingMethod { call, receiver, key, function } = *method;
+                            let result = self.eval_resumed_member_argument(
+                                &frame.program, call, (receiver, key, function), value,
+                                frame.environment()?, &frame.this, host,
+                            )?;
                             self.push_transient_value(&result)?;
                             result
                         } else {
@@ -729,10 +733,13 @@ impl Runtime {
     fn prepare_await_method(
         &mut self,
         frame: &Activation,
-        method: ExprId,
+        call: ExprId,
         retained: usize,
         host: &mut dyn Host,
     ) -> Result<Box<PendingMethod>, Fault> {
+        let ExprKind::Call(method, _) = frame.program.exprs[call].kind else {
+            unreachable!("prepared method needs a call expression");
+        };
         let ExprKind::Member(receiver, key) = frame.program.exprs[method].kind else {
             unreachable!("suspended member call needs a member expression");
         };
@@ -745,7 +752,7 @@ impl Runtime {
         if let Some(function) = &function {
             self.push_transient_value(function)?;
         }
-        let method = PendingMethod { receiver, key, function };
+        let method = PendingMethod { call, receiver, key, function };
         let bytes = method.retained_bytes();
         self.await_storage(retained.saturating_add(bytes), bytes)?;
         Ok(Box::new(method))
@@ -918,6 +925,7 @@ mod tests {
                 action: Resume::Discard,
                 call: Some(PendingCall { function: Value::Function(17), direct_eval: false }),
                 method: Some(Box::new(PendingMethod {
+                    call: 0,
                     receiver: Value::Function(19),
                     key: PropertyKey::String("invoke".into()),
                     function: Some(Value::Function(20)),

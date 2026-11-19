@@ -104,8 +104,8 @@ fn await_operand(program: &Program, expression: ExprId) -> Option<(ExprId, Optio
     // of the ordinary member call.
     let (expression, method) = match &program.exprs[expression].kind {
         ExprKind::Call(method, arguments) if matches!(program.exprs[*method].kind, ExprKind::Member(..)) => {
-            let [Argument { expression, spread: false }] = arguments.as_slice() else { return None };
-            (*expression, Some(*method))
+            let Some(Argument { expression: first, spread: false }) = arguments.first() else { return None };
+            (*first, Some(expression))
         }
         _ => (expression, None),
     };
@@ -548,7 +548,7 @@ mod tests {
     fn async_plan_rejects_unreachable_embedded_await_and_cross_scope_jumps_during_parse() {
         for body in [
             "if(false){use(1,await p);}",
-            "return receiver.method(await p, 1);",
+            "return receiver.method(1, await p);",
             "return receiver.method(1 + await p);",
             "receiver[await p] = await p;",
             "value += await p;",
@@ -612,6 +612,7 @@ mod tests {
             ("async function f(p){let value; value=use(await p);}", 2),
             ("async function f(p){receiver.field=use(await p);}", 1),
             ("async function f(p){let value=receiver.method(use(await p));}", 1),
+            ("async function f(p){return receiver.method(use(await p), 1, ...others);}", 1),
         ] {
             let mut runtime = Runtime::for_test();
             let program = runtime.register_program(source, false).unwrap();
