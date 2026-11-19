@@ -284,6 +284,43 @@ mod tests {
     }
 
     #[test]
+    fn literal_async_methods_keep_property_identity_and_suspend_with_the_receiver() {
+        let mut runtime = Runtime::for_test();
+        let result = runtime.execute(r#"
+var trace='', symbol=Symbol('load');
+var base={get units(){return this.count;}};
+var item={
+    __proto__:base,
+    count:3,
+    async run(value) {
+        trace+='start|';
+        var resolved=await Promise.resolve(value);
+        trace+='resume|';
+        return super.units+resolved;
+    },
+    async [(trace+='key|',symbol)](value){return this.count*value;},
+    async constructor(){return 'ordinary property';},
+    async(){return 5;}
+};
+var promise=item.run(4);
+promise.then(function(result){if(result!==7)throw 'receiver or home object';trace+='done|';});
+item[symbol](3).then(function(result){if(result!==9)throw 'computed receiver';trace+='symbol|';});
+item.constructor().then(function(result){if(result!=='ordinary property')throw 'constructor name';trace+='name|';});
+var descriptor=Object.getOwnPropertyDescriptor(item,'run'), denied=false;
+try{new item.run(2);}catch(e){denied=e.name==='TypeError';}
+if(trace!=='key|start|'||!(promise instanceof Promise)||!denied||item.async()!==5)throw 'call state';
+if(!descriptor.enumerable||!descriptor.writable||!descriptor.configurable||descriptor.value!==item.run||
+    item.run.name!=='run'||item.run.length!==1||item[symbol].name!=='[load]'||
+    Object.hasOwn(item.run,'prototype'))throw 'method descriptor';
+'ok';
+"#, &mut NoHost).unwrap();
+        assert_eq!(result.to_text(), "ok");
+        assert!(runtime.microtask_checkpoint(&mut NoHost).unwrap().is_empty());
+        let result = runtime.execute("if(trace!=='key|start|resume|symbol|name|done|')throw trace;'ok';", &mut NoHost).unwrap();
+        assert_eq!(result.to_text(), "ok");
+    }
+
+    #[test]
     fn literal_accessor_syntax_errors_are_atomic() {
         for source in [
             "({get x(a){return a;}});",
@@ -295,8 +332,12 @@ mod tests {
             "({get __proto__(){return 1;}});",
             // Accessors have a HomeObject, but only derived constructors admit super().
             "({get x(){super();}});",
-            "({async x(){}});",
-            "({async [x](){}});",
+            "({async *x(){}});",
+            "({async [x]:1});",
+            "({async\nx(){}});",
+            "({async x(await){}});",
+            "({async x(a,a){}});",
+            "({async x(){super();}});",
             "({*x(){}});",
             "({set x(arguments){'use strict';}});",
             "(function(){'use strict';return {set x(eval){}};})();",

@@ -2810,8 +2810,9 @@ impl Parser {
             let position = self.at();
             // get/set are also ordinary property names. An accessor prefix
             // needs a following PropertyName, including a computed name.
+            let next = self.tokens.get(self.current + 1);
             let next_name = matches!(
-                self.tokens.get(self.current + 1).map(|token| &token.kind),
+                next.map(|token| &token.kind),
                 Some(
                     TokenKind::Word(_)
                         | TokenKind::EscapedWord(_)
@@ -2820,7 +2821,16 @@ impl Parser {
                         | TokenKind::Punct("[")
                 )
             );
-            let accessor = if next_name && (self.is("get") || self.is("set")) {
+            let asynchronous = self.is("async")
+                && next.is_some_and(|token| !token.newline())
+                && (next_name || self.next_is("*"));
+            let accessor = if asynchronous {
+                self.current += 1;
+                if self.is("*") {
+                    return Err(self.unsupported("Async generator object methods are not implemented."));
+                }
+                None
+            } else if next_name && (self.is("get") || self.is("set")) {
                 let kind = if self.eat("get") {
                     Kind::Getter
                 } else {
@@ -2829,15 +2839,6 @@ impl Parser {
                 };
                 Some(kind)
             } else {
-                if self.is("async")
-                    && (next_name
-                        || matches!(
-                            self.tokens.get(self.current + 1).map(|token| &token.kind),
-                            Some(TokenKind::Punct("*"))
-                        ))
-                {
-                    return Err(self.unsupported("Async method definitions are not implemented."));
-                }
                 None
             };
             let (key, shorthand) = if self.eat("[") {
@@ -2860,7 +2861,7 @@ impl Parser {
                 if name == "__proto__" {
                     // Only a noncomputed colon definition sets [[Prototype]].
                     // Methods/accessors/shorthand keep their existing refusal.
-                    if accessor.is_some()
+                    if asynchronous || accessor.is_some()
                         || !matches!(
                             self.tokens.get(self.current + 1).map(|token| &token.kind),
                             Some(TokenKind::Punct(":"))
@@ -2888,7 +2889,7 @@ impl Parser {
                     shorthand,
                 )
             };
-            let (value, kind) = if accessor.is_some() || self.is("(") {
+            let (value, kind) = if asynchronous || accessor.is_some() || self.is("(") {
                 // A setter has one binding parameter. Its
                 // PropertySetParameterList forbids even a trailing comma.
                 if accessor == Some(Kind::Setter)
@@ -2899,7 +2900,7 @@ impl Parser {
                 {
                     return Err(self.error("A setter parameter cannot be followed by a comma."));
                 }
-                let template = self.function_with_super(None, position, false, true, false)?;
+                let template = self.function_with_super(None, position, asynchronous, true, false)?;
                 let params = &self.program.templates[template].params;
                 let kind = accessor.unwrap_or(Kind::Method);
                 if kind == Kind::Getter && !params.is_empty() {
@@ -11697,7 +11698,7 @@ caught;
             ("try{for(var n=0;n<200;n++)eval('1');}catch(e){test.record('caught');}finally{test.record('finally');}".to_owned(), "Retained script limit"),
             (format!("try{{eval('{}1;');}}catch(e){{test.record('caught');}}finally{{test.record('finally');}}", "!".repeat(500)), "Parser nesting limit"),
             ("try{eval('class Unsupported {field=1;}');}catch(e){test.record('caught');}finally{test.record('finally');}".to_owned(), "Class fields"),
-            ("try{eval('({async value(){return 1;}})');}catch(e){test.record('caught');}finally{test.record('finally');}".to_owned(), "not implemented"),
+            ("try{eval('({async *value(){return 1;}})');}catch(e){test.record('caught');}finally{test.record('finally');}".to_owned(), "Async generator object methods"),
         ] {
             let (mut runtime, mut host) = test_runtime();
             host.eval_permission = Some(true);
@@ -12726,12 +12727,12 @@ if(errors!==6)throw 'quantifier syntax';'brace-ok';
     #[test]
     fn parsing_finishes_before_any_script_effects() {
         for source in [
-            "test.value=1; const thing={async x(){return 1;}};",
+            "test.value=1; const thing={async *x(){return 1;}};",
             "test.value=1; class Nope {field=1;}",
             "test.value=1; let duplicate; let duplicate;",
             "test.value=1; function f(){break;}",
             "test.value=1; if(true) let local=1;",
-            "test.value=1; const bad='\\uD800';",
+            "test.value=1; const bad='\\u00g0';",
         ] {
             let (mut runtime, mut host) = test_runtime();
             assert!(runtime.execute(source, &mut host).is_err(), "{source}");
