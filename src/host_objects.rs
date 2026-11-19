@@ -1,7 +1,8 @@
 //! Bounded ordinary expandos on explicitly selected native objects and live
 //! named-property reflection. Host handles never acquire arbitrary capability.
 
-use super::{Accessors, Fault, Function, Host, Ordinary, Runtime, Value, ELEMENT_STYLE_GET, ELEMENT_STYLE_SET,
+use super::{Accessors, Fault, Function, Host, Ordinary, Runtime, Value,
+    ELEMENT_INNER_HTML_GET, ELEMENT_INNER_HTML_SET, ELEMENT_STYLE_GET, ELEMENT_STYLE_SET,
     NODE_TEXT_CONTENT_GET, NODE_TEXT_CONTENT_SET};
 
 #[cfg(test)]
@@ -101,6 +102,8 @@ impl Runtime {
                         NODE_TEXT_CONTENT_GET, Some(NODE_TEXT_CONTENT_SET))?;
                 }
                 if name=="Element" {
+                    self.define_node_attribute(prototype, window, "innerHTML",
+                        ELEMENT_INNER_HTML_GET, Some(ELEMENT_INNER_HTML_SET))?;
                     for (key, getter, setter) in [
                         ("scrollLeft", "\0Element.get.scrollLeft", "\0Element.set.scrollLeft"),
                         ("scrollTop", "\0Element.get.scrollTop", "\0Element.set.scrollTop"),

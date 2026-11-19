@@ -700,10 +700,46 @@ document.title='element-expando-first-ok';
 }
 
 #[test]
+fn inner_html_element_descriptor_wraps_checked_native_accessor() {
+    let (mut doc, mut forms, mut page, outcome) = page("<div id=p><b>original</b></div><div id=q></div>", &[r#"
+var p=document.getElementById('p'), q=document.getElementById('q');
+var d=Object.getOwnPropertyDescriptor(Element.prototype,'innerHTML');
+if(!d || !d.enumerable || !d.configurable || d.get.length!==0 || d.set.length!==1 ||
+    Object.hasOwn(HTMLElement.prototype,'innerHTML') || Object.hasOwn(p,'innerHTML')) throw 'descriptor';
+var writes=0;
+Object.defineProperty(p,'innerHTML',{
+    get:function(){return d.get.call(this);},
+    set:function(value){writes++; d.set.call(this,value);},
+    configurable:true
+});
+p.innerHTML='<i>new</i>';
+if(writes!==1 || p.innerHTML!=='<i>new</i>' || p.firstChild.localName!=='i') throw 'wrapped native write';
+delete p.innerHTML;
+p.innerHTML=null;
+if(Object.hasOwn(p,'innerHTML') || p.innerHTML!=='' || p.firstChild!==null || writes!==1) throw 'restore';
+Object.defineProperty(q,'innerHTML',{value:'shadow'});
+q.innerHTML='ignored';
+if(q.innerHTML!=='shadow' || d.get.call(q)!=='') throw 'ordinary shadow';
+var converted=false, wrongBrand=false;
+try {d.set.call(document.createTextNode(''),{toString:function(){converted=true;return 'bad';}});}
+catch(e){wrongBrand=e instanceof TypeError;}
+if(!wrongBrand || converted) throw 'brand before conversion';
+p.innerHTML='<b>keep</b>';
+document.title='inner-html-descriptor-ok';
+"#]);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    assert_eq!(doc.title, "inner-html-descriptor-ok");
+    let refused = page.console_eval(&mut doc, &mut forms, "d.set.call(p,'<i>prefix</i><iframe></iframe>');");
+    assert_eq!(refused.errors, 1, "{}", page.report());
+    let retained = page.console_eval(&mut doc, &mut forms, "if(d.get.call(p)!=='<b>keep</b>')throw 'atomic guarded write';");
+    assert_eq!(retained.errors, 0, "{}", page.report());
+}
+
+#[test]
 fn native_element_expandos_preserve_unsupported_native_and_enumeration_boundaries() {
     let (mut doc,mut forms,mut page,outcome)=page("<div id=p></div><iframe id=inert srcdoc=x></iframe>",&["var p=document.getElementById('p');p.customProbe=1;"]);
     assert_eq!(outcome.errors,0,"{}",page.report());
-    for operation in ["p.getBoxQuads;","Object.defineProperty(p,'innerHTML',{value:'x'});","Object.defineProperty(document.createElement('input'),'files',{value:[]});","Object.defineProperty(document.createElement('blockquote'),'cite',{value:'https://example.test/'});","Object.defineProperty(document.createElement('meta'),'content',{value:'x'});","Object.defineProperty(document.createElement('link'),'as',{value:'script'});","Object.setPrototypeOf(p,Array.prototype);","for(var key in p){};"] {
+    for operation in ["p.getBoxQuads;","Object.defineProperty(p,'outerHTML',{value:'x'});","Object.defineProperty(document.createElement('input'),'files',{value:[]});","Object.defineProperty(document.createElement('blockquote'),'cite',{value:'https://example.test/'});","Object.defineProperty(document.createElement('meta'),'content',{value:'x'});","Object.defineProperty(document.createElement('link'),'as',{value:'script'});","Object.setPrototypeOf(p,Array.prototype);","for(var key in p){};"] {
         let outcome=page.console_eval(&mut doc,&mut forms,operation);
         assert_eq!(outcome.errors,1,"{operation}: {}",page.report());
     }
