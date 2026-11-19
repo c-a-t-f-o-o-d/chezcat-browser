@@ -31,7 +31,7 @@ pub(super) enum Instruction {
     FinishFinally,
     Logical { statement: StmtId, operator: &'static str, target: usize, action: Resume },
     CaptureComparison(StmtId),
-    StrictComparison { statement: StmtId, operator: &'static str, action: Resume },
+    Comparison { statement: StmtId, operator: &'static str, action: Resume },
     ReadAccess { statement: StmtId, expression: ExprId, action: Resume },
     Await {
         statement: StmtId,
@@ -164,7 +164,7 @@ fn await_operand(program: &Program, expression: ExprId) -> Option<(ExprId, Optio
 enum ExpressionPart {
     Value(ExprId, Resume),
     CaptureComparison,
-    StrictComparison(&'static str, Resume),
+    Comparison(&'static str, Resume),
     ReadAccess(ExprId, Resume),
     LogicalTest(&'static str, Resume),
     LogicalEnd,
@@ -175,9 +175,13 @@ enum ExpressionPart {
     WriteAssignment(Resume),
 }
 
+fn is_comparison(operator: &str) -> bool {
+    matches!(operator, "===" | "!==" | "<" | "<=" | ">" | ">=")
+}
+
 fn is_composed_expression(kind: &ExprKind) -> bool {
-    matches!(kind, ExprKind::Conditional(..) | ExprKind::Sequence(..)
-        | ExprKind::Binary("&&" | "||" | "??" | "===" | "!==", _, _))
+    matches!(kind, ExprKind::Conditional(..) | ExprKind::Sequence(..) | ExprKind::Binary("&&" | "||" | "??", _, _))
+        || matches!(kind, ExprKind::Binary(operator, _, _) if is_comparison(operator))
 }
 
 fn visit_expression(
@@ -203,8 +207,8 @@ fn visit_expression(
                     part = ExpressionPart::Value(left, Resume::StoreExpressionValue);
                     continue;
                 }
-                ExprKind::Binary(operator @ ("===" | "!=="), left, right) => {
-                    push(&mut pending, ExpressionPart::StrictComparison(operator, action))?;
+                ExprKind::Binary(operator, left, right) if is_comparison(operator) => {
+                    push(&mut pending, ExpressionPart::Comparison(operator, action))?;
                     push(&mut pending, ExpressionPart::Value(right, Resume::StoreExpressionValue))?;
                     push(&mut pending, ExpressionPart::CaptureComparison)?;
                     part = ExpressionPart::Value(left, Resume::StoreExpressionValue);
@@ -254,7 +258,7 @@ fn expression_size(program: &Program, expression: ExprId) -> Result<(usize, usiz
                 instructions += 1;
                 sites += usize::from(await_expression(program, expression).is_some());
             }
-            ExpressionPart::CaptureComparison | ExpressionPart::StrictComparison(..) | ExpressionPart::ReadAccess(..)
+            ExpressionPart::CaptureComparison | ExpressionPart::Comparison(..) | ExpressionPart::ReadAccess(..)
             | ExpressionPart::LogicalTest(_, _) | ExpressionPart::ConditionalTest
             | ExpressionPart::ConditionalElse | ExpressionPart::CaptureAssignment(_)
             | ExpressionPart::WriteAssignment(_) => instructions += 1,
@@ -307,8 +311,8 @@ fn emit_expression(
                 Instruction::Logical { statement: id, operator, target: 0, action }
             }
             ExpressionPart::CaptureComparison => Instruction::CaptureComparison(id),
-            ExpressionPart::StrictComparison(operator, action) => {
-                Instruction::StrictComparison { statement: id, operator, action }
+            ExpressionPart::Comparison(operator, action) => {
+                Instruction::Comparison { statement: id, operator, action }
             }
             ExpressionPart::ReadAccess(expression, action) => {
                 Instruction::ReadAccess { statement: id, expression, action }
@@ -486,7 +490,7 @@ fn set_branch_target(code: &mut [Instruction], destination: usize) {
             Instruction::BranchFalse { target, .. }
             | Instruction::Await { action: Resume::BranchFalse(target), .. }
             | Instruction::Logical { action: Resume::BranchFalse(target), .. }
-            | Instruction::StrictComparison { action: Resume::BranchFalse(target), .. }
+            | Instruction::Comparison { action: Resume::BranchFalse(target), .. }
             | Instruction::ReadAccess { action: Resume::BranchFalse(target), .. }
             | Instruction::WriteAssignment { action: Resume::BranchFalse(target), .. }
             | Instruction::Evaluate { action: Resume::BranchFalse(target), .. } => {
@@ -811,6 +815,7 @@ mod tests {
             ("async function f(p){if(!use(await p)){done();}}", 2),
             ("async function f(p){if(use(await p)!==flag){done();}}", 5),
             ("async function f(p){return use(await p)===(original!==use(await p));}", 7),
+            ("async function f(p){return use(await p).value > use(await p);}", 4),
             ("async function f(p){return ((use(await p)??base)?.item??fallback).done;}", 7),
             ("async function f(p){try{}finally{await p;}}", 7),
             ("async function f(p){for(;test();advance()){await p;}}", 6),
