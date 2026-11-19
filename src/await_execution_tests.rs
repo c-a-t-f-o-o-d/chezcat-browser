@@ -32,6 +32,56 @@ fn checkpoint(runtime: &mut Runtime) {
 }
 
 #[test]
+fn await_execution_if_selects_one_branch_after_the_condition_finishes() {
+    let mut runtime = Runtime::for_test();
+    succeeds(&mut runtime, r#"
+var trace='', releaseYes, releaseNo, reject, reason={}, caught=0;
+var yes=new Promise(function(resolve){releaseYes=resolve;});
+var no=new Promise(function(resolve){releaseNo=resolve;});
+var failed=new Promise(function(resolve,fail){reject=fail;});
+function check(flag,label){trace+='check:'+label+'|';return flag;}
+function wrap(value){trace+='read:'+value+'|';return {ready:value};}
+async function choose(flag,gate,label){
+    try {
+        if(check(flag,label) && wrap(await gate).ready)trace+='yes:'+label+'|';
+        else trace+='no:'+label+'|';
+        if(flag && await Promise.resolve(false))throw 'false condition without else';
+        trace+='after:'+label+'|';
+    } finally { trace+='finally:'+label+'|'; }
+}
+choose(false,yes,'skip');
+choose(true,yes,'a');
+choose(true,no,'b');
+choose(true,failed,'c').catch(function(error){if(error!==reason)throw error;caught++;});
+if(trace!=='check:skip|no:skip|after:skip|finally:skip|check:a|check:b|check:c|'||caught)
+    throw 'condition prefix';
+'ok';
+"#);
+    checkpoint(&mut runtime);
+    runtime.begin_job();
+    succeeds(&mut runtime, "releaseYes(true);releaseNo(false);reject(reason);'ok';");
+    checkpoint(&mut runtime);
+    succeeds(&mut runtime, r#"
+if(trace!=='check:skip|no:skip|after:skip|finally:skip|check:a|check:b|check:c|read:true|yes:a|read:false|no:b|finally:c|after:a|finally:a|after:b|finally:b|'||caught!==1)
+    throw 'branch choice, rejection or continuation order';
+'ok';
+"#);
+    runtime.begin_job();
+    succeeds(&mut runtime, r#"
+var tail=0;
+async function commaCondition(){
+    if((await Promise.resolve(true),0))throw 'used the awaited value';
+    else tail++;
+    if((await Promise.resolve(false),2))tail++;
+}
+commaCondition();
+'ok';
+"#);
+    checkpoint(&mut runtime);
+    succeeds(&mut runtime, "if(tail!==2)throw 'condition discarded the final operand';'ok';");
+}
+
+#[test]
 fn await_execution_member_read_uses_original_receiver_and_evaluates_key_after_resume() {
     let mut runtime = Runtime::for_test();
     succeeds(&mut runtime, r#"
@@ -642,7 +692,7 @@ if(prefix!==1||entered!==0)throw 'fatal pending prefix';
 fn await_execution_unsupported_positions_reject_before_effects_even_in_dead_code() {
     for body in [
         "if(false){consume(1,await p);}",
-        "if(await p){}",
+        "if(1+await p){}",
         "return await p+1;",
         "let first=await p,second=1+await p;",
         "while(false){await p;}",

@@ -521,7 +521,7 @@ impl Runtime {
 
     fn await_resume_action(
         &mut self,
-        frame: &Activation,
+        frame: &mut Activation,
         action: Resume,
         value: Value,
         host: &mut dyn Host,
@@ -529,6 +529,12 @@ impl Runtime {
         match action {
             Resume::Discard => Ok(Progress::Continue),
             Resume::Return => Ok(Progress::Return(value)),
+            Resume::BranchFalse(target) => {
+                if !value.truthy() {
+                    frame.next = target;
+                }
+                Ok(Progress::Continue)
+            }
             Resume::Initialize { kind, pattern } => {
                 let environment = frame.environment()?;
                 let mode = self.declaration_mode(kind, environment)?;
