@@ -438,6 +438,7 @@ pub(super) struct CreatedEvent {
     ui: Option<UiData>,
     mouse: Option<MouseData>,
     custom: Option<Value>,
+    message: bool,
 }
 
 #[derive(Clone,Copy)]
@@ -597,7 +598,7 @@ impl Bridge<'_> {
         let event=CreatedEvent {owner,composed:flag("composed"),handle,name,
             bubbles:flag("bubbles"),cancelable:flag("cancelable"),prevented:false,stopped:false,immediate:false,
             target:None,current:None,phase:0,dispatching:false,initialized:true,trusted:false,passive:false,
-            timestamp,ui,mouse,custom};
+            timestamp,ui,mouse,custom,message:false};
         self.state.created_events.push(event);
         self.state.retained=retained;
         self.state.next_event=next;
@@ -662,7 +663,30 @@ impl Bridge<'_> {
     }
 
     pub(super) fn custom_receiver(&self, handle:u32) -> bool {
-        self.created_event_index(handle).is_some_and(|id| self.state.created_events[id].custom.is_some())
+        self.created_event_index(handle).is_some_and(|id| {
+            let event = &self.state.created_events[id];
+            event.custom.is_some() && !event.message
+        })
+    }
+
+    pub(super) fn message_event_receiver(&self, handle: u32) -> bool {
+        self.created_event_index(handle).is_some_and(|id| self.state.created_events[id].message)
+    }
+
+    pub(super) fn construct_message_event(&mut self, data: &Value) -> Result<u32, String> {
+        let Value::Host(handle) = self.construct_event_record(
+            WINDOW, &[Value::String("message".into())], None, None, None, Some(data),
+        )? else { unreachable!() };
+        let index = self.created_event_index(handle).unwrap();
+        self.state.created_events[index].message = true;
+        Ok(handle)
+    }
+
+    pub(super) fn message_event_data(&mut self, handle: u32) -> Result<Value, String> {
+        let index = self.created_event_index(handle).ok_or("MessageEvent is unavailable.")?;
+        let value = self.state.created_events[index].custom.as_ref().ok_or("MessageEvent payload is unavailable.")?;
+        self.state.copies(value.bytes())?;
+        copy_custom_value(self.state.created_events[index].custom.as_ref().unwrap())
     }
 
     pub(super) fn created_event_method(&self, object: u32, name: &str) -> Option<&'static str> {
@@ -683,7 +707,7 @@ impl Bridge<'_> {
     pub(super) fn created_event_readonly(&self, object: u32, name: &str) -> bool {
         !matches!(name,"cancelBubble"|"returnValue") && (self.created_event_index(object).is_some_and(|id| base_property(name)
             || self.state.created_events[id].mouse.is_some() && mouse_property(name)
-            || self.state.created_events[id].custom.is_some() && name == "detail")
+            || self.custom_receiver(object) && name == "detail")
             || self.ui_receiver(object) && ui_property(name)
             || self.state.event.as_ref().is_some_and(|event|event.handle==object&&event.mouse.is_some()) && mouse_property(name))
     }
@@ -692,7 +716,7 @@ impl Bridge<'_> {
         let id = self.created_event_index(object)?;
         Some(self.state.work(self.state.created_events.len()).map(|()| {
             base_property(name) || self.state.created_events[id].mouse.is_some() && mouse_property(name)
-                || self.state.created_events[id].custom.is_some() && name == "detail"
+                || self.custom_receiver(object) && name == "detail"
                 || self.state.created_events[id].ui.is_some() && ui_property(name)
                 || self.created_event_method(object, name).is_some()
         }))
@@ -707,7 +731,7 @@ impl Bridge<'_> {
                 self.state.copies(len)?;
                 return Ok(Value::String(self.state.created_events[id].name.clone()));
             }
-            if name == "detail" && self.state.created_events[id].custom.is_some() {
+            if name == "detail" && self.custom_receiver(object) {
                 let bytes = custom_bytes(self.state.created_events[id].custom.as_ref())?;
                 if bytes > self.state.limits.host.string_bytes {return Err("CustomEvent detail exceeds the host string bound.".into());}
                 self.state.copies(bytes)?;
@@ -821,7 +845,7 @@ impl Bridge<'_> {
             timestamp: self.state.clock_ms(Instant::now()),
             ui: matches!(interface,Interface::Ui|Interface::Mouse).then(UiData::default),
             mouse: matches!(interface,Interface::Mouse).then(MouseData::default),
-            custom: matches!(interface,Interface::Custom).then_some(Value::Null) };
+            custom: matches!(interface,Interface::Custom).then_some(Value::Null), message: false };
         self.state.created_events.push(event);
         self.state.next_event = next;
         Ok(Value::Host(handle))

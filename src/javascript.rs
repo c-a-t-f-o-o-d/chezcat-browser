@@ -49,6 +49,8 @@ mod function_arena;
 mod number_radix;
 #[path = "abort_interface.rs"]
 pub(crate) mod abort_interface;
+#[path = "message_channel_interface.rs"]
+pub(crate) mod message_channel_interface;
 #[path = "bigint.rs"]
 mod bigint;
 #[path = "number_to_fixed.rs"]
@@ -4686,6 +4688,11 @@ impl Runtime {
         for value in args { self.pin_exported_value(value); }
         let result = self.call_value(function, args, this, host);
         self.finish_invocation(result)
+    }
+
+    pub(crate) fn invoke_native_dispatch(&mut self, token: usize, host: &mut dyn Host) -> Result<(), String> {
+        let result = self.dispatch_native_event(token, host).map(Value::Bool);
+        self.finish_invocation(result).map(|_| ())
     }
 
     fn finish_invocation(&mut self, result: Result<Value, Fault>) -> Result<Value, String> {

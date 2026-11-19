@@ -282,10 +282,14 @@ impl Bridge<'_> {
     }
     pub(super) fn standalone_target_owner(&self,handle:u32)->Option<u32> {
         handle.checked_sub(0x9000_0000).and_then(|id|self.state.standalone_targets.get(id as usize)).copied()
+            .or_else(|| self.message_port_owner(handle))
     }
     pub(super) fn create_standalone_target(&mut self,owner:u32)->Result<Value,String> {
         self.state.work(1)?;
-        if self.state.standalone_targets.len().saturating_add(self.state.abort_signals.len())>=self.state.limits.host.event_targets {return Err("Standalone EventTarget limit reached.".into());}
+        if self.state.standalone_targets.len().saturating_add(self.state.abort_signals.len())
+            .saturating_add(self.state.message_channels.port_count()) >= self.state.limits.host.event_targets {
+            return Err("Standalone EventTarget limit reached.".into());
+        }
         let index=u32::try_from(self.state.standalone_targets.len()).map_err(|_|"EventTarget identity overflow.")?;
         let handle=0x9000_0000u32.checked_add(index).filter(|id|*id<0xc000_0000).ok_or("EventTarget identity overflow.")?;
         let bytes=std::mem::size_of::<u32>();
