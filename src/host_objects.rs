@@ -152,6 +152,52 @@ impl Runtime {
         result.map_err(Fault::display)
     }
 
+    pub(crate) fn define_message_channel_interfaces(&mut self, window: u32) -> Result<(), String> {
+        use super::message_channel_interface::*;
+        let marker = self.inhibit_transient_collection();
+        let result = (|| {
+            for name in [CHANNEL, PORT, EVENT] {
+                let allocation = self.allocate_host_function_with_length(window, name, usize::from(name == EVENT)).map_err(Fault::new)?;
+                let prototype = self.new_object(None)?;
+                let constructor = Value::Function(allocation.id);
+                let properties = self.function_properties[allocation.id];
+                if let Some(Function::Host { constructible, illegal_interface_constructor, .. }) = self.functions.get_mut(allocation.id) {
+                    *constructible = true;
+                    *illegal_interface_constructor = name != CHANNEL;
+                }
+                if name == CHANNEL {
+                    self.define_readonly_node_getter(prototype, window, "port1", PORT1)?;
+                    self.define_readonly_node_getter(prototype, window, "port2", PORT2)?;
+                } else {
+                    let parent_name = if name == PORT { "EventTarget" } else { "Event" };
+                    let parent = self.native_constructor_prototypes[&(window, parent_name)];
+                    let parent_constructor = self.get_property(parent, "constructor")?;
+                    self.objects[properties].prototype = Ordinary::from_value(&parent_constructor);
+                    self.objects[prototype].prototype = Some(Ordinary::Object(parent));
+                    if name == PORT {
+                        self.define_canvas_operation(prototype, window, "postMessage", POST, 1)?;
+                        self.define_canvas_operation(prototype, window, "start", START, 0)?;
+                        self.define_canvas_operation(prototype, window, "close", CLOSE, 0)?;
+                        self.define_node_attribute(prototype, window, "onmessage", MESSAGE, Some(SET_MESSAGE))?;
+                    } else {
+                        for (property, operation) in [("data", DATA), ("origin", ORIGIN), ("source", SOURCE), ("lastEventId", LAST_ID)] {
+                            self.define_readonly_node_getter(prototype, window, property, operation)?;
+                        }
+                    }
+                }
+                self.store_property(properties, "prototype".into(), Value::Object(prototype), Some((false, false, false)))?;
+                self.store_property(prototype, "constructor".into(), constructor.clone(), Some((false, true, true)))?;
+                self.store_symbol_property(prototype, self.symbol_to_string_tag.unwrap(), Value::String(name.into()), Some((false, false, true)))?;
+                self.native_constructor_prototypes.insert((window, name), prototype);
+                self.put_binding(self.global_environment, name.into(), Some(constructor), super::Declaration::Var, false)?;
+                self.global_attributes.insert(name.into(), (false, true, true));
+            }
+            Ok(())
+        })();
+        self.restore_transient_marker(marker);
+        result.map_err(Fault::display)
+    }
+
     pub(super) fn native_instance_prototype(&mut self,handle:u32,host:&mut dyn Host)->Result<Ordinary,Fault> {
         self.validate_native_access(handle,host)?;
         if !host.exposed_native_prototype(handle) {return Err(Fault::new("Native host prototype inspection is not implemented for this receiver."));}
@@ -833,7 +879,7 @@ impl Runtime {
         if self.host_objects.contains_key(&handle) {return Err(Fault::new("Native expando store conflicts with an existing host binding."));}
         let ancestry=host.instance_ancestry(handle).ok_or_else(||Fault::new("Native expando prototype provenance is unavailable."))?;
         if ancestry.window!=owner {return Err(Fault::new("Native expando prototype owner mismatch."));}
-        let base_event=matches!(ancestry.constructor,Some((window,"Event"|"UIEvent"|"MouseEvent"|"CustomEvent")) if window==owner);
+        let base_event=matches!(ancestry.constructor,Some((window,"Event"|"UIEvent"|"MouseEvent"|"CustomEvent"|"MessageEvent")) if window==owner);
         let prototype=self.native_ancestry_anchor(ancestry)?;
         let id=self.new_object(None)?;
         self.objects[id].prototype=Some(prototype);

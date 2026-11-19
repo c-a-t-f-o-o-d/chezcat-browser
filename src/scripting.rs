@@ -103,6 +103,8 @@ pub use script_anchor_mouse::AnchorMouseInput;
 mod script_dispatch;
 #[path = "script_abort.rs"]
 mod script_abort;
+#[path = "script_message_channel.rs"]
+mod script_message_channel;
 #[cfg(test)]
 #[path = "script_listener_object_tests.rs"]
 mod script_listener_object_tests;
@@ -469,6 +471,7 @@ struct State {
     event: Option<Event>,
     created_events: Vec<script_created_events::CreatedEvent>,
     standalone_targets: Vec<u32>,
+    message_channels: script_message_channel::State,
     abort_signals: Vec<script_abort::Record>,
     synthetic_dispatches: Vec<script_dispatch::Dispatch>,
     #[cfg(test)]
@@ -551,6 +554,7 @@ impl State {
             event: None,
             created_events: Vec::new(),
             standalone_targets: Vec::new(),
+            message_channels: script_message_channel::State::default(),
             abort_signals: Vec::new(),
             synthetic_dispatches: Vec::new(),
             #[cfg(test)]
@@ -984,6 +988,7 @@ impl Page {
         runtime.define_abort_interfaces(WINDOW).expect("fixed abort interfaces");
         runtime.define_dom_parser_interface(WINDOW, script_inert_documents::parser::PARSE).expect("fixed DOMParser interface");
         runtime.define_event_interface(WINDOW).expect("fixed Event interface");
+        runtime.define_message_channel_interfaces(WINDOW).expect("fixed channel interfaces");
         runtime.define_custom_event_interface(WINDOW).expect("fixed CustomEvent interface");
         runtime.define_ui_event_interface(WINDOW).expect("fixed UIEvent interface");
         runtime.define_mouse_event_interface(WINDOW).expect("fixed MouseEvent interface");
@@ -1082,6 +1087,7 @@ impl Page {
             .iter()
             .map(|timer| timer.due)
             .chain(self.state.animation_due)
+            .chain(self.state.message_channels.next_deadline())
             .min()
     }
 
@@ -1101,6 +1107,12 @@ impl Page {
             return None;
         }
         let timer_due = self.state.timers.iter().map(|timer| timer.due).min();
+        if self.state.message_channels.next_deadline().is_some_and(|due|
+            due <= now && timer_due.is_none_or(|timer| due <= timer)
+                && self.state.animation_due.is_none_or(|frame| due <= frame))
+        {
+            return self.poll_message_task(doc, forms, now);
+        }
         if self
             .state
             .animation_due
@@ -1158,6 +1170,7 @@ impl Page {
     pub fn stop_timers(&mut self, reason: &str) {
         self.runtime.cancel_microtasks();
         self.cancel_media_selection();
+        self.clear_message_tasks();
         self.state.timers.clear();
         self.state.animation_frames.clear();
         self.state.animation_due = None;
@@ -2378,6 +2391,7 @@ impl Bridge<'_> {
         // Keep native on* property availability unchanged. Custom names are
         // accepted through add/removeEventListener on existing EventTargets.
         let allowed = event == "abort" && self.abort_signal_owner(handle).is_some()
+            || event == "message" && self.message_port_owner(handle).is_some()
             || self.media_element_receiver(handle) && script_media::event_name(event) || matches!(
             event,
             "click" | "auxclick" | "input" | "change" | "submit" | "reset" | "keydown" | "keyup"
@@ -2397,7 +2411,8 @@ impl Bridge<'_> {
 
     fn handler(&mut self, object: u32, property: &str) -> Result<Option<Value>, String> {
         let Some(event) = (property == "onabort" && self.abort_signal_owner(object).is_some())
-            .then_some("abort").or_else(|| self.media_handler_event(object,property)) else {
+            .then_some("abort").or_else(|| self.media_handler_event(object,property))
+            .or_else(|| self.message_handler_event(object, property)) else {
             return Ok(None);
         };
         let object = self.handler_target(object, event);
@@ -2413,7 +2428,8 @@ impl Bridge<'_> {
 
     fn set_handler(&mut self, object: u32, property: &str, value: Value) -> Result<bool, String> {
         let Some(event) = (property == "onabort" && self.abort_signal_owner(object).is_some())
-            .then_some("abort").or_else(|| self.media_handler_event(object,property)) else {
+            .then_some("abort").or_else(|| self.media_handler_event(object,property))
+            .or_else(|| self.message_handler_event(object, property)) else {
             return Ok(false);
         };
         let object = self.handler_target(object, event);
@@ -2705,6 +2721,7 @@ impl Host for Bridge<'_> {
         {
             return Some(WINDOW);
         }
+        if self.message_instance(object).is_some() { return Some(WINDOW); }
         self.ordinary_event_owner(object).or_else(||self.abort_instance(object).map(|(owner, _)| owner)).or_else(||self.standalone_target_owner(object)).or_else(||(object==DOCUMENT||self.element_expando_receiver(object)||self.fragment_receiver(object)||self.node_list_receiver(object)||self.canvas_context_receiver(object)).then_some(WINDOW))}
     fn ordinary_native_fallback(&self,object:u32,property:&str)->bool {
         self.inert_adopted_node(object) && self.inert_owns_property(object, property)
@@ -2713,7 +2730,7 @@ impl Host for Bridge<'_> {
     fn exposed_native_prototype(&self,object:u32)->bool {
         self.event_target_interface(object) || self.inert_interface(object).is_some() || self.document_interface_receiver(object)
             || self.ordinary_event_owner(object).is_some() || self.standalone_target_owner(object).is_some()
-            || self.abort_instance(object).is_some()
+            || self.abort_instance(object).is_some() || self.message_instance(object).is_some()
             || self.canvas_context_receiver(object)
             || self.video_interface_receiver(object) || self.fragment_receiver(object)
             || self.node_list_receiver(object) || self.concrete_html_interface(object).is_some()
@@ -2753,7 +2770,15 @@ impl Host for Bridge<'_> {
         if let Some(window)=self.event_owner(object) {
             // Subclass immediate prototypes stay opaque; this is their genuine
             // implemented Event ancestry, as with the existing Node suffixes.
-            return Some(crate::javascript::NativeAncestry {window,constructor:Some((window,if self.custom_receiver(object) {"CustomEvent"}else if self.mouse_receiver(object) {"MouseEvent"}else if self.ui_receiver(object) {"UIEvent"}else{"Event"}))});
+            let interface = if self.message_event_receiver(object) {"MessageEvent"}
+                else if self.custom_receiver(object) {"CustomEvent"}
+                else if self.mouse_receiver(object) {"MouseEvent"}
+                else if self.ui_receiver(object) {"UIEvent"}
+                else {"Event"};
+            return Some(crate::javascript::NativeAncestry {window,constructor:Some((window,interface))});
+        }
+        if let Some(interface) = self.message_instance(object) {
+            return Some(crate::javascript::NativeAncestry {window:WINDOW,constructor:Some((WINDOW,interface))});
         }
         if let Some((window, interface)) = self.abort_instance(object) {
             return Some(crate::javascript::NativeAncestry { window, constructor: Some((window, interface)) });
@@ -2835,7 +2860,8 @@ impl Host for Bridge<'_> {
         if self.ordinary_event_owner(object).is_some() {return false;}
         if self.node_event_method(object,property) {return false;}
         if self.fragment_receiver(object) {return matches!(property,"childNodes"|"nodeValue"|"textContent"|"parentNode"|"parentElement"|"ownerDocument"|"isConnected"|"firstChild"|"lastChild"|"previousSibling"|"nextSibling") || self.dom_method(object,property).is_some();}
-        if self.standalone_target_owner(object).is_some() || self.abort_instance(object).is_some() {return false;}
+        if self.standalone_target_owner(object).is_some() || self.abort_instance(object).is_some()
+            || self.message_instance(object).is_some() {return false;}
         if property=="prototype"&&self.location_instance_owner(object).is_some(){return false;}
         if object==DOCUMENT {return self.document_native_property(property);}
         if self.element_expando_receiver(object) {return self.element_native_property(object,property);}
@@ -2869,6 +2895,7 @@ impl Host for Bridge<'_> {
     }
     fn native_access_owner(&self, object: u32) -> Option<u32> {
         if self.inert_interface(object).is_some() { return Some(WINDOW); }
+        if self.message_instance(object).is_some() { return Some(WINDOW); }
         if script_inline_style::handle(object) {return Some(WINDOW);}
         if self.canvas_context_receiver(object) {return Some(WINDOW);}
         if let Some(owner)=self.computed_style_owner(object) {return Some(owner);}
@@ -3139,6 +3166,7 @@ impl Host for Bridge<'_> {
     }
 
     fn native_method_owner(&self, object:u32, method:&str) -> Option<u32> {
+        if object == WINDOW && crate::javascript::message_channel_interface::operation(method) { return Some(WINDOW); }
         if object == WINDOW && matches!(method, script_inert_documents::parser::CONSTRUCTOR | script_inert_documents::parser::PARSE) {
             return Some(WINDOW);
         }
@@ -3324,6 +3352,9 @@ impl Host for Bridge<'_> {
         method: &str,
         args: &[Value],
     ) -> Result<(), (&'static str, String)> {
+        if crate::javascript::message_channel_interface::operation(method) {
+            return self.validate_message_call(object, method, args);
+        }
         if method == "appendChild" && self.template_fragment_receiver(object) {
             return self.validate_template_append(object, args);
         }
@@ -3707,6 +3738,9 @@ impl Host for Bridge<'_> {
     }
 
     fn accepts_receiver(&self, object: u32, method: &str, receiver: u32) -> bool {
+        if crate::javascript::message_channel_interface::operation(method) {
+            return object == WINDOW && self.matches_message_receiver(receiver, method);
+        }
         if self.event_target_interface(object) {
             if matches!(method, CREATE_CDATA_SECTION | CREATE_PROCESSING_INSTRUCTION | script_inert_documents::GET) {
                 return receiver == DOCUMENT || self.inert_document(receiver);
@@ -5158,6 +5192,9 @@ impl Host for Bridge<'_> {
     }
 
     fn call(&mut self, object: u32, method: &str, args: &[Value]) -> Result<Value, String> {
+        if crate::javascript::message_channel_interface::operation(method) {
+            return self.message_call(object, method, args);
+        }
         if method == "appendChild" && self.template_fragment_receiver(object) {
             return self.append_template_child(object, args);
         }
