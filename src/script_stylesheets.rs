@@ -49,6 +49,21 @@ pub(super) struct StylesheetState {
     pub in_flight: usize,
 }
 
+pub(super) enum InlineSheetPlan {
+    Disconnected,
+    Withheld(Option<String>),
+    Admitted(crate::css::StylesheetUsage),
+}
+
+pub(super) fn validate_inline_sheet_media(raw: Option<&str>) -> Result<(), String> {
+    let media = raw.unwrap_or("").trim_matches([' ', '\t', '\r', '\n', '\u{c}']);
+    if media.is_empty() || ["all", "screen", "print"].iter().any(|kind| media.eq_ignore_ascii_case(kind)) {
+        Ok(())
+    } else {
+        Err("Style element media currently supports the empty, all, screen and print media types.".into())
+    }
+}
+
 /// The fragment slice admits no LINK attributes, including seemingly inert
 /// metadata. Later author mutations use the normal checked stylesheet path.
 pub(super) fn bare_fragment_link(doc: &Document, node: usize) -> bool {
@@ -183,6 +198,71 @@ impl Page {
 }
 
 impl Bridge<'_> {
+    // https://html.spec.whatwg.org/multipage/semantics.html#update-a-style-block
+    // The node stays real on CSP/MIME refusal. Source-limit failures precede
+    // mutation and never publish a partial sheet or displace a preceding one.
+    pub(super) fn prepare_inline_sheet(&mut self, node: usize, connected: bool) -> Result<InlineSheetPlan, String> {
+        if !connected { return Ok(InlineSheetPlan::Disconnected); }
+        let entry = &self.doc.nodes[node];
+        let NodeKind::Element { attrs, .. } = &entry.kind else { return Err("Expected a style element.".into()); };
+        self.state.work(attrs.len() + entry.children.len())?;
+        for attr in attrs {
+            self.state.work(attr.name.bytes().saturating_add(attr.value.len()).div_ceil(64))?;
+        }
+        let mut bytes = 0usize;
+        for &child in &entry.children {
+            let NodeKind::Text(value) = &self.doc.nodes[child].kind else {
+                return Err("Created style elements currently admit only direct text children.".into());
+            };
+            bytes = bytes.checked_add(value.len()).ok_or("Stylesheet source size overflow.")?;
+        }
+        validate_inline_sheet_media(self.doc.attr(node, "media"))?;
+        if self.doc.attr(node, "type").is_some_and(|kind| !kind.is_empty() && !kind.eq_ignore_ascii_case("text/css")) {
+            self.doc.withheld_inline_styles.try_reserve(1).map_err(|_| "Stylesheet state reservation failed.")?;
+            return Ok(InlineSheetPlan::Withheld(None));
+        }
+        if bytes > self.doc.stylesheet_limits.sheet_bytes {
+            return Err("Complete inline stylesheet exceeds its byte allowance.".into());
+        }
+        let mut meter = crate::css::CssBudget::new(&mut self.state.host_work, &mut self.state.copy_work);
+        meter.source(bytes)?;
+        let source = crate::css::inline_stylesheet(self.doc, node)?;
+        if let Err(reason) = self.state.dynamic.policy.allows_inline_style(
+            usize::MAX, crate::csp::nonce(self.doc, node), &source,
+        ) {
+            self.doc.withheld_inline_styles.try_reserve(1).map_err(|_| "Stylesheet state reservation failed.")?;
+            return Ok(InlineSheetPlan::Withheld(Some(reason)));
+        }
+        let used = crate::css::StylesheetUsage {
+            bytes: self.state.stylesheets.source_bytes,
+            rules: self.state.stylesheets.source_rules,
+        };
+        // A connected move leaves this same immutable admitted text retained.
+        // A subsequent insertion after removal is a new sheet admission, as
+        // with removed and reinstalled external sources.
+        let next = if self.state.dom.connected[node] && !self.doc.withheld_inline_styles.contains(&node) {
+            used
+        } else {
+            self.doc.stylesheet_limits.accept(&source, used)?
+        };
+        Ok(InlineSheetPlan::Admitted(next))
+    }
+
+    pub(super) fn commit_inline_sheet(&mut self, node: usize, sheet: InlineSheetPlan) {
+        match sheet {
+            InlineSheetPlan::Disconnected => { self.doc.withheld_inline_styles.remove(&node); }
+            InlineSheetPlan::Withheld(reason) => {
+                self.doc.withheld_inline_styles.insert(node);
+                if let Some(reason) = reason { self.state.log(&reason); }
+            }
+            InlineSheetPlan::Admitted(usage) => {
+                self.doc.withheld_inline_styles.remove(&node);
+                self.state.stylesheets.source_bytes = usage.bytes;
+                self.state.stylesheets.source_rules = usage.rules;
+            }
+        }
+    }
+
     pub(super) fn removable_fragment_link(&mut self, node: usize) -> Result<bool, String> {
         self.state.work(1 + self.state.stylesheets.pending.len())?;
         Ok(bare_fragment_link(self.doc, node) && self.state.stylesheets.permits_bare_fragment_removal(node))
@@ -398,6 +478,65 @@ impl Bridge<'_> {
 #[cfg(test)]
 #[path = "script_inert_link_fragment_tests.rs"]
 mod inert_fragment_tests;
+
+#[cfg(test)]
+mod inline_connection_tests {
+    use super::*;
+
+    #[test]
+    fn inline_style_connection_refuses_complete_sheet_before_changing_tree_or_budget() {
+        let mut doc = crate::html::parse("<html><head><link id=base rel=stylesheet href='base.css'></head><body><input id=field value=seed></body></html>");
+        doc.scripting_enabled = true;
+        let original = "#field{color:red}";
+        let extra = "#field{opacity:.5}";
+        let link = (0..doc.nodes.len()).find(|&n| doc.attr(n, "id") == Some("base")).unwrap();
+        let external = HashMap::from([(link, original.to_owned())]);
+        doc.stylesheet_limits = crate::css::StylesheetLimits {
+            sheet_bytes: 512, document_bytes: original.len() + extra.len(), rules: 2,
+        };
+        let mut page = Page::for_test();
+        let mut forms = Forms::new(&doc);
+        page.set_stylesheet_usage(crate::css::stylesheet_usage(&doc, &external));
+        assert_eq!(page.start(&mut doc, &mut forms, &[]).errors, 0);
+        let setup = format!("var f=document.getElementById('field'); f.value='edited'; var s=document.createElement('style'); s.textContent='{extra}'; var t=s.firstChild,list=s.childNodes; document.head.appendChild(s);");
+        let result = page.console_eval(&mut doc, &mut forms, &setup);
+        assert_eq!(result.errors, 0, "{}", page.report());
+        let connected = page.console_eval(&mut doc, &mut forms,
+            "s.media='all';var mediaAttr=s.getAttributeNode('media');var other=document.createAttribute('media');other.value='(width: 300px)';");
+        assert_eq!(connected.errors, 0, "{}", page.report());
+        let connected_commits = page.state.dom_commits;
+        for source in ["s.media='screen and (width: 2px)';", "mediaAttr.value='(width: 300px)';",
+                       "s.setAttributeNode(other);", "s.setAttributeNS(null,'media','screen, print');",
+                       "t.data='body{display:none}';", "t.nodeValue='';", "s.textContent='';",
+                       "s.appendChild(document.body);"] {
+            let result = page.console_eval(&mut doc, &mut forms, source);
+            assert_eq!(result.errors, 1, "{source}: {}", page.report());
+            assert_eq!(page.state.dom_commits, connected_commits);
+        }
+        let checked = page.console_eval(&mut doc, &mut forms,
+            "if(s.media!=='all'||s.getAttributeNode('media')!==mediaAttr||other.ownerElement!==null||s.firstChild!==t||t.data!==s.textContent||!t.isConnected||!s.isConnected) throw 'partial connected mutation';");
+        assert_eq!(checked.errors, 0, "{}", page.report());
+        let result = page.console_eval(&mut doc, &mut forms, "document.head.insertBefore(s,document.getElementById('base'));document.head.removeChild(s);");
+        assert_eq!(result.errors, 0, "{}", page.report());
+        let commits = page.state.dom_commits;
+        let usage = (page.state.stylesheets.source_bytes, page.state.stylesheets.source_rules);
+        assert_eq!(usage, (original.len() + extra.len(), 2));
+        let result = page.console_eval(&mut doc, &mut forms, "document.head.insertBefore(s,document.getElementById('base'));");
+        assert_eq!(result.errors, 1, "{}", page.report());
+        assert!(page.report().contains("per document"), "{}", page.report());
+        assert_eq!(commits, page.state.dom_commits);
+        assert_eq!((page.state.stylesheets.source_bytes, page.state.stylesheets.source_rules), usage);
+        let check = page.console_eval(&mut doc, &mut forms,
+            "if(s.parentNode!==null||s.isConnected||t.parentNode!==s||list[0]!==t||s.textContent!==t.data||f.value!=='edited'||f.defaultValue!=='seed') throw 'partial sheet insertion';");
+        assert_eq!(check.errors, 0, "{}", page.report());
+        let (accepted, errors, _) = crate::css::accepted_stylesheets(&doc, &external);
+        assert!(errors.is_empty());
+        assert_eq!(accepted.len(), 1);
+        assert_eq!(accepted[0].0, link);
+        assert_eq!(accepted[0].1, original);
+        assert!(!page.has_host_tasks());
+    }
+}
 
 #[cfg(test)]
 mod source_lifetime_tests {

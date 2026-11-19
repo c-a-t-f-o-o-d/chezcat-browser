@@ -16,7 +16,7 @@ impl Runtime {
         self.objects[id].prototype = None;
         for (name, capture) in &found.named_captures {
             let value = if let Some((start, end)) = capture {
-                Value::String(self.units_string(&input[*start..*end])?)
+                self.string_from_units(&input[*start..*end])?
             } else {
                 Value::Undefined
             };

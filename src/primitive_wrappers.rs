@@ -62,6 +62,7 @@ impl Runtime {
                 (Data::Symbol(value), self.symbol_prototype)
             }
             Value::String(value) => return self.box_string(value),
+            Value::StringUnits(_) => return Err(Fault::new("Boxing a string containing unpaired UTF-16 surrogates is not implemented.")),
             _ => {
                 return Err(Fault::exception(
                     "TypeError",
@@ -87,12 +88,12 @@ impl Runtime {
             Value::Number(_) => self.number_prototype,
             Value::Bool(_) => self.boolean_prototype,
             Value::Symbol(_) => self.symbol_prototype,
-            Value::String(text) => {
-                self.work(text.len())?;
+            Value::String(_) | Value::StringUnits(_) => {
+                self.work(receiver.bytes())?;
                 // These immutable own properties shadow prototype setters.
                 if name == "length"
                     || super::property_index(&name)
-                        .is_some_and(|index| index < text.encode_utf16().count())
+                        .is_some_and(|index| receiver.string_length().is_some_and(|length| index < length))
                 {
                     return if self.strict {
                         Err(Fault::exception(
@@ -158,6 +159,17 @@ impl Runtime {
         };
         if method == "valueOf" {
             return Ok(receiver);
+        }
+        if number && method == "toFixed" {
+            let digits = self.binary_integer(args.first(), 0.0, host)?;
+            if !(0.0..=100.0).contains(&digits) {
+                return Err(Fault::exception(
+                    "RangeError",
+                    "Number fraction digits must be from 0 to 100.",
+                ));
+            }
+            let Value::Number(value) = receiver else { unreachable!() };
+            return self.number_to_fixed(value, digits as usize);
         }
         // Boolean.toString ignores arguments. Number validates the radix before
         // formatting even NaN/infinity/zero, preserving observable coercion order.

@@ -11,6 +11,10 @@ const MAX_GROUP_NAME_BYTES: usize = 256;
 const MAX_MARKS: usize = 64;
 const MAX_STACK: usize = 1024;
 
+#[cfg(test)]
+#[path = "regexp_utf16_tests.rs"]
+mod utf16_tests;
+
 #[derive(Debug)]
 pub enum Error {
     Syntax(&'static str),
@@ -486,7 +490,8 @@ impl Parser {
                 .peek()
                 .ok_or(Error::Syntax("Unterminated regexp group name."))?;
             self.at += 1;
-            if unit == b'\\' as u16 {
+            let escaped = unit == b'\\' as u16;
+            if escaped {
                 if !self.eat(b'u' as u16) {
                     return Err(Error::Syntax(
                         "A regexp group name allows only Unicode escapes.",
@@ -512,6 +517,9 @@ impl Parser {
                     if digits == 0 {
                         return Err(Error::Syntax("Empty regexp group-name Unicode escape."));
                     }
+                    if (0xd800..=0xdfff).contains(&value) {
+                        return Err(Error::Syntax("Unpaired surrogate in regexp group name."));
+                    }
                     if value > 127 {
                         return Err(Error::Unsupported(
                             "Non-ASCII regexp group names are not implemented.",
@@ -521,6 +529,22 @@ impl Parser {
                 } else {
                     self.hex(4)?
                 };
+            }
+            if (0xd800..=0xdbff).contains(&unit) {
+                // A source code point consists of consecutive literal units.
+                // A four-digit UnicodeEscapeSequence can pair only with another
+                // such escape, never with a raw unit or braced escape.
+                let paired = if escaped {
+                    self.eat(b'\\' as u16) && self.eat(b'u' as u16)
+                        && (0xdc00..=0xdfff).contains(&self.hex(4)?)
+                } else {
+                    self.peek().is_some_and(|low| (0xdc00..=0xdfff).contains(&low))
+                };
+                if !paired {
+                    return Err(Error::Syntax("Unpaired surrogate in regexp group name."));
+                }
+            } else if (0xdc00..=0xdfff).contains(&unit) {
+                return Err(Error::Syntax("Unpaired surrogate in regexp group name."));
             }
             if unit >= 128 {
                 return Err(Error::Unsupported(
@@ -933,6 +957,9 @@ pub struct Regex {
     code: Vec<Instruction>,
     pub flags: Flags,
     pub source: String,
+    /// Escaped source when it contains unpaired UTF-16 units. The scalar
+    /// representation stays unchanged for ordinary patterns.
+    pub source_units: Option<Vec<u16>>,
     groups: usize,
     capture_names: Vec<Option<String>>,
     marks: usize,
@@ -1028,6 +1055,43 @@ impl Regex {
         let flags = Flags::parse(flags)?;
         let units: Vec<_> = pattern.encode_utf16().collect();
         spend(budget, units.len())?;
+        Self::compile_prepared(units, flags, budget)
+    }
+
+    /// Classic patterns are sequences of code units, including unpaired
+    /// surrogates. Never repair or escape those units before parsing: doing so
+    /// would change character classes, ranges and their matched captures.
+    pub fn compile_units(pattern: &[u16], flags: &str, budget: &mut usize) -> Result<Self, Error> {
+        if pattern.len() > MAX_PATTERN {
+            return Err(Error::Limit("Regular-expression pattern limit reached (4 KiB)."));
+        }
+        spend(budget, pattern.len())?;
+        // Keep the scalar entry point's byte ceiling. A paired surrogate costs
+        // four UTF-8 bytes; an unpaired one costs three bytes for this ceiling.
+        let mut bytes = 0usize;
+        let mut at = 0;
+        while at < pattern.len() {
+            let unit = pattern[at];
+            bytes += match unit {
+                0..=0x7f => 1,
+                0x80..=0x7ff => 2,
+                0xd800..=0xdbff if pattern.get(at + 1).is_some_and(|next| (0xdc00..=0xdfff).contains(next)) => {
+                    at += 1;
+                    4
+                }
+                _ => 3,
+            };
+            at += 1;
+        }
+        if bytes > MAX_PATTERN {
+            return Err(Error::Limit("Regular-expression pattern limit reached (4 KiB)."));
+        }
+        spend(budget, bytes.saturating_add(flags.len()))?;
+        let flags = Flags::parse(flags)?;
+        Self::compile_prepared(pattern.to_vec(), flags, budget)
+    }
+
+    fn compile_prepared(units: Vec<u16>, flags: Flags, budget: &mut usize) -> Result<Self, Error> {
         let named_mode = has_named_capture(&units);
         let mut parser = Parser {
             units,
@@ -1058,36 +1122,41 @@ impl Regex {
         compiler.node(&parser.nodes, root, false)?;
         compiler.emit(Instruction::Save(1))?;
         compiler.emit(Instruction::Accept)?;
-        let mut source = String::new();
+        let mut source = Vec::new();
         let mut escaped = false;
-        for ch in pattern.chars() {
+        for &unit in &parser.units {
             if escaped {
-                source.push(ch);
+                source.push(unit);
                 escaped = false;
                 continue;
             }
-            match ch {
-                '\\' => {
-                    source.push(ch);
+            match unit {
+                92 => {
+                    source.push(unit);
                     escaped = true;
                 }
-                '/' => source.push_str("\\/"),
-                '\n' => source.push_str("\\n"),
-                '\r' => source.push_str("\\r"),
-                '\u{2028}' => source.push_str("\\u2028"),
-                '\u{2029}' => source.push_str("\\u2029"),
-                _ => source.push(ch),
+                47 => source.extend("\\/".encode_utf16()),
+                10 => source.extend("\\n".encode_utf16()),
+                13 => source.extend("\\r".encode_utf16()),
+                0x2028 => source.extend("\\u2028".encode_utf16()),
+                0x2029 => source.extend("\\u2029".encode_utf16()),
+                _ => source.push(unit),
             }
         }
         if source.is_empty() {
-            source.push_str("(?:)");
+            source.extend("(?:)".encode_utf16());
         }
+        let (source, source_units) = match String::from_utf16(&source) {
+            Ok(source) => (source, None),
+            Err(_) => (String::new(), Some(source)),
+        };
         let mut capture_names = vec![None; parser.groups + 1];
         for capture in &parser.names {
             spend(compiler.budget, capture.name.len())?;
             capture_names[capture.index] = Some(capture.name.clone());
         }
         let retained_bytes = source.len()
+            + source_units.as_ref().map_or(0, |units| units.len() * std::mem::size_of::<u16>())
             + capture_names.len() * std::mem::size_of::<Option<String>>()
             + capture_names
                 .iter()
@@ -1112,6 +1181,7 @@ impl Regex {
             code: compiler.code,
             flags,
             source,
+            source_units,
             groups: parser.groups,
             capture_names,
             marks: compiler.marks,

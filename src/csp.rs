@@ -213,7 +213,7 @@ impl PolicySet {
         for policy in self.active(node)? {
             policy.allow_sandbox()?;
             if let Some(list) = policy.script_list(false) {
-                if !inline_matches(list, nonce, source, false, &mut digests) {
+                if !inline_matches(list, nonce, source, InlineKind::Script, &mut digests) {
                     return Err("Content Security Policy blocked an inline script (nonce/hash/inline source did not match).".into());
                 }
             }
@@ -265,7 +265,7 @@ impl PolicySet {
         for policy in self.active(usize::MAX)? {
             policy.allow_sandbox()?;
             if let Some(list) = policy.script_list(true) {
-                if !inline_matches(list, None, source, true, &mut digests) {
+                if !inline_matches(list, None, source, InlineKind::Handler, &mut digests) {
                     return Err("Content Security Policy blocked an inline event handler.".into());
                 }
             }
@@ -328,6 +328,20 @@ impl PolicySet {
         Ok(())
     }
 
+    /// Connected style elements follow the style element directive chain. A
+    /// dynamically inserted element is subject to all installed meta policies.
+    pub fn allows_inline_style(&self, node: usize, nonce: Option<&str>, source: &str) -> Result<(), String> {
+        let mut digests = Digests::default();
+        for policy in self.active(node)? {
+            if let Some(list) = policy.style_list() {
+                if !inline_matches(list, nonce, source, InlineKind::Style, &mut digests) {
+                    return Err("Content Security Policy blocked an inline style element.".into());
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// External LINK elements use style-src-elem, then style-src/default-src.
     /// Script nonces never authorize styles unless a style directive matches.
     /// Inline style elements/attributes remain outside this external-fetch API.
@@ -346,12 +360,7 @@ impl PolicySet {
             return Err("Cross-Origin-Embedder-Policy requires the document's exact origin for stylesheets in this build.".into());
         }
         for policy in self.active(node)? {
-            if let Some(list) = policy
-                .style_elements
-                .as_ref()
-                .or(policy.styles.as_ref())
-                .or(policy.default.as_ref())
-            {
+            if let Some(list) = policy.style_list() {
                 if !nonce_matches(list, nonce)
                     && !list
                         .iter()
@@ -418,6 +427,10 @@ impl PolicySet {
 }
 
 impl Policy {
+    fn style_list(&self) -> Option<&[Source]> {
+        self.style_elements.as_deref().or(self.styles.as_deref()).or(self.default.as_deref())
+    }
+
     fn script_list(&self, attribute: bool) -> Option<&[Source]> {
         (if attribute {
             &self.attributes
@@ -590,26 +603,27 @@ fn nonce_matches(list: &[Source], nonce: Option<&str>) -> bool {
     })
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum InlineKind { Script, Handler, Style }
+
 fn inline_matches(
     list: &[Source],
     nonce: Option<&str>,
     source: &str,
-    attribute: bool,
+    kind: InlineKind,
     digests: &mut Digests,
 ) -> bool {
-    if !attribute && nonce_matches(list, nonce) {
+    if kind != InlineKind::Handler && nonce_matches(list, nonce) {
         return true;
     }
     let overrides_inline = list.iter().any(|s| {
-        matches!(
-            s,
-            Source::Nonce(_) | Source::Hash(_, _) | Source::StrictDynamic
-        )
+        matches!(s, Source::Nonce(_) | Source::Hash(_, _))
+            || kind != InlineKind::Style && matches!(s, Source::StrictDynamic)
     });
     if !overrides_inline && list.iter().any(|s| matches!(s, Source::UnsafeInline)) {
         return true;
     }
-    if !attribute || list.iter().any(|s| matches!(s, Source::UnsafeHashes)) {
+    if kind != InlineKind::Handler || list.iter().any(|s| matches!(s, Source::UnsafeHashes)) {
         return list.iter().any(|s| match s {
             Source::Hash(algorithm, expected) => digests.matches(*algorithm, expected, source),
             _ => false,
@@ -848,6 +862,23 @@ mod tests {
         let mut p = policy("style-src https:");
         p.add_embedder_header("unsafe-none");
         assert!(p.allows_external_style(1, None, &foreign).is_ok());
+    }
+
+    #[test]
+    fn inline_style_connection_intersects_style_directives_nonces_and_exact_hashes() {
+        let source = "#tile { opacity: .5 }";
+        let hash = base64(&crypto_hash::sha256(source.as_bytes()));
+        let hashed = format!("style-src-elem 'sha256-{hash}'");
+        let mut set = policy("default-src 'none'; script-src 'nonce-Script'; style-src 'none'; style-src-elem 'nonce-Sheet'");
+        set.add_meta(&hashed, 10);
+        assert!(set.allows_inline_style(9, Some("Sheet"), "different").is_ok());
+        assert!(set.allows_inline_style(usize::MAX, Some("Sheet"), source).is_ok());
+        assert!(set.allows_inline_style(usize::MAX, Some("Sheet"), source.trim_end_matches('}')).is_err());
+        assert!(set.allows_inline_style(usize::MAX, Some("Script"), source).is_err());
+        assert!(policy("style-src 'unsafe-inline' 'strict-dynamic'").allows_inline_style(1, None, source).is_ok());
+        assert!(policy("style-src 'unsafe-inline' 'nonce-Sheet'").allows_inline_style(1, None, source).is_err());
+        assert!(policy("default-src 'self'").allows_inline_style(1, None, source).is_err());
+        assert!(policy("default-src 'unsafe-inline'").allows_inline_style(1, None, source).is_ok());
     }
 
     #[test]

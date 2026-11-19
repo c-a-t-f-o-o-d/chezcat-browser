@@ -45,6 +45,36 @@ enum ResourceFetch<'origin, 'state> {
 }
 
 const MAX_BODY_BYTES: usize = 512 * 1024 * 1024;
+
+#[derive(Clone, Copy)]
+struct BodyLimits {
+    wire: usize,
+    decoded: usize,
+}
+
+impl BodyLimits {
+    fn uniform(limit: usize) -> Self {
+        Self {
+            wire: limit,
+            decoded: limit,
+        }
+    }
+
+    fn capped(self, limit: usize) -> Self {
+        Self {
+            wire: self.wire.min(limit),
+            decoded: self.decoded.min(limit),
+        }
+    }
+
+    fn validate(self) -> Result<(), String> {
+        if self.wire > MAX_BODY_BYTES || self.decoded > MAX_BODY_BYTES {
+            return Err("HTTP body limit cannot exceed 512 MiB.".into());
+        }
+        Ok(())
+    }
+}
+
 pub const MAX_FORM_BYTES: usize = 128 * 1024;
 pub const USER_AGENT: &str = concat!("ChezCat/", env!("CARGO_PKG_VERSION"));
 const MAX_HEADER_BYTES: usize = 32 * 1024;
@@ -175,7 +205,7 @@ pub fn fetch_request(
         &Pool::new(cancel, trust),
         url,
         initial,
-        limit,
+        BodyLimits::uniform(limit),
         same_origin,
         mode,
         false,
@@ -192,7 +222,7 @@ fn fetch_in_pool(
     pool: &Pool<'_>,
     url: &HttpUrl,
     initial: &Request,
-    limit: usize,
+    limits: BodyLimits,
     same_origin: Option<&HttpUrl>,
     mode: FetchMode,
     retain: bool,
@@ -203,9 +233,7 @@ fn fetch_in_pool(
     resource: Option<ResourceFetch<'_, '_>>,
 ) -> Result<Response, String> {
     let cancel = pool.cancel;
-    if limit > MAX_BODY_BYTES {
-        return Err("HTTP body limit cannot exceed 512 MiB.".into());
-    }
+    limits.validate()?;
     if initial.body().len() > MAX_FORM_BYTES {
         return Err("HTTP form request body exceeds 128 KiB.".into());
     }
@@ -346,13 +374,13 @@ fn fetch_in_pool(
                     outgoing.body().len()
                 ));
             }
-            let response_limit = stylesheet.as_deref()
-                .map_or(limit, |stylesheet| limit.min(stylesheet.remaining_bytes()));
+            let response_limits = stylesheet.as_deref()
+                .map_or(limits, |stylesheet| limits.capped(stylesheet.remaining_bytes()));
             let (message, protocol) = pool.exchange(
                 &current,
                 &outgoing,
                 &request,
-                response_limit,
+                response_limits,
                 deadline,
                 retain,
                 &mut events,
@@ -799,7 +827,7 @@ impl<'a> Pool<'a> {
             self,
             url,
             initial,
-            limit,
+            BodyLimits::uniform(limit),
             same_origin,
             mode,
             true,
@@ -823,7 +851,7 @@ impl<'a> Pool<'a> {
             self,
             url,
             &Request::Get,
-            limit,
+            BodyLimits::uniform(limit),
             same_origin,
             mode,
             true,
@@ -851,7 +879,7 @@ impl<'a> Pool<'a> {
             self,
             url,
             &Request::Get,
-            limit,
+            BodyLimits::uniform(limit),
             Some(origin),
             mode,
             true,
@@ -872,7 +900,7 @@ impl<'a> Pool<'a> {
         mode: FetchMode, same_origin_only: bool, guard: &ResourceFilter<'_>,
     ) -> Result<StylesheetResponse, StylesheetFailure> {
         let mut stylesheet = stylesheet::State::new(origin, same_origin_only, limit);
-        let response = fetch_in_pool(self, url, &Request::Get, limit, None, mode,
+        let response = fetch_in_pool(self, url, &Request::Get, BodyLimits::uniform(limit), None, mode,
             true, "CSS", false, None, Some(guard),
             Some(ResourceFetch::Stylesheet(&mut stylesheet)))
             .map_err(|message| stylesheet.failure(message))?;
@@ -889,7 +917,7 @@ impl<'a> Pool<'a> {
         &self, url: &HttpUrl, limit: usize, origin: &HttpUrl,
         credentials: MediaCredentials, mode: FetchMode, guard: &ResourceFilter<'_>,
     ) -> Result<Response, String> {
-        fetch_in_pool(self, url, &Request::Get, limit, None, mode, true, "media", false,
+        fetch_in_pool(self, url, &Request::Get, BodyLimits::uniform(limit), None, mode, true, "media", false,
             None, Some(guard), Some(ResourceFetch::Media(media_cors::Config { origin, credentials })))
     }
 
@@ -898,10 +926,12 @@ impl<'a> Pool<'a> {
     /// Third-party sends and Set-Cookie are omitted permanently after origin
     /// exit. TLS, request blocking and the supplied CSP check remain mandatory.
     /// CORS-mode includes set same_origin_only, checked on every redirect hop.
-    pub fn fetch_classic_script(
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn fetch_classic_script(
         &self,
         url: &HttpUrl,
-        limit: usize,
+        wire_limit: usize,
+        decoded_limit: usize,
         origin: &HttpUrl,
         mode: FetchMode,
         same_origin_only: bool,
@@ -912,7 +942,10 @@ impl<'a> Pool<'a> {
             self,
             url,
             &Request::Get,
-            limit,
+            BodyLimits {
+                wire: wire_limit,
+                decoded: decoded_limit,
+            },
             same_origin_only.then_some(origin),
             mode,
             true,
@@ -947,7 +980,7 @@ impl<'a> Pool<'a> {
             self,
             url,
             request,
-            limit,
+            BodyLimits::uniform(limit),
             None,
             mode,
             true,
@@ -1066,7 +1099,7 @@ impl<'a> Pool<'a> {
         url: &HttpUrl,
         outgoing: &Request,
         request: &str,
-        limit: usize,
+        limits: BodyLimits,
         deadline: Instant,
         retain: bool,
         events: &mut Vec<String>,
@@ -1112,7 +1145,7 @@ impl<'a> Pool<'a> {
                 // never retained, including redirects with an empty body.
                 read_response_traced(
                     &mut connection.stream,
-                    limit,
+                    limits,
                     self.cancel,
                     deadline,
                     true,
@@ -1702,7 +1735,7 @@ fn read_response_detailed<R: Read>(
 ) -> Result<Message, ResponseFailure> {
     read_response_traced(
         source,
-        limit,
+        BodyLimits::uniform(limit),
         cancel,
         deadline,
         skip_redirect_body,
@@ -1727,19 +1760,15 @@ impl<R: Read> Read for TracedRead<'_, R> {
 
 fn read_response_traced<R: Read>(
     source: R,
-    limit: usize,
+    limits: BodyLimits,
     cancel: &AtomicBool,
     deadline: Instant,
     skip_redirect_body: bool,
     trace: Option<&network_trace::Ticket>,
     document: bool,
 ) -> Result<Message, ResponseFailure> {
-    if limit > MAX_BODY_BYTES {
-        return Err(ResponseFailure::before_response(
-            "HTTP body limit cannot exceed 512 MiB.".into(),
-        ));
-    }
-    let mut input = Input::new(TracedRead { source, trace }, limit, cancel, deadline);
+    limits.validate().map_err(ResponseFailure::before_response)?;
+    let mut input = Input::new(TracedRead { source, trace }, limits.wire, cancel, deadline);
     let result = (|| {
         let mut connection_persistent = true;
         for information in 0..=MAX_INFORMATIONAL {
@@ -1784,12 +1813,20 @@ fn read_response_traced<R: Read>(
                 let attachment = header(&headers, "content-disposition")
                     .and_then(|value| value.split(';').next())
                     .is_some_and(|value| value.trim().eq_ignore_ascii_case("attachment"));
-                let body_limit = if status == 205 {
-                    0
+                let response_limits = if status == 205 {
+                    BodyLimits::uniform(0)
                 } else if document && !attachment {
-                    limit.min(2 * 1024 * 1024)
+                    limits.capped(2 * 1024 * 1024)
                 } else {
-                    limit
+                    limits
+                };
+                // Decoders run in reverse header order. Without an effective
+                // coding the framed body itself must fit the decoded allowance.
+                let final_decoder = codings.iter().position(|coding| *coding != ContentCoding::Identity);
+                let body_limit = if final_decoder.is_none() {
+                    response_limits.wire.min(response_limits.decoded)
+                } else {
+                    response_limits.wire
                 };
                 input.stage = "body";
                 match framing {
@@ -1803,15 +1840,17 @@ fn read_response_traced<R: Read>(
                 if let Some(trace) = trace.filter(|_| !codings.is_empty()) {
                     trace.phase(PhaseKind::Decode);
                 }
-                // Each intermediate result obeys the same resource limit. Keep the
-                // original headers for inspection; framing was already completed
-                // using the encoded representation's length, never the decoded one.
-                for coding in codings.iter().rev() {
+                for (index, coding) in codings.iter().enumerate().rev() {
                     check(cancel, deadline)?;
                     let allowed = || check(cancel, deadline);
+                    let output_limit = if Some(index) == final_decoder {
+                        response_limits.decoded
+                    } else {
+                        response_limits.wire
+                    };
                     body = match coding {
-                        ContentCoding::Gzip => compression::gzip(&body, body_limit, &allowed),
-                        ContentCoding::Deflate => compression::zlib(&body, body_limit, &allowed),
+                        ContentCoding::Gzip => compression::gzip(&body, output_limit, &allowed),
+                        ContentCoding::Deflate => compression::zlib(&body, output_limit, &allowed),
                         ContentCoding::Identity => Ok(body),
                     }
                     .map_err(|error| {
@@ -2300,16 +2339,23 @@ mod tests {
     }
 
     fn parse(input: &[u8], limit: usize) -> Result<Message, String> {
-        read_response(
+        parse_with_limits(input, limit, limit)
+    }
+
+    fn parse_with_limits(input: &[u8], wire: usize, decoded: usize) -> Result<Message, String> {
+        read_response_traced(
             Pieces {
                 input: Cursor::new(input),
                 size: 3,
             },
-            limit,
+            BodyLimits { wire, decoded },
             &AtomicBool::new(false),
             Instant::now() + Duration::from_secs(2),
             false,
+            None,
+            false,
         )
+        .map_err(|error| error.text)
     }
 
     #[test]
@@ -2633,6 +2679,47 @@ mod tests {
         assert!(parse(extended.as_bytes(), 100)
             .unwrap_err()
             .contains("chunk metadata"));
+    }
+
+    #[test]
+    fn classic_script_body_limits_identity_checks_each_framing_before_growth() {
+        for encodings in ["", "Content-Encoding: identity, identity\r\n"] {
+            for framed in [
+                "Content-Length: 3\r\n\r\nabc",
+                "Transfer-Encoding: chunked\r\n\r\n2\r\nab\r\n1\r\nc\r\n0\r\n\r\n",
+                "Connection: close\r\n\r\nabc",
+            ] {
+                let wire = format!("HTTP/1.1 200 OK\r\n{encodings}{framed}");
+                assert_eq!(parse_with_limits(wire.as_bytes(), 16, 3).unwrap().body, b"abc");
+                for (encoded, decoded) in [(16, 2), (2, 16)] {
+                    let error = parse_with_limits(wire.as_bytes(), encoded, decoded).unwrap_err();
+                    assert!(error.contains("2-byte limit"), "{error}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn classic_script_body_limits_separate_wire_intermediate_and_final_output() {
+        // zlib wraps an 87-byte gzip member with a 64-byte filename and payload "hi".
+        let wrapped = [
+            120, 156, 147, 239, 230, 224, 96, 96, 96, 96, 96, 250, 159, 72, 33, 96, 56,
+            125, 130, 133, 97, 141, 214, 228, 27, 76, 12, 12, 12, 0, 253, 66, 29, 214,
+        ];
+        let mut wire = format!(
+            "HTTP/1.1 200 OK\r\nContent-Encoding: identity, gzip, identity, deflate\r\nContent-Length: {}\r\n\r\n",
+            wrapped.len()
+        ).into_bytes();
+        wire.extend_from_slice(&wrapped);
+        let message = parse_with_limits(&wire, 87, 2).unwrap();
+        assert_eq!(message.body, b"hi");
+        assert_eq!(message.encoded_bytes, wrapped.len());
+        let too_much_wire = parse_with_limits(&wire, wrapped.len() - 1, 128).unwrap_err();
+        assert!(too_much_wire.contains("33-byte limit"), "{too_much_wire}");
+        let intermediate = parse_with_limits(&wire, 86, 128).unwrap_err();
+        assert!(intermediate.contains("deflate content decoding failed"), "{intermediate}");
+        let decoded = parse_with_limits(&wire, 87, 1).unwrap_err();
+        assert!(decoded.contains("gzip content decoding failed"), "{decoded}");
     }
 
     #[test]

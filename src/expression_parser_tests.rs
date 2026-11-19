@@ -61,6 +61,64 @@ fn execute_ok(source: &str) {
 }
 
 #[test]
+fn identifier_escape_member_matches_literal_and_bracket_keys() {
+    execute_ok(r#"
+        var shelf = { "ɵcard": { label: "ok" } };
+        if (shelf.\u0275card !== shelf["ɵcard"]) throw "escaped key";
+        shelf.ɵcard.label;
+    "#);
+}
+
+#[test]
+fn identifier_escape_bindings_and_property_grammars_share_spelling() {
+    execute_ok(r#"
+        var \u{10400} = 3, a\u0301 = 4, a\u200C = 5, a\u200D = 6;
+        var \u0061sync = n => n + 1;
+        var {\u{000000e9}: value} = {é: 7};
+        var obj = { \u0074rue: 8, \u{10400}, get \u0063ode() { return value; } };
+        if (𐐀 !== 3 || á !== 4 || a\u200C + a\u200D !== 11) throw "binding";
+        if (obj?.\u0074rue !== 8 || obj.𐐀 !== 3 || obj.code !== async(6)) throw "property";
+        var á = 9;
+        if (á === á || 𐐀 / 3 !== 1) throw "spelling";
+        "ok";
+    "#);
+}
+
+#[test]
+fn identifier_escape_invalid_tokens_abort_before_first_effect() {
+    let (mut runtime, mut host) = runtime();
+    for invalid in [
+        r"var \u0031bad;", r"var \u{1f600};", r"var \u200C;",
+        r"var a\u002D;", r"box.\uD800;", r"box.\u{110000};",
+        r"box.\u{};", r"box.\u00G0;", r"box.\x61;", r"box.\u{61;",
+        r"var \u0069f;", r"\u0074rue;", r"\u0072eturn 0;",
+        r"({\u0067et value() { return 1; }});", r"1\u0061;",
+        r"/x/é;", r"/x/\u0067;",
+    ] {
+        let source = format!("probe.record('ran');\n{invalid}");
+        assert!(runtime.execute(&source, &mut host).is_err(), "{invalid}");
+        assert!(host.records.is_empty(), "{invalid}");
+    }
+}
+
+#[test]
+fn identifier_escape_reparse_and_early_errors_retain_native_meaning() {
+    execute_ok(r#"
+        class \u{10401} { \u0069f() { return 8; } }
+        class Leaf extends 𐐁 { read() { return super.\u0069f(); } }
+        var drill = Function('p', 'return p.\\u0069f();');
+        if (drill(new Leaf()) !== 8 || (new Leaf()).read() !== 8) throw "method";
+        "ok";
+    "#);
+    for body in [r"return 1\u0061", "return 1ɵ", "return \u{301}x", r"return \u0301x", r"return \u0069f"] {
+        let (mut runtime, mut host) = runtime();
+        runtime.define_global("body", Value::String(body.into())).unwrap();
+        let error = runtime.execute("var reason='';try{Function(body);}catch(e){reason=e.name;}reason;", &mut host).unwrap();
+        assert_eq!(error.to_text(), "SyntaxError", "{body}");
+    }
+}
+
+#[test]
 fn continuation_reference_and_operator_semantics() {
     execute_ok(include_str!("../tools/fixtures/parser-continuation-semantics.js"));
 }

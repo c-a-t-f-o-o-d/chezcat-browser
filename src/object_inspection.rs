@@ -17,8 +17,8 @@ impl Runtime {
     ) -> Result<Value, Fault> {
         self.step()?;
         Self::require_property_receiver(value)?;
-        if let Value::String(text) = value {
-            return self.inspection_string(method, text);
+        if value.is_string() {
+            return self.inspection_string(method, value);
         }
         let ordinary = Ordinary::from_value(value);
         let keys = if let Some(object) = ordinary {
@@ -145,9 +145,9 @@ impl Runtime {
         Ok(keys)
     }
 
-    fn inspection_string(&mut self, method: &str, text: &str) -> Result<Value, Fault> {
-        self.work(text.len())?;
-        let length = text.encode_utf16().count();
+    fn inspection_string(&mut self, method: &str, text: &Value) -> Result<Value, Fault> {
+        self.work(text.bytes())?;
+        let length = text.string_length().expect("matched string");
         let all = matches!(method, "getOwnPropertyNames" | "getOwnPropertyDescriptors");
         let count = length.saturating_add(usize::from(all));
         if count > self.limits.heap.object_properties {
@@ -165,15 +165,20 @@ impl Runtime {
             return Ok(Value::Object(result));
         }
         self.work(length.saturating_mul(2))?;
-        let units: Vec<_> = text.encode_utf16().collect();
+        let encoded;
+        let units = match text {
+            Value::String(scalar) => {
+                encoded = scalar.encode_utf16().collect::<Vec<_>>();
+                encoded.as_slice()
+            }
+            Value::StringUnits(units) => units.as_slice(),
+            _ => unreachable!(),
+        };
         let descriptors = method == "getOwnPropertyDescriptors";
         let result = self.new_object(if descriptors { None } else { Some(length) })?;
         for index in 0..length {
             self.step()?;
-            // A supplementary character's individual code units cannot be
-            // represented by this runtime's UTF-8 strings. Preserve that
-            // existing capability error instead of replacing or merging them.
-            let value = Value::String(self.units_string(&units[index..index + 1])?);
+            let value = self.string_from_units(&units[index..index + 1])?;
             let key = index.to_string();
             let value = if descriptors {
                 self.inspection_string_descriptor(value, true)?
@@ -404,13 +409,16 @@ d[s].value,typeof d.answer.get].join('|');
                 .to_text(),
             "0,1,length"
         );
-        for method in ["values", "entries", "getOwnPropertyDescriptors"] {
+        for (method, units) in [
+            ("values", "result[0]+result[1]"),
+            ("entries", "result[0][1]+result[1][1]"),
+            ("getOwnPropertyDescriptors", "result[0].value+result[1].value"),
+        ] {
             runtime.begin_job();
-            let error = runtime
-                .object_inspection(method, &source, &mut NoHost)
-                .unwrap_err();
-            assert!(error.exception.is_none());
-            assert!(error.message.contains("lone UTF-16 surrogate"));
+            let result = runtime.object_inspection(method, &source, &mut NoHost).unwrap();
+            runtime.define_global("result", result).unwrap();
+            let reconstructed = runtime.execute(units, &mut NoHost).unwrap();
+            assert!(matches!(reconstructed, Value::String(text) if text == "\u{1f408}"));
         }
         let object = runtime.new_object(None).unwrap();
         runtime

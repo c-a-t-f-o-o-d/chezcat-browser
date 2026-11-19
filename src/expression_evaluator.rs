@@ -848,7 +848,7 @@ impl Runtime {
             "void" => Ok(Value::Undefined),
             "typeof" => Ok(Value::String(match value {
                 Value::Undefined => "undefined", Value::Null | Value::Object(_) | Value::Host(_) => "object",
-                Value::Bool(_) => "boolean", Value::Number(_) => "number", Value::String(_) => "string",
+                Value::Bool(_) => "boolean", Value::Number(_) => "number", Value::String(_) | Value::StringUnits(_) => "string",
                 Value::Symbol(_) => "symbol", Value::Function(_) => "function",
             }.into())),
             "+" | "-" | "~" => {
