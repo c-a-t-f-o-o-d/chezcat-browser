@@ -6788,21 +6788,8 @@ impl Runtime {
             self.push_transient_value(&value)?;
             self.push_transient_root(function_reachability::Edge::Environment(scope))?;
             self.prepare(program, body, scope, false, host)?;
-            let (mut start, mut default) = (None, None);
-            for (test, offset) in cases {
-                self.step()?;
-                if let Some(test) = test {
-                    let candidate = self.eval(program, *test, scope, this, host)?;
-                    self.work(value.bytes().saturating_add(candidate.bytes()))?;
-                    if strict_equal(&value, &candidate) {
-                        start = Some(*offset);
-                        break;
-                    }
-                } else {
-                    default = Some(*offset);
-                }
-            }
-            if let Some(start) = start.or(default) {
+            if let Some(index) = self.select_switch_case(program, cases, &value, scope, this, host)? {
+                let start = cases[index].1;
                 self.statements(program, &body[start..], scope, this, host)
                     .map(|control| control.update_empty(Some(Value::Undefined)))
             } else {
@@ -6812,6 +6799,32 @@ impl Runtime {
         self.restore_transient_marker(marker);
         self.release_environment(scope);
         result
+    }
+
+    #[inline(never)]
+    fn select_switch_case(
+        &mut self,
+        program: &Rc<Program>,
+        cases: &[(Option<ExprId>, usize)],
+        value: &Value,
+        scope: usize,
+        this: &Value,
+        host: &mut dyn Host,
+    ) -> Result<Option<usize>, Fault> {
+        let mut default = None;
+        for (index, (test, _)) in cases.iter().enumerate() {
+            self.step()?;
+            if let Some(test) = test {
+                let candidate = self.eval(program, *test, scope, this, host)?;
+                self.work(value.bytes().saturating_add(candidate.bytes()))?;
+                if strict_equal(value, &candidate) {
+                    return Ok(Some(index));
+                }
+            } else {
+                default = Some(index);
+            }
+        }
+        Ok(default)
     }
 
     fn while_statement(
