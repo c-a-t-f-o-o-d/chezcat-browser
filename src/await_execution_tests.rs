@@ -32,6 +32,48 @@ fn checkpoint(runtime: &mut Runtime) {
 }
 
 #[test]
+fn await_execution_property_assignment_keeps_receiver_and_key_until_the_write() {
+    let mut runtime = Runtime::for_capacity_test();
+    succeeds(&mut runtime, r#"
+var trace='', release, reject, reason={}, marker={}, result=0, stored=0, caught=0;
+var gate=new Promise(function(resolve){release=resolve;});
+var failed=new Promise(function(resolve,fail){reject=fail;});
+var replacement={set slot(value){throw 'replacement receiver';}};
+var current={marker,set slot(value){
+    if(this.marker!==marker)throw 'setter receiver';
+    trace+='setter|';stored=value;
+}};
+function receiver(){trace+='receiver|';return current;}
+function key(label){
+    trace+='key:'+label+'|';
+    return {[Symbol.toPrimitive](hint){
+        if(hint!=='string'||label!=='write')throw 'unexpected key coercion';
+        trace+='convert|';return 'slot';
+    }};
+}
+function input(){trace+='operand|';current=replacement;return gate;}
+function relay(value){trace+='relay|';return value+1;}
+async function work(){return receiver()[key('write')]=relay(await input());}
+async function skip(){
+    try { replacement[key('skip')]=await failed; }
+    catch(error){if(error!==reason)throw error;caught++;}
+}
+work().then(value=>result=value);
+skip();
+if(trace!=='receiver|key:write|operand|key:skip|'||stored||result||caught)throw 'property reference timing';
+'ok';
+"#);
+    checkpoint(&mut runtime);
+    runtime.begin_job();
+    succeeds(&mut runtime, "var trash={};for(var i=0;i<900;i++)trash.fn=function(){return i;};trash=null;'ok';");
+    assert!(runtime.function_arena.retired > 0);
+    runtime.begin_job();
+    succeeds(&mut runtime, "reject(reason);release(4);'ok';");
+    checkpoint(&mut runtime);
+    succeeds(&mut runtime, "if(trace!=='receiver|key:write|operand|key:skip|relay|convert|setter|'||stored!==5||result!==5||caught!==1)throw 'write order, reference identity or rejection';'ok';");
+}
+
+#[test]
 fn await_execution_resumed_callee_evaluates_followup_arguments_in_order() {
     let mut runtime = Runtime::for_test();
     succeeds(&mut runtime, r#"

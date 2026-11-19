@@ -67,7 +67,7 @@ struct AwaitSite {
 
 fn await_expression(program: &Program, expression: ExprId) -> Option<AwaitSite> {
     let (expression, assignment) = match program.exprs[expression].kind {
-        ExprKind::Assign("=", left, right) if matches!(program.exprs[left].kind, ExprKind::Name(_)) => {
+        ExprKind::Assign("=", left, right) if matches!(program.exprs[left].kind, ExprKind::Name(_) | ExprKind::Member(..)) => {
             (right, Some(left))
         }
         _ => (expression, None),
@@ -496,7 +496,7 @@ mod tests {
             "if(false){use(1,await p);}",
             "return receiver.method(await p, 1);",
             "return receiver.method(1 + await p);",
-            "receiver.key = await p;",
+            "receiver[await p] = await p;",
             "value += await p;",
             "value = flag && await p;",
             "return (await p)[await p];",
@@ -553,6 +553,7 @@ mod tests {
             ("async function f(p){return choose() ? await p : other();}", 5),
             ("async function f(p){return choose() ? one() : make(await p)(1);}", 5),
             ("async function f(p){let value; value=use(await p);}", 2),
+            ("async function f(p){receiver.field=use(await p);}", 1),
             ("async function f(p){let value=receiver.method(use(await p));}", 1),
         ] {
             let mut runtime = Runtime::for_test();

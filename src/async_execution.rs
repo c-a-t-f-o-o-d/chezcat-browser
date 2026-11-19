@@ -47,10 +47,11 @@ impl PendingMethod {
     }
 }
 
-fn name_reference_bytes(reference: &Reference) -> usize {
+fn assignment_reference_bytes(reference: &Reference) -> usize {
     match reference {
         Reference::Binding(_, name) | Reference::Global(name) | Reference::Missing(name) => name.len(),
-        _ => unreachable!("async assignment admits only an identifier reference"),
+        Reference::ComputedProperty(receiver, key) => receiver.bytes().saturating_add(key.bytes()),
+        _ => unreachable!("async assignment needs an identifier or ordinary property"),
     }
 }
 
@@ -82,7 +83,7 @@ impl Activation {
             .saturating_add(self.branch_input.as_ref().map_or(0, Value::bytes))
             .saturating_add(self.pending_call().map_or(0, |call| call.function.bytes()))
             .saturating_add(self.pending_method().map_or(0, PendingMethod::retained_bytes))
-            .saturating_add(self.pending_assignment().map_or(0, name_reference_bytes))
+            .saturating_add(self.pending_assignment().map_or(0, assignment_reference_bytes))
             .saturating_add(
                 self.environments
                     .capacity()
@@ -104,7 +105,7 @@ impl Activation {
             .saturating_add(5 + usize::from(self.pending_call().is_some())
                 + usize::from(self.branch_input.is_some())
                 + 2 * usize::from(self.pending_method().is_some())
-                + usize::from(self.pending_assignment().is_some()))
+                + 2 * usize::from(self.pending_assignment().is_some()))
     }
 
     pub(super) fn reachability_edges(&self, add: &mut impl FnMut(Edge)) {
@@ -596,19 +597,7 @@ impl Runtime {
                 } => {
                     let result = (|| {
                         let assignment = if let Some(target) = assignment {
-                            let ExprKind::Name(name) = &frame.program.exprs[target].kind else {
-                                unreachable!("async assignment target must be an identifier");
-                            };
-                            self.await_storage(
-                                frame.retained_bytes().saturating_add(name.len()), name.len(),
-                            )?;
-                            let reference = self.reference(
-                                &frame.program, target, environment, &frame.this, host,
-                            )?;
-                            if let Reference::Binding(scope, _) = &reference {
-                                self.push_transient_root(Edge::Environment(*scope))?;
-                            }
-                            Some(reference)
+                            Some(self.prepare_await_assignment(frame, target, host)?)
                         } else {
                             None
                         };
@@ -622,7 +611,7 @@ impl Runtime {
                             self.step()?; // Enter the call before evaluating its callee.
                         }
                         let mut retained = frame.retained_bytes()
-                            .saturating_add(assignment.as_ref().map_or(0, name_reference_bytes));
+                            .saturating_add(assignment.as_ref().map_or(0, assignment_reference_bytes));
                         let method = if let Some(method) = method {
                             let prepared = self.prepare_await_method(frame, method, retained, host)?;
                             retained = retained.saturating_add(prepared.retained_bytes());
@@ -659,6 +648,28 @@ impl Runtime {
         })();
         self.restore_root_marker(marker);
         result
+    }
+
+    #[inline(never)]
+    fn prepare_await_assignment(
+        &mut self,
+        frame: &Activation,
+        target: ExprId,
+        host: &mut dyn Host,
+    ) -> Result<Reference, Fault> {
+        let reference = self.reference(
+            &frame.program, target, frame.environment()?, &frame.this, host,
+        )?;
+        let bytes = assignment_reference_bytes(&reference);
+        self.await_storage(frame.retained_bytes().saturating_add(bytes), bytes)?;
+        let mut rooted = Ok(());
+        Edge::reference(&reference, &mut |edge| {
+            if rooted.is_ok() {
+                rooted = self.push_transient_root(edge);
+            }
+        });
+        rooted?;
+        Ok(reference)
     }
 
     #[inline(never)]
@@ -797,7 +808,7 @@ mod tests {
             &mut MAX_REGEXP_WORK.clone(),
         )
         .unwrap();
-        let frame = Activation {
+        let mut frame = Activation {
             program: Rc::new(program),
             template: 0,
             callee: 11,
@@ -857,5 +868,16 @@ mod tests {
                 + frame.environments.capacity() * std::mem::size_of::<usize>()
                 + frame.try_scopes.capacity() * std::mem::size_of::<TryScope>()
         );
+        frame.pending.as_mut().unwrap().assignment = Some(Reference::ComputedProperty(
+            Value::Object(22), Value::Function(23),
+        ));
+        edges.clear();
+        frame.reachability_edges(&mut |edge| edges.push(edge));
+        assert!(edges.iter().any(|edge| matches!(edge, Edge::Object(22))));
+        assert!(edges.iter().any(|edge| matches!(edge, Edge::Function(23))));
+        assert!(frame.reachability_cost() >= edges.len());
+        assert_eq!(assignment_reference_bytes(&Reference::ComputedProperty(
+            Value::String("base".into()), Value::String("key".into()),
+        )), 7);
     }
 }
