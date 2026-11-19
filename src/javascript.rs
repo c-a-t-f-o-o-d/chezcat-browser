@@ -152,6 +152,11 @@ mod runtime_diagnostics;
 mod string_substr;
 #[path = "string_concat.rs"]
 mod string_concat;
+#[path = "string_units.rs"]
+mod string_units;
+#[cfg(test)]
+#[path = "string_unit_tests.rs"]
+mod string_unit_tests;
 #[path = "string_last_index_of.rs"]
 mod string_last_index_of;
 #[cfg(test)]
@@ -203,6 +208,8 @@ mod prototypes;
 mod legacy_object_prototype_tests;
 #[path = "regexp.rs"]
 mod regexp;
+#[path = "regexp_utf16_values.rs"]
+mod regexp_utf16_values;
 #[cfg(test)]
 #[path = "rest_parameters.rs"]
 mod rest_parameters;
@@ -302,6 +309,8 @@ pub enum Value {
     Bool(bool),
     Number(f64),
     String(String),
+    /// Exact UTF-16 when at least one code unit is unpaired.
+    StringUnits(Vec<u16>),
     /// Unique primitive identity in this document's bounded symbol arena.
     Symbol(usize),
     Function(usize),
@@ -317,6 +326,7 @@ impl Value {
             Self::Bool(value) => *value,
             Self::Number(value) => *value != 0.0 && !value.is_nan(),
             Self::String(value) => !value.is_empty(),
+            Self::StringUnits(_) => true,
             Self::Symbol(_) | Self::Function(_) | Self::Object(_) | Self::Host(_) => true,
         }
     }
@@ -330,6 +340,7 @@ impl Value {
             Self::Bool(value) => value.to_string(),
             Self::Number(value) => number_text(*value),
             Self::String(value) => value.clone(),
+            Self::StringUnits(_) => "[string containing unpaired UTF-16]".into(),
             Self::Symbol(_) => "[symbol]".into(),
             Self::Function(_) => "[function]".into(),
             Self::Object(_) => "[script object]".into(),
@@ -348,12 +359,14 @@ impl Value {
             Self::Bool(value) => f64::from(*value),
             Self::Number(value) => *value,
             Self::String(value) => string_number(value),
+            Self::StringUnits(_) => f64::NAN,
         }
     }
 
-    fn bytes(&self) -> usize {
+    pub(crate) fn bytes(&self) -> usize {
         match self {
             Self::String(value) => value.len(),
+            Self::StringUnits(value) => value.len().saturating_mul(2),
             _ => 0,
         }
     }
@@ -364,7 +377,7 @@ impl Value {
             Self::Null => "null",
             Self::Bool(_) => "boolean",
             Self::Number(_) => "number",
-            Self::String(_) => "string",
+            Self::String(_) | Self::StringUnits(_) => "string",
             Self::Symbol(_) => "symbol",
             Self::Function(_) => "function",
             Self::Object(_) => "object",
@@ -389,7 +402,7 @@ impl Value {
     /// Diagnostic labels must never become script-visible coercion results.
     fn script_text(&self) -> Result<String, Fault> {
         self.primitive()?;
-        Ok(self.to_text())
+        self.scalar_text().map_err(Fault::new)
     }
 
     fn script_number(&self) -> Result<f64, Fault> {
@@ -976,6 +989,7 @@ enum TokenKind {
     EscapedWord(String),
     Number(f64),
     String(String),
+    StringUnits(Vec<u16>),
     Template(String, template_literals::Part),
     RegExp(Rc<regexp::Regex>),
     Punct(&'static str),
@@ -1288,6 +1302,7 @@ impl LexGoal {
             }
             TokenKind::Number(_)
             | TokenKind::String(_)
+            | TokenKind::StringUnits(_)
             | TokenKind::RegExp(_)
             | TokenKind::Template(
                 _,
@@ -1507,7 +1522,7 @@ fn tokenize_with_capacity(source: &str, regexp_budget: &mut usize, capacity: lim
             TokenKind::Number(value)
         } else if ch == '\'' || ch == '"' {
             at += 1;
-            let mut value = String::new();
+            let mut value = string_units::LiteralBuffer::new();
             let mut closed = false;
             while at < source.len() {
                 let ch = source[at..].chars().next().unwrap();
@@ -1553,28 +1568,21 @@ fn tokenize_with_capacity(source: &str, regexp_budget: &mut usize, capacity: lim
                         'x' | 'u' => {
                             let count = if escaped == 'x' { 2 } else { 4 };
                             let first = hex_escape(source, &mut at, count)?;
-                            let scalar = if (0xd800..=0xdbff).contains(&first) {
-                                if !source[at..].starts_with("\\u") {
-                                    return Err(Fault::new(
-                                        "Lone UTF-16 surrogate escapes are not supported.",
-                                    )
-                                    .at(source, at));
+                            if (0xd800..=0xdbff).contains(&first) && source[at..].starts_with("\\u") {
+                                let mut next = at + 2;
+                                let low = hex_escape(source, &mut next, 4)?;
+                                if (0xdc00..=0xdfff).contains(&low) {
+                                    at = next;
+                                    let scalar = 0x10000 + ((first - 0xd800) << 10) + low - 0xdc00;
+                                    value.push(char::from_u32(scalar).expect("valid surrogate pair"));
+                                } else {
+                                    value.push_unpaired(first as u16, capacity.string_bytes)?;
                                 }
-                                at += 2;
-                                let low = hex_escape(source, &mut at, 4)?;
-                                if !(0xdc00..=0xdfff).contains(&low) {
-                                    return Err(
-                                        Fault::new("Invalid UTF-16 surrogate pair.").at(source, at)
-                                    );
-                                }
-                                0x10000 + ((first - 0xd800) << 10) + low - 0xdc00
+                            } else if let Some(c) = char::from_u32(first) {
+                                value.push(c);
                             } else {
-                                first
-                            };
-                            value.push(char::from_u32(scalar).ok_or_else(|| {
-                                Fault::new("Lone UTF-16 surrogate escapes are not supported.")
-                                    .at(source, at)
-                            })?);
+                                value.push_unpaired(first as u16, capacity.string_bytes)?;
+                            }
                         }
                         other => value.push(other),
                     }
@@ -1589,7 +1597,7 @@ fn tokenize_with_capacity(source: &str, regexp_budget: &mut usize, capacity: lim
                         .at(source, start),
                 );
             }
-            TokenKind::String(value)
+            value.finish(capacity.string_bytes)?
         } else if !ch.is_ascii() && identifier_names::part(ch) {
             return Err(Fault::exception("SyntaxError", "This character can only continue an identifier.").at(source, start));
         } else {
@@ -2125,7 +2133,7 @@ impl Parser {
         let stmt = &self.program.stmts[statement];
         if let StmtKind::Expr(expression) = stmt.kind {
             let expr = &self.program.exprs[expression];
-            if matches!(&expr.kind, ExprKind::Literal(Value::String(_))) && expr.at == stmt.at {
+            if matches!(&expr.kind, ExprKind::Literal(Value::String(_) | Value::StringUnits(_))) && expr.at == stmt.at {
                 let source = &self.program.source[stmt.at..];
                 if source.starts_with("\"use strict\"") || source.starts_with("'use strict'") {
                     self.strict = true;
@@ -2698,6 +2706,10 @@ impl Parser {
             TokenKind::String(value) => {
                 self.current += 1;
                 ExprKind::Literal(Value::String(value))
+            }
+            TokenKind::StringUnits(units) => {
+                self.current += 1;
+                ExprKind::Literal(Value::StringUnits(units))
             }
             TokenKind::Template(
                 value,
@@ -4134,15 +4146,18 @@ impl Runtime {
         host: &mut dyn Host,
     ) -> Result<Value, Fault> {
         self.step()?;
-        let Value::String(source) = value else {
+        if !value.is_string() {
             return self.copy_value(value);
-        };
+        }
         if !host.allow_eval_for_window(self.browser_global.map(|(handle, _)| handle)).map_err(Fault::new)? {
             return Err(Fault::exception(
                 "EvalError",
                 "Content Security Policy blocks string evaluation.",
             ));
         }
+        let Value::String(source) = value else {
+            return Err(Fault::new("Evaluating source containing unpaired UTF-16 surrogates is not implemented."));
+        };
         if self.call_depth >= MAX_CALL_DEPTH {
             return Err(Fault::new("Function call limit reached (32)."));
         }
@@ -5203,39 +5218,6 @@ impl Runtime {
         Ok(Value::Object(id))
     }
 
-    fn regexp_factory(&mut self, args: &[Value]) -> Result<Value, Fault> {
-        let pattern = args.first().unwrap_or(&Value::Undefined);
-        let flags = args.get(1).unwrap_or(&Value::Undefined);
-        let existing = match pattern {
-            Value::Object(id) => self.object(*id)?.regexp.clone(),
-            _ => None,
-        };
-        let pattern = if let Some(existing) = &existing {
-            existing.source.clone()
-        } else if matches!(pattern, Value::Undefined) {
-            String::new()
-        } else {
-            pattern.primitive()?;
-            self.work(pattern.bytes())?;
-            pattern.script_text()?
-        };
-        let flags = if matches!(flags, Value::Undefined) {
-            existing
-                .as_ref()
-                .map_or(String::new(), |regex| regex.flags.text())
-        } else {
-            flags.primitive()?;
-            self.work(flags.bytes())?;
-            flags.script_text()?
-        };
-        self.work(pattern.len().saturating_add(flags.len()))?;
-        let expression = Rc::new(
-            regexp::Regex::compile(&pattern, &flags, &mut self.regexp_work)
-                .map_err(Self::regexp_fault)?,
-        );
-        self.retain_regexp(expression.retained_bytes)?;
-        self.regexp_object(expression)
-    }
 
     fn regexp_run(&mut self, id: usize, input: &[u16]) -> Result<Option<regexp::Match>, Fault> {
         let expression = self
@@ -5352,9 +5334,7 @@ impl Runtime {
         let mut buffer = [0; 2];
         let units = character.encode_utf16(&mut buffer);
         if method == "charAt" {
-            // Keep the current explicit lone-surrogate boundary.
-            self.units_string(&units[index..index + 1])
-                .map(Value::String)
+            self.string_from_units(&units[index..index + 1])
         } else {
             let code = if method == "codePointAt" && index == 0 {
                 u32::from(character)
@@ -5365,127 +5345,8 @@ impl Runtime {
         }
     }
 
-    fn regexp_array(
-        &mut self,
-        found: &regexp::Match,
-        input: &[u16],
-        text: &str,
-    ) -> Result<Value, Fault> {
-        let mut values = Vec::with_capacity(found.captures.len());
-        for capture in &found.captures {
-            values.push(if let Some((start, end)) = capture {
-                Value::String(self.units_string(&input[*start..*end])?)
-            } else {
-                Value::Undefined
-            });
-        }
-        let Value::Object(id) = self.array_from_values(&values)? else {
-            unreachable!()
-        };
-        self.set_property_throw(id, "index".into(), Value::Number(found.start() as f64))?;
-        self.set_property_throw(id, "input".into(), Value::String(text.into()))?;
-        let groups = self.regexp_named_groups(found, input)?;
-        self.set_property_throw(id, "groups".into(), groups)?;
-        Ok(Value::Object(id))
-    }
 
-    fn regexp_method(&mut self, id: usize, method: &str, args: &[Value], host: &mut dyn Host) -> Result<Value, Fault> {
-        if method == "toString" {
-            let expression = self.object(id)?.regexp.clone().unwrap();
-            return self.checked_value(Value::String(format!(
-                "/{}/{}",
-                expression.source,
-                expression.flags.text()
-            )));
-        }
-        // The receiver was branded before entry. Input ToString may run real
-        // author getters/callbacks and must precede reading matching state.
-        let value = self.copy_value(args.first().unwrap_or(&Value::Undefined))?;
-        let value = self.primitive_with_hint(value, true, host)?;
-        self.work_as(value.bytes().saturating_mul(3), WorkKind::StringMethodInput)?;
-        let text = value.script_text()?;
-        let input: Vec<_> = text.encode_utf16().collect();
-        let found = self.regexp_run(id, &input)?;
-        if method == "test" {
-            return Ok(Value::Bool(found.is_some()));
-        }
-        if let Some(found) = found {
-            self.regexp_array(&found, &input, &text)
-        } else {
-            Ok(Value::Null)
-        }
-    }
 
-    fn regexp_string_method(
-        &mut self,
-        text: &str,
-        method: &str,
-        args: &[Value],
-        host: &mut dyn Host,
-    ) -> Result<Value, Fault> {
-        self.work_as(text.len().saturating_mul(3), WorkKind::StringMethodInput)?;
-        let pattern = args.first().unwrap_or(&Value::Undefined);
-        let regex_id = match pattern {
-            Value::Object(id) if self.object(*id)?.regexp.is_some() => Some(*id),
-            _ => None,
-        };
-        if method == "replace" {
-            return self.string_replace(
-                text,
-                pattern,
-                regex_id,
-                args.get(1).unwrap_or(&Value::Undefined),
-                host,
-            );
-        }
-        let id = if let Some(id) = regex_id {
-            id
-        } else {
-            let Value::Object(id) = self.regexp_factory(std::slice::from_ref(pattern))? else {
-                unreachable!()
-            };
-            id
-        };
-        let expression = self.object(id)?.regexp.clone().unwrap();
-        let input: Vec<_> = text.encode_utf16().collect();
-        if method == "search" {
-            let found = expression
-                .find(&input, 0, expression.flags.sticky, &mut self.regexp_work)
-                .map_err(Self::regexp_fault)?;
-            return Ok(Value::Number(
-                found.as_ref().map_or(-1.0, |found| found.start() as f64),
-            ));
-        }
-        if !expression.flags.global {
-            return if let Some(found) = self.regexp_run(id, &input)? {
-                self.regexp_array(&found, &input, text)
-            } else {
-                Ok(Value::Null)
-            };
-        }
-        self.set_property_throw(id, "lastIndex".into(), Value::Number(0.0))?;
-        let mut matches = Vec::new();
-        while let Some(found) = self.regexp_run(id, &input)? {
-            if matches.len() == self.limits.heap.array_length {
-                return Err(Fault::new(format!("Array length limit reached ({}).", self.limits.heap.array_length)));
-            }
-            matches.push(Value::String(
-                self.units_string(&input[found.start()..found.end()])?,
-            ));
-            if found.start() == found.end() {
-                self.set_property_throw(
-                    id,
-                    "lastIndex".into(),
-                    Value::Number((found.end() + 1) as f64),
-                )?;
-            }
-        }
-        if matches.is_empty() {
-            Ok(Value::Null)
-        } else {
-            self.array_from_values(&matches)
-        }
-    }
 
     fn split_string(&mut self, text: &str, args: &[Value]) -> Result<Value, Fault> {
         self.work(text.len().saturating_mul(3))?;
@@ -5848,7 +5709,7 @@ impl Runtime {
         }
         if let Some(expression) = self.object(id)?.regexp.clone() {
             let value = match name {
-                "source" => Some(Value::String(expression.source.clone())),
+                "source" => return self.regexp_source_value(&expression),
                 "flags" => Some(Value::String(expression.flags.text())),
                 "global" => Some(Value::Bool(expression.flags.global)),
                 "ignoreCase" => Some(Value::Bool(expression.flags.insensitive)),
@@ -6276,9 +6137,9 @@ impl Runtime {
         match value {
             Value::Object(id) => self.inherited_keys(Ordinary::Object(*id)),
             Value::Function(id) => self.inherited_keys(Ordinary::Function(*id)),
-            Value::String(text) => {
-                self.work(text.len())?;
-                let length = text.encode_utf16().count();
+            Value::String(_) | Value::StringUnits(_) => {
+                self.work(value.bytes())?;
+                let length = value.string_length().expect("matched string");
                 if length > self.limits.heap.object_properties {
                     return Err(Fault::new(format!("for-in enumeration limit reached ({} keys).", self.limits.heap.object_properties)));
                 }
@@ -7608,7 +7469,7 @@ impl Runtime {
                             Value::Null | Value::Object(_) | Value::Host(_) => "object",
                             Value::Bool(_) => "boolean",
                             Value::Number(_) => "number",
-                            Value::String(_) => "string",
+                            Value::String(_) | Value::StringUnits(_) => "string",
                             Value::Symbol(_) => "symbol",
                             Value::Function(_) => "function",
                         }
@@ -8201,6 +8062,11 @@ impl Runtime {
             Value::Function(function) => {
                 self.get_ordinary_property_with_host(Ordinary::Function(*function), property, host)
             }
+            Value::StringUnits(units) if property == "length" => Ok(Value::Number(units.len() as f64)),
+            Value::StringUnits(units) if property_index(property).is_some_and(|i| i < units.len()) => {
+                let index = property_index(property).unwrap();
+                self.string_from_units(&units[index..=index])
+            }
             Value::String(text) if property == "length" => {
                 self.work_as(text.len(), WorkKind::LengthScan)?;
                 Ok(Value::Number(text.encode_utf16().count() as f64))
@@ -8210,8 +8076,7 @@ impl Runtime {
                 if let Some((character, index)) = self.string_scalar_at(text, target)? {
                     let mut buffer = [0; 2];
                     let units = character.encode_utf16(&mut buffer);
-                    self.units_string(&units[index..index + 1])
-                        .map(Value::String)
+                    self.string_from_units(&units[index..index + 1])
                 } else {
                     // An absent own index may have an inherited getter. Use
                     // the original, already evaluated receiver, not a live
@@ -8224,7 +8089,7 @@ impl Runtime {
                     )
                 }
             }
-            Value::String(_) => self.get_ordinary_property_with_receiver(
+            Value::String(_) | Value::StringUnits(_) => self.get_ordinary_property_with_receiver(
                 Ordinary::Object(self.string_prototype.unwrap()),
                 property,
                 object,
@@ -8288,7 +8153,7 @@ impl Runtime {
             }
             Reference::Property(Value::Object(object), property) => self.assign_ordinary_property(Ordinary::Object(object), property, value, host),
             Reference::Property(Value::Function(function), property) => self.assign_ordinary_property(Ordinary::Function(function), property, value, host),
-            Reference::Property(receiver @ (Value::String(_) | Value::Number(_) | Value::Bool(_) | Value::Symbol(_)), property) => self.assign_primitive_property(receiver, property, value, host),
+            Reference::Property(receiver @ (Value::String(_) | Value::StringUnits(_) | Value::Number(_) | Value::Bool(_) | Value::Symbol(_)), property) => self.assign_primitive_property(receiver, property, value, host),
             Reference::Property(_, _) => Err(Fault::new(
                 "Properties can only be assigned on ordinary objects, arrays or supported host objects.",
             )),
@@ -8380,13 +8245,13 @@ impl Runtime {
                     true
                 }
             }
-            Reference::Property(Value::String(text), name) => {
-                self.work(text.len().saturating_add(name.len()))?;
+            Reference::Property(receiver @ (Value::String(_) | Value::StringUnits(_)), name) => {
+                self.work(receiver.bytes().saturating_add(name.len()))?;
                 let index = name
                     .parse::<usize>()
                     .ok()
                     .filter(|index| index.to_string() == name);
-                name != "length" && !index.is_some_and(|index| index < text.encode_utf16().count())
+                name != "length" && !index.is_some_and(|index| receiver.string_length().is_some_and(|length| index < length))
             }
             Reference::Property(Value::Number(_) | Value::Bool(_) | Value::Symbol(_), _) => true,
             Reference::Property(_, _) => {
@@ -8748,7 +8613,7 @@ impl Runtime {
                     Value::Object(_) | Value::Function(_) | Value::Host(_)
                 ) && matches!(
                     other,
-                    Value::Number(_) | Value::String(_) | Value::Bool(_) | Value::Symbol(_)
+                    Value::Number(_) | Value::String(_) | Value::StringUnits(_) | Value::Bool(_) | Value::Symbol(_)
                 )
             };
             let left = if converts(&left, &right) {
@@ -8782,6 +8647,9 @@ impl Runtime {
         let right = self.primitive_with_preference(right, hint, host)?;
         left.primitive()?;
         right.primitive()?;
+        if op == "+" && (matches!(left, Value::StringUnits(_)) || matches!(right, Value::StringUnits(_))) {
+            return self.concat_unit_values(&left, &right);
+        }
         if op == "+" && (matches!(left, Value::String(_)) || matches!(right, Value::String(_))) {
             self.work_as(
                 left.bytes()
@@ -8801,6 +8669,8 @@ impl Runtime {
             let order = if let (Value::String(left), Value::String(right)) = (&left, &right) {
                 self.work_as(left.len().saturating_add(right.len()), WorkKind::BinaryInspection)?;
                 Some(left.encode_utf16().cmp(right.encode_utf16()))
+            } else if left.is_string() && right.is_string() {
+                Some(self.string_units_for_value(&left)?.cmp(&self.string_units_for_value(&right)?))
             } else {
                 left.script_number()?.partial_cmp(&right.script_number()?)
             };
@@ -9435,6 +9305,15 @@ impl Runtime {
             let value = self.call_host(object, method, args, host)?;
             return self.checked_value(value);
         }
+        if let Value::StringUnits(ref units) = object {
+            return match method {
+                "charCodeAt" | "codePointAt" | "charAt" => self.raw_string_character(units, method, args),
+                "toString" | "valueOf" => Ok(object),
+                "concat" => self.string_primitive_concat(object, args, host),
+                "search" | "match" => self.regexp_string_method_units(units, method, args, host),
+                _ => Err(Fault::new("This string method does not support unpaired UTF-16 surrogates.")),
+            };
+        }
         if let Value::String(text) = object {
             if method == "concat" { return self.string_concat(&text,args,host); }
             if method == "substr" { return self.string_substr(&text,args,host); }
@@ -9831,7 +9710,7 @@ impl Runtime {
                 } else {
                     let value = self.copy_value(value)?;
                     let value = self.primitive_with_hint(value, true, host)?;
-                    self.checked_value(Value::String(value.script_text()?))
+                    if value.is_string() { self.checked_value(value) } else { self.checked_value(Value::String(value.script_text()?)) }
                 }
             }
             Builtin::Number => Ok(Value::Number(if args.is_empty() {
@@ -9921,6 +9800,7 @@ fn strict_equal(left: &Value, right: &Value) -> bool {
         (Value::Bool(a), Value::Bool(b)) => a == b,
         (Value::Number(a), Value::Number(b)) => a == b,
         (Value::String(a), Value::String(b)) => a == b,
+        (Value::StringUnits(a), Value::StringUnits(b)) => a == b,
         (Value::Symbol(a), Value::Symbol(b)) => a == b,
         (Value::Function(a), Value::Function(b)) => a == b,
         (Value::Object(a), Value::Object(b)) => a == b,
@@ -11049,13 +10929,12 @@ caught;
             );
             assert_eq!(runtime.job_usage().1, 4);
         }
-        for position in [0.0, 1.0] {
+        for (position, expected) in [(0.0, 0xd83d), (1.0, 0xde00)] {
             runtime.begin_job();
-            let error = runtime
+            let value = runtime
                 .string_character("😀", "charAt", &[Value::Number(position)])
-                .unwrap_err();
-            assert!(error.exception.is_none());
-            assert!(error.display().contains("lone UTF-16 surrogate"));
+                .unwrap();
+            assert!(matches!(value, Value::StringUnits(units) if units == [expected]));
         }
         for position in [f64::NAN, -0.0, -0.5] {
             runtime.begin_job();
@@ -11126,7 +11005,7 @@ caught;
             let units: Vec<_> = text.encode_utf16().collect();
             let index = property_index(property).unwrap();
             if index < units.len() {
-                runtime.units_string(&units[index..index + 1]).map(Value::String)
+                runtime.string_from_units(&units[index..index + 1])
             } else {
                 runtime.get_ordinary_property_with_receiver(
                     Ordinary::Object(runtime.string_prototype.unwrap()),
@@ -11300,16 +11179,23 @@ caught;
     }
 
     #[test]
-    fn string_index_lone_surrogate_stays_fatal_and_cancels_later_callbacks() {
+    fn string_index_exact_surrogate_runs_callbacks_and_utf8_only_key_refusal_cancels_them() {
         let mut runtime = Runtime::for_test();
         let mut host = TestHost::default();
         runtime.begin_job();
         runtime.execute(
-            "var caught=0,tail=0;Promise.resolve().then(function(){try{'😀'[0];}catch(e){caught++;}finally{caught+=10;}});Promise.resolve().then(function(){tail++;});",
+            "var seen=0,tail=0;Promise.resolve().then(function(){seen='😀'[0].charCodeAt(0);});Promise.resolve().then(function(){tail++;});",
+            &mut host,
+        ).unwrap();
+        runtime.microtask_checkpoint(&mut host).unwrap();
+        assert_eq!(runtime.execute("seen===55357&&tail===1;", &mut host).unwrap().to_text(), "true");
+        runtime.begin_job();
+        runtime.execute(
+            "var caught=0,target={};tail=0;Promise.resolve().then(function(){try{target['😀'[0]]=1;}catch(e){caught++;}finally{caught+=10;}});Promise.resolve().then(function(){tail++;});",
             &mut host,
         ).unwrap();
         let error = runtime.microtask_checkpoint(&mut host).unwrap_err();
-        assert!(error.contains("lone UTF-16 surrogate"), "{error}");
+        assert!(error.contains("unpaired UTF-16"), "{error}");
         assert!(!runtime.has_microtasks());
         assert_eq!((runtime.eval_depth, runtime.call_depth), (0, 0));
         runtime.begin_job();

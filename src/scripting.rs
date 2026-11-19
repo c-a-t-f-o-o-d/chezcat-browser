@@ -614,16 +614,12 @@ impl State {
         if extra.len() > self.limits.host.timer_arguments {
             return Err("Timer argument limit reached (30).".into());
         }
-        let bytes = extra
-            .iter()
-            .try_fold(std::mem::size_of_val(extra), |total, value| {
-                total.checked_add(match value {
-                    Value::String(text) => text.len(),
-                    _ => 0,
-                })
-            })
+        let slots = extra.len().checked_mul(std::mem::size_of::<Value>())
             .ok_or("Timer argument size overflow.")?;
-        if bytes > self.limits.host.timer_bytes.saturating_sub(self.timer_bytes) {
+        let bytes = extra.iter().try_fold(slots, |total, value| total.checked_add(value.bytes()))
+            .ok_or("Timer argument size overflow.")?;
+        let retained = self.timer_bytes.checked_add(bytes).ok_or("Timer argument size overflow.")?;
+        if retained > self.limits.host.timer_bytes {
             return Err("Timer argument memory limit reached (256 KiB per document).".into());
         }
         self.copies(bytes)?;
@@ -645,13 +641,36 @@ impl State {
             .checked_add(1)
             .filter(|id| *id <= i32::MAX as u32)
             .ok_or("Timer identifier limit reached.")?;
+        let mut copied = Vec::new();
+        copied.try_reserve_exact(extra.len()).map_err(|_| "Could not reserve timer argument slots.")?;
+        for value in extra {
+            let value = match value {
+                Value::String(text) => {
+                    let mut copy = String::new();
+                    copy.try_reserve_exact(text.len()).map_err(|_| "Could not reserve timer argument text.")?;
+                    copy.push_str(text);
+                    Value::String(copy)
+                }
+                Value::StringUnits(units) => {
+                    let mut copy = Vec::new();
+                    copy.try_reserve_exact(units.len()).map_err(|_| "Could not reserve timer argument code units.")?;
+                    copy.extend_from_slice(units);
+                    Value::StringUnits(copy)
+                }
+                // All other values retain fixed-size primitive or genuine
+                // object/function/native identities, not another payload.
+                _ => value.clone(),
+            };
+            copied.push(value);
+        }
+        self.timers.try_reserve(1).map_err(|_| "Could not reserve a timer slot.")?;
         self.next_timer = id;
-        self.timer_bytes += bytes;
+        self.timer_bytes = retained;
         self.timers.push(Timer {
             id,
             due,
             callback: callback.clone(),
-            arguments: extra.to_vec(),
+            arguments: copied,
             bytes,
             nesting: self.timer_nesting.saturating_add(1),
         });
@@ -1989,7 +2008,7 @@ impl Bridge<'_> {
         ) {
             return Err("DOM values must be primitive strings, numbers, booleans or null.".into());
         }
-        let text = value.to_text();
+        let text = value.scalar_text()?;
         if text.len() > self.state.limits.host.string_bytes {
             return Err(format!("DOM string limit reached ({} KiB).", self.state.limits.host.string_bytes / 1024).into());
         }

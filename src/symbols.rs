@@ -357,7 +357,7 @@ impl Runtime {
             Some(object) => Some(object),
             None => match receiver {
                 Value::Symbol(_) => self.symbol_prototype.map(Ordinary::Object),
-                Value::String(_) => self.string_prototype.map(Ordinary::Object),
+                Value::String(_) | Value::StringUnits(_) => self.string_prototype.map(Ordinary::Object),
                 Value::Number(_) => self.number_prototype.map(Ordinary::Object),
                 Value::Bool(_) => self.boolean_prototype.map(Ordinary::Object),
                 _ => None,
@@ -414,7 +414,7 @@ impl Runtime {
         let object = match self.symbol_lookup_base(&receiver, key, backing, host)? {
             Some(object) => object,
             None => match receiver {
-                Value::String(_) => Ordinary::Object(self.string_prototype.unwrap()),
+                Value::String(_) | Value::StringUnits(_) => Ordinary::Object(self.string_prototype.unwrap()),
                 Value::Number(_) => Ordinary::Object(self.number_prototype.unwrap()),
                 Value::Bool(_) => Ordinary::Object(self.boolean_prototype.unwrap()),
                 Value::Symbol(_) => Ordinary::Object(self.symbol_prototype.unwrap()),
