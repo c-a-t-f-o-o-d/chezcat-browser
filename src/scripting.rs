@@ -2697,7 +2697,9 @@ impl Host for Bridge<'_> {
         self.state.error("MutationObserver callback", message);
     }
     fn expando_owner(&self,object:u32)->Option<u32> {
-        if self.inert_adopted_node(object) && self.inert_node_type(object) == Some(1) { return Some(WINDOW); }
+        if self.inert_adopted_node(object) && self.inert_interface(object).is_some_and(|interface| interface.starts_with("HTML")) {
+            return Some(WINDOW);
+        }
         self.ordinary_event_owner(object).or_else(||self.abort_instance(object).map(|(owner, _)| owner)).or_else(||self.standalone_target_owner(object)).or_else(||(object==DOCUMENT||self.element_expando_receiver(object)||self.fragment_receiver(object)||self.node_list_receiver(object)||self.canvas_context_receiver(object)).then_some(WINDOW))}
     fn ordinary_native_fallback(&self,object:u32,property:&str)->bool {
         self.inert_adopted_node(object) && self.inert_owns_property(object, property)
