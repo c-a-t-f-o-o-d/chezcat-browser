@@ -81,6 +81,17 @@ pub(super) fn lexical_for_of(program: &Program, id: StmtId) -> Option<(Declarati
     Some((*kind, declarations[0].0, source))
 }
 
+pub(super) fn generator_call_yield(program: &Program, statement: StmtId) -> Option<(ExprId, Option<ExprId>, bool)> {
+    let StmtKind::Expr(call) = program.stmts[statement].kind else { return None };
+    let ExprKind::Call(callee, arguments) = &program.exprs[call].kind else { return None };
+    if !matches!(program.exprs[*callee].kind, ExprKind::Name(_)) {
+        return None;
+    }
+    let [Argument { expression, spread: false }] = arguments.as_slice() else { return None };
+    let ExprKind::Yield { operand, delegate } = program.exprs[*expression].kind else { return None };
+    Some((*callee, operand, delegate))
+}
+
 struct AwaitSite {
     operand: ExprId,
     callee: Option<ExprId>,
@@ -422,7 +433,8 @@ fn split_statements(program: &Program, template: &Template, expected: usize) -> 
         let kind = &program.stmts[id].kind;
         if eligible {
             let (length, suspensions) = if generator {
-                (1, usize::from(matches!(kind, StmtKind::Yield(_) | StmtKind::YieldFrom(_))))
+                (1, usize::from(matches!(kind, StmtKind::Yield(_) | StmtKind::YieldFrom(_))
+                    || generator_call_yield(program, id).is_some()))
             } else {
                 statement_size(program, id)?
             };
@@ -648,6 +660,8 @@ pub(super) fn compile(program: &Program, template: usize, expected_suspensions: 
         };
         if !split.contains(&id) {
             push(&mut code, Instruction::Statement(id))?;
+        } else if template.kind == FunctionKind::Generator && generator_call_yield(program, id).is_some() {
+            push(&mut code, Instruction::Yield(id))?;
         } else if let Some((expression, action)) = statement_expression(program, id) {
             emit_expression(program, id, expression, action, &mut code)?;
         } else {
@@ -773,6 +787,10 @@ mod tests {
             "function* g(){if(true){yield 1;}}",
             "function* g(){try{}finally{yield 1;}}",
             "function* g(){try{yield 1;}catch(error){}}",
+            "function* g(){let value=yield 1;}",
+            "function* g(){receiver.call(yield 1);}",
+            "function* g(){take(...yield 1);}",
+            "function* g(){take(yield 1,2);}",
         ] {
             let error = parse(source).err().expect("unsupported yield placement was accepted");
             assert!(error.message.contains("Yield in this statement position"), "{}", error.display());

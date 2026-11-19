@@ -27,6 +27,74 @@ impl Host for NoHost {
 }
 
 #[test]
+fn generator_yield_call_argument_retains_callee_and_uses_the_resumed_value() {
+    let mut runtime = Runtime::for_capacity_test();
+    let source = r#"
+var trace='', delegated, plain, reason={}, caught;
+function makeOriginal(){return function(value){trace+='call:'+value+'|';return 100;};}
+function other(){throw 'callee looked up after suspension';}
+var target=makeOriginal();
+function* inner(){yield 2;return 8;}
+function* invoke(){
+    try{target(yield* inner());}
+    finally{trace+='finally|';}
+    return 'tail';
+}
+function* accept(){target(yield 5);}
+delegated=invoke();
+var first=delegated.next();
+if(first.done||first.value!==2||trace!=='')throw 'pending delegation';
+target=other;
+var trash={};for(var index=0;index<900;index++)trash.fn=function(){return index;};trash=null;
+var last=delegated.next(1);
+if(!last.done||last.value!=='tail'||trace!=='call:8|finally|')throw 'delegate return value or callee';
+target=makeOriginal();
+plain=accept();
+if(plain.next().value!==5)throw 'bare call yield';
+target=other;
+if(!plain.next(9).done||trace!=='call:8|finally|call:9|')throw 'sent value or repeated target lookup';
+var cancelled=invoke();
+cancelled.next();
+if(cancelled.return(11).value!==11||!cancelled.next().done)throw 'delegate return closed wrong result';
+var failed=invoke();
+failed.next();
+try{failed.throw(reason);}catch(error){caught=error;}
+if(caught!==reason||trace!=='call:8|finally|call:9|finally|finally|'||!failed.next().done)
+    throw 'abrupt interruption entered caller or skipped cleanup';
+'ok';
+"#;
+    assert_eq!(runtime.execute(source, &mut NoHost::default()).unwrap().to_text(), "ok");
+    assert!(runtime.function_arena.retired > 0);
+    assert_eq!((runtime.call_depth, runtime.eval_depth), (0, 0));
+    assert!(runtime.transient_registration_is_empty());
+}
+
+#[test]
+fn generator_yield_call_argument_preserves_direct_eval_policy_and_scope() {
+    let mut runtime = Runtime::for_test();
+    let mut host = NoHost::default();
+    assert_eq!(runtime.execute(r#"
+var visible=0, refused=false;
+function* invoke(){let local=17;eval(yield);return visible;}
+var blocked=invoke();
+if(blocked.next().value!==undefined)throw 'bare yield';
+try{blocked.next('visible=local');}catch(error){if(error.name!=='EvalError')throw error;refused=true;}
+if(!refused||visible||!blocked.next().done)throw 'eval policy or completion';
+'ok';
+"#, &mut host).unwrap().to_text(), "ok");
+    assert_eq!(host.eval_windows, [None]);
+    host.allow_eval = true;
+    assert_eq!(runtime.execute(r#"
+var allowed=invoke();
+allowed.next();
+if(allowed.next('visible=local').value!==17||visible!==17)throw 'resumed direct scope';
+'ok';
+"#, &mut host).unwrap().to_text(), "ok");
+    assert_eq!(host.eval_windows, [None, None]);
+    assert!(runtime.transient_registration_is_empty());
+}
+
+#[test]
 fn generator_try_finally_keeps_scopes_and_unwinds_on_injected_completion() {
     let mut runtime = Runtime::for_capacity_test();
     let source = r#"
