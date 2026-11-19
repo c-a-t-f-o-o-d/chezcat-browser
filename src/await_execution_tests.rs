@@ -881,6 +881,44 @@ if(trace!=='receiver|key:write|operand|key:skip|'||stored||result||caught)throw 
 }
 
 #[test]
+fn await_execution_followup_method_chain_preserves_receivers_and_order() {
+    let mut runtime = Runtime::for_test();
+    succeeds(&mut runtime, r#"
+var trace='', release, reject, result, caught, token={}, reason={};
+var gate=new Promise(resolve=>release=resolve);
+var failure=new Promise((resolve,fail)=>reject=fail);
+function mark(label,value){trace+=label+'|';return value;}
+var first={get step(){
+    trace+='get-first|';
+    return function(input){if(this!==first||input!==token)throw 'first receiver';return mark('first',second);};
+}};
+var second={get finish(){
+    trace+='get-second|';
+    return function(input){if(this!==second||input!==token)throw 'second receiver';return mark('second',input);};
+}};
+function base(input){if(input!==token)throw 'base input';return mark('base',first);}
+async function work(input){
+    try{return base(await input)[mark('key-first','step')](mark('arg-first',token))
+        [mark('key-second','finish')](mark('arg-second',token));}
+    catch(error){caught=error;}
+}
+work(gate).then(value=>result=value);
+work(failure);
+if(trace!==''||result||caught)throw 'method prefix ran before await';
+'ok';
+"#);
+    checkpoint(&mut runtime);
+    runtime.begin_job();
+    succeeds(&mut runtime, "reject(reason);release(token);'ok';");
+    checkpoint(&mut runtime);
+    succeeds(&mut runtime, r#"
+if(trace!=='base|key-first|get-first|arg-first|first|key-second|get-second|arg-second|second|'||
+   result!==token||caught!==reason)throw 'method chain order, receiver, or rejected continuation';
+'ok';
+"#);
+}
+
+#[test]
 fn await_execution_resumed_callee_evaluates_followup_arguments_in_order() {
     let mut runtime = Runtime::for_test();
     succeeds(&mut runtime, r#"
