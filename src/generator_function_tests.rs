@@ -27,6 +27,50 @@ impl Host for NoHost {
 }
 
 #[test]
+fn generator_yield_assignment_keeps_the_original_reference_and_skips_failed_writes() {
+    let mut runtime = Runtime::for_test();
+    let source = r#"
+var trace='', writes=0, reason={}, caught;
+var original={set value(value){if(this!==original)throw 'wrong setter receiver';trace+='write:'+value+'|';writes++;}};
+var receiver=original;
+function getReceiver(){trace+='receiver|';return receiver;}
+function getKey(){trace+='key|';return {toString(){trace+='convert|';return 'value';}};}
+function relay(value){trace+='call:'+value+'|';if(value===reason)throw reason;return value+1;}
+function* input(){yield 2;return 7;}
+function* property(){
+    try{getReceiver()[getKey()]=relay(yield* input());}
+    finally{trace+='finally|';}
+}
+function* local(){
+    let result=3;
+    try{result=relay(yield);}
+    catch(error){caught=error;}
+    return result;
+}
+var pending=property();
+if(pending.next().value!==2||trace!=='receiver|key|'||writes)throw 'assignment target order';
+receiver={set value(value){throw 'repeated receiver lookup';}};
+if(!pending.next().done||trace!=='receiver|key|call:7|convert|write:8|finally|'||writes!==1)
+    throw 'resumed assignment or result';
+var variable=local();
+variable.next();
+if(variable.next(9).value!==10)throw 'identifier assignment';
+var failed=local();
+failed.next();
+if(failed.next(reason).value!==3||caught!==reason||writes!==1)
+    throw 'failed call overwrote assignment target';
+var cancelled=local();
+cancelled.next();
+if(cancelled.return(11).value!==11||!cancelled.next().done||writes!==1)
+    throw 'return executed pending assignment';
+'ok';
+"#;
+    assert_eq!(runtime.execute(source, &mut NoHost::default()).unwrap().to_text(), "ok");
+    assert_eq!((runtime.call_depth, runtime.eval_depth), (0, 0));
+    assert!(runtime.transient_registration_is_empty());
+}
+
+#[test]
 fn generator_try_catch_resumes_after_handling_a_suspended_throw() {
     let mut runtime = Runtime::for_test();
     let source = r#"

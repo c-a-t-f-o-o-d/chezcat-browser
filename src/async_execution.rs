@@ -116,14 +116,6 @@ fn property_key_bytes(key: &PropertyKey) -> usize {
     }
 }
 
-fn assignment_reference_bytes(reference: &Reference) -> usize {
-    match reference {
-        Reference::Binding(_, name) | Reference::Global(name) | Reference::Missing(name) => name.len(),
-        Reference::ComputedProperty(receiver, key) => receiver.bytes().saturating_add(key.bytes()),
-        _ => unreachable!("async assignment needs an identifier or ordinary property"),
-    }
-}
-
 fn apply_logical_not(value: Value, negations: usize) -> Value {
     if negations == 0 {
         value
@@ -159,7 +151,7 @@ impl Activation {
 
     pub(super) fn retained_bytes(&self) -> usize {
         let references = self.assignment_references().fold(0usize, |bytes, reference| {
-            bytes.saturating_add(assignment_reference_bytes(reference))
+            bytes.saturating_add(reference.assignment_bytes())
         });
         let comparisons = self.comparison_operands.iter().fold(
             self.comparison_operands.capacity().saturating_mul(std::mem::size_of::<Value>()),
@@ -803,7 +795,7 @@ impl Runtime {
                             None
                         };
                         let mut retained = frame.retained_bytes()
-                            .saturating_add(assignment.as_ref().map_or(0, assignment_reference_bytes));
+                            .saturating_add(assignment.as_ref().map_or(0, Reference::assignment_bytes));
                         let literal = if let Some(key) = literal_key {
                             let prepared = self.prepare_await_literal(frame, key, retained, host)?;
                             retained = retained.saturating_add(prepared.retained_bytes());
@@ -934,15 +926,9 @@ impl Runtime {
         let reference = self.reference(
             &frame.program, target, frame.environment()?, &frame.this, host,
         )?;
-        let bytes = assignment_reference_bytes(&reference);
+        let bytes = reference.assignment_bytes();
         self.await_storage(frame.retained_bytes().saturating_add(bytes), bytes)?;
-        let mut rooted = Ok(());
-        Edge::reference(&reference, &mut |edge| {
-            if rooted.is_ok() {
-                rooted = self.push_transient_root(edge);
-            }
-        });
-        rooted?;
+        self.push_transient_reference(&reference)?;
         Ok(reference)
     }
 
@@ -1386,8 +1372,8 @@ mod tests {
         assert!(edges.iter().any(|edge| matches!(edge, Edge::Object(22))));
         assert!(edges.iter().any(|edge| matches!(edge, Edge::Function(23))));
         assert!(frame.reachability_cost() >= edges.len());
-        assert_eq!(assignment_reference_bytes(&Reference::ComputedProperty(
+        assert_eq!(Reference::ComputedProperty(
             Value::String("base".into()), Value::String("key".into()),
-        )), 7);
+        ).assignment_bytes(), 7);
     }
 }

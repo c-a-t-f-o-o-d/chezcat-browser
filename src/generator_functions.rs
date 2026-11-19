@@ -27,7 +27,7 @@ pub(super) struct Activation {
     environment: usize,
     next: usize,
     delegate: Option<Record>,
-    pending_call: Option<PendingCall>,
+    pending_call: Option<Box<PendingCall>>,
     scopes: [Option<usize>; 4],
     lexical_scopes: Vec<usize>,
     try_scopes: Vec<TryScope>,
@@ -46,6 +46,14 @@ struct TryScope {
 struct PendingCall {
     function: Value,
     direct_eval: bool,
+    assignment: Option<Reference>,
+}
+
+impl PendingCall {
+    fn retained_bytes(&self) -> usize {
+        std::mem::size_of::<Self>().saturating_add(self.function.bytes())
+            .saturating_add(self.assignment.as_ref().map_or(0, Reference::assignment_bytes))
+    }
 }
 
 enum Progress {
@@ -58,7 +66,7 @@ impl Activation {
     fn retained_bytes(&self) -> usize {
         std::mem::size_of::<Self>().saturating_add(self.this.bytes())
             .saturating_add(self.delegate.as_ref().map_or(0, Record::retained_bytes))
-            .saturating_add(self.pending_call.as_ref().map_or(0, |call| call.function.bytes()))
+            .saturating_add(self.pending_call.as_deref().map_or(0, PendingCall::retained_bytes))
             .saturating_add(self.lexical_scopes.capacity().saturating_mul(std::mem::size_of::<usize>()))
             .saturating_add(self.try_scopes.capacity().saturating_mul(std::mem::size_of::<TryScope>()))
     }
@@ -81,6 +89,9 @@ impl Activation {
         }
         if let Some(call) = &self.pending_call {
             Edge::value(&call.function, add);
+            if let Some(reference) = &call.assignment {
+                Edge::reference(reference, add);
+            }
         }
     }
 }
@@ -96,7 +107,7 @@ impl State {
         match self {
             Self::SuspendedStart(frame) | Self::SuspendedYield(frame) => {
                 6 + frame.lexical_scopes.len() + 2 * usize::from(frame.delegate.is_some())
-                    + usize::from(frame.pending_call.is_some())
+                    + frame.pending_call.as_ref().map_or(0, |call| 1 + 2 * usize::from(call.assignment.is_some()))
             }
             _ => 0,
         }
@@ -106,6 +117,11 @@ impl State {
         if let Self::SuspendedStart(frame) | Self::SuspendedYield(frame) = self {
             roots.extend(frame.scopes.into_iter().flatten());
             roots.extend(frame.lexical_scopes.iter().copied());
+            if let Some(Reference::Binding(environment, _)) = frame.pending_call.as_ref()
+                .and_then(|call| call.assignment.as_ref())
+            {
+                roots.push(*environment);
+            }
         }
     }
 }
@@ -478,10 +494,10 @@ impl Runtime {
                 StmtKind::Yield(operand) => (operand, false),
                 StmtKind::YieldFrom(operand) => (Some(operand), true),
                 StmtKind::Expr(_) => {
-                    let (callee, operand, delegate) = async_plan::generator_call_yield(&frame.program, statement)
+                    let call = async_plan::generator_call_yield(&frame.program, statement)
                         .expect("compiled generator call argument");
-                    self.capture_generator_call(frame, callee, host)?;
-                    (operand, delegate)
+                    self.capture_generator_call(frame, &call, host)?;
+                    (call.operand, call.delegate)
                 }
                 _ => unreachable!("compiled yield statement"),
             };
@@ -500,13 +516,24 @@ impl Runtime {
     }
 
     #[inline(never)]
-    fn capture_generator_call(&mut self, frame: &mut Activation, callee: ExprId, host: &mut dyn Host) -> Result<(), Fault> {
-        let function = self.eval(&frame.program, callee, frame.environment(), &frame.this, host)?;
+    fn capture_generator_call(
+        &mut self, frame: &mut Activation, site: &async_plan::GeneratorCallYield, host: &mut dyn Host,
+    ) -> Result<(), Fault> {
+        let assignment = if let Some(target) = site.target {
+            self.step()?;
+            let reference = self.reference(&frame.program, target, frame.environment(), &frame.this, host)?;
+            self.push_transient_reference(&reference)?;
+            Some(reference)
+        } else {
+            None
+        };
+        let function = self.eval(&frame.program, site.callee, frame.environment(), &frame.this, host)?;
         self.push_transient_value(&function)?;
-        let bytes = function.bytes();
+        let direct_eval = matches!(&frame.program.exprs[site.callee].kind, ExprKind::Name(name) if name == "eval");
+        let call = PendingCall { function, direct_eval, assignment };
+        let bytes = call.retained_bytes();
         self.check_generator_retention(bytes)?;
-        let direct_eval = matches!(&frame.program.exprs[callee].kind, ExprKind::Name(name) if name == "eval");
-        frame.pending_call = Some(PendingCall { function, direct_eval });
+        frame.pending_call = Some(Box::new(call));
         self.value_bytes += bytes;
         Ok(())
     }
@@ -514,13 +541,22 @@ impl Runtime {
     #[inline(never)]
     fn finish_generator_argument(&mut self, frame: &mut Activation, value: Value, host: &mut dyn Host) -> Result<(), Fault> {
         let Some(call) = frame.pending_call.take() else { return Ok(()) };
-        self.value_bytes -= call.function.bytes();
-        let direct = call.direct_eval.then_some((frame.environment(), &frame.this));
+        self.value_bytes -= call.retained_bytes();
+        let PendingCall { function, direct_eval, assignment } = *call;
+        let direct = direct_eval.then_some((frame.environment(), &frame.this));
         let marker = self.root_marker();
         let result = (|| {
-            self.push_transient_value(&call.function)?;
+            self.push_transient_value(&function)?;
             self.push_transient_value(&value)?;
-            self.invoke_plain_call(call.function, &[value], direct, host).map(|_| ())
+            if let Some(reference) = &assignment {
+                self.push_transient_reference(reference)?;
+            }
+            let result = self.invoke_plain_call(function, &[value], direct, host)?;
+            if let Some(reference) = assignment {
+                self.push_transient_value(&result)?;
+                self.write_reference(reference, result, host)?;
+            }
+            Ok(())
         })();
         self.restore_root_marker(marker);
         result
@@ -577,7 +613,7 @@ impl Runtime {
         &mut self, frame: &mut Activation, mut completion: Result<Control, Fault>, host: &mut dyn Host,
     ) -> Result<Option<Progress>, Fault> {
         if let Some(call) = frame.pending_call.take() {
-            self.value_bytes -= call.function.bytes();
+            self.value_bytes -= call.retained_bytes();
         }
         if let Some(delegate) = frame.delegate.take() {
             self.value_bytes -= delegate.retained_bytes();
