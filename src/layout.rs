@@ -373,6 +373,7 @@ pub struct BorderRect {
 
 pub struct Layout {
     pub(crate) computed_properties: css::ComputedProperties,
+    pub(crate) stylesheet_cache: Option<css::StylesheetCache>,
     pub runs: Vec<TextRun>,
     pub items: Vec<PaintItem>,
     pub(crate) opacity_groups: Vec<crate::paint::OpacityGroup>,
@@ -760,7 +761,7 @@ pub fn build_viewport_with_fonts(
     checked: Option<&dyn Fn(usize) -> Option<bool>>,
     fonts: &Book,
 ) -> Layout {
-    build_viewport_with_fonts_inner(doc, width, height, zoom, external_styles, image_sizes, checked, fonts, None)
+    build_viewport_with_fonts_inner(doc, width, height, zoom, external_styles, image_sizes, checked, fonts, None, None)
         .expect("Default rendering has no caller-budget refusal.")
 }
 
@@ -770,7 +771,26 @@ pub(crate) fn build_viewport_with_fonts_budgeted(
     external_styles: &HashMap<usize, String>, image_sizes: &HashMap<usize, (usize, usize)>,
     checked: Option<&dyn Fn(usize) -> Option<bool>>, fonts: &Book, budget: &mut css::CssBudget<'_>,
 ) -> Result<Layout, String> {
-    build_viewport_with_fonts_inner(doc, width, height, zoom, external_styles, image_sizes, checked, fonts, Some(budget))
+    build_viewport_with_fonts_inner(doc, width, height, zoom, external_styles, image_sizes, checked, fonts, Some(budget), None)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn build_viewport_with_fonts_cached(
+    doc:&Document,width:i32,height:i32,zoom:f32,external_styles:&HashMap<usize,String>,
+    image_sizes:&HashMap<usize,(usize,usize)>,checked:Option<&dyn Fn(usize)->Option<bool>>,
+    fonts:&Book,cache:Option<&css::StylesheetCache>,
+) -> Layout {
+    build_viewport_with_fonts_inner(doc,width,height,zoom,external_styles,image_sizes,checked,fonts,None,cache)
+        .expect("Default rendering has no caller-budget refusal.")
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn build_viewport_with_fonts_budgeted_cached(
+    doc:&Document,width:i32,height:i32,zoom:f32,external_styles:&HashMap<usize,String>,
+    image_sizes:&HashMap<usize,(usize,usize)>,checked:Option<&dyn Fn(usize)->Option<bool>>,
+    fonts:&Book,budget:&mut css::CssBudget<'_>,cache:Option<&css::StylesheetCache>,
+) -> Result<Layout,String> {
+    build_viewport_with_fonts_inner(doc,width,height,zoom,external_styles,image_sizes,checked,fonts,Some(budget),cache)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -778,6 +798,7 @@ fn build_viewport_with_fonts_inner(
     doc: &Document, width: i32, height: i32, zoom: f32,
     external_styles: &HashMap<usize, String>, image_sizes: &HashMap<usize, (usize, usize)>,
     checked: Option<&dyn Fn(usize) -> Option<bool>>, fonts: &Book, mut budget: Option<&mut css::CssBudget<'_>>,
+    stylesheet_cache: Option<&css::StylesheetCache>,
 ) -> Result<Layout, String> {
     let width = width.clamp(1, 16_384);
     let zoom = if zoom.is_finite() {
@@ -787,14 +808,17 @@ fn build_viewport_with_fonts_inner(
     };
     let environment = viewport_style_environment(doc, width, height, zoom);
     let cascade = match budget.as_deref_mut() {
+        Some(meter) if stylesheet_cache.is_some() => css::compute_with_environment_and_properties_transform_budgeted_cached(
+            doc,external_styles,checked,Some(environment),meter,stylesheet_cache,
+        )?,
         Some(meter) => css::compute_with_environment_and_properties_transform_budgeted(
             doc, external_styles, checked, Some(environment), meter,
         )?,
-        None => css::compute_with_environment_and_properties(
-            doc, external_styles, checked, Some(environment),
+        None => css::compute_with_environment_and_properties_cached(
+            doc, external_styles, checked, Some(environment), stylesheet_cache,
         ),
     };
-    let css::CascadeOutput { styles, computed_properties } = cascade;
+    let css::CascadeOutput { styles, computed_properties, stylesheet_cache } = cascade;
     if let Some(meter) = budget.as_deref_mut() {
         if computed_properties.has_transform_geometry() {
             // Additional containing-block/fixed-family walks and the fixed
@@ -805,6 +829,7 @@ fn build_viewport_with_fonts_inner(
     }
     let mut page = Layout {
         computed_properties,
+        stylesheet_cache,
         runs: Vec::new(),
         items: Vec::new(),
         opacity_groups: Vec::new(),

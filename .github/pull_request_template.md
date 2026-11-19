@@ -15,6 +15,6 @@ before maintained product/test inclusion. Do not attach signed/private records.
 
 ## Verification
 
-Record actual focused and normal/offline results and exact source identity.
+Record the focused checks actually run and the exact source identity.
 Identify self/agent review honestly, trust boundaries, errors/lifecycle coverage
 and remaining limits. A green CI run is not an assignment or security audit.

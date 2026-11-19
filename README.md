@@ -12,7 +12,7 @@ rendering, and selected media decoding.*
 [![Published prerelease](https://img.shields.io/static/v1?label=Published&message=0.82.0-alpha.1&color=0e7490&style=flat-square)](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.82.0-alpha.1)
 [![Windows x64](https://img.shields.io/static/v1?label=Platform&message=Windows%20x64&color=2563eb&style=flat-square)](docs/BUILDING.md)
 [![Production Cargo dependencies](https://img.shields.io/static/v1?label=Production%20Cargo%20dependencies&message=0&color=6d28d9&style=flat-square)](docs/ARCHITECTURE.md)
-[![Main verification](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/workflows/offline.yml/badge.svg?branch=main&event=push)](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/workflows/offline.yml)
+[![Main source privacy and configuration](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/workflows/offline.yml/badge.svg?branch=main&event=push)](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/workflows/offline.yml)
 [![License](https://img.shields.io/static/v1?label=License&message=CSAPUL%201.1&color=64748b&style=flat-square)](LICENSE)
 
 **[📦 Download](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.82.0-alpha.1)** · **[🗺️ Roadmap](docs/ROADMAP.md)** · **[🔨 Build](#build)** · **[🧪 Compatibility](docs/COMPATIBILITY.md)** · **[📖 Documentation](#documentation)**
@@ -74,8 +74,8 @@ their recorded digests for tagged source `f2e1823266a7c08c89bce7293572d801da6205
 [Download and runtime checks](docs/RELEASING.md#published-baseline)
 
 Commit-identified development downloads and a possible `dev` channel remain
-roadmap items, not advertised delivery options. The CI badge reports workflow
-status—not how well every website works.
+roadmap items, not advertised delivery options. The CI badge reports source
+privacy and configuration checks on the latest trusted push to main.
 
 ## Development highlights
 
@@ -222,18 +222,17 @@ tools, not application runtime dependencies.
 <details>
 <summary><strong>🧪 Verification and development checks</strong></summary>
 
-Use focused affected tests while editing. The complete integration check is:
+For ordinary PRs, compile where relevant and run the small reproduction or tests
+that exercise the change. Include a targeted negative check for a changed security
+or resource boundary. The complete offline verifier runs for an owner-requested release.
 
 ```powershell
 python tools/verify_offline.py
 ```
 
-Existing local and hosted integration gates remain in place. The development
-agent investigates failed checks and fixes the affected work; failures are not
-silently ignored or passed back to the maintainer by default. No new asynchronous
-handoff or branch-promotion system is enabled by this documentation.
-
-Routine CI uses local fixtures. Physical desktop, audio-device, and public-site
+Routine hosted checks inspect snapshot privacy, package configuration and public
+summary handling. The development agent investigates failures and fixes the
+affected work. Physical desktop, audio-device, and public-site
 observations are separate evidence. See [building and testing](docs/BUILDING.md)
 and the [release procedure](docs/RELEASING.md).
 
@@ -254,9 +253,8 @@ and the [release procedure](docs/RELEASING.md).
 
 ## Development and reporting
 
-Development uses coherent public commits and PRs without waiting for a release.
-A completed PR is a checkpoint, not the end of the development queue. Keep the
-current verification-and-repair workflow; broader CI handoff changes are deferred.
+Development uses one open product PR at a time. Merge each coherent change after
+its focused checks, then start the next change from updated main.
 
 For bug reports and contributions, read [CONTRIBUTING.md](CONTRIBUTING.md). For
 security concerns, follow [SECURITY.md](SECURITY.md).

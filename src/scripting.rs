@@ -2064,6 +2064,15 @@ impl Bridge<'_> {
     }
 
     fn attribute_named(&mut self, node: usize, name: crate::html::AttributeName, value: Option<String>) -> Result<(), String> {
+        // HTML style sheet media is a live reference to the element's media
+        // attribute. Type and nonce are checked when updating the style block
+        // on connection; changing either attribute alone does not update it.
+        let sheet_media = self.created_html_style(node) && name.html_is("media");
+        if sheet_media {
+            script_stylesheets::validate_inline_sheet_media(value.as_deref())?;
+        }
+        let repaint_sheet = sheet_media && self.state.dom.connected[node]
+            && self.doc.attr(node, "media") != value.as_deref();
         let input = self.prepare_input_attribute(node, &name, value.as_deref())?;
         let button = self.prepare_button_attribute(node, &name, value.as_deref())?;
         let media_source=name.html_is("src")&&self.media_element_receiver(node_handle(node));let media_change=media_source&&value.is_some();
@@ -2156,7 +2165,7 @@ impl Bridge<'_> {
             self.state.canvas_contexts.commit_resize(node, canvas_resize);
             self.state.dom_committed();
         }
-        if self.state.tree.active.get(node).copied().unwrap_or(false) {
+        if repaint_sheet || self.state.tree.active.get(node).copied().unwrap_or(false) {
             self.state.layout_changed();
         }
         if media_change{self.commit_media_source_change(node)?;}
@@ -2232,9 +2241,7 @@ impl Bridge<'_> {
 
     fn set_text_content(&mut self, node: usize, text: String) -> Result<(), String> {
         let name = tag(self.doc, node);
-        let detached_style = name == "style"
-            && self.doc.nodes[node].namespace == crate::html::Namespace::Html
-            && self.state.dom.created.contains(&node)
+        let detached_style = self.created_html_style(node)
             && self.state.detached_nodes.contains(&node)
             && self.state.dom.connected.get(node) == Some(&false);
         if !text_container(name) && !detached_style {
@@ -2759,7 +2766,7 @@ impl Host for Bridge<'_> {
         if self.hidden_input_property(object,property) {return true;}
         if self.text_input_default_property(object,property) {return true;}
         if self.media_interface_receiver(object)&&property=="src" {return true;}
-        if property=="type"&&self.style_type_receiver(object){return true;}
+        if self.style_text_attribute(object, property) { return true; }
         if self.media_element_receiver(object)&&property=="src"{return true;}
         property=="srcdoc" && self.class_list_element_receiver(object) && node_index(object).is_some_and(|node|self.iframe_srcdoc_property(node))
             || self.class_list_receiver(object) && property == "value"
@@ -4545,7 +4552,11 @@ impl Host for Bridge<'_> {
             let Value::Number(seconds)=value else {return Err("Media time requires numeric conversion.".into());};
             return self.set_media_time(node_index(object).unwrap(),seconds);
         }
-        if property=="type"&&self.style_type_receiver(object){let node=self.node(object)?;let text=self.text(&value)?;return self.attribute(node,"type",Some(text));}
+        if self.style_text_attribute(object, property) {
+            let node = self.node(object)?;
+            let text = self.text(&value)?;
+            return self.attribute(node, property, Some(text));
+        }
         if self.media_element_receiver(object)&&property=="src" {let node=self.node(object)?;let text=self.text(&value)?;return self.attribute(node,"src",Some(text));}
         if script_named_map::element(object).is_some() { self.named_map_get(object, "length")?; return Err("NamedNodeMap property writes are not implemented.".into()); }
         if script_class_list::element(object).is_some() {
