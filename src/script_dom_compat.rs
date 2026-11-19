@@ -86,6 +86,7 @@ impl Bridge<'_> {
         if !self.doc.nodes.get(node).is_some_and(|entry|entry.namespace==crate::html::Namespace::Html && matches!(entry.kind,NodeKind::Element{..})) {return None;}
         match name {
             "dir"=>Some("dir"),"lang"=>Some("lang"),
+            "name" if tag(self.doc, node) == "slot" => Some("name"),
             "useMap" if matches!(tag(self.doc,node),"img"|"input"|"object")=>Some("usemap"),
             "align" if matches!(tag(self.doc,node),"div"|"p"|"h1"|"h2"|"h3"|"h4"|"h5"|"h6"|"hr"|"img"|"input"|"iframe"|"object"|"embed"|"table"|"caption"|"thead"|"tbody"|"tfoot"|"tr"|"td"|"th"|"col"|"colgroup")=>Some("align"),
             _=>None,

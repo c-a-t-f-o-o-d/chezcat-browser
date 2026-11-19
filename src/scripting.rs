@@ -14,7 +14,7 @@ use crate::forms::{self, Forms, Kind};
 use crate::html::{Document, Node, NodeKind};
 use crate::javascript::{Host, Runtime, Value,
     CREATE_CDATA_SECTION, CREATE_PROCESSING_INSTRUCTION, DOCUMENT_IMPORT_NODE,
-    HTML_TEMPLATE_CONTENT_GET, PROCESSING_INSTRUCTION_TARGET_GET,
+    HTML_SLOT_NAME_GET, HTML_SLOT_NAME_SET, HTML_TEMPLATE_CONTENT_GET, PROCESSING_INSTRUCTION_TARGET_GET,
     ELEMENT_INNER_HTML_GET, ELEMENT_INNER_HTML_SET, ELEMENT_STYLE_GET, ELEMENT_STYLE_SET,
     NODE_TEXT_CONTENT_GET, NODE_TEXT_CONTENT_SET, NODE_TRAVERSAL_GETTERS};
 
@@ -2613,6 +2613,7 @@ impl Bridge<'_> {
                 && self.node_traversal_receiver(object)
             || property == "target" && self.processing_instruction_receiver(object)
             || property == "content" && self.template_receiver(object)
+            || property == "name" && self.html_slot_receiver(object)
             || self.content_editable_member(object, property)
             || self.element_sibling_member(object, property)
             || self.document_inherited_property(object,property)
@@ -2681,6 +2682,10 @@ impl Host for Bridge<'_> {
         -> Result<Option<crate::javascript::NativeAttributeChange>, String>
     {
         self.attribute_observation_plan(target, method, args)
+    }
+
+    fn observed_attribute_setter(&self, target: u32, property: &str) -> Option<&'static str> {
+        (property == "name" && self.html_slot_receiver(target)).then_some("name")
     }
 
     fn mutation_node_list(&mut self, nodes: &[u32]) -> Result<u32, String> {
@@ -2932,6 +2937,7 @@ impl Host for Bridge<'_> {
             return Some("innerHTML");
         }
         if method == NODE_TEXT_CONTENT_SET && self.text_content_receiver(object) {return Some("textContent");}
+        if method == HTML_SLOT_NAME_SET && self.html_slot_receiver(object) {return Some("name");}
         if method == script_content_editable::SET && self.content_editable_receiver(object) {return Some("contentEditable");}
         if let Some((name, true)) = script_canvas::accessor(method) {
             return self.canvas_receiver(object).then_some(name);
@@ -3128,6 +3134,9 @@ impl Host for Bridge<'_> {
         if self.event_target_interface(object) && (matches!(method, "Document" | "\0Document.get.documentElement" | "DocumentFragment" | "Text" | "Comment") || Slottable::getter(method).is_some()) {return Some(object);}
         if self.event_target_interface(object) && matches!(method, script_node_root::ROOT_METHOD | script_node_contains::CONTAINS_METHOD | script_clone_node::CLONE_METHOD) {return Some(object);}
         if self.event_target_interface(object) && dom_tree::node_mutation_method(method) {return Some(object);}
+        if self.event_target_interface(object) && matches!(method, HTML_SLOT_NAME_GET | HTML_SLOT_NAME_SET) {
+            return Some(object);
+        }
         if self.event_target_interface(object) && (node_traversal_property(method).is_some()
             || matches!(method, "\0Node.get.nodeType" | "\0Node.get.nodeName" | NODE_TEXT_CONTENT_GET | NODE_TEXT_CONTENT_SET))
         {
@@ -3649,6 +3658,9 @@ impl Host for Bridge<'_> {
                 return self.processing_instruction_receiver(receiver);
             }
             if method == HTML_TEMPLATE_CONTENT_GET { return self.template_receiver(receiver); }
+            if matches!(method, HTML_SLOT_NAME_GET | HTML_SLOT_NAME_SET) {
+                return self.html_slot_receiver(receiver);
+            }
             if method == DOCUMENT_IMPORT_NODE { return receiver == DOCUMENT; }
             if matches!(method, script_inert_documents::CREATE | script_inert_documents::HAS_FEATURE) {
                 return self.inert_implementation(receiver);
@@ -5081,6 +5093,10 @@ impl Host for Bridge<'_> {
         if self.inert_factory(object, method).is_some() { return self.inert_create_node(object, method, args); }
         if method == ELEMENT_INNER_HTML_GET {
             return self.get(object, "innerHTML");
+        }
+        if method == HTML_SLOT_NAME_GET {
+            let node = self.dom_node(object)?;
+            return self.html_text_reflection_get(node, "name");
         }
         if let Some(property) = node_traversal_property(method) {
             return self.get(object, property);
