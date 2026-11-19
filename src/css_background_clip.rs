@@ -27,7 +27,7 @@ pub(super) fn resets_background(value: &str) -> bool {
     matches!(
         value,
         "inherit" | "initial" | "unset" | "transparent" | "none" | "currentcolor"
-    ) || color(value).is_some()
+    ) || opaque_background_color(value).is_some()
 }
 
 /// The sheet checkpoint excludes element-attached declarations. This supports

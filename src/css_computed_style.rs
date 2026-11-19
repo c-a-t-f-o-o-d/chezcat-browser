@@ -130,6 +130,7 @@ impl ComputedProperties {
         self.0.opacities.get(&node).copied().unwrap_or(Some(1.0))
             .map(Some).ok_or(ComputedStyleUnavailable)
     }
+    pub(crate) fn has_opacity_paint(&self) -> bool { !self.0.opacities.is_empty() }
     #[cfg(test)]
     pub(super) fn transform_storage_len(&self) -> usize { self.0.transforms.len() }
 }

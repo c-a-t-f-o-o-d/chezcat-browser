@@ -4,13 +4,16 @@ pub const GLYPH_HEIGHT: i32 = 7;
 
 // Limit a single surface to 256 MiB, including on allocation requests from
 // unexpected window dimensions. An unavailable surface is represented as empty.
-const MAX_CANVAS_PIXELS: usize = 64 * 1024 * 1024;
+pub(crate) const MAX_CANVAS_PIXELS: usize = 64 * 1024 * 1024;
 
 #[path = "paint_area.rs"]
 mod area;
 #[path = "paint_radius.rs"]
 mod radius;
 pub use radius::UniformBorder;
+#[path = "paint_opacity.rs"]
+mod opacity;
+pub(crate) use opacity::{OpacityGroup, OpacityPainter};
 
 #[cfg(test)]
 #[path = "paint_resample_tests.rs"]

@@ -1959,6 +1959,15 @@
       ]
     }
   ],
+  "signed_out_home_observation": {
+    "build": "0.82.0-alpha.1+dev.137.g1aeef14cea53",
+    "source": "1aeef14cea5383b0bb8c894720b99a50ec05b836",
+    "main_script_decoded_bytes": 10883200,
+    "scripts_attempted": 43,
+    "scripts_completed": 40,
+    "visible_result": "Two horizontal lines and three gray placeholders. Site header and search box absent.",
+    "first_reported_failures": ["Main application UTF-16 surrogate escape", "Detached STYLE textContent assignment", "Computed opacity CSS work limit"]
+  },
   "original_script_and_interface_probes": {
     "scope": "Original offline App probes. Measurements retain their feature-source identities.",
     "baseline_source": "f2e1823266a7c08c89bce7293572d801da62053c",
@@ -2001,6 +2010,14 @@
       "app_feature_stages_passed": 5,
       "independent_controls_passed": 9,
       "result": "The 80 by 48 App paints black rectangles, clears pixels, resets on same-width assignment and repaints with the saved context. Separate App controls check object-fit none and scale-down."
+    },
+    "animation_midpoints": {
+      "measured_source": "a965b2b572c467aa729f77f2ca155a8b9449896a",
+      "integrated_main_with_same_tree": "e2dabcf90f66573c4f0176ca9dad51cbfed4cfa0",
+      "executable_sha256": "be95782022addb0faac72f32b257278136fa843e2f78a2d0f81cb5fbc25d55c6",
+      "reference_version": "web-animations-js 2.3.2",
+      "color": "At 500 ms all 576 animated pixels match the literal #6080a0 swatch. All five sampled stages pass.",
+      "next_lite_opacity": "At 0, 500 and 1000 ms the 3456-pixel tile paints #ffffff, #808080 and #010101. The edited input, overlap and exterior pixels pass."
     },
     "canvas_solid_colors": {
       "pull_request": 126,
