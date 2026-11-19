@@ -14,6 +14,10 @@ pub(super) fn element_node_name(doc: &Document, node: usize) -> String {
     }
 }
 
+pub(super) fn node_mutation_method(name: &str) -> bool {
+    crate::javascript::NODE_MUTATION_METHODS.iter().any(|&(method, _)| method == name)
+}
+
 pub(super) fn native_node_member(name:&str)->bool {
     node_constant(name).is_some() || "constructor __proto__ nodeType nodeName baseURI isConnected ownerDocument parentNode parentElement childNodes firstChild lastChild previousSibling nextSibling nodeValue textContent getRootNode hasChildNodes normalize cloneNode isEqualNode isSameNode compareDocumentPosition contains lookupPrefix lookupNamespaceURI isDefaultNamespace insertBefore appendChild replaceChild removeChild addEventListener removeEventListener dispatchEvent".split_ascii_whitespace().any(|candidate|candidate==name)
 }

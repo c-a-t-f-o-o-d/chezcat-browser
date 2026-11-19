@@ -4,7 +4,7 @@
 use super::{Accessors, Fault, Function, Host, Ordinary, Runtime, Value,
     ELEMENT_INNER_HTML_GET, ELEMENT_INNER_HTML_SET, ELEMENT_STYLE_GET, ELEMENT_STYLE_SET,
     CREATE_CDATA_SECTION, CREATE_PROCESSING_INSTRUCTION, DOCUMENT_IMPORT_NODE,
-    NODE_TEXT_CONTENT_GET, NODE_TEXT_CONTENT_SET, NODE_TRAVERSAL_GETTERS,
+    NODE_MUTATION_METHODS, NODE_TEXT_CONTENT_GET, NODE_TEXT_CONTENT_SET, NODE_TRAVERSAL_GETTERS,
     HTML_TEMPLATE_CONTENT_GET, PROCESSING_INSTRUCTION_TARGET_GET};
 
 #[cfg(test)]
@@ -125,7 +125,11 @@ impl Runtime {
                 self.store_property(self.function_properties[allocation.id],"prototype".into(),Value::Object(prototype),Some((false,false,false)))?;
                 self.store_symbol_property(prototype,self.symbol_to_string_tag.unwrap(),Value::String(name.into()),Some((false,false,true)))?;
                 if name=="Node" {
-                    for (name, operation, length) in [("getRootNode", "\0Node.getRootNode", 0), ("contains", "\0Node.contains", 1), ("cloneNode", "\0Node.cloneNode", 0)] {
+                    let readers = [("getRootNode", "\0Node.getRootNode", 0),
+                        ("contains", "\0Node.contains", 1), ("cloneNode", "\0Node.cloneNode", 0)];
+                    for (name, operation, length) in readers.into_iter().chain(
+                        NODE_MUTATION_METHODS.map(|(name, length)| (name, name, length)),
+                    ) {
                         let method = self.allocate_host_function_with_length(window, operation, length).map_err(Fault::new)?;
                         if let Some(Function::Host { receiver_required, .. }) = self.functions.get_mut(method.id) {
                             *receiver_required = true;

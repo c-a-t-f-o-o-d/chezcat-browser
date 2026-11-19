@@ -23,6 +23,38 @@ fn evaluate(page: &mut Page, doc: &mut Document, forms: &mut Forms, source: &str
 }
 
 #[test]
+fn node_prototype_mutations_keep_native_identity_and_checks() {
+    let (_, _, page) = fixture("<main id=host><i id=first></i></main>", r#"
+var host = document.getElementById('host'), first = document.getElementById('first');
+var fragment = document.createDocumentFragment(), proto = Node.prototype, operations = {};
+for (var entry of [['appendChild',1],['insertBefore',2],['removeChild',1],['replaceChild',2]]) {
+    var key = entry[0], d = Object.getOwnPropertyDescriptor(proto, key);
+    if (!d || typeof d.value !== 'function' || !d.enumerable || !d.writable || !d.configurable ||
+        d.value.length !== entry[1] || d.value.name !== key || host[key] !== d.value ||
+        fragment[key] !== d.value || Object.hasOwn(host, key)) throw 'wrong native method ' + key;
+    operations[key] = d.value;
+}
+var a = document.createElement('b'), b = document.createTextNode('visible'), list = host.childNodes;
+var calls = 0, original = operations.appendChild;
+proto.appendChild = function(child) { calls++; return original.call(this, child); };
+if (fragment.appendChild(a) !== a || calls !== 1 || original.call(host, fragment) !== fragment ||
+    fragment.childNodes.length || list[1] !== a || calls !== 1) throw 'prototype wrapper and fragment move';
+proto.appendChild = original;
+if (operations.insertBefore.call(host, b, first) !== b || list[0] !== b ||
+    operations.replaceChild.call(host, first, a) !== a || list[1] !== first ||
+    operations.removeChild.call(host, first) !== first || first.parentNode !== null ||
+    list.length !== 1 || list[0] !== b) throw 'borrowed operations lost real tree state';
+var rejected = 0;
+try { original.call({}, a); } catch (error) { if (error instanceof TypeError) rejected++; }
+try { original.call(host, {}); } catch (error) { if (error instanceof TypeError) rejected++; }
+try { operations.removeChild.call(host, a); } catch (error) { if (error.name === 'NotFoundError') rejected++; }
+if (rejected !== 3 || a.parentNode !== null || host.childNodes !== list ||
+    list.length !== 1 || list[0] !== b) throw 'guarded mutation or retained list';
+"#);
+    assert!(!page.has_host_tasks());
+}
+
+#[test]
 fn node_relationship_descriptors_preserve_checked_tree_links() {
     let (_, _, page) = fixture("<div id=host>lead<b id=child></b>tail</div>", r#"
 var host = document.getElementById('host'), child = document.getElementById('child');

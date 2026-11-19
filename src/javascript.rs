@@ -468,6 +468,12 @@ pub(crate) fn valid_custom_element_name(name: &str) -> bool {
 }
 
 pub(crate) const ELEMENT_STYLE_GET: &str = "\0HTMLElement.get.style";
+pub(crate) const NODE_MUTATION_METHODS: [(&str, usize); 4] = [
+    ("appendChild", 1),
+    ("insertBefore", 2),
+    ("removeChild", 1),
+    ("replaceChild", 2),
+];
 pub(crate) const NODE_TRAVERSAL_GETTERS: [(&str, &str); 7] = [
     ("childNodes", "\0Node.get.childNodes"),
     ("firstChild", "\0Node.get.firstChild"),
