@@ -48,6 +48,7 @@ struct TryScope {
 enum ExitScope {
     Try(TryScope),
     ForOf(Box<ForOfScope>),
+    ClassicFor { lexical_depth: usize, bindings: Vec<String> },
 }
 
 struct ForOfScope {
@@ -90,6 +91,7 @@ impl Activation {
             .saturating_add(self.exit_scopes.capacity().saturating_mul(std::mem::size_of::<ExitScope>()))
             .saturating_add(self.exit_scopes.iter().fold(0usize, |bytes, scope| match scope {
                 ExitScope::ForOf(scope) => bytes.saturating_add(scope.retained_bytes()),
+                ExitScope::ClassicFor { bindings, .. } => bytes.saturating_add(classic_for_binding_bytes(bindings)),
                 ExitScope::Try(_) => bytes,
             }))
     }
@@ -558,6 +560,25 @@ impl Runtime {
                 frame.exit_scopes.push(ExitScope::Try(TryScope { statement, after, lexical_depth: frame.lexical_scopes.len() }));
                 return Ok(None);
             }
+            Instruction::EnterFor { statement, .. } => {
+                self.enter_generator_classic_for(frame, statement, host)
+                    .map_err(|error| error.at(&frame.program.source, frame.program.stmts[statement].at))?;
+                return Ok(None);
+            }
+            Instruction::RefreshForBindings => {
+                self.step()?;
+                self.refresh_generator_for_bindings(frame)?;
+                return Ok(None);
+            }
+            Instruction::LeaveFor => {
+                self.step()?;
+                let Some(ExitScope::ClassicFor { lexical_depth, bindings }) = frame.exit_scopes.pop() else {
+                    unreachable!("compiled generator classic loop exit");
+                };
+                self.value_bytes -= classic_for_binding_bytes(&bindings);
+                self.unwind_generator_scopes(frame, lexical_depth);
+                return Ok(None);
+            }
             Instruction::EnterForOf { statement, after } => {
                 self.enter_generator_for_of(frame, statement, after, host)?;
                 return Ok(None);
@@ -755,6 +776,45 @@ impl Runtime {
     }
 
     #[inline(never)]
+    fn enter_generator_classic_for(
+        &mut self, frame: &mut Activation, statement: StmtId, host: &mut dyn Host,
+    ) -> Result<(), Fault> {
+        let StmtKind::For(Some(initial), ..) = frame.program.stmts[statement].kind else {
+            unreachable!("compiled generator classic loop must have an initializer");
+        };
+        self.step()?;
+        self.reserve_generator_stack(&mut frame.exit_scopes)?;
+        let lexical_depth = frame.lexical_scopes.len();
+        frame.exit_scopes.push(ExitScope::ClassicFor { lexical_depth, bindings: Vec::new() });
+        self.reserve_generator_stack(&mut frame.lexical_scopes)?;
+        let environment = self.new_environment(frame.environment(), false)?;
+        frame.lexical_scopes.push(environment);
+        self.push_transient_root(Edge::Environment(environment))?;
+        let bindings = self.initialize_classic_for(&frame.program, initial, environment, &frame.this, host)?;
+        let bytes = classic_for_binding_bytes(&bindings);
+        self.check_generator_retention(bytes)?;
+        let Some(ExitScope::ClassicFor { bindings: saved, .. }) = frame.exit_scopes.last_mut() else {
+            unreachable!("compiled generator classic loop scope");
+        };
+        *saved = bindings;
+        self.value_bytes += bytes;
+        self.refresh_generator_for_bindings(frame)
+    }
+
+    fn refresh_generator_for_bindings(&mut self, frame: &mut Activation) -> Result<(), Fault> {
+        let Some(ExitScope::ClassicFor { lexical_depth, bindings }) = frame.exit_scopes.last() else {
+            unreachable!("compiled generator classic loop iteration");
+        };
+        if !bindings.is_empty() {
+            let slot = *lexical_depth;
+            let old = frame.lexical_scopes[slot];
+            let parent = if slot == 0 { frame.environment } else { frame.lexical_scopes[slot - 1] };
+            frame.lexical_scopes[slot] = self.iteration_environment(old, parent, bindings)?;
+        }
+        Ok(())
+    }
+
+    #[inline(never)]
     fn enter_generator_for_of(
         &mut self, frame: &mut Activation, statement: StmtId, after: usize, host: &mut dyn Host,
     ) -> Result<(), Fault> {
@@ -842,6 +902,11 @@ impl Runtime {
             let Some(scope) = frame.exit_scopes.pop() else { break; };
             completion = match scope {
                 ExitScope::Try(scope) => self.finish_generator_try(frame, scope, completion, host),
+                ExitScope::ClassicFor { lexical_depth, bindings } => {
+                    self.value_bytes -= classic_for_binding_bytes(&bindings);
+                    self.unwind_generator_scopes(frame, lexical_depth);
+                    completion
+                }
                 ExitScope::ForOf(mut scope) => {
                     self.value_bytes -= scope.retained_bytes();
                     self.unwind_generator_scopes(frame, scope.lexical_depth);
