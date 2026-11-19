@@ -116,6 +116,8 @@ pub use script_resources::DynamicScript;
 use script_resources::DynamicState;
 #[path = "script_blank_frames.rs"]
 mod script_blank_frames;
+#[path = "script_inert_documents.rs"]
+mod script_inert_documents;
 #[path = "script_stylesheets.rs"]
 mod script_stylesheets;
 pub use script_stylesheets::DynamicStylesheet;
@@ -413,6 +415,7 @@ struct State {
     background_pending: bool,
     background_tracking: bool,
     blank_frames: Vec<script_blank_frames::BlankFrame>,
+    inert_documents: script_inert_documents::Arena,
     blank_frame_nodes: usize,
     geometry: Option<crate::script_geometry::Geometry>,
     location: Option<LocationView>,
@@ -492,6 +495,7 @@ impl State {
     fn new() -> Self {
         Self {
             blank_frames: Vec::new(),
+            inert_documents: script_inert_documents::Arena::default(),
             blank_frame_nodes: 0,
             geometry: None,
             location: None,
@@ -973,6 +977,9 @@ impl Page {
         runtime.define_node_interfaces(WINDOW,dom_tree::NODE_CONSTANTS,Some((IMAGE_FACTORY,"Image"))).expect("fixed Node interfaces");
         runtime.define_mutation_observers().expect("fixed mutation observer interfaces");
         runtime.define_tree_walker(WINDOW).expect("fixed tree traversal interfaces");
+        runtime.define_inert_document_interfaces(WINDOW, script_inert_documents::GET,
+            script_inert_documents::CREATE, script_inert_documents::HAS_FEATURE)
+            .expect("fixed inert document interfaces");
         runtime.define_media_interfaces(WINDOW).expect("fixed media interfaces");
         Self { runtime, state }
     }
@@ -2608,6 +2615,7 @@ impl Host for Bridge<'_> {
     fn tree_walker_node_type(&self, node: u32) -> Option<u32> {
         if node == DOCUMENT { return Some(9); }
         if self.attr_receiver(node) { return Some(2); }
+        if let Some(kind) = self.inert_node_type(node) { return Some(kind); }
         let index = node_index(node).filter(|&index| self.dom_accessible(index))?;
         Some(match self.doc.nodes[index].kind {
             NodeKind::Element { .. } => 1,
@@ -2641,7 +2649,8 @@ impl Host for Bridge<'_> {
         object==DOCUMENT && (matches!(property,"constructor"|"__proto__") || !self.document_native_property(property))
     }
     fn exposed_native_prototype(&self,object:u32)->bool {
-        self.document_interface_receiver(object) || self.ordinary_event_owner(object).is_some() || self.standalone_target_owner(object).is_some()
+        self.inert_interface(object).is_some() || self.document_interface_receiver(object)
+            || self.ordinary_event_owner(object).is_some() || self.standalone_target_owner(object).is_some()
             || self.canvas_context_receiver(object)
             || self.video_interface_receiver(object) || self.fragment_receiver(object)
             || self.node_list_receiver(object) || self.concrete_html_interface(object).is_some()
@@ -2660,6 +2669,9 @@ impl Host for Bridge<'_> {
     fn event_target_interface(&self,window:u32)->bool {window==WINDOW || self.frame_context(window).is_some()}
     fn node_interface_constants(&self,window:u32)->Option<&'static [(&'static str,u16)]> {self.event_target_interface(window).then_some(dom_tree::NODE_CONSTANTS)}
     fn instance_ancestry(&self, object:u32) -> Option<crate::javascript::NativeAncestry> {
+        if let Some(interface) = self.inert_interface(object) {
+            return Some(crate::javascript::NativeAncestry { window: WINDOW, constructor: Some((WINDOW, interface)) });
+        }
         if self.canvas_context_receiver(object) {
             return Some(crate::javascript::NativeAncestry { window: WINDOW, constructor: Some((WINDOW, "CanvasRenderingContext2D")) });
         }
@@ -2727,6 +2739,7 @@ impl Host for Bridge<'_> {
     }
 
     fn owns_property(&self, object: u32, property: &str) -> bool {
+        if self.inert_interface(object).is_some() { return self.inert_owns_property(object, property); }
         if self.canvas_context_receiver(object) { return script_canvas_context::unsupported_state(property); }
         if self.frame_document_prototype_lookup(object,property) {return false;}
         if self.node_list_receiver(object) {
@@ -2757,7 +2770,8 @@ impl Host for Bridge<'_> {
         self.location_instance_owner(object).is_some() || object == HISTORY || self.attr_receiver(object) || self.ordinary_event_owner(object).is_some() || self.named_map_receiver(object)
     }
     fn ordinary_lookup_tail_property(&self,object:u32,property:&str)->bool {
-        if self.canvas_context_receiver(object) { !script_canvas_context::unsupported_state(property) }
+        if self.inert_interface(object).is_some() { !self.inert_owns_property(object, property) }
+        else if self.canvas_context_receiver(object) { !script_canvas_context::unsupported_state(property) }
         else if self.node_list_receiver(object) || self.frame_document_prototype_lookup(object,property) {true}
         else if self.element_selector_member(object,property) {true}
         else if self.inherited_node_property(object,property) {true}
@@ -2770,6 +2784,7 @@ impl Host for Bridge<'_> {
         else {self.ordinary_lookup_tail(object)}
     }
     fn native_access_owner(&self, object: u32) -> Option<u32> {
+        if self.inert_interface(object).is_some() { return Some(WINDOW); }
         if script_inline_style::handle(object) {return Some(WINDOW);}
         if self.canvas_context_receiver(object) {return Some(WINDOW);}
         if let Some(owner)=self.computed_style_owner(object) {return Some(owner);}
@@ -2886,6 +2901,12 @@ impl Host for Bridge<'_> {
     }
 
     fn argument_conversions(&self, object: u32, method: &str, args: &[Value]) -> &'static [(usize, bool)] {
+        if self.inert_implementation(object) && method == script_inert_documents::CREATE {
+            return if matches!(args.first(), None | Some(Value::Undefined)) { &[] } else { &[(0, true)] };
+        }
+        if self.inert_factory(object, method).is_some() {
+            return if method == "createElementNS" { &[(0, true), (1, true)] } else { &[(0, true)] };
+        }
         if let Some(operation) = CanvasOperation::parse(method) {
             return if operation.accepts(self, object) { operation.conversions() } else { &[] };
         }
@@ -2979,6 +3000,9 @@ impl Host for Bridge<'_> {
     }
 
     fn method_length(&self, object:u32, method:&str) -> Option<usize> {
+        if self.inert_factory(object, method).is_some() {
+            return Some(if method == "createElementNS" { 2 } else { 1 });
+        }
         if script_inline_style::handle(object) && method == "item" { return Some(1); }
         if let Some(operation) = CanvasOperation::parse(method) { return Some(operation.arity()); }
         if object==WINDOW && method=="getComputedStyle" {return Some(1);}
@@ -3012,6 +3036,12 @@ impl Host for Bridge<'_> {
     }
 
     fn native_method_owner(&self, object:u32, method:&str) -> Option<u32> {
+        if self.event_target_interface(object)
+            && matches!(method, script_inert_documents::GET | script_inert_documents::CREATE | script_inert_documents::HAS_FEATURE)
+        {
+            return Some(object);
+        }
+        if self.inert_factory(object, method).is_some() { return Some(WINDOW); }
         if script_content_editable::accessor(method) && self.event_target_interface(object) {return Some(object);}
         if matches!(method, ELEMENT_INNER_HTML_GET | ELEMENT_INNER_HTML_SET)
             && self.event_target_interface(object) { return Some(object); }
@@ -3052,7 +3082,8 @@ impl Host for Bridge<'_> {
     fn nullable_string_argument(&self, object: u32, method: &str, index: usize) -> bool {
         if (STYLE_BASE..DATASET_BASE).contains(&object) && method == "setProperty" && index == 2 { return true; }
         if object==WINDOW && method=="getComputedStyle" && index==1 {return true;}
-        if object==DOCUMENT && matches!(method,"createAttributeNS"|"createElementNS") && index==0 {return true;}
+        if (object==DOCUMENT && matches!(method,"createAttributeNS"|"createElementNS")
+            || self.inert_document(object) && method=="createElementNS") && index==0 {return true;}
         if object == HISTORY && method == "replaceState" && index == 2 { return true; }
         if self.named_map_receiver(object) { return method == "getNamedItemNS" && index == 0; }
         method == "isDefaultNamespace" && index == 0 && self.namespace_receiver(object)
@@ -3088,6 +3119,9 @@ impl Host for Bridge<'_> {
     }
 
     fn required_arguments(&self, object: u32, method: &str) -> usize {
+        if self.inert_factory(object, method).is_some() {
+            return if method == "createElementNS" { 2 } else { 1 };
+        }
         if script_inline_style::handle(object) && method == "item" { return 1; }
         if let Some(operation) = CanvasOperation::parse(method) { return operation.arity(); }
         if matches!(method, "addEventListener" | "removeEventListener") { return 2; }
@@ -3162,6 +3196,9 @@ impl Host for Bridge<'_> {
         method: &str,
         args: &[Value],
     ) -> Result<(), (&'static str, String)> {
+        if object == WINDOW && matches!(method, "DOMImplementation" | "DocumentType") {
+            return Err(("TypeError", "Illegal inert DOM interface constructor.".into()));
+        }
         if matches!(method, NODE_TEXT_CONTENT_GET | NODE_TEXT_CONTENT_SET) {
             if !self.text_content_receiver(object) {
                 return Err(("TypeError", "The textContent accessor requires a Node.".into()));
@@ -3445,6 +3482,7 @@ impl Host for Bridge<'_> {
     }
 
     fn method(&self, object: u32, property: &str) -> Option<&'static str> {
+        if self.inert_interface(object).is_some() { return self.inert_factory(object, property); }
         if script_inline_style::handle(object) {
             return self.attr_element_receiver(node_handle((object - STYLE_BASE) as usize))
                 .then(|| script_inline_style::method(property)).flatten();
@@ -3516,6 +3554,13 @@ impl Host for Bridge<'_> {
     }
 
     fn accepts_receiver(&self, object: u32, method: &str, receiver: u32) -> bool {
+        if self.event_target_interface(object) {
+            if method == script_inert_documents::GET { return receiver == DOCUMENT || self.inert_document(receiver); }
+            if matches!(method, script_inert_documents::CREATE | script_inert_documents::HAS_FEATURE) {
+                return self.inert_implementation(receiver);
+            }
+        }
+        if self.inert_factory(object, method).is_some() { return self.inert_document(receiver); }
         if script_content_editable::accessor(method) && self.event_target_interface(object) {return self.content_editable_receiver(receiver);}
         if matches!(method, ELEMENT_INNER_HTML_GET | ELEMENT_INNER_HTML_SET) {
             return self.event_target_interface(object) && self.attr_element_receiver(receiver);
@@ -3993,6 +4038,10 @@ impl Host for Bridge<'_> {
     }
 
     fn has(&mut self, object: u32, property: &str) -> Result<bool, String> {
+        if self.inert_interface(object).is_some() {
+            self.state.work(1)?;
+            return Ok(self.inert_owns_property(object, property));
+        }
         if self.canvas_context_receiver(object) {self.state.work(1)?;return Ok(false);}
         if script_computed_style::index(object).is_some() {self.state.work(1)?;return if self.computed_style_receiver(object) {Ok(script_computed_style::attribute_member(property)||self.method(object,property).is_some())} else {Err("Invalid computed declaration receiver.".into())};}
         if self.node_list_iteration_member(object,property) {self.state.work(1)?;return Ok(false);}
@@ -4285,6 +4334,11 @@ impl Host for Bridge<'_> {
     }
 
     fn get(&mut self, object: u32, property: &str) -> Result<Value, String> {
+        if self.inert_interface(object).is_some() { return self.inert_get(object, property); }
+        if object == DOCUMENT && property == "implementation" {
+            self.state.work(1)?;
+            return Ok(Value::Host(script_inert_documents::MAIN_IMPLEMENTATION));
+        }
         if self.canvas_context_receiver(object) {
             self.state.work(1)?;
             if script_canvas_context::unsupported_state(property) {
@@ -4631,6 +4685,10 @@ impl Host for Bridge<'_> {
     }
 
     fn set(&mut self, object: u32, property: &str, value: Value) -> Result<(), String> {
+        if self.inert_interface(object).is_some() {
+            if property == "textContent" && matches!(self.inert_node_type(object), Some(9 | 10)) { return Ok(()); }
+            return Err(format!("Writing inert DOM property {property:?} is unavailable."));
+        }
         if object == DOCUMENT && property == "textContent" {return Ok(());}
         if self.content_editable_attribute(object,property) {return self.content_editable_set(object,&value);}
         if self.canvas_context_receiver(object) {
@@ -4896,6 +4954,10 @@ impl Host for Bridge<'_> {
     }
 
     fn call(&mut self, object: u32, method: &str, args: &[Value]) -> Result<Value, String> {
+        if method == script_inert_documents::GET { return self.get(object, "implementation"); }
+        if method == script_inert_documents::CREATE { return self.create_inert_document(args); }
+        if method == script_inert_documents::HAS_FEATURE { return Ok(Value::Bool(true)); }
+        if self.inert_factory(object, method).is_some() { return self.inert_create_node(object, method, args); }
         if method == ELEMENT_INNER_HTML_GET {
             return self.get(object, "innerHTML");
         }

@@ -4,11 +4,11 @@ use super::*;
 
 impl Bridge<'_> {
     pub(super) fn document_interface_receiver(&self, object:u32)->bool {
-        object==DOCUMENT || self.active_frame_document(object)
+        object==DOCUMENT || self.active_frame_document(object) || self.inert_document(object)
     }
 
     pub(super) fn document_inherited_property(&self, object:u32, name:&str)->bool {
-        object==DOCUMENT && name=="createTreeWalker" || self.document_interface_receiver(object)
+        object==DOCUMENT && matches!(name, "createTreeWalker" | "implementation") || self.document_interface_receiver(object)
             && (name=="documentElement" || script_element_properties::ordinary_interface_member(name))
     }
 
@@ -22,7 +22,7 @@ impl Bridge<'_> {
         dom_tree::native_node_member(name)
             // An unavailable native factory keeps its diagnostic dispatch;
             // its presence/callable exposure remains controlled by the gate.
-            || matches!(name, "createEvent" | "createTreeWalker")
+            || matches!(name, "createEvent" | "createTreeWalker" | "implementation")
             || self.method(DOCUMENT, name).is_some()
             // The fixed startup table also owns legacy prebound methods that
             // Host::method does not expose through dynamic native dispatch.
