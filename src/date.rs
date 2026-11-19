@@ -5,7 +5,7 @@
 
 use super::{
     primitive_conversion::Hint, Builtin, Declaration, Fault, Host, Ordinary, Reference, Runtime,
-    Value, MAX_CALL_DEPTH,
+    Value,
 };
 
 const DAY_MS: f64 = 86_400_000.0;
@@ -597,9 +597,7 @@ impl Runtime {
         host: &mut dyn Host,
     ) -> Result<Value, Fault> {
         self.step()?;
-        if self.call_depth >= MAX_CALL_DEPTH {
-            return Err(Fault::new("Date callback call limit reached (32)."));
-        }
+        self.check_native_call_stack("Date callback call")?;
         self.call_depth += 1;
         // Calendar and formatting work is constant-bounded; callbacks retain
         // their existing execution/copy limits and cannot start a fresh job.

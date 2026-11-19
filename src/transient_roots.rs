@@ -1,8 +1,8 @@
 //! ID-only registrations for suspended interpreter state and audited call entries.
 #[cfg(test)]
-use super::MAX_ARGUMENTS;
-use super::{Control, Exception, Fault, Reference, Runtime, Value, MAX_CALL_DEPTH, MAX_EVAL_DEPTH,
-    MAX_EVALUATION_ARGUMENT_SLOTS, MAX_EVALUATION_FRAME_SLOTS};
+use super::{MAX_ARGUMENTS, MAX_CALL_DEPTH, MAX_EVAL_DEPTH, MAX_EVALUATION_ARGUMENT_SLOTS,
+    MAX_EVALUATION_FRAME_SLOTS};
+use super::{Control, Exception, Fault, Reference, Runtime, Value};
 use super::function_reachability::Edge;
 
 #[cfg(test)]
@@ -56,18 +56,28 @@ pub(super) struct RootMarker(usize);
 
 impl Runtime {
     pub(super) fn argument_scratch_limit(&self) -> Result<usize, Fault> {
-        self.limits.capacity.arguments.checked_mul(MAX_CALL_DEPTH + 1)
-            .map(|limit| limit.max(MAX_EVALUATION_ARGUMENT_SLOTS))
-            .ok_or_else(|| Fault::new("Argument scratch policy arithmetic overflow."))
+        #[cfg(test)]
+        if let Some(limit) = self.limits.test_call_depth {
+            return self.limits.capacity.arguments.checked_mul(limit + 1)
+                .map(|limit| limit.max(MAX_EVALUATION_ARGUMENT_SLOTS))
+                .ok_or_else(|| Fault::new("Argument scratch policy arithmetic overflow."));
+        }
+        let root_bytes = self.transient_roots.roots.capacity().saturating_mul(size_of::<Edge>());
+        Ok(self.limits.heap.retained_values.saturating_sub(root_bytes) / size_of::<Value>())
     }
 
     fn root_reference_limit(&self) -> Result<usize, Fault> {
-        let arguments = self.limits.capacity.arguments.checked_add(4)
-            .and_then(|n| n.checked_mul(MAX_CALL_DEPTH))
-            .ok_or_else(|| Fault::new("Transient root policy arithmetic overflow."))?;
-        self.argument_scratch_limit()?.checked_add(arguments)
-            .and_then(|n| n.checked_add(4 * MAX_EVALUATION_FRAME_SLOTS + 4 * MAX_EVAL_DEPTH))
-            .ok_or_else(|| Fault::new("Transient root policy arithmetic overflow."))
+        #[cfg(test)]
+        if let Some(limit) = self.limits.test_call_depth {
+            let arguments = self.limits.capacity.arguments.checked_add(4)
+                .and_then(|n| n.checked_mul(limit))
+                .ok_or_else(|| Fault::new("Transient root policy arithmetic overflow."))?;
+            return self.argument_scratch_limit()?.checked_add(arguments)
+                .and_then(|n| n.checked_add(4 * MAX_EVALUATION_FRAME_SLOTS + 4 * MAX_EVAL_DEPTH))
+                .ok_or_else(|| Fault::new("Transient root policy arithmetic overflow."));
+        }
+        let argument_bytes = self.transient_roots.argument_slots.saturating_mul(size_of::<Value>());
+        Ok(self.limits.heap.retained_values.saturating_sub(argument_bytes) / size_of::<Edge>())
     }
 
     pub(super) fn inhibition_diagnostic(&self) -> String {

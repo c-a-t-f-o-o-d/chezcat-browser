@@ -285,7 +285,10 @@ const MAX_EVAL_DEPTH: usize = 128;
 const MAX_EVALUATION_FRAMES: usize = 4096;
 const MAX_EVALUATION_FRAME_SLOTS: usize = 2 * MAX_EVALUATION_FRAMES;
 const MAX_EVALUATION_ARGUMENT_SLOTS: usize = 4 * MAX_EVALUATION_FRAMES;
+#[cfg(any(test, not(windows)))]
 const MAX_CALL_DEPTH: usize = 32;
+#[path = "native_call_stack.rs"]
+mod native_call_stack;
 #[cfg(test)]
 const MAX_ARGUMENTS: usize = 256;
 #[cfg(test)]
@@ -4547,9 +4550,7 @@ impl Runtime {
         let Value::String(source) = value else {
             return Err(Fault::new("Evaluating source containing unpaired UTF-16 surrogates is not implemented."));
         };
-        if self.call_depth >= MAX_CALL_DEPTH {
-            return Err(Fault::new("Function call limit reached (32)."));
-        }
+        self.check_native_call_stack("Function call")?;
         let previous_strict = self.strict;
         let previous_invocation = self.invocation;
         if direct.is_none() { self.invocation = None; }
@@ -6090,9 +6091,7 @@ impl Runtime {
         let Some(callback) = callback else {
             return Ok(Value::Undefined);
         };
-        if self.call_depth >= MAX_CALL_DEPTH {
-            return Err(Fault::new("Accessor call limit reached (32)."));
-        }
+        self.check_native_call_stack("Accessor call")?;
         self.call_depth += 1;
         self.transient_roots.owned_call_depth += 1;
         let result = self.call_value(Value::Function(callback), args, receiver, host);
@@ -9418,9 +9417,7 @@ impl Runtime {
             return Err(Self::not_callable_fault(function));
         };
         let ordinary = self.is_ordinary_script_call(*index);
-        if ordinary && self.call_depth >= MAX_CALL_DEPTH {
-            return Err(Fault::new("Function call limit reached (32)."));
-        }
+        if ordinary { self.check_native_call_stack("Function call")?; }
         Ok((*index, ordinary))
     }
 
@@ -9584,9 +9581,7 @@ impl Runtime {
                         }
                     }
                 }
-                if self.call_depth >= MAX_CALL_DEPTH {
-                    return Err(Fault::new("Function call limit reached (32)."));
-                }
+                self.check_native_call_stack("Function call")?;
                 self.call_depth += 1;
                 let result = self.call_host(object, method, args, host);
                 self.call_depth -= 1;
@@ -9657,9 +9652,7 @@ impl Runtime {
     fn call_script_value(
         &mut self, index: usize, args: &[Value], this: Value, new_target: Option<usize>, host: &mut dyn Host,
     ) -> Result<Value, Fault> {
-        if self.call_depth >= MAX_CALL_DEPTH {
-            return Err(Fault::new("Function call limit reached (32)."));
-        }
+        self.check_native_call_stack("Function call")?;
         let Function::Script {
             program,
             template,
@@ -9737,9 +9730,7 @@ impl Runtime {
     fn call_derived_script_value(
         &mut self, index: usize, args: &[Value], this: Value, new_target: Option<usize>, host: &mut dyn Host,
     ) -> Result<Value, Fault> {
-        if self.call_depth >= MAX_CALL_DEPTH {
-            return Err(Fault::new("Function call limit reached (32)."));
-        }
+        self.check_native_call_stack("Function call")?;
         let Function::Script { program, template, environment, .. } = &self.functions[index]
             else { unreachable!() };
         let (program, template, parent) = (program.clone(), *template, *environment);

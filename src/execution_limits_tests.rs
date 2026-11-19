@@ -188,10 +188,9 @@ fn browser_budget_microtasks_share_the_enlarged_allowance_and_still_cancel() {
 
 #[test]
 fn browser_budget_separates_native_guards_from_capacity_policy() {
-    assert_eq!(MAX_PARSE_DEPTH, 64);
-    assert_eq!(MAX_EVAL_DEPTH, 128);
-    assert_eq!(MAX_CALL_DEPTH, 32);
-    assert_eq!(MAX_EVALUATION_FRAMES, 4096);
+    assert_eq!(limits::BROWSER.test_call_depth, None);
+    assert!(limits::REGRESSION.test_call_depth.is_some());
+    assert!(limits::CAPACITY_REGRESSION.test_call_depth.is_some());
     assert_eq!(limits::BROWSER.capacity.string_bytes, 8 * 1024 * 1024);
     assert_eq!(limits::REGRESSION.capacity.string_bytes, 128 * 1024);
     assert_eq!(limits::REGRESSION_HEAP.retained_values, 2 * 1024 * 1024);

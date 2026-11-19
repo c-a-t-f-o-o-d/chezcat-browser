@@ -6,7 +6,7 @@
 use super::MAX_PROPERTY_BYTES;
 use super::{
     primitive_conversion, property_index, strict_equal, Builtin, Fault, Function, Host,
-    Ordinary, PropertyKey, Runtime, Value, MAX_CALL_DEPTH, MAX_PARSE_DEPTH,
+    Ordinary, PropertyKey, Runtime, Value, MAX_PARSE_DEPTH,
 };
 use std::cmp::Ordering;
 
@@ -63,11 +63,9 @@ impl Runtime {
         if self.active_array_joins.contains(&id) {
             return Ok(String::new());
         }
-        if self.active_array_joins.len() >= MAX_CALL_DEPTH {
-            return Err(Fault::new(
-                "Array string conversion nesting limit reached (32).",
-            ));
-        }
+        self.check_native_call_stack("Array string conversion nesting")?;
+        self.active_array_joins.try_reserve(1)
+            .map_err(|_| Fault::new("Unable to reserve an active Array join identity."))?;
         self.active_array_joins.push(id);
         let result = (|| {
             #[cfg(test)]

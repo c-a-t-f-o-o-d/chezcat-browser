@@ -2,7 +2,9 @@
 //! All other member calls retain their owned receiver/callee snapshots.
 
 use super::{Argument, Builtin, ExprId, ExprKind, Fault, Function, Host, Program,
-    Runtime, Value, WorkKind, MAX_CALL_DEPTH, MAX_EVALUATION_FRAMES};
+    Runtime, Value, WorkKind, MAX_EVALUATION_FRAMES};
+#[cfg(test)]
+use super::MAX_CALL_DEPTH;
 use std::rc::Rc;
 
 impl Runtime {
@@ -74,7 +76,7 @@ impl Runtime {
             })().map_err(|error| error.at(&program.source, program.exprs[argument].at))?;
             self.step()?; // call_value
             if bytes > self.limits.capacity.string_bytes { return Err(Fault::new(format!("String limit reached ({} KiB).", self.limits.capacity.string_bytes / 1024))); }
-            if self.call_depth >= MAX_CALL_DEPTH { return Err(Fault::new("Function call limit reached (32).")); }
+            self.check_native_call_stack("Function call")?;
             self.call_depth += 1;
             let result = (|| {
                 self.step()?; // call_member

@@ -6,7 +6,7 @@
 
 use super::{
     int32, number_text, string_number, Builtin, Declaration, Fault, Function, Host, Ordinary,
-    Runtime, Value, MAX_CALL_DEPTH,
+    Runtime, Value,
 };
 use std::cmp::Ordering;
 
@@ -833,9 +833,7 @@ impl Runtime {
         args: &[Value],
         host: &mut dyn Host,
     ) -> Result<Value, Fault> {
-        if self.call_depth >= MAX_CALL_DEPTH {
-            return Err(Fault::new("Function call limit reached (32)."));
-        }
+        self.check_native_call_stack("Function call")?;
         self.call_depth += 1;
         let result = self.construct_binary_inner(constructor, args, host);
         self.call_depth -= 1;
@@ -999,9 +997,7 @@ impl Runtime {
         this: Value,
         host: &mut dyn Host,
     ) -> Result<Value, Fault> {
-        if self.call_depth >= MAX_CALL_DEPTH {
-            return Err(Fault::new("Function call limit reached (32)."));
-        }
+        self.check_native_call_stack("Function call")?;
         self.call_depth += 1;
         let result = self.binary_builtin_inner(operation, args, this, host);
         self.call_depth -= 1;

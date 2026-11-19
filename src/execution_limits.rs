@@ -110,6 +110,8 @@ pub const BROWSER_HOST: HostCapacities = HostCapacities {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Limits {
+    #[cfg(test)]
+    pub(crate) test_call_depth: Option<usize>,
     pub capacity: Capacities,
     pub host: HostCapacities,
     pub heap: HeapLimits,
@@ -132,6 +134,8 @@ const BROWSER_HOST_WORK: usize = crate::css::FULL_STYLESHEET_SOURCE_WORK + 256 *
 /// Default for every browser script, callback, timer and microtask checkpoint.
 /// Copy bytes are cumulative charged work, not reserved or retained memory.
 pub const BROWSER: Limits = Limits {
+    #[cfg(test)]
+    test_call_depth: None,
     capacity: BROWSER_CAPACITIES,
     host: BROWSER_HOST,
     heap: BROWSER_HEAP,
@@ -151,6 +155,7 @@ pub const BROWSER: Limits = Limits {
 /// policy. This is explicit test selection, never the normal browser default.
 #[cfg(test)]
 pub(crate) const CAPACITY_REGRESSION: Limits = Limits {
+    test_call_depth: Some(super::MAX_CALL_DEPTH),
     capacity: REGRESSION_CAPACITIES,
     host: REGRESSION_HOST,
     steps: 50_000_000,
@@ -171,6 +176,7 @@ pub(crate) const CAPACITY_REGRESSION: Limits = Limits {
 /// this constant, and compiling with cfg(test) does not change Runtime::new().
 #[cfg(test)]
 pub(crate) const REGRESSION: Limits = Limits {
+    test_call_depth: Some(super::MAX_CALL_DEPTH),
     capacity: REGRESSION_CAPACITIES,
     host: REGRESSION_HOST,
     heap: REGRESSION_HEAP,

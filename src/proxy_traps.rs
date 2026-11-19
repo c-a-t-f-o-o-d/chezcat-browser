@@ -21,9 +21,7 @@ impl Runtime {
         let (target, handler) = (data.target, data.handler);
         self.object(target)?;
         self.object(handler)?;
-        if self.call_depth >= MAX_CALL_DEPTH {
-            return Err(Fault::new("Proxy operation call limit reached (32)."));
-        }
+        self.check_native_call_stack("Proxy operation call")?;
         let marker = self.root_marker();
         self.call_depth += 1;
         self.transient_roots.owned_call_depth += 1;

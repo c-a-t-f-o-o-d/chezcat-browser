@@ -6,7 +6,7 @@
 //! https://tc39.es/ecma262/#sec-iteratorstepvalue
 //! https://tc39.es/ecma262/#sec-iteratorclose
 
-use super::{Builtin, Fault, Function, Host, Ordinary, Runtime, Value, MAX_CALL_DEPTH};
+use super::{Builtin, Fault, Function, Host, Ordinary, Runtime, Value};
 use super::function_reachability::Edge;
 use super::generator_functions::Op as GeneratorOp;
 
@@ -204,9 +204,7 @@ impl Runtime {
                         // Reading its done/value immediately cannot expose its
                         // identity, so keep the previous native-loop allocation
                         // behavior instead of spending an object for each step.
-                        if self.call_depth >= MAX_CALL_DEPTH {
-                            return Err(Fault::new("Function call limit reached (32)."));
-                        }
+                        self.check_native_call_stack("Function call")?;
                         self.call_depth += 1;
                         let result = self.next_native_iterator(*id, host);
                         self.call_depth -= 1;
@@ -361,9 +359,7 @@ impl Runtime {
         this: Value,
         host: &mut dyn Host,
     ) -> Result<Value, Fault> {
-        if self.call_depth >= MAX_CALL_DEPTH {
-            return Err(Fault::new("Function call limit reached (32)."));
-        }
+        self.check_native_call_stack("Function call")?;
         self.call_depth += 1;
         let result = (|| match operation {
             Op::Self_ => self.copy_value(&this),

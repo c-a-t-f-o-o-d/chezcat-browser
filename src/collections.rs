@@ -6,7 +6,7 @@
 #[cfg(test)]
 use super::MAX_STRING_BYTES;
 use super::{
-    Builtin, Declaration, Fault, Host, NativeGetter, Ordinary, Runtime, Value, MAX_CALL_DEPTH,
+    Builtin, Declaration, Fault, Host, NativeGetter, Ordinary, Runtime, Value,
 };
 use std::collections::{BTreeMap, HashMap};
 
@@ -690,9 +690,7 @@ impl Runtime {
         new_target: Option<usize>,
         host: &mut dyn Host,
     ) -> Result<Value, Fault> {
-        if self.call_depth >= MAX_CALL_DEPTH {
-            return Err(Fault::new("Function call limit reached (32)."));
-        }
+        self.check_native_call_stack("Function call")?;
         self.call_depth += 1;
         let result = self.construct_collection_inner(kind, args, new_target, host);
         self.call_depth -= 1;
@@ -756,9 +754,7 @@ impl Runtime {
         this: Value,
         host: &mut dyn Host,
     ) -> Result<Value, Fault> {
-        if self.call_depth >= MAX_CALL_DEPTH {
-            return Err(Fault::new("Function call limit reached (32)."));
-        }
+        self.check_native_call_stack("Function call")?;
         self.call_depth += 1;
         let result = self.collection_builtin_inner(operation, args, this, host);
         self.call_depth -= 1;

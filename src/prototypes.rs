@@ -9,7 +9,7 @@
 
 use super::{
     strict_equal, Accessors, Builtin, Fault, Function, Host, Ordinary, PropertyKey, Runtime,
-    Value, MAX_CALL_DEPTH,
+    Value,
 };
 use std::collections::HashSet;
 
@@ -2196,9 +2196,7 @@ impl Runtime {
         this: Value,
         host: &mut dyn Host,
     ) -> Result<Value, Fault> {
-        if self.call_depth >= MAX_CALL_DEPTH {
-            return Err(Fault::new("Function call limit reached (32)."));
-        }
+        self.check_native_call_stack("Function call")?;
         self.call_depth += 1;
         let audited = matches!(builtin, Builtin::FunctionMethod("call" | "apply"));
         if audited { self.transient_roots.owned_call_depth += 1; }

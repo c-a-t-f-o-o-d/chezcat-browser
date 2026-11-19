@@ -433,9 +433,7 @@ impl Runtime {
         if frame.realm != self.active_realm {
             return Err(Fault::new("Async activation resumed in a different realm."));
         }
-        if self.call_depth >= MAX_CALL_DEPTH {
-            return Err(Fault::new("Function call limit reached (32)."));
-        }
+        self.check_native_call_stack("Function call")?;
         if value.bytes() > self.limits.capacity.string_bytes {
             return Err(self.string_limit_fault());
         }

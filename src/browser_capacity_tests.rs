@@ -69,6 +69,8 @@ fn browser_capacity_direct_spread_apply_arguments_exceed_old_scratch_and_call_ca
         assert_eq!(runtime.execute(&expression, &mut NoHost).unwrap().to_number(), 20_000.0);
         assert!(runtime.transient_registration_is_empty());
     }
+    let scratch = runtime.argument_scratch_limit().unwrap();
+    assert!(scratch > 20_000 && scratch <= runtime.limits.heap.retained_values / size_of::<Value>());
     runtime.limits.capacity.arguments = usize::MAX;
-    assert!(runtime.argument_scratch_limit().unwrap_err().message.contains("overflow"));
+    assert_eq!(runtime.argument_scratch_limit().unwrap(), scratch);
 }

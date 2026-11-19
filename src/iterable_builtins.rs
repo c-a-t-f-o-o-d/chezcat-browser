@@ -5,7 +5,7 @@
 //! https://tc39.es/ecma262/#sec-object.fromentries
 
 use super::{
-    Builtin, Fault, Function, Host, PropertyKey, Reference, Runtime, Value, MAX_CALL_DEPTH,
+    Builtin, Fault, Function, Host, PropertyKey, Reference, Runtime, Value,
 };
 
 #[derive(Clone, Copy)]
@@ -40,9 +40,7 @@ impl Runtime {
         this: Value,
         host: &mut dyn Host,
     ) -> Result<Value, Fault> {
-        if self.call_depth >= MAX_CALL_DEPTH {
-            return Err(Fault::new("Function call limit reached (32)."));
-        }
+        self.check_native_call_stack("Function call")?;
         self.call_depth += 1;
         let result = match operation {
             Op::ArrayFrom => self.array_from(args, this, host),

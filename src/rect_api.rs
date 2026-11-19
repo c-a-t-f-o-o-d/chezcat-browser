@@ -167,7 +167,7 @@ impl Runtime {
     }
     pub(super) fn rect_construct(&mut self, mutable: bool, args: &[Value], host: &mut dyn Host) -> Result<Value, Fault> {
         self.step()?;
-        if self.call_depth >= MAX_CALL_DEPTH { return Err(Fault::new("DOMRect callback call limit reached (32).")); }
+        self.check_native_call_stack("DOMRect callback call")?;
         self.call_depth += 1;
         let result = self.rect_construct_inner(mutable, args, host);
         self.call_depth -= 1;
@@ -182,7 +182,7 @@ impl Runtime {
     }
     pub(super) fn rect_builtin(&mut self, op: Op, args: &[Value], this: Value, host: &mut dyn Host) -> Result<Value, Fault> {
         self.step()?;
-        if self.call_depth >= MAX_CALL_DEPTH { return Err(Fault::new("DOMRect callback call limit reached (32).")); }
+        self.check_native_call_stack("DOMRect callback call")?;
         self.call_depth += 1;
         let result = self.rect_builtin_inner(op, args, this, host);
         self.call_depth -= 1;
