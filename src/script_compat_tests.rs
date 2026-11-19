@@ -700,6 +700,85 @@ document.title='element-expando-first-ok';
 }
 
 #[test]
+fn mutation_observer_batches_direct_detached_character_data_in_microtask_order() {
+    let (doc, _, page, outcome) = page("<title>pending</title>", &[r#"
+var text=document.createTextNode('initial'), order='';
+var first=new MutationObserver(function(records, observer){
+    if(this!==first||observer!==first||records.length!==2)throw 'observer callback arguments';
+    if(!(records[0] instanceof MutationRecord)||records[0].type!=='characterData'||
+        records[0].target!==text||records[0].oldValue!=='initial'||records[1].oldValue!=='one'||
+        records[0].addedNodes.length||records[0].removedNodes.length||
+        records[0].previousSibling!==null||records[0].nextSibling!==null||
+        records[0].attributeName!==null||records[0].attributeNamespace!==null)throw 'record values';
+    order+='first|';
+});
+var second=new MutationObserver(function(records){
+    if(records.length!==2||records[0].oldValue!==null||text.data!=='two')throw 'second observer';
+    order+='second|';
+});
+second.observe(text,{characterData:true});
+first.observe(text,{characterDataOldValue:true});
+Promise.resolve().then(function(){order+='promise|';});
+text.textContent='one';
+text.data='two';
+if(order!=='')throw 'observer ran synchronously';
+var drained=new MutationObserver(function(){throw 'drained callback';});
+var comment=document.createComment('saved');
+drained.observe(comment,{characterData:true,characterDataOldValue:true});
+comment.nodeValue='new';
+var records=drained.takeRecords();
+if(records.length!==1||records[0].oldValue!=='saved'||records[0].target!==comment)throw 'takeRecords';
+comment.data='discarded';
+drained.disconnect();
+if(drained.takeRecords().length)throw 'disconnect clears records';
+queueMicrotask(function(){
+    if(order!=='promise|first|second|')throw 'observer ordering';
+    document.title='observed-character-data';
+});
+"#]);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    assert_eq!(doc.title, "observed-character-data");
+}
+
+#[test]
+fn mutation_observer_keeps_scheduled_peers_and_checks_options_and_brand() {
+    let (doc, _, page, outcome) = page("<title>pending</title>", &[r#"
+var text=document.createTextNode('zero'), trace='', seen=0;
+var first=new MutationObserver(function(records){
+    seen++;
+    if(seen===1){
+        if(second.takeRecords().length!==1||records[0].oldValue!=='zero')throw 'queued values';
+        trace+='first|';
+        text.data='two';
+        throw 'reported observer exception';
+    }
+    if(records.length!==1||records[0].oldValue!=='one'||trace!=='first|peer|later|')throw 'rescheduled order';
+    document.title='observer-rescheduled';
+});
+var second=new MutationObserver(function(records){
+    if(records.length!==1||records[0].oldValue!=='one')throw 'pending peer saw the wrong record';
+    trace+='peer|';
+});
+var types=0;
+try {first.observe(text,{characterData:false,characterDataOldValue:true});} catch(e){if(e instanceof TypeError)types++;}
+try {first.observe(navigator,{characterData:true});} catch(e){if(e instanceof TypeError)types++;}
+try {first.observe(document,{childList:true});} catch(e){if(e.name==='NotSupportedError')types++;}
+try {MutationObserver.prototype.takeRecords.call({});} catch(e){if(e instanceof TypeError)types++;}
+try {new MutationRecord();} catch(e){if(e instanceof TypeError)types++;}
+if(types!==5)throw 'validation';
+first.observe(text,{characterData:true});
+first.observe(text,{characterDataOldValue:true});
+second.observe(text,{characterDataOldValue:true});
+text.nodeValue='one';
+queueMicrotask(function(){trace+='later|';});
+"#]);
+    assert_eq!(outcome.errors, 1, "{}", page.report());
+    assert!(page.report().lines().any(|line| line.starts_with("MutationObserver callback:")
+        && line.contains("reported observer exception")));
+    assert_eq!(doc.title, "observer-rescheduled");
+}
+
+#[test]
 fn inner_html_element_descriptor_wraps_checked_native_accessor() {
     let (mut doc, mut forms, mut page, outcome) = page("<div id=p><b>original</b></div><div id=q></div>", &[r#"
 var p=document.getElementById('p'), q=document.getElementById('q');

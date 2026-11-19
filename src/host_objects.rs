@@ -873,9 +873,17 @@ impl Runtime {
             return Err(Fault::exception(kind,message));
         }
         let ticket=self.prepare_host_microtask(host,handle,name,std::slice::from_ref(&value),true)?;
+        let observation = match self.prepare_character_data_write(handle, name, host) {
+            Ok(observation) => observation,
+            Err(error) => {
+                self.finish_host_microtask(host, ticket)?;
+                return Err(error);
+            }
+        };
         host.native_operation_caller(self.native_access_caller
             .unwrap_or_else(|| self.browser_global.map(|(window, _)| window)));
         let result=host.set(handle,name,value).map_err(Fault::new);
+        self.finish_character_data_write(observation, name, host)?;
         if self.drain_native_promise_effects(host)?!=0 {
             self.defer_host_microtask_after_effects(ticket)?;
         }

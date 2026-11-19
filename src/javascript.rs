@@ -119,6 +119,8 @@ mod rect_api;
 mod image_data_api;
 #[path = "dom_exception.rs"]
 mod dom_exception;
+#[path = "mutation_observers.rs"]
+mod mutation_observers;
 #[path = "expression_parser.rs"]
 mod expression_parser;
 #[path = "identifier_names.rs"]
@@ -479,6 +481,10 @@ pub(crate) enum NativePromiseFailure {
 }
 
 pub trait Host {
+    fn mutation_observation_target(&self, _target: u32) -> Option<bool> { None }
+    fn character_data_write_generation(&self, _target: u32, _property: &str) -> Option<u64> { None }
+    fn empty_mutation_node_list(&mut self) -> Result<u32, String> { Err("MutationRecord nodes are unavailable.".into()) }
+    fn mutation_callback_error(&mut self, _message: &str) {}
     fn promise_returning_operation(&self,_object:u32,_method:&str)->bool {false}
     fn validate_promise_operation(&self,_object:u32,_method:&str)->Result<(),NativePromiseFailure> {Ok(())}
     fn call_promise_operation(&mut self,_object:u32,_method:&str,_promise:NativePromise)->Result<(),NativePromiseFailure> {
@@ -3588,6 +3594,7 @@ enum Builtin {
     Rect(rect_api::Op),
     ImageData(image_data_api::Op),
     DomException(dom_exception::Op),
+    MutationObserver(mutation_observers::Op),
     Eval,
     JsonParse,
     JsonStringify,
@@ -3840,6 +3847,7 @@ pub struct Runtime {
     symbol_to_string_tag: Option<usize>,
     symbol_species: Option<usize>,
     promises: promises::Arena,
+    mutations: mutation_observers::Arena,
     binary_roots: binary_data::Roots,
     retained_binary: usize,
     collection_roots: collections::Roots,
@@ -3989,6 +3997,7 @@ impl Runtime {
             symbol_to_string_tag: None,
             symbol_species: None,
             promises: promises::Arena::default(),
+            mutations: mutation_observers::Arena::default(),
             binary_roots: binary_data::Roots::default(),
             retained_binary: 0,
             collection_roots: collections::Roots::default(),
@@ -8253,6 +8262,9 @@ impl Runtime {
             Some(Function::Native(Builtin::DomException(dom_exception::Op::Constructor))) => {
                 self.dom_exception_construct(args,host)
             }
+            Some(Function::Native(Builtin::MutationObserver(mutation_observers::Op::Constructor))) => {
+                self.construct_mutation_observer(args, new_target, host)
+            }
             Some(Function::Native(Builtin::Promise(promises::Op::Constructor))) => {
                 self.construct_promise(args, host)
             }
@@ -9309,6 +9321,9 @@ impl Runtime {
             Some(Function::Native(Builtin::DomException(operation))) => {
                 return self.dom_exception_builtin(*operation,this);
             }
+            Some(Function::Native(Builtin::MutationObserver(operation))) => {
+                return self.mutation_observer_builtin(*operation, args, this, host);
+            }
             Some(Function::Native(Builtin::Promise(operation))) => {
                 return self.promise_builtin(*operation, args, this, host);
             }
@@ -10018,6 +10033,7 @@ impl Runtime {
             | Builtin::Rect(_)
             | Builtin::ImageData(_)
             | Builtin::DomException(_)
+            | Builtin::MutationObserver(_)
             | Builtin::Binary(_)
             | Builtin::Collection(_)
             | Builtin::Iterator(_)
