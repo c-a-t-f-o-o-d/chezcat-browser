@@ -700,6 +700,42 @@ document.title='element-expando-first-ok';
 }
 
 #[test]
+fn create_html_document_builds_an_independent_inert_native_tree() {
+    let (doc, _, page, outcome) = page("<html><head><title>Main</title></head><body></body></html>", &[r#"
+var impl=document.implementation;
+if(impl!==document.implementation||!(impl instanceof DOMImplementation)||!impl.hasFeature()||
+    Object.hasOwn(document,'implementation')||
+    typeof Object.getOwnPropertyDescriptor(Document.prototype,'implementation').get!=='function')throw 'implementation';
+var markup='  Starter <b> & word  ';
+var other=impl.createHTMLDocument(markup);
+if(other===document||!(other instanceof Document)||other.defaultView!==null||other.contentType!=='text/html'||
+    other.URL!=='about:blank'||other.title!=='Starter <b> & word'||other.implementation===impl)throw 'independent document';
+if(!(other.doctype instanceof DocumentType)||other.doctype.name!=='html'||other.doctype.nodeType!==10||
+    other.firstChild!==other.doctype||other.doctype.nextSibling!==other.documentElement||
+    other.lastChild!==other.documentElement||other.documentElement.ownerDocument!==other)throw 'structure';
+var title=other.head.firstChild, value=title.firstChild;
+if(title.localName!=='title'||value.data!==markup||value.nodeName!=='#text'||value.ownerDocument!==other||
+    value.parentNode!==title||!value.isConnected||other.body.parentNode!==other.documentElement||
+    other.head.nextSibling!==other.body||other.body.previousSibling!==other.head)throw 'literal title';
+var empty=other.implementation.createHTMLDocument(undefined);
+if(empty===other||empty.title!==''||empty.head.firstChild!==null)throw 'omitted title';
+var raw=other.createElement('DIV'), named=other.createElementNS('http://www.w3.org/1999/xhtml','SPAN');
+var text=other.createTextNode('<>&');
+if(raw.ownerDocument!==other||raw.localName!=='div'||named.localName!=='SPAN'||named.ownerDocument!==other||
+    text.ownerDocument!==other||text.textContent!=='<>&'||raw.isConnected||raw.parentNode!==null||
+    document.body.firstChild!==null||document.title!=='Main')throw 'detached factory ownership';
+var guarded=0;
+try {new DOMImplementation();} catch(e){if(e instanceof TypeError)guarded++;}
+try {impl.createHTMLDocument.call({});} catch(e){if(e instanceof TypeError)guarded++;}
+try {document.body.appendChild(other.createElement('script'));} catch(e){if(e instanceof TypeError)guarded++;}
+if(guarded!==3||document.body.firstChild!==null||other.body.firstChild!==null)throw 'native isolation';
+document.title='inert-html-document-ok';
+"#]);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    assert_eq!(doc.title, "inert-html-document-ok");
+}
+
+#[test]
 fn wide_tree_walker_keeps_sibling_reads_within_one_job_and_tracks_reordering() {
     let mut doc = crate::html::parse(&format!("<div id=root>{}</div>", "<wbr>".repeat(4096)));
     doc.scripting_enabled = true;

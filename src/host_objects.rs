@@ -14,6 +14,54 @@ mod document_property_limits_tests;
 const WINDOW_TAG_RECORD: &str = "\0WindowTag";
 
 impl Runtime {
+    pub(crate) fn define_inert_document_interfaces(
+        &mut self, window: u32, implementation_get: &'static str,
+        create: &'static str, has_feature: &'static str,
+    ) -> Result<(), String> {
+        let marker = self.inhibit_transient_collection();
+        let result = (|| {
+            let document = self.native_constructor_prototypes[&(window, "Document")];
+            self.define_readonly_node_getter(document, window, "implementation", implementation_get)?;
+            for name in ["DOMImplementation", "DocumentType"] {
+                let allocation = self.allocate_host_function_with_length(window, name, 0).map_err(Fault::new)?;
+                if let Some(Function::Host { constructible, illegal_interface_constructor, .. }) =
+                    self.functions.get_mut(allocation.id)
+                {
+                    *constructible = true;
+                    *illegal_interface_constructor = true;
+                }
+                let prototype = self.new_object(None)?;
+                if name == "DocumentType" {
+                    let parent = self.native_constructor_prototypes[&(window, "Node")];
+                    self.objects[prototype].prototype = Some(Ordinary::Object(parent));
+                    if let Value::Function(parent_constructor) = self.objects[parent].properties["constructor"].value.as_value()? {
+                        self.objects[self.function_properties[allocation.id]].prototype = Some(Ordinary::Function(*parent_constructor));
+                    }
+                } else {
+                    for (name, operation) in [("createHTMLDocument", create), ("hasFeature", has_feature)] {
+                        let method = self.allocate_host_function_with_length(window, operation, 0).map_err(Fault::new)?;
+                        if let Some(Function::Host { receiver_required, .. }) = self.functions.get_mut(method.id) {
+                            *receiver_required = true;
+                        }
+                        self.store_property(self.function_properties[method.id], "name".into(),
+                            Value::String(name.into()), Some((false, false, true)))?;
+                        self.store_property(prototype, name.into(), Value::Function(method.id), Some((true, true, true)))?;
+                    }
+                }
+                self.store_symbol_property(prototype, self.symbol_to_string_tag.unwrap(),
+                    Value::String(name.into()), Some((false, false, true)))?;
+                self.put_binding(self.global_environment, name.into(), Some(Value::Function(allocation.id)),
+                    super::Declaration::Var, false)?;
+                self.global_attributes.insert(name.into(), (false, true, true));
+                self.constructor_prototype(name, Value::Object(prototype))?;
+                self.native_constructor_prototypes.insert((window, name), prototype);
+            }
+            Ok(())
+        })();
+        self.restore_transient_marker(marker);
+        result.map_err(Fault::display)
+    }
+
     #[cfg(test)]
     pub(crate) fn native_overlay_state_for_test(&self, handle:u32)->(Option<usize>,Option<u32>) {
         (self.host_objects.get(&handle).copied(),self.native_expando_owners.get(&handle).copied())

@@ -201,7 +201,7 @@ impl Bridge<'_> {
     }
 
     pub(super) fn node_identity_receiver(&self,object:u32)->bool {
-        !self.is_frame_handle(object) && self.namespace_receiver(object)
+        !self.is_frame_handle(object) && (self.namespace_receiver(object) || self.inert_node_type(object).is_some())
     }
 
     pub(super) fn text_content_receiver(&self, object: u32) -> bool {
@@ -455,7 +455,7 @@ impl Bridge<'_> {
                 super::script_attribute_names::validate_namespace(namespace,name)?;
             }
         }
-        if object==DOCUMENT && method=="createElementNS" {
+        if (object == DOCUMENT || self.inert_document(object)) && method=="createElementNS" {
             if let (Some(namespace),Some(Value::String(name)))=(args.first(),args.get(1)) {
                 let namespace=match namespace{Value::String(value) if !value.is_empty()=>Some(value.as_str()),_=>None};
                 super::script_attribute_names::validate_element_namespace(namespace,name)?;
@@ -486,7 +486,7 @@ impl Bridge<'_> {
         if method == "removeAttributeNode" && node_index(object).is_some() {
             return self.validate_attr_removal(object, args);
         }
-        if object == DOCUMENT && method == "createElement" {
+        if (object == DOCUMENT || self.inert_document(object)) && method == "createElement" {
             if let Some(Value::String(name)) = args.first() {
                 // This HTML subset accepts bounded ASCII element names. Other
                 // namespaces and customized built-in element options are absent.
