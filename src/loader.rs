@@ -965,7 +965,7 @@ fn load_request_progressively(
     } else {
         &raw
     };
-    let mut document = html::parse(markup);
+    let mut document = html::parse_loaded_document(markup, &|| check_cancel(cancel))?;
     document.media_environment=options.media_environment;
     let media_node = document_media.as_ref().and_then(|_|document.nodes.iter().enumerate().find_map(|(node,item)|
         (item.namespace==html::Namespace::Html && matches!(&item.kind,NodeKind::Element {tag,..} if tag=="img") && document.attr(node,"id")==Some("media-frame")).then_some(node)));
