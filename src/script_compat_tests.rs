@@ -3919,6 +3919,36 @@ var third=document.createElement('script');third.async=false;third.crossOrigin='
 }
 
 #[test]
+fn template_svg_insertion_keeps_the_original_checked_foreign_nodes() {
+    let (doc, _, mut page, result) = page("<html><head><title>Fixture</title></head><body><main id=app></main></body></html>", &[r#"
+var template=document.createElement('template'), panel=document.getElementById('app');
+template.innerHTML='<fixture-atlas>\n<svg id="vector" xmlns="http://www.w3.org/2000/svg"><defs><g id="shape"><path d="M2 3 L4 7"/></g></defs></svg></fixture-atlas>';
+var donor=template.content, owner=donor.ownerDocument, atlas=donor.firstChild, svg=atlas.lastChild;
+var defs=svg.firstChild, shape=defs.firstChild, path=shape.firstChild;
+var before=svg.childNodes, held=donor.childNodes, leading=atlas.firstChild;
+if(path.isConnected||path.ownerDocument!==owner||document.getElementById('vector')!==null)
+    throw 'inert SVG identities';
+if(panel.appendChild(donor)!==donor||panel.firstChild!==atlas||atlas.lastChild!==svg||
+   document.getElementById('vector')!==svg||document.getElementById('shape')!==shape||
+   svg.firstChild!==defs||shape.firstChild!==path||atlas.firstChild!==leading)
+    throw 'transferred tree identity';
+if(!(svg instanceof SVGElement)||svg instanceof HTMLElement||svg.namespaceURI!=='http://www.w3.org/2000/svg'||
+   path.namespaceURI!==svg.namespaceURI||path.ownerDocument!==document||leading.ownerDocument!==document||
+   !path.isConnected||path.parentNode!==shape||path.getAttribute('d')!=='M2 3 L4 7'||
+   svg.childNodes!==before||before[0]!==defs||held!==donor.childNodes||held.length!==0||
+   donor.ownerDocument!==owner||template.content!==donor)
+    throw 'namespace, ownership or child lists';
+document.title='checked SVG attached';
+"#]);
+    assert_eq!(result.errors, 0, "{}", page.report());
+    assert_eq!(doc.title, "checked SVG attached");
+    assert!(page.take_dynamic_scripts().is_empty() && page.take_dynamic_stylesheets().is_empty());
+    let (added, removed, changed) = page.take_image_changes();
+    assert!(added.is_empty() && removed.is_empty() && changed.is_empty());
+    assert!(!page.has_navigation_request());
+}
+
+#[test]
 fn template_svg_keeps_checked_inert_namespaces_and_rolls_back_unsafe_markup() {
     let (mut doc, mut forms, mut page, result) = page("<html><body><main id=app></main></body></html>", &[r#"
 var template=document.createElement('template'), uri='http://www.w3.org/2000/svg';

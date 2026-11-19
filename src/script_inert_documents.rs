@@ -1239,6 +1239,9 @@ impl Bridge<'_> {
 fn template_node_can_park(node: &Node) -> bool {
     match &node.kind {
         NodeKind::Text(_) | NodeKind::Comment(_) => true,
+        // Only the checked template parser feeds this reservation path.
+        // It publishes SVG provenance after validating the entire island.
+        NodeKind::Element { .. } if node.namespace == crate::html::Namespace::Svg => true,
         NodeKind::Element { tag, attrs, .. } => {
             node.namespace == crate::html::Namespace::Html
                 && (tag == "style" || script_clone_node::ordinary_clone_element(tag)
