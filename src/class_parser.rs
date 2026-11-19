@@ -126,7 +126,7 @@ impl Parser {
             }
         }
         self.need("}")?;
-        let end = self.tokens[self.current - 1].end;
+        let end = self.tokens[self.current - 1].end();
         self.class_node_capacity(members.len())?;
         let constructor = if let Some(constructor) = constructor {
             let syntax = &mut self.program.templates[constructor];
