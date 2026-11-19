@@ -195,7 +195,7 @@ fn weak_set_api_constructor_closes_invalid_values_and_adder_throw() {
 fn weak_set_api_stores_undefined_and_shares_exact_entry_budgets() {
     let mut runtime = Runtime::for_test();
     let set = runtime
-        .construct_collection(Kind::WeakSet, &[], &mut NoHost)
+        .construct_collection(Kind::WeakSet, &[], None, &mut NoHost)
         .unwrap();
     let Value::Object(id) = set.clone() else {
         unreachable!()
@@ -250,7 +250,7 @@ fn weak_set_api_stores_undefined_and_shares_exact_entry_budgets() {
             set.clone()
         } else {
             runtime
-                .construct_collection(kind, &[], &mut NoHost)
+                .construct_collection(kind, &[], None, &mut NoHost)
                 .unwrap()
         };
         for index in 0..MAX_ENTRIES {
@@ -289,7 +289,7 @@ fn weak_set_api_stores_undefined_and_shares_exact_entry_budgets() {
         )
         .unwrap();
     let another = runtime
-        .construct_collection(Kind::WeakSet, &[], &mut NoHost)
+        .construct_collection(Kind::WeakSet, &[], None, &mut NoHost)
         .unwrap();
     assert!(runtime
         .weak_collection_method(
@@ -352,7 +352,7 @@ fn weak_set_api_native_key_owner_and_brand_checks_precede_any_key_effects() {
     };
     runtime.native_access_caller = Some(Some(1));
     let set = runtime
-        .construct_collection(Kind::WeakSet, &[], &mut host)
+        .construct_collection(Kind::WeakSet, &[], None, &mut host)
         .unwrap();
     let stores = (
         runtime.host_objects.len(),
@@ -395,7 +395,7 @@ fn weak_set_api_native_key_owner_and_brand_checks_precede_any_key_effects() {
     }
     let checks = host.checks.get();
     let map = runtime
-        .construct_collection(Kind::WeakMap, &[], &mut host)
+        .construct_collection(Kind::WeakMap, &[], None, &mut host)
         .unwrap();
     assert!(runtime
         .weak_collection_method(Kind::WeakSet, "has", &[Value::Host(50)], map, &mut host)

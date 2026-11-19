@@ -221,7 +221,7 @@ fn weak_map_api_native_key_owner_is_revalidated_without_expando_or_coercion() {
     };
     runtime.native_access_caller = Some(Some(1));
     let map = runtime
-        .construct_collection(Kind::WeakMap, &[], &mut host)
+        .construct_collection(Kind::WeakMap, &[], None, &mut host)
         .unwrap();
     let native_key = Value::Host(50);
     let before = (
@@ -278,7 +278,7 @@ fn weak_map_api_native_key_owner_is_revalidated_without_expando_or_coercion() {
 fn weak_map_api_retained_copy_and_entry_caps_preserve_prior_values() {
     let mut runtime = Runtime::for_test();
     let map = runtime
-        .construct_collection(Kind::WeakMap, &[], &mut NoHost)
+        .construct_collection(Kind::WeakMap, &[], None, &mut NoHost)
         .unwrap();
     let key = Value::Object(runtime.new_object(None).unwrap());
     let baseline = runtime.value_bytes;
@@ -392,7 +392,7 @@ fn weak_map_api_shares_document_entry_limit_with_existing_strong_maps() {
     let mut maps = Vec::new();
     for _ in 0..MAX_DOCUMENT_ENTRIES / MAX_ENTRIES {
         let map = runtime
-            .construct_collection(Kind::WeakMap, &[], &mut NoHost)
+            .construct_collection(Kind::WeakMap, &[], None, &mut NoHost)
             .unwrap();
         for index in 0..MAX_ENTRIES {
             if index % 256 == 0 {
@@ -415,7 +415,7 @@ fn weak_map_api_shares_document_entry_limit_with_existing_strong_maps() {
         .collection_put(strong, Kind::Map, &Value::Number(1.0), &Value::Null)
         .is_err());
     let another = runtime
-        .construct_collection(Kind::WeakMap, &[], &mut NoHost)
+        .construct_collection(Kind::WeakMap, &[], None, &mut NoHost)
         .unwrap();
     assert!(runtime
         .weak_map_method(

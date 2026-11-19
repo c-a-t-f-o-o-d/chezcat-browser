@@ -1,5 +1,5 @@
 //! Original finite derived-class acceptance, including selected nonallocating
-//! DOM-interface bases. Allocating native/builtin bases and deferred syntax stay out.
+//! DOM-interface bases and branded native collections.
 use super::*;
 
 #[derive(Default)]
@@ -375,4 +375,55 @@ fn derived_class_interface_allocating_and_other_native_interfaces_remain_unadmit
         assert_eq!(runtime.binding_value(0, "after").unwrap().to_number(), 0.0);
         assert_eq!((host.validations.get(), host.calls, host.writes), (0, 0, 0));
     }
+}
+
+#[test]
+fn derived_class_native_map_installs_brand_before_observable_adder_and_keeps_new_target() {
+    succeeds(r#"
+var calls='', retained;
+class Indexed extends Map {
+    constructor(source) { super(source); if(new.target!==Leaf)throw 'new target'; }
+    get set() {
+        calls+='get|';
+        return function(key,value) {
+            if(this.size!==0 || !(this instanceof Leaf))throw 'brand before add';
+            retained=this;
+            calls+='set|';
+            return Map.prototype.set.call(this,key,value*2);
+        };
+    }
+    read(key) { return super.get(key); }
+}
+class Leaf extends Indexed {}
+var map=new Leaf([['a',4]]);
+if(calls!=='get|set|' || retained!==map || map.read('a')!==8 ||
+   !map.has('a') || map.size!==1 || !(map instanceof Indexed) ||
+   !(map instanceof Map) || Object.getPrototypeOf(map)!==Leaf.prototype ||
+   Object.getPrototypeOf(Indexed)!==Map)throw 'native Map subclass';
+var empty=new (class extends Map { constructor(){super();} })();
+if(empty.size!==0 || Map.prototype.set.call(empty,'b',5)!==empty || empty.get('b')!==5)
+    throw 'empty native Map subclass';
+'ok';
+"#);
+}
+
+#[test]
+fn derived_class_other_native_collections_keep_their_specific_brands_and_close_iterator() {
+    succeeds(r#"
+var item={}, token={}, closes=0, source={};
+source[Symbol.iterator]=function(){
+    return {next:function(){return {done:false,value:1};},
+            return:function(){closes++;return {};}};
+};
+class Unique extends Set { add(value){if(value===1)throw token;return super.add(value);} }
+try{new Unique(source);throw 'missing adder exception';}catch(e){if(e!==token)throw e;}
+if(closes!==1)throw 'iterator close';
+var set=new Unique([2,2]), wm=new (class extends WeakMap {})([[item,3]]);
+var ws=new (class extends WeakSet {})([item]);
+if(!(set instanceof Set)||set.size!==1||!set.has(2)||!(wm instanceof WeakMap)||
+   wm.get(item)!==3||!(ws instanceof WeakSet)||!ws.has(item))throw 'collection brands';
+try{Map.prototype.get.call(wm,item);throw 'borrowed wrong brand';}
+catch(e){if(e.name!=='TypeError')throw e;}
+'ok';
+"#);
 }

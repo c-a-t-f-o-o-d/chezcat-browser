@@ -1,5 +1,5 @@
-//! Genuine finite Script/null and selected DOM-interface classes. Heritage
-//! and computed member names evaluate in the private TDZ scope.
+//! Class definitions with Script/null, selected DOM-interface and collection bases.
+//! Heritage and computed member names evaluate in the private TDZ scope.
 //! https://tc39.es/ecma262/#sec-runtime-semantics-classdefinitionevaluation
 use super::*;
 

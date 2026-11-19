@@ -157,6 +157,15 @@ pub(super) struct Roots {
 }
 
 impl Roots {
+    fn prototype(&self, kind: Kind) -> Option<Ordinary> {
+        match kind {
+            Kind::Map => self.map,
+            Kind::Set => self.set,
+            Kind::WeakMap => self.weak_map,
+            Kind::WeakSet => self.weak_set,
+        }.map(Ordinary::Object)
+    }
+
     pub(super) fn reachability_edges(&self, add: &mut impl FnMut(super::function_reachability::Edge)) {
         use super::function_reachability::Edge;
         for id in [self.map, self.set, self.weak_map, self.weak_set, self.iterator_prototype, self.array_iterator, self.map_iterator, self.set_iterator, self.string_iterator].into_iter().flatten() { add(Edge::Object(id)); }
@@ -678,13 +687,14 @@ impl Runtime {
         &mut self,
         kind: Kind,
         args: &[Value],
+        new_target: Option<usize>,
         host: &mut dyn Host,
     ) -> Result<Value, Fault> {
         if self.call_depth >= MAX_CALL_DEPTH {
             return Err(Fault::new("Function call limit reached (32)."));
         }
         self.call_depth += 1;
-        let result = self.construct_collection_inner(kind, args, host);
+        let result = self.construct_collection_inner(kind, args, new_target, host);
         self.call_depth -= 1;
         result
     }
@@ -692,8 +702,22 @@ impl Runtime {
         &mut self,
         kind: Kind,
         args: &[Value],
+        new_target: Option<usize>,
         host: &mut dyn Host,
     ) -> Result<Value, Fault> {
+        let prototype = if let Some(target) = new_target {
+            let prototype = self.get_ordinary_property_with_host(Ordinary::Function(target), "prototype", host)?;
+            if let Some(prototype) = Ordinary::from_value(&prototype) {
+                Some(prototype)
+            } else if matches!(prototype, Value::Host(_)) {
+                return Err(Fault::new("Native host object collection prototypes are not implemented."));
+            } else {
+                let realm = self.function_realms[target];
+                self.with_intrinsic_realm(realm, |runtime| Ok(runtime.collection_roots.prototype(kind)))?
+            }
+        } else {
+            self.collection_roots.prototype(kind)
+        };
         let weak_count = if kind.is_weak() {
             Some(self.weak_collection_count.checked_add(1)
                 .ok_or_else(|| Fault::new("Weak collection identity count overflow."))?)
@@ -703,12 +727,7 @@ impl Runtime {
         // Native construction inhibits transient collection through iterator
         // getters/adders/close. Objects remain append-only even if these throw.
         if let Some(count) = weak_count { self.weak_collection_count = count; }
-        self.objects[id].prototype = match kind {
-            Kind::Map => self.collection_roots.map,
-            Kind::Set => self.collection_roots.set,
-            Kind::WeakMap => self.collection_roots.weak_map,
-            Kind::WeakSet => self.collection_roots.weak_set,
-        }.map(Ordinary::Object);
+        self.objects[id].prototype = prototype;
         let source = args.first().unwrap_or(&Value::Undefined);
         if matches!(source, Value::Null | Value::Undefined) {
             return Ok(Value::Object(id));

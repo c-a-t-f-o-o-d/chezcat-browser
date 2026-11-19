@@ -8369,7 +8369,7 @@ impl Runtime {
                 encoder,
             )))) => self.construct_text_encoding(*encoder, args, host),
             Some(Function::Native(Builtin::Collection(collections::Op::Constructor(kind)))) => {
-                self.construct_collection(*kind, args, host)
+                self.construct_collection(*kind, args, new_target, host)
             }
             Some(Function::Native(Builtin::Binary(binary_data::Op::Constructor(kind)))) => {
                 self.construct_binary(*kind, args, host)
