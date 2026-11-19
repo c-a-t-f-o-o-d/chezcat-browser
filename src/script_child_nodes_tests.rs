@@ -23,6 +23,43 @@ fn evaluate(page: &mut Page, doc: &mut Document, forms: &mut Forms, source: &str
 }
 
 #[test]
+fn child_nodes_native_descriptor_and_element_shadow_keep_live_list() {
+    let (_, _, page) = fixture("<div id=host><b id=child></b></div>", r#"
+var node = document.getElementById('host'), child = document.getElementById('child');
+var live = node.childNodes, descriptor = Object.getOwnPropertyDescriptor(Node.prototype, 'childNodes');
+if (!descriptor || typeof descriptor.get !== 'function' || descriptor.set !== undefined ||
+    !descriptor.enumerable || !descriptor.configurable || descriptor.get.name !== 'get childNodes' ||
+    Object.hasOwn(node, 'childNodes') || !('childNodes' in node))
+    throw 'wrong descriptor or inheritance';
+var read = descriptor.get, fragment = document.createDocumentFragment();
+var template = document.createElement('template'), content = template.content;
+if (read.call(node) !== live || read.call(document) !== document.childNodes ||
+    read.call(fragment) !== fragment.childNodes || read.call(content) !== content.childNodes ||
+    read.call(content.ownerDocument) !== content.ownerDocument.childNodes)
+    throw 'native getter did not return the existing lists';
+var rejected = false;
+try { read.call({}); } catch (error) { rejected = error instanceof TypeError; }
+if (!rejected) throw 'wrong receiver accepted';
+node.childNodes = 'ignored';
+if (node.childNodes !== live || Object.hasOwn(node, 'childNodes')) throw 'readonly assignment';
+var calls = 0, shadow = function() {
+    if (this !== node) throw 'wrong author getter receiver';
+    calls++;
+    return Array.prototype.slice.call(read.call(this));
+};
+Object.defineProperty(node, 'childNodes', {get:shadow, configurable:true});
+if (Object.getOwnPropertyDescriptor(node, 'childNodes').get !== shadow || calls !== 0 ||
+    !Array.isArray(node.childNodes) || calls !== 1) throw 'own descriptor';
+node.removeChild(child);
+if (read.call(node) !== live || live.length !== 0 || node.childNodes.length !== 0)
+    throw 'native list lost identity or liveness';
+if (!delete node.childNodes || node.childNodes !== live || Object.hasOwn(node, 'childNodes'))
+    throw 'deletion did not reveal the original getter';
+"#);
+    assert!(!page.has_host_tasks());
+}
+
+#[test]
 fn child_nodes_actual_document_and_element_borrowed_slice_are_real_static_arrays() {
     let (doc, _, page) = fixture("<!doctype html><!--unrepresented--><html><head></head><body><div id=parent>lead<span id=inside>middle</span>tail</div></body></html>", r#"
 var slice=Array.prototype.slice,children=document.childNodes,root=document.documentElement;

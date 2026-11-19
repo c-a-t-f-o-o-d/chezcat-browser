@@ -468,6 +468,7 @@ pub(crate) fn valid_custom_element_name(name: &str) -> bool {
 }
 
 pub(crate) const ELEMENT_STYLE_GET: &str = "\0HTMLElement.get.style";
+pub(crate) const NODE_CHILD_NODES_GET: &str = "\0Node.get.childNodes";
 pub(crate) const NODE_TEXT_CONTENT_GET: &str = "\0Node.get.textContent";
 pub(crate) const NODE_TEXT_CONTENT_SET: &str = "\0Node.set.textContent";
 pub(crate) const DOCUMENT_IMPORT_NODE: &str = "\0Document.importNode";
