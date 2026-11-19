@@ -12,7 +12,8 @@ use std::time::{Duration, Instant};
 
 use crate::forms::{self, Forms, Kind};
 use crate::html::{Document, Node, NodeKind};
-use crate::javascript::{Host, Runtime, Value, ELEMENT_STYLE_GET, ELEMENT_STYLE_SET,
+use crate::javascript::{Host, Runtime, Value,
+    ELEMENT_INNER_HTML_GET, ELEMENT_INNER_HTML_SET, ELEMENT_STYLE_GET, ELEMENT_STYLE_SET,
     NODE_TEXT_CONTENT_GET, NODE_TEXT_CONTENT_SET};
 
 #[path = "script_promises.rs"]
@@ -2554,6 +2555,7 @@ impl Bridge<'_> {
     /// Properties handled by ordinary lookup on the node's interface prototypes.
     fn inherited_node_property(&self, object: u32, property: &str) -> bool {
         property == "style" && self.element_expando_receiver(object)
+            || property == "innerHTML" && self.attr_element_receiver(object)
             || property == "textContent" && self.text_content_receiver(object)
             || self.content_editable_member(object, property)
             || self.element_sibling_member(object, property)
@@ -2734,6 +2736,7 @@ impl Host for Bridge<'_> {
 
     fn inherited_assignment(&self, object: u32, property: &str) -> bool {
         script_scroll_offsets::axis(property).is_some() && self.element_selector_receiver(object)
+            || property == "innerHTML" && self.attr_element_receiver(object)
             || property == "textContent" && self.text_content_receiver(object)
             || self.content_editable_attribute(object, property)
             || self.html_offset_attribute(object, property)
@@ -2793,6 +2796,7 @@ impl Host for Bridge<'_> {
         self.prepare_media_microtask(object,script_media::interface_operation(member).unwrap_or(member),args,setter)
     }
     fn native_setter_property(&self,object:u32,method:&str)->Option<&'static str>{
+        if method == ELEMENT_INNER_HTML_SET && self.attr_element_receiver(object) {return Some("innerHTML");}
         if method == NODE_TEXT_CONTENT_SET && self.text_content_receiver(object) {return Some("textContent");}
         if method == script_content_editable::SET && self.content_editable_receiver(object) {return Some("contentEditable");}
         if let Some((name, true)) = script_canvas::accessor(method) {
@@ -2946,6 +2950,8 @@ impl Host for Bridge<'_> {
 
     fn native_method_owner(&self, object:u32, method:&str) -> Option<u32> {
         if script_content_editable::accessor(method) && self.event_target_interface(object) {return Some(object);}
+        if matches!(method, ELEMENT_INNER_HTML_GET | ELEMENT_INNER_HTML_SET)
+            && self.event_target_interface(object) { return Some(object); }
         if matches!(method, ELEMENT_STYLE_GET | ELEMENT_STYLE_SET)
             && self.event_target_interface(object) { return Some(object); }
         if script_inline_style::handle(object) && script_inline_style::method(method).is_some() {return Some(WINDOW);}
@@ -3448,6 +3454,9 @@ impl Host for Bridge<'_> {
 
     fn accepts_receiver(&self, object: u32, method: &str, receiver: u32) -> bool {
         if script_content_editable::accessor(method) && self.event_target_interface(object) {return self.content_editable_receiver(receiver);}
+        if matches!(method, ELEMENT_INNER_HTML_GET | ELEMENT_INNER_HTML_SET) {
+            return self.event_target_interface(object) && self.attr_element_receiver(receiver);
+        }
         if matches!(method, ELEMENT_STYLE_GET | ELEMENT_STYLE_SET) {
             return self.event_target_interface(object) && self.html_element_receiver(receiver);
         }
@@ -4824,6 +4833,9 @@ impl Host for Bridge<'_> {
     }
 
     fn call(&mut self, object: u32, method: &str, args: &[Value]) -> Result<Value, String> {
+        if method == ELEMENT_INNER_HTML_GET {
+            return self.get(object, "innerHTML");
+        }
         if method == NODE_TEXT_CONTENT_GET {
             return if object == DOCUMENT { Ok(Value::Null) } else { self.get(object, "textContent") };
         }

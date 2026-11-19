@@ -465,6 +465,8 @@ pub(crate) fn valid_custom_element_name(name: &str) -> bool {
 pub(crate) const ELEMENT_STYLE_GET: &str = "\0HTMLElement.get.style";
 pub(crate) const NODE_TEXT_CONTENT_GET: &str = "\0Node.get.textContent";
 pub(crate) const NODE_TEXT_CONTENT_SET: &str = "\0Node.set.textContent";
+pub(crate) const ELEMENT_INNER_HTML_GET: &str = "\0Element.get.innerHTML";
+pub(crate) const ELEMENT_INNER_HTML_SET: &str = "\0Element.set.innerHTML";
 pub(crate) const ELEMENT_STYLE_SET: &str = "\0HTMLElement.set.style";
 
 /// One callback from a host-owned synchronous event propagation plan. The host
