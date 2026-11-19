@@ -21,6 +21,11 @@ impl Slottable {
 }
 
 impl Bridge<'_> {
+    pub(super) fn html_slot_receiver(&self, object: u32) -> bool {
+        node_index(object).is_some()
+            && self.concrete_html_interface(object) == Some("HTMLSlotElement")
+    }
+
     pub(super) fn slottable(&self, object: u32) -> Option<Slottable> {
         if self.frame_element_sibling_receiver(object) {
             return Some(Slottable::Element);

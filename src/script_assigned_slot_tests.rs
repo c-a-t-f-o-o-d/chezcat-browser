@@ -36,6 +36,45 @@ fn kept(
 }
 
 #[test]
+fn slot_name_reflects_checked_content_attribute_on_genuine_elements() {
+    let mut doc = crate::html::parse("<slot id=existing name=original></slot><div id=other></div>");
+    doc.scripting_enabled = true;
+    let mut forms = Forms::new(&doc);
+    let mut page = Page::for_test();
+    assert_eq!(page.start(&mut doc, &mut forms, &[]).errors, 0, "{}", page.report());
+    let out = page.console_eval(&mut doc, &mut forms, r#"
+var slot = document.createElement('slot'), existing = document.getElementById('existing');
+slot.setAttribute('NAME', ' a ');
+var descriptor = Object.getOwnPropertyDescriptor(HTMLSlotElement.prototype, 'name');
+if (Object.getPrototypeOf(slot) !== HTMLSlotElement.prototype || !(existing instanceof HTMLSlotElement) ||
+    Object.getPrototypeOf(HTMLSlotElement.prototype) !== HTMLElement.prototype ||
+    !descriptor.enumerable || !descriptor.configurable || Object.hasOwn(slot, 'name') ||
+    descriptor.get.call(slot) !== ' a ' || existing.name !== 'original') throw 'native slot reflection';
+var original = slot.getAttributeNode('name'), other = document.getElementById('other');
+var calls = 0, value = {toString:function(){ calls++; return ' Named '; }};
+var rejected = false;
+try { descriptor.set.call(other, value); } catch (error) { rejected = error instanceof TypeError; }
+if (!rejected || calls !== 0 || other.hasAttribute('name')) throw 'receiver guard before coercion';
+var observer = new MutationObserver(function(){});
+observer.observe(slot, {attributes:true, attributeFilter:['name'], attributeOldValue:true});
+descriptor.set.call(slot, value);
+var changed = observer.takeRecords();
+if (calls !== 1 || slot.name !== ' Named ' || slot.getAttribute('name') !== ' Named ' ||
+    slot.getAttributeNode('name') !== original || original.value !== ' Named ') throw 'raw value';
+if (changed.length !== 1 || changed[0].target !== slot || changed[0].oldValue !== ' a ')
+    throw 'mutation record';
+slot.removeAttribute('name');
+if (slot.name !== '' || slot.hasAttribute('name') || original.ownerElement !== null)
+    throw 'missing name default';
+slot.name = null;
+if (slot.name !== 'null' || slot.assignedSlot !== null || other.assignedSlot !== null)
+    throw 'string conversion or ordinary tree assignment';
+"#);
+    assert_eq!(out.errors, 0, "{}", page.report());
+    assert!(!page.has_host_tasks());
+}
+
+#[test]
 fn assigned_slot_original_real_element_text_light_slot_detached_and_readonly() {
     let mut doc=crate::html::parse(concat!(
         "<!doctype html><title>Original Slottable</title><body><div id=first>",

@@ -5,7 +5,7 @@ use super::{Accessors, Fault, Function, Host, Ordinary, Runtime, Value,
     ELEMENT_INNER_HTML_GET, ELEMENT_INNER_HTML_SET, ELEMENT_STYLE_GET, ELEMENT_STYLE_SET,
     CREATE_CDATA_SECTION, CREATE_PROCESSING_INSTRUCTION, DOCUMENT_IMPORT_NODE,
     NODE_MUTATION_METHODS, NODE_TEXT_CONTENT_GET, NODE_TEXT_CONTENT_SET, NODE_TRAVERSAL_GETTERS,
-    HTML_TEMPLATE_CONTENT_GET, PROCESSING_INSTRUCTION_TARGET_GET};
+    HTML_SLOT_NAME_GET, HTML_SLOT_NAME_SET, HTML_TEMPLATE_CONTENT_GET, PROCESSING_INSTRUCTION_TARGET_GET};
 
 #[cfg(test)]
 #[path = "host_document_property_limits_tests.rs"]
@@ -335,6 +335,9 @@ impl Runtime {
             )?;
             if name == "HTMLTemplateElement" {
                 self.define_readonly_node_getter(prototype, window, "content", HTML_TEMPLATE_CONTENT_GET)?;
+            }
+            if name == "HTMLSlotElement" {
+                self.define_node_attribute(prototype, window, "name", HTML_SLOT_NAME_GET, Some(HTML_SLOT_NAME_SET))?;
             }
             if name == "HTMLInputElement" {
                 for (key, getter, setter) in [
@@ -970,7 +973,14 @@ impl Runtime {
             return Err(Fault::exception(kind,message));
         }
         let ticket=self.prepare_host_microtask(host,handle,name,std::slice::from_ref(&value),true)?;
-        let observation = match self.prepare_character_data_write(handle, name, host) {
+        let reflected = host.observed_attribute_setter(handle, name);
+        let observation = if let Some(attribute) = reflected {
+            self.prepare_attribute_write(handle, "setAttributeNS",
+                &[Value::Null, Value::String(attribute.into())], host)
+        } else {
+            self.prepare_character_data_write(handle, name, host)
+        };
+        let observation = match observation {
             Ok(observation) => observation,
             Err(error) => {
                 self.finish_host_microtask(host, ticket)?;
@@ -980,7 +990,11 @@ impl Runtime {
         host.native_operation_caller(self.native_access_caller
             .unwrap_or_else(|| self.browser_global.map(|(window, _)| window)));
         let result=host.set(handle,name,value).map_err(Fault::new);
-        self.finish_character_data_write(observation, name, host)?;
+        if reflected.is_some() {
+            self.finish_tree_observation(observation, host)?;
+        } else {
+            self.finish_character_data_write(observation, name, host)?;
+        }
         if self.drain_native_promise_effects(host)?!=0 {
             self.defer_host_microtask_after_effects(ticket)?;
         }

@@ -442,6 +442,7 @@ pub(crate) const ORDINARY_HTML_SUBCLASSES: &[(&str, &str)] = &[
     ("html", "HTMLHtmlElement"),
     ("iframe", "HTMLIFrameElement"),
     ("input", "HTMLInputElement"),
+    ("slot", "HTMLSlotElement"),
     ("template", "HTMLTemplateElement"),
     ("ul", "HTMLUListElement"),
 ];
@@ -468,6 +469,8 @@ pub(crate) fn valid_custom_element_name(name: &str) -> bool {
 }
 
 pub(crate) const ELEMENT_STYLE_GET: &str = "\0HTMLElement.get.style";
+pub(crate) const HTML_SLOT_NAME_GET: &str = "\0HTMLSlotElement.get.name";
+pub(crate) const HTML_SLOT_NAME_SET: &str = "\0HTMLSlotElement.set.name";
 pub(crate) const NODE_MUTATION_METHODS: [(&str, usize); 4] = [
     ("appendChild", 1),
     ("insertBefore", 2),
@@ -525,6 +528,7 @@ pub trait Host {
     fn mutation_child_list_target(&self, _target: u32) -> bool { false }
     fn mutation_observation_parent(&self, _target: u32) -> Option<u32> { None }
     fn mutation_tree_generation(&self) -> Option<u64> { None }
+    fn observed_attribute_setter(&self, _target: u32, _property: &str) -> Option<&'static str> { None }
     fn mutation_child_list_changes(&mut self, _target: u32, _method: &str, _args: &[Value])
         -> Result<Vec<NativeChildListChange>, String> { Ok(Vec::new()) }
     fn mutation_attribute_change(&mut self, _target: u32, _method: &str, _args: &[Value])
