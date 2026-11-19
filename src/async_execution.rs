@@ -726,6 +726,17 @@ impl Runtime {
                         error.at(&frame.program.source, frame.program.stmts[statement].at)
                     })
                 }
+                Instruction::StrictComparison { statement, operator, right, action } => {
+                    let result = (|| {
+                        let left = frame.take_expression_value()?;
+                        let right = self.eval(&frame.program, right, environment, &frame.this, host)?;
+                        let value = self.binary_value(operator, left, right, host)?;
+                        self.await_resume_action(frame, action, value, host)
+                    })();
+                    result.map_err(|error: Fault| {
+                        error.at(&frame.program.source, frame.program.stmts[statement].at)
+                    })
+                }
                 Instruction::Await {
                     statement,
                     operand,

@@ -32,6 +32,44 @@ fn checkpoint(runtime: &mut Runtime) {
 }
 
 #[test]
+fn await_execution_strict_comparison_runs_the_right_operand_only_after_the_left() {
+    let mut runtime = Runtime::for_test();
+    succeeds(&mut runtime, r#"
+var trace='', release, reject, eq, neq, different, finalCount=0, caught;
+var gate=new Promise(function(resolve){release=resolve;});
+var failed=new Promise(function(resolve,fail){reject=fail;});
+var thing={valueOf(){throw 'strict comparison coerced its operand';}}, reason={};
+function relay(value){trace+='left|';return value;}
+function right(label,value){trace+=label+'|';return value;}
+async function equal(){return relay(await gate)===right('equal',thing);}
+async function unequal(){return relay(await gate)!==right('unequal',{});}
+async function types(){return (true ? await Promise.resolve(7) : 0)===right('types','7');}
+async function stop(){
+    try{return relay(await failed)!==right('unreachable',thing);}
+    catch(error){caught=error;}
+    finally{finalCount++;}
+}
+equal().then(value=>eq=value);
+unequal().then(value=>neq=value);
+types().then(value=>different=value);
+stop();
+if(trace!==''||eq!==undefined||neq!==undefined||different!==undefined||finalCount)
+    throw 'comparison ran before fulfillment';
+'ok';
+"#);
+    checkpoint(&mut runtime);
+    succeeds(&mut runtime, "if(different!==false||trace!=='types|')throw 'compared different types as equal';'ok';");
+    runtime.begin_job();
+    succeeds(&mut runtime, "release(thing);reject(reason);'ok';");
+    checkpoint(&mut runtime);
+    succeeds(&mut runtime, r#"
+if(eq!==true||neq!==true||caught!==reason||finalCount!==1||trace!=='types|left|equal|left|unequal|')
+    throw 'strict equality, ordering or rejection';
+'ok';
+"#);
+}
+
+#[test]
 fn await_execution_for_of_continue_unwinds_inner_scopes_and_preserves_target_iterator() {
     let mut runtime = Runtime::for_test();
     succeeds(&mut runtime, r#"
