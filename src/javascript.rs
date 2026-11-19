@@ -11721,6 +11721,26 @@ caught;
     }
 
     #[test]
+    fn await_execution_resumed_callee_keeps_eval_indirect_and_csp_checked() {
+        for allowed in [false, true] {
+            let (mut runtime, mut host) = test_runtime();
+            host.eval_permission = Some(allowed);
+            runtime.execute(r#"
+var token='global';
+async function work(){
+    let token='local';
+    try {return (await Promise.resolve(eval))('token');}
+    catch(error){return error.name;}
+}
+work().then(value=>test.record(value));
+"#, &mut host).unwrap();
+            assert!(host.records.is_empty());
+            assert!(runtime.microtask_checkpoint(&mut host).unwrap().is_empty());
+            assert_eq!(host.records, [if allowed { "global" } else { "EvalError" }]);
+        }
+    }
+
+    #[test]
     fn await_execution_name_assignment_keeps_the_reference_across_direct_eval() {
         let (mut runtime, mut host) = test_runtime();
         host.eval_permission = Some(true);

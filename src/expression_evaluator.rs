@@ -332,8 +332,8 @@ impl Runtime {
         self.eval_heap_continuations(program, id, None, env, this, host)
     }
 
-    pub(super) fn eval_resumed_chain(
-        &mut self, program: &Rc<Program>, id: ExprId, mut base: Value, env: usize,
+    pub(super) fn eval_resumed_expression(
+        &mut self, program: &Rc<Program>, id: ExprId, mut value: Value, env: usize,
         this: &Value, host: &mut dyn Host,
     ) -> Result<Value, Fault> {
         self.step()?;
@@ -342,7 +342,7 @@ impl Runtime {
         }
         self.eval_depth += 1;
         self.transient_roots.owned_eval_depth += 1;
-        let result = self.eval_heap_continuations(program, id, Some(&mut base), env, this, host);
+        let result = self.eval_heap_continuations(program, id, Some(&mut value), env, this, host);
         self.transient_roots.owned_eval_depth -= 1;
         self.eval_depth -= 1;
         result
@@ -350,12 +350,12 @@ impl Runtime {
 
     #[inline(always)]
     fn eval_heap_continuations(
-        &mut self, program: &Rc<Program>, id: ExprId, chain_base: Option<&mut Value>,
+        &mut self, program: &Rc<Program>, id: ExprId, resumed_value: Option<&mut Value>,
         env: usize, this: &Value, host: &mut dyn Host,
     ) -> Result<Value, Fault> {
         let baseline = (self.evaluation_frames, self.evaluation_frame_slots,
                         self.evaluation_argument_slots);
-        let result = self.eval_heap_driver(program, id, chain_base, env, this, host);
+        let result = self.eval_heap_driver(program, id, resumed_value, env, this, host);
         // Each driver has dropped only its own scratch. Restore the enclosing
         // driver's reservations on success, catchable errors and fatal exits.
         self.evaluation_frames = baseline.0;
@@ -464,7 +464,7 @@ impl Runtime {
 
     #[inline(never)]
     fn eval_heap_driver(
-        &mut self, program: &Rc<Program>, id: ExprId, chain_base: Option<&mut Value>, env: usize,
+        &mut self, program: &Rc<Program>, id: ExprId, resumed_value: Option<&mut Value>, env: usize,
         this: &Value, host: &mut dyn Host,
     ) -> Result<Value, Fault> {
         let mut scratch = Scratch { frames: Vec::new(), arguments: Vec::new() };
@@ -472,8 +472,8 @@ impl Runtime {
         // reentry. Children on this driver never recurse into Runtime::eval.
         self.push_evaluation(&mut scratch, program, Request::Value(id), true)?;
         let mut completed = None;
-        if let Some(base) = chain_base {
-            Self::start_resumed_chain(program, id, base, &mut scratch, &mut completed);
+        if let Some(value) = resumed_value {
+            Self::start_resumed_expression(program, id, value, &mut scratch, &mut completed);
         }
         while let Some(mut frame) = scratch.frames.pop() {
             compact(&mut scratch.frames, &mut self.evaluation_frame_slots);
@@ -570,17 +570,19 @@ impl Runtime {
         Ok(value(completed.expect("root expression completion")))
     }
 
-    // Keep the resumed value and chain-state setup out of ordinary evaluator frames.
+    // Keep resumed-value setup out of ordinary evaluator frames.
     #[inline(never)]
-    fn start_resumed_chain<'p>(
-        program: &'p Program, id: ExprId, base: &mut Value,
+    fn start_resumed_expression<'p>(
+        program: &'p Program, id: ExprId, value: &mut Value,
         scratch: &mut Scratch<'p>, completed: &mut Option<Completion>,
     ) {
-        let ExprKind::OptionalChain(_, steps) = &program.exprs[id].kind else {
-            unreachable!("a resumed chain entry requires an optional chain");
+        scratch.frames[0].state = match &program.exprs[id].kind {
+            ExprKind::OptionalChain(_, steps) => State::ChainNext { steps, next: 0, end: ChainEnd::Value },
+            // A function-valued result has no receiver or direct eval reference.
+            ExprKind::Call(_, arguments) => State::Callee { arguments, direct_eval: false, construct: false },
+            _ => unreachable!("a resumed entry requires a call or optional chain"),
         };
-        scratch.frames[0].state = State::ChainNext { steps, next: 0, end: ChainEnd::Value };
-        *completed = Some(Completion::Value(std::mem::replace(base, Value::Undefined)));
+        *completed = Some(Completion::Value(std::mem::replace(value, Value::Undefined)));
     }
 
     #[inline(never)]

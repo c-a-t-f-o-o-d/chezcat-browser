@@ -17,6 +17,7 @@ struct PendingAwait {
     action: Resume,
     call: Option<PendingCall>,
     method: Option<Box<PendingMethod>>,
+    followup_call: Option<ExprId>,
     member_key: Option<ExprId>,
     chain: Option<ExprId>,
     assignment: Option<Reference>,
@@ -370,7 +371,9 @@ impl Runtime {
         let result = (|| {
             if let Some((value, reject)) = resumed {
                 self.push_transient_value(&value)?;
-                let PendingAwait { statement, action, call, method, member_key, chain, assignment } = frame
+                let PendingAwait {
+                    statement, action, call, method, followup_call, member_key, chain, assignment,
+                } = frame
                     .pending
                     .take()
                     .ok_or_else(|| Fault::new("Async activation has no pending await."))?;
@@ -395,6 +398,15 @@ impl Runtime {
                         } else {
                             value
                         };
+                        let value = if let Some(call) = followup_call {
+                            let result = self.eval_resumed_expression(
+                                &frame.program, call, value, frame.environment()?, &frame.this, host,
+                            )?;
+                            self.push_transient_value(&result)?;
+                            result
+                        } else {
+                            value
+                        };
                         let value = if let Some(key) = member_key {
                             let key = self.eval(
                                 &frame.program, key, frame.environment()?, &frame.this, host,
@@ -407,7 +419,7 @@ impl Runtime {
                             value
                         };
                         let value = if let Some(chain) = chain {
-                            let result = self.eval_resumed_chain(
+                            let result = self.eval_resumed_expression(
                                 &frame.program, chain, value, frame.environment()?, &frame.this, host,
                             )?;
                             self.push_transient_value(&result)?;
@@ -576,6 +588,7 @@ impl Runtime {
                     operand,
                     callee,
                     method,
+                    followup_call,
                     member_key,
                     chain,
                     assignment,
@@ -605,6 +618,9 @@ impl Runtime {
                         if chain.is_some() {
                             self.step()?; // Optional-chain reference construction.
                         }
+                        if followup_call.is_some() {
+                            self.step()?; // Enter the call before evaluating its callee.
+                        }
                         let mut retained = frame.retained_bytes()
                             .saturating_add(assignment.as_ref().map_or(0, name_reference_bytes));
                         let method = if let Some(method) = method {
@@ -630,7 +646,9 @@ impl Runtime {
                             self.eval(&frame.program, operand, environment, &frame.this, host)?;
                         self.push_transient_value(&value)?;
                         let promise = self.promise_for_await(value, host)?;
-                        frame.pending = Some(PendingAwait { statement, action, call, method, member_key, chain, assignment });
+                        frame.pending = Some(PendingAwait {
+                            statement, action, call, method, followup_call, member_key, chain, assignment,
+                        });
                         Ok(Progress::Suspend(promise))
                     })();
                     result.map_err(|error: Fault| {
@@ -806,6 +824,7 @@ mod tests {
                     key: PropertyKey::String("invoke".into()),
                     function: Some(Value::Function(20)),
                 })),
+                followup_call: None,
                 member_key: None,
                 chain: None,
                 assignment: Some(Reference::Binding(18, "target".into())),

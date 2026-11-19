@@ -32,6 +32,45 @@ fn checkpoint(runtime: &mut Runtime) {
 }
 
 #[test]
+fn await_execution_resumed_callee_evaluates_followup_arguments_in_order() {
+    let mut runtime = Runtime::for_test();
+    succeeds(&mut runtime, r#"
+var trace='', release, reason={}, result=0, invalid=0, rejected=0;
+var gate=new Promise(function(resolve){release=resolve;});
+function mark(label,value){trace+=label+'|';return value;}
+function factory(seed){
+    trace+='factory|';
+    return function(first,second,third){
+        'use strict';if(this!==undefined)throw 'function-valued call receiver';
+        return {value:mark('invoke',seed+first+second+third)};
+    };
+}
+function never(){throw 'argument evaluated after rejection';}
+async function work(){
+    return factory(await gate)(mark('first',1),...mark('spread',[2,3]))?.value;
+}
+async function bad(){
+    try {return (await Promise.resolve(7))(mark('bad-argument',1));}
+    catch(error){if(error.name!=='TypeError')throw error;invalid++;}
+}
+async function skip(){
+    try {return (await Promise.reject(reason))(never());}
+    catch(error){if(error!==reason)throw error;rejected++;}
+}
+work().then(value=>result=value);
+bad();skip();
+if(trace!==''||result||invalid||rejected)throw 'follow-up call before suspension';
+'ok';
+"#);
+    checkpoint(&mut runtime);
+    succeeds(&mut runtime, "if(trace!=='bad-argument|'||invalid!==1||rejected!==1||result)throw 'callability or rejection order';'ok';");
+    runtime.begin_job();
+    succeeds(&mut runtime, "release(4);'ok';");
+    checkpoint(&mut runtime);
+    succeeds(&mut runtime, "if(trace!=='bad-argument|factory|first|spread|invoke|'||result!==10)throw 'follow-up argument or call result';'ok';");
+}
+
+#[test]
 fn await_execution_conditional_values_evaluate_only_the_selected_arms() {
     let mut runtime = Runtime::for_test();
     succeeds(&mut runtime, r#"
