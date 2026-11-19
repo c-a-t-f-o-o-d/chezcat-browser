@@ -8,6 +8,7 @@ use super::{
     Runtime, Value, MAX_PARSE_DEPTH,
 };
 use std::collections::{BTreeMap, BTreeSet};
+use std::mem::size_of;
 
 struct ParseSnapshot {
     value: Value,
@@ -40,6 +41,7 @@ impl Reader<'_> {
         key: &str,
         value: &Value,
         start: usize,
+        frame_bytes: usize,
     ) -> Result<(), Fault> {
         let Some(snapshots) = self.snapshots.as_mut() else {
             return Ok(());
@@ -59,7 +61,7 @@ impl Reader<'_> {
             .snapshot_bytes
             .saturating_sub(old)
             .saturating_add(bytes);
-        if retained > runtime.limits.heap.retained_values {
+        if retained > runtime.limits.heap.retained_values.saturating_sub(frame_bytes) {
             return Err(Fault::new(format!("JSON reviver snapshot limit reached ({} bytes).", runtime.limits.heap.retained_values)));
         }
         runtime.work(bytes)?;
@@ -228,13 +230,11 @@ impl Reader<'_> {
     fn value(
         &mut self,
         runtime: &mut Runtime,
-        depth: usize,
     ) -> Result<(Value, Option<ParseFrame>), Fault> {
         runtime.step()?;
         self.space();
         let value = match self.byte() {
             Some(b'[' | b'{') => {
-                runtime.json_depth(depth + 1)?;
                 let array = self.take(b'[');
                 if !array {
                     self.at += 1;
@@ -273,9 +273,12 @@ impl Reader<'_> {
     fn parse(&mut self, runtime: &mut Runtime) -> Result<Value, Fault> {
         self.space();
         let start = self.at;
-        let (root, frame) = self.value(runtime, 0)?;
-        self.snapshot(runtime, usize::MAX, "", &root, start)?;
+        let (root, frame) = self.value(runtime)?;
         let mut frames = Vec::new();
+        self.reserve_frames(runtime, &mut frames, usize::from(frame.is_some()))?;
+        self.snapshot(
+            runtime, usize::MAX, "", &root, start, frames.capacity() * size_of::<ParseFrame>(),
+        )?;
         frames.extend(frame);
         while let Some(mut frame) = frames.pop() {
             runtime.step()?;
@@ -300,8 +303,11 @@ impl Reader<'_> {
                 };
                 self.space();
                 let start = self.at;
-                let (value, child) = self.value(runtime, frames.len() + 1)?;
-                self.snapshot(runtime, frame.id, &key, &value, start)?;
+                let (value, child) = self.value(runtime)?;
+                self.reserve_frames(runtime, &mut frames, 1 + usize::from(child.is_some()))?;
+                self.snapshot(
+                    runtime, frame.id, &key, &value, start, frames.capacity() * size_of::<ParseFrame>(),
+                )?;
                 runtime.set_property(frame.id, key, value)?;
                 frame.entry = false;
                 frames.push(frame);
@@ -321,6 +327,31 @@ impl Reader<'_> {
             return Err(self.syntax("Unexpected text after the JSON value."));
         }
         Ok(root)
+    }
+
+    fn reserve_frames(
+        &self,
+        runtime: &Runtime,
+        frames: &mut Vec<ParseFrame>,
+        additional: usize,
+    ) -> Result<(), Fault> {
+        let required = frames.len() + additional;
+        if required <= frames.capacity() {
+            return Ok(());
+        }
+        let budget = runtime.limits.heap.retained_values;
+        let max_frames = budget.saturating_sub(self.snapshot_bytes) / size_of::<ParseFrame>();
+        if required > max_frames {
+            return Err(Fault::new(format!("JSON parse scratch limit reached ({budget} bytes).")));
+        }
+        let target = required.max(frames.capacity().saturating_mul(2).min(max_frames));
+        frames.try_reserve_exact(target - frames.len()).map_err(|_| {
+            Fault::new("Unable to allocate JSON parse frames.")
+        })?;
+        if frames.capacity() > max_frames {
+            return Err(Fault::new(format!("JSON parse scratch limit reached ({budget} bytes).")));
+        }
+        Ok(())
     }
 }
 
@@ -382,8 +413,9 @@ impl Runtime {
         source: &str,
         capture: bool,
     ) -> Result<(Value, Snapshots), Fault> {
-        if source.len() > self.limits.capacity.string_bytes {
-            return Err(Fault::new("JSON source limit reached (128 KiB)."));
+        let max_source = self.limits.capacity.string_bytes;
+        if source.len() > max_source {
+            return Err(Fault::new(format!("JSON source limit reached ({max_source} bytes).")));
         }
         self.work(source.len())?;
         let checkpoint = (self.objects.len(), self.properties, self.value_bytes);
