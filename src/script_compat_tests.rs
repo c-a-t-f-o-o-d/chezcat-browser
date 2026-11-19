@@ -4032,3 +4032,38 @@ if(shallow.content.firstChild!==null||deepInner.content.firstChild.textContent!=
     let result = page.console_eval(&mut doc, &mut forms, "if(deepInner.content.firstChild.textContent!=='original'||deep.cloneNode(true).content.firstChild.firstChild.content.firstChild.textContent!=='original')throw 'clone retry';");
     assert_eq!(result.errors, 0, "{}", page.report());
 }
+
+#[test]
+fn comment_inherited_native_getter_alias_keeps_the_real_receiver() {
+    let (doc, _, page, result) = page("<!doctype html><html><head><title>Original comment test</title></head><body><iframe hidden></iframe><div id=app></div></body></html>", &[r#"
+var host=document.head, first=document.createComment('first'), second=document.createComment('second');
+var before=Object.getOwnPropertyDescriptor(Node.prototype,'parentNode');
+var originalInsert=Node.prototype.insertBefore;
+var reads=0;
+Object.defineProperty(Node.prototype,'savedParent',before);
+Object.defineProperty(CharacterData.prototype,'receiverProof',{
+    get:function(){reads++;return this;},configurable:true
+});
+Node.prototype.insertBefore=function(node,reference){
+    if(reference!==null&&reference.savedParent!==this)throw Error('bad insertion parent');
+    return originalInsert.call(this,node,reference);
+};
+if(first.savedParent!==null||!('savedParent' in first)||first.receiverProof!==first||reads!==1||
+   !(first instanceof Comment)||first.ownerDocument!==document||first.data!=='first'||first.length!==5)
+    throw 'detached inherited receiver';
+originalInsert.call(host,first,host.firstChild);
+if(first.savedParent!==host||host.firstChild!==first)throw 'physical parent';
+if(host.insertBefore(second,first)!==second||second.savedParent!==host||
+   host.firstChild!==second||second.nextSibling!==first)
+   throw 'ordinary insertion through inherited getter';
+host.removeChild(second);
+if(second.savedParent!==null||second.isConnected||'neverDefined' in second||
+   second.neverDefined!==undefined||second.nodeValue!=='second')
+   throw 'retained Comment lookup';
+delete Node.prototype.savedParent;
+if('savedParent' in second||second.savedParent!==undefined)throw 'live inherited descriptor';
+document.title='comment-native-alias-ok';
+"#]);
+    assert_eq!(result.errors, 0, "{}", page.report());
+    assert_eq!(doc.title, "comment-native-alias-ok");
+}
