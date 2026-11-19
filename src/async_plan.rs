@@ -41,6 +41,7 @@ pub(super) enum Instruction {
         operand: ExprId,
         callee: Option<ExprId>,
         method: Option<ExprId>,
+        argument_call: Option<ArgumentAwait>,
         followup_call: Option<FollowupCalls>,
         member_key: Option<ExprId>,
         chain: Option<ExprId>,
@@ -142,12 +143,19 @@ struct AwaitSite {
     operand: ExprId,
     callee: Option<ExprId>,
     method: Option<ExprId>,
+    argument_call: Option<ArgumentAwait>,
     followup_call: Option<FollowupCalls>,
     member_key: Option<ExprId>,
     chain: Option<ExprId>,
     literal: Option<LiteralAwait>,
     negations: usize,
     assignment: Option<ExprId>,
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct ArgumentAwait {
+    pub(super) call: ExprId,
+    pub(super) index: usize,
 }
 
 #[derive(Clone, Copy)]
@@ -230,16 +238,24 @@ fn await_value(program: &Program, expression: ExprId) -> Option<AwaitSite> {
             break;
         }
     }
-    let ((operand, callee, method), followup_call) = match nested_operand {
+    let (parts, followup_call) = match nested_operand {
         Some(parts) => (parts, Some(FollowupCalls { outer: expression, count })),
         None => (await_operand(program, expression)?, None),
     };
     Some(AwaitSite {
-        operand, callee, method, followup_call, member_key, chain, literal: None, negations, assignment: None,
+        operand: parts.operand, callee: parts.callee, method: parts.method, argument_call: parts.argument_call,
+        followup_call, member_key, chain, literal: None, negations, assignment: None,
     })
 }
 
-fn await_operand(program: &Program, expression: ExprId) -> Option<(ExprId, Option<ExprId>, Option<ExprId>)> {
+struct AwaitOperand {
+    operand: ExprId,
+    callee: Option<ExprId>,
+    method: Option<ExprId>,
+    argument_call: Option<ArgumentAwait>,
+}
+
+fn await_operand(program: &Program, expression: ExprId) -> Option<AwaitOperand> {
     // If the receiver is synchronous, the await can still be in the argument
     // of the ordinary member call.
     let (expression, method) = match &program.exprs[expression].kind {
@@ -249,15 +265,35 @@ fn await_operand(program: &Program, expression: ExprId) -> Option<(ExprId, Optio
         }
         _ => (expression, None),
     };
-    let (expression, callee) = match &program.exprs[expression].kind {
-        ExprKind::Call(callee, arguments) if matches!(&program.exprs[*callee].kind, ExprKind::Name(_)) => {
-            let [Argument { expression, spread: false }] = arguments.as_slice() else { return None };
-            (*expression, Some(*callee))
-        }
-        _ => (expression, None),
+    if let ExprKind::Unary("await", operand) = program.exprs[expression].kind {
+        return Some(AwaitOperand { operand, callee: None, method, argument_call: None });
+    }
+    let ExprKind::Call(callee, arguments) = &program.exprs[expression].kind else { return None };
+    if !matches!(program.exprs[*callee].kind, ExprKind::Name(_)) {
+        return None;
+    }
+    let (index, (operand, inner_callee)) = arguments.iter().enumerate().find_map(|(index, argument)| {
+        if argument.spread { return None; }
+        bare_argument_operand(program, argument.expression).map(|operand| (index, operand))
+    })?;
+    let (callee, argument_call) = if arguments.len() == 1 && inner_callee.is_none() {
+        (Some(*callee), None)
+    } else {
+        (inner_callee, Some(ArgumentAwait { call: expression, index }))
     };
-    let ExprKind::Unary("await", operand) = program.exprs[expression].kind else { return None };
-    Some((operand, callee, method))
+    Some(AwaitOperand { operand, callee, method, argument_call })
+}
+
+fn bare_argument_operand(program: &Program, argument: ExprId) -> Option<(ExprId, Option<ExprId>)> {
+    match &program.exprs[argument].kind {
+        ExprKind::Unary("await", operand) => Some((*operand, None)),
+        ExprKind::Call(callee, arguments) if matches!(program.exprs[*callee].kind, ExprKind::Name(_)) => {
+            let [Argument { expression, spread: false }] = arguments.as_slice() else { return None };
+            let ExprKind::Unary("await", operand) = program.exprs[*expression].kind else { return None };
+            Some((operand, Some(*callee)))
+        }
+        _ => None,
+    }
 }
 
 enum ExpressionPart {
@@ -430,11 +466,11 @@ fn emit_expression(
             }
             ExpressionPart::Value(expression, action) => {
                 if let Some(AwaitSite {
-                    operand, callee, method, followup_call, member_key, chain, literal, negations, assignment,
+                    operand, callee, method, argument_call, followup_call, member_key, chain, literal, negations, assignment,
                 }) = await_expression(program, expression)
                 {
                     Instruction::Await {
-                        statement: id, operand, callee, method, followup_call, member_key,
+                        statement: id, operand, callee, method, argument_call, followup_call, member_key,
                         chain, literal, negations, assignment, action,
                     }
                 } else {
@@ -917,7 +953,7 @@ mod tests {
     #[test]
     fn async_plan_rejects_unreachable_embedded_await_and_cross_scope_jumps_during_parse() {
         for body in [
-            "if(false){use(1,await p);}",
+            "if(false){use(1,await p,await p);}",
             "return receiver.method(1, await p);",
             "return receiver.method(1 + await p);",
             "receiver[await p] = await p;",
