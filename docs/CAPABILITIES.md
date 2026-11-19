@@ -112,7 +112,7 @@ See [compatibility outcomes](COMPATIBILITY.md) for exact versions and stages.
 
 | Capability | Implemented slice | Important limits |
 | :--- | :--- | :--- |
-| **CSS/layout** | Loaded styles, token selectors, finite viewport/hover media groups, measured supported geometry/scrollHeight, clipping and software painting | Wider media/selector grammar, pseudo-element generated painting and broad layout remain incomplete |
+| **CSS/layout** | Loaded styles; presence, exact, token, dash-prefix and substring attribute selectors shared with DOM queries; finite viewport/hover media groups; measured supported geometry/scrollHeight; clipping and software painting | Attribute comparisons retain the supported HTML case rules and ASCII `i`/`s` flags. Selector-string escapes, namespaces, wider media/selector grammar, pseudo-element generated painting and broad layout remain incomplete. |
 | **Default grid rows** | A single implicit column lays out in-flow items in successive rows with actual row gaps. On `067ac5e` the Bootstrap action stack matches its literal and flex controls at 640 px for 8 and 16 px gaps. | Authored tracks, placement and per-item inline alignment are outside this source baseline. |
 | **Text and box sizing** | Inherited custom properties can supply supported heights and line heights. An absolutely positioned caption sizes from the same word widths and spaces used to lay out its text. | The progress-meter comparison covers a 240×16 track and its 25% and 75% fills at 640 and 1280 px. |
 | **Responsive foundation** | Initial-font em media, explicit box-sizing inheritance and fractional flex fitting; Foundation fixture stacks at 640 and forms two columns at 1280 | Does not establish framework initialization or complete component styling |
