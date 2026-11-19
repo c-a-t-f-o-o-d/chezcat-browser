@@ -99,6 +99,7 @@ fn accepted_stylesheets_with<'a>(doc:&'a Document,external:&'a HashMap<usize,Str
         if matches!(tag,"template"|"iframe"|"object") || tag=="noscript"&&doc.scripting_enabled {continue;}
         stack.extend(entry.children.iter().rev().copied().filter(|&child|child!=0));
         if !matches!(tag,"style"|"link") {continue;}
+        if tag == "style" && doc.withheld_inline_styles.contains(&node) {continue;}
         if !media_supported(doc.attr(node,"media").unwrap_or("")) {continue;}
         let source=if tag=="link" {
             let source=if let Some((_,source))=replacement.filter(|(owner,_)|*owner==node) {source} else {let Some(source)=external.get(&node) else {continue;};source.as_str()};

@@ -176,3 +176,113 @@ document.getElementById('apply').onclick=function(event){
         }
     }
 }
+
+#[test]
+fn inline_style_connection_applies_in_head_order_and_disconnects_without_replacing_native_nodes() {
+    let files = Fixture::new();
+    let path = files.write("sheet-order.html", r#"<!doctype html><html><head><title>Detached</title>
+<style>html,body{margin:0}#sample{position:absolute;left:10px;top:12px;width:24px;height:16px;background-color:#234567}
+#literal{position:absolute;left:40px;top:12px;width:24px;height:16px;background:#507090}
+button{position:absolute;left:12px;top:48px;width:100px;height:28px}
+input{position:absolute;left:12px;top:90px;width:150px;height:28px}</style></head>
+<body><div id=sample></div><div id=literal></div><form><input id=neighbor value=seed>
+<button type=button id=apply>Change sheet</button></form><script>
+var sheet=document.createElement('style'),source='#sample{background-color:#507090}',phase=0;
+sheet.textContent=source;
+var first=sheet.firstChild, list=sheet.childNodes, neighbor=document.getElementById('neighbor');
+document.getElementById('apply').onclick=function(e){
+    if(!e.isTrusted)throw 'Expected a trusted sheet operation';
+    if(phase===0){document.head.appendChild(sheet);document.title='After existing styles';}
+    if(phase===1){document.head.insertBefore(sheet,document.head.firstChild);document.title='Before existing styles';}
+    if(phase===2){document.head.removeChild(sheet);document.title='Removed';}
+    var attached=phase!==2;
+    if(first!==sheet.firstChild || list.length!==1 || list[0]!==first ||
+       first.data!==source || sheet.textContent!==source || first.parentNode!==sheet ||
+       first.ownerDocument!==document || sheet.isConnected!==attached || first.isConnected!==attached ||
+       sheet.parentNode!==(attached?document.head:null))throw 'Lost sheet or text identity';
+    if(neighbor!==document.getElementById('neighbor') || neighbor.value!=='preserved' ||
+       neighbor.defaultValue!=='seed')throw 'Changed adjacent native control';
+    phase++;
+};
+</script></body></html>"#);
+    let mut app = App::new();
+    app.resize(420, 320);
+    app.set_javascript_enabled(true);
+    app.open(&path);
+    app.wait_for_load();
+    let input = app.page.controls.iter()
+        .find(|c| app.document.attr(c.node, "id") == Some("neighbor")).unwrap();
+    let (x, y) = (input.x + 8, input.y + app.content_top() - app.scroll + 8);
+    assert!(matches!(app.pointer_down(x, y, false), PlatformAction::None));
+    assert!(matches!(app.pointer_up(x, y), PlatformAction::None));
+    app.key(0x41, true, false, false);
+    app.paste("preserved");
+    for (stage, color) in [("Detached", 0x234567), ("After existing styles", 0x507090),
+                           ("Before existing styles", 0x234567), ("Removed", 0x234567)] {
+        if stage != "Detached" { click_apply(&mut app); }
+        let script = app.scripting.as_ref().unwrap();
+        assert_eq!(script.error_count(), 0, "{}", script.report());
+        assert_eq!(app.document.title, stage);
+        let frame = app.draw();
+        let top = (app.content_top() + 12 - app.scroll) as usize;
+        for y in top..top + 16 {
+            for (x, expected) in [(10, color), (40, 0x507090)] {
+                let start = y * frame.width + x;
+                assert_eq!(&frame.pixels[start..start + 24], &[expected; 24], "{stage}");
+            }
+        }
+    }
+}
+
+#[test]
+fn inline_style_connection_policy_and_type_gate_pixels_against_loaded_link() {
+    let files = Fixture::new();
+    files.write("baseline.css", "body{margin:0}.tile{position:absolute;top:16px;width:24px;height:24px}#sample{left:16px;background:#204060}#reference{left:64px;background:#6080a0}button{position:absolute;left:16px;top:70px;width:112px;height:30px}");
+    let path = files.write("policy.html", r#"<!doctype html><html><head><title>Initial</title>
+<link id=baseline rel=stylesheet href="baseline.css">
+<meta http-equiv="Content-Security-Policy" content="style-src 'none'; style-src-elem 'nonce-Here'">
+</head><body><div id=sample class=tile></div><div id=reference class=tile></div>
+<button id=apply type=button>Apply sheet</button><script>
+var sheet=document.createElement('style'), source='#sample{background-color:#6080a0}', phase=0;
+sheet.textContent=source;
+var text=sheet.firstChild,children=sheet.childNodes,base=document.getElementById('baseline');
+document.getElementById('apply').onclick=function(e){
+  if(!e.isTrusted)throw 'untrusted sheet operation';
+  if(phase===0){document.head.appendChild(sheet);document.title='Blocked but connected';}
+  if(phase===1){sheet.setAttributeNS(null,'nonce','Here');document.title='Nonce awaits reconnection';}
+  if(phase===2){document.head.removeChild(sheet);sheet.setAttribute('type','text/css; charset=utf-8');document.head.appendChild(sheet);document.title='Non-CSS but connected';}
+  if(phase===3){sheet.getAttributeNode('type').value='TEXT/CSS';document.title='Type awaits reconnection';}
+  if(phase===4){document.head.removeChild(sheet);sheet.media='print';document.head.appendChild(sheet);document.title='Print sheet on screen';}
+  if(phase===5){sheet.getAttributeNode('media').value='SCREEN';if(sheet.media!=='SCREEN')throw 'media reflection';document.title='Screen sheet after link';}
+  if(phase===6){sheet.setAttributeNS('urn:metadata','media','print');sheet.type='metadata';document.title='Association retained';}
+  if(phase===7){sheet.type='text/css';sheet.setAttributeNS(null,'media','print');document.title='Switched to print';}
+  if(phase===8){sheet.removeAttributeNS(null,'media');if(sheet.media!=='')throw 'removed media';document.title='Removed screen filter';}
+  if(phase===9){sheet.getAttributeNode('nonce').value='Wrong';document.title='Existing association after nonce edit';}
+  if(phase===10){document.head.appendChild(sheet);document.title='Nonce rechecked on move';}
+  if(phase===11){sheet.setAttribute('nonce','Here');document.head.insertBefore(sheet,base);document.title='Admitted before link';}
+  if(phase===12){document.head.removeChild(sheet);document.title='Disconnected';}
+  if(sheet.isConnected!==(phase!==12)||sheet.textContent!==source||sheet.firstChild!==text||
+     children.length!==1||children[0]!==text||text.parentNode!==sheet)throw 'lost style identity';
+  phase++;
+};
+</script></body></html>"#);
+    let mut app = App::new();
+    app.resize(400, 290);
+    app.set_javascript_enabled(true);
+    app.open(&path);
+    app.wait_for_load();
+    check_pixels(&app, 0x204060);
+    for (title, expected) in [("Blocked but connected", 0x204060), ("Nonce awaits reconnection", 0x204060),
+                              ("Non-CSS but connected", 0x204060), ("Type awaits reconnection", 0x204060),
+                              ("Print sheet on screen", 0x204060), ("Screen sheet after link", 0x6080a0),
+                              ("Association retained", 0x6080a0), ("Switched to print", 0x204060),
+                              ("Removed screen filter", 0x6080a0), ("Existing association after nonce edit", 0x6080a0),
+                              ("Nonce rechecked on move", 0x204060), ("Admitted before link", 0x204060),
+                              ("Disconnected", 0x204060)] {
+        click_apply(&mut app);
+        let script = app.scripting.as_ref().unwrap();
+        assert_eq!(script.error_count(), 0, "{}", script.report());
+        assert_eq!(app.document.title, title);
+        check_pixels(&app, expected);
+    }
+}
