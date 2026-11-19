@@ -67,7 +67,7 @@ pub(super) struct Activation {
     environments: Vec<usize>,
     try_scopes: Vec<TryScope>,
     pending: Option<PendingAwait>,
-    logical_input: Option<Value>,
+    branch_input: Option<Value>,
 }
 
 impl Activation {
@@ -78,7 +78,7 @@ impl Activation {
     pub(super) fn retained_bytes(&self) -> usize {
         std::mem::size_of::<Self>()
             .saturating_add(self.this.bytes())
-            .saturating_add(self.logical_input.as_ref().map_or(0, Value::bytes))
+            .saturating_add(self.branch_input.as_ref().map_or(0, Value::bytes))
             .saturating_add(self.pending_call().map_or(0, |call| call.function.bytes()))
             .saturating_add(self.pending_method().map_or(0, PendingMethod::retained_bytes))
             .saturating_add(self.pending_assignment().map_or(0, name_reference_bytes))
@@ -101,7 +101,7 @@ impl Activation {
             .len()
             .saturating_add(self.try_scopes.len())
             .saturating_add(5 + usize::from(self.pending_call().is_some())
-                + usize::from(self.logical_input.is_some())
+                + usize::from(self.branch_input.is_some())
                 + 2 * usize::from(self.pending_method().is_some())
                 + usize::from(self.pending_assignment().is_some()))
     }
@@ -110,7 +110,7 @@ impl Activation {
         add(Edge::Function(self.callee));
         add(Edge::Object(self.outer));
         Edge::value(&self.this, add);
-        if let Some(value) = &self.logical_input {
+        if let Some(value) = &self.branch_input {
             Edge::value(value, add);
         }
         if let Some(call) = self.pending_call() {
@@ -156,6 +156,10 @@ impl Activation {
 
     fn pending_method(&self) -> Option<&PendingMethod> {
         self.pending.as_ref().and_then(|pending| pending.method.as_deref())
+    }
+
+    fn take_branch_input(&mut self) -> Result<Value, Fault> {
+        self.branch_input.take().ok_or_else(|| Fault::new("Async branch has no input."))
     }
 
     fn pending_assignment(&self) -> Option<&Reference> {
@@ -205,7 +209,7 @@ impl Runtime {
             environments,
             try_scopes: Vec::new(),
             pending: None,
-            logical_input: None,
+            branch_input: None,
         });
         self.drive_await_body(frame, None, host)
     }
@@ -510,6 +514,12 @@ impl Runtime {
                     }
                     Ok(Progress::Continue)
                 }
+                Instruction::BranchOnValueFalse(target) => {
+                    if !frame.take_branch_input()?.truthy() {
+                        frame.next = target;
+                    }
+                    Ok(Progress::Continue)
+                }
                 Instruction::Jump(target) => {
                     frame.next = target;
                     Ok(Progress::Continue)
@@ -550,8 +560,7 @@ impl Runtime {
                 }
                 Instruction::Logical { statement, operator, target, action } => {
                     let result = (|| {
-                        let value = frame.logical_input.take()
-                            .ok_or_else(|| Fault::new("Async logical test has no input."))?;
+                        let value = frame.take_branch_input()?;
                         if !logical_short_circuits(operator, &value) {
                             return Ok(Progress::Continue);
                         }
@@ -670,9 +679,9 @@ impl Runtime {
         match action {
             Resume::Discard => Ok(Progress::Continue),
             Resume::Return => Ok(Progress::Return(value)),
-            Resume::StoreLogicalInput => {
-                debug_assert!(frame.logical_input.is_none());
-                frame.logical_input = Some(value);
+            Resume::StoreBranchInput => {
+                debug_assert!(frame.branch_input.is_none());
+                frame.branch_input = Some(value);
                 Ok(Progress::Continue)
             }
             Resume::BranchFalse(target) => {
@@ -787,7 +796,7 @@ mod tests {
                 after: 2,
                 environments: 1,
             }],
-            logical_input: Some(Value::Function(21)),
+            branch_input: Some(Value::Function(21)),
             pending: Some(PendingAwait {
                 statement: 0,
                 action: Resume::Discard,

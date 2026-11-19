@@ -32,6 +32,46 @@ fn checkpoint(runtime: &mut Runtime) {
 }
 
 #[test]
+fn await_execution_conditional_values_evaluate_only_the_selected_arms() {
+    let mut runtime = Runtime::for_test();
+    succeeds(&mut runtime, r#"
+var trace='', release, token={}, reason={}, direct, suspended, yes, no, mixed, rejected=0;
+var gate=new Promise(function(resolve){release=resolve;});
+function mark(label,value){trace+=label+'|';return value;}
+function relay(value){return mark('alternate',value);}
+function never(){throw 'unselected arm';}
+async function choose(flag){
+    let value=mark('test',flag) ? mark('primary',token) : relay(await gate);
+    return value;
+}
+async function fromGate(input){
+    return (await input) ? mark('test-true','yes') : mark('test-false','no');
+}
+async function nested(){
+    return ((await Promise.resolve(0)) ? never() : token) && 'kept';
+}
+async function fails(){
+    try {return (await Promise.reject(reason)) ? never() : never();}
+    finally{trace+='finally|';}
+}
+choose(true).then(value=>direct=value);
+choose(false).then(value=>suspended=value);
+fromGate(Promise.resolve(true)).then(value=>yes=value);
+fromGate(Promise.resolve(false)).then(value=>no=value);
+nested().then(value=>mixed=value);
+fails().catch(error=>{if(error===reason)rejected++;});
+if(trace!=='test|primary|test|'||direct!==undefined||suspended!==undefined)throw 'conditional prefix';
+'ok';
+"#);
+    checkpoint(&mut runtime);
+    succeeds(&mut runtime, "if(trace!=='test|primary|test|test-true|test-false|finally|'||direct!==token||suspended!==undefined||yes!=='yes'||no!=='no'||mixed!=='kept'||rejected!==1)throw 'selected arm or rejection';'ok';");
+    runtime.begin_job();
+    succeeds(&mut runtime, "release(7);'ok';");
+    checkpoint(&mut runtime);
+    succeeds(&mut runtime, "if(trace!=='test|primary|test|test-true|test-false|finally|alternate|'||suspended!==7)throw 'alternate arm or result';'ok';");
+}
+
+#[test]
 fn await_execution_nested_logical_values_choose_only_the_required_operands() {
     let mut runtime = Runtime::for_test();
     succeeds(&mut runtime, r#"

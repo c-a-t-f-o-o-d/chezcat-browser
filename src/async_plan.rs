@@ -8,7 +8,7 @@ pub(super) enum Resume {
     Return,
     Initialize { kind: Declaration, pattern: binding_patterns::Id },
     BranchFalse(usize),
-    StoreLogicalInput,
+    StoreBranchInput,
 }
 
 #[derive(Clone, Copy)]
@@ -19,6 +19,7 @@ pub(super) enum Instruction {
     EnterBlock(StmtId),
     LeaveBlock,
     BranchFalse { statement: StmtId, condition: ExprId, target: usize },
+    BranchOnValueFalse(usize),
     Jump(usize),
     PushTry { statement: StmtId, after: usize },
     FinishTry,
@@ -99,6 +100,9 @@ enum ExpressionPart {
     Value(ExprId, Resume),
     LogicalTest(&'static str, Resume),
     LogicalEnd,
+    ConditionalTest,
+    ConditionalElse,
+    ConditionalEnd,
 }
 
 fn visit_expression(
@@ -121,7 +125,16 @@ fn visit_expression(
                     push(&mut pending, ExpressionPart::LogicalEnd)?;
                     push(&mut pending, ExpressionPart::Value(right, action))?;
                     push(&mut pending, ExpressionPart::LogicalTest(operator, action))?;
-                    part = ExpressionPart::Value(left, Resume::StoreLogicalInput);
+                    part = ExpressionPart::Value(left, Resume::StoreBranchInput);
+                    continue;
+                }
+                ExprKind::Conditional(test, yes, no) => {
+                    push(&mut pending, ExpressionPart::ConditionalEnd)?;
+                    push(&mut pending, ExpressionPart::Value(no, action))?;
+                    push(&mut pending, ExpressionPart::ConditionalElse)?;
+                    push(&mut pending, ExpressionPart::Value(yes, action))?;
+                    push(&mut pending, ExpressionPart::ConditionalTest)?;
+                    part = ExpressionPart::Value(test, Resume::StoreBranchInput);
                     continue;
                 }
                 _ => {}
@@ -141,8 +154,9 @@ fn expression_size(program: &Program, expression: ExprId) -> Result<(usize, usiz
                 instructions += 1;
                 sites += usize::from(await_expression(program, expression).is_some());
             }
-            ExpressionPart::LogicalTest(_, _) => instructions += 1,
-            ExpressionPart::LogicalEnd => {}
+            ExpressionPart::LogicalTest(_, _) | ExpressionPart::ConditionalTest
+            | ExpressionPart::ConditionalElse => instructions += 1,
+            ExpressionPart::LogicalEnd | ExpressionPart::ConditionalEnd => {}
         }
         Ok(())
     })?;
@@ -170,7 +184,7 @@ fn emit_expression(
     program: &Program, id: StmtId, expression: ExprId, action: Resume,
     code: &mut Vec<Instruction>,
 ) -> Result<(), Fault> {
-    let mut logical_tests = Vec::new();
+    let mut branches = Vec::new();
     visit_expression(program, expression, action, |part| {
         let instruction = match part {
             ExpressionPart::Value(expression, action) => {
@@ -183,14 +197,31 @@ fn emit_expression(
                 }
             }
             ExpressionPart::LogicalTest(operator, action) => {
-                push(&mut logical_tests, code.len())?;
+                push(&mut branches, code.len())?;
                 Instruction::Logical { statement: id, operator, target: 0, action }
             }
             ExpressionPart::LogicalEnd => {
-                let test = logical_tests.pop().expect("logical expression must have a test");
+                let test = branches.pop().expect("logical expression must have a test");
                 let end = code.len();
                 let Instruction::Logical { target, .. } = &mut code[test] else { unreachable!() };
                 *target = end;
+                return Ok(());
+            }
+            ExpressionPart::ConditionalTest => {
+                push(&mut branches, code.len())?;
+                Instruction::BranchOnValueFalse(0)
+            }
+            ExpressionPart::ConditionalElse => {
+                let test = branches.pop().expect("conditional expression must have a test");
+                let jump = code.len();
+                push(code, Instruction::Jump(0))?;
+                code[test] = Instruction::BranchOnValueFalse(code.len());
+                push(&mut branches, jump)?;
+                return Ok(());
+            }
+            ExpressionPart::ConditionalEnd => {
+                let jump = branches.pop().expect("conditional expression must have a jump");
+                code[jump] = Instruction::Jump(code.len());
                 return Ok(());
             }
         };
@@ -339,7 +370,7 @@ pub(super) fn compile(program: &Program, template: usize, expected_await_count: 
     let mut pending = Vec::new();
     for &id in template.body.iter().rev() { push(&mut pending, Emit::Statement(id))?; }
     // Container statements emit bounded control instructions. Split expressions
-    // emit one instruction per leaf and logical test, within the same AST limit.
+    // emit instructions for their leaves and branches, within the same AST limit.
     while let Some(task) = pending.pop() {
         let id = match task {
             Emit::Statement(id) => id,
@@ -462,6 +493,7 @@ mod tests {
             "return use(...await p);",
             "return (use(), 1 + await p);",
             "return (1+await p) && use(await p);",
+            "return true ? await p : use(1+await p);",
             "if(1+await p){}",
             "return await p + 1;",
             "let a=await p,b=1+await p;",
@@ -504,6 +536,7 @@ mod tests {
             ("async function f(p){return yes() && use(await p).ready;}", 3),
             ("async function f(p){if(yes() && use(await p).ready){noop();}}", 4),
             ("async function f(p){return yes() && use(await p) && after();}", 5),
+            ("async function f(p){return choose() ? await p : other();}", 5),
             ("async function f(p){let value; value=use(await p);}", 2),
             ("async function f(p){let value=receiver.method(use(await p));}", 1),
         ] {
