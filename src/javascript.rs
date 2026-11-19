@@ -116,6 +116,8 @@ mod image_data_api;
 mod dom_exception;
 #[path = "expression_parser.rs"]
 mod expression_parser;
+#[path = "identifier_names.rs"]
+mod identifier_names;
 #[path = "expression_evaluator.rs"]
 mod expression_evaluator;
 #[cfg(test)]
@@ -941,6 +943,7 @@ impl FaultLocation {
 #[derive(Clone, Debug)]
 enum TokenKind {
     Word(String),
+    EscapedWord(String),
     Number(f64),
     String(String),
     Template(String, template_literals::Part),
@@ -954,13 +957,6 @@ struct Token {
     at: usize,
     end: usize,
     newline: bool,
-}
-
-fn identifier_start(ch: char) -> bool {
-    ch.is_ascii_alphabetic() || matches!(ch, '_' | '$')
-}
-fn identifier_part(ch: char) -> bool {
-    identifier_start(ch) || ch.is_ascii_digit()
 }
 
 fn reserved(name: &str) -> bool {
@@ -1065,24 +1061,25 @@ impl LexGoal {
         let body = self.function_body.take();
         let switch_body = std::mem::take(&mut self.switch_body);
         match token {
-            TokenKind::Word(word) => {
+            TokenKind::Word(word) | TokenKind::EscapedWord(word) => {
+                let keyword = if matches!(token, TokenKind::Word(_)) { word.as_str() } else { "" };
                 let property = matches!(self.previous.as_str(), "." | "?.");
                 let label = !reserved(word)
                     && (self.statement || newline && self.end_expression)
                     && !property;
                 let jump_end = !property
-                    && (matches!(word.as_str(), "break" | "continue" | "return")
+                    && (matches!(keyword, "break" | "continue" | "return")
                         || !newline
                             && self.jump_end
                             && matches!(self.previous.as_str(), "break" | "continue"));
                 if !property
-                    && matches!(word.as_str(), "case" | "default")
+                    && matches!(keyword, "case" | "default")
                     && matches!(self.delimiters.last(), Some(LexDelimiter::SwitchBlock))
                 {
                     self.case_expressions.push((self.delimiters.len(), 0));
                     self.end_expression = false;
                     self.statement = false;
-                } else if word == "function" && !property {
+                } else if keyword == "function" && !property {
                     // A contextual async prefix keeps the statement position it
                     // had before the word, just like a possible label there.
                     let declaration = if !newline && self.previous == "async" && !self.previous_is_property {
@@ -1094,11 +1091,11 @@ impl LexGoal {
                     self.end_expression = false;
                     self.statement = false;
                 } else if !property
-                    && (word == "of"
+                    && (keyword == "of"
                         && self.end_expression
                         && matches!(self.delimiters.last(), Some(LexDelimiter::ForControl))
                         || matches!(
-                            word.as_str(),
+                            keyword,
                             "return"
                                 | "throw"
                                 | "typeof"
@@ -1118,7 +1115,7 @@ impl LexGoal {
                     self.statement = false;
                 } else if !property
                     && matches!(
-                        word.as_str(),
+                        keyword,
                         "else" | "do" | "try" | "finally" | "break" | "continue"
                     )
                 {
@@ -1128,7 +1125,7 @@ impl LexGoal {
                     self.end_expression = true;
                     self.statement = false;
                 }
-                self.previous = word.clone();
+                self.previous = keyword.to_owned();
                 self.previous_is_property = property;
                 self.previous_is_label = label;
                 self.jump_end = jump_end;
@@ -1304,8 +1301,11 @@ fn regexp_literal(
             let pattern_end = *at;
             *at += 1;
             let flags_start = *at;
-            while source[*at..].chars().next().is_some_and(identifier_part) {
-                *at += 1;
+            while let Some(flag) = source[*at..].chars().next().filter(|&ch| identifier_names::part(ch)) {
+                *at += flag.len_utf8();
+            }
+            if source[*at..].starts_with('\\') {
+                return Err(Fault::exception("SyntaxError", "A regexp flag cannot contain an escape.").at(source, *at));
             }
             return regexp::Regex::compile(
                 &source[pattern_start..pattern_end],
@@ -1424,12 +1424,8 @@ fn tokenize_with_capacity(source: &str, regexp_budget: &mut usize, capacity: lim
                 return Err(Fault::new(format!("Retained regexp limit reached ({} MiB).", capacity.retained_regexp / (1024 * 1024))).at(source, start));
             }
             TokenKind::RegExp(expression)
-        } else if identifier_start(ch) {
-            at += 1;
-            while at < source.len() && identifier_part(source[at..].chars().next().unwrap()) {
-                at += 1;
-            }
-            TokenKind::Word(source[start..at].into())
+        } else if identifier_names::start(ch) || ch == '\\' {
+            identifier_names::read(source, &mut at)?
         } else if ch.is_ascii_digit()
             || (ch == '.' && bytes.get(at + 1).is_some_and(u8::is_ascii_digit))
         {
@@ -1467,8 +1463,13 @@ fn tokenize_with_capacity(source: &str, regexp_budget: &mut usize, capacity: lim
                     Fault::exception("SyntaxError", "Invalid number literal.").at(source, start)
                 })?
             };
+            if source[at..].starts_with('\\')
+                || source[at..].chars().next().is_some_and(|ch| !ch.is_ascii() && identifier_names::part(ch))
+            {
+                return Err(Fault::exception("SyntaxError", "An identifier cannot immediately follow a numeric literal.").at(source, at));
+            }
             if at < source.len()
-                && (identifier_part(source[at..].chars().next().unwrap())
+                && (identifier_names::part(source[at..].chars().next().unwrap())
                     || source[at..].starts_with('.'))
             {
                 return Err(Fault::new("Invalid or unsupported numeric literal.").at(source, start));
@@ -1559,6 +1560,8 @@ fn tokenize_with_capacity(source: &str, regexp_budget: &mut usize, capacity: lim
                 );
             }
             TokenKind::String(value)
+        } else if !ch.is_ascii() && identifier_names::part(ch) {
+            return Err(Fault::exception("SyntaxError", "This character can only continue an identifier.").at(source, start));
         } else {
             let Some(punct) = [
                 ">>>=", "**=", "&&=", "||=", "??=", "<<=", ">>=", "===", "!==", ">>>", "...", "=>",
@@ -2023,14 +2026,14 @@ impl Parser {
         }
     }
     fn name(&mut self) -> Result<String, Fault> {
-        if let TokenKind::Word(word) = &self.token().kind {
+        if let TokenKind::Word(word) | TokenKind::EscapedWord(word) = &self.token().kind {
             if !reserved(word) {
                 let word = word.clone();
                 self.current += 1;
                 return Ok(word);
             }
         }
-        Err(self.error("Expected an ASCII identifier."))
+        Err(self.error("Expected an identifier."))
     }
     fn enter(&mut self) -> Result<(), Fault> {
         self.depth += 1;
@@ -2199,7 +2202,7 @@ impl Parser {
     }
 
     fn label_ahead(&self) -> bool {
-        matches!(&self.token().kind, TokenKind::Word(name) if !reserved(name))
+        matches!(&self.token().kind, TokenKind::Word(name) | TokenKind::EscapedWord(name) if !reserved(name))
             && matches!(
                 self.tokens.get(self.current + 1).map(|token| &token.kind),
                 Some(TokenKind::Punct(":"))
@@ -2209,7 +2212,7 @@ impl Parser {
     fn jump_target(&mut self, continued: bool) -> Result<StmtId, Fault> {
         let name = if !self.token().newline {
             match &self.token().kind {
-                TokenKind::Word(word) if !reserved(word) => Some(self.name()?),
+                TokenKind::Word(word) | TokenKind::EscapedWord(word) if !reserved(word) => Some(self.name()?),
                 _ => None,
             }
         } else {
@@ -2509,7 +2512,7 @@ impl Parser {
     fn arrow_ahead(&self) -> bool {
         let tokens = &self.tokens;
         let mut at = self.current;
-        let word = |token: &Token| matches!(&token.kind, TokenKind::Word(name) if !reserved(name));
+        let word = |token: &Token| matches!(&token.kind, TokenKind::Word(name) | TokenKind::EscapedWord(name) if !reserved(name));
         let punct = |token: Option<&Token>, text| matches!(token.map(|t| &t.kind), Some(TokenKind::Punct(value)) if *value == text);
         // In `async => ...`, async itself is the ordinary binding name.
         if self.is("async") && !self.next_is("=>") && !tokens[at + 1].newline {
@@ -2674,6 +2677,13 @@ impl Parser {
                 self.current += 1;
                 ExprKind::RegExp(expression)
             }
+            TokenKind::EscapedWord(name) => {
+                if reserved(&name) {
+                    return Err(self.error("A reserved word cannot be used as an identifier reference."));
+                }
+                self.current += 1;
+                ExprKind::Name(name)
+            }
             TokenKind::Word(word) => {
                 self.current += 1;
                 match word.as_str() {
@@ -2721,6 +2731,7 @@ impl Parser {
                 self.tokens.get(self.current + 1).map(|token| &token.kind),
                 Some(
                     TokenKind::Word(_)
+                        | TokenKind::EscapedWord(_)
                         | TokenKind::String(_)
                         | TokenKind::Number(_)
                         | TokenKind::Punct("[")
@@ -2752,7 +2763,7 @@ impl Parser {
                 (key, None)
             } else {
                 let (name, shorthand) = match self.token().kind.clone() {
-                    TokenKind::Word(name) => {
+                    TokenKind::Word(name) | TokenKind::EscapedWord(name) => {
                         let shorthand = (!reserved(&name)).then(|| name.clone());
                         (name, shorthand)
                     }
@@ -4002,8 +4013,8 @@ impl Runtime {
     pub fn define_global(&mut self, name: &str, value: Value) -> Result<(), String> {
         if name.len() > 256
             || name.is_empty()
-            || !name.chars().next().is_some_and(identifier_start)
-            || !name.chars().all(identifier_part)
+            || !name.chars().next().is_some_and(identifier_names::start)
+            || !name.chars().all(identifier_names::part)
             || reserved(name)
         {
             return Err(Fault::new("Invalid global identifier.").display());

@@ -1332,6 +1332,7 @@
       "sources": [
         "src/javascript.rs",
         "src/expression_parser.rs",
+        "src/identifier_names.rs",
         "tools/check_javascript.py"
       ]
     },
