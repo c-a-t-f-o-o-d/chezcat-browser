@@ -41,7 +41,7 @@ pub(super) enum Instruction {
         operand: ExprId,
         callee: Option<ExprId>,
         method: Option<ExprId>,
-        followup_call: Option<ExprId>,
+        followup_call: Option<FollowupCalls>,
         member_key: Option<ExprId>,
         chain: Option<ExprId>,
         literal: Option<LiteralAwait>,
@@ -142,7 +142,7 @@ struct AwaitSite {
     operand: ExprId,
     callee: Option<ExprId>,
     method: Option<ExprId>,
-    followup_call: Option<ExprId>,
+    followup_call: Option<FollowupCalls>,
     member_key: Option<ExprId>,
     chain: Option<ExprId>,
     literal: Option<LiteralAwait>,
@@ -162,6 +162,21 @@ impl LiteralAwait {
             unreachable!("compiled async object literal");
         };
         properties
+    }
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct FollowupCalls {
+    pub(super) outer: ExprId,
+    pub(super) count: usize,
+}
+
+pub(super) fn followup_receiver(program: &Program, expression: ExprId) -> Option<ExprId> {
+    let ExprKind::Call(callee, _) = program.exprs[expression].kind else { return None };
+    match program.exprs[callee].kind {
+        ExprKind::Member(receiver, _) => Some(receiver),
+        ExprKind::Call(..) | ExprKind::Unary("await", _) => Some(callee),
+        _ => None,
     }
 }
 
@@ -207,20 +222,21 @@ fn await_value(program: &Program, expression: ExprId) -> Option<AwaitSite> {
         ExprKind::Member(receiver, key) => (receiver, Some(key)),
         _ => (expression, None),
     };
-    let resumed_base = match program.exprs[expression].kind {
-        ExprKind::Call(callee, _) => match program.exprs[callee].kind {
-            ExprKind::Member(receiver, _) => Some(receiver),
-            ExprKind::Call(..) | ExprKind::Unary("await", _) => Some(callee),
-            _ => None,
-        },
-        _ => None,
+    let mut candidate = expression;
+    let mut count = 0;
+    let mut nested_operand = None;
+    while let Some(receiver) = followup_receiver(program, candidate) {
+        count += 1;
+        candidate = receiver;
+        if let Some(parts) = await_operand(program, candidate) {
+            nested_operand = Some(parts);
+            break;
+        }
+    }
+    let ((operand, callee, method), followup_call) = match nested_operand {
+        Some(parts) => (parts, Some(FollowupCalls { outer: expression, count })),
+        None => (await_operand(program, expression)?, None),
     };
-    let ((operand, callee, method), followup_call) =
-        if let Some(parts) = resumed_base.and_then(|base| await_operand(program, base)) {
-            (parts, Some(expression))
-        } else {
-            (await_operand(program, expression)?, None)
-        };
     Some(AwaitSite {
         operand, callee, method, followup_call, member_key, chain, literal: None, negations, assignment: None,
     })

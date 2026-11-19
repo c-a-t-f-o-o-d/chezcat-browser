@@ -1,7 +1,7 @@
 //! Owned await activations for the parser's finite statement plan. A resumed
 //! instruction never evaluates the prefix again. Synchronous subtrees use
 //! the ordinary evaluator and its native access checks.
-use super::async_plan::{Instruction, LiteralAwait, Resume};
+use super::async_plan::{followup_receiver, FollowupCalls, Instruction, LiteralAwait, Resume};
 use super::function_reachability::Edge;
 use super::*;
 
@@ -69,7 +69,7 @@ struct PendingAwait {
     action: Resume,
     call: Option<PendingCall>,
     method: Option<Box<PendingMethod>>,
-    followup_call: Option<ExprId>,
+    followup_call: Option<FollowupCalls>,
     member_key: Option<ExprId>,
     chain: Option<ExprId>,
     literal: Option<Box<PendingLiteral>>,
@@ -545,10 +545,8 @@ impl Runtime {
                         } else {
                             value
                         };
-                        let value = if let Some(call) = followup_call {
-                            let result = self.eval_resumed_expression(
-                                &frame.program, call, value, frame.environment()?, &frame.this, host,
-                            )?;
+                        let value = if let Some(calls) = followup_call {
+                            let result = self.eval_await_followup_calls(frame, calls, value, host)?;
                             self.push_transient_value(&result)?;
                             result
                         } else {
@@ -806,8 +804,13 @@ impl Runtime {
                         if chain.is_some() {
                             self.step()?; // Optional-chain reference construction.
                         }
-                        if followup_call.is_some() {
-                            self.step()?; // Enter the call before evaluating its callee.
+                        if let Some(calls) = followup_call {
+                            if calls.count > MAX_EVALUATION_FRAMES.saturating_sub(self.evaluation_frames) {
+                                return Err(Fault::new("Pending evaluation limit reached (4096)."));
+                            }
+                            for _ in 0..calls.count {
+                                self.step()?; // Enter each call before evaluating its callee.
+                            }
                         }
                         let method = if let Some(method) = method {
                             let prepared = self.prepare_await_method(frame, method, retained, host)?;
@@ -888,6 +891,35 @@ impl Runtime {
         let result = self.copy_value(&value)?;
         self.write_reference(reference, value, host)?;
         Ok(result)
+    }
+
+    #[inline(never)]
+    fn eval_await_followup_calls(
+        &mut self, frame: &Activation, calls: FollowupCalls, mut value: Value, host: &mut dyn Host,
+    ) -> Result<Value, Fault> {
+        let environment = frame.environment()?;
+        if calls.count == 1 {
+            return self.eval_resumed_expression(&frame.program, calls.outer, value, environment, &frame.this, host);
+        }
+        let bytes = calls.count.saturating_mul(std::mem::size_of::<ExprId>());
+        self.await_storage(frame.retained_bytes().saturating_add(bytes), bytes)?;
+        let mut suffix = Vec::new();
+        suffix.try_reserve_exact(calls.count)
+            .map_err(|_| Fault::new("Unable to allocate bounded async call chain."))?;
+        let mut expression = calls.outer;
+        for _ in 0..calls.count {
+            suffix.push(expression);
+            expression = followup_receiver(&frame.program, expression).expect("compiled async call chain");
+        }
+        for expression in suffix.into_iter().rev() {
+            let marker = self.transient_marker();
+            let result = self.push_transient_value(&value).and_then(|()| {
+                self.eval_resumed_expression(&frame.program, expression, value, environment, &frame.this, host)
+            });
+            self.restore_transient_marker(marker);
+            value = result?;
+        }
+        Ok(value)
     }
 
     #[inline(never)]
